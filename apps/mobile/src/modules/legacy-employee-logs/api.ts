@@ -1,8 +1,10 @@
 import { apiClient } from "@/shared/api/client";
 import {
   arr,
+  normalizeDeviceOptions,
   normalizeLegacyLogItem,
   normalizeLegacyLogReview,
+  normalizeLogBadgeSummary,
   normalizePosEmployeeSummary,
   normalizePosLogItem,
   num,
@@ -11,7 +13,8 @@ import {
   unwrap,
   type Raw,
 } from "./api-normalization";
-import type { LegacyEmployeeSummaryResult, LegacyLogContext, LegacyLogPage, LegacyLogReview } from "./types";
+import { LOG_BADGE_DAYS, mergeLogBadgeSummaries } from "./badge";
+import type { LegacyEmployeeSummaryResult, LegacyLogContext, LegacyLogPage, LegacyLogReview, LogBadgeSummary } from "./types";
 
 const BASE_URL = "/react/legacy-employee-logs";
 
@@ -24,7 +27,7 @@ export async function fetchLegacyLogs(params: URLSearchParams, signal?: AbortSig
     total: num(data.total),
     operationCounts: arr(data.operationCounts, (row) => ({ operation: str(row.operation), count: num(row.count) })),
     employees: arr(data.employees, (row) => ({ employeeId: str(row.employeeId), employeeName: str(row.employeeName), count: num(row.count) })),
-    devices: arr(data.devices, (row) => ({ deviceCode: str(row.deviceCode), count: num(row.count) })),
+    devices: normalizeDeviceOptions(data.devices),
     riskSummary: {
       dangerTotal: num(summary.dangerTotal),
       abnormalTotal: num(summary.abnormalTotal),
@@ -58,6 +61,7 @@ export async function fetchLegacyEmployeeSummary(params: URLSearchParams, signal
   return {
     total: num(data.total),
     dangerTotal: num(data.dangerTotal),
+    devices: normalizeDeviceOptions(data.devices),
     employees: arr(data.employees, (row) => ({
       employeeId: str(row.employeeId),
       employeeName: str(row.employeeName),
@@ -107,7 +111,8 @@ export async function fetchPosLogs(params: URLSearchParams, operationLabel: Oper
     allTotal: num(summary.total),
     operationCounts: [],
     employees: [],
-    devices: [],
+    // 设备下拉来自汇总接口的 devices；响应没有该字段（旧后端）时为空数组，下拉不渲染。
+    devices: normalizeDeviceOptions(summary.devices),
     riskSummary: {
       dangerTotal: num(summary.dangerTotal),
       abnormalTotal: num(summary.abnormalTotal),
@@ -139,6 +144,7 @@ export async function fetchPosEmployeeSummary(params: URLSearchParams, signal?: 
   return {
     total: num(data.total),
     dangerTotal: num(data.dangerTotal),
+    devices: normalizeDeviceOptions(data.devices),
     employees: arr(data.employees, normalizePosEmployeeSummary),
   };
 }
@@ -156,4 +162,31 @@ export async function reviewPosLog(body: {
     throw Object.assign(new Error("POS log review response invalid"), { code: "LEGACY_LOG_INVALID_RESPONSE" });
   }
   return review;
+}
+
+/**
+ * 导航角标摘要：近 7 天、当前账号可见分店内「未核查的危险异常 / 待核查的异常」数，两个来源相加。
+ * 只请求有权限的来源；某个来源失败按 0 处理，所有被请求的来源都失败才抛错
+ * （react-query 失败时保留上一次的数据，圆点不会因为偶发断网闪没）。
+ */
+export async function fetchLogBadgeSummary(
+  sources: { legacy: boolean; pos: boolean },
+  signal?: AbortSignal,
+): Promise<LogBadgeSummary> {
+  const params = { days: LOG_BADGE_DAYS };
+  const requests: Promise<LogBadgeSummary>[] = [];
+  if (sources.legacy) {
+    requests.push(apiClient.get(`${BASE_URL}/badge-summary`, { params, signal }).then((response) => normalizeLogBadgeSummary(unwrap(response.data))));
+  }
+  if (sources.pos) {
+    requests.push(apiClient.get(`${POS_BASE_URL}/badge-summary`, { params, signal }).then((response) => normalizeLogBadgeSummary(unwrap(response.data))));
+  }
+  if (requests.length === 0) return { dangerPending: 0, abnormalPending: 0 };
+  const settled = await Promise.allSettled(requests);
+  const fulfilled = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  if (fulfilled.length === 0) {
+    const failure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    throw failure?.reason ?? new Error("Legacy log badge summary failed");
+  }
+  return mergeLogBadgeSummaries(fulfilled);
 }

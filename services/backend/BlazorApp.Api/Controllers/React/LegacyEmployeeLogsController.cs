@@ -45,6 +45,18 @@ public sealed class LegacyEmployeeLogsController : ControllerBase
         CancellationToken cancellationToken
     ) => ToActionResult(await _service.GetEmployeeSummaryAsync(request, cancellationToken));
 
+    /// <summary>
+    /// 工作台角标：最近 days 天（默认 7，限制 1~31）内可见分店范围内待核查的异常数及其中危险操作数。
+    /// 不接收分店参数，范围由服务端按账号决定；结果缓存约 45 秒。
+    /// </summary>
+    [HttpGet("badge-summary")]
+    [Authorize(Policy = Permissions.LegacyEmployeeLogs.View)]
+    public async Task<ActionResult<ApiResponse<EmployeeLogBadgeSummaryDto>>> GetBadgeSummary(
+        [FromQuery] int? days,
+        CancellationToken cancellationToken
+    ) => Ok(ApiResponse<EmployeeLogBadgeSummaryDto>.OK(
+        await _service.GetBadgeSummaryAsync(days, cancellationToken: cancellationToken)));
+
     /// <summary>核查一条异常操作：确认正常 / 需跟进 / 撤销。版本号不符返回 409。</summary>
     [HttpPost("reviews")]
     [Authorize(Policy = Permissions.LegacyEmployeeLogs.Review)]

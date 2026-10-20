@@ -76,7 +76,7 @@ export function StoreSwitchButton({
       style={({ pressed }) => [styles.storeButton, pressed && selectable ? styles.pressed : null]}
     >
       {storeLocked ? <Icon source="lock-outline" size={14} color={HB_COLORS.action} /> : null}
-      <Text variant="titleSmall" style={styles.storeName} numberOfLines={1}>
+      <Text variant="titleSmall" style={styles.storeName} numberOfLines={2}>
         {name}
       </Text>
       {selectable ? <Icon source="chevron-down" size={18} color={HB_COLORS.textSecondary} /> : null}
@@ -286,6 +286,8 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
+    // 窄屏放不下「分店名 + 两个开关」时，开关整体换到下一行，分店名不再被挤成省略号。
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: HB_SPACING.xs,
@@ -294,7 +296,10 @@ const styles = StyleSheet.create({
     paddingBottom: HB_SPACING.xs,
   },
   headerStore: {
-    flex: 1,
+    // 至少给分店名 140dp 的基础宽度并允许增长；剩余空间不够容纳开关时由 header 换行
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 140,
     minWidth: 0,
   },
   storeButton: {

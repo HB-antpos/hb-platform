@@ -1,3 +1,4 @@
+import type { LogBadgeLevel } from "../legacy-employee-logs/types";
 import { FACE_HUB_ROUTE_NAME, isLegacyFaceRouteName } from "./face-hub";
 
 export type PrimaryNavigationKey =
@@ -71,7 +72,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     return "scan";
   }
 
-  // 商品进销、仓库商品进销、订单拣货、销售订单查询、员工操作日志、日结记录、人脸比对（合并入口 face-hub 与保留的旧三个路由）与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
+  // 商品进销、仓库商品进销、订单拣货、POS 订单查询、员工操作日志、日结记录、人脸比对（合并入口 face-hub 与保留的旧三个路由）与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
   if (
     routeName === "product-insights" ||
     routeName === "warehouse-picking" ||
@@ -218,6 +219,8 @@ export const PRIMARY_TAB_BADGE_MAX = 99;
 export interface PrimaryTabBadgeCounts {
   /** 当前登录人还没看的「黑名单命中」通知数（只有持 FaceMatch.Unwelcome.Review 的人才会 > 0）。 */
   faceHitUnreadCount: number;
+  /** 员工操作日志圆点级别（红 = 有危险操作待核查，橙 = 有异常待核查）；没有权限或没有待核查时为 null / 缺省。 */
+  legacyLogBadgeLevel?: LogBadgeLevel | null;
 }
 
 /** 把计数规整成非负整数：负数、NaN、Infinity 一律按 0。 */
@@ -251,4 +254,17 @@ export function resolvePrimaryTabBadge(
   const count = normalizeBadgeCount(counts.faceHitUnreadCount);
   const text = formatUnreadBadgeText(count);
   return text ? { count, text } : null;
+}
+
+/**
+ * 「工作台」页签的圆点（无数字）：员工操作日志是工作台子页，不进工作台也要能看到提醒。
+ * 数字徽标优先——已有人脸命中未读数字时不叠加圆点（数字在先，进入工作台后再看日志入口的圆点）。
+ */
+export function resolvePrimaryTabDot(
+  key: PrimaryNavigationKey,
+  counts: PrimaryTabBadgeCounts,
+): LogBadgeLevel | null {
+  if (key !== "workbench") return null;
+  if (resolvePrimaryTabBadge(key, counts)) return null;
+  return counts.legacyLogBadgeLevel ?? null;
 }

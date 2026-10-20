@@ -2,6 +2,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LogBadgeDot } from "@/components/legacy-employee-logs/LogBadgeDot";
 import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import { TAB_PATHS } from "@/modules/navigation/default-route";
 import {
@@ -9,6 +10,7 @@ import {
   resolveMeTabLabel,
   resolvePrimaryNavigationAction,
   resolvePrimaryTabBadge,
+  resolvePrimaryTabDot,
 } from "@/modules/navigation/primary-navigation";
 import { markReportHubNavigationStart } from "@/modules/reports/report-load-performance";
 import { useAuthStore } from "@/store/auth-store";
@@ -23,7 +25,7 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation("common");
-  const { orderedVisibleRouteNames, isDeviceMode, faceHitUnreadCount } = useAppNavigationAccess();
+  const { orderedVisibleRouteNames, isDeviceMode, faceHitUnreadCount, legacyLogBadgeLevel } = useAppNavigationAccess();
   const fullName = useAuthStore((state) => state.user?.fullName);
   const username = useAuthStore((state) => state.user?.username);
   const items = buildPrimaryNavigation({
@@ -52,9 +54,13 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
         const baseAccessibilityLabel = label === baseLabel ? baseLabel : `${baseLabel} ${label}`;
         // 红色数字徽标（> 0 才有，99 封顶）：无障碍标签带上真实数字，读屏不依赖视觉上的红点。
         const badge = resolvePrimaryTabBadge(item.key, { faceHitUnreadCount });
+        // 员工操作日志圆点（无数字）：没有数字徽标时才显示，数字优先不叠加；无障碍标签说明原因，不只靠颜色。
+        const dot = resolvePrimaryTabDot(item.key, { faceHitUnreadCount, legacyLogBadgeLevel });
         const accessibilityLabel = badge
           ? t("tabs.unreadHitsLabel", { label: baseAccessibilityLabel, count: badge.count })
-          : baseAccessibilityLabel;
+          : dot
+            ? t(dot === "danger" ? "tabs.logDangerLabel" : "tabs.logWarningLabel", { label: baseAccessibilityLabel })
+            : baseAccessibilityLabel;
         const iconColor = item.active ? HB_COLORS.brand : HB_COLORS.textSecondary;
         const labelColor = item.active ? HB_COLORS.action : HB_COLORS.textSecondary;
 
@@ -101,6 +107,7 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
                   </Text>
                 </View>
               ) : null}
+              {dot ? <LogBadgeDot level={dot} borderColor={HB_COLORS.surface} style={styles.dot} /> : null}
             </View>
             <Text
               allowFontScaling
@@ -168,6 +175,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#D92D20",
     alignItems: "center",
     justifyContent: "center",
+  },
+  // 圆点：与数字徽标同一落点（图标右上角），10px、白色描边，不带数字。
+  dot: {
+    position: "absolute",
+    top: -3,
+    right: 1,
   },
   badgeText: {
     color: HB_COLORS.white,

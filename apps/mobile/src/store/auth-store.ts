@@ -728,7 +728,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       usePickerStore.getState().clearPicker();
       void closeOfflineCatalogRuntime();
       useAppNavigationStore.getState().reset({ keepMenuCache: true });
-      await AppAsyncStorage.removeItem(STORE_SELECTION_STORAGE_KEY).catch(() => undefined);
+      // 分店选择按账号分 key 持久化（见 buildStoreSelectionStorageKey），切换账号只清内存态，
+      // 不删持久化值，切回该账号时由 useStores 恢复到它之前选择的分店。
       // 收银条码打印记录属于旧账号凭证：必须在覆盖令牌之前清（清理逻辑靠旧令牌识别归属）。
       await SecureStorage.clearCashierBarcodePrintSession().catch((error) => {
         console.warn("[account-switch] 清理收银条码打印记录失败", error);

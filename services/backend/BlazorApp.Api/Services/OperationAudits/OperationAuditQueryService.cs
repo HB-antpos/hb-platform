@@ -1,10 +1,12 @@
 using System.Security.Claims;
+using BlazorApp.Api.Features.LegacyEmployeeLogs;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services.OperationAudits.Risk;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models.POSM;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using SqlSugar;
 
@@ -75,13 +77,19 @@ public sealed class OperationAuditQueryService
     // 审计表在 POSM 库，商品主档（图片）在 HBweb 库，需要单独的连接；未提供时不补图片。
     private readonly ISqlSugarClient? _productDb;
     private readonly ILogger<OperationAuditQueryService>? _logger;
+    // 仅角标接口使用；为空（测试替身）时不缓存。
+    private readonly IMemoryCache? _cache;
+
+    /// <summary>设备下拉选项最多返回的项数，按事件数降序截取。</summary>
+    private const int MaxDeviceOptions = 100;
 
     public OperationAuditQueryService(
         ISqlSugarClient db,
         ICurrentUserManageableStoreScopeService storeScopeService,
         IHttpContextAccessor httpContextAccessor,
         ISqlSugarClient? productDb = null,
-        ILogger<OperationAuditQueryService>? logger = null
+        ILogger<OperationAuditQueryService>? logger = null,
+        IMemoryCache? cache = null
     )
     {
         _db = db;
@@ -89,6 +97,7 @@ public sealed class OperationAuditQueryService
         _httpContextAccessor = httpContextAccessor;
         _productDb = productDb;
         _logger = logger;
+        _cache = cache;
     }
 
     public async Task<PagedListReactDto<OperationAuditListItemDto>> QueryAsync(
@@ -173,7 +182,94 @@ public sealed class OperationAuditQueryService
         summary.PendingReview = abnormal.Count(item => item.Pending);
         summary.AbnormalEmployees = abnormal.Select(item => EmployeeKey(item.CashierId, item.CashierName)).Distinct().Count();
         summary.AbnormalByRule = CountByRule(abnormal);
+        // 设备下拉：与总数同一套过滤条件，但不带设备编码本身，选了某设备后仍能列出全部设备。
+        summary.Devices = await LoadDeviceOptionsAsync(
+            BuildFilteredQuery(request, access, now, FilterScope.OperationType | FilterScope.Cashier, applyDeviceCode: false)!);
         return summary;
+    }
+
+    /// <summary>
+    /// 按设备编码分组计数，剔除空设备码，按事件数降序（同数按编码升序），最多 <see cref="MaxDeviceOptions"/> 项。
+    /// 分组结果只有「设备数」行，排序与截取在内存里做。
+    /// </summary>
+    private static async Task<List<LegacyEmployeeLogDeviceOptionDto>> LoadDeviceOptionsAsync(ISugarQueryable<PosOperationAudit> query)
+    {
+        var rows = await query
+            .Where(item => item.DeviceCode != null && item.DeviceCode != "")
+            .GroupBy(item => item.DeviceCode)
+            .Select(item => new { item.DeviceCode, Count = SqlFunc.AggregateCount(item.EventId) })
+            .ToListAsync();
+        return rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.DeviceCode))
+            .OrderByDescending(row => row.Count)
+            .ThenBy(row => row.DeviceCode, StringComparer.Ordinal)
+            .Take(MaxDeviceOptions)
+            .Select(row => new LegacyEmployeeLogDeviceOptionDto { DeviceCode = row.DeviceCode, Count = row.Count })
+            .ToList();
+    }
+
+    /// <summary>
+    /// 工作台角标：最近 days 天（1~31，默认 7）内、当前账号可见分店内待核查的异常事件数，及其中危险操作数。
+    /// - 单位是「命中有效异常规则的事件」，同一事件命中多条规则只计一次，与汇总里 PendingReview 同口径
+    ///   （待核查 = 没有「确认正常 / 需跟进」结论，撤销过的回到待核查）。
+    /// - 只读标记表（分店 + 发生时间索引），操作类型取标记表自带的 OperationType，不扫 pos_operation_audit 主表；
+    ///   只有标记为 CASH_DRAWER_OPEN 的少量事件才按主键回查是否关联订单，以区分「手动开钱箱（危险）」与「随收款自动开钱箱」。
+    /// - 范围由服务端按账号取（管理员全部，店长全部关联分店），无可见分店返回 0；结果按范围 + 天数缓存。
+    /// </summary>
+    public async Task<EmployeeLogBadgeSummaryDto> GetBadgeSummaryAsync(int? days = null, DateTime? utcNow = null)
+    {
+        var window = EmployeeLogBadgeSupport.NormalizeDays(days);
+        var access = await ResolveAccessAsync();
+        if (!access.IsAllowed)
+        {
+            return new EmployeeLogBadgeSummaryDto();
+        }
+
+        var now = DateTime.SpecifyKind(utcNow ?? DateTime.UtcNow, DateTimeKind.Utc);
+        var key = EmployeeLogBadgeSupport.BuildCacheKey("pos-operation-audit-badge", access.IsAdmin, access.StoreCodes, window);
+        return await EmployeeLogBadgeSupport.GetOrLoadAsync(_cache, key, () => LoadBadgeSummaryAsync(access, now.AddDays(-window), now));
+    }
+
+    private async Task<EmployeeLogBadgeSummaryDto> LoadBadgeSummaryAsync(OperationAuditStoreAccess access, DateTime fromUtc, DateTime toUtc)
+    {
+        var flags = _db.Queryable<PosOperationAuditFlag>()
+            .Where(flag => flag.RetractedAtUtc == null && flag.OccurredAtUtc >= fromUtc && flag.OccurredAtUtc <= toUtc);
+        if (!access.IsAdmin)
+        {
+            var storeCodes = access.StoreCodes.ToArray();
+            flags = flags.Where(flag => storeCodes.Contains(flag.StoreCode));
+        }
+
+        // 待核查：没有「确认正常 / 需跟进」结论。按事件去重，操作类型同一事件恒定，一并带出。
+        var pending = await flags
+            .Where(flag => SqlFunc.Subqueryable<PosOperationAuditReview>()
+                .Where(review => review.EventId == flag.EventId && (review.Result == ReviewNormal || review.Result == ReviewFollowUp))
+                .NotAny())
+            .GroupBy(flag => new { flag.EventId, flag.OperationType })
+            .Select(flag => new { flag.EventId, flag.OperationType })
+            .ToListAsync();
+
+        var dangerTypes = new HashSet<string>(PosOperationAuditRiskCatalog.DangerOperations, StringComparer.Ordinal);
+        var dangerCount = pending.Count(item => dangerTypes.Contains(item.OperationType));
+
+        // 开钱箱只有不关联订单的手动开箱才算危险；标记表没有订单号，按主键分批回查这些事件。
+        var drawerIds = pending
+            .Where(item => item.OperationType == PosOperationAuditRiskCatalog.CashDrawerOpen)
+            .Select(item => item.EventId)
+            .ToList();
+        foreach (var batch in drawerIds.Chunk(IdBatchSize))
+        {
+            var ids = batch.ToList();
+            dangerCount += await _db.Queryable<PosOperationAudit>()
+                .Where(item => ids.Contains(item.EventId) && (item.OrderGuid == null || item.OrderGuid == ""))
+                .CountAsync();
+        }
+
+        return new EmployeeLogBadgeSummaryDto
+        {
+            AbnormalPending = pending.Count,
+            DangerPending = Math.Min(dangerCount, pending.Count),
+        };
     }
 
     /// <summary>
@@ -277,6 +373,9 @@ public sealed class OperationAuditQueryService
         result.Employees = employees;
         result.Total = employees.Sum(item => item.Total);
         result.DangerTotal = employees.Sum(item => item.DangerCount);
+        // 设备下拉：同分店、时间等基础条件，但不带设备编码本身。
+        result.Devices = await LoadDeviceOptionsAsync(
+            BuildFilteredQuery(request, access, now, FilterScope.Base, applyDeviceCode: false)!);
         return result;
     }
 
@@ -557,7 +656,8 @@ public sealed class OperationAuditQueryService
         OperationAuditQueryDto request,
         OperationAuditStoreAccess access,
         DateTime now,
-        FilterScope scope
+        FilterScope scope,
+        bool applyDeviceCode = true
     )
     {
         var fromUtc = request.FromUtc?.UtcDateTime ?? now.AddDays(-7);
@@ -613,7 +713,8 @@ public sealed class OperationAuditQueryService
             );
         }
 
-        var deviceCode = TrimToNull(request.DeviceCode);
+        // 设备下拉选项要列出全部设备，统计它们时不能带设备编码条件本身。
+        var deviceCode = applyDeviceCode ? TrimToNull(request.DeviceCode) : null;
         if (deviceCode != null)
         {
             query = query.Where(item => item.DeviceCode == deviceCode);

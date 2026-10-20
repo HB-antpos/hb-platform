@@ -6,6 +6,7 @@ using BlazorApp.Api.Services.OperationAudits;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models.POSM;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Data.Sqlite;
 using SqlSugar;
 using Xunit;
@@ -142,6 +143,131 @@ public sealed class OperationAuditRiskQueryTests : IDisposable
         Assert.Equal("Cashier c2", c2.CashierName);
         Assert.Equal(4, result.Total);
         Assert.Equal(3, result.DangerTotal);
+    }
+
+    [Fact]
+    public async Task 设备选项_汇总与员工汇总都返回_不带设备条件本身_剔除空设备码_按事件数降序()
+    {
+        await InsertAsync(C.SaleComplete, -50, device: "POS-1", orderGuid: "a");
+        await InsertAsync(C.SaleComplete, -40, device: "POS-1", orderGuid: "b");
+        await InsertAsync(C.SaleComplete, -30, device: "POS-2", orderGuid: "c");
+        await InsertAsync(C.SaleComplete, -20, device: "POS-3", orderGuid: "d");
+        await InsertAsync(C.SaleComplete, -10, device: "", orderGuid: "e");
+        await InsertAsync(C.SaleComplete, -10, store: "1042", device: "POS-9", orderGuid: "f");
+        var service = CreateService("Admin");
+
+        // 选了设备 POS-2 后，列表计数只剩它，但设备下拉仍列出该范围内的全部设备。
+        var summary = await service.GetSummaryAsync(new OperationAuditQueryDto { StoreCode = "1013", DeviceCode = "POS-2" }, Now);
+        var employees = await service.GetEmployeeSummaryAsync(new OperationAuditQueryDto { StoreCode = "1013", DeviceCode = "POS-2" }, Now);
+
+        Assert.Equal(1, summary.Total);
+        Assert.Equal(1, employees.Total);
+        var expected = new[] { ("POS-1", 2), ("POS-2", 1), ("POS-3", 1) };
+        Assert.Equal(expected, summary.Devices.Select(item => (item.DeviceCode!, item.Count)));
+        Assert.Equal(expected, employees.Devices.Select(item => (item.DeviceCode!, item.Count)));
+    }
+
+    [Fact]
+    public async Task 设备选项_最多返回100项()
+    {
+        for (var index = 0; index < 105; index++)
+        {
+            await InsertAsync(C.SaleComplete, -50, device: $"POS-{index:000}", orderGuid: $"o{index}");
+        }
+
+        var summary = await CreateService("Admin").GetSummaryAsync(new OperationAuditQueryDto(), Now);
+
+        Assert.Equal(100, summary.Devices.Count);
+    }
+
+    [Fact]
+    public async Task 角标_待核查异常按事件去重_危险是其子集_自动开钱箱不算危险()
+    {
+        // 手动开钱箱（危险）：命中两条规则，只计一个事件。
+        var manualDrawer = await InsertAsync(C.CashDrawerOpen, -50);
+        await FlagAsync(manualDrawer, C.Rules.NoSaleDrawer);
+        await FlagAsync(manualDrawer, C.Rules.OffHours);
+        // 随收款自动开钱箱（带订单）：命中异常但不危险。
+        var autoDrawer = await InsertAsync(C.CashDrawerOpen, -45, orderGuid: "order-1");
+        await FlagAsync(autoDrawer, C.Rules.OffHours);
+        // 危险操作类型。
+        var remove = await InsertAsync(C.CartItemRemove, -40);
+        await FlagAsync(remove, C.Rules.BurstDelete);
+        // 非危险（重打印）异常。
+        var reprint = await InsertAsync(C.ReceiptReprint, -35, orderGuid: "order-2");
+        await FlagAsync(reprint, C.Rules.RepeatReprint);
+        // 已核查（确认正常 / 需跟进）不算待核查；撤销（0）视同待核查。
+        var normal = await InsertAsync(C.CartClear, -30);
+        var followUp = await InsertAsync(C.CartClear, -29);
+        var revoked = await InsertAsync(C.CartClear, -28);
+        foreach (var (id, result) in new[] { (normal, (byte)1), (followUp, (byte)2), (revoked, (byte)0) })
+        {
+            await FlagAsync(id, C.Rules.BurstDelete);
+            await _db.Insertable(new PosOperationAuditReview
+            {
+                EventId = id, StoreCode = "1013", OccurredAtUtc = Now, Result = result,
+                ReviewedByUserId = "u", ReviewedByName = "M", ReviewedAtUtc = Now, Version = 1,
+            }).ExecuteCommandAsync();
+        }
+        // 规则命中已撤回的不算。
+        var retracted = await InsertAsync(C.CartItemRemove, -20);
+        await FlagAsync(retracted, C.Rules.BurstDelete, retractedAt: Now);
+        // 没有命中规则的危险操作不算异常。
+        await InsertAsync(C.CartItemRemove, -10);
+
+        var badge = await CreateService("Admin").GetBadgeSummaryAsync(utcNow: Now);
+
+        // 异常：手动开钱箱、自动开钱箱、删除、重打印、撤销核查的清空 = 5；危险：手动开钱箱、删除、撤销核查的清空 = 3。
+        Assert.Equal(5, badge.AbnormalPending);
+        Assert.Equal(3, badge.DangerPending);
+    }
+
+    [Fact]
+    public async Task 角标_天数窗口默认7限制1到31_店长只看关联分店_无分店或无权限返回零()
+    {
+        var recent = await InsertAsync(C.CartItemRemove, -3600, store: "1013");
+        var old = await InsertAsync(C.CartItemRemove, -3 * 86400, store: "1013");
+        var tooOld = await InsertAsync(C.CartItemRemove, -9 * 86400, store: "1013");
+        var otherStore = await InsertAsync(C.CartItemRemove, -3600, store: "1042");
+        foreach (var id in new[] { recent, old, tooOld, otherStore })
+        {
+            await FlagAsync(id, C.Rules.BurstDelete);
+        }
+
+        var admin = CreateService("Admin");
+        // 默认 7 天：不含 9 天前。
+        Assert.Equal((3, 3), Pair(await admin.GetBadgeSummaryAsync(utcNow: Now)));
+        // 1 天：只有最近一小时内的两条（两家分店）。
+        Assert.Equal((2, 2), Pair(await admin.GetBadgeSummaryAsync(1, Now)));
+        // 0 与负数收敛到 1 天；超过 31 收敛到 31 天。
+        Assert.Equal((2, 2), Pair(await admin.GetBadgeSummaryAsync(0, Now)));
+        Assert.Equal((4, 4), Pair(await admin.GetBadgeSummaryAsync(999, Now)));
+
+        var manager = CreateService("StoreManager", ["1013"]);
+        Assert.Equal((2, 2), Pair(await manager.GetBadgeSummaryAsync(utcNow: Now)));
+        Assert.Equal((0, 0), Pair(await CreateService("StoreManager", []).GetBadgeSummaryAsync(utcNow: Now)));
+        Assert.Equal((0, 0), Pair(await CreateService("Cashier").GetBadgeSummaryAsync(utcNow: Now)));
+
+        static (int, int) Pair(EmployeeLogBadgeSummaryDto badge) => (badge.AbnormalPending, badge.DangerPending);
+    }
+
+    [Fact]
+    public async Task 角标_按范围加天数缓存_缓存期内不重复查库_不同范围互不串用()
+    {
+        var first = await InsertAsync(C.CartItemRemove, -3600, store: "1013");
+        await FlagAsync(first, C.Rules.BurstDelete);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var manager = CreateService("StoreManager", ["1013"], cache);
+
+        Assert.Equal(1, (await manager.GetBadgeSummaryAsync(utcNow: Now)).AbnormalPending);
+
+        var second = await InsertAsync(C.CartItemRemove, -1800, store: "1013");
+        await FlagAsync(second, C.Rules.BurstDelete);
+
+        // 缓存期内仍是旧值；换一个天数、换一个可见范围都不会命中这份缓存。
+        Assert.Equal(1, (await manager.GetBadgeSummaryAsync(utcNow: Now)).AbnormalPending);
+        Assert.Equal(2, (await manager.GetBadgeSummaryAsync(8, Now)).AbnormalPending);
+        Assert.Equal(0, (await CreateService("StoreManager", ["1042"], cache).GetBadgeSummaryAsync(utcNow: Now)).AbnormalPending);
     }
 
     [Fact]
@@ -283,7 +409,7 @@ public sealed class OperationAuditRiskQueryTests : IDisposable
         }).ExecuteCommandAsync();
     }
 
-    private OperationAuditQueryService CreateService(string role, IReadOnlyList<string>? storeCodes = null)
+    private OperationAuditQueryService CreateService(string role, IReadOnlyList<string>? storeCodes = null, IMemoryCache? cache = null)
     {
         var identity = new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, "test-user"), new Claim(ClaimTypes.Role, role)],
@@ -296,7 +422,7 @@ public sealed class OperationAuditRiskQueryTests : IDisposable
             IsAuthenticated = true,
             StoreCodes = storeCodes ?? [],
         });
-        return new OperationAuditQueryService(_db, scope, accessor);
+        return new OperationAuditQueryService(_db, scope, accessor, cache: cache);
     }
 
     private OperationAuditReviewService CreateReviewService(string role, IReadOnlyList<string>? storeCodes = null) =>

@@ -88,6 +88,12 @@ public sealed class OperationAuditSummaryDto
 
     /// <summary>按规则计数；同一事件命中多条规则时各计一次。</summary>
     public List<OperationAuditRuleCountDto> AbnormalByRule { get; set; } = [];
+
+    /// <summary>
+    /// 当前过滤条件下出现过的设备（不带设备编码条件本身，选了某设备后下拉仍能列出全部设备），供筛选下拉。
+    /// 与老收银列表的 Devices 同形状；空设备码已剔除，按事件数降序，最多 100 项。
+    /// </summary>
+    public List<LegacyEmployeeLogDeviceOptionDto> Devices { get; set; } = [];
 }
 
 public sealed class OperationAuditRuleCountDto
@@ -166,6 +172,12 @@ public sealed class OperationAuditEmployeeSummaryResultDto
     public int Total { get; set; }
 
     public int DangerTotal { get; set; }
+
+    /// <summary>
+    /// 分店、时间范围内出现过的设备（不带设备编码条件本身），供员工汇总页筛选下拉；
+    /// 与 Summary.Devices 同形状、同排序、同上限。
+    /// </summary>
+    public List<LegacyEmployeeLogDeviceOptionDto> Devices { get; set; } = [];
 }
 
 /// <summary>一条审计事件及其同设备前后若干分钟内的操作，供详情还原操作过程。</summary>

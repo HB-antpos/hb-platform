@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ActivityIndicator, AppState, View } from "react-native";
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import { PrimaryTabBar } from "@/components/navigation";
@@ -27,6 +27,9 @@ import { FACE_HUB_ROUTE_NAME, shouldFetchFaceHitUnread } from "@/modules/navigat
 import { FACE_HIT_NOTIFICATION_TYPE, faceHitUnreadQueryKey } from "@/modules/face-match/hit-unread";
 import { FACE_MATCH_PERMISSIONS } from "@/modules/face-match/constants";
 import { getUnreadCount } from "@/modules/notifications/api";
+import { fetchLogBadgeSummary } from "@/modules/legacy-employee-logs/api";
+import { legacyLogBadgeQueryKey, resolveLogBadgeLevel, shouldFetchLogBadge } from "@/modules/legacy-employee-logs/badge";
+import { subscribeLegacyLogReviewed } from "@/modules/legacy-employee-logs/review-events";
 import { usePushRegistration } from "@/modules/push/use-push-registration";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { usePriceTaskOverview } from "@/modules/price-updates/use-price-task-overview";
@@ -52,6 +55,10 @@ const CONTAINER_NEW_PRODUCTS_ROUTE = "container-new-products";
 /** 「黑名单命中未读数」（红色数字）：30 秒内视为新鲜，前台每 60 秒轮询一次，回到前台立即刷新。 */
 const FACE_HIT_UNREAD_STALE_MS = 30_000;
 const FACE_HIT_UNREAD_REFETCH_INTERVAL_MS = 60_000;
+const LEGACY_LOG_ROUTE = "legacy-employee-logs";
+/** 员工操作日志圆点：与人脸命中未读同一节奏（30 秒新鲜、前台每 60 秒轮询、回前台立即刷新）。 */
+const LEGACY_LOG_BADGE_STALE_MS = 30_000;
+const LEGACY_LOG_BADGE_REFETCH_INTERVAL_MS = 60_000;
 
 export default function ShellLayout() {
   const router = useRouter();
@@ -87,6 +94,9 @@ export default function ShellLayout() {
   const hasFaceUnwelcomeReview = useAuthStore((state) =>
     state.access.hasPermission(FACE_MATCH_PERMISSIONS.unwelcomeReview)
   );
+  // 员工操作日志圆点：老收银 / 新收银任一来源有查看权限才请求，且只请求有权限的来源。
+  const canViewLegacyLogs = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const canViewPosAudits = useAuthStore((state) => state.access.canViewPosOperationAudits);
   const iosReviewOfflineGuardActive = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   const versionManagementAllowed = canAccessVersionManagement({ isAdmin, isAuthenticated, sessionKind });
   const isWarehouseStaffOnly = useAuthStore((state) => state.access.isWarehouseStaffOnly);
@@ -494,6 +504,7 @@ export default function ShellLayout() {
   });
   const [appActive, setAppActive] = useState(() => AppState.currentState === "active");
   const wasAppActiveRef = useRef(appActive);
+  const legacyLogBadgeWasActive = useRef(appActive);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => setAppActive(next === "active"));
     return () => subscription.remove();
@@ -515,6 +526,37 @@ export default function ShellLayout() {
       void refetchFaceHitUnread();
     }
   }, [appActive, faceHitUnreadEnabled, refetchFaceHitUnread]);
+  // 员工操作日志圆点（红 / 橙，无数字）：失败时 react-query 保留上一次的数据；账号切换靠查询键里的账号编号隔离。
+  const legacyLogBadgeEnabled = shouldFetchLogBadge({
+    isAuthenticated,
+    isReviewSession: isIosReviewSession || iosReviewOfflineGuardActive,
+    isDeviceMode,
+    navigationReady,
+    logsRouteVisible: visibleRouteNames.has(LEGACY_LOG_ROUTE),
+    canViewLegacy: canViewLegacyLogs,
+    canViewPos: canViewPosAudits,
+  });
+  const queryClient = useQueryClient();
+  const legacyLogBadgeQuery = useQuery({
+    queryKey: legacyLogBadgeQueryKey(userGuid),
+    enabled: legacyLogBadgeEnabled,
+    queryFn: ({ signal }) => fetchLogBadgeSummary({ legacy: canViewLegacyLogs, pos: canViewPosAudits }, signal),
+    staleTime: LEGACY_LOG_BADGE_STALE_MS,
+    refetchInterval: appActive ? LEGACY_LOG_BADGE_REFETCH_INTERVAL_MS : false,
+  });
+  const refetchLegacyLogBadge = legacyLogBadgeQuery.refetch;
+  useEffect(() => {
+    // 只在「后台 → 前台」的那一刻刷新；用独立的 ref 记录上一次前台状态，不依赖人脸未读 effect 的先后顺序。
+    if (appActive && legacyLogBadgeEnabled && legacyLogBadgeWasActive.current === false) {
+      void refetchLegacyLogBadge();
+    }
+    legacyLogBadgeWasActive.current = appActive;
+  }, [appActive, legacyLogBadgeEnabled, refetchLegacyLogBadge]);
+  // 日志页里提交核查后立刻重取圆点，不必等 60 秒轮询。
+  useEffect(
+    () => subscribeLegacyLogReviewed(() => void queryClient.invalidateQueries({ queryKey: legacyLogBadgeQueryKey(userGuid) })),
+    [queryClient, userGuid],
+  );
   const shouldWaitForNavigation =
     (hasUserSession || isDeviceMode) && (!navigationReady || navigationLoading);
   const preferredDefaultRoute = resolvePreferredDefaultTabRoute({
@@ -639,6 +681,7 @@ export default function ShellLayout() {
         refreshPriceTasks,
         newProductKindCount,
         faceHitUnreadCount: faceHitUnreadEnabled ? (faceHitUnreadQuery.data ?? 0) : 0,
+        legacyLogBadgeLevel: legacyLogBadgeEnabled ? resolveLogBadgeLevel(legacyLogBadgeQuery.data) : null,
         isDeviceMode,
         isWarehouseStaffOnly,
       }}

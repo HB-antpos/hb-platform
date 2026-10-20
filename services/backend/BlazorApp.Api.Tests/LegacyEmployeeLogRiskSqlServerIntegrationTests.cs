@@ -122,6 +122,48 @@ public sealed partial class LegacyEmployeeLogSqlServerIntegrationTests
 
     [LegacyEmployeeLogSqlServerFact]
     [Trait("Category", "SQL")]
+    public async Task 角标_待核查异常与危险数_已核查不算_撤销回到待核查_窗口与分店范围生效_员工汇总带设备选项()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await SeedRiskDayAsync(fixture);
+        await ScanRiskDayAsync(fixture);
+        var reviews = CreateReviewService(fixture);
+        Assert.Equal(LegacyEmployeeLogResultStatus.Ok, (await reviews.ReviewAsync(new LegacyEmployeeLogReviewRequestDto { LogId = "R-CART-1", Result = "followUp" })).Status);
+        var service = fixture.CreateService(RiskStore);
+        // 种子日是 2026-09-30（门店墙钟），取 10-02 作为「现在」让它落在 7 天窗口内。
+        var now = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc);
+
+        // 5 条异常里 R-CART-1 已有「需跟进」结论 → 待核查 4；危险（删除、开钱箱）→ 2，改价整单折扣已核查不计。
+        var badge = await service.GetBadgeSummaryAsync(utcNow: now);
+        Assert.Equal((4, 2), (badge.AbnormalPending, badge.DangerPending));
+
+        // 撤销核查回到待核查。
+        Assert.Equal(LegacyEmployeeLogResultStatus.Ok, (await reviews.ReviewAsync(new LegacyEmployeeLogReviewRequestDto { LogId = "R-CART-1", Result = "revoked", ExpectedVersion = 1 })).Status);
+        badge = await service.GetBadgeSummaryAsync(utcNow: now);
+        Assert.Equal((5, 3), (badge.AbnormalPending, badge.DangerPending));
+
+        // 窗口之外、可见分店之外都不计。
+        Assert.Equal((0, 0), Pair(await service.GetBadgeSummaryAsync(utcNow: now.AddDays(30))));
+        Assert.Equal((0, 0), Pair(await fixture.CreateService("1013").GetBadgeSummaryAsync(utcNow: now)));
+
+        // 员工汇总带回设备选项（不带设备条件本身）。
+        var employees = (await service.GetEmployeeSummaryAsync(new LegacyEmployeeLogEmployeeSummaryQueryDto
+        {
+            StoreCodes = [RiskStore],
+            From = RiskDay,
+            To = RiskDay.AddDays(1),
+            DeviceCode = "NO_SUCH_DEVICE",
+        })).Data!;
+        Assert.Empty(employees.Employees);
+        var device = Assert.Single(employees.Devices);
+        Assert.Equal(RiskDevice, device.DeviceCode);
+        Assert.Equal(10, device.Count);
+
+        static (int, int) Pair(EmployeeLogBadgeSummaryDto value) => (value.AbnormalPending, value.DangerPending);
+    }
+
+    [LegacyEmployeeLogSqlServerFact]
+    [Trait("Category", "SQL")]
     public async Task 核查_乐观并发_撤销与历史流水_未命中记录与越权都拒绝()
     {
         await using var fixture = await Fixture.CreateAsync();

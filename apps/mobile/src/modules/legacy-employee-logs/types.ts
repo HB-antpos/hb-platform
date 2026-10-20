@@ -88,6 +88,12 @@ export interface LegacyOperationCount {
   count: number;
 }
 
+/** 设备过滤下拉的一项；deviceCode 为空的行不进下拉。 */
+export interface LegacyDeviceOption {
+  deviceCode: string | null;
+  count: number;
+}
+
 export interface LegacyLogPage {
   items: LegacyLogItem[];
   total: number;
@@ -95,7 +101,7 @@ export interface LegacyLogPage {
   allTotal?: number;
   operationCounts: LegacyOperationCount[];
   employees: { employeeId: string | null; employeeName: string | null; count: number }[];
-  devices: { deviceCode: string | null; count: number }[];
+  devices: LegacyDeviceOption[];
   riskSummary: LegacyRiskSummary;
 }
 
@@ -123,6 +129,8 @@ export interface LegacyEmployeeSummaryResult {
   employees: LegacyEmployeeSummary[];
   total: number;
   dangerTotal: number;
+  /** 汇总接口返回的设备选项（不带设备条件本身）；旧后端没有该字段时为空数组，页面改由员工行推出。 */
+  devices: LegacyDeviceOption[];
 }
 
 /** 列表筛选。subOperations 是「全部 / 危险」入口下的细分；ruleCode 与 reviewStatus 只在「异常」入口下生效。 */
@@ -139,3 +147,12 @@ export interface LegacyLogFilters {
   ruleCode: string | null;
   reviewStatus: LegacyReviewStatus;
 }
+
+/** 导航角标摘要（近 7 天、当前账号可见分店）：未核查的危险异常数与待核查的异常数。 */
+export interface LogBadgeSummary {
+  dangerPending: number;
+  abnormalPending: number;
+}
+
+/** 角标圆点级别：danger = 红，warning = 橙；null = 不显示。 */
+export type LogBadgeLevel = "danger" | "warning";

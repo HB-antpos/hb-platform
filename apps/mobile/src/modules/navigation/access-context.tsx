@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { LogBadgeLevel } from "@/modules/legacy-employee-logs/types";
 import type { PriceTaskOverview } from "@/modules/price-updates/overview";
 
 export interface AppNavigationAccessValue {
@@ -22,6 +23,11 @@ export interface AppNavigationAccessValue {
    * 用于工作台「人脸比对」入口角标、底部「工作台」页签红色徽标、合并页「抓拍 / 名单」页签。没有权限或取不到时为 0。
    */
   faceHitUnreadCount: number;
+  /**
+   * 员工操作日志圆点级别（无数字）：近 7 天可见分店内有未核查的危险异常 → "danger"（红），
+   * 否则有待核查的异常 → "warning"（橙），否则 null。用于工作台入口、折叠分组头与底部「工作台」页签。
+   */
+  legacyLogBadgeLevel: LogBadgeLevel | null;
   isDeviceMode: boolean;
   isWarehouseStaffOnly: boolean;
 }

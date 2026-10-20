@@ -4,7 +4,8 @@
   "search": {
     "placeholder": "条码 / 货号 / 编码",
     "lastHit": "最近命中：{{value}}",
-    "scan": "扫码查询"
+    "scan": "扫码查询",
+    "more": "更多"
   },
   "actions": {
     "returnToInvoiceDetails": "返回发票明细",

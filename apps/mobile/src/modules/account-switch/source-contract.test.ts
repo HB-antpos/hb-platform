@@ -47,7 +47,6 @@ test("auth-store：激活账号会话先清旧账号的内存态与收银条码�
     "clearSensitiveQueryCache(queryClient)",
     "useCartStore.getState().reset()",
     "usePickerStore.getState().clearPicker()",
-    "STORE_SELECTION_STORAGE_KEY",
     "clearCashierBarcodePrintSession()",
     "SecureStorage.setToken(accessToken)",
     "SecureStorage.setRefreshToken(refreshToken)",
@@ -59,6 +58,8 @@ test("auth-store：激活账号会话先清旧账号的内存态与收银条码�
     return index;
   });
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  // 分店选择按账号持久化：切换账号只清内存态，不能删持久化值，否则切回来无法恢复之前选的分店
+  assert.doesNotMatch(body, /STORE_SELECTION_STORAGE_KEY/);
   // 写到一半失败：整体清场回登录页，不留半新半旧的混合身份
   assert.match(body, /catch \(error\)[\s\S]{0,200}clearLocalSession\(\)[\s\S]{0,60}throw error/);
   // 菜单不在闸门内拉（会被自己的闸门挡住）

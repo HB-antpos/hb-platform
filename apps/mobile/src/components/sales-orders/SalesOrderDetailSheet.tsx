@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Divider, Icon, Text } from "react-native-paper";
+import { ProductImageBox } from "@/components/seasonal-product-insights/ProductImageBox";
 import { QrCodePanel } from "@/components/ui/QrCodePanel";
 import { InsightSheet } from "@/components/warehouse-product-insights/InsightSheet";
 import type { InvoiceAction } from "@/modules/sales-orders/invoice";
@@ -10,9 +11,13 @@ import type {
   SalesOrderMatchedProduct,
 } from "@/modules/sales-orders/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { productThumbnailUri } from "@/shared/utils/product-image";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { SalesOrderStatusTag } from "./SalesOrderStatusTag";
 import { formatSalesOrderMoney, formatSalesOrderTime } from "./format";
+
+/** 明细行缩略图边长（dp）。 */
+const LINE_IMAGE_SIZE = 56;
 
 export interface SalesOrderDetailSheetProps {
   visible: boolean;
@@ -147,30 +152,38 @@ export function SalesOrderDetailSheet({
                     key={`${line.productCode ?? "line"}-${index}`}
                     style={[styles.line, matched ? styles.lineMatched : null]}
                   >
-                    <View style={styles.row}>
-                      <Text style={styles.lineCode}>
-                        {line.itemNumber ?? line.productCode ?? "—"}
-                      </Text>
-                      {matched ? (
-                        <Text style={styles.matchedTag}>{t("detail.matched")}</Text>
-                      ) : null}
-                    </View>
-                    <Text numberOfLines={2} style={styles.lineName}>
-                      {line.productName ?? "—"}
-                    </Text>
-                    <View style={styles.row}>
-                      <Text style={styles.meta}>
-                        {line.quantity ?? 0} × {formatSalesOrderMoney(line.unitPrice)}
-                        {line.discountAmount ? (
-                          <Text style={styles.lineDiscount}>
-                            {"  "}
-                            {t("detail.lineDiscount", {
-                              value: formatSalesOrderMoney(line.discountAmount),
-                            })}
-                          </Text>
+                    {/* 左侧缩略图（主档无图或加载失败时显示占位），右侧保持原有文字布局 */}
+                    <ProductImageBox
+                      uri={productThumbnailUri(line.productImage, 96)}
+                      size={LINE_IMAGE_SIZE}
+                      label={line.productName ?? line.itemNumber ?? line.productCode ?? ""}
+                    />
+                    <View style={styles.lineBody}>
+                      <View style={styles.row}>
+                        <Text style={styles.lineCode}>
+                          {line.itemNumber ?? line.productCode ?? "—"}
+                        </Text>
+                        {matched ? (
+                          <Text style={styles.matchedTag}>{t("detail.matched")}</Text>
                         ) : null}
+                      </View>
+                      <Text numberOfLines={2} style={styles.lineName}>
+                        {line.productName ?? "—"}
                       </Text>
-                      <Text style={styles.lineAmount}>{formatSalesOrderMoney(line.actualAmount)}</Text>
+                      <View style={styles.row}>
+                        <Text style={styles.meta}>
+                          {line.quantity ?? 0} × {formatSalesOrderMoney(line.unitPrice)}
+                          {line.discountAmount ? (
+                            <Text style={styles.lineDiscount}>
+                              {"  "}
+                              {t("detail.lineDiscount", {
+                                value: formatSalesOrderMoney(line.discountAmount),
+                              })}
+                            </Text>
+                          ) : null}
+                        </Text>
+                        <Text style={styles.lineAmount}>{formatSalesOrderMoney(line.actualAmount)}</Text>
+                      </View>
                     </View>
                   </View>
                 );
@@ -272,8 +285,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: HB_COLORS.outlineMuted,
     padding: HB_SPACING.sm,
-    gap: 2,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: HB_SPACING.sm,
   },
+  lineBody: { flex: 1, minWidth: 0, gap: 2 },
   lineMatched: { borderColor: "#FAC775", backgroundColor: "#FFFBF2" },
   lineCode: { fontSize: 12, fontWeight: "700", color: HB_COLORS.textPrimary },
   lineName: { fontSize: 13, color: HB_COLORS.textPrimary },
