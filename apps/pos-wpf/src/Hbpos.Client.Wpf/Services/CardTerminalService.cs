@@ -527,7 +527,6 @@ public sealed class ConfiguredCardTerminalClient :
     // 轮询等顾客刷卡的间隔。Hbpos API 在新加坡，门店往返约 0.3 秒；间隔越长，顾客刷完到收银机确认的平均滞后越长（约半个间隔）。
     // 1 秒对 Square 与 Hbpos API 的请求量都可忽略（每台收银机同时最多一笔在等），比原 2 秒平均快约 0.5 秒。
     private static readonly TimeSpan SquarePollInterval = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan SquareCleanupTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan SquareWarmUpTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan SquareApprovedSettleInterval = TimeSpan.FromSeconds(1);
 
@@ -545,6 +544,14 @@ public sealed class ConfiguredCardTerminalClient :
     internal TimeSpan SquareCancelConfirmWindow { get; init; } = TimeSpan.FromSeconds(15);
 
     internal TimeSpan SquareCancelConfirmInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// 取消 + 关闭结账两次请求<b>共用</b>的时间上限（不是各 5 秒）。原来是 5 秒：Hbpos API 在新加坡，门店往返约 0.3 秒，
+    /// 10-19 实测取消 0.7~2.4 秒、关闭 0.7~2.0 秒，加起来最多 4.4 秒，已经贴着 5 秒；门店网络一抖（当天一次创建结账花了 18 秒）
+    /// 就会在清理中途被截断，把一次本可确认的取消记成「结果未知」并进恢复中心。
+    /// 放宽到 15 秒（与取消确认窗口一致），代价只是极端网络下收银员多等几秒才看到结果。
+    /// </summary>
+    internal TimeSpan SquareCleanupTimeout { get; init; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// Square 付款等待用的时钟：总等待预算（TerminalTimeout）、轮询间隔与瞬时错误退避都走它。
@@ -2271,7 +2278,8 @@ public sealed class ConfiguredCardTerminalClient :
         }
 
         LogSquare($"cleanup start checkoutId={checkoutId}");
-        using var cleanupCts = new CancellationTokenSource(SquareCleanupTimeout);
+        // 走 TimeProvider：生产是系统时钟，测试用虚拟时钟验证「取消 + 关闭共用上限」，不靠墙钟硬等。
+        using var cleanupCts = new CancellationTokenSource(SquareCleanupTimeout, TimeProvider);
         var cancelResult = await CancelSquareCheckoutBestEffortAsync(
             settings,
             checkoutId,

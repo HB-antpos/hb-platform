@@ -524,8 +524,20 @@ public sealed partial class ConfiguredCardTerminalClientTests
         private int _checkoutGets;
         private int _paymentGets;
         private int _cancels;
+        private int _dismisses;
 
         public IReadOnlyList<Func<HttpResponseMessage>> CreateSteps { get; init; } = [];
+
+        /// <summary>取消请求返回的结账状态；默认 CANCELED（终态，无需再关闭）。CANCEL_REQUESTED 会让客户端继续发关闭请求。</summary>
+        public string CancelResponseStatus { get; init; } = "CANCELED";
+
+        /// <summary>取消 / 关闭请求在虚拟时钟上的耗时，模拟「门店到新加坡网络慢」；零表示立即返回。</summary>
+        public TimeSpan CancelDelay { get; init; }
+
+        public TimeSpan DismissDelay { get; init; }
+
+        /// <summary>由 SquareRetryHarness 注入的虚拟时钟，延迟用它等，测试推进时间即可，不靠墙钟硬等。</summary>
+        public TimeProvider? DelayClock { get; set; }
 
         public IReadOnlyList<Func<HttpResponseMessage>> CheckoutSteps { get; init; } = [];
 
@@ -542,10 +554,12 @@ public sealed partial class ConfiguredCardTerminalClientTests
 
         public int Cancels => Volatile.Read(ref _cancels);
 
+        public int Dismisses => Volatile.Read(ref _dismisses);
+
         public string CreatedCheckoutJson() =>
             $$"""{ "checkout": { "id": "{{checkoutId}}", "status": "PENDING" } }""";
 
-        public HttpMessageHandler CreateHandler() => new StubHttpMessageHandler((request, _) =>
+        public HttpMessageHandler CreateHandler() => new StubHttpMessageHandler(async (request, cancellationToken) =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Post)
@@ -553,11 +567,14 @@ public sealed partial class ConfiguredCardTerminalClientTests
                 if (path.EndsWith("/cancel", StringComparison.Ordinal))
                 {
                     Interlocked.Increment(ref _cancels);
-                    return JsonResponse(CanceledCheckoutJson());
+                    await DelayAsync(CancelDelay, cancellationToken);
+                    return JsonResponse(CheckoutJson(CancelResponseStatus));
                 }
 
                 if (path.EndsWith("/dismiss", StringComparison.Ordinal))
                 {
+                    Interlocked.Increment(ref _dismisses);
+                    await DelayAsync(DismissDelay, cancellationToken);
                     return JsonResponse(CanceledCheckoutJson());
                 }
 
@@ -579,8 +596,15 @@ public sealed partial class ConfiguredCardTerminalClientTests
             return NextStep(CheckoutSteps, ref _checkoutGets);
         });
 
-        private string CanceledCheckoutJson() =>
-            $$"""{ "checkout": { "id": "{{checkoutId}}", "status": "CANCELED" } }""";
+        private string CanceledCheckoutJson() => CheckoutJson("CANCELED");
+
+        private string CheckoutJson(string status) =>
+            $$"""{ "checkout": { "id": "{{checkoutId}}", "status": "{{status}}" } }""";
+
+        private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
+            delay > TimeSpan.Zero && DelayClock is not null
+                ? Task.Delay(delay, DelayClock, cancellationToken)
+                : Task.CompletedTask;
 
         private static HttpResponseMessage NextStep(IReadOnlyList<Func<HttpResponseMessage>> steps, ref int counter)
         {
@@ -594,10 +618,11 @@ public sealed partial class ConfiguredCardTerminalClientTests
     {
         private readonly DateTimeOffset _startedAt;
 
-        public SquareRetryHarness(SquareRetryScript script, TimeSpan? terminalTimeout = null)
+        public SquareRetryHarness(SquareRetryScript script, TimeSpan? terminalTimeout = null, TimeSpan? cancelConfirmWindow = null)
         {
             Script = script;
             Time = new FakeTimeProvider();
+            script.DelayClock = Time;
             _startedAt = Time.GetUtcNow();
             Repository = new RecordingFailureSquarePaymentAttemptRepository();
             Context = new SquarePaymentAttemptContextAccessor();
@@ -607,7 +632,9 @@ public sealed partial class ConfiguredCardTerminalClientTests
                 squarePaymentAttemptContextAccessor: Context,
                 squarePaymentAttemptRepository: Repository)
             {
-                TimeProvider = Time
+                TimeProvider = Time,
+                // 取消确认窗口走真实时间：需要走到这一步的用例传入很短的窗口，避免真等 15 秒。
+                SquareCancelConfirmWindow = cancelConfirmWindow ?? TimeSpan.FromSeconds(15)
             };
         }
 
@@ -635,9 +662,11 @@ public sealed partial class ConfiguredCardTerminalClientTests
         /// 启动付款并逐秒推进虚拟时间直到结束。每步先让出真实线程时间，保证被测代码已登记好退避 / 轮询计时器再推进；
         /// 以真实时间上限兜底，避免被测代码卡住时测试挂死。
         /// </summary>
-        public async Task<PaymentAuthorizationResult> RunToCompletionAsync()
+        public Task<PaymentAuthorizationResult> RunToCompletionAsync() => AdvanceUntilCompletedAsync(AuthorizeAsync());
+
+        /// <summary>已启动（可能已被调用方取消）的付款：逐秒推进虚拟时间直到结束，同样以真实时间上限兜底。</summary>
+        public async Task<PaymentAuthorizationResult> AdvanceUntilCompletedAsync(Task<PaymentAuthorizationResult> authorizeTask)
         {
-            var authorizeTask = AuthorizeAsync();
             var watch = Stopwatch.StartNew();
             while (!authorizeTask.IsCompleted && watch.Elapsed < AsyncTestWaitSupport.DefaultTimeout)
             {
