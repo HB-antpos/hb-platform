@@ -85,6 +85,7 @@ import {
 } from "@/modules/product-maintenance/api";
 import { resolveExternalQueryStore } from "@/modules/product-maintenance/external-query-store";
 import { describeLookupRequestError } from "@/modules/product-maintenance/lookup-error-feedback";
+import { getRetailPriceEditBlock } from "@/modules/product-maintenance/retail-price-edit-guard";
 import {
   resolveCreateProductServerError,
   validateCreateProductForm,
@@ -3372,6 +3373,12 @@ function ProductQueryContent() {
   ]);
 
   const openStoreRetailPriceEditor = useCallback(() => {
+    // 自动定价开启时零售价由规则重算，手改会被下一次扫码覆盖：不打开输入框，提示先关闭自动定价。
+    if (getRetailPriceEditBlock(detail?.storePrice) === "autoPricingOn") {
+      setSnackbarMessage(t("storePrice.autoPricingBlocksRetailEdit"));
+      return;
+    }
+
     openNumericInputModal({
       key: "store-retail",
       title: t("storePrice.retail"),
@@ -3380,6 +3387,7 @@ function ProductQueryContent() {
       onConfirmValue: handleChangeStoreRetailPrice,
     });
   }, [
+    detail?.storePrice,
     handleChangeStoreRetailPrice,
     openNumericInputModal,
     storeRetailInput,
@@ -5392,7 +5400,8 @@ function ProductQueryContent() {
       <Snackbar
         visible={Boolean(snackbarMessage)}
         onDismiss={() => setSnackbarMessage("")}
-        duration={2500}
+        // 短提示 2.5 秒；较长的提示（如「请先关闭自动定价」）按字数多留阅读时间，最长 6 秒。
+        duration={Math.min(6000, Math.max(2500, snackbarMessage.length * 120))}
       >
         {snackbarMessage}
       </Snackbar>

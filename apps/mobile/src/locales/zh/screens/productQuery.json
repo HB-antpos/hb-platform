@@ -207,6 +207,7 @@
     "on": "开",
     "off": "关",
     "autoPricing": "自动定价",
+    "autoPricingBlocksRetailEdit": "自动定价已开启，零售价会被自动覆盖。请先关闭「自动定价」，再修改零售价。",
     "specialProduct": "特殊商品",
     "rateLabel": "倍率",
     "gp": "毛利",
