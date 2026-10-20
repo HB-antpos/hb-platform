@@ -71,7 +71,10 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
             typeof(ChinaSupplier),
             // 仓库销售看板分店栏的「进货」读仓库订单。
             typeof(WareHouseOrder),
-            typeof(WareHouseOrderDetails)
+            typeof(WareHouseOrderDetails),
+            // 销售明细商品抽屉的进货明细读供应商进货单。
+            typeof(StoreLocalSupplierInvoice),
+            typeof(StoreLocalSupplierInvoiceDetails)
         );
         CreateScheduledTaskLogTable(_localDb);
         _posmDb.CodeFirst.InitTables(
@@ -275,6 +278,128 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
             DateRange = range,
             PurchaseDateRange = new DateRangeDto { StartDate = date, EndDate = date.AddDays(731) },
         }));
+    }
+
+    [Fact]
+    public async Task GetSalesDetailProductTrendAsync_窗口为销售开始日前60天_按授权范围与单店汇总日销量()
+    {
+        var salesStart = new DateTime(2026, 8, 10);
+        var salesEnd = new DateTime(2026, 8, 12);
+        var windowStart = salesStart.AddDays(-60);
+        for (var day = windowStart; day <= salesEnd; day = day.AddDays(1))
+            await SeedStatisticStateAsync(day, SalesStatisticRefreshStatus.Fresh);
+        await _localDb.Insertable(new[]
+        {
+            new ProductStoreDailySalesStatistic { Date = salesStart, BranchCode = "B1", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 5, TotalAmount = 50m },
+            new ProductStoreDailySalesStatistic { Date = salesStart.AddDays(1), BranchCode = "B1", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 7, TotalAmount = 70m },
+            // 同一天另一家分店、另一个原始供应商：汇总成一天。
+            new ProductStoreDailySalesStatistic { Date = salesStart.AddDays(1), BranchCode = "B2 ", SupplierCode = "T", ProductCode = "P-TREND", TotalQuantity = 3, TotalAmount = 30m },
+            // 窗口内（销售期之前）的销量要出现；窗口之外、别的商品、授权范围外的分店都不算。
+            new ProductStoreDailySalesStatistic { Date = windowStart, BranchCode = "B1", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 2, TotalAmount = 20m },
+            new ProductStoreDailySalesStatistic { Date = windowStart.AddDays(-1), BranchCode = "B1", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 99, TotalAmount = 990m },
+            new ProductStoreDailySalesStatistic { Date = salesStart, BranchCode = "B1", SupplierCode = "S", ProductCode = "P-OTHER", TotalQuantity = 50, TotalAmount = 500m },
+            new ProductStoreDailySalesStatistic { Date = salesStart.AddDays(1), BranchCode = "B3", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 100, TotalAmount = 1000m },
+        }).ExecuteCommandAsync();
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = salesStart, EndDate = salesEnd };
+        string Days(ProductReportResponseDto<SalesDetailProductTrendDto> response) =>
+            string.Join(";", response.Data!.Daily.Select(day => $"{day.Date:MM-dd}:{day.Quantity:0.##}"));
+
+        var all = await service.GetSalesDetailProductTrendAsync(range, " P-TREND ", new List<string> { "B1", "B2" }, null);
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, all.StatisticStatus);
+        Assert.Equal((windowStart, salesEnd), (all.Data!.WindowStart, all.Data.WindowEnd));
+        Assert.Equal("06-11:2;08-10:5;08-11:10", Days(all));
+        Assert.Equal("06-11:2;08-10:5;08-11:7", Days(await service.GetSalesDetailProductTrendAsync(range, "P-TREND", new List<string> { "B1", "B2" }, "B1")));
+        Assert.Equal("08-11:103", Days(await service.GetSalesDetailProductTrendAsync(range, "P-TREND", new List<string> { "B2", "B3" }, null)));
+        Assert.Empty((await service.GetSalesDetailProductTrendAsync(range, "P-TREND", new List<string>(), null)).Data!.Daily);
+        Assert.Equal("06-11:2;08-10:5;08-11:110", Days(await service.GetSalesDetailProductTrendAsync(range, "P-TREND", null, null)));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailProductTrendAsync(range, " ", null, null));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailProductTrendAsync(
+            new DateRangeDto { StartDate = salesStart, EndDate = salesStart.AddDays(731) }, "P-TREND", null, null));
+    }
+
+    [Fact]
+    public async Task GetSalesDetailProductTrendAsync_窗口内有日期统计未就绪时只返回状态不返回数据()
+    {
+        var salesStart = new DateTime(2026, 8, 10);
+        for (var day = salesStart.AddDays(-60); day <= salesStart.AddDays(1); day = day.AddDays(1))
+        {
+            // 销售期内最后一天没有状态行。
+            if (day == salesStart.AddDays(1)) break;
+            await SeedStatisticStateAsync(day, SalesStatisticRefreshStatus.Fresh);
+        }
+        await _localDb.Insertable(new ProductStoreDailySalesStatistic { Date = salesStart, BranchCode = "B1", SupplierCode = "S", ProductCode = "P-TREND", TotalQuantity = 5, TotalAmount = 50m }).ExecuteCommandAsync();
+
+        var response = await CreateService().GetSalesDetailProductTrendAsync(
+            new DateRangeDto { StartDate = salesStart, EndDate = salesStart.AddDays(1) }, "P-TREND", null, null);
+
+        Assert.NotEqual(SalesStatisticRefreshStatus.Fresh, response.StatisticStatus);
+        Assert.Empty(response.Data!.Daily);
+    }
+
+    [Fact]
+    public async Task GetSalesDetailProductPurchasesAsync_每一批进货按来源与单号返回_配货为空与范围外不计()
+    {
+        var salesStart = new DateTime(2026, 8, 10);
+        var salesEnd = new DateTime(2026, 8, 12);
+        await SeedStoreAsync("B1", "Branch One");
+        await SeedStoreAsync("B2", "Branch Two");
+        await SeedStoreAsync("B3", "Branch Three");
+        WareHouseOrder Order(string guid, string store, int? flow, DateTime? outbound, DateTime? orderDate, bool deleted = false) => new()
+        {
+            OrderGUID = guid, StoreCode = store, OrderNo = $"NO-{guid}", FlowStatus = flow, OutboundDate = outbound, OrderDate = orderDate, IsDeleted = deleted,
+        };
+        WareHouseOrderDetails Line(string order, string product, decimal? alloc, bool deleted = false) => new()
+        {
+            DetailGUID = $"{order}-{product}-{alloc}", OrderGUID = order, ProductCode = product, AllocQuantity = alloc, IsDeleted = deleted,
+        };
+        await _localDb.Insertable(new[]
+        {
+            Order("W1", "B1", 2, new DateTime(2026, 8, 11), new DateTime(2026, 8, 9)),
+            Order("W2", "B1 ", 2, new DateTime(2026, 6, 20), null),
+            Order("W-OLD", "B1", 2, new DateTime(2026, 6, 10), null),
+            Order("W-DRAFT", "B1", 0, null, new DateTime(2026, 8, 10)),
+            Order("W-NULL", "B2", 2, new DateTime(2026, 8, 10), null),
+            Order("W-DEL", "B2", 2, new DateTime(2026, 8, 10), null, deleted: true),
+            Order("W-SCOPE", "B3", 2, new DateTime(2026, 8, 10), null),
+            Order("W-NOOUT", "B2", 3, null, new DateTime(2026, 7, 1)),
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            Line("W1", "P-DR", 60m), Line("W1", "P-OTHER", 5m), Line("W1", "P-DR", 40m, deleted: true),
+            Line("W2", "P-DR", 24m), Line("W-OLD", "P-DR", 7m), Line("W-DRAFT", "P-DR", 8m),
+            Line("W-NULL", "P-DR", null), Line("W-DEL", "P-DR", 9m), Line("W-SCOPE", "P-DR", 11m), Line("W-NOOUT", "P-DR", 36m),
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new StoreRetailPrice { UUID = "RP-1", ProductCode = "P-DR" }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new StoreLocalSupplierInvoice { InvoiceGUID = "I1", InvoiceNo = "INV-1", StoreCode = "B1", InboundDate = new DateTime(2026, 8, 5) },
+            new StoreLocalSupplierInvoice { InvoiceGUID = "I2", InvoiceNo = "INV-2", StoreCode = "B2", OrderDate = new DateTime(2026, 7, 20) },
+            new StoreLocalSupplierInvoice { InvoiceGUID = "I-OLD", InvoiceNo = "INV-OLD", StoreCode = "B1", InboundDate = new DateTime(2026, 6, 1) },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new StoreLocalSupplierInvoiceDetails { DetailGUID = "d1", InvoiceGUID = "I1", StoreCode = "B1", ProductCode = "P-DR", Quantity = 12m },
+            // 明细缺商品编码：按零售价 UUID 回查到该商品。
+            new StoreLocalSupplierInvoiceDetails { DetailGUID = "d2", InvoiceGUID = "I2", StoreCode = "B2", ProductCode = "", StoreProductCode = "RP-1", Quantity = 6m },
+            new StoreLocalSupplierInvoiceDetails { DetailGUID = "d3", InvoiceGUID = "I-OLD", StoreCode = "B1", ProductCode = "P-DR", Quantity = 99m },
+        }).ExecuteCommandAsync();
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = salesStart, EndDate = salesEnd };
+        string Rows(SalesDetailProductPurchasesDto dto) => string.Join(";", dto.Batches.Select(batch =>
+            $"{batch.Date:MM-dd}|{batch.BranchCode}|{batch.Source}|{batch.DocumentNo}|{batch.Quantity:0.##}"));
+
+        var all = await service.GetSalesDetailProductPurchasesAsync(range, " P-DR ", new List<string> { "B1", "B2" });
+        Assert.Equal(
+            "08-11|B1|warehouse|NO-W1|60;08-05|B1|supplier|INV-1|12;07-20|B2|supplier|INV-2|6;07-01|B2|warehouse|NO-W-NOOUT|36;06-20|B1|warehouse|NO-W2|24",
+            Rows(all));
+        Assert.Equal(new[] { ("B1", "Branch One"), ("B2", "Branch Two") }, all.Stores.Select(store => (store.Code, store.Name)));
+        Assert.Equal(new DateTime(2026, 6, 11), all.WindowStart);
+        Assert.Equal("08-11|B1|warehouse|NO-W1|60;08-05|B1|supplier|INV-1|12;06-20|B1|warehouse|NO-W2|24",
+            Rows(await service.GetSalesDetailProductPurchasesAsync(range, "P-DR", new List<string> { "B1" })));
+        Assert.Contains("B3|warehouse|NO-W-SCOPE|11", Rows(await service.GetSalesDetailProductPurchasesAsync(range, "P-DR", null)));
+        Assert.Empty((await service.GetSalesDetailProductPurchasesAsync(range, "P-DR", new List<string>())).Batches);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailProductPurchasesAsync(range, "", null));
     }
 
     [Fact]

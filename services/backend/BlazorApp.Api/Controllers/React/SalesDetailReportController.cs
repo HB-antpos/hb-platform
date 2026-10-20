@@ -232,6 +232,93 @@ public sealed class SalesDetailReportController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// 商品抽屉的销售曲线（日）。授权与分店范围同销售明细报表；窗口 = 销售开始日前 60 天 ~ 销售结束日，
+    /// 统计未就绪时只带回状态、不返回数据，前端提示而不画半截曲线。
+    /// </summary>
+    [HttpGet("sales-detail-product-trend")]
+    public async Task<IActionResult> GetSalesDetailProductTrend(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] string productCode,
+        [FromQuery] List<string>? branchCodes = null,
+        [FromQuery] string? selectedBranchCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var range = new DateRangeDto { StartDate = startDate, EndDate = endDate, CompareMode = CompareMode.ByDate };
+            BlazorApp.Api.Services.React.SalesDashboardReactService.ResolveProductDrawerWindow(range);
+            var scope = await ResolveBranchScopeAsync(branchCodes);
+            if (!scope.HasAccess || (selectedBranchCode != null && scope.BranchCodes != null
+                && !scope.BranchCodes.Contains(selectedBranchCode.Trim(), StringComparer.OrdinalIgnoreCase)))
+            {
+                return Ok(new ProductReportResponseDto<SalesDetailProductTrendDto>
+                {
+                    StatisticStatus = SalesStatisticRefreshStatus.Fresh,
+                    StatisticMessage = "当前账号没有可访问的分店范围",
+                    CacheVersion = "no-access",
+                    Data = new SalesDetailProductTrendDto { ProductCode = productCode?.Trim() ?? string.Empty },
+                });
+            }
+            return Ok(await _service.GetSalesDetailProductTrendAsync(range, productCode, scope.BranchCodes, selectedBranchCode, cancellationToken));
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetSalesDetailProductTrend failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
+    /// <summary>商品抽屉的进货明细：窗口内每一批总仓配货与供应商进货单（口径见服务方法注释）。</summary>
+    [HttpGet("sales-detail-product-purchases")]
+    public async Task<IActionResult> GetSalesDetailProductPurchases(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] string productCode,
+        [FromQuery] List<string>? branchCodes = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var range = new DateRangeDto { StartDate = startDate, EndDate = endDate, CompareMode = CompareMode.ByDate };
+            var (windowStart, windowEnd) = BlazorApp.Api.Services.React.SalesDashboardReactService.ResolveProductDrawerWindow(range);
+            var scope = await ResolveBranchScopeAsync(branchCodes);
+            if (!scope.HasAccess)
+            {
+                return Ok(ApiResponse<SalesDetailProductPurchasesDto>.OK(new SalesDetailProductPurchasesDto
+                {
+                    ProductCode = productCode?.Trim() ?? string.Empty, WindowStart = windowStart, WindowEnd = windowEnd,
+                }));
+            }
+            return Ok(ApiResponse<SalesDetailProductPurchasesDto>.OK(
+                await _service.GetSalesDetailProductPurchasesAsync(range, productCode, scope.BranchCodes, cancellationToken)));
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetSalesDetailProductPurchases failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
     private async Task<(bool HasAccess, List<string>? BranchCodes)> ResolveBranchScopeAsync(List<string>? requested)
     {
         var normalizedRequested = Normalize(requested);

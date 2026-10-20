@@ -199,8 +199,9 @@
 .drawerBody { min-height:100%; display:flex; flex-direction:column; }
 .drawerIntro { display:flex; justify-content:space-between; gap:12px; padding:15px 22px; background:#f7f9fc; border-bottom:1px solid var(--line); color:#355576; font-size:12px; font-weight:600; }
 .drawerIntro small { color:var(--muted); font-size:11px; font-weight:400; }
-.drawerLegend { padding:8px 22px; color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); }
-.drawerScroll { overflow:auto; min-width:0; flex:1; scrollbar-width:thin; scrollbar-color:#bdcad8 #f2f5f9; }
+.drawerLegend { display:flex; flex-wrap:wrap; gap:4px 18px; padding:8px 22px; color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); }
+.drawerLegend b { color:#1673cf; font-weight:600; }
+.drawerScroll { overflow:auto; min-width:0; flex:1; container-type:inline-size; scrollbar-width:thin; scrollbar-color:#bdcad8 #f2f5f9; }
 .drawerTable { width:max-content; min-width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:12px; }
 .drawerTable th { position:sticky; top:0; z-index:2; min-width:112px; height:39px; padding:8px 12px; background:#f7f9fc; border-bottom:1px solid var(--line); color:var(--muted); text-align:right; white-space:nowrap; font-size:11px; font-weight:500; }
 .drawerTable th:first-child { left:0; z-index:3; min-width:168px; text-align:left; }
@@ -231,5 +232,72 @@
 @media(max-width:1280px) { .page { padding:10px 12px; } }
 @media(max-width:992px) { .headerControls { margin-left:0; justify-content:flex-start; width:100%; } .scopeBlock { margin-left:0; width:100%; align-items:flex-start; border-top:1px solid #edf1f6; } .chips { justify-content:flex-start; } .legend { flex-wrap:wrap; white-space:normal; } }
 @media(max-width:600px) { .page { padding:12px 10px; } .titleGroup { flex-wrap:wrap; gap:10px; } .titleGroup h1 { font-size:20px; } .tabs { gap:16px; } .tabs button { font-size:12px; } .kpi { flex:1 1 50%; border-left:0; padding:8px 10px; } .kpi:nth-child(2n) { border-left:1px solid #edf1f6; } .kpi:nth-child(5) { flex-basis:100%; } .kpiValue,.kpiValue > span:first-child { flex-wrap:wrap; row-gap:2px; } .panel { height:450px; } .panelHeader { flex-wrap:wrap; } .panelFilter { order:3; flex-basis:100%; } .panelActions { margin-left:auto; flex-wrap:wrap; justify-content:flex-end; max-width:100%; } .productTable { min-width:640px; } .productTable[data-view=side] { min-width:1100px; } }
-@media(max-width:760px) { .productDrawer :global(.ant-drawer-content-wrapper) { width:100%!important; } .productDrawer :global(.ant-drawer-header) { padding-inline:16px; } .drawerIntro { padding-inline:16px; } }
+@media(max-width:880px) { .productDrawer :global(.ant-drawer-content-wrapper) { width:100%!important; } .productDrawer :global(.ant-drawer-header) { padding-inline:16px; } .drawerIntro,.trendCard { padding-inline:16px; } }
+/* —— 商品抽屉：销售曲线 + 进货（窗口 = 销售开始日前 60 天 ~ 销售结束日） —— */
+.drawerWindow { display:inline-flex; align-items:center; gap:6px; color:#1673cf!important; }
+.drawerWindow i { width:6px; height:6px; border-radius:2px; background:#1673cf; }
+.trendCard { padding:14px 22px 8px; border-bottom:1px solid var(--line); background:#fff; }
+.trendHead { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+.trendHead h3 { display:flex; align-items:center; margin:0; color:#143452; font-size:13px; font-weight:600; }
+.trendHead h3 small { margin-left:8px; color:var(--muted); font-size:11px; font-weight:400; }
+.trendChip { display:inline-flex; align-items:center; gap:2px; margin-left:8px; padding:0 4px 0 9px; border-radius:10px; background:#eef4fc; color:#1c5ea6; font-size:11px; font-weight:500; line-height:20px; }
+.trendChip button { border:0; background:none; color:inherit; opacity:.65; font-size:10px; line-height:1; cursor:pointer; padding:3px 5px; }
+.trendChip button:hover,.trendChip button:focus-visible { opacity:1; }
+.trendLegend { display:flex; flex-wrap:wrap; align-items:center; gap:2px 16px; margin:2px 0 4px; color:var(--muted); font-size:11px; }
+.trendLegend i { display:inline-block; width:10px; height:10px; margin-right:5px; border-radius:2px; vertical-align:-1px; }
+.trendLegend .legendLine { height:3px; background:#e8710a; vertical-align:3px; }
+.trendLegend .legendWarehouse { background:#5b8fd9; }
+.trendLegend .legendSupplier { background:#3aa57a; }
+.trendLegend .legendBand { background:#eaf3fe; border:1px solid #a9cdf2; }
+.trendError { color:#b7393d; }
+.trendCanvas { position:relative; width:100%; outline-offset:2px; }
+.trendSvg { display:block; overflow:visible; }
+.trendSvg text { font-family:inherit; }
+.trendTip { position:absolute; z-index:4; display:flex; flex-direction:column; gap:1px; padding:7px 10px; border-radius:6px; background:#1f2d3d; color:#fff; font-size:11px; line-height:1.6; white-space:nowrap; box-shadow:0 6px 16px rgba(16,24,40,.25); pointer-events:none; }
+.trendTip span:first-child { color:#9ec9ff; font-weight:600; }
+.trendState { display:flex; align-items:center; gap:12px; padding:8px 0 12px; }
+.trendState :global(.ant-alert) { flex:1; }
+.trendSkeleton { display:flex; flex-direction:column; gap:10px; padding:6px 0 10px; }
+.trendSkeleton :global(.ant-skeleton-node) { display:block; }
+.buyHead { background:#f1f7fe!important; color:#1c5ea6!important; border-left:1px solid #cfe2f7; border-right:1px solid #cfe2f7; }
+.buyHead small { display:block; margin-top:1px; color:#5f8bb8; font-size:10px; font-weight:400; }
+.drawerTable .buyCell { min-width:132px; background:#fbfdff; border-left:1px solid #cfe2f7; border-right:1px solid #cfe2f7; }
+.drawerTable th.buyHead { min-width:132px; }
+.buyButton { display:inline-flex; flex-direction:column; gap:4px; align-items:flex-end; padding:0; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
+.buyTop { display:inline-flex; align-items:center; gap:4px; color:var(--ink); font-size:12px; font-weight:600; }
+.buyChevron { width:10px; height:10px; color:#7b97b6; }
+.buySub { color:var(--muted); font-size:11px; }
+.buyHot { color:#1673cf; font-style:normal; font-weight:600; }
+.buySkeleton { display:inline-flex; flex-direction:column; gap:6px; align-items:flex-end; }
+.buySkeleton i { display:block; height:9px; border-radius:4px; background:linear-gradient(90deg,#eef1f5,#f6f8fb,#eef1f5); }
+.buySkeleton i:first-child { width:30px; }
+.buySkeleton i:last-child { width:74px; }
+.drawerTable tbody tr[aria-selected] { cursor:pointer; }
+.drawerTable tbody tr.drawerRowActive td,.drawerTable tbody tr.drawerRowActive td:first-child { background:#f1f7ff; }
+.drawerTable tbody tr.drawerRowActive td:first-child { box-shadow:inset 3px 0 0 #e8710a,1px 0 var(--line); }
+.drawerTable tbody tr.drawerRowOpen td { background:#f4f9ff; }
+.drawerTable tbody tr.drawerRowOpen td.buyCell { background:#eaf3fe; }
+.drawerTable tbody tr:focus-visible { outline:2px solid #1673cf; outline-offset:-2px; }
+.onlyTag { margin-left:6px; padding:0 6px; border-radius:9px; background:#fff3e0; color:#a8610a; font-size:10px; font-weight:500; line-height:16px; vertical-align:1px; }
+.drawerTable tbody tr.drawerDetailRow td { height:auto; padding:0; background:#f4f9ff; border-bottom:1px solid #cfe2f7; box-shadow:none; text-align:left; white-space:normal; }
+.drawerTable tbody tr.drawerDetailRow:hover td { background:#f4f9ff; }
+/* 展开框宽度取滚动容器的可视宽度（cqw）：外层宽表可横向滚动，展开框用 sticky 贴左，不随表格一起溢出 */
+.batchBox { margin:0 12px 12px 22px; padding:10px 14px 12px; background:#fff; border:1px solid #cfe2f7; border-radius:6px; position:sticky; left:22px; width:calc(100cqw - 34px); }
+.batchHead { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:6px; color:#1c5ea6; font-size:11px; font-weight:600; }
+.batchHead small { color:var(--muted); font-weight:400; }
+/* 明细行的 td 恰是 tr 的首列，会命中上面 `td:first-child small` 的 145px 省略规则，这里显式还原 */
+.drawerTable td .batchHead small { display:inline; max-width:none; margin:0; overflow:visible; text-overflow:clip; white-space:nowrap; }
+.batchTable { width:100%; table-layout:auto; border-collapse:collapse; font-size:12px; }
+.batchTable th { height:26px; padding:4px 10px; background:none; border-bottom:1px solid #e3ecf6; color:var(--muted); font-size:10px; font-weight:500; text-align:left; position:static; min-width:0; }
+.batchTable td { height:30px; padding:4px 10px; background:none; border-bottom:1px dashed #e9eef5; text-align:left; font-variant-numeric:tabular-nums; }
+.batchTable tr:last-child td { border-bottom:0; }
+.batchTable td:nth-child(3) { font-weight:600; }
+.drawerTable .batchTable tbody tr td { box-shadow:none; position:static; min-width:0; }
+.batchNo { color:var(--muted); font-size:11px; }
+.chipWarehouse,.chipSupplier { display:inline-block; padding:0 7px; border-radius:4px; font-size:11px; line-height:18px; }
+.chipWarehouse { background:#e8f1fb; color:#1d5fa8; }
+.chipSupplier { background:#e8f6ef; color:#147451; }
+.tagIn,.tagBefore { display:inline-block; padding:0 6px; border-radius:9px; font-size:10px; font-weight:500; line-height:16px; }
+.tagIn { background:#e6f4ea; color:#147451; }
+.tagBefore { background:#eef1f5; color:#5c7088; }
 @media(prefers-reduced-motion:reduce) { .page *,.productDrawer * { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
