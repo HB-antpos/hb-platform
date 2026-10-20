@@ -43,6 +43,9 @@ public sealed class PaymentTerminalSettingsService(
             Linkly = string.IsNullOrWhiteSpace(selectedStoreCode)
                 ? new List<LinklyCloudCredentialAdminDto>()
                 : await GetLinklyStatusesAsync(selectedStoreCode),
+            SquareDirect = string.IsNullOrWhiteSpace(selectedStoreCode)
+                ? null
+                : await GetSquareDirectStatusAsync(selectedStoreCode),
         };
 
         logger.LogDebug("支付终端配置查询完成 StoreCode={StoreCode}", selectedStoreCode);
@@ -140,6 +143,94 @@ public sealed class PaymentTerminalSettingsService(
         });
 
         return await GetSettingsAsync(storeCode, cancellationToken);
+    }
+
+    /// <summary>
+    /// 打开 / 关闭某家门店的「收银机直连 Square」。开关表 POSM_SquareDirectStore 由 POS API 启动时建表，
+    /// 主 API 只读写开关行：没有行 = 关闭；POS API 只给开关已打开的门店下发令牌。
+    /// </summary>
+    public async Task<ApiResponse<PaymentTerminalSettingsDto>> UpdateSquareDirectAsync(
+        UpdateSquareDirectDto request,
+        string? updatedBy,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var requestedStoreCode = NormalizeOptional(request.StoreCode);
+        var stores = await GetStoreOptionsAsync();
+        var store = requestedStoreCode is null
+            ? null
+            : stores.FirstOrDefault(item =>
+                string.Equals(item.StoreCode, requestedStoreCode, StringComparison.OrdinalIgnoreCase));
+        if (store is null)
+        {
+            return ApiResponse<PaymentTerminalSettingsDto>.Error(
+                "门店不存在或已停用",
+                "PAYMENT_STORE_NOT_FOUND"
+            );
+        }
+
+        if (!IsSquareDirectTableAvailable())
+        {
+            return ApiResponse<PaymentTerminalSettingsDto>.Error(
+                "直连开关表尚未创建，请先部署新版 POS API 后再试",
+                "SQUARE_DIRECT_NOT_READY"
+            );
+        }
+
+        var existing = await posmContext.Db.Queryable<PaymentSquareDirectStoreRecord>()
+            .Where(row => row.StoreCode == store.StoreCode)
+            .FirstAsync();
+
+        if (request.Enabled)
+        {
+            // 开启前必须已有生效的 Square 令牌（该店专用或共用），否则开了也领不到令牌。
+            var hasToken = await posmContext.Db.Queryable<PaymentSquareTokenRecord>()
+                .Where(row => row.IsEnabled
+                    && row.AccessToken != ""
+                    && (row.StoreCode == null || row.StoreCode == store.StoreCode))
+                .AnyAsync();
+            if (!hasToken)
+            {
+                return ApiResponse<PaymentTerminalSettingsDto>.Error(
+                    "该门店还没有生效的 Square Token，请先配置共用或门店专用 Token",
+                    "SQUARE_TOKEN_NOT_CONFIGURED"
+                );
+            }
+        }
+        else if (existing is null)
+        {
+            // 本来就是关闭（没有行）：不必写库。
+            return await GetSettingsAsync(store.StoreCode, cancellationToken);
+        }
+
+        var now = DateTime.UtcNow;
+        var updater = NormalizeOptional(updatedBy);
+        if (existing is null)
+        {
+            await posmContext.Db.Insertable(new PaymentSquareDirectStoreRecord
+            {
+                StoreCode = store.StoreCode,
+                IsEnabled = request.Enabled,
+                UpdatedAt = now,
+                UpdatedBy = updater,
+            }).ExecuteCommandAsync();
+        }
+        else
+        {
+            existing.IsEnabled = request.Enabled;
+            existing.UpdatedAt = now;
+            existing.UpdatedBy = updater;
+            await posmContext.Db.Updateable(existing).ExecuteCommandAsync();
+        }
+
+        // 谁在什么时候改了哪家店的直连开关，留一条日志便于追溯（令牌下发审计在 POS API 一侧）。
+        logger.LogWarning(
+            "Square 直连开关变更 StoreCode={StoreCode} Enabled={Enabled} By={UpdatedBy}",
+            store.StoreCode,
+            request.Enabled,
+            updater
+        );
+        return await GetSettingsAsync(store.StoreCode, cancellationToken);
     }
 
     public async Task<ApiResponse<LinklyTerminalManagementDto>> GetLinklyTerminalManagementAsync(
@@ -1058,6 +1149,31 @@ public sealed class PaymentTerminalSettingsService(
     }
 
     // storeCode 为空：统计共用 Token；有值：统计该门店的专用 Token。
+    private bool IsSquareDirectTableAvailable() =>
+        posmContext.Db.DbMaintenance.IsAnyTable("POSM_SquareDirectStore", false);
+
+    private async Task<PaymentTerminalSquareDirectStatusDto> GetSquareDirectStatusAsync(string storeCode)
+    {
+        var status = new PaymentTerminalSquareDirectStatusDto { StoreCode = storeCode };
+        if (!IsSquareDirectTableAvailable())
+        {
+            return status;
+        }
+
+        status.Available = true;
+        var row = await posmContext.Db.Queryable<PaymentSquareDirectStoreRecord>()
+            .Where(item => item.StoreCode == storeCode)
+            .FirstAsync();
+        if (row is not null)
+        {
+            status.Enabled = row.IsEnabled;
+            status.UpdatedAtUtc = row.UpdatedAt;
+            status.UpdatedBy = row.UpdatedBy;
+        }
+
+        return status;
+    }
+
     private async Task<List<PaymentTerminalEnvironmentStatusDto>> GetSquareStatusesAsync(string? storeCode = null)
     {
         var scopedQuery = posmContext.Db.Queryable<PaymentSquareTokenRecord>()
@@ -1604,6 +1720,20 @@ public sealed class PaymentTerminalSettingsService(
         public string? StoreCode { get; set; }
 
         public string AccessToken { get; set; } = string.Empty;
+
+        public bool IsEnabled { get; set; }
+
+        public DateTime UpdatedAt { get; set; }
+
+        public string? UpdatedBy { get; set; }
+    }
+
+    // 表由 POS API 启动 DDL 创建（StoreCode 主键）；这里只读写开关行，不进主 API 的建表迁移。
+    [SugarTable("POSM_SquareDirectStore")]
+    private sealed class PaymentSquareDirectStoreRecord
+    {
+        [SugarColumn(IsPrimaryKey = true)]
+        public string StoreCode { get; set; } = string.Empty;
 
         public bool IsEnabled { get; set; }
 
