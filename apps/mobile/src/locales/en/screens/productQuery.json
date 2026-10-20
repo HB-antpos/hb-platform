@@ -207,6 +207,7 @@
     "on": "On",
     "off": "Off",
     "autoPricing": "Auto pricing",
+    "autoPricingBlocksRetailEdit": "Auto pricing is on and will overwrite the retail price. Turn off \"Auto pricing\" first, then edit the retail price.",
     "specialProduct": "Special",
     "rateLabel": "Rate",
     "gp": "GP",
