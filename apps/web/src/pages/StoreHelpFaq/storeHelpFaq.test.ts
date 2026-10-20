@@ -78,7 +78,7 @@ for (const tab of tabs) {
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
 assert.equal(countQuestions('pos'), 21)
-assert.equal(countQuestions('mobile'), 13)
+assert.equal(countQuestions('mobile'), 15)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
@@ -89,9 +89,11 @@ assert.equal(posNumbering.get('card-failure'), 8)
 assert.equal(posNumbering.get('return-scan'), 18)
 assert.equal(posNumbering.get('app-update'), 21)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
-assert.equal(mobileNumbering.get('supplier-invoices'), 8)
-assert.equal(mobileNumbering.get('floating-button'), 12)
-assert.equal(mobileNumbering.get('app-download'), 13)
+assert.equal(mobileNumbering.get('revenue-report'), 5)
+assert.equal(mobileNumbering.get('product-report'), 6)
+assert.equal(mobileNumbering.get('supplier-invoices'), 10)
+assert.equal(mobileNumbering.get('floating-button'), 14)
+assert.equal(mobileNumbering.get('app-download'), 15)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))
@@ -103,6 +105,10 @@ const holdHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '挂单', '
 assert.ok(holdHits.includes('hold-recall') && holdHits.includes('held-other-till'))
 const squareHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'square', 'en').flatMap((group) => group.questions.map((question) => question.id))
 assert.deepEqual(squareHits, ['card-terminal-pairing'])
+const reportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '营业额报告', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(reportHits.includes('revenue-report'))
+const productReportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'product report', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(productReportHits.includes('product-report'))
 assert.deepEqual(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'zzz-no-match', 'en'), [])
 assert.equal(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '   ', 'en'), STORE_HELP_FAQ_GROUPS.mobile)
 
@@ -118,6 +124,8 @@ assert.equal(toStoreHelpFaqAnchor('daily-closes'), 'faq-daily-closes')
 assert.equal(fromStoreHelpFaqAnchor('#faq-daily-closes'), 'daily-closes')
 assert.equal(fromStoreHelpFaqAnchor('#other'), undefined)
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'daily-closes'), 'mobile')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'revenue-report'), 'mobile')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'product-report'), 'mobile')
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'lay-by-continue'), 'pos')
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'missing'), undefined)
 
