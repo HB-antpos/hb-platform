@@ -904,7 +904,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             LinklyPairCodeText = string.Empty;
             TimeoutSecondsText = _loadedConfiguration.TerminalTimeoutSeconds.ToString();
             HasSavedSquareToken = _loadedConfiguration.HasProtectedSquareAccessToken;
-            SquareDirectStatus = await _setupService.GetSquareDirectStatusAsync(SelectedSquareEnvironment);
+            // 直连状态只是附带展示：读取失败不能中断设置页的加载。
+            await ReloadSquareDirectStatusAsync();
             _savedSquareLocationId = _loadedConfiguration.SquareLocationId;
             _savedSquareDeviceId = _loadedConfiguration.SquareDeviceId;
             _devicesLoadedForLocationId = null;
