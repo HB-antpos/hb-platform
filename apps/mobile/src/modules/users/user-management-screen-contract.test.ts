@@ -132,7 +132,7 @@ assert.match(source, /statusChips\.cannotLogin/, "状态筛选必须包含不能
 assert.match(source, /statusChips\.noEmail/, "状态筛选必须保留无邮箱");
 assert.match(
   source,
-  /useStoreUsers\(\s*canViewUsers \? \(isDeviceMode \? deviceBoundStoreCode : managedStoreCode\) : undefined,\s*""\s*\)/,
+  /useStoreUsers\(\s*canViewUsers && storeSelectionResolved \? \(isDeviceMode \? deviceBoundStoreCode : managedStoreCode\) : undefined,\s*""\s*\)/,
   "搜索在客户端做：服务端永远取该分店全部店员，不再把关键词发给服务端（昵称、姓名各段才搜得到）"
 );
 assert.match(source, /StaffBarcodeDialog/, "员工行必须接入单人个人码弹层");
@@ -195,7 +195,13 @@ assert.match(
   /const pickerStores = useMemo\([\s\S]{0,260}access\.isAdmin[\s\S]{0,120}\? posEnabledStores[\s\S]{0,160}isStoreManageable\(store\.storeCode, manageableStores\)/,
   "店长的分店候选只能是管理分店，管理员不受限"
 );
-assert.match(source, /pickerStores\.some\(\(store\) => store\.storeCode === current\)/, "默认 / 记忆的分店也必须落在候选里，不能自动选中非管理分店");
+// 默认分店规则抽到 resolveStaffStoreSelection（纯逻辑，见 store-staff-list-logic.test.ts）：组件必须把候选分店与「用户手动选过」传进去。
+assert.match(
+  source,
+  /resolveStaffStoreSelection\(\{[\s\S]{0,200}userPicked: storePickedByUserRef\.current,[\s\S]{0,160}pickerStores,/,
+  "默认 / 记忆的分店也必须落在候选里，不能自动选中非管理分店；用户手动选过后不再被默认覆盖"
+);
+assert.match(source, /storePickedByUserRef\.current = true;/, "手动切换分店（含全部分店）必须标记为用户选择");
 // 店长（即使持有 Users.View）永远走店员口径：列表 / 详情 / 编辑三处都要带上这个标记。
 assert.match(hubSource, /isStoreLevelManager: access\.isStoreLevelManager/, "Hub 必须把店长标记传给列表模式判断，店长不能进管理员全局列表");
 assert.match(source, /manageableStores=\{manageableStores\}/, "可管理 / 仅查看必须按原始可管理分店集合判断");
