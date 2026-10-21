@@ -988,6 +988,7 @@
   <data name="dailyClose.net" xml:space="preserve"><value>Net</value></data>
   <data name="dailyClose.totalNetSales" xml:space="preserve"><value>Total Net Sales</value></data>
   <data name="dailyClose.expectedCash" xml:space="preserve"><value>Expected Cash</value></data>
+  <data name="dailyClose.cashRounding" xml:space="preserve"><value>Cash Rounding</value></data>
   <data name="dailyClose.overShort" xml:space="preserve"><value>Over / Short</value></data>
   <data name="dailyClose.refundAmount" xml:space="preserve"><value>Refund Amount</value></data>
   <data name="dailyClose.returnQty" xml:space="preserve"><value>Return Qty</value></data>

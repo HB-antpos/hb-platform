@@ -185,7 +185,9 @@ public static class DailyCloseTextFormatter
         builder.Text(FitTwoColumns("Return Qty", report.ReturnQuantity.ToString("0.##", CultureInfo.InvariantCulture)));
         builder.Text(FitTwoColumns("Net Amount", Money(report.NetAmount)), isEmphasized: true);
         builder.Separator();
-        builder.Text(FitTwoColumns("Cash Expected", Money(report.SystemCashAmount)));
+        // 现金进位（5 分进位）单独一行：Cash 行是订单精确金额，Cash Expected = Cash 净额 + 进位。
+        builder.Text(FitTwoColumns("Cash Rounding", SignedMoney(report.CashRoundingAmount)));
+        builder.Text(FitTwoColumns("Cash Expected", Money(report.ExpectedCashAmount)));
         builder.Text(FitTwoColumns("Cash Counted", Money(archive.CountedCashAmount)), isEmphasized: true);
         builder.Text(FitTwoColumns("Cash Difference", SignedMoney(archive.CashDifference)), isEmphasized: true);
 

@@ -558,6 +558,12 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         CancellationToken cancellationToken)
     {
         var columns = await ReadColumnNamesAsync(connection, "LocalDailyCloses", cancellationToken);
+        if (!columns.Contains("CashRoundingAmount"))
+        {
+            // 现金进位合计：旧存档补 0（保持当时按「现金净额」算差额的口径），不改写历史数据。
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN CashRoundingAmount TEXT NOT NULL DEFAULT '0';", cancellationToken);
+        }
+
         if (!columns.Contains("UploadStatus"))
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadStatus TEXT NOT NULL DEFAULT 'Pending';", cancellationToken);
@@ -1599,6 +1605,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             CoinSubtotal TEXT NOT NULL,
             CountedCashAmount TEXT NOT NULL,
             CashDifference TEXT NOT NULL,
+            CashRoundingAmount TEXT NOT NULL DEFAULT '0',
             UploadStatus TEXT NOT NULL DEFAULT 'Pending',
             UploadAttemptCount INTEGER NOT NULL DEFAULT 0,
             NextUploadAt TEXT NULL,

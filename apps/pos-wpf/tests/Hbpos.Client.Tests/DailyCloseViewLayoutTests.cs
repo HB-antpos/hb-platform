@@ -306,6 +306,7 @@ public sealed class DailyCloseViewLayoutTests
             "dailyClose.keypad.idle",
             "dailyClose.cashCountDialog.applyNext",
             "dailyClose.reconciliation",
+            "dailyClose.cashRounding",
             "dailyClose.cashWorkspace.returnHistoryHint",
             "dailyClose.linklySettlement.status.pending",
             "dailyClose.linklySettlement.status.succeeded",

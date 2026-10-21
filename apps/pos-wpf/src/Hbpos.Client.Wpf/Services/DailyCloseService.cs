@@ -45,15 +45,21 @@ public sealed record DailyCloseReport(
     int OrderCount,
     IReadOnlyList<DailyClosePaymentSummary> PaymentSummaries,
     decimal RefundAmount,
-    decimal ReturnQuantity)
+    decimal ReturnQuantity,
+    decimal CashRoundingAmount = 0m)
 {
     public decimal SalesAmount => Round(PaymentSummaries.Sum(summary => summary.SalesAmount));
 
     public decimal NetAmount => Round(PaymentSummaries.Sum(summary => summary.NetAmount));
 
+    // 系统记录的现金支付净额（按订单精确金额，不含现金进位）。
     public decimal SystemCashAmount => Round(PaymentSummaries
         .FirstOrDefault(summary => summary.Method == PaymentMethodKind.Cash)
         ?.NetAmount ?? 0m);
+
+    // 应有现金 = 精确现金净额 + 现金进位：澳洲现金按 5 分进位，钱箱里实际多出/少出的是进位后的金额，
+    // 所以实点现金必然是 5 分的整数倍，对账必须拿进位后的金额比，否则每天都会有几分钱的假差额。
+    public decimal ExpectedCashAmount => Round(SystemCashAmount + CashRoundingAmount);
 
     private static decimal Round(decimal amount)
     {
@@ -271,6 +277,7 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
         var orderGuids = await ReadOrderGuidsAsync(connection, session, period.From, period.To, cancellationToken);
         var paymentSummaries = await ReadPaymentSummariesAsync(connection, orderGuids, cancellationToken);
         var returnQuantity = await ReadReturnQuantityAsync(connection, orderGuids, cancellationToken);
+        var cashRoundingAmount = await ReadCashRoundingAmountAsync(connection, orderGuids, cancellationToken);
 
         return new DailyCloseReport(
             businessDate.Date,
@@ -283,7 +290,8 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             orderGuids.Count,
             paymentSummaries,
             Round(paymentSummaries.Sum(summary => summary.RefundAmount)),
-            returnQuantity);
+            returnQuantity,
+            cashRoundingAmount);
     }
 
     public async Task<DailyCloseArchive> SaveAsync(
@@ -297,8 +305,8 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
         var noteSubtotal = Round(normalizedCounts.Where(count => count.Kind == CashDenominationKind.Note).Sum(count => count.Amount));
         var coinSubtotal = Round(normalizedCounts.Where(count => count.Kind == CashDenominationKind.Coin).Sum(count => count.Amount));
         var countedCashAmount = Round(noteSubtotal + coinSubtotal);
-        // 现金差额 = 钱箱实盘现金 - 系统中现金支付净额。
-        var cashDifference = Round(countedCashAmount - report.SystemCashAmount);
+        // 现金差额 = 钱箱实盘现金 - 应有现金（现金支付净额 + 现金进位）。
+        var cashDifference = Round(countedCashAmount - report.ExpectedCashAmount);
 
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
@@ -311,12 +319,12 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                 (DailyCloseGuid, StoreCode, DeviceCode, CashierId, CashierName, BusinessDate, PeriodFrom, PeriodTo, SavedAt,
                  OrderCount, CashSalesAmount, CashRefundAmount, CashNetAmount, CardSalesAmount, CardRefundAmount, CardNetAmount,
                  VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
-                 CoinSubtotal, CountedCashAmount, CashDifference)
+                 CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount)
                 VALUES
                 ($DailyCloseGuid, $StoreCode, $DeviceCode, $CashierId, $CashierName, $BusinessDate, $PeriodFrom, $PeriodTo, $SavedAt,
                  $OrderCount, $CashSalesAmount, $CashRefundAmount, $CashNetAmount, $CardSalesAmount, $CardRefundAmount, $CardNetAmount,
                  $VoucherSalesAmount, $VoucherRefundAmount, $VoucherNetAmount, $RefundAmount, $ReturnQuantity, $NoteSubtotal,
-                 $CoinSubtotal, $CountedCashAmount, $CashDifference);
+                 $CoinSubtotal, $CountedCashAmount, $CashDifference, $CashRoundingAmount);
                 """;
             command.Parameters.AddWithValue("$DailyCloseGuid", dailyCloseGuid.ToString());
             command.Parameters.AddWithValue("$StoreCode", report.StoreCode);
@@ -335,6 +343,7 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             command.Parameters.AddWithValue("$CoinSubtotal", coinSubtotal);
             command.Parameters.AddWithValue("$CountedCashAmount", countedCashAmount);
             command.Parameters.AddWithValue("$CashDifference", cashDifference);
+            command.Parameters.AddWithValue("$CashRoundingAmount", report.CashRoundingAmount);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -372,7 +381,7 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             SELECT DailyCloseGuid, StoreCode, DeviceCode, CashierId, CashierName, BusinessDate, PeriodFrom, PeriodTo, SavedAt,
                    OrderCount, CashSalesAmount, CashRefundAmount, CashNetAmount, CardSalesAmount, CardRefundAmount, CardNetAmount,
                    VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
-                   CoinSubtotal, CountedCashAmount, CashDifference
+                   CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount
             FROM LocalDailyCloses
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -424,7 +433,8 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             reader.GetInt32(reader.GetOrdinal("OrderCount")),
             ReadPaymentSummaries(reader),
             ReadDecimal(reader, "RefundAmount"),
-            ReadDecimal(reader, "ReturnQuantity"));
+            ReadDecimal(reader, "ReturnQuantity"),
+            ReadDecimal(reader, "CashRoundingAmount"));
         return new DailyCloseArchiveRow(
             ReadGuid(reader, "DailyCloseGuid"),
             report,
@@ -517,6 +527,43 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                 Round(item.SalesAmount - item.RefundAmount),
                 item.TransactionCount))
             .ToList();
+    }
+
+    /// <summary>
+    /// 当日所有订单的现金进位合计。每张订单的现金支付合计（销售为正、退款为负）按收银时同一规则进位到 5 分，
+    /// 进位后的金额减去精确金额就是这张订单的进位；只看现金支付，不依赖订单头里的收款/找零字段，历史订单同样可算。
+    /// </summary>
+    private static async Task<decimal> ReadCashRoundingAmountAsync(
+        SqliteConnection connection,
+        IReadOnlyList<Guid> orderGuids,
+        CancellationToken cancellationToken)
+    {
+        if (orderGuids.Count == 0)
+        {
+            return 0m;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT OrderGuid, Amount
+            FROM LocalPayments
+            WHERE Method = $Method
+              AND OrderGuid IN ({CreateInClause(command, orderGuids)});
+            """;
+        command.Parameters.AddWithValue("$Method", (int)PaymentMethodKind.Cash);
+
+        var cashByOrder = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var orderGuid = ReadString(reader, "OrderGuid");
+                cashByOrder[orderGuid] = cashByOrder.GetValueOrDefault(orderGuid) + ReadDecimal(reader, "Amount");
+            }
+        }
+
+        var policy = new CashRoundingPolicy();
+        return Round(cashByOrder.Values.Sum(cashAmount => policy.NormalizeCashTender(cashAmount) - cashAmount));
     }
 
     private static async Task<decimal> ReadReturnQuantityAsync(

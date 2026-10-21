@@ -63,6 +63,22 @@ public sealed class DailyCloseSyncRequestMappingTests
         Assert.Equal(26.35m, request.CoinSubtotal);
         Assert.Equal(351.35m, request.CountedCashAmount);
         Assert.Equal(321.80m, request.CashDifference);
+        // 旧存档（或没有现金进位的日结）进位为 0，与此前上传内容一致。
+        Assert.Equal(0m, request.CashRoundingAmount);
+    }
+
+    [Fact]
+    public async Task ToRequest_carries_cash_rounding_amount_from_the_archive()
+    {
+        await using var fixture = await DailyCloseUploadFixture.CreateAsync();
+        var saved = await DailyCloseTestData.SaveRealisticDailyCloseAsync(fixture.Store, new DateTime(2026, 5, 28));
+        var archive = await fixture.Repository.GetArchiveForUploadAsync(saved.DailyCloseGuid);
+
+        // 进位来自存档里的报告；上传映射原样带出，服务端据此还原「应有现金 = 现金净额 + 进位」。
+        var withRounding = archive! with { Report = archive.Report with { CashRoundingAmount = 0.03m } };
+        var request = DailyCloseSyncRequestMapper.ToRequest(withRounding, "1.0.81");
+
+        Assert.Equal(0.03m, request.CashRoundingAmount);
     }
 
     [Theory]

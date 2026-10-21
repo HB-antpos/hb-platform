@@ -6102,6 +6102,8 @@ export interface components {
             countedCashAmount?: number;
             /** Format: double */
             cashDifference?: number;
+            /** Format: double */
+            cashRoundingAmount?: number;
         };
         DailyCloseSyncResponse: {
             accepted?: boolean;

@@ -8,6 +8,35 @@ namespace Hbpos.Client.Tests;
 public sealed class DailyClosePrintingTests
 {
     [Fact]
+    public async Task Daily_close_print_includes_cash_rounding_row_and_rounded_expected_cash()
+    {
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new DailyClosePrintService(
+            new FakeReceiptPrinterSettingsStore { Settings = ReceiptPrinterSettings.Default with { PrinterPort = "COM5" } },
+            driver);
+        var baseArchive = CreateArchive();
+        // 现金净额 280.00 + 进位 0.03 = 应有现金 280.03；实点 280.05，差额 +0.02。
+        var archive = baseArchive with
+        {
+            Report = baseArchive.Report with { CashRoundingAmount = 0.03m },
+            CountedCashAmount = 280.05m,
+            CashDifference = 0.02m
+        };
+
+        var result = await service.PrintAsync(archive, ReceiptPrintReason.Manual);
+
+        Assert.True(result.Succeeded);
+        var report = driver.Documents[0];
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Cash Rounding", StringComparison.Ordinal) && row.Text.Contains("+$0.03", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Cash Expected", StringComparison.Ordinal) && row.Text.Contains("$280.03", StringComparison.Ordinal));
+        // 进位行在应有现金之前，读起来是「精确现金 → 进位 → 应有现金」。
+        var rows = report.PreviewRows.Select(row => row.Text).ToList();
+        Assert.True(
+            rows.FindIndex(text => text.Contains("Cash Rounding", StringComparison.Ordinal))
+            < rows.FindIndex(text => text.Contains("Cash Expected", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task Daily_close_print_service_prints_required_daily_close_sections()
     {
         var settingsStore = new FakeReceiptPrinterSettingsStore

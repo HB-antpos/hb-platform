@@ -8313,6 +8313,10 @@
           "cashDifference": {
             "type": "number",
             "format": "double"
+          },
+          "cashRoundingAmount": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false

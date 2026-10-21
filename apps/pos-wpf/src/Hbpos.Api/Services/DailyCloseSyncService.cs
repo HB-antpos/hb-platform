@@ -30,6 +30,9 @@ internal sealed class DailyCloseSyncService(
     // Net 与 Sales−Refund、CashDifference 与 Counted−CashNet 允许相差 1 分，吸收客户端各自四舍五入的误差。
     private const decimal RoundingTolerance = 0.01m;
 
+    // 5 分进位下单张订单现金进位的上限（±2 分）。
+    private const decimal MaximumRoundingPerOrder = 0.02m;
+
     private static readonly JsonSerializerOptions CashCountsJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -171,11 +174,23 @@ internal sealed class DailyCloseSyncService(
         RequireWithinLimit(request.CoinSubtotal, "AMOUNT_OUT_OF_RANGE", "coinSubtotal");
         RequireWithinLimit(request.CountedCashAmount, "AMOUNT_OUT_OF_RANGE", "countedCashAmount");
         RequireWithinLimit(request.CashDifference, "AMOUNT_OUT_OF_RANGE", "cashDifference");
+        RequireWithinLimit(request.CashRoundingAmount, "AMOUNT_OUT_OF_RANGE", "cashRoundingAmount");
 
         var noteSubtotal = RoundMoney(request.NoteSubtotal);
         var coinSubtotal = RoundMoney(request.CoinSubtotal);
         var countedCashAmount = RoundMoney(request.CountedCashAmount);
         var cashDifference = RoundMoney(request.CashDifference);
+        var cashRoundingAmount = RoundMoney(request.CashRoundingAmount);
+
+        // 每张订单的现金进位最多 ±2 分（5 分进位），合计不可能超过 订单数 × 2 分；
+        // 超出说明客户端数据有问题，直接拒绝，避免用进位去掩盖真实的现金差异。
+        if (Math.Abs(cashRoundingAmount) > request.OrderCount * MaximumRoundingPerOrder + RoundingTolerance)
+        {
+            throw Invalid("INVALID_CASH_ROUNDING", "cashRoundingAmount exceeds the maximum possible cash rounding for the order count.");
+        }
+
+        // 应有现金 = 现金净额 + 现金进位；旧客户端进位为 0，结果与此前一致。
+        var expectedCashAmount = RoundMoney(cash.NetAmount + cashRoundingAmount);
 
         // 盘点金额只能由数量推出，客户端汇总值必须与之精确一致。
         // 纸币 + 硬币 = 实点现金由这三个等式共同保证，无需再单独校验一次。
@@ -194,10 +209,10 @@ internal sealed class DailyCloseSyncService(
             throw Invalid("INVALID_COUNTED_CASH_AMOUNT", "countedCashAmount does not match the cash counts.");
         }
 
-        // 差额 = 实点 − 应有现金（现金净额）；正为长款、负为短款。
-        if (Math.Abs(cashDifference - (countedCashAmount - cash.NetAmount)) > RoundingTolerance)
+        // 差额 = 实点 − 应有现金（现金净额 + 现金进位）；正为长款、负为短款。
+        if (Math.Abs(cashDifference - (countedCashAmount - expectedCashAmount)) > RoundingTolerance)
         {
-            throw Invalid("INVALID_CASH_DIFFERENCE", "cashDifference must equal countedCashAmount minus the cash net amount.");
+            throw Invalid("INVALID_CASH_DIFFERENCE", "cashDifference must equal countedCashAmount minus the expected cash (cash net amount plus cash rounding).");
         }
 
         return new PosmDailyCloseRecord
@@ -229,7 +244,7 @@ internal sealed class DailyCloseSyncService(
             VoucherRefundAmount = voucher.RefundAmount,
             VoucherNetAmount = voucher.NetAmount,
             RefundAmount = RoundMoney(request.RefundAmount),
-            ExpectedCashAmount = cash.NetAmount,
+            ExpectedCashAmount = expectedCashAmount,
             CountedCashAmount = countedCashAmount,
             CashDifference = cashDifference,
             NoteSubtotal = noteSubtotal,
