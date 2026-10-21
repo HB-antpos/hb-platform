@@ -27,6 +27,11 @@ assertEqual(
   "AWS 测速服务器域名同样走 HTTPS 代理且不带端口（iOS 会拦截域名的明文 HTTP）"
 );
 assertEqual(
+  buildApiBaseUrl("pos.hotbargain.vip"),
+  "https://pos.hotbargain.vip/api",
+  "EdgeOne 边缘入口同样必须走 HTTPS 且不带端口（否则会被拼成 http://域名:5002，被 iOS ATS 拦截）"
+);
+assertEqual(
   buildApiBaseUrl("192.168.31.247"),
   "http://192.168.31.247:5002/api",
   "local API base URL keeps direct backend port"

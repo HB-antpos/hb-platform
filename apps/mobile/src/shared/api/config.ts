@@ -1,3 +1,4 @@
+import { EDGE_API_HOST } from "@/shared/api/transport-failover";
 import { AppAsyncStorage } from "@/shared/storage/async-storage";
 
 const API_HOST_STORAGE_KEY = "hbweb_api_host";
@@ -7,9 +8,10 @@ export const API_PROTOCOL = "http";
 export const API_PORT = process.env.EXPO_PUBLIC_API_PORT?.trim() || "5002";
 export const API_PATH = "/api";
 const PRODUCTION_API_HOST = "hotbargain.vip";
-// 同样经 Nginx HTTPS 代理（443，不带端口）的主机：生产域名 + AWS 悉尼测速服务器。
+// 同样经 Nginx HTTPS 代理（443，不带端口）的主机：生产域名 + 走 EdgeOne 的边缘入口 + AWS 悉尼测速服务器。
 // 其余主机仍按「明文 HTTP + 5002 端口」拼，用于局域网调试；iOS 的 ATS 会拦截域名的明文 HTTP，所以域名主机必须在这里登记。
-const HTTPS_PROXY_API_HOSTS: ReadonlySet<string> = new Set([PRODUCTION_API_HOST, "hotbargain.group"]);
+// 边缘入口只作为传输层入口使用（见 transport.ts），不会成为设备绑定等身份比较使用的 host。
+const HTTPS_PROXY_API_HOSTS: ReadonlySet<string> = new Set([PRODUCTION_API_HOST, EDGE_API_HOST, "hotbargain.group"]);
 export const DEFAULT_API_BASE_URL = buildApiBaseUrl(DEFAULT_API_HOST);
 // 服务器设置弹窗使用的预设地址，线上地址必须放在首位作为发布默认选项。
 export const API_HOST_PRESETS = [

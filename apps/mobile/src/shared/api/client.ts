@@ -1,4 +1,4 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, InternalAxiosRequestConfig, isCancel } from "axios";
 import { router } from "expo-router";
 import { SecureStorage } from "@/shared/storage/secure";
 import { DeviceStorage } from "@/modules/device/storage";
@@ -6,6 +6,15 @@ import { emitUnauthenticatedSession } from "@/modules/auth/auth-session-events";
 import { stopAttendanceLocationTracking } from "@/modules/attendance/location-tracking-control";
 import { isUnauthenticatedApiPayload } from "@/shared/api/auth-error";
 import { buildApiBaseUrl, DEFAULT_API_BASE_URL, getStoredApiHost } from "@/shared/api/config";
+import {
+  apiTransportSelector,
+  buildTransportApiBaseUrl,
+  ensureApiTransportHydrated,
+} from "@/shared/api/transport";
+import {
+  classifyTransportFailure,
+  isTransportRetryableMethod,
+} from "@/shared/api/transport-failover";
 import { extractApiErrorMessage } from "@/shared/api/error-message";
 import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
 import { preserveApiClientError } from "@/shared/api/client-error";
@@ -49,9 +58,82 @@ export const apiClient = axios.create({
 
 async function syncApiBaseUrl() {
   const host = await getStoredApiHost();
-  const baseURL = buildApiBaseUrl(host);
+  await ensureApiTransportHydrated();
+  // 令牌刷新绕过请求拦截器自己拼地址，也必须走当前选中的传输入口，否则线路故障时刷新会白白失败。
+  const baseURL = buildTransportApiBaseUrl(host);
   apiClient.defaults.baseURL = baseURL;
   return baseURL;
+}
+
+/** 请求上记录的传输入口信息：响应拦截器据此上报成败，并在需要时换入口重试。 */
+type TransportTrackedConfig = InternalAxiosRequestConfig & {
+  _transportIdentityHost?: string;
+  _transportUsedHost?: string;
+  /** 故障转移重试时强制指定的备用入口。 */
+  _transportHost?: string;
+  _transportRetried?: boolean;
+  /** 带 X-Client-Api-Host / 跳过鉴权的请求：拦截器首轮会删掉这些头，重放后语义会变，不参与自动重试。 */
+  _transportNoRetry?: boolean;
+};
+
+/** 用「身份 host」决定实际访问的传输入口，并把这次选择记在请求上。身份 host 不变，只改最终域名。 */
+function applyTransportBaseUrl(config: InternalAxiosRequestConfig, identityHost: string) {
+  const tracked = config as TransportTrackedConfig;
+  const usedHost = tracked._transportHost ?? apiTransportSelector.resolve(identityHost);
+  tracked._transportIdentityHost = identityHost;
+  tracked._transportUsedHost = usedHost;
+  config.baseURL = buildApiBaseUrl(usedHost);
+}
+
+function reportTransportSuccess(config: unknown) {
+  const tracked = config as TransportTrackedConfig | undefined;
+  if (tracked?._transportIdentityHost && tracked._transportUsedHost) {
+    apiTransportSelector.reportSuccess(tracked._transportIdentityHost, tracked._transportUsedHost);
+  }
+}
+
+/**
+ * 传输层失败（无响应的网络错误 / 超时 / 边缘 520~530）时的故障转移：
+ * 读请求（GET/HEAD）换备用入口立即重试一次；写请求绝不重放（杜绝重复提交），但失败会让后续请求改走备用入口。
+ * 返回重试得到的响应；不需要或不能重试时返回 null，由原有错误处理继续。
+ */
+async function retryOnFallbackTransport(error: AxiosError) {
+  const tracked = error.config as (TransportTrackedConfig) | undefined;
+  if (!tracked?._transportIdentityHost || !tracked._transportUsedHost) {
+    return null;
+  }
+  const identityHost = tracked._transportIdentityHost;
+  const usedHost = tracked._transportUsedHost;
+  const kind = classifyTransportFailure({
+    code: error.code,
+    status: error.response?.status,
+    isCancel: isCancel(error),
+  });
+  if (!kind) {
+    if (error.response) {
+      // 普通 4xx/5xx 是服务器自己的回答，说明这条链路是通的。
+      apiTransportSelector.reportSuccess(identityHost, usedHost);
+    }
+    return null;
+  }
+
+  const switched = apiTransportSelector.reportFailure(identityHost, usedHost, kind);
+  const fallbackHost = apiTransportSelector.fallbackFor(identityHost, usedHost);
+  if (
+    !fallbackHost
+    || tracked._transportRetried
+    || tracked._transportNoRetry
+    || !isTransportRetryableMethod(tracked.method)
+  ) {
+    return null;
+  }
+  // 超时也可能只是服务器慢（报表）：该入口最近成功过时选择器不会切换，此时不重放，免得把慢请求翻倍。
+  if (kind === "timeout" && !switched) {
+    return null;
+  }
+  tracked._transportRetried = true;
+  tracked._transportHost = fallbackHost;
+  return apiClient(tracked);
 }
 
 let isRefreshing = false;
@@ -252,6 +334,12 @@ apiClient.interceptors.request.use(
       removeRequestHeader(config.headers, "X-Client-Api-Host");
       removeRequestHeader(config.headers, "X-Client-Skip-Authentication");
     }
+    // 这两个控制头在此被删除，重放后无法还原；这类请求（设备激活、免鉴权）不参与传输层自动重试。
+    if ((typeof apiHost === "string" && apiHost) || skipAuthentication) {
+      (config as TransportTrackedConfig)._transportNoRetry = true;
+    }
+    // 恢复上次的传输入口状态：线路黑洞时 App 重启后冷却期内直接走备用入口。
+    await ensureApiTransportHydrated();
     const requestedApiHost =
       typeof apiHost === "string" && apiHost
         ? apiHost
@@ -264,7 +352,7 @@ apiClient.interceptors.request.use(
         sessionKind: null,
         skipAuthentication: true,
       });
-      config.baseURL = buildApiBaseUrl(requestPolicy.apiHost);
+      applyTransportBaseUrl(config, requestPolicy.apiHost);
       if (config.headers) {
         removeRequestHeader(config.headers, "Authorization");
         removeRequestHeader(config.headers, "X-Device-Id");
@@ -326,7 +414,7 @@ apiClient.interceptors.request.use(
       sessionKind,
       skipAuthentication: false,
     });
-    config.baseURL = buildApiBaseUrl(requestPolicy.apiHost);
+    applyTransportBaseUrl(config, requestPolicy.apiHost);
     if (!apiHost && requestPolicy.apiHost === requestedApiHost) {
       apiClient.defaults.baseURL = config.baseURL;
     }
@@ -384,6 +472,7 @@ apiClient.interceptors.request.use(
 
 apiClient.interceptors.response.use(
   async (response) => {
+    reportTransportSuccess(response.config);
     if (
       isUnauthenticatedApiPayload(response.data) &&
       !isAuthenticationRequest(response.config as InternalAxiosRequestConfig)
@@ -426,6 +515,12 @@ apiClient.interceptors.response.use(
     };
     const skipAuthRedirect = shouldSkipAuthRedirect(original);
     const skipAuthRecovery = shouldSkipAuthRecovery(original);
+
+    // 传输层失败（线路故障 / 边缘回源失败）先尝试换入口：读请求立即重试，写请求不重放。
+    const transportRetry = await retryOnFallbackTransport(error);
+    if (transportRetry) {
+      return transportRetry;
+    }
 
     if (
       error.response?.status === 401
