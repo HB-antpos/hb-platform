@@ -386,7 +386,7 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDetailAsync_ReturnsOrderedStringReceiptsWithDefensiveRedaction()
+    public async Task GetDetailAsync_ReturnsOrderedStringReceiptsAsStored()
     {
         var id = await InsertAsync(
             10,
@@ -411,50 +411,14 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
         Assert.Equal(3, result.Receipts.Length);
         Assert.StartsWith("FIRST", result.Receipts[0], StringComparison.Ordinal);
         Assert.Equal("LAST", result.Receipts[2]);
-        var combined = string.Join('\n', result.Receipts);
-        Assert.DoesNotContain("4111111111111111", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("4111 1111 1111 1111", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("123", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("secret-token", combined, StringComparison.Ordinal);
+        // 按用户要求，后台详情展示存库回单原文，不做展示层脱敏。
+        Assert.Equal("FIRST PAN 4111 1111 1111 1111", result.Receipts[0]);
+        Assert.Contains("CVV: 123", result.Receipts[1], StringComparison.Ordinal);
         Assert.DoesNotContain("SettlementData", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ReceiptTextsJson", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(DateTimeKind.Utc, result.RequestedAtUtc.Kind);
         Assert.Equal(DateTimeKind.Utc, result.ReceivedAtUtc.Kind);
         Assert.Contains("Z\"", JsonSerializer.Serialize(result), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetDetailAsync_RedactsAllWpfPanSeparatorsAndCredentialShapes()
-    {
-        var nbsp = '\u00A0';
-        var id = await InsertAsync(
-            12,
-            "S01",
-            "POS-1",
-            new DateTime(2026, 8, 1),
-            DateTime.UtcNow,
-            "",
-            JsonSerializer.Serialize(new[]
-            {
-                "DOT 1234.5678.9012",
-                "TAB 1234\t5678\t9012",
-                $"NBSP 1234{nbsp}5678{nbsp}9012",
-                "Authorization: Bearer auth-secret",
-                "Bearer raw-secret",
-                "access_token=access-secret refreshToken=refresh-secret",
-            }));
-
-        var result = await CreateService().GetDetailAsync(id);
-
-        var combined = string.Join('\n', result!.Receipts);
-        Assert.DoesNotContain("1234.5678.9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("1234\t5678\t9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain($"1234{nbsp}5678{nbsp}9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("auth-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("raw-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("access-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("refresh-secret", combined, StringComparison.Ordinal);
-        Assert.Equal(3, combined.Split("[REDACTED PAN]", StringSplitOptions.None).Length - 1);
     }
 
     [Theory]
