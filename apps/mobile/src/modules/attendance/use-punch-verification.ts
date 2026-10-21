@@ -1,10 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import * as Location from "expo-location";
 import { useFocusEffect } from "@react-navigation/native";
-import {
-  buildApiBaseUrl,
-  getStoredApiHost,
-} from "@/shared/api/config";
+import { getStoredApiHost } from "@/shared/api/config";
+import { probeWithTransportFallback } from "@/shared/api/transport";
 import type {
   AttendancePunchVerificationState,
 } from "@/modules/attendance/types";
@@ -48,19 +46,27 @@ export async function verifyAttendanceNetworkReachability() {
     };
   }
   const host = await getStoredApiHost();
-  const apiBaseUrl = buildApiBaseUrl(host);
-  const healthUrl = `${apiBaseUrl.replace(/\/api$/, "")}/health`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    NETWORK_CHECK_TIMEOUT_MS,
-  );
 
   try {
-    await reviewAwareFetch(healthUrl, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
+    // 打卡时的网络校验也要走传输入口选择：个别运营商到某个入口的线路不通时，
+    // 不能把门店员工误判成「离线」而影响打卡；当前入口不通会顺带试备用入口。
+    // 每次尝试自带独立的超时控制器（第一次耗尽超时后，第二次不能共用已中止的控制器）。
+    await probeWithTransportFallback(host, async (apiBaseUrl) => {
+      const healthUrl = `${apiBaseUrl.replace(/\/api$/, "")}/health`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        NETWORK_CHECK_TIMEOUT_MS,
+      );
+      try {
+        return await reviewAwareFetch(healthUrl, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
     });
     return {
       status: "available" as const,
@@ -73,8 +79,6 @@ export async function verifyAttendanceNetworkReachability() {
       reason: "networkUnreachable" as const,
       verificationStatus: "offline" as const,
     };
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 

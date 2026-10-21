@@ -7,7 +7,8 @@
  */
 import { reviewAwareFetch } from "@/modules/ios-review/network";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
-import { resolveEffectiveApiBaseUrl } from "@/shared/api/effective-api-host";
+import { resolveEffectiveApiHost } from "@/shared/api/effective-api-host";
+import { probeWithTransportFallback } from "@/shared/api/transport";
 
 /** 健康探测默认超时（毫秒），与考勤模块一致。 */
 export const NETWORK_CHECK_TIMEOUT_MS = 5000;
@@ -58,37 +59,45 @@ export async function checkBackendReachable(
   const nowIso = options.nowIso ?? (() => new Date().toISOString());
   const isReviewActive =
     options.isReviewActive ?? isIosReviewSessionActive;
-  // 必须与业务请求解析出同一个 host：设备账号会话下以绑定 host 为准。
-  // 否则绑定 host 与偏好 host 不一致时，探测会稳定成功而业务请求稳定失败，
-  // 把离线态拖进「判定恢复→重跑失败→再判定恢复」的循环。
-  const getApiBaseUrl =
-    options.getApiBaseUrl ?? (() => resolveEffectiveApiBaseUrl());
-
   if (isReviewActive()) {
     // 审核态下健康检查不触网，直接报告可用，避免审核环境产生真实请求。
     return { ok: true, checkedAtIso: nowIso() };
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    options.timeoutMs ?? NETWORK_CHECK_TIMEOUT_MS,
-  );
   const fetcher = options.fetchImpl ?? reviewAwareFetch;
+  const timeoutMs = options.timeoutMs ?? NETWORK_CHECK_TIMEOUT_MS;
+  // 每次探测尝试都有独立的超时控制器：首选入口耗尽超时后，备用入口的探测不能共用已中止的控制器。
+  const probeOnce = async (apiBaseUrl: string) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetcher(buildHealthUrl(apiBaseUrl), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
 
   try {
-    const apiBaseUrl = await getApiBaseUrl();
-    const response = await fetcher(buildHealthUrl(apiBaseUrl), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
+    const response = options.getApiBaseUrl
+      ? await probeOnce(await options.getApiBaseUrl())
+      // 默认路径：必须与业务请求解析出同一个 host（设备账号会话下以绑定 host 为准），
+      // 否则绑定 host 与偏好 host 不一致时，探测会稳定成功而业务请求稳定失败，
+      // 把离线态拖进「判定恢复→重跑失败→再判定恢复」的循环。
+      // 同时探测也要和业务请求一样走传输入口选择：当前入口不通就顺带试备用入口，
+      // 否则线路只对某个入口故障时，App 会被误判为离线，或探测通、业务却不通。
+      : await probeWithTransportFallback(
+          await resolveEffectiveApiHost(),
+          probeOnce,
+          (candidate) => candidate.ok === true,
+        );
     // 只有 2xx（response.ok）才算后端真正可达；5xx/4xx 视为不可达。
     return { ok: response.ok === true, checkedAtIso: nowIso() };
   } catch {
     // 超时、网络不可达或地址解析失败统一视为不可达，不暴露底层异常。
     return { ok: false, checkedAtIso: nowIso() };
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
