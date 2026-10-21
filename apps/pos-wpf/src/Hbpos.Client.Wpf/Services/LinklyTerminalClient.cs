@@ -1570,10 +1570,27 @@ public sealed class LinklyTerminalClient(
             {
                 case EFTReceiptResponse receipt when receipt.Type == ReceiptType.Settlement:
                     CaptureReceipt(receipts, receipt);
-                    LogJson("settlement-receipt", "received", "response", environment, operationId, response: receipt);
+                    LogJson(
+                        "settlement-receipt",
+                        "received",
+                        "response",
+                        environment,
+                        operationId,
+                        response: receipt,
+                        details: BuildSettlementReceiptLogDetails(receipt));
                     break;
                 case EFTReceiptResponse receipt:
-                    LogJson("settlement-receipt", "ignored", "response", environment, operationId, reason: "non-settlement-receipt", response: receipt);
+                    // 仅日志：非 Settlement 类型的回单仍不进入结算记录，但类型、行数和脱敏全文都要留痕，
+                    // 用于事后判断 ANZ 小票里的 GRAND TOTALS 段是 Linkly 没发，还是被当作其他类型回单丢弃。
+                    LogJson(
+                        "settlement-receipt",
+                        "ignored",
+                        "response",
+                        environment,
+                        operationId,
+                        reason: "non-settlement-receipt",
+                        response: receipt,
+                        details: BuildSettlementReceiptLogDetails(receipt));
                     break;
                 case EFTSettlementResponse settlement:
                     LogJson("settlement", "received", "response", environment, operationId, success: settlement.Success, response: settlement);
@@ -1582,6 +1599,21 @@ public sealed class LinklyTerminalClient(
                     throw new InvalidOperationException(T("linkly.local.emptyResponse", "ANZ Linkly returned an empty response."));
             }
         }
+    }
+
+    /// <summary>
+    /// 结算回单日志的补充字段：回单类型、行数，以及经 <see cref="LinklyReceiptTextSanitizer"/> 脱敏后的整张回单文本。
+    /// 原始回单可能含卡号，绝不能直接写日志；这里只输出脱敏结果，且不影响回单是否入库的判断。
+    /// </summary>
+    private static object BuildSettlementReceiptLogDetails(EFTReceiptResponse receipt)
+    {
+        var lines = receipt.ReceiptText ?? [];
+        return new
+        {
+            receiptType = receipt.Type.ToString(),
+            lineCount = lines.Length,
+            sanitizedText = LinklyReceiptTextSanitizer.Sanitize(string.Join(Environment.NewLine, lines))
+        };
     }
 
     private static bool IsPinpadOfflineRejection(
@@ -1873,6 +1905,9 @@ public sealed class LinklyTerminalClient(
             },
             EFTReceiptResponse response => new
             {
+                // 补充回单类型与行数；ReceiptText 在 LinklyJsonLog 中逐行脱敏，不会泄露完整卡号。
+                Type = response.Type.ToString(),
+                LineCount = response.ReceiptText?.Length ?? 0,
                 response.ReceiptText
             },
             EFTTransactionResponse response => new
