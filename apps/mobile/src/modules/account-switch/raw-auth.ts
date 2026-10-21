@@ -12,15 +12,22 @@ import { normalizeCurrentUser } from "@/modules/auth/api";
 import { isUnauthenticatedApiPayload } from "@/shared/api/auth-error";
 import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
 import { buildApiBaseUrl, getStoredApiHost } from "@/shared/api/config";
+import { buildTransportApiBaseUrl, ensureApiTransportHydrated } from "@/shared/api/transport";
 import { assertCurrentUserAuthorized, parseRefreshResponse, type TokenPair } from "./raw-auth-parse";
 
 const RAW_AUTH_TIMEOUT_MS = 20_000;
 
+// 真实发请求的地址：走当前选中的传输入口（边缘或直连，同一后端），线路故障时才不会只有账号切换登录失败。
 async function authBaseUrl(): Promise<string> {
-  return buildApiBaseUrl(await getStoredApiHost());
+  const host = await getStoredApiHost();
+  await ensureApiTransportHydrated();
+  return buildTransportApiBaseUrl(host);
 }
 
-/** 当前使用的 API 主机（保险库按它区分账号来自哪个服务器）。 */
+/**
+ * 当前使用的 API 主机（保险库按它区分账号来自哪个服务器）。
+ * 这是账号的「身份」标识，必须保持稳定，绝不能随传输入口（边缘/直连）变化，所以不走传输选择。
+ */
 export async function currentApiHost(): Promise<string> {
   return buildApiBaseUrl(await getStoredApiHost());
 }

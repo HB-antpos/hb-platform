@@ -202,6 +202,11 @@ const stubs: Record<string, unknown> = {
   "expo-location": location,
   "@react-navigation/native": navigation,
   "@/shared/api/config": config,
+  // 传输入口选择在这里直通：本测试只关心打卡校验的状态流转，入口切换另有 transport-failover 的专门测试。
+  "@/shared/api/transport": {
+    probeWithTransportFallback: async (host: string, attempt: (apiBaseUrl: string) => Promise<unknown>) =>
+      attempt(config.buildApiBaseUrl(host)),
+  },
   "@/modules/attendance/types": {},
   "@/modules/attendance/required-location": requiredLocation,
   "@/modules/ios-review/session": session,

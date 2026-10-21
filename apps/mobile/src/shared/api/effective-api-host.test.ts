@@ -84,10 +84,12 @@ test("健康探测默认必须走统一 host 解析（源码契约）", () => {
   // 默认实现若退回偏好 host，探测与业务请求就会再次分裂成两个后端。
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(resolve(currentDir, "../network/health-check.ts"), "utf8");
+  // 默认路径必须以 resolveEffectiveApiHost()（与 resolveEffectiveApiBaseUrl 同一套解析）得到身份 host，
+  // 再经传输入口选择探测（当前入口不通就试备用入口），这样探测与业务请求始终走同一个入口。
   assert.match(
     source,
-    /options\.getApiBaseUrl \?\? \(\(\) => resolveEffectiveApiBaseUrl\(\)\)/,
-    "健康探测的默认地址来源必须是 resolveEffectiveApiBaseUrl",
+    /probeWithTransportFallback\(\s*await resolveEffectiveApiHost\(\)/,
+    "健康探测的默认地址来源必须是 resolveEffectiveApiHost，并经传输入口选择",
   );
   assert.doesNotMatch(
     source,
