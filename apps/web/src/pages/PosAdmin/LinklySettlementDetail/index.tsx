@@ -6,6 +6,7 @@ import {
   Descriptions,
   Empty,
   Space,
+  Table,
   Tag,
   Typography,
   message,
@@ -19,6 +20,7 @@ import PageContainer from '../../../components/PageContainer'
 import { getLinklySettlementDetail } from '../../../services/linklySettlementService'
 import type { LinklySettlementCardTotal, LinklySettlementDetail } from '../../../types/linklySettlement'
 import {
+  buildReceiptAmountRows,
   formatAmountMinor,
   createLatestAbortableRequestGuard,
   getLinklySettlementRouteIdFromPathname,
@@ -148,6 +150,50 @@ export default function LinklySettlementDetailPage() {
       render: displayValue,
     },
   ], [detail?.amountParseStatus, t])
+
+  // 回单区的金额数据：只列金额与笔数，列比「卡种明细」少，窄屏不需要横向滚动。
+  const receiptAmountColumns = useMemo<ColumnsType<LinklySettlementCardTotal>>(() => {
+    const status = detail?.amountParseStatus ?? 'Missing'
+    const amountCell = (amount: number | null | undefined, count: number | null | undefined) => (
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {formatAmountMinor(amount, status)}
+        <Typography.Text type="secondary"> × {displayValue(count)}</Typography.Text>
+      </span>
+    )
+    return [
+      { title: t('linklySettlements.detail.cardName'), dataIndex: 'cardName', key: 'cardName', width: 120 },
+      {
+        title: t('linklySettlements.columns.purchase'),
+        key: 'purchase',
+        align: 'right',
+        render: (_, record) => amountCell(record.purchaseAmountMinor, record.purchaseCount),
+      },
+      {
+        title: t('linklySettlements.columns.refund'),
+        key: 'refund',
+        align: 'right',
+        render: (_, record) => amountCell(record.refundAmountMinor, record.refundCount),
+      },
+      {
+        title: t('linklySettlements.columns.cashOut'),
+        key: 'cashOut',
+        align: 'right',
+        render: (_, record) => amountCell(record.cashOutAmountMinor, record.cashOutCount),
+      },
+      {
+        title: t('linklySettlements.columns.net'),
+        key: 'net',
+        align: 'right',
+        render: (_, record) => amountCell(record.totalAmountMinor, record.totalCount),
+      },
+    ]
+  }, [detail?.amountParseStatus, t])
+  const receiptAmountRows = useMemo(
+    () => (detail?.amountParseStatus === 'Parsed'
+      ? buildReceiptAmountRows(detail.cardTotals, detail.amountSummary, t('linklySettlements.detail.totalRow'))
+      : []),
+    [detail, t],
+  )
 
   const amountStatus = detail?.amountParseStatus ?? 'Missing'
   const summary = detail?.amountSummary
@@ -295,9 +341,9 @@ export default function LinklySettlementDetailPage() {
           </Card>
 
           <Card size="small" title={t('linklySettlements.detail.receipts')} loading={loading}>
-            {detail?.receipts.length ? (
+            {detail?.receipts.length || receiptAmountRows.length || detail?.generatedSummary ? (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {detail.receipts.map((receipt, index) => (
+                {(detail?.receipts ?? []).map((receipt, index) => (
                   <Card
                     key={`${index}-${receipt.length}`}
                     size="small"
@@ -309,6 +355,30 @@ export default function LinklySettlementDetailPage() {
                     </pre>
                   </Card>
                 ))}
+                {detail?.generatedSummary ? (
+                  <Card
+                    size="small"
+                    type="inner"
+                    title={t('linklySettlements.detail.generatedSummary')}
+                    extra={<Typography.Text type="secondary">{t('linklySettlements.detail.generatedSummaryHint')}</Typography.Text>}
+                  >
+                    <pre style={{ margin: 0, whiteSpace: 'pre', overflowX: 'auto', fontFamily: 'monospace' }}>
+                      {detail.generatedSummary}
+                    </pre>
+                  </Card>
+                ) : null}
+                {receiptAmountRows.length ? (
+                  <Card size="small" type="inner" title={t('linklySettlements.detail.receiptAmountData')}>
+                    <Table<LinklySettlementCardTotal>
+                      rowKey={(record, index) => `${record.cardName}-${index ?? 0}`}
+                      size="small"
+                      columns={receiptAmountColumns}
+                      dataSource={receiptAmountRows}
+                      pagination={false}
+                      scroll={{ x: 'max-content' }}
+                    />
+                  </Card>
+                ) : null}
               </Space>
             ) : (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('linklySettlements.detail.noReceipts')} />

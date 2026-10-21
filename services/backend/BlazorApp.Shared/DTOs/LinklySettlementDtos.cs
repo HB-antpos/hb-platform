@@ -80,4 +80,9 @@ public sealed class LinklySettlementDetailDto : LinklySettlementListItemDto
     public string ClientRevision { get; set; } = string.Empty;
     public List<LinklySettlementCardTotalDto> CardTotals { get; set; } = [];
     public string[] Receipts { get; set; } = [];
+
+    /// <summary>
+    /// 后端按结算数据生成的 GRAND TOTALS 汇总文本（非终端原文）；金额未能解析时为 null。
+    /// </summary>
+    public string? GeneratedSummary { get; set; }
 }
