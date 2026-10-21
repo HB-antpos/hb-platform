@@ -12,7 +12,8 @@ export async function exchangeStoredDeviceAccountToken() {
   // 凭据仍只发往绑定时确定的服务器（身份 host 是 binding.apiHost）；
   // 传输入口（边缘/直连）是同一后端，只决定经哪个域名到达，不改变信任边界。
   const response = await axios.post(
-    `${buildTransportApiBaseUrl(binding.apiHost)}/mobile/v1/device-session/exchange`,
+    // 设备换票是 POST，不拿它去试探冷却结束后的首选入口（probe:false）。
+    `${buildTransportApiBaseUrl(binding.apiHost, undefined, { probe: false })}/mobile/v1/device-session/exchange`,
     {
       hardwareId: binding.hardwareId,
       credential: binding.credential,

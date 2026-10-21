@@ -73,13 +73,18 @@ export class ApiTransportSelector {
     this.backoffStep = Math.min(state.backoffStep, BACKOFF_MINUTES.length - 1);
   }
 
-  /** 现在应该使用的传输入口 host。 */
-  resolve(identityHost: string): string {
+  /**
+   * 现在应该使用的传输入口 host。
+   * @param options.probe 冷却结束后是否允许这次请求去「试探」首选入口。读请求（GET/HEAD）和健康探测可以试探——
+   *   失败了会当场换入口重试；写请求（POST/PUT）失败了不会重放，不能拿来探路，所以继续走已确认可用的入口，
+   *   等读请求 / 健康探测确认首选入口恢复后再切回。
+   */
+  resolve(identityHost: string, options: { probe?: boolean } = {}): string {
     const candidates = transportCandidates(identityHost);
     if (candidates.length === 1) {
       return identityHost;
     }
-    if (this.activeIndex !== 0 && this.now() >= this.stickyUntil) {
+    if (this.activeIndex !== 0 && this.now() >= this.stickyUntil && options.probe !== false) {
       // 冷却结束：回到首选入口试探。是否真的恢复由 reportSuccess / reportFailure 决定。
       this.activeIndex = 0;
       this.save();
@@ -115,6 +120,11 @@ export class ApiTransportSelector {
     const candidates = transportCandidates(identityHost);
     if (candidates.length === 1 || normalizeHost(usedHost) !== normalizeHost(candidates[0])) {
       return false;
+    }
+    if (this.activeIndex !== 0 && this.now() < this.stickyUntil) {
+      // 已经处于冷却：这是更早派发出去的并发请求迟到的失败。不再升级退避——否则一次故障会被
+      // N 个并发请求一次顶满到 30 分钟；但仍告诉调用方「已在用备用入口」，读请求可以换入口重试。
+      return true;
     }
     if (kind === "timeout") {
       const lastSuccess = this.lastSuccessAt.get(normalizeHost(usedHost)) ?? 0;

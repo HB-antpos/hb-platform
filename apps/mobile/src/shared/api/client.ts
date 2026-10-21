@@ -60,7 +60,8 @@ async function syncApiBaseUrl() {
   const host = await getStoredApiHost();
   await ensureApiTransportHydrated();
   // 令牌刷新绕过请求拦截器自己拼地址，也必须走当前选中的传输入口，否则线路故障时刷新会白白失败。
-  const baseURL = buildTransportApiBaseUrl(host);
+  // 这个默认地址不属于某个具体请求（也被 APK 下载地址沿用），不能拿它去试探首选入口，所以 probe:false。
+  const baseURL = buildTransportApiBaseUrl(host, undefined, { probe: false });
   apiClient.defaults.baseURL = baseURL;
   return baseURL;
 }
@@ -79,7 +80,9 @@ type TransportTrackedConfig = InternalAxiosRequestConfig & {
 /** 用「身份 host」决定实际访问的传输入口，并把这次选择记在请求上。身份 host 不变，只改最终域名。 */
 function applyTransportBaseUrl(config: InternalAxiosRequestConfig, identityHost: string) {
   const tracked = config as TransportTrackedConfig;
-  const usedHost = tracked._transportHost ?? apiTransportSelector.resolve(identityHost);
+  // 写请求（POST/PUT）失败不会被重放，不能拿来试探冷却结束后的首选入口：只有读请求才允许 probe。
+  const usedHost = tracked._transportHost
+    ?? apiTransportSelector.resolve(identityHost, { probe: isTransportRetryableMethod(config.method) });
   tracked._transportIdentityHost = identityHost;
   tracked._transportUsedHost = usedHost;
   config.baseURL = buildApiBaseUrl(usedHost);
