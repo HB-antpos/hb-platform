@@ -101,14 +101,16 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         TimeSpan? approvalPollingInterval = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
         ApiServerSettingsViewModel? apiServerSettings = null,
-        IRawScannerService? rawScannerService = null)
+        IRawScannerService? rawScannerService = null,
+        IComputerRenameService? computerRename = null)
         : this(
             new DeviceRegistrationWorkflowService(deviceApiClient, deviceRepository, fingerprintService, localization),
             localization,
             approvalPollingInterval,
             delayAsync,
             apiServerSettings,
-            rawScannerService)
+            rawScannerService,
+            computerRename)
     {
     }
 
@@ -118,7 +120,8 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         TimeSpan? approvalPollingInterval = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
         ApiServerSettingsViewModel? apiServerSettings = null,
-        IRawScannerService? rawScannerService = null)
+        IRawScannerService? rawScannerService = null,
+        IComputerRenameService? computerRename = null)
     {
         _workflowService = workflowService;
         _localization = localization;
@@ -126,6 +129,11 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         _rawScannerService = rawScannerService;
         _approvalPollingInterval = approvalPollingInterval ?? DefaultApprovalPollingInterval;
         _delayAsync = delayAsync ?? Task.Delay;
+        // 生产环境不经组合根传参：没传就用本机 Windows 实现（构造即无副作用，只在发现硬件冲突时才读系统状态）；测试传假实现。
+        ComputerRename = new ComputerRenameViewModel(
+            computerRename ?? new WindowsComputerRenameService(),
+            T,
+            () => PreviewStoreCode);
         _apiServerSettings?.Load();
         if (_localization is not null)
         {
@@ -434,6 +442,15 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         // 限流时网络是通的，检测网络帮不上忙，不显示「检测网络」入口。
         HasNetworkProblem = exception is OperationCanceledException
             or (System.Net.Http.HttpRequestException and not DeviceApiRateLimitedException);
+        // 服务端明确说这台电脑的硬件码已登记：给出「一键改电脑名」；其他失败收起面板（已改名待重启的除外）。
+        if (exception is CatalogApiException { ErrorCode: DeviceActivationReasonCodes.DeviceConflict })
+        {
+            ComputerRename.ShowForHardwareConflict();
+        }
+        else
+        {
+            ComputerRename.Reset();
+        }
     }
 
     /// <summary>门店列表 / 注册 / 验证失败：沿用原消息，同时记下是不是网络问题。</summary>
@@ -444,6 +461,12 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
     }
 
     public IRelayCommand DiagnoseNetworkCommand { get; }
+
+    /// <summary>
+    /// 发现「设备硬件码已被登记」时显示的「一键改电脑名」面板：克隆系统镜像的两台电脑硬件码相同，
+    /// 改电脑名并重启后硬件码才会变，才能用开通码激活。
+    /// </summary>
+    public ComputerRenameViewModel ComputerRename { get; }
 
     partial void OnActivationCodeChanged(string value)
     {
@@ -1165,6 +1188,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         OnPropertyChanged(nameof(RegisterButtonText));
         OnPropertyChanged(nameof(ActivationPreviewButtonText));
         OnPropertyChanged(nameof(ActivationConfirmButtonText));
+        ComputerRename.RefreshLocalizedText();
     }
 
     private string T(string key, string fallback)

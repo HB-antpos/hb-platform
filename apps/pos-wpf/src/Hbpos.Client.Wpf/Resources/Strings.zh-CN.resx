@@ -2468,6 +2468,45 @@
   <data name="deviceActivation.error.failedWithReason" xml:space="preserve">
     <value>设备开通失败，请检查开通码和网络连接后重试。原因：{0}</value>
   </data>
+  <data name="deviceActivation.rename.title" xml:space="preserve">
+    <value>硬件码冲突</value>
+  </data>
+  <data name="deviceActivation.rename.offer" xml:space="preserve">
+    <value>另一台电脑已经在用这台电脑的硬件码，通常是因为两台都由同一个系统镜像装机。给这台电脑改个名字，它就有自己独立的硬件码。另一台电脑不受影响。</value>
+  </data>
+  <data name="deviceActivation.rename.confirm" xml:space="preserve">
+    <value>把这台电脑从 {0} 改名为 {1}？Windows 会弹出管理员授权窗口，改名后电脑必须重启。另一台电脑不受影响。</value>
+  </data>
+  <data name="deviceActivation.rename.restartPending" xml:space="preserve">
+    <value>这台电脑已改名为 {0}。请重启电脑完成改名，重启后再重新输入开通码。</value>
+  </data>
+  <data name="deviceActivation.rename.unavailable" xml:space="preserve">
+    <value>这台电脑已加入域，不能在这里改名。请联系 IT 管理员改名后再激活。</value>
+  </data>
+  <data name="deviceActivation.rename.button.rename" xml:space="preserve">
+    <value>改电脑名...</value>
+  </data>
+  <data name="deviceActivation.rename.button.confirm" xml:space="preserve">
+    <value>确认改名</value>
+  </data>
+  <data name="deviceActivation.rename.button.restart" xml:space="preserve">
+    <value>立即重启</value>
+  </data>
+  <data name="deviceActivation.rename.button.cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="deviceActivation.rename.notice.declined" xml:space="preserve">
+    <value>已取消改名，没有做任何修改。</value>
+  </data>
+  <data name="deviceActivation.rename.notice.failed" xml:space="preserve">
+    <value>无法修改电脑名：{0}</value>
+  </data>
+  <data name="deviceActivation.rename.notice.restarting" xml:space="preserve">
+    <value>即将重启。重启后请打开 HB POS，重新输入开通码。</value>
+  </data>
+  <data name="deviceActivation.rename.notice.restartFailed" xml:space="preserve">
+    <value>无法重启电脑：{0}</value>
+  </data>
   <data name="deviceActivation.error.rateLimited" xml:space="preserve">
     <value>当前网络的开通尝试次数过多，请等待 {0} 分钟后再试。</value>
   </data>
