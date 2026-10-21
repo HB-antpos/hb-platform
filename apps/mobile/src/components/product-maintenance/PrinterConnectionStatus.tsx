@@ -53,7 +53,6 @@ function usePrinterConnectionView({ savedPrinter, status, lastError }: PrinterCo
     t,
     presentation: STATUS_PRESENTATION[effectiveStatus],
     statusLabel,
-    shortLabel: t(`print.printerStatus.short.${effectiveStatus}`),
     printerName,
     errorHint,
     // 朗读完整信息：状态 + 打印机名 + 处理提示。
@@ -62,8 +61,9 @@ function usePrinterConnectionView({ savedPrinter, status, lastError }: PrinterCo
 }
 
 /**
- * 打印行左侧的紧凑状态标识：图标 + 2~4 字状态词，不额外占一行高度。
- * 打印机名与异常提示收进打印设置弹窗，点击 chip 即打开。
+ * 打印行左侧的紧凑状态标识：只有「带色底的状态图标」，没有文字，把整行宽度让给四个打印按钮（Zebra 小屏）。
+ * 状态靠颜色 + 图标形状双重区分（不单靠颜色）；完整状态、打印机名与异常提示仍通过朗读标签提供，
+ * 并收进打印设置弹窗，点击图标即打开。
  */
 export const PrinterConnectionChip = memo(function PrinterConnectionChip({
   savedPrinter,
@@ -71,7 +71,7 @@ export const PrinterConnectionChip = memo(function PrinterConnectionChip({
   lastError,
   onPress,
 }: PrinterConnectionChipProps) {
-  const { t, presentation, shortLabel, summary } = usePrinterConnectionView({
+  const { t, presentation, summary } = usePrinterConnectionView({
     savedPrinter,
     status,
     lastError,
@@ -93,10 +93,7 @@ export const PrinterConnectionChip = memo(function PrinterConnectionChip({
         pressed && onPress ? styles.pressed : null,
       ]}
     >
-      <Icon source={presentation.icon} size={16} color={presentation.color} />
-      <Text style={[styles.chipLabel, { color: presentation.color }]} numberOfLines={1}>
-        {shortLabel}
-      </Text>
+      <Icon source={presentation.icon} size={20} color={presentation.color} />
     </Pressable>
   );
 });
@@ -146,19 +143,14 @@ export const PrinterConnectionSummary = memo(function PrinterConnectionSummary({
 const styles = StyleSheet.create({
   chip: {
     flexShrink: 0,
-    minHeight: 36,
-    flexDirection: "row",
+    width: 36,
+    height: 36,
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: HB_SPACING.xs,
+    justifyContent: "center",
     borderRadius: HB_RADIUS.control,
   },
   pressed: {
     opacity: 0.72,
-  },
-  chipLabel: {
-    fontSize: 12,
-    fontWeight: "700",
   },
   summary: {
     flexDirection: "row",

@@ -72,8 +72,10 @@ async function run() {
   const texts = () => nodes("Text").map((node) => String(node.props.children));
 
   try {
-    // 1. 七种连接状态：chip 显示短状态词与对应图标，朗读标签带完整状态 + 打印机名。
+    // 1. 七种连接状态：chip 只有带色底的状态图标、没有任何文字（把整行宽度让给四个打印按钮），
+    //    朗读标签带完整状态 + 打印机名。
     const seenIcons = new Map<string, string>();
+    const seenBackgrounds = new Map<string, string>();
     for (const status of STATUSES) {
       await act(() => root.render(React.createElement(PrinterConnectionChip, {
         savedPrinter: printer,
@@ -81,8 +83,10 @@ async function run() {
         lastError: null,
         onPress: () => undefined,
       })));
-      assert.deepEqual(texts(), [lookup(`print.printerStatus.short.${status}`)], `${status} chip 只显示短状态词，不再带打印机名`);
+      assert.deepEqual(texts(), [], `${status} chip 不显示任何文字，状态靠颜色 + 图标`);
       const pressable = nodes("Pressable")[0]!;
+      const style = pressable.props.style({ pressed: false }) as (Record<string, unknown> | null)[];
+      seenBackgrounds.set(status, String(style.find((entry) => entry && "backgroundColor" in entry)?.backgroundColor));
       assert.equal(
         pressable.props.accessibilityLabel,
         `${lookup(`print.printerStatus.${status}`)} · Zebra ZD421`,
@@ -95,6 +99,10 @@ async function run() {
     assert.equal(seenIcons.get("connected"), "printer-check");
     assert.equal(seenIcons.get("error"), "alert-circle-outline");
     assert.notEqual(seenIcons.get("connected"), seenIcons.get("disconnected"), "已连接与已断开不能只靠颜色区分，图标形状也要不同");
+    // 颜色承担「能不能打」的第一眼判断：已连接（绿）、需要处理的断开 / 异常（橙 / 红）底色必须互不相同。
+    assert.notEqual(seenBackgrounds.get("connected"), seenBackgrounds.get("disconnected"), "已连接与已断开底色不同");
+    assert.notEqual(seenBackgrounds.get("connected"), seenBackgrounds.get("error"), "已连接与连接异常底色不同");
+    assert.notEqual(seenBackgrounds.get("disconnected"), seenBackgrounds.get("error"), "已断开与连接异常底色不同");
 
     // 2. 未保存打印机：无视传入的连接状态，一律是"未选择"。
     await act(() => root.render(React.createElement(PrinterConnectionChip, {
@@ -103,8 +111,9 @@ async function run() {
       lastError: null,
       onPress: () => undefined,
     })));
-    assert.deepEqual(texts(), [lookup("print.printerStatus.short.unselected")]);
+    assert.deepEqual(texts(), []);
     assert.equal(nodes("Pressable")[0]!.props.accessibilityLabel, lookup("print.printerStatus.unselected"));
+    assert.equal(String(nodes("Icon")[0]!.props.source), "printer-off-outline", "未选择打印机用「关闭的打印机」图标");
 
     // 3. 没有 onPress（扫码打印进行中）：不可点、不声明按钮角色。
     await act(() => root.render(React.createElement(PrinterConnectionChip, {
@@ -116,13 +125,7 @@ async function run() {
     assert.equal(disabled.props.disabled, true);
     assert.equal(disabled.props.accessibilityRole, undefined);
 
-    // 4. 短状态词不超过 4 个字：chip 要和三个打印按钮挤在 Zebra 小屏的一行里。
-    for (const key of ["unselected", ...STATUSES]) {
-      const label = lookup(`print.printerStatus.short.${key}`);
-      assert.ok([...label].length <= 4, `${key} 短状态词「${label}」超过 4 个字，会挤压打印按钮`);
-    }
-
-    // 5. 弹窗摘要：完整状态 + 打印机名；错误态只给处理方向，原生错误细节绝不上屏。
+    // 4. 弹窗摘要：完整状态 + 打印机名；错误态只给处理方向，原生错误细节绝不上屏。
     const nativeError = "java.io.IOException: read failed, socket might closed at android.bluetooth";
     await act(() => root.render(React.createElement(PrinterConnectionSummary, {
       savedPrinter: printer,

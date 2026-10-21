@@ -337,8 +337,9 @@
     "product": "Regular label",
     "discount": "Discount label",
     "bigDiscount": "Large label",
-    "productShort": "Regular",
-    "discountShort": "Discount",
+    "productShort": "Reg",
+    "smallShort": "Small",
+    "discountShort": "Disc",
     "bigDiscountShort": "Large",
     "settingsAction": "Settings",
     "clearance": "Clearance label",
@@ -362,16 +363,6 @@
       "error": "Connection issue",
       "errorHint": "Open settings to check the connection",
       "openSettingsHint": "Open print settings",
-      "short": {
-        "unselected": "No printer",
-        "idle": "Idle",
-        "connecting": "Connecting",
-        "connected": "Connected",
-        "reconnecting": "Retrying",
-        "disconnected": "Offline",
-        "paused": "Paused",
-        "error": "Issue"
-      },
       "manage": "Printer settings"
     },
     "label": "Labels"

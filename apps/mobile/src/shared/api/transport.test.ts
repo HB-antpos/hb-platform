@@ -4,6 +4,9 @@
  */
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   apiTransportSelector,
@@ -114,4 +117,37 @@ test("入口组之外的 host 只探测一次，错误原样抛出（与改动�
     /lan down/,
   );
   assert.equal(calls, 1);
+});
+
+test("冷却已过但首选入口尚未确认恢复：写请求用的基础地址仍是直连，读请求 / 探测才去试探边缘", () => {
+  // 边缘入口刚失败过，且 2 分钟冷却刚刚过去。
+  apiTransportSelector.hydrate({ activeIndex: 1, stickyUntil: Date.now() - 1_000, backoffStep: 1 });
+
+  assert.equal(
+    buildTransportApiBaseUrl("hotbargain.vip", undefined, { probe: false }),
+    "https://hotbargain.vip/api",
+  );
+  assert.equal(apiTransportSelector.isUsingFallback("hotbargain.vip"), false, "冷却已过");
+  assert.equal(buildTransportApiBaseUrl("hotbargain.vip"), "https://pos.hotbargain.vip/api");
+});
+
+test("写请求的几处调用点都显式关闭试探（源码契约）", () => {
+  // 这几处发的是 POST / PUT，或沿用为 APK 下载地址的默认地址，失败了不会被重放，不能拿来试探首选入口。
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const read = (relative: string) => readFileSync(resolve(currentDir, relative), "utf8");
+
+  assert.match(
+    read("./client.ts"),
+    /apiTransportSelector\.resolve\(identityHost,\s*\{\s*probe:\s*isTransportRetryableMethod\(config\.method\)\s*\}\)/u,
+    "业务请求拦截器只让读请求试探首选入口",
+  );
+  assert.match(read("./client.ts"), /buildTransportApiBaseUrl\(host,\s*undefined,\s*\{\s*probe:\s*false\s*\}\)/u);
+  assert.match(
+    read("../../modules/account-switch/raw-auth.ts"),
+    /buildTransportApiBaseUrl\(host,\s*undefined,\s*\{\s*probe:\s*false\s*\}\)/u,
+  );
+  assert.match(
+    read("../../modules/device-activation/device-account-token.ts"),
+    /buildTransportApiBaseUrl\(binding\.apiHost,\s*undefined,\s*\{\s*probe:\s*false\s*\}\)/u,
+  );
 });

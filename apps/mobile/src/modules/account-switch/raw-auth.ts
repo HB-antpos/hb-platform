@@ -21,7 +21,8 @@ const RAW_AUTH_TIMEOUT_MS = 20_000;
 async function authBaseUrl(): Promise<string> {
   const host = await getStoredApiHost();
   await ensureApiTransportHydrated();
-  return buildTransportApiBaseUrl(host);
+  // 这里主要是登录 / 刷新令牌 / 登出这类写请求，不拿它们去试探冷却结束后的首选入口（probe:false）。
+  return buildTransportApiBaseUrl(host, undefined, { probe: false });
 }
 
 /**
