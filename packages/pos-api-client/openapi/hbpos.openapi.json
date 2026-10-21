@@ -7316,6 +7316,18 @@
           "emergencyGrantId": {
             "type": "string",
             "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
+          },
+          "nickname": {
+            "type": "string",
+            "nullable": true
+          },
+          "familyName": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
