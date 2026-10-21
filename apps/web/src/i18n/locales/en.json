@@ -4316,6 +4316,8 @@
       "createUserResultUnknownTitle": "Creation result unconfirmed",
       "createUserEmailExists": "This email is already in use. Please use a different email and try again.",
       "createUserUsernameExists": "This username is already in use. Please use a different username and try again.",
+      "updateUserEmailExists": "This email is already used by another account. Please use a different email and save again.",
+      "updateUserUsernameExists": "This username is already in use. Please use a different username and save again.",
       "createUserPermissionDenied": "Your account cannot create users. Please contact a system administrator.",
       "createUserStoreScopeDenied": "The selected store is outside your management scope. Adjust the selection on the Stores tab and try again.",
       "createUserValidationFailed": "The user information did not pass validation. Please check the entered details and try again.",

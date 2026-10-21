@@ -1218,18 +1218,15 @@ namespace BlazorApp.Api.Services
                     return ApiResponse<UserDto>.Error("不能分配非管辖分店", "STORE_SCOPE_DENIED");
                 }
 
-                // 检查用户名是否已存在（用户名大小写不敏感）
+                // 用户名、邮箱都不能与已有账号重复（去首尾空白、忽略大小写，口径同库里唯一索引）
                 var usernameLower = (dto.Username ?? string.Empty).Trim().ToLowerInvariant();
-                var existingUser = await db.Queryable<User>()
-                    .Where(u => u.Username.ToLower() == usernameLower || u.Email == dto.Email)
-                    .FirstAsync();
-
-                if (existingUser != null)
+                var email = (dto.Email ?? string.Empty).Trim();
+                var conflictError = UserIdentityUniqueness.ToError<UserDto>(
+                    await UserIdentityUniqueness.FindConflictAsync(db, usernameLower, email)
+                );
+                if (conflictError != null)
                 {
-                    if (existingUser.Username.ToLower() == usernameLower)
-                        return ApiResponse<UserDto>.Error("用户名已存在", "USERNAME_EXISTS");
-                    if (existingUser.Email == dto.Email)
-                        return ApiResponse<UserDto>.Error("邮箱已存在", "EMAIL_EXISTS");
+                    return conflictError;
                 }
 
                 // 创建用户（用户名统一写入小写）
@@ -1237,7 +1234,7 @@ namespace BlazorApp.Api.Services
                 {
                     UserGUID = Guid.NewGuid().ToString(),
                     Username = usernameLower,
-                    Email = dto.Email,
+                    Email = email,
                     PasswordHash = PasswordHasher.HashSubmittedPassword(dto.Password, dto.PasswordFormat),
                     IsActive = dto.IsActive,
                     CreatedAt = DateTime.UtcNow,
@@ -1331,6 +1328,18 @@ namespace BlazorApp.Api.Services
             }
             catch (Exception ex)
             {
+                // 并发建号时后到者撞唯一索引：重新判定是哪个字段重复，给出字段级提示而不是笼统失败。
+                var conflictError = await UserIdentityUniqueness.TryMapWriteFailureAsync<UserDto>(
+                    _context.Db,
+                    ex,
+                    dto.Username,
+                    dto.Email
+                );
+                if (conflictError != null)
+                {
+                    return conflictError;
+                }
+
                 _logger.LogError(ex, "创建用户失败，Username: {Username}", dto.Username);
                 return ApiResponse<UserDto>.Error("创建用户失败", "CREATE_USER_FAILED");
             }
@@ -1519,27 +1528,19 @@ namespace BlazorApp.Api.Services
                         );
                     }
 
-                    // 检查用户名和邮箱是否被其他用户使用（用户名大小写不敏感）
+                    // 检查用户名和邮箱是否被其他账号使用（排除自己：原值保存不算重复；去首尾空白、忽略大小写）
                     var usernameLower = (dto.Username ?? string.Empty).Trim().ToLowerInvariant();
-                    var existingUser = await db.Queryable<User>()
-                        .Where(u =>
-                            u.UserGUID != userGuid
-                            && !u.IsDeleted
-                            && (u.Username.ToLower() == usernameLower || u.Email == dto.Email)
-                        )
-                        .FirstAsync();
-
-                    if (existingUser != null)
+                    var email = (dto.Email ?? string.Empty).Trim();
+                    var conflict = await UserIdentityUniqueness.FindConflictAsync(db, usernameLower, email, userGuid);
+                    if (conflict != UserIdentityConflict.None)
                     {
-                        if (existingUser.Username.ToLower() == usernameLower)
-                            return await RollbackUserUpdateAsync<UserDto>(db, "用户名已被其他用户使用", "USERNAME_EXISTS");
-                        if (existingUser.Email == dto.Email)
-                            return await RollbackUserUpdateAsync<UserDto>(db, "邮箱已被其他用户使用", "EMAIL_EXISTS");
+                        await db.Ado.RollbackTranAsync();
+                        return UserIdentityUniqueness.ToError<UserDto>(conflict)!;
                     }
 
                     // 更新用户信息（用户名统一写入小写）
                     user.Username = usernameLower;
-                    user.Email = dto.Email;
+                    user.Email = email;
                     // 姓名：新字段 null=不改、空白=清空；旧客户端只发 FullName 时按旧行为设置并清理失配的拆分字段。
                     var nameError = UserNameParts.ApplyOnUpdate(
                         user,
@@ -1582,6 +1583,19 @@ namespace BlazorApp.Api.Services
             }
             catch (Exception ex)
             {
+                // 并发改名撞唯一索引时（事务已回滚），重新判定重复字段给出友好提示。
+                var conflictError = await UserIdentityUniqueness.TryMapWriteFailureAsync<UserDto>(
+                    db,
+                    ex,
+                    dto.Username,
+                    dto.Email,
+                    userGuid
+                );
+                if (conflictError != null)
+                {
+                    return conflictError;
+                }
+
                 _logger.LogError(ex, "更新用户失败，UserGUID: {UserGUID}", userGuid);
                 return ApiResponse<UserDto>.Error("更新用户失败", "UPDATE_USER_FAILED");
             }

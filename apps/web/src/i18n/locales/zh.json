@@ -4316,6 +4316,8 @@
       "createUserResultUnknownTitle": "创建结果待确认",
       "createUserEmailExists": "该邮箱已被使用，请更换邮箱后重试。",
       "createUserUsernameExists": "该用户名已被使用，请更换用户名后重试。",
+      "updateUserEmailExists": "该邮箱已被其他账号使用，请更换邮箱后再保存。",
+      "updateUserUsernameExists": "该用户名已被使用，请更换用户名后再保存。",
       "createUserPermissionDenied": "当前账号没有创建用户的权限，请联系系统管理员。",
       "createUserStoreScopeDenied": "所选分店不在您的管理范围内，请在“分店”页签调整选择后重试。",
       "createUserValidationFailed": "用户信息未通过校验，请检查填写内容后重试。",
