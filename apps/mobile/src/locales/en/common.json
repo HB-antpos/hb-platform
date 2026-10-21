@@ -251,6 +251,7 @@
       "noCashierEnabledStores": "No cashier-enabled stores",
       "refreshingStatistics": "Refreshing statistics automatically...",
       "statisticsIncomplete": "Statistics are still being prepared. Please retry.",
+      "statisticsFailed": "Statistics for one day in this date range failed to update and are being fixed. Try a shorter date range, or check back later.",
       "comparePending": "LY figures still updating",
       "comparePendingNotice": "Last-year figures are still updating, so LY and growth show “—” for now. Refresh later to fill them in.",
       "errorTitle": "Failed to load revenue data",

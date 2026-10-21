@@ -287,7 +287,7 @@ const legacyProductBranchSnapshot = normalizeProductBranchReportSnapshot([
 assert.equal(legacyProductBranchSnapshot.isComplete, false, "旧商品分店下钻不得绕过完整性元数据");
 
 function createPollingSnapshot(
-  statisticStatus: "Pending" | "Fresh",
+  statisticStatus: "Pending" | "Fresh" | "Failed",
 ): ProductReportSnapshot<string[]> {
   return {
     data: statisticStatus === "Fresh" ? ["complete"] : [],
@@ -339,6 +339,24 @@ async function runProductSnapshotPollingAssertions() {
   assert.equal(exhaustedAtDeadline.isComplete, false);
   assert.equal(exhaustedAtDeadline.pollingExhausted, true, "只有到达真实截止时间后才能标记追数耗尽");
   assert.equal(elapsedMs, 1_000, "最后一次退避必须截断到截止时间，不能提前放弃或超时等待");
+
+  // 后端明确返回 Failed（区间内某天对账失败）不是「补算中」：必须立即结束轮询并标记耗尽，
+  // 不能白等整段 8 秒截止时间；页面据此显示「统计更新失败」而不是让用户反复重试。
+  elapsedMs = 0;
+  let failedLoads = 0;
+  const failedSnapshot = await pollProductReportSnapshot(
+    async () => { failedLoads += 1; return createPollingSnapshot("Failed"); },
+    {
+      deadlineMs: 8_000,
+      now: () => elapsedMs,
+      wait: async (delayMs) => { elapsedMs += delayMs; },
+    },
+  );
+  assert.equal(failedLoads, 1, "Failed 不应继续轮询");
+  assert.equal(elapsedMs, 0, "Failed 不应等待任何退避");
+  assert.equal(failedSnapshot.isComplete, false);
+  assert.equal(failedSnapshot.pollingExhausted, true);
+  assert.equal(failedSnapshot.statisticStatus, "Failed");
 
   const controller = new AbortController();
   let resolvePending: ((value: ProductReportSnapshot<string[]>) => void) | undefined;

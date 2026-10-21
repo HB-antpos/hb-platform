@@ -205,6 +205,16 @@ assert.match(
   "首次无可展示的完整结果时，主表轮询耗尽才显示重试",
 );
 assert.match(
+  source.slice(reportContentStart),
+  /mainReportStatisticsIncomplete && !mainReportHasDisplay \? \([\s\S]*?<ErrorState[\s\S]*?mainReportStatisticsFailed[\s\S]*?reports\.states\.statisticsFailed[\s\S]*?reports\.states\.statisticsIncomplete/,
+  "后端明确返回统计更新失败时，要显示失败文案而不是「补算尚未完成，请重试」",
+);
+assert.match(
+  source,
+  /const mainReportStatisticsFailed =[\s\S]*?totalRevenueQuery\.data\?\.statisticStatus === "Failed"[\s\S]*?supplierQuery\.data\?\.statisticStatus === "Failed"[\s\S]*?productQuery\.data\?\.statisticStatus === "Failed"/,
+  "失败判定要覆盖总额、供应商排行、商品明细等主表请求",
+);
+assert.match(
   source,
   /const mainReportHasDisplay = mainReportHasSnapshot \|\| linkedTransition !== null;/,
   "只有同条件快照或同一份报告内的联动过渡才算可展示结果",

@@ -938,6 +938,14 @@ export function ProductReportScreen({
       && chinaSupplierBranchesQuery.data.pollingExhausted
       && !chinaSupplierBranchesQuery.isFetching
     );
+  // 后端明确标记统计更新失败（区间内某天对账失败，需后台恢复）：与「补算尚未完成」区分开，
+  // 否则用户会一直点「重试」却永远没有结果。
+  const mainReportStatisticsFailed =
+    totalRevenueQuery.data?.statisticStatus === "Failed"
+    || supplierQuery.data?.statisticStatus === "Failed"
+    || productQuery.data?.statisticStatus === "Failed"
+    || (isChinaKind && chinaBranchTotalsQuery.data?.statisticStatus === "Failed")
+    || (hasChinaSupplierBranches && chinaSupplierBranchesQuery.data?.statisticStatus === "Failed");
   const mainReportRequestError =
     storeOptionsQuery.isError
     || totalRevenueQuery.isError
@@ -2074,7 +2082,9 @@ export function ProductReportScreen({
           <LoadingState label={t("reports.states.refreshingStatistics")} />
         ) : mainReportStatisticsIncomplete && !mainReportHasDisplay ? (
           <ErrorState
-            label={t("reports.states.statisticsIncomplete")}
+            label={mainReportStatisticsFailed
+              ? t("reports.states.statisticsFailed")
+              : t("reports.states.statisticsIncomplete")}
             retryLabel={t("actions.retry")}
             onRetry={() => {
               resetMainReportVersionSync();
@@ -2381,7 +2391,9 @@ export function ProductReportScreen({
         closeLabel={t("actions.close")}
         retryLabel={t("actions.retry")}
         errorLabel={isDrilldownStatisticsIncomplete
-          ? t("reports.states.statisticsIncomplete")
+          ? t(activeDrilldownQuery?.data?.statisticStatus === "Failed"
+            ? "reports.states.statisticsFailed"
+            : "reports.states.statisticsIncomplete")
           : t("productReport.states.error")}
         emptyLabel={drilldownEmptyLabel}
         kind={drilldownKind}

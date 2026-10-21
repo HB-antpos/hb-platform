@@ -33,7 +33,7 @@ namespace BlazorApp.Api.Services
                 && o.OrderTime >= targetDate
                 && o.OrderTime < nextDate
             )
-            .Select((o, d) => new { d.OrderDetailGuid })
+            .Select((o, d) => new { o.OrderGuid, o.BranchCode, o.DeviceCode, d.OrderDetailGuid })
             .ToListAsync();
         var detailGuidSet = detailRows
             .Select(x => x.OrderDetailGuid)
@@ -53,7 +53,7 @@ namespace BlazorApp.Api.Services
             supplementalReturnRows.Select(row => row.DeviceCode)
         );
 
-        return supplementalReturnRows
+        var returnAdjustments = supplementalReturnRows
             .Select(row => new
             {
                 Row = row,
@@ -74,6 +74,36 @@ namespace BlazorApp.Api.Services
                 (int)group.Sum(x => x.Row.Quantity)
             ))
             .ToList();
+
+        // 与统计写入同口径：已支付但没有明细的订单无法归属商品，对账前从分店营业额里扣掉，
+        // 汇总页才不会对写入时已判定通过的日期再显示「对账失败」。
+        var headerOnlyOrders = detailRows
+            .Where(row => string.IsNullOrWhiteSpace(row.OrderDetailGuid) && !string.IsNullOrWhiteSpace(row.OrderGuid))
+            .Select(row => new SalesStatisticsProductStoreDailyDomainRules.HeaderOnlyOrder(
+                row.OrderGuid, row.BranchCode, row.DeviceCode))
+            .ToList();
+        if (headerOnlyOrders.Count == 0)
+        {
+            return returnAdjustments;
+        }
+        var (paymentAmounts, _) = await SalesStatisticsProductStoreDailySourceQueries.LoadOrderAmountMapsAsync(
+            _posmContext,
+            targetDate,
+            nextDate,
+            headerOnlyOrders,
+            order => order.OrderGuid,
+            _ => 0m
+        );
+        var headerOnlyDeviceBranchMap = await SalesStatisticsProductStoreDailySourceQueries.LoadDeviceBranchMapAsync(
+            _posmContext,
+            headerOnlyOrders.Where(order => string.IsNullOrWhiteSpace(order.BranchCode)).Select(order => order.DeviceCode)
+        );
+        returnAdjustments.AddRange(SalesStatisticsProductStoreDailyDomainRules.BuildHeaderOnlyOrderDeductions(
+            headerOnlyOrders,
+            headerOnlyDeviceBranchMap,
+            paymentAmounts
+        ));
+        return returnAdjustments;
     }
 
     internal static async Task<List<ProductStoreDailySourceRow>> LoadSupplementalReturnRowsAsync(

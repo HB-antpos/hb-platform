@@ -215,6 +215,7 @@
     <Compile Include="SalesDashboardCostStatusTests.cs" />
     <Compile Include="SalesStatisticsProductStoreDailyCommandWriterTests.cs" />
     <Compile Include="SalesStatisticsProductStoreDailyBuilderPerformanceTests.cs" />
+    <Compile Include="SalesStatisticsHeaderOnlyOrderReconciliationTests.cs" />
     <Compile Include="SalesStatisticsHistoricalCostConcurrencySqlServerTests.cs" />
     <Compile Include="SalesStatisticsProductStoreDailyCostRulesTests.cs" />
     <Compile Include="SalesCostBackfillSqlServerTests.cs" />

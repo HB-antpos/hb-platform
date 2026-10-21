@@ -367,7 +367,7 @@ export function normalizeProductReportSnapshot<T>(
 export async function pollProductReportSnapshot<TSnapshot extends Pick<
   ProductReportSnapshot<unknown>,
   "isComplete" | "pollingExhausted" | "pollingAttemptCount"
->>(
+> & { statisticStatus?: ProductReportStatisticStatus }>(
   loadSnapshot: (signal?: AbortSignal) => Promise<TSnapshot>,
   options: ProductReportPollingOptions = {},
 ): Promise<TSnapshot> {
@@ -387,6 +387,10 @@ export async function pollProductReportSnapshot<TSnapshot extends Pick<
     if (latest.isComplete) {
       return { ...latest, pollingExhausted: false, pollingAttemptCount } as TSnapshot;
     }
+
+    // 后端明确返回 Failed（如某天对账失败）说明不是「补算还没跑完」，等 8 秒也不会变好：立即结束轮询，
+    // 让页面马上显示失败提示，而不是让用户白等一轮再看到「补算尚未完成」。
+    if (latest.statisticStatus === "Failed") break;
 
     const configuredDelayMs = delaysMs[attempt];
     const remainingMs = deadlineAt - now();
