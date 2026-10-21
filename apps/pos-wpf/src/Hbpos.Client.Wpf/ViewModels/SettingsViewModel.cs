@@ -3292,6 +3292,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SelectedSquareDevice = _squareState.SelectedDevice;
         SelectedSquareDeviceCode = _squareState.SelectedDeviceCode;
         _syncingSquare = false;
+        // 关键逻辑：上面三个选中项是在 _syncingSquare 期间静默赋值的，On*Changed 处理函数会提前返回、不通知命令。
+        // 加载位置后只有一个位置（沙盒自动选中 / 已保存的位置被选中）或加载设备后自动选中已保存的设备时，
+        // 「加载设备」「保存」等按钮的可用状态就没人刷新，界面上一直是灰的。同步结束后统一刷新一次。
+        RaiseCommandStates();
         RaiseActivePaymentProviderProperties();
         OnPaymentTerminalStateSynced();
     }

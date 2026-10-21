@@ -1183,6 +1183,88 @@ public sealed partial class SettingsViewModelTests
         Assert.Null(viewModel.SelectedSquareLocation);
     }
 
+    // 界面按钮只在收到 CanExecuteChanged 时才会重新查询可用状态（CanExecute 本身每次调用都重新计算，
+    // 单看 CanExecute 为 true 发现不了「没通知」的缺陷）。记录最后一次通知时按钮对界面是否可点。
+    private static Func<bool> TrackLastNotifiedEnabled(System.Windows.Input.ICommand command)
+    {
+        var lastNotifiedEnabled = false;
+        command.CanExecuteChanged += (_, _) => lastNotifiedEnabled = command.CanExecute(null);
+        return () => lastNotifiedEnabled;
+    }
+
+    [Fact]
+    public async Task LoadDevicesCommand_is_enabled_for_the_ui_when_the_only_sandbox_location_is_selected_automatically()
+    {
+        var service = new FakeCardTerminalSetupService(
+            CardTerminalConfiguration.Default with
+            {
+                Processor = CardProcessorKind.Square,
+                Environment = CardTerminalEnvironment.Sandbox,
+                HasProtectedSquareAccessToken = true
+            },
+            CachedToken);
+        var viewModel = new SettingsViewModel(service);
+        await viewModel.LoadAsync();
+        var loadDevicesEnabled = TrackLastNotifiedEnabled(viewModel.LoadDevicesCommand);
+
+        await viewModel.LoadLocationsCommand.ExecuteAsync(null);
+
+        // 沙盒只有一个位置时自动选中；选中发生在同步协调器状态期间（静默赋值），
+        // 加载设备按钮必须在同步结束后通知界面重新变为可点，不能一直灰着。
+        Assert.Equal("LOC-1", viewModel.SelectedSquareLocation!.Id);
+        Assert.True(loadDevicesEnabled(), "自动选中唯一位置后，加载设备按钮应通知界面变为可点");
+    }
+
+    [Fact]
+    public async Task LoadDevicesCommand_is_enabled_for_the_ui_when_the_saved_production_location_is_selected_after_loading()
+    {
+        var service = new FakeCardTerminalSetupService(
+            CardTerminalConfiguration.Default with
+            {
+                Processor = CardProcessorKind.Square,
+                Environment = CardTerminalEnvironment.Production,
+                SquareLocationId = "LOC-1",
+                HasProtectedSquareAccessToken = true
+            },
+            CachedToken);
+        var viewModel = new SettingsViewModel(service);
+        await viewModel.LoadAsync();
+        var loadDevicesEnabled = TrackLastNotifiedEnabled(viewModel.LoadDevicesCommand);
+
+        await viewModel.LoadLocationsCommand.ExecuteAsync(null);
+
+        Assert.Equal("LOC-1", viewModel.SelectedSquareLocation!.Id);
+        Assert.True(loadDevicesEnabled(), "已保存的位置被选中后，加载设备按钮应通知界面变为可点");
+
+        await viewModel.LoadDevicesCommand.ExecuteAsync(null);
+        Assert.NotEmpty(viewModel.SquareDevices);
+    }
+
+    [Fact]
+    public async Task SaveSquareCommand_is_enabled_for_the_ui_when_the_saved_device_is_selected_after_loading_devices()
+    {
+        var service = new FakeCardTerminalSetupService(
+            CardTerminalConfiguration.Default with
+            {
+                Processor = CardProcessorKind.Square,
+                Environment = CardTerminalEnvironment.Production,
+                SquareLocationId = "LOC-1",
+                SquareDeviceId = "DEV-1",
+                HasProtectedSquareAccessToken = true
+            },
+            CachedToken);
+        var viewModel = new SettingsViewModel(service);
+        await viewModel.LoadAsync();
+        await viewModel.LoadLocationsCommand.ExecuteAsync(null);
+        var saveEnabled = TrackLastNotifiedEnabled(viewModel.SaveSquareCommand);
+
+        await viewModel.LoadDevicesCommand.ExecuteAsync(null);
+
+        // 加载设备后自动选中已保存的设备，同样是静默赋值：保存按钮要在同步结束后通知界面刷新。
+        Assert.Equal("DEV-1", viewModel.SelectedSquareDevice!.Id);
+        Assert.True(saveEnabled(), "自动选中已保存设备后，保存按钮应通知界面变为可点");
+    }
+
     [Fact]
     public async Task LoadAsync_uses_backend_square_token_status_text()
     {
