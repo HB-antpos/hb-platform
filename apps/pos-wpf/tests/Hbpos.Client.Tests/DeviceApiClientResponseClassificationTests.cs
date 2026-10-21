@@ -67,6 +67,37 @@ public sealed class DeviceApiClientResponseClassificationTests
     }
 
     [Fact]
+    public async Task Redeem_With429AndRetryAfter_ThrowsRateLimitedWithWaitTime()
+    {
+        // POS API 的限流器返回无信封的 ProblemDetails + Retry-After；客户端要识别成限流，而不是「网络不可用」。
+        var client = CreateClient(_ =>
+        {
+            var response = Json(HttpStatusCode.TooManyRequests, "{\"status\":429,\"title\":\"Too many device activation requests.\"}");
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(300));
+            return response;
+        });
+
+        var exception = await Record.ExceptionAsync(() => client.RedeemActivationCodeAsync(CreateRedeemRequest()));
+
+        var rateLimited = Assert.IsType<DeviceApiRateLimitedException>(exception);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rateLimited.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(300), rateLimited.RetryAfter);
+        // 仍是传输类故障：不能被当成确定性拒绝去清恢复记录。
+        Assert.IsAssignableFrom<DeviceApiUnavailableException>(rateLimited);
+    }
+
+    [Fact]
+    public async Task Redeem_With429HtmlFromGatewayAndNoRetryAfter_ThrowsRateLimitedWithoutWaitTime()
+    {
+        var client = CreateClient(_ => Html(HttpStatusCode.TooManyRequests, "<html><body>429 Too Many Requests</body></html>"));
+
+        var exception = await Record.ExceptionAsync(() => client.RedeemActivationCodeAsync(CreateRedeemRequest()));
+
+        var rateLimited = Assert.IsType<DeviceApiRateLimitedException>(exception);
+        Assert.Null(rateLimited.RetryAfter);
+    }
+
+    [Fact]
     public async Task Verify_WithApiEnvelopeOn502_ThrowsCatalogApiExceptionWithStatusAndErrorCode()
     {
         var client = CreateClient(_ => Envelope(

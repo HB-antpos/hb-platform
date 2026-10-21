@@ -298,6 +298,54 @@ public sealed class DeviceActivationCodeContractTests
     }
 
     [Fact]
+    public void AnonymousActivationRateLimit_AllowsTwentyRequestsPerTenMinutesPerIp()
+    {
+        Assert.Equal(20, DeviceActivationRateLimitOptions.PermitLimit);
+        Assert.Equal(TimeSpan.FromMinutes(10), DeviceActivationRateLimitOptions.Window);
+    }
+
+    [Fact]
+    public async Task AnonymousActivationRateLimit_RejectionCarriesRetryAfterSeconds()
+    {
+        var options = new RateLimiterOptions();
+        DeviceActivationRateLimitOptions.Configure(options);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+
+        await options.OnRejected!(
+            new OnRejectedContext
+            {
+                HttpContext = httpContext,
+                Lease = new RetryAfterLease(TimeSpan.FromSeconds(125.2))
+            },
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status429TooManyRequests, httpContext.Response.StatusCode);
+        // 向上取整到秒，客户端据此提示「请等几分钟」。
+        Assert.Equal("126", httpContext.Response.Headers.RetryAfter.ToString());
+    }
+
+    private sealed class RetryAfterLease(TimeSpan retryAfter) : System.Threading.RateLimiting.RateLimitLease
+    {
+        public override bool IsAcquired => false;
+
+        public override IEnumerable<string> MetadataNames =>
+            new[] { System.Threading.RateLimiting.MetadataName.RetryAfter.Name };
+
+        public override bool TryGetMetadata(string metadataName, out object? metadata)
+        {
+            if (metadataName == System.Threading.RateLimiting.MetadataName.RetryAfter.Name)
+            {
+                metadata = retryAfter;
+                return true;
+            }
+
+            metadata = null;
+            return false;
+        }
+    }
+
+    [Fact]
     public void ReasonCodes_AreExactlyTheApprovedNonLeakingSet()
     {
         var values = typeof(DeviceActivationReasonCodes)

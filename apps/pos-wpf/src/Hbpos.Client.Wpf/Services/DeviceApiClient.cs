@@ -259,6 +259,11 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
                 errorCode = apiException.ErrorCode;
                 statusCode ??= apiException.StatusCode is { } apiStatus ? (int)apiStatus : (int?)null;
                 break;
+            case DeviceApiRateLimitedException:
+                // 单独记原因，方便从日志直接区分「被限流」与「服务不可达」。
+                reason = "rate-limited";
+                statusCode ??= (int)HttpStatusCode.TooManyRequests;
+                break;
             case DeviceApiUnavailableException unavailable:
                 reason = "unavailable";
                 statusCode ??= unavailable.StatusCode is { } unavailableStatus ? (int)unavailableStatus : (int?)null;
@@ -355,7 +360,7 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
             {
                 // 非 JSON 正文（nginx 502/503/504 HTML、Wi-Fi 认证页）或信封数据形状不符：响应不是来自可用的 POS API，
                 // 按传输故障处理，绝不能让调用方把它当作确定性拒绝（持久化设备拒绝、清除开通码恢复记录等）。
-                throw new DeviceApiUnavailableException(statusCode, ex);
+                throw CreateUnavailableException(response, ex);
             }
         }
 
@@ -364,7 +369,7 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
             if (response.IsSuccessStatusCode || IsGatewayStatus(statusCode))
             {
                 // 2xx 却没有信封（空 200、认证页 JSON），或网关类状态没有信封：同样视为服务不可达。
-                throw new DeviceApiUnavailableException(statusCode);
+                throw CreateUnavailableException(response);
             }
 
             // 400/401/403/409 等由 API 自身产生却不带信封的响应（ASP.NET 模型校验 ProblemDetails、授权策略默认 Forbid 空正文）
@@ -389,6 +394,34 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
         }
 
         return result.Data;
+    }
+
+    /// <summary>
+    /// 按状态码选择"服务不可达"异常：429 是限流（POS API 的限流器只返回无信封的 ProblemDetails，nginx/WAF 也可能返回 429），
+    /// 必须与断网、网关故障区分，否则店员会被引导去查网络，并继续点击占用限流额度。
+    /// </summary>
+    private static DeviceApiUnavailableException CreateUnavailableException(
+        HttpResponseMessage response,
+        Exception? innerException = null)
+    {
+        if (response.StatusCode != HttpStatusCode.TooManyRequests)
+        {
+            return new DeviceApiUnavailableException(response.StatusCode, innerException);
+        }
+
+        var retryAfter = response.Headers.RetryAfter;
+        TimeSpan? wait = retryAfter?.Delta;
+        if (wait is null && retryAfter?.Date is { } date)
+        {
+            wait = date - DateTimeOffset.UtcNow;
+        }
+
+        if (wait is { } value && value < TimeSpan.Zero)
+        {
+            wait = TimeSpan.Zero;
+        }
+
+        return new DeviceApiRateLimitedException(wait, innerException);
     }
 
     /// <summary>
@@ -430,7 +463,7 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
 /// 设备 API 未给出可解析的业务响应（网关 HTML、认证页、空 200 等）。
 /// 继承 <see cref="HttpRequestException"/>，让所有调用方沿用"传输故障/服务不可达"的既有处理分支。
 /// </summary>
-public sealed class DeviceApiUnavailableException : HttpRequestException
+public class DeviceApiUnavailableException : HttpRequestException
 {
     public DeviceApiUnavailableException(HttpStatusCode statusCode, Exception? innerException = null)
         : base(
@@ -439,4 +472,28 @@ public sealed class DeviceApiUnavailableException : HttpRequestException
             statusCode)
     {
     }
+
+    protected DeviceApiUnavailableException(string message, HttpStatusCode statusCode, Exception? innerException)
+        : base(message, innerException, statusCode)
+    {
+    }
+}
+
+/// <summary>
+/// 服务端（或网关）对请求限流返回 429。网络本身是通的，换网络或重试都没用，只能等窗口过去；
+/// 仍继承 <see cref="DeviceApiUnavailableException"/>，既有"不确定结果、不清恢复记录"的处理分支保持不变。
+/// </summary>
+public sealed class DeviceApiRateLimitedException : DeviceApiUnavailableException
+{
+    public DeviceApiRateLimitedException(TimeSpan? retryAfter, Exception? innerException = null)
+        : base(
+            "Too many device activation requests (HTTP 429). Wait a few minutes and try again.",
+            HttpStatusCode.TooManyRequests,
+            innerException)
+    {
+        RetryAfter = retryAfter;
+    }
+
+    /// <summary>服务端 Retry-After 给出的剩余等待时间；网关未带该头时为 null。</summary>
+    public TimeSpan? RetryAfter { get; }
 }
