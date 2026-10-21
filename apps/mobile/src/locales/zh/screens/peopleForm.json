@@ -8,7 +8,9 @@
     "done": "完成",
     "searchOptions": "搜索",
     "loading": "加载中…",
-    "noOptions": "没有可选项"
+    "noOptions": "没有可选项",
+    "usernameTaken": "这个账号已被使用，请换一个",
+    "emailTaken": "这个邮箱已被其他账号使用，请换一个"
   },
   "name": {
     "familyName": "姓",
@@ -141,7 +143,8 @@
     "email": "邮箱",
     "emailErrors": {
       "invalid": "请输入正确的邮箱地址",
-      "required": "请输入邮箱"
+      "required": "请输入邮箱",
+      "taken": "这个邮箱已被其他账号使用，请换一个"
     },
     "emailEmptyHint": "还没有可用邮箱，设置后才能给员工发密码邮件。",
     "emailDeliverable": "可收信",

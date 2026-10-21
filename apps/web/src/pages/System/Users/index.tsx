@@ -112,7 +112,7 @@ import {
   splitPermissionCategoriesByPlatform,
 } from './userPermissions'
 import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPermissions'
-import { getCreateUserErrorFeedback } from './createUserFeedback'
+import { getCreateUserErrorFeedback, getUpdateUserFieldError } from './createUserFeedback'
 import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
   LOGIN_TOGGLE_ERROR_MESSAGES,
@@ -960,7 +960,14 @@ export default function SystemUsersPage() {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return
       if (isCurrentEditingSession(targetUserGuid, editSessionId)) {
         console.error(error)
-        message.error(t('system.users.updateFailed', '更新用户失败'))
+        // 用户名 / 邮箱被其他账号占用：提示落在对应输入框下，不再弹笼统的「更新用户失败」。
+        const fieldError = getUpdateUserFieldError(error, t)
+        if (fieldError) {
+          form.setFields([{ name: fieldError.field, errors: [fieldError.message] }])
+          form.scrollToField(fieldError.field)
+        } else {
+          message.error(t('system.users.updateFailed', '更新用户失败'))
+        }
       }
     } finally {
       if (isCurrentEditingSession(targetUserGuid, editSessionId)) {

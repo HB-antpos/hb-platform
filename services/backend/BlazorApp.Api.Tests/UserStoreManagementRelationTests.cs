@@ -265,6 +265,111 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateUserAsync_DuplicateUsernameOrEmail_ReturnsFieldErrorWithoutWriting()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            var existing = CreateUser("taken-user", "Taken@Example.com");
+            await _db.Insertable(existing).ExecuteCommandAsync();
+            var before = await _db.Queryable<User>().CountAsync();
+
+            // 用户名：大小写与首尾空白不同也算重复。
+            var username = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "  TAKEN-USER ", Email = "fresh@example.com", Password = "secret1",
+            });
+            // 邮箱：库里存的是大写，提交小写 + 尾随空白也必须判为重复（旧逻辑在这里漏判，最后撞唯一索引报「创建用户失败」）。
+            var email = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "fresh-user", Email = "taken@example.com ", Password = "secret1",
+            });
+
+            Assert.False(username.Success);
+            Assert.Equal("USERNAME_EXISTS", username.ErrorCode);
+            Assert.Equal("该用户名已被使用，请换一个用户名", username.Message);
+            Assert.False(email.Success);
+            Assert.Equal("EMAIL_EXISTS", email.ErrorCode);
+            Assert.Equal("该邮箱已被其他账号使用，请换一个邮箱", email.Message);
+            Assert.Equal(before, await _db.Queryable<User>().CountAsync());
+        }
+
+        [Fact]
+        public async Task CreateUserAsync_SoftDeletedAccountStillOccupiesEmail()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            var deleted = CreateUser("deleted-user", "deleted@example.com");
+            deleted.IsDeleted = true;
+            await _db.Insertable(deleted).ExecuteCommandAsync();
+
+            var result = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "another-user", Email = "deleted@example.com", Password = "secret1",
+            });
+
+            // 库里的唯一索引覆盖软删除行，预检必须同口径，否则只会变成数据库异常。
+            Assert.Equal("EMAIL_EXISTS", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task CreateUserAsync_TrimsEmailBeforeSaving()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "trim-user", Email = "  Trim.User@Example.com ", Password = "secret1",
+            });
+
+            Assert.True(result.Success, result.Message);
+            var saved = await _db.Queryable<User>().FirstAsync(item => item.Username == "trim-user");
+            Assert.Equal("Trim.User@Example.com", saved.Email);
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_UsernameOrEmailTakenByAnotherUser_ReturnsFieldError()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            await _db.Insertable(new List<User>
+            {
+                CreateUser("target-user", "target@example.com"),
+                CreateUser("other-user", "Other@Example.com"),
+            }).ExecuteCommandAsync();
+
+            var username = await service.UpdateUserByGuidAsync("target-user", new UpdateUserDto
+            {
+                Username = "Other-User", Email = "target@example.com", IsActive = true,
+            });
+            var email = await service.UpdateUserByGuidAsync("target-user", new UpdateUserDto
+            {
+                Username = "target-user", Email = " other@example.com", IsActive = true,
+            });
+
+            Assert.Equal("USERNAME_EXISTS", username.ErrorCode);
+            Assert.Equal("EMAIL_EXISTS", email.ErrorCode);
+            var unchanged = await _db.Queryable<User>().InSingleAsync("target-user");
+            Assert.Equal("target-user", unchanged!.Username);
+            Assert.Equal("target@example.com", unchanged.Email);
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_KeepingOwnUsernameAndEmail_IsNotDuplicate()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            await _db.Insertable(CreateUser("target-user", "Target@Example.com")).ExecuteCommandAsync();
+
+            // 原值（含大小写、首尾空白差异）保存只是改资料，不能被自己挡住。
+            var result = await service.UpdateUserByGuidAsync("target-user", new UpdateUserDto
+            {
+                Username = " Target-User", Email = "target@example.com ", FullName = "Target User", IsActive = true,
+            });
+
+            Assert.True(result.Success, result.Message);
+            var saved = await _db.Queryable<User>().InSingleAsync("target-user");
+            Assert.Equal("target-user", saved!.Username);
+            Assert.Equal("target@example.com", saved.Email);
+            Assert.Equal("Target User", saved.FullName);
+        }
+
+        [Fact]
         public async Task GetUserByGuidAsync_StoreManagerSeesOnlySharedStoresAndCannotSeePrivilegedTarget()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();

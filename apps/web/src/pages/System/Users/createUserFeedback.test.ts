@@ -4,7 +4,7 @@ import en from '../../../i18n/locales/en.json'
 import zh from '../../../i18n/locales/zh.json'
 import { createUser } from '../../../services/userService'
 import { AUTH_EXPIRED_EVENT, RequestError, unwrapApiData } from '../../../utils/request'
-import { getCreateUserErrorFeedback } from './createUserFeedback'
+import { getCreateUserErrorFeedback, getUpdateUserFieldError } from './createUserFeedback'
 
 const i18n = createInstance()
 await i18n.init({
@@ -49,6 +49,25 @@ assert.deepEqual(feedbackFor(usernameError), {
   field: 'username',
   message: '该用户名已被使用，请更换用户名后重试。',
 })
+
+// 「保存基本信息」：用户名 / 邮箱被其他账号占用时落到对应字段，其余错误交还调用方走通用提示。
+assert.deepEqual(getUpdateUserFieldError(usernameError, i18n.t), {
+  field: 'username',
+  message: '该用户名已被使用，请更换用户名后再保存。',
+})
+assert.deepEqual(
+  getUpdateUserFieldError(businessError({ success: false, errorCode: 'email_exists', message: '邮箱已被其他用户使用' }), i18n.t),
+  { field: 'email', message: '该邮箱已被其他账号使用，请更换邮箱后再保存。' },
+)
+assert.equal(
+  getUpdateUserFieldError(new RequestError('x', 200, { errorCode: 'UPDATE_USER_FAILED' }), i18n.t),
+  null,
+)
+assert.equal(getUpdateUserFieldError(new Error('Network Error'), i18n.t), null)
+assert.equal(
+  getUpdateUserFieldError(usernameError, i18n.getFixedT('en'))?.message,
+  'This username is already in use. Please use a different username and save again.',
+)
 
 for (const [code, status, expected] of [
   ['ADMIN_REQUIRED', 403, /没有.*权限.*管理员/],

@@ -84,8 +84,8 @@ export function listPersonEditChanges(
 
 export interface PersonEditErrors {
   names: PersonNameErrors;
-  /** 邮箱错误码：`invalid` 格式不对；`required` 必填（管理员接口邮箱必填）。 */
-  email?: "invalid" | "required";
+  /** 邮箱错误码：`invalid` 格式不对；`required` 必填（管理员接口邮箱必填）；`taken` 保存时后端判定已被其他账号使用。 */
+  email?: "invalid" | "required" | "taken";
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

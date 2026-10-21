@@ -271,6 +271,91 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateAsync_DuplicateUsernameOrEmail_ReturnsFieldErrorWithoutWriting()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+            var before = await _db.Queryable<User>().CountAsync();
+
+            CreateStoreUserDto Build(string username, string email) => new()
+            {
+                Username = username,
+                Email = email,
+                Password = "Secret123",
+                FullName = "Duplicate",
+                StoreCode = "S001",
+                Status = 1,
+            };
+
+            // 撞的是别家分店员工也要拦：用户名 / 邮箱在全系统唯一。
+            var username = await service.CreateAsync(Build(" STAFF_2 ", "fresh@example.com"), "manager-1");
+            var email = await service.CreateAsync(Build("fresh_staff", "Staff2@Example.com"), "manager-1");
+
+            Assert.Equal("USERNAME_EXISTS", username.ErrorCode);
+            Assert.Equal("该用户名已被使用，请换一个用户名", username.Message);
+            Assert.Equal("EMAIL_EXISTS", email.ErrorCode);
+            Assert.Equal("该邮箱已被其他账号使用，请换一个邮箱", email.Message);
+            Assert.Equal(before, await _db.Queryable<User>().CountAsync());
+        }
+
+        [Fact]
+        public async Task UpdateAsync_UsernameOrEmailTakenByAnotherUser_ReturnsFieldError()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var username = await service.UpdateAsync("staff-1", new UpdateStoreUserDto
+            {
+                Username = "Staff_2", StoreCode = "S001", Status = 1,
+            }, "manager-1");
+            var email = await service.UpdateAsync("staff-1", new UpdateStoreUserDto
+            {
+                Username = "staff_1", Email = "STAFF2@example.com", StoreCode = "S001", Status = 1,
+            }, "manager-1");
+
+            Assert.Equal("USERNAME_EXISTS", username.ErrorCode);
+            Assert.Equal("EMAIL_EXISTS", email.ErrorCode);
+            var unchanged = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "staff-1");
+            Assert.Equal("staff_1", unchanged.Username);
+            Assert.Equal("staff1@example.com", unchanged.Email);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_KeepingOwnUsernameAndEmail_IsNotDuplicate()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync("staff-1", new UpdateStoreUserDto
+            {
+                Username = "Staff_1", Email = " Staff1@Example.com ", FullName = "Staff One", StoreCode = "S001", Status = 1,
+            }, "manager-1");
+
+            Assert.True(result.Success, result.Message);
+            var saved = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "staff-1");
+            Assert.Equal("staff_1", saved.Username);
+            Assert.Equal("staff1@example.com", saved.Email);
+        }
+
+        [Fact]
+        public async Task UserIdentityUniqueness_MapsUniqueIndexViolationToFieldError()
+        {
+            await SeedStoreUserDataAsync();
+            // 模拟两个请求同时通过预检：后到者写库时撞唯一索引，兜底须重新判定为字段级错误。
+            _db.Ado.ExecuteCommand("CREATE UNIQUE INDEX IX_Test_User_Username ON \"User\" (\"Username\")");
+            var duplicate = CreateUser("racer", "staff_2", "racer@example.com");
+            var exception = await Assert.ThrowsAnyAsync<Exception>(() => _db.Insertable(duplicate).ExecuteCommandAsync());
+
+            var mapped = await UserIdentityUniqueness.TryMapWriteFailureAsync<StoreUserDetailDto>(
+                _db, exception, duplicate.Username, duplicate.Email);
+            var unrelated = await UserIdentityUniqueness.TryMapWriteFailureAsync<StoreUserDetailDto>(
+                _db, new InvalidOperationException("boom"), duplicate.Username, duplicate.Email);
+
+            Assert.Equal("USERNAME_EXISTS", mapped?.ErrorCode);
+            Assert.Null(unrelated);
+        }
+
+        [Fact]
         public async Task UpdatePasswordAsync_WhenStoreManagerResetsManagedStaff_RequiresPasswordChange()
         {
             await SeedStoreUserDataAsync();

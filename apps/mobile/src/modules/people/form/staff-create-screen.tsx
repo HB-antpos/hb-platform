@@ -33,6 +33,7 @@ import {
   type StaffCreateErrors,
   type StaffCreateFormValues,
 } from "./staff-create-form";
+import { resolveIdentityConflictField } from "./identity-conflict";
 import { resolvePersonName } from "../person-name";
 import { InfoCard, NoticeBox, PeopleTag, SectionTitle } from "../ui";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -132,7 +133,17 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
       setInviteError(user.passwordSetupEmail ? "" : user.passwordSetupEmailError || t("created.inviteFailedFallback"));
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
-      setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.saveFailed" }));
+      // 账号 / 邮箱被其他人占用：标红对应字段，而不是只在表单顶部给一句通用失败。
+      const conflictField = resolveIdentityConflictField(error);
+      if (conflictField) {
+        setErrors((current) => ({
+          ...current,
+          [conflictField]: conflictField === "username" ? t("form.usernameTaken") : t("form.emailTaken"),
+        }));
+        setFormError(t("form.fixErrors"));
+      } else {
+        setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.saveFailed" }));
+      }
       setErrorTick((tick) => tick + 1);
     }
   };
