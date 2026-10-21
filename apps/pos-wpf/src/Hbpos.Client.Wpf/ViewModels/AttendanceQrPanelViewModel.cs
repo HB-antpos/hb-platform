@@ -34,7 +34,7 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     private readonly ApiRuntimeEndpointState? _endpointState;
     private readonly TimeSpan _tickInterval;
     private readonly TimeSpan _refreshInterval;
-    private readonly bool _scheduleRefreshByTimeOfDay;
+    private readonly bool _adaptiveRefresh;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly SemaphoreSlim _stateGate = new(1, 1);
     // 失败日志去重状态：刷新循环、tick、语言切换回调可能并发写日志，用独立锁保护。
@@ -88,8 +88,9 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         _endpointState = endpointState;
         _tickInterval = ValidateInterval(tickInterval ?? DefaultTickInterval, nameof(tickInterval));
         _refreshInterval = ValidateInterval(refreshInterval ?? DefaultRefreshInterval, nameof(refreshInterval));
-        // 只有使用默认刷新间隔时才按夜间静默窗口降频；调用方显式指定间隔（测试、特殊场景）时保持原样。
-        _scheduleRefreshByTimeOfDay = refreshInterval is null;
+        // 只有使用默认刷新间隔时才按状态自适应（健康 5 分钟 / 异常 15 秒重试）；
+        // 调用方显式指定间隔（测试、特殊场景）时保持固定间隔不变。
+        _adaptiveRefresh = refreshInterval is null;
         _endpointVersion = endpointState?.Version ?? 0;
         _localization.CultureChanged += OnCultureChanged;
         ApplyLocalizedState();
@@ -306,24 +307,50 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
 
     private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
     {
-        await RefreshSafeAsync(cancellationToken);
-        using var timer = new PeriodicTimer(CurrentRefreshInterval());
         try
         {
+            await RefreshSafeAsync(cancellationToken);
+            using var timer = new PeriodicTimer(await GetNextRefreshIntervalAsync(cancellationToken));
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                // 二维码在本机每秒签发，登记密钥 / 校时只是后台保活；夜间静默窗口内放慢到 5 分钟。
-                timer.Period = CurrentRefreshInterval();
                 await RefreshSafeAsync(cancellationToken);
+                // 每次刷新后按最新状态重算下一次的等待时间：健康时放慢，异常时快速重试。
+                timer.Period = await GetNextRefreshIntervalAsync(cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
-    private TimeSpan CurrentRefreshInterval() =>
-        _scheduleRefreshByTimeOfDay
-            ? BackgroundPollingSchedule.GetInterval(_timeProvider.GetLocalNow(), _refreshInterval)
-            : _refreshInterval;
+    /// <summary>
+    /// 下一次后台刷新（登记密钥 / 校时 / 连通性检查）前等多久。
+    /// 二维码在本机每秒签发，登记只是后台保活：状态健康（在线、已启用、校时有效）时 5 分钟一次；
+    /// 离线、启用失败、需要重新校时等异常状态仍 15 秒重试，保证提示在恢复后尽快消失。
+    /// 调用方显式指定刷新间隔时保持固定间隔。
+    /// </summary>
+    internal async Task<TimeSpan> GetNextRefreshIntervalAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_adaptiveRefresh)
+        {
+            return _refreshInterval;
+        }
+
+        bool healthy;
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            healthy = _isOnline
+                && !_setupFailed
+                && !_requiresOnlineResync
+                && _identity is not null
+                && _trustedTime is not null;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+
+        return BackgroundPollingSchedule.GetQrPanelRefreshInterval(healthy);
+    }
 
     private async Task RefreshSafeAsync(CancellationToken cancellationToken)
     {
