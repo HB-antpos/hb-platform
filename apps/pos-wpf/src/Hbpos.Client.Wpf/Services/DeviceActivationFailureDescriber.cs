@@ -56,4 +56,15 @@ internal static class DeviceActivationFailureDescriber
             ? $"{message} ({innermost.Message})"
             : message;
     }
+
+    /// <summary>
+    /// 把本机硬件码末 6 位填进「设备已登记」提示的 {0}。硬件码是 电脑名|域名|平台|64位|MachineGuid 的哈希，
+    /// 克隆同一系统镜像的两台电脑会得到同一个值；末 6 位能让总部直接对照登记表确认是哪一条。
+    /// </summary>
+    internal static string ApplyHardwareIdSuffix(string template, string? hardwareId)
+    {
+        var id = hardwareId?.Trim() ?? string.Empty;
+        var suffix = id.Length <= 6 ? id : id[^6..];
+        return template.Replace("{0}", string.IsNullOrEmpty(suffix) ? "?" : suffix, StringComparison.Ordinal);
+    }
 }
