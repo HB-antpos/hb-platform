@@ -251,6 +251,7 @@
       "noCashierEnabledStores": "暂无启用收银的分店",
       "refreshingStatistics": "统计补算中，正在自动刷新...",
       "statisticsIncomplete": "统计补算尚未完成，请重试",
+      "statisticsFailed": "所选日期范围内有一天的统计更新失败，后台正在处理，暂时无法查看。可先缩短日期范围，或稍后再试。",
       "comparePending": "同期补算中",
       "comparePendingNotice": "同期数据仍在补算，同期与增长率暂显示“—”，稍后刷新即可补全",
       "errorTitle": "营业额数据加载失败",

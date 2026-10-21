@@ -213,13 +213,21 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                     PreserveHistoricalCostSnapshots(build.Statistics, previousRows, input.ChinaSupplierCodes);
                 }
 
+                if (build.HeaderOnlyOrderDeductions.Count > 0)
+                {
+                    logger.LogWarning(
+                        "当天存在已支付但没有明细的订单，对账时已从分店营业额扣除 Date={Date:yyyy-MM-dd} Deductions={Deductions}",
+                        input.TargetDate,
+                        string.Join(", ", build.HeaderOnlyOrderDeductions.Select(item => $"{item.BranchCode}:{-item.TotalAmount}")));
+                }
                 status = await SalesStatisticsProductStoreDailyStateSlice.BuildProductStatisticStatusAsync(
                     context,
                     input.TargetDate,
                     build.Statistics,
                     build.Diagnostics,
                     input.LastSourceUploadTime,
-                    build.SupplementalReturnAdjustments,
+                    // 补充退货与无明细订单都只调整分店营业额一侧，对账前一并应用。
+                    build.SupplementalReturnAdjustments.Concat(build.HeaderOnlyOrderDeductions).ToList(),
                     atomicStoreStatistics);
                 if (build.Statistics.Count == 0 && input.RawRows.Count > 0)
                 {

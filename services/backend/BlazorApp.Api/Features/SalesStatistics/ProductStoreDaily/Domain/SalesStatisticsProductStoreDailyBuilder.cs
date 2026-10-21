@@ -63,8 +63,27 @@ internal sealed class SalesStatisticsProductStoreDailyBuilder
             .GroupBy(row => row.BranchCode, StringComparer.OrdinalIgnoreCase)
             .Select(group => new ProductStoreDailyBranchRollup(group.Key, group.Sum(row => row.StatisticAmount), (int)group.Sum(row => row.Row.Quantity)))
             .ToList();
-        return new ProductStoreDailyRefreshBuildResult(statistics, diagnostics, returnAdjustments);
+        return new ProductStoreDailyRefreshBuildResult(
+            statistics,
+            diagnostics,
+            returnAdjustments,
+            BuildHeaderOnlyOrderDeductions(input));
     }
+
+    /// <summary>
+    /// 无明细订单的分店营业额扣除项，规则见 <see cref="SalesStatisticsProductStoreDailyDomainRules.BuildHeaderOnlyOrderDeductions"/>。
+    /// 订单来自 SalesOrder 左连接明细的结果：明细列为空即无明细（HBSales 来源行不涉及）。
+    /// </summary>
+    private static List<ProductStoreDailyBranchRollup> BuildHeaderOnlyOrderDeductions(ProductStoreDailyRefreshInput input) =>
+        SalesStatisticsProductStoreDailyDomainRules.BuildHeaderOnlyOrderDeductions(
+            input.RawRows
+                .Where(row => !row.IsHBSalesSource
+                    && string.IsNullOrWhiteSpace(row.DetailGuid)
+                    && string.IsNullOrWhiteSpace(row.ProductCode))
+                .Select(row => new SalesStatisticsProductStoreDailyDomainRules.HeaderOnlyOrder(
+                    row.OrderGuid, row.BranchCode, row.DeviceCode)),
+            input.DeviceBranchMap,
+            input.PaymentAmounts);
 
     /// <summary>
     /// 写进日统计 SupplierCode 的编码。读取器只在开关打开时给出「商品 → 国内供应商编码」，
@@ -213,4 +232,10 @@ internal sealed record ProductStoreDailyGroupKey(DateTime Date, string BranchCod
 internal sealed record ProductStoreDailyRefreshBuildResult(
     List<ProductStoreDailySalesStatistic> Statistics,
     ProductStatisticDiagnostics Diagnostics,
-    IReadOnlyList<ProductStoreDailyBranchRollup> SupplementalReturnAdjustments);
+    IReadOnlyList<ProductStoreDailyBranchRollup> SupplementalReturnAdjustments,
+    IReadOnlyList<ProductStoreDailyBranchRollup>? HeaderOnlyOrderDeductions = null)
+{
+    /// <summary>无明细订单的分店营业额扣除项（负数）；见 <see cref="SalesStatisticsProductStoreDailyBuilder"/>。</summary>
+    public IReadOnlyList<ProductStoreDailyBranchRollup> HeaderOnlyOrderDeductions { get; init; } =
+        HeaderOnlyOrderDeductions ?? Array.Empty<ProductStoreDailyBranchRollup>();
+}
