@@ -89,6 +89,10 @@ import {
 import { getCurrentAppUpdateInfo } from "@/modules/updates/app-update-runtime";
 import { useMobileOtaManualCheck } from "@/modules/updates/MobileOtaUpdateBoundary";
 import {
+  hydrateAutoUpdatePreference,
+  useAutoUpdatePreferenceStore,
+} from "@/modules/updates/auto-update-preference";
+import {
   API_HOST_PRESETS,
   getCurrentApiHost,
   getStoredApiHost,
@@ -441,6 +445,12 @@ export default function Settings() {
   const showFloatingLanguageSetting = sessionKind !== "iosReview";
   useEffect(() => {
     void hydrateFloatingLanguagePreference();
+  }, []);
+  // 自动更新：本机偏好，默认开启；关闭只停可选更新的自动检查 / 下载 / 提醒，强制更新与手动检查不受影响。
+  const autoUpdateEnabled = useAutoUpdatePreferenceStore((state) => state.enabled);
+  const setAutoUpdateEnabled = useAutoUpdatePreferenceStore((state) => state.setEnabled);
+  useEffect(() => {
+    void hydrateAutoUpdatePreference();
   }, []);
   const deviceSession = useDeviceStore((state) => state.session);
   const accountBinding = useDeviceStore((state) => state.accountBinding);
@@ -1316,6 +1326,21 @@ export default function Settings() {
                 }
               />
             </View>
+            <SettingsRow
+              divider
+              icon="update"
+              title={t("updates.autoUpdate")}
+              subtitle={t(autoUpdateEnabled ? "updates.autoUpdateOnHint" : "updates.autoUpdateOffHint")}
+              testID="settings-auto-update"
+              right={
+                <Switch
+                  value={autoUpdateEnabled}
+                  onValueChange={setAutoUpdateEnabled}
+                  accessibilityLabel={t("updates.autoUpdate")}
+                  testID="settings-auto-update-switch"
+                />
+              }
+            />
             <ValueRow divider label={t("updates.version")} value={appPackageVersion} />
             <ValueRow divider label={t("updates.channel")} value={appUpdateChannelLabel} />
             {runtimeVersionLabel ? (

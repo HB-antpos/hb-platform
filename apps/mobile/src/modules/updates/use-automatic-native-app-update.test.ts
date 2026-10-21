@@ -68,8 +68,8 @@ async function run() {
   const { useAutomaticNativeAppUpdate } = hookModule.exports as typeof import("./use-automatic-native-app-update");
   const { NativeAppUpdateStatus } = await import("./NativeAppUpdateStatus");
   let current!: ReturnType<typeof useAutomaticNativeAppUpdate>;
-  function Harness({ enabled }: { enabled: boolean }) {
-    current = useAutomaticNativeAppUpdate({ enabled });
+  function Harness({ enabled, autoUpdate }: { enabled: boolean; autoUpdate?: boolean }) {
+    current = useAutomaticNativeAppUpdate({ enabled, autoUpdate });
     return React.createElement(React.Fragment, null,
       React.createElement(NativeAppUpdateStatus, {
         phase: current.phase, onRetry: current.retry, onDismiss: current.dismiss,
@@ -79,8 +79,8 @@ async function run() {
   }
   const root = createRoot();
   const view = () => JSON.stringify(root.container.toJSON());
-  const render = async (enabled: boolean) => {
-    await act(async () => { root.render(React.createElement(Harness, { enabled })); });
+  const render = async (enabled: boolean, autoUpdate?: boolean) => {
+    await act(async () => { root.render(React.createElement(Harness, { enabled, autoUpdate })); });
   };
   const originalWarn = console.warn;
   const warnings: unknown[][] = [];
@@ -144,16 +144,28 @@ async function run() {
     assert.equal(prompts.length, 1, "静默失败不弹任何框");
     assert.ok(warnings.some((entry) => String(entry[0]).includes("automatic APK update check failed")), "仍记录日志便于排查");
 
+    // 自动更新关闭：没有强制更新时，重试 / 回前台都不检查、不下载可选安装包。
+    await render(true, false);
+    await act(async () => { current.retry(); });
+    assert.equal(operations.length, 4, "自动更新关闭时不得检查可选安装包");
+    assert.equal(current.phase, null);
+    // 重新打开：立即补查一次。
+    await render(true, true);
+    assert.equal(operations.length, 5, "自动更新从关到开应立即补查");
+    assert.equal(current.phase, "checking");
+    await act(async () => { operations[4].resolve({ status: "not-available" }); });
+    assert.equal(current.phase, null);
+
     appUpdateMutualExclusion.setOtaRequiredGate(true);
     await act(async () => { current.retry(); });
-    assert.equal(operations.length, 4, "重试不能绕过强制 OTA 门禁");
+    assert.equal(operations.length, 5, "重试不能绕过强制 OTA 门禁");
     await render(false);
     appUpdateMutualExclusion.setOtaRequiredGate(false);
     assert.equal(current.phase, null);
     platform.OS = "ios";
     await render(true);
     assert.equal(current.phase, null, "iOS 不出现 APK 状态条");
-    assert.equal(operations.length, 4);
+    assert.equal(operations.length, 5);
   } finally {
     await act(async () => { root.unmount(); });
     console.warn = originalWarn;

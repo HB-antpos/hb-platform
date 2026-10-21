@@ -109,7 +109,10 @@
     "noBuildVersion": "未知",
     "noChannel": "未配置渠道",
     "noUpdateId": "当前无更新 ID",
-    "check": "检查更新"
+    "check": "检查更新",
+    "autoUpdate": "自动更新",
+    "autoUpdateOnHint": "开启：有新版本时自动下载并提醒你重启或安装。",
+    "autoUpdateOffHint": "已关闭：不再自动检查和下载更新；总部标记的强制更新仍会提示，可随时点「检查更新」手动更新。"
   },
   "device": {
     "title": "设备绑定",
