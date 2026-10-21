@@ -72,9 +72,16 @@ assert.match(
   /const pickerStores = useMemo\([\s\S]{0,300}access\.isAdmin[\s\S]{0,120}\? posEnabledStores[\s\S]{0,160}posEnabledStores\.filter\(/,
   "分店候选必须以 POS 启用的分店为底；店长再收窄到管理分店",
 );
+// 选择规则抽到 resolveStaffStoreSelection：effect 必须把候选分店传进去，规则里当前选择与记忆选择都要过候选校验。
+const staffListLogicSource = readFileSync(resolve(currentDirectory, "../users/store-staff-list-logic.ts"), "utf8");
 assert.match(
   selectionEffectSource,
-  /pickerStores\.some\([\s\S]*?pickerStores\.find/,
+  /resolveStaffStoreSelection\(\{[\s\S]*?pickerStores,/,
+  "账号模式的当前选择和记忆选择必须由候选分店（POS 启用 + 店长只含管理分店）重新校验",
+);
+assert.match(
+  staffListLogicSource,
+  /input\.pickerStores\.some\([\s\S]*?inPicker\(input\.currentStoreCode\)[\s\S]*?inPicker\(input\.rememberedStoreCode\)/,
   "账号模式的当前选择和记忆选择必须由候选分店（POS 启用 + 店长只含管理分店）重新校验",
 );
 assert.match(

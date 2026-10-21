@@ -8,6 +8,7 @@ import {
   matchesStaffKeyword,
   matchesStaffStatusFilter,
   resolveRowPosition,
+  resolveStaffStoreSelection,
   resolveStoreListSubtitleKind,
 } from "./store-staff-list-logic";
 import type { StoreUserListItem } from "./types";
@@ -110,5 +111,71 @@ assertEqual(resolveStoreListSubtitleKind({ managedStoreCode: null, hasSelectedSt
 assertEqual(resolveStoreListSubtitleKind({ managedStoreCode: "1008", hasSelectedStore: false, canManageSelectedStore: false }), "noStore", "分店列表未就绪");
 assertEqual(resolveStoreListSubtitleKind({ managedStoreCode: "1008", hasSelectedStore: true, canManageSelectedStore: true }), "manageable", "可管理");
 assertEqual(resolveStoreListSubtitleKind({ managedStoreCode: "1003", hasSelectedStore: true, canManageSelectedStore: false }), "viewOnly", "仅查看");
+
+// ── 默认分店：自己管理的第一个分店兜底 ──
+const managerPicker = [
+  { storeCode: "1012", isPrimary: true },
+  { storeCode: "1008", isPrimary: true },
+];
+const baseSelection = {
+  deviceBoundStoreCode: null,
+  currentStoreCode: null,
+  userPicked: false,
+  rememberedStoreCode: null,
+  rememberedIsAuto: false,
+  pickerStores: managerPicker,
+};
+assertEqual(resolveStaffStoreSelection(baseSelection), "1012", "店长进入页面：默认自己管理的第一个分店");
+assertEqual(resolveStaffStoreSelection({ ...baseSelection, pickerStores: [] }), null, "候选为空 / 还没加载完：退回全部分店");
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, rememberedStoreCode: "1008", rememberedIsAuto: true }),
+  "1012",
+  "全局自动默认的分店不算用户选择，仍按第一个管理分店",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, rememberedStoreCode: "1008" }),
+  "1008",
+  "用户在别处明确选过的分店（且在候选里）优先于默认",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, rememberedStoreCode: "9999" }),
+  "1012",
+  "记住的分店不在候选里（非管理分店）时不能选中它",
+);
+assertEqual(resolveStaffStoreSelection({ ...baseSelection, currentStoreCode: "1008" }), "1008", "已有选择且仍在候选里：保持不变");
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, currentStoreCode: "1008", pickerStores: [managerPicker[0]] }),
+  "1012",
+  "当前选择已不在候选里：回到第一个管理分店",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, userPicked: true, rememberedStoreCode: "1008", rememberedIsAuto: true }),
+  null,
+  "用户手动选了全部分店：后续重算（分店刷新、全局自动默认变化）不覆盖",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, userPicked: true, currentStoreCode: "1008" }),
+  "1008",
+  "用户手动选了某个分店：保持",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, deviceBoundStoreCode: "2001", userPicked: true }),
+  "2001",
+  "设备绑定模式永远固定本机分店",
+);
+// 管理员：候选是全部 POS 分店，只有自己管理的（isPrimary）才作为默认；一家都没有就保持全部分店。
+assertEqual(
+  resolveStaffStoreSelection({
+    ...baseSelection,
+    pickerStores: [{ storeCode: "1001" }, { storeCode: "1003", isPrimary: false }, { storeCode: "1005", isPrimary: true }],
+  }),
+  "1005",
+  "管理员：跳过非自己管理的分店，选第一个自己管理的",
+);
+assertEqual(
+  resolveStaffStoreSelection({ ...baseSelection, pickerStores: [{ storeCode: "1001" }, { storeCode: "1003", isPrimary: false }] }),
+  null,
+  "管理员没有自己管理的分店：保持全部分店",
+);
 
 console.log("store-staff-list-logic.test.ts: ok");
