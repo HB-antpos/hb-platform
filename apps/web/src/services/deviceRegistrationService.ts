@@ -20,7 +20,29 @@ const DEVICE_API_BASE = '/api'
 const REACT_API_BASE = '/api/react/v1/device-registration'
 const EMERGENCY_LOGIN_GRANT_API_BASE = '/api/react/v1/emergency-login-grants'
 export const DEVICE_RUNTIME_ONLINE_STALE_MS = 45_000
+/**
+ * 收银端夜间（设备本地 22:00–06:00）会把运行状态心跳从 15 秒放慢到 5 分钟（WPF 的 BackgroundPollingSchedule）。
+ * 心跳本身发生在夜间窗口时，在线判定放宽到 12 分钟（大于夜间间隔的两倍），否则夜里所有收银机都会显示成离线。
+ */
+export const DEVICE_RUNTIME_QUIET_ONLINE_STALE_MS = 12 * 60_000
+const POS_QUIET_HOURS_TIME_ZONE = 'Australia/Sydney'
+/** 窗口两侧各放宽 1 小时：门店分布在悉尼 / 墨尔本 / 布里斯班，夏令时期间本地时间最多差 1 小时。 */
+const POS_QUIET_HOURS_START_HOUR = 21
+const POS_QUIET_HOURS_END_HOUR = 7
+const posQuietHoursFormatter = new Intl.DateTimeFormat('en-AU', {
+  timeZone: POS_QUIET_HOURS_TIME_ZONE,
+  hour: 'numeric',
+  hourCycle: 'h23',
+})
 const APP_DEVICE_API_BASE = '/api/mobile/app-device-status'
+
+/** 这个时刻（按澳洲东部时间）是否落在收银端的夜间静默窗口（含两侧各 1 小时的余量）内。 */
+function isInPosQuietHours(timestamp: number) {
+  const hour = Number(
+    posQuietHoursFormatter.formatToParts(timestamp).find((part) => part.type === 'hour')?.value
+  )
+  return Number.isFinite(hour) && (hour >= POS_QUIET_HOURS_START_HOUR || hour < POS_QUIET_HOURS_END_HOUR)
+}
 
 function getString(raw: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) {
@@ -76,7 +98,15 @@ export function isDeviceRuntimeOnline(
   }
 
   const heartbeatTime = Date.parse(item.lastHeartbeatAt)
-  return !Number.isNaN(heartbeatTime) && now - heartbeatTime <= DEVICE_RUNTIME_ONLINE_STALE_MS
+  if (Number.isNaN(heartbeatTime)) {
+    return false
+  }
+
+  // 夜间窗口内发出的心跳间隔是 5 分钟，不能再按 45 秒判离线；白天的阈值保持不变。
+  const staleMs = isInPosQuietHours(heartbeatTime)
+    ? DEVICE_RUNTIME_QUIET_ONLINE_STALE_MS
+    : DEVICE_RUNTIME_ONLINE_STALE_MS
+  return now - heartbeatTime <= staleMs
 }
 
 function pick(raw: Record<string, unknown>, ...keys: string[]) {

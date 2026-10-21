@@ -211,6 +211,52 @@ assertEqual(
   'Runtime status should become offline after the 45 second heartbeat window',
 )
 
+// 收银端夜间（本地 22:00–06:00）心跳放慢到 5 分钟：夜间心跳按 12 分钟判在线，白天仍是 45 秒。
+// 2026-10-22 悉尼处于夏令时（UTC+11）：12:00Z = 悉尼 23:00，01:00Z = 悉尼 12:00。
+const nightHeartbeat = { isOnline: true, lastHeartbeatAt: '2026-10-22T12:00:00Z' }
+const dayHeartbeat = { isOnline: true, lastHeartbeatAt: '2026-10-22T01:00:00Z' }
+assertEqual(
+  isDeviceRuntimeOnline(nightHeartbeat, Date.parse('2026-10-22T12:11:00Z')),
+  true,
+  'A night heartbeat should stay online for up to 12 minutes (devices report every 5 minutes at night)',
+)
+assertEqual(
+  isDeviceRuntimeOnline(nightHeartbeat, Date.parse('2026-10-22T12:13:00Z')),
+  false,
+  'A night heartbeat should become offline after 12 minutes',
+)
+assertEqual(
+  isDeviceRuntimeOnline(dayHeartbeat, Date.parse('2026-10-22T01:05:00Z')),
+  false,
+  'A daytime heartbeat must keep the strict 45 second window',
+)
+assertEqual(
+  isDeviceRuntimeOnline({ isOnline: false, lastHeartbeatAt: '2026-10-22T12:00:00Z' }, Date.parse('2026-10-22T12:01:00Z')),
+  false,
+  'A device that reported itself offline is offline even inside the night window',
+)
+// 窗口边界（悉尼时间，含两侧各 1 小时余量）：20:59 仍按白天，21:00 起放宽；06:59 仍放宽，07:00 起按白天。
+assertEqual(
+  isDeviceRuntimeOnline({ isOnline: true, lastHeartbeatAt: '2026-10-22T09:59:00Z' }, Date.parse('2026-10-22T10:03:00Z')),
+  false,
+  'Sydney 20:59 is still daytime',
+)
+assertEqual(
+  isDeviceRuntimeOnline({ isOnline: true, lastHeartbeatAt: '2026-10-22T10:00:00Z' }, Date.parse('2026-10-22T10:03:00Z')),
+  true,
+  'Sydney 21:00 starts the lenient window',
+)
+assertEqual(
+  isDeviceRuntimeOnline({ isOnline: true, lastHeartbeatAt: '2026-10-21T19:59:00Z' }, Date.parse('2026-10-21T20:03:00Z')),
+  true,
+  'Sydney 06:59 is still inside the lenient window',
+)
+assertEqual(
+  isDeviceRuntimeOnline({ isOnline: true, lastHeartbeatAt: '2026-10-21T20:00:00Z' }, Date.parse('2026-10-21T20:03:00Z')),
+  false,
+  'Sydney 07:00 is daytime again',
+)
+
 const updateValuesWithRuntimeExtras = {
   deviceType: 'Mobile',
   deviceSystem: 'Android',
