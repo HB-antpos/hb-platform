@@ -191,7 +191,7 @@ public sealed class OpenApiSnapshotExportTests
             "HBDEV1-CODE",
             DeviceSystems.Windows);
 
-        for (var requestNumber = 1; requestNumber <= 10; requestNumber++)
+        for (var requestNumber = 1; requestNumber <= DeviceActivationRateLimitOptions.PermitLimit; requestNumber++)
         {
             using var allowed = await client.PostAsJsonAsync(
                 "/api/v1/devices/activation-code/preview",
@@ -204,13 +204,16 @@ public sealed class OpenApiSnapshotExportTests
             payload);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        // 收银端据此提示「请等几分钟」：Retry-After 必须是 1 秒到整个窗口之间的整数秒。
+        var retryAfterSeconds = Assert.Single(rejected.Headers.GetValues("Retry-After"));
+        Assert.InRange(int.Parse(retryAfterSeconds), 1, (int)DeviceActivationRateLimitOptions.Window.TotalSeconds);
         Assert.Equal("application/json", rejected.Content.Headers.ContentType?.MediaType);
         using var problem = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync());
         Assert.Equal(429, problem.RootElement.GetProperty("status").GetInt32());
         Assert.Equal(
             "Too many device activation requests.",
             problem.RootElement.GetProperty("title").GetString());
-        Assert.Equal(10, factory.ActivationService.CallCount);
+        Assert.Equal(DeviceActivationRateLimitOptions.PermitLimit, factory.ActivationService.CallCount);
     }
 
     [Fact]
