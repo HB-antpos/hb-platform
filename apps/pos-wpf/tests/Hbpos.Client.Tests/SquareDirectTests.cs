@@ -239,7 +239,6 @@ public sealed class SquareDirectTests
     }
 
     [Theory]
-    [InlineData("api/v1/square/payments/p-1?environment=Production")]
     [InlineData("api/v1/square/refunds")]
     [InlineData("api/v1/square/refunds/r-1?environment=Production")]
     [InlineData("api/v1/health")]
@@ -323,6 +322,48 @@ public sealed class SquareDirectTests
         Assert.Equal("{}", harness.SquareRequests[1].Body);
         // 只读 / 取消 / 关闭不是「创建」，不触发归属登记。
         Assert.Empty(harness.Api.OriginCalls);
+    }
+
+    [Fact]
+    public async Task Gateway_payment_lookup_goes_directly_to_square_payments_endpoint()
+    {
+        var harness = await DirectHarness.WithCredentialAsync();
+        harness.RespondSquare = _ => Json("""{ "payment": { "id": "p-1", "status": "COMPLETED" } }""");
+
+        using var response = await harness.Gateway.TrySendAsync(HttpMethod.Get, "api/v1/square/payments/p-1?environment=Production", null, default);
+
+        Assert.NotNull(response);
+        Assert.Contains("\"p-1\"", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        var sent = Assert.Single(harness.SquareRequests);
+        Assert.Equal("GET https://connect.squareup.com/v2/payments/p-1", $"{sent.Method} {sent.Uri}");
+        Assert.Empty(harness.Api.OriginCalls);
+    }
+
+    [Fact]
+    public async Task Gateway_payment_lookup_with_unreadable_body_falls_back_to_relay()
+    {
+        var harness = await DirectHarness.WithCredentialAsync();
+        harness.RespondSquare = _ => Json("""{ "checkout": { "id": "co-1" } }""");
+
+        var response = await harness.Gateway.TrySendAsync(HttpMethod.Get, "api/v1/square/payments/p-1?environment=Production", null, default);
+
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public async Task Gateway_payment_lookup_forbidden_falls_back_but_keeps_credential_and_direct_mode()
+    {
+        var harness = await DirectHarness.WithCredentialAsync();
+        harness.RespondSquare = _ => Json(HttpStatusCode.Forbidden, """{ "errors": [ { "code": "INSUFFICIENT_SCOPES" } ] }""");
+
+        var first = await harness.Gateway.TrySendAsync(HttpMethod.Get, "api/v1/square/payments/p-1?environment=Production", null, default);
+
+        Assert.Null(first);
+        // 权限不足只影响付款详情，结账接口用同一令牌仍然通，凭据与冷却状态都不能被动。
+        Assert.NotNull(await harness.Store.LoadCredentialAsync(CardTerminalEnvironment.Production));
+        harness.RespondSquare = _ => Json("""{ "checkout": { "id": "co-1", "status": "IN_PROGRESS" } }""");
+        using var checkout = await harness.Gateway.TrySendAsync(HttpMethod.Get, "api/v1/square/checkouts/co-1?environment=Production", null, default);
+        Assert.NotNull(checkout);
     }
 
     [Fact]

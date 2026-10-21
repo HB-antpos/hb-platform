@@ -6,8 +6,8 @@ using Hbpos.Contracts.Square;
 namespace Hbpos.Client.Tests;
 
 // 直连 Square（默认关闭）与 ConfiguredCardTerminalClient 的接线：
-// 付款流程里的 创建 / 轮询 / 取消 / 关闭 先问网关；网关返回 null 就照旧走 Hbpos API 中转（行为与未接入时完全一致）；
-// 退款、恢复中心查询、付款详情永远不问网关。
+// 付款流程里的 创建 / 轮询 / 取消 / 关闭 / 付款详情查询先问网关；网关返回 null 就照旧走 Hbpos API 中转（行为与未接入时完全一致）；
+// 退款、恢复中心查询永远不问网关。
 public sealed partial class ConfiguredCardTerminalClientTests
 {
     private static string DirectCheckoutJson(string checkoutId, string status, string? paymentId = null)
@@ -17,7 +17,7 @@ public sealed partial class ConfiguredCardTerminalClientTests
     }
 
     [Fact]
-    public async Task Direct_gateway_serves_create_and_poll_so_the_relay_only_sees_the_payment_lookup()
+    public async Task Direct_gateway_serves_create_poll_and_payment_lookup_so_the_relay_sees_nothing()
     {
         var checkoutId = NewRetryCheckoutId();
         var gateway = new ScriptedDirectGateway((method, url, _) =>
@@ -27,25 +27,26 @@ public sealed partial class ConfiguredCardTerminalClientTests
                 return JsonResponse(DirectCheckoutJson(checkoutId, "PENDING"));
             }
 
+            if (url.StartsWith("api/v1/square/payments/", StringComparison.Ordinal))
+            {
+                return JsonResponse($$"""{ "payment": { "id": "{{RetryPaymentId}}", "status": "COMPLETED", "amount_money": { "amount": 500, "currency": "AUD" } } }""");
+            }
+
             return url.StartsWith("api/v1/square/checkouts/", StringComparison.Ordinal)
                 ? JsonResponse(DirectCheckoutJson(checkoutId, "COMPLETED", RetryPaymentId))
                 : null;
         });
-        var harness = new SquareRetryHarness(
-            new SquareRetryScript(checkoutId)
-            {
-                PaymentSteps = [RetryPaymentStep(RetryPaymentId, "COMPLETED")]
-            },
-            directGateway: gateway);
+        var harness = new SquareRetryHarness(new SquareRetryScript(checkoutId), directGateway: gateway);
 
         var result = await harness.RunToCompletionAsync();
 
         Assert.True(result.Approved);
         Assert.False(result.ResultUnknown);
-        // 创建与轮询都没有到过 Hbpos API；付款详情仍走服务端（金额 / 状态校验口径不变）。
+        // 创建、轮询、付款详情都没有到过 Hbpos API：直连模式下服务端不认识这笔付款，经它查详情会被 403 误判成「结果未知」。
         Assert.Equal(0, harness.Script.Creates);
         Assert.Equal(0, harness.Script.CheckoutGets);
-        Assert.Equal(1, harness.Script.PaymentGets);
+        Assert.Equal(0, harness.Script.PaymentGets);
+        Assert.Contains(gateway.Calls, call => call.Url.StartsWith("api/v1/square/payments/", StringComparison.Ordinal));
         var create = Assert.IsType<SquareCreateCheckoutRequest>(gateway.CreateBodies.Single());
         Assert.StartsWith("idem-retry-", create.IdempotencyKey, StringComparison.Ordinal);
         Assert.Equal("Production", create.Environment);
