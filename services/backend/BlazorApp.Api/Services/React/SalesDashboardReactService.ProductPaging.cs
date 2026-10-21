@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BlazorApp.Shared.DTOs;
+using Microsoft.Data.SqlClient;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.POSM;
 using SqlSugar;
@@ -74,13 +75,26 @@ public partial class SalesDashboardReactService
         }
         var normalizedLocal = NormalizeCodes(chinaSupplierScope ? null : localSupplierCodes);
         var normalizedChina = NormalizeCodes(chinaSupplierCodes);
+        var normalizedSearch = string.IsNullOrWhiteSpace(productSearch) ? null : productSearch.Trim();
+
+        // 默认「全部分店」且没有关键词时，商品事实读月 / 日预聚合投影（销售明细页同一套）：
+        // 整年区间原来要把本期 + 同期约 966 万行日统计扫三遍（生产冷启动 45 秒），投影只需读约 140 万行。
+        // 月 / 日投影没有门店维度，也没有条码，所以选了分店或带关键词时仍走日统计原路径。
+        var useProjection = normalizedBranches.Count == 0 && normalizedSearch is null
+            && ProductReportProjectionRangeSupported(dateRange)
+            && !MonthlyProjectionRecentlyMissing()
+            && await MonthlyProductProjectionExistsAsync();
 
         var chinaProductMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (chinaSupplierScope || normalizedChina.Any())
         {
             // 先按本期/同期和授权分店确定遗留商品，避免为一页结果读取整份商品映射。
             // 全部中国供应商代码单独读取，仍包含期间内只有直写统计行的供应商。
-            var legacyProducts = await GetReportLegacyChinaProductCodesAsync(dateRange, normalizedBranches);
+            // 投影路径直接读全部遗留映射（约 1.3 万行，不到半秒），省掉对日统计的遗留商品预扫描（整年约 2.5 秒）：
+            // 区间内没有销售的商品不会出现在事实里，多读的映射行不影响结果。
+            var legacyProducts = useProjection
+                ? null
+                : await GetReportLegacyChinaProductCodesAsync(dateRange, normalizedBranches);
             var includeAllSuppliers = chinaSupplierScope && !normalizedChina.Any();
             var mapping = await ReadReportChinaSupplierMappingsAsync(legacyProducts, includeAllSuppliers);
             chinaProductMap = mapping.ProductMap;
@@ -106,7 +120,6 @@ public partial class SalesDashboardReactService
                 .ToList();
         }
 
-        var normalizedSearch = string.IsNullOrWhiteSpace(productSearch) ? null : productSearch.Trim();
         var hasCompare = dateRange.CompareStartDate.HasValue && dateRange.CompareEndDate.HasValue;
         var selectedChinaCodes = normalizedChina.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var parameters = new List<SugarParameter>
@@ -136,10 +149,34 @@ public partial class SalesDashboardReactService
             parameters.Add(new SugarParameter("@CompareEndExclusive", dateRange.CompareEndDate!.Value.Date.AddDays(1)));
         }
 
-        var rows = await _context.Db.Ado.SqlQueryAsync<ProductReportPagingSqlRow>(
-            BuildProductReportPagingSql(hasCompare, sort),
-            parameters.ToArray()
-        );
+        List<ProductReportPagingSqlRow> rows;
+        if (useProjection)
+        {
+            try
+            {
+                rows = await _context.Db.Ado.SqlQueryAsync<ProductReportPagingSqlRow>(
+                    BuildProductReportProjectionPagingSql(hasCompare, sort),
+                    parameters.ToArray()
+                );
+            }
+            catch (Exception ex) when (IsMissingMonthlyProjectionError(ex))
+            {
+                // 投影表被删或尚未部署：5 分钟内不再尝试，退回日统计原路径（结果口径相同，只是慢）。
+                RememberMonthlyProjectionMissing();
+                _logger.LogInformation("商品报告：月 / 日预聚合投影不可用，改读日统计：{Message}", ex.Message);
+                rows = await _context.Db.Ado.SqlQueryAsync<ProductReportPagingSqlRow>(
+                    BuildProductReportPagingSql(hasCompare, sort),
+                    parameters.ToArray()
+                );
+            }
+        }
+        else
+        {
+            rows = await _context.Db.Ado.SqlQueryAsync<ProductReportPagingSqlRow>(
+                BuildProductReportPagingSql(hasCompare, sort),
+                parameters.ToArray()
+            );
+        }
         // 先确定实际页，避免优化器把商品图片等宽字段连接提前到全量汇总之前。
         var pageCodes = rows.Where(row => row.HasData && !string.IsNullOrWhiteSpace(row.ProductCode))
             .Select(row => row.ProductCode!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -164,8 +201,9 @@ public partial class SalesDashboardReactService
         return MapProductReportPagingRows(rows, pageIndex, pageSize);
     }
 
+    /// <param name="productCodes">限定的遗留商品集合；为 null 表示读取全部遗留（供应商 200）映射。</param>
     internal Task<(Dictionary<string, string> ProductMap, List<string> SupplierCodes)> ReadReportChinaSupplierMappingsAsync(
-        HashSet<string> productCodes, bool includeAllSupplierCodes)
+        HashSet<string>? productCodes, bool includeAllSupplierCodes)
     {
         return ReadReportSnapshotOnConnectionAsync(_posmContext.Db, async () =>
         {
@@ -179,6 +217,18 @@ public partial class SalesDashboardReactService
                     .Select(row => row.ChinaSupplierCode!).Distinct().ToListAsync()
                 : new List<string>();
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (productCodes is null)
+            {
+                // 全部遗留映射（生产约 1.3 万行）一次读完，不再按商品集合分批或 OPENJSON 连接。
+                var allRows = await query.Clone().Where(row => row.ProductCode != null && row.ProductCode.Trim() != "")
+                    .Select(row => new ChinaSupplierProductMapRow
+                    {
+                        ProductCode = row.ProductCode,
+                        ChinaSupplierCode = row.ChinaSupplierCode!,
+                    }).ToListAsync();
+                MergeChinaSupplierProductMap(map, allRows);
+                return (map, suppliers);
+            }
             if (productCodes.Count > 0 && _posmContext.Db.CurrentConnectionConfig.DbType == DbType.SqlServer)
             {
                 // 月报涉及上万商品，使用一个 JSON 参数做集合连接，避免数十批查询往返。
@@ -231,6 +281,208 @@ public partial class SalesDashboardReactService
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         return (await selected.ToListAsync()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>投影的日期展开上限（日 / 月临时表按 731 天设计），超出时退回日统计原路径，避免静默漏天。</summary>
+    internal static bool ProductReportProjectionRangeSupported(DateRangeDto range)
+    {
+        const int maxDays = 731;
+        if ((range.EndDate.Date - range.StartDate.Date).TotalDays >= maxDays) return false;
+        return !HasCompare(range)
+            || (range.CompareEndDate!.Value.Date - range.CompareStartDate!.Value.Date).TotalDays < maxDays;
+    }
+
+    /// <summary>投影表是否齐全（一次很轻的元数据查询）。这里不写「5 分钟内不再尝试」的全局标志，只有真正读投影时抛出缺表错误才记。</summary>
+    private async Task<bool> MonthlyProductProjectionExistsAsync()
+        => await _context.Db.Ado.GetIntAsync(SalesDetailQueryMonthlyProjection.TablesExistSql) == 1;
+
+    /// <summary>SqlSugar 会包装 SqlException，沿异常链找投影缺表的专用错误号。</summary>
+    internal static bool IsMissingMonthlyProjectionError(Exception error)
+    {
+        for (var current = error; current != null; current = current.InnerException!)
+            if (current is SqlException sql && sql.Number == SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// 商品报告的投影版分页 SQL：与 <see cref="BuildProductReportPagingSql"/> 同形同序同列，只把「扫日统计」换成预聚合投影。
+    /// 事实 = 整月有效读月表 + 其余日期读日投影 + 日投影没追上的日期读日统计（复用销售明细的月 / 日有效性判定：
+    /// 身份校验、统计失败日排除、三级回退都在 BuildSalesDetailMonthlyBranchFactsSql 里）。
+    /// 投影按（供应商、商品）汇总，没有门店维度和条码，所以只服务「全部分店、无关键词」；供应商过滤与原查询同口径
+    /// （本地供应商 / 中国供应商代码 / 供应商 200 的遗留商品映射）。
+    /// 三段事实 UNION 后直接按商品一次聚合出全部指标（本期 / 同期销售额、数量、订单数、毛利及覆盖行数），
+    /// 排名、分页和本页明细都读这张只有几万行的聚合表，不物化约 140 万行的中间事实（实测省 2 秒以上）。
+    /// 商品名只对本页商品各取一行：本期、同期内最近一天的统计名（原路径取区间内最大的名字，改名商品可能不同，显示名以最新为准）。
+    /// </summary>
+    internal static string BuildProductReportProjectionPagingSql(bool includeCompare, ProductReportSort sort = default)
+    {
+        // 月份 / 日期有效性与日事实兜底；映射签名只影响分店粒度，商品粒度用常量占位。
+        var monthly = BuildSalesDetailMonthlyBranchFactsSql("POSM", branchEdgesOnly: false);
+        const string projected = "[Revenue], [Quantity], [OrderCount], [GrossProfit], [StatisticRowCount], [CostedRowCount], [GrossProfitRowCount]";
+        var compareStart = includeCompare ? "@CompareStart" : "NULL";
+        var compareEnd = includeCompare ? "@CompareEndExclusive" : "NULL";
+        string Compare(string value, string zero) => includeCompare ? value : zero;
+        string CompareName() => includeCompare
+            ? """
+              OUTER APPLY
+              (
+                  SELECT TOP 1 s.[ProductName] AS [Name]
+                  FROM [dbo].[ProductStoreDailySalesStatistic] AS s
+                  WHERE page.[HasData] = 1 AND s.[ProductCode] = page.[ProductCode]
+                      AND s.[Date] >= @CompareStart AND s.[Date] < @CompareEndExclusive AND s.[ProductName] IS NOT NULL
+                  ORDER BY s.[Date] DESC
+              ) AS compareName
+              """
+            : string.Empty;
+        return $"""
+            BEGIN TRY
+            IF OBJECT_ID(N'dbo.SalesDetailQueryMonthlyProduct', N'U') IS NULL OR OBJECT_ID(N'dbo.SalesDetailQueryMonthlyState', N'U') IS NULL
+                OR OBJECT_ID(N'dbo.SalesDetailQueryDailyProduct', N'U') IS NULL OR OBJECT_ID(N'dbo.SalesDetailQueryDailyState', N'U') IS NULL
+                THROW {SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber}, N'销售明细预聚合投影尚未建立。', 1;
+            DECLARE @sdmMappingVersion varchar(64) = '';
+            DECLARE @sdrCurrentStart datetime = @CurrentStart, @sdrCurrentEnd datetime = @CurrentEndExclusive,
+                    @sdrHasCompare int = {(includeCompare ? 1 : 0)}, @sdrCompareStart datetime = {compareStart}, @sdrCompareEnd datetime = {compareEnd};
+            CREATE TABLE #ProductReportLocalFilter ([SupplierCode] nvarchar(100) COLLATE DATABASE_DEFAULT,
+                INDEX [IX_ProductReportLocalFilter] CLUSTERED ([SupplierCode]));
+            INSERT INTO #ProductReportLocalFilter SELECT DISTINCT CONVERT(nvarchar(100), [value]) FROM OPENJSON(@LocalSuppliers);
+            CREATE TABLE #ProductReportChinaFilter ([SupplierCode] nvarchar(100) COLLATE DATABASE_DEFAULT,
+                INDEX [IX_ProductReportChinaFilter] CLUSTERED ([SupplierCode]));
+            INSERT INTO #ProductReportChinaFilter SELECT DISTINCT CONVERT(nvarchar(100), [value]) FROM OPENJSON(@ChinaSuppliers);
+            CREATE TABLE #ProductReportChinaMap ([ProductCode] nvarchar(100) COLLATE DATABASE_DEFAULT,
+                [ChinaSupplierCode] nvarchar(100) COLLATE DATABASE_DEFAULT,
+                INDEX [IX_ProductReportChinaMap_Product] CLUSTERED ([ProductCode]));
+            INSERT INTO #ProductReportChinaMap
+            SELECT [ProductCode], [ChinaSupplierCode]
+            FROM OPENJSON(@ChinaProductMap)
+            WITH
+            (
+                [ProductCode] nvarchar(100) '$.ProductCode',
+                [ChinaSupplierCode] nvarchar(100) '$.ChinaSupplierCode'
+            );
+
+            {monthly.Months}
+            {monthly.Days}
+
+            SELECT r.[ProductCode],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[Revenue] ELSE 0 END) AS [CurrentSalesAmount],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[Revenue] ELSE 0 END) AS [CompareSalesAmount],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[Quantity] ELSE 0 END) AS [CurrentQuantity],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[Quantity] ELSE 0 END) AS [CompareQuantity],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[OrderCount] ELSE 0 END) AS [CurrentOrderCount],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[OrderCount] ELSE 0 END) AS [CompareOrderCount],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[GrossProfit] END) AS [CurrentGrossProfit],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[GrossProfit] END) AS [CompareGrossProfit],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[StatisticRowCount] ELSE 0 END) AS [CurrentStatisticRowCount],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[StatisticRowCount] ELSE 0 END) AS [CompareStatisticRowCount],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[CostedRowCount] ELSE 0 END) AS [CurrentCostedRowCount],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[CostedRowCount] ELSE 0 END) AS [CompareCostedRowCount],
+                SUM(CASE WHEN r.[Period] = 0 THEN r.[GrossProfitRowCount] ELSE 0 END) AS [CurrentGrossProfitRowCount],
+                SUM(CASE WHEN r.[Period] = 1 THEN r.[GrossProfitRowCount] ELSE 0 END) AS [CompareGrossProfitRowCount]
+            INTO #ProductReportAggregates
+            FROM
+            (
+                SELECT mo.[Period], mp.[RawSupplierCode], mp.[ProductCode], {projected.Replace("[", "mp.[")}
+                FROM [dbo].[SalesDetailQueryMonthlyProduct] AS mp
+                INNER JOIN #sdmMonths AS mo ON mo.[Month] = mp.[Month] AND mo.[ProductValid] = 1
+                UNION ALL
+                SELECT d.[Period], dp.[RawSupplierCode], dp.[ProductCode], {projected.Replace("[", "dp.[")}
+                FROM [dbo].[SalesDetailQueryDailyProduct] AS dp
+                INNER JOIN #sdmDays AS d ON d.[Day] = dp.[Date] AND d.[ProductSource] = 1
+                UNION ALL
+                SELECT d.[Period], LTRIM(RTRIM(COALESCE(s.[SupplierCode], N''))), LTRIM(RTRIM(COALESCE(s.[ProductCode], N''))), {SdmFactMeasures}
+                FROM #sdmDays AS d
+                INNER JOIN [dbo].[ProductStoreDailySalesStatistic] AS s ON s.[Date] >= d.[DayStart] AND s.[Date] < d.[DayEnd]
+                WHERE d.[ProductSource] = 2
+                GROUP BY d.[Period], LTRIM(RTRIM(COALESCE(s.[SupplierCode], N''))), LTRIM(RTRIM(COALESCE(s.[ProductCode], N'')))
+            ) AS r
+            -- 中国供应商过滤（供应商代码在中国供应商集合内，或供应商 200 且商品在遗留映射里）用左连接 + IS NOT NULL，
+            -- 比逐行 OR + EXISTS 快（整年约 140 万行实测省 4 秒以上）；两张过滤表的键都是唯一的，不会放大行数。
+            LEFT JOIN #ProductReportChinaFilter AS cf ON cf.[SupplierCode] = r.[RawSupplierCode]
+            LEFT JOIN #ProductReportChinaMap AS cm ON cm.[ProductCode] = r.[ProductCode] AND r.[RawSupplierCode] = N'200'
+            WHERE r.[ProductCode] <> N''
+                AND (@HasLocalFilter = 0 OR EXISTS (SELECT 1 FROM #ProductReportLocalFilter AS x WHERE x.[SupplierCode] = r.[RawSupplierCode]))
+                AND (@HasChinaFilter = 0 OR cf.[SupplierCode] IS NOT NULL OR cm.[ProductCode] IS NOT NULL)
+            GROUP BY r.[ProductCode]
+            OPTION (RECOMPILE);
+
+            CREATE TABLE #ProductReportPage ([HasData] bit NOT NULL, [TotalCount] int NOT NULL,
+                [RowNumber] bigint NOT NULL, [ProductCode] nvarchar(50) COLLATE DATABASE_DEFAULT,
+                INDEX [IX_ProductReportPage_Product] CLUSTERED ([ProductCode]));
+            ;WITH Windowed AS
+            (
+                SELECT a.*,
+                    CONVERT(int, COUNT(*) OVER ()) AS [TotalCount],
+                    ROW_NUMBER() OVER
+                    (
+                        ORDER BY {BuildProductReportRankingOrderBy(sort)}
+                    ) AS [RowNumber]
+                FROM #ProductReportAggregates AS a
+            )
+            INSERT INTO #ProductReportPage
+            SELECT CAST(CASE WHEN windowed.[RowNumber] > @PageOffset THEN 1 ELSE 0 END AS bit) AS [HasData],
+                windowed.[TotalCount], windowed.[RowNumber], windowed.[ProductCode]
+            FROM Windowed AS windowed
+            WHERE
+                (
+                    windowed.[RowNumber] > @PageOffset
+                    AND windowed.[RowNumber] <= @PageOffset + @PageSize
+                )
+                OR
+                (
+                    windowed.[TotalCount] <= @PageOffset
+                    AND windowed.[RowNumber] = 1
+                );
+
+            SELECT page.[HasData], page.[TotalCount], page.[ProductCode],
+                currentName.[Name] AS [CurrentProductName], {Compare("compareName.[Name]", "CAST(NULL AS nvarchar(255))")} AS [CompareProductName],
+                CONVERT(int, detail.[CurrentQuantity]) AS [CurrentQuantity], detail.[CurrentSalesAmount],
+                CONVERT(int, detail.[CurrentOrderCount]) AS [CurrentOrderCount], detail.[CurrentGrossProfit],
+                CONVERT(int, detail.[CurrentStatisticRowCount]) AS [CurrentStatisticRowCount],
+                CONVERT(int, detail.[CurrentCostedRowCount]) AS [CurrentCostedRowCount],
+                CONVERT(int, detail.[CurrentGrossProfitRowCount]) AS [CurrentGrossProfitRowCount],
+                {Compare("CONVERT(int, detail.[CompareQuantity])", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareQuantity],
+                {Compare("detail.[CompareSalesAmount]", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareSalesAmount],
+                {Compare("CONVERT(int, detail.[CompareOrderCount])", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareOrderCount],
+                {Compare("detail.[CompareGrossProfit]", "CAST(NULL AS decimal(18,4))")} AS [CompareGrossProfit],
+                {Compare("CONVERT(int, detail.[CompareStatisticRowCount])", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareStatisticRowCount],
+                {Compare("CONVERT(int, detail.[CompareCostedRowCount])", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareCostedRowCount],
+                {Compare("CONVERT(int, detail.[CompareGrossProfitRowCount])", "CASE WHEN detail.[ProductCode] IS NULL THEN NULL ELSE 0 END")} AS [CompareGrossProfitRowCount]
+            FROM #ProductReportPage AS page
+            LEFT JOIN #ProductReportAggregates AS detail ON detail.[ProductCode] = page.[ProductCode] AND page.[HasData] = 1
+            OUTER APPLY
+            (
+                SELECT TOP 1 s.[ProductName] AS [Name]
+                FROM [dbo].[ProductStoreDailySalesStatistic] AS s
+                WHERE page.[HasData] = 1 AND s.[ProductCode] = page.[ProductCode]
+                    AND s.[Date] >= @CurrentStart AND s.[Date] < @CurrentEndExclusive AND s.[ProductName] IS NOT NULL
+                ORDER BY s.[Date] DESC
+            ) AS currentName
+            {CompareName()}
+            ORDER BY page.[RowNumber] ASC;
+
+            DROP TABLE #ProductReportPage;
+            DROP TABLE #ProductReportAggregates;
+            DROP TABLE #sdmDays;
+            DROP TABLE #sdmMonths;
+            DROP TABLE #ProductReportChinaMap;
+            DROP TABLE #ProductReportLocalFilter;
+            DROP TABLE #ProductReportChinaFilter;
+            END TRY
+            BEGIN CATCH
+                IF XACT_STATE() <> -1
+                BEGIN
+                IF OBJECT_ID(N'tempdb..#ProductReportPage') IS NOT NULL DROP TABLE #ProductReportPage;
+                IF OBJECT_ID(N'tempdb..#ProductReportAggregates') IS NOT NULL DROP TABLE #ProductReportAggregates;
+                IF OBJECT_ID(N'tempdb..#sdmDays') IS NOT NULL DROP TABLE #sdmDays;
+                IF OBJECT_ID(N'tempdb..#sdmMonths') IS NOT NULL DROP TABLE #sdmMonths;
+                IF OBJECT_ID(N'tempdb..#ProductReportChinaMap') IS NOT NULL DROP TABLE #ProductReportChinaMap;
+                IF OBJECT_ID(N'tempdb..#ProductReportLocalFilter') IS NOT NULL DROP TABLE #ProductReportLocalFilter;
+                IF OBJECT_ID(N'tempdb..#ProductReportChinaFilter') IS NOT NULL DROP TABLE #ProductReportChinaFilter;
+                END;
+                THROW;
+            END CATCH;
+            """;
     }
 
     internal static string BuildProductReportPagingSql(bool includeCompare, ProductReportSort sort = default)
