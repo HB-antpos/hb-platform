@@ -853,6 +853,19 @@
   <data name="deviceActivation.error.failed" xml:space="preserve"><value>Device activation failed. Check the code and connection, then try again.</value></data>
   <data name="deviceActivation.error.timeout" xml:space="preserve"><value>The server took too long to respond. Check the network and try again.</value></data>
   <data name="deviceActivation.error.failedWithReason" xml:space="preserve"><value>Device activation failed. Check the code and connection, then try again. Reason: {0}</value></data>
+  <data name="deviceActivation.rename.title" xml:space="preserve"><value>Hardware ID conflict</value></data>
+  <data name="deviceActivation.rename.offer" xml:space="preserve"><value>Another computer already uses this computer's hardware ID, usually because both were set up from the same system image. Renaming this computer gives it its own ID. The other computer is not changed.</value></data>
+  <data name="deviceActivation.rename.confirm" xml:space="preserve"><value>Rename this computer from {0} to {1}? Windows will ask for administrator approval, and the computer must restart afterwards. The other computer is not changed.</value></data>
+  <data name="deviceActivation.rename.restartPending" xml:space="preserve"><value>This computer is renamed to {0}. Restart it to finish, then enter the activation code again.</value></data>
+  <data name="deviceActivation.rename.unavailable" xml:space="preserve"><value>This computer is joined to a domain, so it cannot be renamed here. Ask your IT administrator to rename it, then activate again.</value></data>
+  <data name="deviceActivation.rename.button.rename" xml:space="preserve"><value>Rename this computer...</value></data>
+  <data name="deviceActivation.rename.button.confirm" xml:space="preserve"><value>Confirm rename</value></data>
+  <data name="deviceActivation.rename.button.restart" xml:space="preserve"><value>Restart now</value></data>
+  <data name="deviceActivation.rename.button.cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="deviceActivation.rename.notice.declined" xml:space="preserve"><value>The rename was cancelled. Nothing was changed.</value></data>
+  <data name="deviceActivation.rename.notice.failed" xml:space="preserve"><value>Could not rename the computer: {0}</value></data>
+  <data name="deviceActivation.rename.notice.restarting" xml:space="preserve"><value>Restarting shortly. After the restart, open HB POS and enter the activation code again.</value></data>
+  <data name="deviceActivation.rename.notice.restartFailed" xml:space="preserve"><value>Could not restart the computer: {0}</value></data>
   <data name="deviceActivation.error.rateLimited" xml:space="preserve"><value>Too many activation attempts from this network. Wait {0} minute(s), then try again.</value></data>
   <data name="deviceActivation.error.deviceConflict" xml:space="preserve"><value>This computer's hardware ID (ending {0}) is already registered. If another computer was set up from the same system image, the two share one ID: do not disable the other device. Rename this computer, restart, and activate again. If this computer was registered before, ask head office to check it in Device Management.</value></data>
   <data name="deviceActivation.error.storeUnavailable" xml:space="preserve"><value>The target store is not active. Ask head office to check the store, then create a new code.</value></data>

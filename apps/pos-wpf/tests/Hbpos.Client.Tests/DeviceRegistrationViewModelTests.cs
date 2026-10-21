@@ -234,6 +234,111 @@ public sealed class DeviceRegistrationViewModelTests
     }
 
     [Fact]
+    public async Task Hardware_conflict_shows_the_rename_panel_and_other_failures_hide_it()
+    {
+        var rename = new FakeComputerRenameService();
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new CatalogApiException(
+                "Device hardware is already registered.",
+                errorCode: "DEVICE_ALREADY_REGISTERED")
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow, computerRename: rename);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+        Assert.False(viewModel.ComputerRename.IsVisible);
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.ComputerRename.IsVisible);
+        Assert.Equal(ComputerRenameStep.Offer, viewModel.ComputerRename.Step);
+        Assert.Equal(1, rename.GetStateCalls);
+        // 面板本身不会碰系统：只有用户点按钮并确认后才会改名。
+        Assert.Empty(rename.RenamedTo);
+
+        // 换成别的失败原因：面板收起。
+        workflow.PreviewException = new CatalogApiException(
+            "not available",
+            errorCode: "ACTIVATION_CODE_NOT_AVAILABLE");
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.ComputerRename.IsVisible);
+    }
+
+    [Fact]
+    public async Task Rename_panel_uses_the_previewed_store_code_in_the_new_computer_name()
+    {
+        var rename = new FakeComputerRenameService();
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new CatalogApiException("x", errorCode: "DEVICE_ALREADY_REGISTERED")
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow, computerRename: rename);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+        // 预览成功过的店号会留在页面上；冲突发生在随后的激活时，新电脑名要带这个店号（桩的预览直接抛异常，这里手动设置）。
+        viewModel.PreviewStoreCode = "2010";
+
+        await viewModel.ComputerRename.PrimaryCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("HB-2010-", viewModel.ComputerRename.ProposedName);
+    }
+
+    [Theory]
+    [InlineData("deviceActivation.rename.title", false)]
+    [InlineData("deviceActivation.rename.offer", false)]
+    [InlineData("deviceActivation.rename.confirm", true)]
+    [InlineData("deviceActivation.rename.restartPending", true)]
+    [InlineData("deviceActivation.rename.unavailable", false)]
+    [InlineData("deviceActivation.rename.button.rename", false)]
+    [InlineData("deviceActivation.rename.button.confirm", false)]
+    [InlineData("deviceActivation.rename.button.restart", false)]
+    [InlineData("deviceActivation.rename.button.cancel", false)]
+    [InlineData("deviceActivation.rename.notice.declined", false)]
+    [InlineData("deviceActivation.rename.notice.failed", true)]
+    [InlineData("deviceActivation.rename.notice.restarting", false)]
+    [InlineData("deviceActivation.rename.notice.restartFailed", true)]
+    public void Rename_panel_texts_exist_in_both_languages(string resourceKey, bool hasPlaceholder)
+    {
+        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var value = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == resourceKey)
+                .Element("value")?.Value;
+            Assert.False(string.IsNullOrWhiteSpace(value), $"{file}:{resourceKey}");
+            Assert.Equal(hasPlaceholder, value!.Contains("{0}", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Registration_view_shows_the_rename_panel_between_the_error_and_the_network_button()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Screens", "DeviceRegistrationView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        // 无前缀的 XAML 属性在 XML 里没有命名空间。
+        var automationId = XName.Get("AutomationProperties.AutomationId");
+
+        var panel = Assert.Single(document.Descendants(presentation + "Border").Where(
+            element => (string?)element.Attribute(automationId) == "RegistrationComputerRenamePanel"));
+        Assert.Contains("ComputerRename.IsVisible", (string?)panel.Attribute("Visibility"));
+
+        var rename = Assert.Single(panel.Descendants(presentation + "Button").Where(
+            element => (string?)element.Attribute(automationId) == "RegistrationRenameComputerButton"));
+        Assert.Equal("{Binding ComputerRename.PrimaryCommand}", (string?)rename.Attribute("Command"));
+        var cancel = Assert.Single(panel.Descendants(presentation + "Button").Where(
+            element => (string?)element.Attribute(automationId) == "RegistrationRenameComputerCancelButton"));
+        Assert.Equal("{Binding ComputerRename.CancelCommand}", (string?)cancel.Attribute("Command"));
+
+        // 面板紧挨在激活码模式的「检测网络」按钮前面：错误提示 → 改名面板 → 检测网络。
+        var next = panel.ElementsAfterSelf().First();
+        Assert.Equal("RegistrationDiagnoseNetworkButton", (string?)next.Attribute(automationId));
+    }
+
+    [Fact]
     public async Task A_network_failure_while_checking_the_code_offers_the_network_check_and_a_rejection_does_not()
     {
         var workflow = new StubDeviceRegistrationWorkflowService
@@ -671,6 +776,29 @@ public sealed class DeviceRegistrationViewModelTests
                 null,
                 false,
                 false);
+        }
+    }
+
+    private sealed class FakeComputerRenameService : IComputerRenameService
+    {
+        public int GetStateCalls { get; private set; }
+
+        public List<string> RenamedTo { get; } = [];
+
+        public ComputerRenameState GetState()
+        {
+            GetStateCalls++;
+            return new ComputerRenameState("OLD-PC", null, false);
+        }
+
+        public Task<bool> RenameAsync(string newName, CancellationToken cancellationToken)
+        {
+            RenamedTo.Add(newName);
+            return Task.FromResult(true);
+        }
+
+        public void Restart()
+        {
         }
     }
 }
