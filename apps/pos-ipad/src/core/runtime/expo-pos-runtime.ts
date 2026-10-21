@@ -1,3 +1,4 @@
+import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -845,8 +846,9 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         policy: appUpdates.getPolicy(),
         restartAvailable: Updates.isEnabled,
       });
+    // 设置页 / 登录前连接检查的健康探测：经入口感知的 fetch，边缘入口不通时改探直连。
     const probeApiHealth = createSettingsApiHealthProbe(
-      (url, init) => fetch(url, init),
+      createFailoverFetch((url, init) => fetch(url, init)),
     );
     const attendanceAudit =
       attendanceCredentials &&

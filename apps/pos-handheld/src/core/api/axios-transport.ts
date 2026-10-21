@@ -6,6 +6,7 @@ import {
   type HbposRequestCredentialProvider,
   type HbposTransport,
 } from "@hb/pos-api-client/transport";
+import { sharedApiTransportSelector } from "@hb/pos-api-client/transport-failover";
 
 export type {
   HbposAuthenticationFailureHandler,
@@ -21,6 +22,12 @@ const FRESH_CASHIER_TRANSPORT_POLICY = {
   cashierHeader: "preserve-explicit",
   responseHeaders: "normalize",
 } as const;
+/**
+ * 双入口故障转移：配置地址（设备身份）是 hotbargain.vip 时，实际请求默认走 EdgeOne 入口
+ * pos.hotbargain.vip，边缘线路不通再改走直连；不在入口组内的地址（本地开发、局域网）不受影响。
+ * 所有 transport 共用同一个进程内选择器，状态一致。
+ */
+const FAILOVER = { selector: sharedApiTransportSelector } as const;
 
 export function createAxiosHbposTransport(
   baseUrl: string,
@@ -34,6 +41,7 @@ export function createAxiosHbposTransport(
     instance,
     authenticationFailureHandler,
     DEFAULT_TRANSPORT_POLICY,
+    FAILOVER,
   );
 }
 
@@ -50,5 +58,6 @@ export function createFreshCashierAxiosHbposTransport(
     instance,
     authenticationFailureHandler,
     FRESH_CASHIER_TRANSPORT_POLICY,
+    FAILOVER,
   );
 }

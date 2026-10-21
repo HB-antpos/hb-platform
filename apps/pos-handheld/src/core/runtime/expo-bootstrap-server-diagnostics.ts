@@ -1,3 +1,4 @@
+import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
 import Constants from "expo-constants";
 
 import { ExpoSecureStoreAdapter } from "../security/expo-secure-store";
@@ -42,8 +43,9 @@ export async function loadExpoBootstrapServerDiagnostics(): Promise<BootstrapSer
   const currentApiBaseUrl = resolveHbposApiUrl(
     persisted.apiBaseUrl ?? extra?.hbpos?.apiBaseUrl,
   );
-  const probe = createSettingsApiHealthProbe((url, init) =>
-    fetch(url, init),
+  // 只读探测也走入口感知的 fetch：边缘入口不通时改探直连。
+  const probe = createSettingsApiHealthProbe(
+    createFailoverFetch((url, init) => fetch(url, init)),
   );
 
   return createBootstrapServerDiagnostics({
