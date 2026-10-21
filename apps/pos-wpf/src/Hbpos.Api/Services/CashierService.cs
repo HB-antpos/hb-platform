@@ -328,6 +328,8 @@ public sealed class CashierService(
             {
                 Username = user.Username,
                 FullName = user.FullName,
+                Nickname = user.Nickname,
+                FamilyName = user.FamilyName,
                 StoreGuid = store.StoreGUID,
                 StoreCode = store.StoreCode,
             })
@@ -370,7 +372,11 @@ public sealed class CashierService(
             IsOfflineCached: false,
             IsEmergencyOverride: false,
             AuthorizationToken: authorization.Token,
-            AuthorizationExpiresAtUtc: authorization.ExpiresAtUtc);
+            AuthorizationExpiresAtUtc: authorization.ExpiresAtUtc,
+            // 小票只显示「昵称/用户名 + 姓首字母」，由客户端按这三段格式化；CashierName 仍是全名（订单、审计沿用）。
+            Username: user.Username,
+            Nickname: user.Nickname,
+            FamilyName: user.FamilyName);
     }
 
     private static string[] AddLegacyDiscountCompatibility(IEnumerable<string> permissionCodes)
@@ -406,6 +412,8 @@ public sealed class CashierService(
     {
         public string Username { get; set; } = string.Empty;
         public string? FullName { get; set; }
+        public string? Nickname { get; set; }
+        public string? FamilyName { get; set; }
         public string StoreGuid { get; set; } = string.Empty;
         public string StoreCode { get; set; } = string.Empty;
     }

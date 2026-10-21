@@ -24,4 +24,7 @@ public sealed record CashierSessionDto(
     bool IsEmergencyOverride,
     string? AuthorizationToken = null,
     DateTimeOffset? AuthorizationExpiresAtUtc = null,
-    string? EmergencyGrantId = null);
+    string? EmergencyGrantId = null,
+    string? Username = null,
+    string? Nickname = null,
+    string? FamilyName = null);

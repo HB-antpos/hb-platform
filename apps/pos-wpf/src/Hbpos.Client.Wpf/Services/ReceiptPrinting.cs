@@ -806,7 +806,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             : receipt.OrderDisplay.Trim();
         builder.Text($"Order: {displayOrderId}");
         builder.Text($"Date: {receipt.SoldAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
-        builder.Text($"Cashier: {receipt.CashierName}");
+        // 中文注释：小票不再印员工全名，统一显示「昵称 + 姓首字母」；历史订单只有全名时按本机已知员工换算，查不到才印原文。
+        builder.Text($"Cashier: {ReceiptStaffDirectory.Shared.ResolveDisplayName(receipt.CashierName)}");
         // 中文注释：门店名称与代码共用显示规则，并按纸宽换行，保证打印和预览保持一致。
         foreach (var storeLine in WrapByWord(
                      $"Store: {FormatStoreDisplay(settings.StoreName, receipt.StoreCode)}",
