@@ -81,3 +81,9 @@ export interface LinklySettlementExportResult {
   blob: Blob
   fileName: string
 }
+
+/** 筛选用「门店 + 设备」候选，来自已同步的结算记录。 */
+export interface LinklySettlementDeviceOption {
+  storeCode: string
+  deviceCode: string
+}

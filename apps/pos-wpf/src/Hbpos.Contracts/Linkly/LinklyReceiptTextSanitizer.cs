@@ -344,10 +344,13 @@ public static class LinklyReceiptTextSanitizer
         }
 
         var name = record[..20].Trim().ToString();
+        // 真实终端的汇总行名称是 TOTALS（官方文档写作 TOTAL），符号位非负时是空格；
+        // 两者不兼容会让整段定长数据落入通用 PAN 正则，被误掩码成 ****dddd 而无法还原金额。
         if (name.Length == 0
-            || name.Equals("TOTAL", StringComparison.OrdinalIgnoreCase) != total
+            || (name.Equals("TOTAL", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("TOTALS", StringComparison.OrdinalIgnoreCase)) != total
             || !AllDigits(record.Slice(20, 36))
-            || record[56] is not ('+' or '-')
+            || record[56] is not ('+' or '-' or ' ')
             || !AllDigits(record.Slice(57, 12)))
         {
             return false;

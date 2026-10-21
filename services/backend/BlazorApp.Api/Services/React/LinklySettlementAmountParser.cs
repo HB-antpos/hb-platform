@@ -13,6 +13,11 @@ internal interface ILinklySettlementAmountParser
 internal sealed class LinklySettlementAmountParser : ILinklySettlementAmountParser
 {
     private const int CardRecordLength = 69;
+    private const string MaskedMarker = "****";
+    private const string TotalCardName = "TOTAL";
+    // 存量脱敏记录：头部 8 字符（****dddd）+ 每条 65 字符（名称 20 + 6 组金额/笔数 36 + 符号 1 + ****dddd 8）。
+    private const int MaskedHeaderLength = 8;
+    private const int MaskedRecordLength = 65;
 
     public LinklySettlementAmountParseResult Parse(string? value)
     {
@@ -22,6 +27,10 @@ internal sealed class LinklySettlementAmountParser : ILinklySettlementAmountPars
         var first = value.AsSpan().TrimStart()[0];
         if (first is '{' or '[')
             return ParseJson(value);
+
+        // 旧版 WPF 脱敏器把整段定长数据里的 12 位数字串误当卡号，写成了 ****dddd 形态（存量记录）。
+        if (value.StartsWith(MaskedMarker, StringComparison.Ordinal))
+            return ParseMaskedFixedWidth(value);
 
         if (value.Length < 12 || !AllDigits(value.AsSpan(0, Math.Min(12, value.Length))))
             return LinklySettlementAmountParseResult.Unsupported;
@@ -236,7 +245,7 @@ internal sealed class LinklySettlementAmountParser : ILinklySettlementAmountPars
             || !TryReadUnsigned(record.Slice(41, 3), out var cashOutCount)
             || !TryReadUnsigned(record.Slice(44, 9), out var refundAmount)
             || !TryReadUnsigned(record.Slice(53, 3), out var refundCount)
-            || record[56] is not ('+' or '-')
+            || record[56] is not ('+' or '-' or ' ')
             || !TryReadUnsigned(record.Slice(57, 9), out var totalAmount)
             || !TryReadUnsigned(record.Slice(66, 3), out var totalCount))
             return false;
@@ -260,7 +269,7 @@ internal sealed class LinklySettlementAmountParser : ILinklySettlementAmountPars
         IReadOnlyList<LinklySettlementCardTotalDto> rows)
     {
         var totals = rows
-            .Where(row => row.CardName.Equals("TOTAL", StringComparison.OrdinalIgnoreCase))
+            .Where(row => IsTotalName(row.CardName))
             .ToList();
         if (totals.Count != 1)
             return LinklySettlementAmountParseResult.Invalid;
@@ -282,9 +291,102 @@ internal sealed class LinklySettlementAmountParser : ILinklySettlementAmountPars
                 TotalCount = total.TotalCount,
             },
             CardTotals = rows
-                .Where(row => !row.CardName.Equals("TOTAL", StringComparison.OrdinalIgnoreCase))
+                .Where(row => !IsTotalName(row.CardName))
                 .ToList(),
         };
+    }
+
+    // 真实终端的汇总行名称是 TOTALS（官方文档写作 TOTAL），两者都按汇总行处理。
+    private static bool IsTotalName(string name) =>
+        name.Equals(TotalCardName, StringComparison.OrdinalIgnoreCase)
+        || name.Equals(TotalCardName + "S", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 解析被旧版脱敏器破坏的存量数据。每条记录的购买/Cash Out/退款金额与笔数完整保留，
+    /// 只有「合计金额+合计笔数」12 位被替换成 ****dddd；这里用保留字段重算合计，
+    /// 并用残留的末 4 位（合计金额末位 + 3 位笔数）校验，任何不一致都按无效处理，绝不猜测金额。
+    /// </summary>
+    private static LinklySettlementAmountParseResult ParseMaskedFixedWidth(string value)
+    {
+        var body = value.Length - MaskedHeaderLength;
+        if (body <= 0 || body % MaskedRecordLength != 0)
+            return LinklySettlementAmountParseResult.Unsupported;
+
+        var recordCount = body / MaskedRecordLength;
+        var cardCount = recordCount - 1;
+        // 头部是 9 位卡种数 + 3 位数据长度的末 4 位：卡种数个位 + 3 位（卡种数 × 69）。
+        if (!IsMaskedTail(value.AsSpan(0, MaskedHeaderLength), out var headerDigits)
+            || headerDigits != cardCount % 10 * 1000 + cardCount * CardRecordLength)
+            return LinklySettlementAmountParseResult.Unsupported;
+
+        var rows = new List<LinklySettlementCardTotalDto>(recordCount);
+        for (var index = 0; index < recordCount; index++)
+        {
+            var record = value.AsSpan(MaskedHeaderLength + index * MaskedRecordLength, MaskedRecordLength);
+            // 汇总行前面还有 3 位长度「069」，它与上一条记录的合计 12 位连成 15 位数字被一起掩码。
+            var followedByTotalLength = index == recordCount - 2;
+            if (!TryParseMaskedRecord(record, followedByTotalLength, out var row))
+                return LinklySettlementAmountParseResult.Invalid;
+            rows.Add(row);
+        }
+
+        return BuildResult(rows);
+    }
+
+    private static bool TryParseMaskedRecord(
+        ReadOnlySpan<char> record,
+        bool followedByTotalLength,
+        out LinklySettlementCardTotalDto row)
+    {
+        row = new LinklySettlementCardTotalDto();
+        var name = record[..20].Trim().ToString();
+        if (name.Length == 0
+            || !TryReadUnsigned(record.Slice(20, 9), out var purchaseAmount)
+            || !TryReadUnsigned(record.Slice(29, 3), out var purchaseCount)
+            || !TryReadUnsigned(record.Slice(32, 9), out var cashOutAmount)
+            || !TryReadUnsigned(record.Slice(41, 3), out var cashOutCount)
+            || !TryReadUnsigned(record.Slice(44, 9), out var refundAmount)
+            || !TryReadUnsigned(record.Slice(53, 3), out var refundCount)
+            || record[56] is not ('+' or '-' or ' ')
+            || !IsMaskedTail(record.Slice(57, MaskedHeaderLength), out var tailDigits))
+            return false;
+
+        // 合计 = 购买 + Cash Out - 退款；笔数 = 三类笔数之和。
+        var net = purchaseAmount + cashOutAmount - refundAmount;
+        var totalAmount = net;
+        var totalCount = purchaseCount + cashOutCount + refundCount;
+        // 非负合计不应带负号，负合计必须带负号，否则说明数据不是预期形态。
+        if ((net < 0) != (record[56] == '-') && net != 0)
+            return false;
+        // 常规记录残留「金额末位 + 3 位笔数」；汇总行之前的那条残留「笔数末位 + 069」。
+        var expectedTail = followedByTotalLength
+            ? totalCount % 10 * 1000 + CardRecordLength
+            : Math.Abs(net) % 10 * 1000 + totalCount;
+        if (tailDigits != expectedTail)
+            return false;
+
+        row = new LinklySettlementCardTotalDto
+        {
+            CardName = name,
+            PurchaseAmountMinor = purchaseAmount,
+            PurchaseCount = purchaseCount,
+            CashOutAmountMinor = cashOutAmount,
+            CashOutCount = cashOutCount,
+            RefundAmountMinor = refundAmount,
+            RefundCount = refundCount,
+            TotalAmountMinor = totalAmount,
+            TotalCount = totalCount,
+        };
+        return true;
+    }
+
+    // 读取 ****dddd 形态的 8 字符片段，返回末 4 位数字。
+    private static bool IsMaskedTail(ReadOnlySpan<char> segment, out long digits)
+    {
+        digits = 0;
+        return segment.Length == MaskedHeaderLength
+            && segment[..4].SequenceEqual(MaskedMarker)
+            && TryReadUnsigned(segment[4..], out digits);
     }
 
     private static bool TryReadUnsigned(ReadOnlySpan<char> value, out long parsed) =>

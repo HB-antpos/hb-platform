@@ -28,11 +28,14 @@ import PageContainer from '../../../components/PageContainer'
 import {
   downloadLinklySettlementExport,
   exportLinklySettlements,
+  getLinklySettlementDevices,
   getLinklySettlements,
 } from '../../../services/linklySettlementService'
+import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import type {
   LinklyProviderSubmissionState,
   LinklySettlementConnectionMode,
+  LinklySettlementDeviceOption,
   LinklySettlementEnvironment,
   LinklySettlementFilters,
   LinklySettlementListItem,
@@ -42,6 +45,7 @@ import type {
 import {
   DEFAULT_LINKLY_SETTLEMENT_PAGE_SIZE,
   DEFAULT_LINKLY_SETTLEMENT_SORT,
+  buildLinklyDeviceSelectOptions,
   buildLinklySettlementQuery,
   canExportLinklySettlementRange,
   createLatestAbortableRequestGuard,
@@ -98,6 +102,9 @@ export default function LinklySettlementsPage() {
   const [sortOrder, setSortOrder] = useState<LinklySettlementSortOrder>(
     DEFAULT_LINKLY_SETTLEMENT_SORT.sortOrder,
   )
+  const [storeOptions, setStoreOptions] = useState<StoreOption[]>([])
+  const [deviceCandidates, setDeviceCandidates] = useState<LinklySettlementDeviceOption[]>([])
+  const selectedStoreCode = Form.useWatch('storeCode', form)
   const requestGuardRef = useRef(createLatestAbortableRequestGuard())
   const exportControllerRef = useRef<AbortController | null>(null)
 
@@ -153,6 +160,46 @@ export default function LinklySettlementsPage() {
       if (requestGuardRef.current.isLatest(currentRequest.requestId)) setLoading(false)
     }
   }, [getCurrentFilters, pageNumber, pageSize, sortBy, sortOrder, t])
+
+  // 门店 / 设备下拉候选：失败只影响候选，不阻塞列表查询。
+  useEffect(() => {
+    const controller = new AbortController()
+    void getActiveStores()
+      .then((stores) => {
+        if (!controller.signal.aborted) setStoreOptions(stores)
+      })
+      .catch((error) => console.error(error))
+    void getLinklySettlementDevices(controller.signal)
+      .then((devices) => {
+        if (!controller.signal.aborted) setDeviceCandidates(devices)
+      })
+      .catch((error) => {
+        if (!isAbortError(error)) console.error(error)
+      })
+    return () => controller.abort()
+  }, [])
+
+  const storeSelectOptions = useMemo(
+    () => storeOptions.map((option) => ({
+      value: option.value,
+      label: option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value,
+    })),
+    [storeOptions],
+  )
+  const deviceSelectOptions = useMemo(
+    () => buildLinklyDeviceSelectOptions(deviceCandidates, selectedStoreCode),
+    [deviceCandidates, selectedStoreCode],
+  )
+
+  // 换门店后，已选设备若不属于新门店则清空，避免组合出永远查不到的条件。
+  const handleStoreChange = (nextStoreCode?: string) => {
+    const deviceCode = form.getFieldValue('deviceCode') as string | undefined
+    if (!deviceCode || !nextStoreCode) return
+    const belongs = deviceCandidates.some(
+      (item) => item.storeCode === nextStoreCode && item.deviceCode === deviceCode,
+    )
+    if (!belongs) form.setFieldValue('deviceCode', undefined)
+  }
 
   useLayoutEffect(() => () => {
     requestGuardRef.current.abort()
@@ -417,12 +464,25 @@ export default function LinklySettlementsPage() {
               </Col>
               <Col xs={24} sm={12} md={6} xl={4}>
                 <Form.Item name="storeCode" label={t('linklySettlements.filters.store')}>
-                  <Input allowClear placeholder={t('linklySettlements.filters.storePlaceholder')} />
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={t('linklySettlements.filters.storePlaceholder')}
+                    options={storeSelectOptions}
+                    onChange={handleStoreChange}
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} md={6} xl={4}>
                 <Form.Item name="deviceCode" label={t('linklySettlements.filters.device')}>
-                  <Input allowClear placeholder={t('linklySettlements.filters.devicePlaceholder')} />
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={t('linklySettlements.filters.devicePlaceholder')}
+                    options={deviceSelectOptions}
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} md={6} xl={4}>

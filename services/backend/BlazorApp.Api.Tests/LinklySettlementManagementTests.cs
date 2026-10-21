@@ -180,6 +180,56 @@ public sealed class LinklySettlementAmountParserTests
         Assert.Equal(LinklySettlementAmountParseStatus.Invalid, _parser.Parse(json).Status);
     }
 
+    [Fact]
+    public void ParseFixedWidth_AcceptsTotalsNameAndSpaceSignFromRealTerminal()
+    {
+        // 真实终端：汇总行名称为 TOTALS，非负合计的符号位是空格而不是 +。
+        var value = FixedWidth(
+            [Record("VISA", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4).Remove(56, 1).Insert(56, " ")],
+            Record("TOTALS", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4).Remove(56, 1).Insert(56, " "));
+
+        var result = _parser.Parse(value);
+
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, result.Status);
+        Assert.Equal(11_000, result.Summary!.TotalAmountMinor);
+        Assert.Equal("VISA", Assert.Single(result.CardTotals).CardName);
+    }
+
+    [Fact]
+    public void ParseMasked_RebuildsTotalsFromPreviouslySanitizedProductionData()
+    {
+        // 生产存量记录（旧版脱敏器把合计 12 位数字串误当卡号）；汇总行前一条的残留为「笔数末位 + 069」。
+        const string masked =
+            "****3207MASTERCARD          000040050038000000000000000000000000 ****0038" +
+            "VISA                000041520038000000000000000000000000 ****0038" +
+            "DEBIT               000001600001000000000000000000000000 ****1069" +
+            "TOTALS              000083170077000000000000000000000000 ****0077";
+
+        var result = _parser.Parse(masked);
+
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, result.Status);
+        Assert.Equal(83_170, result.Summary!.PurchaseAmountMinor);
+        Assert.Equal(83_170, result.Summary.TotalAmountMinor);
+        Assert.Equal(77, result.Summary.TotalCount);
+        Assert.Equal(["MASTERCARD", "VISA", "DEBIT"], result.CardTotals.Select(item => item.CardName));
+    }
+
+    [Fact]
+    public void ParseMasked_ReconcilesRefundsAndRejectsInconsistentResidue()
+    {
+        // 含退款：VISA 购买 517.02 / 34 笔，退款 17.48 / 2 笔 → 合计末位 4、笔数 036。
+        const string withRefund =
+            "****2138VISA                000051702034000000000000000001748002 ****4036" +
+            "DEBIT               000000500001000000000000000000000000 ****1069" +
+            "TOTALS              000052202035000000000000000001748002 ****4037";
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, _parser.Parse(withRefund).Status);
+
+        // 残留末位与重算结果对不上时不得猜测金额。
+        Assert.Equal(
+            LinklySettlementAmountParseStatus.Invalid,
+            _parser.Parse(withRefund.Replace("****4036", "****9036")).Status);
+    }
+
     internal static string FixedWidth(IReadOnlyList<string> cards, string total)
     {
         var cardData = string.Concat(cards);
@@ -301,6 +351,21 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
         Assert.Empty(payloadResult.Items);
         Assert.Empty(injectionResult.Items);
         Assert.Single(scalarResult.Items);
+    }
+
+    [Fact]
+    public async Task GetDeviceOptionsAsync_ReturnsDistinctStoreDevicePairsInOrder()
+    {
+        await InsertAsync(1, "S02", "POS-2", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(2, "S01", "POS-9", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(3, "S01", "POS-1", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(4, "S01", "POS-1", new DateTime(2026, 8, 2), DateTime.UtcNow, "");
+
+        var result = await CreateService().GetDeviceOptionsAsync();
+
+        Assert.Equal(
+            ["S01/POS-1", "S01/POS-9", "S02/POS-2"],
+            result.Select(item => $"{item.StoreCode}/{item.DeviceCode}"));
     }
 
     [Fact]
@@ -883,6 +948,10 @@ public sealed class LinklySettlementControllerContractTests
             LinklySettlementQueryDto request,
             CancellationToken cancellationToken = default) =>
             throw new LinklySettlementRequestException("INVALID_QUERY", "查询无效");
+
+        public Task<IReadOnlyList<LinklySettlementDeviceOptionDto>> GetDeviceOptionsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LinklySettlementDeviceOptionDto>>([]);
 
         public Task<LinklySettlementDetailDto?> GetDetailAsync(
             long id,

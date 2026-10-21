@@ -20,6 +20,15 @@ public sealed class LinklySettlementQueryDto
     public int PageSize { get; set; } = 20;
 }
 
+/// <summary>
+/// 结算筛选用的「门店 + 设备」候选，来自已同步到服务器的结算记录。
+/// </summary>
+public sealed class LinklySettlementDeviceOptionDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string DeviceCode { get; set; } = string.Empty;
+}
+
 public class LinklySettlementAmountDto
 {
     public string CurrencyCode { get; set; } = "AUD";

@@ -6762,9 +6762,9 @@
     "filters": {
       "businessDate": "营业日期",
       "store": "门店",
-      "storePlaceholder": "输入门店编码",
+      "storePlaceholder": "选择或搜索门店",
       "device": "设备",
-      "devicePlaceholder": "输入设备编码",
+      "devicePlaceholder": "选择或搜索设备",
       "connectionMode": "连接模式",
       "environment": "环境",
       "status": "结算状态",

@@ -6762,9 +6762,9 @@
     "filters": {
       "businessDate": "Business Date",
       "store": "Store",
-      "storePlaceholder": "Enter store code",
+      "storePlaceholder": "Select or search a store",
       "device": "Device",
-      "devicePlaceholder": "Enter device code",
+      "devicePlaceholder": "Select or search a device",
       "connectionMode": "Connection Mode",
       "environment": "Environment",
       "status": "Settlement Status",
