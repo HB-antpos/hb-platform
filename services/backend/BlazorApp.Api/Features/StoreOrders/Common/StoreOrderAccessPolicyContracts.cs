@@ -104,6 +104,13 @@ public interface IStoreOrderAccessPolicy
     /// </summary>
     Task<StoreOrderAccessDecision> RequireStartPickingAsync(string orderGuid);
 
+    /// <summary>
+    /// 当前账号是否持有 Warehouse.StoreOrderReturn（分店订单退货）。该权限没有别名：
+    /// 持有 Warehouse.Manage / ManageOrders 不会自动具备，需管理员显式授予（真正的管理员角色由授权层放行）。
+    /// 退货行的保存校验用它判定能否录入、修改、删除退货行。
+    /// </summary>
+    Task<bool> CanRecordStoreOrderReturnsAsync();
+
     Task<StoreOrderAccessDecision> RequireOrderEditAsync(
         string orderGuid,
         string? storeCode = null

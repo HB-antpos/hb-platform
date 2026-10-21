@@ -8,6 +8,7 @@ export type StoreOrderDetailTableColumnKey =
   | 'allocQuantity'
   | 'importPrice'
   | 'allocatedImportAmount'
+  | 'returnInfo'
   | 'orderVolume'
   | 'allocVolume'
   | 'isActive'

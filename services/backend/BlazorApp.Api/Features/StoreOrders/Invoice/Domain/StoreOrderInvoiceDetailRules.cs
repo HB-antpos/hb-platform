@@ -1,3 +1,4 @@
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Shared.DTOs;
 
 namespace BlazorApp.Api.Features.StoreOrders.Invoice.Domain;
@@ -63,6 +64,9 @@ internal sealed class StoreOrderInvoiceLineSnapshot
     public decimal? WarehouseImportPrice { get; set; }
     public decimal? StoredImportAmount { get; set; }
     public decimal? RetailPrice { get; set; }
+    public string? ReturnReason { get; set; }
+    public int? ReturnDisposition { get; set; }
+    public string? ReturnNote { get; set; }
 }
 
 internal static class StoreOrderInvoiceDetailRules
@@ -70,6 +74,7 @@ internal static class StoreOrderInvoiceDetailRules
     internal static StoreOrderCartDto ToDto(StoreOrderInvoiceDetailSnapshot detail)
     {
         var items = detail.Lines.Select(ToItemDto).ToList();
+        var netAmount = items.Sum(item => item.AllocatedImportAmount);
         return new StoreOrderCartDto
         {
             OrderGUID = detail.Header.OrderGuid,
@@ -80,8 +85,21 @@ internal static class StoreOrderInvoiceDetailRules
             TotalQuantity = (int)items.Sum(item => item.Quantity),
             // 订货金额保留历史持久值优先的规则，不能用发货数量重算。
             TotalImportAmount = items.Sum(item => item.ImportAmount),
-            // 发票金额始终按实际配货数量计算，与订货金额保持独立。
-            TotalAllocatedImportAmount = items.Sum(item => item.AllocatedImportAmount),
+            // 发票金额始终按实际配货数量计算，与订货金额保持独立；退货行（发货数量为负）按原价冲减，
+            // 所以这是净额：TotalAllocatedImportAmount = TotalShipImportAmount + TotalReturnImportAmount。
+            TotalAllocatedImportAmount = netAmount,
+            TotalShipImportAmount = items
+                .Where(item => (item.AllocQuantity ?? 0m) > 0m)
+                .Sum(item => item.AllocatedImportAmount),
+            TotalReturnImportAmount = items
+                .Where(item => StoreOrderReturnRules.IsReturnLine(item.AllocQuantity))
+                .Sum(item => item.AllocatedImportAmount),
+            ReturnLineCount = items.Count(item => StoreOrderReturnRules.IsReturnLine(item.AllocQuantity)),
+            TotalReturnQuantity = items
+                .Where(item => StoreOrderReturnRules.IsReturnLine(item.AllocQuantity))
+                .Sum(item => -(item.AllocQuantity ?? 0m)),
+            // 单据类型按净额判定（净额 < 0 为退款单），邮件主题、附件名、前端发票页共用同一判定。
+            DocumentType = StoreOrderReturnRules.ResolveDocumentType(netAmount),
             ShippingFee = detail.Header.ShippingFee,
             Remarks = detail.Header.Remarks,
             StoreAddress = detail.Header.StoreAddress,
@@ -118,6 +136,9 @@ internal static class StoreOrderInvoiceDetailRules
             ImportAmount = line.StoredImportAmount ?? (importPrice * quantity),
             AllocatedImportAmount = importPrice * allocatedQuantity,
             RRP = line.RetailPrice,
+            ReturnReason = line.ReturnReason,
+            ReturnDisposition = line.ReturnDisposition,
+            ReturnNote = line.ReturnNote,
         };
     }
 }

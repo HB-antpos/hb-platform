@@ -191,6 +191,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyUserNamePartsAsync(CancellationToken cancellationToken);
 
+    Task ApplyWarehouseOrderReturnFieldsAsync(CancellationToken cancellationToken);
+
+    Task VerifyWarehouseOrderReturnFieldsAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1170,6 +1174,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             UserNamePartsSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyWarehouseOrderReturnFieldsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderReturnFieldsSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/长度不符的列不会被误标为完成。
+        await VerifyWarehouseOrderReturnFieldsAsync(cancellationToken);
+    }
+
+    public async Task VerifyWarehouseOrderReturnFieldsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderReturnFieldsSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

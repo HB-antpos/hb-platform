@@ -350,7 +350,15 @@ export interface StoreOrderSyncJobResult {
   errors?: string[]
 }
 
-export type StoreOrderDetailStatFilter = 'all' | 'orderedNotShipped' | 'shippedWithoutOrder'
+/** 退货原因码（与后端一致，见方案 §9）。 */
+export type StoreOrderReturnReason = 'damaged' | 'wrongItem' | 'overShipped' | 'quality' | 'nearExpiry' | 'other'
+/** 退货处置：0 回仓可售，1 报损不回库。 */
+export type StoreOrderReturnDisposition = 0 | 1
+/** 发票 / 退款单：净额 < 0 时为 creditNote。 */
+export type StoreOrderDocumentType = 'invoice' | 'creditNote'
+
+// 'return' = 退货行（allocQuantity < 0），后端 statFilter="return" 按退货行过滤。
+export type StoreOrderDetailStatFilter = 'all' | 'orderedNotShipped' | 'shippedWithoutOrder' | 'return'
 
 export type StoreOrderDetailSortField =
   | 'itemNumber'
@@ -410,9 +418,16 @@ export interface StoreOrderDetailLine {
   isActive: boolean
   locationCode?: string
   rrp?: number
+  /** 退货行（allocQuantity < 0）才有值：退货原因码，取值见 STORE_ORDER_RETURN_REASONS。 */
+  returnReason?: StoreOrderReturnReason | null
+  /** 退货处置：0 回仓可售 / 1 报损不回库；仅记录，不联动库存。 */
+  returnDisposition?: StoreOrderReturnDisposition | null
+  returnNote?: string | null
 }
 
 export interface StoreOrderInvoiceEmailSentInfo {
+  /** 已发送邮件对应的单据类型；旧后端不返回，按发票处理。 */
+  documentType?: StoreOrderDocumentType
   hasSent: boolean
   sentAt?: string
   toEmail?: string
@@ -444,6 +459,16 @@ export interface StoreOrderDetail {
   invoiceEmailSentInfo?: StoreOrderInvoiceEmailSentInfo
   orderedNotShippedCount?: number
   shippedWithoutOrderCount?: number
+  /** 正发货行 allocQuantity × importPrice 之和（≥ 0）；totalAllocatedImportAmount 仍是净额。 */
+  totalShipImportAmount?: number
+  /** 退货行金额之和（≤ 0）。 */
+  totalReturnImportAmount?: number
+  /** 退货行数。 */
+  returnLineCount?: number
+  /** 退回件数（正数）。 */
+  totalReturnQuantity?: number
+  /** 单据类型：净额 < 0 为退款单；旧后端不返回时前端按净额推导。 */
+  documentType?: StoreOrderDocumentType
   items: StoreOrderDetailLine[]
 }
 
@@ -637,7 +662,11 @@ export type StoreOrderScanStatus =
 export interface AddStoreOrderLinePayload {
   orderGUID: string
   productCode: string
+  /** 加入商品：正数按原行为；负数 = 一步建出退货行（需 Warehouse.StoreOrderReturn 且必须带 returnReason）。 */
   quantity: number
+  returnReason?: StoreOrderReturnReason
+  returnDisposition?: StoreOrderReturnDisposition
+  returnNote?: string
 }
 
 export interface BatchAddStoreOrderLinePayload {
@@ -646,6 +675,9 @@ export interface BatchAddStoreOrderLinePayload {
     productCode: string
     quantity: number
     importPrice?: number
+    returnReason?: StoreOrderReturnReason
+    returnDisposition?: StoreOrderReturnDisposition
+    returnNote?: string
   }>
 }
 
@@ -655,6 +687,9 @@ export interface UpdateStoreOrderLinePayload {
   allocQuantity: number
   importPrice?: number
   syncImportPrice?: boolean
+  returnReason?: StoreOrderReturnReason
+  returnDisposition?: StoreOrderReturnDisposition
+  returnNote?: string
 }
 
 export interface RemoveStoreOrderLinePayload {
@@ -667,9 +702,14 @@ export interface BatchUpdateStoreOrderLinePayload {
   items: Array<{
     detailGUID?: string
     productCode: string
+    /** 批量更新接口里的 quantity 表示发货数（allocQuantity）；退货行为负数。 */
     quantity?: number
     importPrice?: number
     syncImportPrice?: boolean
+    /** 仅发货数为负（退货行）时携带；缺 returnReason 后端会拒绝。 */
+    returnReason?: StoreOrderReturnReason
+    returnDisposition?: StoreOrderReturnDisposition
+    returnNote?: string
   }>
 }
 

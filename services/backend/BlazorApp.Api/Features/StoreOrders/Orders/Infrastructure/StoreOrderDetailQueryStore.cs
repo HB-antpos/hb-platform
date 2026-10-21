@@ -277,6 +277,14 @@ internal sealed class StoreOrderDetailQueryStore(
                     (detail.Quantity ?? 0) <= 0 && (detail.AllocQuantity ?? 0) > 0
             );
         }
+        else if (statFilter == "return")
+        {
+            // 退货行：发货数量为负（订货数量恒为 0）。直接比较，NULL 发货数量按 SQL 三值逻辑不命中。
+            detailQuery = detailQuery.Where(
+                (detail, product, warehouseProduct, domesticProduct) =>
+                    detail.AllocQuantity < 0
+            );
+        }
         else if (statFilter is "active" or "1" or "true")
         {
             detailQuery = detailQuery.Where(
@@ -397,6 +405,9 @@ internal sealed class StoreOrderDetailQueryStore(
                     Price = detail.OEMPrice ?? 0,
                     Quantity = detail.Quantity ?? 0,
                     AllocQuantity = detail.AllocQuantity,
+                    ReturnReason = detail.ReturnReason,
+                    ReturnDisposition = detail.ReturnDisposition,
+                    ReturnNote = detail.ReturnNote,
                     Amount = detail.OEMAmount ?? 0,
                     ImportPrice = detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0),
                     // 订货金额与发货金额是两个独立业务量，不能互相覆盖。
@@ -489,6 +500,9 @@ internal sealed class StoreOrderDetailQueryStore(
                             Price = detail.OEMPrice ?? 0,
                             Quantity = detail.Quantity ?? 0,
                             AllocQuantity = detail.AllocQuantity,
+                            ReturnReason = detail.ReturnReason,
+                            ReturnDisposition = detail.ReturnDisposition,
+                            ReturnNote = detail.ReturnNote,
                             Amount = detail.OEMAmount ?? 0,
                             ImportPrice = detail.ImportPrice
                                 ?? (warehouseProduct.ImportPrice ?? 0),
@@ -536,70 +550,7 @@ internal sealed class StoreOrderDetailQueryStore(
         FillVolumeFields(pageDetails);
 
         // 汇总按整单计算，不受当前页和筛选条件影响。
-        var summary = await _db.Queryable<WareHouseOrderDetails>()
-            .LeftJoin<Product>((detail, product) =>
-                detail.ProductCode == product.ProductCode
-            )
-            .LeftJoin<WarehouseProduct>((detail, product, warehouseProduct) =>
-                detail.ProductCode == warehouseProduct.ProductCode
-            )
-            .LeftJoin<DomesticProduct>(
-                (detail, product, warehouseProduct, domesticProduct) =>
-                    warehouseProduct.ProductCode == domesticProduct.ProductCode
-            )
-            .Where(detail =>
-                detail.OrderGUID == order.Order.OrderGUID && !detail.IsDeleted
-            )
-            .Select((detail, product, warehouseProduct, domesticProduct) => new
-            {
-                TotalQuantity = SqlFunc.AggregateSum(detail.Quantity ?? 0),
-                TotalAllocQuantity = SqlFunc.AggregateSum(detail.AllocQuantity ?? 0),
-                TotalSKU = SqlFunc.AggregateDistinctCount(detail.ProductCode),
-                TotalImportAmount = SqlFunc.AggregateSum(
-                    detail.ImportAmount
-                        ?? (
-                            (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
-                            * (detail.Quantity ?? 0)
-                        )
-                ),
-                TotalAllocatedImportAmount = SqlFunc.AggregateSum(
-                    (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
-                    * (detail.AllocQuantity ?? 0)
-                ),
-                TotalOrderVolume = SqlFunc.AggregateSum(
-                    (
-                        domesticProduct.PackingQuantity > 0
-                            ? domesticProduct.UnitVolume
-                                / domesticProduct.PackingQuantity
-                            : domesticProduct.UnitVolume
-                    ) * (detail.Quantity ?? 0)
-                ),
-                TotalAllocVolume = SqlFunc.AggregateSum(
-                    (
-                        domesticProduct.PackingQuantity > 0
-                            ? domesticProduct.UnitVolume
-                                / domesticProduct.PackingQuantity
-                            : domesticProduct.UnitVolume
-                    ) * (detail.AllocQuantity ?? 0)
-                ),
-                OrderedNotShippedCount = SqlFunc.AggregateCount(
-                    SqlFunc.IIF(
-                        (detail.Quantity ?? 0) > 0
-                            && (detail.AllocQuantity ?? 0) == 0,
-                        detail.DetailGUID,
-                        null
-                    )
-                ),
-                ShippedWithoutOrderCount = SqlFunc.AggregateCount(
-                    SqlFunc.IIF(
-                        (detail.Quantity ?? 0) <= 0
-                            && (detail.AllocQuantity ?? 0) > 0,
-                        detail.DetailGUID,
-                        null
-                    )
-                ),
-            })
-            .FirstAsync();
+        var summary = await BuildSummaryQuery(_db, order.Order.OrderGUID).FirstAsync();
         var latestInvoiceEmailSentRecord = await _db
             .Queryable<StoreOrderInvoiceEmailSendRecord>()
             .Where(record => record.StoreOrderUuid == order.Order.OrderGUID)
@@ -620,6 +571,14 @@ internal sealed class StoreOrderDetailQueryStore(
             TotalSKU = summary?.TotalSKU ?? 0,
             TotalImportAmount = summary?.TotalImportAmount ?? 0,
             TotalAllocatedImportAmount = summary?.TotalAllocatedImportAmount ?? 0,
+            TotalShipImportAmount = summary?.TotalShipImportAmount ?? 0,
+            TotalReturnImportAmount = summary?.TotalReturnImportAmount ?? 0,
+            ReturnLineCount = summary?.ReturnLineCount ?? 0,
+            TotalReturnQuantity = summary?.TotalReturnQuantity ?? 0,
+            // 单据类型按净额判定：与发票接口、邮件、附件共用 StoreOrderReturnRules.ResolveDocumentType。
+            DocumentType = StoreOrderReturnRules.ResolveDocumentType(
+                summary?.TotalAllocatedImportAmount ?? 0
+            ),
             TotalVolume = summary?.TotalOrderVolume ?? 0,
             TotalOrderVolume = summary?.TotalOrderVolume ?? 0,
             TotalAllocVolume = summary?.TotalAllocVolume ?? 0,
@@ -649,6 +608,130 @@ internal sealed class StoreOrderDetailQueryStore(
             ShippedWithoutOrderCount = summary?.ShippedWithoutOrderCount ?? 0,
         };
         return new ApiResponse<StoreOrderDetailDto?> { Success = true, Data = dto };
+    }
+
+    /// <summary>
+    /// 整单汇总查询（单独成方法，便于做 SQL Server 方言 SQL 文本断言）。
+    /// 发货金额口径：进口价 × 发货数量。TotalAllocatedImportAmount 是净额，
+    /// = TotalShipImportAmount（发货数量 &gt; 0 的行）+ TotalReturnImportAmount（发货数量 &lt; 0 的退货行，&lt;= 0）。
+    /// 分行用 SUM(CASE WHEN 发货数量 &gt; 0 …)：条件里发货数量一律 (AllocQuantity ?? 0)，不写 HasValue 之类会被翻成 &lt;&gt;'' 的写法。
+    /// </summary>
+    internal static ISugarQueryable<StoreOrderDetailSummaryRow> BuildSummaryQuery(
+        ISqlSugarClient db,
+        string orderGuid
+    )
+    {
+        return db.Queryable<WareHouseOrderDetails>()
+            .LeftJoin<Product>((detail, product) =>
+                detail.ProductCode == product.ProductCode
+            )
+            .LeftJoin<WarehouseProduct>((detail, product, warehouseProduct) =>
+                detail.ProductCode == warehouseProduct.ProductCode
+            )
+            .LeftJoin<DomesticProduct>(
+                (detail, product, warehouseProduct, domesticProduct) =>
+                    warehouseProduct.ProductCode == domesticProduct.ProductCode
+            )
+            .Where(detail => detail.OrderGUID == orderGuid && !detail.IsDeleted)
+            .Select((detail, product, warehouseProduct, domesticProduct) =>
+                new StoreOrderDetailSummaryRow
+                {
+                    TotalQuantity = SqlFunc.AggregateSum(detail.Quantity ?? 0),
+                    TotalAllocQuantity = SqlFunc.AggregateSum(detail.AllocQuantity ?? 0),
+                    TotalSKU = SqlFunc.AggregateDistinctCount(detail.ProductCode),
+                    TotalImportAmount = SqlFunc.AggregateSum(
+                        detail.ImportAmount
+                            ?? (
+                                (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
+                                * (detail.Quantity ?? 0)
+                            )
+                    ),
+                    TotalAllocatedImportAmount = SqlFunc.AggregateSum(
+                        (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
+                        * (detail.AllocQuantity ?? 0)
+                    ),
+                    TotalShipImportAmount = SqlFunc.AggregateSum(
+                        SqlFunc.IIF(
+                            detail.AllocQuantity > 0,
+                            (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
+                                * (detail.AllocQuantity ?? 0),
+                            0m
+                        )
+                    ),
+                    TotalReturnImportAmount = SqlFunc.AggregateSum(
+                        SqlFunc.IIF(
+                            detail.AllocQuantity < 0,
+                            (detail.ImportPrice ?? (warehouseProduct.ImportPrice ?? 0))
+                                * (detail.AllocQuantity ?? 0),
+                            0m
+                        )
+                    ),
+                    ReturnLineCount = SqlFunc.AggregateCount(
+                        SqlFunc.IIF(
+                            detail.AllocQuantity < 0,
+                            detail.DetailGUID,
+                            null
+                        )
+                    ),
+                    // 退回件数以正数表示（allocQuantity 为负，取反）。
+                    TotalReturnQuantity = SqlFunc.AggregateSum(
+                        SqlFunc.IIF(
+                            detail.AllocQuantity < 0,
+                            0m - (detail.AllocQuantity ?? 0),
+                            0m
+                        )
+                    ),
+                    TotalOrderVolume = SqlFunc.AggregateSum(
+                        (
+                            domesticProduct.PackingQuantity > 0
+                                ? domesticProduct.UnitVolume
+                                    / domesticProduct.PackingQuantity
+                                : domesticProduct.UnitVolume
+                        ) * (detail.Quantity ?? 0)
+                    ),
+                    TotalAllocVolume = SqlFunc.AggregateSum(
+                        (
+                            domesticProduct.PackingQuantity > 0
+                                ? domesticProduct.UnitVolume
+                                    / domesticProduct.PackingQuantity
+                                : domesticProduct.UnitVolume
+                        ) * (detail.AllocQuantity ?? 0)
+                    ),
+                    OrderedNotShippedCount = SqlFunc.AggregateCount(
+                        SqlFunc.IIF(
+                            (detail.Quantity ?? 0) > 0
+                                && (detail.AllocQuantity ?? 0) == 0,
+                            detail.DetailGUID,
+                            null
+                        )
+                    ),
+                    ShippedWithoutOrderCount = SqlFunc.AggregateCount(
+                        SqlFunc.IIF(
+                            (detail.Quantity ?? 0) <= 0
+                                && (detail.AllocQuantity ?? 0) > 0,
+                            detail.DetailGUID,
+                            null
+                        )
+                    ),
+                }
+            );
+    }
+
+    internal sealed class StoreOrderDetailSummaryRow
+    {
+        public decimal TotalQuantity { get; set; }
+        public decimal TotalAllocQuantity { get; set; }
+        public int TotalSKU { get; set; }
+        public decimal TotalImportAmount { get; set; }
+        public decimal TotalAllocatedImportAmount { get; set; }
+        public decimal TotalShipImportAmount { get; set; }
+        public decimal TotalReturnImportAmount { get; set; }
+        public int ReturnLineCount { get; set; }
+        public decimal TotalReturnQuantity { get; set; }
+        public decimal? TotalOrderVolume { get; set; }
+        public decimal? TotalAllocVolume { get; set; }
+        public int OrderedNotShippedCount { get; set; }
+        public int ShippedWithoutOrderCount { get; set; }
     }
 
     private async Task FillLocationCodesAsync(List<StoreOrderCartItemDto> items)

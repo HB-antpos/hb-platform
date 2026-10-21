@@ -845,6 +845,10 @@
       "name": "Start picking on print",
       "description": "Web page /warehouse/store-order/picking/:id - printing or downloading the picking sheet moves the order from Submitted to Picking. Granted separately from order editing; not included with Manage warehouse."
     },
+    "Warehouse.StoreOrderReturn": {
+      "name": "Store order returns",
+      "description": "Web page /warehouse/store-orders order detail - record returned goods as a negative ship quantity (returns reduce the amount; a negative net total becomes a credit note). Nobody has it by default; granted manually and not included with Manage warehouse."
+    },
     "Warehouse.ManageProducts": {
       "name": "Manage warehouse products",
       "description": "Manage warehouse products, retail price changes and product grades on the web admin and in the app."

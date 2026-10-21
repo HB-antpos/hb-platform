@@ -23,7 +23,9 @@ internal static class StoreOrderOrderManagementServiceCollectionExtensions
             new StoreOrderManagementPersistence(
                 serviceProvider.GetRequiredService<SqlSugarContext>(),
                 serviceProvider.GetRequiredService<IStoreOrderActorContext>(),
-                serviceProvider.GetRequiredService<IStoreOrderProductCostCoordinator>()
+                serviceProvider.GetRequiredService<IStoreOrderProductCostCoordinator>(),
+                // 退货权限判定由访问策略切片注册；缺失时按「无权限」处理（只会更严）。
+                serviceProvider.GetService<IStoreOrderReturnPermission>()
             )
         );
         services.AddScoped<IStoreOrderLineCommandStore>(serviceProvider =>

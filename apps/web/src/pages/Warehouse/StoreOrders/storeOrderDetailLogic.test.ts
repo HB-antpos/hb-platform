@@ -125,6 +125,14 @@ runTest('发货差异：未发、少发 N、主动配货 +N、一致', () => {
   assert.deepEqual(describeStoreOrderDetailAllocDiff(0, 0), { kind: 'match' })
 })
 
+runTest('发货差异：订货 0、发货为负是退货行，不再被判成少发；订货 > 0 时不归退货', () => {
+  assert.deepEqual(describeStoreOrderDetailAllocDiff(0, -3), { kind: 'return', amount: 3 })
+  assert.deepEqual(describeStoreOrderDetailAllocDiff(undefined, -5), { kind: 'return', amount: 5 })
+  assert.deepEqual(describeStoreOrderDetailAllocDiff(0, -0.5), { kind: 'return', amount: 0.5 })
+  // 订货 > 0 的行本就不允许负数；万一出现仍沿用「少发」，不静默当成退货。
+  assert.deepEqual(describeStoreOrderDetailAllocDiff(4, -1), { kind: 'short', amount: 5 })
+})
+
 runTest('未保存修改统计按整单保存 payload 计数：行数、发货数处数、进口价处数', () => {
   assert.deepEqual(summarizeStoreOrderEditedLines([]), { lineCount: 0, allocQuantityCount: 0, importPriceCount: 0 })
   assert.deepEqual(
@@ -143,6 +151,17 @@ runTest('发货进度：百分比四舍五入，超过 100% 时进度条封顶�
   assert.deepEqual(computeStoreOrderShipProgress(0, 5), { percent: null, barPercent: 100 })
   assert.deepEqual(computeStoreOrderShipProgress(0, 0), { percent: null, barPercent: 0 })
   assert.deepEqual(computeStoreOrderShipProgress(undefined, undefined), { percent: null, barPercent: 0 })
+})
+
+runTest('发货进度只统计正数：净件数加回退回件数；净件数为负时进度不为负', () => {
+  // 订货 10、发货 12、退回 7 → 净件数 5，加回退回 7 还原成发出 12 件。
+  assert.deepEqual(computeStoreOrderShipProgress(10, 5, 7), { percent: 120, barPercent: 100 })
+  assert.deepEqual(computeStoreOrderShipProgress(0, 5, 7), { percent: null, barPercent: 100 })
+  // 只含退货行的单：净 −7、退回 7 → 发货 0，不显示 100%。
+  assert.deepEqual(computeStoreOrderShipProgress(0, -7, 7), { percent: null, barPercent: 0 })
+  assert.deepEqual(computeStoreOrderShipProgress(10, -7, 0), { percent: 0, barPercent: 0 })
+  // 不传退回件数时与改动前一致。
+  assert.deepEqual(computeStoreOrderShipProgress(1482, 1311), { percent: 88, barPercent: 88 })
 })
 
 runTest('已生效筛选条：文本、数值区间、上下架各成一个标签，并带上要清掉的键', () => {

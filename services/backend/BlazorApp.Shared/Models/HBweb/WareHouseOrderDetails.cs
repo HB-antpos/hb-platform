@@ -55,6 +55,25 @@ namespace BlazorApp.Shared.Models
         public decimal? AllocQuantity { get; set; }
 
         /// <summary>
+        /// 退货原因码（仅退货行有值）：damaged / wrongItem / overShipped / quality / nearExpiry / other。
+        /// 退货行 = AllocQuantity &lt; 0 且 Quantity = 0。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 32)]
+        public string? ReturnReason { get; set; }
+
+        /// <summary>
+        /// 退货处置（仅作记录，不联动库存）：0 回仓可售，1 报损不回库。
+        /// </summary>
+        [SugarColumn(IsNullable = true)]
+        public int? ReturnDisposition { get; set; }
+
+        /// <summary>
+        /// 退货备注（仅退货行）。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 200)]
+        public string? ReturnNote { get; set; }
+
+        /// <summary>
         /// 上次成本
         /// </summary>
         [SugarColumn(IsNullable = true, DecimalDigits = 2)]

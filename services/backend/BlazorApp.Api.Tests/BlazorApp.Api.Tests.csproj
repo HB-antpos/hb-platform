@@ -118,6 +118,11 @@
     <Compile Include="DomesticProductGridFilterTests.cs" />
     <Compile Include="DomesticProductDtoValidationTests.cs" />
     <Compile Include="StoreOrderStartPickingAccessTests.cs" />
+    <Compile Include="StoreOrderReturnRulesTests.cs" />
+    <Compile Include="StoreOrderReturnLineSaveTests.cs" />
+    <Compile Include="StoreOrderReturnPickingProtectionTests.cs" />
+    <Compile Include="StoreOrderReturnSummaryAndInvoiceTests.cs" />
+    <Compile Include="StoreOrderReturnPermissionTests.cs" />
     <Compile Include="ChinaSupplierSortTests.cs" />
     <Compile Include="ProductPrefixCodeUpdateSortOrderTests.cs" />
     <Compile Include="EmployeeProfileServiceTests.cs" />

@@ -27,7 +27,12 @@ internal sealed class BatchUpdateOrderLineValidator
                     item.ProductCode,
                     item.Quantity,
                     item.ImportPrice,
-                    item.SyncImportPrice == true
+                    item.SyncImportPrice == true,
+                    new StoreOrderReturnLineRequest(
+                        item.ReturnReason,
+                        item.ReturnDisposition,
+                        item.ReturnNote
+                    )
                 )
             )
             .ToList();

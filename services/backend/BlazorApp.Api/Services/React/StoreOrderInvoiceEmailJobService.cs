@@ -109,11 +109,22 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 var bundle = attachmentResult.Data;
+                // 单据类型由附件服务按净额判定（净额 < 0 为退款单）；未自带主题 / 正文时按类型切换默认文案，
+                // 防止「退款单发成发票主题」。前端发信弹窗自带的主题以请求为准。
+                var isCreditNote = string.Equals(
+                    bundle.DocumentType,
+                    "creditNote",
+                    StringComparison.Ordinal
+                );
                 var subject = string.IsNullOrWhiteSpace(jobState.Request.Subject)
-                    ? $"分店订货发票 {bundle.OrderNo ?? bundle.OrderGUID}"
+                    ? isCreditNote
+                        ? $"Credit note {bundle.OrderNo ?? bundle.OrderGUID}"
+                        : $"分店订货发票 {bundle.OrderNo ?? bundle.OrderGUID}"
                     : jobState.Request.Subject.Trim();
                 var body = string.IsNullOrWhiteSpace(jobState.Request.Body)
-                    ? "您好，附件为本次分店订货发票，请查收。"
+                    ? isCreditNote
+                        ? "您好，附件为本次分店订货退款单（Adjustment Note），请查收。"
+                        : "您好，附件为本次分店订货发票，请查收。"
                     : jobState.Request.Body.Trim();
                 var result = await invoiceEmailService.SendInvoiceAsync(
                     new StoreOrderInvoiceEmailMessage

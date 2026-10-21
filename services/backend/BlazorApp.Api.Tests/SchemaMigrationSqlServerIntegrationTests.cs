@@ -1051,6 +1051,84 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 分店订单退货三列_依赖原表_可重复执行_不丢存量数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表不存在：拒绝执行，提示先跑基线。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql));
+        Assert.Equal(53900, missingTable.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53900, missingVerify.Number);
+
+        // 迁移前形态：没有退货三列的订单明细表与一行存量明细（含一条负发货的历史脏数据也不应被改动）。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.WareHouseOrderDetails
+            (
+                DetailGUID nvarchar(200) NOT NULL PRIMARY KEY,
+                OrderGUID nvarchar(50) NULL,
+                AllocQuantity decimal(18,2) NULL
+            );
+            INSERT dbo.WareHouseOrderDetails (DetailGUID, OrderGUID, AllocQuantity) VALUES (N'd-1', N'o-1', 5);
+            """);
+        // 缺列时门禁报 53901。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+        // 写入退货字段后重复执行：不得丢数据；存量明细三列为 NULL（迁移不回填）。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.WareHouseOrderDetails (DetailGUID, OrderGUID, AllocQuantity, ReturnReason, ReturnDisposition, ReturnNote)
+            VALUES (N'd-2', N'o-1', -3, N'damaged', 1, N'box crushed');
+            """);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.WareHouseOrderDetails WHERE DetailGUID = N'd-1' AND AllocQuantity = 5
+                AND ReturnReason IS NULL AND ReturnDisposition IS NULL AND ReturnNote IS NULL) <> 1
+                THROW 53910, 'Existing detail row should keep its data after the migration.', 1;
+            IF (SELECT COUNT(*) FROM dbo.WareHouseOrderDetails WHERE DetailGUID = N'd-2' AND ReturnReason = N'damaged'
+                AND ReturnDisposition = 1 AND ReturnNote = N'box crushed') <> 1
+                THROW 53911, 'Return line should keep its return fields after re-running the migration.', 1;
+            """);
+
+        // 长度漂移与类型漂移都要被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnReason nvarchar(64) NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnReason nvarchar(32) NULL;");
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnDisposition bigint NULL;");
+        var typeMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, typeMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 分店订单退货三列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 关键约束：CheckCoreAsync 只查账本、不比较实体与库列，实体 [SugarColumn(Length = 32/200)] 必须与迁移 SQL 的
+        // nvarchar(32) / int / nvarchar(200) NULL 一致。这里让 SqlSugar 按实体直接建表，再用迁移门禁验证两边没有漂移。
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.WareHouseOrderDetails>();
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+
+        // CodeFirst 抢先建列后，迁移 ApplySql 是空操作且门禁仍然通过。
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
