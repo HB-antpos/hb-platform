@@ -3161,7 +3161,7 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyPricesByScopeAsync_仅修改进货价_不应同步旧零售价()
+    public async Task ApplyPricesByScopeAsync_仅修改进货价_只落明细不回写仓库表()
     {
         await SeedDetailAndProductAsync(
             "D-APPLY-IMPORT-ONLY",
@@ -3195,18 +3195,19 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
             .ToListAsync();
 
         Assert.Equal(1, totalUpdated);
+        // 批量改价改的是「本次」价：只落货柜明细，不回写仓库表、商品主档和分店表。
         Assert.Equal(8.88m, detail.ImportPrice);
         Assert.Equal(7.77m, detail.OEMPrice);
-        Assert.Equal(8.88m, warehouseProduct.ImportPrice);
+        Assert.Equal(1.11m, warehouseProduct.ImportPrice);
         Assert.Equal(2.22m, warehouseProduct.OEMPrice);
-        Assert.Equal(8.88m, product.PurchasePrice);
+        Assert.Equal(1.11m, product.PurchasePrice);
         Assert.Equal(2.22m, product.RetailPrice);
-        Assert.All(storeRetailPrices, row => Assert.Equal(8.88m, row.PurchasePrice));
+        Assert.All(storeRetailPrices, row => Assert.Equal(1.11m, row.PurchasePrice));
         Assert.All(storeRetailPrices, row => Assert.Equal(2.22m, row.StoreRetailPriceValue));
     }
 
     [Fact]
-    public async Task ApplyPricesByScopeAsync_仅修改零售价_不应同步旧进货价()
+    public async Task ApplyPricesByScopeAsync_仅修改零售价_只落明细不回写仓库表()
     {
         await SeedDetailAndProductAsync(
             "D-APPLY-OEM-ONLY",
@@ -3240,12 +3241,13 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
             .ToListAsync();
 
         Assert.Equal(1, totalUpdated);
+        // 批量改价改的是「本次」零售价：只落货柜明细，仓库零售价 / 商品主档零售价保持不变。
         Assert.Equal(4.44m, detail.ImportPrice);
         Assert.Equal(9.99m, detail.OEMPrice);
         Assert.Equal(1.11m, warehouseProduct.ImportPrice);
-        Assert.Equal(9.99m, warehouseProduct.OEMPrice);
+        Assert.Equal(2.22m, warehouseProduct.OEMPrice);
         Assert.Equal(1.11m, product.PurchasePrice);
-        Assert.Equal(9.99m, product.RetailPrice);
+        Assert.Equal(2.22m, product.RetailPrice);
         Assert.All(storeRetailPrices, row => Assert.Equal(1.11m, row.PurchasePrice));
         Assert.All(storeRetailPrices, row => Assert.Equal(2.22m, row.StoreRetailPriceValue));
     }
@@ -3407,7 +3409,7 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyPricesByScopeAsync_有效预览令牌_应完整提交明细与关联价格()
+    public async Task ApplyPricesByScopeAsync_有效预览令牌_应只提交明细本次价()
     {
         await SeedDetailAndProductAsync("D-PREVIEW-COMMIT", "P-PREVIEW-COMMIT", englishName: "Old English");
         await SeedRelatedPriceRowsAsync("P-PREVIEW-COMMIT");
@@ -3449,10 +3451,11 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
             .ToListAsync();
 
         Assert.Equal(1, totalUpdated);
+        // 只落货柜明细；仓库表 / 主档 / 分店进货价保持种子值。
         Assert.Equal(8.88m, detail.ImportPrice);
-        Assert.Equal(8.88m, warehouse.ImportPrice);
-        Assert.Equal(8.88m, product.PurchasePrice);
-        Assert.All(storePrices, item => Assert.Equal(8.88m, item.PurchasePrice));
+        Assert.Equal(1.11m, warehouse.ImportPrice);
+        Assert.Equal(1.11m, product.PurchasePrice);
+        Assert.All(storePrices, item => Assert.Equal(1.11m, item.PurchasePrice));
     }
 
     [Fact]

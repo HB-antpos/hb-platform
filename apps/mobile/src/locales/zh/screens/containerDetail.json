@@ -170,8 +170,8 @@
     "productName": "中文名称",
     "englishName": "英文名称",
     "domesticPrice": "国内价",
-    "importPrice": "进口价",
-    "oemPrice": "零售价",
+    "importPrice": "本次进口价",
+    "oemPrice": "本次零售价",
     "floatRate": "浮率",
     "containerQuantity": "装柜数量",
     "middlePackQuantity": "中包数",
@@ -192,14 +192,19 @@
       "productName": "中文名称",
       "englishName": "英文名称",
       "domesticPrice": "国内价",
-      "importPrice": "进口价",
-      "oemPrice": "零售价",
+      "importPrice": "本次进口价",
+      "oemPrice": "本次零售价",
       "floatRate": "浮率",
       "containerQuantity": "装柜数量",
       "middlePackQuantity": "中包数",
-      "isActive": "启用状态"
+      "isActive": "启用状态",
+      "warehouseImportPrice": "已有进口价",
+      "warehouseOemPrice": "已有零售价"
     },
-    "validationLine": "{{field}}：{{message}}"
+    "validationLine": "{{field}}：{{message}}",
+    "warehouseImportPrice": "已有进口价",
+    "warehouseOemPrice": "已有零售价",
+    "warehousePriceHint": "已有商品只能改「已有进口价 / 已有零售价」：保存后回写仓库表、商品主档和分店表；「本次进口价 / 本次零售价」只是货柜明细里的建档数据，已有商品不可改。"
   },
   "retailSync": {
     "storesLabel": "同步分店零售价",
@@ -236,7 +241,8 @@
     "previewMessage": "服务器预览：影响 {{count}} 条。{{summary}}",
     "previewAffected": "服务器预览：影响 {{count}} 条",
     "confirmExecute": "确认执行",
-    "preview": "预览"
+    "preview": "预览",
+    "thisPriceHint": "只修改明细里的「本次进口价 / 本次零售价」（新商品建档数据），不会更新仓库、商品主档和分店表。已有商品的价格请在编辑明细里改「已有进口价 / 已有零售价」。"
   },
   "pushHq": {
     "confirmMessage": "将把已选 {{count}} 条明细发送到 HQ 数据库（更新全部可更新字段）。",

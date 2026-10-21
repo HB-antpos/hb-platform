@@ -3208,6 +3208,23 @@ namespace BlazorApp.Api.Services.React
                 : CloneWithRejectedDirectFields(update, rejectedFields);
         }
 
+        // 「已有价」语义：新字段 仓库进口价 / 仓库零售价 只回写仓库表、商品主档和分店表，不改明细自己的本次价；
+        // 旧客户端（如移动端）仍只传 进口价格 / 贴牌价格，沿用「明细 + 同步已有商品」的旧语义，所以同步侧读取时新字段优先、旧字段兜底。
+        private static decimal? SyncImportPrice(UpdateContainerDetailDto update) =>
+            update.仓库进口价 ?? update.进口价格;
+
+        private static decimal? SyncOemPrice(UpdateContainerDetailDto update) =>
+            update.仓库零售价 ?? update.贴牌价格;
+
+        private static string SyncImportField(UpdateContainerDetailDto update) =>
+            update.仓库进口价.HasValue ? "仓库进口价" : "进口价格";
+
+        private static string SyncOemField(UpdateContainerDetailDto update) =>
+            update.仓库零售价.HasValue ? "仓库零售价" : "贴牌价格";
+
+        private static bool HasWarehousePriceIntent(UpdateContainerDetailDto update) =>
+            update.仓库进口价.HasValue || update.仓库零售价.HasValue;
+
         private static IEnumerable<ContainerDetailFieldIntent> EnumerateFieldIntents(
             UpdateContainerDetailDto update
         )
@@ -3259,7 +3276,8 @@ namespace BlazorApp.Api.Services.React
         /// 服务端纯明细批量重算没有字段令牌，不应被无关的商品成本任务阻塞。
         /// </summary>
         private static bool RequiresRelatedSnapshotLock(UpdateContainerDetailDto update) =>
-            EnumerateFieldIntents(update).Any(intent =>
+            HasWarehousePriceIntent(update)
+            || EnumerateFieldIntents(update).Any(intent =>
                 IsRelatedSyncField(intent.Field)
                 && (
                     update.SkipRelatedProductSync != true
@@ -3349,6 +3367,10 @@ namespace BlazorApp.Api.Services.React
             IsActive = rejectedFields.Contains("IsActive") ? null : update.IsActive,
             备注 = rejectedFields.Contains("备注") ? null : update.备注,
             SkipRelatedProductSync = update.SkipRelatedProductSync,
+            仓库进口价 = rejectedFields.Contains("仓库进口价") ? null : update.仓库进口价,
+            仓库零售价 = rejectedFields.Contains("仓库零售价") ? null : update.仓库零售价,
+            ExpectedWarehouseImportPrice = update.ExpectedWarehouseImportPrice,
+            ExpectedWarehouseOemPrice = update.ExpectedWarehouseOemPrice,
         };
 
         private sealed record ContainerDetailFieldIntent(
@@ -3800,12 +3822,12 @@ namespace BlazorApp.Api.Services.React
                 if (replayLock != null)
                 {
                     foreach (var group in updates
-                        .Where(update => update.进口价格.HasValue && detailMap.ContainsKey(update.HGUID))
+                        .Where(update => SyncImportPrice(update).HasValue && detailMap.ContainsKey(update.HGUID))
                         .Select(update => new { Update = update, Detail = detailMap[update.HGUID] })
                         .Where(item => !string.IsNullOrWhiteSpace(item.Detail.ProductCode))
                         .GroupBy(item => item.Detail.ProductCode!.Trim(), StringComparer.OrdinalIgnoreCase))
                     {
-                        var submittedPrices = group.Select(item => item.Update.进口价格!.Value).Distinct().ToList();
+                        var submittedPrices = group.Select(item => SyncImportPrice(item.Update)!.Value).Distinct().ToList();
                         if (submittedPrices.Count != 1 || busyImportProductCodes.Contains(group.Key))
                         {
                             continue;
@@ -3891,6 +3913,8 @@ namespace BlazorApp.Api.Services.React
                             .Where(intent => IsRelatedSyncField(intent.Field))
                             .Select(intent => intent.Field)
                             .ToHashSet(StringComparer.Ordinal);
+                        if (update.仓库进口价.HasValue) fields.Add("仓库进口价");
+                        if (update.仓库零售价.HasValue) fields.Add("仓库零售价");
                         if (fields.Count == 0) continue;
                         rejectedBusyFields[update.HGUID] = fields;
                         foreach (var field in fields)
@@ -3904,6 +3928,61 @@ namespace BlazorApp.Api.Services.React
                     updates = updates.Select(update => rejectedBusyFields.TryGetValue(update.HGUID, out var fields)
                         ? CloneWithRejectedDirectFields(update, fields) : update).ToList();
                 }
+                // 已有价（仓库进口价 / 仓库零售价）不走字段令牌：它们属于仓库表而不是货柜明细行。
+                // 这里用前端提交时看到的旧价与锁内读到的仓库当前价比对，不一致说明已被他人修改，
+                // 只拒绝该字段并提示刷新；商品没有仓库记录（新商品）也不能改已有价。
+                updates = updates
+                    .Select(update =>
+                    {
+                        if (!HasWarehousePriceIntent(update) || !detailMap.TryGetValue(update.HGUID, out var priceDetail))
+                        {
+                            return update;
+                        }
+                        var rejectedPriceFields = new HashSet<string>(StringComparer.Ordinal);
+                        WarehouseProduct? currentWarehouseProduct = null;
+                        Product? currentLocalProduct = null;
+                        if (!string.IsNullOrWhiteSpace(priceDetail.ProductCode))
+                        {
+                            tokenWarehouseProductMap.TryGetValue(priceDetail.ProductCode.Trim(), out currentWarehouseProduct);
+                            tokenLocalProductMap.TryGetValue(priceDetail.ProductCode.Trim(), out currentLocalProduct);
+                        }
+                        // 已有价要回写仓库表和商品主档两处：缺任何一处都按「没有已有商品记录」拒绝，
+                        // 否则后面的同步会静默跳过，前端却把草稿当成已保存清掉。
+                        var hasExistingProductRecords =
+                            currentWarehouseProduct != null
+                            && !currentWarehouseProduct.IsDeleted
+                            && currentLocalProduct != null;
+                        void RejectWarehousePrice(string field, string code, string message)
+                        {
+                            rejectedPriceFields.Add(field);
+                            result.ValidationErrors.Add(new ContainerDetailBatchUpdateValidationErrorDto
+                            {
+                                HGUID = update.HGUID,
+                                Field = field,
+                                Code = code,
+                                Message = message,
+                            });
+                        }
+                        if (update.仓库进口价.HasValue)
+                        {
+                            if (!hasExistingProductRecords)
+                                RejectWarehousePrice("仓库进口价", "WAREHOUSE_PRODUCT_NOT_FOUND", "该商品还没有仓库商品记录，不能修改已有进口价");
+                            else if (currentWarehouseProduct!.ImportPrice != update.ExpectedWarehouseImportPrice)
+                                RejectWarehousePrice("仓库进口价", "WAREHOUSE_PRICE_CHANGED", "仓库进口价已被他人修改，请刷新后重试");
+                        }
+                        if (update.仓库零售价.HasValue)
+                        {
+                            if (!hasExistingProductRecords)
+                                RejectWarehousePrice("仓库零售价", "WAREHOUSE_PRODUCT_NOT_FOUND", "该商品还没有仓库商品记录，不能修改已有零售价");
+                            else if (currentWarehouseProduct!.OEMPrice != update.ExpectedWarehouseOemPrice)
+                                RejectWarehousePrice("仓库零售价", "WAREHOUSE_PRICE_CHANGED", "仓库零售价已被他人修改，请刷新后重试");
+                        }
+                        return rejectedPriceFields.Count == 0
+                            ? update
+                            : CloneWithRejectedDirectFields(update, rejectedPriceFields);
+                    })
+                    .ToList();
+
                 // 在同一货柜互斥事务内以刚读取的行值校验字段基线；冲突字段从本次意图中剔除，
                 // 其余字段仍按原有部分成功语义写入，避免不同字段的编辑互相阻塞。
                 if (IsContainerDetailFieldConcurrencyEnabled())
@@ -3983,9 +4062,9 @@ namespace BlazorApp.Api.Services.React
                     ))
                 {
                     var oemUpdates = productGroup
-                        .Where(update => update.贴牌价格.HasValue)
+                        .Where(update => SyncOemPrice(update).HasValue)
                         .ToList();
-                    if (oemUpdates.Select(update => update.贴牌价格!.Value).Distinct().Count() > 1)
+                    if (oemUpdates.Select(update => SyncOemPrice(update)!.Value).Distinct().Count() > 1)
                     {
                         foreach (var update in oemUpdates)
                         {
@@ -3997,7 +4076,7 @@ namespace BlazorApp.Api.Services.React
                                 new ContainerDetailBatchUpdateValidationErrorDto
                                 {
                                     HGUID = update.HGUID,
-                                    Field = "贴牌价格",
+                                    Field = SyncOemField(update),
                                     Code = "CONFLICTING_PRODUCT_OEM_PRICE",
                                     Message = "同一商品的贴牌价格更新意图冲突",
                                 }
@@ -4031,6 +4110,11 @@ namespace BlazorApp.Api.Services.React
 
                 bool HasAcceptedOemPrice(UpdateContainerDetailDto update) =>
                     update.贴牌价格.HasValue
+                    && !rejectedOemPriceHguids.Contains(update.HGUID);
+
+                // 同步到仓库表 / 商品主档 / 分店表的零售价意图（新字段优先，旧字段兜底）；明细自己的本次零售价仍只看 HasAcceptedOemPrice。
+                bool HasAcceptedSyncOemPrice(UpdateContainerDetailDto update) =>
+                    SyncOemPrice(update).HasValue
                     && !rejectedOemPriceHguids.Contains(update.HGUID);
 
                 bool HasAcceptedActive(UpdateContainerDetailDto update) =>
@@ -4264,7 +4348,10 @@ namespace BlazorApp.Api.Services.React
                 var relatedSyncDetailUpdates = validDetailUpdates
                     .Where(x =>
                         x.Update.SkipRelatedProductSync != true
-                        && EnumerateFieldIntents(x.Update).Any(intent => IsRelatedSyncField(intent.Field))
+                        && (
+                            HasWarehousePriceIntent(x.Update)
+                            || EnumerateFieldIntents(x.Update).Any(intent => IsRelatedSyncField(intent.Field))
+                        )
                     )
                     .ToList();
                 // 纯货柜明细字段（尤其 partial busy 商品）不进入任何关联表读取、同步或商品变更历史。
@@ -4459,8 +4546,8 @@ namespace BlazorApp.Api.Services.React
                         !string.IsNullOrEmpty(x.Detail.ProductCode)
                         && localProductMap.ContainsKey(x.Detail.ProductCode)
                         && (
-                            x.Update.进口价格.HasValue
-                            || HasAcceptedOemPrice(x.Update)
+                            SyncImportPrice(x.Update).HasValue
+                            || HasAcceptedSyncOemPrice(x.Update)
                             || HasAcceptedActive(x.Update)
                         )
                     )
@@ -4472,7 +4559,7 @@ namespace BlazorApp.Api.Services.React
                     // React 详细保存会在锁内确认进口价是否可提交；其它字段可先按原契约计数。
                     if (
                         !repairMissingStoreRelations
-                        || HasAcceptedOemPrice(item.Update)
+                        || HasAcceptedSyncOemPrice(item.Update)
                         || HasAcceptedActive(item.Update)
                     )
                     {
@@ -4765,7 +4852,7 @@ namespace BlazorApp.Api.Services.React
                         )
                         {
                             foreach (var item in existingProductUpdates.Where(item =>
-                                item.Update.进口价格.HasValue
+                                SyncImportPrice(item.Update).HasValue
                                 && string.Equals(
                                     item.Detail.ProductCode?.Trim(),
                                     productCode,
@@ -4781,7 +4868,7 @@ namespace BlazorApp.Api.Services.React
                                     new ContainerDetailBatchUpdateValidationErrorDto
                                     {
                                         HGUID = item.Update.HGUID,
-                                        Field = "进口价格",
+                                        Field = SyncImportField(item.Update),
                                         Code = code,
                                         Message = message,
                                     }
@@ -4793,7 +4880,7 @@ namespace BlazorApp.Api.Services.React
                         {
                             foreach (var group in existingProductUpdates
                                 .Where(item =>
-                                    item.Update.进口价格.HasValue
+                                    SyncImportPrice(item.Update).HasValue
                                     && !string.IsNullOrWhiteSpace(item.Detail.ProductCode)
                                 )
                                 .GroupBy(
@@ -4802,7 +4889,7 @@ namespace BlazorApp.Api.Services.React
                                 ))
                             {
                                 var distinctPrices = group
-                                    .Select(item => item.Update.进口价格!.Value)
+                                    .Select(item => SyncImportPrice(item.Update)!.Value)
                                     .Distinct()
                                     .ToList();
                                 if (distinctPrices.Count == 1)
@@ -4892,8 +4979,20 @@ namespace BlazorApp.Api.Services.React
                         }
 
                         bool HasAcceptedImportPrice(UpdateContainerDetailDto update) =>
-                            update.进口价格.HasValue
+                            SyncImportPrice(update).HasValue
                             && !rejectedImportPriceHguids.Contains(update.HGUID);
+
+                        if (countValidNoOps)
+                        {
+                            // 只提交「已有进口价」的更新不会走上面的明细写入分支；通过结构检查的这类更新也要计入成功行数。
+                            foreach (var item in existingProductUpdates.Where(item =>
+                                item.Update.仓库进口价.HasValue
+                                && !rejectedImportPriceHguids.Contains(item.Update.HGUID)
+                            ))
+                            {
+                                updatedRequestGuids.Add(item.Update.HGUID);
+                            }
+                        }
 
                         // 第二步：更新货柜明细表
                         if (changedDetails.Count > 0)
@@ -5155,15 +5254,15 @@ namespace BlazorApp.Api.Services.React
                                         HasAcceptedImportPrice(item.Update)
                                     );
                                     var oemItem = group.LastOrDefault(item =>
-                                        HasAcceptedOemPrice(item.Update)
+                                        HasAcceptedSyncOemPrice(item.Update)
                                     );
                                     var activeItem = group.LastOrDefault(item =>
                                         HasAcceptedActive(item.Update)
                                     );
                                     return new ContainerProductSyncPlan(
                                         group.Key,
-                                        importItem?.Update.进口价格,
-                                        oemItem?.Update.贴牌价格,
+                                        importItem == null ? null : SyncImportPrice(importItem.Update),
+                                        oemItem == null ? null : SyncOemPrice(oemItem.Update),
                                         activeItem?.Update.IsActive
                                     );
                                 })
@@ -6344,7 +6443,9 @@ namespace BlazorApp.Api.Services.React
                             {
                                 HGUID = detail.DetailCode,
                             };
-                            // 批量改价只同步用户实际提交的字段，避免旧零售价被当成本次改价写回主档。
+                            // 批量改价改的是「本次」进口价 / 零售价：只落货柜明细，作为新商品建档数据，
+                            // 不再回写仓库表、商品主档和分店表（已有价请在明细里逐行改「已有进口价 / 已有零售价」）。
+                            update.SkipRelatedProductSync = true;
                             if (request.ImportPrice.HasValue)
                             {
                                 update.进口价格 = request.ImportPrice.Value;
@@ -6359,11 +6460,8 @@ namespace BlazorApp.Api.Services.React
                 },
                 "apply-prices",
                 $"importPrice={request.ImportPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}&oemPrice={request.OemPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}",
-                // 开关只决定改零售价后的副作用（覆盖分店价 / 发任务），不改变命中的明细，所以不进预览指纹。
-                priceSyncPolicy: WarehousePriceSyncPolicy.From(
-                    request.SyncStoreRetailPrices,
-                    request.GenerateTasks
-                )
+                // 请求里保留的 SyncStoreRetailPrices / GenerateTasks 仅为兼容旧客户端；本次价不再联动分店价，开关不再生效。
+                priceSyncPolicy: null
             );
         }
 

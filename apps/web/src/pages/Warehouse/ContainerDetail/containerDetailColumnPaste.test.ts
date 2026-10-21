@@ -3,7 +3,10 @@ import type { ContainerDetail } from '../../../types/container'
 import {
   CONTAINER_DETAIL_COLUMN_PASTE_KEYS,
   buildContainerDetailColumnPastePlan,
+  buildContainerDetailFillPlan,
   getContainerDetailColumnPasteCurrentValue,
+  isContainerDetailColumnEditableForRow,
+  resolveContainerDetailFillTargetRows,
   parseContainerDetailColumnPasteText,
   parseContainerDetailColumnPasteValue,
 } from './containerDetailColumnPaste'
@@ -87,8 +90,35 @@ assertDeepEqual(parseContainerDetailColumnPasteValue('remark', '   '), { ok: fal
 
 assertEqual(
   getContainerDetailColumnPasteCurrentValue('oemPrice', makeRow({ id: 1, 是否新商品: false, 贴牌价格: 10, warehouseOEMPrice: 12 })),
+  10,
+  '「本次零售价」当前值取货柜明细自己的价格，不再绑定仓库实时价',
+)
+assertEqual(
+  getContainerDetailColumnPasteCurrentValue('lastOEMPrice', makeRow({ id: 1, 是否新商品: false, 贴牌价格: 10, warehouseOEMPrice: 12 })),
   12,
-  '已有商品的零售价当前值应取仓库实时价',
+  '「已有零售价」当前值取仓库实时价',
+)
+assertEqual(
+  getContainerDetailColumnPasteCurrentValue('warehouseImportPrice', makeRow({ id: 1, 是否新商品: false, 进口价格: 3, warehouseImportPrice: 4 })),
+  4,
+  '「已有进口价」当前值取仓库实时进货价',
+)
+assertDeepEqual(
+  parseContainerDetailColumnPasteValue('lastOEMPrice', '$2.5'),
+  { ok: true, value: 2.5 },
+  '已有零售价列应按两位小数解析并剥离货币符号',
+)
+assertDeepEqual(
+  [
+    isContainerDetailColumnEditableForRow('importPrice', makeRow({ id: 1, 是否新商品: true })),
+    isContainerDetailColumnEditableForRow('importPrice', makeRow({ id: 2, 是否新商品: false })),
+    isContainerDetailColumnEditableForRow('oemPrice', makeRow({ id: 3, 是否新商品: false })),
+    isContainerDetailColumnEditableForRow('warehouseImportPrice', makeRow({ id: 4, 是否新商品: false })),
+    isContainerDetailColumnEditableForRow('lastOEMPrice', makeRow({ id: 5, 是否新商品: true })),
+    isContainerDetailColumnEditableForRow('remark', makeRow({ id: 6, 是否新商品: false })),
+  ],
+  [true, false, false, true, false, true],
+  '本次价只有新商品可改，已有价只有已有商品可改，其余列不受限',
 )
 assertEqual(
   getContainerDetailColumnPasteCurrentValue('englishName', makeRow({ id: 2, 商品信息: { 英文名称: 'Santa' } as ContainerDetail['商品信息'] })),
@@ -149,6 +179,104 @@ const missingPlan = buildContainerDetailColumnPastePlan({
 assertEqual(missingPlan.error, 'missing_target', '起始行不在列表中时应返回 missing_target')
 assertEqual(missingPlan.entries.length, 0, '起始行缺失时不应生成补丁')
 
+// ---- 已有价 / 本次价按商品类型跳过不可编辑行 ----
+
+const mixedRows = [
+  makeRow({ id: 21, 是否新商品: false, warehouseImportPrice: 5 }),
+  makeRow({ id: 22, 是否新商品: true }),
+  makeRow({ id: 23, 是否新商品: false, warehouseImportPrice: 6 }),
+]
+const warehousePlan = buildContainerDetailColumnPastePlan({
+  columnKey: 'warehouseImportPrice',
+  values: ['9', '9', '6'],
+  rows: mixedRows,
+  startRowKey: 'hguid-21',
+  getRowKey: rowKey,
+})
+assertDeepEqual(
+  warehousePlan.entries.map((entry) => [entry.row.hguid, entry.field, entry.value]),
+  [['hguid-21', '仓库进口价', 9]],
+  '已有进口价只给已有商品生成补丁，字段名是「仓库进口价」',
+)
+assertEqual(warehousePlan.notEditableCount, 1, '新商品行的已有价单元格应计入不可编辑并跳过')
+assertEqual(warehousePlan.unchangedCount, 1, '与当前仓库价相同的行应计入未变更')
+assertEqual(warehousePlan.invalidCount, 0, '不可编辑的行不算无效值')
+
+// ---- 拖拽填充 ----
+
+const fillRows = [
+  makeRow({ id: 31, 备注: '易碎' }),
+  makeRow({ id: 32 }),
+  makeRow({ id: 33, 备注: '易碎' }),
+  makeRow({ id: 34 }),
+]
+assertDeepEqual(
+  resolveContainerDetailFillTargetRows({ rows: fillRows, sourceRowKey: 'hguid-31', endRowKey: 'hguid-33', getRowKey: rowKey }).map((row) => row.hguid),
+  ['hguid-32', 'hguid-33'],
+  '向下拖：目标是源行之后到终点行（含终点）',
+)
+assertDeepEqual(
+  resolveContainerDetailFillTargetRows({ rows: fillRows, sourceRowKey: 'hguid-34', endRowKey: 'hguid-32', getRowKey: rowKey }).map((row) => row.hguid),
+  ['hguid-33', 'hguid-32'],
+  '向上拖：目标是源行之前到终点行（含终点），按离源行由近到远排序',
+)
+assertEqual(
+  resolveContainerDetailFillTargetRows({ rows: fillRows, sourceRowKey: 'hguid-31', endRowKey: 'hguid-31', getRowKey: rowKey }).length,
+  0,
+  '终点就是源行时没有目标行',
+)
+assertEqual(
+  resolveContainerDetailFillTargetRows({ rows: fillRows, sourceRowKey: 'hguid-31', endRowKey: 'missing', getRowKey: rowKey }).length,
+  0,
+  '终点不在列表里时没有目标行',
+)
+const fillPlan = buildContainerDetailFillPlan({
+  columnKey: 'remark',
+  sourceRow: fillRows[0],
+  targetRows: resolveContainerDetailFillTargetRows({ rows: fillRows, sourceRowKey: 'hguid-31', endRowKey: 'hguid-34', getRowKey: rowKey }),
+  getRowKey: rowKey,
+})
+assertDeepEqual(
+  fillPlan.entries.map((entry) => [entry.row.hguid, entry.field, entry.value]),
+  [['hguid-32', '备注', '易碎'], ['hguid-34', '备注', '易碎']],
+  '源单元格的值复制到目标行，已经是同值的行不生成补丁',
+)
+assertEqual(fillPlan.unchangedCount, 1, '同值目标行计入未变更')
+const blankSourceFill = buildContainerDetailFillPlan({
+  columnKey: 'remark',
+  sourceRow: fillRows[1],
+  targetRows: [fillRows[2]],
+  getRowKey: rowKey,
+})
+assertEqual(blankSourceFill.entries.length, 0, '源单元格没有值时不会清空目标单元格')
+assertEqual(blankSourceFill.skippedBlankCount, 1, '源值为空按空单元格跳过')
+const textFill = buildContainerDetailFillPlan({
+  columnKey: 'englishName',
+  sourceRow: makeRow({ id: 41, 英文名称: 'Santa Hat' }),
+  targetRows: [makeRow({ id: 42 }), makeRow({ id: 43, 英文名称: 'Old' })],
+  getRowKey: rowKey,
+})
+assertDeepEqual(
+  textFill.entries.map((entry) => [entry.row.hguid, entry.field, entry.value]),
+  [['hguid-42', '英文名称', 'Santa Hat'], ['hguid-43', '英文名称', 'Santa Hat']],
+  '文本列（英文名称）同样可以拖拽填充',
+)
+const priceFillSkipsNotEditable = buildContainerDetailFillPlan({
+  columnKey: 'lastOEMPrice',
+  sourceRow: makeRow({ id: 51, 是否新商品: false, warehouseOEMPrice: 3.5 }),
+  targetRows: [
+    makeRow({ id: 52, 是否新商品: false, warehouseOEMPrice: 1 }),
+    makeRow({ id: 53, 是否新商品: true }),
+  ],
+  getRowKey: rowKey,
+})
+assertDeepEqual(
+  priceFillSkipsNotEditable.entries.map((entry) => [entry.row.hguid, entry.field, entry.value]),
+  [['hguid-52', '仓库零售价', 3.5]],
+  '已有零售价填充只写已有商品，新商品行被跳过',
+)
+assertEqual(priceFillSkipsNotEditable.notEditableCount, 1, '跳过的新商品行计入不可编辑')
+
 // ---- 页面接线契约 ----
 
 const pageSource = readFileSync('src/pages/Warehouse/ContainerDetail/index.tsx', 'utf8')
@@ -170,6 +298,23 @@ assert(
     && pageSource.includes('enqueueAutoSavePatches(entries.map('),
   '列粘贴必须复用“保存明细”草稿与自动保存两条既有落库通道',
 )
+assert(
+  pageSource.includes('const commitContainerDetailColumnPlan = (')
+    && pageSource.includes("commitContainerDetailColumnPlan(columnKey, plan, 'paste')")
+    && pageSource.includes("commitContainerDetailColumnPlan(columnKey, plan, 'fill')"),
+  '粘贴与拖拽填充必须共用同一个提交函数，沿用草稿 / 自动保存两条既有通道',
+)
+assert(
+  pageSource.includes('<ContainerDetailFillContext.Provider value={fillContextValue}>')
+    && pageSource.includes('buildContainerDetailFillPlan({ columnKey, sourceRow, targetRows, getRowKey: rowKey })'),
+  '页面应提供填充上下文，并用源单元格值生成填充计划',
+)
+CONTAINER_DETAIL_COLUMN_PASTE_KEYS.forEach((columnKey) => {
+  assert(
+    pageSource.includes(`columnKey="${columnKey}"`),
+    `${columnKey} 列的可编辑输入框应包上拖拽填充容器`,
+  )
+})
 assert(
   pageSource.includes('target.requiresCostParameters')
     && pageSource.includes('showCostRecalculateWarning(getContainerDetailCostMissingFields(container))'),

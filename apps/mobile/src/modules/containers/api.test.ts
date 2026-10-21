@@ -132,6 +132,10 @@ async function run() {
           英文名称: "Large 草莓",
           ClearEnglishName: undefined,
           贴牌价格: undefined,
+          仓库进口价: undefined,
+          仓库零售价: undefined,
+          ExpectedWarehouseImportPrice: undefined,
+          ExpectedWarehouseOemPrice: undefined,
           单件装箱数: undefined,
           中包数: undefined,
           单件体积: undefined,
@@ -453,9 +457,12 @@ async function run() {
     }) as typeof apiClient.post;
     await batchUpdateDetails(
       "CONTAINER-1",
-      [{ hguid: "DETAIL-RETAIL", 贴牌价格: 6.66 }],
+      [{ hguid: "DETAIL-RETAIL", 仓库零售价: 6.66, expectedWarehouseOemPrice: 5 }],
       { syncStoreRetailPrices: false, generateTasks: true },
     );
+    assert.equal(switchCalls[0]?.body[0].仓库零售价, 6.66, "已有零售价用独立字段「仓库零售价」提交，不再借用「贴牌价格」");
+    assert.equal(switchCalls[0]?.body[0].ExpectedWarehouseOemPrice, 5, "已有零售价带上提交时看到的仓库价做并发基线");
+    assert.equal(switchCalls[0]?.body[0].贴牌价格, undefined, "已有零售价不改明细自己的「本次零售价」");
     assert.equal(
       switchCalls[0]?.url,
       "/react/v1/containers/CONTAINER-1/batch-update-details?syncStoreRetailPrices=false&generateTasks=true",
@@ -467,29 +474,21 @@ async function run() {
       "/react/v1/containers/CONTAINER-1/batch-update-details",
       "没改零售价（不传开关）时 URL 不带任何参数，后端按默认处理",
     );
-    await applyPrices(
-      "CONTAINER-1",
-      { selectedHguids: ["DETAIL-1"] },
-      { oemPrice: 7.77 },
-      "preview-token",
-      { syncStoreRetailPrices: true, generateTasks: false },
-    );
+    await applyPrices("CONTAINER-1", { selectedHguids: ["DETAIL-1"] }, { oemPrice: 7.77 }, "preview-token");
     assert.deepEqual(switchCalls[2], {
       url: "/react/v1/containers/CONTAINER-1/actions/apply-prices",
       body: {
         selectedHguids: ["DETAIL-1"],
         oemPrice: 7.77,
-        syncStoreRetailPrices: true,
-        generateTasks: false,
         previewToken: "preview-token",
       },
-    }, "批量设价把两个开关放进请求体，且不进预览参数");
+    }, "批量设价只写本次价（货柜明细），请求体没有同步分店价的开关");
     await applyPrices("CONTAINER-1", { selectedHguids: ["DETAIL-1"] }, { importPrice: 4.5 }, "preview-token");
     assert.deepEqual(switchCalls[3]?.body, {
       selectedHguids: ["DETAIL-1"],
       importPrice: 4.5,
       previewToken: "preview-token",
-    }, "只改进口价（没传开关）时请求体不带这两个字段");
+    }, "只改本次进口价时请求体同样没有开关字段");
   } finally {
     apiClient.post = originalPost;
     apiClient.get = originalGet;

@@ -507,7 +507,8 @@ export function getDetailRealtimeRetailPrice(detail: ContainerDetail) {
 }
 
 export function getDetailVisibleOemPrice(detail: ContainerDetail) {
-  // 新商品继续使用明细业务价；已有商品按 Web 端展示仓库实时零售价。
+  // 表格「零售价」列显示商品当前零售价：新商品用明细价（建档时使用），已有商品用仓库实时零售价。
+  // 编辑弹窗里的「本次零售价」是明细自己的 贴牌价格，「已有零售价」才是仓库实时价，两者不要混用。
   return detail.是否新商品 ? detail.贴牌价格 : getDetailRealtimeRetailPrice(detail);
 }
 

@@ -148,19 +148,17 @@ assert(
 )
 
 // 6. 货柜明细页：改零售价的流程已接入同一组开关（保存明细 / 批量设价 / 更新已有商品），不再写死 sync=false、tasks=true
-const containerUpdateSection = extractSection(containerDetailSource, 'const updateExistingPurchase = async () => {', 'const updateWarehouseImportPrice = async () => {')
+const containerUpdateSection = extractSection(containerDetailSource, 'const updateExistingPurchase = async () => {', '删除明细后后端已按剩余明细重算')
 assert(
   !containerUpdateSection.includes('syncStoreRetailPrices: false') &&
     containerUpdateSection.includes('...buildRetailPriceSyncFields(') &&
     containerUpdateSection.includes("selectedFields.includes('oemPrice')"),
   '货柜明细「更新已有商品」的批量修改应由「零售价」字段触发开关并随请求发送，不能再写死 false/true',
 )
-const containerImportSection = extractSection(containerDetailSource, 'const updateWarehouseImportPrice = async () => {', '删除明细后后端已按剩余明细重算')
+// 「更新仓库进货价」按钮已移除：已有价改为在明细里逐行改，保存明细时回写；不再有单独写死开关的入口。
 assert(
-  containerImportSection.includes('{ syncStorePurchasePrice: false }') &&
-    !containerImportSection.includes('syncStoreRetailPrices') &&
-    !containerImportSection.includes('generateTasks'),
-  '货柜明细「更新仓库进货价」只改进货价，不涉及零售价，不应带两个开关',
+  !containerDetailSource.includes('const updateWarehouseImportPrice = async () => {'),
+  '货柜明细「更新仓库进货价」入口已移除，改为逐行改「已有进口价」并点「保存明细」',
 )
 
 console.log('WarehouseProducts.retailPriceSync.uiContract.test: ok')

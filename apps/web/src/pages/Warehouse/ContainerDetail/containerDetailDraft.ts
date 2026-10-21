@@ -20,6 +20,7 @@ const CONTAINER_DETAIL_DRAFT_STORAGE_PREFIX = 'hb.containerDetailDraft.v2'
 const numericDraftFields = new Set<string>([
   '调整浮率', '国内价格', '进口价格', '运输成本', '贴牌价格', '单件装箱数',
   '中包数', '单件体积', '装柜数量', '合计装柜体积', '合计装柜金额',
+  '仓库进口价', '仓库零售价',
 ])
 const booleanDraftFields = new Set<string>(['IsActive'])
 
