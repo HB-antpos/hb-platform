@@ -21,6 +21,11 @@ import {
   shouldEnableIosNativeUpdate,
   shouldPauseAutomaticOtaForIosNativeUpdate,
 } from "@/modules/updates/ios-native-app-update";
+import {
+  hydrateAutoUpdatePreference,
+  isAutoUpdateAllowed,
+  useAutoUpdatePreferenceStore,
+} from "@/modules/updates/auto-update-preference";
 import { useAutomaticNativeAppUpdate } from "@/modules/updates/use-automatic-native-app-update";
 import { NativeAppUpdateStatus } from "@/modules/updates/NativeAppUpdateStatus";
 import { useIosNativeAppUpdate } from "@/modules/updates/use-ios-native-app-update";
@@ -75,8 +80,12 @@ export default function RootLayout() {
       isDevelopment: __DEV__,
       reviewGuardActive: iosReviewOfflineGuardActive,
     });
+  // 设置页「自动更新」开关：关闭只停可选更新的自动检查 / 下载 / 提醒，强制更新照常拦截；
+  // 读盘完成前按「关」处理，启动就绪任务里会先读盘，所以实际不会误关已开启的用户。
+  const autoUpdateAllowed = useAutoUpdatePreferenceStore(isAutoUpdateAllowed);
   const iosNativeUpdate = useIosNativeAppUpdate({
     enabled: iosNativeUpdateEnabled,
+    autoUpdate: autoUpdateAllowed,
   });
   const pauseAutomaticOta = shouldPauseAutomaticOtaForIosNativeUpdate({
     enabled: iosNativeUpdateEnabled,
@@ -114,9 +123,13 @@ export default function RootLayout() {
   // 班中定位：启动就绪与每次回前台时自愈后台任务并补传本地队列。
   useAttendanceLocationRecovery({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
-  const nativeAppUpdate = useAutomaticNativeAppUpdate({ enabled: automaticUpdatesEnabled });
+  const nativeAppUpdate = useAutomaticNativeAppUpdate({
+    enabled: automaticUpdatesEnabled,
+    autoUpdate: autoUpdateAllowed,
+  });
   const mobileOtaUpdate = useMobileOtaUpdate({
     enabled: automaticUpdatesEnabled && !pauseAutomaticOta,
+    autoUpdate: autoUpdateAllowed,
     beforeCheck: iosNativeUpdateEnabled
       ? async () => {
           const receipt = await iosNativeUpdate.recheck();
@@ -154,6 +167,8 @@ export default function RootLayout() {
         [
           initI18n(),
           prepareReviewAwareDeviceState(),
+          // 自动更新开关读盘：先于更新通道启动，避免已关闭的用户在冷启动被默认值触发可选更新。
+          hydrateAutoUpdatePreference(),
         ],
         MIN_SPLASH_VISIBLE_MS,
       );

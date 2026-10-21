@@ -127,7 +127,8 @@ async function run() {
 
   let current!: ReturnType<typeof useAutomaticNativeAppUpdate>;
   function Harness() {
-    current = useAutomaticNativeAppUpdate({ enabled: true });
+    // 「自动更新」开关关闭：强制更新仍必须照常检查、下载并拦截；开启路径由 use-automatic-native-app-update.test.ts 覆盖。
+    current = useAutomaticNativeAppUpdate({ enabled: true, autoUpdate: false });
     return React.createElement(AndroidNativeUpdateBoundary, {
       enabled: true,
       decision: current.requiredDecision,
@@ -193,6 +194,7 @@ async function run() {
     assert.equal(appUpdateMutualExclusion.isNativeRequiredGateActive(), false);
     assert.match(view(), /业务页面/);
     assert.equal(storage.size, 0, "none 清除离线缓存");
+    assert.equal(operations.length, 1, "自动更新关闭且无强制更新时，重试不得下载可选安装包");
   } finally {
     await act(async () => { root.unmount(); });
     console.warn = originalWarn;
