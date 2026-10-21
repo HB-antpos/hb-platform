@@ -852,6 +852,12 @@
   <data name="deviceActivation.error.platformMismatch" xml:space="preserve"><value>This activation code is not valid for Windows POS.</value></data>
   <data name="deviceActivation.error.failed" xml:space="preserve"><value>Device activation failed. Check the code and connection, then try again.</value></data>
   <data name="deviceActivation.error.timeout" xml:space="preserve"><value>The server took too long to respond. Check the network and try again.</value></data>
+  <data name="deviceActivation.error.failedWithReason" xml:space="preserve"><value>Device activation failed. Check the code and connection, then try again. Reason: {0}</value></data>
+  <data name="deviceActivation.error.rateLimited" xml:space="preserve"><value>Too many activation attempts from this network. Wait {0} minute(s), then try again.</value></data>
+  <data name="deviceActivation.error.deviceConflict" xml:space="preserve"><value>This computer is already registered to a store. To move it, use Change Store Registration with a code for the new store.</value></data>
+  <data name="deviceActivation.error.storeUnavailable" xml:space="preserve"><value>The target store is not active. Ask head office to check the store, then create a new code.</value></data>
+  <data name="deviceActivation.error.deviceStateConflict" xml:space="preserve"><value>This device's registration is in an unexpected state. Restart HB POS and try again, or contact head office.</value></data>
+  <data name="deviceActivation.error.targetStoreUnchanged" xml:space="preserve"><value>This device is already registered to the target store. Use a code for a different store.</value></data>
   <data name="returns.status.default" xml:space="preserve"><value>Scan order number to start a receipt return.</value></data>
   <data name="returns.status.noReceiptMode" xml:space="preserve"><value>No-receipt return enabled. Scan a product to add it.</value></data>
   <data name="returns.status.receiptMode" xml:space="preserve"><value>Receipt return mode enabled. Scan an order number.</value></data>

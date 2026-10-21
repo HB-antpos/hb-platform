@@ -2465,6 +2465,24 @@
   <data name="deviceActivation.error.timeout" xml:space="preserve">
     <value>服务器响应太慢，请检查网络后重试。</value>
   </data>
+  <data name="deviceActivation.error.failedWithReason" xml:space="preserve">
+    <value>设备开通失败，请检查开通码和网络连接后重试。原因：{0}</value>
+  </data>
+  <data name="deviceActivation.error.rateLimited" xml:space="preserve">
+    <value>当前网络的开通尝试次数过多，请等待 {0} 分钟后再试。</value>
+  </data>
+  <data name="deviceActivation.error.deviceConflict" xml:space="preserve">
+    <value>这台电脑已登记到某个分店。如需换店，请使用「更换门店登记」并输入新分店的开通码。</value>
+  </data>
+  <data name="deviceActivation.error.storeUnavailable" xml:space="preserve">
+    <value>目标分店当前不可用，请联系总部确认分店状态后重新生成开通码。</value>
+  </data>
+  <data name="deviceActivation.error.deviceStateConflict" xml:space="preserve">
+    <value>此设备的登记状态异常，请重启 HB POS 后重试，或联系总部。</value>
+  </data>
+  <data name="deviceActivation.error.targetStoreUnchanged" xml:space="preserve">
+    <value>此设备已登记在目标分店，请使用其他分店的开通码。</value>
+  </data>
   <data name="returns.status.default" xml:space="preserve">
     <value>请扫描订单号开始小票退货。</value>
   </data>

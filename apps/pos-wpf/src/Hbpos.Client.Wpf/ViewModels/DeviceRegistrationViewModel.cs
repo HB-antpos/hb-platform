@@ -431,7 +431,9 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
     private void ShowActivationError(Exception exception)
     {
         StatusMessage = ResolveActivationError(exception);
-        HasNetworkProblem = exception is OperationCanceledException or System.Net.Http.HttpRequestException;
+        // 限流时网络是通的，检测网络帮不上忙，不显示「检测网络」入口。
+        HasNetworkProblem = exception is OperationCanceledException
+            or (System.Net.Http.HttpRequestException and not DeviceApiRateLimitedException);
     }
 
     /// <summary>门店列表 / 注册 / 验证失败：沿用原消息，同时记下是不是网络问题。</summary>
@@ -1031,20 +1033,57 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
             return T("deviceActivation.error.timeout", "The server took too long to respond. Check the network and try again.");
         }
 
-        if (exception is not CatalogApiException apiException)
+        if (exception is DeviceApiRateLimitedException rateLimited)
         {
-            return exception.Message;
+            // 服务端按来源 IP 限流（同店设备共用出口 IP）；告诉店员要等多久，别再连点。没有 Retry-After 时按完整窗口 10 分钟提示。
+            var wait = rateLimited.RetryAfter ?? TimeSpan.FromMinutes(10);
+            var minutes = Math.Max(1, (int)Math.Ceiling(wait.TotalMinutes));
+            return string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                T(
+                    "deviceActivation.error.rateLimited",
+                    "Too many activation attempts from this network. Wait {0} minute(s), then try again."),
+                minutes);
         }
 
-        var key = apiException.ErrorCode switch
+        if (exception is not CatalogApiException apiException)
         {
-            InvalidActivationCodeError => "deviceActivation.error.invalid",
-            DeviceActivationReasonCodes.NotAvailable => "deviceActivation.error.notAvailable",
-            DeviceActivationReasonCodes.PlatformMismatch => "deviceActivation.error.platformMismatch",
-            _ => "deviceActivation.error.failed"
-        };
-        return T(key, apiException.Message);
+            return DeviceActivationFailureDescriber.DescribeTransportFailure(exception);
+        }
+
+        var key = ActivationErrorResourceKey(apiException.ErrorCode);
+        if (!string.Equals(key, GenericActivationErrorKey, StringComparison.Ordinal))
+        {
+            return T(key, apiException.Message);
+        }
+
+        // 未知原因码、没有原因码的 HTTP 拒绝、凭据不完整等：不再只给一句笼统的话，把状态码/原因码附在后面，现场能直接报给我们。
+        var detail = DeviceActivationFailureDescriber.DescribeRejection(apiException);
+        return detail is null
+            ? T(GenericActivationErrorKey, apiException.Message)
+            : string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                T(
+                    "deviceActivation.error.failedWithReason",
+                    "Device activation failed. Check the code and connection, then try again. Reason: {0}"),
+                detail);
     }
+
+    private const string GenericActivationErrorKey = "deviceActivation.error.failed";
+
+    /// <summary>服务端拒绝原因码 → 文案资源键；未知原因落到通用「开通失败」。</summary>
+    internal static string ActivationErrorResourceKey(string? errorCode) => errorCode switch
+    {
+        InvalidActivationCodeError => "deviceActivation.error.invalid",
+        DeviceActivationReasonCodes.NotAvailable => "deviceActivation.error.notAvailable",
+        DeviceActivationReasonCodes.PlatformMismatch => "deviceActivation.error.platformMismatch",
+        // 以下原因服务端早已明确返回，之前都被折叠成同一句「开通失败」，现场无法判断该怎么处理。
+        DeviceActivationReasonCodes.DeviceConflict => "deviceActivation.error.deviceConflict",
+        DeviceActivationReasonCodes.StoreUnavailable => "deviceActivation.error.storeUnavailable",
+        DeviceActivationReasonCodes.DeviceStateConflict => "deviceActivation.error.deviceStateConflict",
+        DeviceActivationReasonCodes.TargetStoreUnchanged => "deviceActivation.error.targetStoreUnchanged",
+        _ => "deviceActivation.error.failed"
+    };
 
     private bool CanRegister()
     {

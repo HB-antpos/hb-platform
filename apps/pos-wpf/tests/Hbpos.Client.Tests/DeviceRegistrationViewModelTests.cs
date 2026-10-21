@@ -126,6 +126,107 @@ public sealed class DeviceRegistrationViewModelTests
     }
 
     [Fact]
+    public async Task Rate_limited_check_tells_the_cashier_how_long_to_wait_and_hides_the_network_check()
+    {
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new DeviceApiRateLimitedException(TimeSpan.FromSeconds(125))
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        // 125 秒向上取整为 3 分钟；限流时网络是通的，不给「检测网络」入口。
+        Assert.Equal(
+            "Too many activation attempts from this network. Wait 3 minute(s), then try again.",
+            viewModel.StatusMessage);
+        Assert.False(viewModel.HasNetworkProblem);
+        Assert.DoesNotContain("not a POS API response", viewModel.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData("DEVICE_ALREADY_REGISTERED", "deviceActivation.error.deviceConflict")]
+    [InlineData("STORE_UNAVAILABLE", "deviceActivation.error.storeUnavailable")]
+    [InlineData("DEVICE_STATE_CONFLICT", "deviceActivation.error.deviceStateConflict")]
+    [InlineData("TARGET_STORE_UNCHANGED", "deviceActivation.error.targetStoreUnchanged")]
+    [InlineData("ACTIVATION_CODE_NOT_AVAILABLE", "deviceActivation.error.notAvailable")]
+    [InlineData("SOMETHING_UNKNOWN", "deviceActivation.error.failed")]
+    [InlineData(null, "deviceActivation.error.failed")]
+    public void Activation_rejection_reason_maps_to_its_own_message_key(string? reasonCode, string resourceKey)
+    {
+        // 这几个原因服务端明确返回过，之前都显示成同一句「开通失败」。
+        Assert.Equal(resourceKey, DeviceRegistrationViewModel.ActivationErrorResourceKey(reasonCode));
+    }
+
+    [Theory]
+    [InlineData("deviceActivation.error.rateLimited")]
+    [InlineData("deviceActivation.error.failedWithReason")]
+    [InlineData("deviceActivation.error.deviceConflict")]
+    [InlineData("deviceActivation.error.storeUnavailable")]
+    [InlineData("deviceActivation.error.deviceStateConflict")]
+    [InlineData("deviceActivation.error.targetStoreUnchanged")]
+    public void Activation_error_messages_exist_in_both_languages(string resourceKey)
+    {
+        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var value = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == resourceKey)
+                .Element("value")?.Value;
+            Assert.False(string.IsNullOrWhiteSpace(value), $"{file}:{resourceKey}");
+        }
+    }
+
+    [Fact]
+    public void Rate_limited_message_keeps_the_minutes_placeholder_in_both_languages()
+    {
+        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var value = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.rateLimited")
+                .Element("value")?.Value;
+            Assert.Contains("{0}", value);
+
+            var failedWithReason = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.failedWithReason")
+                .Element("value")?.Value;
+            Assert.Contains("{0}", failedWithReason);
+        }
+    }
+
+    [Theory]
+    [InlineData("Device API request failed with HTTP 400.", HttpStatusCode.BadRequest, null, "HTTP 400")]
+    [InlineData("Device error.", HttpStatusCode.InternalServerError, "SOME_NEW_CODE", "HTTP 500 · SOME_NEW_CODE")]
+    [InlineData("Device activation returned incomplete credentials.", null, null, "Device activation returned incomplete credentials")]
+    [InlineData("Device activation returned an unexpected success response.", null, "WEIRD", "WEIRD")]
+    public async Task Unmapped_activation_failures_append_the_concrete_reason(
+        string message,
+        HttpStatusCode? status,
+        string? errorCode,
+        string expectedReason)
+    {
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new CatalogApiException(message, status, errorCode)
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            $"Device activation failed. Check the code and connection, then try again. Reason: {expectedReason}",
+            viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task A_network_failure_while_checking_the_code_offers_the_network_check_and_a_rejection_does_not()
     {
         var workflow = new StubDeviceRegistrationWorkflowService
