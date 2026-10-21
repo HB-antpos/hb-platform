@@ -197,6 +197,13 @@ public sealed class DeviceRegistrationViewModelTests
                 .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.failedWithReason")
                 .Element("value")?.Value;
             Assert.Contains("{0}", failedWithReason);
+
+            // 「设备已登记」提示必须带 {0}（本机硬件码末 6 位），并说明克隆镜像共用硬件码、不要停用另一台。
+            var conflict = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.deviceConflict")
+                .Element("value")?.Value;
+            Assert.Contains("{0}", conflict);
         }
     }
 

@@ -66,4 +66,14 @@ public sealed class DeviceActivationFailureDescriberTests
             nameof(InvalidOperationException),
             DeviceActivationFailureDescriber.DescribeTransportFailure(new InvalidOperationException("")));
     }
+
+    [Theory]
+    [InlineData("ID (ending {0}) is registered.", "ABCDEF0123456789AABBCC", "ID (ending AABBCC) is registered.")]
+    [InlineData("ID (ending {0}) is registered.", "abc", "ID (ending abc) is registered.")]
+    [InlineData("ID (ending {0}) is registered.", null, "ID (ending ?) is registered.")]
+    [InlineData("No placeholder here.", "ABCDEF", "No placeholder here.")]
+    public void Hardware_id_suffix_is_filled_into_the_already_registered_message(string template, string? hardwareId, string expected)
+    {
+        Assert.Equal(expected, DeviceActivationFailureDescriber.ApplyHardwareIdSuffix(template, hardwareId));
+    }
 }

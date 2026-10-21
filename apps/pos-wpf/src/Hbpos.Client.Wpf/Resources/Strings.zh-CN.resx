@@ -2472,7 +2472,7 @@
     <value>当前网络的开通尝试次数过多，请等待 {0} 分钟后再试。</value>
   </data>
   <data name="deviceActivation.error.deviceConflict" xml:space="preserve">
-    <value>这台电脑已登记到某个分店。如需换店，请使用「更换门店登记」并输入新分店的开通码。</value>
+    <value>这台电脑的硬件码（末 6 位 {0}）已被登记。如果另一台电脑是用同一个系统镜像装的，两台会共用同一个硬件码：请不要停用另一台，先给这台电脑改名并重启，再重新激活。如果这台电脑本来就登记过，请联系总部在「设备管理」里核对。</value>
   </data>
   <data name="deviceActivation.error.storeUnavailable" xml:space="preserve">
     <value>目标分店当前不可用，请联系总部确认分店状态后重新生成开通码。</value>

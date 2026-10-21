@@ -1054,7 +1054,11 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         var key = ActivationErrorResourceKey(apiException.ErrorCode);
         if (!string.Equals(key, GenericActivationErrorKey, StringComparison.Ordinal))
         {
-            return T(key, apiException.Message);
+            var text = T(key, apiException.Message);
+            // 「设备已登记」要带上本机硬件码末 6 位：克隆镜像的两台电脑硬件码相同，总部凭它对登记表。
+            return string.Equals(apiException.ErrorCode, DeviceActivationReasonCodes.DeviceConflict, StringComparison.Ordinal)
+                ? DeviceActivationFailureDescriber.ApplyHardwareIdSuffix(text, HardwareId)
+                : text;
         }
 
         // 未知原因码、没有原因码的 HTTP 拒绝、凭据不完整等：不再只给一句笼统的话，把状态码/原因码附在后面，现场能直接报给我们。
