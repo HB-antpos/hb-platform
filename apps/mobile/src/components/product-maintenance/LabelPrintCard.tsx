@@ -6,11 +6,14 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 interface LabelPrintCardProps {
   isPrintingProduct?: boolean;
+  isPrintingSmall?: boolean;
   isPrintingDiscount?: boolean;
   isPrintingBigDiscount?: boolean;
   canPrintDiscount?: boolean;
   canPrintBigDiscount?: boolean;
   onPrintProduct?: () => void;
+  /** 小标签（60mm）：固定按小标签打印，不受打印设置里「小标签」开关影响。 */
+  onPrintSmall?: () => void;
   onPrintDiscount?: () => void;
   onPrintBigDiscount?: () => void;
   /** 行首槽位（打印机连接状态 chip）；不传时显示"标签"文字标题。 */
@@ -21,11 +24,13 @@ interface LabelPrintCardProps {
 
 export const LabelPrintCard = memo(function LabelPrintCard({
   isPrintingProduct = false,
+  isPrintingSmall = false,
   isPrintingDiscount = false,
   isPrintingBigDiscount = false,
   canPrintDiscount = false,
   canPrintBigDiscount = false,
   onPrintProduct,
+  onPrintSmall,
   onPrintDiscount,
   onPrintBigDiscount,
   leading,
@@ -48,6 +53,17 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             labelStyle={styles.buttonLabel}
           >
             {t("print.productShort")}
+          </Button>
+          <Button
+            compact
+            mode="contained"
+            onPress={onPrintSmall}
+            loading={isPrintingSmall}
+            disabled={!onPrintSmall || isPrintingSmall}
+            style={styles.button}
+            labelStyle={styles.buttonLabel}
+          >
+            {t("print.smallShort")}
           </Button>
           <Button
             compact
@@ -89,9 +105,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: HB_SPACING.xs,
+    // 360dp 屏的预算：容器内边距 16×2 → 行内边距 8×2 → 状态图标 36 + 间距 6 → 四个按钮各约 64dp，
+    // 英文 “Discount”（13sp 约 54dp）加标签边距仍有余量，不会被截断。
+    gap: 6,
     minHeight: 52,
-    paddingHorizontal: HB_SPACING.sm,
+    paddingHorizontal: HB_SPACING.xs,
   },
   rowTitle: {
     minWidth: 32,
@@ -103,14 +121,17 @@ const styles = StyleSheet.create({
   actions: {
     flex: 1,
     flexDirection: "row",
-    gap: 6,
+    // 状态图标去掉文字后，四个打印按钮要在 Zebra 小屏（约 360dp）一行排下：间距与标签边距都收紧一点。
+    gap: 4,
   },
   button: {
     flex: 1,
+    // 去掉 Paper 紧凑按钮默认的最小宽度，否则四个按钮会撑出一行。
+    minWidth: 0,
     borderRadius: HB_RADIUS.control,
   },
   buttonLabel: {
-    marginHorizontal: 6,
+    marginHorizontal: 2,
     fontSize: 13,
   },
   footer: {
