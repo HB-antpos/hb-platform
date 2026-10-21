@@ -80,6 +80,54 @@ public sealed class AttendanceQrPanelViewModelTests
     }
 
     [Fact]
+    public async Task The_default_refresh_slows_to_five_minutes_when_healthy_and_retries_quickly_otherwise()
+    {
+        var fixture = new Fixture(online: true);
+        using var viewModel = fixture.CreateViewModel();
+
+        // 还没成功启用过（没有身份 / 可信时间）：按异常处理，15 秒重试。
+        Assert.Equal(TimeSpan.FromSeconds(15), await viewModel.GetNextRefreshIntervalAsync());
+
+        await viewModel.RefreshAsync();
+        Assert.Equal(TimeSpan.FromMinutes(5), await viewModel.GetNextRefreshIntervalAsync());
+
+        // 离线：快速重试，网络恢复后尽快回到在线校验状态。
+        fixture.Connectivity.IsOnline = false;
+        await viewModel.RefreshAsync();
+        Assert.Equal(TimeSpan.FromSeconds(15), await viewModel.GetNextRefreshIntervalAsync());
+
+        fixture.Connectivity.IsOnline = true;
+        await viewModel.RefreshAsync();
+        Assert.Equal(TimeSpan.FromMinutes(5), await viewModel.GetNextRefreshIntervalAsync());
+    }
+
+    [Fact]
+    public async Task A_failed_setup_is_retried_every_fifteen_seconds_until_it_recovers()
+    {
+        var fixture = new Fixture(online: true);
+        using var viewModel = fixture.CreateViewModel();
+        fixture.Api.RegisterException = new HttpRequestException("registration failed");
+
+        await viewModel.RefreshAsync();
+        Assert.Equal(TimeSpan.FromSeconds(15), await viewModel.GetNextRefreshIntervalAsync());
+
+        fixture.Api.RegisterException = null;
+        await viewModel.RefreshAsync();
+        Assert.Equal(TimeSpan.FromMinutes(5), await viewModel.GetNextRefreshIntervalAsync());
+    }
+
+    [Fact]
+    public async Task An_explicit_refresh_interval_stays_fixed()
+    {
+        var fixture = new Fixture(online: true);
+        using var viewModel = fixture.CreateViewModel(refreshInterval: TimeSpan.FromSeconds(30));
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(TimeSpan.FromSeconds(30), await viewModel.GetNextRefreshIntervalAsync());
+    }
+
+    [Fact]
     public async Task Repeated_ticks_during_early_rotation_do_not_reissue_qr()
     {
         var fixture = new Fixture(online: true);

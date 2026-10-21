@@ -39,6 +39,13 @@ public sealed class BackgroundPollingScheduleTests
     }
 
     [Fact]
+    public void The_qr_panel_refresh_is_five_minutes_when_healthy_and_fifteen_seconds_otherwise()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(5), BackgroundPollingSchedule.GetQrPanelRefreshInterval(healthy: true));
+        Assert.Equal(TimeSpan.FromSeconds(15), BackgroundPollingSchedule.GetQrPanelRefreshInterval(healthy: false));
+    }
+
+    [Fact]
     public void The_quiet_interval_never_makes_a_slower_poll_faster()
     {
         var alreadySlow = TimeSpan.FromMinutes(10);
