@@ -110,6 +110,8 @@ export const CONTAINER_DETAIL_DRAFT_FIELDS = [
   '调整浮率', '国内价格', '进口价格', '运输成本', '商品名称', '英文名称',
   'ProductCategoryGUID', '贴牌价格', '单件装箱数', '中包数', '单件体积',
   '装柜数量', '合计装柜体积', '合计装柜金额', '备注', 'IsActive',
+  // 已有价：保存明细时只回写仓库表 / 商品主档 / 分店表，不改明细自己的本次价。
+  '仓库进口价', '仓库零售价',
 ] as const
 export type ContainerDetailDraftField = typeof CONTAINER_DETAIL_DRAFT_FIELDS[number]
 export type PendingContainerDetailPatch = Pick<UpdateContainerDetailRequest, 'hguid'> &
@@ -151,8 +153,14 @@ export interface PendingContainerDetailSavePlan {
   pendingPatches: PendingContainerDetailPatch[]
   detailUpdates: UpdateContainerDetailRequest[]
   localValidationErrors: ContainerDetailSaveValidationError[]
+  /** 本次进口价（新商品建档数据，只存货柜明细）。 */
   importPriceCount: number
+  /** 本次零售价（新商品建档数据，只存货柜明细）。 */
   retailPriceCount: number
+  /** 已有进口价（回写仓库表 / 商品主档 / 分店进货价）。 */
+  warehouseImportPriceCount: number
+  /** 已有零售价（回写仓库表 / 商品主档，可联动分店价与价格任务）。 */
+  warehouseRetailPriceCount: number
   englishNameCount: number
   clearEnglishNameCount: number
 }
@@ -248,13 +256,20 @@ export function applyPendingContainerDetailPatches(
       if (field === CONTAINER_DETAIL_ENGLISH_NAME_FIELD || !(field in pendingPatch)) return
       ;(visiblePatch as Record<string, unknown>)[field] = pendingPatch[field]
     })
-    if ('贴牌价格' in pendingPatch) {
-      visiblePatch.贴牌价格 = pendingPatch.贴牌价格
-      if (!row.是否新商品) {
-        // 已有商品的零售价列读取仓库实时价，重载后也要继续显示本地草稿。
-        visiblePatch.warehouseOEMPrice = pendingPatch.贴牌价格
-        visiblePatch.WarehouseOEMPrice = pendingPatch.贴牌价格
-      }
+    // 已有价列显示仓库实时价：草稿未保存时覆盖显示值，并记下覆盖前的服务器值，保存时作为后端的并发基线。
+    if (pendingPatch.仓库进口价 != null) {
+      visiblePatch.draftBaselineWarehouseImportPrice = row.draftBaselineWarehouseImportPrice !== undefined
+        ? row.draftBaselineWarehouseImportPrice
+        : (getContainerDetailRealtimeImportPrice(row) ?? null)
+      visiblePatch.warehouseImportPrice = pendingPatch.仓库进口价
+      visiblePatch.WarehouseImportPrice = pendingPatch.仓库进口价
+    }
+    if (pendingPatch.仓库零售价 != null) {
+      visiblePatch.draftBaselineWarehouseOEMPrice = row.draftBaselineWarehouseOEMPrice !== undefined
+        ? row.draftBaselineWarehouseOEMPrice
+        : (getContainerDetailRealtimeRetailPrice(row) ?? null)
+      visiblePatch.warehouseOEMPrice = pendingPatch.仓库零售价
+      visiblePatch.WarehouseOEMPrice = pendingPatch.仓库零售价
     }
     if (pendingPatch.ClearEnglishName === true) {
       visiblePatch.英文名称 = undefined
@@ -302,24 +317,46 @@ export function buildPendingContainerDetailSavePlan(
     localValidationErrors,
     importPriceCount: pendingPatches.filter((patch) => patch.进口价格 != null).length,
     retailPriceCount: pendingPatches.filter((patch) => patch.贴牌价格 != null).length,
+    warehouseImportPriceCount: pendingPatches.filter((patch) => patch.仓库进口价 != null).length,
+    warehouseRetailPriceCount: pendingPatches.filter((patch) => patch.仓库零售价 != null).length,
     englishNameCount: pendingPatches.filter((patch) => patch.英文名称 !== undefined).length,
     clearEnglishNameCount: pendingPatches.filter((patch) => patch.ClearEnglishName === true).length,
   }
 }
 
 /**
- * 待保存草稿里「会改仓库零售价」的条数：只有已有商品的零售价会回写仓库价、再联动分店价；
- * 新商品的零售价只存货柜明细（建档时才使用），不需要「同步分店零售价 / 生成价格任务」两个开关。
- * 草稿对应的行不在当前已加载页里时无法判断，按已有商品算（宁可多问一次，也不静默按默认覆盖分店价）。
+ * 待保存草稿里「会改仓库零售价」的条数：只有「已有零售价」草稿会回写仓库价、再联动分店价；
+ * 「本次零售价」只存货柜明细（新商品建档时才使用），不需要「同步分店零售价 / 生成价格任务」两个开关。
  */
-export function countPendingExistingProductRetailPrices(
-  patches: ReadonlyArray<Pick<PendingContainerDetailPatch, 'hguid' | '贴牌价格'>>,
-  rows: ReadonlyArray<Pick<ContainerDetail, 'hguid' | '是否新商品'>>,
+export function countPendingWarehouseRetailPrices(
+  patches: ReadonlyArray<Pick<PendingContainerDetailPatch, '仓库零售价'>>,
 ): number {
-  const newProductHguids = new Set(
-    rows.filter((row) => row.hguid && row.是否新商品).map((row) => row.hguid as string),
-  )
-  return patches.filter((patch) => patch.贴牌价格 != null && !newProductHguids.has(patch.hguid)).length
+  return patches.filter((patch) => patch.仓库零售价 != null).length
+}
+
+/**
+ * 给「已有价」草稿补上并发基线：提交时页面看到的仓库价（草稿覆盖显示值之前的服务器值）。
+ * 后端发现仓库当前价与它不同，会拒绝该字段并提示刷新，避免覆盖他人刚改过的价格。
+ */
+export function attachContainerDetailWarehousePriceExpectations<T extends UpdateContainerDetailRequest>(
+  update: T,
+  row: ContainerDetail | undefined,
+): T & Pick<UpdateContainerDetailRequest, 'expectedWarehouseImportPrice' | 'expectedWarehouseOemPrice'> {
+  if (!row) return update
+  const next: T & Pick<UpdateContainerDetailRequest, 'expectedWarehouseImportPrice' | 'expectedWarehouseOemPrice'> = { ...update }
+  if (update.仓库进口价 != null) {
+    const baseline = row.draftBaselineWarehouseImportPrice !== undefined
+      ? row.draftBaselineWarehouseImportPrice
+      : getContainerDetailRealtimeImportPrice(row)
+    if (baseline != null) next.expectedWarehouseImportPrice = baseline
+  }
+  if (update.仓库零售价 != null) {
+    const baseline = row.draftBaselineWarehouseOEMPrice !== undefined
+      ? row.draftBaselineWarehouseOEMPrice
+      : getContainerDetailRealtimeRetailPrice(row)
+    if (baseline != null) next.expectedWarehouseOemPrice = baseline
+  }
+  return next
 }
 
 function hasValidationError(
@@ -1281,41 +1318,32 @@ export function getContainerDetailImportPriceTrend(row: ContainerDetail): 'up' |
   return currentImportPrice > realtimeImportPrice ? 'up' : 'down'
 }
 
-export interface ContainerDetailWarehouseImportPriceUpdate {
-  productCode: string
-  importPrice: number
-}
-
-/**
- * 「更新仓库进货价」：用本次货柜进口价格覆盖仓库进货价（WarehouseProduct.ImportPrice，即表格里的实时进货价）。
- * - 只处理已有商品（新商品还没有仓库记录，由「创建新商品」负责写入）
- * - 进口价格必须 > 0，且与实时进货价不同（相同的不必再写）
- * - 同一商品在柜内出现多行时只取第一行，避免同一批次里互相覆盖
- */
-export function buildContainerDetailWarehouseImportPriceUpdates(rows: readonly ContainerDetail[]): ContainerDetailWarehouseImportPriceUpdate[] {
-  const seen = new Set<string>()
-  const updates: ContainerDetailWarehouseImportPriceUpdate[] = []
-  rows.forEach((row) => {
-    if (row.是否新商品) return
-    const productCode = (row.商品编码 || row.商品信息?.商品编码 || '').trim()
-    if (!productCode || seen.has(productCode)) return
-    const importPrice = row.进口价格
-    if (typeof importPrice !== 'number' || !Number.isFinite(importPrice) || importPrice <= 0) return
-    seen.add(productCode)
-    if (getContainerDetailRealtimeImportPrice(row) === importPrice) return
-    updates.push({ productCode, importPrice })
-  })
-  return updates
-}
-
 export function getContainerDetailRealtimeRetailPrice(row: ContainerDetail): number | undefined {
   // 实时零售价取 WarehouseProduct.OEMPrice；缺失时不回退货柜明细零售价。
   return row.warehouseOEMPrice ?? row.WarehouseOEMPrice
 }
 
 export function getContainerDetailVisibleOemPrice(row: ContainerDetail): number | undefined {
-  // 表格零售价：新商品沿用明细价，已有商品绑定仓库实时零售价。
+  // 「本次零售价」列：所有行都显示货柜明细自己的价格（已有商品只读，新商品建档时使用）。
+  return resolveContainerDetailOemPrice(row)
+}
+
+/**
+ * 商品当前零售价：新商品取明细价（建档时使用），已有商品取仓库实时零售价。
+ * 推送 HQ、「更新已有商品价格」这类写向商品主档的操作用它，不能用「本次零售价」列的明细快照。
+ */
+export function getContainerDetailProductRetailPrice(row: ContainerDetail): number | undefined {
   return row.是否新商品 ? resolveContainerDetailOemPrice(row) : getContainerDetailRealtimeRetailPrice(row)
+}
+
+/** 「已有进口价 / 已有零售价」只有已有商品可改（新商品还没有仓库记录）。 */
+export function isContainerDetailExistingPriceEditable(row: ContainerDetail): boolean {
+  return !row.是否新商品
+}
+
+/** 「本次进口价 / 本次零售价」只有新商品可改：它是建档数据，已有商品的价格要改「已有」两列。 */
+export function isContainerDetailThisPriceEditable(row: ContainerDetail): boolean {
+  return Boolean(row.是否新商品)
 }
 
 export function getContainerDetailLastOemPrice(row: ContainerDetail): number | undefined {
@@ -2776,7 +2804,8 @@ export function buildContainerDetailHqPushSelection(rows: ContainerDetail[]): Co
     const englishName = getContainerDetailEnglishName(row)?.trim()
     const barcode = row.商品信息?.条形码?.trim()
     const imageUrl = row.商品图片?.trim() || row.商品信息?.商品图片?.trim()
-    const oemPrice = getContainerDetailVisibleOemPrice(row)
+    // 推送 HQ 的零售价取商品当前零售价（已有商品是仓库实时价），不能用「本次零售价」的明细快照。
+    const oemPrice = getContainerDetailProductRetailPrice(row)
     if (!productCode && !(localSupplierCode && itemNumber)) {
       missingProductCodeCount += 1
       return

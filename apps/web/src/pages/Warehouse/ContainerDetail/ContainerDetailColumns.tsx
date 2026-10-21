@@ -44,7 +44,7 @@ export function renderNumericCell(value: ReactNode) {
   return <span className="container-detail-nowrap container-detail-numeric-cell">{value}</span>
 }
 
-/** 零售价只读单元格：新商品显示明细价，已有商品显示仓库实时价。 */
+/** 零售价只读单元格：显示货柜明细自己的「本次零售价」（已有商品只读，新商品建档时使用）。 */
 export function renderOemPriceCell(row: ContainerDetail) {
   const className = [
     'container-detail-nowrap',

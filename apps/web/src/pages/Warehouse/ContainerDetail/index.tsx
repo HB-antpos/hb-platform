@@ -150,7 +150,7 @@ import {
   applyContainerDetailColumnState,
   applyContainerDetailWarehouseStatusByProductCodes,
   buildContainerDetailQuery,
-  buildContainerDetailWarehouseImportPriceUpdates,
+  attachContainerDetailWarehousePriceExpectations,
   buildContainerDetailClearEnglishNameUpdates,
   buildContainerDetailDetectionItems,
   buildContainerDetailEnglishNameUpdates,
@@ -159,7 +159,7 @@ import {
   buildContainerDetailSaveFailureKeys,
   buildContainerDetailSuccessfulEnglishNameUpdates,
   buildPendingContainerDetailSavePlan,
-  countPendingExistingProductRetailPrices,
+  countPendingWarehouseRetailPrices,
   buildContainerDetailTagStats,
   buildContainerDetailHqPushSelection,
   buildCreatedProductsHqPushPlan,
@@ -203,7 +203,10 @@ import {
   getContainerDetailRealtimeImportPrice,
   getContainerDetailRealtimeRetailPrice,
   getContainerDetailRetailPriceGapRatio,
+  getContainerDetailProductRetailPrice,
   getContainerDetailVisibleOemPrice,
+  isContainerDetailExistingPriceEditable,
+  isContainerDetailThisPriceEditable,
   isContainerDetailPriceGapHighlighted,
   getPendingContainerDetailEnglishNameError,
   getContainerDetailMatchType,
@@ -263,7 +266,8 @@ import {
 } from './containerDetailLogic'
 import { buildWarehouseCategoryLookup, formatWarehouseCategoryNodeName, getWarehouseProductCategoryTooltip } from '../Products/categoryPath'
 import CategoryTreePicker from '../Products/CategoryTreePicker'
-import RetailPriceSyncOptionsField, { UncontrolledRetailPriceSyncOptions, type RetailPriceSyncMessageKeys } from '../Products/RetailPriceSyncOptionsField'
+import { UncontrolledRetailPriceSyncOptions, type RetailPriceSyncMessageKeys } from '../Products/RetailPriceSyncOptionsField'
+import { ContainerDetailFillContext, FillableCell, type ContainerDetailFillDragState } from './ContainerDetailFillHandle'
 import { DEFAULT_RETAIL_PRICE_SYNC_CHOICE, buildRetailPriceSyncFields, type RetailPriceSyncChoice } from '../Products/retailPriceSyncOptions'
 import WarehouseProductChangeHistoryDrawer from '../Products/WarehouseProductChangeHistoryDrawer'
 import {
@@ -357,10 +361,13 @@ import {
   CONTAINER_DETAIL_COLUMN_PASTE_KEYS,
   CONTAINER_DETAIL_COLUMN_PASTE_TARGETS,
   buildContainerDetailColumnPastePlan,
+  buildContainerDetailFillPlan,
   isContainerDetailColumnPasteKey,
   parseContainerDetailColumnPasteText,
+  resolveContainerDetailFillTargetRows,
   type ContainerDetailColumnPasteEntry,
   type ContainerDetailColumnPasteKey,
+  type ContainerDetailColumnPastePlan,
 } from './containerDetailColumnPaste'
 import useContainerSetCode from './useContainerSetCode'
 import {
@@ -765,10 +772,10 @@ const CONTAINER_DETAIL_MAX_COLUMN_WIDTH = 420
 // 完全成功的后台任务通知自动关闭（悬停时暂停计时），避免长期遮住右上角的“编辑货柜”等按钮；失败与部分成功仍需手动关闭。
 const CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS = 10
 const DEFAULT_CONTAINER_DETAIL_SORT: ContainerDetailSortState = { field: 'itemNumber', order: 'ascend' }
-const CONTAINER_DETAIL_EDITABLE_COLUMN_KEYS = ['englishName', 'packingQuantity', 'unitVolume', 'middlePackQuantity', 'floatRate', 'importPrice', 'oemPrice', 'remark'] as const
+const CONTAINER_DETAIL_EDITABLE_COLUMN_KEYS = ['englishName', 'packingQuantity', 'unitVolume', 'middlePackQuantity', 'floatRate', 'warehouseImportPrice', 'lastOEMPrice', 'importPrice', 'oemPrice', 'remark'] as const
 // 失焦即自动保存的列与需点「保存明细」的草稿列，只用于表头图例样式，不影响任何保存逻辑。
 const CONTAINER_DETAIL_AUTO_SAVE_COLUMN_KEYS = new Set(['packingQuantity', 'unitVolume', 'floatRate', 'middlePackQuantity', 'productName', 'remark'])
-const CONTAINER_DETAIL_DRAFT_COLUMN_KEYS = new Set(['importPrice', 'oemPrice', 'englishName'])
+const CONTAINER_DETAIL_DRAFT_COLUMN_KEYS = new Set(['importPrice', 'oemPrice', 'englishName', 'warehouseImportPrice', 'lastOEMPrice'])
 
 function getContainerDetailColumnSaveModeClassName(columnKey: string) {
   if (CONTAINER_DETAIL_AUTO_SAVE_COLUMN_KEYS.has(columnKey)) return 'container-detail-col-autosave'
@@ -1034,7 +1041,6 @@ export default function ContainerDetailPage() {
   const [batchImportPrice, setBatchImportPrice] = useState<number | null>(null)
   const [batchOemPrice, setBatchOemPrice] = useState<number | null>(null)
   // 批量设价填了零售价时的两个开关；每次打开弹窗都回到默认（都勾选），不持久化。
-  const [batchRetailPriceSync, setBatchRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE })
   const [batchFloatRateModalOpen, setBatchFloatRateModalOpen] = useState(false)
   const [batchFloatRateSaving, setBatchFloatRateSaving] = useState(false)
   const [batchPricesModalOpen, setBatchPricesModalOpen] = useState(false)
@@ -3135,6 +3141,8 @@ export default function ContainerDetailPage() {
       return
     }
     const fields: { field: string; columnKey: ContainerDetailEditableColumnKey }[] = [
+      { field: '仓库进口价', columnKey: 'warehouseImportPrice' },
+      { field: '仓库零售价', columnKey: 'lastOEMPrice' },
       { field: '进口价格', columnKey: 'importPrice' },
       { field: '贴牌价格', columnKey: 'oemPrice' },
       { field: '英文名称', columnKey: 'englishName' },
@@ -3146,11 +3154,15 @@ export default function ContainerDetailPage() {
         const pendingPatch = pendingDetailPatchesRef.current[row.hguid]
         if (!pendingPatch) continue
         for (const candidate of fields) {
-          const hasField = candidate.field === '进口价格'
-            ? pendingPatch.进口价格 != null
-            : candidate.field === '贴牌价格'
-              ? pendingPatch.贴牌价格 != null
-              : pendingPatch.英文名称 !== undefined || pendingPatch.ClearEnglishName === true
+          const hasField = candidate.field === '仓库进口价'
+            ? pendingPatch.仓库进口价 != null
+            : candidate.field === '仓库零售价'
+              ? pendingPatch.仓库零售价 != null
+              : candidate.field === '进口价格'
+                ? pendingPatch.进口价格 != null
+                : candidate.field === '贴牌价格'
+                  ? pendingPatch.贴牌价格 != null
+                  : pendingPatch.英文名称 !== undefined || pendingPatch.ClearEnglishName === true
           const hasFailure = Boolean(getContainerDetailDraftFieldFailure(
             pendingDetailFailuresRef.current,
             row.hguid,
@@ -3300,22 +3312,32 @@ export default function ContainerDetailPage() {
 
   type PendingDetailPatchItem = {
     row: ContainerDetail
-    patch: Pick<Partial<ContainerDetail>, '进口价格' | '贴牌价格' | '英文名称'>
+    patch: Pick<Partial<UpdateContainerDetailRequest>, '进口价格' | '贴牌价格' | '英文名称' | '仓库进口价' | '仓库零售价'>
   }
 
   // 批量标记草稿：页面行只合并一次，localStorage 草稿也只写一次。
   const markPendingDetailPatches = (items: PendingDetailPatchItem[]) => {
     const visiblePatches = new Map<string, Partial<ContainerDetail>>()
     items.forEach(({ row, patch }) => {
-      const isExistingProductRetailPatch = !row.是否新商品 && '贴牌价格' in patch
-      const visiblePatch: Partial<ContainerDetail> = isExistingProductRetailPatch
-        ? {
-            ...patch,
-            // 已有商品的零售价列绑定仓库实时价，输入后同步刷新两套字段，避免保存前显示回跳。
-            warehouseOEMPrice: patch.贴牌价格,
-            WarehouseOEMPrice: patch.贴牌价格,
-          }
-        : patch
+      const { 仓库进口价, 仓库零售价, ...detailPatch } = patch
+      const visiblePatch: Partial<ContainerDetail> = { ...detailPatch }
+      // 「已有价」两列显示仓库实时价：输入后同步刷新两套字段，避免保存前显示回跳；
+      // 同时记下覆盖前的服务器值，保存时作为后端判断仓库价是否被他人改过的基线。
+      const latestRow = rowsRef.current.find((item) => rowKey(item) === rowKey(row)) ?? row
+      if (仓库进口价 !== undefined) {
+        visiblePatch.draftBaselineWarehouseImportPrice = latestRow.draftBaselineWarehouseImportPrice !== undefined
+          ? latestRow.draftBaselineWarehouseImportPrice
+          : (getContainerDetailRealtimeImportPrice(latestRow) ?? null)
+        visiblePatch.warehouseImportPrice = 仓库进口价
+        visiblePatch.WarehouseImportPrice = 仓库进口价
+      }
+      if (仓库零售价 !== undefined) {
+        visiblePatch.draftBaselineWarehouseOEMPrice = latestRow.draftBaselineWarehouseOEMPrice !== undefined
+          ? latestRow.draftBaselineWarehouseOEMPrice
+          : (getContainerDetailRealtimeRetailPrice(latestRow) ?? null)
+        visiblePatch.warehouseOEMPrice = 仓库零售价
+        visiblePatch.WarehouseOEMPrice = 仓库零售价
+      }
       const key = rowKey(row)
       visiblePatches.set(key, { ...visiblePatches.get(key), ...visiblePatch })
     })
@@ -3339,6 +3361,53 @@ export default function ContainerDetailPage() {
 
     // 兼容只改变原生输入值、未触发 React onChange 的粘贴工具，失焦时补入持久草稿。
     markPendingDetailPatch(row, { 进口价格: value })
+  }
+
+  // 已有价输入框清空 / 改回服务器值时撤销草稿，并把显示恢复成服务器值（草稿覆盖显示值之前记下的基线）。
+  const discardPendingWarehousePriceDraft = (row: ContainerDetail, field: '仓库进口价' | '仓库零售价') => {
+    markPendingDetailPatch(row, { [field]: undefined } as PendingDetailPatchItem['patch'])
+    const latest = rowsRef.current.find((item) => rowKey(item) === rowKey(row)) ?? row
+    const baseline = field === '仓库进口价'
+      ? latest.draftBaselineWarehouseImportPrice
+      : latest.draftBaselineWarehouseOEMPrice
+    if (baseline === undefined) return
+    patchRow(rowKey(row), field === '仓库进口价'
+      ? {
+          warehouseImportPrice: baseline ?? undefined,
+          WarehouseImportPrice: baseline ?? undefined,
+          draftBaselineWarehouseImportPrice: undefined,
+        }
+      : {
+          warehouseOEMPrice: baseline ?? undefined,
+          WarehouseOEMPrice: baseline ?? undefined,
+          draftBaselineWarehouseOEMPrice: undefined,
+        })
+  }
+
+  const handlePendingWarehousePriceBlur = (row: ContainerDetail, field: '仓库进口价' | '仓库零售价', rawValue: string) => {
+    const latest = rowsRef.current.find((item) => rowKey(item) === rowKey(row)) ?? row
+    const currentValue = field === '仓库进口价'
+      ? getContainerDetailRealtimeImportPrice(latest)
+      : getContainerDetailRealtimeRetailPrice(latest)
+    const baseline = field === '仓库进口价'
+      ? latest.draftBaselineWarehouseImportPrice
+      : latest.draftBaselineWarehouseOEMPrice
+    const normalized = rawValue.trim().replace(/,/g, '')
+    if (!normalized) {
+      // 清空 = 不改这个价：撤销草稿并恢复显示。
+      discardPendingWarehousePriceDraft(row, field)
+      return
+    }
+    const typed = Number(Number(normalized).toFixed(2))
+    if (Number.isFinite(typed) && baseline !== undefined && baseline === typed) {
+      // 改回了服务器当前值，没有需要保存的变化。
+      discardPendingWarehousePriceDraft(row, field)
+      return
+    }
+    const value = resolveContainerDetailPendingPriceOnBlur(rawValue, currentValue)
+    if (value === undefined) return
+    // 兼容只改变原生输入值、未触发 React onChange 的粘贴工具，失焦时补入持久草稿。
+    markPendingDetailPatch(row, { [field]: value } as PendingDetailPatchItem['patch'])
   }
 
   const getDetailSaveFailedMessage = () => t('containers.messages.detailSaveFailed', '货柜明细保存失败，请稍后重试')
@@ -3588,11 +3657,11 @@ export default function ContainerDetailPage() {
       pendingDetailFieldVersionsRef.current,
       pendingDetailOverrideAcknowledgementsRef.current,
     )
-    const detailUpdates = plan.detailUpdates.map((update) => ({
+    const detailUpdates = plan.detailUpdates.map((update) => attachContainerDetailWarehousePriceExpectations({
       ...update,
       expectedServerFieldTokens: expectedServerFieldTokens[update.hguid],
       overrideAcknowledgements: overrideAcknowledgements[update.hguid],
-    }))
+    }, rowsRef.current.find((row) => row.hguid === update.hguid)))
     const saveKeys = detailUpdates.flatMap((update) => (
       buildContainerDetailSaveFailureKeys(update.hguid, update)
     ))
@@ -3615,8 +3684,8 @@ export default function ContainerDetailPage() {
     const invalidEnglishNameCount = plan.pendingPatches.filter((patch) => (
       Boolean(getPendingContainerDetailEnglishNameError(patch))
     )).length
-    // 只有已有商品的零售价才会回写仓库价并联动分店价；新商品零售价只存货柜明细，不需要两个开关。
-    const existingRetailPriceCount = countPendingExistingProductRetailPrices(plan.pendingPatches, rowsRef.current)
+    // 只有「已有零售价」才会回写仓库价并联动分店价；「本次零售价」只存货柜明细，不需要两个开关。
+    const existingRetailPriceCount = countPendingWarehouseRetailPrices(plan.pendingPatches)
     let retailPriceSyncChoice: RetailPriceSyncChoice = { ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE }
     Modal.confirm({
       title: t('containers.modals.savePendingDetailsTitle', '确认保存明细'),
@@ -3625,10 +3694,12 @@ export default function ContainerDetailPage() {
           <Typography.Text strong>{t('containers.modals.savePendingDetailsUpdateTitle', '更新说明')}</Typography.Text>
           <Typography.Text>
             {t(
-              'containers.modals.savePendingDetailsSummary',
-              '本次涉及 {{total}} 条明细：进口价 {{importPriceCount}} 条、零售价 {{retailPriceCount}} 条、英文名称 {{englishNameCount}} 条、清除英文名称 {{clearEnglishNameCount}} 条。',
+              'warehouseUi.containerDetail.savePendingSummary',
+              '本次涉及 {{total}} 条明细：已有进口价 {{warehouseImportPriceCount}} 条、已有零售价 {{warehouseRetailPriceCount}} 条、本次进口价 {{importPriceCount}} 条、本次零售价 {{retailPriceCount}} 条、英文名称 {{englishNameCount}} 条、清除英文名称 {{clearEnglishNameCount}} 条。',
               {
                 total: plan.pendingPatches.length,
+                warehouseImportPriceCount: plan.warehouseImportPriceCount,
+                warehouseRetailPriceCount: plan.warehouseRetailPriceCount,
                 importPriceCount: plan.importPriceCount,
                 retailPriceCount: plan.retailPriceCount,
                 englishNameCount: plan.englishNameCount,
@@ -3636,22 +3707,27 @@ export default function ContainerDetailPage() {
               },
             )}
           </Typography.Text>
-          {plan.retailPriceCount > 0 ? (
+          {plan.warehouseImportPriceCount > 0 ? (
+            <Typography.Text type="warning">
+              {t('warehouseUi.containerDetail.savePendingWarehouseImportHint', '已有进口价会回写仓库商品进货价、商品主档进货价和各分店进货价，并重算套装子项成本；不会改本货柜明细的「本次进口价」。')}
+            </Typography.Text>
+          ) : null}
+          {plan.warehouseRetailPriceCount > 0 ? (
             <>
               <Typography.Text type="warning">
-                {t('containers.modals.savePendingDetailsExistingRetailHint', '已有商品零售价会同步更新仓库商品实时零售价，并同步本货柜明细贴牌价格。')}
+                {t('warehouseUi.containerDetail.savePendingWarehouseRetailHint', '已有零售价会回写仓库商品零售价和商品主档零售价；是否同步分店零售价、是否给分店发价签更换任务，由下面的开关决定。')}
               </Typography.Text>
-              <Typography.Text type="secondary">
-                {t('containers.modals.savePendingDetailsNewRetailHint', '新商品零售价只保存到本货柜明细，后续创建商品时继续使用该价格。')}
-              </Typography.Text>
-              {existingRetailPriceCount > 0 ? (
-                <UncontrolledRetailPriceSyncOptions
-                  initialValue={retailPriceSyncChoice}
-                  messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
-                  onChange={(next) => { retailPriceSyncChoice = next }}
-                />
-              ) : null}
+              <UncontrolledRetailPriceSyncOptions
+                initialValue={retailPriceSyncChoice}
+                messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
+                onChange={(next) => { retailPriceSyncChoice = next }}
+              />
             </>
+          ) : null}
+          {plan.importPriceCount > 0 || plan.retailPriceCount > 0 ? (
+            <Typography.Text type="secondary">
+              {t('warehouseUi.containerDetail.savePendingThisPriceHint', '本次进口价 / 本次零售价只保存到本货柜明细，作为新商品建档数据，不会更新仓库、商品主档和分店表。')}
+            </Typography.Text>
           ) : null}
           {invalidEnglishNameCount > 0 ? (
             <Typography.Text type="danger">
@@ -3827,8 +3903,12 @@ export default function ContainerDetailPage() {
       // 条件删除失败时保留内存状态，不能用一次普通写入伪装成“草稿已清除”。
       applyPendingDetailDraftState(settledDraftState, removedSavedDrafts.persisted, plan.pendingPatches)
       saveResponseApplied = true
-      if (plan.detailUpdates.length > 0 && scopedSave.shouldReloadCurrentDetail) {
-        // 后发查询可能在事务提交前读取旧快照，保存完成后用当前筛选条件立即替换。
+      const warehousePriceFieldSaved = executionResult.successfulFieldKeys.some((key) => (
+        key.endsWith(':仓库进口价') || key.endsWith(':仓库零售价')
+      ))
+      if (plan.detailUpdates.length > 0 && (scopedSave.shouldReloadCurrentDetail || warehousePriceFieldSaved)) {
+        // 后发查询可能在事务提交前读取旧快照，保存完成后用当前筛选条件立即替换；
+        // 已有价保存成功后也必须重载，让已有价、差额高亮和涨跌箭头反映服务器最新值，并丢弃草稿基线。
         await reloadCurrentDetailRef.current()
       }
 
@@ -4108,27 +4188,15 @@ export default function ContainerDetailPage() {
   }
 
   /**
-   * 把一列 Excel 值按当前显示顺序从 startRowKey 向下写入目标列。
-   * 价格/英文名称进入“保存明细”草稿，其余列进入自动保存队列，与单元格手工编辑走同一条落库链路。
+   * 把一份列补丁计划写入目标列：价格 / 英文名称进入“保存明细”草稿，其余列进入自动保存队列，
+   * 与单元格手工编辑走同一条落库链路。Excel 粘贴和单元格拖拽填充共用。
    */
-  const applyContainerDetailColumnPaste = (
+  const commitContainerDetailColumnPlan = (
     columnKey: ContainerDetailColumnPasteKey,
-    values: string[],
-    startRowKey: string,
+    plan: ContainerDetailColumnPastePlan,
+    mode: 'paste' | 'fill',
   ) => {
-    if (!access.canEditContainer) return false
     const target = CONTAINER_DETAIL_COLUMN_PASTE_TARGETS[columnKey]
-    const plan = buildContainerDetailColumnPastePlan({
-      columnKey,
-      values,
-      rows: displayRows,
-      startRowKey,
-      getRowKey: rowKey,
-    })
-    if (plan.error === 'missing_target') {
-      message.warning(t('containers.messages.columnPasteTargetMissing', '粘贴起始行已不在当前列表中，请重新选择'))
-      return false
-    }
     if (
       plan.entries.length > 0
       && target.requiresCostParameters
@@ -4152,18 +4220,27 @@ export default function ContainerDetailPage() {
     }
     applyEntries(plan.entries)
 
-    const summary = [t('containers.messages.columnPasteApplied', '已粘贴 {{count}} 个值', { count: plan.appliedCount })]
+    const summary = [mode === 'fill'
+      ? t('warehouseUi.containerDetail.columnFillApplied', '已填充 {{count}} 个单元格', { count: plan.appliedCount })
+      : t('containers.messages.columnPasteApplied', '已粘贴 {{count}} 个值', { count: plan.appliedCount })]
     if (plan.unchangedCount > 0) {
       summary.push(t('containers.messages.columnPasteUnchanged', '{{count}} 个与当前值相同', { count: plan.unchangedCount }))
     }
+    if (plan.notEditableCount > 0) {
+      summary.push(t('warehouseUi.containerDetail.columnPasteNotEditable', '跳过 {{count}} 个不可编辑的单元格（已有商品的「本次价」、新商品的「已有价」）', { count: plan.notEditableCount }))
+    }
     if (plan.skippedBlankCount > 0) {
-      summary.push(t('containers.messages.columnPasteSkippedBlank', '跳过 {{count}} 个空单元格', { count: plan.skippedBlankCount }))
+      summary.push(mode === 'fill'
+        ? t('warehouseUi.containerDetail.columnFillSourceBlank', '源单元格没有值，未填充')
+        : t('containers.messages.columnPasteSkippedBlank', '跳过 {{count}} 个空单元格', { count: plan.skippedBlankCount }))
     }
     if (plan.invalidCount > 0) {
-      summary.push(t('containers.messages.columnPasteInvalid', '{{count}} 个无效值未应用（第 {{rows}} 行）', {
-        count: plan.invalidCount,
-        rows: plan.invalidRowNumbers.slice(0, 10).join('、') + (plan.invalidRowNumbers.length > 10 ? '…' : ''),
-      }))
+      summary.push(mode === 'fill'
+        ? t('warehouseUi.containerDetail.columnFillInvalid', '源单元格的值不适用于目标列，{{count}} 个未填充', { count: plan.invalidCount })
+        : t('containers.messages.columnPasteInvalid', '{{count}} 个无效值未应用（第 {{rows}} 行）', {
+            count: plan.invalidCount,
+            rows: plan.invalidRowNumbers.slice(0, 10).join('、') + (plan.invalidRowNumbers.length > 10 ? '…' : ''),
+          }))
     }
     if (plan.overflowCount > 0) {
       summary.push(t('containers.messages.columnPasteOverflow', '超出列表末尾 {{count}} 行未粘贴', { count: plan.overflowCount }))
@@ -4179,6 +4256,126 @@ export default function ContainerDetailPage() {
     }
     return plan.appliedCount > 0
   }
+
+  /** 把一列 Excel 值按当前显示顺序从 startRowKey 向下写入目标列。 */
+  const applyContainerDetailColumnPaste = (
+    columnKey: ContainerDetailColumnPasteKey,
+    values: string[],
+    startRowKey: string,
+  ) => {
+    if (!access.canEditContainer) return false
+    const plan = buildContainerDetailColumnPastePlan({
+      columnKey,
+      values,
+      rows: displayRows,
+      startRowKey,
+      getRowKey: rowKey,
+    })
+    if (plan.error === 'missing_target') {
+      message.warning(t('containers.messages.columnPasteTargetMissing', '粘贴起始行已不在当前列表中，请重新选择'))
+      return false
+    }
+    return commitContainerDetailColumnPlan(columnKey, plan, 'paste')
+  }
+
+  // ---- 单元格拖拽填充（Excel 式填充柄）：把源单元格的值向上 / 向下复制到拖过的行 ----
+  const [fillDrag, setFillDrag] = useState<ContainerDetailFillDragState | null>(null)
+  const fillDragCleanupRef = useRef<(() => void) | null>(null)
+
+  const applyContainerDetailFill = (
+    columnKey: ContainerDetailColumnPasteKey,
+    sourceRowKey: string,
+    endRowKey: string,
+  ) => {
+    if (!access.canEditContainer || sourceRowKey === endRowKey) return
+    // 先结束源单元格的编辑，让它自己的 blur 保存链路先落库，随后读到的就是最终值。
+    blurActiveContainerDetailEditableCell()
+    const sourceRow = rowsRef.current.find((row) => rowKey(row) === sourceRowKey)
+    if (!sourceRow) return
+    const targetRows = resolveContainerDetailFillTargetRows({
+      rows: displayRows,
+      sourceRowKey,
+      endRowKey,
+      getRowKey: rowKey,
+    })
+    const plan = buildContainerDetailFillPlan({ columnKey, sourceRow, targetRows, getRowKey: rowKey })
+    commitContainerDetailColumnPlan(columnKey, plan, 'fill')
+  }
+
+  const startContainerDetailFillDrag = (sourceRowKey: string, columnKey: ContainerDetailColumnPasteKey) => {
+    if (!access.canEditContainer) return
+    fillDragCleanupRef.current?.()
+    let endRowKey = sourceRowKey
+    let lastPointerX = 0
+    let lastPointerY = 0
+    let scrollFrame = 0
+    setFillDrag({ sourceRowKey, columnKey, targetRowKeys: new Set() })
+
+    const holder = document.querySelector<HTMLElement>('.container-detail-table .ant-table-tbody-virtual-holder')
+    const updateEndRow = (clientX: number, clientY: number) => {
+      const rowElement = document.elementFromPoint(clientX, clientY)?.closest('.ant-table-row')
+      const marker = rowElement?.querySelector<HTMLElement>('[data-fill-row-key]')
+      const key = marker?.dataset.fillRowKey
+      if (!key || key === endRowKey) return
+      endRowKey = key
+      const targets = resolveContainerDetailFillTargetRows({
+        rows: displayRows,
+        sourceRowKey,
+        endRowKey,
+        getRowKey: rowKey,
+      })
+      setFillDrag({ sourceRowKey, columnKey, targetRowKeys: new Set(targets.map(rowKey)) })
+    }
+    // 指针贴近表格上 / 下边缘时自动滚动，方便拖过一屏以外的行。
+    const autoScroll = () => {
+      if (holder) {
+        const rect = holder.getBoundingClientRect()
+        const before = holder.scrollTop
+        if (lastPointerY > rect.bottom - 36) holder.scrollTop += 18
+        else if (lastPointerY < rect.top + 36) holder.scrollTop -= 18
+        // 指针不动但列表在滚动时，指针下方的行也在变：滚动后要按最后的指针位置重新解析终点行，
+        // 否则范围和高亮停在旧位置，松手只填到滚动前的终点。
+        if (holder.scrollTop !== before) updateEndRow(lastPointerX, lastPointerY)
+      }
+      scrollFrame = window.requestAnimationFrame(autoScroll)
+    }
+    const handleMouseMove = (event: MouseEvent) => {
+      lastPointerX = event.clientX
+      lastPointerY = event.clientY
+      updateEndRow(event.clientX, event.clientY)
+    }
+    const cleanup = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      window.cancelAnimationFrame(scrollFrame)
+      document.body.classList.remove('container-detail-filling')
+      fillDragCleanupRef.current = null
+      setFillDrag(null)
+    }
+    const handleMouseUp = (event: MouseEvent) => {
+      // 松手位置可能和最后一次 mousemove 之间又滚动过，以松手时指针下方的行为准。
+      lastPointerX = event.clientX
+      lastPointerY = event.clientY
+      updateEndRow(lastPointerX, lastPointerY)
+      const finalEndRowKey = endRowKey
+      cleanup()
+      applyContainerDetailFill(columnKey, sourceRowKey, finalEndRowKey)
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.classList.add('container-detail-filling')
+    scrollFrame = window.requestAnimationFrame(autoScroll)
+    fillDragCleanupRef.current = cleanup
+  }
+
+  useEffect(() => () => { fillDragCleanupRef.current?.() }, [])
+
+  const fillContextValue = useMemo(() => ({
+    drag: fillDrag,
+    onFillStart: startContainerDetailFillDrag,
+    // 回调内部读取的 displayRows / access 随渲染更新，这里只在拖拽状态变化时重建上下文即可。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [fillDrag, displayRows, access.canEditContainer])
 
   /** 可编辑单元格内 Ctrl+V：单个值交给原生粘贴；多行数据则从当前行向下按列填充。 */
   const handleEditableCellPaste = (
@@ -4547,7 +4744,6 @@ export default function ContainerDetailPage() {
     setBatchModalScopeRows(scopedRows)
     setBatchImportPrice(null)
     setBatchOemPrice(null)
-    setBatchRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE })
     setBatchPricesModalOpen(true)
   }
 
@@ -4568,14 +4764,8 @@ export default function ContainerDetailPage() {
         'apply-prices', scope, prices, t('containers.actions.batchUpdatePrices', '批量修改价格'),
       )
       if (!previewToken) return
-      // 只有填了零售价才带两个开关；只改进口价时不传，后端按默认处理且不会碰分店零售价。
-      const result = await applyContainerPricesByScope(
-        containerGuid,
-        scope,
-        prices,
-        previewToken,
-        buildRetailPriceSyncFields(batchRetailPriceSync, batchOemPrice != null),
-      )
+      // 批量改价只写本次进口价 / 零售价（货柜明细，新商品建档数据），不再联动仓库表和分店价，所以没有同步开关。
+      const result = await applyContainerPricesByScope(containerGuid, scope, prices, previewToken)
       await reloadCurrentDetailRef.current()
       setBatchPricesModalOpen(false)
       setBatchModalTargetCount(0)
@@ -5550,7 +5740,7 @@ export default function ContainerDetailPage() {
     }
     const shouldUpdate = (field: ContainerExistingProductUpdateField) => updateFields.includes(field)
     const hasPositiveImportPrice = (row: ContainerDetail) => (row.进口价格 ?? 0) > 0
-    const hasPositiveOemPrice = (row: ContainerDetail) => (getContainerDetailVisibleOemPrice(row) ?? 0) > 0
+    const hasPositiveOemPrice = (row: ContainerDetail) => (getContainerDetailProductRetailPrice(row) ?? 0) > 0
     const updates = candidates.filter((row) => {
       const code = row.商品编码 || row.商品信息?.商品编码 || ''
       // 更新已有商品时零售价使用表格可见价，已有商品取仓库实时零售价。
@@ -5573,7 +5763,7 @@ export default function ContainerDetailPage() {
         const item: WarehouseProductBatchUpdateItem = {
           ProductCode: row.商品编码 || row.商品信息?.商品编码,
         }
-        const oemPrice = getContainerDetailVisibleOemPrice(row)
+        const oemPrice = getContainerDetailProductRetailPrice(row)
         if (shouldUpdate('domesticPrice') && row.国内价格 != null) item.DomesticPrice = row.国内价格
         if (shouldUpdate('importPrice') && hasPositiveImportPrice(row)) item.ImportPrice = row.进口价格
         if (shouldUpdate('oemPrice') && hasPositiveOemPrice(row)) item.OEMPrice = oemPrice
@@ -5628,7 +5818,7 @@ export default function ContainerDetailPage() {
           const item: StoreMultiCodePriceUpsertActiveItem = {
             ProductCode: row.商品编码 || row.商品信息?.商品编码 || '',
           }
-          const oemPrice = getContainerDetailVisibleOemPrice(row)
+          const oemPrice = getContainerDetailProductRetailPrice(row)
           if (shouldUpdate('storeMultiCodePurchasePrice') && hasPositiveImportPrice(row)) item.PurchasePrice = row.进口价格
           if (shouldUpdate('storeMultiCodeRetailPrice') && hasPositiveOemPrice(row)) item.MultiCodeRetailPrice = oemPrice
           return item
@@ -5640,51 +5830,6 @@ export default function ContainerDetailPage() {
       message.success(t('containers.messages.purchasePricesUpdated', { count: updates.length }))
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('containers.messages.purchasePricesUpdateFailed', '更新已有商品价格失败'))
-    }
-  }
-
-  // 用本次货柜进口价格覆盖仓库进货价；只写仓库主表，不联动分店进货价（后端默认会联动，这里显式关闭）。
-  const updateWarehouseImportPrice = async () => {
-    if (!ensureNoPendingDetails()) return
-    if (!ensureTargetRowsVisible()) return
-    const actionName = t('warehouseUi.containerDetail.actionUpdateWarehouseImportPrice')
-    const scopedRows = await resolveBatchActionTargetRows()
-    if (scopedRows == null) return
-    if (!scopedRows.length) {
-      message.warning(t('containers.messages.selectBatchProducts', '请先选择要批量操作的商品'))
-      return
-    }
-    const updates = buildContainerDetailWarehouseImportPriceUpdates(scopedRows)
-    if (!updates.length) {
-      message.info(t('warehouseUi.containerDetail.noWarehouseImportPriceChanges'))
-      return
-    }
-    // 确认数量按实际会写入的商品数显示，并说明范围内被跳过的明细数。
-    const confirmed = await confirmBatchAction(actionName, updates.length, {
-      extra: (
-        <Typography.Text type="secondary">
-          {t('warehouseUi.containerDetail.updateWarehouseImportPriceHint', { skipped: scopedRows.length - updates.length })}
-        </Typography.Text>
-      ),
-    })
-    if (!confirmed) return
-    if (!await drainAutoSavesBeforeAction()) return
-    try {
-      const result = await batchUpdateWarehouseProducts(
-        updates.map((item): WarehouseProductBatchUpdateItem => ({ ProductCode: item.productCode, ImportPrice: item.importPrice })),
-        // 只改进货价，不涉及零售价，不需要也不传「同步分店零售价 / 生成价格任务」。
-        { syncStorePurchasePrice: false },
-      )
-      const failedCount = Number(result.failedCount ?? result.FailedCount ?? result.failed ?? result.Failed ?? 0)
-      if (failedCount > 0) {
-        const errors = result.errors ?? result.Errors ?? []
-        throw new Error(errors.join('；') || result.message || t('warehouseUi.containerDetail.warehouseImportPriceUpdateFailed'))
-      }
-      message.success(t('warehouseUi.containerDetail.warehouseImportPriceUpdated', { count: updates.length }))
-      // 刷新明细，让实时进货价与涨跌箭头/筛选计数立即反映新值。
-      await loadData(false)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('warehouseUi.containerDetail.warehouseImportPriceUpdateFailed'))
     }
   }
 
@@ -6280,7 +6425,7 @@ export default function ContainerDetailPage() {
   }
 
   // 手动草稿字段（进口价、零售价、英文名称）改过还没点「保存明细」时，单元格用琥珀底提示。
-  const getDraftInputRootClassName = (row: ContainerDetail, field: '进口价格' | '贴牌价格' | '英文名称') => {
+  const getDraftInputRootClassName = (row: ContainerDetail, field: '进口价格' | '贴牌价格' | '英文名称' | '仓库进口价' | '仓库零售价') => {
     const patch = row.hguid ? pendingDetailPatches[row.hguid] : undefined
     const dirty = field === '英文名称'
       ? patch?.英文名称 !== undefined || patch?.ClearEnglishName === true
@@ -6373,23 +6518,25 @@ export default function ContainerDetailPage() {
             ? t('containers.messages.emptyEnglishNameNotSaved', '空白英文名称不会保存，如需清空请使用“清除英文名称”')
             : undefined)
         return renderConcurrentEditableField(row, '英文名称', (
-          <Input.TextArea
-            ref={(cell) => setEditableCellRef(rowKey(row), 'englishName', cell)}
-            className="container-detail-english-name-input"
-            rootClassName={getDraftInputRootClassName(row, '英文名称')}
-            value={getContainerDetailEnglishName(row) ?? ''}
-            autoSize={{ minRows: 1, maxRows: 2 }}
-            style={{ resize: 'none' }}
-            status={validationError || saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(validationError || saveFailure || concurrencyConflict)}
-            aria-label={validationMessage
-              ? `${t('containers.fields.englishName')}：${validationMessage}`
-              : t('containers.fields.englishName')}
-            title={validationMessage}
-            onChange={(event) => markPendingDetailPatch(row, { 英文名称: event.target.value })}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'englishName', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'englishName', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="englishName" block>
+            <Input.TextArea
+              ref={(cell) => setEditableCellRef(rowKey(row), 'englishName', cell)}
+              className="container-detail-english-name-input"
+              rootClassName={getDraftInputRootClassName(row, '英文名称')}
+              value={getContainerDetailEnglishName(row) ?? ''}
+              autoSize={{ minRows: 1, maxRows: 2 }}
+              style={{ resize: 'none' }}
+              status={validationError || saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(validationError || saveFailure || concurrencyConflict)}
+              aria-label={validationMessage
+                ? `${t('containers.fields.englishName')}：${validationMessage}`
+                : t('containers.fields.englishName')}
+              title={validationMessage}
+              onChange={(event) => markPendingDetailPatch(row, { 英文名称: event.target.value })}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'englishName', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'englishName', event)}
+            />
+          </FillableCell>
         ))
       },
     },
@@ -6435,32 +6582,34 @@ export default function ContainerDetailPage() {
         const saveFailure = getAutoSaveFailure(row, '单件装箱数')
         const concurrencyConflict = resolveConcurrencyConflict(row, '单件装箱数')
         return access.canEditContainer ? renderConcurrentEditableField(row, '单件装箱数', (
-          <InputNumber
-            ref={(cell) => setEditableCellRef(rowKey(row), 'packingQuantity', cell)}
-            rootClassName="container-detail-autosave-input"
-            value={row.单件装箱数}
-            keyboard={false}
-            min={0}
-            precision={0}
-            step={1}
-            controls={false}
-            style={{ width: 72 }}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onFocus={() => captureAutoSaveEditBaseline(row, '单件装箱数', row.单件装箱数)}
-            onChange={(value) => patchAutoSaveRow(row, { 单件装箱数: value == null ? undefined : Number(value) })}
-            onBlur={(event) => {
-              if (!event.target.value.trim()) {
-                restoreAutoSaveEditBaseline(row, '单件装箱数')
-                return
-              }
-              if (isAutoSaveEditUnchanged(row, '单件装箱数', Number(event.target.value))) return
-              void savePackageMetricPatch(row, { 单件装箱数: Number(event.target.value) }).catch(handleDetailSaveError)
-            }}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'packingQuantity', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'packingQuantity', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="packingQuantity">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'packingQuantity', cell)}
+              rootClassName="container-detail-autosave-input"
+              value={row.单件装箱数}
+              keyboard={false}
+              min={0}
+              precision={0}
+              step={1}
+              controls={false}
+              style={{ width: 72 }}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onFocus={() => captureAutoSaveEditBaseline(row, '单件装箱数', row.单件装箱数)}
+              onChange={(value) => patchAutoSaveRow(row, { 单件装箱数: value == null ? undefined : Number(value) })}
+              onBlur={(event) => {
+                if (!event.target.value.trim()) {
+                  restoreAutoSaveEditBaseline(row, '单件装箱数')
+                  return
+                }
+                if (isAutoSaveEditUnchanged(row, '单件装箱数', Number(event.target.value))) return
+                void savePackageMetricPatch(row, { 单件装箱数: Number(event.target.value) }).catch(handleDetailSaveError)
+              }}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'packingQuantity', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'packingQuantity', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '单件装箱数', renderNumericCell(formatNumber(row.单件装箱数, 0)))
       },
     },
@@ -6484,31 +6633,33 @@ export default function ContainerDetailPage() {
         const saveFailure = getAutoSaveFailure(row, '单件体积')
         const concurrencyConflict = resolveConcurrencyConflict(row, '单件体积')
         return access.canEditContainer ? renderConcurrentEditableField(row, '单件体积', (
-          <InputNumber
-            ref={(cell) => setEditableCellRef(rowKey(row), 'unitVolume', cell)}
-            rootClassName="container-detail-autosave-input"
-            value={row.单件体积}
-            keyboard={false}
-            min={0}
-            precision={3}
-            controls={false}
-            style={{ width: 72 }}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onFocus={() => captureAutoSaveEditBaseline(row, '单件体积', row.单件体积)}
-            onChange={(value) => patchAutoSaveRow(row, { 单件体积: value == null ? undefined : Number(value) })}
-            onBlur={(event) => {
-              if (!event.target.value.trim()) {
-                restoreAutoSaveEditBaseline(row, '单件体积')
-                return
-              }
-              if (isAutoSaveEditUnchanged(row, '单件体积', Number(event.target.value))) return
-              void savePackageMetricPatch(row, { 单件体积: Number(event.target.value) }).catch(handleDetailSaveError)
-            }}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'unitVolume', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'unitVolume', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="unitVolume">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'unitVolume', cell)}
+              rootClassName="container-detail-autosave-input"
+              value={row.单件体积}
+              keyboard={false}
+              min={0}
+              precision={3}
+              controls={false}
+              style={{ width: 72 }}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onFocus={() => captureAutoSaveEditBaseline(row, '单件体积', row.单件体积)}
+              onChange={(value) => patchAutoSaveRow(row, { 单件体积: value == null ? undefined : Number(value) })}
+              onBlur={(event) => {
+                if (!event.target.value.trim()) {
+                  restoreAutoSaveEditBaseline(row, '单件体积')
+                  return
+                }
+                if (isAutoSaveEditUnchanged(row, '单件体积', Number(event.target.value))) return
+                void savePackageMetricPatch(row, { 单件体积: Number(event.target.value) }).catch(handleDetailSaveError)
+              }}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'unitVolume', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'unitVolume', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '单件体积', renderNumericCell(formatNumber(row.单件体积, 3)))
       },
     },
@@ -6549,31 +6700,33 @@ export default function ContainerDetailPage() {
         const saveFailure = getAutoSaveFailure(row, '调整浮率')
         const concurrencyConflict = resolveConcurrencyConflict(row, '调整浮率')
         return access.canEditContainer ? renderConcurrentEditableField(row, '调整浮率', (
-          <InputNumber
-            ref={(cell) => setEditableCellRef(rowKey(row), 'floatRate', cell)}
-            rootClassName="container-detail-autosave-input"
-            value={row.调整浮率}
-            keyboard={false}
-            precision={2}
-            controls={false}
-            style={{ width: 78 }}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onFocus={() => captureAutoSaveEditBaseline(row, '调整浮率', row.调整浮率)}
-            onChange={(value) => patchAutoSaveRow(row, { 调整浮率: value == null ? undefined : Number(value) })}
-            onBlur={(event) => {
-              if (!event.target.value.trim()) {
-                restoreAutoSaveEditBaseline(row, '调整浮率')
-                return
-              }
-              const value = Number(event.target.value)
-              if (isAutoSaveEditUnchanged(row, '调整浮率', value)) return
-              void saveFloatRatePatch(row, value).catch(handleDetailSaveError)
-            }}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'floatRate', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'floatRate', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="floatRate">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'floatRate', cell)}
+              rootClassName="container-detail-autosave-input"
+              value={row.调整浮率}
+              keyboard={false}
+              precision={2}
+              controls={false}
+              style={{ width: 78 }}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onFocus={() => captureAutoSaveEditBaseline(row, '调整浮率', row.调整浮率)}
+              onChange={(value) => patchAutoSaveRow(row, { 调整浮率: value == null ? undefined : Number(value) })}
+              onBlur={(event) => {
+                if (!event.target.value.trim()) {
+                  restoreAutoSaveEditBaseline(row, '调整浮率')
+                  return
+                }
+                const value = Number(event.target.value)
+                if (isAutoSaveEditUnchanged(row, '调整浮率', value)) return
+                void saveFloatRatePatch(row, value).catch(handleDetailSaveError)
+              }}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'floatRate', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'floatRate', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '调整浮率', renderNumericCell(formatNumber(row.调整浮率, 2)))
       },
     },
@@ -6588,31 +6741,33 @@ export default function ContainerDetailPage() {
         const saveFailure = getAutoSaveFailure(row, '中包数')
         const concurrencyConflict = resolveConcurrencyConflict(row, '中包数')
         return access.canEditContainer ? renderConcurrentEditableField(row, '中包数', (
-          <InputNumber
-            ref={(cell) => setEditableCellRef(rowKey(row), 'middlePackQuantity', cell)}
-            rootClassName="container-detail-autosave-input"
-            value={row.中包数}
-            keyboard={false}
-            min={0}
-            precision={0}
-            controls={false}
-            style={{ width: 68 }}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onFocus={() => captureAutoSaveEditBaseline(row, '中包数', row.中包数)}
-            onChange={(value) => patchAutoSaveRow(row, { 中包数: value == null ? undefined : Number(value) })}
-            onBlur={(event) => {
-              if (!event.target.value.trim()) {
-                restoreAutoSaveEditBaseline(row, '中包数')
-                return
-              }
-              if (isAutoSaveEditUnchanged(row, '中包数', Number(event.target.value))) return
-              void saveRowPatch(row, { 中包数: Number(event.target.value) }).catch(handleDetailSaveError)
-            }}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'middlePackQuantity', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'middlePackQuantity', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="middlePackQuantity">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'middlePackQuantity', cell)}
+              rootClassName="container-detail-autosave-input"
+              value={row.中包数}
+              keyboard={false}
+              min={0}
+              precision={0}
+              controls={false}
+              style={{ width: 68 }}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onFocus={() => captureAutoSaveEditBaseline(row, '中包数', row.中包数)}
+              onChange={(value) => patchAutoSaveRow(row, { 中包数: value == null ? undefined : Number(value) })}
+              onBlur={(event) => {
+                if (!event.target.value.trim()) {
+                  restoreAutoSaveEditBaseline(row, '中包数')
+                  return
+                }
+                if (isAutoSaveEditUnchanged(row, '中包数', Number(event.target.value))) return
+                void saveRowPatch(row, { 中包数: Number(event.target.value) }).catch(handleDetailSaveError)
+              }}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'middlePackQuantity', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'middlePackQuantity', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '中包数', renderNumericCell(row.中包数 ?? '--'))
       },
     },
@@ -6623,7 +6778,39 @@ export default function ContainerDetailPage() {
       align: 'right',
       ...makeSortProps('warehouseImportPrice'),
       ...numberFilterProps('warehouseImportPrice'),
-      render: (_value, row) => renderImportPriceGap(row, renderNumericCell(formatCurrency(getContainerDetailRealtimeImportPrice(row), '$'))),
+      render: (_value, row) => {
+        const readOnlyCell = renderNumericCell(formatCurrency(getContainerDetailRealtimeImportPrice(row), '$'))
+        // 已有进口价只有已有商品可改（新商品没有仓库记录）；失焦后只进草稿，点「保存明细」才回写仓库表 / 主档 / 分店进货价。
+        if (!access.canEditContainer || !isContainerDetailExistingPriceEditable(row)) {
+          return renderImportPriceGap(row, readOnlyCell)
+        }
+        const saveFailure = getContainerDetailDraftFieldFailure(pendingDetailFailures, row.hguid, '仓库进口价')
+        return renderImportPriceGap(row, (
+          <FillableCell rowKey={rowKey(row)} columnKey="warehouseImportPrice">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'warehouseImportPrice', cell)}
+              rootClassName={getDraftInputRootClassName(row, '仓库进口价')}
+              value={getContainerDetailRealtimeImportPrice(row)}
+              keyboard={false}
+              min={0}
+              prefix="$"
+              precision={2}
+              controls={false}
+              style={{ width: 78 }}
+              status={saveFailure ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure)}
+              aria-label={saveFailure
+                ? `${t('containers.fields.warehouseImportPrice')}：${saveFailure.message}`
+                : t('containers.fields.warehouseImportPrice')}
+              title={saveFailure?.message}
+              onChange={(value) => markPendingDetailPatch(row, { 仓库进口价: value == null ? undefined : Number(value) })}
+              onBlur={(event) => handlePendingWarehousePriceBlur(row, '仓库进口价', event.currentTarget.value)}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'warehouseImportPrice', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'warehouseImportPrice', event)}
+            />
+          </FillableCell>
+        ))
+      },
     },
     {
       title: renderColumnTitle('importPrice', t('containers.fields.importPrice')),
@@ -6639,29 +6826,31 @@ export default function ContainerDetailPage() {
           '进口价格',
         )
         const concurrencyConflict = resolveConcurrencyConflict(row, '进口价格')
-        return renderImportPriceGap(row, access.canEditContainer
+        return renderImportPriceGap(row, access.canEditContainer && isContainerDetailThisPriceEditable(row)
           ? renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row, (
-            <InputNumber
-              ref={(cell) => setEditableCellRef(rowKey(row), 'importPrice', cell)}
-              rootClassName={getDraftInputRootClassName(row, '进口价格')}
-              value={row.进口价格}
-              keyboard={false}
-              min={0}
-              prefix="$"
-              precision={2}
-              controls={false}
-              style={{ width: 78 }}
-              status={saveFailure || concurrencyConflict ? 'error' : undefined}
-              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-              aria-label={saveFailure || concurrencyConflict
-                ? `${t('containers.fields.importPrice')}：${concurrencyConflict?.message ?? saveFailure?.message}`
-                : t('containers.fields.importPrice')}
-              title={concurrencyConflict?.message ?? saveFailure?.message}
-              onChange={(value) => markPendingDetailPatch(row, { 进口价格: value == null ? undefined : Number(value) })}
-              onBlur={(event) => handlePendingImportPriceBlur(row, event.currentTarget.value)}
-              onKeyDown={(event) => handleEditableCellKeyDown(row, 'importPrice', event)}
-              onPaste={(event) => handleEditableCellPaste(row, 'importPrice', event)}
-            />
+            <FillableCell rowKey={rowKey(row)} columnKey="importPrice">
+              <InputNumber
+                ref={(cell) => setEditableCellRef(rowKey(row), 'importPrice', cell)}
+                rootClassName={getDraftInputRootClassName(row, '进口价格')}
+                value={row.进口价格}
+                keyboard={false}
+                min={0}
+                prefix="$"
+                precision={2}
+                controls={false}
+                style={{ width: 78 }}
+                status={saveFailure || concurrencyConflict ? 'error' : undefined}
+                aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+                aria-label={saveFailure || concurrencyConflict
+                  ? `${t('containers.fields.importPrice')}：${concurrencyConflict?.message ?? saveFailure?.message}`
+                  : t('containers.fields.importPrice')}
+                title={concurrencyConflict?.message ?? saveFailure?.message}
+                onChange={(value) => markPendingDetailPatch(row, { 进口价格: value == null ? undefined : Number(value) })}
+                onBlur={(event) => handlePendingImportPriceBlur(row, event.currentTarget.value)}
+                onKeyDown={(event) => handleEditableCellKeyDown(row, 'importPrice', event)}
+                onPaste={(event) => handleEditableCellPaste(row, 'importPrice', event)}
+              />
+            </FillableCell>
           )))
           : renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row)))
       },
@@ -6680,27 +6869,29 @@ export default function ContainerDetailPage() {
           '贴牌价格',
         )
         const concurrencyConflict = resolveConcurrencyConflict(row, '贴牌价格')
-        return renderRetailPriceGap(row, access.canEditContainer ? renderConcurrentEditableField(row, '贴牌价格', (
-          <InputNumber
-            ref={(cell) => setEditableCellRef(rowKey(row), 'oemPrice', cell)}
-            rootClassName={getDraftInputRootClassName(row, '贴牌价格')}
-            value={getContainerDetailVisibleOemPrice(row)}
-            keyboard={false}
-            min={0}
-            prefix="$"
-            precision={2}
-            controls={false}
-            style={{ width: 78 }}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            aria-label={saveFailure || concurrencyConflict
-              ? `${t('containers.fields.oemPrice')}：${concurrencyConflict?.message ?? saveFailure?.message}`
-              : t('containers.fields.oemPrice')}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onChange={(value) => markPendingDetailPatch(row, { 贴牌价格: value == null ? undefined : Number(value) })}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'oemPrice', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'oemPrice', event)}
-          />
+        return renderRetailPriceGap(row, access.canEditContainer && isContainerDetailThisPriceEditable(row) ? renderConcurrentEditableField(row, '贴牌价格', (
+          <FillableCell rowKey={rowKey(row)} columnKey="oemPrice">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'oemPrice', cell)}
+              rootClassName={getDraftInputRootClassName(row, '贴牌价格')}
+              value={getContainerDetailVisibleOemPrice(row)}
+              keyboard={false}
+              min={0}
+              prefix="$"
+              precision={2}
+              controls={false}
+              style={{ width: 78 }}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              aria-label={saveFailure || concurrencyConflict
+                ? `${t('containers.fields.oemPrice')}：${concurrencyConflict?.message ?? saveFailure?.message}`
+                : t('containers.fields.oemPrice')}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onChange={(value) => markPendingDetailPatch(row, { 贴牌价格: value == null ? undefined : Number(value) })}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'oemPrice', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'oemPrice', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '贴牌价格', renderOemPriceCell(row)))
       },
     },
@@ -6710,7 +6901,39 @@ export default function ContainerDetailPage() {
       align: 'right',
       ...makeSortProps('lastOEMPrice'),
       ...numberFilterProps('lastOEMPrice'),
-      render: (_, row) => renderRetailPriceGap(row, renderNumericCell(formatCurrency(getContainerDetailRealtimeRetailPrice(row), '$'))),
+      render: (_, row) => {
+        const readOnlyCell = renderNumericCell(formatCurrency(getContainerDetailRealtimeRetailPrice(row), '$'))
+        // 已有零售价同理：失焦进草稿，保存明细时回写仓库表 / 主档，并按弹窗里的开关决定是否改分店价、是否发价签更换任务。
+        if (!access.canEditContainer || !isContainerDetailExistingPriceEditable(row)) {
+          return renderRetailPriceGap(row, readOnlyCell)
+        }
+        const saveFailure = getContainerDetailDraftFieldFailure(pendingDetailFailures, row.hguid, '仓库零售价')
+        return renderRetailPriceGap(row, (
+          <FillableCell rowKey={rowKey(row)} columnKey="lastOEMPrice">
+            <InputNumber
+              ref={(cell) => setEditableCellRef(rowKey(row), 'lastOEMPrice', cell)}
+              rootClassName={getDraftInputRootClassName(row, '仓库零售价')}
+              value={getContainerDetailRealtimeRetailPrice(row)}
+              keyboard={false}
+              min={0}
+              prefix="$"
+              precision={2}
+              controls={false}
+              style={{ width: 78 }}
+              status={saveFailure ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure)}
+              aria-label={saveFailure
+                ? `${t('containers.fields.lastOEMPrice')}：${saveFailure.message}`
+                : t('containers.fields.lastOEMPrice')}
+              title={saveFailure?.message}
+              onChange={(value) => markPendingDetailPatch(row, { 仓库零售价: value == null ? undefined : Number(value) })}
+              onBlur={(event) => handlePendingWarehousePriceBlur(row, '仓库零售价', event.currentTarget.value)}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'lastOEMPrice', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'lastOEMPrice', event)}
+            />
+          </FillableCell>
+        ))
+      },
     },
     {
       title: renderColumnTitle('newProduct', t('containers.fields.newProduct')),
@@ -6844,22 +7067,24 @@ export default function ContainerDetailPage() {
         const saveFailure = getAutoSaveFailure(row, '备注')
         const concurrencyConflict = resolveConcurrencyConflict(row, '备注')
         return access.canEditContainer ? renderConcurrentEditableField(row, '备注', (
-          <Input
-            ref={(cell) => setEditableCellRef(rowKey(row), 'remark', cell)}
-            rootClassName="container-detail-autosave-input"
-            value={row.备注 ?? ''}
-            status={saveFailure || concurrencyConflict ? 'error' : undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onFocus={() => captureAutoSaveEditBaseline(row, '备注', row.备注 ?? '')}
-            onChange={(event) => patchAutoSaveRow(row, { 备注: event.target.value })}
-            onBlur={(event) => {
-              if (isAutoSaveEditUnchanged(row, '备注', event.target.value)) return
-              void saveRowPatch(row, { 备注: event.target.value }).catch(handleDetailSaveError)
-            }}
-            onKeyDown={(event) => handleEditableCellKeyDown(row, 'remark', event)}
-            onPaste={(event) => handleEditableCellPaste(row, 'remark', event)}
-          />
+          <FillableCell rowKey={rowKey(row)} columnKey="remark" block>
+            <Input
+              ref={(cell) => setEditableCellRef(rowKey(row), 'remark', cell)}
+              rootClassName="container-detail-autosave-input"
+              value={row.备注 ?? ''}
+              status={saveFailure || concurrencyConflict ? 'error' : undefined}
+              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+              title={concurrencyConflict?.message ?? saveFailure?.message}
+              onFocus={() => captureAutoSaveEditBaseline(row, '备注', row.备注 ?? '')}
+              onChange={(event) => patchAutoSaveRow(row, { 备注: event.target.value })}
+              onBlur={(event) => {
+                if (isAutoSaveEditUnchanged(row, '备注', event.target.value)) return
+                void saveRowPatch(row, { 备注: event.target.value }).catch(handleDetailSaveError)
+              }}
+              onKeyDown={(event) => handleEditableCellKeyDown(row, 'remark', event)}
+              onPaste={(event) => handleEditableCellPaste(row, 'remark', event)}
+            />
+          </FillableCell>
         )) : renderConcurrentEditableField(row, '备注', row.备注 || '--')
       },
     },
@@ -7400,6 +7625,8 @@ export default function ContainerDetailPage() {
     : {}
   const manualDraftSummary = summarizeContainerDetailManualDraft(pendingDetailPatches, autoSaveUnsettledPatches)
   const manualDraftBreakdown = [
+    manualDraftSummary.warehouseImportPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownWarehouseImport', '已有进口价 {{count}}', { count: manualDraftSummary.warehouseImportPrice }) : '',
+    manualDraftSummary.warehouseRetailPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownWarehouseRetail', '已有零售价 {{count}}', { count: manualDraftSummary.warehouseRetailPrice }) : '',
     manualDraftSummary.importPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownImport', { count: manualDraftSummary.importPrice }) : '',
     manualDraftSummary.retailPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownRetail', { count: manualDraftSummary.retailPrice }) : '',
     manualDraftSummary.englishName > 0 ? t('warehouseUi.containerDetail.draftBreakdownEnglish', { count: manualDraftSummary.englishName }) : '',
@@ -7421,7 +7648,6 @@ export default function ContainerDetailPage() {
   const priceSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
     { key: 'batchPrices', label: t('containers.actions.batchUpdatePrices', '批量修改价格'), disabled: batchPricesSaving, onClick: () => void openBatchPricesModal() },
     { key: 'batchFloatRate', label: t('containers.actions.batchUpdateFloatRate', '批量修改浮率'), disabled: batchFloatRateSaving, onClick: () => void openBatchFloatRateModal() },
-    { key: 'updateWarehouseImportPrice', label: t('warehouseUi.containerDetail.actionUpdateWarehouseImportPrice'), onClick: () => void updateWarehouseImportPrice() },
   ] : []
   const englishNameSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
     { key: 'translate', label: t('containers.actions.describeFromImages'), onClick: () => void translateNames() },
@@ -7551,14 +7777,9 @@ export default function ContainerDetailPage() {
             style={{ width: '100%' }}
             onChange={setBatchOemPrice}
           />
-          {batchOemPrice != null ? (
-            <RetailPriceSyncOptionsField
-              value={batchRetailPriceSync}
-              onChange={setBatchRetailPriceSync}
-              disabled={batchPricesSaving}
-              messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
-            />
-          ) : null}
+          <Typography.Text type="secondary">
+            {t('warehouseUi.containerDetail.batchPricesThisPriceHint', '只修改货柜明细里的「本次进口价 / 本次零售价」（新商品建档数据），不会更新仓库、商品主档和分店表。已有商品的价格请在明细里改「已有进口价 / 已有零售价」。')}
+          </Typography.Text>
         </Space>
       </Modal>
       <Modal
@@ -8088,6 +8309,7 @@ export default function ContainerDetailPage() {
                   }
                 }}
               >
+                <ContainerDetailFillContext.Provider value={fillContextValue}>
                 <DndContext sensors={columnDragSensors} collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>
                   <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                     <MeasuredTable metricId="warehouse.container-detail.table-1"
@@ -8155,6 +8377,7 @@ export default function ContainerDetailPage() {
                     />
                   </SortableContext>
                 </DndContext>
+                </ContainerDetailFillContext.Provider>
               </div>
             </div>
           </Card>
@@ -8296,7 +8519,7 @@ export default function ContainerDetailPage() {
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary">
-            {t('containers.modals.columnPasteHint', '从 Excel 复制一列后粘贴到下方。数据将按当前显示顺序从起始行向下逐行填充，空单元格保持原值；进口价格、零售价、英文名称需再点击“保存明细”落库。')}
+            {t('containers.modals.columnPasteHint', '从 Excel 复制一列后粘贴到下方。数据将按当前显示顺序从起始行向下逐行填充，空单元格保持原值；已有进口价 / 已有零售价、本次进口价 / 本次零售价、英文名称需再点击“保存明细”落库。已有商品的「本次价」和新商品的「已有价」不可编辑，会自动跳过。')}
           </Typography.Text>
           <Space wrap size={[12, 8]}>
             <Space size={6}>

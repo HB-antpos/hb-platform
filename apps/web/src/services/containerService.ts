@@ -507,6 +507,10 @@ export async function batchUpdateDetails(
     ClearEnglishName: item.ClearEnglishName,
     ProductCategoryGUID: item.ProductCategoryGUID,
     贴牌价格: item.贴牌价格,
+    仓库进口价: item.仓库进口价,
+    仓库零售价: item.仓库零售价,
+    ExpectedWarehouseImportPrice: item.expectedWarehouseImportPrice,
+    ExpectedWarehouseOemPrice: item.expectedWarehouseOemPrice,
     单件装箱数: item.单件装箱数,
     中包数: item.中包数,
     单件体积: item.单件体积,
@@ -530,6 +534,8 @@ export async function batchUpdateDetails(
         || field === 'SkipRelatedProductSync'
         || field === 'ExpectedServerFieldTokens'
         || field === 'OverrideAcknowledgements'
+        || field === 'ExpectedWarehouseImportPrice'
+        || field === 'ExpectedWarehouseOemPrice'
         || value === undefined
       ) return []
       if (field === 'ClearEnglishName') return value === true ? ['英文名称'] : []

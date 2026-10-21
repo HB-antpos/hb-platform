@@ -1210,6 +1210,52 @@
   background: transparent;
 }
 
+/* 单元格拖拽填充（Excel 式填充柄）：输入框聚焦时右下角出现小方块，按住上下拖动把值复制到拖过的行。
+   柄靠 :focus-within 显示；按下柄时 mousedown 被 preventDefault，输入框不失焦，所以拖动期间柄一直在。 */
+.container-detail-fillable {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.container-detail-fillable-block {
+  display: block;
+  width: 100%;
+}
+
+.container-detail-fill-handle {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  z-index: 4;
+  display: none;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #fff;
+  border-radius: 1px;
+  background: #1677ff;
+  cursor: crosshair;
+}
+
+.container-detail-fillable:focus-within .container-detail-fill-handle,
+.container-detail-fillable-source .container-detail-fill-handle {
+  display: block;
+}
+
+/* 拖动范围内会被覆盖的单元格：蓝色虚线框 + 浅蓝底；不可编辑的行没有输入框，自然不高亮 */
+.container-detail-fill-target {
+  border-radius: 4px;
+  outline: 2px dashed #1677ff;
+  outline-offset: 1px;
+  background: rgba(22, 119, 255, 0.1);
+}
+
+body.container-detail-filling {
+  cursor: crosshair;
+  user-select: none;
+}
+
 .wh-cdetail-table-footer {
   display: flex;
   flex-wrap: wrap;

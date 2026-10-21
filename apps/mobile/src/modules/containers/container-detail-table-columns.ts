@@ -231,6 +231,8 @@ const EDIT_FIELD_LABEL_KEYS: Readonly<Record<string, string>> = {
   国内价格: "domesticPrice",
   进口价格: "importPrice",
   贴牌价格: "oemPrice",
+  仓库进口价: "warehouseImportPrice",
+  仓库零售价: "warehouseOemPrice",
   调整浮率: "floatRate",
   装柜数量: "containerQuantity",
   中包数: "middlePackQuantity",

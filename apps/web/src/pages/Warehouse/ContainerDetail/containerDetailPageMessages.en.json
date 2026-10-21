@@ -84,11 +84,6 @@
       "priceDown": "Price down",
       "priceTrendFilterAria": "Filter by import price vs. current purchase price",
       "chipGroupPriceTrend": "Price change",
-      "actionUpdateWarehouseImportPrice": "Update warehouse purchase price",
-      "updateWarehouseImportPriceHint": "Overwrite the warehouse purchase price (current purchase price) with this container's import price. Only the warehouse master is updated; store purchase prices are unchanged. Only existing products whose import price differs are included; {{skipped}} line(s) skipped.",
-      "noWarehouseImportPriceChanges": "Nothing to update: the lines are new products, have no import price, or already match the current purchase price.",
-      "warehouseImportPriceUpdated": "Updated the warehouse purchase price for {{count}} product(s)",
-      "warehouseImportPriceUpdateFailed": "Failed to update the warehouse purchase price",
       "importPriceGapHint": "Import price is {{percent}} vs. the existing import price (over 30% difference)",
       "retailPriceGapHint": "Retail price is {{percent}} vs. the existing retail price (over 30% difference)",
       "formulaHint": "Formulas",
@@ -97,7 +92,18 @@
         "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away; when unchecked, store prices stay as they are. Whether stores are notified or asked to swap labels is decided by \"Create price tasks\" below.",
         "generateTasks": "Create price tasks",
         "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices are still pushed to HQ immediately, and shelf labels are not changed."
-      }
+      },
+      "savePendingSummary": "This affects {{total}} lines: {{warehouseImportPriceCount}} current import prices, {{warehouseRetailPriceCount}} current retail prices, {{importPriceCount}} this-container import prices, {{retailPriceCount}} this-container retail prices, {{englishNameCount}} English names, {{clearEnglishNameCount}} English-name clears.",
+      "savePendingWarehouseImportHint": "Current import prices are written back to the warehouse purchase price, the product master purchase price and every store's purchase price, and set-child costs are recalculated. The \"This import price\" stored on this container line is not changed.",
+      "savePendingWarehouseRetailHint": "Current retail prices are written back to the warehouse retail price and the product master retail price. Whether store retail prices are synced and whether price-label change tasks are sent is decided by the switches below.",
+      "savePendingThisPriceHint": "This import price / this retail price are saved on this container line only, as data for creating new products. They do not update the warehouse, the product master or store prices.",
+      "batchPricesThisPriceHint": "Only changes \"This import price / This retail price\" on the container lines (data for creating new products). The warehouse, product master and store prices are not updated. To change an existing product's price, edit \"Current import price / Current retail price\" on the line.",
+      "draftBreakdownWarehouseImport": "Current import price {{count}}",
+      "draftBreakdownWarehouseRetail": "Current retail price {{count}}",
+      "columnFillApplied": "Filled {{count}} cell(s)",
+      "columnFillSourceBlank": "The source cell is empty, nothing was filled",
+      "columnFillInvalid": "The source value does not fit the target column; {{count}} cell(s) not filled",
+      "columnPasteNotEditable": "Skipped {{count}} cell(s) that cannot be edited (this-container prices of existing products, current prices of new products)"
     }
   }
 }

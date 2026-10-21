@@ -6,7 +6,6 @@ import {
   DEFAULT_RETAIL_PRICE_SYNC_CHOICE,
   buildRetailPriceSyncQuery,
   buildRetailPriceSyncRequestFields,
-  isBulkRetailPriceFilled,
   isEditRetailPriceChangeForExistingProduct,
 } from "./retail-price-sync";
 import type { ContainerDetail } from "./types";
@@ -34,21 +33,17 @@ assert.equal(buildRetailPriceSyncQuery({}), "");
 assert.equal(buildRetailPriceSyncQuery({ syncStoreRetailPrices: false, generateTasks: false }), "?syncStoreRetailPrices=false&generateTasks=false");
 assert.equal(buildRetailPriceSyncQuery({ generateTasks: true }), "?generateTasks=true");
 
-// 编辑弹窗：只有「已有商品 + 填了与当前不同的有效零售价」才出现开关。
-const existing = { 是否新商品: false, 实时零售价: 5, WarehouseOEMPrice: 5 } as unknown as ContainerDetail;
+// 编辑弹窗：只有「已有商品 + 填了与当前仓库价不同的有效已有零售价」才出现开关。
+const existing = { 是否新商品: false, 实时零售价: 5, WarehouseOEMPrice: 5, 贴牌价格: 2 } as unknown as ContainerDetail;
 const newProduct = { 是否新商品: true, 贴牌价格: 5 } as unknown as ContainerDetail;
-assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "6.66"), true, "已有商品改了零售价要出现开关");
-assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "5"), false, "填了和当前一样的价不算改");
+assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "6.66"), true, "已有商品改了已有零售价要出现开关");
+assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "5"), false, "填了和当前仓库价一样的价不算改");
+assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "2"), true, "与明细「本次零售价」比较没有意义：只和仓库实时零售价比");
 assert.equal(isEditRetailPriceChangeForExistingProduct(existing, ""), false, "没填不算改");
 assert.equal(isEditRetailPriceChangeForExistingProduct(existing, "abc"), false, "无效数字不算改");
 assert.equal(isEditRetailPriceChangeForExistingProduct(newProduct, "6.66"), false, "新商品零售价只存货柜明细，不出现开关");
 
-// 批量设价：填了有效零售价才出现。
-assert.equal(isBulkRetailPriceFilled("7.77"), true);
-assert.equal(isBulkRetailPriceFilled("  "), false);
-assert.equal(isBulkRetailPriceFilled("abc"), false);
-
-// 屏幕接线：默认勾选、打开重置、只在会改零售价时展示、提交带上开关、预览不受开关影响。
+// 屏幕接线：默认勾选、打开重置、只在会改已有零售价时展示、提交带上开关；批量设价已不再有开关，预览不受开关影响。
 const screenSource = read("./container-detail-screen.tsx");
 assert.match(screenSource, /useState<RetailPriceSyncChoice>\(\{ \.\.\.DEFAULT_RETAIL_PRICE_SYNC_CHOICE \}\)/, "两个开关默认勾选");
 assert.match(
@@ -63,28 +58,19 @@ assert.match(
 );
 assert.match(
   screenSource,
-  /setBulkRetailPriceSync\(\{ \.\.\.DEFAULT_RETAIL_PRICE_SYNC_CHOICE \}\);\s*afterSheetClosed\(\(\) => setBulkModalType\(action\)\)/,
-  "每次打开批量设价弹窗都回到默认勾选",
-);
-assert.match(
-  screenSource,
-  /editingDetail && isEditRetailPriceChangeForExistingProduct\(editingDetail, editForm\.oemPrice\) \? \(\s*<ContainerRetailPriceSyncSwitches/,
-  "编辑弹窗只在已有商品零售价被改时展示开关",
-);
-assert.match(
-  screenSource,
-  /isBulkRetailPriceFilled\(bulkOemPrice\) \? \(\s*<ContainerRetailPriceSyncSwitches/,
-  "批量设价弹窗只在填了零售价时展示开关",
+  /editingDetail && isEditRetailPriceChangeForExistingProduct\(editingDetail, editForm\.warehouseOemPrice\) \? \(\s*<ContainerRetailPriceSyncSwitches/,
+  "编辑弹窗只在已有零售价被改时展示开关",
 );
 assert.match(
   screenSource,
   /batchUpdateDetails\(containerGuid, \[submittedPayload\], retailPriceSync\)/,
   "保存明细把开关随请求提交",
 );
+assert.equal(/bulkRetailPriceSync|isBulkRetailPriceFilled/.test(screenSource), false, "批量设价只写本次价，不再有同步开关");
 assert.match(
   screenSource,
-  /buildRetailPriceSyncRequestFields\(bulkRetailPriceSync, isBulkRetailPriceFilled\(bulkOemPrice\)\)/,
-  "批量设价把开关随请求提交",
+  /applyPrices\(containerGuid, scope, \{ importPrice, oemPrice \}, previewToken\)/,
+  "批量设价不带开关",
 );
 // 预览参数（previewContainerDetailBatchAction 的 parameters）里不能有开关：开关只决定副作用，不决定命中行。
 const previewSource = screenSource.slice(

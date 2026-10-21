@@ -203,6 +203,10 @@ function mapDetailUpdate(item: UpdateContainerDetailRequest) {
     英文名称: item.英文名称,
     ClearEnglishName: item.ClearEnglishName,
     贴牌价格: item.贴牌价格,
+    仓库进口价: item.仓库进口价,
+    仓库零售价: item.仓库零售价,
+    ExpectedWarehouseImportPrice: item.expectedWarehouseImportPrice,
+    ExpectedWarehouseOemPrice: item.expectedWarehouseOemPrice,
     单件装箱数: item.单件装箱数,
     中包数: item.中包数,
     单件体积: item.单件体积,
@@ -336,7 +340,7 @@ export async function updateContainer(containerGuid: string, data: UpdateContain
 export async function batchUpdateDetails(
   containerGuid: string,
   updates: UpdateContainerDetailRequest[],
-  // 本次改了已有商品零售价时随请求带上「同步分店零售价 / 生成价格任务」；不传则后端按默认（都开）处理。
+  // 本次改了「已有零售价」时随请求带上「同步分店零售价 / 生成价格任务」；不传则后端按默认（都开）处理。
   retailPriceSync?: RetailPriceSyncRequestFields,
 ): Promise<ContainerDetailBatchUpdateResult> {
   try {
@@ -398,10 +402,9 @@ export async function applyPrices(
   scope: ContainerDetailBatchScope,
   prices: { importPrice?: number | null; oemPrice?: number | null },
   previewToken: string,
-  // 两个开关只决定改零售价后的副作用，不进预览参数；没改零售价时不传。
-  retailPriceSync?: RetailPriceSyncRequestFields,
 ) {
-  return postContainerAction(containerGuid, "apply-prices", { ...scope, ...prices, ...retailPriceSync, previewToken });
+  // 批量改价只写「本次进口价 / 本次零售价」（货柜明细，新商品建档数据），不再联动仓库表和分店价，所以没有同步开关。
+  return postContainerAction(containerGuid, "apply-prices", { ...scope, ...prices, previewToken });
 }
 
 export async function recalculate(containerGuid: string, scope: ContainerDetailBatchScope, previewToken: string) {
