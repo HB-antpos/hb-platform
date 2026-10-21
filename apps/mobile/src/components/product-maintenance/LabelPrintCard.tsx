@@ -49,6 +49,8 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             onPress={onPrintProduct}
             loading={isPrintingProduct}
             disabled={!onPrintProduct || isPrintingProduct}
+            // 按钮上的文字是为小屏做的简写；读屏朗读完整名称。
+            accessibilityLabel={t("print.product")}
             style={styles.button}
             labelStyle={styles.buttonLabel}
           >
@@ -60,6 +62,7 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             onPress={onPrintSmall}
             loading={isPrintingSmall}
             disabled={!onPrintSmall || isPrintingSmall}
+            accessibilityLabel={t("print.smallLabel")}
             style={styles.button}
             labelStyle={styles.buttonLabel}
           >
@@ -71,6 +74,7 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             onPress={onPrintDiscount}
             loading={isPrintingDiscount}
             disabled={!onPrintDiscount || !canPrintDiscount || isPrintingDiscount}
+            accessibilityLabel={t("print.discount")}
             style={styles.button}
             labelStyle={styles.buttonLabel}
           >
@@ -82,6 +86,7 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             onPress={onPrintBigDiscount}
             loading={isPrintingBigDiscount}
             disabled={!onPrintBigDiscount || !canPrintBigDiscount || isPrintingBigDiscount}
+            accessibilityLabel={t("print.bigDiscount")}
             style={styles.button}
             labelStyle={styles.buttonLabel}
           >
@@ -105,8 +110,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    // 360dp 屏的预算：容器内边距 16×2 → 行内边距 8×2 → 状态图标 36 + 间距 6 → 四个按钮各约 64dp，
-    // 英文 “Discount”（13sp 约 54dp）加标签边距仍有余量，不会被截断。
+    // 360dp 屏的预算：容器内边距 16×2 → 行内边距 8×2 → 状态图标 36 + 间距 6 → 四个按钮各约 64dp。
+    // 真机 TC26 字体缩放 1.15 倍：13sp 的 “Discount” 实测约 60dp，几乎零余量，所以英文按钮用简写
+    // （Reg / Small / Disc / Large，最长约 38dp），读屏仍读完整名称。
     gap: 6,
     minHeight: 52,
     paddingHorizontal: HB_SPACING.xs,

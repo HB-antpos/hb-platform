@@ -1204,7 +1204,7 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
             'Tap an invoice to open [d:Invoice details|发票明细]: last cost, cost, quantity and subtotal per line. Use [tab:Price up|涨价] or [tab:Price down|减价] to see only price changes.',
             '§Print product labels',
             'Tap [k:Edit product|商品编辑] on a line. The product page opens with that item.',
-            'At the bottom, tap [k:Regular|普通], [k:Small|小标签], [k:Discount|折扣] or [k:Large|大标签] to print. The printer icon on the left shows the connection status by colour.',
+            'At the bottom, tap [k:Reg|普通], [k:Small|小标签], [k:Disc|折扣] or [k:Large|大标签] to print. The printer icon on the left shows the connection status by colour.',
             'To change copies, tap the printer icon on the left to open [d:Print settings|打印设置] and set [i:Print quantity|打印数量]. To connect a printer: [k:Printer settings|打印机设置] → [k:Scan for printers|扫描打印机] → [k:Connect|连接].',
           ],
         },

@@ -106,11 +106,30 @@ async function run() {
     assert.equal(buttons()[1]!.props.disabled, true);
     assert.equal(buttons()[0]!.props.loading, false);
 
-    // 6. 小屏字数上限：中文 ≤ 4 字、英文 ≤ 8 字符，四个按钮 + 状态图标才能在 Zebra 一行排下。
+    // 6. 小屏字数上限：中文 ≤ 4 字、英文 ≤ 5 字符（简写）。真机 TC26 字体缩放 1.15 倍，
+    //    实测 13sp 的 “Discount” 约 60dp，而四个按钮每个只有约 64dp（含标签边距几乎为零余量），
+    //    所以英文用 Reg / Small / Disc / Large（最长约 38dp）。
     for (const key of BUTTON_KEYS) {
       assert.ok([...lookupIn("zh", key)].length <= 4, `中文按钮「${lookupIn("zh", key)}」超过 4 个字`);
-      assert.ok(lookupIn("en", key).length <= 8, `英文按钮「${lookupIn("en", key)}」超过 8 个字符`);
+      assert.ok(lookupIn("en", key).length <= 5, `英文按钮「${lookupIn("en", key)}」超过 5 个字符，真机会被截断`);
     }
+    assert.deepEqual(
+      BUTTON_KEYS.map((key) => lookupIn("en", key)),
+      ["Reg", "Small", "Disc", "Large"],
+      "英文按钮文案是 Reg / Small / Disc / Large",
+    );
+
+    // 6b. 简写只是视觉上的：读屏朗读完整名称（普通标签 / 小标签 / 折扣标签 / 大标签）。
+    await render({ ...allHandlers });
+    assert.deepEqual(
+      buttons().map((node) => node.props.accessibilityLabel),
+      ["print.product", "print.smallLabel", "print.discount", "print.bigDiscount"].map((key) => lookupIn("zh", key)),
+    );
+    assert.deepEqual(
+      ["print.product", "print.smallLabel", "print.discount", "print.bigDiscount"].map((key) => lookupIn("en", key)),
+      ["Regular label", "Small label (60mm)", "Discount label", "Large label"],
+      "英文完整名称",
+    );
 
     // 7. 页面接线契约：小标签动作存在、固定打小标签、并传给打印栏（页面太大没法整体渲染，按源码钉住）。
     const page = readFileSync(resolve(__dirname, "../../../app/(shell)/product-query.tsx"), "utf8");
