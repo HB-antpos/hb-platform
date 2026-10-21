@@ -316,7 +316,8 @@ public static class DailyCloseTextFormatter
         }
 
         builder.Text($"Terminal: {Fallback(report.DeviceCode)}");
-        builder.Text($"Cashier: {Fallback(report.CashierName)}");
+        // 中文注释：与客户小票同一规则，不印员工全名；日结存档只有全名，查不到本机员工时按原文打印。
+        builder.Text($"Cashier: {Fallback(ReceiptStaffDirectory.Shared.ResolveDisplayName(report.CashierName))}");
         builder.Text($"Saved: {archive.SavedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
     }
 

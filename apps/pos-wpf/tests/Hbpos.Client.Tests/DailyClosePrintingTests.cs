@@ -278,6 +278,23 @@ public sealed class DailyClosePrintingTests
     }
 
     [Fact]
+    public void Daily_close_text_formatter_prints_receipt_staff_name_instead_of_full_name()
+    {
+        // 共用目录是进程级的，这里用不会和其他用例撞名的员工。
+        ReceiptStaffDirectory.Shared.Remember(new Hbpos.Contracts.Cashiers.CashierSessionDto(
+            "DC1", "USER-DC1", "Dailyclose Staffer", "S001", "POS-01", [], [], ["S001"],
+            IsSuperAdmin: false, IsOfflineCached: false, IsEmergencyOverride: false,
+            Username: "dc.staffer", Nickname: "Dee", FamilyName: "staffer"));
+        var archive = CreateArchive();
+        archive = archive with { Report = archive.Report with { CashierName = "Dailyclose Staffer" } };
+
+        var document = DailyCloseTextFormatter.Build(archive, ReceiptPrinterSettings.Default);
+
+        Assert.Contains(document.PreviewRows, row => row.Text == "Cashier: Dee S");
+        Assert.DoesNotContain(document.PreviewRows, row => row.Text.Contains("Staffer", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Daily_close_text_formatter_wraps_every_store_line_to_receipt_width()
     {
         var settings = ReceiptPrinterSettings.Default with
