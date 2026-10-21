@@ -788,6 +788,37 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
           ],
         },
       },
+      {
+        // 状态栏文案对照 WPF Strings.resx 的 shell.footer.terminalInfo（Terminal: {0} / 终端：{0}）与 shell.footer.currentVersion；
+        // 远程维护入口对照 SettingsStrings.resx 的 settings.remoteMaintenance.*。
+        id: 'remote-assist',
+        title: { zh: '需要远程协助时，如何找到收银机的设备号？', en: 'Need remote help? How do I find the till’s terminal number?' },
+        where: { zh: '收银页面底部状态栏 · [d:Terminal|终端]', en: 'Status bar at the bottom of the sale screen · [d:Terminal|终端]' },
+        steps: {
+          zh: [
+            '看收银页面最下方的状态栏，找到 [d:Terminal|终端] 后面的设备号，例如 POS_1022_0841。',
+            '联系总部 IT 时，把这个设备号完整告诉对方（字母、数字和下划线都要报全），最好连同旁边的 [d:Current version|当前版本] 一起提供。',
+            '保持收银机开机并联网，等待 IT 远程连接。',
+          ],
+          en: [
+            'Look at the status bar along the bottom of the sale screen and find the number after [d:Terminal|终端], e.g. POS_1022_0841.',
+            'When you contact HQ IT, give them the full terminal number (letters, digits and underscores), ideally with the [d:Current version|当前版本] shown next to it.',
+            'Keep the till switched on and online while IT connects remotely.',
+          ],
+        },
+        tips: {
+          zh: [
+            '也可以把状态栏这一行拍照或截图发给 IT，注意拍全设备号。',
+            '远程维护在 [k:Settings|设置] → [k:Remote maintenance|远程维护] 里查看 [d:Local service status|本机服务状态]：未配置时点 [k:Install remote maintenance|安装远程维护]（Windows 弹出授权窗口时选「是」），服务停止时点 [k:Check and restore|检查并恢复]。',
+            '配置好之后，收银员退出登录也不影响 IT 远程维护。',
+          ],
+          en: [
+            'You can also send IT a photo or screenshot of the status bar. Make sure the full terminal number is visible.',
+            'Remote maintenance lives in [k:Settings|设置] → [k:Remote maintenance|远程维护], which shows the [d:Local service status|本机服务状态]. If it is not set up, tap [k:Install remote maintenance|安装远程维护] (choose Yes when Windows asks for permission); if the service has stopped, tap [k:Check and restore|检查并恢复].',
+            'Once set up, IT can still connect after the cashier signs out.',
+          ],
+        },
+      },
     ],
   },
 ]
