@@ -6840,7 +6840,7 @@
       "lastPrintedAt": "最后打印时间",
       "printing": "打印信息",
       "lastPrintError": "最后打印错误",
-      "receipts": "已脱敏回单",
+      "receipts": "回单",
       "receiptNumber": "回单 {{number}}",
       "noReceipts": "暂无回单"
     }

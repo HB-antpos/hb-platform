@@ -124,7 +124,7 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
             LastPrintedAtUtc = AsNullableUtc(row.LastPrintedAtUtc),
             ClientRevision = row.ClientRevision.ToString(CultureInfo.InvariantCulture),
             CardTotals = parsed.CardTotals.ToList(),
-            Receipts = LinklySettlementReceiptSanitizer.ParseAndSanitize(row.ReceiptTextsJson),
+            Receipts = LinklySettlementReceiptReader.ParseReceipts(row.ReceiptTextsJson),
         };
     }
 
@@ -282,7 +282,7 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
         CompletedAtUtc = AsNullableUtc(row.CompletedAtUtc),
         ResponseCode = row.ResponseCode,
         ResponseText = row.ResponseText,
-        ReceiptCount = LinklySettlementReceiptSanitizer.Count(row.ReceiptTextsJson),
+        ReceiptCount = LinklySettlementReceiptReader.Count(row.ReceiptTextsJson),
         PrintCount = row.PrintCount,
         LastPrintError = row.LastPrintError,
         ReceivedAtUtc = AsUtc(row.ReceivedAtUtc),
