@@ -38,7 +38,10 @@ public sealed class ApiEndpointDatabasePartitionResolver
 
     internal static string CreateEndpointKey(string address)
     {
-        var uri = new Uri(ApiServerSettingsService.NormalizeAddress(address), UriKind.Absolute);
+        // 关键逻辑：先把别名入口折算成规范入口再算分区键，pos 入口与 hotbargain.vip 必须落在同一份本地库上，
+        // 否则升级后门店会丢掉已激活状态并重新下载全部数据。
+        var uri = ApiEndpointAliases.Canonicalize(
+            new Uri(ApiServerSettingsService.NormalizeAddress(address), UriKind.Absolute));
         var builder = new UriBuilder(uri)
         {
             Scheme = uri.Scheme.ToLowerInvariant(),

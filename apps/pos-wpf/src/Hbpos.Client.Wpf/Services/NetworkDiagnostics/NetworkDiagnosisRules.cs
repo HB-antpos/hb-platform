@@ -24,8 +24,10 @@ public static class NetworkDiagnosisRules
     /// <summary>
     /// 服务器证书预期的签发者关键字。收到的证书签发者不含它们，说明有软件在中间重签（杀毒的 HTTPS 扫描、代理、防火墙设备）。
     /// 将来服务器换了证书颁发机构时，这里要同步更新；结论里会把实际签发者名字显示出来，所以误报也容易看出来。
+    /// TrustAsia：默认入口 pos.hotbargain.vip 走 EdgeOne，其托管的免费证书由 TrustAsia 签发；
+    /// 不放进来，每台店机的诊断都会误报"HTTPS 被重签"，线路真有问题时还会把店员引到错误方向。
     /// </summary>
-    public static readonly string[] ExpectedIssuerMarkers = ["Let's Encrypt", "ISRG"];
+    public static readonly string[] ExpectedIssuerMarkers = ["Let's Encrypt", "ISRG", "TrustAsia"];
 
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(5);
 
@@ -532,7 +534,7 @@ public static class NetworkDiagnosisRules
                 DiagnosticStepId.CertificateTrust,
                 DiagnosticStepStatus.Failed,
                 null,
-                $"issued by {issuer}, not by Let's Encrypt · something on this machine or network is re-signing HTTPS");
+                $"issued by {issuer}, not by Let's Encrypt or TrustAsia · something on this machine or network is re-signing HTTPS");
         }
 
         if (m.ChainTrusted)

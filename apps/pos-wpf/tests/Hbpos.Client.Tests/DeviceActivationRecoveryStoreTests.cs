@@ -150,6 +150,35 @@ public sealed class DeviceActivationRecoveryStoreTests
         }
     }
 
+    [Fact]
+    public async Task Recovery_saved_on_the_direct_entry_stays_valid_when_the_pos_alias_entry_becomes_current()
+    {
+        // 老设备升级后默认入口换成 pos.hotbargain.vip：升级前留下的未完成激活恢复数据按规范入口记录，
+        // 仍然必须被识别为"同一台服务器"，不能报「恢复数据不可读」。
+        var directoryPath = Path.Combine(Path.GetTempPath(), $"hbpos-activation-recovery-{Guid.NewGuid():N}");
+        var recoveryFilePath = Path.Combine(directoryPath, "device-activation-recovery.pending");
+        try
+        {
+            var endpointState = new ApiRuntimeEndpointState(ApiEndpoint);
+            var recoveryStore = CreateStore(new PrefixAuthorizationProtector(), recoveryFilePath, endpointState);
+            await recoveryStore.SaveAsync(ValidCode, DeviceActivationRecoveryMode.Rebind, HardwareId);
+
+            endpointState.Switch("https://pos.hotbargain.vip/pos-api/");
+
+            var restored = await recoveryStore.GetAsync();
+            Assert.NotNull(restored);
+            Assert.Equal(ValidCode, restored.ActivationCode);
+            Assert.Equal(ApiEndpoint, restored.ApiEndpoint);
+        }
+        finally
+        {
+            if (Directory.Exists(directoryPath))
+            {
+                Directory.Delete(directoryPath, recursive: true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData("https://other.example.com/pos-api/", HardwareId)]
     [InlineData(ApiEndpoint, "HW-002")]

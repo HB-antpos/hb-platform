@@ -450,6 +450,24 @@ public sealed class NetworkDiagnosisRulesTests
     }
 
     [Fact]
+    public void An_edgeone_certificate_from_trustasia_is_an_expected_issuer()
+    {
+        // 默认入口 pos.hotbargain.vip 走 EdgeOne，其托管证书由 TrustAsia 签发。
+        // 线路真有问题（回复超时、TLS 超时）时，不能被误判成"HTTPS 被重新签名"，否则会把店员引到错误的方向。
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            CertificateIssuer = "CN=TrustAsia DV TLS RSA CA 2025, O=\"TrustAsia Technologies, Inc.\", C=CN"
+        };
+
+        Assert.NotEqual(DiagnosisKind.HttpsIntercepted, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var trust = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.CertificateTrust);
+        Assert.NotEqual(DiagnosticStepStatus.Failed, trust.Status);
+    }
+
+    [Fact]
     public void A_certificate_from_an_unexpected_issuer_means_something_is_re_signing_https()
     {
         var m = TlsHealthy() with

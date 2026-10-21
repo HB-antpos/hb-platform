@@ -11,7 +11,12 @@ public sealed class ApiServerSettingsServiceTests
     [Fact]
     public void Release_api_base_address_is_https()
     {
-        Assert.Equal("https://hotbargain.vip/pos-api/", ApiServerSettingsService.ReleaseApiBaseAddress);
+        // 默认首选入口是走 EdgeOne 的 pos 域名；直连入口 hotbargain.vip 自动作为备份（见 ApiEndpointAliases）。
+        Assert.Equal("https://pos.hotbargain.vip/pos-api/", ApiServerSettingsService.ReleaseApiBaseAddress);
+        Assert.True(ApiEndpointAliases.IsAlias(new Uri(ApiServerSettingsService.ReleaseApiBaseAddress)));
+        Assert.True(ApiEndpointAliases.SameIdentity(
+            new Uri(ApiServerSettingsService.ReleaseApiBaseAddress),
+            new Uri("https://hotbargain.vip/pos-api/")));
     }
 
     [Theory]

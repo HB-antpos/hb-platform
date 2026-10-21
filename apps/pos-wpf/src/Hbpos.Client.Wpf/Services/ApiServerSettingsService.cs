@@ -9,7 +9,9 @@ namespace Hbpos.Client.Wpf.Services;
 public sealed class ApiServerSettingsService
 {
     public const string DevelopmentApiBaseAddress = "http://localhost:5159/";
-    public const string ReleaseApiBaseAddress = "https://hotbargain.vip/pos-api/";
+    // 默认首选入口走 EdgeOne（离澳洲门店近，绕开个别运营商到新加坡的不稳线路）；
+    // 直连入口 https://hotbargain.vip/pos-api/ 自动作为备份，两者是同一后端，见 ApiEndpointAliases / ApiTransportSelector。
+    public const string ReleaseApiBaseAddress = "https://pos.hotbargain.vip/pos-api/";
     internal static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(10);
 
     private readonly HttpClient _httpClient;
