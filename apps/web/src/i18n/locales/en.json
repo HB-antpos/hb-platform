@@ -6841,6 +6841,10 @@
       "printing": "Printing",
       "lastPrintError": "Last Print Error",
       "receipts": "Receipts",
+      "generatedSummary": "Settlement Summary",
+      "generatedSummaryHint": "Generated from settlement data, not the terminal original",
+      "receiptAmountData": "Amount Data",
+      "totalRow": "Total",
       "receiptNumber": "Receipt {{number}}",
       "noReceipts": "No receipts"
     }

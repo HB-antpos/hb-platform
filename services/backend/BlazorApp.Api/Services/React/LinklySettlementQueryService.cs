@@ -125,6 +125,7 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
             ClientRevision = row.ClientRevision.ToString(CultureInfo.InvariantCulture),
             CardTotals = parsed.CardTotals.ToList(),
             Receipts = LinklySettlementReceiptReader.ParseReceipts(row.ReceiptTextsJson),
+            GeneratedSummary = LinklySettlementSummaryReceipt.Build(parsed.Summary, parsed.CardTotals),
         };
     }
 

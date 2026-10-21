@@ -6841,6 +6841,10 @@
       "printing": "打印信息",
       "lastPrintError": "最后打印错误",
       "receipts": "回单",
+      "generatedSummary": "结算汇总",
+      "generatedSummaryHint": "系统按结算数据生成，非刷卡机原文",
+      "receiptAmountData": "金额数据",
+      "totalRow": "合计",
       "receiptNumber": "回单 {{number}}",
       "noReceipts": "暂无回单"
     }

@@ -1,5 +1,6 @@
 import {
   buildLinklyDeviceSelectOptions,
+  buildReceiptAmountRows,
   canExportLinklySettlementRange,
   createLatestAbortableRequestGuard,
   formatAmountMinor,
@@ -124,5 +125,13 @@ assertEqual(
   'POS_1002_2111 · 1002',
   '未选门店时选项文案带门店',
 )
+
+const receiptRows = buildReceiptAmountRows(
+  [{ cardName: 'VISA', purchaseAmountMinor: 100 }],
+  { purchaseAmountMinor: 100, totalAmountMinor: 100 },
+  '合计',
+)
+assertEqual(receiptRows.map((row) => row.cardName).join(','), 'VISA,合计', '回单金额数据：卡种在前、合计在最后')
+assertEqual(buildReceiptAmountRows(undefined, undefined, '合计').length, 0, '没有金额数据时不产生行')
 
 console.log('LinklySettlements logic.test: ok')

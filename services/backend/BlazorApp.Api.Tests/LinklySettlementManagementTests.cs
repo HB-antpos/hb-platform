@@ -230,6 +230,40 @@ public sealed class LinklySettlementAmountParserTests
             _parser.Parse(withRefund.Replace("****4036", "****9036")).Status);
     }
 
+    [Fact]
+    public void SummaryReceipt_BuildsTwentyFourColumnGrandTotalsFromParsedData()
+    {
+        var value = FixedWidth(
+            [Record("VISA", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4)],
+            Record("TOTALS", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4));
+        var parsed = _parser.Parse(value);
+
+        var text = LinklySettlementSummaryReceipt.Build(parsed.Summary, parsed.CardTotals);
+
+        Assert.NotNull(text);
+        var lines = text.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        Assert.Equal("GRAND TOTALS", lines[0]);
+        Assert.Equal("Sales      2     $100.00", lines[1]);
+        Assert.Equal("Cash       1      $20.00", lines[2]);
+        Assert.Equal("Refund     1      $10.00", lines[3]);
+        Assert.Equal(new string('-', 24), lines[4]);
+        Assert.Equal("Net Amount       $110.00", lines[5]);
+        Assert.All(lines.Take(6), line => Assert.True(line.Length <= 24, line));
+        Assert.Contains("VISA", lines[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SummaryReceipt_FormatsNegativeNetAndThousandsAndSkipsUnparsed()
+    {
+        var summary = new LinklySettlementAmountDto { PurchaseAmountMinor = 123_456_78, TotalAmountMinor = -5_00 };
+
+        var text = LinklySettlementSummaryReceipt.Build(summary, []);
+
+        Assert.Contains("$123,456.78", text, StringComparison.Ordinal);
+        Assert.Contains("-$5.00", text, StringComparison.Ordinal);
+        Assert.Null(LinklySettlementSummaryReceipt.Build(null, []));
+    }
+
     internal static string FixedWidth(IReadOnlyList<string> cards, string total)
     {
         var cardData = string.Concat(cards);
@@ -409,6 +443,7 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
 
         Assert.NotNull(result);
         Assert.Equal(3, result.Receipts.Length);
+        Assert.Contains("GRAND TOTALS", result.GeneratedSummary, StringComparison.Ordinal);
         Assert.StartsWith("FIRST", result.Receipts[0], StringComparison.Ordinal);
         Assert.Equal("LAST", result.Receipts[2]);
         // 按用户要求，后台详情展示存库回单原文，不做展示层脱敏。

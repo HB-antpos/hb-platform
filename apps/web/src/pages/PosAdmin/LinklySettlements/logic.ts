@@ -2,6 +2,7 @@ import { matchPath } from 'react-router-dom'
 import type {
   LinklyAmountParseStatus,
   LinklySettlementAmountSummary,
+  LinklySettlementCardTotal,
   LinklySettlementDeviceOption,
   LinklySettlementFilters,
   LinklySettlementListQuery,
@@ -213,4 +214,18 @@ export function buildLinklyDeviceSelectOptions(
       value: item.deviceCode,
       label: storeCode ? item.deviceCode : `${item.deviceCode} · ${item.storeCode}`,
     }))
+}
+
+/**
+ * 回单区的「金额数据」行：各卡种明细在前，合计行在最后。
+ * 终端打印的结算回单常常只有「SETTLEMENT CONFIRMED」而没有金额，金额只在结算数据里，所以在回单区补出来。
+ */
+export function buildReceiptAmountRows(
+  cardTotals: LinklySettlementCardTotal[] | null | undefined,
+  summary: LinklySettlementAmountSummary | null | undefined,
+  totalLabel: string,
+): LinklySettlementCardTotal[] {
+  const rows = [...(cardTotals ?? [])]
+  if (summary) rows.push({ ...summary, cardName: totalLabel })
+  return rows
 }
