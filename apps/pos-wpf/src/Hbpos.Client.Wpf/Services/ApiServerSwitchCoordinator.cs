@@ -115,7 +115,12 @@ public sealed class ApiServerSwitchCoordinator : IApiServerSwitchCoordinator
             }
 
             var previousAddress = _endpointState.CurrentAddress.AbsoluteUri;
-            if (string.Equals(normalized, previousAddress, StringComparison.Ordinal))
+            // 同一台服务器的别名入口（例如 pos.hotbargain.vip 与 hotbargain.vip）互相切换不是换服务器：
+            // 不能走会清理登录身份、重建本地库的完整切换流程，直接按"地址未变"处理。
+            if (string.Equals(normalized, previousAddress, StringComparison.Ordinal)
+                || ApiEndpointAliases.SameIdentity(
+                    new Uri(normalized, UriKind.Absolute),
+                    _endpointState.CurrentAddress))
             {
                 return new ApiServerSwitchResult(ApiServerSwitchStatus.SameAddress);
             }

@@ -24,6 +24,10 @@ internal sealed class ApiBaseAddressConfigurationException : Exception
 public static class ServiceRegistration
 {
     private const string ApiBaseUrlEnvironmentVariable = "HBPOS_API_BASE_URL";
+    // 建连超时：线路"黑洞"（个别运营商到新加坡丢 SYN）时 TCP 连接会一直挂到系统默认的约 21 秒，
+    // 长于多数接口 10~15 秒的请求超时，入口故障转移根本来不及触发。取 4 秒：澳洲境内正常建连只要几十到几百毫秒，
+    // 同时必须明显短于最短的 10 秒请求超时，给备用入口的重试留出时间。
+    internal static readonly TimeSpan ApiConnectTimeout = TimeSpan.FromSeconds(4);
     internal const string PreviewApiBaseAddress = "http://127.0.0.1:0/";
     private const string ApplicationLogUploadClientName = "HbposApplicationLogUpload";
     internal const string SquareDirectGatewayHttpClientName = "HbposSquareDirect";
@@ -56,6 +60,13 @@ public static class ServiceRegistration
         services.AddSingleton<ILocalizationService, LocalizationService>();
         var initialApiAddress = GetInitialApiBaseAddress(startupOptions);
         services.AddSingleton(new ApiRuntimeEndpointState(initialApiAddress.AbsoluteUri));
+        // 进程内共享的主备入口选择器：所有 API 客户端的处理器必须共用同一份状态，才能一起切到备用入口。
+        services.AddSingleton<ApiTransportSelector>();
+        // 所有 HttpClient 的默认主处理器：只增加建连超时，其余保持与 HttpClientFactory 默认一致（不用 Cookie）。
+        // 建连超时必须由我们自己实现（见 ApiHttpHandlerFactory），否则超时异常和请求超时无法区分。
+        // 自行配置了主处理器的客户端（目录同步、远程维护）以各自配置为准。
+        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler(
+            () => ApiHttpHandlerFactory.Create(ApiConnectTimeout)));
         services.AddTransient<ApiRuntimeEndpointHandler>();
         services.AddHttpClient<ApiServerSettingsService>(client =>
         {
@@ -254,9 +265,14 @@ public static class ServiceRegistration
             client.Timeout = Timeout.InfiniteTimeSpan;
         })
         // 中文注释：声明并自动解压 gzip，服务端只对 checksumVersion=2 的目录分页与码冲突候选压缩，其它接口响应不变。
-        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        .ConfigurePrimaryHttpMessageHandler(() =>
         {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+            // 该客户端自带主处理器，不会继承默认的建连超时；这里同样使用带建连超时的处理器，
+            // 保证目录同步在线路黑洞时也能及时切到备用入口。
+            var handler = ApiHttpHandlerFactory.Create(ApiConnectTimeout);
+            handler.AutomaticDecompression =
+                DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli;
+            return handler;
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();

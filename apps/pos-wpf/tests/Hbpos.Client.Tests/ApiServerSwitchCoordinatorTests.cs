@@ -191,6 +191,31 @@ public sealed class ApiServerSwitchCoordinatorTests
         Assert.Equal("https://current.example.com/pos-api/", saved());
     }
 
+    [Fact]
+    public async Task Switching_between_aliases_of_the_same_server_is_not_a_server_switch()
+    {
+        // pos.hotbargain.vip 与 hotbargain.vip 是同一台服务器的两个入口：互相切换不能走会清理登录身份、
+        // 重建本地库的完整切换流程，也不需要做健康检查。
+        var runtime = new FakeRuntime();
+        var healthCalls = 0;
+        var service = new ApiServerSettingsService(
+            new HttpClient(new StubHandler(_ =>
+            {
+                healthCalls++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            })),
+            () => "https://pos.hotbargain.vip/pos-api/",
+            _ => { });
+        var state = new ApiRuntimeEndpointState("https://pos.hotbargain.vip/pos-api/");
+        var coordinator = new ApiServerSwitchCoordinator(service, state, runtime);
+
+        var result = await coordinator.SwitchAsync("https://hotbargain.vip/pos-api/");
+
+        Assert.Equal(ApiServerSwitchStatus.SameAddress, result.Status);
+        Assert.Equal(0, healthCalls);
+        Assert.Empty(runtime.Events);
+    }
+
     private static (ApiServerSwitchCoordinator Coordinator, Func<int> HealthCalls, Func<string?> Saved) CreateCoordinator(
         FakeRuntime runtime)
     {

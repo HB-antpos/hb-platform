@@ -374,7 +374,8 @@ public sealed class LocalDeviceActivationRecoveryStore : IDeviceActivationRecove
 
     private string GetCurrentEndpoint()
     {
-        return _endpointState.CurrentAddress.AbsoluteUri;
+        // 恢复数据按规范入口记录：别名入口与规范入口是同一台服务器，已记录的历史恢复数据（hotbargain.vip）依然有效。
+        return ApiEndpointAliases.Canonicalize(_endpointState.CurrentAddress).AbsoluteUri;
     }
 
     private string GetCurrentHardwareId()
