@@ -184,6 +184,26 @@ namespace BlazorApp.Api.Services.React
             };
         }
 
+        /// <summary>
+        /// 按状态码过滤货柜列表。
+        /// 注意不能写 <c>x.Status.HasValue &amp;&amp; ...</c>：SqlSugar 会把它翻译成 <c>[Status]&lt;&gt;'' AND [Status] IS NOT NULL</c>，
+        /// SQL Server 把 '' 隐式转成 int 0，于是 <c>Status &lt;&gt; 0</c> 把状态码 0（已装柜）整个排除掉。
+        /// IN 本身就不会命中 NULL，调用方也已先过滤掉 Status 为 null 的记录。
+        /// </summary>
+        internal static ISugarQueryable<Container> ApplyStatusesFilter(
+            ISugarQueryable<Container> query,
+            IEnumerable<int>? requestStatuses
+        )
+        {
+            var statuses = requestStatuses?.Distinct().ToList();
+            if (statuses == null || statuses.Count == 0)
+            {
+                return query;
+            }
+
+            return query.Where(x => statuses.Contains(x.Status!.Value));
+        }
+
         private static string? NormalizeKeyword(string? value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -1087,11 +1107,7 @@ namespace BlazorApp.Api.Services.React
                 {
                     query = query.Where(x => x.TotalVolume <= request.TotalVolumeMax.Value);
                 }
-                if (request.Statuses?.Any() == true)
-                {
-                    var statuses = request.Statuses.Distinct().ToList();
-                    query = query.Where(x => x.Status.HasValue && statuses.Contains(x.Status.Value));
-                }
+                query = ApplyStatusesFilter(query, request.Statuses);
 
                 // 柜内商品筛选：货号（ItemNumberFilter，移动端沿用）与关键字（ProductKeyword）同时给出时按「且」处理；
                 // 关键字本身覆盖「货柜编号 或 柜内商品」
