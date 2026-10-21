@@ -44,6 +44,36 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public void StatusFilters_SQLServer方言不得生成空串比较以免排除状态码0()
+        {
+            // SQLite 里 0 <> '' 为真，行为测试抓不到；线上 SQL Server 会把 '' 转成 0，
+            // 写成 Status.HasValue && ... 时 SqlSugar 生成的 [Status]<>'' 会把「禁用(0)」排除。
+            var db = new SqlSugarClient(
+                new ConnectionConfig
+                {
+                    DbType = DbType.SqlServer,
+                    ConnectionString = "Server=127.0.0.1;Database=x;User Id=x;Password=x;",
+                    IsAutoCloseConnection = true,
+                }
+            );
+
+            var equalsResult = LocationReactService
+                .ApplyStatusEqualsFilter(db.Queryable<Location>(), 0)
+                .ToSql();
+            var equalsSql = equalsResult.Key;
+            var inSql = LocationReactService
+                .ApplyNullableIntFilter(db.Queryable<Location>(), "status", new[] { "0", "1" })
+                .ToSql()
+                .Key;
+
+            Assert.Contains("[Status] = @Status0", equalsSql);
+            Assert.Equal(0, Assert.Single(equalsResult.Value).Value);
+            Assert.DoesNotContain("<>''", equalsSql);
+            Assert.Contains("[Status] IN (0,1)", inSql);
+            Assert.DoesNotContain("<>''", inSql);
+        }
+
+        [Fact]
         public async Task LookupAsync_StillReturnsLocationWhenKeywordMatchesLocationCode()
         {
             await SeedBoundProductLocationAsync();

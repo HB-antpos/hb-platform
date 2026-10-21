@@ -278,6 +278,52 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
         Assert.Equal("CSGU7035442", Assert.Single(result.Containers).货柜编号);
     }
 
+    [Fact]
+    public async Task GetContainersAsync_状态过滤应能命中状态码0的已装柜货柜()
+    {
+        // 状态码 0 = 已装柜，是 int? 里最容易被当成「空」丢掉的值，单独锁住。
+        await SeedContainerAsync("C-ST-0", "AAAU0000000", status: 0);
+        await SeedContainerAsync("C-ST-1", "BBBU1111111", status: 1);
+        await SeedContainerAsync("C-ST-2", "CCCU2222222", status: 2);
+        var service = CreateService(CreateContainerListMapper());
+
+        async Task<List<string>> QueryAsync(params int[] statuses)
+        {
+            var result = await service.GetContainersAsync(
+                new ContainerQueryRequest { Page = 1, PageSize = 20, Statuses = statuses.ToList() }
+            );
+            return result.Containers.Select(x => x.货柜编号!).OrderBy(x => x).ToList();
+        }
+
+        Assert.Equal(new[] { "AAAU0000000" }, await QueryAsync(0));
+        Assert.Equal(new[] { "BBBU1111111" }, await QueryAsync(1));
+        Assert.Equal(new[] { "AAAU0000000", "BBBU1111111" }, await QueryAsync(0, 1));
+    }
+
+    [Fact]
+    public void ApplyStatusesFilter_SQLServer方言只生成IN条件不得带空串比较()
+    {
+        // SQLite 里 0 <> '' 为真，上面的行为测试抓不到；线上 SQL Server 会把 '' 转成 0，
+        // 一旦写成 Status.HasValue && ...，SqlSugar 生成的 [Status]<>'' 就会排除状态码 0（已装柜）。
+        // SqlSugar 生成 SQL 不需要真连库，这里直接断言 SQL Server 方言的 SQL 文本。
+        var db = new SqlSugarClient(
+            new ConnectionConfig
+            {
+                DbType = DbType.SqlServer,
+                ConnectionString = "Server=127.0.0.1;Database=x;User Id=x;Password=x;",
+                IsAutoCloseConnection = true,
+            }
+        );
+
+        var sql = ContainerReactService
+            .ApplyStatusesFilter(db.Queryable<Container>(), new[] { 0, 0 })
+            .ToSql()
+            .Key;
+
+        Assert.Contains("[Status] IN (0)", sql);
+        Assert.DoesNotContain("<>''", sql);
+    }
+
     [Theory]
     [InlineData("KW101", "C-KW-1")] // 货号
     [InlineData("商品 KW2", "C-KW-2")] // 商品名称

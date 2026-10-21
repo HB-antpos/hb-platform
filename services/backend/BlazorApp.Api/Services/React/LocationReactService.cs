@@ -935,8 +935,7 @@ namespace BlazorApp.Api.Services.React
 
             if (filter.Status.HasValue)
             {
-                var status = filter.Status.Value;
-                query = query.Where(l => l.Status.HasValue && l.Status.Value == status);
+                query = ApplyStatusEqualsFilter(query, filter.Status.Value);
             }
 
             if (filter.UpdatedAtStart.HasValue)
@@ -1276,7 +1275,20 @@ namespace BlazorApp.Api.Services.React
             };
         }
 
-        private static ISugarQueryable<Location> ApplyNullableIntFilter(
+        /// <summary>
+        /// 按单个状态码过滤货位（0 = 禁用，1 = 启用）。
+        /// 注意不能写 <c>l.Status.HasValue &amp;&amp; ...</c>：SqlSugar 会生成 <c>[Status]&lt;&gt;''</c>，
+        /// SQL Server 把 '' 隐式转成 int 0，状态码 0（禁用）会被整个排除。直接比较即可，NULL 不会等于任何值。
+        /// </summary>
+        internal static ISugarQueryable<Location> ApplyStatusEqualsFilter(
+            ISugarQueryable<Location> query,
+            int status
+        )
+        {
+            return query.Where(l => l.Status == status);
+        }
+
+        internal static ISugarQueryable<Location> ApplyNullableIntFilter(
             ISugarQueryable<Location> query,
             string key,
             IEnumerable<string> values
@@ -1296,10 +1308,9 @@ namespace BlazorApp.Api.Services.React
 
             return key switch
             {
-                "status" => query.Where(l => l.Status.HasValue && intValues.Contains(l.Status.Value)),
-                "locationtype" => query.Where(l =>
-                    l.LocationType.HasValue && intValues.Contains(l.LocationType.Value)
-                ),
+                // 不用 HasValue：见 ApplyStatusEqualsFilter 的说明，IN 本身不会命中 NULL。
+                "status" => query.Where(l => intValues.Contains(l.Status!.Value)),
+                "locationtype" => query.Where(l => intValues.Contains(l.LocationType!.Value)),
                 _ => query,
             };
         }
