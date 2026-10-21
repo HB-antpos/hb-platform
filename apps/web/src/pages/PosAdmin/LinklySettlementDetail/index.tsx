@@ -6,7 +6,6 @@ import {
   Descriptions,
   Empty,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -369,7 +368,7 @@ export default function LinklySettlementDetailPage() {
                 ) : null}
                 {receiptAmountRows.length ? (
                   <Card size="small" type="inner" title={t('linklySettlements.detail.receiptAmountData')}>
-                    <Table<LinklySettlementCardTotal>
+                    <MeasuredTable<LinklySettlementCardTotal> metricId="pos-admin.linkly-settlement-detail.table-2"
                       rowKey={(record, index) => `${record.cardName}-${index ?? 0}`}
                       size="small"
                       columns={receiptAmountColumns}
