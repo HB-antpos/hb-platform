@@ -402,14 +402,14 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
         steps: {
           zh: [
             '点功能砖 [k:Refund|退款]。',
-            '勾选 [t:No-receipt return|无小票退货]。',
+            '打开右上角的 [t:No-receipt return|无小票退货] 开关。',
             '商品有条码：直接扫条码加入。',
             '商品没有条码：点 [k:No-barcode Item|无码商品]，在弹窗 [d:No-barcode return item|无码退货商品] 填 [i:Item name|商品名称] 和 [i:Retail price|零售价]，点 [k:Add|加入]。',
             '点 [k:Add to Cart|加入购物车]，再按「有小票，如何退款？」第 5–6 步选退款方式并完成退款。',
           ],
           en: [
             'Tap the [k:Refund|退款] tile.',
-            'Tick [t:No-receipt return|无小票退货].',
+            'Turn on the [t:No-receipt return|无小票退货] switch at the top right.',
             'Item has a barcode: scan it.',
             'No barcode: tap [k:No-barcode Item|无码商品]. In [d:No-barcode return item|无码退货商品], enter the [i:Item name|商品名称] and [i:Retail price|零售价], then tap [k:Add|加入].',
             'Tap [k:Add to Cart|加入购物车], then follow steps 5–6 of “How do I refund with a receipt?”.',
