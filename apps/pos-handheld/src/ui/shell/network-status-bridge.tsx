@@ -1,3 +1,4 @@
+import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
 import Constants from "expo-constants";
 import * as Network from "expo-network";
 import { useEffect } from "react";
@@ -82,8 +83,9 @@ export function NetworkStatusBridge() {
     // 每次 probe 分配单调代次；多来源并发时只允许最新结果发布。
     let probeGeneration = 0;
 
-    const probe = createSettingsApiHealthProbe((url, init) =>
-      fetch(url, init),
+    // 健康探测经入口感知的 fetch：边缘入口不通时改探直连，避免整台设备被误判离线进入仅现金模式。
+    const probe = createSettingsApiHealthProbe(
+      createFailoverFetch((url, init) => fetch(url, init)),
     );
 
     // 依据最近一次设备状态与后端探测结果发布最终 connectivity。

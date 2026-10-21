@@ -1,9 +1,17 @@
 export * from "./transport-contracts";
 export { isDeviceRevocationCode } from "./core/api/forbidden-response";
-import { AxiosError, isAxiosError, type AxiosInstance, type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios";
+import { AxiosError, isAxiosError, type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 
 import { isDeviceRevocationCode } from "./core/api/forbidden-response";
 import { HbposApiError, type HbposTransport, type HbposTransportRequest, type HbposTransportResponse } from "./transport-contracts";
+import {
+  classifyTransportFailure,
+  entryOrigins,
+  isFailoverBaseUrl,
+  isTransportRetryableMethod,
+  rewriteEntryHost,
+  type ApiTransportSelector,
+} from "./transport-failover";
 
 export type HbposRequestCredentials = Readonly<{
   device?: Readonly<{
@@ -31,14 +39,26 @@ export type HbposTransportPolicy = Readonly<{
   responseHeaders: "omit" | "normalize";
 }>;
 
+/**
+ * 双入口故障转移（可选）。只有 baseUrl 属于入口组（https://hotbargain.vip/pos-api 或
+ * https://pos.hotbargain.vip/pos-api）时才生效；其他地址（本地开发、局域网）完全不受影响。
+ */
+export type HbposTransportFailover = Readonly<{ selector: ApiTransportSelector }>;
+
 export function createAxiosHbposTransport(
   baseUrl: string,
   credentialProvider: HbposRequestCredentialProvider,
   instance: AxiosInstance,
   authenticationFailureHandler: HbposAuthenticationFailureHandler | undefined,
   policy: HbposTransportPolicy,
+  failover?: HbposTransportFailover,
 ): HbposTransport {
-  const trustedOrigin = new URL(baseUrl).origin;
+  // 配置地址是设备「身份」；启用故障转移时，同一后端的另一个入口也是受信来源。
+  const selector = failover && isFailoverBaseUrl(baseUrl) ? failover.selector : undefined;
+  const trustedOrigins = new Set([new URL(baseUrl).origin, ...(selector ? entryOrigins(baseUrl) : [])]);
+  // 记录每个请求实际走的入口。只在凭据读取成功、真正派发前才登记，
+  // 所以钥匙串读取超时之类的本地故障不会被误判成线路故障。
+  const usedHostByConfig = new WeakMap<object, string>();
   instance.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
     // 有限正超时从进入 interceptor 起只计算一次，凭据读取和 HTTP 派发共用同一预算。
     const timeoutDeadline = freezeRequestTimeoutDeadline(config.timeout);
@@ -46,7 +66,7 @@ export function createAxiosHbposTransport(
       config.url ?? "",
       config.baseURL ?? baseUrl,
     );
-    if (requestUrl.origin !== trustedOrigin) {
+    if (!trustedOrigins.has(requestUrl.origin)) {
       throw new HbposApiError(
         "Hbpos request origin is not trusted.",
         { kind: "transport", code: "UNTRUSTED_API_ORIGIN" },
@@ -75,13 +95,68 @@ export function createAxiosHbposTransport(
     ) {
       config.headers.set("X-HBPOS-Cashier-Authorization", credentials.cashierAuthorization);
     }
+    if (selector) {
+      // 凭据已就绪，现在才决定走哪个入口：配置里的身份地址 → 当前选中的传输入口。
+      const identityBase = config.baseURL ?? baseUrl;
+      if (isFailoverBaseUrl(identityBase)) {
+        // 写请求（POST/PUT）不当探路的：冷却结束后由读请求 / 健康探测先确认边缘入口恢复。
+        const host = selector.resolve({ probe: isTransportRetryableMethod(config.method) });
+        config.baseURL = rewriteEntryHost(identityBase, host);
+        usedHostByConfig.set(config, host);
+      }
+    }
     return config;
   });
+
+  /**
+   * 派发一次请求；启用故障转移时负责上报线路结果，并在首选入口刚被判定故障时
+   * 让读请求（GET/HEAD）换另一个入口重试一次。写请求（POST/PUT）绝不自动重试，
+   * 避免支付、同步等操作被重复提交，但失败会让后续请求改走另一个入口。
+   */
+  async function dispatch<T>(request: HbposTransportRequest): Promise<AxiosResponse<T>> {
+    if (!selector) {
+      return instance.request<T>(toAxiosRequest(request));
+    }
+    const maxAttempts = isTransportRetryableMethod(request.method) ? 2 : 1;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const response = await instance.request<T>(toAxiosRequest(request));
+        const usedHost = usedHostByConfig.get(response.config);
+        if (usedHost) {
+          selector.reportSuccess(usedHost);
+        }
+        return response;
+      } catch (error: unknown) {
+        const usedHost = isAxiosError(error) && error.config
+          ? usedHostByConfig.get(error.config)
+          : undefined;
+        if (!isAxiosError(error) || !usedHost) {
+          throw error;
+        }
+        const kind = classifyTransportFailure({
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.response ? { status: error.response.status } : {}),
+          isCancel: error.code === "ERR_CANCELED",
+        });
+        if (!kind) {
+          // 收到了服务器的回答（含 4xx/5xx 业务错误）：线路是通的。
+          if (error.response) {
+            selector.reportSuccess(usedHost);
+          }
+          throw error;
+        }
+        const flipped = selector.reportFailure(usedHost, kind);
+        if (!flipped || attempt >= maxAttempts) {
+          throw error;
+        }
+      }
+    }
+  }
 
   return {
     async request<T>(request: HbposTransportRequest): Promise<HbposTransportResponse<T>> {
       try {
-        const response = await instance.request<T>(toAxiosRequest(request));
+        const response = await dispatch<T>(request);
         const base = { status: response.status, data: response.data };
         return policy.responseHeaders === "normalize"
           ? { ...base, headers: normalizeResponseHeaders(response.headers) }
