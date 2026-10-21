@@ -4306,6 +4306,7 @@ export default function ContainerDetailPage() {
     if (!access.canEditContainer) return
     fillDragCleanupRef.current?.()
     let endRowKey = sourceRowKey
+    let lastPointerX = 0
     let lastPointerY = 0
     let scrollFrame = 0
     setFillDrag({ sourceRowKey, columnKey, targetRowKeys: new Set() })
@@ -4329,12 +4330,17 @@ export default function ContainerDetailPage() {
     const autoScroll = () => {
       if (holder) {
         const rect = holder.getBoundingClientRect()
+        const before = holder.scrollTop
         if (lastPointerY > rect.bottom - 36) holder.scrollTop += 18
         else if (lastPointerY < rect.top + 36) holder.scrollTop -= 18
+        // 指针不动但列表在滚动时，指针下方的行也在变：滚动后要按最后的指针位置重新解析终点行，
+        // 否则范围和高亮停在旧位置，松手只填到滚动前的终点。
+        if (holder.scrollTop !== before) updateEndRow(lastPointerX, lastPointerY)
       }
       scrollFrame = window.requestAnimationFrame(autoScroll)
     }
     const handleMouseMove = (event: MouseEvent) => {
+      lastPointerX = event.clientX
       lastPointerY = event.clientY
       updateEndRow(event.clientX, event.clientY)
     }
@@ -4346,7 +4352,11 @@ export default function ContainerDetailPage() {
       fillDragCleanupRef.current = null
       setFillDrag(null)
     }
-    const handleMouseUp = () => {
+    const handleMouseUp = (event: MouseEvent) => {
+      // 松手位置可能和最后一次 mousemove 之间又滚动过，以松手时指针下方的行为准。
+      lastPointerX = event.clientX
+      lastPointerY = event.clientY
+      updateEndRow(lastPointerX, lastPointerY)
       const finalEndRowKey = endRowKey
       cleanup()
       applyContainerDetailFill(columnKey, sourceRowKey, finalEndRowKey)

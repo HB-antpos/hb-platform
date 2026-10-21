@@ -309,6 +309,11 @@ assert(
     && pageSource.includes('buildContainerDetailFillPlan({ columnKey, sourceRow, targetRows, getRowKey: rowKey })'),
   '页面应提供填充上下文，并用源单元格值生成填充计划',
 )
+assert(
+  pageSource.includes('if (holder.scrollTop !== before) updateEndRow(lastPointerX, lastPointerY)')
+    && pageSource.includes('updateEndRow(lastPointerX, lastPointerY)\n      const finalEndRowKey = endRowKey'),
+  '拖拽填充自动滚动后、以及松手时，都要按最后的指针位置重新解析终点行（指针不动但列表在滚动时范围要跟着延伸）',
+)
 CONTAINER_DETAIL_COLUMN_PASTE_KEYS.forEach((columnKey) => {
   assert(
     pageSource.includes(`columnKey="${columnKey}"`),
