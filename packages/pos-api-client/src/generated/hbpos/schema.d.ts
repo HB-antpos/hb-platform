@@ -5792,6 +5792,9 @@ export interface components {
             /** Format: date-time */
             authorizationExpiresAtUtc?: string | null;
             emergencyGrantId?: string | null;
+            username?: string | null;
+            nickname?: string | null;
+            familyName?: string | null;
         };
         CashierSessionDtoApiResult: {
             success?: boolean;

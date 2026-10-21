@@ -98,6 +98,31 @@ public sealed class CashierServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BarcodeLoginAsync_会话携带用户名昵称和姓供小票格式化()
+    {
+        await SeedStoreAsync("store-allowed", "S-ALLOWED");
+        await SeedUserAsync("user-1", "alice.lee");
+        await _db.Updateable<User>()
+            .SetColumns(user => new User { FullName = "Alice Lee", Nickname = "Amy", FamilyName = "Lee" })
+            .Where(user => user.UserGUID == "user-1")
+            .ExecuteCommandAsync();
+        await SeedUserStoreAsync("user-1", "store-allowed");
+        await SeedCashierAsync("cashier-1", "user-1", "S-ALLOWED", "BARCODE-1");
+
+        var session = await CreateService().BarcodeLoginAsync(
+            new CashierBarcodeLoginRequest("S-ALLOWED", "BARCODE-1", "POS-1"),
+            CancellationToken.None
+        );
+
+        Assert.NotNull(session);
+        // CashierName 仍是全名（订单、审计沿用），小票显示名由客户端用下面三段格式化。
+        Assert.Equal("Alice Lee", session.CashierName);
+        Assert.Equal("alice.lee", session.Username);
+        Assert.Equal("Amy", session.Nickname);
+        Assert.Equal("Lee", session.FamilyName);
+    }
+
+    [Fact]
     public async Task BarcodeLoginAsync_普通登录最多执行五次查询()
     {
         await SeedStoreAsync("store-query-count", "S-QUERY");

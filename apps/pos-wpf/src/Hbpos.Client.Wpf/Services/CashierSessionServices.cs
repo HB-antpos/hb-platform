@@ -509,6 +509,7 @@ public sealed class CashierLoginService(
     private readonly ConcurrentDictionary<string, CashierSessionCacheReference> _cacheKeysBySessionIdentity =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _cacheGate = new(1, 1);
+    private volatile bool _receiptStaffNamesLoaded;
 
     public async Task<CashierLoginResult> LoginAsync(
         string storeCode,
@@ -517,6 +518,7 @@ public sealed class CashierLoginService(
         bool attemptOnline = true,
         CancellationToken cancellationToken = default)
     {
+        await EnsureReceiptStaffNamesLoadedAsync(cancellationToken);
         if (EmergencyLoginTokenCodec.HasSupportedPrefix(userBarcode))
         {
             // 紧急二维码必须在普通条码 API 和商品查询之前分流，避免令牌外泄。
@@ -605,6 +607,45 @@ public sealed class CashierLoginService(
             : CashierLoginResult.Success(cached);
     }
 
+    private async Task EnsureReceiptStaffNamesLoadedAsync(CancellationToken cancellationToken)
+    {
+        if (_receiptStaffNamesLoaded)
+        {
+            return;
+        }
+
+        try
+        {
+            ReceiptStaffDirectory.Shared.Load(
+                await settingsRepository.GetValueAsync(ReceiptStaffDirectory.SettingsKey, cancellationToken));
+            _receiptStaffNamesLoaded = true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 小票员工显示名只是展示增强，读取失败不能影响登录；下次登录再试，期间查不到的员工按订单原文打印。
+            ConsoleLog.WriteWarning("CashierLogin", $"load receipt staff names failed: {ex.GetType().Name}");
+        }
+    }
+
+    private async Task RememberReceiptStaffNameAsync(CashierSessionDto session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnsureReceiptStaffNamesLoadedAsync(cancellationToken);
+            if (ReceiptStaffDirectory.Shared.Remember(session))
+            {
+                await settingsRepository.SetValueAsync(
+                    ReceiptStaffDirectory.SettingsKey,
+                    ReceiptStaffDirectory.Shared.Serialize(),
+                    cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleLog.WriteWarning("CashierLogin", $"remember receipt staff name failed: {ex.GetType().Name}");
+        }
+    }
+
     private async Task CacheSessionAsync(
         string storeCode,
         string deviceCode,
@@ -612,6 +653,7 @@ public sealed class CashierLoginService(
         CashierSessionDto session,
         CancellationToken cancellationToken)
     {
+        await RememberReceiptStaffNameAsync(session, cancellationToken);
         var json = JsonSerializer.Serialize(session with { IsOfflineCached = false }, JsonOptions);
         var protectedJson = protector.Protect(json)
             ?? throw new InvalidOperationException("无法保护收银员离线缓存。");
@@ -687,6 +729,7 @@ public sealed class CashierLoginService(
         CashierSessionDto session,
         CancellationToken cancellationToken = default)
     {
+        await RememberReceiptStaffNameAsync(session, cancellationToken);
         var json = JsonSerializer.Serialize(session with { IsOfflineCached = false }, JsonOptions);
         var protectedJson = protector.Protect(json)
             ?? throw new InvalidOperationException("无法保护收银员离线缓存。");
