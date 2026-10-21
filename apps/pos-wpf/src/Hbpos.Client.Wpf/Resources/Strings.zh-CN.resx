@@ -2755,6 +2755,9 @@
   <data name="dailyClose.expectedCash" xml:space="preserve">
     <value>应有现金</value>
   </data>
+  <data name="dailyClose.cashRounding" xml:space="preserve">
+    <value>现金进位</value>
+  </data>
   <data name="dailyClose.overShort" xml:space="preserve">
     <value>溢长 / 短款</value>
   </data>

@@ -164,6 +164,72 @@ public sealed class DailyCloseServiceTests
     }
 
     [Fact]
+    public async Task LoadReportAsync_adds_per_order_cash_rounding_to_expected_cash_and_difference()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var orderRepository = new LocalOrderRepository(store);
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+            var session = CreateSession();
+            var businessDate = new DateTime(2026, 5, 28);
+
+            await schema.InitializeAsync();
+            // 现金按 5 分进位：12.43→12.45(+0.02)，12.42→12.40(-0.02)，混合支付的现金部分 7.43→7.45(+0.02)，
+            // 现金退款 -5.02→-5.00(+0.02)；纯刷卡订单没有现金，不产生进位。
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 9, 0, 0), 12.43m,
+                [CreateLine("SKU-R1", "R1", 1m, 12.43m)],
+                [CreatePayment(PaymentMethodKind.Cash, 12.43m)]));
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 10, 0, 0), 12.42m,
+                [CreateLine("SKU-R2", "R2", 1m, 12.42m)],
+                [CreatePayment(PaymentMethodKind.Cash, 12.42m)]));
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 11, 0, 0), 20m,
+                [CreateLine("SKU-R3", "R3", 1m, 20m)],
+                [CreatePayment(PaymentMethodKind.Cash, 7.43m), CreatePayment(PaymentMethodKind.Card, 12.57m)]));
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 12, 0, 0), -5.02m,
+                [CreateReturnLine("SKU-R4", "R4", 1m, 5.02m)],
+                [CreatePayment(PaymentMethodKind.Cash, -5.02m)]));
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 13, 0, 0), 10m,
+                [CreateLine("SKU-R5", "R5", 1m, 10m)],
+                [CreatePayment(PaymentMethodKind.Card, 10m)]));
+
+            var report = await service.LoadReportAsync(session, businessDate);
+
+            // 精确现金净额 27.26；进位 +0.04；应有现金 27.30（= 12.45 + 12.40 + 7.45 - 5.00，全是 5 分整数倍）。
+            Assert.Equal(27.26m, report.SystemCashAmount);
+            Assert.Equal(0.04m, report.CashRoundingAmount);
+            Assert.Equal(27.30m, report.ExpectedCashAmount);
+
+            // 钱箱点出 27.30（$20+$5+$2+20c+10c）：差额必须是 0，而不是旧口径的 +0.04。
+            var archive = await service.SaveAsync(
+                session,
+                businessDate,
+                [Count(20m, 1), Count(5m, 1), Count(2m, 1), Count(0.20m, 1), Count(0.10m, 1)]);
+            Assert.Equal(27.30m, archive.CountedCashAmount);
+            Assert.Equal(0m, archive.CashDifference);
+            Assert.Equal(0.04m, archive.Report.CashRoundingAmount);
+
+            // 存档重新读出后进位仍在，重印小票不会丢这一行。
+            var reloaded = Assert.Single(await service.GetArchivesAsync(session, businessDate));
+            Assert.Equal(0.04m, reloaded.Report.CashRoundingAmount);
+            Assert.Equal(27.30m, reloaded.Report.ExpectedCashAmount);
+            Assert.Equal(0m, reloaded.CashDifference);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task SaveAsync_persists_multiple_archives_and_cash_counts()
     {
         var databasePath = CreateTempDatabasePath();

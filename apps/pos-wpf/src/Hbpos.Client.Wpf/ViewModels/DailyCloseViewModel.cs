@@ -69,6 +69,10 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private decimal _expectedCashAmount;
 
+    // 现金进位合计（5 分进位）；应有现金已包含它，单独展示是为了让收银员看懂为什么应有现金不等于现金销售额。
+    [ObservableProperty]
+    private decimal _cashRoundingAmount;
+
     [ObservableProperty]
     private decimal _grossAmount;
 
@@ -552,6 +556,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         _currentReport = null;
         PaymentSummaries.Clear();
         ExpectedCashAmount = 0m;
+        CashRoundingAmount = 0m;
         GrossAmount = 0m;
         NetAmount = 0m;
         RefundAmount = 0m;
@@ -626,7 +631,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 _operationAuditLogger,
                 Session,
                 archive.DailyCloseGuid,
-                archive.Report.SystemCashAmount,
+                archive.Report.ExpectedCashAmount,
                 archive.CountedCashAmount,
                 archive.CashDifference,
                 correlation.CorrelationId,
@@ -1474,7 +1479,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             summary.RefundAmount,
             summary.NetAmount,
             summary.TransactionCount)));
-        ExpectedCashAmount = report.SystemCashAmount;
+        CashRoundingAmount = report.CashRoundingAmount;
+        ExpectedCashAmount = report.ExpectedCashAmount;
         GrossAmount = report.SalesAmount;
         NetAmount = report.NetAmount;
         RefundAmount = report.RefundAmount;
@@ -2044,7 +2050,9 @@ public sealed record DailyCloseArchiveListItemViewModel(DailyCloseArchive Archiv
 
     public string ShortArchiveId => Archive.ShortArchiveId;
 
-    public decimal ExpectedCashAmount => Archive.Report.SystemCashAmount;
+    public decimal ExpectedCashAmount => Archive.Report.ExpectedCashAmount;
+
+    public decimal CashRoundingAmount => Archive.Report.CashRoundingAmount;
 
     public decimal NetAmount => Archive.Report.NetAmount;
 

@@ -146,7 +146,8 @@ internal static class DailyCloseSyncRequestMapper
             archive.NoteSubtotal,
             archive.CoinSubtotal,
             archive.CountedCashAmount,
-            archive.CashDifference);
+            archive.CashDifference,
+            report.CashRoundingAmount);
     }
 
     /// <summary>本地面额是以元为单位的 decimal（如 100、0.05），换算成分用 decimal 乘 100 取整，避免浮点误差。</summary>

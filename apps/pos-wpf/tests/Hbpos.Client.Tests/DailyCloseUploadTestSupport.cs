@@ -525,7 +525,15 @@ internal static class DailyCloseServerRuleReplica
         }
 
         var cashNet = Round(byMethod[DailyCloseContractConstants.TenderCash].NetAmount);
-        if (Math.Abs(Round(request.CashDifference) - (counted - cashNet)) > RoundingTolerance)
+        // 每张订单的现金进位最多 ±2 分，合计不超过 订单数 × 2 分（与服务端 DailyCloseSyncService 一致）。
+        var cashRounding = Round(request.CashRoundingAmount);
+        if (Math.Abs(cashRounding) > request.OrderCount * 0.02m + RoundingTolerance)
+        {
+            return "INVALID_CASH_ROUNDING";
+        }
+
+        // 应有现金 = 现金净额 + 现金进位。
+        if (Math.Abs(Round(request.CashDifference) - (counted - Round(cashNet + cashRounding))) > RoundingTolerance)
         {
             return "INVALID_CASH_DIFFERENCE";
         }

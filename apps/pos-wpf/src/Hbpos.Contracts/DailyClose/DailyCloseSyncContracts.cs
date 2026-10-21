@@ -70,7 +70,10 @@ public sealed record DailyCloseSyncRequest(
     decimal NoteSubtotal,
     decimal CoinSubtotal,
     decimal CountedCashAmount,
-    decimal CashDifference);
+    decimal CashDifference,
+    // 现金进位合计（澳洲现金按 5 分进位）：抽屉里实际收到的现金 = 现金净额 + 进位。
+    // 可选、默认 0：旧客户端不带这个字段时与此前行为完全一致。
+    decimal CashRoundingAmount = 0m);
 
 /// <summary>
 /// Accepted 恒为 true（被拒绝时走 400 / 409）；AlreadySynced 表示同一份内容此前已入库；

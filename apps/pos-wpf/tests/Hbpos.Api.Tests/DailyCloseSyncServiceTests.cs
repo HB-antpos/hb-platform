@@ -63,6 +63,37 @@ public sealed class DailyCloseSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_expected_cash_includes_cash_rounding_and_difference_is_checked_against_it()
+    {
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        // 现金净额 400.00 + 现金进位 0.03 = 应有现金 400.03；实点 401.35 → 差额 1.32（不是 1.35）。
+        var request = CreateRequest() with { CashRoundingAmount = 0.03m, CashDifference = 1.32m };
+
+        var response = await service.SyncAsync(request, "S001", "POS-01", CancellationToken.None);
+
+        Assert.True(response.Accepted);
+        var stored = Assert.Single(repository.Records);
+        Assert.Equal(400m, stored.CashNetAmount);
+        Assert.Equal(400.03m, stored.ExpectedCashAmount);
+        Assert.Equal(1.32m, stored.CashDifference);
+    }
+
+    [Fact]
+    public async Task SyncAsync_old_clients_without_cash_rounding_keep_the_previous_behavior()
+    {
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+
+        // 不带 CashRoundingAmount（默认 0）：应有现金仍是现金净额，差额按净额算。
+        await service.SyncAsync(CreateRequest(), "S001", "POS-01", CancellationToken.None);
+
+        var stored = Assert.Single(repository.Records);
+        Assert.Equal(400m, stored.ExpectedCashAmount);
+        Assert.Equal(1.35m, stored.CashDifference);
+    }
+
+    [Fact]
     public async Task SyncAsync_serializes_cash_counts_for_all_denominations_in_descending_order()
     {
         var repository = new FakeRepository();
@@ -748,6 +779,14 @@ public sealed class DailyCloseSyncServiceTests
             "INVALID_CASH_DIFFERENCE",
             "difference sign flipped",
             r => r with { CashDifference = -1.35m });
+        yield return Invalid(
+            "INVALID_CASH_DIFFERENCE",
+            "cash rounding sent but the difference still ignores it",
+            r => r with { CashRoundingAmount = 0.03m });
+        yield return Invalid(
+            "INVALID_CASH_ROUNDING",
+            "cash rounding larger than 2 cents per order (12 orders)",
+            r => r with { CashRoundingAmount = 0.30m, CashDifference = 1.05m });
     }
 
     private static DailyCloseCashCountSync[] ReplaceQuantity(DailyCloseSyncRequest request, int denominationCents, int quantity)
