@@ -1,4 +1,5 @@
 import {
+  buildLinklyDeviceSelectOptions,
   canExportLinklySettlementRange,
   createLatestAbortableRequestGuard,
   formatAmountMinor,
@@ -100,6 +101,28 @@ assertEqual(
     && !listSource.includes('Number(record.id)'),
   true,
   '列表 rowKey 必须直接使用字符串 ID',
+)
+
+const deviceCandidates = [
+  { storeCode: '1002', deviceCode: 'POS_1002_2111' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0239' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0222' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0222' },
+]
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates, '1013').map((item) => item.value).join(','),
+  'POS_1013_0222,POS_1013_0239',
+  '选了门店时只列该门店设备并去重排序',
+)
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates).length,
+  3,
+  '未选门店时列出全部设备（去重）',
+)
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates)[0].label,
+  'POS_1002_2111 · 1002',
+  '未选门店时选项文案带门店',
 )
 
 console.log('LinklySettlements logic.test: ok')

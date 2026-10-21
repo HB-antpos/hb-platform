@@ -2,6 +2,7 @@ import { normalizeLinklySettlementPage } from '../pages/PosAdmin/LinklySettlemen
 import type { ApiResponse, PagedResult } from '../types/api'
 import type {
   LinklySettlementDetail,
+  LinklySettlementDeviceOption,
   LinklySettlementExportResult,
   LinklySettlementFilters,
   LinklySettlementListItem,
@@ -25,6 +26,14 @@ export async function getLinklySettlements(
     signal,
   })
   return normalizeLinklySettlementPage(unwrapApiData(response))
+}
+
+export async function getLinklySettlementDevices(signal?: AbortSignal) {
+  const response = await request.get<ApiResponse<LinklySettlementDeviceOption[]>>(
+    `${API_BASE}/devices`,
+    { signal },
+  )
+  return unwrapApiData(response) ?? []
 }
 
 export async function getLinklySettlementDetail(id: string, signal?: AbortSignal) {

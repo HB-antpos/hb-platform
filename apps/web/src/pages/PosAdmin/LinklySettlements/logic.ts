@@ -2,6 +2,7 @@ import { matchPath } from 'react-router-dom'
 import type {
   LinklyAmountParseStatus,
   LinklySettlementAmountSummary,
+  LinklySettlementDeviceOption,
   LinklySettlementFilters,
   LinklySettlementListQuery,
   LinklySettlementStatus,
@@ -189,4 +190,27 @@ export function createLatestAbortableRequestGuard() {
       latestRequestId += 1
     },
   }
+}
+
+/**
+ * 设备下拉候选：已选门店时只列该门店的设备，未选门店时列全部（去重、排序）。
+ * 选项文案带上门店，方便未选门店时区分同名设备。
+ */
+export function buildLinklyDeviceSelectOptions(
+  devices: LinklySettlementDeviceOption[],
+  storeCode?: string,
+) {
+  const seen = new Set<string>()
+  return devices
+    .filter((item) => !storeCode || item.storeCode === storeCode)
+    .filter((item) => {
+      if (!item.deviceCode || seen.has(item.deviceCode)) return false
+      seen.add(item.deviceCode)
+      return true
+    })
+    .sort((left, right) => left.deviceCode.localeCompare(right.deviceCode))
+    .map((item) => ({
+      value: item.deviceCode,
+      label: storeCode ? item.deviceCode : `${item.deviceCode} · ${item.storeCode}`,
+    }))
 }

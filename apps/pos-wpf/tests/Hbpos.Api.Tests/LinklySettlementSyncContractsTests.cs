@@ -155,6 +155,20 @@ public sealed class LinklySettlementSyncContractsTests
     }
 
     [Fact]
+    public void Settlement_data_sanitizer_preserves_real_terminal_payload_with_totals_name_and_space_sign()
+    {
+        // 生产终端实测：汇总行叫 TOTALS，非负合计的符号位是空格；之前会被 PAN 正则整段误掩码。
+        const string realTerminalSettlement =
+            "000000001069" +
+            "VISA                000041520038000000000000000000000000 000041520038" +
+            "069TOTALS              000041520038000000000000000000000000 000041520038";
+
+        Assert.Equal(
+            realTerminalSettlement,
+            LinklyReceiptTextSanitizer.SanitizeSettlementData(realTerminalSettlement));
+    }
+
+    [Fact]
     public void Settlement_data_sanitizer_does_not_treat_arbitrary_twelve_digit_text_as_fixed_width()
     {
         Assert.Equal(
