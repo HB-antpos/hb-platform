@@ -1318,6 +1318,67 @@ public sealed class LinklyTerminalClientTests
     }
 
     [Fact]
+    public async Task SettlementAsync_logs_non_settlement_receipt_without_storing_it_or_leaking_card_number()
+    {
+        using var logs = new ConsoleLogCapture();
+        var eftClient = new FakeLinklyEftClient(
+            new EFTReceiptResponse
+            {
+                Type = ReceiptType.Merchant,
+                ReceiptText = ["GRAND TOTALS", "Card 4111 1111 1111 1111", "Net Amount $10.00"]
+            },
+            new EFTReceiptResponse
+            {
+                Type = ReceiptType.Settlement,
+                ReceiptText = ["SETTLEMENT", "TOTAL $10.00"]
+            },
+            new EFTSettlementResponse
+            {
+                Success = true,
+                ResponseCode = "00",
+                ResponseText = "APPROVED",
+                SettlementData = "TOTAL=10.00"
+            });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        // 行为不变：非 Settlement 类型回单仍不进入结算记录。
+        Assert.True(result.Succeeded);
+        var storedReceipt = Assert.Single(result.ReceiptTexts!);
+        Assert.Contains("SETTLEMENT", storedReceipt);
+        Assert.DoesNotContain("GRAND TOTALS", storedReceipt);
+
+        // 日志：被忽略的回单要带类型、行数和脱敏后的全文。
+        var events = logs.ReadJsonEvents("LinklyLocal");
+        var ignored = AssertEvent(events, "settlement-receipt", "ignored", "response");
+        Assert.Equal("non-settlement-receipt", ignored.GetProperty("reason").GetString());
+        var ignoredResponse = ignored.GetProperty("response");
+        Assert.Equal("Merchant", ignoredResponse.GetProperty("type").GetString());
+        Assert.Equal(3, ignoredResponse.GetProperty("lineCount").GetInt32());
+        var ignoredDetails = ignored.GetProperty("details");
+        Assert.Equal("Merchant", ignoredDetails.GetProperty("receiptType").GetString());
+        Assert.Equal(3, ignoredDetails.GetProperty("lineCount").GetInt32());
+        var sanitizedText = ignoredDetails.GetProperty("sanitizedText").GetString();
+        Assert.Contains("GRAND TOTALS", sanitizedText);
+        Assert.Contains("Net Amount $10.00", sanitizedText);
+        Assert.Contains("1111", sanitizedText);
+
+        // Settlement 类型回单同样记录类型与行数。
+        var received = AssertEvent(events, "settlement-receipt", "received", "response");
+        Assert.Equal("Settlement", received.GetProperty("response").GetProperty("type").GetString());
+        Assert.Equal(2, received.GetProperty("details").GetProperty("lineCount").GetInt32());
+
+        // 所有 LinklyLocal 日志中都不能出现完整卡号。
+        foreach (var logEvent in events)
+        {
+            var raw = logEvent.GetRawText();
+            Assert.DoesNotContain("4111 1111 1111 1111", raw, StringComparison.Ordinal);
+            Assert.DoesNotContain("4111111111111111", raw, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task SettlementAsync_connection_failure_explains_settlement_was_not_sent()
     {
         var eftClient = new FakeLinklyEftClient { ConnectResult = false };
