@@ -37,6 +37,22 @@
   <data name="settings.square.tokenSource" xml:space="preserve"><value>Token Source</value></data>
   <data name="settings.square.tokenStatus.cached" xml:space="preserve"><value>Square token is configured in HBPOS for this environment.</value></data>
   <data name="settings.square.tokenStatus.missing" xml:space="preserve"><value>Square token is not configured in HBPOS for this environment.</value></data>
+  <data name="settings.square.direct.title" xml:space="preserve"><value>Direct to Square (off by default)</value></data>
+  <data name="settings.square.direct.description" xml:space="preserve"><value>When this is on and head office has enabled it for this store, the register talks to Square directly for faster card payments. If anything fails it automatically falls back to the normal route, and it never charges twice. Refunds and payment recovery always go through the server.</value></data>
+  <data name="settings.square.direct.turnOn" xml:space="preserve"><value>Turn on direct mode</value></data>
+  <data name="settings.square.direct.turnOff" xml:space="preserve"><value>Turn off direct mode</value></data>
+  <data name="settings.square.direct.refresh" xml:space="preserve"><value>Refresh status</value></data>
+  <data name="settings.square.direct.local.on" xml:space="preserve"><value>This register: direct mode is ON</value></data>
+  <data name="settings.square.direct.local.off" xml:space="preserve"><value>This register: direct mode is OFF</value></data>
+  <data name="settings.square.direct.server.on" xml:space="preserve"><value>Store switch (head office): ON</value></data>
+  <data name="settings.square.direct.server.off" xml:space="preserve"><value>Store switch (head office): OFF - payments use the normal route</value></data>
+  <data name="settings.square.direct.server.unknown" xml:space="preserve"><value>Store switch (head office): not confirmed yet</value></data>
+  <data name="settings.square.direct.token.remaining" xml:space="preserve"><value>Token on this register: valid for {0}h {1}m</value></data>
+  <data name="settings.square.direct.token.none" xml:space="preserve"><value>Token on this register: none</value></data>
+  <data name="settings.status.squareDirectOn" xml:space="preserve"><value>Direct mode is on. Head office has enabled it for this store.</value></data>
+  <data name="settings.status.squareDirectOff" xml:space="preserve"><value>Direct mode is off. Card payments use the normal route.</value></data>
+  <data name="settings.status.squareDirectServerOff" xml:space="preserve"><value>Direct mode is on for this register, but head office has not enabled it for this store. Payments use the normal route.</value></data>
+  <data name="settings.status.squareDirectServerUnknown" xml:space="preserve"><value>Direct mode is on, but the store switch could not be confirmed (network?). Payments use the normal route for now.</value></data>
   <data name="settings.square.tokenHelp" xml:space="preserve"><value>Square setup and payment requests now use the token configured in HBPOS. Local cached tokens remain for compatibility only.</value></data>
   <data name="settings.payment.environment" xml:space="preserve"><value>Environment</value></data>
   <data name="settings.payment.sandbox.toggle" xml:space="preserve"><value>Use Sandbox test environment</value></data>

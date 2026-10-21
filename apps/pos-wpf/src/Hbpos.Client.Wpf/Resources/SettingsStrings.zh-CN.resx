@@ -37,6 +37,22 @@
   <data name="settings.square.tokenSource" xml:space="preserve"><value>&#x4EE4;&#x724C;&#x6765;&#x6E90;</value></data>
   <data name="settings.square.tokenStatus.cached" xml:space="preserve"><value>当前环境已在 HBPOS 后端配置 Square token。</value></data>
   <data name="settings.square.tokenStatus.missing" xml:space="preserve"><value>当前环境尚未在 HBPOS 后端配置 Square token。</value></data>
+  <data name="settings.square.direct.title" xml:space="preserve"><value>直连 Square（默认关闭）</value></data>
+  <data name="settings.square.direct.description" xml:space="preserve"><value>开启后，如果总部也为本门店打开了直连，收银机会直接和 Square 通信，刷卡更快。任何一步失败都会自动回落到原来的中转路径，并且不会重复扣款。退款和付款恢复始终走服务端。</value></data>
+  <data name="settings.square.direct.turnOn" xml:space="preserve"><value>开启直连</value></data>
+  <data name="settings.square.direct.turnOff" xml:space="preserve"><value>关闭直连</value></data>
+  <data name="settings.square.direct.refresh" xml:space="preserve"><value>刷新状态</value></data>
+  <data name="settings.square.direct.local.on" xml:space="preserve"><value>本机开关：已开启</value></data>
+  <data name="settings.square.direct.local.off" xml:space="preserve"><value>本机开关：已关闭</value></data>
+  <data name="settings.square.direct.server.on" xml:space="preserve"><value>门店开关（总部）：已开启</value></data>
+  <data name="settings.square.direct.server.off" xml:space="preserve"><value>门店开关（总部）：已关闭，付款走原中转路径</value></data>
+  <data name="settings.square.direct.server.unknown" xml:space="preserve"><value>门店开关（总部）：尚未确认</value></data>
+  <data name="settings.square.direct.token.remaining" xml:space="preserve"><value>本机令牌：剩余有效期 {0} 小时 {1} 分钟</value></data>
+  <data name="settings.square.direct.token.none" xml:space="preserve"><value>本机令牌：无</value></data>
+  <data name="settings.status.squareDirectOn" xml:space="preserve"><value>直连已开启，总部已为本门店打开直连。</value></data>
+  <data name="settings.status.squareDirectOff" xml:space="preserve"><value>直连已关闭，刷卡走原中转路径。</value></data>
+  <data name="settings.status.squareDirectServerOff" xml:space="preserve"><value>本机已开启直连，但总部尚未为本门店打开，付款仍走原中转路径。</value></data>
+  <data name="settings.status.squareDirectServerUnknown" xml:space="preserve"><value>本机已开启直连，但暂时无法确认门店开关（网络？），目前付款走原中转路径。</value></data>
   <data name="settings.square.tokenHelp" xml:space="preserve"><value>Square 设置和付款请求现在统一使用 HBPOS 后端已配置的 token。本地缓存仅保留兼容用途。</value></data>
   <data name="settings.payment.environment" xml:space="preserve"><value>环境</value></data>
   <data name="settings.payment.sandbox.toggle" xml:space="preserve"><value>使用 Sandbox 测试环境</value></data>

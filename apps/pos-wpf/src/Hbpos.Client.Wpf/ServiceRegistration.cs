@@ -26,6 +26,7 @@ public static class ServiceRegistration
     private const string ApiBaseUrlEnvironmentVariable = "HBPOS_API_BASE_URL";
     internal const string PreviewApiBaseAddress = "http://127.0.0.1:0/";
     private const string ApplicationLogUploadClientName = "HbposApplicationLogUpload";
+    internal const string SquareDirectGatewayHttpClientName = "HbposSquareDirect";
     private const string OperationAuditUploadClientName = "HbposOperationAuditUpload";
 #if DEBUG
     private const bool IsDebugBuild = true;
@@ -580,6 +581,29 @@ public static class ServiceRegistration
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        // 直连 Square（默认关闭）：领取凭据 / 登记归属走 Hbpos API（带设备授权）。
+        services.AddHttpClient<ISquareDirectApiClient, SquareDirectApiClient>(client =>
+        {
+            client.BaseAddress = initialApiAddress;
+            client.Timeout = TimeSpan.FromSeconds(15);
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        // 直连 Square 本身用独立的命名 HttpClient：绝不能挂设备授权处理器，否则会把设备令牌发给 Square。
+        services.AddHttpClient(SquareDirectGatewayHttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddSingleton<ISquareDirectCredentialStore>(sp => new SquareDirectCredentialStore(
+            sp.GetRequiredService<ILocalAppSettingsRepository>(),
+            sp.GetRequiredService<IDeviceAuthorizationProtector>()));
+        services.AddSingleton<ISquareDirectGateway>(sp => new SquareDirectGateway(
+            sp.GetRequiredService<ISquareDirectCredentialStore>(),
+            sp.GetRequiredService<ISquareDirectApiClient>(),
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(SquareDirectGatewayHttpClientName)));
+        services.AddSingleton<ISquareDirectSettingsService>(sp => new SquareDirectSettingsService(
+            sp.GetRequiredService<ISquareDirectCredentialStore>(),
+            sp.GetRequiredService<ISquareDirectGateway>()));
         services.AddSingleton<ICardTerminalSetupService>(sp => new CardTerminalSetupService(
             sp.GetRequiredService<ICardTerminalSettingsStore>(),
             sp.GetRequiredService<ISquareTerminalSetupClient>(),
@@ -593,7 +617,8 @@ public static class ServiceRegistration
             cardPaymentRecoveryService: sp.GetRequiredService<ICardPaymentRecoveryService>(),
             linklyPaymentAttemptContextAccessor: sp.GetRequiredService<ILinklyPaymentAttemptContextAccessor>(),
             linklyTerminalSelectionTransitionGate: sp.GetRequiredService<ILinklyTerminalSelectionTransitionGate>(),
-            linklySettlementRepository: sp.GetRequiredService<ILinklyUnresolvedSettlementReader>()));
+            linklySettlementRepository: sp.GetRequiredService<ILinklyUnresolvedSettlementReader>(),
+            squareDirectSettingsService: sp.GetRequiredService<ISquareDirectSettingsService>()));
         services.AddHttpClient<ICardTerminalClient, ConfiguredCardTerminalClient>(client =>
         {
             client.BaseAddress = initialApiAddress;

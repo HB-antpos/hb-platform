@@ -592,6 +592,7 @@ public sealed class ConfiguredCardTerminalClient :
     private readonly ILocalSquarePaymentAttemptRepository? _squarePaymentAttemptRepository;
     private readonly ILinklyPaymentAttemptContextAccessor? _linklyPaymentAttemptContextAccessor;
     private readonly ILinklyTerminalSelectionTransitionGate? _linklyTerminalSelectionTransitionGate;
+    private readonly ISquareDirectGateway? _squareDirectGateway;
     private readonly ConcurrentDictionary<SquareRefundAttemptKey, string> _squareRefundIdempotencyKeys = new();
 
     public ConfiguredCardTerminalClient(
@@ -605,7 +606,8 @@ public sealed class ConfiguredCardTerminalClient :
         ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
         ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
         ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
-        ILinklyCloudTerminalClient? linklyCloudTerminalClient = null)
+        ILinklyCloudTerminalClient? linklyCloudTerminalClient = null,
+        ISquareDirectGateway? squareDirectGateway = null)
     {
         _settingsProvider = settingsProvider;
         _httpClient = httpClient;
@@ -617,6 +619,7 @@ public sealed class ConfiguredCardTerminalClient :
         _squarePaymentAttemptRepository = squarePaymentAttemptRepository;
         _linklyPaymentAttemptContextAccessor = linklyPaymentAttemptContextAccessor;
         _linklyTerminalSelectionTransitionGate = linklyTerminalSelectionTransitionGate;
+        _squareDirectGateway = squareDirectGateway;
     }
 
     /// <summary>
@@ -639,6 +642,20 @@ public sealed class ConfiguredCardTerminalClient :
             using var request = new HttpRequestMessage(HttpMethod.Get, "api/v1/health");
             using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, warmUpCts.Token);
             LogSquare($"connection warm-up completed http={(int)response.StatusCode}");
+
+            // 直连 Square（默认关闭）：同一次预热里确保本机凭据有效、补登待登记的结账归属；开关关闭时这里什么都不做。
+            if (_squareDirectGateway is not null)
+            {
+                try
+                {
+                    await _squareDirectGateway.WarmUpAsync(settings.Environment, warmUpCts.Token);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    // 直连预热只是优化：任何失败（含本地存储异常）都不能影响进付款页与收款。
+                    LogSquare($"direct warm-up skipped reason={ex.GetType().Name}");
+                }
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or InvalidOperationException)
         {
@@ -1307,7 +1324,8 @@ public sealed class ConfiguredCardTerminalClient :
                     HttpMethod.Post,
                     "api/v1/square/checkouts",
                     createRequest,
-                    cancellationToken);
+                    cancellationToken,
+                    allowDirect: true);
                 var responseBody = await ReadResponseBodyAsync(response, cancellationToken);
                 if (response.IsSuccessStatusCode ||
                     !IsAmbiguousSquareHttpStatus(response.StatusCode) ||
@@ -1384,7 +1402,7 @@ public sealed class ConfiguredCardTerminalClient :
             string cause;
             try
             {
-                using var response = await SendSquareApiAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+                using var response = await SendSquareApiAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken, allowDirect: true);
                 var responseBody = await ReadResponseBodyAsync(response, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
@@ -2156,12 +2174,41 @@ public sealed class ConfiguredCardTerminalClient :
         return _localization?.T(key) ?? fallback;
     }
 
+    // allowDirect 只在「付款流程」（创建 / 轮询 / 取消 / 关闭结账）里传 true；
+    // 退款、恢复中心查询、其他调用保持默认 false，始终走 Hbpos API，不受直连开关影响。
     private async Task<HttpResponseMessage> SendSquareApiAsync(
         HttpMethod method,
         string relativeUrl,
         object? body,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowDirect = false)
     {
+        // 直连 Square（默认关闭）：只有 2xx 才采用；
+        // 返回 null（未启用、未成功）时照旧走下面的 Hbpos API 中转，同一幂等键与请求体不变。
+        if (allowDirect && _squareDirectGateway is not null)
+        {
+            HttpResponseMessage? directResponse = null;
+            try
+            {
+                directResponse = await _squareDirectGateway.TrySendAsync(method, relativeUrl, body, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // 调用方取消 / 总预算到期：与中转路径一样原样上抛，由 AuthorizeSquareAsync 的取消分支收尾。
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // 直连网关自身出错（本机存储异常等）绝不能让一笔付款失败：当作「直连未成功」，照旧走中转。
+                LogSquare($"direct gateway error reason={ex.GetType().Name}; fallback to relay");
+            }
+
+            if (directResponse is not null)
+            {
+                return directResponse;
+            }
+        }
+
         using var request = new HttpRequestMessage(method, relativeUrl);
         if (body is not null)
         {
@@ -2331,7 +2378,8 @@ public sealed class ConfiguredCardTerminalClient :
                     HttpMethod.Get,
                     $"api/v1/square/checkouts/{Uri.EscapeDataString(checkoutId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
                     body: null,
-                    windowCts.Token);
+                    windowCts.Token,
+                    allowDirect: true);
                 var body = await ReadResponseBodyAsync(response, windowCts.Token);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2372,7 +2420,8 @@ public sealed class ConfiguredCardTerminalClient :
                 HttpMethod.Post,
                 $"api/v1/square/checkouts/{Uri.EscapeDataString(checkoutId)}/cancel",
                 new SquareCheckoutActionRequest(settings.Environment.ToString()),
-                cancellationToken);
+                cancellationToken,
+                allowDirect: true);
             var body = await ReadResponseBodyAsync(response, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -2402,7 +2451,8 @@ public sealed class ConfiguredCardTerminalClient :
                 HttpMethod.Post,
                 $"api/v1/square/checkouts/{Uri.EscapeDataString(checkoutId)}/dismiss",
                 new SquareCheckoutActionRequest(settings.Environment.ToString()),
-                cancellationToken);
+                cancellationToken,
+                allowDirect: true);
             var body = await ReadResponseBodyAsync(response, cancellationToken);
             LogSquare($"checkout dismiss result checkoutId={checkoutId} http={(int)response.StatusCode}");
             return response.IsSuccessStatusCode ? ReadSquareCheckoutStatusSafely(body) : null;
