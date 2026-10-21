@@ -2465,6 +2465,9 @@
   <data name="deviceActivation.error.timeout" xml:space="preserve">
     <value>服务器响应太慢，请检查网络后重试。</value>
   </data>
+  <data name="deviceActivation.error.failedWithReason" xml:space="preserve">
+    <value>设备开通失败，请检查开通码和网络连接后重试。原因：{0}</value>
+  </data>
   <data name="deviceActivation.error.rateLimited" xml:space="preserve">
     <value>当前网络的开通尝试次数过多，请等待 {0} 分钟后再试。</value>
   </data>

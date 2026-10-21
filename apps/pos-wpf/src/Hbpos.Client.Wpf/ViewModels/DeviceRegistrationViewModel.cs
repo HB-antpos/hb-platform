@@ -1048,11 +1048,28 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
 
         if (exception is not CatalogApiException apiException)
         {
-            return exception.Message;
+            return DeviceActivationFailureDescriber.DescribeTransportFailure(exception);
         }
 
-        return T(ActivationErrorResourceKey(apiException.ErrorCode), apiException.Message);
+        var key = ActivationErrorResourceKey(apiException.ErrorCode);
+        if (!string.Equals(key, GenericActivationErrorKey, StringComparison.Ordinal))
+        {
+            return T(key, apiException.Message);
+        }
+
+        // 未知原因码、没有原因码的 HTTP 拒绝、凭据不完整等：不再只给一句笼统的话，把状态码/原因码附在后面，现场能直接报给我们。
+        var detail = DeviceActivationFailureDescriber.DescribeRejection(apiException);
+        return detail is null
+            ? T(GenericActivationErrorKey, apiException.Message)
+            : string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                T(
+                    "deviceActivation.error.failedWithReason",
+                    "Device activation failed. Check the code and connection, then try again. Reason: {0}"),
+                detail);
     }
+
+    private const string GenericActivationErrorKey = "deviceActivation.error.failed";
 
     /// <summary>服务端拒绝原因码 → 文案资源键；未知原因落到通用「开通失败」。</summary>
     internal static string ActivationErrorResourceKey(string? errorCode) => errorCode switch

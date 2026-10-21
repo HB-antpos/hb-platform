@@ -162,6 +162,7 @@ public sealed class DeviceRegistrationViewModelTests
 
     [Theory]
     [InlineData("deviceActivation.error.rateLimited")]
+    [InlineData("deviceActivation.error.failedWithReason")]
     [InlineData("deviceActivation.error.deviceConflict")]
     [InlineData("deviceActivation.error.storeUnavailable")]
     [InlineData("deviceActivation.error.deviceStateConflict")]
@@ -190,7 +191,39 @@ public sealed class DeviceRegistrationViewModelTests
                 .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.rateLimited")
                 .Element("value")?.Value;
             Assert.Contains("{0}", value);
+
+            var failedWithReason = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.failedWithReason")
+                .Element("value")?.Value;
+            Assert.Contains("{0}", failedWithReason);
         }
+    }
+
+    [Theory]
+    [InlineData("Device API request failed with HTTP 400.", HttpStatusCode.BadRequest, null, "HTTP 400")]
+    [InlineData("Device error.", HttpStatusCode.InternalServerError, "SOME_NEW_CODE", "HTTP 500 · SOME_NEW_CODE")]
+    [InlineData("Device activation returned incomplete credentials.", null, null, "Device activation returned incomplete credentials")]
+    [InlineData("Device activation returned an unexpected success response.", null, "WEIRD", "WEIRD")]
+    public async Task Unmapped_activation_failures_append_the_concrete_reason(
+        string message,
+        HttpStatusCode? status,
+        string? errorCode,
+        string expectedReason)
+    {
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new CatalogApiException(message, status, errorCode)
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            $"Device activation failed. Check the code and connection, then try again. Reason: {expectedReason}",
+            viewModel.StatusMessage);
     }
 
     [Fact]
