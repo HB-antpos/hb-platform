@@ -117,7 +117,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly DeviceReregistrationCoordinator _deviceReregistrationCoordinator;
     private readonly CatalogStartupCoordinator _catalogStartupCoordinator;
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly DispatcherTimer _connectivityTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    /// <summary>营业时间的连通性检查 / 运行状态心跳间隔；夜间静默窗口内由 <see cref="BackgroundPollingSchedule"/> 降频。</summary>
+    private static readonly TimeSpan ConnectivityNormalInterval = TimeSpan.FromSeconds(15);
+
+    private readonly DispatcherTimer _connectivityTimer = new() { Interval = ConnectivityNormalInterval };
     private readonly DispatcherTimer _catalogDownloadHideTimer = new();
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly object _connectivityRefreshSync = new();
@@ -1936,6 +1939,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             $"startup home preload skipped store={Session.StoreCode} reason=moved-before-main-window");
         await RecoverStartupCardPaymentAttemptAsync();
         await RefreshOnlineStateAsync(CancellationToken.None, autoRetryOrders: true);
+        // 启动（或重新初始化）时先按当前时间设好间隔，避免沿用上次停表时的夜间间隔而白等 5 分钟。
+        ApplyConnectivityTimerInterval();
         _connectivityTimer.Start();
         BeginInitialCatalogSync();
     }
@@ -3376,7 +3381,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnConnectivityTimerTick(object? sender, EventArgs e)
     {
+        ApplyConnectivityTimerInterval();
         _ = RefreshOnlineStateFromTimerSafeAsync();
+    }
+
+    /// <summary>
+    /// 按本地时间调整连通性定时器的间隔：夜间静默窗口内放慢到 5 分钟，窗口结束后恢复 15 秒。
+    /// 付款等关键路径会主动检查在线状态，不依赖这个周期；这里只是后台保活 / 离线恢复 / 订单重试的节奏。
+    /// </summary>
+    private void ApplyConnectivityTimerInterval()
+    {
+        var interval = BackgroundPollingSchedule.GetInterval(DateTimeOffset.Now, ConnectivityNormalInterval);
+        if (_connectivityTimer.Interval != interval)
+        {
+            _connectivityTimer.Interval = interval;
+        }
     }
 
     private async Task RefreshOnlineStateFromTimerSafeAsync()

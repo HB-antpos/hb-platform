@@ -29,8 +29,13 @@ public sealed class ApiTransportSelector
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <summary>返回现在应该使用的传输地址。configured 是当前配置的首选地址。</summary>
-    public Uri Resolve(Uri configured)
+    /// <summary>
+    /// 返回现在应该使用的传输地址。configured 是当前配置的首选地址。
+    /// allowProbe：冷却结束后是否允许这次请求去「试探」首选入口。读请求（GET/HEAD）失败了会当场换入口重试，
+    /// 可以试探；写请求（POST/PUT 等）失败了不会重放，不能拿来探路——否则恰好是一次收款 / 同步去撞一个仍然
+    /// 坏掉的首选入口。所以写请求传 false，继续走已确认可用的入口，等读请求确认首选入口恢复后再切回。
+    /// </summary>
+    public Uri Resolve(Uri configured, bool allowProbe = true)
     {
         var candidates = ApiEndpointAliases.GetCandidates(configured);
         if (candidates.Count == 1)
@@ -41,7 +46,7 @@ public sealed class ApiTransportSelector
         lock (_gate)
         {
             var state = GetState(configured);
-            if (state.ActiveIndex != 0 && _timeProvider.GetUtcNow() >= state.StickyUntil)
+            if (allowProbe && state.ActiveIndex != 0 && _timeProvider.GetUtcNow() >= state.StickyUntil)
             {
                 // 冷却结束：回到首选入口试探一次。是否真的恢复由 ReportSuccess / ReportConnectFailure 决定。
                 state.ActiveIndex = 0;
@@ -77,8 +82,16 @@ public sealed class ApiTransportSelector
         lock (_gate)
         {
             var state = GetState(configured);
+            var now = _timeProvider.GetUtcNow();
+            if (state.ActiveIndex != 0 && now < state.StickyUntil)
+            {
+                // 已经处于冷却：这是更早派发出去的并发请求迟到的失败。不再升级退避——否则一次故障会被
+                // N 个并发请求一次顶满到 30 分钟；调用方仍会让读请求换备用入口重试。
+                return;
+            }
+
             state.ActiveIndex = 1;
-            state.StickyUntil = _timeProvider.GetUtcNow() + BackoffSteps[Math.Min(state.BackoffStep, BackoffSteps.Length - 1)];
+            state.StickyUntil = now + BackoffSteps[Math.Min(state.BackoffStep, BackoffSteps.Length - 1)];
             state.BackoffStep = Math.Min(state.BackoffStep + 1, BackoffSteps.Length - 1);
         }
     }
