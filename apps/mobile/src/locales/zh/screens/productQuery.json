@@ -338,6 +338,7 @@
     "discount": "折扣标签",
     "bigDiscount": "大标签",
     "productShort": "普通",
+    "smallShort": "小标签",
     "discountShort": "折扣",
     "bigDiscountShort": "大标签",
     "settingsAction": "设置",
@@ -362,16 +363,6 @@
       "error": "连接异常",
       "errorHint": "请打开设置检查连接",
       "openSettingsHint": "打开打印设置",
-      "short": {
-        "unselected": "未选择",
-        "idle": "待连接",
-        "connecting": "连接中",
-        "connected": "已连接",
-        "reconnecting": "重连中",
-        "disconnected": "已断开",
-        "paused": "已暂停",
-        "error": "连接异常"
-      },
       "manage": "打印机设置"
     },
     "label": "标签"

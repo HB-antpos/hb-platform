@@ -323,6 +323,7 @@ function replaceStorePriceDetail(
 
 type PrintAction =
   | "product"
+  | "small"
   | "discount"
   | "clearance"
   | "bigDiscount"
@@ -4006,7 +4007,7 @@ function ProductQueryContent() {
 
   const handlePrint = useCallback(
     async (
-      kind: "product" | "discount" | "clearance" | "bigDiscount",
+      kind: "product" | "small" | "discount" | "clearance" | "bigDiscount",
       // 保存并打印需要用刚保存回读的详情，不能读闭包里尚未刷新的 detail。
       targetDetail?: ProductDetail | null,
     ) => {
@@ -4033,6 +4034,10 @@ function ProductQueryContent() {
         const printType = smallLabel ? "small" : null;
         if (kind === "product") {
           await sendProductLabel(source, { action: "product", printType });
+          return;
+        } else if (kind === "small") {
+          // 「小标签」按钮固定打 60mm 小标签，不看打印设置里的小标签开关；其余口径（价格、折扣、数量）与普通标签一致。
+          await sendProductLabel(source, { action: "small", printType: "small" });
           return;
         } else if (kind === "discount") {
           await printDiscountLabel(source, printType);
@@ -4074,6 +4079,9 @@ function ProductQueryContent() {
   handlePrintRef.current = handlePrint;
   const handleProductPrintPress = useCallback(() => {
     void handlePrintRef.current("product");
+  }, []);
+  const handleSmallPrintPress = useCallback(() => {
+    void handlePrintRef.current("small");
   }, []);
   const handleDiscountPrintPress = useCallback(() => {
     void handlePrintRef.current("discount");
@@ -4846,6 +4854,7 @@ function ProductQueryContent() {
               />
             }
             isPrintingProduct={printingAction === "product"}
+            isPrintingSmall={printingAction === "small"}
             isPrintingDiscount={printingAction === "discount"}
             isPrintingBigDiscount={printingAction === "bigDiscount"}
             canPrintDiscount={Boolean(
@@ -4860,6 +4869,11 @@ function ProductQueryContent() {
               pendingScanPresentation || (printingAction && printingAction !== "product")
                 ? undefined
                 : handleProductPrintPress
+            }
+            onPrintSmall={
+              pendingScanPresentation || (printingAction && printingAction !== "small")
+                ? undefined
+                : handleSmallPrintPress
             }
             onPrintDiscount={
               pendingScanPresentation || (printingAction && printingAction !== "discount")
