@@ -731,7 +731,7 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
       },
       {
         // 门店运维经验（非代码可查）：Windows 托盘的绿色 S、C 两个图标代表刷卡机连接正常；缺了查底座蓝牙与 USB 插口；
-        // 都在说明刷卡机死机，Func + Clear 同按重启 ANZ 刷卡机。
+        // 都在说明刷卡机死机，Func + Clear 同按重启 ANZ 刷卡机；还不行提供设备号请求远程协助。
         id: 'anz-terminal-unresponsive',
         title: {
           zh: 'ANZ 刷卡机没反应（Linkly 弹窗或收银端刷卡操作无响应）怎么办？',
@@ -745,10 +745,12 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
             '找有没有两个绿色小图标：一个是绿底的 S，一个是绿底的 C（不是棕色底的那个 C）。',
             '§绿色 S 和 C 不全：硬件连接有问题',
             '看刷卡机屏幕上的蓝牙是否已和底座正常连接。',
-            '检查底座的 USB 线插口有没有松动，或者是否被换插到收银机的其他 USB 口；仍不行请联系总部 IT，并提供收银页面底部的终端号。',
+            '检查底座的 USB 线插口有没有松动，或者是否被换插到收银机的其他 USB 口。',
             '§绿色 S 和 C 都在：刷卡机死机了',
             '在刷卡机上同时按住 [k:Func] 键和 [k:Clear] 键，重启刷卡机。',
             '刷卡机重新启动、回到待机画面后，再在收银端重试刚才的刷卡或操作。',
+            '§还是不行',
+            '提供收银页面底部状态栏 [d:Terminal|终端] 后面的设备号，联系总部 IT 请求远程协助（见「需要远程协助时，如何找到收银机的设备号？」）。',
           ],
           en: [
             '§First check the small icons at the bottom right',
@@ -756,10 +758,12 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
             'Look for two green icons: a green S and a green C (not the brown C).',
             '§Green S or C missing: hardware connection problem',
             'On the terminal screen, check that Bluetooth is connected to the base.',
-            'Check that the base’s USB plug is not loose and has not been moved to a different USB port on the till. If it still does not work, contact HQ IT with the terminal number shown at the bottom of the sale screen.',
+            'Check that the base’s USB plug is not loose and has not been moved to a different USB port on the till.',
             '§Both green S and C are there: the terminal has frozen',
             'On the terminal, press and hold the [k:Func] and [k:Clear] keys together to restart it.',
             'Once it has restarted and is back on its idle screen, retry the card payment or action on the POS.',
+            '§Still not working',
+            'Contact HQ IT for remote help and give them the terminal number after [d:Terminal|终端] in the status bar at the bottom of the sale screen (see “Need remote help? How do I find the till’s terminal number?”).',
           ],
         },
         tips: {
