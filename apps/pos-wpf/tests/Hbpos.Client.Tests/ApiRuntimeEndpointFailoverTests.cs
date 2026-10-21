@@ -141,6 +141,45 @@ public sealed class ApiRuntimeEndpointFailoverTests
     }
 
     [Fact]
+    public async Task A_post_after_the_cooldown_does_not_probe_the_primary_entry_but_a_get_does()
+    {
+        var terminal = new ScriptedHandler(request => IsPos(request) ? throw ConnectFailure() : Ok());
+        var (client, _, time) = CreateClient(PosEntry, terminal);
+        await client.GetAsync("api/v1/health"); // 主入口连接失败，进入 2 分钟冷却。
+        time.Advance(TimeSpan.FromMinutes(3)); // 冷却已过，但主入口其实仍然不通。
+        terminal.Requests.Clear();
+
+        // 写请求（收款、同步）失败了不会重放，不能拿它去试探一个可能仍然坏掉的主入口。
+        var post = await client.PostAsync("api/v1/orders", new StringContent("{}"));
+        Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+        Assert.Equal(new[] { "hotbargain.vip" }, terminal.Requests.Select(r => r.Host));
+
+        // 读请求负责试探：先碰主入口，失败后当场换备用入口重试。
+        terminal.Requests.Clear();
+        var get = await client.GetAsync("api/v1/health");
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+        Assert.Equal(new[] { "pos.hotbargain.vip", "hotbargain.vip" }, terminal.Requests.Select(r => r.Host));
+    }
+
+    [Fact]
+    public void Late_failures_from_concurrent_requests_do_not_escalate_the_backoff()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-10-22T00:00:00Z"));
+        var selector = new ApiTransportSelector(time);
+        var configured = new Uri(PosEntry);
+
+        // 一次边缘故障时，同时在途的 6 个请求各自失败：只能算一级冷却，不能被顶到 30 分钟。
+        for (var index = 0; index < 6; index++)
+        {
+            selector.ReportConnectFailure(configured, configured);
+        }
+
+        Assert.True(selector.IsUsingFallback(configured));
+        time.Advance(TimeSpan.FromMinutes(2));
+        Assert.False(selector.IsUsingFallback(configured), "冷却仍是 2 分钟");
+    }
+
+    [Fact]
     public async Task External_requests_are_forwarded_without_entry_selection()
     {
         var terminal = new ScriptedHandler(_ => Ok());

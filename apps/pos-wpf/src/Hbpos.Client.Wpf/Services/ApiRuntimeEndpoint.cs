@@ -239,7 +239,8 @@ public sealed class ApiRuntimeEndpointHandler(
             }
 
             var configured = endpoint.Address;
-            var transport = _transportSelector.Resolve(configured);
+            // 写请求（POST/PUT 等）不当探路的：冷却结束后由读请求先确认首选入口恢复，见 ApiTransportSelector.Resolve。
+            var transport = _transportSelector.Resolve(configured, allowProbe: IsRetryableRequest(request));
             request.RequestUri = new Uri(transport, relativePath);
 
             // 关键逻辑：只有无请求体的 GET/HEAD 才允许在「连接阶段失败」后自动换入口重试。
@@ -344,10 +345,16 @@ public sealed class ApiRuntimeEndpointHandler(
         };
     }
 
+    /// <summary>只有无请求体的 GET/HEAD 才允许自动换入口重试，也只有它们可以去试探首选入口。</summary>
+    private static bool IsRetryableRequest(HttpRequestMessage request)
+    {
+        return request.Content is null
+            && (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head);
+    }
+
     private static HttpRequestMessage? CreateRetryRequest(HttpRequestMessage original)
     {
-        if (original.Content is not null ||
-            (original.Method != HttpMethod.Get && original.Method != HttpMethod.Head))
+        if (!IsRetryableRequest(original))
         {
             return null;
         }

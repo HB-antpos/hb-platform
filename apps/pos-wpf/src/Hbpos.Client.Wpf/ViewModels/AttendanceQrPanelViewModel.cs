@@ -34,6 +34,7 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     private readonly ApiRuntimeEndpointState? _endpointState;
     private readonly TimeSpan _tickInterval;
     private readonly TimeSpan _refreshInterval;
+    private readonly bool _scheduleRefreshByTimeOfDay;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly SemaphoreSlim _stateGate = new(1, 1);
     // 失败日志去重状态：刷新循环、tick、语言切换回调可能并发写日志，用独立锁保护。
@@ -87,6 +88,8 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         _endpointState = endpointState;
         _tickInterval = ValidateInterval(tickInterval ?? DefaultTickInterval, nameof(tickInterval));
         _refreshInterval = ValidateInterval(refreshInterval ?? DefaultRefreshInterval, nameof(refreshInterval));
+        // 只有使用默认刷新间隔时才按夜间静默窗口降频；调用方显式指定间隔（测试、特殊场景）时保持原样。
+        _scheduleRefreshByTimeOfDay = refreshInterval is null;
         _endpointVersion = endpointState?.Version ?? 0;
         _localization.CultureChanged += OnCultureChanged;
         ApplyLocalizedState();
@@ -304,16 +307,23 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
     {
         await RefreshSafeAsync(cancellationToken);
-        using var timer = new PeriodicTimer(_refreshInterval);
+        using var timer = new PeriodicTimer(CurrentRefreshInterval());
         try
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
+                // 二维码在本机每秒签发，登记密钥 / 校时只是后台保活；夜间静默窗口内放慢到 5 分钟。
+                timer.Period = CurrentRefreshInterval();
                 await RefreshSafeAsync(cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
+
+    private TimeSpan CurrentRefreshInterval() =>
+        _scheduleRefreshByTimeOfDay
+            ? BackgroundPollingSchedule.GetInterval(_timeProvider.GetLocalNow(), _refreshInterval)
+            : _refreshInterval;
 
     private async Task RefreshSafeAsync(CancellationToken cancellationToken)
     {
