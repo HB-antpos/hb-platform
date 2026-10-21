@@ -77,7 +77,7 @@ for (const tab of tabs) {
   }
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
-assert.equal(countQuestions('pos'), 23)
+assert.equal(countQuestions('pos'), 24)
 assert.equal(countQuestions('mobile'), 15)
 
 // 编号跨分组连续，过滤后保持原编号
@@ -88,8 +88,9 @@ assert.equal(posNumbering.get('voucher'), 7)
 assert.equal(posNumbering.get('card-failure'), 8)
 assert.equal(posNumbering.get('pos-daily-close'), 13)
 assert.equal(posNumbering.get('return-scan'), 19)
-assert.equal(posNumbering.get('app-update'), 22)
-assert.equal(posNumbering.get('remote-assist'), 23)
+assert.equal(posNumbering.get('anz-terminal-unresponsive'), 21)
+assert.equal(posNumbering.get('app-update'), 23)
+assert.equal(posNumbering.get('remote-assist'), 24)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
 assert.equal(mobileNumbering.get('revenue-report'), 5)
 assert.equal(mobileNumbering.get('product-report'), 6)
@@ -115,6 +116,10 @@ const remoteHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '设备�
 assert.ok(remoteHits.includes('remote-assist'))
 const remoteEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'remote maintenance', 'en').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(remoteEnHits.includes('remote-assist'))
+const frozenHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '死机', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.deepEqual(frozenHits, ['anz-terminal-unresponsive'])
+const funcClearHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'func clear', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(funcClearHits.includes('anz-terminal-unresponsive'))
 const reportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '营业额报告', 'zh').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(reportHits.includes('revenue-report'))
 const productReportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'product report', 'en').flatMap((group) => group.questions.map((question) => question.id))

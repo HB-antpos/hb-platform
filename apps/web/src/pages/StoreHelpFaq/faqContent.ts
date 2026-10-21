@@ -730,6 +730,50 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
         permissions: ['Settings.PaymentTerminal'],
       },
       {
+        // 门店运维经验（非代码可查）：Windows 托盘的绿色 S、C 两个图标代表刷卡机连接正常；缺了查底座蓝牙与 USB 插口；
+        // 都在说明刷卡机死机，Func + Clear 同按重启 ANZ 刷卡机。
+        id: 'anz-terminal-unresponsive',
+        title: {
+          zh: 'ANZ 刷卡机没反应（Linkly 弹窗或收银端刷卡操作无响应）怎么办？',
+          en: 'The ANZ terminal is not responding (Linkly pop-up or card actions on the POS do nothing). What do I do?',
+        },
+        where: { zh: 'Windows 任务栏右下角 · 显示隐藏的图标 [k:^]', en: 'Windows taskbar, bottom right · show hidden icons [k:^]' },
+        steps: {
+          zh: [
+            '§先看右下角的小图标',
+            '点 Windows 任务栏右下角的 [k:^]（显示隐藏的图标），展开小图标面板。',
+            '找有没有两个绿色小图标：一个是绿底的 S，一个是绿底的 C（不是棕色底的那个 C）。',
+            '§绿色 S 和 C 不全：硬件连接有问题',
+            '看刷卡机屏幕上的蓝牙是否已和底座正常连接。',
+            '检查底座的 USB 线插口有没有松动，或者是否被换插到收银机的其他 USB 口；仍不行请联系总部 IT，并提供收银页面底部的终端号。',
+            '§绿色 S 和 C 都在：刷卡机死机了',
+            '在刷卡机上同时按住 [k:Func] 键和 [k:Clear] 键，重启刷卡机。',
+            '刷卡机重新启动、回到待机画面后，再在收银端重试刚才的刷卡或操作。',
+          ],
+          en: [
+            '§First check the small icons at the bottom right',
+            'Click [k:^] (show hidden icons) at the bottom right of the Windows taskbar to open the icon panel.',
+            'Look for two green icons: a green S and a green C (not the brown C).',
+            '§Green S or C missing: hardware connection problem',
+            'On the terminal screen, check that Bluetooth is connected to the base.',
+            'Check that the base’s USB plug is not loose and has not been moved to a different USB port on the till. If it still does not work, contact HQ IT with the terminal number shown at the bottom of the sale screen.',
+            '§Both green S and C are there: the terminal has frozen',
+            'On the terminal, press and hold the [k:Func] and [k:Clear] keys together to restart it.',
+            'Once it has restarted and is back on its idle screen, retry the card payment or action on the POS.',
+          ],
+        },
+        tips: {
+          zh: [
+            '如果不确定顾客有没有被扣款，重启后不要马上重刷，先按「刷卡失败或异常怎么处理？」到 [k:Card transaction recovery|卡交易异常中心] 核对。',
+            '这个检查只适用于连接 ANZ-Linkly 刷卡机的收银机。',
+          ],
+          en: [
+            'If you are not sure whether the customer was charged, do not charge again straight after the restart. Check it in [k:Card transaction recovery|卡交易异常中心] first (see “What do I do when a card payment fails or gets stuck?”).',
+            'This check only applies to tills connected to an ANZ-Linkly terminal.',
+          ],
+        },
+      },
+      {
         id: 'customer-display',
         title: { zh: '客显（顾客屏）怎么开启、调整大小、主副屏对调？', en: 'How do I open, resize or swap the customer display?' },
         where: { zh: '窗口顶部标题栏 · 显示器图标 [k:Customer display window|客显窗口]', en: 'Window title bar · monitor icon [k:Customer display window|客显窗口]' },
