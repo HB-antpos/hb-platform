@@ -39,9 +39,15 @@ export function ensureApiTransportHydrated(): Promise<void> {
  * 用「身份 host」构造实际发请求的基础地址：经传输选择器映射到当前应使用的入口。
  * 身份 host 仍是设备绑定、多账号保险库等一切比较使用的值，这里只改最终访问的域名。
  * transportHostOverride 供故障转移重试时强制指定备用入口。
+ * options.probe=false 用于写请求（登录、刷新令牌、设备换票等 POST）：冷却结束后不拿它们去试探首选入口，
+ * 由读请求 / 健康探测先确认首选入口恢复（见 ApiTransportSelector.resolve）。
  */
-export function buildTransportApiBaseUrl(identityHost: string, transportHostOverride?: string) {
-  return buildApiBaseUrl(transportHostOverride ?? apiTransportSelector.resolve(identityHost));
+export function buildTransportApiBaseUrl(
+  identityHost: string,
+  transportHostOverride?: string,
+  options: { probe?: boolean } = {},
+) {
+  return buildApiBaseUrl(transportHostOverride ?? apiTransportSelector.resolve(identityHost, options));
 }
 
 /**

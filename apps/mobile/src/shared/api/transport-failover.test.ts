@@ -91,6 +91,31 @@ test("首选入口成功后清零退避：再次失败又只冷却 2 分钟", ()
   assert.equal(selector.resolve("hotbargain.vip"), EDGE_API_HOST);
 });
 
+test("并发请求迟到的失败不重复升级退避：一次故障只算一级，且仍允许读请求换入口重试", () => {
+  const { selector, clock } = createSelector();
+
+  assert.equal(selector.reportFailure("hotbargain.vip", EDGE_API_HOST, "network"), true);
+  // 同一时刻在途的另外 5 个请求也陆续失败：已在冷却中，返回 true 让它们换入口重试，但不升级退避。
+  for (let index = 0; index < 5; index += 1) {
+    assert.equal(selector.reportFailure("hotbargain.vip", EDGE_API_HOST, "network"), true);
+  }
+
+  clock.now += MINUTE;
+  assert.equal(selector.resolve("hotbargain.vip"), DIRECT_API_HOST);
+  clock.now += MINUTE;
+  assert.equal(selector.resolve("hotbargain.vip"), EDGE_API_HOST, "仍是 2 分钟冷却，而不是被并发失败顶到 30 分钟");
+});
+
+test("冷却结束后：写请求（probe:false）不当探路的，继续走直连；读请求 / 健康探测负责试探首选", () => {
+  const { selector, clock } = createSelector();
+  selector.reportFailure("hotbargain.vip", EDGE_API_HOST, "network");
+  clock.now += 5 * MINUTE; // 2 分钟冷却已过
+
+  assert.equal(selector.resolve("hotbargain.vip", { probe: false }), DIRECT_API_HOST);
+  assert.equal(selector.resolve("hotbargain.vip", { probe: false }), DIRECT_API_HOST, "多次写请求都不会触发试探");
+  assert.equal(selector.resolve("hotbargain.vip"), EDGE_API_HOST, "读请求 / 健康探测去试探首选入口");
+});
+
 test("直连入口上的失败不会改变当前入口", () => {
   const { selector } = createSelector();
   selector.reportFailure("hotbargain.vip", EDGE_API_HOST, "network");
