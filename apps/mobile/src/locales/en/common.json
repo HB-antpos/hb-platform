@@ -387,6 +387,29 @@
       "none": "not sorted",
       "label": "Sort"
     },
+    "supplierTable": {
+      "share": "Share",
+      "shareRevenue": "Revenue",
+      "hint": "Tap a supplier for products or store data",
+      "compareLegend": "Grey = LY",
+      "swipeMore": "Swipe for more",
+      "swipeBack": "Swipe back"
+    },
+    "sheet": {
+      "openA11y": "{{supplier}}, tap to choose product details or store data",
+      "tabProducts": "Products",
+      "tabBranches": "Stores",
+      "tabWithCount": "{{label}} · {{count}}",
+      "chooseProductsDesc": "What this supplier sold",
+      "chooseBranchesDesc": "Sales at each store",
+      "productCount": "{{count}} items",
+      "branchCount": "{{count}} stores",
+      "linkOnly": "Only filter the page (no popup)",
+      "rowDetailHint": "Details",
+      "branchProductsSubtitle": "Products at this store",
+      "totalCount": "{{count}} total · {{pageSize}} per page",
+      "emptyBranches": "No store data"
+    },
     "chinaGoods": {
       "revenue": "China revenue",
       "shareOfTotal": "Share of total",
@@ -409,7 +432,6 @@
       "compareShareOfChina": "China %",
       "compareShareOfTotal": "Total %",
       "pageTotal": "Page total",
-      "supplierHint": "Tap supplier to filter stores and products · tap amount for stores",
       "productHint": "Tap item for stores",
       "supplierBranchSection": "Stores · {{supplier}}",
       "supplierBranchFormula": "{{supplier}} sales ÷ store revenue",
@@ -417,8 +439,8 @@
       "appendedSelectedBranch": "Selected store is outside the top {{count}}; shown below"
     },
     "linked": {
-      "hintChina": "Tap a store or supplier to filter",
-      "hintAustralia": "Tap a supplier to filter products",
+      "hintChina": "Tap a store to filter · tap a supplier for details",
+      "hintAustralia": "Tap a supplier for products or store data",
       "branchLabel": "Store",
       "supplierLabel": "Supplier",
       "clearAll": "Clear",
