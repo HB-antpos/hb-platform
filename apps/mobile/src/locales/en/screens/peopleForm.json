@@ -8,7 +8,9 @@
     "done": "Done",
     "searchOptions": "Search",
     "loading": "Loading…",
-    "noOptions": "No options"
+    "noOptions": "No options",
+    "usernameTaken": "This username is already in use. Choose another one.",
+    "emailTaken": "This email is already used by another account. Use a different email."
   },
   "name": {
     "familyName": "Last name",
@@ -141,7 +143,8 @@
     "email": "Email",
     "emailErrors": {
       "invalid": "Enter a valid email address",
-      "required": "Enter an email"
+      "required": "Enter an email",
+      "taken": "This email is already used by another account. Use a different email."
     },
     "emailEmptyHint": "No usable email yet. Add one so password emails can be sent to them.",
     "emailDeliverable": "Can receive mail",

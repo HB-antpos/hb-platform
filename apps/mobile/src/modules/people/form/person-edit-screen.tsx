@@ -27,6 +27,7 @@ import {
   type PersonEditErrors,
   type PersonEditValues,
 } from "./person-edit-form";
+import { resolveIdentityConflictField } from "./identity-conflict";
 import {
   DiscardChangesDialog,
   FormField,
@@ -299,7 +300,16 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
       }
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
-      setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.saveFailed" }));
+      // 邮箱被其他账号占用：标红邮箱字段；账号在本页不可改，撞车时只给表单级提示。
+      const conflictField = resolveIdentityConflictField(error);
+      if (conflictField === "email") {
+        setErrors((current) => ({ ...current, email: "taken" }));
+        setFormError(t("form.fixErrors"));
+      } else if (conflictField === "username") {
+        setFormError(t("form.usernameTaken"));
+      } else {
+        setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.saveFailed" }));
+      }
       setErrorTick((tick) => tick + 1);
     } finally {
       inFlight.current = false;

@@ -24,6 +24,11 @@ type MobileOtaBarrierReceipt = Readonly<{ allowed: boolean; epoch: number }>;
 
 export type UseMobileOtaUpdateOptions = Readonly<{
   enabled: boolean;
+  /**
+   * 设置页「自动更新」开关（默认 true）。false 时仍检查并处理强制（required）更新，
+   * 但不自动下载 / 提醒可选更新；用户手动「检查更新」不受影响。
+   */
+  autoUpdate?: boolean;
   beforeCheck?: () => Promise<MobileOtaBarrierReceipt>;
   getEpoch?: () => number;
 }>;
@@ -70,6 +75,7 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
   const snapshotRef = useRef(snapshot);
   const optionsRef = useRef(options);
   const enabledRef = useRef(effectiveEnabled);
+  const autoUpdateRef = useRef(options.autoUpdate !== false);
   const contextRef = useRef<MobileOtaUpdateContext | null>(null);
   const portRef = useRef<MobileOtaUpdatePort | null>(null);
   const generationRef = useRef(0);
@@ -89,6 +95,7 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
 
   optionsRef.current = options;
   enabledRef.current = effectiveEnabled;
+  autoUpdateRef.current = options.autoUpdate !== false;
   snapshotRef.current = snapshot;
 
   const commitSnapshot = (next: MobileOtaSnapshot) => {
@@ -158,7 +165,9 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
 
   // 关键逻辑：OTA 一律后台静默下载，完整下载并校验通过后才提醒一次重启；
   // required 与 optional 共用同一个提醒（可选择「稍后」），不再占屏拦截，失败/断网也不提示。
-  function promptRestart(decision: MobileOtaUpdateDecision) {
+  function promptRestart(decision: MobileOtaUpdateDecision, force = false) {
+    // 自动更新关闭时，可选更新不弹重启提醒；强制更新和用户手动检查（force）照常提醒。
+    if (!force && !autoUpdateRef.current && decision.state !== "required") return;
     const identity = decisionTargetIdentity(decision);
     if (!tryClaimMobileOtaOptionalPrompt(
       optionalPromptTargetRef,
@@ -264,6 +273,15 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         // 先发布判定再放行原生 lane。
         appUpdateMutualExclusion.setOtaInitializationPending(false);
         if (decision && decision.state !== "none" && !portRef.current?.isReady(decision)) {
+          // 自动更新关闭：只有强制更新和手动检查才继续下载，可选更新到此为止（判定已发布，不占互斥锁）。
+          if (
+            !manualCheckRef.current
+            && !autoUpdateRef.current
+            && decision.state !== "required"
+          ) {
+            deferredByIdleGateRef.current = false;
+            return;
+          }
           // OTA 等登录完成并空闲后再静默下载，不和开机、登录抢带宽；仅手动检查立即下载。
           if (
             !manualCheckRef.current
@@ -396,6 +414,28 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     };
   }, []);
 
+  // 自动更新从关到开：立即补查一次；关闭期间已下载好的可选更新此时补弹重启提醒。
+  const previousAutoUpdateRef = useRef(autoUpdateRef.current);
+  useEffect(() => {
+    const enabledNow = autoUpdateRef.current;
+    const wasEnabled = previousAutoUpdateRef.current;
+    previousAutoUpdateRef.current = enabledNow;
+    if (!enabledNow || wasEnabled || !enabledRef.current) return;
+    void runCheckRef.current().then(() => {
+      const current = snapshotRef.current;
+      const decision = current.decision;
+      if (
+        enabledRef.current
+        && autoUpdateRef.current
+        && current.downloaded
+        && decision
+        && decision.state !== "none"
+      ) {
+        promptRestart(decision);
+      }
+    });
+  }, [options.autoUpdate]);
+
   // 前台定时补查新 OTA 目标；已提示过的目标由 optionalPromptTargetRef 去重，不会重复弹窗。
   useForegroundUpdateCheckInterval(() => {
     void runCheckRef.current();
@@ -429,7 +469,7 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
       return Object.freeze({ status: "failed" });
     }
 
-    promptRestart(current.decision);
+    promptRestart(current.decision, true);
     return Object.freeze({ status: "update-ready" });
   }
 

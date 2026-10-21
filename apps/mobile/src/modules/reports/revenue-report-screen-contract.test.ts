@@ -100,8 +100,8 @@ const flatListSource = screenSource.slice(flatListStart);
 
 assert.match(
   flatListSource,
-  /ListHeaderComponent=\{\s*<View style=\{styles\.listHeader\}>[\s\S]*?<View style=\{styles\.filtersCard\}>[\s\S]*?<SegmentedButtons[\s\S]*?<MonthDatePickerField[\s\S]*?style=\{styles\.toolbar\}[\s\S]*?getPeriodLabel\(period\)/,
-  "紧凑日期筛选必须完整放入 ListHeaderComponent",
+  /ListHeaderComponent=\{\s*<View style=\{styles\.listHeader\}>[\s\S]*?<View style=\{styles\.filtersCard\}>[\s\S]*?<PeriodSegment[\s\S]*?setBranchPickerVisible\(true\)[\s\S]*?<View style=\{styles\.toolbar\}>[\s\S]*?<MonthDatePickerField[\s\S]*?getPeriodLabel\(period\)/,
+  "期间卡（日周月分段、分店选择、翻期 + 日期 + 快捷键）必须完整放入 ListHeaderComponent",
 );
 assert.doesNotMatch(
   flatListSource,
@@ -113,10 +113,10 @@ assert.match(
   /data=\{summaryListItems\}/,
   "完整分店行和表头必须由稳定的 summaryListItems 驱动",
 );
-assert.match(
+assert.doesNotMatch(
   flatListSource,
-  /stickyHeaderIndices=\{\[1\]\}/,
-  "ListHeaderComponent 之后的表格列标题必须吸顶",
+  /stickyHeaderIndices|table-header|renderSummaryTableHeader/,
+  "分店排行已改为自带标签的卡片行：不再有需要吸顶的列标题哨兵条目",
 );
 assert.match(
   flatListSource,
@@ -125,13 +125,20 @@ assert.match(
 );
 assert.match(
   flatListSource,
-  /item\.type === "table-header"[\s\S]*?renderSummaryTableHeader\(\)/,
-  "表头哨兵条目必须渲染营业额表格列标题",
+  /keyExtractor=\{\(item\) => item\.row\.id\}[\s\S]*?renderSummaryRow\(item\.row, item\.rank, index === 0, index === summaryListItems\.length - 1\)/,
+  "排行卡片行必须由 summaryListItems 逐条渲染，并带首尾标记以画圆角分组",
 );
+// 2026-10 重设计：全店汇总提到页面顶部（第一眼看到总营业额），取代此前「移到排行之后保留六行排行」的决定；
+// 排行行改为卡片行（每行约两倍高），首屏行数不再是约束，换来「不用左右滑就能看全客单数 / 客单价的本期与同期」。
 assert.match(
   flatListSource,
-  /reports\.sections\.branchRanking[\s\S]*?ListFooterComponent[\s\S]*?<RevenueSummaryCard[\s\S]*?reports\.sections\.summary/,
-  "全店汇总必须移到排行之后，为窄屏首屏保留至少六行排行空间",
+  /<RevenueHeroCard[\s\S]*?reports\.sections\.summary[\s\S]*?reports\.sections\.branchRanking[\s\S]*?ListFooterComponent/,
+  "全店汇总卡必须位于排行标题之前（页面顶部）",
+);
+assert.doesNotMatch(
+  flatListSource.slice(flatListSource.indexOf("ListFooterComponent")),
+  /RevenueHeroCard|RevenueSummaryCard/,
+  "汇总卡不得再出现在列表底部",
 );
 assert.match(flatListSource, /viewabilityConfig=\{summaryViewabilityConfig\}/, "首屏数据必须接入稳定可见性计时");
 assert.match(flatListSource, /onViewableItemsChanged=\{onSummaryViewableItemsChanged\}/, "首条可见分店必须完成性能计时");
@@ -296,6 +303,37 @@ assert.match(source.slice(modalStart), /<Modal[\s\S]*?<FlatList[\s\S]*?renderDet
 assert.match(source.slice(modalStart), /data=\{branchPickerRows\}[\s\S]*?initialNumToRender=\{14\}/, "分店选择器必须连续滚动全部分店而不分页");
 assert.match(source.slice(modalStart), /branchPickerSearch[\s\S]*?searchBranchPlaceholder/, "分店选择抽屉必须支持从 25 到 30 家中快速搜索");
 assert.match(source, /numberOfLines=\{2\}[\s\S]*?getWeekdayLabel/, "每日明细必须完整显示日期与星期");
-assert.match(source, /tableRow:\s*\{[\s\S]*?minHeight: 54/, "排行行高必须保持 54px 高密度且仍大于 44px 触控下限");
+assert.match(source, /rankCard:\s*\{[\s\S]*?minHeight: 64/, "排行卡片行高不得低于 64，且远大于 44px 触控下限");
+
+// ===== 卡片化后「显示的数据类型不能少」的字段守卫 =====
+const summaryRowStart = source.indexOf("const renderSummaryRow =");
+const detailRowStart = source.indexOf("const renderDetailRow =");
+const screenReturnStart = source.indexOf("  return (\n    <View style={styles.container}>", detailRowStart);
+assert.ok(summaryRowStart > 0 && detailRowStart > summaryRowStart && screenReturnStart > detailRowStart, "必须能隔离排行行与明细行渲染函数");
+const summaryRowSource = source.slice(summaryRowStart, detailRowStart);
+const detailRowSource = source.slice(detailRowStart, screenReturnStart);
+for (const field of [
+  "item.branchName", "item.branchCode", "item.revenue", "item.compareRevenue", "item.compareUnavailable",
+  "item.transactions", "item.compareTransactions", "item.averageTransaction", "item.compareAverageTransaction",
+  "GrowthPill", "reports.metrics.transactions", "reports.metrics.averageTransaction", "reports.metrics.compare",
+]) {
+  assert.ok(summaryRowSource.includes(field), `分店排行卡片必须仍显示 ${field}`);
+}
+for (const field of [
+  "item.revenue", "item.compareRevenue", "item.transactions", "item.compareTransactions",
+  "item.averageTransaction", "item.compareAverageTransaction", "GrowthPill", "reports.cumulative.upTo",
+  "reports.cumulative.live", "reports.cumulative.upcoming", "reports.cumulative.comparedAt", "isCutoffRow",
+]) {
+  assert.ok(detailRowSource.includes(field), `明细卡片必须仍显示 ${field}`);
+}
+const heroStart = source.indexOf("function RevenueHeroCard(");
+const heroSource = source.slice(heroStart, source.indexOf("export function RevenueReportScreen(", heroStart));
+for (const field of [
+  "summary?.revenue", "summary?.compareRevenue", "summary?.transactions", "summary?.compareTransactions",
+  "summary?.averageTransaction", "summary?.compareAverageTransaction", "reports.metrics.current", "reports.metrics.compare",
+]) {
+  assert.ok(heroSource.includes(field), `全店汇总卡必须仍显示 ${field}`);
+}
+assert.doesNotMatch(source, /detailHorizontalScroll|detailHorizontalContent|minWidth: 500/, "明细抽屉卡片不再需要横向滚动");
 
 console.log("revenue-report-screen-contract.test.ts: ok");

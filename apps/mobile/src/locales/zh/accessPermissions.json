@@ -262,8 +262,8 @@
       "description": "Web 页面 /pos-admin/sales-orders 收银记录与移动端「订货单」- 查看收银记录、分店订货单与到货预告"
     },
     "SalesOrders.View": {
-      "name": "查看销售订单",
-      "description": "移动端「销售订单」- 按分店、日期与订单类型查看销售订单、明细及发票"
+      "name": "查看 POS 订单",
+      "description": "移动端「POS 订单」- 按分店、日期与订单类型查看 POS 订单、明细及发票"
     },
     "Permissions.PosTerminal.Audit.View": {
       "name": "查看员工操作日志",
@@ -844,6 +844,10 @@
     "Warehouse.StartPicking": {
       "name": "打印配货单开始配货",
       "description": "Web 页面 /warehouse/store-order/picking/:id - 仓库员工打印或下载配货单时自动把订单从「已提交」推进到「配货中」；与订单编辑权限分开授权，不会随管理仓库权限自动具备"
+    },
+    "Warehouse.StoreOrderReturn": {
+      "name": "分店订单退货",
+      "description": "Web 页面 /warehouse/store-orders 订货单明细 - 用负数发货数量录入退货（退货冲减金额，订单净额为负时开退款单）；默认无人具备，管理员手动授权，不会随管理仓库权限自动具备"
     },
     "Warehouse.ManageProducts": {
       "name": "管理仓库商品",

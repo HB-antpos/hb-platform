@@ -440,6 +440,13 @@ export interface UpdateContainerDetailRequest {
   英文名称?: string;
   ClearEnglishName?: boolean;
   贴牌价格?: number;
+  /** 已有进口价：只回写仓库表 / 商品主档 / 分店进货价，不改明细「本次进口价」。 */
+  仓库进口价?: number;
+  /** 已有零售价：只回写仓库表 / 商品主档（可联动分店价与价格任务），不改明细「本次零售价」。 */
+  仓库零售价?: number;
+  /** 提交已有价时看到的仓库价；后端发现仓库当前值不同就拒绝该字段。 */
+  expectedWarehouseImportPrice?: number;
+  expectedWarehouseOemPrice?: number;
   单件装箱数?: number;
   中包数?: number;
   单件体积?: number;

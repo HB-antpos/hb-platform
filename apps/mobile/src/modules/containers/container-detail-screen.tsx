@@ -15,7 +15,6 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import {
   DEFAULT_RETAIL_PRICE_SYNC_CHOICE,
   buildRetailPriceSyncRequestFields,
-  isBulkRetailPriceFilled,
   isEditRetailPriceChangeForExistingProduct,
   type RetailPriceSyncChoice,
 } from "./retail-price-sync";
@@ -77,6 +76,7 @@ import {
   getContainerDetailEditableFieldValue,
   getContainerDetailServerFieldTokens,
   isCurrentContainerDetailEditSession,
+  isNewProductDetail,
   reconcileContainerDetailPartialSave,
   type ContainerDetailEditForm,
 } from "./container-detail-edit-state";
@@ -253,7 +253,6 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   const [bulkOemPrice, setBulkOemPrice] = useState("");
   // 改零售价时的两个开关；每次打开编辑 / 批量设价弹窗都回到默认（都开），不持久化。
   const [editRetailPriceSync, setEditRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
-  const [bulkRetailPriceSync, setBulkRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
   const [batchPreview, setBatchPreview] = useState<(ContainerDetailBatchPreview & { action: BatchAction }) | null>(null);
   const [viewingDetail, setViewingDetail] = useState<ContainerDetail | null>(null);
 
@@ -364,6 +363,8 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   const refreshPresenceRef = useRef<(state?: "viewing" | "editing") => Promise<void>>(async () => undefined);
   const pushInFlightRef = useRef(false);
   editingDetailRef.current = editingDetail;
+  // 新商品还没有仓库记录，只能改本次价；已有商品只能改已有价（保存时回写仓库表）。
+  const isEditingNewProduct = editingDetail ? isNewProductDetail(editingDetail) : false;
   editFormRef.current = editForm;
   presenceStateRef.current = presenceState;
   detailRefetchRef.current = productsQuery.refetch;
@@ -492,10 +493,10 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
       const editSessionId = editSessionIdRef.current;
       const editingHguid = getDetailGuid(editingDetail).trim();
       const submittedPayload = buildContainerDetailEditPayload(editingDetail, editForm, overrideAcknowledgements);
-      // 只有已有商品的零售价确实被改了才带两个开关；其它保存保持原请求，后端按默认处理且不会碰分店价。
+      // 只有「已有零售价」确实被改了才带两个开关；其它保存保持原请求，后端按默认处理且不会碰分店价。
       const retailPriceSync = buildRetailPriceSyncRequestFields(
         editRetailPriceSync,
-        isEditRetailPriceChangeForExistingProduct(editingDetail, editForm.oemPrice),
+        isEditRetailPriceChangeForExistingProduct(editingDetail, editForm.warehouseOemPrice),
       );
       const result = await batchUpdateDetails(containerGuid, [submittedPayload], retailPriceSync);
       return {
@@ -535,7 +536,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
         validationErrors,
         conflicts,
       });
-      if (reconciled.savedFields.size) {
+      if (reconciled.savedFields.size || reconciled.warehouseBaselineRefreshed) {
         setEditingDetail(reconciled.detail);
         setEditForm(reconciled.form);
       }
@@ -635,13 +636,8 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
         ) {
           throw new Error(t("messages.invalidPrices"));
         }
-        return applyPrices(
-          containerGuid,
-          scope,
-          { importPrice, oemPrice },
-          previewToken,
-          buildRetailPriceSyncRequestFields(bulkRetailPriceSync, isBulkRetailPriceFilled(bulkOemPrice)),
-        );
+        // 批量改价只写本次进口价 / 本次零售价（货柜明细），不联动仓库表和分店价，所以没有同步开关。
+        return applyPrices(containerGuid, scope, { importPrice, oemPrice }, previewToken);
       }
       if (action === "recalculate") return recalculate(containerGuid, scope, previewToken);
       return backfill(containerGuid, scope, previewToken);
@@ -651,7 +647,6 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
       setBulkFloatRate("");
       setBulkImportPrice("");
       setBulkOemPrice("");
-      setBulkRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
       setBatchPreview(null);
       setSelectedHguids([]);
       invalidateDetail();
@@ -932,8 +927,6 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
       case "float":
       case "prices":
         setBatchPreview(null);
-        // 每次打开批量弹窗都从默认勾选开始，不沿用上一次的选择。
-        setBulkRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
         afterSheetClosed(() => setBulkModalType(action));
         break;
       case "recalculate":
@@ -1323,17 +1316,28 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
             ) : null}
             <View style={styles.inputRow}>
               <TextInput mode="outlined" label={t("edit.domesticPrice")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.domesticPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, domesticPrice: value })} style={styles.inputHalf} />
-              <TextInput mode="outlined" label={t("edit.importPrice")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.importPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, importPrice: value })} style={styles.inputHalf} />
+              {/* 本次进口价 / 本次零售价是货柜明细自己的价格（新商品建档数据）：已有商品只读，要改请用下面的「已有价」。 */}
+              <TextInput mode="outlined" label={t("edit.importPrice")} disabled={updateMutation.isPending || !isEditingNewProduct} keyboardType="decimal-pad" value={editForm.importPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, importPrice: value })} style={styles.inputHalf} />
             </View>
             <View style={styles.inputRow}>
-              <TextInput mode="outlined" label={t("edit.oemPrice")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.oemPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, oemPrice: value })} style={styles.inputHalf} />
+              <TextInput mode="outlined" label={t("edit.oemPrice")} disabled={updateMutation.isPending || !isEditingNewProduct} keyboardType="decimal-pad" value={editForm.oemPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, oemPrice: value })} style={styles.inputHalf} />
               <TextInput mode="outlined" label={t("edit.floatRate")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.floatRate} onChangeText={(value) => setEditForm((current) => current && { ...current, floatRate: value })} style={styles.inputHalf} />
             </View>
             <View style={styles.inputRow}>
               <TextInput mode="outlined" label={t("edit.containerQuantity")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.containerQuantity} onChangeText={(value) => setEditForm((current) => current && { ...current, containerQuantity: value })} style={styles.inputHalf} />
               <TextInput mode="outlined" label={t("edit.middlePackQuantity")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.middlePackQuantity} onChangeText={(value) => setEditForm((current) => current && { ...current, middlePackQuantity: value })} style={styles.inputHalf} />
             </View>
-            {editingDetail && isEditRetailPriceChangeForExistingProduct(editingDetail, editForm.oemPrice) ? (
+            {!isEditingNewProduct ? (
+              <>
+                {/* 已有进口价 / 已有零售价：保存时回写仓库表、商品主档和分店表（零售价按下面的开关联动分店价与价签任务）。 */}
+                <View style={styles.inputRow}>
+                  <TextInput mode="outlined" label={t("edit.warehouseImportPrice")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.warehouseImportPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, warehouseImportPrice: value })} style={styles.inputHalf} />
+                  <TextInput mode="outlined" label={t("edit.warehouseOemPrice")} disabled={updateMutation.isPending} keyboardType="decimal-pad" value={editForm.warehouseOemPrice} onChangeText={(value) => setEditForm((current) => current && { ...current, warehouseOemPrice: value })} style={styles.inputHalf} />
+                </View>
+                <Text style={styles.muted}>{t("edit.warehousePriceHint")}</Text>
+              </>
+            ) : null}
+            {editingDetail && isEditRetailPriceChangeForExistingProduct(editingDetail, editForm.warehouseOemPrice) ? (
               <ContainerRetailPriceSyncSwitches
                 value={editRetailPriceSync}
                 onChange={setEditRetailPriceSync}
@@ -1381,13 +1385,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
           <>
             <TextInput mode="outlined" label={t("edit.importPrice")} keyboardType="decimal-pad" value={bulkImportPrice} onChangeText={(value) => { setBatchPreview(null); setBulkImportPrice(value); }} />
             <TextInput mode="outlined" label={t("edit.oemPrice")} keyboardType="decimal-pad" value={bulkOemPrice} onChangeText={(value) => { setBatchPreview(null); setBulkOemPrice(value); }} />
-            {isBulkRetailPriceFilled(bulkOemPrice) ? (
-              <ContainerRetailPriceSyncSwitches
-                value={bulkRetailPriceSync}
-                onChange={setBulkRetailPriceSync}
-                disabled={bulkMutation.isPending || previewBulkMutation.isPending}
-              />
-            ) : null}
+            <Text style={styles.muted}>{t("bulk.thisPriceHint")}</Text>
           </>
         )}
         <Text style={styles.muted}>{selectedHguids.length ? t("bulk.scopeSelected", { count: selectedHguids.length }) : t("bulk.scopeFiltered", { count: total })}</Text>

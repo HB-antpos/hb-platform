@@ -32,6 +32,7 @@ import {
   type AdminCreateErrors,
   type AdminCreateFormValues,
 } from "./admin-create-form";
+import { resolveIdentityConflictField, type IdentityConflictField } from "./identity-conflict";
 import { RolePickerSheet, StoreAssignmentSheet } from "./admin-pickers";
 import { CreatedResult, type CreatedNotice } from "./created-result";
 import {
@@ -162,6 +163,8 @@ export function AdminCreateScreen() {
     setFormError(message);
     setErrorTick((tick) => tick + 1);
   };
+  const identityConflictMessage = (field: IdentityConflictField) =>
+    field === "username" ? t("form.usernameTaken") : t("form.emailTaken");
   const failWith = (error: unknown, fallbackKey: string) =>
     fail(error, resolveLocalizedErrorMessage(error, { t, language, fallbackKey }));
 
@@ -185,7 +188,14 @@ export function AdminCreateScreen() {
         await invalidateEverywhere();
         setStage({ kind: "done", user: outcome.user, storesPending: false });
       } else if (outcome.kind === "createFailed") {
-        failWith(outcome.error, "adminCreate.createFailed");
+        // 账号 / 邮箱被其他人占用：标红对应字段，而不是只在表单顶部给一句通用失败。
+        const conflictField = resolveIdentityConflictField(outcome.error);
+        if (conflictField) {
+          setErrors((current) => ({ ...current, [conflictField]: identityConflictMessage(conflictField) }));
+          fail(outcome.error, t("form.fixErrors"));
+        } else {
+          failWith(outcome.error, "adminCreate.createFailed");
+        }
       } else if (outcome.kind === "createUncertain") {
         // 结果未知：冻结表单，先核对是否已建成，禁止直接重发（会重复创建）。
         fail(outcome.error, t("adminCreate.uncertain"));

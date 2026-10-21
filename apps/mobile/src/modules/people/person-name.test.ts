@@ -5,6 +5,7 @@ import {
   containsCjk,
   hasStructuredName,
   resolvePersonName,
+  resolvePersonalCodeLabelName,
   splitLegacyFullName,
 } from "./person-name";
 
@@ -84,3 +85,17 @@ const search = buildPersonSearchText({ fullName: "Emily Chen", givenName: "Emily
 assertEqual(search.includes("em "), true, "包含昵称");
 assertEqual(search.includes("emily.chen"), true, "包含账号并小写");
 assertEqual(buildPersonSearchText({}), "", "空");
+
+// ── 个人码标签称呼：昵称 + 姓 → 名 + 姓首字母 → 账号 ──
+assertEqual(resolvePersonalCodeLabelName({ givenName: "Emily", middleName: "Rose", familyName: "chen", nickname: "Em", username: "emily" }), "Em chen", "昵称 + 姓（不印中间名）");
+assertEqual(resolvePersonalCodeLabelName({ givenName: "Emily", familyName: "chen", username: "emily" }), "Emily C.", "名 + 姓首字母大写");
+assertEqual(resolvePersonalCodeLabelName({ nickname: " Em ", username: "emily" }), "Em", "只有昵称");
+assertEqual(resolvePersonalCodeLabelName({ givenName: "Emily", username: "emily" }), "Emily", "只有名");
+assertEqual(resolvePersonalCodeLabelName({ familyName: "Chen", username: "emily" }), "emily", "只有姓用账号兜底");
+assertEqual(resolvePersonalCodeLabelName({ username: " order1003 " }), "order1003", "账号兜底");
+assertEqual(resolvePersonalCodeLabelName({}), "", "全空");
+assertEqual(resolvePersonalCodeLabelName({ fullName: "Emily Rose Chen", username: "emily" }), "Emily C.", "存量全名先拆分");
+assertEqual(resolvePersonalCodeLabelName({ fullName: "Emily Chen", nickname: "Em", username: "emily" }), "Em Chen", "存量全名 + 昵称");
+assertEqual(resolvePersonalCodeLabelName({ givenName: "芳", familyName: "王", username: "wf" }), "王芳", "中文名不缩写");
+assertEqual(resolvePersonalCodeLabelName({ givenName: "芳", familyName: "王", nickname: "小芳", username: "wf" }), "王小芳", "中文昵称接在姓后");
+assertEqual(resolvePersonalCodeLabelName({ fullName: "王芳", username: "wf" }), "王芳", "中文存量全名");

@@ -1,4 +1,4 @@
-import { getDetailVisibleOemPrice } from "./query";
+import { getDetailRealtimeRetailPrice } from "./query";
 import type { ContainerDetail } from "./types";
 
 /**
@@ -18,7 +18,7 @@ export interface RetailPriceSyncRequestFields {
   generateTasks?: boolean;
 }
 
-/** 每次打开编辑 / 批量设价弹窗都回到这组默认值（都开），不持久化。 */
+/** 每次打开编辑弹窗都回到这组默认值（都开），不持久化。 */
 export const DEFAULT_RETAIL_PRICE_SYNC_CHOICE: Readonly<RetailPriceSyncChoice> = Object.freeze({
   syncStoreRetailPrices: true,
   generateTasks: true,
@@ -60,16 +60,11 @@ function isNewProductDetail(detail: ContainerDetail) {
 }
 
 /**
- * 编辑弹窗里零售价是否「会改仓库零售价」：只有已有商品、且填了与当前不同的有效数字时，
- * 才会回写仓库价并联动分店价，这时才需要展示两个开关。新商品的零售价只存货柜明细，不展示。
+ * 编辑弹窗里「已有零售价」是否会改仓库零售价：只有已有商品、且填了与当前仓库价不同的有效数字时，
+ * 才会回写仓库价并联动分店价，这时才需要展示两个开关。「本次零售价」只存货柜明细，不触发开关。
  */
-export function isEditRetailPriceChangeForExistingProduct(detail: ContainerDetail, oemPriceInput: string): boolean {
+export function isEditRetailPriceChangeForExistingProduct(detail: ContainerDetail, warehouseOemPriceInput: string): boolean {
   if (isNewProductDetail(detail)) return false;
-  const next = parseFiniteNumber(oemPriceInput);
-  return next !== undefined && next !== getDetailVisibleOemPrice(detail);
-}
-
-/** 批量设价里是否填了有效的零售价（与提交时「只传填写字段」的口径一致）。 */
-export function isBulkRetailPriceFilled(oemPriceInput: string): boolean {
-  return parseFiniteNumber(oemPriceInput) !== undefined;
+  const next = parseFiniteNumber(warehouseOemPriceInput);
+  return next !== undefined && next !== getDetailRealtimeRetailPrice(detail);
 }

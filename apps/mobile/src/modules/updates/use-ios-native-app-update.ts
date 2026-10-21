@@ -69,10 +69,18 @@ async function openAppStore(url: string) {
   }
 }
 
-export function useIosNativeAppUpdate(options: { enabled: boolean }) {
+export function useIosNativeAppUpdate(options: {
+  enabled: boolean;
+  /**
+   * 设置页「自动更新」开关（默认 true）。false 时仍检查并拦截强制更新，
+   * 但不弹 App Store 可选更新提醒。
+   */
+  autoUpdate?: boolean;
+}) {
   const [snapshot, setSnapshot] = useState<IosNativeUpdateSnapshot>(EMPTY_SNAPSHOT);
   const [checking, setChecking] = useState(false);
   const enabledRef = useRef(options.enabled);
+  const autoUpdateRef = useRef(options.autoUpdate !== false);
   const snapshotRef = useRef(snapshot);
   const contextRef = useRef<IosNativeUpdateContext | null>(null);
   const generationRef = useRef(0);
@@ -98,6 +106,7 @@ export function useIosNativeAppUpdate(options: { enabled: boolean }) {
   const tryShowOptionalPromptRef = useRef<() => void>(() => undefined);
 
   enabledRef.current = options.enabled;
+  autoUpdateRef.current = options.autoUpdate !== false;
   snapshotRef.current = snapshot;
 
   tryShowOptionalPromptRef.current = () => {
@@ -106,6 +115,8 @@ export function useIosNativeAppUpdate(options: { enabled: boolean }) {
       !pending
       || optionalPromptInFlightRef.current
       || !enabledRef.current
+      // 自动更新关闭：可选提醒保持排队但不弹，重新打开开关后补弹；强制更新走拦截页，不经过这里。
+      || !autoUpdateRef.current
       || generationRef.current !== pending.generation
     ) {
       return;
@@ -358,6 +369,17 @@ export function useIosNativeAppUpdate(options: { enabled: boolean }) {
       appUpdateMutualExclusion.releasePrompt("native");
     };
   }, [options.enabled]);
+
+  // 自动更新从关到开：立即重新检查一次，并补弹关闭期间排队的可选提醒。
+  const previousAutoUpdateRef = useRef(options.autoUpdate !== false);
+  useEffect(() => {
+    const enabledNow = options.autoUpdate !== false;
+    const wasEnabled = previousAutoUpdateRef.current;
+    previousAutoUpdateRef.current = enabledNow;
+    if (enabledNow && !wasEnabled && enabledRef.current) {
+      void runServerCheckRef.current();
+    }
+  }, [options.autoUpdate]);
 
   useEffect(() => {
     const unsubscribe = appUpdateMutualExclusion.subscribe(() => {

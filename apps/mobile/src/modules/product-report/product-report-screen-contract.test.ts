@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 const directory = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(directory, "product-report-screen.tsx"), "utf8");
 const hubSource = readFileSync(join(directory, "../reports/reports-hub-screen.tsx"), "utf8");
+const cardPartsSource = readFileSync(join(directory, "product-report-card-parts.tsx"), "utf8");
+const formatSource = readFileSync(join(directory, "product-report-format.ts"), "utf8");
+const rowsSource = readFileSync(join(directory, "product-report-rows.tsx"), "utf8");
+const tableSource = readFileSync(join(directory, "supplier-report-table.tsx"), "utf8");
+const sheetSource = readFileSync(join(directory, "supplier-detail-sheet.tsx"), "utf8");
 
 assert.match(
   source,
@@ -19,8 +24,8 @@ assert.match(
 );
 assert.equal(
   (source.match(/buildProductReportDateQuery\(activeRange, cashierEnabledStoreCodes\)/g) ?? []).length,
-  4,
-  "三表联动的全店数据、供应商与商品分店下钻及完整快照都必须显式限定在全部收银启用分店",
+  3,
+  "三表联动的全店数据、商品分店下钻及完整快照都必须显式限定在全部收银启用分店（供应商弹窗的全店范围由 allBranchQueryParams 传入）",
 );
 assert.match(
   source,
@@ -115,11 +120,13 @@ assert.match(pickerSource, /options\.map/);
 assert.match(pickerSource, /style=\{styles\.storeModalList\}/);
 assert.match(pickerSource, /contentContainerStyle=\{styles\.storeModalListContent\}/);
 
-assert.match(source, /function formatNullableMoney\(value: number \| null\)/);
-assert.match(source, /function formatGrossMarginRate\([\s\S]*?costStatus: ProductReportCostStatus[\s\S]*?costPendingLabel: string/);
-assert.match(source, /\(value \* 100\)\.toFixed\(1\)/, "毛利率 0.4 必须显示为 40.0%，不能显示成 0.4%");
+assert.match(formatSource, /export function formatNullableMoney\(value: number \| null\)/);
+assert.match(formatSource, /export function formatGrossMarginRate\([\s\S]*?costStatus: ProductReportCostStatus[\s\S]*?costPendingLabel: string/);
+assert.match(formatSource, /\(value \* 100\)\.toFixed\(1\)/, "毛利率 0.4 必须显示为 40.0%，不能显示成 0.4%");
+assert.match(source, /product-report-format"/, "主页面必须使用共享格式化函数，不得再各写一份");
+assert.match(sheetSource, /product-report-rows"/, "供应商弹窗必须使用与主页面同一套商品卡与分店行");
 assert.match(source, /productReport\.states\.costPending/);
-assert.match(source, /styles\.rowNumberColumn/);
+assert.match(rowsSource, /styles\.rowNumberColumn/);
 assert.match(source, /rowNumber: \(supplierPage - 1\) \* supplierPageSize \+ index \+ 1/);
 assert.match(
   source,
@@ -130,9 +137,8 @@ assert.match(source, /grossProfit/);
 assert.match(source, /grossMarginRate/);
 assert.match(source, /costStatus/);
 assert.match(source, /compareCostStatus/);
-assert.match(source, /showsHorizontalScrollIndicator>/, "宽表必须显示水平滚动提示，让毛利字段可发现");
 assert.match(source, /reports\.metrics\.current[\s\S]*?productReport\.metrics\.compare/, "双行数值必须明确标注本期与同期");
-assert.match(source, /accessibilityRole="button"[\s\S]*?productReport\.drilldown\.product/, "商品行必须明确提供可点击的分店下钻入口");
+assert.match(rowsSource, /accessibilityRole="button"[\s\S]*?productReport\.drilldown\.product/, "商品行必须明确提供可点击的分店下钻入口");
 assert.match(source, /new ReportLoadPerformanceTimer\(\)/, "商品报告必须计量首数据耗时");
 assert.match(
   source,
@@ -169,7 +175,7 @@ const productQueryStart = source.indexOf("const productQuery =", totalRevenueSta
 const mainReportPendingStart = source.indexOf("const mainReportStatisticsPending =", productQueryStart);
 const mainReportIncompleteStart = source.indexOf("const mainReportStatisticsIncomplete =", mainReportPendingStart);
 const productRowStart = source.indexOf("const renderProductRow =");
-const reportContentStart = source.indexOf("{!dateRangeValid ? (", productRowStart);
+const reportContentStart = source.indexOf("{!dateRangeValid ? (\n          <View style={styles.stateBox}>", productRowStart);
 assert.ok(totalRevenueStateStart >= 0 && productQueryStart > totalRevenueStateStart, "必须定义总额统计状态");
 assert.ok(
   mainReportPendingStart > productQueryStart && mainReportIncompleteStart > mainReportPendingStart,
@@ -205,6 +211,16 @@ assert.match(
   "首次无可展示的完整结果时，主表轮询耗尽才显示重试",
 );
 assert.match(
+  source.slice(reportContentStart),
+  /mainReportStatisticsIncomplete && !mainReportHasDisplay \? \([\s\S]*?<ErrorState[\s\S]*?mainReportStatisticsFailed[\s\S]*?reports\.states\.statisticsFailed[\s\S]*?reports\.states\.statisticsIncomplete/,
+  "后端明确返回统计更新失败时，要显示失败文案而不是「补算尚未完成，请重试」",
+);
+assert.match(
+  source,
+  /const mainReportStatisticsFailed =[\s\S]*?totalRevenueQuery\.data\?\.statisticStatus === "Failed"[\s\S]*?supplierQuery\.data\?\.statisticStatus === "Failed"[\s\S]*?productQuery\.data\?\.statisticStatus === "Failed"/,
+  "失败判定要覆盖总额、供应商排行、商品明细等主表请求",
+);
+assert.match(
   source,
   /const mainReportHasDisplay = mainReportHasSnapshot \|\| linkedTransition !== null;/,
   "只有同条件快照或同一份报告内的联动过渡才算可展示结果",
@@ -222,12 +238,12 @@ assert.match(
 assert.match(
   source,
   /isDrilldownLoading[\s\S]*?\.data\.isComplete[\s\S]*?isDrilldownStatisticsIncomplete[\s\S]*?\.data\.pollingExhausted/,
-  "供应商和商品下钻必须识别非 Fresh 追数与耗尽状态",
+  "商品下钻必须识别非 Fresh 追数与耗尽状态",
 );
 assert.match(
   source,
-  /supplierRows=\{displayedSupplierBranchRows\}[\s\S]*?productRows=\{displayedProductBranchRows\}/,
-  "下钻行数据必须来自同条件完整快照，非 Fresh 不得渲染为空业务表",
+  /productRows=\{displayedProductBranchRows\}/,
+  "商品下钻行数据必须来自同条件完整快照，非 Fresh 不得渲染为空业务表",
 );
 assert.doesNotMatch(
   productRowSource,
@@ -280,9 +296,14 @@ assert.match(
   "商品首屏请求必须接收并透传 React Query 取消信号",
 );
 assert.match(
-  source,
-  /fetchSupplierBranchBreakdown\([\s\S]*?supplier\.supplierCode,[\s\S]*?\{ signal \},[\s\S]*?\)/,
-  "供应商下钻请求必须接收并透传 React Query 取消信号",
+  sheetSource,
+  /fetchSupplierBranchBreakdown\(kind, queryParams!, supplierCode, \{ signal \}\)/,
+  "供应商弹窗的分店数据请求必须接收并透传 React Query 取消信号",
+);
+assert.match(
+  sheetSource,
+  /fetchProductReportProductRows\([\s\S]*?\{ signal \},[\s\S]*?\)[\s\S]*?fetchProductBranchBreakdown\(queryParams!, activeProduct!\.productCode, \{ signal \}\)/,
+  "供应商弹窗的商品明细与商品分店请求必须透传取消信号",
 );
 assert.match(
   source,
@@ -292,8 +313,8 @@ assert.match(
 assert.match(source, /recordReportLoadPerformance\("product", measurement\)/, "商品报告必须记录 2 秒预算结果");
 assert.match(
   source,
-  /recordReportLoadPerformance\(\s*drilldownLoadKindRef\.current === "supplier" \? "supplier-branches" : "product-branches",\s*measurement,?\s*\)/,
-  "供应商和商品分店下钻必须分别记录首行可见耗时",
+  /recordReportLoadPerformance\("product-branches", measurement\)/,
+  "商品分店下钻必须记录首行可见耗时",
 );
 assert.match(
   source,
@@ -314,11 +335,6 @@ assert.match(
   source,
   /hasUsableSuccessfulReportCache\(\s*queryClient\.getQueryState\(totalRevenueQueryKey\)\?\.status[\s\S]*?hasUsableSuccessfulReportCache\(\s*queryClient\.getQueryState\(supplierQueryKey\)\?\.status[\s\S]*?hasUsableSuccessfulReportCache\(\s*queryClient\.getQueryState\(productQueryKey\)\?\.status/,
   "商品主报表三个缓存都必须处于 success 状态才能按 warm 预算统计",
-);
-assert.match(
-  source,
-  /hasUsableSuccessfulReportCache\([\s\S]*?queryClient\.getQueryState\(supplierBranchQueryKey\)\?\.status[\s\S]*?cachedSupplierBranches/,
-  "供应商下钻必须排除 error 缓存的 warm 分类",
 );
 assert.match(
   source,
@@ -352,8 +368,13 @@ assert.match(
 );
 assert.match(
   source,
-  /supplierPageRows\.map\(\(item, index\) => \([\s\S]*?ref=\{index === 0 \? firstSupplierReportRowRef : undefined\}[\s\S]*?onLayout=\{index === 0 \? scheduleProductDataVisibilityCheck : undefined\}/,
+  /<SupplierReportTable[\s\S]*?firstRowRef=\{firstSupplierReportRowRef\}[\s\S]*?onFirstRowLayout=\{scheduleProductDataVisibilityCheck\}/,
   "第一条供应商业务行布局或进入视口后必须触发真实可见性复测",
+);
+assert.match(
+  tableSource,
+  /ref=\{index === 0 \? firstRowRef : undefined\}[\s\S]*?onLayout=\{index === 0 \? onFirstRowLayout : undefined\}/,
+  "供应商表必须把第一行（固定列里的行）暴露给首数据可见性计时",
 );
 assert.match(
   source,
@@ -368,19 +389,18 @@ assert.match(
 assert.match(source, /onScroll=\{markProductDataVisible\}/, "滚动后必须重新核对首数据是否真实进入视口");
 assert.doesNotMatch(source, /firstProductReportRowLaidOutRef/, "性能计时不得继续使用仅布局未可见的旧标记");
 assert.match(source, /productReport\.sections\.pageSummary/, "商品页必须在明细前展示本页营业额、毛利额和毛利率汇总");
+assert.match(rowsSource, /rowNumberColumn:\s*\{\s*width: 24,/, "分店下钻的名次徽标列固定 24pt，不挤占名称与金额");
+assert.match(rowsSource, /productImageColumn:\s*\{\s*width: 62,\s*height: 62,/, "商品卡左侧图片固定 62×62，名次角标叠在图片左上角");
 assert.match(
-  source,
-  /productTableRow:\s*\{[\s\S]*?gap: 3,[\s\S]*?paddingHorizontal: 4,[\s\S]*?\}/,
-  "375px 窄屏必须完整容纳商品核心毛利列",
+  cardPartsSource,
+  /gridCell:\s*\{\s*flex: 1,\s*minWidth: 0,/,
+  "数量 / 均价 / 毛利额 / 毛利率四格等分卡片宽度，375px 窄屏也能并排完整显示毛利字段",
 );
 assert.match(
-  source,
-  /supplierTableRow:\s*\{[\s\S]*?gap: 3,[\s\S]*?paddingHorizontal: 4,[\s\S]*?\}/,
-  "375px 窄屏必须完整容纳供应商核心毛利列",
+  cardPartsSource,
+  /numberOfLines=\{1\}\s*adjustsFontSizeToFit/,
+  "指标格数值单行显示，放大字体或长英文时按比例缩小而不是截断",
 );
-assert.match(source, /rowNumberColumn:\s*\{\s*width: 24,/, "行号列不能挤占核心毛利字段空间");
-assert.match(source, /productInfoColumn:\s*\{[\s\S]*?width: 80,/, "商品名称列需为毛利率保留首屏空间");
-assert.match(source, /supplierNameColumn:\s*\{\s*width: 80,/, "供应商名称列需为毛利率保留首屏空间");
 assert.match(source, /formatWholeMoney\(item\.revenue\)/, "供应商高密度排行必须用整元金额，避免大额数值被下钻箭头截断");
 
 const supplierTitleStart = source.indexOf("function getSupplierTitle(");
@@ -402,179 +422,267 @@ assert.match(
   "供应商名称回退成代码时，副行必须留空避免上下重复显示同一串代码",
 );
 
-const supplierHeaderStart = source.indexOf("function SupplierTableHeader(");
-const productHeaderStart = source.indexOf("function ProductTableHeader(");
-assert.ok(supplierHeaderStart >= 0 && productHeaderStart > supplierHeaderStart, "供应商表头必须存在");
-const supplierHeader = source.slice(supplierHeaderStart, productHeaderStart);
-const productHeaderEnd = source.indexOf("function LoadingState(", productHeaderStart);
-const productHeader = source.slice(productHeaderStart, productHeaderEnd);
-assert.match(supplierHeader, /productReport\.metrics\.grossProfit/);
-assert.match(supplierHeader, /productReport\.metrics\.grossMarginRate/);
-assert.equal(
-  (supplierHeader.match(/productReport\.metrics\.growthRate/g) ?? []).length,
-  1,
-  "供应商增长列只能保留一列"
-);
-
-const supplierRowStart = source.indexOf("const renderSupplierRow =");
-const productPageTotalStart = source.indexOf("const renderChinaProductPageTotalRow =", productRowStart);
+const supplierRowStart = source.indexOf("const buildSupplierTableRow =");
+const productPageTotalStart = source.indexOf("const renderChinaProductPageTotalCard =", productRowStart);
 const mainReportReturnStart = source.indexOf("\n  return (\n    <View style={styles.container}>", productRowStart);
+const sectionHeaderStart = source.indexOf("function SectionHeader(", mainReportReturnStart);
 const drilldownStart = source.indexOf("function BranchDrilldownModal(");
-const supplierBranchRowStart = source.indexOf("function SupplierBranchRow(", drilldownStart);
-const productBranchRowStart = source.indexOf("function ProductBranchRow(", supplierBranchRowStart);
-const productBranchRowEnd = source.indexOf("const styles = StyleSheet.create(", productBranchRowStart);
-assert.ok(supplierRowStart >= 0 && productRowStart > supplierRowStart, "必须能够隔离供应商与商品主表行");
-assert.ok(productPageTotalStart > productRowStart && mainReportReturnStart > productPageTotalStart, "必须能够隔离商品主表行与中国本页合计");
-assert.ok(productHeaderEnd > productHeaderStart, "商品表头必须存在");
-assert.ok(drilldownStart >= 0 && supplierBranchRowStart > drilldownStart, "分店下钻表头必须存在");
-assert.ok(productBranchRowStart > supplierBranchRowStart, "供应商分店行必须存在");
-assert.ok(productBranchRowEnd > productBranchRowStart, "商品分店行必须存在");
-
-assertSourceOrder(
-  supplierHeader,
-  [
-    "styles.chinaSupplierAmountColumn",
-    "styles.chinaQuantityColumn",
-    "styles.chinaShareColumn",
-    "styles.chinaShareColumn",
-    "styles.chinaAverageColumn",
-    "styles.grossProfitColumn",
-    "styles.grossMarginColumn",
-    "styles.chinaGrowthColumn",
-  ],
-  "澳洲与中国供应商表头必须使用相同的中国页签列顺序",
-);
+const drilldownEnd = source.indexOf("function DrilldownRowHead(", drilldownStart) >= 0
+  ? source.indexOf("function DrilldownRowHead(", drilldownStart)
+  : source.indexOf("const styles = StyleSheet.create(", drilldownStart);
+assert.ok(supplierRowStart >= 0 && productRowStart > supplierRowStart, "必须能够隔离供应商表行模型与商品卡");
+assert.ok(productPageTotalStart > productRowStart && mainReportReturnStart > productPageTotalStart, "必须能够隔离商品卡与中国本页合计卡");
+assert.ok(sectionHeaderStart > mainReportReturnStart, "必须能够隔离主报表渲染");
+assert.ok(drilldownStart >= 0 && drilldownEnd > drilldownStart, "商品分店下钻抽屉必须存在");
 const supplierRowSource = source.slice(supplierRowStart, productRowStart);
+const productMainRowSource = source.slice(productRowStart, productPageTotalStart);
+const pageTotalSource = source.slice(productPageTotalStart, mainReportReturnStart);
+const mainReturnSource = source.slice(mainReportReturnStart, sectionHeaderStart);
+const drilldownSource = source.slice(drilldownStart, drilldownEnd);
+// 共用行组件：商品卡、供应商分店行、商品分店行都在 product-report-rows.tsx，主页面与供应商弹窗用同一份。
+const productCardStart = rowsSource.indexOf("export function ProductReportCard(");
+const supplierBranchRowStart = rowsSource.indexOf("export function SupplierBranchRow(");
+const productBranchRowStart = rowsSource.indexOf("export function ProductBranchRow(");
+const rowsStylesStart = rowsSource.indexOf("const styles = StyleSheet.create(");
+assert.ok(productCardStart >= 0 && supplierBranchRowStart > productCardStart, "必须能够隔离商品卡与供应商分店行");
+assert.ok(productBranchRowStart > supplierBranchRowStart && rowsStylesStart > productBranchRowStart, "必须能够隔离商品分店行");
+const productCardSource = rowsSource.slice(productCardStart, rowsSource.indexOf("export function DrilldownRowHead(", productCardStart));
+const supplierBranchRowSource = rowsSource.slice(supplierBranchRowStart, productBranchRowStart);
+const productBranchRowSource = rowsSource.slice(productBranchRowStart, rowsStylesStart);
+
+/** 同期值必须经过 compareText（澳洲页签 / 澳洲下钻返回 null）；增长率胶囊只用同期金额计算，不显示数值。 */
+function assertCompareValuesGated(scope: string, rowVariable: string, growthCompareField: string, message: string) {
+  const compareReads = scope
+    .split("\n")
+    .filter((line) => line.includes(`${rowVariable}.compare`))
+    .filter((line) => !line.includes(`compare={${rowVariable}.${growthCompareField}}`));
+  assert.ok(compareReads.length > 0, `${message}：必须保留同期字段`);
+  compareReads.forEach((line) => assert.ok(line.includes("compareText("), `${message}：${line.trim()}`));
+}
+
+// —— 供应商紧凑表（澳洲与中国共用）：行模型 ——
+assert.match(supplierRowSource, /productReport\.sheet\.openA11y/, "供应商行必须说明点按会弹出商品明细 / 分店数据选择");
+assert.match(supplierRowSource, /productReport\.metrics\.grossProfit|formatNullableWholeMoney\(item\.grossProfit\)/, "供应商表必须显示毛利额");
+assert.match(supplierRowSource, /formatGrossMarginRate\(item\.grossMarginRate/, "供应商表必须显示毛利率");
+assert.equal(
+  (supplierRowSource.match(/<GrowthPill /g) ?? []).length,
+  1,
+  "供应商表增长率只保留一处（金额右侧的胶囊列）",
+);
 assertSourceOrder(
   supplierRowSource,
   [
-    "styles.chinaSupplierAmountColumn",
-    "styles.chinaQuantityColumn",
-    "styles.chinaShareColumn",
-    "styles.chinaShareColumn",
-    "styles.chinaAverageColumn",
-    "styles.grossProfitColumn",
-    "styles.grossMarginColumn",
-    "styles.chinaGrowthColumn",
+    "formatWholeMoney(item.revenue)",
+    "formatCount(item.totalQuantity)",
+    "formatShare(item.revenue, categoryRevenue)",
+    "formatNullableMoney(item.averagePrice)",
+    "formatNullableWholeMoney(item.grossProfit)",
+    "formatGrossMarginRate(item.grossMarginRate",
+    "formatShare(item.revenue, supplierScopeRevenue.revenue)",
+    '<GrowthPill size="sm" fitText current={item.revenue} compare={item.compareRevenue}',
   ],
-  "澳洲与中国供应商行必须与统一表头保持相同列顺序",
+  "澳洲与中国供应商行必须给出 金额、数量、占比、均价、毛利额、毛利率、总占比，并带增长率胶囊",
 );
-assert.match(supplierRowSource, /const showComparison = isChinaKind;/, "澳洲供应商主表不得显示同期列组");
-assert.match(supplierHeader, /\{showComparison \? \([\s\S]*?productReport\.metrics\.compare[\s\S]*?\) : null\}/, "供应商同期表头只能按页签条件显示");
+assert.match(supplierRowSource, /const showComparison = isChinaKind;/, "澳洲供应商表不得显示同期值");
+assert.match(
+  supplierRowSource,
+  /const compareText = \(value: string\) => \(showComparison \? value : null\);/,
+  "供应商表的同期值统一由页签条件控制",
+);
+[
+  "formatWholeMoney(item.compareRevenue)",
+  "formatShare(item.compareRevenue, categoryCompareRevenue)",
+  "formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)",
+  "formatCount(item.compareTotalQuantity)",
+  "formatNullableMoney(item.compareAveragePrice)",
+  "formatNullableWholeMoney(item.compareGrossProfit)",
+  "formatGrossMarginRate(item.compareGrossMarginRate, item.compareCostStatus",
+].forEach((marker) => assert.ok(supplierRowSource.includes(marker), `中国供应商表不得少显示同期字段：${marker}`));
+assertCompareValuesGated(supplierRowSource, "item", "compareRevenue", "供应商表同期值只能在中国页签显示");
+assert.match(
+  supplierRowSource,
+  /onPress: \(\) => setSheetSupplier\(item\)/,
+  "点供应商行（名称、金额或任一指标）都打开选择弹窗",
+);
+assert.match(
+  supplierRowSource,
+  /shouldShowSupplierCode\(item\) \? item\.supplierCode : ""/,
+  "供应商名称回退成代码时，编号行必须留空避免上下重复显示同一串代码",
+);
 
-const productColumnOrder = [
-  "styles.productImageColumn",
-  "infoWidth",
-  "styles.chinaQuantityColumn",
-  "styles.chinaProductAmountColumn",
-  "styles.chinaAverageColumn",
-  "styles.grossProfitColumn",
-  "styles.grossMarginColumn",
-  "styles.chinaGrowthColumn",
-];
+// —— 供应商紧凑表：布局与交互（左列固定，右侧整体横滑）——
+assert.match(tableSource, /export const SUPPLIER_TABLE_FROZEN_WIDTH = 112;/, "供应商表固定列宽 112pt，给右侧首屏四列留够空间");
 assertSourceOrder(
-  productHeader,
-  productColumnOrder,
-  "澳洲与中国商品表头必须使用相同的中国页签列顺序",
+  tableSource,
+  [
+    'key: "revenue"',
+    'key: "quantity"',
+    'key: "growth"',
+    'key: "share"',
+    'key: "averagePrice"',
+    'key: "grossProfit"',
+    'key: "grossMargin"',
+    'key: "totalShare"',
+  ],
+  "供应商表列顺序：首屏 金额、数量、增长率、占比，左滑后 均价、毛利额、毛利率、总占比",
 );
-const productMainRowSource = source.slice(productRowStart, productPageTotalStart);
+assert.equal((tableSource.match(/<ScrollView/g) ?? []).length, 1, "整张表右侧只有一个横向滚动容器，所有行同步横滑");
+assert.match(tableSource, /<ScrollView\s+horizontal/, "右侧指标列放在横向 ScrollView 里");
+assert.match(tableSource, /sortField: "amount"[\s\S]*?sortField: "quantity"[\s\S]*?sortField: "unitPrice"/, "表头可按金额 / 数量 / 均价排序，与原排序字段一致");
+assert.match(tableSource, /onPress=\{\(\) => onSort\(column\.sortField!\)\}/, "表头点按交给 toggleReportSort 切换排序");
+assert.match(tableSource, /alwaysShowCode=\{isChina\}/, "中国页签名称下方固定显示供应商编号，澳洲页签仅在名称一行时显示");
+assert.match(tableSource, /ROW_HEIGHT_WITH_COMPARE/, "中国页签每格多一行同期小字，行高单独定义");
+assert.match(tableSource, /rowSelected|selectedAccent/, "已联动的供应商行必须保留紫色选中态");
+assert.match(
+  mainReturnSource,
+  /<SupplierReportTable[\s\S]*?sort=\{supplierSort\}[\s\S]*?onSort=\{applySupplierSort\}/,
+  "供应商表头排序沿用 applySupplierSort",
+);
+assert.match(
+  mainReturnSource,
+  /<PageSizePicker[\s\S]*?options=\{SUPPLIER_PAGE_SIZE_OPTIONS\}[\s\S]*?setSupplierPageSize\(size\); setSupplierPage\(1\)/,
+  "每页条数挪到供应商表底部，切换后仍回到第 1 页",
+);
+
+// —— 商品卡（澳洲与中国共用，主页面与供应商弹窗是同一个组件，只显示本期）——
 assertSourceOrder(
-  productMainRowSource,
+  productCardSource,
   [
     "styles.productImageColumn",
-    "productInfoWidth",
-    "styles.chinaQuantityColumn",
-    "styles.chinaProductAmountColumn",
-    "styles.chinaAverageColumn",
-    "styles.grossProfitColumn",
-    "styles.grossMarginColumn",
-    "styles.chinaGrowthColumn",
+    "styles.rankBadge",
+    "item.itemNumber",
+    "item.productName",
+    "formatWholeMoney(item.salesAmount)",
+    "formatCount(item.quantity)",
+    "formatMoney(item.averageUnitPrice)",
+    "formatNullableWholeMoney(item.grossProfit)",
+    "formatGrossMarginRate(item.grossMarginRate",
   ],
-  "澳洲与中国商品行必须与统一表头保持相同列顺序",
+  "澳洲与中国商品卡必须依次显示图片与名次、货号、名称、金额、数量、均价、毛利额、毛利率",
 );
-assert.doesNotMatch(productHeader, /productReport\.metrics\.compare|chinaCompare/, "两个商品明细表头都不得显示同期列");
+assert.match(
+  productCardSource,
+  /<GrowthPill current=\{item\.salesAmount\} compare=\{item\.compareSalesAmount\}/,
+  "商品卡必须显示增长率胶囊",
+);
 assert.doesNotMatch(
-  productMainRowSource,
-  /item\.compareQuantity|item\.compareAverageUnitPrice|item\.compareGrossProfit|item\.compareGrossMarginRate|styles\.chinaCompare/,
-  "两个商品明细行都不得显示同期数值；同期金额只允许用于计算增长率",
+  productCardSource,
+  /item\.compareQuantity|item\.compareAverageUnitPrice|item\.compareGrossProfit|item\.compareGrossMarginRate|compareText/,
+  "两个商品明细卡都不得显示同期数值；同期金额只允许用于计算增长率",
 );
+assert.equal(
+  (productCardSource.match(/item\.compareSalesAmount/g) ?? []).length,
+  1,
+  "商品卡的同期金额只能出现在增长率胶囊的计算参数里",
+);
+assert.match(productMainRowSource, /<ProductReportCard/, "主页面商品明细使用共用商品卡组件");
 
-const drilldownHeader = source.slice(drilldownStart, supplierBranchRowStart);
-const productBranchHeaderStart = drilldownHeader.indexOf('{kind === "product" ? (', drilldownHeader.indexOf("styles.tableHeaderRow"));
-const supplierBranchHeaderStart = drilldownHeader.indexOf(") : (", productBranchHeaderStart);
-const drilldownHeaderEnd = drilldownHeader.indexOf('{kind === "supplier"', supplierBranchHeaderStart);
-assert.ok(productBranchHeaderStart >= 0 && supplierBranchHeaderStart > productBranchHeaderStart, "必须能够隔离商品分店表头");
-assert.ok(drilldownHeaderEnd > supplierBranchHeaderStart, "必须能够隔离供应商分店表头");
+// —— 中国本页合计卡 ——
 assertSourceOrder(
-  drilldownHeader.slice(productBranchHeaderStart, supplierBranchHeaderStart),
-  ["styles.productBranchCountColumn", "styles.productBranchMoneyColumn", "styles.productBranchAverageColumn", "styles.productBranchGrowthColumn", "styles.grossProfitColumn", "styles.grossMarginColumn"],
-  "商品分店表毛利列必须位于所有经营字段之后",
+  pageTotalSource,
+  [
+    "productReport.chinaGoods.pageTotal",
+    "productReport.pageSummaryCaption",
+    "formatWholeMoney(totals.salesAmount)",
+    "<GrowthPill current={totals.salesAmount} compare={totals.compareSalesAmount}",
+    "formatCount(totals.quantity)",
+    "formatNullableMoney(totals.averageUnitPrice)",
+    "formatNullableWholeMoney(totals.grossProfit)",
+    "formatGrossMarginRate(totals.grossMarginRate",
+  ],
+  "中国商品本页合计必须与商品卡保持相同的本期字段顺序",
 );
-assertSourceOrder(
-  drilldownHeader.slice(supplierBranchHeaderStart, drilldownHeaderEnd),
-  ["styles.chinaSupplierAmountColumn", "styles.chinaQuantityColumn", "styles.chinaAverageColumn", "styles.grossProfitColumn", "styles.grossMarginColumn", "styles.chinaGrowthColumn"],
-  "澳洲与中国供应商分店表头必须使用相同的中国页签列顺序",
+assert.doesNotMatch(pageTotalSource, /compareText|totals\.compare(?!SalesAmount)/, "中国商品本页合计不得显示同期值");
+
+// —— 商品分店下钻底部抽屉（页面商品卡点开）——
+assert.match(
+  drilldownSource,
+  /useSortChipFields\(PRODUCT_SORT_FIELDS\)[\s\S]*?<SortChips fields=\{sortChipFields\} sort=\{sort\} onSort=\{onSortChange\} \/>/,
+  "分店下钻的排序是与主表相同的排序芯片，字段不变",
 );
-const supplierBranchRowSource = source.slice(supplierBranchRowStart, productBranchRowStart);
+assert.match(
+  drilldownSource,
+  /isLoading \? \([\s\S]*?<LoadingState[\s\S]*?isError \? \([\s\S]*?<ErrorState[\s\S]*?rows\.length === 0 \? \([\s\S]*?<EmptyState label=\{emptyLabel\} \/>/,
+  "分店下钻必须保留加载、失败与空态",
+);
+assert.match(drilldownSource, /\{snapshotNotice \? </, "分店下钻必须保留快照提示");
+assert.match(
+  drilldownSource,
+  /sortedProductRows\.map\(\(row, index\) => \([\s\S]*?rowRef=\{index === 0 \? firstRowRef : undefined\}/,
+  "商品分店下钻的第一张卡片行必须挂 firstRowRef 供首行可见计时",
+);
 assertSourceOrder(
   supplierBranchRowSource,
-  ["styles.chinaSupplierAmountColumn", "styles.chinaQuantityColumn", "styles.chinaAverageColumn", "styles.grossProfitColumn", "styles.grossMarginColumn", "styles.chinaGrowthColumn"],
-  "澳洲与中国供应商分店行必须与统一表头保持相同列顺序",
+  [
+    "current={row.revenue}",
+    "compare={row.compareRevenue}",
+    "formatWholeMoney(row.revenue)",
+    "formatCount(row.totalQuantity)",
+    "formatNullableMoney(row.averagePrice)",
+    "formatNullableWholeMoney(row.grossProfit)",
+    "formatGrossMarginRate(row.grossMarginRate",
+  ],
+  "澳洲与中国供应商分店卡片行必须依次显示增长率、金额、数量、均价、毛利额、毛利率",
 );
 assert.match(
-  source,
-  /showComparison=\{drilldown\?\.type === "supplier" && drilldown\.kind === "china"\}/,
-  "供应商分店同期列只能在中国供应商下钻中显示",
+  supplierBranchRowSource,
+  /const compareText = \(value: string\) => \(showComparison \? value : null\);/,
+  "供应商分店同期值必须受同一 showComparison 条件控制",
 );
-assert.match(supplierBranchRowSource, /\{showComparison \? \([\s\S]*?styles\.chinaCompareAmountColumn/, "供应商分店同期值必须受同一条件控制");
+assertCompareValuesGated(supplierBranchRowSource, "row", "compareRevenue", "供应商分店同期值只能在中国下钻显示");
 assertSourceOrder(
-  source.slice(productBranchRowStart, productBranchRowEnd),
-  ["styles.productBranchAverageColumn", "renderGrowthCell", "renderGrossProfitCell", "renderGrossMarginCell"],
-  "商品分店行必须与表头保持相同列顺序",
+  productBranchRowSource,
+  [
+    "current={row.salesAmount}",
+    "compare={row.compareSalesAmount}",
+    "formatCount(row.quantity)",
+    "formatWholeMoney(row.salesAmount)",
+    "formatMoney(row.averageUnitPrice)",
+    "formatNullableWholeMoney(row.grossProfit)",
+    "formatGrossMarginRate(row.grossMarginRate",
+  ],
+  "商品分店卡片行必须依次显示增长率、数量、金额、均价、毛利额、毛利率",
+);
+[
+  "formatCount(row.compareQuantity)",
+  "formatWholeMoney(row.compareSalesAmount)",
+  "formatMoney(row.compareAverageUnitPrice)",
+  "formatNullableWholeMoney(row.compareGrossProfit)",
+  "formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus",
+].forEach((marker) => assert.ok(productBranchRowSource.includes(marker), `商品分店原有的同期小字不得减少：${marker}`));
+
+// —— 供应商弹窗：先选「商品明细 / 分店数据」，两处都能继续下钻 ——
+assert.match(source, /<SupplierDetailSheet[\s\S]*?queryParams=\{allBranchQueryParams\}[\s\S]*?onLinkFilter=\{toggleLinkedSupplier\}/, "弹窗看的是全部授权分店，并保留「只联动筛选页面」入口");
+assert.match(sheetSource, /\| \{ name: "choose" \}[\s\S]*?\| \{ name: "products" \}[\s\S]*?\| \{ name: "branches" \}[\s\S]*?\| \{ name: "productBranches"[\s\S]*?\| \{ name: "branchProducts"/, "弹窗五个视图：选择、商品明细、分店数据、商品的分店数据、分店的商品明细");
+assert.match(sheetSource, /const goBack = \(\) => setStack\(\(current\) => \(current\.length > 1 \? current\.slice\(0, -1\) : current\)\);/, "下钻后左上角返回弹出视图栈，回到真正的上一层（分店 → 商品 → 商品分店 返回到分店商品）");
+assert.match(sheetSource, /onPress=\{\(\) => pushView\(\{ name: "productBranches", product: item \}\)\}/, "商品明细里点商品看该商品各分店的销售");
+assert.match(sheetSource, /pushView\(\{ name: "branchProducts", branchCode: row\.branchCode, branchName: row\.branchName \}\)/, "分店数据里点分店看该分店的商品明细");
+assert.match(sheetSource, /\{ \.\.\.queryParams, branchCodes: \[activeBranch\.branchCode\] \}/, "分店的商品明细只把分店范围收窄到所点的那一家");
+assert.match(sheetSource, /onLinkFilter\(supplierCode\);\s*onClose\(\);/, "选择弹窗保留「只在页面里联动筛选」入口");
+assert.match(sheetSource, /placeholderData: keepPreviousData/, "商品明细翻页、换排序时保留上一页占位，避免整块闪空");
+assert.match(sheetSource, /snapshot\.statisticStatus === "Failed" \? "failed" : "incomplete"/, "弹窗里的统计未完成要区分后端「更新失败」与补算未完成");
+assert.match(sheetSource, /SUPPLIER_BRANCH_SORT_VALUES[\s\S]*?PRODUCT_BRANCH_SORT_VALUES/, "弹窗里的分店数据在前端按金额 / 数量 / 均价排序");
+
+// —— 排序（主表）——
+assert.match(
+  mainReturnSource,
+  /sortFields=\{PRODUCT_SORT_FIELDS\}\s*sort=\{productSort\}\s*onSort=\{applyProductSort\}/,
+  "商品明细排序芯片沿用 applyProductSort（后端排序）",
+);
+assert.match(
+  cardPartsSource,
+  /onPress=\{\(\) => onSort\(field\)\}[\s\S]*?descending \? "▼" : "▲"/,
+  "排序芯片点按交给 toggleReportSort 切换，当前字段显示 ▼ / ▲",
 );
 
-assert.match(source, /function FrozenHorizontalTable\(/, "宽表必须共用固定列横向滚动容器");
-assert.match(
+// —— 页面纵向仍是单一滚动：只有供应商表内部的指标列横向滑动 ——
+assert.doesNotMatch(
   source,
-  /<Animated\.ScrollView[\s\S]*?horizontal[\s\S]*?Animated\.event\([\s\S]*?useNativeDriver: true/,
-  "固定列必须由原生横向滚动事件驱动",
+  /FrozenHorizontalTable|FrozenLeadingColumns|TableHeaderGroup|SupplierTableHeader|ProductTableHeader|Animated\.ScrollView|tableViewportWidth|sectionScreenHeight|styles\.china[A-Z]\w*Column/,
+  "主页面不得残留旧的横向宽表、固定列或嵌套固定高度列表（横滑只在 supplier-report-table.tsx 内部）",
 );
-assert.match(source, /function FrozenLeadingColumns\([\s\S]*?translateX: scrollX/, "固定列必须反向补偿横向位移");
-assert.match(
-  source.slice(supplierRowStart, productRowStart),
-  /<FrozenLeadingColumns[\s\S]*?styles\.rowNumberColumn[\s\S]*?supplierNameWidth[\s\S]*?<\/FrozenLeadingColumns>/,
-  "供应商主表必须固定行号和供应商列",
-);
-assert.match(
-  productMainRowSource,
-  /<FrozenLeadingColumns[\s\S]*?styles\.productImageColumn[\s\S]*?productInfoWidth[\s\S]*?<\/FrozenLeadingColumns>/,
-  "商品主表必须固定带排名的图片与货号名称列",
-);
-assert.match(
-  supplierHeader,
-  /<FrozenLeadingColumns[\s\S]*?styles\.rowNumberColumn[\s\S]*?nameWidth[\s\S]*?<\/FrozenLeadingColumns>/,
-  "供应商表头必须与固定列对齐",
-);
-assert.match(
-  productHeader,
-  /<FrozenLeadingColumns[\s\S]*?styles\.productImageColumn[\s\S]*?infoWidth[\s\S]*?<\/FrozenLeadingColumns>/,
-  "商品表头必须固定图片与货号名称列",
-);
-assert.match(
-  drilldownHeader,
-  /<FrozenLeadingColumns[\s\S]*?styles\.rowNumberColumn[\s\S]*?productBranchNameColumn[\s\S]*?branchColumn[\s\S]*?<\/FrozenLeadingColumns>/,
-  "分店下钻表头必须按表型固定行号和分店列",
-);
-assert.match(
-  source.slice(supplierBranchRowStart, productBranchRowStart),
-  /<FrozenLeadingColumns[\s\S]*?styles\.rowNumberColumn[\s\S]*?styles\.branchColumn[\s\S]*?<\/FrozenLeadingColumns>/,
-  "供应商分店表必须固定行号和分店列",
-);
-assert.match(
-  source.slice(productBranchRowStart, productBranchRowEnd),
-  /<FrozenLeadingColumns[\s\S]*?styles\.rowNumberColumn[\s\S]*?styles\.productBranchNameColumn[\s\S]*?<\/FrozenLeadingColumns>/,
-  "商品分店表必须固定行号和分店列",
-);
+assert.equal((mainReturnSource.match(/<ScrollView/g) ?? []).length, 1, "商品报告页面内只能有一条纵向滚动");
+assert.doesNotMatch(mainReturnSource, /\bhorizontal\b|nestedScrollEnabled/, "主报表自身不得放进横向或嵌套滚动容器");
 
 // ===== 中国供应商页签（2026-09-22 重设计）=====
 assert.match(
@@ -668,110 +776,43 @@ assert.match(
   /const isRefreshing =[\s\S]*?\(productQuery\.isRefetching && !productQuery\.isPlaceholderData\)/,
   "明细占位重取属于局部加载，不能驱动下拉刷新转圈把整页往下推",
 );
-assert.equal(
-  (source.match(/<View style=\{\{ width: tableViewportWidth \}\}>/g) ?? []).length,
-  2,
-  "供应商与商品宽表的空态必须限制在首屏可见宽度内居中，联动出现空交集时提示与清除按钮才看得见",
+assert.match(
+  mainReturnSource,
+  /supplierPageRows\.length === 0 \? \(\s*<EmptyState label=\{t\("productReport\.states\.emptySuppliers"\)\} \/>/,
+  "供应商空态直接放在卡片列表里，不再受宽表视口宽度约束",
 );
-assert.match(source, /const LINKED_FILTER_BAR_INDEX = 2;/, "吸顶联动条必须位于日期行与页签之后");
+assert.match(
+  mainReturnSource,
+  /productRows\.length === 0 \? \([\s\S]*?productReport\.states\.emptyProductSearch[\s\S]*?productReport\.linked\.emptyFiltered[\s\S]*?actionLabel=\{t\("productReport\.linked\.clearFilters"\)\}[\s\S]*?onAction=\{clearLinkedSelection\}[\s\S]*?productReport\.states\.emptyProducts/,
+  "商品明细三种空态保留，联动出现空交集时给出清除筛选入口",
+);
+assert.match(source, /const LINKED_FILTER_BAR_INDEX = 2;/, "吸顶联动条必须位于分段与日期卡之后（第 3 个直接子元素）");
 assert.match(source, /stickyHeaderIndices=\{\[LINKED_FILTER_BAR_INDEX\]\}/, "联动条必须吸顶，受影响的表在屏幕外时仍能看到并清除选择");
 assert.match(
   source,
-  /<SegmentedButtons[\s\S]*?\/>\s*\{\/\*[^*]*\*\/\}\s*<LinkedFilterBar/,
-  "吸顶联动条紧跟在页签之后（第 3 个直接子元素）",
+  /refreshControl=\{[^\n]*\n\s*>\s*\{\/\*[^*]*\*\/\}\s*<View style=\{styles\.topBlock\}>[\s\S]*?<SegmentToggle[\s\S]*?<\/View>\s*\{\/\*[^*]*\*\/\}\s*<View style=\{styles\.dateCard\}>[\s\S]*?<\/View>\s*\{\/\*[^*]*\*\/\}\s*<LinkedFilterBar/,
+  "ScrollView 直接子元素依次为分段、日期卡、吸顶联动条，前两个不得带条件渲染，否则吸顶下标会错位",
 );
 assert.match(
   source,
-  /<ProductTableHeader[\s\S]*?\{isChinaKind && productRows\.length > 0 \? renderChinaProductPageTotalRow\(scrollX\) : null\}[\s\S]*?<ScrollView/,
-  "中国页签「本页合计」固定在商品表头下方，不随商品行纵向滚动",
+  /<View style=\{styles\.dateCard\}>[\s\S]*?productReport\.filters\.startDate[\s\S]*?productReport\.filters\.endDate[\s\S]*?!dateRangeValid \? \([\s\S]*?productReport\.states\.invalidDate[\s\S]*?"today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth"/,
+  "日期卡保留开始 / 结束日期、日期格式错误提示与 6 个快捷键",
+);
+assert.match(
+  source,
+  /const scrollToLinkedSection = \(key: LinkedAnchorKey\) => \{[\s\S]*?sectionOffsetsRef\.current\[key\] - linkedBarHeightRef\.current/,
+  "锚点跳转仍按区块偏移减去吸顶联动条高度计算",
+);
+assert.match(
+  mainReturnSource,
+  /productSectionLoading \? \([\s\S]*?<LoadingState[\s\S]*?\) : \([\s\S]*?\{isChinaKind && productRows\.length > 0 \? renderChinaProductPageTotalCard\(\) : null\}\s*<View style=\{\[styles\.cardList, linkedStaleness\.productTable/,
+  "中国页签「本页合计」固定在商品卡片列表上方",
 );
 
 assert.doesNotMatch(
   source,
   /renderChinaSupplierRow|renderChinaProductRow|ChinaSupplierTableHeader|ChinaProductTableHeader|ChinaSupplierBranchRow/,
   "澳洲与中国必须共用同一套供应商、商品和供应商分店渲染，避免列顺序再次漂移",
-);
-
-const supplierCompareColumnOrder = [
-  "styles.chinaCompareAmountColumn",
-  "styles.chinaCompareQuantityColumn",
-  "styles.chinaShareColumn",
-  "styles.chinaShareColumn",
-  "styles.chinaAverageColumn",
-  "styles.grossProfitColumn",
-  "styles.grossMarginColumn",
-];
-const supplierRowComparisonStart = supplierRowSource.indexOf("{showComparison ? (");
-const supplierHeaderComparisonStart = supplierHeader.indexOf("{showComparison ? (");
-assert.ok(supplierRowComparisonStart > 0 && supplierHeaderComparisonStart > 0, "中国供应商同期列组必须位于当前值之后");
-assertSourceOrder(
-  supplierRowSource.slice(supplierRowComparisonStart),
-  supplierCompareColumnOrder,
-  "中国供应商行的同期列必须放在所有本期经营字段之后",
-);
-assertSourceOrder(
-  supplierHeader.slice(supplierHeaderComparisonStart),
-  supplierCompareColumnOrder,
-  "中国供应商同期表头必须与同期数据列保持相同顺序",
-);
-assert.doesNotMatch(
-  supplierRowSource.slice(0, supplierRowSource.indexOf("renderGrowthCell(")),
-  /item\.compare/,
-  "统一供应商行增长率之前的本期格子不得上下叠放同期值",
-);
-
-const pageTotalSource = source.slice(productPageTotalStart, mainReportReturnStart);
-assertSourceOrder(
-  pageTotalSource,
-  [
-    "styles.chinaQuantityColumn",
-    "styles.chinaProductAmountColumn",
-    "styles.chinaAverageColumn",
-    "styles.grossProfitColumn",
-    "styles.grossMarginColumn",
-    "styles.chinaGrowthColumn",
-  ],
-  "中国商品本页合计必须与统一商品表保持相同本期列顺序",
-);
-assert.doesNotMatch(pageTotalSource, /styles\.chinaCompare/, "中国商品本页合计不得显示同期列");
-
-const supplierBranchCompareColumnOrder = [
-  "styles.chinaCompareAmountColumn",
-  "styles.chinaCompareQuantityColumn",
-  "styles.chinaAverageColumn",
-  "styles.grossProfitColumn",
-  "styles.grossMarginColumn",
-];
-const supplierBranchCompareStart = supplierBranchRowSource.indexOf("{showComparison ? (");
-assert.ok(supplierBranchCompareStart > 0, "供应商分店同期列必须由 showComparison 控制");
-assertSourceOrder(
-  supplierBranchRowSource.slice(supplierBranchCompareStart),
-  supplierBranchCompareColumnOrder,
-  "中国供应商分店同期列必须放在所有本期经营字段之后",
-);
-assert.match(
-  drilldownHeader,
-  /\{showComparison \? \([\s\S]*?<TableHeaderGroup muted columnGap=\{8\} label=\{t\("productReport\.metrics\.compare"\)\}>/,
-  "供应商分店同期表头只能在中国下钻显示，且子列间距与数据行一致",
-);
-
-const unifiedProductColumnOrder = [
-  "styles.chinaQuantityColumn",
-  "styles.chinaProductAmountColumn",
-  "styles.chinaAverageColumn",
-  "styles.grossProfitColumn",
-  "styles.grossMarginColumn",
-  "styles.chinaGrowthColumn",
-];
-assertSourceOrder(
-  productMainRowSource,
-  ["styles.productImageColumn", "productInfoWidth", ...unifiedProductColumnOrder],
-  "澳洲与中国商品行必须共同使用图片、货号名称、数量、金额、均价、毛利、增长率顺序",
-);
-assertSourceOrder(
-  productHeader,
-  ["styles.productImageColumn", "infoWidth", ...unifiedProductColumnOrder],
-  "统一商品表头必须与澳洲、中国商品行保持相同列顺序",
 );
 
 console.log("product-report-screen-contract.test.ts: ok");
@@ -786,7 +827,7 @@ for (const language of ["zh", "en"]) {
 // 每页条数：供应商 50/100、商品明细 100/200/500；档位必须进入查询键与请求，否则切换后仍显示旧批次。
 assert.match(source, /useState<number>\(SUPPLIER_PAGE_SIZE\)/, "供应商每页条数用默认 50 初始化");
 assert.match(source, /useState<number>\(PRODUCT_PAGE_SIZE\)/, "商品明细每页条数用默认 100 初始化");
-assert.match(source, /pageSizeOptions=\{SUPPLIER_PAGE_SIZE_OPTIONS\}/, "供应商表提供每页条数选择");
+assert.match(source, /options=\{SUPPLIER_PAGE_SIZE_OPTIONS\}/, "供应商表提供每页条数选择");
 assert.match(source, /pageSizeOptions=\{PRODUCT_PAGE_SIZE_OPTIONS\}/, "商品明细提供每页条数选择");
 assert.match(source, /productPage,\s*productPageSize,\s*productSortKey,\s*\] as const/, "商品明细查询键必须包含每页条数");
 assert.match(source, /productPage,\s*productPageSize,\s*productSearch,\s*productSort,/, "商品明细请求必须带上所选每页条数");

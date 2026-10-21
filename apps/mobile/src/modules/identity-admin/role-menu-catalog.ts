@@ -64,7 +64,7 @@ const WEB_MENU: MenuSource[] = ([
 const MOBILE_MENU: MenuSource[] = ([
   ["home", "Home", "首页", ["Orders.Create"]],
   ["orders", "Orders", "订单", ["OrderFront", "Orders.View", "Warehouse.ManageOrders", "Warehouse.Manage"]],
-  ["sales-orders", "Sales records", "销售订单", ["SalesOrders.View"]],
+  ["sales-orders", "POS orders", "POS 订单", ["SalesOrders.View"]],
   ["cart", "Cart", "购物车", ["Orders.Create"]],
   ["warehouse", "Products & locations", "商品和货位管理", ["Warehouse.ManageProducts"]],
   ["containers", "Containers", "货柜管理", ["Container.View"]],

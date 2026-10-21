@@ -170,8 +170,8 @@
     "productName": "Chinese name",
     "englishName": "English name",
     "domesticPrice": "China price",
-    "importPrice": "Import price",
-    "oemPrice": "Retail price",
+    "importPrice": "This import price",
+    "oemPrice": "This retail price",
     "floatRate": "Cost factor",
     "containerQuantity": "Loaded quantity",
     "middlePackQuantity": "Inner qty",
@@ -192,14 +192,19 @@
       "productName": "Chinese name",
       "englishName": "English name",
       "domesticPrice": "China price",
-      "importPrice": "Import price",
-      "oemPrice": "Retail price",
+      "importPrice": "This import price",
+      "oemPrice": "This retail price",
       "floatRate": "Cost factor",
       "containerQuantity": "Loaded quantity",
       "middlePackQuantity": "Inner qty",
-      "isActive": "Active status"
+      "isActive": "Active status",
+      "warehouseImportPrice": "Current import price",
+      "warehouseOemPrice": "Current retail price"
     },
-    "validationLine": "{{field}}: {{message}}"
+    "validationLine": "{{field}}: {{message}}",
+    "warehouseImportPrice": "Current import price",
+    "warehouseOemPrice": "Current retail price",
+    "warehousePriceHint": "For an existing product only \"Current import price / Current retail price\" can be changed: saving writes them back to the warehouse, the product master and store prices. \"This import price / This retail price\" are container-line data for creating new products and cannot be edited for existing products."
   },
   "retailSync": {
     "storesLabel": "Sync store retail prices",
@@ -236,7 +241,8 @@
     "previewMessage": "Server preview: {{count}} row(s) affected. {{summary}}",
     "previewAffected": "Server preview: {{count}} row(s) affected",
     "confirmExecute": "Confirm",
-    "preview": "Preview"
+    "preview": "Preview",
+    "thisPriceHint": "Only changes \"This import price / This retail price\" on the container lines (data for creating new products); the warehouse, product master and store prices are not updated. To change an existing product's price, edit \"Current import price / Current retail price\" in Edit line."
   },
   "pushHq": {
     "confirmMessage": "Send {{count}} selected row(s) to the HQ database (all updatable fields).",

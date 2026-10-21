@@ -1,6 +1,7 @@
 // 「人员管理」店长版列表（StoreStaffList）的纯逻辑：搜索、状态筛选与计数、「我」置顶分组、各分店人数。
 // 从原 app/(shell)/users/index.tsx 的 filteredUsers / statusCounts / listRows 抽出，业务规则不变，
 // 新增：「不能登录」筛选（loginEnabled === false）与昵称 / 姓名各段搜索。
+// 默认分店（resolveStaffStoreSelection）：进入页面默认选中自己管理的第一个分店，没有才看全部分店。
 // 不依赖 React Native，可在 Node 下测试。
 import { resolveRowPosition, type ListRowPosition } from "../people/list-position";
 import { buildPersonSearchText, resolvePersonName } from "../people/person-name";
@@ -169,4 +170,43 @@ export function resolveStoreListSubtitleKind(input: {
   if (!input.managedStoreCode) return "allStores";
   if (!input.hasSelectedStore) return "noStore";
   return input.canManageSelectedStore ? "manageable" : "viewOnly";
+}
+
+// ───────────────────────── 默认分店：自己管理的第一个分店兜底 ─────────────────────────
+
+export interface StaffStoreSelectionInput {
+  /** 设备绑定模式下的本机分店；有值时永远固定为它。 */
+  deviceBoundStoreCode?: string | null;
+  /** 当前选中的分店；null = 全部分店。 */
+  currentStoreCode: string | null;
+  /** 用户是否在本页手动切过分店（含手动选「全部分店」）。 */
+  userPicked: boolean;
+  /** 全局记住的分店（useStores.selectedStoreCode）。 */
+  rememberedStoreCode?: string | null;
+  /** 全局分店是否只是自动默认（不是用户选的）。 */
+  rememberedIsAuto: boolean;
+  /** 切换弹层的候选分店（POS 启用；店长只含管理分店），顺序即界面顺序。 */
+  pickerStores: readonly { storeCode: string; isPrimary?: boolean }[];
+}
+
+/**
+ * 人员管理页的分店选择。优先级：设备绑定分店 → 当前选择（仍在候选里）→ 用户手动选的「全部分店」
+ * → 用户在别处明确选过的分店 → 自己管理的第一个分店（isPrimary）→ 全部分店。
+ * 管理员的候选是全部 POS 分店，同样只认 isPrimary（自己管理的）那几家；一家都没有就保持全部分店。
+ * 候选还没加载完时返回 null（全部分店），加载完成后再算一次即可落到默认分店。
+ */
+export function resolveStaffStoreSelection(input: StaffStoreSelectionInput): string | null {
+  if (input.deviceBoundStoreCode) return input.deviceBoundStoreCode;
+
+  const inPicker = (storeCode: string | null | undefined): storeCode is string =>
+    Boolean(storeCode && input.pickerStores.some((store) => store.storeCode === storeCode));
+
+  if (inPicker(input.currentStoreCode)) return input.currentStoreCode;
+  // 用户手动选了「全部分店」：分店列表刷新、全局选择变化都不能再把它改回默认分店。
+  if (input.userPicked && !input.currentStoreCode) return null;
+
+  // 全局自动默认的分店不算用户选择，不沿用。
+  if (!input.rememberedIsAuto && inPicker(input.rememberedStoreCode)) return input.rememberedStoreCode;
+
+  return input.pickerStores.find((store) => store.isPrimary === true)?.storeCode ?? null;
 }

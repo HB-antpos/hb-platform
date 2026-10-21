@@ -9,6 +9,7 @@ import {
   resolveMeTabLabel,
   resolvePrimaryNavigationAction,
   resolvePrimaryTabBadge,
+  resolvePrimaryTabDot,
   shouldHidePrimaryTabBar,
   type PrimaryNavigationKey,
 } from "./primary-navigation";
@@ -19,6 +20,7 @@ import {
   formatWorkbenchBadgeCount,
   SUPPORT_FAQ_ROUTE,
   summarizeWorkbenchSectionBadge,
+  summarizeWorkbenchSectionDot,
   toggleAllWorkbenchSections,
   toggleWorkbenchSectionCollapsed,
   withLocalWorkbenchRoutes,
@@ -899,4 +901,55 @@ assert.equal(
   assert.equal(enCommon.tabs.unreadHitsLabel, "{{label}}, {{count}} unread unwelcome hits");
   assert.equal(zhCommon.tabs.faceHub, "人脸比对");
   assert.equal(enCommon.tabs.faceHub, "Face matching");
+}
+
+// ───────── 员工操作日志圆点（红 / 橙，无数字）：工作台页签、折叠分组头、工作台入口 ─────────
+{
+  // 工作台页签：没有数字徽标时显示圆点，数字优先不叠加
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: 0, legacyLogBadgeLevel: "danger" }), "danger");
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: 0, legacyLogBadgeLevel: "warning" }), "warning");
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: 0, legacyLogBadgeLevel: null }), null);
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: 0 }), null, "字段缺省不显示");
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: 3, legacyLogBadgeLevel: "danger" }), null, "已有数字徽标时圆点让位");
+  assert.deepEqual(resolvePrimaryTabBadge("workbench", { faceHitUnreadCount: 3, legacyLogBadgeLevel: "danger" }), { count: 3, text: "3" }, "数字徽标不受圆点影响");
+  assert.equal(resolvePrimaryTabDot("workbench", { faceHitUnreadCount: -1, legacyLogBadgeLevel: "warning" }), "warning", "非法数字按 0，圆点照常显示");
+  for (const key of ["scan", "attendance", "reports", "me"] as PrimaryNavigationKey[]) {
+    assert.equal(resolvePrimaryTabDot(key, { faceHitUnreadCount: 0, legacyLogBadgeLevel: "danger" }), null, `${key} 页签不挂日志圆点`);
+  }
+
+  // 折叠分组头：取组内最高级别（红 > 橙），与数字合计互不影响
+  const group = { items: [{ routeName: "a" }, { routeName: "legacy-employee-logs" }, { routeName: "b" }].map((item) => ({ ...item, labelKey: "", icon: "" })) };
+  assert.equal(summarizeWorkbenchSectionDot(group, { "legacy-employee-logs": "warning" }), "warning");
+  assert.equal(summarizeWorkbenchSectionDot(group, { "legacy-employee-logs": "danger", a: "warning" }), "danger");
+  assert.equal(summarizeWorkbenchSectionDot(group, { "legacy-employee-logs": null }), null);
+  assert.equal(summarizeWorkbenchSectionDot(group, { other: "danger" }), null, "组外入口的圆点不计入");
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(group, { a: 4 }, {}),
+    { count: 4, maxCount: 99 },
+    "数字合计口径不变（圆点不进合计）",
+  );
+
+  // 源码契约：底栏 / 工作台接入圆点，无障碍标签与中英文案齐全，颜色符合口径
+  const navDir = dirname(fileURLToPath(import.meta.url));
+  const tabBarSource = readFileSync(resolve(navDir, "../../components/navigation/PrimaryTabBar.tsx"), "utf8");
+  assert.ok(tabBarSource.includes("resolvePrimaryTabDot(item.key, { faceHitUnreadCount, legacyLogBadgeLevel })"));
+  assert.ok(tabBarSource.includes('"tabs.logDangerLabel"') && tabBarSource.includes('"tabs.logWarningLabel"'), "圆点有无障碍标签");
+  const workbenchSource = readFileSync(resolve(navDir, "../workbench/workbench-screen.tsx"), "utf8");
+  assert.ok(/"legacy-employee-logs":\s*legacyLogBadgeLevel/.test(workbenchSource), "员工操作日志入口接入圆点");
+  assert.ok(workbenchSource.includes("summarizeWorkbenchSectionDot(section, dotByRouteName)"), "折叠分组头显示组内最高级圆点");
+  assert.ok(workbenchSource.includes("DOT_ACCESSIBILITY_KEY"), "工作台圆点有无障碍标签");
+  const dotSource = readFileSync(resolve(navDir, "../../components/legacy-employee-logs/LogBadgeDot.tsx"), "utf8");
+  assert.ok(/width:\s*10/.test(dotSource) && /height:\s*10/.test(dotSource) && /borderWidth:\s*1\.5/.test(dotSource), "圆点约 10px、1.5 描边");
+  assert.ok(!dotSource.includes("<Text"), "圆点不显示数字");
+  const layoutSource = readFileSync(resolve(navDir, "../../../app/(shell)/_layout.tsx"), "utf8");
+  assert.ok(layoutSource.includes("legacyLogBadgeLevel: legacyLogBadgeEnabled ? resolveLogBadgeLevel(legacyLogBadgeQuery.data) : null"));
+  assert.ok(layoutSource.includes("subscribeLegacyLogReviewed") && layoutSource.includes("invalidateQueries({ queryKey: legacyLogBadgeQueryKey(userGuid) })"), "核查后立即刷新圆点");
+  assert.ok(/legacyLogBadgeLevel:\s*LogBadgeLevel \| null/.test(readFileSync(resolve(navDir, "access-context.tsx"), "utf8")));
+  assert.ok(/#D92D20/.test(readFileSync(resolve(navDir, "../legacy-employee-logs/badge.ts"), "utf8")) && /#F79009/.test(readFileSync(resolve(navDir, "../legacy-employee-logs/badge.ts"), "utf8")), "红 #D92D20 / 橙 #F79009");
+  for (const lang of ["zh", "en"]) {
+    const common = JSON.parse(readFileSync(resolve(localeRoot, `${lang}/common.json`), "utf8"));
+    const workbench = JSON.parse(readFileSync(resolve(localeRoot, `${lang}/screens/workbench.json`), "utf8"));
+    assert.ok(common.tabs.logDangerLabel.includes("{{label}}") && common.tabs.logWarningLabel.includes("{{label}}"), `${lang} 底栏圆点文案`);
+    assert.ok(workbench.accessibility.logDangerPending.includes("{{label}}") && workbench.accessibility.logAbnormalPending.includes("{{label}}"), `${lang} 工作台圆点文案`);
+  }
 }

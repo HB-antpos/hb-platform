@@ -91,7 +91,14 @@ function getNativeAppInstallerTrustedOrigins(
   return Array.from(new Set(values.map(toTrustedHttpsOrigin).filter((value): value is string => Boolean(value))));
 }
 
-export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
+export function useAutomaticNativeAppUpdate(options: {
+  enabled: boolean;
+  /**
+   * 设置页「自动更新」开关（默认 true）。false 时仍检查并处理强制更新，
+   * 但不自动检查 / 下载 / 提醒可选安装包。
+   */
+  autoUpdate?: boolean;
+}) {
   const [phase, setPhaseState] = useState<NativeAppUpdatePhase | "failed" | null>(null);
   const [progress, setProgress] = useState<NativeAppDownloadProgress | null>(null);
   // 同步记录最近一次阶段：catch 里要据此判断失败发生在「还没确认有新版」还是「已在下载/校验」。
@@ -155,7 +162,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
 
   useEffect(() => {
     optionsRef.current = options;
-  }, [options.enabled]);
+  }, [options.enabled, options.autoUpdate]);
 
   async function openDownloadedApk(
     build: NativeAppBuildInfo,
@@ -244,6 +251,10 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     fileUri: string,
     nativeInstaller: HBAppInstallerNativeModule | null,
   ) {
+    // 自动更新关闭：已下载好的可选安装包不弹安装提醒（强制更新走拦截页，不经过这里）。
+    if (optionsRef.current.autoUpdate === false) {
+      return false;
+    }
     if (!appUpdateMutualExclusion.tryOwnPrompt("native")) {
       return false;
     }
@@ -277,7 +288,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     return true;
   }
 
-  async function check(options: { enabled: boolean }) {
+  async function check(options: { enabled: boolean; autoUpdate?: boolean }) {
     if (!options.enabled || inFlightRef.current) {
       return;
     }
@@ -301,6 +312,12 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
       // 强制判定只是一次只读 GET，先于互斥锁执行：required 时打开原生强制门，
       // 才能在 OTA 初始化或 OTA required 期间继续下载 APK，避免两边互相卡死。
       await refreshRequiredDecision(apiClient, buildProfile, Application.nativeBuildVersion);
+
+      // 自动更新关闭：强制判定已刷新，非强制就到此为止，不检查也不下载可选安装包。
+      if (!requiredRef.current && options.autoUpdate === false) {
+        deferredByIdleGateRef.current = false;
+        return;
+      }
 
       // 可选安装包等登录完成并空闲后再检查与下载，不和开机、登录抢带宽；强制更新照常立即进行。
       if (!requiredRef.current && !backgroundDownloadGate.isOpen()) {
@@ -431,6 +448,17 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     // 登录态恢复之前也执行检查，保证未登录设备能收到重新下载安装提示。
     void check(options);
   }, [options.enabled]);
+
+  // 自动更新从关到开：立即补查一次可选安装包。
+  const previousAutoUpdateRef = useRef(options.autoUpdate !== false);
+  useEffect(() => {
+    const enabledNow = options.autoUpdate !== false;
+    const wasEnabled = previousAutoUpdateRef.current;
+    previousAutoUpdateRef.current = enabledNow;
+    if (enabledNow && !wasEnabled && options.enabled) {
+      void check(options);
+    }
+  }, [options.autoUpdate]);
 
   useEffect(() => {
     const unsubscribe = appUpdateMutualExclusion.subscribe(() => {

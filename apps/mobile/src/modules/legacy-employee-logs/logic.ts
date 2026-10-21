@@ -1,4 +1,5 @@
 import type {
+  LegacyDeviceOption,
   LegacyLogFilters,
   LegacyLogFlag,
   LegacyLogItem,
@@ -253,6 +254,36 @@ export function buildLegacyEmployeeSummaryQuery(filters: LegacyLogFilters, now: 
   storeCodes.forEach((code) => params.append("storeCodes", code));
   if (filters.deviceCode) params.set("deviceCode", filters.deviceCode);
   return params;
+}
+
+/**
+ * 「按员工汇总」页的设备下拉选项。优先用汇总接口返回的 devices（后端不带设备条件本身，选了设备后仍是全集）；
+ * 响应没有该字段（旧后端）时，退回由各员工行的 deviceCodes 推出，按设备去重（count = 用过该设备的员工数），不必额外加请求。
+ * 退回推导时，已按某台设备过滤的结果只剩该设备，下拉若跟着收缩就切不回别的设备：此时沿用上一次的选项。
+ * 无论哪种，当前设备一定在列（深链带 device 进入、上一次选项为空时也成立）。
+ */
+export function mergeSummaryDeviceOptions(
+  employees: readonly { deviceCodes: readonly string[] }[],
+  activeDeviceCode: string | null,
+  previous: readonly LegacyDeviceOption[],
+  reported: readonly LegacyDeviceOption[] = [],
+): LegacyDeviceOption[] {
+  if (reported.length > 0) {
+    const options = reported.filter((row) => row.deviceCode);
+    return !activeDeviceCode || options.some((row) => row.deviceCode === activeDeviceCode)
+      ? options
+      : [...options, { deviceCode: activeDeviceCode, count: 0 }];
+  }
+  const counts = new Map<string, number>();
+  employees.forEach((employee) => {
+    new Set(employee.deviceCodes).forEach((code) => counts.set(code, (counts.get(code) ?? 0) + 1));
+  });
+  const derived = [...counts.entries()]
+    .map(([deviceCode, count]) => ({ deviceCode, count }))
+    .sort((a, b) => a.deviceCode.localeCompare(b.deviceCode));
+  if (!activeDeviceCode) return derived;
+  const base = previous.length > 0 ? [...previous] : derived;
+  return base.some((row) => row.deviceCode === activeDeviceCode) ? base : [...base, { deviceCode: activeDeviceCode, count: 0 }];
 }
 
 /** 已设置的非默认筛选数（不含风险入口与细分），用于筛选按钮角标。 */

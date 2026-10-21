@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { ActivityIndicator, Button, Icon, IconButton, Snackbar, Text } from "react-native-paper";
@@ -29,6 +29,7 @@ import {
   countStaffByStore,
   countStaffStatuses,
   filterStoreStaff,
+  resolveStaffStoreSelection,
   resolveStoreListSubtitleKind,
   type StaffListRow,
   type StaffStatusFilter,
@@ -67,6 +68,10 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
   // 仅收窄选择候选，设备绑定与店员操作权限继续使用原分店范围。
   const posEnabledStores = useMemo(() => getPosEnabledStores(stores), [stores]);
   const [managedStoreCode, setManagedStoreCode] = useState<string | null>(null);
+  // 分店列表加载完、默认分店算出来之前不取名单，避免先拉一次「全部分店」再跳到默认分店。
+  const [storeSelectionResolved, setStoreSelectionResolved] = useState(false);
+  // 用户在本页手动切过分店（含「全部分店」）后，默认规则不再覆盖用户的选择。
+  const storePickedByUserRef = useRef(false);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
   const [keywordInput, setKeywordInput] = useState("");
   const [statusFilter, setStatusFilter] = useState<StaffStatusFilter>("all");
@@ -119,25 +124,18 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
       return;
     }
 
-    setManagedStoreCode((current) => {
-      if (deviceBoundStoreCode) {
-        return deviceBoundStoreCode;
-      }
-
-      if (current && pickerStores.some((store) => store.storeCode === current)) {
-        return current;
-      }
-
-      // 全局自动默认的分店不算用户选择，仍默认全部分店
-      const selectedAssignedStore = rememberedStoreCode && !isSelectedStoreAuto
-        ? pickerStores.find((store) => store.storeCode === rememberedStoreCode)
-        : null;
-      if (selectedAssignedStore) {
-        return selectedAssignedStore.storeCode;
-      }
-
-      return null;
-    });
+    // 默认落到自己管理的第一个分店（规则见 resolveStaffStoreSelection），候选里没有自己管理的分店才看全部。
+    setManagedStoreCode((current) =>
+      resolveStaffStoreSelection({
+        deviceBoundStoreCode,
+        currentStoreCode: current,
+        userPicked: storePickedByUserRef.current,
+        rememberedStoreCode,
+        rememberedIsAuto: isSelectedStoreAuto,
+        pickerStores,
+      })
+    );
+    setStoreSelectionResolved(true);
   }, [deviceBoundStoreCode, isHydratingSelection, isSelectedStoreAuto, rememberedStoreCode, pickerStores, storesLoading]);
 
   const managedStore = useMemo(
@@ -151,7 +149,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
 
   // 搜索在客户端做（姓名各段 / 昵称 / 账号 / 邮箱 / 电话），所以服务端永远取该分店的全部店员，不再把关键词发给服务端。
   const usersQuery = useStoreUsers(
-    canViewUsers ? (isDeviceMode ? deviceBoundStoreCode : managedStoreCode) : undefined,
+    canViewUsers && storeSelectionResolved ? (isDeviceMode ? deviceBoundStoreCode : managedStoreCode) : undefined,
     ""
   );
   // 切换分店弹层里的各店人数：只在弹层打开时才取「全部已分配分店」的名单（与「全部」视图共用同一份缓存）。
@@ -223,6 +221,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
       // 批量选择只能属于一个明确分店，切店时必须清空，避免跨店打印。
       setSelectedUserGuids(new Set());
       setBatchSelecting(false);
+      storePickedByUserRef.current = true;
       setManagedStoreCode(deviceBoundStoreCode ?? store?.storeCode ?? null);
       setStorePickerVisible(false);
 
@@ -246,6 +245,8 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
   }, [language, refetchUsers, t]);
 
   const users = usersQuery.data ?? NO_USERS;
+  // 默认分店还没算出来时名单查询尚未启用，同样按「加载中」显示，不闪空状态。
+  const usersLoading = (canViewUsers && !storeSelectionResolved) || usersQuery.isLoading;
   const keyword = keywordInput.trim();
   const statusCounts = useMemo(() => countStaffStatuses(users), [users]);
   const filteredUsers = useMemo(
@@ -452,7 +453,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          usersQuery.isLoading ? (
+          usersLoading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
@@ -483,7 +484,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
           )
         }
         ListFooterComponent={
-          usersQuery.isLoading || usersQuery.isError ? null : (
+          usersLoading || usersQuery.isError ? null : (
             // 后端不返回其他店长；明示这一点，避免店长误以为名单不全。
             <View style={styles.onlyStaffNote} testID="staff-scope-note">
               <Icon source="lock-outline" size={16} color={HB_COLORS.textSecondary} />

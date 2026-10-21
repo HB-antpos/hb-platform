@@ -1,3 +1,6 @@
+import { highestLogBadgeLevel } from "../legacy-employee-logs/badge";
+import type { LogBadgeLevel } from "../legacy-employee-logs/types";
+
 export interface WorkbenchNavigationItem {
   routeName: string;
   labelKey: string;
@@ -204,4 +207,13 @@ export function summarizeWorkbenchSectionBadge(
     );
   }
   return { count, maxCount };
+}
+
+// 折叠分组的圆点汇总：取组内入口圆点的最高级别（红 > 橙）。圆点不带数字，与数字合计互不影响：
+// 组头有数字合计时数字照旧，圆点另外显示在数字左侧；无数字时圆点单独显示。
+export function summarizeWorkbenchSectionDot(
+  section: Pick<WorkbenchNavigationSection, "items">,
+  dotByRouteName: Readonly<Record<string, LogBadgeLevel | null | undefined>>
+): LogBadgeLevel | null {
+  return highestLogBadgeLevel(section.items.map((item) => dotByRouteName[item.routeName]));
 }

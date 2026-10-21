@@ -20,7 +20,9 @@ import {
   Text,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LogBadgeDot } from "@/components/legacy-employee-logs/LogBadgeDot";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import type { LogBadgeLevel } from "@/modules/legacy-employee-logs/types";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import { TAB_PATHS } from "@/modules/navigation/default-route";
@@ -32,6 +34,7 @@ import {
   formatWorkbenchBadgeCount,
   SUPPORT_FAQ_ROUTE,
   summarizeWorkbenchSectionBadge,
+  summarizeWorkbenchSectionDot,
   toggleAllWorkbenchSections,
   WORKBENCH_BADGE_DEFAULT_MAX,
   toggleWorkbenchSectionCollapsed,
@@ -62,6 +65,12 @@ const QUICK_ACTION_ROUTE_ORDER = [
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
+/** 圆点角标的无障碍文案键（screens/workbench 的 accessibility 下）。 */
+const DOT_ACCESSIBILITY_KEY = {
+  danger: "accessibility.logDangerPending",
+  warning: "accessibility.logAbnormalPending",
+} as const;
+
 function formatStoreLabel(
   storeName: string | null | undefined,
   storeCode: string | null | undefined,
@@ -79,6 +88,8 @@ interface FunctionButtonProps {
   item: WorkbenchNavigationItem;
   label: string;
   pendingCount?: number;
+  /** 圆点角标（红 / 橙，无数字）：与数字角标互不影响，位置在图标右上角；null / 缺省不显示。 */
+  dotLevel?: LogBadgeLevel | null;
   /** 角标封顶值，超过显示「N+」；待办类默认 99，HB新品品种数常达数百，放宽到 999。 */
   maxCount?: number;
   onPress: () => void;
@@ -92,6 +103,7 @@ function FunctionButton({
   item,
   label,
   pendingCount = 0,
+  dotLevel = null,
   maxCount = WORKBENCH_BADGE_DEFAULT_MAX,
   onPress,
   compact = false,
@@ -100,14 +112,16 @@ function FunctionButton({
 }: FunctionButtonProps) {
   const { t } = useAppTranslation("workbench");
   const visiblePendingCount = formatWorkbenchBadgeCount(pendingCount, maxCount);
+  const openLabel = locked && lockedAccessibilityLabel
+    ? lockedAccessibilityLabel
+    : t("accessibility.openFunction", { title: label });
 
   return (
     <Pressable
       accessibilityRole="button"
+      // 圆点只靠颜色传达不够：无障碍标签里说明是危险操作待核查还是异常待核查。
       accessibilityLabel={
-        locked && lockedAccessibilityLabel
-          ? lockedAccessibilityLabel
-          : t("accessibility.openFunction", { title: label })
+        dotLevel ? t(DOT_ACCESSIBILITY_KEY[dotLevel], { label: openLabel }) : openLabel
       }
       onPress={onPress}
       style={({ pressed }) => [
@@ -121,6 +135,9 @@ function FunctionButton({
           color={locked ? HB_COLORS.outline : HB_COLORS.action}
           size={compact ? 23 : 21}
         />
+        {dotLevel ? (
+          <LogBadgeDot level={dotLevel} borderColor={HB_COLORS.white} style={styles.iconCornerDot} />
+        ) : null}
         {compact && locked ? (
           <View style={[styles.countBadge, styles.iconCornerBadge]}>
             <MaterialCommunityIcons name="lock" size={11} color={HB_COLORS.danger} />
@@ -226,6 +243,7 @@ export function WorkbenchScreen() {
     priceTasks,
     newProductKindCount,
     faceHitUnreadCount,
+    legacyLogBadgeLevel,
     isDeviceMode,
     isWarehouseStaffOnly,
   } = useAppNavigationAccess();
@@ -236,6 +254,10 @@ export function WorkbenchScreen() {
     "container-new-products": newProductKindCount,
     // 「人脸比对」入口：当前登录人还没看的黑名单命中通知数（沿用浅红胶囊角标；折叠分组汇总会自动累加）。
     "face-hub": faceHitUnreadCount,
+  };
+  // 圆点角标（无数字）：员工操作日志有危险操作 / 异常待核查时，红 / 橙圆点挂在入口图标右上角。
+  const dotByRouteName: Record<string, LogBadgeLevel | null> = {
+    "legacy-employee-logs": legacyLogBadgeLevel,
   };
   const maxCountByRouteName: Record<string, number> = {
     "container-new-products": 999,
@@ -661,6 +683,7 @@ export function WorkbenchScreen() {
                       item={item}
                       label={t(item.labelKey)}
                       pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
+                      dotLevel={dotByRouteName[item.routeName] ?? null}
                       maxCount={maxCountByRouteName[item.routeName]}
                       compact
                       locked={reportsLocked && item.routeName === "reports"}
@@ -726,10 +749,20 @@ export function WorkbenchScreen() {
                     const collapsedBadgeText = collapsedBadge && collapsedBadge.count > 0
                       ? formatWorkbenchBadgeCount(collapsedBadge.count, collapsedBadge.maxCount)
                       : null;
+                    // 折叠后组内圆点同样看不到：分组头显示组内最高级别的圆点（红 > 橙）。
+                    const collapsedDot = expanded
+                      ? null
+                      : summarizeWorkbenchSectionDot(section, dotByRouteName);
                     const sectionLabel = t("accessibility.functionCount", {
                       title: t(section.titleKey),
                       count: section.items.length,
                     });
+                    const sectionBadgeLabel = collapsedBadgeText
+                      ? t("accessibility.sectionBadge", {
+                        label: sectionLabel,
+                        badge: collapsedBadgeText,
+                      })
+                      : sectionLabel;
                     return (
                       <View key={section.key}>
                         {sectionIndex > 0 ? <Divider style={styles.groupDivider} /> : null}
@@ -737,12 +770,9 @@ export function WorkbenchScreen() {
                           accessibilityRole="button"
                           accessibilityState={{ expanded }}
                           accessibilityLabel={
-                            collapsedBadgeText
-                              ? t("accessibility.sectionBadge", {
-                                label: sectionLabel,
-                                badge: collapsedBadgeText,
-                              })
-                              : sectionLabel
+                            collapsedDot
+                              ? t(DOT_ACCESSIBILITY_KEY[collapsedDot], { label: sectionBadgeLabel })
+                              : sectionBadgeLabel
                           }
                           accessibilityHint={t("accessibility.toggleSectionHint")}
                           onPress={() =>
@@ -761,6 +791,10 @@ export function WorkbenchScreen() {
                           <Text variant="labelMedium" style={styles.functionSectionCount}>
                             {t("allFunctions.sectionCount", { count: section.items.length })}
                           </Text>
+                          {/* 圆点在数字合计左侧：有数字时数字照旧，另外多一个圆点；无数字时圆点单独显示。 */}
+                          {collapsedDot ? (
+                            <LogBadgeDot level={collapsedDot} borderColor={HB_COLORS.surface} />
+                          ) : null}
                           {collapsedBadgeText ? (
                             <View style={styles.countBadge}>
                               <Text variant="labelSmall" style={styles.countBadgeText}>
@@ -782,6 +816,7 @@ export function WorkbenchScreen() {
                               item={item}
                               label={t(item.labelKey)}
                               pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
+                              dotLevel={dotByRouteName[item.routeName] ?? null}
                               maxCount={maxCountByRouteName[item.routeName]}
                               locked={reportsLocked && item.routeName === "reports"}
                               lockedAccessibilityLabel={tPrice("workbench.lockedTile", { title: t(item.labelKey) })}
@@ -1027,6 +1062,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     borderWidth: 1.5,
     borderColor: HB_COLORS.white,
+  },
+  // 圆点角标：落点与数字角标相同（图标右上角），10px，不带数字。
+  iconCornerDot: {
+    position: "absolute",
+    top: -4,
+    right: -4,
   },
   quickIcon: {
     width: 34,

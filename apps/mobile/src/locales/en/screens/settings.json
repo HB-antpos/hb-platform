@@ -109,7 +109,10 @@
     "noBuildVersion": "Unknown",
     "noChannel": "No channel configured",
     "noUpdateId": "No update ID",
-    "check": "Check for updates"
+    "check": "Check for updates",
+    "autoUpdate": "Automatic updates",
+    "autoUpdateOnHint": "On: new versions download automatically and you are prompted to restart or install.",
+    "autoUpdateOffHint": "Off: updates are no longer checked or downloaded automatically. Required updates still apply, and you can tap Check for updates any time."
   },
   "device": {
     "title": "Device binding",
