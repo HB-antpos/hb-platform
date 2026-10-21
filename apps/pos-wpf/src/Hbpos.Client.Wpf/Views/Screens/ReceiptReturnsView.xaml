@@ -85,11 +85,17 @@
                            VerticalAlignment="Center" />
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <CheckBox IsChecked="{Binding IsNoReceiptMode}"
-                              Content="{loc:Loc returns.noReceipt}"
-                              VerticalAlignment="Center"
-                              FontWeight="Bold"
-                              Margin="0,0,0,0" />
+                    <!-- 无小票退货是切换整个页面工作模式的「开关」，不是表单勾选项：
+                         用开关（与设置页一致），触屏上更容易点中，开 / 关状态一眼可见。 -->
+                    <TextBlock Text="{loc:Loc returns.noReceipt}"
+                               VerticalAlignment="Center"
+                               FontWeight="Bold"
+                               Margin="0,0,12,0" />
+                    <ToggleButton Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                  IsChecked="{Binding IsNoReceiptMode, Mode=TwoWay}"
+                                  AutomationProperties.Name="{loc:Loc returns.noReceipt}"
+                                  MinHeight="44" MinWidth="56"
+                                  VerticalAlignment="Center" />
                     <Button Command="{Binding OpenNoReceiptOpenItemDialogCommand}"
                             Visibility="{Binding IsNoReceiptMode, Converter={StaticResource BoolToVis}}"
                             Style="{StaticResource PosSecondaryButtonStyle}"
