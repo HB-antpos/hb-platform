@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import {
-  Image,
   InteractionManager,
   Pressable,
   RefreshControl,
@@ -60,12 +59,12 @@ import {
   type ReportSortField,
   type ReportSortValues,
 } from "@/modules/product-report/sorting";
-import { formatMoney, formatWholeMoney } from "@/modules/reports/format";
+import { formatWholeMoney } from "@/modules/reports/format";
 import {
   getCashierEnabledStoreCodes,
   getCashierScopedBranchCodes,
 } from "@/modules/reports/cashier-enabled-store-scope";
-import { GrowthPill, RankBadge, REPORT_UI } from "@/modules/reports/report-card-parts";
+import { GrowthPill, REPORT_UI } from "@/modules/reports/report-card-parts";
 import { REPORT_QUERY_OPTIONS } from "@/modules/reports/report-config";
 import {
   ReportLoadPerformanceTimer,
@@ -98,11 +97,23 @@ import {
   CompactPager,
   FilterChip,
   MetricGrid,
-  PRODUCT_CARD_COLORS,
   SegmentToggle,
-  ShareMeter,
   SortChips,
 } from "@/modules/product-report/product-report-card-parts";
+import {
+  formatCount,
+  formatGrossMarginRate,
+  formatNullableMoney,
+  formatNullableWholeMoney,
+  formatShare,
+} from "@/modules/product-report/product-report-format";
+import {
+  PRODUCT_BRANCH_SORT_VALUES,
+  ProductBranchRow,
+  ProductReportCard,
+} from "@/modules/product-report/product-report-rows";
+import { SupplierDetailSheet } from "@/modules/product-report/supplier-detail-sheet";
+import { SupplierReportTable, type SupplierTableRow } from "@/modules/product-report/supplier-report-table";
 import {
   FRESH_LINKED_SECTIONS,
   filterRowsByBranch,
@@ -116,9 +127,8 @@ import {
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
 
-type Drilldown =
-  | { type: "supplier"; kind: SupplierReportKind; supplier: SupplierReportRow }
-  | { type: "product"; product: ProductReportProductRow };
+// 页面上商品卡的「商品分店数据」下钻；供应商的商品明细 / 分店数据由 SupplierDetailSheet 负责。
+type Drilldown = { type: "product"; product: ProductReportProductRow };
 
 interface ProductReportScreenProps {
   embedded?: boolean;
@@ -156,15 +166,7 @@ const SUPPLIER_METRIC_SORT_VALUES: ReportSortValues<SupplierMetricSortRow> = {
   unitPrice: (row) => [row.averagePrice, row.compareAveragePrice],
 };
 
-// 商品分店均价由后端给出，数量为 0 时是 0，与商品明细的服务端排序口径一致。
-const PRODUCT_BRANCH_SORT_VALUES: ReportSortValues<ProductBranchBreakdownRow> = {
-  amount: (row) => [row.salesAmount, row.compareSalesAmount],
-  quantity: (row) => [row.quantity, row.compareQuantity],
-  unitPrice: (row) => [row.averageUnitPrice, row.compareAverageUnitPrice],
-};
-
-// 供应商与供应商分店按金额 / 数量 / 均价排序；商品明细沿用原表头顺序：数量 / 金额 / 均价。
-const SUPPLIER_SORT_FIELDS: readonly ReportSortField[] = ["amount", "quantity", "unitPrice"];
+// 商品明细沿用原表头顺序：数量 / 金额 / 均价（供应商表的排序在表头里点按，见 supplier-report-table.tsx）。
 const PRODUCT_SORT_FIELDS: readonly ReportSortField[] = ["quantity", "amount", "unitPrice"];
 const SORT_FIELD_LABEL_KEYS: Record<ReportSortField, string> = {
   amount: "productReport.columns.amount",
@@ -195,46 +197,14 @@ type DisplayedMainReport = {
   report: CompleteProductMainReport;
 };
 
-function formatCount(value: number) {
-  return Math.round(value).toLocaleString("en-AU");
-}
-
 function formatRowNumber(value: number) {
   return String(value).padStart(2, "0");
-}
-
-function formatNullableMoney(value: number | null) {
-  return value === null ? "—" : formatMoney(value);
-}
-
-function formatNullableWholeMoney(value: number | null) {
-  return value === null ? "—" : formatWholeMoney(value);
-}
-
-function formatGrossMarginRate(
-  value: number | null,
-  costStatus: ProductReportCostStatus,
-  costPendingLabel: string,
-  noActivityLabel: string,
-) {
-  // 后端统一返回 0-1 比率（例如 0.4 = 40%），展示层再换算为百分比。
-  if (costStatus === "NoActivity") return noActivityLabel;
-  if (costStatus === "Missing") return costPendingLabel;
-  // Complete 但销售额为零时毛利率按数学定义为空值，不代表成本缺失。
-  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 function mergeCostStatuses(statuses: readonly ProductReportCostStatus[]): ProductReportCostStatus {
   if (statuses.some((status) => status === "Missing")) return "Missing";
   if (statuses.some((status) => status === "Complete")) return "Complete";
   return "NoActivity";
-}
-
-function formatShare(value: number, denominator: number) {
-  if (!Number.isFinite(value) || !Number.isFinite(denominator) || denominator <= 0) {
-    return "--";
-  }
-  return `${((value / denominator) * 100).toFixed(1)}%`;
 }
 
 // 标题只放供应商名称，代码由下方副行单独展示，避免中国供应商代码上下重复。
@@ -341,7 +311,7 @@ export function ProductReportScreen({
   const firstProductReportRowRef = useRef<View>(null);
   const drilldownLoadGate = useRef(new ReportLoadVisibilityGate()).current;
   const drilldownLoadQueryKeyRef = useRef<readonly unknown[] | null>(null);
-  const drilldownLoadKindRef = useRef<"supplier" | "product" | null>(null);
+  const drilldownLoadKindRef = useRef<"product" | null>(null);
   const drilldownRequestGenerationRef = useRef(0);
   const drilldownPhysicalRowVisibleRef = useRef(false);
   const drilldownPhysicalPresentationReadyRef = useRef(false);
@@ -379,6 +349,8 @@ export function ProductReportScreen({
   const [productSearchDraft, setProductSearchDraft] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
+  // 点某家供应商后打开的弹窗（先选商品明细 / 分店数据）；null 表示未打开。
+  const [sheetSupplier, setSheetSupplier] = useState<SupplierReportRow | null>(null);
   // 各表独立记住排序：主表排序在切换筛选时保留，分店弹窗每次打开回到默认金额降序。
   const [supplierSort, setSupplierSort] = useState<ReportSort>(DEFAULT_REPORT_SORT);
   const [productSort, setProductSort] = useState<ReportSort>(DEFAULT_REPORT_SORT);
@@ -474,6 +446,7 @@ export function ProductReportScreen({
     setSupplierPage(1);
     setProductPage(1);
     setDrilldown(null);
+    setSheetSupplier(null);
   }, [branchCodes.length, selectedStoreCode, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess]);
 
   useEffect(() => {
@@ -488,22 +461,10 @@ export function ProductReportScreen({
     ) return;
     // 白名单不可用时关闭下钻，避免展示上一次范围的缓存明细。
     setDrilldown(null);
+    setSheetSupplier(null);
     setStoreModalVisible(false);
   }, [cashierEnabledStoreCodes.length, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess]);
 
-  // 供应商营业额弹窗要看所有分店，不继承顶部单店筛选。
-  const supplierBranchQueryParams = useMemo(
-    () => (
-      dateRangeValid
-      && activeRange
-      && storeOptionsQuery.isSuccess
-      && !storeOptionsQuery.isFetching
-      && cashierEnabledStoreCodes.length > 0
-        ? buildProductReportDateQuery(activeRange, cashierEnabledStoreCodes)
-        : null
-    ),
-    [activeRange, cashierEnabledStoreCodes, dateRangeValid, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess],
-  );
   // 商品分店弹窗也要完整分店数据，不继承顶部单店筛选。
   const productBranchQueryParams = useMemo(
     () => (
@@ -1015,6 +976,7 @@ export function ProductReportScreen({
       completeDrilldownSnapshotsRef.clear();
       lastDisplayedMainReportRef.current = null;
       setDrilldown(null);
+      setSheetSupplier(null);
     }
     previousScopeCodesRef.current = scopeFingerprint;
     if (!reportScopeValid) {
@@ -1022,6 +984,7 @@ export function ProductReportScreen({
       completeDrilldownSnapshotsRef.clear();
       lastDisplayedMainReportRef.current = null;
       setDrilldown(null);
+      setSheetSupplier(null);
     }
   }, [
     accountIdentity,
@@ -1311,17 +1274,6 @@ export function ProductReportScreen({
   const costPendingLabel = t("productReport.states.costPending");
   const costNoActivityLabel = t("productReport.states.costNoActivity");
 
-  const supplierBranchQueryKey = useMemo(
-    () => [
-      "product-report",
-      "supplier-branches",
-      accountIdentity,
-      cashierStoreScopeVersion,
-      drilldown,
-      supplierBranchQueryParams,
-    ] as const,
-    [accountIdentity, cashierStoreScopeVersion, drilldown, supplierBranchQueryParams],
-  );
   const productBranchQueryKey = useMemo(
     () => [
       "product-report",
@@ -1332,25 +1284,6 @@ export function ProductReportScreen({
       productBranchQueryParams,
     ] as const,
     [accountIdentity, cashierStoreScopeVersion, drilldown, productBranchQueryParams],
-  );
-  const supplierBranchSnapshotKey = useMemo(
-    () => drilldown?.type === "supplier" && drilldownSnapshotQueryParams
-      ? createReportSnapshotKey({
-          accountIdentity,
-          tab: "product",
-          detail: "supplier-branches",
-          period: range.key,
-          startDate: drilldownSnapshotQueryParams.startDate,
-          endDate: drilldownSnapshotQueryParams.endDate,
-          compareStartDate: drilldownSnapshotQueryParams.compareStartDate,
-          compareEndDate: drilldownSnapshotQueryParams.compareEndDate,
-          compareMode: drilldownSnapshotQueryParams.compareMode,
-          branchCodes: drilldownSnapshotQueryParams.branchCodes ?? [],
-          supplierKind: drilldown.kind,
-          supplierCode: drilldown.supplier.supplierCode,
-        })
-      : null,
-    [accountIdentity, drilldown, range.key, drilldownSnapshotQueryParams],
   );
   const productBranchSnapshotKey = useMemo(
     () => drilldown?.type === "product" && drilldownSnapshotQueryParams
@@ -1373,7 +1306,7 @@ export function ProductReportScreen({
   );
   const startDrilldownLoad = useCallback((
     queryKey: readonly unknown[],
-    nextKind: "supplier" | "product",
+    nextKind: "product",
     hasUsableCache: boolean,
   ) => {
     const requestGeneration = drilldownRequestGenerationRef.current + 1;
@@ -1405,47 +1338,6 @@ export function ProductReportScreen({
     ) return;
     drilldownLoadGate.fail();
   }, [drilldownLoadGate]);
-
-  const supplierBranchQuery = useQuery({
-    queryKey: supplierBranchQueryKey,
-    queryFn: async ({ signal }) => {
-      const cachedSupplierBranches = queryClient.getQueryData<
-        ProductReportSnapshot<SupplierBranchBreakdownRow[]>
-      >(supplierBranchQueryKey);
-      const requestGeneration = startDrilldownLoad(
-        supplierBranchQueryKey,
-        "supplier",
-        hasUsableSuccessfulReportCache(
-          queryClient.getQueryState(supplierBranchQueryKey)?.status,
-          cachedSupplierBranches,
-          (cachedSupplierBranches) => cachedSupplierBranches.isComplete && cachedSupplierBranches.data.length > 0,
-        ),
-      );
-      try {
-        const result = await fetchSupplierBranchBreakdown(
-          (drilldown as Extract<Drilldown, { type: "supplier" }>).kind,
-          supplierBranchQueryParams!,
-          (drilldown as Extract<Drilldown, { type: "supplier" }>).supplier.supplierCode,
-          { signal },
-        );
-        if (
-          signal.aborted
-          || drilldownRequestGenerationRef.current !== requestGeneration
-          || drilldownLoadQueryKeyRef.current !== supplierBranchQueryKey
-        ) {
-          const abortError = new Error("Stale supplier branch report request");
-          abortError.name = "AbortError";
-          throw abortError;
-        }
-        return result;
-      } catch (error) {
-        failDrilldownLoad(requestGeneration, supplierBranchQueryKey);
-        throw error;
-      }
-    },
-    enabled: Boolean(supplierBranchQueryParams && drilldown?.type === "supplier"),
-    ...REPORT_QUERY_OPTIONS,
-  });
 
   const productBranchQuery = useQuery({
     queryKey: productBranchQueryKey,
@@ -1487,29 +1379,12 @@ export function ProductReportScreen({
     ...REPORT_QUERY_OPTIONS,
   });
   const drilldownKind = drilldown?.type ?? null;
-  const activeDrilldownQuery = drilldownKind === "supplier"
-    ? supplierBranchQuery
-    : drilldownKind === "product"
-      ? productBranchQuery
-      : null;
-  const activeDrilldownQueryKey = drilldownKind === "supplier"
-    ? supplierBranchQueryKey
-    : drilldownKind === "product"
-      ? productBranchQueryKey
-      : null;
-  const activeDrilldownSnapshotKey = drilldownKind === "supplier"
-    ? supplierBranchSnapshotKey
-    : drilldownKind === "product"
-      ? productBranchSnapshotKey
-      : null;
+  const activeDrilldownQuery = drilldownKind === "product" ? productBranchQuery : null;
+  const activeDrilldownQueryKey = drilldownKind === "product" ? productBranchQueryKey : null;
+  const activeDrilldownSnapshotKey = drilldownKind === "product" ? productBranchSnapshotKey : null;
   const activeDrilldownSnapshot = activeDrilldownSnapshotKey
     ? getCompleteReportSnapshot(completeDrilldownSnapshotsRef, activeDrilldownSnapshotKey)
     : undefined;
-  const displayedSupplierBranchRows = reportScopeValid && drilldownKind === "supplier"
-    ? (supplierBranchQuery.data?.isComplete && !supplierBranchQuery.isFetching && !supplierBranchQuery.isError
-      ? supplierBranchQuery.data.data
-      : (activeDrilldownSnapshot?.data as SupplierBranchBreakdownRow[] | undefined) ?? [])
-    : [];
   const displayedProductBranchRows = reportScopeValid && drilldownKind === "product"
     ? (productBranchQuery.data?.isComplete && !productBranchQuery.isFetching && !productBranchQuery.isError
       ? productBranchQuery.data.data
@@ -1537,7 +1412,7 @@ export function ProductReportScreen({
   ]);
   // 弹窗状态按当前下钻类型取值，避免另一个禁用查询把内容渲染成空白。
   const isDrilldownLoading =
-    activeDrilldownQuery?.isLoading && displayedSupplierBranchRows.length === 0 && displayedProductBranchRows.length === 0
+    activeDrilldownQuery?.isLoading && displayedProductBranchRows.length === 0
     || Boolean(
       activeDrilldownQuery?.data !== undefined
       && !activeDrilldownQuery.data.isComplete
@@ -1549,20 +1424,12 @@ export function ProductReportScreen({
     && activeDrilldownQuery.data.pollingExhausted
     && !activeDrilldownQuery.isFetching,
   );
-  const isDrilldownError =
-    drilldownKind === "supplier"
-      ? supplierBranchQuery.isError
-      : drilldownKind === "product"
-        ? productBranchQuery.isError
-        : false;
+  const isDrilldownError = drilldownKind === "product" ? productBranchQuery.isError : false;
   const drilldownShowingSnapshot = activeDrilldownSnapshot !== undefined
     && (Boolean(activeDrilldownQuery?.isFetching) || Boolean(isDrilldownError) || Boolean(isDrilldownStatisticsIncomplete));
   const recordDrilldownMeasurement = useCallback((measurement: ReportLoadPerformanceMeasurement | null) => {
     if (!measurement || !drilldownLoadKindRef.current) return;
-    recordReportLoadPerformance(
-      drilldownLoadKindRef.current === "supplier" ? "supplier-branches" : "product-branches",
-      measurement,
-    );
+    recordReportLoadPerformance("product-branches", measurement);
   }, []);
   const updateDrilldownFirstDataVisibility = useCallback((visible: boolean) => {
     // 该回调已在 InteractionManager 后测量视口，因此同时证明弹窗展示完成。
@@ -1601,7 +1468,7 @@ export function ProductReportScreen({
     ) return;
     if (isDrilldownError) {
       // 同条件完整快照仍在时保留旧行；只有没有快照才清空物理可见状态。
-      if (displayedSupplierBranchRows.length > 0 || displayedProductBranchRows.length > 0) return;
+      if (displayedProductBranchRows.length > 0) return;
       drilldownPhysicalRowVisibleRef.current = false;
       drilldownLoadGate.setFirstRowVisible(false);
       return;
@@ -1628,22 +1495,15 @@ export function ProductReportScreen({
     drilldownLoadGate,
     isDrilldownError,
     displayedProductBranchRows.length,
-    displayedSupplierBranchRows.length,
     recordDrilldownMeasurement,
   ]);
   const retryDrilldown = () => {
-    if (
-      (drilldownKind === "supplier" && supplierBranchQueryParams)
-      || (drilldownKind === "product" && productBranchQueryParams)
-    ) {
+    if (drilldownKind === "product" && productBranchQueryParams) {
       // 先重验白名单，避免用上一次成功范围重试刚被停用的分店。
       void storeOptionsQuery.refetch();
     }
   };
-  const drilldownEmptyLabel =
-    drilldownKind === "supplier"
-      ? t("productReport.states.emptySupplierBranches")
-      : t("productReport.states.emptyProducts");
+  const drilldownEmptyLabel = t("productReport.states.emptyProducts");
 
   const setQuickRange = (key: ProductReportQuickRangeKey) => {
     const next = getProductReportQuickRange(key);
@@ -1790,104 +1650,59 @@ export function ProductReportScreen({
     setDrilldown(next);
   };
 
-  // 澳洲与中国供应商共用同一张卡：右上金额 + 增长率（点金额看分店），两项占比横条，
-  // 数量 / 均价 / 毛利额 / 毛利率四格。澳洲只显示本期；中国把同期写在金额下方、占比旁和每格下方。
-  const renderSupplierRow = ({
+  // 澳洲与中国供应商共用同一张紧凑表：每家供应商给出一行模型，列顺序即表格顺序——
+  // 金额、增长率、数量、占比（首屏），再左滑看 均价、毛利额、毛利率、总占比。
+  // 澳洲只显示本期；中国在每格下方多一行灰色同期小字（表头标注「灰字＝同期」）。
+  const buildSupplierTableRow = ({
     item,
     rowNumber,
   }: {
     item: SupplierReportRow;
     rowNumber: number;
-  }) => {
+  }): SupplierTableRow => {
     const isSelected = isSameLinkedCode(item.supplierCode, selectedSupplierCode);
     const showComparison = isChinaKind;
-    // 同期值一律经过 compareText：澳洲页签返回 null，卡片上不出现任何同期数值。
+    // 同期值一律经过 compareText：澳洲页签返回 null，表格上不出现任何同期数值。
     const compareText = (value: string) => (showComparison ? value : null);
-    const compareLabel = t("productReport.metrics.compare");
-    // 占比分母跟随卡片数据所属的分店：中国页签用该范围的中国货合计，澳洲页签用本表小计。
+    // 占比分母跟随数据所属的分店：中国页签用该范围的中国货合计，澳洲页签用本表小计。
     const categoryRevenue = isChinaKind ? supplierScopeChinaGoods.revenue : supplierSubtotal;
     const categoryCompareRevenue = isChinaKind
       ? supplierScopeChinaGoods.compareRevenue
       : supplierCompareSubtotal;
-    // 两条占比横条用同一标尺：满格 = 当前页签金额最大的供应商；总占比条再按「分类合计 ÷ 总营业额」等比缩短。
+    // 两条占比迷你条用同一标尺：满格 = 当前页签金额最大的供应商；总占比条再按「分类合计 ÷ 总营业额」等比缩短。
     const shareBarPercent = topSupplierRevenue > 0
       ? Math.min(100, Math.max(0, (item.revenue / topSupplierRevenue) * 100))
       : 0;
     const totalShareBarPercent = supplierScopeRevenue.revenue > 0
       ? shareBarPercent * Math.min(1, categoryRevenue / supplierScopeRevenue.revenue)
       : 0;
-    const categoryShareLabel = isChinaKind
-      ? t("productReport.chinaGoods.compareShareOfChina")
-      : t("productReport.metrics.supplierShare");
-    const totalShareLabel = isChinaKind
-      ? t("productReport.chinaGoods.compareShareOfTotal")
-      : t("productReport.metrics.totalShare");
-    const compareRevenueText = compareText(`${compareLabel} ${formatWholeMoney(item.compareRevenue)}`);
 
-    return (
-      <View style={[styles.supplierCard, isSelected ? styles.selectedSupplierCard : null]}>
-        {isSelected ? <View style={styles.selectedSupplierAccent} /> : null}
-        <View style={styles.supplierCardTop}>
-          <View style={styles.rowNumberColumn}>
-            <RankBadge value={formatRowNumber(rowNumber)} />
-          </View>
-          <Pressable
-            // 供应商名称点选联动分店表与商品明细（再点取消），金额单独查看分店汇总。
-            onPress={() => toggleLinkedSupplier(item.supplierCode)}
-            accessibilityRole="button"
-            accessibilityLabel={isSelected
-              ? t("productReport.linked.selectedSupplierA11y", { supplier: getSupplierTitle(item) })
-              : t("productReport.linked.selectSupplierA11y", { supplier: getSupplierTitle(item) })}
-            accessibilityState={{ selected: isSelected }}
-            style={styles.supplierNameBlock}
-          >
-            <Text style={[styles.supplierName, isSelected ? styles.selectedSupplierName : null]} numberOfLines={2}>
-              {getSupplierTitle(item)}
-            </Text>
-            <Text style={styles.caption} numberOfLines={1}>{shouldShowSupplierCode(item) ? item.supplierCode : ""}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => openDrilldown({ type: "supplier", kind, supplier: item })}
-            accessibilityRole="button"
-            accessibilityLabel={[getSupplierTitle(item), t("productReport.drilldown.supplier")].join(" ")}
-            style={styles.amountLink}
-          >
-            <Text style={styles.cardAmount} numberOfLines={1}>{formatWholeMoney(item.revenue)}</Text>
-            <View style={styles.amountMeta}>
-              <GrowthPill current={item.revenue} compare={item.compareRevenue} newLabel={growthNewLabel} />
-              <Text style={styles.drillLink}>{t("productReport.actions.branchDetail")} ›</Text>
-            </View>
-            {compareRevenueText ? <Text style={styles.caption} numberOfLines={1}>{compareRevenueText}</Text> : null}
-          </Pressable>
-        </View>
-        <View style={styles.shareRow}>
-          <ShareMeter
-            label={categoryShareLabel}
-            value={formatShare(item.revenue, categoryRevenue)}
-            compareText={compareText(`${compareLabel} ${formatShare(item.compareRevenue, categoryCompareRevenue)}`)}
-            percent={shareBarPercent}
-          />
-          <ShareMeter
-            label={totalShareLabel}
-            value={formatShare(item.revenue, supplierScopeRevenue.revenue)}
-            compareText={compareText(`${compareLabel} ${formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)}`)}
-            percent={totalShareBarPercent}
-          />
-        </View>
-        <MetricGrid
-          style={styles.cardGrid}
-          cells={[
-            { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(item.totalQuantity), compare: compareText(item.compareTotalQuantity === null ? "—" : formatCount(item.compareTotalQuantity)) },
-            { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatNullableMoney(item.averagePrice), compare: compareText(formatNullableMoney(item.compareAveragePrice)) },
-            { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(item.grossProfit), compare: compareText(formatNullableWholeMoney(item.compareGrossProfit)) },
-            { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel), pending: item.costStatus === "Missing", compare: compareText(formatGrossMarginRate(item.compareGrossMarginRate, item.compareCostStatus, costPendingLabel, costNoActivityLabel)) },
-          ]}
-        />
-      </View>
-    );
+    return {
+      id: item.id,
+      rank: formatRowNumber(rowNumber),
+      title: getSupplierTitle(item),
+      // 中国页签名称下方固定显示编号；后端缺名回退成编号时留空，避免上下重复。
+      code: shouldShowSupplierCode(item) ? item.supplierCode : "",
+      selected: isSelected,
+      accessibilityLabel: t("productReport.sheet.openA11y", { supplier: getSupplierTitle(item) }),
+      // 点名称、金额或任一指标都打开同一个选择弹窗：商品明细 / 分店数据（联动筛选在弹窗里）。
+      onPress: () => setSheetSupplier(item),
+      cells: {
+        revenue: { value: formatWholeMoney(item.revenue), compare: compareText(formatWholeMoney(item.compareRevenue)) },
+        quantity: { value: formatCount(item.totalQuantity), compare: compareText(item.compareTotalQuantity === null ? "—" : formatCount(item.compareTotalQuantity)) },
+        share: { value: formatShare(item.revenue, categoryRevenue), compare: compareText(formatShare(item.compareRevenue, categoryCompareRevenue)), barPercent: shareBarPercent },
+        averagePrice: { value: formatNullableMoney(item.averagePrice), compare: compareText(formatNullableMoney(item.compareAveragePrice)) },
+        grossProfit: { value: formatNullableWholeMoney(item.grossProfit), compare: compareText(formatNullableWholeMoney(item.compareGrossProfit)) },
+        grossMargin: { value: formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel), pending: item.costStatus === "Missing", compare: compareText(formatGrossMarginRate(item.compareGrossMarginRate, item.compareCostStatus, costPendingLabel, costNoActivityLabel)) },
+        totalShare: { value: formatShare(item.revenue, supplierScopeRevenue.revenue), compare: compareText(formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)), barPercent: totalShareBarPercent },
+      },
+      // 增长率胶囊由表格放在「数量」和「占比」之间；这里只负责用同一套口径渲染。
+      growth: <GrowthPill size="sm" fitText current={item.revenue} compare={item.compareRevenue} newLabel={growthNewLabel} />,
+    };
   };
 
-  // 两个供应商页签的商品明细共用同一张商品卡，并且都只显示本期值（同期金额只用于算增长率）。
+  // 两个供应商页签的商品明细共用同一张商品卡（与供应商弹窗里的商品卡是同一个组件），
+  // 都只显示本期值（同期金额只用于算增长率）。
   const renderProductRow = ({
     item,
     rowNumber,
@@ -1895,45 +1710,14 @@ export function ProductReportScreen({
     item: ProductReportProductRow;
     rowNumber: number;
   }) => (
-    <Pressable
-      style={styles.productCard}
+    <ProductReportCard
+      item={item}
+      rowNumber={rowNumber}
+      growthNewLabel={growthNewLabel}
+      costPendingLabel={costPendingLabel}
+      costNoActivityLabel={costNoActivityLabel}
       onPress={() => openDrilldown({ type: "product", product: item })}
-      accessibilityRole="button"
-      accessibilityLabel={[item.itemNumber || item.productCode, item.productName || "", t("productReport.drilldown.product")].filter(Boolean).join(" ")}
-    >
-      {/* 图片 + 货号/名称/金额在上一行；四格指标占满整卡宽度，英文「Gross profit / Gross margin」才不会被截断。 */}
-      <View style={styles.productCardTop}>
-      <View style={styles.productImageColumn}>
-        {item.productImage ? (
-          <Image source={{ uri: item.productImage }} style={styles.productImage} resizeMode="cover" />
-        ) : (
-          <View style={styles.productImagePlaceholder}>
-            <Text style={styles.placeholderText}>{t("productReport.columns.image")}</Text>
-          </View>
-        )}
-        <View style={styles.rankBadge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <Text style={styles.rankBadgeText}>{String(rowNumber)}</Text>
-        </View>
-      </View>
-      <View style={styles.productCardBody}>
-        <Text style={styles.productCode} numberOfLines={1}>{item.itemNumber || "--"}</Text>
-        <Text style={styles.productName} numberOfLines={1}>{item.productName || "--"}</Text>
-        <View style={styles.amountLine}>
-          <Text style={styles.cardAmount} numberOfLines={1}>{formatWholeMoney(item.salesAmount)}</Text>
-          <GrowthPill current={item.salesAmount} compare={item.compareSalesAmount} newLabel={growthNewLabel} />
-        </View>
-      </View>
-      </View>
-      <MetricGrid
-        style={styles.productGrid}
-        cells={[
-          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(item.quantity) },
-          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatMoney(item.averageUnitPrice) },
-          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(item.grossProfit) },
-          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel), pending: item.costStatus === "Missing" },
-        ]}
-      />
-    </Pressable>
+    />
   );
 
   // 中国页签「本页合计」：固定在商品卡片列表上方，字段与商品卡一致，只有本期值。
@@ -1968,15 +1752,16 @@ export function ProductReportScreen({
     );
   };
 
-  const drilldownSubtitle = drilldown?.type === "supplier"
-    ? [getSupplierTitle(drilldown.supplier), shouldShowSupplierCode(drilldown.supplier) ? drilldown.supplier.supplierCode : ""]
+  const drilldownSubtitle = drilldown?.type === "product"
+    ? [drilldown.product.itemNumber || drilldown.product.productCode, drilldown.product.productName]
         .filter(Boolean)
         .join(" · ")
-    : drilldown?.type === "product"
-      ? [drilldown.product.itemNumber || drilldown.product.productCode, drilldown.product.productName]
-          .filter(Boolean)
-          .join(" · ")
-      : undefined;
+    : undefined;
+
+  const supplierTableRows = supplierPageRows.map((item, index) => buildSupplierTableRow({
+    item,
+    rowNumber: (supplierPage - 1) * supplierPageSize + index + 1,
+  }));
 
   return (
     <View style={styles.container}>
@@ -2155,24 +1940,16 @@ export function ProductReportScreen({
               </View>
             )}
             <View style={styles.reportSection} onLayout={recordSectionOffset("suppliers")}>
-              <SectionHeader
+              <SupplierSectionHeader
                 title={t("productReport.sections.suppliers")}
-                hint={isChinaKind ? t("productReport.chinaGoods.supplierHint") : undefined}
                 badges={displayedContext?.branchCode ? (
                   <ScopePill tone="branch" label={t("productReport.linked.branchScope", { branch: getStoreLabel(displayedContext.branchCode) })} />
                 ) : null}
                 updating={linkedStaleness.supplierTable}
-                sortFields={SUPPLIER_SORT_FIELDS}
-                sort={supplierSort}
-                onSort={applySupplierSort}
                 page={supplierPage}
                 pageCount={supplierPageCount}
                 onPrevious={() => setSupplierPage((current) => Math.max(1, current - 1))}
                 onNext={() => setSupplierPage((current) => Math.min(supplierPageCount, current + 1))}
-                pageSize={supplierPageSize}
-                pageSizeOptions={SUPPLIER_PAGE_SIZE_OPTIONS}
-                onPageSizeChange={(size) => { setSupplierPageSize(size); setSupplierPage(1); }}
-                pageSizeTestID="product-report-supplier-page-size"
                 previousLabel={t("productReport.actions.previous")}
                 nextLabel={t("productReport.actions.next")}
               />
@@ -2191,30 +1968,32 @@ export function ProductReportScreen({
               {supplierQuery.isLoading && !mainReportHasDisplay ? (
                 <LoadingState label={t("productReport.states.loading")} />
               ) : (
-                // 供应商卡片直接排在页面 ScrollView 里（单一纵向滚动），不再嵌套固定高度的列表。
-                <View style={[styles.cardList, linkedStaleness.supplierTable ? styles.staleSection : null]}>
+                // 供应商紧凑表直接排在页面 ScrollView 里（纵向仍是单一滚动），只有表内右侧指标列横向滑动。
+                <View style={linkedStaleness.supplierTable ? styles.staleSection : null}>
                   {supplierPageRows.length === 0 ? (
                     <EmptyState label={t("productReport.states.emptySuppliers")} />
                   ) : (
-                    supplierPageRows.map((item, index) => (
-                      <View
-                        key={item.id}
-                        ref={index === 0 ? firstSupplierReportRowRef : undefined}
-                        collapsable={index === 0 ? false : undefined}
-                        onLayout={index === 0 ? scheduleProductDataVisibilityCheck : undefined}
-                      >
-                        {renderSupplierRow({
-                          item,
-                          rowNumber: (supplierPage - 1) * supplierPageSize + index + 1,
-                        })}
-                      </View>
-                    ))
+                    <SupplierReportTable
+                      rows={supplierTableRows}
+                      isChina={isChinaKind}
+                      hint={t("productReport.supplierTable.hint")}
+                      sort={supplierSort}
+                      onSort={applySupplierSort}
+                      firstRowRef={firstSupplierReportRowRef}
+                      onFirstRowLayout={scheduleProductDataVisibilityCheck}
+                    />
                   )}
                 </View>
               )}
-              {supplierPageCount > 1 ? (
-                // 列表底部同样可以翻页；翻页后回到供应商区块顶部，从新一页第一张卡开始看。
-                <View style={styles.bottomPager}>
+              <View style={styles.supplierFooter}>
+                <PageSizePicker
+                  pageSize={supplierPageSize}
+                  options={SUPPLIER_PAGE_SIZE_OPTIONS}
+                  onChange={(size) => { setSupplierPageSize(size); setSupplierPage(1); }}
+                  testIDPrefix="product-report-supplier-page-size"
+                />
+                {supplierPageCount > 1 ? (
+                  // 列表底部同样可以翻页；翻页后回到供应商区块顶部，从新一页第一行开始看。
                   <CompactPager
                     page={supplierPage}
                     pageCount={supplierPageCount}
@@ -2229,8 +2008,8 @@ export function ProductReportScreen({
                     previousLabel={t("productReport.actions.previous")}
                     nextLabel={t("productReport.actions.next")}
                   />
-                </View>
-              ) : null}
+                ) : null}
+              </View>
             </View>
 
             <View style={styles.reportSection} onLayout={recordSectionOffset("products")}>
@@ -2362,23 +2141,36 @@ export function ProductReportScreen({
         onSelect={applyStore}
         onDismiss={() => setStoreModalVisible(false)}
       />
+      {sheetSupplier ? (
+        <SupplierDetailSheet
+          // 换供应商时整体重建，视图、排序、页码都回到初始状态。
+          key={sheetSupplier.supplierCode}
+          supplier={sheetSupplier}
+          kind={kind}
+          queryParams={allBranchQueryParams}
+          rangeLabel={`${activeRange.startDate} ~ ${activeRange.endDate}`}
+          accountIdentity={accountIdentity}
+          scopeVersion={cashierStoreScopeVersion}
+          summaryShareText={`${isChinaKind ? t("productReport.chinaGoods.compareShareOfChina") : t("productReport.metrics.supplierShare")} ${
+            formatShare(sheetSupplier.revenue, isChinaKind ? supplierScopeChinaGoods.revenue : supplierSubtotal)
+          }`}
+          growthNewLabel={growthNewLabel}
+          costPendingLabel={costPendingLabel}
+          costNoActivityLabel={costNoActivityLabel}
+          onClose={() => setSheetSupplier(null)}
+          onLinkFilter={toggleLinkedSupplier}
+        />
+      ) : null}
       <BranchDrilldownModal
         visible={
           Boolean(drilldown)
           && reportScopeValid
         }
-        title={
-          drilldown?.type === "supplier"
-            ? t("productReport.drilldown.supplier")
-            : t("productReport.drilldown.product")
-        }
+        title={t("productReport.drilldown.product")}
         subtitle={drilldownSubtitle}
-        supplierRows={displayedSupplierBranchRows}
         productRows={displayedProductBranchRows}
-        showComparison={drilldown?.type === "supplier" && drilldown.kind === "china"}
         isLoading={isDrilldownLoading}
         isError={(isDrilldownError || isDrilldownStatisticsIncomplete)
-          && displayedSupplierBranchRows.length === 0
           && displayedProductBranchRows.length === 0}
         snapshotNotice={drilldownShowingSnapshot
           ? t("reports.states.showingSnapshot", {
@@ -2396,7 +2188,6 @@ export function ProductReportScreen({
             : "reports.states.statisticsIncomplete")
           : t("productReport.states.error")}
         emptyLabel={drilldownEmptyLabel}
-        kind={drilldownKind}
         sort={drilldownSort}
         onSortChange={applyDrilldownSort}
         growthNewLabel={growthNewLabel}
@@ -2487,34 +2278,107 @@ function SectionHeader({
           nextLabel={nextLabel}
         />
       </View>
-      <View style={styles.pageSizeRow}>
-        <Text style={styles.pageSizeLabel}>{t("pagination.perPage")}</Text>
-        <View style={styles.pageSizeSegment} accessibilityRole="radiogroup">
-          {pageSizeOptions.map((option) => {
-            const selected = option === pageSize;
-            return (
-              <Pressable
-                key={option}
-                testID={`${pageSizeTestID}-${option}`}
-                accessibilityRole="radio"
-                accessibilityLabel={t("pagination.perPageOption", { count: option })}
-                accessibilityState={{ checked: selected }}
-                hitSlop={{ top: 8, bottom: 8 }}
-                // 点已选中的档位不触发回调，避免无谓地回到第 1 页
-                onPress={() => { if (!selected) onPageSizeChange(option); }}
-                style={[styles.pageSizeButton, selected && styles.pageSizeSelected]}
-              >
-                <Text style={[styles.pageSizeText, selected && styles.pageSizeTextSelected]}>{option}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
+      <PageSizePicker
+        pageSize={pageSize}
+        options={pageSizeOptions}
+        onChange={onPageSizeChange}
+        testIDPrefix={pageSizeTestID}
+      />
     </View>
   );
 }
 
 /** 区块标题旁的联动范围标签：分店蓝、供应商紫，与吸顶联动条和选中卡片同色。 */
+/** 「每页 50 / 100」分段：点已选中的档位不触发回调，避免无谓地回到第 1 页。 */
+function PageSizePicker({
+  pageSize,
+  options,
+  onChange,
+  testIDPrefix,
+}: {
+  pageSize: number;
+  options: readonly number[];
+  onChange: (pageSize: number) => void;
+  testIDPrefix: string;
+}) {
+  const { t } = useAppTranslation("common");
+  return (
+    <View style={styles.pageSizeRow}>
+      <Text style={styles.pageSizeLabel}>{t("pagination.perPage")}</Text>
+      <View style={styles.pageSizeSegment} accessibilityRole="radiogroup">
+        {options.map((option) => {
+          const selected = option === pageSize;
+          return (
+            <Pressable
+              key={option}
+              testID={`${testIDPrefix}-${option}`}
+              accessibilityRole="radio"
+              accessibilityLabel={t("pagination.perPageOption", { count: option })}
+              accessibilityState={{ checked: selected }}
+              hitSlop={{ top: 8, bottom: 8 }}
+              // 点已选中的档位不触发回调，避免无谓地回到第 1 页
+              onPress={() => { if (!selected) onChange(option); }}
+              style={[styles.pageSizeButton, selected && styles.pageSizeSelected]}
+            >
+              <Text style={[styles.pageSizeText, selected && styles.pageSizeTextSelected]}>{option}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 供应商区块头：标题 + 范围标签 + 更新中，右侧翻页。排序改在表头点按，每页条数挪到列表底部，
+ * 把首屏高度让给供应商行。
+ */
+function SupplierSectionHeader({
+  title,
+  badges,
+  updating,
+  page,
+  pageCount,
+  onPrevious,
+  onNext,
+  previousLabel,
+  nextLabel,
+}: {
+  title: string;
+  badges?: ReactNode;
+  updating: boolean;
+  page: number;
+  pageCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+  previousLabel: string;
+  nextLabel: string;
+}) {
+  const { t } = useAppTranslation("common");
+  return (
+    <View style={styles.supplierHeaderRow}>
+      <View style={styles.sectionTitleLine}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {badges}
+        {updating ? (
+          <View style={styles.updatingIndicator} accessibilityRole="progressbar">
+            <ActivityIndicator size={12} />
+            <Text variant="labelSmall" style={styles.updatingText}>{t("productReport.linked.updating")}</Text>
+          </View>
+        ) : null}
+      </View>
+      <CompactPager
+        page={page}
+        pageCount={pageCount}
+        onPrevious={onPrevious}
+        onNext={onNext}
+        previousLabel={previousLabel}
+        nextLabel={nextLabel}
+      />
+    </View>
+  );
+}
+
 function ScopePill({ tone, label }: { tone: "branch" | "supplier"; label: string }) {
   const branch = tone === "branch";
   return (
@@ -2612,14 +2476,13 @@ function StorePickerModal({
 }
 
 /**
- * 分店下钻底部抽屉：每个分店一张卡片行（名次 + 分店 + 增长率胶囊，下面一行五项指标）。
- * 供应商分店的同期小字只在中国供应商下钻显示；商品分店保留原有的同期小字。
+ * 商品分店下钻底部抽屉：每个分店一张卡片行（名次 + 分店 + 增长率胶囊，下面一行五项指标，同期小字保留）。
+ * 供应商的商品明细 / 分店数据弹窗见 supplier-detail-sheet.tsx。
  */
 function BranchDrilldownModal({
   visible,
   title,
   subtitle,
-  supplierRows,
   productRows,
   isLoading,
   isError,
@@ -2629,8 +2492,6 @@ function BranchDrilldownModal({
   retryLabel,
   errorLabel,
   emptyLabel,
-  kind,
-  showComparison = false,
   sort,
   onSortChange,
   growthNewLabel,
@@ -2642,7 +2503,6 @@ function BranchDrilldownModal({
   visible: boolean;
   title: string;
   subtitle?: string;
-  supplierRows: SupplierBranchBreakdownRow[];
   productRows: ProductBranchBreakdownRow[];
   isLoading: boolean;
   isError: boolean;
@@ -2652,9 +2512,6 @@ function BranchDrilldownModal({
   retryLabel: string;
   errorLabel: string;
   emptyLabel: string;
-  kind: "supplier" | "product" | null;
-  // 两类供应商下钻共用同一卡片行；仅中国供应商在每项下方显示同期。
-  showComparison?: boolean;
   sort: ReportSort;
   onSortChange: (field: ReportSortField) => void;
   growthNewLabel: string;
@@ -2666,13 +2523,9 @@ function BranchDrilldownModal({
   const { t } = useAppTranslation("common");
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const sortChipFields = useSortChipFields(kind === "product" ? PRODUCT_SORT_FIELDS : SUPPLIER_SORT_FIELDS);
-  const rows = kind === "supplier" ? supplierRows : productRows;
+  const sortChipFields = useSortChipFields(PRODUCT_SORT_FIELDS);
+  const rows = productRows;
   // 分店弹窗是全量数据，直接在前端排序；序号即当前排序下的名次，同值按分店编码兜底。
-  const sortedSupplierRows = useMemo(
-    () => sortReportRows(supplierRows, sort, SUPPLIER_METRIC_SORT_VALUES, (row) => row.branchCode),
-    [sort, supplierRows],
-  );
   const sortedProductRows = useMemo(
     () => sortReportRows(productRows, sort, PRODUCT_BRANCH_SORT_VALUES, (row) => row.branchCode),
     [productRows, sort],
@@ -2707,7 +2560,7 @@ function BranchDrilldownModal({
       visibilityTaskRef.current?.cancel();
       visibilityTaskRef.current = null;
     };
-  }, [isError, isLoading, kind, rows, scheduleFirstRowVisibilityCheck, visible]);
+  }, [isError, isLoading, rows, scheduleFirstRowVisibilityCheck, visible]);
   return (
     <Portal>
       <Modal
@@ -2749,152 +2602,23 @@ function BranchDrilldownModal({
                 style={styles.sheetList}
                 contentContainerStyle={styles.sheetListContent}
               >
-                {kind === "supplier"
-                  ? sortedSupplierRows.map((row, index) => (
-                      <SupplierBranchRow
-                        key={row.id}
-                        row={row}
-                        rowNumber={index + 1}
-                        growthNewLabel={growthNewLabel}
-                        costPendingLabel={costPendingLabel}
-                        costNoActivityLabel={costNoActivityLabel}
-                        showComparison={showComparison}
-                        rowRef={index === 0 ? firstRowRef : undefined}
-                      />
-                    ))
-                  : sortedProductRows.map((row, index) => (
-                      <ProductBranchRow
-                        key={row.id}
-                        row={row}
-                        rowNumber={index + 1}
-                        growthNewLabel={growthNewLabel}
-                        costPendingLabel={costPendingLabel}
-                        costNoActivityLabel={costNoActivityLabel}
-                        rowRef={index === 0 ? firstRowRef : undefined}
-                      />
-                    ))}
+                {sortedProductRows.map((row, index) => (
+                  <ProductBranchRow
+                    key={row.id}
+                    row={row}
+                    rowNumber={index + 1}
+                    growthNewLabel={growthNewLabel}
+                    costPendingLabel={costPendingLabel}
+                    costNoActivityLabel={costNoActivityLabel}
+                    rowRef={index === 0 ? firstRowRef : undefined}
+                  />
+                ))}
               </ScrollView>
             </>
           )}
         </View>
       </Modal>
     </Portal>
-  );
-}
-
-function DrilldownRowHead({
-  rowNumber,
-  branchName,
-  branchCode,
-  current,
-  compare,
-  growthNewLabel,
-}: {
-  rowNumber: number;
-  branchName: string;
-  branchCode: string;
-  current: number;
-  compare: number;
-  growthNewLabel: string;
-}) {
-  return (
-    <View style={styles.drillRowHead}>
-      <View style={styles.rowNumberColumn}>
-        <RankBadge value={String(rowNumber)} />
-      </View>
-      <View style={styles.drillBranchName}>
-        <Text style={styles.drillBranchTitle} numberOfLines={1}>{branchName || branchCode}</Text>
-        <Text style={styles.caption} numberOfLines={1}>{branchCode}</Text>
-      </View>
-      <GrowthPill current={current} compare={compare} newLabel={growthNewLabel} />
-    </View>
-  );
-}
-
-function SupplierBranchRow({
-  row,
-  rowNumber,
-  growthNewLabel,
-  costPendingLabel,
-  costNoActivityLabel,
-  showComparison,
-  rowRef,
-}: {
-  row: SupplierBranchBreakdownRow;
-  rowNumber: number;
-  growthNewLabel: string;
-  costPendingLabel: string;
-  costNoActivityLabel: string;
-  showComparison: boolean;
-  rowRef?: RefObject<View | null>;
-}) {
-  const { t } = useAppTranslation("common");
-  // 同期值一律经过 compareText：只有中国供应商下钻（showComparison）才显示同期小字。
-  const compareText = (value: string) => (showComparison ? value : null);
-  return (
-    <View ref={rowRef} style={styles.drillRow}>
-      <DrilldownRowHead
-        rowNumber={rowNumber}
-        branchName={row.branchName}
-        branchCode={row.branchCode}
-        current={row.revenue}
-        compare={row.compareRevenue}
-        growthNewLabel={growthNewLabel}
-      />
-      <MetricGrid
-        variant="plain"
-        style={styles.drillGrid}
-        cells={[
-          { key: "amount", label: t("productReport.columns.amount"), value: formatWholeMoney(row.revenue), compare: compareText(formatWholeMoney(row.compareRevenue)) },
-          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(row.totalQuantity), compare: compareText(row.compareTotalQuantity === null ? "—" : formatCount(row.compareTotalQuantity)) },
-          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatNullableMoney(row.averagePrice), compare: compareText(formatNullableMoney(row.compareAveragePrice)) },
-          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(row.grossProfit), compare: compareText(formatNullableWholeMoney(row.compareGrossProfit)) },
-          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(row.grossMarginRate, row.costStatus, costPendingLabel, costNoActivityLabel), pending: row.costStatus === "Missing", compare: compareText(formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus, costPendingLabel, costNoActivityLabel)) },
-        ]}
-      />
-    </View>
-  );
-}
-
-// 商品分店：数量、金额、均价、毛利额、毛利率五项；原表就带同期双行，这里保留为每项下方的小字，不减少数据。
-function ProductBranchRow({
-  row,
-  rowNumber,
-  growthNewLabel,
-  costPendingLabel,
-  costNoActivityLabel,
-  rowRef,
-}: {
-  row: ProductBranchBreakdownRow;
-  rowNumber: number;
-  growthNewLabel: string;
-  costPendingLabel: string;
-  costNoActivityLabel: string;
-  rowRef?: RefObject<View | null>;
-}) {
-  const { t } = useAppTranslation("common");
-  return (
-    <View ref={rowRef} style={styles.drillRow}>
-      <DrilldownRowHead
-        rowNumber={rowNumber}
-        branchName={row.branchName}
-        branchCode={row.branchCode}
-        current={row.salesAmount}
-        compare={row.compareSalesAmount}
-        growthNewLabel={growthNewLabel}
-      />
-      <MetricGrid
-        variant="plain"
-        style={styles.drillGrid}
-        cells={[
-          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(row.quantity), compare: formatCount(row.compareQuantity) },
-          { key: "amount", label: t("productReport.columns.amount"), value: formatWholeMoney(row.salesAmount), compare: formatWholeMoney(row.compareSalesAmount) },
-          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatMoney(row.averageUnitPrice), compare: formatMoney(row.compareAverageUnitPrice) },
-          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(row.grossProfit), compare: formatNullableWholeMoney(row.compareGrossProfit) },
-          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(row.grossMarginRate, row.costStatus, costPendingLabel, costNoActivityLabel), pending: row.costStatus === "Missing", compare: formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus, costPendingLabel, costNoActivityLabel) },
-        ]}
-      />
-    </View>
   );
 }
 
@@ -3076,163 +2800,18 @@ const styles = StyleSheet.create({
   bottomPager: {
     alignItems: "center",
   },
-  supplierCard: {
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: REPORT_UI.border,
-    borderRadius: 14,
-    backgroundColor: REPORT_UI.card,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  // 供应商选中色用紫色（分店蓝、供应商紫），与吸顶联动条的供应商 chip 同色。
-  selectedSupplierCard: {
-    borderColor: LINKED_COLORS.supplierBorder,
-    backgroundColor: "#FCFBFF",
-  },
-  selectedSupplierAccent: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 4,
-    backgroundColor: LINKED_COLORS.supplier,
-  },
-  supplierCardTop: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  rowNumberColumn: {
-    width: 24,
-    minWidth: 0,
-    paddingTop: 1,
-  },
-  supplierNameBlock: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 44,
-  },
-  supplierName: {
-    color: REPORT_UI.text,
-    fontSize: 14.5,
-    lineHeight: 19,
-    fontWeight: "700",
-  },
-  selectedSupplierName: {
-    color: LINKED_COLORS.supplierText,
-  },
-  amountLink: {
-    flexShrink: 0,
-    maxWidth: "50%",
-    alignItems: "flex-end",
-    gap: 2,
-  },
-  cardAmount: {
-    color: REPORT_UI.text,
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  amountMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  drillLink: {
-    color: PRODUCT_CARD_COLORS.link,
-    fontSize: 11.5,
-    fontWeight: "700",
-  },
-  shareRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 9,
-  },
-  cardGrid: {
-    marginTop: 9,
-  },
-  productCard: {
-    gap: 8,
-    borderWidth: 1,
-    borderColor: REPORT_UI.border,
-    borderRadius: 14,
-    backgroundColor: REPORT_UI.card,
-    paddingVertical: 10,
-    paddingLeft: 10,
-    paddingRight: 12,
-  },
-  productCardTop: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  productImageColumn: {
-    width: 62,
-    height: 62,
-    position: "relative",
-    overflow: "hidden",
-    borderRadius: 10,
-  },
-  productImage: {
-    width: 62,
-    height: 62,
-    backgroundColor: "#F2F4F7",
-  },
-  productImagePlaceholder: {
-    width: 62,
-    height: 62,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F2F4F7",
-  },
-  placeholderText: {
-    color: REPORT_UI.muted,
-    fontSize: 10,
-  },
-  rankBadge: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    minWidth: 18,
-    alignItems: "center",
-    borderBottomRightRadius: 8,
-    backgroundColor: "rgba(16,24,40,0.78)",
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  rankBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  productCardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  productCode: {
-    color: REPORT_UI.text,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  productName: {
-    color: REPORT_UI.muted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  amountLine: {
+  supplierHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    marginTop: 3,
   },
-  productGrid: {
-    marginTop: 0,
+  // 供应商表底部：左侧每页条数，右侧翻页。
+  supplierFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   pageTotalCard: {
     borderWidth: 1,
@@ -3351,6 +2930,16 @@ const styles = StyleSheet.create({
   pageSizeTextSelected: {
     color: "#FFFFFF",
   },
+  amountLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 3,
+  },
+  cardGrid: {
+    marginTop: 9,
+  },
   stateBox: {
     minHeight: 72,
     alignItems: "center",
@@ -3446,28 +3035,5 @@ const styles = StyleSheet.create({
     borderColor: REPORT_UI.border,
     borderRadius: 14,
     backgroundColor: REPORT_UI.card,
-  },
-  drillRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: REPORT_UI.divider,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  drillRowHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  drillBranchName: {
-    flex: 1,
-    minWidth: 0,
-  },
-  drillBranchTitle: {
-    color: REPORT_UI.text,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  drillGrid: {
-    marginTop: 7,
   },
 });

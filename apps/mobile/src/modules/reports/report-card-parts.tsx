@@ -53,6 +53,7 @@ export function GrowthPill({
   newLabel,
   unavailable = false,
   size = "md",
+  fitText = false,
   style,
 }: {
   current: number | null | undefined;
@@ -60,13 +61,20 @@ export function GrowthPill({
   newLabel: string;
   unavailable?: boolean;
   size?: "sm" | "md" | "lg";
+  /** 放在定宽窄列里（如供应商表）时，百分比太长就按比例缩小，而不是被省略号截断。 */
+  fitText?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const { label, tone } = getGrowthPillModel(current, compare, newLabel, unavailable);
   const colors = PILL_COLORS[tone];
   return (
-    <View style={[styles.pill, styles[`pill_${size}`], { backgroundColor: colors.background }, style]}>
-      <Text style={[styles.pillText, styles[`pillText_${size}`], { color: colors.text }]} numberOfLines={1}>
+    <View style={[styles.pill, styles[`pill_${size}`], fitText ? styles.pillFit : null, { backgroundColor: colors.background }, style]}>
+      <Text
+        style={[styles.pillText, styles[`pillText_${size}`], { color: colors.text }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit={fitText}
+        minimumFontScale={fitText ? 0.65 : undefined}
+      >
         {label}
       </Text>
     </View>
@@ -87,6 +95,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderRadius: 10,
   },
+  pillFit: { maxWidth: "100%" },
   pill_sm: { paddingHorizontal: 6, paddingVertical: 1 },
   pill_md: { paddingHorizontal: 8, paddingVertical: 2 },
   pill_lg: { paddingHorizontal: 10, paddingVertical: 4 },

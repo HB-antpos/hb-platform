@@ -387,6 +387,29 @@
       "none": "未排序",
       "label": "排序"
     },
+    "supplierTable": {
+      "share": "占比",
+      "shareRevenue": "营业额",
+      "hint": "点供应商看商品明细或分店数据",
+      "compareLegend": "灰字＝同期",
+      "swipeMore": "左滑看更多",
+      "swipeBack": "右滑回首屏"
+    },
+    "sheet": {
+      "openA11y": "{{supplier}}，点按选择商品明细或分店数据",
+      "tabProducts": "商品明细",
+      "tabBranches": "分店数据",
+      "tabWithCount": "{{label}} · {{count}}",
+      "chooseProductsDesc": "该供应商卖了哪些商品",
+      "chooseBranchesDesc": "该供应商在各分店的销售",
+      "productCount": "{{count}} 款",
+      "branchCount": "{{count}} 家",
+      "linkOnly": "只在页面里联动筛选（不弹窗）",
+      "rowDetailHint": "明细",
+      "branchProductsSubtitle": "该分店的商品明细",
+      "totalCount": "共 {{count}} 条 · 每页 {{pageSize}}",
+      "emptyBranches": "暂无分店数据"
+    },
     "chinaGoods": {
       "revenue": "中国货营业额",
       "shareOfTotal": "占总营业额",
@@ -409,7 +432,6 @@
       "compareShareOfChina": "占中国货",
       "compareShareOfTotal": "占总营业",
       "pageTotal": "本页合计",
-      "supplierHint": "点供应商联动分店与明细 · 点金额看分店",
       "productHint": "点商品看分店",
       "supplierBranchSection": "分店 · {{supplier}}",
       "supplierBranchFormula": "{{supplier}}金额 ÷ 分店营业额",
@@ -417,8 +439,8 @@
       "appendedSelectedBranch": "已选分店不在前 {{count}} 名，附在末尾"
     },
     "linked": {
-      "hintChina": "点分店或供应商可联动筛选",
-      "hintAustralia": "点供应商可筛选商品明细",
+      "hintChina": "点分店联动筛选，点供应商看明细",
+      "hintAustralia": "点供应商看商品明细或分店数据",
       "branchLabel": "分店",
       "supplierLabel": "供应商",
       "clearAll": "清除",
