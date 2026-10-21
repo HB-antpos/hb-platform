@@ -23,10 +23,12 @@ public enum SquareDirectRefreshOutcome
 
 /// <summary>
 /// 「收银机直连 Square」网关（默认关闭）。插在 <see cref="ConfiguredCardTerminalClient"/> 发往 Hbpos API 的 Square 请求之前：
-/// 本地开关开启、凭据有效、没有处在失败冷却期时，创建结账 / 轮询 / 取消 / 关闭四个请求直接发给 Square；
+/// 本地开关开启、凭据有效、没有处在失败冷却期时，创建结账 / 轮询 / 取消 / 关闭 / 付款详情查询五个请求直接发给 Square；
 /// 任何非 2xx 结果、断网、超时一律返回 null，由调用方照旧走 Hbpos API 中转。
 /// 防重复扣款靠两点：回落中转时沿用同一个幂等键与同样的请求体（Square 对同键同体只建一笔结账），
-/// 轮询 / 取消是只读或幂等操作，换通道重发不会产生新的扣款。退款、恢复中心、付款详情查询不经过这里，仍走服务端。
+/// 轮询 / 取消 / 付款详情查询是只读或幂等操作，换通道重发不会产生新的扣款。
+/// 付款详情必须直连：服务端靠 webhook 或中转轮询才记得住 payment id，直连轮询时它还不认识这笔付款，会按「归属不明」回 403，
+/// 已经刷成功的卡就被误判成「结果未知」。退款、恢复中心不经过这里，仍走服务端。
 /// </summary>
 public interface ISquareDirectGateway
 {
@@ -81,6 +83,9 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
 
     [GeneratedRegex(@"^api/v1/square/checkouts/(?<id>[^/]+)(?:/(?<action>cancel|dismiss))?$", RegexOptions.CultureInvariant)]
     private static partial Regex CheckoutRoutePattern();
+
+    [GeneratedRegex(@"^api/v1/square/payments/(?<id>[^/]+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex PaymentRoutePattern();
 
     private readonly ISquareDirectCredentialStore _store;
     private readonly ISquareDirectApiClient _api;
@@ -266,10 +271,11 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
         CancellationToken cancellationToken)
     {
         string? checkoutId = null;
+        var resourceProperty = route.Kind == RouteKind.Payment ? "payment" : "checkout";
         try
         {
             using var document = JsonDocument.Parse(responseBody);
-            if (document.RootElement.TryGetProperty("checkout", out var checkout) &&
+            if (document.RootElement.TryGetProperty(resourceProperty, out var checkout) &&
                 checkout.ValueKind == JsonValueKind.Object &&
                 checkout.TryGetProperty("id", out var idElement) &&
                 idElement.ValueKind == JsonValueKind.String)
@@ -313,7 +319,12 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
         CancellationToken cancellationToken)
     {
         var code = (int)statusCode;
-        if (statusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        if (route.Kind == RouteKind.Payment && statusCode == HttpStatusCode.Forbidden)
+        {
+            // 付款详情 403 多半是令牌缺 PAYMENTS_READ 之类的权限；结账接口用同一令牌是通的，不能因此删掉凭据让后续付款整体回落中转。
+            Log($"direct {route.Describe()} forbidden http={code}; fallback to relay");
+        }
+        else if (statusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             // 令牌被 Square 拒绝（总部换了令牌 / 被吊销）：立即删掉本机副本，等预热重新领取。
             await _store.DeleteCredentialAsync(route.Environment, CancellationToken.None);
@@ -343,12 +354,13 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
             {
                 Content = JsonBody(BuildCreatePayload(route.Environment, (SquareCreateCheckoutRequest)body!))
             },
-            RouteKind.Get => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.CheckoutId!)}"),
-            RouteKind.Cancel => new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.CheckoutId!)}/cancel")
+            RouteKind.Get => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.ResourceId!)}"),
+            RouteKind.Payment => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}payments/{Uri.EscapeDataString(route.ResourceId!)}"),
+            RouteKind.Cancel => new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.ResourceId!)}/cancel")
             {
                 Content = JsonBody(new { })
             },
-            _ => new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.CheckoutId!)}/dismiss")
+            _ => new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}terminals/checkouts/{Uri.EscapeDataString(route.ResourceId!)}/dismiss")
             {
                 Content = JsonBody(new { })
             }
@@ -535,6 +547,16 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
                 SetRoute(RouteKind.Create, createEnvironment, null, out route);
         }
 
+        var paymentMatch = PaymentRoutePattern().Match(path);
+        if (paymentMatch.Success)
+        {
+            var paymentId = Uri.UnescapeDataString(paymentMatch.Groups["id"].Value);
+            return method == HttpMethod.Get &&
+                !string.IsNullOrWhiteSpace(paymentId) &&
+                TryParseEnvironment(ReadQueryValue(query, "environment"), out var paymentEnvironment) &&
+                SetRoute(RouteKind.Payment, paymentEnvironment, paymentId, out route);
+        }
+
         var match = CheckoutRoutePattern().Match(path);
         if (!match.Success)
         {
@@ -601,12 +623,15 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
     {
         Create,
         Get,
+        Payment,
         Cancel,
         Dismiss
     }
 
-    private readonly record struct DirectRoute(RouteKind Kind, CardTerminalEnvironment Environment, string? CheckoutId)
+    private readonly record struct DirectRoute(RouteKind Kind, CardTerminalEnvironment Environment, string? ResourceId)
     {
-        public string Describe() => CheckoutId is null ? Kind.ToString() : $"{Kind} checkoutId={CheckoutId}";
+        public string Describe() => ResourceId is null
+            ? Kind.ToString()
+            : Kind == RouteKind.Payment ? $"{Kind} paymentId={ResourceId}" : $"{Kind} checkoutId={ResourceId}";
     }
 }
