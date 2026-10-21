@@ -477,6 +477,68 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
     ],
   },
   {
+    id: 'close',
+    title: { en: 'Daily close', zh: '日结' },
+    questions: [
+      {
+        // 按钮名对照 WPF Strings.resx / Strings.zh-CN.resx 的 dailyClose.* 同一 key；
+        // 自动 Linkly 结算条件见 LinklySettlementService.ShouldAutoSettleAfterDailyCloseAsync（今天、集成 Linkly、未开手动刷卡、当天无成功/待定结算）。
+        id: 'pos-daily-close',
+        title: { zh: '如何日结（清点现金、Linkly 结算、打印日结单）？', en: 'How do I do the daily close (cash count, Linkly settlement, printout)?' },
+        where: { zh: '区域 ③ 功能砖 [k:Daily Close|日结]', en: 'Area ③ tile [k:Daily Close|日结]' },
+        steps: {
+          zh: [
+            '§清点现金并保存',
+            '先结束当前交易，点右侧功能砖 [k:Daily Close|日结]。',
+            '核对顶部 [i:Business Date|营业日期]（点 [k:Today|今天] 切回今天），点 [p:New Daily Close|创建新日结]；上次没做完时按钮显示为 [p:Continue Daily Close|继续日结]。',
+            '在 [d:Cash Count|现金盘点] 里逐个点选纸币、硬币面额，用数字键输入钱箱里的数量，点 [k:Apply · Next|应用 · 下一项] 跳到下一个面额。',
+            '在右侧 [d:Cash Reconciliation|现金对账] 核对 [d:Expected Cash|应有现金]、[d:Cash Counted|现金实盘] 和 [d:Over / Short|溢长 / 短款]（显示短款、长款或平账）；[d:System Totals|系统汇总] 里可看销售、退款和订单数。',
+            '点 [p:Save & Finalize|保存并完成]，日结保存并自动打印日结单。',
+            '§Linkly 刷卡结算',
+            '按钮下方显示 [d:Also sends Linkly settlement|同时发送 Linkly 结算] 时，保存后会自动向刷卡机结算、打印银行结算单，并停在 [tab:Linkly Settlement|Linkly 结算] 页签显示结果。',
+            '没发出或失败（例如刷卡机离线）：检查刷卡机和 Linkly 程序后，在 [tab:Linkly Settlement|Linkly 结算] 点 [k:Settle & Print|结算并打印]，在 [d:Confirm Linkly settlement|确认刷卡机日结] 里再点 [k:Settle & Print|结算并打印] 重试。',
+            '§重打日结单或银行结算单',
+            '在 [tab:Daily Close History|日结历史] 选好营业日期，点选一条记录，再点 [k:Reprint Daily Close|重打印日结单]。',
+            '银行结算单：在 [tab:Linkly Settlement|Linkly 结算] 选中记录，点 [k:Reprint Selected Settlement|重打所选结算单]。',
+          ],
+          en: [
+            '§Count the cash and save',
+            'Finish the current sale, then tap the [k:Daily Close|日结] tile on the right.',
+            'Check the [i:Business Date|营业日期] at the top (tap [k:Today|今天] to go back to today), then tap [p:New Daily Close|创建新日结]. If one was left unfinished, the button shows [p:Continue Daily Close|继续日结].',
+            'In [d:Cash Count|现金盘点], tap each note and coin denomination, type how many are in the till, then tap [k:Apply · Next|应用 · 下一项] to move to the next one.',
+            'On the right, check [d:Expected Cash|应有现金], [d:Cash Counted|现金实盘] and [d:Over / Short|溢长 / 短款] under [d:Cash Reconciliation|现金对账] (shown as Short, Over or Balanced). [d:System Totals|系统汇总] shows sales, refunds and order count.',
+            'Tap [p:Save & Finalize|保存并完成]. The daily close is saved and printed.',
+            '§Linkly (EFTPOS) settlement',
+            'If [d:Also sends Linkly settlement|同时发送 Linkly 结算] shows under the button, saving also settles the card terminal and prints the bank settlement receipt, then stays on the [tab:Linkly Settlement|Linkly 结算] tab to show the result.',
+            'Not sent or failed (e.g. terminal offline): check the terminal and the Linkly program, then on [tab:Linkly Settlement|Linkly 结算] tap [k:Settle & Print|结算并打印] and confirm with [k:Settle & Print|结算并打印] in [d:Confirm Linkly settlement|确认刷卡机日结].',
+            '§Reprint the daily close or bank settlement',
+            'On [tab:Daily Close History|日结历史], pick the business date, select a record and tap [k:Reprint Daily Close|重打印日结单].',
+            'Bank settlement receipt: on [tab:Linkly Settlement|Linkly 结算], select the record and tap [k:Reprint Selected Settlement|重打所选结算单].',
+          ],
+        },
+        tips: {
+          zh: [
+            '清点到一半可点 [k:Return to History|返回历史] 保留草稿，之后点「继续日结」接着做；[k:Discard Draft|放弃草稿] 会清空已输入的数量，无法撤销。',
+            '一天可以做多次日结；当天 Linkly 已结算成功后，再次日结不会重复结算。补做以前日期的日结不会发送结算，[k:Settle & Print|结算并打印] 只能结算今天。',
+            '只有这台收银机接的是 Linkly 刷卡机、且没开「使用手动刷卡」时，收银端才会发送 Linkly 结算。',
+            '提示结算结果未知时不要再次提交：有 [k:Query result from Linkly|向 Linkly 查询结果] 按钮就先点它；仍查不到，由主管对照刷卡机在 [d:Supervisor resolution|主管人工处理] 选 [k:Confirmed succeeded|确认结算成功]、[k:Confirmed failed|确认结算失败] 或 [k:Confirmed not submitted|确认未提交结算]，再点 [k:Confirm decision|确认结论]（只记录结论，不会再次结算）。',
+            '日结后如弹出 [d:Restart this POS?|建议重启这台收银机]，可点 [k:Restart now|立即重启]，或点 [k:Later|稍后] 今天不再提醒。',
+            '日结记录会上传总部：Web 后台 [k:POS Admin|收银管理] → [k:Daily Closes|日结记录]，或 App 工作台 [k:Daily closes|日结记录] 都能查看。',
+          ],
+          en: [
+            'Halfway through counting? Tap [k:Return to History|返回历史] to keep the draft, then use Continue Daily Close later. [k:Discard Draft|放弃草稿] clears the counts and cannot be undone.',
+            'You can close more than once a day; once today’s Linkly settlement has succeeded it is not sent again. A daily close for an earlier date never settles, and [k:Settle & Print|结算并打印] only works for today.',
+            'The POS only sends a Linkly settlement when this till uses a Linkly terminal and “Use manual card payment” is off.',
+            'If the settlement result is unknown, do not resubmit. Tap [k:Query result from Linkly|向 Linkly 查询结果] if it is shown; if there is still no answer, a supervisor checks the terminal and picks [k:Confirmed succeeded|确认结算成功], [k:Confirmed failed|确认结算失败] or [k:Confirmed not submitted|确认未提交结算] under [d:Supervisor resolution|主管人工处理], then [k:Confirm decision|确认结论] (this only records the outcome; nothing is settled again).',
+            'If [d:Restart this POS?|建议重启这台收银机] appears after the close, tap [k:Restart now|立即重启], or [k:Later|稍后] to skip it for today.',
+            'Daily closes are uploaded to head office. View them in Web admin under [k:POS Admin|收银管理] → [k:Daily Closes|日结记录], or on the app’s Home under [k:Daily closes|日结记录].',
+          ],
+        },
+        permissions: ['DailyClose.View', 'DailyClose.Save', 'DailyClose.Reprint'],
+      },
+    ],
+  },
+  {
     id: 'settings',
     title: { en: 'Settings', zh: '设置' },
     questions: [
