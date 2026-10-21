@@ -373,6 +373,11 @@ namespace BlazorApp.Shared.Constants
             /// </summary>
             public const string StartPicking = "Warehouse.StartPicking";
             /// <summary>
+            /// 在分店订货单里用负数发货录入退货（退货冲减金额，净额为负时开退款单）。
+            /// 默认无人具备、管理员手动授权；刻意不设别名，持有 Warehouse.Manage / ManageOrders 不会自动具备。
+            /// </summary>
+            public const string StoreOrderReturn = "Warehouse.StoreOrderReturn";
+            /// <summary>
             /// 撤销未完成的分店价格变更任务（Web「价格变更任务」页与移动端「价格和标签」）。撤销按商品覆盖所有分店，
             /// 只取消提醒、不改任何价格、不可恢复，所以单独成码，可以只授予需要的人。
             /// 持有 Warehouse.ManageProducts / Warehouse.Manage 的账号经别名自动具备，保证 Web 原有撤销能力不丢。

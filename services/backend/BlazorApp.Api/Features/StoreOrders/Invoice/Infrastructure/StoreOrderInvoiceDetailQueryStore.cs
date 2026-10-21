@@ -91,6 +91,9 @@ internal sealed class StoreOrderInvoiceDetailQueryStore(
                     WarehouseImportPrice = warehouseProduct.ImportPrice,
                     StoredImportAmount = line.ImportAmount,
                     RetailPrice = product.RetailPrice,
+                    ReturnReason = line.ReturnReason,
+                    ReturnDisposition = line.ReturnDisposition,
+                    ReturnNote = line.ReturnNote,
                 }
             )
             .ToListAsync();

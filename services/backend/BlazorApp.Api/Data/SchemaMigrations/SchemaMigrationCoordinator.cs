@@ -82,6 +82,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string StorePriceUpdateSettingMigrationId =
         "20261017.003-store-price-update-setting";
     internal const string UserNamePartsMigrationId = "20261018.001-user-name-parts";
+    internal const string WarehouseOrderReturnFieldsMigrationId =
+        "20261021.001-warehouse-order-return-fields";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -297,6 +299,11 @@ internal sealed class SchemaMigrationCoordinator
             UserNamePartsMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyUserNamePartsAsync(cancellationToken)
+        ),
+        new(
+            WarehouseOrderReturnFieldsMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyWarehouseOrderReturnFieldsAsync(cancellationToken)
         ),
     ];
 

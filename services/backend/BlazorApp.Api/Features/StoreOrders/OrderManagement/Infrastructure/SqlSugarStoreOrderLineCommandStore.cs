@@ -19,11 +19,32 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
 {
     private readonly ISqlSugarClient _db = context.Db;
 
+    /// <summary>
+    /// 在事务内执行命令；退货规则校验失败（<see cref="StoreOrderReturnRuleException"/>）转成带中文文案的失败结果，
+    /// 事务由执行器按失败结果回滚，不当成服务器异常记日志。
+    /// </summary>
+    private Task<StoreOrderManagementResult<T>> ExecuteGuardedAsync<T>(
+        Func<Task<StoreOrderManagementResult<T>>> command
+    )
+    {
+        return transactionExecutor.ExecuteAsync(async () =>
+        {
+            try
+            {
+                return await command();
+            }
+            catch (StoreOrderReturnRuleException exception)
+            {
+                return StoreOrderManagementResult<T>.Fail(exception.Message);
+            }
+        });
+    }
+
     public Task<StoreOrderManagementResult<bool>> AddOrderLineAsync(
         AddOrderLineInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var order = await persistence.GetEditableOrderAsync(input.OrderGuid);
             if (order == null)
@@ -39,7 +60,8 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
                 input.ProductCode,
                 input.Quantity,
                 importPrice: null,
-                isUpdate: false
+                isUpdate: false,
+                returnRequest: input.ReturnRequest
             );
             await persistence.UpdateOrderTotalAsync(order.OrderGUID);
             return StoreOrderManagementResult<bool>.Ok(true);
@@ -50,7 +72,7 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         BatchAddOrderLineInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var order = await persistence.GetEditableOrderAsync(input.OrderGuid);
             if (order == null)
@@ -67,7 +89,8 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
                     item.ProductCode,
                     item.Quantity,
                     item.ImportPrice,
-                    isUpdate: false
+                    isUpdate: false,
+                    returnRequest: item.ReturnRequest
                 );
             }
 
@@ -80,7 +103,7 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         UpdateOrderLineInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var order = await persistence.GetEditableOrderAsync(input.OrderGuid);
             if (order == null)
@@ -109,7 +132,8 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
                 input.ProductCode,
                 input.Quantity,
                 input.ImportPrice,
-                isUpdate: true
+                isUpdate: true,
+                returnRequest: input.ReturnRequest
             );
 
             if (syncImportPrice)
@@ -152,7 +176,7 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         RemoveOrderLineInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var order = await persistence.GetEditableOrderAsync(input.OrderGuid);
             if (order == null)
@@ -174,6 +198,21 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
                 return StoreOrderManagementResult<bool>.Fail("Order line not found");
             }
 
+            // 退货行只有持「分店订单退货」权限者才能删除，否则无权限者可以借删行抹掉别人录的退货。
+            if (
+                StoreOrderReturnRules.IsReturnLine(detail.AllocQuantity)
+                && !await persistence.CanRecordReturnsAsync()
+            )
+            {
+                return StoreOrderManagementResult<bool>.Fail(
+                    "没有「分店订单退货」权限，不能修改或删除退货行"
+                );
+            }
+
+            // 删掉的行不再保留退货字段，避免日后被复用时带出陈旧原因。
+            detail.ReturnReason = null;
+            detail.ReturnDisposition = null;
+            detail.ReturnNote = null;
             detail.IsDeleted = true;
             detail.UpdatedAt = DateTime.Now;
             detail.UpdatedBy = actorContext.ActorName;
@@ -187,7 +226,7 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         BatchUpdateOrderLineInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var order = await persistence.GetEditableOrderAsync(input.OrderGuid);
             if (order == null)
@@ -230,7 +269,8 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
                     item.ImportPrice,
                     isUpdate: true,
                     isBatch: true,
-                    originalQuantity: item.Quantity
+                    originalQuantity: item.Quantity,
+                    returnRequest: item.ReturnRequest
                 );
 
                 if (item.SyncImportPrice && item.ImportPrice.HasValue)
@@ -278,7 +318,7 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         RefreshOrderLineImportPricesInput input
     )
     {
-        return transactionExecutor.ExecuteAsync(async () =>
+        return ExecuteGuardedAsync(async () =>
         {
             var orderExists = await _db.Queryable<WareHouseOrder>()
                 .Where(item => item.OrderGUID == input.OrderGuid && !item.IsDeleted)
@@ -403,11 +443,6 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
             );
         }
 
-        if (input.Items.Any(item => item.Quantity.GetValueOrDefault() < 0))
-        {
-            return StoreOrderManagementResult<bool>.Fail("Quantity cannot be negative");
-        }
-
         var details = await _db.Queryable<WareHouseOrderDetails>()
             .Where(detail =>
                 detail.OrderGUID == order.OrderGUID
@@ -431,7 +466,17 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
         {
             var detail = detailMap[item.DetailGuid!.Trim()];
             var allocatedQuantity = item.Quantity!.Value;
+            // 发货数量为负 = 退货行：必须持权限、订货数量为 0、带有效原因；规则失败抛异常，整批回滚。
+            // 已有退货行被改回 0 / 正数同样需要权限（防止无权限者抹掉退货）。
+            var returnDecision = await persistence.EvaluateReturnWriteAsync(
+                allocatedQuantity,
+                detail,
+                item.ReturnRequest
+            );
             detail.AllocQuantity = allocatedQuantity;
+            detail.ReturnReason = returnDecision.Reason;
+            detail.ReturnDisposition = returnDecision.Disposition;
+            detail.ReturnNote = returnDecision.Note;
             detail.OEMAmount = allocatedQuantity * (detail.OEMPrice ?? 0);
             detail.ImportAmount = StoreOrderManagementRules.CalculateOrderImportAmount(
                 detail.Quantity,
@@ -447,6 +492,9 @@ internal sealed class SqlSugarStoreOrderLineCommandStore(
             )
             {
                 detail.IsDeleted = true;
+                detail.ReturnReason = null;
+                detail.ReturnDisposition = null;
+                detail.ReturnNote = null;
             }
         }
 

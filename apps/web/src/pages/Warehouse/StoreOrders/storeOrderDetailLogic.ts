@@ -139,10 +139,13 @@ export type StoreOrderDetailAllocDiff =
   | { kind: 'unshipped' }
   | { kind: 'short'; amount: number }
   | { kind: 'extra'; amount: number }
+  /** 退货行：订货 ≤ 0 且发货 < 0；amount 是退回件数（正数）。 */
+  | { kind: 'return'; amount: number }
 
 /**
  * 发货数输入框下方的小字：有订货却发 0 → 未发；少于订货 → 少发 N；多于订货（含没订货的主动配货）→ 主动配货 +N。
  * 「未发」「主动配货」与页签统计同一口径（订货 > 0 且发货 = 0；订货 ≤ 0 且发货 > 0 也落在 extra 里）。
+ * 订货 ≤ 0 且发货 < 0 是退货行，单独归为 return，不能被误判成「少发」。
  */
 export function describeStoreOrderDetailAllocDiff(
   quantity: number | null | undefined,
@@ -150,6 +153,9 @@ export function describeStoreOrderDetailAllocDiff(
 ): StoreOrderDetailAllocDiff {
   const ordered = Number(quantity ?? 0)
   const allocated = Number(allocQuantity ?? 0)
+  if (ordered <= 0 && allocated < 0) {
+    return { kind: 'return', amount: -allocated }
+  }
   if (ordered > 0 && allocated === 0) {
     return { kind: 'unshipped' }
   }
@@ -186,12 +192,17 @@ export interface StoreOrderShipProgress {
   barPercent: number
 }
 
+/**
+ * 发货进度只统计正数发货：接口的 totalAllocQuantity 是净件数（含退货的负数），
+ * 传入退回件数 totalReturnQuantity（正数）把它还原成「真正发出去的件数」，进度才不会被退货拉低。
+ */
 export function computeStoreOrderShipProgress(
   totalQuantity: number | null | undefined,
   totalAllocQuantity: number | null | undefined,
+  totalReturnQuantity: number | null | undefined = 0,
 ): StoreOrderShipProgress {
   const ordered = Number(totalQuantity ?? 0)
-  const allocated = Number(totalAllocQuantity ?? 0)
+  const allocated = Math.max(0, Number(totalAllocQuantity ?? 0) + Math.max(0, Number(totalReturnQuantity ?? 0)))
   if (!(ordered > 0)) {
     return { percent: null, barPercent: allocated > 0 ? 100 : 0 }
   }

@@ -827,7 +827,8 @@ async function main() {
     assert(detailSource.includes("'copyOrderQuantityToAllocQuantity'"), '批量修改类型应包含复制订货数量到发货数量')
     assert(detailSource.includes("t('storeOrders.batchCopyOrderQuantityToAllocQuantity')"), '批量弹窗应展示复制订货数量到发货数量选项')
     assert(detailSource.includes("payload.type === 'copyOrderQuantityToAllocQuantity'"), '批量确认应处理复制订货数量分支')
-    assert(copyBranchSource.includes('const changedCopyLines = selectedLines.filter'), '复制订货数量分支应计算实际变化行数')
+    // 退货行（发货数为负）先被排除出 batchLines，再计算实际变化行数。
+    assert(copyBranchSource.includes('const changedCopyLines = batchLines.filter'), '复制订货数量分支应计算实际变化行数')
     assert(copyBranchSource.includes('setEditingRows((current) => {'), '复制订货数量分支应只写页面草稿')
     assert(copyBranchSource.includes('changedCopyLines.forEach'), '复制订货数量分支应只把实际变化行写入发货数草稿')
     assert(copyBranchSource.includes('allocQuantity: Number(line.quantity ?? 0)'), '复制订货数量分支应把订货数量写入发货数草稿')
@@ -896,9 +897,13 @@ async function main() {
   const amountLabelsFailure = await runTest('详情页顶部金额应显示预计销售额、发货金额 ex GST 和 GST 10%', () => {
     assert(detailSource.includes('estimatedSalesAmount'), '详情页缺少预计销售额计算')
     assert(detailSource.includes('gstAmount'), '详情页缺少 GST 10% 计算')
-    assert(detailSource.includes('const totalAllocQuantity = useMemo') && detailSource.includes('draftDelta'), '顶部发货数量应按后端总数叠加页面草稿差值')
+    // 汇总口径抽到 storeOrderReturnLogic.computeStoreOrderDraftTotals（已保存合计 + 本页草稿差额，并按发货正负拆分），逻辑由 storeOrderReturnLogic.test 覆盖。
+    assert(
+      detailSource.includes('computeStoreOrderDraftTotals(') && detailSource.includes('const totalAllocQuantity = draftTotals.shipQuantity'),
+      '顶部发货数量应按后端总数叠加页面草稿差值（只统计正数发货）',
+    )
     assert(detailSource.includes('const totalAllocVolume = useMemo') && detailSource.includes('Number(item.volume) * (Number(editedAllocQuantity)'), '顶部发货体积应按页面草稿差值更新')
-    assert(detailSource.includes('draftTotalImportAmount') && detailSource.includes('Number(allocQuantity) * Number(importPrice) - Number(savedAmount)'), '发货金额 ex GST 应按页面草稿金额差值更新')
+    assert(detailSource.includes('const draftTotalImportAmount = draftTotals.netAmount') && detailSource.includes('edits: editingRows'), '发货金额 ex GST 应按页面草稿金额差值更新（净额 = 发货 + 退货冲减）')
     assert(detailSource.includes('detail?.totalAllocatedImportAmount') && detailSource.includes('line.allocatedImportAmount'), '发货金额 ex GST 应优先使用发货/发票金额字段')
     assert(detailSource.includes('line.price') && detailSource.includes('line.allocQuantity'), '预计销售额应按零售价和当前发货数计算')
     // 重设计：金额移到「数量与金额」卡（dl 列表、带 $）；预计销售额只按当前已加载的一页求和，有筛选或超过一页时标「仅本页」。

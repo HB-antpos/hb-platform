@@ -91,6 +91,7 @@ namespace BlazorApp.Shared.Constants
             "Users.Delete",
             "Users.ViewWebConsole",
             "Warehouse.StartPicking",
+            "Warehouse.StoreOrderReturn",
             "Warehouse.View",
         };
 

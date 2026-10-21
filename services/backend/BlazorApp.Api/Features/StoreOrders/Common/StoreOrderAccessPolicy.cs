@@ -322,6 +322,12 @@ internal sealed class StoreOrderAccessPolicy(
         return await RequireOrderEditAsync(orderGuid);
     }
 
+    public Task<bool> CanRecordStoreOrderReturnsAsync()
+    {
+        // 只认显式的 Warehouse.StoreOrderReturn，不设别名；纯仓库员工同样只认它（不因 Warehouse.Manage 等宽泛权限带出）。
+        return HasAnyPermissionAsync(Permissions.Warehouse.StoreOrderReturn);
+    }
+
     public async Task<StoreOrderAccessDecision> RequireOrderEditAsync(
         string orderGuid,
         string? storeCode = null

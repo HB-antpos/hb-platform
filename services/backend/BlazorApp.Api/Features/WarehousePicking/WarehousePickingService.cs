@@ -152,11 +152,20 @@ internal sealed class WarehousePickingService(
                 StoreName = SqlFunc.Subqueryable<Store>()
                     .Where(store => store.StoreCode == order.StoreCode || store.StoreGUID == order.StoreCode)
                     .Select(store => store.StoreName),
+                // 拣货单行数 / 件数只算要拣的行：退货行（发货数量为负）不拣货，不计入。
                 LineCount = SqlFunc.Subqueryable<WareHouseOrderDetails>()
-                    .Where(detail => detail.OrderGUID == order.OrderGUID && !detail.IsDeleted)
+                    .Where(detail =>
+                        detail.OrderGUID == order.OrderGUID
+                        && !detail.IsDeleted
+                        && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+                    )
                     .Count(),
                 TotalQuantity = SqlFunc.Subqueryable<WareHouseOrderDetails>()
-                    .Where(detail => detail.OrderGUID == order.OrderGUID && !detail.IsDeleted)
+                    .Where(detail =>
+                        detail.OrderGUID == order.OrderGUID
+                        && !detail.IsDeleted
+                        && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+                    )
                     .Sum(detail => detail.Quantity),
             })
             .ToListAsync();
@@ -745,8 +754,14 @@ internal sealed class WarehousePickingService(
                 );
             }
 
+            // 退货行（AllocQuantity < 0）整行排除：提交时只写拣到的行，绝不能把退货行的发货数量覆盖成 0，
+            // 也不能因「订货 0、拣货 0」把它当成空行软删。写成 (AllocQuantity IS NULL OR AllocQuantity >= 0)，避免 SQL 把 NULL 行一并排除。
             var details = await _db.Queryable<WareHouseOrderDetails>()
-                .Where(detail => detail.OrderGUID == orderGuid && !detail.IsDeleted)
+                .Where(detail =>
+                    detail.OrderGUID == orderGuid
+                    && !detail.IsDeleted
+                    && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+                )
                 .ToListAsync();
             var totals = (await WarehousePickingQueries.LoadPickTotalsAsync(_db, orderGuid))
                 .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
@@ -912,7 +927,13 @@ internal sealed class WarehousePickingService(
         }
 
         var details = await _db.Queryable<WareHouseOrderDetails>()
-            .Where(detail => detail.OrderGUID != null && orderGuids.Contains(detail.OrderGUID) && !detail.IsDeleted)
+            // 已拣行数只统计要拣的行（退货行不拣货）。
+            .Where(detail =>
+                detail.OrderGUID != null
+                && orderGuids.Contains(detail.OrderGUID)
+                && !detail.IsDeleted
+                && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+            )
             .Select(detail => new { detail.OrderGUID, detail.DetailGUID, detail.Quantity })
             .ToListAsync();
         var totals = await _db.Queryable<WarehouseOrderPickRecord>()
@@ -1147,10 +1168,12 @@ internal sealed class WarehousePickingService(
             .LeftJoin<WarehouseProduct>((detail, warehouseProduct) =>
                 detail.ProductCode == warehouseProduct.ProductCode
             )
+            // 退货行不能被拣货：按「没有这一行」处理，拣货记录写不进去。
             .Where(detail =>
                 detail.DetailGUID == detailGuid
                 && detail.OrderGUID == orderGuid
                 && !detail.IsDeleted
+                && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
             )
             .Select((detail, warehouseProduct) => new PickLine
             {

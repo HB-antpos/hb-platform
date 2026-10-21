@@ -75,6 +75,8 @@ export interface AccessControl {
   canManageWarehouseProducts: boolean
   canManageWarehouseOrders: boolean
   canManageStoreOrderImportPriceVariance: boolean
+  /** 分店订货单可录入退货（负数发货）；只认 Warehouse.StoreOrderReturn，无别名。 */
+  canReturnStoreOrderGoods: boolean
   canManageWarehouseCategories: boolean
   canManageWarehouseLocations: boolean
   canViewContainers: boolean

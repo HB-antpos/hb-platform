@@ -227,9 +227,27 @@ namespace BlazorApp.Shared.DTOs
     public decimal TotalImportAmount { get; set; }
 
     /// <summary>
-    /// 总发货/发票进口金额
+    /// 总发货/发票进口金额（净额 = TotalShipImportAmount + TotalReturnImportAmount，退货已冲减）
     /// </summary>
     public decimal TotalAllocatedImportAmount { get; set; }
+
+    /// <summary>正发货行（allocQuantity &gt; 0）的 allocQuantity × importPrice 之和（&gt;= 0）。</summary>
+    public decimal TotalShipImportAmount { get; set; }
+
+    /// <summary>退货行（allocQuantity &lt; 0）的 allocQuantity × importPrice 之和（&lt;= 0）。</summary>
+    public decimal TotalReturnImportAmount { get; set; }
+
+    /// <summary>退货行数（allocQuantity &lt; 0 的明细行数）。</summary>
+    public int ReturnLineCount { get; set; }
+
+    /// <summary>退回件数合计（正数）。</summary>
+    public decimal TotalReturnQuantity { get; set; }
+
+    /// <summary>
+    /// 单据类型：按净额（TotalAllocatedImportAmount，ex GST）判定，净额 &lt; 0 为 creditNote（退款单），否则 invoice。
+    /// 发票接口、邮件主题、附件名与前端发票页共用同一判定。
+    /// </summary>
+    public string DocumentType { get; set; } = "invoice";
 
     /// <summary>
     /// 总体积 (m³)
@@ -648,6 +666,15 @@ namespace BlazorApp.Shared.DTOs
     /// 零售价 (RRP)
     /// </summary>
     public decimal? RRP { get; set; }
+
+    /// <summary>退货原因码；仅退货行（allocQuantity &lt; 0）有值。</summary>
+    public string? ReturnReason { get; set; }
+
+    /// <summary>退货处置：0 回仓可售，1 报损；仅退货行有值。</summary>
+    public int? ReturnDisposition { get; set; }
+
+    /// <summary>退货备注；仅退货行有值。</summary>
+    public string? ReturnNote { get; set; }
   }
 
   /// <summary>
@@ -1184,10 +1211,23 @@ namespace BlazorApp.Shared.DTOs
     [Required]
     public string ProductCode { get; set; } = string.Empty;
 
+    /// <summary>发货数量；加入商品时为负数表示录入退货行（需 Warehouse.StoreOrderReturn 且必须带 returnReason）。</summary>
     [Required]
     public decimal Quantity { get; set; }
 
     public decimal? ImportPrice { get; set; }
+
+    /// <summary>
+    /// 退货原因码（damaged / wrongItem / overShipped / quality / nearExpiry / other）。
+    /// 只有发货数量（quantity）为负的退货行才允许带；负数发货必填。
+    /// </summary>
+    public string? ReturnReason { get; set; }
+
+    /// <summary>退货处置：0 回仓可售，1 报损不回库（仅记录，不联动库存）。</summary>
+    public int? ReturnDisposition { get; set; }
+
+    /// <summary>退货备注（最长 200 字符）；传空串表示清空。</summary>
+    public string? ReturnNote { get; set; }
   }
 
   public class ProductQuantityDto
@@ -1196,6 +1236,18 @@ namespace BlazorApp.Shared.DTOs
     public decimal Quantity { get; set; }
     public decimal? ImportPrice { get; set; }
     public string? Action { get; set; }
+
+    /// <summary>
+    /// 退货原因码（damaged / wrongItem / overShipped / quality / nearExpiry / other）。
+    /// 只有发货数量（quantity）为负的退货行才允许带；负数发货必填。
+    /// </summary>
+    public string? ReturnReason { get; set; }
+
+    /// <summary>退货处置：0 回仓可售，1 报损不回库（仅记录，不联动库存）。</summary>
+    public int? ReturnDisposition { get; set; }
+
+    /// <summary>退货备注（最长 200 字符）；传空串表示清空。</summary>
+    public string? ReturnNote { get; set; }
   }
 
   /// <summary>
@@ -1220,6 +1272,18 @@ namespace BlazorApp.Shared.DTOs
     /// 是否把本次进口价同步到商品主档和分店进货价；为空/false 时只保存订单明细。
     /// </summary>
     public bool? SyncImportPrice { get; set; }
+
+    /// <summary>
+    /// 退货原因码（damaged / wrongItem / overShipped / quality / nearExpiry / other）。
+    /// 只有发货数量（quantity）为负的退货行才允许带；负数发货必填。
+    /// </summary>
+    public string? ReturnReason { get; set; }
+
+    /// <summary>退货处置：0 回仓可售，1 报损不回库（仅记录，不联动库存）。</summary>
+    public int? ReturnDisposition { get; set; }
+
+    /// <summary>退货备注（最长 200 字符）；传空串表示清空。</summary>
+    public string? ReturnNote { get; set; }
   }
 
   /// <summary>
@@ -1305,6 +1369,18 @@ namespace BlazorApp.Shared.DTOs
     /// 是否把本次进口价同步到商品主档和分店进货价；为空/false 时只保存订单明细。
     /// </summary>
     public bool? SyncImportPrice { get; set; }
+
+    /// <summary>
+    /// 退货原因码（damaged / wrongItem / overShipped / quality / nearExpiry / other）。
+    /// 只有发货数量（quantity）为负的退货行才允许带；负数发货必填。
+    /// </summary>
+    public string? ReturnReason { get; set; }
+
+    /// <summary>退货处置：0 回仓可售，1 报损不回库（仅记录，不联动库存）。</summary>
+    public int? ReturnDisposition { get; set; }
+
+    /// <summary>退货备注（最长 200 字符）；传空串表示清空。</summary>
+    public string? ReturnNote { get; set; }
   }
 
   /// <summary>
@@ -1941,5 +2017,9 @@ public class StoreOrderInvoiceAttachmentBundle
     public string OrderGUID { get; set; } = string.Empty;
     public string? OrderNo { get; set; }
     public string? StoreCode { get; set; }
+
+    /// <summary>单据类型：invoice / creditNote（按净额判定，净额 &lt; 0 为退款单）；邮件主题据此切换。</summary>
+    public string DocumentType { get; set; } = "invoice";
+
     public List<StoreOrderInvoiceEmailAttachment> Attachments { get; set; } = new();
 }

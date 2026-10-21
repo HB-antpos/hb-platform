@@ -704,6 +704,16 @@ namespace BlazorApp.Api.Services
 
                 if (existingDetail != null)
                 {
+                    // 退货行（发货数量为负）只能在后台订货单里由有权限的人处理，PDA 的累加 / 覆盖会悄悄抹掉退货。
+                    if ((existingDetail.AllocQuantity ?? 0) < 0)
+                    {
+                        return new PDAWarehouseOrderDetailResponseDto
+                        {
+                            Success = false,
+                            Message = "该商品在本单是退货行（负数发货），PDA 不能修改，请在后台订货单中处理",
+                        };
+                    }
+
                     existingDetail.Quantity += request.Quantity;
                     existingDetail.AllocQuantity =
                         request.AllocQuantity ?? existingDetail.AllocQuantity;
@@ -833,6 +843,16 @@ namespace BlazorApp.Api.Services
                     };
                 }
 
+                // 退货行不允许 PDA 改动（同累加入口）。
+                if ((detail.AllocQuantity ?? 0) < 0)
+                {
+                    return new PDAWarehouseOrderDetailResponseDto
+                    {
+                        Success = false,
+                        Message = "该商品在本单是退货行（负数发货），PDA 不能修改，请在后台订货单中处理",
+                    };
+                }
+
                 detail.Quantity = request.Quantity;
                 detail.AllocQuantity = request.AllocQuantity ?? detail.AllocQuantity;
 
@@ -921,6 +941,16 @@ namespace BlazorApp.Api.Services
                     {
                         Success = false,
                         Message = "只能修改草稿状态的订单",
+                    };
+                }
+
+                // 退货行（发货数量为负）不允许 PDA 硬删，否则无权限者可以抹掉别人录的退货。
+                if ((detail.AllocQuantity ?? 0) < 0)
+                {
+                    return new PDAWarehouseOrderDetailResponseDto
+                    {
+                        Success = false,
+                        Message = "该商品在本单是退货行（负数发货），PDA 不能修改，请在后台订货单中处理",
                     };
                 }
 
@@ -1020,6 +1050,17 @@ namespace BlazorApp.Api.Services
                     {
                         if (existingDetailMap.TryGetValue(line.ProductCode, out var existingDetail))
                         {
+                            // 批量里碰到退货行整批回滚：不能只跳过，否则前端会以为这一行已经加上。
+                            if ((existingDetail.AllocQuantity ?? 0) < 0)
+                            {
+                                await db.Ado.RollbackTranAsync();
+                                return new PDAWarehouseOrderDetailResponseDto
+                                {
+                                    Success = false,
+                                    Message = "该商品在本单是退货行（负数发货），PDA 不能修改，请在后台订货单中处理",
+                                };
+                            }
+
                             existingDetail.Quantity += line.Quantity;
                             existingDetail.AllocQuantity =
                                 line.AllocQuantity ?? existingDetail.AllocQuantity;

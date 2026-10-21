@@ -1,0 +1,37 @@
+{
+  "warehouseUi": {
+    "storeOrderInvoice": {
+      "docTitleInvoice": "TAX INVOICE",
+      "docTitleCredit": "ADJUSTMENT NOTE",
+      "creditStamp": "CREDIT",
+      "docNoCredit": "ADJUSTMENT NOTE NO. {{orderNo}}",
+      "docDateCredit": "DATE: {{date}}",
+      "creditReference": "REFERENCE:",
+      "creditReferenceValue": "Return of goods previously supplied",
+      "sectionSupplied": "Goods supplied",
+      "sectionAdjustments": "Adjustments · returned goods",
+      "sectionReturned": "Returned goods",
+      "reasonLine": "Reason: {{reason}}",
+      "totalCredit": "Total Credit:",
+      "invoiceFootnote": "Returned goods are credited at the price supplied and netted against this invoice.",
+      "creditFootnote": "This credit adjusts the GST previously charged on the returned goods.",
+      "reason": {
+        "damaged": "damaged",
+        "wrongItem": "wrong item sent",
+        "overShipped": "over shipped",
+        "quality": "quality issue",
+        "nearExpiry": "near expiry",
+        "other": "other"
+      },
+      "excelFileNameCredit": "ADJUSTMENT_NOTE",
+      "creditTitle": "Adjustment Note",
+      "creditTitleWithStore": "Adjustment Note - {{storeName}} - {{orderNo}}",
+      "creditFileName": "Adjustment Note",
+      "creditEmailModalTitle": "Send Adjustment Note Email",
+      "creditPrintButton": "Print Adjustment Note",
+      "creditEmailSubject": "Credit note {{orderNo}} · {{storeName}}",
+      "creditEmailBody": "Hello,\n\nAttached is adjustment note (credit note) {{orderNo}} for {{storeName}}.\n\nThank you.",
+      "creditEmailSubmitted": "Adjustment note email task submitted"
+    }
+  }
+}

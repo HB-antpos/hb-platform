@@ -28,6 +28,7 @@ import {
   MoreOutlined,
   PlusOutlined,
   PrinterOutlined,
+  RollbackOutlined,
   SaveOutlined,
   ScanOutlined,
   SearchOutlined,
@@ -51,6 +52,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Popover,
   Radio,
   Select,
   Space,
@@ -80,7 +82,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import PageContainer from '../../../components/PageContainer'
 import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
@@ -131,6 +133,8 @@ import type {
   StoreOrderPasteTargetField,
   StoreOrderProductColumnFilters,
   StoreOrderProductItem,
+  StoreOrderReturnDisposition,
+  StoreOrderReturnReason,
 } from '../../../types/storeOrder'
 import { StoreOrderFlowStatus } from '../../../types/storeOrder'
 import { copyTextToClipboard } from '../../../utils/clipboard'
@@ -169,6 +173,23 @@ import {
   resolvePasteOptimisticPendingAfterJob,
   type StoreOrderPasteOptimisticPending,
 } from './pasteOptimisticRows'
+import StoreOrderReturnLineModal from './StoreOrderReturnLineModal'
+import {
+  resolveStoreOrderReturnDispositionLabel,
+  resolveStoreOrderReturnReasonLabel,
+  StoreOrderReturnDispositionSegment,
+  StoreOrderReturnNoteInput,
+  StoreOrderReturnReasonChips,
+} from './StoreOrderReturnFields'
+import {
+  buildReturnPayloadFields,
+  buildStoreOrderReturnBanner,
+  canEnterNegativeAllocQuantity,
+  computeStoreOrderDraftTotals,
+  findPayloadMissingReturnReason,
+  isStoreOrderReturnLine,
+  type StoreOrderDraftEdit,
+} from './storeOrderReturnLogic'
 import PickingAssignmentSection, { type LineAssigneeMap } from './pickingAssignment/PickingAssignmentSection'
 import { segmentColor } from './pickingAssignment/pickingAssignmentLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
@@ -228,8 +249,12 @@ function formatAmount(value?: number) {
 }
 
 function formatCurrencyAmount(value?: number) {
-  const amount = formatAmount(value)
-  return amount === '--' ? amount : `$${amount}`
+  if (value === undefined || value === null) {
+    return '--'
+  }
+  // 负数（退货冲减 / 净额）写成 −$7.50（真正的减号），而不是 $-7.50。
+  const amount = formatAmount(Math.abs(value))
+  return value < 0 && Number(amount.replace(/,/g, '')) !== 0 ? `−$${amount}` : `$${amount}`
 }
 
 type DetailLoadStatus = 'idle' | 'loading' | 'loaded' | 'notFound' | 'error'
@@ -269,6 +294,7 @@ const STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS: Record<StoreOrderDetailTableColu
   allocQuantity: 104,
   importPrice: 88,
   allocatedImportAmount: 100,
+  returnInfo: 168,
   orderVolume: 84,
   allocVolume: 84,
   isActive: 76,
@@ -281,6 +307,7 @@ const STORE_ORDER_DETAIL_MIN_COLUMN_WIDTHS: Record<StoreOrderDetailTableColumnKe
   allocQuantity: 88,
   importPrice: 76,
   allocatedImportAmount: 76,
+  returnInfo: 132,
   orderVolume: 68,
   allocVolume: 68,
   isActive: 64,
@@ -357,6 +384,17 @@ interface EditedLinePayload {
   importPrice?: number
   syncImportPrice?: boolean
   importPriceChanged: boolean
+  // 退货行（发货数为负）才带：原因必填，处置与备注仅记录。
+  returnReason?: StoreOrderReturnReason
+  returnDisposition?: StoreOrderReturnDisposition
+  returnNote?: string
+}
+
+/** 明细行未保存的草稿：发货数 / 进口价 + 退货三字段（原因确认后才写入，见 handleConfirmReturnPopover）。 */
+interface StoreOrderDetailRowDraft extends StoreOrderDraftEdit {
+  returnReason?: StoreOrderReturnReason
+  returnDisposition?: StoreOrderReturnDisposition
+  returnNote?: string
 }
 
 function toNumber(value?: number | null) {
@@ -486,7 +524,13 @@ function renderStoreOrderDetailCheckedNumber(value: number | null | undefined, f
     return renderStoreOrderDetailNumericCell(<span className="wh-order-detail-zero">--</span>)
   }
   return renderStoreOrderDetailNumericCell(
-    <span className={Number(value) === 0 ? 'wh-order-detail-zero' : undefined}>{format(Number(value))}</span>,
+    <span
+      className={
+        Number(value) === 0 ? 'wh-order-detail-zero' : Number(value) < 0 ? 'wh-order-detail-negative' : undefined
+      }
+    >
+      {format(Number(value))}
+    </span>,
   )
 }
 
@@ -1500,6 +1544,85 @@ function BatchEditModal({ open, loading, selectedCount, onCancel, onConfirm }: B
   )
 }
 
+interface ReturnReasonPopoverContentProps {
+  mode: 'new' | 'edit'
+  initialReason?: StoreOrderReturnReason | null
+  initialDisposition?: StoreOrderReturnDisposition | null
+  initialNote?: string | null
+  /** 确认后才把原因 / 处置 / 备注写进草稿。 */
+  onConfirm: (info: { returnReason: StoreOrderReturnReason; returnDisposition: StoreOrderReturnDisposition; returnNote: string }) => void
+  /** new：改回录入负数之前的发货数；edit：只关闭气泡。 */
+  onRevert: () => void
+}
+
+/**
+ * 发货格输入负数后的原因气泡（设计图 ② 入口 B）：选原因（必选）+ 处置 + 备注，确认前不写草稿的退货字段。
+ * 点气泡外不会关闭：未确认的负数是个悬而未决的状态，必须明确选「确认退货行」或「改回正数」。
+ */
+function ReturnReasonPopoverContent({
+  mode,
+  initialReason,
+  initialDisposition,
+  initialNote,
+  onConfirm,
+  onRevert,
+}: ReturnReasonPopoverContentProps) {
+  const { t } = useTranslation()
+  const [reason, setReason] = useState<StoreOrderReturnReason | null>(initialReason ?? null)
+  const [disposition, setDisposition] = useState<StoreOrderReturnDisposition>(initialDisposition === 1 ? 1 : 0)
+  const [note, setNote] = useState(initialNote ?? '')
+
+  return (
+    <div className="wh-order-return-popover-body" onKeyDown={(event) => event.stopPropagation()}>
+      <h4>
+        {mode === 'new'
+          ? t('warehouseUi.storeOrderDetail.returnPopoverTitle')
+          : t('warehouseUi.storeOrderDetail.returnPopoverEditTitle')}
+      </h4>
+      {mode === 'new' ? <p>{t('warehouseUi.storeOrderDetail.returnPopoverHint')}</p> : null}
+      <StoreOrderReturnReasonChips
+        t={t}
+        compact
+        value={reason}
+        ariaLabel={t('warehouseUi.storeOrderDetail.returnModal.reason')}
+        onChange={setReason}
+      />
+      <div className="wh-order-return-popover-label">{t('warehouseUi.storeOrderDetail.returnPopoverDisposition')}</div>
+      <StoreOrderReturnDispositionSegment
+        t={t}
+        value={disposition}
+        ariaLabel={t('warehouseUi.storeOrderDetail.returnModal.disposition')}
+        onChange={setDisposition}
+      />
+      <div className="wh-order-return-popover-label">{t('warehouseUi.storeOrderDetail.returnPopoverNote')}</div>
+      <StoreOrderReturnNoteInput
+        rows={2}
+        value={note}
+        placeholder={t('warehouseUi.storeOrderDetail.returnPopoverNotePlaceholder')}
+        onChange={setNote}
+      />
+      <div className="wh-order-return-popover-actions">
+        <Button size="small" onClick={onRevert}>
+          {mode === 'new'
+            ? t('warehouseUi.storeOrderDetail.returnPopoverRevert')
+            : t('warehouseUi.storeOrderDetail.returnPopoverCancel')}
+        </Button>
+        <Tooltip title={reason ? undefined : t('warehouseUi.storeOrderDetail.returnPopoverReasonRequired')}>
+          <Button
+            size="small"
+            type="primary"
+            danger
+            disabled={!reason}
+            onClick={() => reason && onConfirm({ returnReason: reason, returnDisposition: disposition, returnNote: note })}
+          >
+            {t('warehouseUi.storeOrderDetail.returnPopoverConfirm')}
+          </Button>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
+
 export default function StoreOrderDetailPage() {
   const { t, i18n } = useTranslation()
   const route = useStableRouteContext()
@@ -1523,6 +1646,8 @@ export default function StoreOrderDetailPage() {
   // 只用于配货单等只读文档入口，不开放订单编辑、状态流转或明细写入能力。
   const canUseStoreOrderDocumentActions = access.isWarehouseStaff
   const canUseStoreOrderDetailExtraActions = canUseWarehouseManagerActions || canUseStoreOrderDocumentActions
+  // 退货（负数发货）要同时具备订货管理写权限和 Warehouse.StoreOrderReturn；没有权限时发货格仍 ≥ 0，退货行只读可见。
+  const canReturnGoods = canUseWarehouseManagerActions && access.canReturnStoreOrderGoods
   const id = route?.params.id || ''
   const isDesktop = Boolean(screens.xl)
   const detailRequestControllerRef = useRef<AbortController | null>(null)
@@ -1612,7 +1737,10 @@ export default function StoreOrderDetailPage() {
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([])
   // 拣货分配卡片加载后回传每行负责人，明细表“负责人”列用。
   const [lineAssignees, setLineAssignees] = useState<LineAssigneeMap>({})
-  const [editingRows, setEditingRows] = useState<Record<string, { allocQuantity?: number; importPrice?: number }>>({})
+  const [editingRows, setEditingRows] = useState<Record<string, StoreOrderDetailRowDraft>>({})
+  // 发货格输入负数后弹出的退货原因气泡：new = 刚录入负数（取消则改回原值），edit = 修改已有退货行的原因。
+  const [returnPopover, setReturnPopover] = useState<{ detailGUID: string; mode: 'new' | 'edit' } | null>(null)
+  const [returnModalOpen, setReturnModalOpen] = useState(false)
   const initialOrderNo =
     typeof location.state === 'object' &&
     location.state !== null &&
@@ -1884,19 +2012,51 @@ export default function StoreOrderDetailPage() {
     [detail?.storeName, headerForm.storeCode, stores, t],
   )
 
-  const totalAllocQuantity = useMemo(() => {
-    const savedTotal =
-      detail?.totalAllocQuantity ?? detail?.items?.reduce((sum, item) => sum + Number(item.allocQuantity ?? 0), 0) ?? 0
-    const draftDelta =
-      detail?.items?.reduce((sum, item) => {
-        const editedAllocQuantity = editingRows[item.detailGUID]?.allocQuantity
-        if (editedAllocQuantity === undefined) {
-          return sum
-        }
-        return sum + Number(editedAllocQuantity) - Number(item.allocQuantity ?? 0)
-      }, 0) ?? 0
-    return savedTotal + draftDelta
-  }, [detail?.items, detail?.totalAllocQuantity, editingRows])
+  // 汇总卡口径：已保存的整单合计 + 本页未保存修改的差额，并按发货正负拆成 发货 / 退货冲减 / 净额（GST 按净额）。
+  // 没有退货行时 shipAmount = netAmount、退货为 0，与改动前的合计完全一致。
+  const itemsAreWholeOrder =
+    Boolean(detail) &&
+    (detail?.itemsTotal ?? detail?.items.length ?? 0) <= (detail?.items.length ?? 0) &&
+    detailStatFilter === 'all' &&
+    !detailItemFilter.trim() &&
+    !cleanedDetailColumnFilters
+  const draftTotals = useMemo(
+    () =>
+      computeStoreOrderDraftTotals({
+        saved: {
+          netAmount:
+            detail?.totalAllocatedImportAmount ??
+            detail?.items.reduce(
+              (sum, line) =>
+                sum + (line.allocatedImportAmount ?? Number(line.allocQuantity ?? 0) * Number(line.importPrice ?? 0)),
+              0,
+            ) ??
+            0,
+          shipAmount: detail?.totalShipImportAmount,
+          returnAmount: detail?.totalReturnImportAmount,
+          netQuantity:
+            detail?.totalAllocQuantity ?? detail?.items?.reduce((sum, item) => sum + Number(item.allocQuantity ?? 0), 0) ?? 0,
+          returnQuantity: detail?.totalReturnQuantity,
+          returnLineCount: detail?.returnLineCount,
+        },
+        lines: detail?.items ?? [],
+        edits: editingRows,
+        allLinesLoaded: itemsAreWholeOrder,
+      }),
+    [
+      detail?.items,
+      detail?.returnLineCount,
+      detail?.totalAllocQuantity,
+      detail?.totalAllocatedImportAmount,
+      detail?.totalReturnImportAmount,
+      detail?.totalReturnQuantity,
+      detail?.totalShipImportAmount,
+      editingRows,
+      itemsAreWholeOrder,
+    ],
+  )
+  // 发货件数只统计正数发货，退回件数单独显示。
+  const totalAllocQuantity = draftTotals.shipQuantity
 
   const totalOrderVolume =
     detail?.totalOrderVolume ??
@@ -1936,33 +2096,11 @@ export default function StoreOrderDetailPage() {
     [detail?.items, editingRows],
   )
 
-  const draftTotalImportAmount = useMemo(() => {
-    const savedTotal =
-      detail?.totalAllocatedImportAmount ??
-      detail?.items.reduce(
-        (sum, line) =>
-          sum + (line.allocatedImportAmount ?? Number(line.allocQuantity ?? 0) * Number(line.importPrice ?? 0)),
-        0,
-      ) ??
-      0
-    const draftDelta =
-      detail?.items.reduce((sum, line) => {
-        const edited = editingRows[line.detailGUID]
-        if (!edited || (edited.allocQuantity === undefined && edited.importPrice === undefined)) {
-          return sum
-        }
-        const savedAmount = line.allocatedImportAmount ?? Number(line.allocQuantity ?? 0) * Number(line.importPrice ?? 0)
-        const allocQuantity = edited.allocQuantity ?? line.allocQuantity ?? 0
-        const importPrice = edited.importPrice ?? line.importPrice ?? 0
-        return sum + Number(allocQuantity) * Number(importPrice) - Number(savedAmount)
-      }, 0) ?? 0
-    return savedTotal + draftDelta
-  }, [detail?.items, detail?.totalAllocatedImportAmount, editingRows])
-
-  const gstAmount = useMemo(
-    () => Number((Number(draftTotalImportAmount) * 0.1).toFixed(2)),
-    [draftTotalImportAmount],
-  )
+  // 净额（发货 + 退货冲减）；GST 按净额，净额为负时 GST 也是负数。
+  const draftTotalImportAmount = draftTotals.netAmount
+  const gstAmount = draftTotals.gst
+  // 发货体积只统计正数发货：净体积加回退回体积；退回体积未知（整单没全部加载）时保持净体积原样。
+  const shipVolumeDisplay = draftTotals.returnVolume === null ? totalAllocVolume : totalAllocVolume + draftTotals.returnVolume
 
   const validPastePreviewCount = useMemo(
     () => buildPasteSubmitItems(pastePreviewItems).length,
@@ -1997,19 +2135,35 @@ export default function StoreOrderDetailPage() {
         edited.allocQuantity !== undefined && Number(edited.allocQuantity) !== Number(line.allocQuantity ?? 0)
       const importPriceChanged =
         edited.importPrice !== undefined && Number(edited.importPrice) !== Number(line.importPrice ?? 0)
+      // 退货原因 / 处置 / 备注在气泡里确认后才写入草稿；与已保存值不同才算修改。
+      const returnInfoChanged =
+        (edited.returnReason !== undefined && edited.returnReason !== (line.returnReason ?? undefined)) ||
+        (edited.returnDisposition !== undefined && edited.returnDisposition !== (line.returnDisposition ?? undefined)) ||
+        (edited.returnNote !== undefined && edited.returnNote !== (line.returnNote ?? undefined))
+      const effectiveAllocQuantity = Number(edited.allocQuantity ?? line.allocQuantity ?? 0)
+      // 只改了退货信息而没改数量时，退货行也要带上当前发货数：后端据此校验「负数必须带原因」。
+      const includesReturnInfo = effectiveAllocQuantity < 0 && (allocQuantityChanged || returnInfoChanged)
 
-      if (!allocQuantityChanged && !importPriceChanged) {
+      if (!allocQuantityChanged && !importPriceChanged && !returnInfoChanged) {
         return payloads
       }
 
       payloads.push({
         detailGUID: line.detailGUID,
         productCode: line.productCode,
-        quantity: allocQuantityChanged ? edited.allocQuantity : undefined,
+        quantity: allocQuantityChanged || includesReturnInfo ? effectiveAllocQuantity : undefined,
         // 进口价本身始终保存到订单明细；syncImportPrice 只控制是否同步商品/分店主档。
         importPrice: importPriceChanged ? edited.importPrice : undefined,
         syncImportPrice: importPriceChanged ? syncImportPrice : undefined,
         importPriceChanged,
+        // 已有退货行没改原因时沿用已保存的原因，避免保存时丢字段；发货数 ≥ 0 一律不带退货字段。
+        ...(includesReturnInfo
+          ? buildReturnPayloadFields(effectiveAllocQuantity, {
+              returnReason: edited.returnReason ?? line.returnReason,
+              returnDisposition: edited.returnDisposition ?? line.returnDisposition,
+              returnNote: edited.returnNote ?? line.returnNote,
+            })
+          : {}),
       })
 
       return payloads
@@ -2032,8 +2186,10 @@ export default function StoreOrderDetailPage() {
       all: total,
       orderedNotShipped: detail?.orderedNotShippedCount ?? items.filter(isOrderedNotShipped).length,
       shippedWithoutOrder: detail?.shippedWithoutOrderCount ?? items.filter(isShippedWithoutOrder).length,
+      // 退货行数（已保存）：与另外两个页签一样是整单统计，不随未保存草稿变化。
+      returned: detail?.returnLineCount ?? items.filter(isStoreOrderReturnLine).length,
     }
-  }, [detail?.items, detail?.itemsTotal, detail?.orderedNotShippedCount, detail?.shippedWithoutOrderCount])
+  }, [detail?.items, detail?.itemsTotal, detail?.orderedNotShippedCount, detail?.returnLineCount, detail?.shippedWithoutOrderCount])
 
   const statusLabelMap = useMemo(
     () => ({
@@ -2085,6 +2241,7 @@ export default function StoreOrderDetailPage() {
     pageItemCount: detail?.items.length ?? 0,
     hasActiveFilters: hasActiveDetailFilters,
   })
+  // totalAllocQuantity 已是只统计正数的发货件数，不再重复加退回件数。
   const shipProgress = computeStoreOrderShipProgress(detail?.totalQuantity, totalAllocQuantity)
 
   function ensureOrderEditable() {
@@ -2291,6 +2448,10 @@ export default function StoreOrderDetailPage() {
     }
   }
 
+  // 发货数为负只对有退货权限且这一行订货为 0 的行开放；其余沿用 ≥ 0。
+  const isNegativeAllocAllowed = (line: Pick<StoreOrderDetailLine, 'quantity'>) =>
+    canEnterNegativeAllocQuantity(canReturnGoods, line.quantity)
+
   const handleSaveLine = async (line: StoreOrderDetailLine) => {
     if (!detail) {
       return
@@ -2303,8 +2464,18 @@ export default function StoreOrderDetailPage() {
     const allocQuantity = edited?.allocQuantity ?? line.allocQuantity ?? 0
     const importPrice = edited?.importPrice ?? line.importPrice
 
-    if (allocQuantity < 0) {
+    if (allocQuantity < 0 && !isNegativeAllocAllowed(line)) {
       message.warning(t('storeOrders.detail.allocQtyNonNegative'))
+      return
+    }
+    const returnFields = buildReturnPayloadFields(allocQuantity, {
+      returnReason: edited?.returnReason ?? line.returnReason,
+      returnDisposition: edited?.returnDisposition ?? line.returnDisposition,
+      returnNote: edited?.returnNote ?? line.returnNote,
+    })
+    // 退货行必须带原因：原因气泡没确认之前不允许保存这一行。
+    if (allocQuantity < 0 && !returnFields.returnReason) {
+      message.warning(t('warehouseUi.storeOrderDetail.returnReasonRequiredOnSave', { code: line.itemNumber || line.productCode }))
       return
     }
 
@@ -2327,6 +2498,7 @@ export default function StoreOrderDetailPage() {
         // 取消勾选只取消主档同步，不取消订单明细价格保存。
         importPrice: importPriceChanged ? importPrice : undefined,
         syncImportPrice: importPriceChanged ? syncImportPrice : undefined,
+        ...returnFields,
       })
       message.success(t('storeOrders.detail.lineSaved'))
       await loadDetail(false)
@@ -2352,9 +2524,23 @@ export default function StoreOrderDetailPage() {
       return
     }
 
-    const invalidQuantity = payloads.find((item) => item.quantity !== undefined && item.quantity < 0)
+    // 负数发货只允许「有退货权限 + 订货为 0」的行；其余仍按原规则拦下。
+    const invalidQuantity = payloads.find((item) => {
+      if (item.quantity === undefined || item.quantity >= 0) {
+        return false
+      }
+      const line = detail.items.find((row) => row.detailGUID === item.detailGUID)
+      return !line || !isNegativeAllocAllowed(line)
+    })
     if (invalidQuantity) {
       message.warning(t('storeOrders.detail.allocQtyNonNegative'))
+      return
+    }
+    // 退货行缺原因（气泡没确认）：拦在前端，并把气泡重新打开提示用户补选。
+    const missingReason = findPayloadMissingReturnReason(payloads)
+    if (missingReason) {
+      message.warning(t('warehouseUi.storeOrderDetail.returnReasonRequiredOnSave', { code: detail.items.find((row) => row.detailGUID === missingReason.detailGUID)?.itemNumber || missingReason.productCode }))
+      setReturnPopover({ detailGUID: missingReason.detailGUID, mode: 'new' })
       return
     }
 
@@ -2379,9 +2565,13 @@ export default function StoreOrderDetailPage() {
           quantity: item.quantity,
           importPrice: item.importPrice,
           syncImportPrice: item.syncImportPrice,
+          returnReason: item.returnReason,
+          returnDisposition: item.returnDisposition,
+          returnNote: item.returnNote,
         })),
       })
       message.success(t('storeOrders.detail.editedLinesSaved', { count: payloads.length }))
+      setReturnPopover(null)
       const savedDetailGUIDs = new Set(payloads.map((item) => item.detailGUID))
       setEditingRows((current) => {
         const next = { ...current }
@@ -2467,9 +2657,23 @@ export default function StoreOrderDetailPage() {
       return
     }
 
+    // 退货行（发货数为负）不参与「批量改发货数 / 订货数复制到发货数」：这两个动作会把负数发货覆盖成 0 或正数，
+    // 退货行等于被悄悄删掉。进口价、上下架这类不改发货数的批量动作不受影响。
+    const touchesAllocQuantity = payload.type === 'allocQuantity' || payload.type === 'copyOrderQuantityToAllocQuantity'
+    const batchLines = touchesAllocQuantity
+      ? selectedLines.filter((line) => Number(editingRows[line.detailGUID]?.allocQuantity ?? line.allocQuantity ?? 0) >= 0)
+      : selectedLines
+    const skippedReturnLineCount = selectedLines.length - batchLines.length
+    if (skippedReturnLineCount > 0) {
+      message.info(t('warehouseUi.storeOrderDetail.batchSkippedReturnLines', { count: skippedReturnLineCount }))
+      if (batchLines.length === 0) {
+        return
+      }
+    }
+
     const copyOrderQuantityPayload =
       payload.type === 'copyOrderQuantityToAllocQuantity'
-        ? buildBatchCopyOrderQuantityPayload(selectedLines)
+        ? buildBatchCopyOrderQuantityPayload(batchLines)
         : null
     if (copyOrderQuantityPayload?.shouldConfirm) {
       const confirmed = await new Promise<boolean>((resolve) => {
@@ -2478,7 +2682,7 @@ export default function StoreOrderDetailPage() {
           content: (
             <Space direction="vertical" size={8}>
               <Typography.Text>
-                {t('storeOrders.batchCopyOrderQuantityConfirmContent', { count: selectedLines.length })}
+                {t('storeOrders.batchCopyOrderQuantityConfirmContent', { count: batchLines.length })}
               </Typography.Text>
               {copyOrderQuantityPayload.overwriteCount > 0 ? (
                 <Typography.Text type="warning">
@@ -2510,7 +2714,7 @@ export default function StoreOrderDetailPage() {
 
     setBatchLoading(true)
     try {
-      let successMessage = t('storeOrders.batchUpdateSuccess', { count: selectedLines.length })
+      let successMessage = t('storeOrders.batchUpdateSuccess', { count: batchLines.length })
       let successMessageType: 'success' | 'info' = 'success'
       if (payload.type === 'status') {
         const nextIsActive = payload.isActive ?? true
@@ -2520,7 +2724,7 @@ export default function StoreOrderDetailPage() {
           ...(supplyNotice && !nextIsActive ? { supplyNotice } : {}),
         })
       } else if (payload.type === 'copyOrderQuantityToAllocQuantity' && copyOrderQuantityPayload) {
-        const changedCopyLines = selectedLines.filter((line) => {
+        const changedCopyLines = batchLines.filter((line) => {
           const currentAllocQuantity = editingRows[line.detailGUID]?.allocQuantity ?? line.allocQuantity ?? 0
           return Number(currentAllocQuantity) !== Number(line.quantity ?? 0)
         })
@@ -2543,7 +2747,7 @@ export default function StoreOrderDetailPage() {
       } else {
         await batchUpdateStoreOrderLines({
           orderGUID: detail.orderGUID,
-          items: selectedLines.map((item) => ({
+          items: batchLines.map((item) => ({
             productCode: item.productCode,
             quantity: payload.type === 'allocQuantity' ? payload.allocQuantity : undefined,
             importPrice: payload.type === 'importPrice' ? payload.importPrice : undefined,
@@ -3177,6 +3381,65 @@ export default function StoreOrderDetailPage() {
     ),
   })
 
+  // ---- 退货（负数发货）录入 ----
+  // 发货格 onChange：负数先照常写进草稿（金额、汇总实时更新），但退货原因 / 处置 / 备注要等气泡确认后才写入；
+  // 改回 ≥ 0 则清掉退货草稿字段并关闭气泡。已有原因的退货行（保存过的或刚确认的）改数量不再弹气泡。
+  const handleAllocQuantityChange = (record: StoreOrderDetailLine, nextValue: number | string | null) => {
+    const next = nextValue === null ? undefined : Number(nextValue)
+    const hasReason = Boolean(editingRows[record.detailGUID]?.returnReason ?? record.returnReason)
+    setEditingRows((current) => {
+      const draft: StoreOrderDetailRowDraft = { ...current[record.detailGUID], allocQuantity: next }
+      if (next === undefined || next >= 0) {
+        delete draft.returnReason
+        delete draft.returnDisposition
+        delete draft.returnNote
+      }
+      return { ...current, [record.detailGUID]: draft }
+    })
+    if (next !== undefined && next < 0) {
+      if (!hasReason) {
+        setReturnPopover({ detailGUID: record.detailGUID, mode: 'new' })
+      }
+    } else {
+      setReturnPopover((current) => (current?.detailGUID === record.detailGUID ? null : current))
+    }
+  }
+
+  const handleConfirmReturnPopover = (
+    detailGUID: string,
+    info: { returnReason: StoreOrderReturnReason; returnDisposition: StoreOrderReturnDisposition; returnNote: string },
+  ) => {
+    setEditingRows((current) => ({ ...current, [detailGUID]: { ...current[detailGUID], ...info } }))
+    setReturnPopover(null)
+  }
+
+  // 「改回正数」：丢弃这次录入的负数（发货数回到已保存值）及其退货草稿字段；edit 模式只关闭气泡。
+  const handleRevertReturnPopover = (detailGUID: string, mode: 'new' | 'edit') => {
+    if (mode === 'new') {
+      setEditingRows((current) => {
+        const rest: StoreOrderDetailRowDraft = { ...current[detailGUID] }
+        delete rest.allocQuantity
+        delete rest.returnReason
+        delete rest.returnDisposition
+        delete rest.returnNote
+        const next = { ...current }
+        if (Object.keys(rest).length > 0) {
+          next[detailGUID] = rest
+        } else {
+          delete next[detailGUID]
+        }
+        return next
+      })
+    }
+    setReturnPopover(null)
+  }
+
+  // 「添加退货商品」写入后刷新明细：与「加入商品」同样走 loadDetail(false)（会一并清空未保存草稿）。
+  const handleReturnModalChanged = async () => {
+    setSelectedLineKeys([])
+    await loadDetail(false)
+  }
+
   const lineEditDisabled = !canUseWarehouseManagerActions || isReadonlyOrder || isPasteOptimisticPreviewActive
 
   const confirmRemoveLine = (line: StoreOrderDetailLine) => {
@@ -3255,9 +3518,18 @@ export default function StoreOrderDetailPage() {
         ? t('warehouseUi.storeOrderDetail.diffUnshipped')
         : diff.kind === 'short'
           ? t('warehouseUi.storeOrderDetail.diffShort', { count: diff.amount })
-          : t('warehouseUi.storeOrderDetail.diffExtra', { count: diff.amount })
+          : diff.kind === 'return'
+            ? t('warehouseUi.storeOrderDetail.diffReturn', { count: diff.amount })
+            : t('warehouseUi.storeOrderDetail.diffExtra', { count: diff.amount })
     return <span className={`wh-order-detail-diff is-${diff.kind}`}>{text}</span>
   }
+
+  // 行当前生效的发货数（未保存草稿优先）；< 0 即退货行，用于红色标记、不拣货提示与退货信息列。
+  const getEffectiveAllocQuantity = (line: StoreOrderDetailLine) =>
+    toNumber(editingRows[line.detailGUID]?.allocQuantity ?? line.allocQuantity)
+  // 退货信息列只在整单有退货行（含未保存的）或正在看退货页签时出现；没有退货行时表格列与改动前完全一致。
+  const showReturnInfoColumn =
+    draftTotals.returnLineCount > 0 || (detail?.returnLineCount ?? 0) > 0 || detailStatFilter === 'return'
 
   const baseDetailColumns: ColumnsType<StoreOrderDetailLine> = ([
     {
@@ -3302,6 +3574,9 @@ export default function StoreOrderDetailPage() {
               <span className="wh-order-detail-product-name" title={record.productName}>
                 {record.productName || '--'}
               </span>
+              {getEffectiveAllocQuantity(record) < 0 ? (
+                <span className="wh-order-return-tag">{t('warehouseUi.storeOrderDetail.returnTag')}</span>
+              ) : null}
             </div>
             <div className="wh-order-detail-product-sub">
               {record.barcode || '--'} · {t('warehouseUi.storeOrderDetail.retailPrice', { price: formatCurrencyAmount(record.price) })}
@@ -3320,6 +3595,10 @@ export default function StoreOrderDetailPage() {
       sortOrder: detailColumnSortOrder('locationCode'),
       ...detailTextFilterProps('locationCode', t('storeOrders.detail.filterLocation', '过滤货位')),
       render: (value: string | undefined, record: StoreOrderDetailLine) => {
+        // 退货行不拣货：不显示货位与拣货负责人，只给一句固定说明。
+        if (getEffectiveAllocQuantity(record) < 0) {
+          return <span className="wh-order-detail-muted">{t('warehouseUi.storeOrderDetail.returnNoPicking')}</span>
+        }
         const assigneeState = resolveStoreOrderLineAssigneeState(lineAssignees, record.detailGUID)
         const assignee = lineAssignees[record.detailGUID]
         return (
@@ -3353,7 +3632,11 @@ export default function StoreOrderDetailPage() {
       sorter: true,
       sortOrder: detailColumnSortOrder('quantity'),
       ...detailNumberFilterProps({ min: 'quantityMin', max: 'quantityMax' }),
-      render: (_, record) => renderStoreOrderDetailCheckedNumber(toNumber(record.quantity), formatCount),
+      // 退货行的订货恒为 0（分店没有「订退货」），是正常值，不按「订货为 0」标红。
+      render: (_, record) =>
+        getEffectiveAllocQuantity(record) < 0
+          ? renderStoreOrderDetailNumericCell(formatCount(toNumber(record.quantity)))
+          : renderStoreOrderDetailCheckedNumber(toNumber(record.quantity), formatCount),
     },
     {
       title: t('warehouseUi.storeOrderDetail.colShipped'),
@@ -3369,30 +3652,62 @@ export default function StoreOrderDetailPage() {
         // 已改未存的单元格琥珀底，口径同整单保存（与已保存值不同才算修改）。
         const isDraftChanged = draftAllocQuantity !== undefined && Number(draftAllocQuantity) !== Number(value ?? 0)
         const currentAllocQuantity = toNumber(editingRows[record.detailGUID]?.allocQuantity ?? value)
+        // 有退货权限且这一行订货为 0 才放开负数；其余保持 min={0}，与改动前一致。
+        const allowNegative = isNegativeAllocAllowed(record)
+        const isReturnRow = currentAllocQuantity < 0
+        const popoverOpen = returnPopover?.detailGUID === record.detailGUID && !lineEditDisabled
+        const draftRow = editingRows[record.detailGUID]
+        // 原因气泡锚在发货格上；点气泡外不关闭，必须明确「确认退货行」或「改回正数」。
         return (
           <div className="wh-order-detail-alloc-cell">
-            <InputNumber
-              ref={(node) => registerDetailInput(record.detailGUID, 'allocQuantity', node)}
-              size="small"
-              min={0}
-              precision={0}
-              disabled={!canUseWarehouseManagerActions || isReadonlyOrder || isPasteOptimisticPreviewActive}
-              status={describeStoreOrderDetailAllocDiff(record.quantity, currentAllocQuantity).kind === 'unshipped' ? 'error' : undefined}
-              className={isDraftChanged ? 'wh-order-detail-input-dirty' : undefined}
-              aria-label={`${t('column.allocQuantity')} ${record.itemNumber ?? ''}`.trim()}
-              style={{ width: 60 }}
-              value={editingRows[record.detailGUID]?.allocQuantity ?? value ?? 0}
-              onKeyDown={(event) => handleDetailInputKeyDown(event, record.detailGUID, 'allocQuantity')}
-              onChange={(nextValue) =>
-                setEditingRows((current) => ({
-                  ...current,
-                  [record.detailGUID]: {
-                    ...current[record.detailGUID],
-                    allocQuantity: nextValue === null ? undefined : Number(nextValue),
-                  },
-                }))
+            <Popover
+              open={popoverOpen}
+              trigger={[]}
+              placement="bottomRight"
+              destroyOnHidden
+              rootClassName="wh-order-return-popover"
+              content={
+                returnPopover ? (
+                  <ReturnReasonPopoverContent
+                    key={`${record.detailGUID}:${returnPopover.mode}`}
+                    mode={returnPopover.mode}
+                    initialReason={draftRow?.returnReason ?? record.returnReason}
+                    initialDisposition={draftRow?.returnDisposition ?? record.returnDisposition}
+                    initialNote={draftRow?.returnNote ?? record.returnNote}
+                    onConfirm={(info) => handleConfirmReturnPopover(record.detailGUID, info)}
+                    onRevert={() => handleRevertReturnPopover(record.detailGUID, returnPopover.mode)}
+                  />
+                ) : null
               }
-            />
+            >
+              <span className="wh-order-detail-alloc-anchor">
+                <InputNumber
+                  ref={(node) => registerDetailInput(record.detailGUID, 'allocQuantity', node)}
+                  size="small"
+                  min={allowNegative ? undefined : 0}
+                  precision={0}
+                  disabled={!canUseWarehouseManagerActions || isReadonlyOrder || isPasteOptimisticPreviewActive}
+                  status={
+                    isReturnRow
+                      ? undefined
+                      : describeStoreOrderDetailAllocDiff(record.quantity, currentAllocQuantity).kind === 'unshipped'
+                        ? 'error'
+                        : undefined
+                  }
+                  className={[
+                    isDraftChanged ? 'wh-order-detail-input-dirty' : '',
+                    isReturnRow ? 'wh-order-detail-input-return' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ') || undefined}
+                  aria-label={`${t('column.allocQuantity')} ${record.itemNumber ?? ''}`.trim()}
+                  style={{ width: 60 }}
+                  value={editingRows[record.detailGUID]?.allocQuantity ?? value ?? 0}
+                  onKeyDown={(event) => handleDetailInputKeyDown(event, record.detailGUID, 'allocQuantity')}
+                  onChange={(nextValue) => handleAllocQuantityChange(record, nextValue)}
+                />
+              </span>
+            </Popover>
             {renderAllocDiff(record, currentAllocQuantity)}
           </div>
         )
@@ -3455,6 +3770,51 @@ export default function StoreOrderDetailPage() {
       },
     },
     {
+      // 退货原因 · 处置：仅退货行有内容；有权限且订单可编辑时点原因标签可改原因（气泡仍锚在这一行的发货格）。
+      title: t('warehouseUi.storeOrderDetail.colReturnInfo'),
+      key: 'returnInfo',
+      width: STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS.returnInfo,
+      render: (_: unknown, record: StoreOrderDetailLine) => {
+        if (getEffectiveAllocQuantity(record) >= 0) {
+          return <span className="wh-order-detail-muted">—</span>
+        }
+        const draftRow = editingRows[record.detailGUID]
+        const reason = draftRow?.returnReason ?? record.returnReason
+        const disposition = draftRow?.returnDisposition ?? record.returnDisposition
+        const note = draftRow?.returnNote ?? record.returnNote
+        const canEditReason = canReturnGoods && !lineEditDisabled
+        const reasonTag = (
+          <span className={`wh-order-return-reason-tag${reason ? '' : ' is-missing'}`}>
+            {reason ? resolveStoreOrderReturnReasonLabel(t, reason) : t('warehouseUi.storeOrderDetail.returnReasonMissing')}
+          </span>
+        )
+        return (
+          <div className="wh-order-return-info">
+            {canEditReason ? (
+              <button
+                type="button"
+                className="wh-order-return-reason-button"
+                title={t('warehouseUi.storeOrderDetail.returnEditReason')}
+                aria-label={t('warehouseUi.storeOrderDetail.returnEditReason')}
+                onClick={() => setReturnPopover({ detailGUID: record.detailGUID, mode: reason ? 'edit' : 'new' })}
+              >
+                {reasonTag}
+              </button>
+            ) : (
+              reasonTag
+            )}
+            {disposition === 0 || disposition === 1 ? (
+              <span className="wh-order-detail-muted" title={note ?? undefined}>
+                {t('warehouseUi.storeOrderDetail.dispositionLine', {
+                  value: resolveStoreOrderReturnDispositionLabel(t, disposition),
+                })}
+              </span>
+            ) : null}
+          </div>
+        )
+      },
+    },
+    {
       title: t('column.orderVolume'),
       key: 'orderVolume',
       dataIndex: 'orderVolume',
@@ -3514,7 +3874,8 @@ export default function StoreOrderDetailPage() {
     // 操作列只给仓库订货管理者；订货体积列默认收起，可在列设置里打开。
     (column) =>
       (canUseWarehouseManagerActions || column.key !== 'actions') &&
-      (showOrderVolumeColumn || column.key !== 'orderVolume'),
+      (showOrderVolumeColumn || column.key !== 'orderVolume') &&
+      (showReturnInfoColumn || column.key !== 'returnInfo'),
   )
   const detailDraggableColumnKeys = baseDetailColumns.map(
     (column) => String(column.key) as StoreOrderDetailTableColumnKey,
@@ -3910,6 +4271,16 @@ export default function StoreOrderDetailPage() {
     commitDetailColumnFilters({})
   }
 
+  // 整单提示条：只有退货行（含未保存的）才出现；没有退货行时为 null，页面与改动前完全一致。
+  const returnBanner = buildStoreOrderReturnBanner(draftTotals)
+  const returnBannerValues = returnBanner
+    ? {
+        lines: returnBanner.returnLineCount,
+        qty: formatCount(returnBanner.returnQuantity),
+        net: formatCurrencyAmount(returnBanner.netAmount),
+      }
+    : null
+
   const detailStatTabItems = [
     {
       key: 'all' as const,
@@ -3931,6 +4302,17 @@ export default function StoreOrderDetailPage() {
       label: t('warehouseUi.storeOrderDetail.tabShippedWithoutOrder'),
       count: statSummary.shippedWithoutOrder,
     },
+    // 「退货」页签只在整单有退货行（或正停在该页签）时出现；红色标签 + 红色计数。
+    ...(statSummary.returned > 0 || detailStatFilter === 'return'
+      ? [
+          {
+            key: 'return' as const,
+            label: <span className="wh-order-return-tab-label">{t('warehouseUi.storeOrderDetail.tabReturned')}</span>,
+            count: statSummary.returned,
+            tone: 'danger' as const,
+          },
+        ]
+      : []),
   ]
 
   // 与 handleSaveHeader 同一判定：可编辑订单里地址/邮箱和当前分店默认联系方式不同时，保存会改写分店默认值，提前提示。
@@ -4307,45 +4689,176 @@ export default function StoreOrderDetailPage() {
                     >
                       {t('warehouseUi.storeOrderDetail.shippedWithoutOrderLink', { count: statSummary.shippedWithoutOrder })}
                     </button>
+                    {draftTotals.returnLineCount > 0 ? (
+                      <button
+                        type="button"
+                        className="wh-order-detail-link wh-order-return-link"
+                        onClick={() => focusDetailStatFilter('return')}
+                      >
+                        {t('warehouseUi.storeOrderDetail.returnedLink', {
+                          count: draftTotals.returnLineCount,
+                          qty: formatCount(draftTotals.returnQuantity),
+                        })}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
-                <dl className="wh-order-detail-metrics">
-                  <div>
-                    <dt>{t('storeOrders.importAmountLabel')}</dt>
-                    <dd className="is-strong">{formatCurrencyAmount(draftTotalImportAmount)}</dd>
-                  </div>
-                  <div>
-                    <dt>{t('storeOrders.gstAmountLabel')}</dt>
-                    <dd className="is-strong">{formatCurrencyAmount(gstAmount)}</dd>
-                  </div>
-                  <div>
-                    <dt>{t('storeOrders.freightLabel')}</dt>
-                    <dd className={`is-strong${headerDirtyFieldSet.has('shippingFee') ? ' is-dirty' : ''}`}>
-                      {formatCurrencyAmount(headerForm.shippingFee)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('warehouseUi.storeOrderDetail.volumeLabel')}</dt>
-                    <dd>
-                      {t('warehouseUi.storeOrderDetail.volumeValue', {
-                        ordered: formatStoreOrderVolume(totalOrderVolume),
-                        shipped: formatStoreOrderVolume(totalAllocVolume),
-                      })}
-                    </dd>
-                  </div>
-                  <div>
-                    {/* 预计销售额按当前已加载的这一页明细求和；有筛选或超过一页时标成「本页」。 */}
-                    <dt>
-                      {isEstimatedSalesPageScoped
-                        ? t('warehouseUi.storeOrderDetail.estimatedSalesPage')
-                        : t('storeOrders.orderAmountLabel')}
-                    </dt>
-                    <dd>{formatCurrencyAmount(estimatedSalesAmount)}</dd>
-                  </div>
-                </dl>
+                {draftTotals.returnLineCount > 0 ? (
+                  // 有退货行：金额拆成 发货 / 退货冲减 / 净额三段，GST 按净额，并给出应退 / 应收（含 GST）。
+                  <dl className="wh-order-detail-metrics">
+                    <div>
+                      <dt>{t('warehouseUi.storeOrderDetail.shipAmountLabel')}</dt>
+                      <dd className="is-strong">{formatCurrencyAmount(draftTotals.shipAmount)}</dd>
+                    </div>
+                    <div className="wh-order-return-box is-return">
+                      <dt>{t('warehouseUi.storeOrderDetail.returnAmountLabel')}</dt>
+                      <dd className="is-strong wh-order-detail-negative">{formatCurrencyAmount(draftTotals.returnAmount)}</dd>
+                      <span className="wh-order-return-box-sub">
+                        {t('warehouseUi.storeOrderDetail.returnAmountSub', {
+                          lines: draftTotals.returnLineCount,
+                          qty: formatCount(draftTotals.returnQuantity),
+                        })}
+                      </span>
+                    </div>
+                    <div className={`wh-order-return-box is-net${draftTotals.netAmount < 0 ? ' is-credit' : ''}`}>
+                      <dt>{t('warehouseUi.storeOrderDetail.netAmountLabel')}</dt>
+                      <dd className={`is-strong${draftTotals.netAmount < 0 ? ' wh-order-detail-negative' : ''}`}>
+                        {formatCurrencyAmount(draftTotals.netAmount)}
+                      </dd>
+                      <span className="wh-order-return-box-sub">
+                        {draftTotals.netAmount < 0
+                          ? t('warehouseUi.storeOrderDetail.netHintCredit')
+                          : draftTotals.netAmount === 0
+                            ? t('warehouseUi.storeOrderDetail.netHintZero')
+                            : t('warehouseUi.storeOrderDetail.netHintInvoice')}
+                      </span>
+                    </div>
+                    <div>
+                      <dt>{t('warehouseUi.storeOrderDetail.gstNetLabel')}</dt>
+                      <dd className={`is-strong${gstAmount < 0 ? ' wh-order-detail-negative' : ''}`}>{formatCurrencyAmount(gstAmount)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('storeOrders.freightLabel')}</dt>
+                      <dd className={`is-strong${headerDirtyFieldSet.has('shippingFee') ? ' is-dirty' : ''}`}>
+                        {formatCurrencyAmount(headerForm.shippingFee)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        {draftTotals.netAmount < 0
+                          ? t('warehouseUi.storeOrderDetail.refundDueLabel')
+                          : t('warehouseUi.storeOrderDetail.receivableLabel')}
+                      </dt>
+                      <dd className={`is-strong${draftTotals.netAmount < 0 ? ' wh-order-detail-negative' : ''}`}>
+                        {formatCurrencyAmount(
+                          Number((draftTotals.netAmount + gstAmount + Number(headerForm.shippingFee ?? 0)).toFixed(2)),
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('warehouseUi.storeOrderDetail.volumeLabel')}</dt>
+                      <dd>
+                        {t('warehouseUi.storeOrderDetail.volumeValue', {
+                          ordered: formatStoreOrderVolume(totalOrderVolume),
+                          shipped: formatStoreOrderVolume(shipVolumeDisplay),
+                        })}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('warehouseUi.storeOrderDetail.returnVolumeLabel')}</dt>
+                      <dd>
+                        {draftTotals.returnVolume === null
+                          ? t('warehouseUi.storeOrderDetail.returnVolumeUnknown')
+                          : `${formatStoreOrderVolume(draftTotals.returnVolume)} m³`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        {isEstimatedSalesPageScoped
+                          ? t('warehouseUi.storeOrderDetail.estimatedSalesPage')
+                          : t('storeOrders.orderAmountLabel')}
+                      </dt>
+                      <dd>{formatCurrencyAmount(estimatedSalesAmount)}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <dl className="wh-order-detail-metrics">
+                    <div>
+                      <dt>{t('storeOrders.importAmountLabel')}</dt>
+                      <dd className="is-strong">{formatCurrencyAmount(draftTotalImportAmount)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('storeOrders.gstAmountLabel')}</dt>
+                      <dd className="is-strong">{formatCurrencyAmount(gstAmount)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('storeOrders.freightLabel')}</dt>
+                      <dd className={`is-strong${headerDirtyFieldSet.has('shippingFee') ? ' is-dirty' : ''}`}>
+                        {formatCurrencyAmount(headerForm.shippingFee)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('warehouseUi.storeOrderDetail.volumeLabel')}</dt>
+                      <dd>
+                        {t('warehouseUi.storeOrderDetail.volumeValue', {
+                          ordered: formatStoreOrderVolume(totalOrderVolume),
+                          shipped: formatStoreOrderVolume(totalAllocVolume),
+                        })}
+                      </dd>
+                    </div>
+                    <div>
+                      {/* 预计销售额按当前已加载的这一页明细求和；有筛选或超过一页时标成「本页」。 */}
+                      <dt>
+                        {isEstimatedSalesPageScoped
+                          ? t('warehouseUi.storeOrderDetail.estimatedSalesPage')
+                          : t('storeOrders.orderAmountLabel')}
+                      </dt>
+                      <dd>{formatCurrencyAmount(estimatedSalesAmount)}</dd>
+                    </div>
+                  </dl>
+                )}
               </div>
             </section>
           </div>
+
+          {returnBanner && returnBannerValues ? (
+            <div
+              className={`wh-order-return-banner is-${returnBanner.tone}`}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="wh-order-return-banner-icon" aria-hidden="true">!</span>
+              <span className="wh-order-return-banner-text">
+                <Trans
+                  i18nKey={
+                    returnBanner.tone === 'credit'
+                      ? 'warehouseUi.storeOrderDetail.bannerCredit'
+                      : returnBanner.tone === 'zero'
+                        ? 'warehouseUi.storeOrderDetail.bannerZero'
+                        : 'warehouseUi.storeOrderDetail.bannerInvoice'
+                  }
+                  values={returnBannerValues}
+                  components={{ b: <strong /> }}
+                />
+              </span>
+              <span className="wh-order-detail-spacer" />
+              <Button
+                size="small"
+                className="wh-order-return-banner-button"
+                onClick={() => {
+                  if (detailStatFilter === 'return') {
+                    handleChangeDetailStatFilter('all')
+                  } else {
+                    focusDetailStatFilter('return')
+                  }
+                }}
+              >
+                {detailStatFilter === 'return'
+                  ? t('warehouseUi.storeOrderDetail.bannerShowAll')
+                  : t('warehouseUi.storeOrderDetail.bannerOnlyReturned')}
+              </Button>
+            </div>
+          ) : null}
 
           {canUseWarehouseManagerActions ? (
             <PickingAssignmentSection
@@ -4429,6 +4942,19 @@ export default function StoreOrderDetailPage() {
                     <DownOutlined />
                   </Button>
                 </Dropdown>
+              ) : null}
+              {/* 「添加退货商品」：需要 Warehouse.StoreOrderReturn；订单完成后只读，按钮禁用并写明原因。 */}
+              {canReturnGoods ? (
+                <Tooltip title={isReadonlyOrder ? t('warehouseUi.storeOrderDetail.returnModal.orderReadonly') : undefined}>
+                  <Button
+                    className="wh-order-return-add-button"
+                    icon={<RollbackOutlined />}
+                    disabled={isReadonlyOrder || isPasteOptimisticPreviewActive}
+                    onClick={() => setReturnModalOpen(true)}
+                  >
+                    {t('warehouseUi.storeOrderDetail.addReturnProduct')}
+                  </Button>
+                </Tooltip>
               ) : null}
               <Input
                 allowClear
@@ -4557,7 +5083,15 @@ export default function StoreOrderDetailPage() {
                   columns={detailTableColumns}
                   dataSource={detail.items}
                   components={{ header: { cell: DraggableHeaderCell } }}
-                  rowClassName={(record) => (editedLineGuidSet.has(record.detailGUID) ? 'wh-order-detail-row-dirty' : '')}
+                  rowClassName={(record) =>
+                    [
+                      editedLineGuidSet.has(record.detailGUID) ? 'wh-order-detail-row-dirty' : '',
+                      // 退货行：浅红底 + 左红条（红色只给退货，「未发」继续用橙色）。
+                      getEffectiveAllocQuantity(record) < 0 ? 'wh-order-detail-row-return' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+                  }
                   rowSelection={
                     canUseWarehouseManagerActions
                       ? {
@@ -4602,6 +5136,18 @@ export default function StoreOrderDetailPage() {
                 />
               </SortableContext>
             </DndContext>
+
+            {draftTotals.returnLineCount > 0 ? (
+              <div className="wh-order-return-footer">
+                <span className="wh-order-detail-spacer" />
+                <span>
+                  {t('warehouseUi.storeOrderDetail.returnFooterTotal', {
+                    qty: t('warehouseUi.storeOrderDetail.returnFooterQty', { count: formatCount(draftTotals.returnQuantity) }),
+                    amount: formatCurrencyAmount(draftTotals.returnAmount),
+                  })}
+                </span>
+              </div>
+            ) : null}
 
             {canUseWarehouseManagerActions && editedLineCount > 0 ? (
               // 吸底「未保存修改」条 = 原「整单保存」：只提交改过的行，进口价同步确认流程不变。
@@ -4649,6 +5195,23 @@ export default function StoreOrderDetailPage() {
             onCancel={() => setPickerOpen(false)}
             onConfirm={handlePickerConfirm}
           />
+
+          {canReturnGoods ? (
+            <StoreOrderReturnLineModal
+              open={returnModalOpen}
+              orderGUID={detail.orderGUID}
+              orderNo={detail.orderNo}
+              storeLabel={
+                detail.storeName
+                  ? `${detail.storeName}${detail.storeCode ? ` (${detail.storeCode})` : ''}`
+                  : detail.storeCode
+              }
+              currentNetAmount={draftTotals.netAmount}
+              editable={canEditOrder}
+              onCancel={() => setReturnModalOpen(false)}
+              onChanged={handleReturnModalChanged}
+            />
+          ) : null}
 
           <ContainerProductPicker
             open={containerPickerOpen}

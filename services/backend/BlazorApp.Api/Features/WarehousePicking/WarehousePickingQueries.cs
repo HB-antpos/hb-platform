@@ -100,7 +100,13 @@ internal static class WarehousePickingQueries
             .LeftJoin<WarehouseProduct>((detail, product, warehouseProduct) =>
                 detail.ProductCode == warehouseProduct.ProductCode
             )
-            .Where(detail => detail.OrderGUID == orderGuid && !detail.IsDeleted)
+            // 退货行（发货数量为负，订货数量 0）不参与拣货：不出现在拣货单、不能被分配或扫码拣货。
+            // 用 (AllocQuantity IS NULL OR AllocQuantity >= 0) 而不是 !(AllocQuantity < 0)：后者在 SQL 里会把 AllocQuantity 为 NULL 的行一并排除。
+            .Where(detail =>
+                detail.OrderGUID == orderGuid
+                && !detail.IsDeleted
+                && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+            )
             .Select((detail, product, warehouseProduct) => new LineRow
             {
                 DetailGUID = detail.DetailGUID,
@@ -296,7 +302,12 @@ internal static class WarehousePickingQueries
             .LeftJoin<WarehouseProduct>((detail, warehouseProduct) =>
                 detail.ProductCode == warehouseProduct.ProductCode
             )
-            .Where(detail => detail.OrderGUID == orderGuid && !detail.IsDeleted)
+            // 退货行不参与拣货进度（同 LoadLinesAsync）。
+            .Where(detail =>
+                detail.OrderGUID == orderGuid
+                && !detail.IsDeleted
+                && (detail.AllocQuantity == null || detail.AllocQuantity >= 0)
+            )
             .Select((detail, warehouseProduct) => new LineRow
             {
                 DetailGUID = detail.DetailGUID,

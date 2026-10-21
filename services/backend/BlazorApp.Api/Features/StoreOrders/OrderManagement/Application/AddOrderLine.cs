@@ -1,3 +1,4 @@
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.StoreOrders.OrderManagement.Domain;
 using BlazorApp.Api.Features.StoreOrders.OrderManagement.Infrastructure;
 using BlazorApp.Shared.DTOs;
@@ -23,7 +24,12 @@ internal sealed class AddOrderLineValidator
             new AddOrderLineInput(
                 command.Request.OrderGUID,
                 command.Request.ProductCode,
-                command.Request.Quantity
+                command.Request.Quantity,
+                new StoreOrderReturnLineRequest(
+                    command.Request.ReturnReason,
+                    command.Request.ReturnDisposition,
+                    command.Request.ReturnNote
+                )
             )
         );
     }

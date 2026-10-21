@@ -100,7 +100,10 @@ export function formatDocumentFileDate(value?: string | Date) {
 }
 
 export function formatCurrency(value?: number) {
-  return `$${Number(value ?? 0).toFixed(2)}`
+  const amount = Number(value ?? 0)
+  const text = Math.abs(amount).toFixed(2)
+  // 退货冲减 / 退款单金额为负数：符号写在 $ 前（-$7.50），不写成 $-7.50；不足 1 分的负数按 0 显示。
+  return amount < 0 && text !== '0.00' ? `-$${text}` : `$${text}`
 }
 
 export function sanitizeFileNamePart(value: string) {

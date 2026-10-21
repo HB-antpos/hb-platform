@@ -1,3 +1,4 @@
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.SupplyNotices;
 
 namespace BlazorApp.Api.Features.StoreOrders.OrderManagement.Domain;
@@ -5,7 +6,8 @@ namespace BlazorApp.Api.Features.StoreOrders.OrderManagement.Domain;
 internal sealed record AddOrderLineInput(
     string OrderGuid,
     string ProductCode,
-    decimal Quantity
+    decimal Quantity,
+    StoreOrderReturnLineRequest ReturnRequest = default
 );
 
 internal sealed record BatchAddOrderLineInput(
@@ -16,7 +18,8 @@ internal sealed record BatchAddOrderLineInput(
 internal sealed record AddOrderLineItemInput(
     string ProductCode,
     decimal Quantity,
-    decimal? ImportPrice
+    decimal? ImportPrice,
+    StoreOrderReturnLineRequest ReturnRequest = default
 );
 
 internal sealed record UpdateOrderLineInput(
@@ -24,7 +27,8 @@ internal sealed record UpdateOrderLineInput(
     string ProductCode,
     decimal Quantity,
     decimal? ImportPrice,
-    bool SyncImportPrice
+    bool SyncImportPrice,
+    StoreOrderReturnLineRequest ReturnRequest = default
 );
 
 internal sealed record RemoveOrderLineInput(string OrderGuid, string DetailGuid);
@@ -39,7 +43,8 @@ internal sealed record BatchUpdateOrderLineItemInput(
     string ProductCode,
     decimal? Quantity,
     decimal? ImportPrice,
-    bool SyncImportPrice
+    bool SyncImportPrice,
+    StoreOrderReturnLineRequest ReturnRequest = default
 );
 
 internal sealed record RefreshOrderLineImportPricesInput(

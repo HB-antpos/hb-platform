@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
 import { useDynamicTabTitle } from '../../../hooks/useDynamicTabTitle'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getInvoiceEmailSenderAccounts } from '../../../services/invoiceEmailSettingsService'
 import { getStores } from '../../../services/storeService'
 import {
@@ -35,7 +36,18 @@ import {
   formatCurrency,
   formatPrintDate,
 } from './printUtils'
+import {
+  computeStoreOrderDocumentTotals,
+  isStoreOrderReturnLine,
+  resolveStoreOrderDocumentTypeOf,
+  splitStoreOrderInvoiceLines,
+} from './storeOrderReturnLogic'
+import storeOrderInvoiceMessagesEn from './storeOrderInvoiceMessages.en.json'
+import storeOrderInvoiceMessagesZh from './storeOrderInvoiceMessages.zh.json'
 import './print.css'
+
+// 退货 / 退款单新增的文案随页面代码块懒注册，不进首屏 i18n 包（首屏 gzip 预算很紧）。
+registerPageMessages({ zh: storeOrderInvoiceMessagesZh, en: storeOrderInvoiceMessagesEn })
 
 const TRANSPARENT_IMAGE_FALLBACK = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -84,6 +96,31 @@ function formatOptionalCurrency(value?: number | null) {
   return value === undefined || value === null ? '--' : formatCurrency(value)
 }
 
+/** 退货原因的单据文案（英文，客户可见）；写成字面量映射，页面消息契约测试才能静态核对键。 */
+function resolveInvoiceReturnReasonLabel(t: TFunction, reason?: string | null) {
+  switch (reason) {
+    case 'damaged':
+      return t('warehouseUi.storeOrderInvoice.reason.damaged')
+    case 'wrongItem':
+      return t('warehouseUi.storeOrderInvoice.reason.wrongItem')
+    case 'overShipped':
+      return t('warehouseUi.storeOrderInvoice.reason.overShipped')
+    case 'quality':
+      return t('warehouseUi.storeOrderInvoice.reason.quality')
+    case 'nearExpiry':
+      return t('warehouseUi.storeOrderInvoice.reason.nearExpiry')
+    case 'other':
+      return t('warehouseUi.storeOrderInvoice.reason.other')
+    default:
+      return ''
+  }
+}
+
+function formatInvoiceReasonLine(t: TFunction, item: StoreOrderDetailLine) {
+  const reason = resolveInvoiceReturnReasonLabel(t, item.returnReason)
+  return reason ? t('warehouseUi.storeOrderInvoice.reasonLine', { reason }) : ''
+}
+
 async function downloadInvoiceExcel(
   order: StoreOrderDetail,
   items: StoreOrderDetailLine[],
@@ -106,16 +143,31 @@ async function downloadInvoiceExcel(
     { key: 'subtotal', width: 16 },
   ]
 
-  const titleRow = worksheet.addRow(['INVOICE'])
+  // 净额 < 0 整张单据改为退款单（Adjustment Note）；有退货行时发货与退货分段列出。
+  const documentType = resolveStoreOrderDocumentTypeOf(order)
+  const isCreditNote = documentType === 'creditNote'
+  const { supplied: suppliedItems, returned: returnedItems } = splitStoreOrderInvoiceLines(items)
+  const hasReturns = returnedItems.length > 0
+  const titleRow = worksheet.addRow([
+    isCreditNote
+      ? t('warehouseUi.storeOrderInvoice.docTitleCredit')
+      : hasReturns
+        ? t('warehouseUi.storeOrderInvoice.docTitleInvoice')
+        : 'INVOICE',
+  ])
   titleRow.font = { bold: true, size: 14 }
   worksheet.mergeCells(titleRow.number, 1, titleRow.number, 9)
 
   worksheet.addRow([
-    t('warehouse.invoice.invoiceNo', { orderNo: order.orderNo || order.orderGUID }),
+    isCreditNote
+      ? t('warehouseUi.storeOrderInvoice.docNoCredit', { orderNo: order.orderNo || order.orderGUID })
+      : t('warehouse.invoice.invoiceNo', { orderNo: order.orderNo || order.orderGUID }),
     '',
     '',
     '',
-    t('warehouse.invoice.invoiceDate', { date: headerInfo.invoiceDateText }),
+    isCreditNote
+      ? t('warehouseUi.storeOrderInvoice.docDateCredit', { date: headerInfo.invoiceDateText })
+      : t('warehouse.invoice.invoiceDate', { date: headerInfo.invoiceDateText }),
   ])
   worksheet.mergeCells(2, 1, 2, 4)
   worksheet.mergeCells(2, 5, 2, 9)
@@ -138,14 +190,17 @@ async function downloadInvoiceExcel(
   ])
   tableHeaderRow.font = { bold: true }
 
-  items.forEach((item, index) => {
+  let rowIndex = 0
+  const addItemRow = (item: StoreOrderDetailLine) => {
     const orderQuantity = Number(item.quantity || 0)
     const allocQuantity = Number(item.allocQuantity ?? 0)
     const allocatedImportAmount = Number(item.allocatedImportAmount ?? allocQuantity * Number(item.importPrice || 0))
+    const reasonLine = isStoreOrderReturnLine(item) ? formatInvoiceReasonLine(t, item) : ''
+    rowIndex += 1
     worksheet.addRow({
-      index: index + 1,
+      index: rowIndex,
       itemNumber: item.itemNumber || '',
-      productName: item.productName || '',
+      productName: reasonLine ? `${item.productName || ''} (${reasonLine})` : item.productName || '',
       barcode: item.barcode || item.productCode,
       importPrice: Number(item.importPrice || 0),
       rrp: item.rrp ?? null,
@@ -153,18 +208,42 @@ async function downloadInvoiceExcel(
       allocQuantity,
       subtotal: Number(allocatedImportAmount.toFixed(2)),
     })
-  })
+  }
+  const addSectionRow = (title: string) => {
+    const sectionRow = worksheet.addRow([title])
+    sectionRow.font = { bold: true }
+    worksheet.mergeCells(sectionRow.number, 1, sectionRow.number, 9)
+  }
+  if (hasReturns) {
+    // 发货在前、退货（调整项）在后；净额为负的退款单没有发货行时只剩「Returned goods」一段。
+    if (suppliedItems.length > 0) {
+      addSectionRow(t('warehouseUi.storeOrderInvoice.sectionSupplied'))
+      suppliedItems.forEach(addItemRow)
+    }
+    addSectionRow(
+      suppliedItems.length > 0 && !isCreditNote
+        ? t('warehouseUi.storeOrderInvoice.sectionAdjustments')
+        : t('warehouseUi.storeOrderInvoice.sectionReturned'),
+    )
+    returnedItems.forEach(addItemRow)
+  } else {
+    items.forEach(addItemRow)
+  }
 
-  const subTotal = Number(order.totalAllocatedImportAmount ?? order.totalImportAmount ?? 0)
-  const gst = Number((subTotal * 0.1).toFixed(2))
-  const freight = Number(order.shippingFee || 0)
-  const total = Number((subTotal + gst + freight).toFixed(2))
+  const totals = computeStoreOrderDocumentTotals(order.totalAllocatedImportAmount ?? order.totalImportAmount ?? 0, order.shippingFee)
+  const subTotal = totals.subTotal
+  const gst = totals.gst
+  const freight = totals.freight
+  const total = totals.total
 
   worksheet.addRow({})
   worksheet.addRow({ productName: t('warehouse.invoice.subTotal'), subtotal: subTotal })
   worksheet.addRow({ productName: t('warehouse.invoice.gst'), subtotal: gst })
   worksheet.addRow({ productName: t('warehouse.invoice.freight'), subtotal: freight })
-  worksheet.addRow({ productName: t('warehouse.invoice.total'), subtotal: total })
+  worksheet.addRow({
+    productName: isCreditNote ? t('warehouseUi.storeOrderInvoice.totalCredit') : t('warehouse.invoice.total'),
+    subtotal: total,
+  })
   worksheet.addRow({})
   worksheet.addRow({ productName: t('warehouse.invoice.remarks'), barcode: t('warehouse.invoice.imageRefNote') })
 
@@ -180,7 +259,7 @@ async function downloadInvoiceExcel(
   const link = document.createElement('a')
   link.href = url
   link.download = buildDocumentFileName(
-    'INVOICE',
+    isCreditNote ? t('warehouseUi.storeOrderInvoice.excelFileNameCredit') : 'INVOICE',
     headerInfo.storeName || order.storeCode,
     order.orderNo || order.orderGUID,
     'xlsx',
@@ -227,10 +306,18 @@ export default function StoreOrderInvoicePage() {
   // 每次打开弹窗都重新拉取发件账号，只采纳最后一次请求的结果，避免快速开关弹窗时旧响应覆盖新列表。
   const senderAccountsRequestRef = useRef(0)
 
+  // 单据类型按净额：净额 < 0 为退款单（Adjustment Note），否则仍是发票；优先用后端给的 documentType。
+  const documentType = resolveStoreOrderDocumentTypeOf(order ?? {})
+  const isCreditNote = documentType === 'creditNote'
+
   useDynamicTabTitle(
     order?.orderNo
-      ? t('warehouse.invoice.titleWithStore', { storeName: store?.storeName || order.storeCode || t('warehouse.invoice.unknownStore'), orderNo: order.orderNo })
-      : t('warehouse.invoice.title'),
+      ? isCreditNote
+        ? t('warehouseUi.storeOrderInvoice.creditTitleWithStore', { storeName: store?.storeName || order.storeCode || t('warehouse.invoice.unknownStore'), orderNo: order.orderNo })
+        : t('warehouse.invoice.titleWithStore', { storeName: store?.storeName || order.storeCode || t('warehouse.invoice.unknownStore'), orderNo: order.orderNo })
+      : isCreditNote
+        ? t('warehouseUi.storeOrderInvoice.creditTitle')
+        : t('warehouse.invoice.title'),
   )
 
   useEffect(() => {
@@ -309,24 +396,30 @@ export default function StoreOrderInvoicePage() {
     }
   }, [])
 
-  const totals = useMemo(() => {
-    const subTotal = Number(order?.totalAllocatedImportAmount ?? order?.totalImportAmount ?? 0)
-    const gst = Number((subTotal * 0.1).toFixed(2))
-    const freight = Number(order?.shippingFee || 0)
-    return {
-      subTotal,
-      gst,
-      freight,
-      total: Number((subTotal + gst + freight).toFixed(2)),
-    }
-  }, [order?.shippingFee, order?.totalAllocatedImportAmount, order?.totalImportAmount])
+  // 小计 = 净额（发货 + 退货冲减）；GST 按净额算（净额为负时同向冲减），与后端同一口径。
+  const totals = useMemo(
+    () => computeStoreOrderDocumentTotals(order?.totalAllocatedImportAmount ?? order?.totalImportAmount ?? 0, order?.shippingFee),
+    [order?.shippingFee, order?.totalAllocatedImportAmount, order?.totalImportAmount],
+  )
 
   const sortedItems = useMemo(() => sortInvoiceItems(order?.items || []), [order?.items])
+  // 退货行（发货数为负）单独成段；没有退货行时 returnedItems 为空，页面与改动前一致。
+  const { supplied: suppliedItems, returned: returnedItems } = useMemo(
+    () => splitStoreOrderInvoiceLines(sortedItems),
+    [sortedItems],
+  )
+  const hasReturnLines = returnedItems.length > 0
   const defaultRecipientEmail = order ? order.storeContactEmail || store?.contactEmail || '' : ''
   const getEmailStoreName = (language: InvoiceEmailModalLanguage) =>
     store?.storeName || order?.storeCode || t('warehouse.invoice.unknownStore', { lng: language })
   const buildDefaultEmailSubject = (language: InvoiceEmailModalLanguage) =>
-    order
+    order && isCreditNote
+      ? t('warehouseUi.storeOrderInvoice.creditEmailSubject', {
+          lng: language,
+          storeName: getEmailStoreName(language),
+          orderNo: order.orderNo || order.orderGUID,
+        })
+      : order
       ? t('warehouse.invoice.defaultEmailSubject', {
           lng: language,
           storeName: getEmailStoreName(language),
@@ -334,7 +427,13 @@ export default function StoreOrderInvoicePage() {
         })
       : ''
   const buildDefaultEmailBody = (language: InvoiceEmailModalLanguage) =>
-    order
+    order && isCreditNote
+      ? t('warehouseUi.storeOrderInvoice.creditEmailBody', {
+          lng: language,
+          storeName: getEmailStoreName(language),
+          orderNo: order.orderNo || order.orderGUID,
+        })
+      : order
       ? t('warehouse.invoice.defaultEmailBody', {
           lng: language,
           storeName: getEmailStoreName(language),
@@ -347,7 +446,7 @@ export default function StoreOrderInvoicePage() {
 
   const resolveInvoicePdfFileName = () =>
     buildDocumentFileName(
-      t('warehouse.invoice.fileName'),
+      isCreditNote ? t('warehouseUi.storeOrderInvoice.creditFileName') : t('warehouse.invoice.fileName'),
       store?.storeName || order?.storeCode,
       order?.orderNo || order?.orderGUID,
       'pdf',
@@ -544,7 +643,9 @@ export default function StoreOrderInvoicePage() {
         fromAccountId: senderAccountId,
       })
 
-      message.success(t('warehouse.invoice.emailJobSubmitted'))
+      message.success(
+        isCreditNote ? t('warehouseUi.storeOrderInvoice.creditEmailSubmitted') : t('warehouse.invoice.emailJobSubmitted'),
+      )
       setEmailModalOpen(false)
       if (job.jobId) {
         void pollInvoiceEmailJob(job.jobId, normalizedRecipientEmail)
@@ -606,6 +707,58 @@ export default function StoreOrderInvoicePage() {
   const displayStoreName = store?.storeName || order.storeCode || '--'
   const storeAddress = order.storeAddress || store?.address || '--'
 
+  // 一行明细：退货行（发货数为负）数字标红并在名称下写英文原因；其余与改动前一致。
+  const renderInvoiceRow = (item: StoreOrderDetailLine, index: number) => {
+    const orderQuantity = Number(item.quantity || 0)
+    const allocQuantity = Number(item.allocQuantity ?? 0)
+    const isReturnRow = isStoreOrderReturnLine(item)
+    const reasonLine = isReturnRow ? formatInvoiceReasonLine(t, item) : ''
+    return (
+      <tr key={item.detailGUID}>
+        <td className="col-index">{index + 1}</td>
+        <td className="col-image">
+          {item.productImage ? (
+            <Image
+              src={item.productImage}
+              alt=""
+              width={36}
+              height={36}
+              preview={false}
+              fallback={TRANSPARENT_IMAGE_FALLBACK}
+              style={{ objectFit: 'contain' }}
+            />
+          ) : (
+            null
+          )}
+        </td>
+        <td className="col-item">{item.itemNumber || '--'}</td>
+        <td className="col-barcode">
+          {item.barcode ? (
+            <BarcodePreview
+              value={item.barcode}
+              showCopy={false}
+              textMaxWidth={78}
+              options={{ width: 0.9, height: 20, margin: 0 }}
+            />
+          ) : (
+            item.productCode
+          )}
+        </td>
+        <td className="col-name">
+          {item.productName || '--'}
+          {reasonLine ? <div className="store-order-invoice-reason">{reasonLine}</div> : null}
+        </td>
+        <td className="col-cost">{formatCurrency(item.importPrice)}</td>
+        <td className="col-rrp">{formatOptionalCurrency(item.rrp)}</td>
+        <td className="col-qty">{orderQuantity}</td>
+        <td className={`col-qty${isReturnRow ? ' is-negative' : ''}`}>{allocQuantity}</td>
+        <td className={`col-subtotal${isReturnRow ? ' is-negative' : ''}`}>
+          {formatCurrency(item.allocatedImportAmount ?? allocQuantity * Number(item.importPrice || 0))}
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div className="store-order-print-page">
       <div className="store-order-print-toolbar no-print">
@@ -623,7 +776,7 @@ export default function StoreOrderInvoicePage() {
             {t('warehouse.invoice.downloadPdf')}
           </Button>
           <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint}>
-            {t('warehouse.invoice.printInvoice')}
+            {isCreditNote ? t('warehouseUi.storeOrderInvoice.creditPrintButton') : t('warehouse.invoice.printInvoice')}
           </Button>
         </Space>
       </div>
@@ -634,6 +787,19 @@ export default function StoreOrderInvoicePage() {
             <Image src="/invoice-logo.png" alt="HOT BARGAIN" preview={false} style={{ maxHeight: 120, objectFit: 'contain' }} />
           </div>
           <div className="store-order-invoice-company">
+            {/* 退款单：红色 ADJUSTMENT NOTE + CREDIT 印章，避免被当成普通发票付款；有退货的发票写 TAX INVOICE。 */}
+            {isCreditNote || hasReturnLines ? (
+              <div className="store-order-invoice-doc-heading">
+                <h3 className={`store-order-invoice-doc-title${isCreditNote ? ' is-credit' : ''}`}>
+                  {isCreditNote
+                    ? t('warehouseUi.storeOrderInvoice.docTitleCredit')
+                    : t('warehouseUi.storeOrderInvoice.docTitleInvoice')}
+                </h3>
+                {isCreditNote ? (
+                  <span className="store-order-invoice-stamp">{t('warehouseUi.storeOrderInvoice.creditStamp')}</span>
+                ) : null}
+              </div>
+            ) : null}
             <h4>{t('warehouse.invoice.warehouseAddress')}</h4>
             <p>3 Rogilla close Maryland, NSW, 2287, Australia</p>
             <p>
@@ -645,9 +811,17 @@ export default function StoreOrderInvoicePage() {
           </div>
         </div>
 
-        <div className="store-order-invoice-bar">
-          <div>{t('warehouse.invoice.invoiceNo', { orderNo: order.orderNo || order.orderGUID })}</div>
-          <div>{t('warehouse.invoice.invoiceDate', { date: invoiceDateText })}</div>
+        <div className={`store-order-invoice-bar${isCreditNote ? ' is-credit' : ''}`}>
+          <div>
+            {isCreditNote
+              ? t('warehouseUi.storeOrderInvoice.docNoCredit', { orderNo: order.orderNo || order.orderGUID })
+              : t('warehouse.invoice.invoiceNo', { orderNo: order.orderNo || order.orderGUID })}
+          </div>
+          <div>
+            {isCreditNote
+              ? t('warehouseUi.storeOrderInvoice.docDateCredit', { date: invoiceDateText })
+              : t('warehouse.invoice.invoiceDate', { date: invoiceDateText })}
+          </div>
         </div>
 
         <div className="store-order-invoice-customer">
@@ -663,6 +837,12 @@ export default function StoreOrderInvoicePage() {
             <span className="store-order-invoice-label">{t('warehouse.invoice.address')}</span>
             <span>{storeAddress}</span>
           </div>
+          {isCreditNote ? (
+            <div className="store-order-invoice-customer-row">
+              <span className="store-order-invoice-label">{t('warehouseUi.storeOrderInvoice.creditReference')}</span>
+              <span>{t('warehouseUi.storeOrderInvoice.creditReferenceValue')}</span>
+            </div>
+          ) : null}
         </div>
 
         <table className="store-order-invoice-table">
@@ -681,81 +861,65 @@ export default function StoreOrderInvoicePage() {
             </tr>
           </thead>
           <tbody>
-            {sortedItems.map((item, index) => {
-              const orderQuantity = Number(item.quantity || 0)
-              const allocQuantity = Number(item.allocQuantity ?? 0)
-              return (
-                <tr key={item.detailGUID}>
-                  <td className="col-index">{index + 1}</td>
-                  <td className="col-image">
-                    {item.productImage ? (
-                      <Image
-                        src={item.productImage}
-                        alt=""
-                        width={36}
-                        height={36}
-                        preview={false}
-                        fallback={TRANSPARENT_IMAGE_FALLBACK}
-                        style={{ objectFit: 'contain' }}
-                      />
-                    ) : (
-                      null
-                    )}
-                  </td>
-                  <td className="col-item">{item.itemNumber || '--'}</td>
-                  <td className="col-barcode">
-                    {item.barcode ? (
-                      <BarcodePreview
-                        value={item.barcode}
-                        showCopy={false}
-                        textMaxWidth={78}
-                        options={{ width: 0.9, height: 20, margin: 0 }}
-                      />
-                    ) : (
-                      item.productCode
-                    )}
-                  </td>
-                  <td className="col-name">{item.productName || '--'}</td>
-                  <td className="col-cost">{formatCurrency(item.importPrice)}</td>
-                  <td className="col-rrp">{formatOptionalCurrency(item.rrp)}</td>
-                  <td className="col-qty">{orderQuantity}</td>
-                  <td className="col-qty">{allocQuantity}</td>
-                  <td className="col-subtotal">
-                    {formatCurrency(item.allocatedImportAmount ?? allocQuantity * Number(item.importPrice || 0))}
+            {hasReturnLines ? (
+              <>
+                {suppliedItems.length > 0 ? (
+                  <>
+                    <tr className="store-order-invoice-section-row">
+                      <td colSpan={10}>{t('warehouseUi.storeOrderInvoice.sectionSupplied')}</td>
+                    </tr>
+                    {suppliedItems.map((item, index) => renderInvoiceRow(item, index))}
+                  </>
+                ) : null}
+                <tr className="store-order-invoice-section-row is-return">
+                  <td colSpan={10}>
+                    {suppliedItems.length > 0 && !isCreditNote
+                      ? t('warehouseUi.storeOrderInvoice.sectionAdjustments')
+                      : t('warehouseUi.storeOrderInvoice.sectionReturned')}
                   </td>
                 </tr>
-              )
-            })}
+                {returnedItems.map((item, index) => renderInvoiceRow(item, suppliedItems.length + index))}
+              </>
+            ) : (
+              sortedItems.map((item, index) => renderInvoiceRow(item, index))
+            )}
           </tbody>
         </table>
 
         <div className="store-order-invoice-footer">
-          <div className="store-order-invoice-payment">
-            <h4>{t('warehouse.invoice.paymentDetail')}</h4>
-            <div className="store-order-invoice-payment-row">
-              <span className="store-order-invoice-label">{t('warehouse.invoice.paymentName')}</span>
-              <span>HOT BARGAIN INTERNATIONAL</span>
+          {/* 退款单是我们退钱给分店，不是让对方付款，所以不放收款账户与 30 天付款条款。 */}
+          {isCreditNote ? (
+            <div className="store-order-invoice-payment">
+              <div className="store-order-invoice-note">{t('warehouseUi.storeOrderInvoice.creditFootnote')}</div>
             </div>
-            <div className="store-order-invoice-payment-row">
-              <span className="store-order-invoice-label">{t('warehouse.invoice.bsb')}</span>
-              {/* 公司收款 BSB 需保留银行分隔符，避免显示成错误的 5 位数字。 */}
-              <span>012-532</span>
+          ) : (
+            <div className="store-order-invoice-payment">
+              <h4>{t('warehouse.invoice.paymentDetail')}</h4>
+              <div className="store-order-invoice-payment-row">
+                <span className="store-order-invoice-label">{t('warehouse.invoice.paymentName')}</span>
+                <span>HOT BARGAIN INTERNATIONAL</span>
+              </div>
+              <div className="store-order-invoice-payment-row">
+                <span className="store-order-invoice-label">{t('warehouse.invoice.bsb')}</span>
+                {/* 公司收款 BSB 需保留银行分隔符，避免显示成错误的 5 位数字。 */}
+                <span>012-532</span>
+              </div>
+              <div className="store-order-invoice-payment-row">
+                <span className="store-order-invoice-label">{t('warehouse.invoice.account')}</span>
+                <span>208034605</span>
+              </div>
+              <div className="store-order-invoice-disclaimer">
+                {t('warehouse.invoice.paymentDisclaimer')}
+              </div>
             </div>
-            <div className="store-order-invoice-payment-row">
-              <span className="store-order-invoice-label">{t('warehouse.invoice.account')}</span>
-              <span>208034605</span>
-            </div>
-            <div className="store-order-invoice-disclaimer">
-              {t('warehouse.invoice.paymentDisclaimer')}
-            </div>
-          </div>
+          )}
 
           <div className="store-order-invoice-totals">
-            <div className="store-order-invoice-total-row">
+            <div className={`store-order-invoice-total-row${totals.subTotal < 0 ? ' is-negative' : ''}`}>
               <span>{t('warehouse.invoice.subTotal')}</span>
               <span>{formatCurrency(totals.subTotal)}</span>
             </div>
-            <div className="store-order-invoice-total-row">
+            <div className={`store-order-invoice-total-row${totals.gst < 0 ? ' is-negative' : ''}`}>
               <span>{t('warehouse.invoice.gst')}</span>
               <span>{formatCurrency(totals.gst)}</span>
             </div>
@@ -763,12 +927,17 @@ export default function StoreOrderInvoicePage() {
               <span>{t('warehouse.invoice.freight')}</span>
               <span>{formatCurrency(totals.freight)}</span>
             </div>
-            <div className="store-order-invoice-total-row is-grand">
-              <span>{t('warehouse.invoice.totalBeforeDiscount')}</span>
+            <div className={`store-order-invoice-total-row is-grand${isCreditNote ? ' is-credit' : ''}`}>
+              <span>
+                {isCreditNote ? t('warehouseUi.storeOrderInvoice.totalCredit') : t('warehouse.invoice.totalBeforeDiscount')}
+              </span>
               <span>{formatCurrency(totals.total)}</span>
             </div>
           </div>
         </div>
+        {hasReturnLines && !isCreditNote ? (
+          <div className="store-order-invoice-note">{t('warehouseUi.storeOrderInvoice.invoiceFootnote')}</div>
+        ) : null}
 
         <div className="store-order-print-footer">
           <div>{t('warehouse.invoice.pageDocument')}</div>
@@ -778,7 +947,11 @@ export default function StoreOrderInvoicePage() {
       </div>
 
       <Modal
-        title={t('warehouse.invoice.emailModalTitle', { lng: emailModalLanguage })}
+        title={
+          isCreditNote
+            ? t('warehouseUi.storeOrderInvoice.creditEmailModalTitle', { lng: emailModalLanguage })
+            : t('warehouse.invoice.emailModalTitle', { lng: emailModalLanguage })
+        }
         open={emailModalOpen}
         destroyOnHidden
         okText={t('warehouse.invoice.sendEmail', { lng: emailModalLanguage })}

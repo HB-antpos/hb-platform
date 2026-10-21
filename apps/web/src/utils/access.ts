@@ -80,6 +80,7 @@ function createEmptyAccess(): AccessControl {
     canManageWarehouseProducts: false,
     canManageWarehouseOrders: false,
     canManageStoreOrderImportPriceVariance: false,
+    canReturnStoreOrderGoods: false,
     canManageWarehouseCategories: false,
     canManageWarehouseLocations: false,
     canViewContainers: false,
@@ -285,6 +286,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 首柜价差异报表暴露全局基准差异和可编辑价格入口，纯 WarehouseStaff 仍只保留分店订货文档入口。
   const canManageStoreOrderImportPriceVariance =
     canManageWarehouseOrders && !isWarehouseStaffOnly
+  // 退货（负数发货）单独授权：不继承 Warehouse.Manage / ManageOrders，管理员由 hasPermission 统一放行；
+  // 页面里还要同时具备订货管理写权限才会真正放开负数输入。
+  const canReturnStoreOrderGoods = hasPermission(P.Warehouse.StoreOrderReturn)
   const canManageWarehouseCategories =
     isAdmin || hasPermission(P.Warehouse.ManageCategories) || hasPermission(P.Warehouse.Manage)
   const canManageWarehouseLocations =
@@ -478,6 +482,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageWarehouseProducts,
     canManageWarehouseOrders,
     canManageStoreOrderImportPriceVariance,
+    canReturnStoreOrderGoods,
     canManageWarehouseCategories,
     canManageWarehouseLocations,
     canViewContainers,

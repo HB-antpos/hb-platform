@@ -26,7 +26,12 @@ internal sealed class UpdateOrderLineValidator
                 command.Request.ProductCode,
                 command.Request.Quantity,
                 command.Request.ImportPrice,
-                command.Request.SyncImportPrice == true
+                command.Request.SyncImportPrice == true,
+                new StoreOrderReturnLineRequest(
+                    command.Request.ReturnReason,
+                    command.Request.ReturnDisposition,
+                    command.Request.ReturnNote
+                )
             )
         );
     }

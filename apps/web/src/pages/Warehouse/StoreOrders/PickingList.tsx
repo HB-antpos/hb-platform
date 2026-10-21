@@ -9,6 +9,7 @@ import { useAuthStore } from '../../../store/auth'
 import { P } from '../../../types/permissions'
 import { getStores } from '../../../services/storeService'
 import { getStoreOrderDetail, startPickingStoreOrder } from '../../../services/storeOrderService'
+import { withoutStoreOrderReturnLines } from './storeOrderReturnLogic'
 import { StoreOrderFlowStatus } from '../../../types/storeOrder'
 import type { StoreDto } from '../../../types/store'
 import type { StoreOrderDetail } from '../../../types/storeOrder'
@@ -102,7 +103,8 @@ export default function PickingListPage() {
         // 仅在当前激活请求完整结束后一次性提交，避免隐藏 Tab 回写半套打印数据。
         loadedOrderIdRef.current = detail.orderGUID || id
         visibleOrderIdRef.current = detail.orderGUID || id
-        setOrder(detail)
+        // 退货行不进配货单：只拣要发出去的货，总发货数量也只统计正数。
+        setOrder(withoutStoreOrderReturnLines(detail))
         setStore(nextStore)
       } catch (error) {
         if (cancelled || !activeRef.current) return

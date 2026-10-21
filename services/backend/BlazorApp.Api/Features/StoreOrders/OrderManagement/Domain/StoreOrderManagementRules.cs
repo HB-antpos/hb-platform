@@ -25,7 +25,9 @@ internal static class StoreOrderManagementRules
 
     internal static bool ShouldSoftDelete(decimal? quantity, decimal? allocatedQuantity)
     {
-        return (quantity ?? 0) <= 0 && (allocatedQuantity ?? 0) <= 0;
+        // 空行 = 订货数量 <= 0 且发货数量恰好为 0。发货数量为负的是退货行（Quantity=0、AllocQuantity<0），
+        // 它是有效数据，不能被当成空行软删。
+        return (quantity ?? 0) <= 0 && (allocatedQuantity ?? 0) == 0;
     }
 
     internal static bool ShouldSoftDeleteExistingDetail(
@@ -34,7 +36,8 @@ internal static class StoreOrderManagementRules
     )
     {
         // 原单行更新使用可空比较；任一历史列为 NULL 时不自动软删除。
-        return quantity <= 0 && allocatedQuantity <= 0;
+        // 发货数量必须恰好为 0 才算空行：负数是退货行（见 ShouldSoftDelete），不能被软删。
+        return quantity <= 0 && allocatedQuantity == 0;
     }
 
     internal static bool CanUseDetailGuidQuantityBatchUpdate(
