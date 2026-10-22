@@ -1,4 +1,5 @@
-import { Alert, Button, InputNumber, Table, Typography } from 'antd'
+import { Alert, Button, InputNumber, Typography } from 'antd'
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import { FIXED_PREVIEW_COSTS, FIXED_RATE_MAX, FIXED_RATE_MIN, fixedRateError, fixedRetailPrice } from './pricingCurve'
 
 const PRESETS = [1.5, 2, 2.5, 3, 3.5, 5]
@@ -39,7 +40,7 @@ export default function FixedRatePanel({ value, onChange }: Props) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
           <b>实时预览</b><Typography.Text type="secondary" style={{ fontSize: 12 }}>按当前成率试算，与后端计算一致</Typography.Text>
         </div>
-        <Table size="small" pagination={false} rowKey="cost" dataSource={rows} columns={[
+        <MeasuredTable metricId="pos-admin.pricing-strategies.fixed-rate-preview" size="small" pagination={false} rowKey="cost" dataSource={rows} columns={[
           { title: '进货价', dataIndex: 'cost', render: (v: number) => v.toFixed(2) },
           { title: '零售价', dataIndex: 'price', align: 'right', render: (v: number | null) => v === null ? '—' : <b style={{ color: '#1677ff' }}>{v.toFixed(2)}</b> },
           { title: '实际成率', dataIndex: 'actual', align: 'right', render: (v: number | null) => v === null ? '—' : <span style={{ color: '#8c8c8c' }}>{v.toFixed(4)}</span> },

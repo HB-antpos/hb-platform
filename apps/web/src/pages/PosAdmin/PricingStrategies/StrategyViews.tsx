@@ -1,4 +1,5 @@
-import { Table, Typography } from 'antd'
+import { Typography } from 'antd'
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import type { PricingStrategyListDto, PricingStrategyNodeDto } from '../../../types/pricingStrategy'
 import { fmtRate } from './pricingCurve'
 
@@ -76,7 +77,7 @@ export function StrategyExpanded({ record }: { record: PricingStrategyListDto })
   return <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', alignItems: 'flex-start', padding: '4px 0 4px 24px' }}>
     <div style={{ flex: '0 1 520px', minWidth: 320 }}>
       <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>{legacy ? '区间端点' : '定价节点'}</Typography.Text>
-      <Table size="small" pagination={false} rowKey={(_, i) => String(i)} dataSource={nodes} columns={[
+      <MeasuredTable metricId="pos-admin.pricing-strategies.expanded-nodes" size="small" pagination={false} rowKey={(_, i) => String(i)} dataSource={nodes} columns={[
         { title: '#', width: 48, render: (_: unknown, __: PricingStrategyNodeDto, i: number) => i + 1 },
         { title: '成本', dataIndex: 'cost', render: (v: number) => v.toFixed(2) },
         { title: '零售价', dataIndex: 'price', align: 'right', render: (v: number) => v.toFixed(2) },
