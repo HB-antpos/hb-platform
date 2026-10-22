@@ -5,7 +5,7 @@ import type { ContainerNewProductItem } from "./types";
 // date 是到仓库日期；传 null 模拟旧版后端（没有到仓库日期，只有预计到店起始日 storeDate）
 const item = (productCode: string, hbProductNo: string | null, date: string | null = "2026-10-01", storeDate = "2026-10-20"): ContainerNewProductItem => ({
   productCode, hbProductNo, estimatedStoreArrivalDate: storeDate, estimatedStoreArrivalDateEnd: null, quantity: null,
-  imageUrl: null, barcode: null, retailPrice: null, containerNumber: null, containerCode: "C", warehouseArrivalDate: date, basis: "estimated", isNewProduct: true,
+  imageUrl: null, barcode: null, retailPrice: null, containerNumber: null, containerCode: "C", warehouseArrivalDate: date, basis: "estimated", isNewProduct: true, isCreated: true,
 });
 
 const sorted = [

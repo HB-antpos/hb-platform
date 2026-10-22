@@ -43,4 +43,9 @@ public sealed class ContainerNewProductItemDto
     public string Basis { get; init; } = string.Empty;
     /// <summary>是否新商品（仓库里没有、或由本柜提交时新建）；false 为补货的已有商品，只在请求带 includeExisting=true 时出现。</summary>
     public bool IsNewProduct { get; init; } = true;
+    /// <summary>
+    /// 仓库是否已完成建档：商品主档（Product，未删除）里已有该商品。商品查询页只认主档，
+    /// 所以为 false 时移动端不跳转，改为提示等待仓库创建；与 <see cref="IsNewProduct"/> 不同——本柜新建的新品也会是 true。
+    /// </summary>
+    public bool IsCreated { get; init; }
 }

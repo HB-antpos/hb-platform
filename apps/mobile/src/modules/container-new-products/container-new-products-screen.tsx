@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
-import { ActivityIndicator, Button, Card, SegmentedButtons, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Card, Dialog, Portal, SegmentedButtons, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
@@ -22,6 +22,7 @@ import { countActiveFilters, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS, formatContai
 import { compareByArrivalThenProductNo } from "./ordering";
 import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS, paginate, type ContainerNewProductsPageSize } from "./pagination";
 import { peekRememberedPageSize, readRememberedPageSize, rememberPageSize } from "./page-size-storage";
+import { isAwaitingWarehouseCreation, PRODUCT_QUERY_PATH, resolveProductTap, resolveRecheck } from "./product-query-link";
 import { countNewProductKinds } from "./summary";
 import type { ContainerNewProductItem } from "./types";
 import { getWarehouseDateColumn } from "./warehouse-date";
@@ -29,8 +30,13 @@ import { getWarehouseDateColumn } from "./warehouse-date";
 const ACCENT_SOFT = "#EAF2FF";
 const SUCCESS_SOFT = "#ECFDF3";
 const WARNING_SOFT = "#FFFAEB";
+// 未建档卡片：灰底标签与置灰文字
+const PENDING_SOFT = "#EAECF0";
+const PENDING_TEXT = "#344054";
+const PENDING_MUTED = "#667085";
 
 type OpenSheet = "product" | "containers" | "stores" | null;
+type PendingCheck = "idle" | "checking" | "stillPending" | "failed";
 
 function ScreenMessage({ message, onBack, retry }: { message: string; onBack: () => void; retry?: () => void }) {
   const { t } = useAppTranslation("containerNewProducts");
@@ -49,27 +55,44 @@ function FilterChip({ icon, label, active, onPress }: { icon: keyof typeof Mater
   </Pressable>;
 }
 
-function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProductItem; imageSize: number; dateWidth: number }) {
+function ProductCard({ item, imageSize, dateWidth, onPress }: { item: ContainerNewProductItem; imageSize: number; dateWidth: number; onPress: () => void }) {
   const { t } = useAppTranslation("containerNewProducts");
   // 货柜编号默认只显示后 4 位（门店账号后端已遮罩）；有权限的账号点筛选条旁眼睛按钮显示完整编号。
   const { format: formatContainerNumber } = useContainerNumberDisplay();
   const containerNumber = item.containerNumber?.trim();
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const arrived = item.basis === "actual";
+  // 仓库还没建档：卡片置灰并加「未创建」标签，点击弹出等待提示而不是跳转（见 resolveProductTap）
+  const pending = isAwaitingWarehouseCreation(item);
+  const displayCode = item.hbProductNo ?? item.productCode;
   // 右列显示货柜到仓库日期：已到仓 = 「到仓库」+ 实际到货日期，在途 = 「预计到仓库」+ 预计到岸日期；
   // 旧版后端没有该字段时整列不渲染（左侧详情自然撑满），也不回退去显示到店日期
   const warehouseColumn = getWarehouseDateColumn(item.basis, item.warehouseArrivalDate);
-  return <Card style={styles.card} contentStyle={styles.cardContent} mode="contained">
+  return <Card
+    style={[styles.card, pending && styles.cardPending]}
+    contentStyle={styles.cardContent}
+    mode="contained"
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={pending ? `${displayCode}, ${t("labels.notCreatedTag")}` : t("actions.openProductQuery", { code: displayCode })}
+  >
     <View style={styles.cardRow}>
-      <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
+      <View style={[styles.imageFrame, { width: imageSize, height: imageSize }, pending && styles.dimmed]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
       <View style={styles.details}>
-        <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
-        {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
-        <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: containerNumber ? formatContainerNumber(containerNumber) : item.containerCode })}</Text>
+        <View style={styles.codeRow}>
+          <Text variant="titleMedium" style={[styles.productCode, pending && styles.pendingText]} numberOfLines={1}>{displayCode}</Text>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={HB_COLORS.textSecondary} />
+        </View>
+        {item.retailPrice !== null ? <Text variant="titleSmall" style={[styles.retailPrice, pending && styles.pendingText]} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
+        <Text variant="bodyMedium" style={[styles.containerCode, pending && styles.pendingText]} numberOfLines={1}>{t("labels.container", { code: containerNumber ? formatContainerNumber(containerNumber) : item.containerCode })}</Text>
         {/* 不向门店展示到货数量：数量只在接口里保留，卡片上不显示 */}
         {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓日期为实际到货日期，在途为预计到岸日期 */}
         <View style={styles.tagRow}>
-          <Text style={[styles.typeTag, !item.isNewProduct && styles.typeTagExisting]}>{t(item.isNewProduct ? "labels.newTag" : "labels.existingTag")}</Text>
+          <Text style={[styles.typeTag, (!item.isNewProduct || pending) && styles.typeTagExisting]}>{t(item.isNewProduct ? "labels.newTag" : "labels.existingTag")}</Text>
+          {pending ? <View style={[styles.statusPill, styles.statusPending]}>
+            <MaterialCommunityIcons name="clock-outline" size={13} color={PENDING_TEXT} />
+            <Text style={[styles.statusText, styles.pendingTagText]}>{t("labels.notCreatedTag")}</Text>
+          </View> : null}
           <View style={[styles.statusPill, arrived ? styles.statusArrived : styles.statusTransit]}>
             <MaterialCommunityIcons name={arrived ? "check" : "truck-outline"} size={13} color={arrived ? HB_COLORS.success : HB_COLORS.warning} />
             <Text style={[styles.statusText, arrived ? styles.successText : styles.warningText]}>{t(arrived ? "labels.arrived" : "labels.transit")}</Text>
@@ -83,7 +106,7 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
       </View> : null}
     </View>
     {/* 条码放在卡片底部整宽显示，门店可直接对着屏幕扫码；没有条码不占位 */}
-    {item.barcode ? <View style={styles.barcode}><ProductBarcodeImage value={item.barcode} compact /></View> : null}
+    {item.barcode ? <View style={[styles.barcode, pending && styles.dimmed]}><ProductBarcodeImage value={item.barcode} compact /></View> : null}
   </Card>;
 }
 
@@ -151,6 +174,43 @@ export function ContainerNewProductsScreen() {
         formatContainerNumber,
       ) ?? effectiveFilters.containerCodes[0]
       : t("chips.containersMany", { count: effectiveFilters.containerCodes.length });
+  // 点击卡片：已建档（或旧后端未知）→ 打开商品查询页（本店缺分店价时由查询页补建）；未建档 → 弹窗提示等仓库创建
+  const [pendingItem, setPendingItem] = useState<ContainerNewProductItem | null>(null);
+  const [pendingCheck, setPendingCheck] = useState<PendingCheck>("idle");
+  // 每次打开/关闭弹窗换一个序号：关掉弹窗或换了商品后，迟到的「重新检查」结果不再生效
+  const pendingRequestRef = useRef(0);
+  const handleProductTap = (item: ContainerNewProductItem) => {
+    if (!storeCode) return;
+    const action = resolveProductTap(item, storeCode);
+    if (action.type === "open") {
+      router.push({ pathname: action.pathname, params: action.params });
+      return;
+    }
+    pendingRequestRef.current += 1;
+    setPendingCheck("idle");
+    setPendingItem(item);
+  };
+  const closePendingDialog = () => {
+    pendingRequestRef.current += 1;
+    setPendingItem(null);
+    setPendingCheck("idle");
+  };
+  // 重新检查：刷新整个列表再看这一行的 isCreated，不靠商品详情接口的报错文字区分「不存在」与其他错误
+  const recheckPendingItem = async () => {
+    if (!pendingItem || pendingCheck === "checking") return;
+    const requestId = ++pendingRequestRef.current;
+    const target = pendingItem;
+    setPendingCheck("checking");
+    const result = await query.refetch();
+    if (pendingRequestRef.current !== requestId) return;
+    const outcome = resolveRecheck(result.isSuccess ? result.data.items : null, target);
+    if (outcome === "open") {
+      closePendingDialog();
+      if (storeCode) router.push({ pathname: PRODUCT_QUERY_PATH, params: { productCode: target.productCode, storeCode } });
+      return;
+    }
+    setPendingCheck(outcome);
+  };
   const imageSize = width < 360 ? 72 : 88;
   const dateWidth = width < 360 ? 88 : 100;
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/workbench"));
@@ -214,7 +274,7 @@ export function ContainerNewProductsScreen() {
         : orderedItems.length === 0 ? <View style={styles.center}><Text>{t("states.empty")}</Text></View>
         : itemsMatchingFilters.length === 0 ? <View style={styles.center}><Text>{t("states.emptyFiltered")}</Text><Button onPress={() => setFilters(DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS)}>{t("actions.clearFilters")}</Button></View>
         : filteredItems.length === 0 ? <View style={styles.center}><Text>{t(rangeFilter === "past" ? "states.emptyPast" : "states.emptyUpcoming")}</Text></View>
-        : pageSlice.items.map((item, index) => <ProductCard key={`${item.containerCode}:${item.productCode}:${item.estimatedStoreArrivalDate}:${index}`} item={item} imageSize={imageSize} dateWidth={dateWidth} />)}
+        : pageSlice.items.map((item, index) => <ProductCard key={`${item.containerCode}:${item.productCode}:${item.estimatedStoreArrivalDate}:${index}`} item={item} imageSize={imageSize} dateWidth={dateWidth} onPress={() => handleProductTap(item)} />)}
       {hasData && filteredItems.length > 0 ? pager(true) : null}
     </ScrollView>
 
@@ -247,6 +307,21 @@ export function ContainerNewProductsScreen() {
         await selectStore(store).catch(() => undefined);
       }}
     />
+    <Portal>
+      <Dialog visible={pendingItem !== null} onDismiss={closePendingDialog}>
+        <Dialog.Title>{t("pendingDialog.title")}</Dialog.Title>
+        <Dialog.Content>
+          <Text variant="bodyMedium" style={styles.dialogMessage}>{t("pendingDialog.description", { code: pendingItem?.hbProductNo ?? pendingItem?.productCode ?? "" })}</Text>
+          {pendingCheck === "stillPending" || pendingCheck === "failed"
+            ? <Text variant="bodyMedium" style={styles.dialogNotice} accessibilityLiveRegion="polite">{t(pendingCheck === "stillPending" ? "pendingDialog.stillPending" : "pendingDialog.checkFailed")}</Text>
+            : null}
+        </Dialog.Content>
+        <Dialog.Actions>
+          <Button onPress={closePendingDialog}>{t("pendingDialog.close")}</Button>
+          <Button mode="contained" loading={pendingCheck === "checking"} disabled={pendingCheck === "checking"} onPress={() => void recheckPendingItem()}>{t("pendingDialog.checkAgain")}</Button>
+        </Dialog.Actions>
+      </Dialog>
+    </Portal>
   </SafeAreaView>;
 }
 
@@ -285,7 +360,15 @@ const styles = StyleSheet.create({
   image: { width: "100%", height: "100%" },
   imagePlaceholder: { color: HB_COLORS.textSecondary, fontSize: 12 },
   details: { flex: 1, minWidth: 0, paddingHorizontal: HB_SPACING.sm, gap: 4 },
-  productCode: { color: HB_COLORS.textPrimary, fontWeight: "700" },
+  codeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 },
+  productCode: { color: HB_COLORS.textPrimary, fontWeight: "700", flexShrink: 1 },
+  cardPending: { backgroundColor: "#FAFAFB" },
+  dimmed: { opacity: 0.55 },
+  pendingText: { color: PENDING_MUTED },
+  statusPending: { backgroundColor: PENDING_SOFT },
+  pendingTagText: { color: PENDING_TEXT },
+  dialogMessage: { color: HB_COLORS.textSecondary },
+  dialogNotice: { marginTop: HB_SPACING.xs, color: HB_COLORS.warning },
   tagRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
   typeTag: { color: HB_COLORS.action, backgroundColor: ACCENT_SOFT, fontSize: 12, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
   typeTagExisting: { color: HB_COLORS.textSecondary, backgroundColor: HB_COLORS.surfaceMuted },
