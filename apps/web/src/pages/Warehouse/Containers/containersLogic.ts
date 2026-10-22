@@ -132,19 +132,22 @@ export interface ContainerTotals {
   count: number
   pieces: number
   amount: number
+  /** 运费合计（美元）。 */
+  freight: number
   volume: number
 }
 
-/** 当前页或已勾选货柜的件数/金额/体积合计；只用于「本页合计」与勾选条，不能当成筛选结果合计。 */
+/** 当前页或已勾选货柜的件数/金额/运费/体积合计；只用于「本页合计」与勾选条，不能当成筛选结果合计。 */
 export function summarizeContainers(containers: readonly ContainerMain[]): ContainerTotals {
   return containers.reduce<ContainerTotals>(
     (acc, item) => ({
       count: acc.count + 1,
       pieces: acc.pieces + (item.合计件数 || 0),
       amount: acc.amount + (item.合计金额 || 0),
+      freight: acc.freight + (item.运费 || 0),
       volume: acc.volume + (item.总体积 || 0),
     }),
-    { count: 0, pieces: 0, amount: 0, volume: 0 },
+    { count: 0, pieces: 0, amount: 0, freight: 0, volume: 0 },
   )
 }
 
