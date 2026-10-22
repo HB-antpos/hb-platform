@@ -3,7 +3,7 @@ export { isDeviceRevocationCode } from "./core/api/forbidden-response";
 import { AxiosError, isAxiosError, type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 
 import { isDeviceRevocationCode } from "./core/api/forbidden-response";
-import { HbposApiError, type HbposTransport, type HbposTransportRequest, type HbposTransportResponse } from "./transport-contracts";
+import { HbposApiError, isHbposApiEnvelope, type HbposTransport, type HbposTransportRequest, type HbposTransportResponse } from "./transport-contracts";
 import {
   classifyTransportFailure,
   entryOrigins,
@@ -192,11 +192,14 @@ export function createAxiosHbposTransport(
           });
         }
         const code = payload?.errorCode;
+        // 记录正文是否为 ApiResult 信封：网关 HTML 403/404、认证页等非信封响应由上层按“服务不可用”分类，
+        // 不能当作服务端业务拒绝（例如持久化锁机）。错误码读取口径保持不变。
+        const apiEnvelope = isHbposApiEnvelope(error.response.data);
         const apiError = new HbposApiError(
           payload?.message ?? error.message ?? "Hbpos API request failed.",
           code
-            ? { kind: "http", status: error.response.status, code }
-            : { kind: "http", status: error.response.status }
+            ? { kind: "http", status: error.response.status, code, apiEnvelope }
+            : { kind: "http", status: error.response.status, apiEnvelope }
         );
         if (
           (apiError.status === 401 || apiError.status === 403) &&
@@ -204,6 +207,8 @@ export function createAxiosHbposTransport(
         ) {
           await notifyAuthenticationFailure(authenticationFailureHandler?.onForbidden);
         } else if (apiError.status === 401 && !suppressesCashierLoginFailure(request, apiError)) {
+          // 无错误码（含网关非信封）401 仍只清当前收银员票据：代价是重新扫码登录，不锁机、不删离线登录缓存，
+          // 与 WPF 会话刷新 401 即失效（#604）同口径；持久锁机只由上面的设备撤销码触发。
           await notifyAuthenticationFailure(authenticationFailureHandler?.onUnauthorized);
         }
         throw apiError;

@@ -2487,3 +2487,51 @@ test("启动先用 pending 开通码恢复首次兑换；确定拒绝后才回�
   assert.equal(await pendingActivation.load(), activationCode);
   assert.equal(verifyCalls, 1);
 });
+
+test("被网关 403 误锁的设备在下次联网 verify 得到服务端启用结论后自动解锁并恢复出站凭据", async () => {
+  const secureStore = new InMemorySecureStore();
+  const installation = new InstallationIdentityStore(secureStore, () => "INSTALL-001");
+  const credentials = new DeviceCredentialStore(secureStore);
+  const lockStore = new DeviceLockStore(secureStore);
+  await credentials.save({
+    deviceCode: "POS_1003_1011",
+    storeCode: "1003",
+    hardwareId: "INSTALL-001",
+    authorizationCode: "device-secret",
+  });
+  const verifyCalls: unknown[] = [];
+  const api: DeviceSessionApi = {
+    async register() {
+      throw new Error("not used");
+    },
+    async verify(input) {
+      verifyCalls.push(input);
+      return {
+        deviceCode: "POS_1003_1011",
+        storeCode: "1003",
+        deviceStatus: 1,
+        isAllowed: true,
+        authorizationCode: "device-secret-2",
+      };
+    },
+    async reregister() {
+      throw new Error("not used");
+    },
+  };
+  const coordinator = new DeviceSessionCoordinator(api, installation, credentials, lockStore);
+
+  // 旧版本把 HTML 403 当明确拒绝：持久化锁只阻止出站凭据，不删除设备凭据。
+  await coordinator.lockFromAuthorizationFailure("Request failed with status code 403");
+  assert.equal(await lockStore.isLocked(), true);
+  assert.equal(await coordinator.getRequestHeaders(), null);
+
+  const state = await coordinator.poll();
+
+  assert.equal(verifyCalls.length, 1);
+  assert.equal(state.status, "authorized");
+  assert.equal(await lockStore.isLocked(), false);
+  assert.equal(
+    (await coordinator.getRequestHeaders())?.Authorization,
+    "Bearer device-secret-2",
+  );
+});

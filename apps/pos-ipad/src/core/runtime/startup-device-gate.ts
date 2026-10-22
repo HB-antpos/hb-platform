@@ -1,4 +1,4 @@
-import { HbposApiError } from "../api/hbpos-api";
+import { HbposApiError, isHbposNonApiResponse } from "../api/hbpos-api";
 import type { DeviceSessionState } from "../security/device-session";
 
 import type {
@@ -21,9 +21,13 @@ export type StartupDeviceGateOptions = Readonly<{
 }>;
 
 /**
- * 在线启动必须重新验证设备；只有传输失败或 5xx 才允许回退本地离线状态。
- * 明确的设备 403 会锁机；其他 HTTP、业务 envelope、解析或编程错误必须保持
- * 不可交易，不能伪装成断网后使用旧 Keychain 凭据。
+ * 在线启动必须重新验证设备，口径与 WPF #519 一致：
+ * - 只有带服务端业务错误码的 ApiResult 403 才是明确拒绝，持久化锁机；
+ * - 传输失败、5xx，以及正文不是 ApiResult 信封的响应（网关/EdgeOne/WAF HTML 403、404/405、
+ *   Wi-Fi 认证页、2xx 非信封等）都证明不了服务端拒绝，按服务不可用回退本地离线状态；
+ * - 其余带信封的 HTTP/业务错误、解析或编程错误保持不可交易，不能伪装成断网后使用旧 Keychain 凭据。
+ * 已被旧版本误锁的设备：锁只阻止出站设备凭据，不删除凭据；下次联网启动的匿名 verify 一旦
+ * 得到服务端「已启用且下发授权码」的结论，DeviceSessionCoordinator 会写回凭据并解除本地锁（自愈）。
  */
 export async function resolveStartupDeviceGate(
   options: StartupDeviceGateOptions,
@@ -108,10 +112,14 @@ function fromVerifiedSession(
 function isExplicitDeviceRejection(
   error: unknown,
 ): error is HbposApiError & { status: number } {
+  // 网关 HTML 403 没有信封也没有错误码，绝不能据此持久化锁机。
   return (
     error instanceof HbposApiError &&
     error.kind === "http" &&
-    error.status === 403
+    error.status === 403 &&
+    error.apiEnvelope === true &&
+    typeof error.code === "string" &&
+    error.code.trim().length > 0
   );
 }
 
@@ -119,6 +127,8 @@ function isOfflineCompatibleFailure(error: unknown): boolean {
   return (
     error instanceof HbposApiError &&
     (error.kind === "transport" ||
+      // 非 ApiResult 响应（含 2xx 非信封抛出的 envelope 类错误）不是服务端结论，按服务不可用处理。
+      isHbposNonApiResponse(error) ||
       (error.kind === "http" &&
         error.status !== undefined &&
         error.status >= 500 &&

@@ -305,11 +305,39 @@ test("在线 408、429 和 5xx 视为可恢复故障，普通与主管登录都�
   }
 });
 
+test("在线遇网关 404/405 或 2xx 非 ApiResult 信封按服务不可用回退离线缓存（WPF #606/#607）", async () => {
+  const failures = [
+    new HbposApiError("Request failed with status code 404", { kind: "http", status: 404, apiEnvelope: false }),
+    new HbposApiError("Request failed with status code 405", { kind: "http", status: 405, apiEnvelope: false }),
+    new HbposApiError("Hbpos API response is not an ApiResult envelope.", { kind: "envelope", apiEnvelope: false }),
+  ];
+  for (const failure of failures) {
+    const cache = new CashierSessionCache(new InMemorySecureStore(), cacheKeyHasher, cashierCacheNamespace);
+    await cache.save("1003", "POS_1003_1011", "CASHIER-BARCODE", session);
+    const api: CashierAuthenticationApi = {
+      async barcodeLogin() {
+        throw failure;
+      },
+    };
+    const service = new CashierAuthenticationService(api, cache, { isOnline: async () => true });
+
+    const result = await service.login({
+      storeCode: "1003",
+      deviceCode: "POS_1003_1011",
+      userBarcode: "CASHIER-BARCODE",
+    });
+    assert.equal(result.source, "offline-cache", `${failure.kind} ${failure.status ?? "2xx"} must use the offline cache`);
+  }
+});
+
 test("在线其他 4xx 和 envelope 业务拒绝绝不回退缓存", async () => {
   const rejections = [
     new HbposApiError("bad request", { kind: "http", status: 400 }),
     new HbposApiError("denied", { kind: "http", status: 403 }),
+    // 与 WPF #606 同口径：登录遇 403 无论正文是否为信封（含网关 HTML 403）都按在线拒绝，不回退缓存。
+    new HbposApiError("Request failed with status code 403", { kind: "http", status: 403, apiEnvelope: false }),
     new HbposApiError("business denied", { kind: "envelope", code: "CASHIER_LOGIN_FAILED" }),
+    new HbposApiError("business denied", { kind: "envelope", code: "CASHIER_LOGIN_FAILED", apiEnvelope: true }),
   ];
   for (const rejection of rejections) {
     const cache = new CashierSessionCache(new InMemorySecureStore(), cacheKeyHasher, cashierCacheNamespace);
