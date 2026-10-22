@@ -269,6 +269,32 @@ export function setEndpoint(rules: Rule[], i: number, which: 'start' | 'end', wa
   return finish(next)
 }
 
+/**
+ * 按成率设置曲线端点：目标价 = 端点成本 × 成率，吸附到合法尾数后作为零售价，页面显示的是算出来的零售价。
+ * 保存用户输入的成率（价格取整后的实际成率可能略有出入）；若相邻约束迫使价格偏离太多，则保存实际成率。
+ */
+export function setEndpointRate(rules: Rule[], i: number, which: 'start' | 'end', rate: number, linked: boolean[]): Result {
+  if (!Number.isFinite(rate)) return fail('请填写成率')
+  if (rate < FIXED_RATE_MIN || rate > FIXED_RATE_MAX) return fail(`成率必须在 ${FIXED_RATE_MIN}～${FIXED_RATE_MAX} 之间`)
+  const r = rules[i]
+  if (isFixed(r)) return fail('固定成率区间请直接设置成率')
+  const cost = which === 'start' ? r.minPrice : r.maxPrice
+  const moved = setEndpoint(rules, i, which, cost * rate, linked)
+  if (!moved.rules) return moved
+  const next = moved.rules.map(x => ({ ...x }))
+  const price = which === 'start' ? startPrice(next[i]) : endPrice(next[i])
+  // 合法尾数相邻档最多差 0.51 元，超出这个范围说明价格是被相邻约束压过来的，此时记录实际成率。
+  const stored = Math.abs(price / cost - rate) <= 0.51 / cost + 1e-6 ? r4(rate) : r4(price / cost)
+  next[i] = which === 'start' ? { ...next[i], startRate: stored } : { ...next[i], endRate: stored }
+  const bIdx = which === 'start' ? i - 1 : i
+  if (bIdx >= 0 && bIdx < linked.length && linked[bIdx]) {
+    // 联动的曲线邻居共用同一个交界，成率一并记录
+    const j = which === 'start' ? i - 1 : i + 1
+    if (next[j] && !isFixed(next[j])) next[j] = which === 'start' ? { ...next[j], endRate: stored } : { ...next[j], startRate: stored }
+  }
+  return finish(next)
+}
+
 export function setShape(rules: Rule[], i: number, algorithm: 'Linear' | 'ArcUp' | 'ArcDown'): Result {
   const r = rules[i]
   if (isFixed(r)) return fail('固定成率区间没有曲线形状')

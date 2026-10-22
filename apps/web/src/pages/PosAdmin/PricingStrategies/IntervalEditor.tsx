@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { defaultCurve, fixedRules, fmtRate } from './pricingCurve'
 import {
   MAX_INTERVALS, UNBOUNDED_COST, actualPrice, addInterval, appendInterval, arcLimit, breakLink, chartRange, endPrice, hasCurveSide, intervalAt, intervalsError,
-  formatBound, isFixed, linkedFlags, parseBound, priceDrops, relink, removeInterval, setBend, setBoundary, setEdge, setEndpoint, setKind, setRate, setShape,
+  formatBound, isFixed, linkedFlags, parseBound, priceDrops, relink, removeInterval, setBend, setBoundary, setEdge, setEndpoint, setEndpointRate, setKind, setRate, setShape,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, startPrice, theoryPrice, visibleMaxPrice, type Result, type Rule,
 } from './pricingIntervals'
 
@@ -306,8 +306,12 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
                       {(['start', 'end'] as const).map(which => {
                         const b = which === 'start' ? i - 1 : i, nb = rules[which === 'start' ? i - 1 : i + 1]
                         const locked = b >= 0 && b < n - 1 && flags[b] && !!nb && isFixed(nb), p = which === 'start' ? startPrice(r) : endPrice(r)
-                        return <div key={which}><label style={fieldLabel}>{which === 'start' ? '起点' : '终点'}售价（成本 {money(which === 'start' ? r.minPrice : r.maxPrice)}）</label>
-                          <NumberField ariaLabel={which === 'start' ? '起点售价' : '终点售价'} disabled={locked} precision={2} value={p} onCommit={v => apply(setEndpoint(rules, i, which, v, flags))} style={{ width: '100%' }} />
+                        const cost = which === 'start' ? r.minPrice : r.maxPrice
+                        // 输入的是成率；零售价由 成本 × 成率 算出并取合法尾数后显示。跟随固定区间时显示固定成率（不可改）。
+                        const rate = locked ? nb.startRate : (which === 'start' ? r.startRate : r.endRate)
+                        return <div key={which}><label style={fieldLabel}>{which === 'start' ? '起点' : '终点'}成率（成本 {money(cost)}）</label>
+                          <NumberField ariaLabel={which === 'start' ? '起点成率' : '终点成率'} disabled={locked} min={1.5} max={5} step={0.05} precision={4} value={rate} onCommit={v => apply(setEndpointRate(rules, i, which, v, flags))} addonAfter="倍" style={{ width: '100%' }} />
+                          <div style={{ fontSize: 12, color: '#595959', marginTop: 2 }}>零售价 <b style={{ color: '#1677ff' }}>{money(p)}</b>{!locked && Math.abs(cost * rate - p) > 0.004 && <span style={{ color: '#8c8c8c' }} title={`成本 × 成率 = ${money(cost * rate)}，取最近的 .50 / .99 尾数`}>（{money(cost * rate)} 取尾数）</span>}</div>
                           {linkRow(i, which)}</div>
                       })}
                     </div>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { defaultCurve } from './pricingCurve'
 import {
   MAX_INTERVALS, actualPrice, addInterval, appendInterval, chartRange, endPrice, intervalAt, intervalsError, isEditable, isLegalTail, linkedFlags,
-  breakLink, convertLegacy, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
+  breakLink, convertLegacy, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setEndpointRate, setKind, setRate, setShape, startPrice,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, visibleMaxPrice, type Rule,
 } from './pricingIntervals'
 
@@ -100,6 +100,29 @@ assert.deepEqual([...shiftBrokenAfterRemove(new Set([0, 1, 3]), 2)].sort(), [0, 
   assert.equal(startPrice(free[1]), 24.99, '断开后可独立设置（并吸附到合法尾数）')
   assert.deepEqual(priceDrops(free).map(d => [d.from, d.to]), [[25, 24.99]])
   assert.ok(setEndpoint(mixed(), 0, 'start', 3, [true, true]).error, '固定区间没有端点')
+}
+
+// ---- 曲线端点按成率输入 ----
+{
+  const flags = linkedFlags(defaultCurve(), NONE)
+  // 区间 1 终点（成本 50）输入成率 3.2：目标价 160 → 合法尾数 159.99；联动的区间 2 起点同步
+  const r = must(setEndpointRate(defaultCurve(), 0, 'end', 3.2, flags))
+  assert.equal(endPrice(r[0]), 159.99)
+  assert.equal(startPrice(r[1]), 159.99)
+  assert.equal(r[0].endRate, 3.2, '保存用户输入的成率，而不是取整后的 3.1998')
+  assert.equal(r[1].startRate, 3.2, '联动邻居共用交界，成率一并记录')
+  // 成率 3：下一个区间要求成率不升（其终点为 3.0），149.99 会让它起点成率掉到 2.9998，所以取 150.50
+  const bound = must(setEndpointRate(defaultCurve(), 0, 'end', 3, flags))
+  assert.equal(endPrice(bound[0]), 150.5)
+  // 成率 2.5 在成本 10：目标 25.00 不是合法尾数 → 24.99；成率仍记 2.5
+  const small = must(setEndpointRate([makeCurve(1, 10, 4.5, 40)], 0, 'end', 2.5, []))
+  assert.equal(endPrice(small[0]), 24.99)
+  assert.equal(small[0].endRate, 2.5)
+  assert.ok(setEndpointRate(defaultCurve(), 0, 'end', 6, flags).error, '成率超出 1.5～5')
+  assert.ok(setEndpointRate(defaultCurve(), 0, 'end', Number.NaN, flags).error)
+  assert.ok(setEndpointRate(mixed(), 0, 'end', 3, linkedFlags(mixed(), NONE)).error, '固定区间没有端点成率')
+  // 跟随相邻固定区间的端点不能直接改，需先断开
+  assert.ok(setEndpointRate(mixed(), 1, 'start', 3, linkedFlags(mixed(), NONE)).error)
 }
 
 // ---- 类型切换 ----
