@@ -3676,12 +3676,17 @@ test("生产更新门禁阻止空车开始普通或特殊商品交易，但不�
     hasFulfilmentInFlight: false,
   });
 
+  // 加购成功后本页保持防连点锁定（WPF 28f2f0833），路由会返回收银台；
+  // 再次加购对应重新进入特殊商品页，即新的 presenter 实例。
+  specials.destroy();
+  const reenteredSpecials = services.specialProducts.createPresenter();
+  await reenteredSpecials.load();
   canStartNewTransaction = false;
-  await specials.addToCart("SPECIAL-GATE");
-  assert.equal(specials.getState().statusCode, "added-to-cart");
+  await reenteredSpecials.addToCart("SPECIAL-GATE");
+  assert.equal(reenteredSpecials.getState().statusCode, "added-to-cart");
   assert.equal(sales.getState().cart.lines[0]?.quantity, "2");
 
-  specials.destroy();
+  reenteredSpecials.destroy();
   sales.destroy();
 });
 

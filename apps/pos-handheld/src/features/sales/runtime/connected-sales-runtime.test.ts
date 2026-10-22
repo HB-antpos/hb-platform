@@ -1178,7 +1178,7 @@ test("本地 miss 授权暂停跨越结账边界时，不得登记远程自动�
   assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
 });
 
-test("本地 miss 立即释放连续扫码；共享远程结果仍按每次扫码自动加购", async () => {
+test("本地 miss 立即释放连续扫码；同码补查进行中再扫只提示不加购（WPF c7ae10476）", async () => {
   const remote = deferred<CatalogLookupRevalidationResult>();
   const revalidation = new SharedRevalidation(remote.promise);
   const dependencies = connected({
@@ -1187,18 +1187,27 @@ test("本地 miss 立即释放连续扫码；共享远程结果仍按每次扫�
     catalogWorkScheduler: immediateScheduler(),
   });
   const scanTargets: string[] = [];
+  const outcomes: SalesFeedbackEvent[] = [];
   dependencies.workflow.subscribeScanTarget((lineId) => {
     scanTargets.push(lineId);
   });
+  dependencies.workflow.subscribeLookupOutcome?.((outcome) => {
+    outcomes.push(outcome);
+  });
 
   const immediateLineIds = await Promise.all([
-    dependencies.workflow.addByLookupCode("930000000001"),
-    dependencies.workflow.addByLookupCode(" 930000000001 "),
+    dependencies.workflow.addByLookupCode("930000000001", { source: "hid" }),
+    dependencies.workflow.addByLookupCode(" 930000000001 ", { source: "hid" }),
   ]);
 
   assert.deepEqual(immediateLineIds, [null, null]);
   assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
-  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 2);
+  // 第二次扫码不再登记第二个补查加购任务。
+  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 1);
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.kind),
+    ["lookup-in-progress"],
+  );
   remote.resolve({
     kind: "found",
     baseSnapshotId: "snapshot-1",
@@ -1206,8 +1215,198 @@ test("本地 miss 立即释放连续扫码；共享远程结果仍按每次扫�
   });
   await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
 
+  // 一件实物只加一次，避免补查期间收银员重扫把数量加成 2。
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.quantity, "1");
+  assert.deepEqual(scanTargets, ["line-1"]);
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.kind),
+    ["lookup-in-progress", "added"],
+  );
+
+  // 补查结束即释放登记：再扫同码是新的一次扫码，照常补查并加购。
+  assert.equal(
+    await dependencies.workflow.addByLookupCode("930000000001", {
+      source: "hid",
+    }),
+    null,
+  );
+  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 1);
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
   assert.equal(dependencies.cart.getSnapshot().lines[0]?.quantity, "2");
-  assert.deepEqual(scanTargets, ["line-1", "line-1"]);
+});
+
+test("同码补查去重按交易世代：清空换单后重扫不会被旧扫码吞掉", async () => {
+  const remote = deferred<CatalogLookupRevalidationResult>();
+  const source = cartWithLine();
+  const dependencies = connected({
+    activeCartSession: activeCart(source),
+    catalog: new Catalog([]),
+    catalogRevalidation: new SharedRevalidation(remote.promise),
+    catalogWorkScheduler: immediateScheduler(),
+  });
+  const outcomes: SalesFeedbackEvent[] = [];
+  dependencies.workflow.subscribeLookupOutcome?.((outcome) => {
+    outcomes.push(outcome);
+  });
+
+  await dependencies.workflow.addByLookupCode("930000000001");
+  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 1);
+  await dependencies.cart.clearCart();
+  await dependencies.workflow.addByLookupCode("930000000001");
+
+  // 新世代的扫码登记了自己的补查任务，而不是被当成重复扫码。
+  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 2);
+  assert.equal(
+    outcomes.some((outcome) => outcome.kind === "lookup-in-progress"),
+    false,
+  );
+  remote.resolve({
+    kind: "found",
+    baseSnapshotId: "snapshot-1",
+    item: item(),
+  });
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+  // 旧世代的结果被丢弃，只有清空后的那次扫码加购。
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 1);
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.quantity, "1");
+});
+
+test("前导 0 回退：原码精确无结果才试 12↔13 位另一写法，唯一命中直接加购", async () => {
+  const thirteen = item({
+    productCode: "P-NMATS",
+    lookupCode: "0810812024527",
+    lookupCodeNormalized: "0810812024527",
+  });
+  const revalidation = new CountingRevalidation(() => ({
+    kind: "found",
+    baseSnapshotId: "snapshot-1",
+    item: thirteen,
+  }));
+  const dependencies = connected({
+    catalog: new Catalog([thirteen]),
+    catalogRevalidation: revalidation,
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  const lineId = await dependencies.workflow.addByLookupCode("810812024527", {
+    source: "hid",
+  });
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+
+  assert.equal(lineId, "line-1");
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.productCode, "P-NMATS");
+  // 变体命中按命中的那种写法做在线校准，不再按原码远程补查加购。
+  assert.deepEqual(revalidation.requests, ["0810812024527"]);
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 1);
+});
+
+test("前导 0 回退：13 位去 0 命中 12 位；无在线校准分支同样回退", async () => {
+  const twelve = item({
+    productCode: "P-TWELVE",
+    lookupCode: "810812024527",
+    lookupCodeNormalized: "810812024527",
+  });
+  const dependencies = connected({ catalog: new Catalog([twelve]) });
+
+  assert.equal(
+    await dependencies.workflow.addByLookupCode("0810812024527", {
+      source: "camera",
+    }),
+    "line-1",
+  );
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.productCode, "P-TWELVE");
+});
+
+test("前导 0 回退：精确优先，12 位与 13 位分属不同商品时各自命中自己", async () => {
+  const twelve = item({
+    productCode: "P-TWELVE",
+    lookupCode: "810812024527",
+    lookupCodeNormalized: "810812024527",
+  });
+  const thirteen = item({
+    productCode: "P-THIRTEEN",
+    lookupCode: "0810812024527",
+    lookupCodeNormalized: "0810812024527",
+  });
+  const dependencies = connected({ catalog: new Catalog([twelve, thirteen]) });
+
+  await dependencies.workflow.addByLookupCode("810812024527");
+  await dependencies.workflow.addByLookupCode("0810812024527");
+
+  assert.deepEqual(
+    dependencies.cart.getSnapshot().lines.map((line) => line.productCode),
+    ["P-TWELVE", "P-THIRTEEN"],
+  );
+});
+
+test("前导 0 回退：其它长度与含非数字不回退，未命中仍按原码远程补查", async () => {
+  const revalidation = new CountingRevalidation(() => ({
+    kind: "not-found",
+    baseSnapshotId: "snapshot-1",
+  }));
+  const dependencies = connected({
+    catalog: new Catalog([
+      item({ lookupCode: "012345678901", lookupCodeNormalized: "012345678901" }),
+      item({ lookupCode: "081081202452A", lookupCodeNormalized: "081081202452A" }),
+    ]),
+    catalogRevalidation: revalidation,
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  await dependencies.workflow.addByLookupCode("12345678901");
+  await dependencies.workflow.addByLookupCode("81081202452A");
+  await dependencies.workflow.addByLookupCode("810812024527");
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+  assert.deepEqual(revalidation.requests, [
+    "12345678901",
+    "81081202452A",
+    "810812024527",
+  ]);
+});
+
+test("前导 0 回退：变体命中多个商品进待选，选定按变体码加购", async () => {
+  const zeroCode = "0640509040147";
+  const variantCode = zeroCode.slice(1);
+  const zeroCoded = { lookupCode: zeroCode, lookupCodeNormalized: zeroCode };
+  const catalog = new ConflictCatalog(
+    [flySwatter(zeroCoded)],
+    [flySwatter(zeroCoded), flower(zeroCoded)],
+  );
+  const dependencies = connected({
+    catalog,
+    catalogRevalidation: new CountingRevalidation(() => ({
+      kind: "found",
+      baseSnapshotId: "snapshot-1",
+      item: flySwatter(zeroCoded),
+    })),
+    catalogWorkScheduler: immediateScheduler(),
+  });
+  const selections: SalesLookupSelection[] = [];
+  dependencies.workflow.subscribeLookupSelection?.((selection) => {
+    selections.push(selection);
+  });
+
+  // 0 开头的 13 位冲突码被扫成 12 位。
+  assert.equal(
+    await dependencies.workflow.addByLookupCode(variantCode, { source: "hid" }),
+    null,
+  );
+  assert.equal(selections.length, 1);
+  assert.equal(selections[0]?.lookupCode, zeroCode);
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+
+  await dependencies.workflow.addLookupCandidate?.({
+    lookupCode: selections[0]!.lookupCode,
+    productCode: "P-FLOWER",
+    source: "hid",
+  });
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+  assert.deepEqual(
+    dependencies.cart.getSnapshot().lines.map((line) => line.productCode),
+    ["P-FLOWER"],
+  );
 });
 
 test("本地 miss 的远程补入同样只连续合并最后一行", async () => {

@@ -81,6 +81,9 @@ export class SpecialProductsPresenter {
   private loadGeneration = 0;
   private searchGeneration = 0;
   private managementInFlight: Promise<void> | null = null;
+  // 点商品加购的防重入锁（对齐 WPF 28f2f0833）：从开始加购到离开本页期间不再接受新的点击，
+  // 避免连点或退场动画期间的点击把同一商品加两件；加购失败 / 未授权时立即解锁，允许重试。
+  private cartAddLocked = false;
 
   public constructor(options: SpecialProductsPresenterOptions) {
     this.options = options;
@@ -213,7 +216,7 @@ export class SpecialProductsPresenter {
   }
 
   public async addToCart(productCode: string): Promise<void> {
-    if (this.destroyed) return;
+    if (this.destroyed || this.cartAddLocked) return;
     if (!this.state.access.canAddToCart) {
       this.patch({ statusCode: "permission-required" });
       this.publishFeedback({ kind: "failed-blocked" });
@@ -228,12 +231,15 @@ export class SpecialProductsPresenter {
       return;
     }
 
+    this.cartAddLocked = true;
     try {
       const disposition = await this.options.addToCart.add(item);
       if (this.destroyed) return;
+      // 成功后保持锁定：路由层收到 added / incremented 会返回收银台，本页实例随之销毁。
       this.patch({ statusCode: "added-to-cart" });
       this.publishFeedback(disposition);
     } catch {
+      this.cartAddLocked = false;
       if (!this.destroyed) {
         this.patch({ statusCode: "add-to-cart-failed" });
         this.publishFeedback({ kind: "failed-blocked" });

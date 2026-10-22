@@ -38,6 +38,7 @@ import {
   type SalesToolbarActionId,
   type SalesUtilityActionResult,
 } from "@/features/sales/ui";
+import { bindSalesLookupSelectionLog } from "@/features/sales/ui/sales-lookup-selection-log";
 import { reconcileSalesToolbarOrder } from "@/features/sales/ui/sales-toolbar-order";
 import { SETTINGS_VIEW_PERMISSION } from "@/features/settings";
 import { SPECIAL_PRODUCTS_VIEW_PERMISSION } from "@/features/special-products";
@@ -316,6 +317,17 @@ export default function SalesRoute() {
           createdPresenter.destroy();
           createdPresenter = null;
         } else {
+          // 一码多商品待选日志随 presenter 生命周期绑定；destroy 时自动清理监听。
+          bindSalesLookupSelectionLog(
+            createdPresenter,
+            (
+              services as typeof services & {
+                applicationLog?: Parameters<
+                  typeof bindSalesLookupSelectionLog
+                >[1];
+              }
+            ).applicationLog,
+          );
           setBinding({ services, cashier, presenter: createdPresenter });
         }
       } catch (error: unknown) {
@@ -644,6 +656,10 @@ function SalesSoundBridge({ presenter }: Readonly<{ presenter: SalesPresenter }>
             return;
           case "failed-blocked":
             play("cart-failed-blocked");
+            return;
+          case "lookup-in-progress":
+            // 同码补查进行中的重复扫码只提示「正在查询」，不再发加购 / 失败音（对齐 WPF）。
+            return;
         }
       }),
     [play, presenter],

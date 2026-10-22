@@ -17,6 +17,7 @@ import {
   type SalesCashCompletion,
   type SalesFeedbackEvent,
   type SalesLookupSelection,
+  type SalesLookupSelectionLogEvent,
   type SalesPresenterDependencies,
   type SalesProductSearchItem,
   type SalesWorkflowPort,
@@ -261,6 +262,7 @@ function createPresenter(
     capabilities?: SalesCapabilities;
     createCheckoutIntentId?: () => string;
     canStartNewTransaction?: () => boolean;
+    now?: () => number;
   }> = {},
 ): Readonly<{ presenter: SalesPresenter; cart: MemoryCartPort }> {
   const cart = input.cart ?? new MemoryCartPort(saleCart());
@@ -281,6 +283,7 @@ function createPresenter(
       input.createCheckoutIntentId ?? (() => "checkout-intent-1"),
     canStartNewTransaction:
       input.canStartNewTransaction ?? (() => true),
+    ...(input.now ? { now: input.now } : {}),
   };
   return {
     presenter: new SalesPresenter(dependencies),
@@ -1547,47 +1550,261 @@ test("一码多商品候选：弹出选择并发出 query-found，选定后按�
   presenter.destroy();
 });
 
-test("取消、新的扫码与结账准备都关闭候选；非收银态迟到的候选只发失败反馈", async () => {
-  const harness = selectionWorkflow(async () => "unused");
-  const { presenter } = createPresenter({ workflow: harness.workflow });
-  const feedback: SalesFeedbackEvent[] = [];
-  presenter.subscribeFeedback((event) => feedback.push(event));
+function conflictSelection(
+  selectionId: string,
+  lookupCode = "6405090401470",
+): SalesLookupSelection {
+  return {
+    ...CONFLICT_SELECTION,
+    selectionId,
+    lookupCode,
+    candidates: CONFLICT_SELECTION.candidates.map((candidate) => ({
+      ...candidate,
+      lookupCode,
+    })),
+  };
+}
 
-  harness.publish(CONFLICT_SELECTION);
-  presenter.cancelLookupSelection();
-  assert.equal(presenter.getState().lookupSelection, null);
+test("待选队列：后续扫码不顶掉待选，先进先出，选定后自动轮到下一个并记日志（WPF c685663c5）", async () => {
+  let now = 10_000;
+  const cart = new MemoryCartPort(EMPTY_SALE_CART);
+  const requests: unknown[] = [];
+  const harness = selectionWorkflow(async (input) => {
+    requests.push(input);
+    return null;
+  });
+  const { presenter } = createPresenter({
+    cart,
+    workflow: harness.workflow,
+    now: () => now,
+  });
+  const logs: SalesLookupSelectionLogEvent[] = [];
+  presenter.subscribeLookupSelectionLog((event) => logs.push(event));
 
-  harness.publish(CONFLICT_SELECTION);
+  const first = conflictSelection("lookup-1");
+  const second = conflictSelection("lookup-2", "5237");
+  harness.publish(first);
+  // 待选期间继续扫码：唯一命中照常加购，待选不会被关掉。
   await presenter.addScannedLookupCode("930000000001", "hid");
-  assert.equal(presenter.getState().lookupSelection, null);
+  harness.publish(second);
+  assert.equal(presenter.getState().lookupSelection, first);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 2);
 
-  harness.publish(CONFLICT_SELECTION);
-  const preparing = presenter.prepareOnlineCheckout();
-  assert.equal(presenter.getState().phase, "verifying-checkout");
-  assert.equal(presenter.getState().lookupSelection, null);
-
-  feedback.length = 0;
-  harness.publish(CONFLICT_SELECTION);
-  assert.equal(presenter.getState().lookupSelection, null);
-  assert.deepEqual(feedback, [
-    { attemptId: "lookup-7", source: "hid", kind: "failed-blocked" },
+  now = 13_500;
+  assert.equal(await presenter.chooseLookupCandidate("P-FLOWER"), true);
+  assert.deepEqual(requests, [
+    { lookupCode: "6405090401470", productCode: "P-FLOWER", source: "hid" },
   ]);
-  await preparing;
+  assert.equal(presenter.getState().lookupSelection, second);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 1);
+
+  assert.equal(await presenter.chooseLookupCandidate("P-FLY"), true);
+  assert.equal(presenter.getState().lookupSelection, null);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 0);
+
+  assert.deepEqual(
+    logs.map((event) => [
+      event.action,
+      event.choiceId,
+      event.queueLength,
+      event.waitedMs,
+      event.productCode,
+    ]),
+    [
+      ["created", 1, 1, null, null],
+      ["created", 2, 2, null, null],
+      ["resolved", 1, 1, 3_500, "P-FLOWER"],
+      ["resolved", 2, 0, 3_500, "P-FLY"],
+    ],
+  );
+  // 日志只带查询码末 4 位与长度，不带完整条码。
+  assert.equal(logs[0]?.lookupCodeTail, "1470");
+  assert.equal(logs[0]?.lookupCodeLength, 13);
+  assert.equal(logs[0]?.candidateProducts, "P-FLY,P-FLOWER");
   presenter.destroy();
 });
 
-test("候选加购被拒绝时关闭弹窗并显示对应错误", async () => {
+test("待选队列：同码再扫是新条目；放弃只出队首；收起后仍保留可展开", async () => {
+  const harness = selectionWorkflow(async () => "unused");
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+  const logs: SalesLookupSelectionLogEvent[] = [];
+  presenter.subscribeLookupSelectionLog((event) => logs.push(event));
+
+  const first = conflictSelection("lookup-1");
+  const again = conflictSelection("lookup-2");
+  harness.publish(first);
+  presenter.collapseLookupSelection();
+  assert.equal(presenter.getState().lookupSelectionCollapsed, true);
+  // 收起继续扫码时，新的待选只累加计数，不强行弹出。
+  harness.publish(again);
+  assert.equal(presenter.getState().lookupSelectionCollapsed, true);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 2);
+  assert.equal(logs[1]?.sameLookupCodeAsPrevious, true);
+
+  presenter.expandLookupSelection();
+  assert.equal(presenter.getState().lookupSelectionCollapsed, false);
+  presenter.cancelLookupSelection();
+  assert.equal(presenter.getState().lookupSelection, again);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 1);
+  assert.deepEqual(
+    [logs[2]?.action, logs[2]?.choiceId, logs[2]?.reason],
+    ["abandoned", 1, "cashier-abandon"],
+  );
+
+  presenter.cancelLookupSelection();
+  assert.equal(presenter.getState().lookupSelection, null);
+  assert.equal(presenter.getState().lookupSelectionCollapsed, false);
+  presenter.destroy();
+});
+
+test("待选未处理时付款、挂单与取单入口都被拒绝并展开待选", async () => {
+  const harness = selectionWorkflow(async () => "unused");
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+
+  harness.publish(conflictSelection("lookup-1"));
+  presenter.collapseLookupSelection();
+
+  assert.equal(await presenter.openCash(), false);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "lookup-selection-required");
+  assert.equal(presenter.getState().lookupSelectionCollapsed, false);
+
+  presenter.collapseLookupSelection();
+  assert.equal(await presenter.prepareOnlineCheckout(), null);
+  assert.equal(presenter.getState().lookupSelectionCollapsed, false);
+
+  assert.equal(await presenter.holdCart(), false);
+  assert.equal(presenter.getState().errorCode, "lookup-selection-required");
+  assert.equal(presenter.requireNoPendingLookupSelections(), false);
+
+  presenter.cancelLookupSelection();
+  assert.equal(presenter.requireNoPendingLookupSelections(), true);
+  assert.equal(await presenter.openCash(), true);
+  presenter.destroy();
+});
+
+test("结账准备期间迟到的待选入队并退回收银态；现金页迟到的候选只发失败反馈", async () => {
+  const settleGate = deferred<void>();
+  let settleCalls = 0;
+  const harness = selectionWorkflow(async () => "unused");
+  const workflow: SalesWorkflowPort = {
+    ...harness.workflow,
+    async settlePendingCatalogWork() {
+      settleCalls += 1;
+      // 只有第一次准备停在核验中，用来模拟核验期间迟到的一码多商品结果。
+      if (settleCalls === 1) await settleGate.promise;
+      return { timedOut: false };
+    },
+  };
+  const { presenter } = createPresenter({ workflow });
+  const feedback: SalesFeedbackEvent[] = [];
+  presenter.subscribeFeedback((event) => feedback.push(event));
+
+  const preparing = presenter.prepareOnlineCheckout();
+  assert.equal(presenter.getState().phase, "verifying-checkout");
+  harness.publish(conflictSelection("lookup-late"));
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 1);
+  settleGate.resolve();
+  assert.equal(await preparing, null);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "lookup-selection-required");
+
+  presenter.cancelLookupSelection();
+  assert.equal(await presenter.openCash(), true);
+  assert.equal(presenter.getState().phase, "cash");
+
+  feedback.length = 0;
+  harness.publish(conflictSelection("lookup-cash"));
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 0);
+  assert.deepEqual(feedback, [
+    { attemptId: "lookup-cash", source: "hid", kind: "failed-blocked" },
+  ]);
+  presenter.destroy();
+});
+
+test("候选加购被拒绝时待选保留并显示对应错误，可改选或放弃", async () => {
+  let deny = true;
   const harness = selectionWorkflow(async () => {
-    throw Object.assign(new Error("denied"), {
-      code: "SALES_OPERATION_NOT_AUTHORIZED",
-    });
+    if (deny) {
+      throw Object.assign(new Error("denied"), {
+        code: "SALES_OPERATION_NOT_AUTHORIZED",
+      });
+    }
+    return null;
   });
   const { presenter } = createPresenter({ workflow: harness.workflow });
 
   harness.publish(CONFLICT_SELECTION);
   assert.equal(await presenter.chooseLookupCandidate("P-FLY"), false);
 
-  assert.equal(presenter.getState().lookupSelection, null);
+  assert.equal(presenter.getState().lookupSelection, CONFLICT_SELECTION);
+  assert.equal(presenter.getState().lookupSelectionPending, false);
   assert.equal(presenter.getState().errorCode, "authorization-denied");
+
+  deny = false;
+  assert.equal(await presenter.chooseLookupCandidate("P-FLOWER"), true);
+  assert.equal(presenter.getState().lookupSelection, null);
   presenter.destroy();
+});
+
+test("待选队列满 20 拒收：报错误音与错误提示并记日志，已有待选不丢", () => {
+  const harness = selectionWorkflow(async () => "unused");
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+  const feedback: SalesFeedbackEvent[] = [];
+  const logs: SalesLookupSelectionLogEvent[] = [];
+  presenter.subscribeFeedback((event) => feedback.push(event));
+  presenter.subscribeLookupSelectionLog((event) => logs.push(event));
+
+  for (let index = 0; index < 20; index += 1) {
+    harness.publish(conflictSelection(`lookup-${index}`));
+  }
+  feedback.length = 0;
+  harness.publish(conflictSelection("lookup-overflow"));
+
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 20);
+  assert.equal(presenter.getState().lookupSelection?.selectionId, "lookup-0");
+  assert.equal(presenter.getState().errorCode, "lookup-selection-queue-full");
+  assert.deepEqual(feedback, [
+    { attemptId: "lookup-overflow", source: "hid", kind: "failed-blocked" },
+  ]);
+  assert.deepEqual(
+    [logs.at(-1)?.action, logs.at(-1)?.choiceId, logs.at(-1)?.reason],
+    ["rejected", null, "queue-full"],
+  );
+  presenter.destroy();
+});
+
+test("清空购物车与页面销毁放弃全部待选并逐条记日志；锁屏保留待选", async () => {
+  const harness = selectionWorkflow(async () => "unused");
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+  const logs: SalesLookupSelectionLogEvent[] = [];
+  presenter.subscribeLookupSelectionLog((event) => logs.push(event));
+
+  harness.publish(conflictSelection("lookup-1"));
+  harness.publish(conflictSelection("lookup-2"));
+  assert.equal(await presenter.clearCart(), true);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 0);
+  assert.deepEqual(
+    logs.filter((event) => event.action === "abandoned").map((event) => [
+      event.choiceId,
+      event.reason,
+    ]),
+    [
+      [1, "cart-cleared"],
+      [2, "cart-cleared"],
+    ],
+  );
+
+  logs.length = 0;
+  harness.publish(conflictSelection("lookup-3"));
+  assert.equal(await presenter.lockTerminal(), true);
+  assert.equal(presenter.getState().lookupSelectionQueueLength, 1);
+  presenter.destroy();
+  assert.deepEqual(
+    logs.map((event) => [event.action, event.reason]),
+    [
+      ["created", null],
+      ["abandoned", "page-destroyed"],
+    ],
+  );
 });
