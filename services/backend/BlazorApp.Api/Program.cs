@@ -1331,6 +1331,8 @@ builder.Services.AddScoped<IPreorderReactService>(provider =>
 builder.Services.AddScoped<IPreorderGateService>(provider =>
     provider.GetRequiredService<PreorderReactService>()
 );
+// 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderService, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderService>();
 builder.Services.AddScoped<IStoreProductMaintenanceReactService, StoreProductMaintenanceReactService>();
 // 移动端离线商品目录：索引缓存为进程级单例（每店保留多版本供 delta），服务按请求作用域。
 builder.Services.AddSingleton<

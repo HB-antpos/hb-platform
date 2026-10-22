@@ -856,6 +856,14 @@
     "Warehouse.CancelPriceUpdateTasks": {
       "name": "Cancel price update tasks",
       "description": "Web page /warehouse/products/price-update-tasks and the app's Prices & labels page - cancel pending store price update tasks (per product, across all stores; only removes the reminder, never changes any price, cannot be undone). Accounts with Manage warehouse products have it automatically."
+    },
+    "SupplierPreorder.Manage": {
+      "name": "Manage supplier seasonal preorders",
+      "description": "Web pages /supplier-preorders and /supplier-preorders/orderers - import KFC, Dats, Brazco and other seasonal order forms, choose participating stores, manage who may order for which store, lock at the deadline and export the summary (can still edit after the deadline). Nobody has it by default; granted manually."
+    },
+    "SupplierPreorder.Order": {
+      "name": "Order on supplier seasonal preorders",
+      "description": "Web page /supplier-preorder-ordering - entry to seasonal preorder ordering. Which stores a person may order for is set only on the Orderer authorization page, not by managed stores or store manager role. Nobody has it by default; granted manually."
     }
   },
   "roles": {

@@ -67,6 +67,11 @@ export const P = {
     // 与 Warehouse.StartPicking 一样没有别名：持有 Warehouse.Manage / ManageOrders 不会自动具备，需管理员显式授予。
     StoreOrderReturn: 'Warehouse.StoreOrderReturn',
   },
+  // 供应商节日预订单：两码都没有别名，需显式授予。能替哪家店下单另由「下单人员授权」页决定，不靠权限码。
+  SupplierPreorder: {
+    Manage: 'SupplierPreorder.Manage',
+    Order: 'SupplierPreorder.Order',
+  },
   Container: {
     View: 'Container.View',
     Create: 'Container.Create',

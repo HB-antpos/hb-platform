@@ -83,6 +83,8 @@ namespace BlazorApp.Shared.Constants
             "Stores.Delete",
             "Stores.Edit",
             "Stores.Sync",
+            "SupplierPreorder.Manage",
+            "SupplierPreorder.Order",
             "System.ManageAppDownloads",
             "System.ManagePerformanceBaseline",
             "System.ManageScheduledTasks",

@@ -195,6 +195,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyWarehouseOrderReturnFieldsAsync(CancellationToken cancellationToken);
 
+    Task ApplySupplierPreorderAsync(CancellationToken cancellationToken);
+
+    Task VerifySupplierPreorderAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1196,6 +1200,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             WarehouseOrderReturnFieldsSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplySupplierPreorderAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 10 张表的列签名与唯一索引全部通过后协调器才登记账本。
+        await VerifySupplierPreorderAsync(cancellationToken);
+    }
+
+    public async Task VerifySupplierPreorderAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

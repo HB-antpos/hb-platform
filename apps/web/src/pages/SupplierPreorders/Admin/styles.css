@@ -1,0 +1,110 @@
+/* ===== 供应商节日预订单 · 管理端（sp-admin-*）：普通 CSS + 页面前缀，测试打包把 .css 当空模块 ===== */
+.sp-admin-muted { color: #667085; }
+.sp-admin-faint { color: #b4bac5; }
+.sp-admin-small { font-size: 12px; }
+.sp-admin-strong { font-weight: 600; color: #1f2430; }
+.sp-admin-danger { color: #cf1322; }
+.sp-admin-urgent { color: #b45309; font-weight: 600; }
+.sp-admin-number,
+.sp-admin-number * { font-variant-numeric: tabular-nums; }
+.sp-admin-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.sp-admin-ellipsis { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.sp-admin-cell-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-admin-cell-stack > .ant-tag { align-self: flex-start; }
+.sp-admin-link-text { color: #1554c0; font-weight: 500; }
+.sp-admin-gap-top { margin-top: 12px; }
+.sp-admin-stack { display: flex; flex-direction: column; gap: 16px; }
+.sp-admin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sp-admin-row-actions { display: flex; align-items: center; gap: 2px; }
+.sp-admin-row-actions .ant-btn { padding-inline: 4px; }
+.sp-admin-tag.ant-tag { margin-inline-end: 0; }
+.sp-admin-loading { display: flex; justify-content: center; padding: 80px 0; }
+.sp-admin-plain-list { margin: 0; padding-left: 18px; }
+
+/* 卡片与工具条 */
+.sp-admin-card { min-width: 0; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+/* .page-container 自带 16px 纵向 gap；只有同一包裹层里相邻的卡片需要补间距 */
+.sp-admin-step { display: flex; flex-direction: column; gap: 16px; }
+.sp-admin-card-pad { padding: 16px; }
+.sp-admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.sp-admin-toolbar-spacer { flex: 1; }
+.sp-admin-search.ant-input-search { width: 260px; max-width: 100%; }
+.sp-admin-section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
+.sp-admin-section-title { margin: 0; color: #1f2430; font-size: 15px; font-weight: 600; }
+.sp-admin-card-pad > .sp-admin-section-title { margin-bottom: 12px; }
+.sp-admin-table .ant-table-thead > tr > th { background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-admin-clickable-row { cursor: pointer; }
+.sp-admin-row-invalid > td { background: #fff1f0 !important; }
+.sp-admin-inline-alert { margin: 12px 16px 0; }
+.sp-admin-switch-label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* 缩略图 */
+.sp-admin-thumb { border-radius: 4px; border: 1px solid #eef0f4; background: #fafbfc; }
+.sp-admin-thumb-empty { display: inline-block; border-radius: 4px; border: 1px solid #eef0f4; background: #fafbfc; }
+
+/* 截止 */
+.sp-admin-deadline { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; }
+
+/* 导入向导 */
+.sp-admin-steps-card { padding: 14px 20px; }
+.sp-admin-source-card { max-width: 860px; }
+.sp-admin-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.sp-admin-field-label { color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-admin-source-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 10px; padding: 2px 10px; overflow: hidden; border: 1px solid #b8d4ff; border-radius: 6px; background: #eef5ff; color: #1554c0; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-paste-head { margin: 16px 0 6px; color: #4b5563; font-size: 12px; }
+.sp-admin-paste textarea,
+textarea.sp-admin-paste { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; }
+.sp-admin-footer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sp-admin-import-grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.sp-admin-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; font-size: 13px; }
+.sp-admin-kv dt { color: #667085; }
+.sp-admin-kv dd { margin: 0; text-align: right; color: #1f2430; font-weight: 500; }
+.sp-admin-mapping-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.sp-admin-mapping-field { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; }
+.sp-admin-mapping-field.is-missing { border-color: #ffccc7; background: #fffafa; }
+.sp-admin-mapping-label { color: #4b5563; font-size: 12px; }
+.sp-admin-required { margin-left: 2px; color: #cf1322; }
+.sp-admin-mapping-option { min-width: 0; line-height: 1.4; }
+.sp-admin-export-unit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+.sp-admin-footer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sp-admin-footer-inner { margin-top: 4px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+
+/* 订单表信息表单（导入第 3 步 / 编辑抽屉） */
+.sp-admin-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 16px; }
+.sp-admin-form-grid.is-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sp-admin-form-span2 { grid-column: span 2; }
+.sp-admin-form-span-all { grid-column: 1 / -1; }
+.sp-admin-header-form .ant-form-item { margin-bottom: 14px; }
+
+/* 详情页头 */
+.sp-admin-detail-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }
+.sp-admin-detail-title-block { display: flex; flex: 1 1 420px; flex-direction: column; gap: 4px; min-width: 0; }
+.sp-admin-detail-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.sp-admin-detail-title { margin: 0; color: #1f2430; font-size: 20px; font-weight: 600; }
+.sp-admin-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+
+/* 分店开启卡片 */
+.sp-admin-store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 10px; }
+.sp-admin-store-grid-placeholder { min-height: 120px; }
+.sp-admin-store-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; }
+.sp-admin-store-card.is-disabled { border-style: dashed; background: #fafbfc; }
+.sp-admin-store-card.is-disabled .sp-admin-store-figures,
+.sp-admin-store-card.is-disabled .sp-admin-store-figures .sp-admin-strong { color: #b4bac5; }
+.sp-admin-store-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sp-admin-store-name { overflow: hidden; color: #1f2430; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-store-figures { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #1f2430; font-size: 13px; }
+
+/* 下单矩阵 */
+.sp-admin-matrix .sp-admin-col-total { background: #fafbfc; }
+.sp-admin-summary-row > td { background: #f8f9fb !important; }
+
+@media (max-width: 1100px) {
+  .sp-admin-import-grid { grid-template-columns: 1fr; }
+  .sp-admin-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .sp-admin-form-grid,
+  .sp-admin-form-grid.is-compact { grid-template-columns: 1fr; }
+  .sp-admin-form-span2 { grid-column: auto; }
+  .sp-admin-search.ant-input-search { width: 100%; }
+}

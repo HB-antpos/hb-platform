@@ -1112,6 +1112,45 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 供应商节日预订单十张表_可重复执行_保留数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54000, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderOrderer (UserGuid, CanViewOtherStores, CreatedAtUtc, UpdatedAtUtc)
+            VALUES (N'u-1', 1, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """);
+        // 重复执行是空操作，不丢已有数据
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.SupplierPreorderOrderer WHERE UserGuid = N'u-1' AND CanViewOtherStores = 1) <> 1
+                THROW 54010, 'Existing orderer row should survive re-running the migration.', 1;
+            """);
+
+        // 列长度漂移
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN SupplierItemCode nvarchar(50) NOT NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54001, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN SupplierItemCode nvarchar(100) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        // 唯一索引被删（会导致同一分店重复建单）
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_SupplierPreorderStoreOrder_FormStore ON dbo.SupplierPreorderStoreOrder;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54002, indexMissing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 分店订单退货三列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
