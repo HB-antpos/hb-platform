@@ -544,5 +544,58 @@
       "clearAfter": "清空已打印",
       "resultQuestion": "打印好后可以清空这批海报，继续扫下一批。"
     }
+  },
+  "priceTask": {
+    "titlePriceUpdate": "本店有待处理的价格任务",
+    "titleLabelOnly": "本店有待换的价格标签",
+    "overdueTag": "超期 {{days}} 天",
+    "waitingTag": "已等待 {{days}} 天",
+    "storeNow": "本店现价",
+    "warehouseNew": "仓库新价",
+    "shelfLabel": "货架标签",
+    "deltaUp": "涨 {{amount}}",
+    "deltaDown": "降 {{amount}}",
+    "discountRow": "折扣：{{from}} → {{to}}",
+    "printerOffline": "标签机未连接，本次只会更新价格",
+    "connectPrinter": "去连接",
+    "dirtyBlocked": "页面上有未保存的价格修改，请先保存或放弃，再处理这条任务。",
+    "actions": {
+      "applyAndPrint": "更新并打印",
+      "applyOnly": "仅更新价格",
+      "printLabel": "打印标签",
+      "markReplaced": "标记已换",
+      "more": "更多",
+      "keepStorePrice": "保持本店价",
+      "viewTask": "查看任务详情",
+      "reprint": "再打一张",
+      "retry": "重试"
+    },
+    "steps": {
+      "apply": "更新价格",
+      "print": "打印标签",
+      "complete": "完成任务",
+      "skipped": "未执行"
+    },
+    "notice": {
+      "priceUpdatedLabelPending": "价格已更新，标签还没打印，已转为「待换标签」。",
+      "targetChanged": "价格已发生变化，已刷新为最新内容，请重新确认。",
+      "applyFailed": "更新价格失败，请重试。",
+      "printFailed": "价格已更新，但标签打印失败，任务保留在「待换标签」。",
+      "confirmFailed": "标签已打印，但回写任务状态失败，请点重试（不会重复打印）。",
+      "printerRequired": "请先连接标签机，再打印标签。",
+      "operationFailed": "操作失败，请重试"
+    },
+    "done": {
+      "completed": "任务已完成：价格已更新为 {{price}}，标签已打印",
+      "markedReplaced": "已标记为已换标签",
+      "keptStorePrice": "已保持本店价，任务已完成",
+      "reprinted": "已再打一张"
+    }
+  },
+  "autoPricingStore": {
+    "storeTag": "当前分店：{{store}}",
+    "taskHint": "本店还有 1 条仓库价格任务（{{kind}}），确认后在页面上处理。",
+    "kindPriceUpdate": "需改价",
+    "kindLabelOnly": "待换标签"
   }
 }
