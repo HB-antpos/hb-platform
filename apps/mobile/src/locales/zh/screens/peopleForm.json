@@ -18,6 +18,7 @@
     "middleName": "中间名",
     "nickname": "昵称",
     "nicknamePlaceholder": "选填，如 Em",
+    "nicknameHint": "会显示在小票和员工码上，默认与名相同",
     "optional": "选填",
     "phone": "电话",
     "legacySplitHint": "由全名自动拆分，请核对姓和名",

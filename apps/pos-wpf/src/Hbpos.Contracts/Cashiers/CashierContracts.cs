@@ -27,4 +27,5 @@ public sealed record CashierSessionDto(
     string? EmergencyGrantId = null,
     string? Username = null,
     string? Nickname = null,
-    string? FamilyName = null);
+    string? FamilyName = null,
+    string? GivenName = null);

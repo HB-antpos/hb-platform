@@ -371,3 +371,19 @@ export function resolveLoginToggleErrorKind(error: unknown): LoginToggleErrorKin
   if (byCode) return byCode
   return record?.status === 403 ? 'forbidden' : 'generic'
 }
+
+/**
+ * 新建用户：昵称默认跟「名」一致（昵称会印在小票和员工码上）。
+ * 昵称为空、或仍等于改动前的名（没被单独改过）时返回新名作为昵称；否则返回 null 表示不改。
+ */
+export function syncCreateNicknameWithGivenName(
+  previousGivenName: string | undefined,
+  nextGivenName: string | undefined,
+  currentNickname: string | undefined,
+): string | null {
+  const nickname = currentNickname ?? ''
+  if (nickname.trim() === '' || nickname === (previousGivenName ?? '')) {
+    return nextGivenName ?? ''
+  }
+  return null
+}

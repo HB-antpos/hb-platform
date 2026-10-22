@@ -18,6 +18,7 @@ import {
   mergeSelectedUsers,
   planBatchRoleChange,
   pickUserNamePartFormValues,
+  syncCreateNicknameWithGivenName,
   planBatchStatusChange,
   planLoginToggleNotice,
   resolveLoginToggleErrorKind,
@@ -306,3 +307,11 @@ assert.equal(getServerErrorMessage(new Error('Network Error'), '失败'), '失�
   assert.equal(new Set(messages.map((item) => item.key)).size, messages.length, '文案键不能重复')
   assert.ok(messages.every((item) => item.key.startsWith('system.usersWorkspace.loginToggleError.') && item.fallback.length > 0))
 }
+
+// 新建用户：昵称默认跟名一致；手动改过昵称后改名不覆盖。
+assert.equal(syncCreateNicknameWithGivenName('', 'Em', ''), 'Em')
+assert.equal(syncCreateNicknameWithGivenName('Em', 'Emily', 'Em'), 'Emily')
+assert.equal(syncCreateNicknameWithGivenName('Emily', 'Emma', 'Mimi'), null)
+assert.equal(syncCreateNicknameWithGivenName('Emily', 'Emma', '  '), 'Emma')
+assert.equal(syncCreateNicknameWithGivenName(undefined, undefined, undefined), '')
+

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  applyCreateNameChange,
   buildCreateNameBody,
   buildPersonNameValues,
   diffNameParts,
@@ -185,6 +186,18 @@ assert.equal(resolveUpdateFullName({ diff: diffNameParts(blank, blank), currentF
   );
   // 空白折叠后再算长度，纯空白按空处理。
   assert.equal(validatePersonNameFields({ ...blank, familyName: "   ", givenName: "A" }, { requireNames: true }).familyName, "required");
+}
+
+// 新增账号：昵称默认跟名一致，手动改过昵称后不再跟随。
+{
+  const empty = { familyName: "", givenName: "", middleName: "", nickname: "" };
+  const typed = applyCreateNameChange(applyCreateNameChange(empty, "givenName", "Em"), "givenName", "Emily");
+  assert.equal(typed.nickname, "Emily", "昵称为空 / 仍等于名时跟着名走");
+  const custom = applyCreateNameChange(typed, "nickname", "Mimi");
+  assert.equal(applyCreateNameChange(custom, "givenName", "Emma").nickname, "Mimi", "手动改过昵称后改名不覆盖");
+  const cleared = applyCreateNameChange(custom, "nickname", "");
+  assert.equal(applyCreateNameChange(cleared, "givenName", "Emma").nickname, "Emma", "昵称清空后重新跟随名");
+  assert.equal(applyCreateNameChange(typed, "familyName", "Chen").nickname, "Emily", "改姓不影响昵称");
 }
 
 console.log("person-form.test.ts: ok");

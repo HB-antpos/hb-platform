@@ -133,6 +133,7 @@ import {
   planLoginToggleNotice,
   resolveLoginToggleErrorKind,
   splitVisibleStores,
+  syncCreateNicknameWithGivenName,
   toIsActiveQuery,
   withLoginEnabled,
 } from './usersPageLogic'
@@ -283,8 +284,12 @@ export default function SystemUsersPage() {
   const [createStoreManageableKeys, setCreateStoreManageableKeys] = useState<string[]>([])
   const [createStoreLoading, setCreateStoreLoading] = useState(false)
 
+  // 新建表单里上一次的「名」，用来判断昵称是否还在跟随名（见 syncCreateNicknameWithGivenName）。
+  const createGivenNameRef = useRef('')
+
   const clearCreateFormState = () => {
     createForm.resetFields()
+    createGivenNameRef.current = ''
     setCreateFeedback(null)
     setCreateRoleTargetKeys([])
     setCreateStoreTargetKeys([])
@@ -1562,6 +1567,7 @@ export default function SystemUsersPage() {
     setCreateOpen(true)
     setCreateTab('info')
     createForm.resetFields()
+    createGivenNameRef.current = ''
     setCreateFeedback(null)
     setCreateRoleTargetKeys([])
     setCreateStoreTargetKeys([])
@@ -2108,7 +2114,11 @@ export default function SystemUsersPage() {
       <Form.Item label={t('system.usersWorkspace.middleName', '中间名')} name="middleName">
         <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
       </Form.Item>
-      <Form.Item label={t('system.usersWorkspace.nickname', '昵称')} name="nickname">
+      <Form.Item
+        label={t('system.usersWorkspace.nickname', '昵称')}
+        name="nickname"
+        extra={t('system.usersWorkspace.nicknameHint', '会显示在小票和员工码上，新建时默认与名相同')}
+      >
         <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
       </Form.Item>
     </>
@@ -3223,7 +3233,17 @@ export default function SystemUsersPage() {
               key: 'info',
               label: t('system.users.basicInfo', '基本信息'),
               children: (
-                <Form form={createForm} layout="vertical" style={{ maxWidth: 480 }}>
+                <Form
+                  form={createForm}
+                  layout="vertical"
+                  style={{ maxWidth: 480 }}
+                  onValuesChange={(changed: Partial<CreateUserDto>, all: Partial<CreateUserDto>) => {
+                    if (!('givenName' in changed)) return
+                    const nickname = syncCreateNicknameWithGivenName(createGivenNameRef.current, changed.givenName ?? '', all.nickname ?? '')
+                    if (nickname !== null) createForm.setFieldsValue({ nickname })
+                    createGivenNameRef.current = changed.givenName ?? ''
+                  }}
+                >
                   <Form.Item
                     label={t('system.users.username', '用户名')}
                     name="username"

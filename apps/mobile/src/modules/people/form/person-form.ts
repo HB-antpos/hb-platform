@@ -66,6 +66,18 @@ export function buildPersonNameValues(source: PersonNameRecord): { values: Perso
   };
 }
 
+/**
+ * 新增账号时改姓名的一段：昵称默认跟「名」一致——昵称为空、或仍等于改动前的名（说明没被单独改过）时，
+ * 改名会同步改昵称；店长手动改过昵称后不再跟随。编辑已有账号不调用此规则（不覆盖已有昵称）。
+ */
+export function applyCreateNameChange(names: PersonNameInput, key: PersonNameField, value: string): PersonNameInput {
+  const next = { ...names, [key]: value };
+  if (key === "givenName" && (names.nickname.trim() === "" || names.nickname === names.givenName)) {
+    next.nickname = value;
+  }
+  return next;
+}
+
 /** 姓 / 名 / 中间名 / 昵称是否都为空（新增表单的「是否填过」判断）。 */
 export function isPersonNameEmpty(values: PersonNameInput) {
   return NAME_PART_KEYS.every((key) => clean(values[key]) === "");

@@ -130,26 +130,33 @@ export function resolvePersonName(source: PersonNameSource): ResolvedPersonName 
 }
 
 /**
- * 个人码标签上打印的称呼（标签字号大、位置窄，不印中间名）：
- * 1. 有昵称：昵称 + 姓（Em Chen）；没有姓只印昵称；
- * 2. 没昵称但有名：名 + 姓首字母（Emily C.）；没有姓只印名；
- * 3. 都没有：账号兜底。
+ * 个人码（员工码）标签与收银小票共用的称呼（与 WPF ReceiptStaffName 规则一致，改一处须同步另一处）：
+ * 1. 依次取第一个非空的：昵称 → 名 → 账号（账号是邮箱时取 @ 前面的部分）；
+ * 2. 有姓时在后面加空格和姓的首字母（英文转大写），如 Em C、Emily C、emily C；没有姓只印第 1 步的结果；
+ * 3. 含中文时不缩写、不加空格，按「姓 + 昵称 / 名」拼接（王小芳 / 王芳），与 composeFullName 的中文顺序一致。
  * 拆分字段上线前创建、只有「全名」的存量账号，先按 splitLegacyFullName 拆出名 / 姓再套上面的规则。
- * 含中文时不缩写首字母，按「姓 + 昵称 / 名」无空格拼接（王小芳 / 王芳），与 composeFullName 的中文顺序一致。
  */
 export function resolvePersonalCodeLabelName(source: PersonNameSource): string {
-  const legacy = hasStructuredName(source) ? null : splitLegacyFullName(source.fullName);
+  // 全名就是账号（没填姓名时后端用账号当全名）不拆，避免把邮箱当成「名」。
+  const legacyFullName = cleanNamePart(source.fullName);
+  const fullNameIsAccount = Boolean(legacyFullName) && legacyFullName?.toLowerCase() === cleanNamePart(source.username)?.toLowerCase();
+  const legacy = hasStructuredName(source) || fullNameIsAccount ? null : splitLegacyFullName(source.fullName);
   const nickname = cleanNamePart(source.nickname);
   const given = cleanNamePart(legacy ? legacy.givenName : source.givenName);
   const family = cleanNamePart(legacy ? legacy.familyName : source.familyName);
-  const lead = nickname ?? given;
-  if (lead) {
-    if (!family) return lead;
-    if (containsCjk(lead) || containsCjk(family)) return `${family}${lead}`;
-    // 有昵称印完整的姓；只有名时姓缩成首字母，避免标签上与全名重复。
-    return nickname ? `${nickname} ${family}` : `${given} ${Array.from(family)[0].toUpperCase()}.`;
-  }
-  return cleanNamePart(source.username) ?? "";
+  const lead = nickname ?? given ?? accountDisplayPart(source.username);
+  if (!lead) return "";
+  if (!family) return lead;
+  if (containsCjk(lead) || containsCjk(family)) return `${family}${lead}`;
+  return `${lead} ${Array.from(family)[0].toUpperCase()}`;
+}
+
+/** 账号兜底：邮箱形式的账号只取 @ 前面的部分（@ 前为空视为没有）。 */
+function accountDisplayPart(username?: string | null): string | null {
+  const account = cleanNamePart(username);
+  if (!account) return null;
+  const at = account.indexOf("@");
+  return at >= 0 ? cleanNamePart(account.slice(0, at)) : account;
 }
 
 /** 搜索用：把姓名各段、昵称、账号拼成一串小写文本，客户端本地过滤时命中任意一段。 */

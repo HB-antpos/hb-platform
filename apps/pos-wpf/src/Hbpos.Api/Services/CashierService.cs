@@ -330,6 +330,7 @@ public sealed class CashierService(
                 FullName = user.FullName,
                 Nickname = user.Nickname,
                 FamilyName = user.FamilyName,
+                GivenName = user.GivenName,
                 StoreGuid = store.StoreGUID,
                 StoreCode = store.StoreCode,
             })
@@ -373,10 +374,12 @@ public sealed class CashierService(
             IsEmergencyOverride: false,
             AuthorizationToken: authorization.Token,
             AuthorizationExpiresAtUtc: authorization.ExpiresAtUtc,
-            // 小票只显示「昵称/用户名 + 姓首字母」，由客户端按这三段格式化；CashierName 仍是全名（订单、审计沿用）。
+            // 小票员工显示名由客户端按「昵称 → 名 → 账号（邮箱取 @ 前）+ 姓」格式化（见 WPF ReceiptStaffName），
+            // 这里只原样下发各段；CashierName 仍是全名（订单、审计沿用，老账号没有姓名拆分字段时客户端据此拆）。
             Username: user.Username,
             Nickname: user.Nickname,
-            FamilyName: user.FamilyName);
+            FamilyName: user.FamilyName,
+            GivenName: user.GivenName);
     }
 
     private static string[] AddLegacyDiscountCompatibility(IEnumerable<string> permissionCodes)
@@ -414,6 +417,7 @@ public sealed class CashierService(
         public string? FullName { get; set; }
         public string? Nickname { get; set; }
         public string? FamilyName { get; set; }
+        public string? GivenName { get; set; }
         public string StoreGuid { get; set; } = string.Empty;
         public string StoreCode { get; set; } = string.Empty;
     }

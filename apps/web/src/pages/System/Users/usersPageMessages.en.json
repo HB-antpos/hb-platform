@@ -74,6 +74,7 @@
       "givenName": "Given name",
       "middleName": "Middle name",
       "nickname": "Nickname",
+      "nicknameHint": "Shown on receipts and staff codes. Defaults to the given name for new users.",
       "fullNameAutoHint": "When you fill in or change the family, given or middle name below, the full name is regenerated on save"
     },
     "usersBatch": {
