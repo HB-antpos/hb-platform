@@ -18,6 +18,7 @@
     "middleName": "Middle name",
     "nickname": "Nickname",
     "nicknamePlaceholder": "Optional, e.g. Em",
+    "nicknameHint": "Shown on receipts and staff codes. Defaults to the first name.",
     "optional": "Optional",
     "phone": "Phone",
     "legacySplitHint": "Split from the full name. Check the first and last name are right.",

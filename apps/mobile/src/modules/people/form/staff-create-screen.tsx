@@ -54,6 +54,7 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
+import { applyCreateNameChange } from "./person-form";
 
 const NO_ERRORS: StaffCreateErrors = { names: {} };
 
@@ -316,8 +317,9 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
         <NameFields
           values={values.names}
           onChange={(key, value) => {
-            patch({ names: { ...values.names, [key]: value } });
-            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, fullName: undefined } }));
+            // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
+            patch({ names: applyCreateNameChange(values.names, key, value) });
+            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
           }}
           errors={errors.names}
           phone={{
