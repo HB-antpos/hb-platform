@@ -133,12 +133,15 @@ public class PricingCurveTests
     }
 
     [Theory]
-    [InlineData("10.00", "25.00")]
-    [InlineData("10.10", "25.25")]
-    [InlineData("10.30", "25.75")]
-    [InlineData("3.33", "8.33")]   // 8.325 按四舍五入进位到分
-    [InlineData("0.10", "0.25")]   // 低价也不被吸附到 .50
-    public void 固定成率直接取进货价乘成率且不做尾数调整(string cost, string expected)
+    [InlineData("8.94", "22.50")]   // 22.35 → 进位到 .50（用户反馈的实例）
+    [InlineData("10.10", "25.50")]  // 25.25 → .50
+    [InlineData("10.30", "25.99")]  // 25.75 → .99
+    [InlineData("10.00", "24.99")]  // 整数 25.00 → 取到 24.99
+    [InlineData("3.33", "8.50")]    // 8.325 → .50
+    [InlineData("0.10", "0.50")]    // 0.25 → 最低 0.50
+    [InlineData("0.40", "1")]       // 1.00 是合法整数，保留
+    [InlineData("0.76", "2")]       // 1.90 → 1.99 → 归整为 2
+    public void 固定成率与其他区间一样按尾数规则调整(string cost, string expected)
     {
         var strategy = Strategy(Rule(0.1m, 99999m, 2.5m, 2.5m, "Fixed"));
         PricingCurveMath.Validate(strategy.Details);
@@ -146,7 +149,7 @@ public class PricingCurveTests
         var price = _service.CalculateRetailPrice(decimal.Parse(cost), strategy);
 
         Assert.Equal(decimal.Parse(expected), price);
-        // 展示用的上浮率保持精确的 2.5，不受分位取整影响。
+        // 展示用的上浮率是理论成率，保持精确的 2.5，不受尾数调整影响。
         Assert.Equal(2.5m, _service.CalculateRate(decimal.Parse(cost), strategy));
     }
 
@@ -177,11 +180,11 @@ public class PricingCurveTests
         PricingCurveMath.Validate(rules);
 
         var strategy = Strategy(rules);
-        Assert.Equal(25.00m, _service.CalculateRetailPrice(10m, strategy));      // 交界值属于上一个（固定）区间
-        Assert.Equal(25.03m, _service.CalculateRetailPrice(10.01m, Strategy(Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed"))));
-        // 50 属于曲线区间的上限；曲线区间的实际价仍做尾数调整，理论 100.00 → 99.99，与相邻固定区间相差一分。
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, strategy));      // 交界值属于上一个（固定）区间：25.00 → 24.99
+        Assert.Equal(25.50m, _service.CalculateRetailPrice(10.01m, Strategy(Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed"))));
+        // 50 属于曲线区间的上限：理论 100.00 → 99.99。
         Assert.Equal(99.99m, _service.CalculateRetailPrice(50m, strategy));
-        Assert.Equal(100.02m, _service.CalculateRetailPrice(50.01m, strategy));   // 50.01 起按固定 2.0×
+        Assert.Equal(100.50m, _service.CalculateRetailPrice(50.01m, strategy));   // 50.01 起按固定 2.0×：100.02 → 100.50
     }
 
     [Fact]
@@ -196,11 +199,11 @@ public class PricingCurveTests
     [Fact]
     public void 区间交界允许售价回落以支持阶梯定价但必须首尾相接()
     {
-        // 3× 与 2.5× 相邻：10 处 30.00 → 25.03，成本变大售价反而降低，属于有意的阶梯。
+        // 3× 与 2.5× 相邻：10 处 29.99 → 25.50，成本变大售价反而降低，属于有意的阶梯。
         var tiers = new[] { Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed") };
         PricingCurveMath.Validate(tiers);
-        Assert.Equal(30.00m, _service.CalculateRetailPrice(10m, Strategy(tiers)));
-        Assert.Equal(25.03m, _service.CalculateRetailPrice(10.01m, Strategy(tiers)));
+        Assert.Equal(29.99m, _service.CalculateRetailPrice(10m, Strategy(tiers)));
+        Assert.Equal(25.50m, _service.CalculateRetailPrice(10.01m, Strategy(tiers)));
 
         // 空隙与重叠都不允许。
         Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(11m, 50m, 2.5m, 2.5m, "Fixed") }));
@@ -233,8 +236,9 @@ public class PricingCurveTests
         Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(100.01m, fixedStrategy));
         Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(.09m, fixedStrategy));
 
-        // 已有的 Step 算法行为不变：10.00 × 2.5 = 25.00 仍被吸附为 24.99。
+        // 固定成率与旧的阶梯算法结果一致（都走尾数规则）：10.00 × 2.5 = 25.00 → 24.99。
         Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, Strategy(Rule(0.1m, 100m, 2.5m, 2.5m, "Step"))));
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, fixedStrategy));
     }
 
     [Fact]

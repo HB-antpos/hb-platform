@@ -13,7 +13,7 @@ public static class PricingCurveMath
     public const int MaxIntervals = 10;
 
     public static bool IsCurve(string? algorithm) => algorithm?.ToLowerInvariant() is "linear" or "arcup" or "arcdown";
-    /// <summary>固定成率：售价 = 进货价 × 成率，四舍五入到分，不做 .50/.99 尾数调整。</summary>
+    /// <summary>固定成率：理论价 = 进货价 × 成率；实际售价与其他区间一样再按 .50/.99 尾数调整。</summary>
     public static bool IsFixed(string? algorithm) => string.Equals(algorithm, "Fixed", StringComparison.OrdinalIgnoreCase);
     public static decimal Start(PricingStrategyDetail r) => r.StartRetailPrice ?? r.MinPrice * r.StartRate;
     public static decimal End(PricingStrategyDetail r) => r.EndRetailPrice ?? r.MaxPrice * r.EndRate;

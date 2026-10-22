@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { boundedPrice, curveError, defaultCurve, finalPrice, fixedRateError, fmtRate, fixedRetailPrice, fixedRules, isFixedRules, nodesFromRules, rawPrice, rulesFromNodes } from './pricingCurve'
+import { boundedPrice, curveError, defaultCurve, finalPrice, fixedRateError, fmtRate, fixedRules, isFixedRules, nodesFromRules, rawPrice, rulesFromNodes } from './pricingCurve'
 
 const rules = defaultCurve()
 assert.equal(curveError(rules), null)
@@ -56,9 +56,10 @@ assert.equal(curveError([lower]), null)
 assert.ok(rawPrice(lower, 125) < rawPrice(rules[1], 125))
 console.log('定价曲线：99,801 成本点、边界尾数、弧度和倒挂回归测试通过')
 
-// 固定成率：直接 进货价 × 成率 四舍五入到分，不做 .50/.99 尾数调整（与后端 AutoPricingService 一致）
-for (const [cost, expected] of [[10, 25], [10.1, 25.25], [10.3, 25.75], [3.33, 8.33], [0.1, 0.25], [99.99, 249.98]] as const) {
-  assert.equal(fixedRetailPrice(cost, 2.5), expected, `固定成率 ${cost}`)
+// 固定成率与其他区间一样走尾数规则（与后端 AutoPricingService.CalculateRetailPrice 一致）：
+// 小数进位到 .50 / .99，整数取到 .99，1 与 2 保留整数
+for (const [cost, expected] of [[8.94, 22.5], [10.1, 25.5], [10.3, 25.99], [10, 24.99], [3.33, 8.5], [0.1, 0.5], [0.4, 1], [0.76, 2]] as const) {
+  assert.equal(finalPrice(cost, cost * 2.5), expected, `固定成率 2.5× 成本 ${cost}`)
 }
 assert.equal(fixedRateError(2.5), null)
 assert.equal(fixedRateError(1.5), null)

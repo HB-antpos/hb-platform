@@ -128,14 +128,13 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
   const intervalPaths = rules.map(r => {
     if (r.minPrice >= end) return null
     const lo = r.minPrice, hi = Math.min(r.maxPrice, end)
-    if (isFixed(r)) return { fixed: true, line: `M${X(lo)},${Y(lo * r.startRate)} L${X(hi)},${Y(hi * r.startRate)}`, steps: '' }
     let line = '', steps = ''
     for (let k = 0; k <= 240; k++) {
       const c = lo + (hi - lo) * k / 240, p = theoryPrice(r, c), f = actualPrice(r, c)
       line += `${k ? 'L' : 'M'}${X(c).toFixed(1)},${Y(p).toFixed(1)}`
       steps += k ? `H${X(c).toFixed(1)}V${Y(f).toFixed(1)}` : `M${X(c).toFixed(1)},${Y(f).toFixed(1)}`
     }
-    return { fixed: false, line, steps }
+    return { fixed: isFixed(r), line, steps }
   })
   const hiddenCount = rules.filter(r => r.minPrice >= end).length
   const shown = hover ?? { cost: sel.minPrice, price: actualPrice(sel, sel.minPrice), theory: theoryPrice(sel, sel.minPrice), index }
@@ -169,7 +168,7 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 14, fontSize: 12, color: '#595959', flexWrap: 'wrap' }}>
             <span><i style={{ ...LEGEND, width: 18, height: 3, background: GOLD }} />固定成率</span>
             <span><i style={{ ...LEGEND, width: 18, height: 3, background: BLUE }} />曲线理论价</span>
-            <span><i style={{ ...LEGEND, width: 18, height: 0, borderTop: `2px solid ${ORANGE}` }} />曲线实际价</span>
+            <span><i style={{ ...LEGEND, width: 18, height: 0, borderTop: `2px solid ${ORANGE}` }} />实际售价（取尾数）</span>
             <span><i style={{ ...LEGEND, width: 14, height: 10, background: '#f6ffed', border: '1px solid #b7eb8f' }} />1.5～5 倍</span>
           </div>
         </div>
@@ -208,7 +207,7 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
 
           <g clipPath="url(#interval-plot)">
             {intervalPaths.map((p, i) => p && (p.fixed
-              ? <path key={i} d={p.line} fill="none" stroke={GOLD} strokeWidth="3" />
+              ? <g key={i}><path d={p.steps} fill="none" stroke={ORANGE} strokeWidth="2" /><path d={p.line} fill="none" stroke={GOLD} strokeWidth="3" /></g>
               : <g key={i}><path d={p.steps} fill="none" stroke={ORANGE} strokeWidth="2" /><path d={p.line} fill="none" stroke={BLUE} strokeWidth="2.5" /></g>))}
           </g>
           {rules.map((r, i) => isFixed(r) && r.minPrice < end && (() => { const c = (r.minPrice + Math.min(r.maxPrice, end)) / 2; return <text key={`f${i}`} x={X(c)} y={Y(c * r.startRate) - 12} textAnchor="middle" fontSize="11" fontWeight="600" fill={GOLD} pointerEvents="none">×{fmtRate(r.startRate)}</text> })())}
@@ -300,7 +299,7 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                       {RATE_PRESETS.map(p => <Button key={p} size="small" shape="round" type={r.startRate === p ? 'primary' : 'default'} ghost={r.startRate === p} onClick={() => apply(setRate(rules, i, p, flags))}>{p}</Button>)}
                     </div>
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c' }}>零售价 = 进货价 × {fmtRate(r.startRate)}，到分，不调整尾数；区间内 {money(startPrice(r))} → {r.maxPrice >= UNBOUNDED_COST ? '不限' : money(endPrice(r))}</div>
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c' }}>零售价 = 进货价 × {fmtRate(r.startRate)}，再取 .50 / .99 尾数（整数取 .99，1、2 除外）；区间内 {money(actualPrice(r, r.minPrice))} → {r.maxPrice >= UNBOUNDED_COST ? '不限' : money(actualPrice(r, r.maxPrice))}</div>
                   </div> : <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
                       {(['start', 'end'] as const).map(which => {
