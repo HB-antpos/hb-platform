@@ -3276,13 +3276,23 @@ function ProductQueryContent() {
       }
 
       if (!value) {
-        handleChangeStorePrice({ isAutoPricing: false });
+        // 关闭与开启一样即时写库：只改本地状态时，保存前的重新扫码/刷新会把库里仍为「开」的值读回来，
+        // 开关就会自己弹回去。失败时 persistStorePrice 已提示，开关由库值驱动所以保持原状。
+        if (saving) {
+          return;
+        }
+        setSaving(true);
+        try {
+          await persistStorePrice(detail, { isAutoPricing: false });
+        } finally {
+          setSaving(false);
+        }
         return;
       }
 
       await maybeHandleAutoPricing(detail, { forceAutoPricing: true });
     },
-    [detail, handleChangeStorePrice, maybeHandleAutoPricing],
+    [detail, maybeHandleAutoPricing, persistStorePrice, saving],
   );
 
   const handleChangeStorePurchasePrice = useCallback(
