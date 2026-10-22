@@ -70,6 +70,7 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { listSeparator } from "@/shared/i18n/punctuation";
+import { applyCreateNameChange } from "./person-form";
 
 const NO_ERRORS: AdminCreateErrors = { names: {} };
 
@@ -478,8 +479,9 @@ export function AdminCreateScreen() {
         <NameFields
           values={values.names}
           onChange={(key, value) => {
-            patch({ names: { ...values.names, [key]: value } });
-            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, fullName: undefined } }));
+            // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
+            patch({ names: applyCreateNameChange(values.names, key, value) });
+            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
           }}
           errors={errors.names}
           disabled={frozen}

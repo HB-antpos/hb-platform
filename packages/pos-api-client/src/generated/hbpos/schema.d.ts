@@ -5795,6 +5795,7 @@ export interface components {
             username?: string | null;
             nickname?: string | null;
             familyName?: string | null;
+            givenName?: string | null;
         };
         CashierSessionDtoApiResult: {
             success?: boolean;

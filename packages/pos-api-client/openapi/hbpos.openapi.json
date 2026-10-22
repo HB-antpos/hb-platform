@@ -7328,6 +7328,10 @@
           "familyName": {
             "type": "string",
             "nullable": true
+          },
+          "givenName": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

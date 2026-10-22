@@ -98,12 +98,12 @@ public sealed class CashierServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BarcodeLoginAsync_会话携带用户名昵称和姓供小票格式化()
+    public async Task BarcodeLoginAsync_会话携带用户名昵称名和姓供小票格式化()
     {
         await SeedStoreAsync("store-allowed", "S-ALLOWED");
         await SeedUserAsync("user-1", "alice.lee");
         await _db.Updateable<User>()
-            .SetColumns(user => new User { FullName = "Alice Lee", Nickname = "Amy", FamilyName = "Lee" })
+            .SetColumns(user => new User { FullName = "Alice Lee", Nickname = "Amy", GivenName = "Alice", FamilyName = "Lee" })
             .Where(user => user.UserGUID == "user-1")
             .ExecuteCommandAsync();
         await SeedUserStoreAsync("user-1", "store-allowed");
@@ -115,10 +115,11 @@ public sealed class CashierServiceTests : IDisposable
         );
 
         Assert.NotNull(session);
-        // CashierName 仍是全名（订单、审计沿用），小票显示名由客户端用下面三段格式化。
+        // CashierName 仍是全名（订单、审计沿用），小票显示名由客户端用下面几段格式化。
         Assert.Equal("Alice Lee", session.CashierName);
         Assert.Equal("alice.lee", session.Username);
         Assert.Equal("Amy", session.Nickname);
+        Assert.Equal("Alice", session.GivenName);
         Assert.Equal("Lee", session.FamilyName);
     }
 

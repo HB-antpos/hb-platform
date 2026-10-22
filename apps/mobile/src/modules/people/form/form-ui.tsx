@@ -290,6 +290,7 @@ export function NameFields({
       value={values.nickname}
       onChangeText={(value) => onChange("nickname", value)}
       placeholder={t("name.nicknamePlaceholder")}
+      hint={t("name.nicknameHint")}
       error={message("nickname", errors.nickname)}
       autoCapitalize="words"
       disabled={disabled}
