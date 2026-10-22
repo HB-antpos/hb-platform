@@ -52,14 +52,16 @@ export interface InvoiceListCountKeyRow {
   orderDate?: string
   createdAt?: string
   isProductChecked?: boolean
+  /** 「有商品未创建」筛选的成员依据：新品行数是否大于 0。 */
+  newProductDetailCount?: number
 }
 
 /**
  * 明细变化后，列表上方的分段计数（全部/待检测）与左侧分店单数是否需要重算。
  *
- * 这些计数只取决于「哪些单落在筛选条件内、各自属于哪个分店、是否已检测」。对每张变化的单：
+ * 这些计数只取决于「哪些单落在筛选条件内、各自属于哪个分店、是否已检测、是否还有未创建新品」。对每张变化的单：
  * - 刷新前后有一边不在当前页：可能被筛选条件排除/纳入了（或本来就不在这一页），无法判断，保守重算；
- * - 两边都在、但分店/供应商/单号/订单日期/是否检测任一变化：成员关系或分组变了，重算；
+ * - 两边都在、但分店/供应商/单号/订单日期/是否检测/是否有未创建新品任一变化：成员关系或分组变了，重算；
  * - 其余（金额、明细数、备注、涨降价等变化）不影响任何计数，跳过这 3 路较重的请求。
  */
 export function invoiceChangeAffectsListCounts(
@@ -85,6 +87,7 @@ export function invoiceChangeAffectsListCounts(
       || previous.orderDate !== next.orderDate
       || previous.createdAt !== next.createdAt
       || Boolean(previous.isProductChecked) !== Boolean(next.isProductChecked)
+      || ((previous.newProductDetailCount ?? 0) > 0) !== ((next.newProductDetailCount ?? 0) > 0)
     )
   })
 }

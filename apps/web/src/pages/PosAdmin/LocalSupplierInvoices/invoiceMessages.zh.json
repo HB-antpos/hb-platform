@@ -19,6 +19,8 @@
       "datePresetLast30Days": "近 30 天",
       "datePresetLast90Days": "近 90 天",
       "datePresetThisYear": "今年",
+      "uncreatedFilter": "有商品未创建",
+      "uncreatedFilterTip": "只看含「新品」明细（商品主档里还没有、尚未创建）的随货单。「本单新品」是已建好的，不算",
       "clearFilters": "清空筛选",
       "columnSettings": "列设置",
       "columnSettingsTitle": "显示列",
