@@ -1,5 +1,5 @@
 export type PricingStrategyLevel = 'Supplier' | 'Store' | 'Global'
-export type PricingStrategyAlgorithm = 'Linear' | 'ArcUp' | 'ArcDown' | 'Exponential' | 'Step'
+export type PricingStrategyAlgorithm = 'Linear' | 'ArcUp' | 'ArcDown' | 'Exponential' | 'Step' | 'Fixed'
 
 export interface PricingStrategyListDto {
   id: string
@@ -11,6 +11,20 @@ export interface PricingStrategyListDto {
   supplierCodes: string[]
   detailsCount: number
   targetsCount: number
+  // 以下为列表摘要字段（后端较旧时可能缺失，界面需容忍 undefined）
+  pricingMode?: PricingStrategyMode
+  fixedRate?: number | null
+  startRate?: number | null
+  endRate?: number | null
+  nodes?: PricingStrategyNodeDto[]
+}
+
+/** Fixed 固定成率 / Curve 曲线 / Legacy 旧版区间规则 / Empty 无区间 */
+export type PricingStrategyMode = 'Fixed' | 'Curve' | 'Legacy' | 'Empty'
+
+export interface PricingStrategyNodeDto {
+  cost: number
+  price: number
 }
 
 export interface PricingStrategyRuleDto {
@@ -59,10 +73,11 @@ export interface PricingEvaluateRequest {
 }
 
 export interface PricingEvaluateResponse {
-  storeCode?: string
-  supplierCode?: string
-  purchasePrice: number
   retailPrice: number
-  appliedStrategy?: string
-  appliedRule?: string
+  /** 理论成率（未做尾数调整） */
+  rate?: number
+  /** 实际成率 = 零售价 / 进货价 */
+  effectiveRate?: number
+  strategyId?: string | null
+  strategyName?: string | null
 }

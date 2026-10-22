@@ -132,6 +132,51 @@ public class PricingCurveTests
         Assert.Equal(2m, _service.CalculateRetailPrice(.7m, Strategy(rule)));
     }
 
+    [Theory]
+    [InlineData("10.00", "25.00")]
+    [InlineData("10.10", "25.25")]
+    [InlineData("10.30", "25.75")]
+    [InlineData("3.33", "8.33")]   // 8.325 按四舍五入进位到分
+    [InlineData("0.10", "0.25")]   // 低价也不被吸附到 .50
+    public void 固定成率直接取进货价乘成率且不做尾数调整(string cost, string expected)
+    {
+        var strategy = Strategy(Rule(0.1m, 99999m, 2.5m, 2.5m, "Fixed"));
+        PricingCurveMath.Validate(strategy.Details);
+
+        var price = _service.CalculateRetailPrice(decimal.Parse(cost), strategy);
+
+        Assert.Equal(decimal.Parse(expected), price);
+        // 展示用的上浮率保持精确的 2.5，不受分位取整影响。
+        Assert.Equal(2.5m, _service.CalculateRate(decimal.Parse(cost), strategy));
+    }
+
+    [Fact]
+    public void 固定成率只能单区间且成率相同并保持在一点五到五之间()
+    {
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 2.5m, 3m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 1.4m, 1.4m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 5.1m, 5.1m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 2.5m, 2.5m, "Fixed", .1m) }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[]
+        {
+            Rule(0.1m, 50m, 2.5m, 2.5m, "Fixed"), Rule(50m, 100m, 2.5m, 2.5m, "Fixed"),
+        }));
+        var withNode = Rule(0.1m, 50m, 2.5m, 2.5m, "Fixed");
+        withNode.StartRetailPrice = .5m;
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { withNode }));
+    }
+
+    [Fact]
+    public void 固定成率区间外的进货价明确失败且其他算法仍走尾数调整()
+    {
+        var fixedStrategy = Strategy(Rule(0.1m, 100m, 2.5m, 2.5m, "Fixed"));
+        Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(100.01m, fixedStrategy));
+        Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(.09m, fixedStrategy));
+
+        // 已有的 Step 算法行为不变：10.00 × 2.5 = 25.00 仍被吸附为 24.99。
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, Strategy(Rule(0.1m, 100m, 2.5m, 2.5m, "Step"))));
+    }
+
     [Fact]
     public void 成率上下限只使用合法尾数且极低成本明确失败()
     {

@@ -145,6 +145,9 @@ namespace BlazorApp.Api.Services.React
                     TargetsCount = allTargets.Count(t => t.StrategyId == s.Id),
                 })
                 .ToList();
+            // 列表直接展示定价方式与成率区间，避免前端为每一行再拉一次明细。
+            foreach (var row in list)
+                PricingStrategySummary.Apply(row, allDetails.Where(d => d.StrategyId == row.Id));
 
             return GridResponseDto<PricingStrategyListDto>.OK(list, total);
         }

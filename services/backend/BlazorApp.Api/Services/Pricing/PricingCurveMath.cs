@@ -6,13 +6,15 @@ namespace BlazorApp.Api.Services.Pricing;
 public static class PricingCurveMath
 {
     public static bool IsCurve(string? algorithm) => algorithm?.ToLowerInvariant() is "linear" or "arcup" or "arcdown";
+    /// <summary>固定成率：售价 = 进货价 × 成率，四舍五入到分，不做 .50/.99 尾数调整。</summary>
+    public static bool IsFixed(string? algorithm) => string.Equals(algorithm, "Fixed", StringComparison.OrdinalIgnoreCase);
     public static decimal Start(PricingStrategyDetail r) => r.StartRetailPrice ?? r.MinPrice * r.StartRate;
     public static decimal End(PricingStrategyDetail r) => r.EndRetailPrice ?? r.MaxPrice * r.EndRate;
 
     public static decimal TheoreticalRetail(decimal cost, PricingStrategyDetail r)
     {
         var algorithm = r.Algorithm?.ToLowerInvariant();
-        if (algorithm == "step") return cost * r.StartRate;
+        if (algorithm == "step" || algorithm == "fixed") return cost * r.StartRate;
         if (algorithm == "exponential")
         {
             if (r.StartRate <= 0 || r.EndRate <= 0 || r.MaxPrice <= r.MinPrice)
@@ -76,6 +78,16 @@ public static class PricingCurveMath
                 if (r.Algorithm.Equals("Exponential", StringComparison.OrdinalIgnoreCase)
                     && 1 + (double)(b / h) * Math.Log((double)(r.EndRate / r.StartRate)) < 0)
                     throw new ArgumentException("指数规则会导致零售价倒挂，请改用直线");
+            }
+            else if (IsFixed(r.Algorithm))
+            {
+                // 固定成率不参与曲线连续性约束，只允许单个区间覆盖全部成本，避免与其他算法在交界处价格跳变。
+                if (rules.Count != 1)
+                    throw new ArgumentException("固定成率策略只能包含一个进货价区间");
+                if (r.StartRate != r.EndRate)
+                    throw new ArgumentException("固定成率的开始和结束成率必须相同");
+                if (bend != 0 || r.StartRetailPrice.HasValue || r.EndRetailPrice.HasValue)
+                    throw new ArgumentException("固定成率不能指定曲线节点零售价或弧度");
             }
             else throw new ArgumentException("不支持的定价算法");
             previous = r;

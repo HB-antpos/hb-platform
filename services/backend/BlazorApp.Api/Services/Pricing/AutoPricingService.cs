@@ -55,6 +55,10 @@ namespace BlazorApp.Api.Services.Pricing
         }
 
         private static decimal CalculateTheoreticalRetail(decimal purchasePrice, PricingStrategy? strategy)
+            => ResolveTheoreticalRetail(purchasePrice, strategy).Theoretical;
+
+        private static (decimal Theoretical, PricingStrategyDetail? Rule) ResolveTheoreticalRetail(
+            decimal purchasePrice, PricingStrategy? strategy)
         {
             if (purchasePrice < 0.1m)
                 throw new ArgumentException("进货价必须至少为 0.10，才能满足尾数及 1.5～5 成率限制");
@@ -63,17 +67,23 @@ namespace BlazorApp.Api.Services.Pricing
             if (rule == null)
             {
                 if (strategy != null) throw new ArgumentException("当前成本不在此定价策略范围内");
-                return purchasePrice * 2.5m;
+                return (purchasePrice * 2.5m, null);
             }
             if (PricingCurveMath.IsCurve(rule.Algorithm))
                 PricingCurveMath.Validate(strategy!.Details, allowLegacyZero: true);
-            return PricingCurveMath.TheoreticalRetail(purchasePrice, rule);
+            return (PricingCurveMath.TheoreticalRetail(purchasePrice, rule), rule);
         }
 
-        /// <summary>计算建议零售价，先按合法尾数及倍率限幅，再将 0.99/1.99 归整为 1/2。</summary>
+        /// <summary>
+        /// 计算建议零售价，先按合法尾数及倍率限幅，再将 0.99/1.99 归整为 1/2。
+        /// 固定成率（Fixed）区间例外：直接取 进货价 × 成率 并四舍五入到分，不做尾数调整。
+        /// </summary>
         public decimal CalculateRetailPrice(decimal purchasePrice, PricingStrategy? strategy)
         {
-            return PricingCurveMath.AdjustTail(purchasePrice, CalculateTheoreticalRetail(purchasePrice, strategy));
+            var (theoretical, rule) = ResolveTheoreticalRetail(purchasePrice, strategy);
+            if (rule != null && PricingCurveMath.IsFixed(rule.Algorithm))
+                return decimal.Round(theoretical, 2, MidpointRounding.AwayFromZero);
+            return PricingCurveMath.AdjustTail(purchasePrice, theoretical);
         }
 
         /// <summary>

@@ -68,4 +68,32 @@ export function rulesFromNodes(nodes: PriceNode[], old: PricingStrategyRuleDto[]
     return { minPrice: a.cost, maxPrice: b.cost, startRate: Math.round(a.price / a.cost * 1e4) / 1e4, endRate: Math.round(b.price / b.cost * 1e4) / 1e4, startRetailPrice: a.price, endRetailPrice: b.price, algorithm: previous?.algorithm === 'ArcUp' || previous?.algorithm === 'ArcDown' ? previous.algorithm : 'Linear', curveBend: safeBend(previous?.curveBend ?? 0) }
   })
 }
+
+// ---- 固定成率（Fixed）：零售价 = 进货价 × 成率，四舍五入到分，不做 .50/.99 尾数调整 ----
+export const FIXED_MIN_COST = 0.1
+export const FIXED_MAX_COST = 99999
+export const FIXED_RATE_MIN = 1.5
+export const FIXED_RATE_MAX = 5
+export const FIXED_PREVIEW_COSTS = [3.33, 10, 10.1, 10.3, 99.99]
+
+/** 与后端 decimal.Round(…, 2, AwayFromZero) 对齐；先消除二进制浮点误差，避免 8.325 被舍成 8.32。 */
+export const fixedRetailPrice = (cost: number, rate: number) => Math.round(Number((cost * rate * 100).toPrecision(12))) / 100
+
+export function fixedRateError(rate: unknown): string | null {
+  if (typeof rate !== 'number' || !Number.isFinite(rate)) return '请填写成率'
+  if (rate < FIXED_RATE_MIN || rate > FIXED_RATE_MAX) return `成率必须在 ${FIXED_RATE_MIN}～${FIXED_RATE_MAX} 之间`
+  return null
+}
+
+/** 固定成率只生成一条覆盖全部进货价的区间，起止成率相同，不带节点零售价和弧度。 */
+export function fixedRules(rate: number): PricingStrategyRuleDto[] {
+  const fixed = Math.round(rate * 1e4) / 1e4
+  return [{ minPrice: FIXED_MIN_COST, maxPrice: FIXED_MAX_COST, startRate: fixed, endRate: fixed, startRetailPrice: null, endRetailPrice: null, curveBend: null, algorithm: 'Fixed' }]
+}
+
+export const isFixedRules = (rules: PricingStrategyRuleDto[]) => rules.length === 1 && rules[0].algorithm === 'Fixed'
+
+/** 成率显示：保留 4 位后去掉末尾多余的 0，但至少保留 2 位小数（2.5 → 2.50，2.5125 → 2.5125）。 */
+export const fmtRate = (rate: number) => rate.toFixed(4).replace(/0{1,2}$/, '')
+
 export const defaultCurve = () => rulesFromNodes([{ cost: 1, price: 4.5 }, { cost: 50, price: 174.99 }, { cost: 200, price: 599.99 }, { cost: 999, price: 1997.99 }])
