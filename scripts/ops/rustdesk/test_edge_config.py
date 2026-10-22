@@ -29,6 +29,19 @@ class EdgeWssConfigTests(unittest.TestCase):
         self.assertEqual(re.findall(r"location\s+(\S+)\s*\{", text), ["/.well-known/acme-challenge/", "/"])
         self.assertRegex(text, r"location\s*/\s*\{\s*return 404;\s*\}")
 
+    def test_registration_override_only_replaces_the_hbbs_image(self):
+        text = (HERE / "compose.registration.yml").read_text(encoding="utf-8")
+        self.assertIn("image: hb-rustdesk-server:1.1.16-wss-registration-20260908", text)
+        self.assertEqual(re.findall(r"^  (rustdesk-\w+):", text, re.M), ["rustdesk-server"])
+        self.assertNotIn("ports:", text)
+
+    def test_release_record_pins_the_image_digest(self):
+        import json
+        record = json.loads((HERE / "hbbs-patched.release.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["image"], "hb-rustdesk-server:1.1.16-wss-registration-20260908")
+        self.assertRegex(record["files"]["image.tar"], r"^[0-9a-f]{64}$")
+        self.assertRegex(record["image_id"], r"^sha256:[0-9a-f]{64}$")
+
 
 if __name__ == "__main__":
     unittest.main()

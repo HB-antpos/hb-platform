@@ -46,6 +46,17 @@ RustDesk 1.4.x 控制端在配置了 key 时，对 hbbs/hbbr 的**原生 TCP** �
 6. 验证：`curl -i --http1.1 https://rd.hotbargain.vip/ws/id -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='` 应返回 `101 Switching Protocols`（`/ws/relay` 同理）。普通 GET `/ws/id` 返回 502 属正常（上游只接受 WebSocket）。
 7. 控制端使用：ID/中继服务器填 `rd.hotbargain.vip`（含端口 21116/21117），**打开「使用 WebSocket」**，Key 为 `id_ed25519.pub` 的内容。`e2e_check.py` 测的是原生 TCP 协议路径，不覆盖 WSS。
 
+**补丁版 hbbs：WebSocket 在线查询与注册（通讯录在线状态）**
+
+控制端开着「使用 WebSocket」时，通讯录的在线状态（`OnlineRequest`）和自身注册都走 `/ws/id`。官方 `rustdesk/rustdesk-server:1.1.16` 的 hbbs 不支持这两项：在线查询会被直接断开，Mac 日志里是每秒一条 `query onlines, Online stream receives None`，表现为**通讯录里所有设备在线状态全灰**（连接本身不受影响）。新加坡生产一直用自编译镜像 `hb-rustdesk-server:1.1.16-wss-registration-20260908`（base revision `c3a3e0d1…`，标签 `compat=wss-registration-v1`），它让 WS 上的 `OnlineRequest` 正常应答、WS 上的空注册返回 `UUID_MISMATCH`（而非 `NOT_SUPPORT`）。边缘机也必须用它的 hbbs（hbbr 仍用官方镜像）：
+
+1. 镜像包不入库：从新加坡 `/home/ubuntu/rustdesk-wss-registration-20260908/image.tar`（以及 `source.bundle`、`smoke-server.py`）取，`shasum -a 256` 必须等于 `hbbs-patched.release.json` 里 `files.image.tar`（`c39da0cd…97669`）。
+2. 先对库做 `.backup` 快照，再 `docker load -i image.tar`。
+3. 与 `compose.yml`、`compose.wss.yml` 一起加上 `compose.registration.yml`：`docker compose -f compose.yml -f compose.wss.yml -f compose.registration.yml up -d --no-deps rustdesk-server`。hbbs 重启约 10 秒，设备自动重新注册；核对 `Key:` 不变、`relay-servers=["rd.hotbargain.vip:21117"]`、peer 数与 `integrity_check`。
+4. 验证：用 WSS 向 `/ws/id` 发 `OnlineRequest`（只含不存在的 ID，不写库）应返回 `c201030a0100`；控制端通讯录里在 rd 的设备在线点恢复。
+5. 回滚：去掉 `-f compose.registration.yml` 重建 hbbs，官方镜像（固定摘要）仍在本机。
+6. **以后升级 hbbs/换版本必须重新打这个补丁并重新验证**，否则通讯录在线状态会再次全灰。
+
 **协议级端到端检查（`e2e_check.py`）**
 
 不改任何真实客户端配置，直接按官方协议对服务器做检查：库副本是否生效、UDP 注册、打洞时下发的设备公钥是否带有效的服务器签名（用设备配置里的公钥验签，证明私钥迁移正确）、下发的中继地址、hbbr 中继配对与转发。

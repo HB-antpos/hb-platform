@@ -1,0 +1,6 @@
+# 仅覆盖 ID 服务镜像：自编译 hbbs（base revision c3a3e0d1），支持 WebSocket 上的在线查询（OnlineRequest）并让 WS 注册返回 UUID_MISMATCH，
+# 否则 1.4.x 控制端开着「使用 WebSocket」时通讯录在线状态全灰。中继容器、端口和数据挂载沿用 compose.yml。
+# 与 compose.yml、compose.wss.yml 一起使用。镜像包的 SHA-256 见 release.json。
+services:
+  rustdesk-server:
+    image: hb-rustdesk-server:1.1.16-wss-registration-20260908
