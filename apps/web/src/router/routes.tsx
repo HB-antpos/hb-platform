@@ -67,6 +67,12 @@ const PurchaseSalesAnalysisPage = lazy(() => import('../pages/ExecutiveSalesInte
 const LocalProductSalesAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/LocalProductSalesAnalysis'))
 const PurchaseAmountDashboardPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/PurchaseAmountDashboard'))
 const PosmSalesOrdersPage = lazy(() => import('../pages/PosmSalesOrders'))
+const SupplierPreorderAdminPage = lazy(() => import('../pages/SupplierPreorders/Admin'))
+const SupplierPreorderImportPage = lazy(() => import('../pages/SupplierPreorders/Admin/Import'))
+const SupplierPreorderFormDetailPage = lazy(() => import('../pages/SupplierPreorders/Admin/FormDetail'))
+const SupplierPreorderOrderersPage = lazy(() => import('../pages/SupplierPreorders/Orderers'))
+const SupplierPreorderOrderingPage = lazy(() => import('../pages/SupplierPreorders/Ordering'))
+const SupplierPreorderOrderFormPage = lazy(() => import('../pages/SupplierPreorders/Ordering/OrderForm'))
 const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashRegisterUsers'))
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
@@ -644,6 +650,46 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canManageWarehouseProducts',
         },
         element: <ProductGradeManagementPage />,
+      },
+    ],
+  },
+  {
+    // 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
+    path: '/seasonal-preorders',
+    meta: {
+      title: 'menu.seasonalPreorders',
+      icon: 'GiftOutlined',
+    },
+    children: [
+      {
+        path: '/supplier-preorder-ordering',
+        meta: { title: 'menu.supplierPreorderOrdering', icon: 'ShoppingCartOutlined', accessKey: 'canOrderSupplierPreorders' },
+        element: <SupplierPreorderOrderingPage />,
+      },
+      {
+        path: '/supplier-preorder-ordering/:formGuid',
+        meta: { title: 'menu.supplierPreorderOrderForm', hidden: true, accessKey: 'canOrderSupplierPreorders', activeMenu: '/supplier-preorder-ordering' },
+        element: <SupplierPreorderOrderFormPage />,
+      },
+      {
+        path: '/supplier-preorders',
+        meta: { title: 'menu.supplierPreorders', icon: 'FileExcelOutlined', keepAlive: true, accessKey: 'canManageSupplierPreorders' },
+        element: <SupplierPreorderAdminPage />,
+      },
+      {
+        path: '/supplier-preorders/import',
+        meta: { title: 'menu.supplierPreorderImport', hidden: true, accessKey: 'canManageSupplierPreorders', activeMenu: '/supplier-preorders' },
+        element: <SupplierPreorderImportPage />,
+      },
+      {
+        path: '/supplier-preorders/forms/:formGuid',
+        meta: { title: 'menu.supplierPreorderFormDetail', hidden: true, accessKey: 'canManageSupplierPreorders', activeMenu: '/supplier-preorders' },
+        element: <SupplierPreorderFormDetailPage />,
+      },
+      {
+        path: '/supplier-preorders/orderers',
+        meta: { title: 'menu.supplierPreorderOrderers', icon: 'TeamOutlined', accessKey: 'canManageSupplierPreorders' },
+        element: <SupplierPreorderOrderersPage />,
       },
     ],
   },

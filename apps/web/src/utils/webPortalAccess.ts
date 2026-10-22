@@ -20,6 +20,8 @@ type WebPortalAccess = Pick<
   | 'canViewPerformanceBaseline'
   | 'canViewOperationAudits'
   | 'canViewDeviceRegistration'
+  | 'canManageSupplierPreorders'
+  | 'canOrderSupplierPreorders'
   | 'hasPermission'
 >
 
@@ -135,6 +137,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     defaultPath: '/pos-admin/daily-closes',
     targetPrefixes: ['/pos-admin/daily-closes'],
     canAccess: (access) => access.hasPermission(P.DailyCloseRecords.View),
+  },
+  {
+    // 供应商节日预订单：只有下单入口或管理权限的账号（店长、采购）也能进后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/supplier-preorder-ordering',
+    targetPrefixes: ['/supplier-preorder-ordering', '/supplier-preorders'],
+    canAccess: (access) => access.canOrderSupplierPreorders || access.canManageSupplierPreorders,
   },
   {
     // 分店现金管理：只有 Cash.Overview.View 的店长 / 财务登录后直接落到现金管理页。

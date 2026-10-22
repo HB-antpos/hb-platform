@@ -306,6 +306,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Warehouse.Picking, "仓库订单拣货", "仓库管理", "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"),
                 new(Permissions.Warehouse.StartPicking, "打印配货单开始配货", "仓库管理", "Web 页面 /warehouse/store-order/picking/:id - 仓库员工打印或下载配货单时自动把订单从「已提交」推进到「配货中」；与订单编辑权限分开授权，不会随管理仓库权限自动具备"),
                 new(Permissions.Warehouse.StoreOrderReturn, "分店订单退货", "仓库管理", "Web 页面 /warehouse/store-orders 订货单明细 - 用负数发货数量录入退货（退货冲减金额，订单净额为负时开退款单）；默认无人具备，管理员手动授权，不会随管理仓库权限自动具备"),
+                new(Permissions.SupplierPreorder.Manage, "管理供应商节日预订单", "仓库管理", "Web 页面 /supplier-preorders 与 /supplier-preorders/orderers - 导入 KFC、Dats、Brazco 等节日订单表，开启参与分店，维护下单人员授权，截止锁定并导出汇总（截止后仍可修改）；默认无人具备，管理员手动授权"),
+                new(Permissions.SupplierPreorder.Order, "供应商节日预订单下单", "仓库管理", "Web 页面 /supplier-preorder-ordering - 预订单下单入口；能替哪家店下单只认「下单人员授权」页，不看可管理分店或店长身份；默认无人具备，管理员手动授权"),
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),

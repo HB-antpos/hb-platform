@@ -61,6 +61,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageDomesticPrefixCodes: [P.DomesticPurchase.ManagePrefixCodes],
   canManageDomesticProducts: [P.DomesticPurchase.ManageProducts],
   canManageWarehouseOrders: [P.Warehouse.ManageOrders, P.Warehouse.Manage],
+  canManageSupplierPreorders: [P.SupplierPreorder.Manage],
+  canOrderSupplierPreorders: [P.SupplierPreorder.Order, P.SupplierPreorder.Manage],
   canManageStoreOrderImportPriceVariance: [P.Warehouse.ManageOrders, P.Warehouse.Manage],
   canViewContainers: [P.Container.View],
   canManageWarehouseProducts: [P.Warehouse.ManageProducts, P.Warehouse.Manage],
@@ -155,6 +157,15 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/warehouse/categories', title: 'menu.categories', accessKey: 'canManageWarehouseCategories' },
       { path: '/warehouse/locations', title: 'menu.warehouseLocations', accessKey: 'canManageWarehouseLocations' },
       { path: '/warehouse/product-grade-management', title: 'menu.productGradeManagement', accessKey: 'canManageWarehouseProducts' },
+    ],
+  },
+  {
+    path: '/seasonal-preorders',
+    title: 'menu.seasonalPreorders',
+    children: [
+      { path: '/supplier-preorder-ordering', title: 'menu.supplierPreorderOrdering', accessKey: 'canOrderSupplierPreorders' },
+      { path: '/supplier-preorders', title: 'menu.supplierPreorders', accessKey: 'canManageSupplierPreorders' },
+      { path: '/supplier-preorders/orderers', title: 'menu.supplierPreorderOrderers', accessKey: 'canManageSupplierPreorders' },
     ],
   },
   {
