@@ -324,6 +324,25 @@ export function removeInterval(rules: Rule[], i: number): Result {
   return finish(next)
 }
 
+// ---- 上限输入框的显示 / 解析 ----
+/**
+ * 区间上限输入框的显示文本。注意：antd InputNumber 在用户**正在输入**时传给 formatter 的是字符串（而不是数字），
+ * 此时必须原样显示用户键入的内容，否则像 "5." 这样的中间状态会被打乱，直接对字符串调用 toFixed 还会让整页崩溃。
+ */
+export function formatBound(value: unknown, info?: { userTyping?: boolean; input?: string }): string {
+  if (info?.userTyping) return info.input ?? String(value ?? '')
+  if (value === undefined || value === null || value === '') return ''
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value)
+  return n >= UNBOUNDED_COST ? '不限' : n.toFixed(2)
+}
+/** 解析上限输入：「不限」= 99999；空或无法识别返回 NaN（输入框当作空值处理）。 */
+export function parseBound(text: string | undefined): number {
+  if (text === '不限') return UNBOUNDED_COST
+  const t = (text ?? '').trim()
+  return t === '' ? Number.NaN : Number(t)
+}
+
 // ---- 图表范围 ----
 export function chartRange(rules: Rule[], maxCost: number | null) {
   const first = rules[0].minPrice, last = rules[rules.length - 1]

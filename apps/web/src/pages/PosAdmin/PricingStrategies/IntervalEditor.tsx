@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { defaultCurve, fixedRules, fmtRate } from './pricingCurve'
 import {
   MAX_INTERVALS, UNBOUNDED_COST, actualPrice, addInterval, arcLimit, breakLink, chartRange, endPrice, hasCurveSide, intervalAt, intervalsError,
-  isFixed, linkedFlags, priceDrops, relink, removeInterval, setBend, setBoundary, setEdge, setEndpoint, setKind, setRate, setShape,
+  formatBound, isFixed, linkedFlags, parseBound, priceDrops, relink, removeInterval, setBend, setBoundary, setEdge, setEndpoint, setKind, setRate, setShape,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, startPrice, theoryPrice, visibleMaxPrice, type Result, type Rule,
 } from './pricingIntervals'
 
@@ -267,7 +267,7 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
                         : <><InputNumber aria-label="区间下限" disabled precision={2} value={r.minPrice} style={{ width: '100%' }} /><div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>= 区间 {i} 上限</div></>}</div>
                     <div><label style={fieldLabel}>上限（进货价 ≤）</label>
                       <InputNumber aria-label="区间上限" min={0.11} precision={2} value={r.maxPrice} style={{ width: '100%' }}
-                        formatter={v => (v === undefined ? '' : v >= UNBOUNDED_COST ? '不限' : v.toFixed(2))} parser={v => (v === '不限' ? UNBOUNDED_COST : Number(v))}
+                        formatter={(v, info) => formatBound(v, info)} parser={parseBound}
                         onChange={v => v !== null && apply(last ? setEdge(rules, 'max', v) : setBoundary(rules, i, v, flags))} /></div>
                   </div>
                   <div style={{ marginTop: 10 }}><label style={fieldLabel}>定价方式</label>
