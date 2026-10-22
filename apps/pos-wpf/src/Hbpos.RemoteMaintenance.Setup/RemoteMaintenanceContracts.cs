@@ -44,7 +44,9 @@ public sealed record RemoteMaintenanceStatus(
     string RustdeskId,
     string ClientVersion,
     string ServiceStatus,
-    string? Detail = null);
+    string? Detail = null,
+    // 状态上报服务的运行状态（Windows 服务状态字符串；不存在为 "notInstalled"）；旧调用方不关心时为 null。
+    string? StatusAgentStatus = null);
 
 public sealed class RemoteMaintenanceApiException(
     string message,

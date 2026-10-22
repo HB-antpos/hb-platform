@@ -313,10 +313,21 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             await RequireManagedOptionsAsync(executable, cancellationToken);
         }
 
+        // RustDesk 1.4.9 的 --config 会无条件把 api-server 设为字符串里的 api= 值，没有 api= 就是清空。
+        // 公司地址簿要求手工填写的 api-server，不能被换服务器的对账或修复顺手抹掉：到这里 IPC 已证明可用，
+        // 先读出现值，--config 之后写回并读回校验。
+        var preservedApiServer = await ReadPreservableApiServerAsync(executable, cancellationToken);
+
         // 官方 CLI 按精确参数数量分支，--config 和 --password 必须分开调用。
         var value = $"host={config.IdServer},key={config.PublicKey},relay={config.RelayServer},";
         if (await commandRunner.RunAsync(executable, "--config " + Q(value), cancellationToken) != 0)
             throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+        if (preservedApiServer.Length > 0)
+        {
+            if (await commandRunner.RunAsync(executable, "--option " + Q("api-server") + " " + Q(preservedApiServer), cancellationToken) != 0 ||
+                !await OptionMatchesAsync(executable, "api-server", preservedApiServer, cancellationToken))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+        }
         // 仅密码认证允许无人值守；禁止仅靠界面点击确认，逐项读回真实服务配置。
         if (password is not null)
             foreach (var option in ManagedOptions)
@@ -330,6 +341,14 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         foreach (var option in expected)
             if (!await OptionMatchesAsync(executable, option.Key, option.Value, cancellationToken))
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+    }
+
+    // 读取现有 api-server；过长或含控制字符的值当作不存在（不写回），避免把异常内容原样塞进命令行。
+    private async Task<string> ReadPreservableApiServerAsync(string executable, CancellationToken cancellationToken)
+    {
+        var result = await commandRunner.RunWithOutputAsync(executable, "--option " + Q("api-server"), cancellationToken);
+        var current = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+        return current.Length <= 512 && !current.Any(char.IsControl) ? current : string.Empty;
     }
 
     private async Task RequireManagedOptionsAsync(string executable, CancellationToken cancellationToken)
@@ -443,7 +462,8 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     public async Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
-        return new(status is not null, string.Empty, string.Empty, status ?? "notInstalled");
+        var agent = await serviceControl.QueryAsync(StatusServiceName, cancellationToken);
+        return new(status is not null, string.Empty, string.Empty, status ?? "notInstalled", StatusAgentStatus: agent ?? "notInstalled");
     }
     internal async Task EnsureNoForeignRustDeskConfigAsync(RemoteMaintenanceConfig config, CancellationToken cancellationToken)
     {

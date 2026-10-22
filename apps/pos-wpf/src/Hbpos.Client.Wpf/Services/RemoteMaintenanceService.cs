@@ -132,6 +132,17 @@ public sealed class RemoteMaintenanceService(
 
                 // 对账成功后 helper 已更新 journal，重新读取避免用旧快照。
                 existing = await journal.ReadAsync(cancellationToken) ?? existing;
+                // 这一轮刚把服务器改好（已弹过一次 UAC），且 RustDesk 与状态服务都在运行：修复已经完成，
+                // 不再为 configure 弹第二次 UAC。其余情况（对账无事可做、失败、状态服务没跑）仍照旧 configure。
+                if (reconcile == RemoteMaintenanceReconcileResult.Reconciled)
+                {
+                    var afterReconcile = await GetSafeStatusAsync();
+                    if (afterReconcile.ServiceStatus == "running" && afterReconcile.StatusAgentStatus == "running")
+                    {
+                        return new RemoteMaintenanceProvisionResult(true, "settings.remoteMaintenance.result.serviceRestored", afterReconcile);
+                    }
+                }
+
                 var existingConfigureCode = await uacHelperLauncher.RunAsync(
                     _helperPath,
                     _journalPath,
