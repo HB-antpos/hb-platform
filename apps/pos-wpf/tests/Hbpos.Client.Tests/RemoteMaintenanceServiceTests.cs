@@ -609,6 +609,57 @@ public sealed class RemoteMaintenanceServiceTests
     }
 
     [Fact]
+    public async Task Manual_repair_skips_second_uac_when_reconcile_applied_and_both_services_run()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Installer.ServiceStatus = "running";
+        fixture.Installer.StatusAgentStatus = "running";
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("settings.remoteMaintenance.result.serviceRestored", result.Message);
+        // 只弹一次 UAC：对账，不再 configure。
+        Assert.Equal(new[] { "reconcile" }, fixture.Launcher.Stages);
+        Assert.Equal(DedicatedServer, (await fixture.ReadStateAsync())!.Config);
+    }
+
+    [Theory]
+    [InlineData("stopped", "running")]
+    [InlineData("running", "stopped")]
+    [InlineData("running", "notInstalled")]
+    public async Task Manual_repair_still_configures_when_a_service_is_not_running(string rustDesk, string statusAgent)
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Installer.ServiceStatus = rustDesk;
+        fixture.Installer.StatusAgentStatus = statusAgent;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "reconcile", "configure" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Manual_repair_still_configures_when_the_server_was_already_up_to_date()
+    {
+        // 对账无事可做时用户点“修复”，多半是状态服务/令牌有问题，configure 不能省。
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, DedicatedServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Installer.ServiceStatus = "running";
+        fixture.Installer.StatusAgentStatus = "running";
+
+        await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.Equal(new[] { "configure" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
     public async Task Reconcile_stops_waiting_when_the_uac_prompt_is_ignored_and_releases_the_gate()
     {
         using var fixture = new Fixture(reconcileHelperTimeout: TimeSpan.FromMilliseconds(100));
@@ -838,7 +889,9 @@ public sealed class RemoteMaintenanceServiceTests
             public Task ConfigureStatusAgentAsync(RemoteMaintenancePrepareResponse prepare, RemoteMaintenanceCommitResponse commit, string rustdeskId, string clientVersion, CancellationToken cancellationToken = default) => Task.CompletedTask;
             public Task<string?> GetRustdeskIdAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>("unused");
             public string ServiceStatus { get; set; } = "stopped";
-            public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", ServiceStatus));
+            // 默认 null：保持原有用例“状态服务状态未知 → 手动修复照常 configure”的行为。
+            public string? StatusAgentStatus { get; set; }
+            public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", ServiceStatus, StatusAgentStatus: StatusAgentStatus));
         }
 
         public sealed class FakeLauncher(RemoteMaintenanceJournal journal) : IRemoteMaintenanceUacHelperLauncher

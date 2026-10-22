@@ -96,6 +96,40 @@ public sealed class RemoteMaintenanceReconcileTests
     }
 
     [Fact]
+    public async Task 对账换服务器时保留已有的api服务器()
+    {
+        using var rig = new Rig(Legacy);
+        rig.RustDesk.Options["api-server"] = "https://hotbargain.vip/api/rustdesk";
+
+        await rig.Installer.ReconcileServerAsync(Dedicated);
+
+        Assert.Equal(Dedicated.IdServer, rig.RustDesk.Options["custom-rendezvous-server"]);
+        Assert.Equal("https://hotbargain.vip/api/rustdesk", rig.RustDesk.Options["api-server"]);
+    }
+
+    [Fact]
+    public async Task 原本没有api服务器时不会凭空写入()
+    {
+        using var rig = new Rig(Legacy);
+
+        await rig.Installer.ReconcileServerAsync(Dedicated);
+
+        Assert.False(rig.RustDesk.Options.ContainsKey("api-server"));
+        Assert.DoesNotContain(rig.RustDesk.Commands, x => x.StartsWith("--option \"api-server\" \""));
+    }
+
+    [Fact]
+    public async Task 含控制字符的api服务器不写回()
+    {
+        using var rig = new Rig(Legacy);
+        rig.RustDesk.Options["api-server"] = "https://x\u0007y";
+
+        await rig.Installer.ReconcileServerAsync(Dedicated);
+
+        Assert.False(rig.RustDesk.Options.ContainsKey("api-server"));
+    }
+
+    [Fact]
     public async Task 配置已经一致时不重写配置_但仍重启一次()
     {
         // helper 只在 journal 尚未记录目标配置时被调用，说明上次可能在“标记已改、重启未做”时中断。
@@ -499,6 +533,9 @@ public sealed class RemoteMaintenanceReconcileTests
                     Options["custom-rendezvous-server"] = fields["host"];
                     Options["relay-server"] = fields["relay"];
                     Options["key"] = fields["key"];
+                    // 与真实 RustDesk 1.4.9 一致：--config 无条件按 api= 覆盖 api-server，缺省即清空。
+                    if (fields.TryGetValue("api", out var api)) Options["api-server"] = api;
+                    else Options.Remove("api-server");
                 }
             }
             else if (arguments.StartsWith("--option ", StringComparison.Ordinal) && quoted.Length == 2)
