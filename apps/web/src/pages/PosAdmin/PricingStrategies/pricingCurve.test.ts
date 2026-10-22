@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { boundedPrice, curveError, defaultCurve, finalPrice, nodesFromRules, rawPrice, rulesFromNodes } from './pricingCurve'
+import { boundedPrice, curveError, defaultCurve, finalPrice, fixedRateError, fmtRate, fixedRetailPrice, fixedRules, isFixedRules, nodesFromRules, rawPrice, rulesFromNodes } from './pricingCurve'
 
 const rules = defaultCurve()
 assert.equal(curveError(rules), null)
@@ -55,3 +55,30 @@ const lower = { ...rules[1], algorithm: 'ArcDown' as const, curveBend: -.01 }
 assert.equal(curveError([lower]), null)
 assert.ok(rawPrice(lower, 125) < rawPrice(rules[1], 125))
 console.log('定价曲线：99,801 成本点、边界尾数、弧度和倒挂回归测试通过')
+
+// 固定成率：直接 进货价 × 成率 四舍五入到分，不做 .50/.99 尾数调整（与后端 AutoPricingService 一致）
+for (const [cost, expected] of [[10, 25], [10.1, 25.25], [10.3, 25.75], [3.33, 8.33], [0.1, 0.25], [99.99, 249.98]] as const) {
+  assert.equal(fixedRetailPrice(cost, 2.5), expected, `固定成率 ${cost}`)
+}
+assert.equal(fixedRateError(2.5), null)
+assert.equal(fixedRateError(1.5), null)
+assert.equal(fixedRateError(5), null)
+assert.ok(fixedRateError(1.49))
+assert.ok(fixedRateError(5.01))
+assert.ok(fixedRateError(null))
+assert.ok(fixedRateError(Number.NaN))
+const fixed = fixedRules(2.5)
+assert.equal(fixed.length, 1)
+assert.equal(fixed[0].algorithm, 'Fixed')
+assert.equal(fixed[0].startRate, 2.5)
+assert.equal(fixed[0].endRate, 2.5)
+assert.equal(fixed[0].startRetailPrice, null)
+assert.equal(fixed[0].curveBend, null)
+assert.ok(isFixedRules(fixed))
+assert.ok(!isFixedRules(defaultCurve()))
+assert.equal(fixedRules(2.123456)[0].startRate, 2.1235)
+
+// 列表里的成率文案：至少 2 位小数，多余的 0 去掉
+for (const [rate, expected] of [[2.5, '2.50'], [2, '2.00'], [2.51, '2.51'], [2.5125, '2.5125'], [4.4998, '4.4998'], [2.501, '2.501']] as const) {
+  assert.equal(fmtRate(rate), expected, `成率文案 ${rate}`)
+}

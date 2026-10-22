@@ -149,6 +149,7 @@
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />
     <Compile Include="PricingCurveTests.cs" />
+    <Compile Include="PricingStrategySummaryTests.cs" />
     <Compile Include="AttendanceWorkSessionCalculatorTests.cs" />
     <Compile Include="AttendanceQrTokenCodecTests.cs" />
     <Compile Include="UserLoginDeviceAuditServiceTests.cs" />

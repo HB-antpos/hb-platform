@@ -1,4 +1,4 @@
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import {
   Alert,
   Button,
@@ -8,15 +8,16 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Segmented,
   Select,
   Space,
-  Spin,
   Switch,
   Tag,
+  Tooltip,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getActiveLocalSuppliers } from '../../../services/localSupplierService'
 import {
@@ -31,7 +32,6 @@ import { getActiveStores } from '../../../services/storeService'
 import { useAuthStore } from '../../../store/auth'
 import type {
   CreatePricingStrategyDto,
-  PricingStrategyDetailDto,
   PricingStrategyListDto,
   PricingStrategyRuleDto,
   PricingStrategyTargetDto,
@@ -43,8 +43,10 @@ import {
 } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
+import FixedRatePanel from './FixedRatePanel'
 import PricingCurveEditor from './PricingCurveEditor'
-import { boundedPrice, curveError, defaultCurve, nodesFromRules, rulesFromNodes } from './pricingCurve'
+import { PricingCell, StrategyExpanded } from './StrategyViews'
+import { boundedPrice, curveError, defaultCurve, fixedRateError, fixedRules, isFixedRules, nodesFromRules, rulesFromNodes } from './pricingCurve'
 
 type DataType = PricingStrategyListDto & { key: string }
 
@@ -65,127 +67,20 @@ export default function PricingStrategiesPage() {
   const [supplierOptions, setSupplierOptions] = useState<{ label: string; value: string }[]>([])
   const [editorOpen, setEditorOpen] = useState(false)
   const [curveMode, setCurveMode] = useState(true)
+  // 固定成率模式：只填一个倍数，保存为单条 Fixed 区间；与曲线/旧版区间互斥
+  const [fixedMode, setFixedMode] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editorForm] = Form.useForm()
+  const watchedDetails = Form.useWatch('details', editorForm) as PricingStrategyRuleDto[] | undefined
   const listRequestGuardRef = useRef(createLatestRequestGuard())
   const mountedRef = useRef(false)
 
   const storeNameMap = useMemo(() => new Map(storeOptions.map((o) => [o.value, o.label])), [storeOptions])
   const supplierNameMap = useMemo(() => new Map(supplierOptions.map((o) => [o.value, o.label])), [supplierOptions])
 
-  const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([])
-  const [detailCache, setDetailCache] = useState<Record<string, PricingStrategyDetailDto>>({})
-  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({})
-
-  const loadDetail = useCallback(async (id: string) => {
-    if (detailCache[id]) return
-    setDetailLoading((prev) => ({ ...prev, [id]: true }))
-    try {
-      const dto = await getStrategyById(id)
-      setDetailCache((prev) => ({ ...prev, [id]: dto }))
-    } catch {
-      message.error(t('posAdmin.pricing.loadDetailFailed', '加载策略详情失败'))
-    } finally {
-      setDetailLoading((prev) => ({ ...prev, [id]: false }))
-    }
-  }, [detailCache])
-
-  const handleExpand = useCallback((expanded: boolean, record: DataType) => {
-    const id = String(record.id)
-    if (expanded) {
-      setExpandedRowKeys((prev) => [...prev, record.key])
-      loadDetail(id)
-    } else {
-      setExpandedRowKeys((prev) => prev.filter((k) => k !== record.key))
-    }
-  }, [loadDetail])
-
-  const algorithmLabel = (v: string) => (v === 'ArcUp' ? '上弧线' : v === 'ArcDown' ? '下弧线' : v === 'Exponential' ? t('posAdmin.pricing.exponential', '指数') : v === 'Step' ? t('posAdmin.pricing.step', '阶梯') : t('posAdmin.pricing.linear', '线性'))
-  const algorithmColor = (v: string) => (v === 'ArcUp' ? 'cyan' : v === 'ArcDown' ? 'geekblue' : v === 'Exponential' ? 'orange' : v === 'Step' ? 'purple' : 'blue')
-
-  const expandedRowRender = (record: DataType) => {
-    const id = String(record.id)
-    const dto = detailCache[id]
-    if (detailLoading[id] || !dto) {
-      return (
-        <div style={{ textAlign: 'center', padding: 24 }}>
-          <Spin />
-        </div>
-      )
-    }
-
-    const ruleColumns: ColumnsType<PricingStrategyRuleDto> = [
-      {
-        title: t('posAdmin.pricing.purchasePriceRange', '进货价区间'), key: 'priceRange', width: 240,
-        render: (_, r) => (
-          <Space>
-            <Tag color="blue">{r.minPrice?.toFixed(2)}</Tag>
-            <span style={{ color: '#999' }}>~</span>
-            <Tag color="red">{r.maxPrice?.toFixed(2)}</Tag>
-          </Space>
-        ),
-      },
-      {
-        title: t('posAdmin.pricing.rateRange', '上浮率区间'), key: 'rateRange', width: 240,
-        render: (_, r) => (
-          <Space>
-            <Tag color="green">{r.startRate?.toFixed(4)}</Tag>
-            <span style={{ color: '#999' }}>~</span>
-            <Tag color="volcano">{r.endRate?.toFixed(4)}</Tag>
-          </Space>
-        ),
-      },
-      {
-        title: t('posAdmin.pricing.algorithm', '算法'), dataIndex: 'algorithm', key: 'algorithm', width: 100,
-        render: (v: string) => <Tag color={algorithmColor(v)}>{algorithmLabel(v)}</Tag>,
-      },
-    ]
-
-    const targetColumns: ColumnsType<PricingStrategyTargetDto> = [
-      {
-        title: t('posAdmin.pricing.targetType', '目标类型'), dataIndex: 'targetType', key: 'targetType', width: 120,
-        render: (v: string) => {
-          const label = v === 'Store' ? t('posAdmin.pricing.storeLevel', '分店') : v === 'Supplier' ? t('posAdmin.pricing.supplierLevel', '供应商') : t('posAdmin.pricing.globalLevel', '全局')
-          const color = v === 'Store' ? 'green' : v === 'Supplier' ? 'blue' : 'purple'
-          return <Tag color={color}>{label}</Tag>
-        },
-      },
-      {
-        title: t('posAdmin.pricing.targetCode', '目标代码'), dataIndex: 'targetCode', key: 'targetCode', width: 200,
-        render: (v: string) => {
-          if (!v) return <Tag>{t('posAdmin.pricing.all', '全部')}</Tag>
-          const name = storeNameMap.get(v) ?? supplierNameMap.get(v)
-          return <Tag color="cyan">{name ? `${v}（${name}）` : v}</Tag>
-        },
-      },
-    ]
-
-    return (
-      <div style={{ padding: '8px 0' }}>
-        <Card title={t('posAdmin.pricing.priceRules', '定价规则（{{count}} 条）', { count: dto.details.length })} size="small" style={{ marginBottom: 12 }}>
-          <MeasuredTable metricId="pos-admin.pricing-strategies.table-1"
-            rowKey={(r, i) => `${r.id ?? i}`}
-            size="small"
-            columns={ruleColumns}
-            dataSource={dto.details}
-            pagination={false}
-          />
-        </Card>
-        <Card title={t('posAdmin.pricing.targetScope', '目标范围（{{count}} 条）', { count: dto.targets.length })} size="small">
-          <MeasuredTable metricId="pos-admin.pricing-strategies.table-2"
-            rowKey={(r, i) => `${r.id ?? i}`}
-            size="small"
-            columns={targetColumns}
-            dataSource={dto.targets}
-            pagination={false}
-          />
-        </Card>
-      </div>
-    )
-  }
-
   const [testForm] = Form.useForm()
-  const [testResult, setTestResult] = useState<{ rate?: number; retailPrice?: number } | null>(null)
+  const [testResult, setTestResult] = useState<{ retailPrice: number; rate: number; strategyId?: string | null; strategyName?: string | null } | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const loadData = async () => {
     if (!mountedRef.current) {
@@ -198,11 +93,15 @@ export default function PricingStrategiesPage() {
       if (sortField && sortOrder) {
         sortModel[sortField] = sortOrder === 'ascend' ? 'asc' : 'desc'
       }
+      const filterModel: Record<string, unknown> = {}
+      if (values.storeCode) filterModel.storeCode = { FilterType: 'text', Type: 'equals', Filter: values.storeCode }
+      if (values.supplierCode) filterModel.supplierCode = { FilterType: 'text', Type: 'equals', Filter: values.supplierCode }
       return getStrategyGrid({
         StartRow: (page - 1) * pageSize,
         EndRow: page * pageSize - 1,
         PageSize: pageSize,
         GlobalSearch: values.keyword || undefined,
+        FilterModel: Object.keys(filterModel).length ? filterModel : undefined,
         SortModel: Object.keys(sortModel).length && sortField ? [{ ColId: sortField, Sort: sortModel[sortField] }] : undefined,
       } as Record<string, unknown>)
     }, {
@@ -234,6 +133,7 @@ export default function PricingStrategiesPage() {
   const openCreate = () => {
     setEditingId(null)
     setCurveMode(true)
+    setFixedMode(false)
     editorForm.resetFields()
     editorForm.setFieldsValue({
       name: '',
@@ -243,6 +143,7 @@ export default function PricingStrategiesPage() {
       targetsStores: [],
       targetsSuppliers: [],
       details: defaultCurve(),
+      fixedRate: 2.5,
     })
     setEditorOpen(true)
   }
@@ -255,7 +156,10 @@ export default function PricingStrategiesPage() {
         return
       }
       setEditingId(id)
-      setCurveMode(dto.details.length > 0 && dto.details.every(r => r.startRetailPrice != null && r.endRetailPrice != null && ['Linear', 'ArcUp', 'ArcDown'].includes(r.algorithm)))
+      // 单条 Fixed 区间 → 进入固定成率模式；其余沿用原有的曲线/旧版判定
+      const fixed = isFixedRules(dto.details)
+      setFixedMode(fixed)
+      setCurveMode(!fixed && dto.details.length > 0 && dto.details.every(r => r.startRetailPrice != null && r.endRetailPrice != null && ['Linear', 'ArcUp', 'ArcDown'].includes(r.algorithm)))
       const stores = dto.targets.filter((t) => t.targetType === 'Store').map((t) => t.targetCode!).filter(Boolean)
       const suppliers = dto.targets.filter((t) => t.targetType === 'Supplier').map((t) => t.targetCode!).filter(Boolean)
       editorForm.setFieldsValue({
@@ -265,6 +169,7 @@ export default function PricingStrategiesPage() {
         isEnabled: dto.isEnabled,
         targetsStores: stores,
         targetsSuppliers: suppliers,
+        fixedRate: fixed ? dto.details[0].startRate : 2.5,
         details: dto.details.map((r) => ({
           id: r.id,
           minPrice: r.minPrice,
@@ -294,7 +199,11 @@ export default function PricingStrategiesPage() {
         message.warning(t('posAdmin.pricing.supplierLevelRequired', '供应商级别策略必须选择至少一个供应商'))
         return
       }
-      const rules: PricingStrategyRuleDto[] = (v.details || []).map((r: any) => ({
+      if (fixedMode) {
+        const rateError = fixedRateError(v.fixedRate)
+        if (rateError) { message.warning(rateError); return }
+      }
+      const rules: PricingStrategyRuleDto[] = fixedMode ? fixedRules(Number(v.fixedRate)) : (v.details || []).map((r: any) => ({
         id: r.id,
         minPrice: Number(r.minPrice),
         maxPrice: Number(r.maxPrice),
@@ -305,7 +214,7 @@ export default function PricingStrategiesPage() {
         endRate: Number(r.endRate),
         algorithm: r.algorithm,
       }))
-      if (curveMode) {
+      if (curveMode && !fixedMode) {
         const error = curveError(rules)
         if (error) { message.warning(error); return }
       }
@@ -318,10 +227,6 @@ export default function PricingStrategiesPage() {
         await createStrategy(payload as CreatePricingStrategyDto)
       } else {
         await updateStrategy(editingId, payload as UpdatePricingStrategyDto)
-      }
-      if (editingId !== null) {
-        setDetailCache((previous) => { const next = { ...previous }; delete next[editingId]; return next })
-        setExpandedRowKeys((previous) => previous.filter((key) => String(key) !== editingId))
       }
       message.success(t('message.saveSuccess', '保存成功'))
       setEditorOpen(false)
@@ -345,36 +250,85 @@ export default function PricingStrategiesPage() {
     }
   }
 
+  // 曲线模式的底部摘要：区间数、覆盖成本范围与校验结果（与保存时的校验同源）
+  const curveSummary = (() => {
+    if (!curveMode || fixedMode || !watchedDetails?.length) return null
+    const error = curveError(watchedDetails)
+    const low = Math.min(...watchedDetails.map(r => r.minPrice)), high = Math.max(...watchedDetails.map(r => r.maxPrice))
+    return <>
+      <span>共 {watchedDetails.length} 个区间，覆盖成本 {low.toFixed(2)} ～ {high.toFixed(2)}</span>
+      <span style={{ color: error ? '#cf1322' : '#52c41a' }}>● {error ?? '校验通过'}</span>
+    </>
+  })()
+
+  // 列表上直接启停：取回完整策略后只改 isEnabled 再整体保存（与编辑弹窗同一套后端校验）
+  const toggleEnabled = async (record: DataType, next: boolean) => {
+    setTogglingId(record.id)
+    try {
+      const dto = await getStrategyById(record.id)
+      await updateStrategy(record.id, {
+        name: dto.name,
+        level: dto.level,
+        priority: dto.priority,
+        isEnabled: next,
+        details: dto.details,
+        targets: dto.targets.map(({ targetType, targetCode }) => ({ targetType, targetCode })),
+      })
+      message.success(t('message.saveSuccess', '保存成功'))
+      if (mountedRef.current) await latestLoadDataRef.current()
+    } catch (error) {
+      message.error((error as Error)?.message || t('message.saveFailed', '保存失败'))
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  const levelTag = (v: string) => {
+    const label = v === 'Supplier' ? t('posAdmin.pricing.supplierLevel', '供应商') : v === 'Store' ? t('posAdmin.pricing.storeLevel', '分店') : t('posAdmin.pricing.globalLevel', '全局')
+    return <Tag color={v === 'Supplier' ? 'blue' : v === 'Store' ? 'green' : 'gold'} style={{ marginInlineEnd: 0 }}>{label}</Tag>
+  }
+  // 目标较多时只显示前 3 个，其余折叠成 +N 并在悬停里列出
+  const scopeChips = (codes: string[], names: Map<string, string>, color: string) => {
+    const shown = codes.slice(0, 3), rest = codes.slice(3)
+    return <>
+      {shown.map((c) => <Tag key={c} color={color} style={{ marginInlineEnd: 0 }}>{names.get(c) ?? c}</Tag>)}
+      {rest.length > 0 && <Tooltip title={rest.map((c) => names.get(c) ?? c).join('、')}><Tag style={{ marginInlineEnd: 0 }}>+{rest.length}</Tag></Tooltip>}
+    </>
+  }
+
   const columns: ColumnsType<DataType> = [
-    { title: t('posAdmin.pricing.strategyName', '名称'), dataIndex: 'name', key: 'name', sorter: true },
     {
-      title: t('posAdmin.pricing.level', '等级'), dataIndex: 'level', key: 'level', width: 100,
-      render: (v: string) => {
-        const label = v === 'Supplier' ? t('posAdmin.pricing.supplierLevel', '供应商') : v === 'Store' ? t('posAdmin.pricing.storeLevel', '分店') : t('posAdmin.pricing.globalLevel', '全局')
-        const color = v === 'Supplier' ? 'blue' : v === 'Store' ? 'green' : 'purple'
-        return <Tag color={color}>{label}</Tag>
+      title: t('posAdmin.pricing.strategy', '策略'), dataIndex: 'name', key: 'name', sorter: true, width: 260,
+      render: (_, r) => <div><div style={{ fontWeight: 500 }}>{r.name}</div><div style={{ color: '#8c8c8c', fontSize: 12 }}>{t('posAdmin.pricing.priority', '优先级')} {r.priority}</div></div>,
+    },
+    {
+      title: t('posAdmin.pricing.scope', '适用范围'), key: 'scope',
+      render: (_, r) => {
+        const stores = r.storeCodes ?? [], suppliers = r.supplierCodes ?? []
+        const hint = !stores.length && !suppliers.length ? '所有分店 · 所有供应商' : !stores.length ? '所有分店' : !suppliers.length ? '所有供应商' : ''
+        return <Space size={[4, 4]} wrap>
+          {levelTag(r.level)}
+          {scopeChips(stores, storeNameMap, 'cyan')}
+          {scopeChips(suppliers, supplierNameMap, 'purple')}
+          {hint && <span style={{ color: '#8c8c8c', fontSize: 12 }}>{hint}</span>}
+        </Space>
       },
     },
+    { title: t('posAdmin.pricing.pricingMethod', '定价方式'), key: 'pricing', width: 290, render: (_, r) => <PricingCell record={r} /> },
     {
-      title: t('posAdmin.pricing.isEnabled', '启用'), dataIndex: 'isEnabled', key: 'isEnabled', sorter: true, width: 100,
-      render: (v: boolean) => <Tag color={v ? 'success' : 'error'}>{v ? t('common.enabled', '启用') : t('common.disabled', '禁用')}</Tag>,
-    },
-    { title: t('posAdmin.pricing.targetStores', '分店'), dataIndex: 'storeCodes', key: 'storeCodes', render: (vals: string[]) => <Space wrap>{(vals || []).map((c) => <Tag key={c} color="cyan">{storeNameMap.get(c) ?? c}</Tag>)}</Space> },
-    { title: t('posAdmin.pricing.targetSuppliers', '供应商'), dataIndex: 'supplierCodes', key: 'supplierCodes', render: (vals: string[]) => <Space wrap>{(vals || []).map((c) => <Tag key={c} color="geekblue">{supplierNameMap.get(c) ?? c}</Tag>)}</Space> },
-    {
-      title: t('posAdmin.pricing.ruleCount', '规则数'), dataIndex: 'detailsCount', key: 'detailsCount', width: 100,
-      render: (v: number) => <Tag color={v > 0 ? 'processing' : 'default'}>{v}</Tag>,
-    },
-    {
-      title: t('posAdmin.pricing.targetCount', '目标数'), dataIndex: 'targetsCount', key: 'targetsCount', width: 100,
-      render: (v: number) => <Tag color={v > 0 ? 'warning' : 'default'}>{v}</Tag>,
+      title: t('posAdmin.pricing.status', '状态'), dataIndex: 'isEnabled', key: 'isEnabled', sorter: true, width: 90,
+      render: (v: boolean, r) => (
+        <Popconfirm disabled={!canEdit} title={v ? t('posAdmin.pricing.confirmDisable', '确认停用该策略？') : t('posAdmin.pricing.confirmEnable', '确认启用该策略？')} description={t('posAdmin.pricing.toggleImpact', '会立即影响自动定价结果')} onConfirm={() => toggleEnabled(r, !v)}>
+          <Switch checked={v} disabled={!canEdit} loading={togglingId === r.id} aria-label={r.name} />
+        </Popconfirm>
+      ),
     },
     {
-      title: t('column.actions', '操作'), key: 'actions', width: 200,
+      title: t('column.actions', '操作'), key: 'actions', width: 140,
       render: (_, record) => (
-        <Space>
+        <Space size={0}>
           <Button type="link" disabled={!canEdit} onClick={() => openEdit(String(record.id))}>{t('common.edit', '编辑')}</Button>
-          <Popconfirm title={t('posAdmin.pricing.confirmDeleteStrategy', '确认删除该策略？')} description={t('posAdmin.pricing.deleteIrreversible', '删除后无法恢复')} okText={t('common.delete', '删除')} cancelText={t('common.cancel', '取消')} okButtonProps={{ danger: true }} disabled={!canEdit} onConfirm={() => handleDelete(String(record.id))}>
+          <Popconfirm title={t('posAdmin.pricing.confirmDeleteStrategy', '确认删除该策略？')} description={t('posAdmin.pricing.deleteIrreversible', '删除后无法恢复')} okText={t('common.delete', '删除')} cancelText={t('common.cancel', '取消')} onConfirm={() => handleDelete(String(record.id))}>
             <Button type="link" danger disabled={!canEdit}>{t('common.delete', '删除')}</Button>
           </Popconfirm>
         </Space>
@@ -413,65 +367,103 @@ export default function PricingStrategiesPage() {
   }, [page, pageSize, sortField, sortOrder])
 
   return (
-    <Card title={t('posAdmin.pricing.title', '自动价格策略管理')} extra={<Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={openCreate}>{t('posAdmin.pricing.createStrategy', '新建策略')}</Button>}>
-      <Form form={form} layout="inline" onFinish={loadData} style={{ marginBottom: 16 }}>
-        <Form.Item name="storeCode" label={t('posAdmin.pricing.targetStores', '分店')}><Select allowClear showSearch optionFilterProp="label" options={storeOptions} style={{ width: 240 }} /></Form.Item>
-        <Form.Item name="supplierCode" label={t('posAdmin.pricing.targetSuppliers', '供应商')}><Select allowClear showSearch optionFilterProp="label" options={supplierOptions} style={{ width: 240 }} /></Form.Item>
-        <Form.Item name="keyword" label={t('posAdmin.pricing.keyword', '关键词')}><Input allowClear placeholder={t('posAdmin.pricing.searchName', '搜索名称')} style={{ width: 240 }} /></Form.Item>
-        <Form.Item><Space><Button type="primary" htmlType="submit">{t('common.query', '查询')}</Button><Button onClick={() => { form.resetFields(); loadData() }}>{t('common.reset', '重置')}</Button></Space></Form.Item>
-      </Form>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{t('posAdmin.pricing.title', '自动价格策略管理')}</h1>
+          <div style={{ color: '#8c8c8c', fontSize: 13, marginTop: 2 }}>{t('posAdmin.pricing.subtitle', '按分店、供应商决定进货价到零售价的换算方式')}</div>
+        </div>
+        <Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={openCreate}>{t('posAdmin.pricing.createStrategy', '新建策略')}</Button>
+      </div>
 
-      <Card title={t('posAdmin.pricing.strategyTest', '策略测试')} style={{ marginBottom: 16 }}>
-        <Form form={testForm} layout="inline" onFinish={async (v) => {
+      <Card style={{ marginBottom: 16 }} styles={{ body: { padding: '14px 18px' } }}>
+        <Form form={testForm} onFinish={async (v) => {
           try {
-            const result = await evaluatePricing({ purchasePrice: Number(v.purchasePrice), storeCode: v.storeCode, supplierCode: v.supplierCode })
-            setTestResult({ rate: result.retailPrice ? result.retailPrice / Number(v.purchasePrice) : undefined, retailPrice: result.retailPrice })
-            message.success(t('posAdmin.pricing.calcComplete', '计算完成'))
-          } catch { message.error(t('posAdmin.pricing.calcFailed', '计算失败')) }
-        }}>
-          <Form.Item name="storeCode" label={t('posAdmin.pricing.targetStores', '分店')}><Select allowClear showSearch optionFilterProp="label" options={storeOptions} style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="supplierCode" label={t('posAdmin.pricing.targetSuppliers', '供应商')}><Select allowClear showSearch optionFilterProp="label" options={supplierOptions} style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="purchasePrice" label={t('posAdmin.pricing.purchasePrice', '进货价')} rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: 160 }} /></Form.Item>
-          <Form.Item><Button type="primary" htmlType="submit">{t('posAdmin.pricing.calculate', '计算')}</Button></Form.Item>
+            const purchasePrice = Number(v.purchasePrice)
+            const result = await evaluatePricing({ purchasePrice, storeCode: v.storeCode, supplierCode: v.supplierCode })
+            setTestResult({
+              retailPrice: result.retailPrice,
+              // 优先用后端返回的实际成率；后端较旧时用 零售价 / 进货价 兜底
+              rate: result.effectiveRate ?? (purchasePrice > 0 ? result.retailPrice / purchasePrice : 0),
+              strategyId: result.strategyId,
+              strategyName: result.strategyName,
+            })
+          } catch (error) { message.error((error as Error)?.message || t('posAdmin.pricing.calcFailed', '计算失败')) }
+        }} style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+            <b>{t('posAdmin.pricing.quickTry', '快速试算')}</b>
+            <span style={{ color: '#8c8c8c', fontSize: 12 }}>{t('posAdmin.pricing.quickTryHint', '输入进货价，看命中哪条策略')}</span>
+          </div>
+          <Form.Item name="storeCode" style={{ marginBottom: 0 }}><Select allowClear showSearch optionFilterProp="label" placeholder={t('posAdmin.pricing.targetStores', '分店')} options={storeOptions} style={{ width: 170 }} /></Form.Item>
+          <Form.Item name="supplierCode" style={{ marginBottom: 0 }}><Select allowClear showSearch optionFilterProp="label" placeholder={t('posAdmin.pricing.targetSuppliers', '供应商')} options={supplierOptions} style={{ width: 170 }} /></Form.Item>
+          <Form.Item name="purchasePrice" rules={[{ required: true, message: t('posAdmin.pricing.purchasePriceRequired', '请输入进货价') }]} style={{ marginBottom: 0 }}><InputNumber min={0} precision={2} placeholder={t('posAdmin.pricing.purchasePrice', '进货价')} style={{ width: 150 }} /></Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}><Button type="primary" htmlType="submit">{t('posAdmin.pricing.calculate', '计算')}</Button></Form.Item>
+          {testResult && <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 20, paddingLeft: 20, borderLeft: '1px solid #f0f0f0' }} aria-live="polite">
+            <div style={{ fontSize: 28, fontWeight: 600, color: '#1677ff', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 14, fontWeight: 400, color: '#8c8c8c', marginRight: 4 }}>{t('posAdmin.pricing.retailPrice', '零售价')}</span>{testResult.retailPrice.toFixed(2)}
+            </div>
+            <div style={{ fontSize: 12, color: '#595959', lineHeight: 1.7 }}>
+              {t('posAdmin.pricing.rate', '成率')} <b style={{ fontVariantNumeric: 'tabular-nums' }}>{testResult.rate.toFixed(4)}</b><br />
+              {t('posAdmin.pricing.hit', '命中')}：{testResult.strategyId
+                ? <a onClick={() => openEdit(String(testResult.strategyId))}>{testResult.strategyName ?? testResult.strategyId} ›</a>
+                : <span style={{ color: '#8c8c8c' }}>{t('posAdmin.pricing.noStrategyHit', '未命中策略（默认 2.5 倍）')}</span>}
+            </div>
+          </div>}
         </Form>
-        {testResult && (
-          <Space style={{ marginTop: 12 }}>
-            <Tag color="blue">{t('posAdmin.pricing.rateLabel', '上浮率：{{rate}}', { rate: typeof testResult.rate === 'number' ? testResult.rate.toFixed(4) : '-' })}</Tag>
-            <Tag color="green">{t('posAdmin.pricing.retailPriceLabel', '零售价：{{price}}', { price: typeof testResult.retailPrice === 'number' ? testResult.retailPrice.toFixed(2) : '-' })}</Tag>
-          </Space>
-        )}
       </Card>
 
-      <MeasuredTable metricId="pos-admin.pricing-strategies.table-3"
-        rowKey="key"
-        loading={loading}
-        dataSource={data}
-        columns={columns}
-        pagination={{ total, current: page, pageSize, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100', '200'] }}
-        onChange={onTableChange}
-        expandable={{
-          expandedRowKeys,
-          onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
-          expandedRowRender,
-          onExpand: handleExpand,
-        }}
-      />
+      <Card styles={{ body: { padding: 0 } }}>
+        <Form form={form} layout="inline" onFinish={loadData} style={{ padding: '14px 16px', borderBottom: '1px solid #f0f0f0', rowGap: 8 }}>
+          <Form.Item name="storeCode"><Select allowClear showSearch optionFilterProp="label" placeholder={t('posAdmin.pricing.targetStores', '分店')} options={storeOptions} style={{ width: 200 }} /></Form.Item>
+          <Form.Item name="supplierCode"><Select allowClear showSearch optionFilterProp="label" placeholder={t('posAdmin.pricing.targetSuppliers', '供应商')} options={supplierOptions} style={{ width: 200 }} /></Form.Item>
+          <Form.Item name="keyword"><Input allowClear placeholder={t('posAdmin.pricing.searchName', '搜索策略名称')} style={{ width: 240 }} /></Form.Item>
+          <Form.Item><Space><Button type="primary" htmlType="submit">{t('common.query', '查询')}</Button><Button onClick={() => { form.resetFields(); loadData() }}>{t('common.reset', '重置')}</Button></Space></Form.Item>
+          <span style={{ marginLeft: 'auto', color: '#8c8c8c', fontSize: 13, alignSelf: 'center' }}>
+            {t('posAdmin.pricing.totalCount', '共 {{count}} 条', { count: total })}{' '}
+            <Tooltip title={t('posAdmin.pricing.matchOrderHint', '匹配顺序：供应商 + 分店 › 仅供应商 › 仅分店 › 全局；同一类别内，优先级数字大的先匹配。')}><QuestionCircleOutlined aria-label={t('posAdmin.pricing.matchOrder', '匹配顺序')} /></Tooltip>
+          </span>
+        </Form>
+        <MeasuredTable metricId="pos-admin.pricing-strategies.table-3"
+          rowKey="key"
+          loading={loading}
+          dataSource={data}
+          columns={columns}
+          pagination={{ total, current: page, pageSize, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100', '200'], style: { padding: '0 16px' } }}
+          onChange={onTableChange}
+          expandable={{
+            expandedRowRender: (record: DataType) => <StrategyExpanded record={record} />,
+            rowExpandable: (record: DataType) => record.pricingMode === 'Fixed' || (record.nodes?.length ?? 0) > 0,
+          }}
+        />
+      </Card>
 
-      <Modal open={editorOpen} title={editingId === null ? t('posAdmin.pricing.newStrategy', '新建策略') : t('posAdmin.pricing.editStrategy', '编辑策略')} onCancel={() => setEditorOpen(false)} onOk={saveEditor} okButtonProps={{ disabled: !canEdit }} width={1100} forceRender>
+      <Modal open={editorOpen} title={editingId === null ? t('posAdmin.pricing.newStrategy', '新建策略') : t('posAdmin.pricing.editStrategy', '编辑策略')} onCancel={() => setEditorOpen(false)} width="min(1220px, calc(100vw - 32px))" forceRender footer={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ marginRight: 'auto', display: 'flex', gap: 14, alignItems: 'center', fontSize: 13, color: '#595959', textAlign: 'left' }}>{curveSummary}</div>
+        <Button onClick={() => setEditorOpen(false)}>{t('common.cancel', '取消')}</Button>
+        <Button type="primary" disabled={!canEdit} onClick={saveEditor}>{t('common.save', '保存')}</Button>
+      </div>}>
         <Form form={editorForm} layout="vertical" disabled={!canEdit}>
-          <Space style={{ width: '100%' }} wrap>
-            <Form.Item name="name" label={t('posAdmin.pricing.strategyName', '名称')} rules={[{ required: true }]} style={{ width: 300 }}><Input /></Form.Item>
-            <Form.Item name="level" label={t('posAdmin.pricing.level', '级别')} rules={[{ required: true }]} style={{ width: 160 }}>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <Form.Item name="name" label={t('posAdmin.pricing.strategyName', '名称')} rules={[{ required: true }]} style={{ width: 280, marginBottom: 12 }}><Input /></Form.Item>
+            <Form.Item name="level" label={t('posAdmin.pricing.level', '级别')} rules={[{ required: true }]} style={{ width: 140, marginBottom: 12 }}>
               <Select options={[{ value: 'Supplier', label: t('posAdmin.pricing.supplierLevel', '供应商') }, { value: 'Store', label: t('posAdmin.pricing.storeLevel', '分店') }, { value: 'Global', label: t('posAdmin.pricing.globalLevel', '全局') }]} />
             </Form.Item>
-            <Form.Item name="priority" label={t('posAdmin.pricing.priority', '优先级')} style={{ width: 180 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="isEnabled" label={t('posAdmin.pricing.isEnabled', '启用')} valuePropName="checked" style={{ width: 120 }}><Switch /></Form.Item>
-          </Space>
-          <Space style={{ width: '100%' }} wrap>
-            <Form.Item name="targetsStores" label={t('posAdmin.pricing.targetStores', '分店')} style={{ width: 400 }}><Select mode="multiple" options={storeOptions} showSearch optionFilterProp="label" allowClear /></Form.Item>
-            <Form.Item name="targetsSuppliers" label={t('posAdmin.pricing.targetSuppliers', '供应商')} style={{ width: 400 }}><Select mode="multiple" options={supplierOptions} showSearch optionFilterProp="label" allowClear /></Form.Item>
-          </Space>
-          {curveMode ? <Form.Item name="details" rules={[{ validator: (_, rules) => { const error = curveError(rules || []); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><PricingCurveEditor /></Form.Item> : <>
+            <Form.Item name="priority" label={t('posAdmin.pricing.priority', '优先级')} style={{ width: 110, marginBottom: 12 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="targetsStores" label={t('posAdmin.pricing.targetStores', '分店')} style={{ flex: '1 1 220px', minWidth: 0, marginBottom: 12 }}><Select mode="multiple" options={storeOptions} showSearch optionFilterProp="label" allowClear /></Form.Item>
+            <Form.Item name="targetsSuppliers" label={t('posAdmin.pricing.targetSuppliers', '供应商')} style={{ flex: '1 1 220px', minWidth: 0, marginBottom: 12 }}><Select mode="multiple" options={supplierOptions} showSearch optionFilterProp="label" allowClear /></Form.Item>
+            <Form.Item name="isEnabled" label={t('posAdmin.pricing.isEnabled', '启用')} valuePropName="checked" style={{ width: 60, marginBottom: 12 }}><Switch /></Form.Item>
+          </div>
+          {(curveMode || fixedMode) && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <span>定价方式</span>
+            <Segmented value={fixedMode ? 'fixed' : 'curve'} options={[{ label: '曲线定价', value: 'curve' }, { label: '固定成率', value: 'fixed' }]} onChange={(next) => {
+              if (next === 'fixed') { setFixedMode(true); return }
+              // 从固定成率切回曲线：单条 Fixed 区间不是合法曲线节点，恢复为默认曲线
+              if (isFixedRules(editorForm.getFieldValue('details') || [])) editorForm.setFieldValue('details', defaultCurve())
+              setFixedMode(false); setCurveMode(true)
+            }} />
+            {!fixedMode && <span style={{ color: '#8c8c8c', fontSize: 12 }}>拖动节点设置售价；实线为理论价，橙色阶梯为尾数调整后的实际价</span>}
+          </div>}
+          {fixedMode ? <Form.Item name="fixedRate" rules={[{ validator: (_, rate) => { const error = fixedRateError(rate); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><FixedRatePanel /></Form.Item> : curveMode ? <Form.Item name="details" rules={[{ validator: (_, rules) => { const error = curveError(rules || []); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><PricingCurveEditor /></Form.Item> : <>
           <Alert type="info" showIcon style={{ marginBottom: 12 }} message="原有区间规则" description="已有 Linear 计算已升级为零售价插值。打开时保留现有配置；转换按钮切换为图形编辑，并将节点吸附到合法尾数、应用 1.5～5 成率约束。编辑结果保存后生效。" action={<Button onClick={() => {
             const old = editorForm.getFieldValue('details') as PricingStrategyRuleDto[]
             if (!old?.length || old.some((r, i) => i > 0 && (r.minPrice !== old[i - 1].maxPrice || Math.abs(r.minPrice * r.startRate - old[i - 1].maxPrice * old[i - 1].endRate) > .000001))) { message.warning('原有区间不连续，请先对齐相邻成本与售价端点'); return }
@@ -504,6 +496,6 @@ export default function PricingStrategiesPage() {
           </>}
         </Form>
       </Modal>
-    </Card>
+    </div>
   )
 }

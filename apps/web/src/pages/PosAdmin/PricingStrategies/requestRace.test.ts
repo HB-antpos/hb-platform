@@ -172,8 +172,9 @@ const mountLifecycle = extractBlock(source, 'useLayoutEffect(() => {\n    mounte
 assert(mountLifecycle.includes('useLayoutEffect'), 'PricingStrategies 应在 layout cleanup 阶段关闭 session')
 assert(mountLifecycle.indexOf('mountedRef.current = false') < mountLifecycle.indexOf('listRequestGuardRef.current.invalidate()'), 'PricingStrategies 卸载时应先标记 unmounted 再 invalidate')
 const saveMutation = extractBlock(source, 'const saveEditor = async () => {', '\n\n  const handleDelete', 'PricingStrategies 保存 mutation')
-const deleteMutation = extractBlock(source, 'const handleDelete = async', '\n\n  const columns:', 'PricingStrategies 删除 mutation')
-for (const [label, block] of [['保存', saveMutation], ['删除', deleteMutation]] as const) {
+const deleteMutation = extractBlock(source, 'const handleDelete = async', '\n\n  // 列表上直接启停', 'PricingStrategies 删除 mutation')
+const toggleMutation = extractBlock(source, 'const toggleEnabled = async', '\n\n  const levelTag', 'PricingStrategies 启停 mutation')
+for (const [label, block] of [['保存', saveMutation], ['删除', deleteMutation], ['启停', toggleMutation]] as const) {
   assert(block.includes('await latestLoadDataRef.current()'), `PricingStrategies ${label}完成后应调用当前 loader`)
   assert(block.includes('if (mountedRef.current)'), `PricingStrategies ${label}完成后应先确认组件仍挂载`)
   assert(!block.includes('await loadData()'), `PricingStrategies ${label}不得调用旧 render loader`)
@@ -183,6 +184,6 @@ assertEqual(count(optionsEffect, 'loadData('), 0, 'PricingStrategies 选项初�
 const listEffect = extractBlock(source, 'useEffect(() => {\n    void loadData()', '\n\n  return (', 'PricingStrategies 列表 effect')
 assertEqual(count(listEffect, 'loadData('), 1, 'PricingStrategies 列表 effect 每次只能加载一次')
 assert(listEffect.includes('listRequestGuardRef.current.invalidate()'), 'PricingStrategies effect 清理时应使旧请求失效')
-assertEqual(count(source, 'await latestLoadDataRef.current()'), 2, 'PricingStrategies mutation 后仍应显式刷新列表')
+assertEqual(count(source, 'await latestLoadDataRef.current()'), 3, 'PricingStrategies mutation 后仍应显式刷新列表')
 
 console.log('PricingStrategies/requestRace.test.ts: ok')
