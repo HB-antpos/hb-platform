@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { defaultCurve } from './pricingCurve'
 import {
   MAX_INTERVALS, actualPrice, addInterval, chartRange, endPrice, intervalAt, intervalsError, isEditable, isLegalTail, linkedFlags,
-  breakLink, makeCurve, makeFixed, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
+  breakLink, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, visibleMaxPrice, type Rule,
 } from './pricingIntervals'
 
@@ -159,5 +159,19 @@ assert.deepEqual([...shiftBrokenAfterRemove(new Set([0, 1, 3]), 2)].sort(), [0, 
   assert.equal(chartRange(defaultCurve(), null).fullEnd, 999)
   assert.ok(visibleMaxPrice(mixed(), 100) >= 200)
 }
+
+// ---- 上限输入框的显示 / 解析（回归：打字时 antd 传入字符串，曾因 toFixed 导致整页崩溃）----
+assert.equal(formatBound(50), '50.00')
+assert.equal(formatBound(99999), '不限')
+assert.equal(formatBound(undefined), '')
+assert.equal(formatBound(null), '')
+assert.equal(formatBound('50'), '50.00', '字符串形式的数字也不能抛错')
+assert.equal(formatBound('5.', { userTyping: true, input: '5.' }), '5.', '输入过程中原样显示')
+assert.equal(formatBound('12', { userTyping: true, input: '12' }), '12')
+assert.equal(formatBound('abc'), 'abc')
+assert.equal(parseBound('不限'), 99999)
+assert.equal(parseBound('12.5'), 12.5)
+assert.ok(Number.isNaN(parseBound('')))
+assert.ok(Number.isNaN(parseBound(undefined)))
 
 console.log('区间式定价逻辑测试通过')
