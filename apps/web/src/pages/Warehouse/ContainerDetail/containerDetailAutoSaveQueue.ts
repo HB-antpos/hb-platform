@@ -22,6 +22,19 @@ export function resolveContainerDetailAutoSaveLifecycleAction(
   return active ? 'attach' : 'discard'
 }
 
+// 队列在「空闲时被 discard」（切到别的标签）会立刻释放 context，并回调页面删除同 key 的快照；
+// 切回来只会重新 attach 队列，不会重建快照。之后再编辑，发送批次就会找不到快照而报「保存上下文已失效」。
+// 因此每次 attach 之前都要幂等补齐快照；已存在时保持不动，避免覆盖正在使用的行与草稿元数据。
+export function ensureContainerDetailAutoSaveContextSnapshot<T>(
+  snapshots: Map<string, T>,
+  contextKey: string,
+  createSnapshot: () => T,
+) {
+  if (!contextKey || snapshots.has(contextKey)) return false
+  snapshots.set(contextKey, createSnapshot())
+  return true
+}
+
 export const CONTAINER_DETAIL_AUTO_SAVE_FIELDS = [
   '商品名称',
   '调整浮率',
