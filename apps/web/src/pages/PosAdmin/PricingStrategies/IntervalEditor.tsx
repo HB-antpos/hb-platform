@@ -1,9 +1,9 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, InputNumber, Popconfirm, Segmented, Slider } from 'antd'
+import { Alert, Button, InputNumber, Popconfirm, Segmented, Slider, type InputNumberProps } from 'antd'
 import { useRef, useState } from 'react'
 import { defaultCurve, fixedRules, fmtRate } from './pricingCurve'
 import {
-  MAX_INTERVALS, UNBOUNDED_COST, actualPrice, addInterval, arcLimit, breakLink, chartRange, endPrice, hasCurveSide, intervalAt, intervalsError,
+  MAX_INTERVALS, UNBOUNDED_COST, actualPrice, addInterval, appendInterval, arcLimit, breakLink, chartRange, endPrice, hasCurveSide, intervalAt, intervalsError,
   formatBound, isFixed, linkedFlags, parseBound, priceDrops, relink, removeInterval, setBend, setBoundary, setEdge, setEndpoint, setKind, setRate, setShape,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, startPrice, theoryPrice, visibleMaxPrice, type Result, type Rule,
 } from './pricingIntervals'
@@ -28,6 +28,26 @@ function niceTicks(lo: number, hi: number, count: number): number[] {
 const tickText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, ''))
 const money = (n: number) => n.toFixed(2)
 const costText = (r: Rule) => `${money(r.minPrice)} ~ ${r.maxPrice >= UNBOUNDED_COST ? '不限' : money(r.maxPrice)}`
+
+/**
+ * 数字输入框：输入过程中只保存草稿、不校验，失焦或回车才提交（Esc 还原）；点上下箭头直接提交。
+ * 否则每敲一个字符就校验，会把「想输 20，敲 2 时小于下限」这类中间状态拒掉并弹回原值，输入就像被锁死。
+ * onCommit 返回 false（校验不通过）时，输入框还原为原值，错误提示由编辑器顶部显示。
+ */
+function NumberField({ value, onCommit, ariaLabel, ...rest }: Omit<InputNumberProps<number>, 'value' | 'onChange'> & { value: number; onCommit: (v: number) => boolean; ariaLabel: string }) {
+  const [draft, setDraftState] = useState<number | null | undefined>(undefined)
+  // 用 ref 同步保存最新草稿：Esc 与失焦可能在同一个事件循环里先后触发，闭包里的 state 还没更新。
+  const draftRef = useRef<number | null | undefined>(undefined)
+  const setDraft = (v: number | null | undefined) => { draftRef.current = v; setDraftState(v) }
+  const commit = (v: number | null | undefined) => {
+    setDraft(undefined)
+    if (v === null || v === undefined || Number.isNaN(v) || v === value) return
+    onCommit(v)
+  }
+  return <InputNumber<number> {...rest} aria-label={ariaLabel} value={draft === undefined ? value : draft}
+    onChange={v => setDraft(v)} onBlur={() => commit(draftRef.current)} onPressEnter={() => commit(draftRef.current)} onStep={v => commit(v)}
+    onKeyDown={e => { if (e.key === 'Escape') setDraft(undefined) }} />
+}
 
 interface Hover { cost: number; price: number; theory: number; index: number }
 type Drag = { kind: 'endpoint'; i: number; which: 'start' | 'end' } | { kind: 'boundary'; i: number }
@@ -74,9 +94,10 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
     return first + Math.max(0, Math.min(1, ((clientX - box.left) * VW / box.width - PAD_L) / PLOT_W)) * (end - first)
   }
 
-  const onAdd = () => {
-    const before = rules
-    if (apply(addInterval(before, index))) { setBroken(shiftBrokenAfterAdd(broken, index)); setSelected(index + 1) }
+  // 添加区间：接在最后一个区间后面（新区间不在已有区间里面）；拆分区间：把选中的区间从中点切成两个
+  const onAppend = () => { if (apply(appendInterval(rules))) setSelected(n) }
+  const onSplit = () => {
+    if (apply(addInterval(rules, index))) { setBroken(shiftBrokenAfterAdd(broken, index)); setSelected(index + 1) }
   }
   const onRemove = () => {
     if (apply(removeInterval(rules, index))) { setBroken(shiftBrokenAfterRemove(broken, index)); setSelected(Math.max(0, index - 1)) }
@@ -130,7 +151,8 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
         <Popconfirm title="替换当前所有区间？" description="整段使用同一个固定成率 2.5×" okText="替换" cancelText="取消" onConfirm={() => reset(fixedRules(2.5))}><Button size="small">整段固定 2.5×</Button></Popconfirm>
         <Popconfirm title="替换当前所有区间？" description="恢复为默认曲线" okText="替换" cancelText="取消" onConfirm={() => reset(defaultCurve())}><Button size="small">默认曲线</Button></Popconfirm>
-        <Button size="small" icon={<PlusOutlined />} disabled={n >= MAX_INTERVALS} title={n >= MAX_INTERVALS ? `最多 ${MAX_INTERVALS} 个区间` : `在区间 ${index + 1} 的中点拆分出新区间`} onClick={onAdd}>添加区间</Button>
+        <Button size="small" disabled={n >= MAX_INTERVALS} title={n >= MAX_INTERVALS ? `最多 ${MAX_INTERVALS} 个区间` : `把区间 ${index + 1} 从中点切成两个`} onClick={onSplit}>拆分区间</Button>
+        <Button size="small" type="primary" ghost icon={<PlusOutlined />} disabled={n >= MAX_INTERVALS || rules[n - 1].maxPrice >= UNBOUNDED_COST} title={n >= MAX_INTERVALS ? `最多 ${MAX_INTERVALS} 个区间` : rules[n - 1].maxPrice >= UNBOUNDED_COST ? '最后一个区间的上限是「不限」，请用「拆分区间」，或先给它设一个具体上限' : `在末尾追加区间 ${n + 1}（从 ${money(rules[n - 1].maxPrice)} 往上）`} onClick={onAppend}>添加区间</Button>
       </span>
     </div>
 
@@ -263,18 +285,18 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
                     <div><label style={fieldLabel}>{first0 ? '下限（进货价 ≥）' : '下限（进货价 >）'}</label>
                       {first0
-                        ? <InputNumber aria-label="区间下限" min={0.1} precision={2} value={r.minPrice} onChange={v => v !== null && apply(setEdge(rules, 'min', v))} style={{ width: '100%' }} />
+                        ? <NumberField ariaLabel="区间下限" min={0.1} precision={2} value={r.minPrice} onCommit={v => apply(setEdge(rules, 'min', v))} style={{ width: '100%' }} />
                         : <><InputNumber aria-label="区间下限" disabled precision={2} value={r.minPrice} style={{ width: '100%' }} /><div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>= 区间 {i} 上限</div></>}</div>
                     <div><label style={fieldLabel}>上限（进货价 ≤）</label>
-                      <InputNumber aria-label="区间上限" min={0.11} precision={2} value={r.maxPrice} style={{ width: '100%' }}
+                      <NumberField ariaLabel="区间上限" min={0.11} precision={2} value={r.maxPrice} style={{ width: '100%' }}
                         formatter={(v, info) => formatBound(v, info)} parser={parseBound}
-                        onChange={v => v !== null && apply(last ? setEdge(rules, 'max', v) : setBoundary(rules, i, v, flags))} /></div>
+                        onCommit={v => apply(last ? setEdge(rules, 'max', v) : setBoundary(rules, i, v, flags))} /></div>
                   </div>
                   <div style={{ marginTop: 10 }}><label style={fieldLabel}>定价方式</label>
                     <Segmented block aria-label="定价方式" value={fx ? 'fixed' : 'curve'} options={[{ value: 'fixed', label: '固定成率' }, { value: 'curve', label: '曲线' }]} onChange={v => apply(setKind(rules, i, v as 'fixed' | 'curve', flags))} /></div>
                   {fx ? <div style={{ marginTop: 10 }}>
                     <label style={fieldLabel}>成率（倍）</label>
-                    <InputNumber aria-label="固定成率" size="large" min={1.5} max={5} step={0.1} precision={4} value={r.startRate} onChange={v => v !== null && apply(setRate(rules, i, v, flags))} addonAfter="倍" style={{ width: '100%', fontWeight: 600 }} />
+                    <NumberField ariaLabel="固定成率" size="large" min={1.5} max={5} step={0.1} precision={4} value={r.startRate} onCommit={v => apply(setRate(rules, i, v, flags))} addonAfter="倍" style={{ width: '100%', fontWeight: 600 }} />
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                       {RATE_PRESETS.map(p => <Button key={p} size="small" shape="round" type={r.startRate === p ? 'primary' : 'default'} ghost={r.startRate === p} onClick={() => apply(setRate(rules, i, p, flags))}>{p}</Button>)}
                     </div>
@@ -285,7 +307,7 @@ export default function IntervalEditor({ value = [], onChange }: Props) {
                         const b = which === 'start' ? i - 1 : i, nb = rules[which === 'start' ? i - 1 : i + 1]
                         const locked = b >= 0 && b < n - 1 && flags[b] && !!nb && isFixed(nb), p = which === 'start' ? startPrice(r) : endPrice(r)
                         return <div key={which}><label style={fieldLabel}>{which === 'start' ? '起点' : '终点'}售价（成本 {money(which === 'start' ? r.minPrice : r.maxPrice)}）</label>
-                          <InputNumber aria-label={which === 'start' ? '起点售价' : '终点售价'} disabled={locked} precision={2} value={p} onChange={v => v !== null && apply(setEndpoint(rules, i, which, v, flags))} style={{ width: '100%' }} />
+                          <NumberField ariaLabel={which === 'start' ? '起点售价' : '终点售价'} disabled={locked} precision={2} value={p} onCommit={v => apply(setEndpoint(rules, i, which, v, flags))} style={{ width: '100%' }} />
                           {linkRow(i, which)}</div>
                       })}
                     </div>
