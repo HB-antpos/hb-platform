@@ -1655,6 +1655,31 @@ export default function ContainerDetailPage() {
   }, [gridContentElement, tableRegionElement, toolbarElement, detailTableRenderKey, exporting, exportProgress, layoutDetailLoadMode])
 
   useEffect(() => {
+    if (!tableRegionElement) return undefined
+    // 虚拟表格的横向滚动由 rc-virtual-list 用 offsetLeft 状态模拟（内层容器 overflow-x: hidden），
+    // 表头只跟这个状态同步。输入框聚焦（点击、Tab、方向键）时浏览器会对被裁住的输入框做原生
+    // scrollIntoView，把内层容器的 scrollLeft 推走，表头不知情，于是表头与表体列上下错位。
+    // 这里把原生偏移折算成一次等量的横向滚轮增量交还给虚拟列表：它会同步更新表体、表头与固定列阴影。
+    const handleNativeHorizontalScroll = (event: Event) => {
+      const holder = event.target
+      if (!(holder instanceof HTMLElement)) return
+      if (!holder.parentElement?.classList.contains('ant-table-tbody-virtual-holder')) return
+      const nativeOffset = holder.scrollLeft
+      if (nativeOffset === 0) return
+      holder.scrollLeft = 0
+      holder.dispatchEvent(new WheelEvent('wheel', {
+        deltaX: nativeOffset,
+        deltaY: 0,
+        bubbles: true,
+        cancelable: true,
+      }))
+    }
+    // scroll 事件不冒泡，必须用捕获阶段监听。
+    tableRegionElement.addEventListener('scroll', handleNativeHorizontalScroll, true)
+    return () => tableRegionElement.removeEventListener('scroll', handleNativeHorizontalScroll, true)
+  }, [tableRegionElement])
+
+  useEffect(() => {
     setCategoryLoading(true)
     getCategoryTree()
       .then((tree) => {
