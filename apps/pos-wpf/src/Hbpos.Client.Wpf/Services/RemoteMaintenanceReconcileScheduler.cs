@@ -30,8 +30,11 @@ internal sealed class RemoteMaintenanceReconcileScheduler(
     {
         await Task.Delay(StartupDelay, _timeProvider, cancellationToken);
         var nextAttemptAt = DateTimeOffset.MinValue;
-        while (!cancellationToken.IsCancellationRequested)
+        while (true)
         {
+            // 取消统一表现为抛 OperationCanceledException：若只用 while 条件判断，取消恰好发生在
+            // Task.Delay 正常结束之后、下一次判断之前时，会无声无息地正常返回，调用方无法区分“已处理完”与“被取消”。
+            cancellationToken.ThrowIfCancellationRequested();
             var now = _timeProvider.GetUtcNow();
             if (now >= nextAttemptAt && HasUsableCashierTicket(now))
             {
