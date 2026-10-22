@@ -12,7 +12,7 @@ public static class Program
     {
         if (args.Length != 6 || !string.Equals(args[0], "--operation", StringComparison.Ordinal) ||
             !string.Equals(args[2], "--stage", StringComparison.Ordinal) ||
-            args[3] is not ("install" or "configure" or "fail-closed") ||
+            args[3] is not ("install" or "configure" or "fail-closed" or "reconcile") ||
             !string.Equals(args[4], "--journal", StringComparison.Ordinal) ||
             !Path.IsPathFullyQualified(args[5]))
         {
@@ -27,6 +27,8 @@ public static class Program
                 args[5],
                 new DpapiRemoteMaintenanceSecretProtector());
             var state = journal.ReadAsync().GetAwaiter().GetResult();
+            // 对账只需要已提交的操作与待应用配置，不依赖安装包路径等安装期字段，所以先于下面的完整性检查处理。
+            if (args[3] == "reconcile") return Reconcile(journal, state, operationId);
             if (state is null || state.OperationId != operationId || state.Config is null ||
                 state.RustDeskArtifactPath is null || state.StatusAgentArtifactPath is null ||
                 state.DataDirectory is null || state.ArtifactManifest is null)
@@ -122,6 +124,44 @@ public static class Program
             // helper 输出只含阶段与退出码，绝不暴露密码、token、异常原文或命令行参数。
             return Emit(false, args[3], operationId, 4);
         }
+    }
+
+    /// <summary>
+    /// 启动对账阶段：把用户态写入 journal 的 PendingConfig 应用到本机 RustDesk。
+    /// PendingConfig 来自普通用户可写的 journal，所以应用前由安装器再次校验白名单、公钥与接管标记；
+    /// 只有应用成功后才把它并入 Config，失败时 Config 保持旧值，下次对账会重试。
+    /// </summary>
+    private static int Reconcile(RemoteMaintenanceJournal journal, RemoteMaintenanceJournalState? state, Guid operationId)
+    {
+        if (state is null || state.OperationId != operationId ||
+            state.State != RemoteMaintenanceOperationState.Committed || state.PendingConfig is null)
+            return Emit(false, "reconcile", operationId, 3);
+
+        // 手动修复与自动对账、不同 Windows 会话可能同时拉起 helper；两个提权进程交错 stop/start 服务没有意义，
+        // 串行执行。拿不到锁就放弃本次，由下次对账重试。
+        using var mutex = new Mutex(false, @"Global\Hbpos.RemoteMaintenance.Setup.Reconcile");
+        bool acquired;
+        try { acquired = mutex.WaitOne(TimeSpan.FromMinutes(2)); }
+        catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) return Emit(false, "reconcile", operationId, 4);
+        try
+        {
+            // 对账只换服务器，不读取、不设置无人值守密码。
+            var commandRunner = new WindowsRemoteMaintenanceCommandRunner();
+            var installer = new WindowsRemoteMaintenanceInstaller(commandRunner, new WindowsRemoteMaintenanceServiceControl(commandRunner));
+            installer.ReconcileServerAsync(state.PendingConfig).GetAwaiter().GetResult();
+
+            var latest = journal.ReadAsync(CancellationToken.None).GetAwaiter().GetResult() ?? state;
+            journal.WriteAsync(latest with
+            {
+                Config = state.PendingConfig,
+                PendingConfig = null,
+                ReconcileFailureCount = 0,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            }).GetAwaiter().GetResult();
+            return Emit(true, "reconcile", operationId, 0);
+        }
+        finally { mutex.ReleaseMutex(); }
     }
 
     private static int Emit(bool ok, string stage, Guid operationId, int exitCode)

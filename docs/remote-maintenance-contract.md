@@ -232,6 +232,27 @@ POS 端还必须从原始 `Authorization: Bearer <deviceAuthorizationCode>` 重�
 
 **回滚：** 任何健康检查、试点或公钥/产物验收失败，先把中心和 POS API 的 `REMOTE_MAINTENANCE_ENABLED` 都改回 `false`，仍须使用原部署的 `--env-file`、project 和两个 `-f` 路径执行 `up -d --no-deps --force-recreate hb-api`、`up -d --no-deps --force-recreate hbpos-api`，再确认旧业务健康。此开关只控制中心/POS API 的远程维护接口、代理下载、提交和心跳，不会卸载或停止已安装的 RustDesk 客户端、status agent Windows 服务，也不会停止 RustDesk server/relay 容器；若要求彻底停用无人值守访问，必须另行执行受控的客户端/Agent 停止或卸载及 RustDesk 服务停用流程。保留新增 schema、中心 DataProtection key ring、artifact 和审计数据，不用回滚或删除它们。若故障只在 RustDesk 服务，按 [`scripts/ops/rustdesk/README.md`](../scripts/ops/rustdesk/README.md) 的精确回滚步骤处理；应用回滚与 RustDesk 容器回滚分开进行。
 
+## 服务器切换与启动对账
+
+RustDesk 服务器地址有两个允许值：历史地址 `hotbargain.vip:21116/21117` 与专用域名 `rd.hotbargain.vip:21116/21117`（ID 与中继必须是同一主机，端口固定，公钥不变，且必须是规范 base64）。白名单在 `RemoteMaintenanceServerPolicy` 中，WPF 安装器、提权 helper 和启动对账共用，中心即使被篡改也无法把设备指向白名单之外。
+
+**唯一开关**是主 API 的 `.env`：`REMOTE_MAINTENANCE_ID_SERVER`、`REMOTE_MAINTENANCE_RELAY_SERVER`（`services/backend/docker-compose.yml` 读取，未设置时仍是历史地址）。它们只被 POS `prepare` 响应与管理员 manifest 读取。**撤回服务器必须把这两个值改回历史地址，不能靠 `REMOTE_MAINTENANCE_ENABLED=false`**：关闭功能后 `prepare` 直接返回 DISABLED，设备端对账只会暂缓，已切换的设备会停在新地址上。
+
+已安装设备的对账流程：
+
+1. **触发时机**：WPF 启动 30 秒后开始等待，**出现普通收银员的有效票据后**才去问中心（`RemoteMaintenanceReconcileScheduler`）。原因：POS 网关对 `prepare` 要求已登录收银员的硬件绑定票据，停在登录界面时只会得到 403；紧急授权会话没有票据，请求被拒后客户端会把该会话清掉，所以紧急会话与过期票据一律不触发。暂缓（离线、中心维护、操作闸门被占用）每 30 分钟重试，其余任何结论本次运行不再重复。
+2. 仅当本机 journal 为 `Committed` 且 RustDesk 仍在时进入，否则不处理（卸载后走完整重装，重装会拿到中心当前配置）。
+3. 用原 `operationId` 调 `prepare`（对已提交设备幂等，只会同步门店/设备代码和计算机名）读取期望配置；离线、401/403 或功能关闭静默等待，不计失败。
+4. 期望配置必须在白名单内且公钥与本机一致，否则拒绝（`Rejected`，需运维修正中心配置）；与 journal 中的 `Config` 相同则空操作，并清掉遗留的待应用配置与失败计数。
+5. 不同则（未超过自动重试上限时）把期望值写入 journal 的 `PendingConfig`，经 UAC 提权运行 helper 的 `reconcile` 阶段。helper 等待最多 5 分钟，超时只是不再等待并计一次失败。
+6. helper 重新校验白名单与公钥，确认 `managed-server.json` 接管标记是公司配置，读回受管选项（`verification-method`、`approve-mode`、`allow-only-conn-window-open`）证明读到的是服务自己的配置，实际服务器配置必须是公司可信配置；然后写入 `--config` 并读回，**之后**才原子更新接管标记并重启 RustDesk 服务，最后把 `PendingConfig` 并入 `Config`。写入中途失败会尽力还原服务配置。
+7. **对账全程不读取、不设置无人值守密码，也不重写无人值守选项**：journal 位于普通用户可写目录，提权 helper 不能把里面的密码写成 RustDesk 永久密码。
+8. UAC 被拒、等待超时或 helper 失败累计 `ReconcileFailureCount`，达到 5 次后不再自动弹 UAC（中心撤回到本机现状时计数清零）；设置页对已提交设备点“安装/修复”会手动再对账一次，失败时提示“服务器地址更新未完成”。
+
+**灰度**没有按设备下发的开关：切换 `.env` 后，所有已升级到带对账的 WPF 的设备会在各自下次收银员登录后切走。灰度靠 WPF 更新策略的范围控制（先只发测试店），旧版 WPF 不会对账，仍留在历史地址。切换后没有自动验证“新服务器能否注册成功”，也没有自动回退，所以切换前必须用一台真机在不改中心配置的情况下手工验证新服务器可达（UDP 21116 在个别运营商网络可能被限）。
+
+**顺序约束**：切换中心开关前，新旧两台 RustDesk 服务器必须同时在线并使用同一对密钥；回退 WPF 版本前必须先把 `.env` 改回历史地址并等设备收敛，否则旧版 `ValidateConfig` 会拒绝新地址、重装失败。中心开关只管 WPF 受管设备；免配置下载包（`prepare-client.py` 把地址编码进文件名）、iOS/Mac 手工配置的客户端是另外的开关，需要各自改。切换详细步骤与回滚见 `scripts/ops/rustdesk/README.md`。
+
 ## 数据库迁移与启动门禁
 
 迁移至少建立：远程设备最新快照/归属表（唯一 `DeviceRegistrationId`）、凭据密文、monitor token hash、加密 commit 操作响应、严格 sequence、时间戳和 schema 版本；凭据密文、token hash、操作响应不得进入列表 DTO。中心主库沿既有正确 db 模式，POS 归属读取既有 POSM 有效登记。

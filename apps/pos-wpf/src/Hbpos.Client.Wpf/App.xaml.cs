@@ -125,6 +125,7 @@ public partial class App : Application
             await WaitForFirstFrameAsync(contentRendered);
             FinishStartupExperience(recordTimings: true, fade: true);
             mainWindow.ContinueStartupAfterShown();
+            ScheduleRemoteMaintenanceReconcile(_host);
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             ScheduleStartupGateReleaseAfterClickGuardDelay();
 
@@ -600,6 +601,28 @@ public partial class App : Application
                 SaveStartupProfileInBackground(profile);
             };
         }
+    }
+
+    /// <summary>
+    /// 等收银员登录后对账受管 RustDesk 的服务器（中心切换到专用域名后，已安装设备自动改过去）。
+    /// 时机判断见 <see cref="RemoteMaintenanceReconcileScheduler"/>；全程静默失败，永远不影响收银主流程。
+    /// </summary>
+    private static void ScheduleRemoteMaintenanceReconcile(IHost host)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var scheduler = new RemoteMaintenanceReconcileScheduler(
+                    host.Services.GetRequiredService<IRemoteMaintenanceReconciler>(),
+                    host.Services.GetRequiredService<ICashierSessionContext>());
+                await scheduler.RunAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                ConsoleLog.WriteWarning("RemoteMaintenance", $"startup reconcile aborted error={ex.GetType().Name}", exception: ex);
+            }
+        });
     }
 
     private static void SaveStartupProfileInBackground(StartupTimingProfile profile)

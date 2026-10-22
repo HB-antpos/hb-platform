@@ -205,6 +205,10 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     internal TimeSpan DaemonReadyTimeout { get; init; } = TimeSpan.FromSeconds(90);
     internal TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
+    /// <summary>接管标记与 RustDesk 程序的实际位置；生产固定在 Program Files，测试可指向临时目录并关闭位置校验。</summary>
+    internal sealed record ManagedPaths(string RustDeskExecutable, string MarkerPath, bool EnforceProtectedLocation = true);
+    internal ManagedPaths Paths { get; init; } = new(InstalledRustDesk, Path.Combine(StatusProgramDirectory, "managed-server.json"));
+
     public async Task<RemoteMaintenanceInstallationResult> InstallAsync(RemoteMaintenanceInstallationRequest request, CancellationToken cancellationToken = default)
     {
         ValidateConfig(request.Prepare.Config);
@@ -253,8 +257,7 @@ public sealed class WindowsRemoteMaintenanceInstaller(
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
 
             await ConfigureRustDeskAsync(InstalledRustDesk, request.Prepare.Config, request.Password, cancellationToken);
-            await File.WriteAllTextAsync(Path.Combine(StatusProgramDirectory, "managed-server.json"),
-                JsonSerializer.Serialize(request.Prepare.Config), cancellationToken);
+            await WriteManagedMarkerAsync(request.Prepare.Config, cancellationToken);
             var rustdeskId = await GetRustdeskIdAsync(cancellationToken);
             if (string.IsNullOrEmpty(rustdeskId))
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
@@ -282,26 +285,58 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         finally { if (File.Exists(staged)) File.Delete(staged); }
     }
 
-    internal async Task ConfigureRustDeskAsync(string executable, RemoteMaintenanceConfig config, string password, CancellationToken cancellationToken)
+    // 受管服务固定写入的三项无人值守选项；对账时用它们的读回当作“读到的是服务自己的配置”的证据。
+    private static readonly (string Key, string Value)[] ManagedOptions =
+    [
+        ("verification-method", "use-permanent-password"), ("approve-mode", "password"), ("allow-only-conn-window-open", "N")
+    ];
+
+    /// <param name="password">
+    /// 安装时传入新生成的无人值守密码：用 --password 的 Done! 证明 IPC 已通，并写入三项无人值守选项。
+    /// 为 null 表示“只换服务器”的对账模式：绝不设置/重置密码，也不重写无人值守选项，
+    /// 而是要求这三项已按公司配置存在——普通用户可写的 journal 里的密码不能被提权 helper 当成永久密码写入。
+    /// </param>
+    internal async Task ConfigureRustDeskAsync(string executable, RemoteMaintenanceConfig config, string? password, CancellationToken cancellationToken)
     {
         ValidateConfig(config);
-        // --password 只有经 IPC 得到服务端 --server 进程确认才输出 Done!，而服务刚启动时 IPC
-        // 尚未就绪（CLI 连接超时仅 1 秒）。先重试到确认成功：既设置了密码，也证明 IPC 已通，
-        // 之后的 --config/--option 才会写入服务配置，而不是静默回退写到当前管理员的本地配置。
-        await WaitForDaemonPasswordAckAsync(executable, password, cancellationToken);
+        if (password is not null)
+        {
+            // --password 只有经 IPC 得到服务端 --server 进程确认才输出 Done!，而服务刚启动时 IPC
+            // 尚未就绪（CLI 连接超时仅 1 秒）。先重试到确认成功：既设置了密码，也证明 IPC 已通，
+            // 之后的 --config/--option 才会写入服务配置，而不是静默回退写到当前管理员的本地配置。
+            await WaitForDaemonPasswordAckAsync(executable, password, cancellationToken);
+        }
+        else
+        {
+            // 对账模式没有密码确认，改为写入前先读回受管选项：IPC 不通时 CLI 会回退读管理员本地配置，
+            // 那里不会有这三项，读回不一致即在写入前失败，不会把新地址误写进管理员本地配置。
+            await RequireManagedOptionsAsync(executable, cancellationToken);
+        }
+
         // 官方 CLI 按精确参数数量分支，--config 和 --password 必须分开调用。
         var value = $"host={config.IdServer},key={config.PublicKey},relay={config.RelayServer},";
         if (await commandRunner.RunAsync(executable, "--config " + Q(value), cancellationToken) != 0)
             throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
         // 仅密码认证允许无人值守；禁止仅靠界面点击确认，逐项读回真实服务配置。
-        foreach (var option in new[] { ("verification-method", "use-permanent-password"), ("approve-mode", "password"), ("allow-only-conn-window-open", "N") })
-            if (await commandRunner.RunAsync(executable, "--option " + Q(option.Item1) + " " + Q(option.Item2), cancellationToken) != 0)
-                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
-        var expected = new[] { ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey),
-            ("verification-method", "use-permanent-password"), ("approve-mode", "password"), ("allow-only-conn-window-open", "N") };
+        if (password is not null)
+            foreach (var option in ManagedOptions)
+                if (await commandRunner.RunAsync(executable, "--option " + Q(option.Key) + " " + Q(option.Value), cancellationToken) != 0)
+                    throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+        var expected = new List<(string Key, string Value)>
+        {
+            ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey)
+        };
+        expected.AddRange(ManagedOptions);
         foreach (var option in expected)
-            if (!await OptionMatchesAsync(executable, option.Item1, option.Item2, cancellationToken))
+            if (!await OptionMatchesAsync(executable, option.Key, option.Value, cancellationToken))
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+    }
+
+    private async Task RequireManagedOptionsAsync(string executable, CancellationToken cancellationToken)
+    {
+        foreach (var option in ManagedOptions)
+            if (!await OptionMatchesAsync(executable, option.Key, option.Value, cancellationToken))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
     }
 
     internal async Task WaitForDetachedRustDeskSetupAsync(CancellationToken cancellationToken)
@@ -331,13 +366,16 @@ public sealed class WindowsRemoteMaintenanceInstaller(
 
     // 服务刚启动时 IPC 可能短暂不可用，CLI 会回退读取当前用户的本地配置；
     // 读回允许有限次重试，全部不一致才判定为不一致。
-    private async Task<bool> OptionMatchesAsync(string executable, string key, string expected, CancellationToken cancellationToken)
+    private Task<bool> OptionMatchesAsync(string executable, string key, string expected, CancellationToken cancellationToken, int maxAttempts = 10) =>
+        OptionMatchesAnyAsync(executable, key, [expected], cancellationToken, maxAttempts);
+
+    private async Task<bool> OptionMatchesAnyAsync(string executable, string key, string[] acceptable, CancellationToken cancellationToken, int maxAttempts = 10)
     {
         for (var attempt = 1; ; attempt++)
         {
             var actual = await commandRunner.RunWithOutputAsync(executable, "--option " + Q(key), cancellationToken);
-            if (actual.ExitCode == 0 && actual.StandardOutput.Trim() == expected) return true;
-            if (attempt >= 10) return false;
+            if (actual.ExitCode == 0 && acceptable.Contains(actual.StandardOutput.Trim())) return true;
+            if (attempt >= maxAttempts) return false;
             await Task.Delay(PollInterval, cancellationToken);
         }
     }
@@ -411,28 +449,138 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     {
         var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
         if (status is null) return;
-        EnsureProtectedProgramPath(InstalledRustDesk);
+        EnsureManagedLocation(Paths.RustDeskExecutable);
+        // 管理员目录里的接管标记是“这台 RustDesk 是公司接管的”的唯一依据，不依据普通用户可写的 journal。
+        // 标记是可信公司配置且公钥与目标一致时，服务仍按标记里的旧公司地址运行也算自己人
+        // （服务器切换期间的中断安装/恢复），后续 ConfigureRustDeskAsync 会把它覆盖成目标配置。
+        var marker = await ReadManagedMarkerAsync(cancellationToken);
+        var managed = marker is not null && RemoteMaintenanceServerPolicy.IsTrusted(marker) &&
+            string.Equals(marker.PublicKey, config.PublicKey, StringComparison.Ordinal) ? marker : null;
         if (status != "running")
         {
-            var marker = Path.Combine(StatusProgramDirectory, "managed-server.json");
-            // 只有管理员目录中已确认接管的服务才允许为恢复事务重新启动；
-            // 其余一律视为外部 RustDesk，不依据普通用户可写的 journal 绕过。
-            if (!File.Exists(marker))
-                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
-            EnsureProtectedProgramPath(marker);
-            if (JsonSerializer.Deserialize<RemoteMaintenanceConfig>(await File.ReadAllTextAsync(marker, cancellationToken)) != config)
-                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+            if (managed is null) throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
             if (await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
         }
-        foreach (var expected in new[] { ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey) })
-            if (!await OptionMatchesAsync(InstalledRustDesk, expected.Item1, expected.Item2, cancellationToken))
+
+        var candidates = managed is null || managed == config ? new[] { config } : new[] { config, managed };
+        foreach (var option in new (string Key, Func<RemoteMaintenanceConfig, string> Select)[]
+        {
+            ("custom-rendezvous-server", x => x.IdServer), ("relay-server", x => x.RelayServer), ("key", x => x.PublicKey)
+        })
+            if (!await OptionMatchesAnyAsync(Paths.RustDeskExecutable, option.Key,
+                    candidates.Select(option.Select).Distinct().ToArray(), cancellationToken))
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
     }
+
+    /// <summary>
+    /// 启动对账（提权侧）：把已接管的 RustDesk 从当前公司服务器改到中心期望的公司服务器。
+    /// 只在服务器域名间切换，公钥必须保持不变；整个过程幂等，任何一步中断后重跑都能收敛。
+    /// 顺序固定为“先写服务配置并读回、再改接管标记、最后重启服务”，因此标记已是新值就说明服务配置已生效。
+    /// 不接收也不设置无人值守密码（见 <see cref="ConfigureRustDeskAsync"/> 的对账模式）。
+    /// </summary>
+    public async Task ReconcileServerAsync(RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default)
+    {
+        ValidateConfig(desired);
+        // RustDesk 被卸载交给完整重装流程，这里不负责安装。
+        var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
+        if (status is null)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        EnsureManagedLocation(Paths.RustDeskExecutable);
+        if (!File.Exists(Paths.RustDeskExecutable))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+
+        var marker = await ReadManagedMarkerAsync(cancellationToken);
+        // 没有接管标记，或标记不是公司配置：这不是我们接管的 RustDesk，绝不改它的配置。
+        if (marker is null || !RemoteMaintenanceServerPolicy.IsTrusted(marker))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+        // 对账只换域名；公钥变化意味着服务端密钥轮换，需要走专门流程，不能在这里悄悄接受。
+        if (!string.Equals(marker.PublicKey, desired.PublicKey, StringComparison.Ordinal))
+            throw new InvalidDataException("对账不允许变更 RustDesk 公钥。");
+
+        // 标记已确认接管，服务停止时先拉起，才能通过 IPC 读写它的真实配置。
+        if (status != "running" && await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        // 先证明读到的是服务自己的配置（受管选项齐全），再读实际服务器配置。
+        await RequireManagedOptionsAsync(Paths.RustDeskExecutable, cancellationToken);
+        var actual = await ReadActualServerConfigAsync(cancellationToken);
+        // 实际配置必须是公司可信配置且公钥不变，否则说明被外部改过，不覆盖。
+        // 它可以是标记值、目标值或另一个公司地址：前两种对应上次对账在不同步骤中断后的半成品，同样能收敛。
+        if (!RemoteMaintenanceServerPolicy.IsTrusted(actual) ||
+            !string.Equals(actual.PublicKey, marker.PublicKey, StringComparison.Ordinal))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+
+        if (actual != desired)
+        {
+            try { await ConfigureRustDeskAsync(Paths.RustDeskExecutable, desired, password: null, cancellationToken); }
+            catch
+            {
+                // 写入或读回中途失败时尽力把服务配置还原到对账前的值，避免留下“服务已改、标记未改”的半成品。
+                try { await ConfigureRustDeskAsync(Paths.RustDeskExecutable, actual, password: null, CancellationToken.None); }
+                catch { /* 还原失败也不掩盖原始错误；下次对账会按实际配置继续收敛。 */ }
+                throw;
+            }
+        }
+
+        if (marker != desired) await WriteManagedMarkerAsync(desired, cancellationToken);
+        // 无论配置是刚改的还是上次已改完，都重启一次：调用方只在 journal 尚未记录目标配置时才进来，
+        // 说明上一次可能在“标记已改、重启未做”时中断，服务仍在用旧注册信息。
+        await RestartRustDeskAsync(cancellationToken);
+    }
+
+    private async Task<RemoteMaintenanceConfig> ReadActualServerConfigAsync(CancellationToken cancellationToken)
+    {
+        async Task<string> ReadAsync(string key)
+        {
+            var result = await commandRunner.RunWithOutputAsync(Paths.RustDeskExecutable, "--option " + Q(key), cancellationToken);
+            return result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+        }
+
+        return new RemoteMaintenanceConfig(
+            await ReadAsync("custom-rendezvous-server"), await ReadAsync("relay-server"), await ReadAsync("key"));
+    }
+
+    // 重启服务让它立即向新服务器注册；配置与标记此时都已落盘，重启失败可由下次对账或手动修复补救。
+    // 停止成功后启动失败会让设备离线，所以启动多试一次再报错。
+    private async Task RestartRustDeskAsync(CancellationToken cancellationToken)
+    {
+        if (await serviceControl.StopAsync(RustDeskServiceName, cancellationToken) != 0)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        if (await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0 &&
+            await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+    }
+
+    private void EnsureManagedLocation(string path)
+    {
+        if (Paths.EnforceProtectedLocation) EnsureProtectedProgramPath(path);
+    }
+
+    private async Task<RemoteMaintenanceConfig?> ReadManagedMarkerAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(Paths.MarkerPath)) return null;
+        EnsureManagedLocation(Paths.MarkerPath);
+        try { return JsonSerializer.Deserialize<RemoteMaintenanceConfig>(await File.ReadAllTextAsync(Paths.MarkerPath, cancellationToken)); }
+        catch (JsonException) { return null; }
+    }
+
+    // 临时文件加原子替换：断电或崩溃时标记要么是旧值要么是新值，不会出现半截 JSON。
+    private async Task WriteManagedMarkerAsync(RemoteMaintenanceConfig config, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(Paths.MarkerPath)!;
+        EnsureManagedLocation(directory);
+        var temporary = Path.Combine(directory, "managed-server-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(config), cancellationToken);
+            File.Move(temporary, Paths.MarkerPath, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     internal static void ValidateConfig(RemoteMaintenanceConfig config)
     {
-        if (config.IdServer != "hotbargain.vip:21116" || config.RelayServer != "hotbargain.vip:21117" ||
-            Convert.FromBase64String(config.PublicKey).Length != 32)
+        if (!RemoteMaintenanceServerPolicy.IsTrusted(config))
             throw new InvalidDataException("RustDesk 配置必须指向公司服务器。");
     }
     private static string ResolveTrustedStatusAgentPath()

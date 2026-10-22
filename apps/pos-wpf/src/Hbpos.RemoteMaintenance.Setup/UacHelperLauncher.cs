@@ -31,7 +31,7 @@ public sealed class WindowsRemoteMaintenanceUacHelperLauncher : IRemoteMaintenan
 
     public async Task<int> RunAsync(string helperPath, string journalPath, Guid operationId, string stage, CancellationToken cancellationToken = default)
     {
-        if (stage is not ("install" or "configure" or "fail-closed")) throw new ArgumentException("无效的 helper 阶段。", nameof(stage));
+        if (stage is not ("install" or "configure" or "fail-closed" or "reconcile")) throw new ArgumentException("无效的 helper 阶段。", nameof(stage));
         if (!Path.IsPathFullyQualified(journalPath)) throw new ArgumentException("journal 路径必须是绝对路径。", nameof(journalPath));
         // 所有提权入口都必须来自受保护安装目录；恢复与清理不要求重新安装状态组件。
         if (stage == "install") ValidateInstallation(helperPath);

@@ -391,6 +391,324 @@ public sealed class RemoteMaintenanceServiceTests
         Assert.Empty(fixture.Launcher.Stages);
     }
 
+    private static readonly string TestPublicKey = Convert.ToBase64String(new byte[32]);
+    private static readonly RemoteMaintenanceConfig LegacyServer = new("hotbargain.vip:21116", "hotbargain.vip:21117", TestPublicKey);
+    private static readonly RemoteMaintenanceConfig DedicatedServer = new("rd.hotbargain.vip:21116", "rd.hotbargain.vip:21117", TestPublicKey);
+
+    // 已提交且配置为历史地址的设备；中心返回的 deviceId 必须与 journal 一致，对账才会信任响应。
+    private static async Task<RemoteMaintenanceJournalState> WriteCommittedAsync(Fixture fixture, RemoteMaintenanceConfig config)
+    {
+        var state = fixture.State(Guid.NewGuid(), RemoteMaintenanceOperationState.Committed,
+            rustdeskId: "rustdesk-123", protectedMonitorToken: fixture.Protect("monitor-token")) with { Config = config };
+        await fixture.WriteStateAsync(state);
+        fixture.Api.DeviceId = state.DeviceId;
+        return state;
+    }
+
+    [Fact]
+    public async Task Reconcile_switches_to_the_server_the_center_asks_for()
+    {
+        using var fixture = new Fixture();
+        var state = await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, result);
+        Assert.Equal(new[] { "reconcile" }, fixture.Launcher.Stages);
+        Assert.Equal(state.OperationId, fixture.Launcher.OperationIds.Single());
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(DedicatedServer, journal!.Config);
+        Assert.Null(journal.PendingConfig);
+    }
+
+    [Fact]
+    public async Task Reconcile_does_nothing_when_local_config_already_matches_the_center()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, DedicatedServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.UpToDate, result);
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Reconcile_rolls_back_to_the_legacy_server_when_the_center_switches_back()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, DedicatedServer);
+        fixture.Api.PrepareConfig = LegacyServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, result);
+        Assert.Equal(LegacyServer, (await fixture.ReadStateAsync())!.Config);
+    }
+
+    [Theory]
+    [InlineData("evil.example.com:21116", "evil.example.com:21117")]
+    [InlineData("rd.hotbargain.vip:21116", "hotbargain.vip:21117")]
+    [InlineData("rd.hotbargain.vip:22", "rd.hotbargain.vip:21117")]
+    [InlineData("rd.hotbargain.vip.evil.com:21116", "rd.hotbargain.vip.evil.com:21117")]
+    public async Task Reconcile_refuses_servers_outside_the_company_allow_list(string idServer, string relayServer)
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = new RemoteMaintenanceConfig(idServer, relayServer, TestPublicKey);
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Rejected, result);
+        Assert.Empty(fixture.Launcher.Stages);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(LegacyServer, journal!.Config);
+        Assert.Null(journal.PendingConfig);
+    }
+
+    [Fact]
+    public async Task Reconcile_refuses_a_public_key_change()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        var otherKey = Convert.ToBase64String(Enumerable.Repeat((byte)7, 32).ToArray());
+        fixture.Api.PrepareConfig = DedicatedServer with { PublicKey = otherKey };
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Rejected, result);
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Reconcile_ignores_a_response_for_another_device()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Api.DeviceId = Guid.NewGuid();
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, result);
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Reconcile_leaves_uninstalled_devices_to_the_full_reinstall_path()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Installer.ServiceStatus = "notInstalled";
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.NotApplicable, result);
+        Assert.Empty(fixture.Api.PreparedOperations);
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Theory]
+    [InlineData(RemoteMaintenanceOperationState.Prepared)]
+    [InlineData(RemoteMaintenanceOperationState.InstalledPendingCommit)]
+    public async Task Reconcile_only_applies_to_committed_operations(RemoteMaintenanceOperationState state)
+    {
+        using var fixture = new Fixture();
+        await fixture.WriteStateAsync(fixture.State(Guid.NewGuid(), state, "rustdesk-123", null) with { Config = LegacyServer });
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.NotApplicable, await fixture.Service.ReconcileAsync());
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Reconcile_with_no_journal_is_not_applicable()
+    {
+        using var fixture = new Fixture();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.NotApplicable, await fixture.Service.ReconcileAsync());
+        Assert.Empty(fixture.Api.PreparedOperations);
+    }
+
+    [Fact]
+    public async Task Reconcile_offline_defers_quietly_without_counting_a_failure()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareFailure = new HttpRequestException("offline");
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, result);
+        Assert.Empty(fixture.Launcher.Stages);
+        Assert.Equal(0, (await fixture.ReadStateAsync())!.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_stops_prompting_for_uac_after_repeated_failures_but_manual_repair_still_tries()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Launcher.ReconcileFailure = new System.ComponentModel.Win32Exception(1223);
+
+        for (var attempt = 1; attempt <= RemoteMaintenanceService.MaxAutomaticReconcileFailures; attempt++)
+        {
+            Assert.Equal(RemoteMaintenanceReconcileResult.Failed, await fixture.Service.ReconcileAsync());
+            Assert.Equal(attempt, (await fixture.ReadStateAsync())!.ReconcileFailureCount);
+        }
+
+        // 达到上限后自动对账不再弹 UAC（仍会问中心，这样中心撤回时才能解除锁定）。
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, await fixture.Service.ReconcileAsync());
+        Assert.Equal(RemoteMaintenanceService.MaxAutomaticReconcileFailures, fixture.Launcher.Stages.Count(x => x == "reconcile"));
+
+        // 设置页手动修复仍会再试一次；这次成功后失败计数清零、配置已切换。
+        fixture.Launcher.ReconcileFailure = null;
+        var repair = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(repair.Succeeded);
+        Assert.Equal(RemoteMaintenanceService.MaxAutomaticReconcileFailures + 1, fixture.Launcher.Stages.Count(x => x == "reconcile"));
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(DedicatedServer, journal!.Config);
+        Assert.Equal(0, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_failure_from_the_helper_keeps_the_old_config_and_retries_next_start()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Launcher.ReconcileExitCode = 13;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Failed, await fixture.Service.ReconcileAsync());
+
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(LegacyServer, journal!.Config);
+        Assert.Equal(1, journal.ReconcileFailureCount);
+
+        fixture.Launcher.ReconcileExitCode = 0;
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+        Assert.Equal(DedicatedServer, (await fixture.ReadStateAsync())!.Config);
+    }
+
+    [Fact]
+    public async Task Manual_repair_reconciles_the_server_before_restoring_the_status_service()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "reconcile", "configure" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Reconcile_stops_waiting_when_the_uac_prompt_is_ignored_and_releases_the_gate()
+    {
+        using var fixture = new Fixture(reconcileHelperTimeout: TimeSpan.FromMilliseconds(100));
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Launcher.HangReconcile = true;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Failed, await fixture.Service.ReconcileAsync());
+        Assert.Equal(1, (await fixture.ReadStateAsync())!.ReconcileFailureCount);
+
+        // 闸门已释放，之后用户点了授权即可成功。
+        fixture.Launcher.HangReconcile = false;
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+    }
+
+    [Fact]
+    public async Task Reconcile_yields_to_a_running_install_instead_of_queueing()
+    {
+        using var fixture = new Fixture();
+        var release = new TaskCompletionSource();
+        fixture.Api.PrepareBlocker = release.Task;
+        var install = fixture.Service.InstallAsync(fixture.Session);
+        await AsyncTestWaitSupport.WaitUntilAsync(() => fixture.Api.PreparedOperations.Count == 1);
+
+        // 安装占着操作闸门：对账立即让路，不排队，也不去问中心。
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, await fixture.Service.ReconcileAsync());
+        Assert.Single(fixture.Api.PreparedOperations);
+
+        fixture.Api.PrepareFailure = new HttpRequestException("stop the install");
+        release.SetResult();
+        await install;
+    }
+
+    [Fact]
+    public async Task Reconcile_clears_leftover_pending_config_and_failure_count_once_it_matches()
+    {
+        using var fixture = new Fixture();
+        var state = await WriteCommittedAsync(fixture, DedicatedServer);
+        await fixture.WriteStateAsync(state with { PendingConfig = DedicatedServer, ReconcileFailureCount = 3 });
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.UpToDate, await fixture.Service.ReconcileAsync());
+
+        var journal = await fixture.ReadStateAsync();
+        Assert.Null(journal!.PendingConfig);
+        Assert.Equal(0, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_failure_lock_is_cleared_when_the_center_reverts_and_does_not_block_a_later_switch()
+    {
+        using var fixture = new Fixture();
+        var state = await WriteCommittedAsync(fixture, LegacyServer);
+        await fixture.WriteStateAsync(state with { ReconcileFailureCount = RemoteMaintenanceService.MaxAutomaticReconcileFailures });
+
+        // 已锁定且中心要求切换：不弹 UAC。
+        fixture.Api.PrepareConfig = DedicatedServer;
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, await fixture.Service.ReconcileAsync());
+        Assert.Empty(fixture.Launcher.Stages);
+
+        // 中心撤回到本机现状：计数被清零，解除锁定。
+        fixture.Api.PrepareConfig = LegacyServer;
+        Assert.Equal(RemoteMaintenanceReconcileResult.UpToDate, await fixture.Service.ReconcileAsync());
+        Assert.Equal(0, (await fixture.ReadStateAsync())!.ReconcileFailureCount);
+
+        // 之后中心再次要求切换，可以自动对账。
+        fixture.Api.PrepareConfig = DedicatedServer;
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+    }
+
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    public async Task Reconcile_gateway_auth_rejections_are_not_counted_as_failures(int statusCode)
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareFailure = new RemoteMaintenanceApiException("denied", statusCode);
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Deferred, await fixture.Service.ReconcileAsync());
+        Assert.Equal(0, (await fixture.ReadStateAsync())!.ReconcileFailureCount);
+        Assert.Empty(fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Manual_repair_tells_the_user_when_the_server_address_could_not_be_updated()
+    {
+        using var fixture = new Fixture();
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Launcher.ReconcileExitCode = 13;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        // 状态服务照常恢复，但不能让用户以为一切就绪。
+        Assert.True(result.Succeeded);
+        Assert.Equal("settings.remoteMaintenance.result.serviceRestoredServerPending", result.Message);
+        Assert.Equal(new[] { "reconcile", "configure" }, fixture.Launcher.Stages);
+    }
+
     private sealed class RecordingProgress(List<RemoteMaintenanceStage> stages) : IProgress<RemoteMaintenanceStage>
     {
         public void Report(RemoteMaintenanceStage value) => stages.Add(value);
@@ -401,7 +719,7 @@ public sealed class RemoteMaintenanceServiceTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "hbpos-remote-test-" + Guid.NewGuid().ToString("N"));
         private readonly PrefixProtector _protector = new();
         private readonly RemoteMaintenanceJournal _journal;
-        public Fixture(bool cancelInstall = false)
+        public Fixture(bool cancelInstall = false, TimeSpan? reconcileHelperTimeout = null)
         {
             Directory.CreateDirectory(_root);
             _journal = new RemoteMaintenanceJournal(Path.Combine(_root, "journal.json"), _protector);
@@ -410,7 +728,10 @@ public sealed class RemoteMaintenanceServiceTests
             Launcher = new FakeLauncher(_journal);
             Launcher.CancelInstall = cancelInstall;
             Installer = new FakeInstaller();
-            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector);
+            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector)
+            {
+                ReconcileHelperTimeout = reconcileHelperTimeout ?? TimeSpan.FromMinutes(5)
+            };
         }
 
         public FakeApi Api { get; }
@@ -445,6 +766,7 @@ public sealed class RemoteMaintenanceServiceTests
         }
 
         public Task WriteStateAsync(RemoteMaintenanceJournalState state) => _journal.WriteAsync(state);
+        public Task<RemoteMaintenanceJournalState?> ReadStateAsync() => _journal.ReadAsync();
 
         public void Dispose() => Directory.Delete(_root, recursive: true);
 
@@ -467,15 +789,21 @@ public sealed class RemoteMaintenanceServiceTests
         {
             public Exception? PrepareFailure { get; set; }
             public Exception? CommitFailure { get; set; }
+            // 对账用例需要中心返回指定的服务器配置，且 deviceId 与 journal 一致。
+            public RemoteMaintenanceConfig? PrepareConfig { get; set; }
+            public Guid? DeviceId { get; set; }
+            // 让 prepare 停在中心请求上，用来制造“安装正占着操作闸门”的并发场景。
+            public Task? PrepareBlocker { get; set; }
             public List<Guid> PreparedOperations { get; } = [];
             public List<Guid> CommittedOperations { get; } = [];
             public List<string> CommittedPasswords { get; } = [];
             public List<string> CommittedRustdeskIds { get; } = [];
-            public Task<RemoteMaintenancePrepareResponse> PrepareAsync(RemoteMaintenancePrepareRequest request, CancellationToken cancellationToken = default)
+            public async Task<RemoteMaintenancePrepareResponse> PrepareAsync(RemoteMaintenancePrepareRequest request, CancellationToken cancellationToken = default)
             {
                 PreparedOperations.Add(request.OperationId);
+                if (PrepareBlocker is not null) await PrepareBlocker;
                 if (PrepareFailure is not null) throw PrepareFailure;
-                return Task.FromResult(new RemoteMaintenancePrepareResponse(request.OperationId, Guid.NewGuid(), Manifest.Config, Manifest.Artifacts));
+                return new RemoteMaintenancePrepareResponse(request.OperationId, DeviceId ?? Guid.NewGuid(), PrepareConfig ?? Manifest.Config, Manifest.Artifacts);
             }
             public Task<Stream> DownloadArtifactAsync(string downloadUrl, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task<RemoteMaintenanceCommitResponse> CommitAsync(RemoteMaintenanceCommitRequest request, CancellationToken cancellationToken = default)
@@ -527,6 +855,11 @@ public sealed class RemoteMaintenanceServiceTests
             public List<string> Stages { get; } = [];
             public List<Guid> OperationIds { get; } = [];
             public List<RemoteMaintenanceInstallationResult> FailClosedRequests { get; } = [];
+            // reconcile 阶段：抛出异常（如 UAC 被拒）或返回非零；成功时模拟 helper 把 PendingConfig 并入 Config。
+            public Exception? ReconcileFailure { get; set; }
+            // 模拟 UAC 弹窗无人理会：helper 一直不返回，只有等待超时才会结束。
+            public bool HangReconcile { get; set; }
+            public int ReconcileExitCode { get; set; }
             public bool InstallWritesId { get; set; }
             public bool CancelInstall { get; set; }
             public int InstallExitCode { get; set; }
@@ -547,6 +880,15 @@ public sealed class RemoteMaintenanceServiceTests
                         state.RustdeskId,
                         state.ClientVersion,
                         state.DataDirectory ?? string.Empty));
+                    return 0;
+                }
+                if (stage == "reconcile")
+                {
+                    if (ReconcileFailure is not null) throw ReconcileFailure;
+                    if (HangReconcile) await Task.Delay(Timeout.Infinite, cancellationToken);
+                    if (ReconcileExitCode != 0) return ReconcileExitCode;
+                    var current = await journal.ReadAsync(cancellationToken) ?? throw new InvalidOperationException();
+                    await journal.WriteAsync(current with { Config = current.PendingConfig, PendingConfig = null, ReconcileFailureCount = 0 }, cancellationToken);
                     return 0;
                 }
                 if (stage == "install" && InstallWritesId)

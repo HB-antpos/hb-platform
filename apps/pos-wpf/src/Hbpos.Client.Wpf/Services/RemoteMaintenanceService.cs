@@ -20,6 +20,32 @@ public sealed record RemoteMaintenanceProvisionResult(
     string Message,
     RemoteMaintenanceStatus Status);
 
+/// <summary>启动对账的结果，只用于日志与测试；界面不展示。</summary>
+public enum RemoteMaintenanceReconcileResult
+{
+    /// <summary>本机没有已提交的受管 RustDesk（未安装、已卸载或未完成登记），不在对账范围。</summary>
+    NotApplicable,
+    /// <summary>本机配置与中心期望一致，无需任何操作。</summary>
+    UpToDate,
+    /// <summary>已提权把 RustDesk 切换到中心期望的服务器。</summary>
+    Reconciled,
+    /// <summary>暂不处理：正在安装、中心不可达、自动重试次数已用完等，之后会再试或由手动触发。</summary>
+    Deferred,
+    /// <summary>需要对账但未完成：UAC 被拒、等待超时或 helper 失败。设备仍在旧服务器，可手动修复。</summary>
+    Failed,
+    /// <summary>中心给出的配置不在公司白名单或要求更换公钥，设备端拒绝执行；需要运维修正中心配置。</summary>
+    Rejected
+}
+
+/// <summary>
+/// 启动对账：已安装的 RustDesk 以中心当前下发的服务器为准。中心把服务器从旧域名切到专用域名后，
+/// 已升级的设备在下次启动时自动收敛一次；一致后每次都是空操作，回滚时中心改回旧值即可原路改回。
+/// </summary>
+public interface IRemoteMaintenanceReconciler
+{
+    Task<RemoteMaintenanceReconcileResult> ReconcileAsync(CancellationToken cancellationToken = default);
+}
+
 public interface IRemoteMaintenanceService
 {
     Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default);
@@ -39,8 +65,15 @@ public sealed class RemoteMaintenanceService(
     IRemoteMaintenanceInstaller installer,
     IRemoteMaintenanceUacHelperLauncher uacHelperLauncher,
     RemoteMaintenanceJournal journal,
-    IRemoteMaintenanceSecretProtector secretProtector) : IRemoteMaintenanceService
+    IRemoteMaintenanceSecretProtector secretProtector) : IRemoteMaintenanceService, IRemoteMaintenanceReconciler
 {
+    // 自动对账连续失败达到该次数后不再自动弹 UAC，用户可在设置页点“修复”手动触发。
+    internal const int MaxAutomaticReconcileFailures = 5;
+
+    // 提权 helper 的最长等待：UAC 无人理会时不能一直占着操作闸门（安装/修复也共用它）。
+    // 超时只是不再等待，已弹出的 UAC 与 helper 本身不受影响，下次对账会按实际状态收敛。
+    internal TimeSpan ReconcileHelperTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly string _helperPath = Path.Combine(AppContext.BaseDirectory, "Hbpos.RemoteMaintenance.Setup.exe");
     private readonly string _journalPath = journal.FilePath;
@@ -89,6 +122,16 @@ public sealed class RemoteMaintenanceService(
             if (!reinstallRegisteredOperation && existing?.State == RemoteMaintenanceOperationState.Committed)
             {
                 ReportStage(RemoteMaintenanceStage.Configuring);
+                // 手动修复同样先对账服务器；失败不阻断下面的状态服务恢复（两者互相独立）。
+                var reconcile = RemoteMaintenanceReconcileResult.Deferred;
+                try { reconcile = await ReconcileCoreAsync(existing, manual: true, cancellationToken); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogReconcile(existing.OperationId, $"reconcile aborted error={ex.GetType().Name}", warning: true);
+                }
+
+                // 对账成功后 helper 已更新 journal，重新读取避免用旧快照。
+                existing = await journal.ReadAsync(cancellationToken) ?? existing;
                 var existingConfigureCode = await uacHelperLauncher.RunAsync(
                     _helperPath,
                     _journalPath,
@@ -97,7 +140,12 @@ public sealed class RemoteMaintenanceService(
                     cancellationToken);
                 return new RemoteMaintenanceProvisionResult(
                     existingConfigureCode == 0,
-                    existingConfigureCode == 0 ? "settings.remoteMaintenance.result.serviceRestored" : "settings.remoteMaintenance.result.serviceRestoreFailed",
+                    existingConfigureCode != 0
+                        ? "settings.remoteMaintenance.result.serviceRestoreFailed"
+                        // 状态服务已恢复但服务器地址没改成：如实告知，不能让用户以为一切就绪。
+                        : reconcile == RemoteMaintenanceReconcileResult.Failed
+                            ? "settings.remoteMaintenance.result.serviceRestoredServerPending"
+                            : "settings.remoteMaintenance.result.serviceRestored",
                     await GetStatusAsync(cancellationToken));
             }
 
@@ -337,6 +385,146 @@ public sealed class RemoteMaintenanceService(
         finally
         {
             _operationGate.Release();
+        }
+    }
+
+    public async Task<RemoteMaintenanceReconcileResult> ReconcileAsync(CancellationToken cancellationToken = default)
+    {
+        // 安装/恢复正在进行时让路，不排队等待；下次启动或手动修复再对账。
+        if (!await _operationGate.WaitAsync(0, cancellationToken)) return RemoteMaintenanceReconcileResult.Deferred;
+        try
+        {
+            return await ReconcileCoreAsync(await journal.ReadAsync(cancellationToken), manual: false, cancellationToken);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    /// <summary>调用方必须已持有 <see cref="_operationGate"/>。</summary>
+    private async Task<RemoteMaintenanceReconcileResult> ReconcileCoreAsync(
+        RemoteMaintenanceJournalState? state, bool manual, CancellationToken cancellationToken)
+    {
+        if (state is not { State: RemoteMaintenanceOperationState.Committed, Config: { } current })
+        {
+            return RemoteMaintenanceReconcileResult.NotApplicable;
+        }
+
+        // RustDesk 已被卸载时走完整重装（它会按中心当前配置安装），这里不处理。
+        var local = await GetSafeStatusAsync();
+        if (local.ServiceStatus is "notInstalled" or "checkFailed")
+        {
+            return RemoteMaintenanceReconcileResult.NotApplicable;
+        }
+
+        // 同一 operationId 的 prepare 对已提交设备是幂等的，只用来读取中心当前期望的服务器配置。
+        RemoteMaintenancePrepareResponse prepare;
+        try
+        {
+            prepare = await apiClient.PrepareAsync(new RemoteMaintenancePrepareRequest(state.OperationId, Environment.MachineName), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 离线、中心维护、功能关闭或票据失效都属正常情况，静默等下次，不计入失败次数。
+            var detail = ex is RemoteMaintenanceApiException api ? $" status={api.StatusCode} code={api.Code ?? "-"}" : string.Empty;
+            LogReconcile(state.OperationId, $"reconcile deferred reason=prepare-failed error={ex.GetType().Name}{detail}", warning: false);
+            return RemoteMaintenanceReconcileResult.Deferred;
+        }
+
+        if (prepare.OperationId != state.OperationId || prepare.DeviceId != state.DeviceId)
+        {
+            LogReconcile(state.OperationId, "reconcile deferred reason=prepare-mismatch", warning: true);
+            return RemoteMaintenanceReconcileResult.Deferred;
+        }
+
+        var desired = prepare.Config;
+        // 中心给出的配置必须在公司白名单内，且公钥不变；否则宁可不动，也不把设备指向未知服务器。
+        if (!RemoteMaintenanceServerPolicy.IsTrusted(desired) ||
+            !string.Equals(desired.PublicKey, current.PublicKey, StringComparison.Ordinal))
+        {
+            LogReconcile(state.OperationId, "reconcile rejected reason=untrusted-desired-config", warning: true);
+            return RemoteMaintenanceReconcileResult.Rejected;
+        }
+
+        if (desired == current)
+        {
+            // 清掉上次失败遗留的待应用配置与失败计数，保持 journal 干净；计数也因此不会把设备永久锁死。
+            if (state.PendingConfig is not null || state.ReconcileFailureCount != 0)
+            {
+                await journal.WriteAsync(
+                    state with { PendingConfig = null, ReconcileFailureCount = 0, UpdatedAtUtc = DateTimeOffset.UtcNow },
+                    cancellationToken);
+            }
+
+            return RemoteMaintenanceReconcileResult.UpToDate;
+        }
+
+        // 确实需要提权才检查自动重试上限：达到上限后不再自动弹 UAC，手动修复仍可再试。
+        if (!manual && state.ReconcileFailureCount >= MaxAutomaticReconcileFailures)
+        {
+            return RemoteMaintenanceReconcileResult.Deferred;
+        }
+
+        // PendingConfig 只是“请求”，真正是否应用由提权 helper 再次校验后决定。
+        await journal.WriteAsync(state with { PendingConfig = desired, UpdatedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
+        var failureReason = "helper-failed";
+        var helperCode = -1;
+        using var helperTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        helperTimeout.CancelAfter(ReconcileHelperTimeout);
+        try
+        {
+            helperCode = await uacHelperLauncher.RunAsync(_helperPath, _journalPath, state.OperationId, "reconcile", helperTimeout.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            failureReason = "helper-timeout";
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            failureReason = "uac-declined";
+        }
+        catch (Exception ex)
+        {
+            failureReason = $"helper-error:{ex.GetType().Name}";
+        }
+
+        if (helperCode == 0)
+        {
+            LogReconcile(state.OperationId, $"reconcile applied idServer={desired.IdServer}", warning: false);
+            return RemoteMaintenanceReconcileResult.Reconciled;
+        }
+
+        // helper 可能已改过 journal，失败计数必须基于最新内容累加。
+        var latest = await journal.ReadAsync(CancellationToken.None) ?? state;
+        await journal.WriteAsync(
+            latest with { ReconcileFailureCount = latest.ReconcileFailureCount + 1, UpdatedAtUtc = DateTimeOffset.UtcNow },
+            CancellationToken.None);
+        LogReconcile(
+            state.OperationId,
+            $"reconcile failed reason={failureReason} exitCode={helperCode} failures={latest.ReconcileFailureCount + 1}",
+            warning: failureReason != "uac-declined");
+        return RemoteMaintenanceReconcileResult.Failed;
+    }
+
+    private static void LogReconcile(Guid operationId, string message, bool warning)
+    {
+        var context = new ApplicationLogContext(TraceId: operationId.ToString("D"));
+        if (warning)
+        {
+            ConsoleLog.WriteWarning("RemoteMaintenance", message, context);
+        }
+        else
+        {
+            ConsoleLog.WriteInformation("RemoteMaintenance", message, context);
         }
     }
 

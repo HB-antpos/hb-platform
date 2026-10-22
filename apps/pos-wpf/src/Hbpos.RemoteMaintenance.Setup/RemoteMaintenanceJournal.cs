@@ -29,7 +29,12 @@ public sealed record RemoteMaintenanceJournalState(
     RemoteMaintenanceArtifactManifest? ArtifactManifest = null,
     // 仅记录本次事务实际触及的服务；预检查拒绝时两个标志都保持 false。
     bool RustDeskInstalled = false,
-    bool StatusAgentInstalled = false);
+    bool StatusAgentInstalled = false,
+    // 启动对账：用户态写入中心期望的新服务器配置，提权 helper 校验白名单后应用，
+    // 成功时由 helper 把它并入 Config 并清空。旧版本 journal 没有该字段，读出为 null。
+    RemoteMaintenanceConfig? PendingConfig = null,
+    // 自动对账连续失败次数（UAC 被拒、服务异常等）；达到上限后不再自动弹 UAC，改由设置页手动触发。
+    int ReconcileFailureCount = 0);
 
 public interface IRemoteMaintenanceSecretProtector
 {

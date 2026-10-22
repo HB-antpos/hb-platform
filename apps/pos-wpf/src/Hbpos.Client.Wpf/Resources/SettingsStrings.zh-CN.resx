@@ -354,6 +354,7 @@
   <data name="settings.remoteMaintenance.detail.serviceUnavailable" xml:space="preserve"><value>远程维护组件不可用，请联系管理员。</value></data>
   <data name="settings.remoteMaintenance.result.activationRequired" xml:space="preserve"><value>当前设备尚未完成激活，无法配置远程维护。</value></data>
   <data name="settings.remoteMaintenance.result.serviceRestored" xml:space="preserve"><value>远程维护状态服务已恢复。</value></data>
+  <data name="settings.remoteMaintenance.result.serviceRestoredServerPending" xml:space="preserve"><value>远程维护状态服务已恢复，但服务器地址更新未完成，请稍后再点一次修复。</value></data>
   <data name="settings.remoteMaintenance.result.serviceRestoreFailed" xml:space="preserve"><value>远程维护状态服务恢复失败，请稍后重试。</value></data>
   <data name="settings.remoteMaintenance.result.journalDecryptFailed" xml:space="preserve"><value>远程维护恢复记录无法解密，请联系管理员处理后重试。</value></data>
   <data name="settings.remoteMaintenance.result.configured" xml:space="preserve"><value>远程维护已完成配置，状态服务将在后台上报设备状态。</value></data>

@@ -112,7 +112,10 @@ public static class ServiceRegistration
         services.AddSingleton<IRemoteMaintenanceUacHelperLauncher, WindowsRemoteMaintenanceUacHelperLauncher>();
         services.AddSingleton<IRemoteMaintenanceInstaller, WindowsRemoteMaintenanceInstaller>();
         services.AddSingleton<IRemoteMaintenanceArtifactDownloader, RemoteMaintenanceArtifactDownloader>();
-        services.AddSingleton<IRemoteMaintenanceService, RemoteMaintenanceService>();
+        // 同一个实例同时提供安装服务与启动对账，二者共用操作闸门，避免对账与手动安装并发改 journal。
+        services.AddSingleton<RemoteMaintenanceService>();
+        services.AddSingleton<IRemoteMaintenanceService>(sp => sp.GetRequiredService<RemoteMaintenanceService>());
+        services.AddSingleton<IRemoteMaintenanceReconciler>(sp => sp.GetRequiredService<RemoteMaintenanceService>());
         services.AddSingleton<IAppShutdownCoordinator, AppShutdownCoordinator>();
         services.AddSingleton<ICashierSessionContext, CashierSessionContext>();
         services.AddSingleton<IEmergencyLoginPublicKeyCache, EmergencyLoginPublicKeyCache>();
