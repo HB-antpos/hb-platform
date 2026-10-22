@@ -8,7 +8,6 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Segmented,
   Select,
   Space,
   Switch,
@@ -43,10 +42,10 @@ import {
 } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
-import FixedRatePanel from './FixedRatePanel'
-import PricingCurveEditor from './PricingCurveEditor'
+import IntervalEditor from './IntervalEditor'
 import { PricingCell, StrategyExpanded } from './StrategyViews'
-import { boundedPrice, curveError, defaultCurve, fixedRateError, fixedRules, isFixedRules, nodesFromRules, rulesFromNodes } from './pricingCurve'
+import { boundedPrice, defaultCurve, nodesFromRules, rulesFromNodes } from './pricingCurve'
+import { intervalsError, isEditable, priceDrops } from './pricingIntervals'
 
 type DataType = PricingStrategyListDto & { key: string }
 
@@ -66,9 +65,8 @@ export default function PricingStrategiesPage() {
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [supplierOptions, setSupplierOptions] = useState<{ label: string; value: string }[]>([])
   const [editorOpen, setEditorOpen] = useState(false)
+  // 区间编辑器模式（固定 / 曲线区间）；含旧版 Step、Exponential 等规则时为 false，走原有区间规则表单
   const [curveMode, setCurveMode] = useState(true)
-  // 固定成率模式：只填一个倍数，保存为单条 Fixed 区间；与曲线/旧版区间互斥
-  const [fixedMode, setFixedMode] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editorForm] = Form.useForm()
   const watchedDetails = Form.useWatch('details', editorForm) as PricingStrategyRuleDto[] | undefined
@@ -133,7 +131,6 @@ export default function PricingStrategiesPage() {
   const openCreate = () => {
     setEditingId(null)
     setCurveMode(true)
-    setFixedMode(false)
     editorForm.resetFields()
     editorForm.setFieldsValue({
       name: '',
@@ -143,7 +140,6 @@ export default function PricingStrategiesPage() {
       targetsStores: [],
       targetsSuppliers: [],
       details: defaultCurve(),
-      fixedRate: 2.5,
     })
     setEditorOpen(true)
   }
@@ -156,10 +152,8 @@ export default function PricingStrategiesPage() {
         return
       }
       setEditingId(id)
-      // 单条 Fixed 区间 → 进入固定成率模式；其余沿用原有的曲线/旧版判定
-      const fixed = isFixedRules(dto.details)
-      setFixedMode(fixed)
-      setCurveMode(!fixed && dto.details.length > 0 && dto.details.every(r => r.startRetailPrice != null && r.endRetailPrice != null && ['Linear', 'ArcUp', 'ArcDown'].includes(r.algorithm)))
+      // 全部是固定 / 带节点售价的曲线区间时用区间编辑器，否则保留原有的旧版区间规则表单
+      setCurveMode(isEditable(dto.details))
       const stores = dto.targets.filter((t) => t.targetType === 'Store').map((t) => t.targetCode!).filter(Boolean)
       const suppliers = dto.targets.filter((t) => t.targetType === 'Supplier').map((t) => t.targetCode!).filter(Boolean)
       editorForm.setFieldsValue({
@@ -169,7 +163,6 @@ export default function PricingStrategiesPage() {
         isEnabled: dto.isEnabled,
         targetsStores: stores,
         targetsSuppliers: suppliers,
-        fixedRate: fixed ? dto.details[0].startRate : 2.5,
         details: dto.details.map((r) => ({
           id: r.id,
           minPrice: r.minPrice,
@@ -199,11 +192,7 @@ export default function PricingStrategiesPage() {
         message.warning(t('posAdmin.pricing.supplierLevelRequired', '供应商级别策略必须选择至少一个供应商'))
         return
       }
-      if (fixedMode) {
-        const rateError = fixedRateError(v.fixedRate)
-        if (rateError) { message.warning(rateError); return }
-      }
-      const rules: PricingStrategyRuleDto[] = fixedMode ? fixedRules(Number(v.fixedRate)) : (v.details || []).map((r: any) => ({
+      const rules: PricingStrategyRuleDto[] = (v.details || []).map((r: any) => ({
         id: r.id,
         minPrice: Number(r.minPrice),
         maxPrice: Number(r.maxPrice),
@@ -214,9 +203,26 @@ export default function PricingStrategiesPage() {
         endRate: Number(r.endRate),
         algorithm: r.algorithm,
       }))
-      if (curveMode && !fixedMode) {
-        const error = curveError(rules)
+      if (curveMode) {
+        const error = intervalsError(rules)
         if (error) { message.warning(error); return }
+        // 交界处成本变大、售价反而降低（阶梯定价）：保存前必须二次确认
+        const drops = priceDrops(rules)
+        if (drops.length > 0) {
+          const confirmed = await new Promise<boolean>((resolve) => Modal.confirm({
+            title: t('posAdmin.pricing.confirmDropsTitle', '存在交界售价回落，确认保存？'),
+            width: 480,
+            content: <div>
+              <div style={{ marginBottom: 8 }}>{t('posAdmin.pricing.confirmDropsHint', '以下交界处进货价变大时售价反而降低（阶梯定价），请确认这是有意设置：')}</div>
+              {drops.map((d) => <div key={d.index} style={{ fontVariantNumeric: 'tabular-nums' }}>• 进货价 {d.at.toFixed(2)}：{d.from.toFixed(2)} → {d.to.toFixed(2)}（回落 {(d.from - d.to).toFixed(2)}）</div>)}
+            </div>,
+            okText: t('posAdmin.pricing.confirmSave', '确认保存'),
+            cancelText: t('common.cancel', '取消'),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          }))
+          if (!confirmed) return
+        }
       }
       const targets: PricingStrategyTargetDto[] = [
         ...(v.targetsStores || []).map((code: string) => ({ targetType: 'Store' as const, targetCode: code })),
@@ -250,14 +256,15 @@ export default function PricingStrategiesPage() {
     }
   }
 
-  // 曲线模式的底部摘要：区间数、覆盖成本范围与校验结果（与保存时的校验同源）
+  // 区间编辑器的底部摘要：区间数与组成、覆盖成本范围、校验结果（与保存时的校验同源）
   const curveSummary = (() => {
-    if (!curveMode || fixedMode || !watchedDetails?.length) return null
-    const error = curveError(watchedDetails)
+    if (!curveMode || !watchedDetails?.length) return null
+    const error = intervalsError(watchedDetails), drops = priceDrops(watchedDetails).length
+    const fixedCount = watchedDetails.filter(r => r.algorithm === 'Fixed').length
     const low = Math.min(...watchedDetails.map(r => r.minPrice)), high = Math.max(...watchedDetails.map(r => r.maxPrice))
     return <>
-      <span>共 {watchedDetails.length} 个区间，覆盖成本 {low.toFixed(2)} ～ {high.toFixed(2)}</span>
-      <span style={{ color: error ? '#cf1322' : '#52c41a' }}>● {error ?? '校验通过'}</span>
+      <span>共 {watchedDetails.length} 个区间（固定 {fixedCount} · 曲线 {watchedDetails.length - fixedCount}），覆盖成本 {low.toFixed(2)} ～ {high >= 99999 ? '不限' : high.toFixed(2)}</span>
+      <span style={{ color: error ? '#cf1322' : drops ? '#d4380d' : '#52c41a' }}>● {error ?? (drops ? `${drops} 处交界回落，保存需确认` : '校验通过')}</span>
     </>
   })()
 
@@ -432,7 +439,7 @@ export default function PricingStrategiesPage() {
           onChange={onTableChange}
           expandable={{
             expandedRowRender: (record: DataType) => <StrategyExpanded record={record} />,
-            rowExpandable: (record: DataType) => record.pricingMode === 'Fixed' || (record.nodes?.length ?? 0) > 0,
+            rowExpandable: (record: DataType) => record.pricingMode === 'Fixed' || (record.intervals?.length ?? 0) > 0 || (record.nodes?.length ?? 0) > 0,
           }}
         />
       </Card>
@@ -453,22 +460,12 @@ export default function PricingStrategiesPage() {
             <Form.Item name="targetsSuppliers" label={t('posAdmin.pricing.targetSuppliers', '供应商')} style={{ flex: '1 1 220px', minWidth: 0, marginBottom: 12 }}><Select mode="multiple" options={supplierOptions} showSearch optionFilterProp="label" allowClear /></Form.Item>
             <Form.Item name="isEnabled" label={t('posAdmin.pricing.isEnabled', '启用')} valuePropName="checked" style={{ width: 60, marginBottom: 12 }}><Switch /></Form.Item>
           </div>
-          {(curveMode || fixedMode) && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-            <span>定价方式</span>
-            <Segmented value={fixedMode ? 'fixed' : 'curve'} options={[{ label: '曲线定价', value: 'curve' }, { label: '固定成率', value: 'fixed' }]} onChange={(next) => {
-              if (next === 'fixed') { setFixedMode(true); return }
-              // 从固定成率切回曲线：单条 Fixed 区间不是合法曲线节点，恢复为默认曲线
-              if (isFixedRules(editorForm.getFieldValue('details') || [])) editorForm.setFieldValue('details', defaultCurve())
-              setFixedMode(false); setCurveMode(true)
-            }} />
-            {!fixedMode && <span style={{ color: '#8c8c8c', fontSize: 12 }}>拖动节点设置售价；实线为理论价，橙色阶梯为尾数调整后的实际价</span>}
-          </div>}
-          {fixedMode ? <Form.Item name="fixedRate" rules={[{ validator: (_, rate) => { const error = fixedRateError(rate); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><FixedRatePanel /></Form.Item> : curveMode ? <Form.Item name="details" rules={[{ validator: (_, rules) => { const error = curveError(rules || []); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><PricingCurveEditor /></Form.Item> : <>
+          {curveMode ? <Form.Item name="details" rules={[{ validator: (_, rules) => { const error = intervalsError(rules || []); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><IntervalEditor /></Form.Item> : <>
           <Alert type="info" showIcon style={{ marginBottom: 12 }} message="原有区间规则" description="已有 Linear 计算已升级为零售价插值。打开时保留现有配置；转换按钮切换为图形编辑，并将节点吸附到合法尾数、应用 1.5～5 成率约束。编辑结果保存后生效。" action={<Button onClick={() => {
             const old = editorForm.getFieldValue('details') as PricingStrategyRuleDto[]
             if (!old?.length || old.some((r, i) => i > 0 && (r.minPrice !== old[i - 1].maxPrice || Math.abs(r.minPrice * r.startRate - old[i - 1].maxPrice * old[i - 1].endRate) > .000001))) { message.warning('原有区间不连续，请先对齐相邻成本与售价端点'); return }
             const converted = rulesFromNodes(nodesFromRules(old).map(n => ({ cost: n.cost, price: boundedPrice(n.cost, n.price) })))
-            const error = curveError(converted)
+            const error = intervalsError(converted)
             if (error) { message.warning(error); return }
             editorForm.setFieldValue('details', converted); setCurveMode(true)
           }}>转换为曲线编辑</Button>} />

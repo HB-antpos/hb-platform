@@ -62,6 +62,7 @@ namespace BlazorApp.Api.Services.Pricing
         {
             if (purchasePrice < 0.1m)
                 throw new ArgumentException("进货价必须至少为 0.10，才能满足尾数及 1.5～5 成率限制");
+            // 交界归属：区间按下限排序后取第一个命中者，所以进货价恰好等于交界值时属于上一个区间（上限含、下限不含）。
             var rule = strategy?.Details?.OrderBy(d => d.MinPrice).FirstOrDefault(d =>
                 purchasePrice >= d.MinPrice && purchasePrice <= d.MaxPrice);
             if (rule == null)
@@ -70,7 +71,7 @@ namespace BlazorApp.Api.Services.Pricing
                 return (purchasePrice * 2.5m, null);
             }
             if (PricingCurveMath.IsCurve(rule.Algorithm))
-                PricingCurveMath.Validate(strategy!.Details, allowLegacyZero: true);
+                PricingCurveMath.Validate(strategy!.Details, allowLegacyZero: true, enforceIntervalLimit: false);
             return (PricingCurveMath.TheoreticalRetail(purchasePrice, rule), rule);
         }
 
