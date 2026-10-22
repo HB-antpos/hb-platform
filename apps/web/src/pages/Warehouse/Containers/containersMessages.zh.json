@@ -37,6 +37,7 @@
       "selectionSummary": "{{pieces}} 件 · {{volume}} m³",
       "columnPieces": "件数",
       "columnAmount": "国内金额 ¥",
+      "columnFreight": "运费 $",
       "columnVolumeLoad": "体积 · 装载率",
       "sortedDescTitle": "列表按{{field}}从新到旧排列（随日期类型切换）",
       "etaToday": "今天到岸",
