@@ -1,4 +1,5 @@
 # 目标部署：AWS 悉尼边缘机（rd.hotbargain.vip）。新加坡生产主机仍在运行历史部署，不要在那里直接 up 这份文件，见 README。
+# 控制端需要的 WebSocket 入口见 compose.wss.yml（与本文件合并使用）和 edge-nginx/。
 name: rustdesk-server
 
 # 固定官方版本和摘要；密钥与注册数据库必须挂载到进程实际工作目录。
