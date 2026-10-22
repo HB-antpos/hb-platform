@@ -867,6 +867,61 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
           ],
         },
       },
+      {
+        // 链路依据：移动端改价/改名/建商品直接写 StoreRetailPrice / Product（无下发步骤）；POS API 扫码查询直读库
+        // （CatalogService.LookupSellableItemDirectAsync），WPF 加购后后台复核并刷新该行（PosCartService.UpdateLineFromRemote，手工价不覆盖）；
+        // 整机目录只在启动时自动同步一次，手动走「数据维护」；服务端目录缓存 20 分钟（CatalogIndexCache）。
+        id: 'pda-product-sync',
+        title: {
+          zh: 'PDA 上改了商品（价格、名称、新建），收银端怎么同步？',
+          en: 'I updated a product on the PDA (price, name or new item). How does the POS pick it up?',
+        },
+        where: {
+          zh: 'PDA [k:Products|商品维护] / [k:Prices & labels|价格和标签] → 收银端扫码或 [k:Data Download|数据下载]',
+          en: 'PDA [k:Products|商品维护] / [k:Prices & labels|价格和标签] → scan on the POS or [k:Data Download|数据下载]',
+        },
+        steps: {
+          zh: [
+            '§在 PDA 上更新商品',
+            '改价：在 [k:Products|商品维护] 找到商品，改好分店价后点 [k:Save|保存]（多项时 [k:Save all|保存全部]）或 [k:Save & print|保存并打印]，提示 [d:Product information saved.|商品信息已保存] 即已写入系统。',
+            '改名：点 [k:Edit product name|修改商品名称] → [k:Save name|保存名称]；新建：点 [k:Create product|创建商品]，提示 [d:Product created.|商品已创建]。',
+            '价格任务：在 [k:Prices & labels|价格和标签] 点 [k:Update only|仅更新] 或 [p:Update & print|更新并打印] 后新价才生效。',
+            '§收银端拿到新数据',
+            '收银机联网时直接扫这个商品即可：加入购物车后会自动向服务器取最新价格和名称，不用做别的操作。',
+            'PDA 新建的商品收银端本地还没有：联网扫码时显示 [d:Looking up item...|正在查询商品...]，查到后直接加入购物车。',
+            '改价前已经扫进购物车的商品不会自动变价：先删掉这一行（[g:Swipe left|向左滑] → [k:Remove|移除]），再重新扫码。',
+            '想让整台收银机的本地商品数据一次更新：[k:Settings|设置] → [k:Data maintenance|数据维护] → [k:Data Download|数据下载]。',
+          ],
+          en: [
+            '§Update the product on the PDA',
+            'Price: find the product in [k:Products|商品维护], change the store price, then tap [k:Save|保存] ([k:Save all|保存全部] for several changes) or [k:Save & print|保存并打印]. [d:Product information saved.|商品信息已保存] means it is in the system.',
+            'Name: tap [k:Edit product name|修改商品名称] → [k:Save name|保存名称]. New item: tap [k:Create product|创建商品] until you see [d:Product created.|商品已创建].',
+            'Price tasks: the new price only takes effect after [k:Update only|仅更新] or [p:Update & print|更新并打印] in [k:Prices & labels|价格和标签].',
+            '§Get the new data on the POS',
+            'With the till online, just scan the item. After it is added to the cart, the POS fetches the latest price and name from the server automatically.',
+            'A new item from the PDA is not on the till yet: when you scan it online, [d:Looking up item...|正在查询商品...] shows and the item is added once found.',
+            'Items scanned before the price change do not reprice by themselves: remove the line ([g:Swipe left|向左滑] → [k:Remove|移除]) and scan it again.',
+            'To refresh the till’s whole local product list: [k:Settings|设置] → [k:Data maintenance|数据维护] → [k:Data Download|数据下载].',
+          ],
+        },
+        tips: {
+          zh: [
+            'PDA 保存后不用另外「下发」；价格任务没处理、或选了 [k:Keep store price|保持本店价]，收银价不会变。',
+            '收银机断网时只能用本地已有的数据，本地没有的新商品会提示 [d:No local item found. Checkout can continue offline.|未在本地找到商品，可继续离线结账。]，联网后再扫。',
+            '刚改完就点「数据下载」可能还拿到旧数据（服务器商品目录约 20 分钟刷新一次），稍后再试；联网扫码不受影响。',
+            '价格不刷新、搜不到商品等本地数据明显不对时，用 [k:Data Reset|数据重置] 重新建立本地商品目录。',
+            '收银机每次启动时也会自动同步一次商品数据；购物车里手工改过价的行，扫码刷新不会覆盖你改的价格。',
+          ],
+          en: [
+            'Nothing needs to be published after saving on the PDA. Price tasks left undone, or set to [k:Keep store price|保持本店价], do not change the POS price.',
+            'Offline, the till only has its local data; a new item it does not have shows [d:No local item found. Checkout can continue offline.|未在本地找到商品，可继续离线结账。]. Scan it again once online.',
+            'Data Download right after a change may still bring old data (the server’s product catalogue refreshes about every 20 minutes); try again later. Scanning online is not affected.',
+            'If local data is clearly wrong (prices not refreshing, items not found), use [k:Data Reset|数据重置] to rebuild the local product catalogue.',
+            'The till also syncs products automatically each time it starts. A cart line whose price you changed by hand keeps your price when it is refreshed.',
+          ],
+        },
+        permissions: ['Settings.CatalogDownload', 'Settings.CatalogReset'],
+      },
     ],
   },
 ]
