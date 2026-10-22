@@ -7,6 +7,7 @@ import {
 } from "@hb/pos-api-client/transport";
 
 export { HbposApiError, unwrapHbposEnvelope };
+export { isHbposNonApiResponse } from "@hb/pos-api-client/transport";
 export type {
   HbposApiErrorKind,
   HbposEnvelope,

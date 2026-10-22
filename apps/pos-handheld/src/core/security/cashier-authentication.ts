@@ -1,4 +1,4 @@
-import { HbposApiError, type CashierSessionDto } from "../api/hbpos-api";
+import { HbposApiError, isHbposNonApiResponse, type CashierSessionDto } from "../api/hbpos-api";
 
 import { CashierAuthorizationStore, CashierSessionCache, DeviceLockStore } from "./secure-storage";
 
@@ -91,7 +91,7 @@ export class CashierAuthenticationService {
       await this.activateAuthorization(session, "online", scope);
       return { source: "online", session };
     } catch (error: unknown) {
-      // 关键逻辑：瞬时网络/服务端失败可回退；401/403/其他 4xx 与 envelope 均是明确在线拒绝。
+      // 关键逻辑：瞬时网络/服务端/网关失败可回退；401/403/400 等其他 4xx 与带信封的 envelope 拒绝是明确在线拒绝。
       if (isCacheFallbackEligible(error)) {
         return this.loadCached({ ...input, ...scope });
       }
@@ -272,6 +272,13 @@ function assertCashierSessionScope(
   }
 }
 
+/**
+ * 与 WPF 收银员扫码登录同口径（#606、#607）：服务端 cashiers/barcode-login 只以 401（条码无效/停用、设备认证失败）、
+ * 403（设备越权）、400（请求体校验）和 success=false 信封表达在线拒绝。
+ * - 404/405 只会来自后端发布、网关切换或路由未就绪；408/429/5xx 是瞬时故障；
+ * - 2xx 却不是 ApiResult 信封（网关 HTML、Wi-Fi 认证页、空 200）不是 POS API 的回答；
+ * 以上都按服务不可用回退离线缓存，而不是误报「条码无效或已停用」。
+ */
 function isCacheFallbackEligible(error: unknown): boolean {
   if (!(error instanceof HbposApiError)) {
     return false;
@@ -279,8 +286,15 @@ function isCacheFallbackEligible(error: unknown): boolean {
   if (error.kind === "transport") {
     return true;
   }
+  if (error.kind === "envelope") {
+    return isHbposNonApiResponse(error);
+  }
   return error.kind === "http"
-    && (error.status === 408 || error.status === 429 || (error.status !== undefined && error.status >= 500));
+    && (error.status === 404
+      || error.status === 405
+      || error.status === 408
+      || error.status === 429
+      || (error.status !== undefined && error.status >= 500));
 }
 
 function hasEmergencyPrefix(value: string): boolean {

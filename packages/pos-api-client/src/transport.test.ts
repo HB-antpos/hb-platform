@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { create, type AxiosRequestConfig } from "axios";
+import { AxiosError, create, type AxiosRequestConfig } from "axios";
 
 import { createAxiosHbposTransport } from "./transport";
+import { HbposApiError, isHbposNonApiResponse, unwrapHbposEnvelope } from "./transport-contracts";
 
 const credentials = {
   async getCredentials() {
@@ -118,4 +119,91 @@ test("二进制下载按 arraybuffer 请求并原样转交 Range 请求头，默
   assert.equal(response.status, 206);
   assert.equal(response.data.byteLength, 4);
   assert.equal(requests[1]?.responseType, undefined);
+});
+
+function failingInstance(status: number, data: unknown) {
+  return create({
+    adapter: async (config) => {
+      throw new AxiosError("request failed", "ERR_BAD_RESPONSE", config, undefined, {
+        config,
+        data,
+        headers: {},
+        status,
+        statusText: String(status),
+      });
+    },
+  });
+}
+
+test("HTTP 错误记录正文是否为 ApiResult 信封：网关 HTML 403/404/405 标记为非 API 响应，信封错误码照常保留", async () => {
+  const unauthorized: string[] = [];
+  const cases: ReadonlyArray<Readonly<{
+    status: number;
+    data: unknown;
+    apiEnvelope: boolean;
+    code: string | undefined;
+  }>> = [
+    { status: 403, data: "<html><body>EdgeOne 403 Forbidden</body></html>", apiEnvelope: false, code: undefined },
+    { status: 404, data: "<html>404 Not Found</html>", apiEnvelope: false, code: undefined },
+    { status: 405, data: "", apiEnvelope: false, code: undefined },
+    { status: 403, data: { code: "DEVICE_SCOPE_FORBIDDEN", message: "scope" }, apiEnvelope: false, code: undefined },
+    {
+      status: 403,
+      data: { success: false, errorCode: "DEVICE_SCOPE_FORBIDDEN", message: "scope" },
+      apiEnvelope: true,
+      code: "DEVICE_SCOPE_FORBIDDEN",
+    },
+  ];
+
+  for (const item of cases) {
+    const transport = createAxiosHbposTransport(
+      "https://hbpos.example",
+      { async getCredentials() { return {}; } },
+      failingInstance(item.status, item.data),
+      {
+        async onUnauthorized() { unauthorized.push(String(item.status)); },
+        async onForbidden() { unauthorized.push(`forbidden-${item.status}`); },
+      },
+      { cashierHeader: "override-explicit", responseHeaders: "omit" },
+    );
+    await assert.rejects(
+      () => transport.request({ method: "POST", url: "/api/v1/devices/verify" }),
+      (error: unknown) => {
+        assert.ok(error instanceof HbposApiError);
+        assert.equal(error.kind, "http");
+        assert.equal(error.status, item.status);
+        assert.equal(error.apiEnvelope, item.apiEnvelope);
+        assert.equal(error.code, item.code);
+        assert.equal(isHbposNonApiResponse(error), !item.apiEnvelope);
+        return true;
+      },
+    );
+  }
+  // 非撤销码 403 与 404/405 都不得触发锁机或清票据。
+  assert.deepEqual(unauthorized, []);
+});
+
+test("unwrap 遇到 2xx 非信封正文（HTML、null、空对象、数组）抛 envelope 错误并标记非 API 响应，不抛 TypeError", () => {
+  for (const body of ["<html>captive portal</html>", null, {}, [], { data: { ok: true } }]) {
+    assert.throws(
+      () => unwrapHbposEnvelope(body as never),
+      (error: unknown) =>
+        error instanceof HbposApiError &&
+        error.kind === "envelope" &&
+        error.code === undefined &&
+        error.apiEnvelope === false &&
+        isHbposNonApiResponse(error),
+    );
+  }
+
+  assert.throws(
+    () => unwrapHbposEnvelope({ success: false, errorCode: "CASHIER_LOGIN_FAILED", message: "bad" }),
+    (error: unknown) =>
+      error instanceof HbposApiError &&
+      error.kind === "envelope" &&
+      error.code === "CASHIER_LOGIN_FAILED" &&
+      error.apiEnvelope === true &&
+      !isHbposNonApiResponse(error),
+  );
+  assert.deepEqual(unwrapHbposEnvelope({ success: true, data: { ok: true } }), { ok: true });
 });

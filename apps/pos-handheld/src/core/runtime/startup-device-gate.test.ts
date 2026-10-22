@@ -121,7 +121,7 @@ test("已知离线和传输/5xx 失败才允许使用本地授权现金收银", 
   assert.deepEqual(serverFailure, knownOffline);
 });
 
-test("在线 403 明确拒绝锁机，旧本地凭据不得兜底", async () => {
+test("在线带业务错误码的 ApiResult 403 明确拒绝锁机，旧本地凭据不得兜底", async () => {
   const locks: string[] = [];
   const result = await resolveStartupDeviceGate({
     internetReachable: true,
@@ -130,6 +130,8 @@ test("在线 403 明确拒绝锁机，旧本地凭据不得兜底", async () => 
       throw new HbposApiError("device rejected", {
         kind: "http",
         status: 403,
+        code: "DEVICE_SCOPE_FORBIDDEN",
+        apiEnvelope: true,
       });
     },
     readLocalDevice: async () => "authorized-local",
@@ -140,6 +142,83 @@ test("在线 403 明确拒绝锁机，旧本地凭据不得兜底", async () => 
 
   assert.deepEqual(result, { backend: "rejected", device: "locked" });
   assert.deepEqual(locks, ["device rejected"]);
+});
+
+test("网关 HTML 403、404、405、2xx 非信封等非 ApiResult 响应按服务不可用离线营业，绝不持久化锁机", async () => {
+  const failures: readonly HbposApiError[] = [
+    // EdgeOne/WAF 拦截页：transport 记录 apiEnvelope=false，且 HTML 正文没有错误码。
+    new HbposApiError("Request failed with status code 403", {
+      kind: "http",
+      status: 403,
+      apiEnvelope: false,
+    }),
+    new HbposApiError("Request failed with status code 404", {
+      kind: "http",
+      status: 404,
+      apiEnvelope: false,
+    }),
+    new HbposApiError("Request failed with status code 405", {
+      kind: "http",
+      status: 405,
+      apiEnvelope: false,
+    }),
+    // 2xx 却是 HTML / Wi-Fi 认证页：unwrapHbposEnvelope 抛出的非信封 envelope 错误。
+    new HbposApiError("Hbpos API response is not an ApiResult envelope.", {
+      kind: "envelope",
+      apiEnvelope: false,
+    }),
+  ];
+
+  for (const failure of failures) {
+    let locks = 0;
+    const result = await resolveStartupDeviceGate({
+      internetReachable: true,
+      readPendingDeviceActivation: readNoPendingDeviceActivation,
+      async verifyCurrentDevice() {
+        throw failure;
+      },
+      readLocalDevice: async () => "authorized-local",
+      async lockDevice() {
+        locks += 1;
+      },
+    });
+
+    assert.deepEqual(
+      result,
+      { backend: "offline", device: "authorized-local" },
+      `${failure.kind} ${failure.status ?? "2xx"} must fall back to offline`,
+    );
+    assert.equal(locks, 0);
+  }
+});
+
+test("带信封但没有业务错误码的 403 不持久化锁机，也不放行旧授权", async () => {
+  const failure = new HbposApiError("forbidden", {
+    kind: "http",
+    status: 403,
+    apiEnvelope: true,
+  });
+  let locks = 0;
+  let localReads = 0;
+  await assert.rejects(
+    resolveStartupDeviceGate({
+      internetReachable: true,
+      readPendingDeviceActivation: readNoPendingDeviceActivation,
+      async verifyCurrentDevice() {
+        throw failure;
+      },
+      async readLocalDevice() {
+        localReads += 1;
+        return "authorized-local";
+      },
+      async lockDevice() {
+        locks += 1;
+      },
+    }),
+    (error) => error === failure,
+  );
+  assert.equal(locks, 0);
+  assert.equal(localReads, 0);
 });
 
 test("envelope、401、429、其他 4xx 和编程错误保持不可交易，不得伪装成离线", async () => {
