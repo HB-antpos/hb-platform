@@ -41,6 +41,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "product-insights", labelKey: "routes.productInsights", icon: "chart-timeline-variant" },
       { routeName: "seasonal-product-insights", labelKey: "routes.seasonalProductInsights", icon: "calendar-star" },
       { routeName: "price-updates", labelKey: "routes.priceUpdates", icon: "tag-arrow-up-outline" },
+      { routeName: "pricing-strategies", labelKey: "routes.pricingStrategies", icon: "chart-bell-curve-cumulative" },
       { routeName: "sales-orders", labelKey: "routes.salesOrders", icon: "receipt-text-outline" },
       { routeName: "installment-orders", labelKey: "routes.installmentOrders", icon: "cash-clock" },
       { routeName: "store-vouchers", labelKey: "routes.storeVouchers", icon: "ticket-confirmation-outline" },

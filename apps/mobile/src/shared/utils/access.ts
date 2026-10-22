@@ -22,6 +22,11 @@ export const PERMISSIONS = {
   DailyCloseRecords: {
     View: "DailyCloseRecords.View",
   },
+  // 自动价格策略：与 Web /pos-admin/pricing-strategies 同一对权限码；View 可查看与试算，Edit 才能新建 / 修改 / 删除 / 启停。
+  PricingStrategy: {
+    View: "PricingStrategy.View",
+    Edit: "PricingStrategy.Edit",
+  },
   // 人脸比对（不受欢迎人员名单、门店档案）与摄像机管理：后端 Permissions.FaceMatch.* / FaceCapture.Cameras.Manage，Admin 靠角色放行。
   FaceMatch: {
     Manage: "FaceMatch.Manage",
