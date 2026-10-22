@@ -303,6 +303,28 @@ export function addInterval(rules: Rule[], i: number): Result {
   return finish(next)
 }
 
+/**
+ * 在末尾追加一个新区间：从最后一个区间的上限接着往上（上限翻倍），而不是把已有区间从中间切开。
+ * 固定成率沿用最后一个区间的成率；曲线从上一区间的终点售价接着走，终点保持同样的成率（再限制成率不上升）。
+ */
+export function appendInterval(rules: Rule[]): Result {
+  if (rules.length >= MAX_INTERVALS) return fail(`最多 ${MAX_INTERVALS} 个定价区间`)
+  const last = rules[rules.length - 1]
+  if (last.maxPrice >= UNBOUNDED_COST) return fail('最后一个区间的上限已是「不限」，后面没有可追加的范围；请用「拆分区间」，或先给它设一个具体的上限')
+  const min = last.maxPrice, doubled = roundMoney(min * 2)
+  const next = rules.map(x => ({ ...x }))
+  if (isFixed(last)) {
+    next.push(makeFixed(min, Math.min(doubled, UNBOUNDED_COST), last.startRate))
+    return finish(next)
+  }
+  const max = Math.min(doubled, UNBOUNDED_COST - 1)
+  if (max <= min + EPS) return fail('上限已接近系统最大值，无法再追加区间')
+  const p0 = endPrice(last), p1raw = snap(max, max * p0 / min)
+  if (Number.isNaN(p1raw)) return fail('新区间没有满足 1.5～5 倍的尾数售价')
+  next.push(makeCurve(min, max, p0, Math.min(p1raw, tailFloor(p0 * max / min + 1e-9))))
+  return finish(next)
+}
+
 /** 删除区间：并入相邻区间（优先并入上一个）。 */
 export function removeInterval(rules: Rule[], i: number): Result {
   if (rules.length <= 1) return fail('至少保留一个定价区间')

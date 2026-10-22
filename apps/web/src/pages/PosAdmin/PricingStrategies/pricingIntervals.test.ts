@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { defaultCurve } from './pricingCurve'
 import {
-  MAX_INTERVALS, actualPrice, addInterval, chartRange, endPrice, intervalAt, intervalsError, isEditable, isLegalTail, linkedFlags,
+  MAX_INTERVALS, actualPrice, addInterval, appendInterval, chartRange, endPrice, intervalAt, intervalsError, isEditable, isLegalTail, linkedFlags,
   breakLink, convertLegacy, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, visibleMaxPrice, type Rule,
 } from './pricingIntervals'
@@ -138,6 +138,17 @@ assert.deepEqual([...shiftBrokenAfterRemove(new Set([0, 1, 3]), 2)].sort(), [0, 
   assert.equal(endPrice(split[0]), startPrice(split[1]), '曲线拆分后交界连续')
   assert.equal(intervalsError(split), null)
   assert.ok(addInterval(tens(MAX_INTERVALS), 0).error, '已达 10 个区间')
+  // 追加：1～10 之后接 10～20，新区间不在已有区间内部
+  const fixedTwo = must(appendInterval([makeFixed(1, 10, 2.5)]))
+  assert.deepEqual(fixedTwo.map(r => [r.minPrice, r.maxPrice, r.algorithm, r.startRate]), [[1, 10, 'Fixed', 2.5], [10, 20, 'Fixed', 2.5]])
+  const curveTwo = must(appendInterval(defaultCurve()))
+  assert.equal(curveTwo.length, 4)
+  assert.equal(curveTwo[3].minPrice, 999, '从最后一个区间的上限接着往上')
+  assert.equal(startPrice(curveTwo[3]), endPrice(curveTwo[2]), '曲线追加后交界连续')
+  assert.equal(intervalsError(curveTwo), null)
+  assert.ok(appendInterval([makeFixed(0.1, 99999, 2.5)]).error, '上限为「不限」时无法追加')
+  assert.ok(appendInterval(tens(MAX_INTERVALS)).error, '已达 10 个区间')
+  assert.equal(must(appendInterval([makeFixed(0.1, 60000, 2.5)]))[1].maxPrice, 99999, '固定成率追加时最多到「不限」')
   const removed = must(removeInterval(mixed(), 1))
   assert.equal(removed.length, 2)
   assert.equal(removed[0].maxPrice, 50, '并入上一个区间')
