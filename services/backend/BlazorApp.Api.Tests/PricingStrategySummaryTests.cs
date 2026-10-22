@@ -52,6 +52,31 @@ public class PricingStrategySummaryTests
     }
 
     [Fact]
+    public void 含固定区间的多区间策略为分段并返回区间摘要()
+    {
+        var dto = Summarize(
+            Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"),
+            Rule(10m, 50m, 2.5m, 2m, "Linear", 25m, 100m),
+            Rule(50m, 99999m, 2m, 2m, "Fixed"));
+        Assert.Equal("Mixed", dto.PricingMode);
+        Assert.Null(dto.FixedRate);
+        Assert.Equal(new[] { "Fixed", "Curve", "Fixed" }, dto.Intervals.Select(i => i.Type).ToArray());
+        Assert.Equal(new decimal?[] { 2.5m, null, 2m }, dto.Intervals.Select(i => i.Rate).ToArray());
+        Assert.Equal(25m, dto.Intervals[1].StartPrice);
+        Assert.Equal(100m, dto.Intervals[1].EndPrice);
+        Assert.Equal(4, dto.Nodes.Count);   // 兼容旧前端的节点字段
+    }
+
+    [Fact]
+    public void 多个固定区间也是分段而单个固定区间仍是固定成率()
+    {
+        Assert.Equal("Mixed", Summarize(Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed")).PricingMode);
+        var single = Summarize(Rule(0.1m, 99999m, 2.5m, 2.5m, "Fixed"));
+        Assert.Equal("Fixed", single.PricingMode);
+        Assert.Single(single.Intervals);
+    }
+
+    [Fact]
     public void 没有节点零售价或使用旧算法的策略视为旧版区间规则()
     {
         var legacy = Summarize(Rule(10m, 100m, 1.5m, 2.5m, "Linear"));

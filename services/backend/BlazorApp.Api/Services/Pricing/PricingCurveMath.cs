@@ -2,9 +2,16 @@ using BlazorApp.Shared.Models.HBweb;
 
 namespace BlazorApp.Api.Services.Pricing;
 
-/// <summary>定价曲线与尾数规则的共同约束。理论成率不升，最终尾数价格不降。</summary>
+/// <summary>
+/// 定价区间与尾数规则的共同约束。每个区间自身要求成本增加时售价不降、理论成率不升；
+/// 区间之间必须首尾相接，但允许在交界处出现价差（阶梯定价，由界面标红并在保存时二次确认）。
+/// 交界归属：进货价等于交界值时属于上一个区间（上限含，下限不含）。
+/// </summary>
 public static class PricingCurveMath
 {
+    /// <summary>单个策略最多的定价区间数。</summary>
+    public const int MaxIntervals = 10;
+
     public static bool IsCurve(string? algorithm) => algorithm?.ToLowerInvariant() is "linear" or "arcup" or "arcdown";
     /// <summary>固定成率：售价 = 进货价 × 成率，四舍五入到分，不做 .50/.99 尾数调整。</summary>
     public static bool IsFixed(string? algorithm) => string.Equals(algorithm, "Fixed", StringComparison.OrdinalIgnoreCase);
@@ -33,13 +40,18 @@ public static class PricingCurveMath
             + delta * (r.CurveBend ?? 0m) * offset / width * (width - offset) / width;
     }
 
-    public static void Validate(IEnumerable<PricingStrategyDetail>? source, bool allowLegacyZero = false)
+    /// <param name="enforceIntervalLimit">保存时为 true；运行时计价传 false，避免历史数据因区间数超限而无法计价。</param>
+    public static void Validate(IEnumerable<PricingStrategyDetail>? source, bool allowLegacyZero = false, bool enforceIntervalLimit = true)
     {
         var rules = source?.OrderBy(r => r.MinPrice).ToList();
         if (rules == null || rules.Count == 0) throw new ArgumentException("请至少设置一个定价区间");
-        PricingStrategyDetail? previous = null;
-        foreach (var r in rules)
+        if (enforceIntervalLimit && rules.Count > MaxIntervals)
+            throw new ArgumentException($"最多支持 {MaxIntervals} 个定价区间");
+        for (var i = 0; i < rules.Count; i++)
         {
+            var r = rules[i];
+            var previous = i > 0 ? rules[i - 1] : null;
+            var next = i < rules.Count - 1 ? rules[i + 1] : null;
             if (decimal.Round(r.MinPrice, 4) != r.MinPrice || decimal.Round(r.MaxPrice, 4) != r.MaxPrice)
                 throw new ArgumentException("成本节点最多支持四位小数");
             var legacyZero = allowLegacyZero && previous == null && r.MinPrice == 0 && !r.StartRetailPrice.HasValue;
@@ -53,10 +65,14 @@ public static class PricingCurveMath
                 throw new ArgumentException("节点零售价对应成率必须在 1.5～5 之间");
             if (d < 0 || pa * b < pb * a)
                 throw new ArgumentException("成本增加时节点零售价不得下降，理论成率不得增加");
-            if ((r.StartRetailPrice.HasValue && !IsLegalTail(pa)) || (r.EndRetailPrice.HasValue && !IsLegalTail(pb)))
+            // 曲线端点与相邻固定区间的交界价保持连续时，端点价格等于「交界成本 × 固定成率」（到分），不要求是合法尾数。
+            var startFollowsFixed = previous != null && IsFixed(previous.Algorithm) && Math.Abs(pa - RoundToCent(End(previous))) <= 0.005m;
+            var endFollowsFixed = next != null && IsFixed(next.Algorithm) && Math.Abs(pb - RoundToCent(Start(next))) <= 0.005m;
+            if ((r.StartRetailPrice.HasValue && !startFollowsFixed && !IsLegalTail(pa)) || (r.EndRetailPrice.HasValue && !endFollowsFixed && !IsLegalTail(pb)))
                 throw new ArgumentException("指定的节点零售价必须使用 .50/.99 尾数或整数 1、2");
-            if (previous != null && (previous.MaxPrice != a || End(previous) != pa))
-                throw new ArgumentException("相邻成本区间必须连续，且交界节点零售价必须相同");
+            // 只要求成本区间首尾相接；交界处的售价允许不连续（阶梯定价）。
+            if (previous != null && previous.MaxPrice != a)
+                throw new ArgumentException("相邻成本区间必须首尾相接：上一区间的上限等于下一区间的下限");
             var bend = r.CurveBend ?? 0m;
             if (IsCurve(r.Algorithm))
             {
@@ -81,18 +97,16 @@ public static class PricingCurveMath
             }
             else if (IsFixed(r.Algorithm))
             {
-                // 固定成率不参与曲线连续性约束，只允许单个区间覆盖全部成本，避免与其他算法在交界处价格跳变。
-                if (rules.Count != 1)
-                    throw new ArgumentException("固定成率策略只能包含一个进货价区间");
                 if (r.StartRate != r.EndRate)
                     throw new ArgumentException("固定成率的开始和结束成率必须相同");
                 if (bend != 0 || r.StartRetailPrice.HasValue || r.EndRetailPrice.HasValue)
                     throw new ArgumentException("固定成率不能指定曲线节点零售价或弧度");
             }
             else throw new ArgumentException("不支持的定价算法");
-            previous = r;
         }
     }
+
+    private static decimal RoundToCent(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
 
     public static bool IsLegalTail(decimal value) => value >= 0.5m &&
         (value is 1m or 2m || value - decimal.Floor(value) is 0.5m or 0.99m);

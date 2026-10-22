@@ -17,14 +17,25 @@ export interface PricingStrategyListDto {
   startRate?: number | null
   endRate?: number | null
   nodes?: PricingStrategyNodeDto[]
+  intervals?: PricingStrategyIntervalDto[]
 }
 
-/** Fixed 固定成率 / Curve 曲线 / Legacy 旧版区间规则 / Empty 无区间 */
-export type PricingStrategyMode = 'Fixed' | 'Curve' | 'Legacy' | 'Empty'
+/** Fixed 单区间固定成率 / Curve 曲线 / Mixed 分段（含固定区间的多区间）/ Legacy 旧版区间规则 / Empty 无区间 */
+export type PricingStrategyMode = 'Fixed' | 'Curve' | 'Mixed' | 'Legacy' | 'Empty'
 
 export interface PricingStrategyNodeDto {
   cost: number
   price: number
+}
+
+/** 列表摘要里的单个区间：进货价上下限、类型与端点售价。 */
+export interface PricingStrategyIntervalDto {
+  minPrice: number
+  maxPrice: number
+  type: 'Fixed' | 'Curve' | 'Legacy'
+  rate?: number | null
+  startPrice: number
+  endPrice: number
 }
 
 export interface PricingStrategyRuleDto {
