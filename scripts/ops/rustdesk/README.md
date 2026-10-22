@@ -1,6 +1,10 @@
 # .vip RustDesk 维护
 
-## 当前部署
+> **两台主机的状态不同，别混用本目录的 Compose：**
+> - 新加坡生产（`hotbargain.vip`，`/www/rustdesk-server`）正在运行的是历史部署，且 hbbs 是自编译补丁镜像（见下“迁移”一节），**不要**在那台机器上直接 `up` 本目录的 `compose.yml`，否则 `-r` 会被改成 `rd.hotbargain.vip:21117`，而 DNS 与 AWS 新机此时可能还没就绪。
+> - 本目录的 `compose.yml` 现在描述的是**目标部署**：只用于 AWS 悉尼边缘机（官方镜像，`-r rd.hotbargain.vip:21117`）。
+
+## 当前部署（新加坡，迁移完成前）
 
 - Compose 项目：`rustdesk-server`，服务目录：`/www/rustdesk-server`。
 - `rustdesk-server` 运行 `hbbs`，`rustdesk-relay` 运行 `hbbr`。
@@ -8,6 +12,32 @@
 - 进程工作目录为 `/root`，宿主机 `/www/rustdesk-server/data` 必须挂载到该目录。
 - TCP：21115、21116、21117；UDP：21116。Web 客户端端口不发布。
 - 客户端固定 `1.4.9`，文件 `rustdesk-1.4.9-x86_64.exe`，大小 24472432 字节，SHA-256：`eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274`。
+
+## 迁移到专用域名 `rd.hotbargain.vip`（AWS 悉尼边缘机）
+
+目标：RustDesk 不再占用业务主域名 `hotbargain.vip`，改由 `rd.hotbargain.vip` 解析到 AWS 悉尼 `hb-edge-syd`（EIP `13.211.103.232`），hbbs/hbbr 直接绑定公网，**不经任何反代**，保住真实源 IP 与 UDP 打洞。主域名之后可自由切到边缘或 EdgeOne。
+
+**与迁移前的差异**
+
+- 新机使用本目录 `compose.yml` 的**官方镜像**（固定摘要）。迁移前新加坡生产跑的是自编译补丁镜像 `hb-rustdesk-server:1.1.16-wss-registration-20260908`（只为 WSS 注册兼容）；WSS 已由业务方确认不再需要（现网日志里只有管理员自己的出口 IP 用过），因此不迁移 `compose.wss.yml`、`compose.registration.yml` 与 nginx 的 `/ws/id`、`/ws/relay`，21118/21119 不发布。
+- `hbbs` 的 `-r` 改为 `rd.hotbargain.vip:21117`。
+- **必须沿用同一对密钥和同一个 `db_v2.sqlite3`**：设备配置里的 `key=` 与 RustDesk ID 都不用变，WPF 对账也要求公钥不变。
+
+**服务端准备（不影响现网）**
+
+1. 新机安全组放行 TCP 21115-21117、UDP 21116（SSH 仍只对管理员 IP 开放）。
+2. 在新加坡对 `/www/rustdesk-server/data/db_v2.sqlite3` 用 `sqlite3 … ".backup"` 取一致性快照（库为 WAL 模式，不要直接拷贝主文件），连同 `id_ed25519`、`id_ed25519.pub` 传到新机同路径；私钥不进 Git、不进日志，传输后核对 `.pub` 内容一致。
+3. 新机 `docker compose -f compose.yml up -d`，先用复制的 db 演练：确认官方镜像能读取旧库，再用一台测试客户端指向 `rd.hotbargain.vip` 验证注册、直连、中继与无人值守密码登录。
+4. DNSPod 添加 `rd` 的 A 记录到 `13.211.103.232`（专业版 TTL 可设 60，不走代理）。
+5. 新机做 EBS 快照并安排周期快照：RustDesk 有密钥与注册库，不再是可随时重建的无状态节点。
+
+**切换与回滚**
+
+- 切换只改主 API 的 `.env`：`REMOTE_MAINTENANCE_ID_SERVER=rd.hotbargain.vip:21116`、`REMOTE_MAINTENANCE_RELAY_SERVER=rd.hotbargain.vip:21117`，再按仅后端流程重建。**必须先发布带对账的 WPF 新版并确认新旧两台服务器同时在线**；旧版 WPF 不会对账，新装也会因白名单只认旧域名而失败。**没有按设备灰度的开关**：灰度靠 WPF 更新策略范围（先只发测试店 1042，在它身上翻开关，其余设备仍是旧版 WPF，不受影响），切换前先用一台真机在不改中心配置的情况下手工验证新服务器可达。
+- 已升级的设备下次启动自动对账（见 `docs/remote-maintenance-contract.md`）。过渡期设备分居两台服务器，控制端一次只能连其中一个，窗口越短越好。
+- 回滚：把 `.env` 改回 `hotbargain.vip:21116/21117` 重建主 API（**不能靠 `REMOTE_MAINTENANCE_ENABLED=false`**：关闭后 `prepare` 直接 DISABLED，设备不会改回），已对账设备下次收银员登录后自动改回；回退 WPF 版本前必须先改回 `.env` 并等设备收敛；新加坡容器与数据在全部设备收敛并观察 1–2 天之前不要停、不要删。
+- 全部收敛后再下线新加坡 hbbs/hbbr，并撤掉主站 nginx 的 `include nginx-wss.conf`（生产变更，单独授权）。
+- 重新生成免配置下载包：`prepare-client.py --server-host rd.hotbargain.vip …`，替换 artifacts 目录与 manifest。
 
 ## 免配置客户端
 

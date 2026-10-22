@@ -2,9 +2,9 @@
 
 官方 RustDesk iOS/macOS 在“ID/中继服务器”中配置：
 
-- ID 服务器：`hotbargain.vip:21116`
-- 中继服务器（客户端显示此项时）：`hotbargain.vip:21117`
-- API 服务器：`https://hotbargain.vip/api/rustdesk`
+- ID 服务器：`hotbargain.vip:21116`（**RustDesk 迁移到专用域名并确认全部设备收敛之后**，改为 `rd.hotbargain.vip:21116`；在那之前控制端连不上已切到新服务器的设备，也连不上仍在旧服务器的设备，过渡期按设备所在服务器各配一套）
+- 中继服务器（客户端显示此项时）：`hotbargain.vip:21117`（同上，迁移完成后为 `rd.hotbargain.vip:21117`）
+- API 服务器：`https://hotbargain.vip/api/rustdesk`（始终是业务主域名的 HTTPS 接口，不随 RustDesk 服务器迁移）
 - Key：沿用服务器当前公钥，不更换私钥。
 
 保存后通过“登录”输入现有 HBWeb 系统管理员账号。在“通讯录”中选择共享的“公司设备”：它包含已安装并回传 RustDesk ID 的有效 Windows POS，以及管理员显式登记的 Mac。公司通讯录只读，个人通讯录为空。已有后台加密密码的有效 POS 会同步连接密码，点击设备时由官方客户端自动完成密码认证。未回传密码的设备仍需输入密码或由被控端接受。

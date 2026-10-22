@@ -354,6 +354,7 @@
   <data name="settings.remoteMaintenance.detail.serviceUnavailable" xml:space="preserve"><value>The remote maintenance component is unavailable. Contact your administrator.</value></data>
   <data name="settings.remoteMaintenance.result.activationRequired" xml:space="preserve"><value>Activate this POS before setting up remote maintenance.</value></data>
   <data name="settings.remoteMaintenance.result.serviceRestored" xml:space="preserve"><value>The remote maintenance status service has been restored.</value></data>
+  <data name="settings.remoteMaintenance.result.serviceRestoredServerPending" xml:space="preserve"><value>The remote maintenance status service has been restored, but the server address update did not finish. Try the repair again later.</value></data>
   <data name="settings.remoteMaintenance.result.serviceRestoreFailed" xml:space="preserve"><value>The status service could not be restored. Please try again.</value></data>
   <data name="settings.remoteMaintenance.result.journalDecryptFailed" xml:space="preserve"><value>The recovery record could not be decrypted. Contact your administrator before trying again.</value></data>
   <data name="settings.remoteMaintenance.result.configured" xml:space="preserve"><value>Remote maintenance is configured. The status service will report device status in the background.</value></data>
