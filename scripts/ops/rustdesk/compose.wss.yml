@@ -1,0 +1,8 @@
+# 与 compose.yml 合并使用。WebSocket 仅供本机 HTTPS 反向代理（nginx 443）访问，不对公网发布。
+services:
+  rustdesk-server:
+    ports:
+      - '127.0.0.1:21118:21118/tcp'
+  rustdesk-relay:
+    ports:
+      - '127.0.0.1:21119:21119/tcp'

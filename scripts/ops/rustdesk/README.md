@@ -15,11 +15,11 @@
 
 ## 迁移到专用域名 `rd.hotbargain.vip`（AWS 悉尼边缘机）
 
-目标：RustDesk 不再占用业务主域名 `hotbargain.vip`，改由 `rd.hotbargain.vip` 解析到 AWS 悉尼 `hb-edge-syd`（EIP `13.211.103.232`），hbbs/hbbr 直接绑定公网，**不经任何反代**，保住真实源 IP 与 UDP 打洞。主域名之后可自由切到边缘或 EdgeOne。
+目标：RustDesk 不再占用业务主域名 `hotbargain.vip`，改由 `rd.hotbargain.vip` 解析到 AWS 悉尼 `hb-edge-syd`（EIP `13.211.103.232`），hbbs/hbbr 的 21115-21117 直接绑定公网，**不经任何反代**，保住真实源 IP 与 UDP 打洞；WebSocket 入口（控制端用）另走 nginx 443，见下文。主域名之后可自由切到边缘或 EdgeOne。
 
 **与迁移前的差异**
 
-- 新机使用本目录 `compose.yml` 的**官方镜像**（固定摘要）。迁移前新加坡生产跑的是自编译补丁镜像 `hb-rustdesk-server:1.1.16-wss-registration-20260908`（只为 WSS 注册兼容）；WSS 已由业务方确认不再需要（现网日志里只有管理员自己的出口 IP 用过），因此不迁移 `compose.wss.yml`、`compose.registration.yml` 与 nginx 的 `/ws/id`、`/ws/relay`，21118/21119 不发布。
+- 新机使用本目录 `compose.yml` 的**官方镜像**（固定摘要）。迁移前新加坡生产跑的是自编译补丁镜像 `hb-rustdesk-server:1.1.16-wss-registration-20260908`（只为 WSS 注册兼容）。**WSS 不能省**：见下文「控制端必须有 WSS 入口」——边缘机用 `compose.wss.yml` + nginx 443 提供 `/ws/id`、`/ws/relay`（先前「现网 WSS 只有管理员出口 IP 在用 → 不需要」的判断是错的，那正是管理员控制端在用）。迁移前新加坡的自编译补丁镜像仍只为 WSS **注册**兼容，设备端（被控）不走 WSS，边缘机官方镜像即可。
 - `hbbs` 的 `-r` 改为 `rd.hotbargain.vip:21117`。
 - **必须沿用同一对密钥和同一个 `db_v2.sqlite3`**：设备配置里的 `key=` 与 RustDesk ID 都不用变，WPF 对账也要求公钥不变。
 
@@ -31,6 +31,20 @@
 4. 新机 `docker compose -f compose.yml up -d`，**检查 `docker logs rustdesk-server` 里有 `relay-servers=["rd.hotbargain.vip:21117"]`**；若是 `[]`，说明启动时解析失败，确认 DNS 后重启 `rustdesk-server` 容器。同时核对日志里的 `Key:` 与 `id_ed25519.pub` 内容一致。
 5. 跑下面的协议级端到端检查，10 项全部通过才算服务端就绪。
 6. 新机做 EBS 快照并安排周期快照：RustDesk 有密钥与注册库，不再是可随时重建的无状态节点。
+
+**控制端必须有 WSS 入口（`/ws/id`、`/ws/relay`）**
+
+RustDesk 1.4.x 控制端在配置了 key 时，对 hbbs/hbbr 的**原生 TCP** 连接会先做密钥交换（`secure_tcp`），而 hbbs/hbbr 1.1.x 连上后不会先发数据，客户端只能等到超时，报 `Failed to secure tcp: deadline has elapsed`。WebSocket 路径会跳过这一步，所以管理员的控制端（Mac / Windows，1.4.9）一直是走 `wss://<host>/ws/id`、`/ws/relay`（443）才连得上；Mac 日志里自 9 月 28 日起没有一次原生 TCP 成功。设备端（被控）不需要 WSS。边缘机缺这个入口时，打开「使用 WebSocket」会报 `Connection refused (os error 61)`，关掉则报 `secure tcp` 超时。
+
+部署（已在 `hb-edge-syd` 上线，文件在本目录）：
+
+1. `compose.wss.yml`：与 `compose.yml` 合并运行 `docker compose -f compose.yml -f compose.wss.yml up -d`，hbbs 的 21118、hbbr 的 21119 **只绑 `127.0.0.1`**，不对公网发布。重建约 10 秒，设备自动重新注册；重建后核对 `Key:` 不变、`relay-servers=["rd.hotbargain.vip:21117"]`，先用 `sqlite3 … ".backup"` 取库快照。
+2. `edge-nginx/rd-acme.conf`：80 端口 `rd.hotbargain.vip` 站点，只放行 `/.well-known/acme-challenge/`（默认站点 `hb-edge.conf` 仍只允许管理员 IP，不改）。
+3. 证书：`certbot certonly --webroot -w /var/www/acme -d rd.hotbargain.vip --register-unsafely-without-email`，并放 `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`（`systemctl reload nginx`）；`certbot renew --dry-run` 验证。
+4. `edge-nginx/rd-wss.conf`：443 终止 TLS，`= /ws/id` → `127.0.0.1:21118`，`= /ws/relay` → `127.0.0.1:21119`（超时 3600 秒，空闲的远程桌面不会被 nginx 切断），其余一律 404。
+5. 安全组放行 TCP 443（和 80，证书续期用）。
+6. 验证：`curl -i --http1.1 https://rd.hotbargain.vip/ws/id -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='` 应返回 `101 Switching Protocols`（`/ws/relay` 同理）。普通 GET `/ws/id` 返回 502 属正常（上游只接受 WebSocket）。
+7. 控制端使用：ID/中继服务器填 `rd.hotbargain.vip`（含端口 21116/21117），**打开「使用 WebSocket」**，Key 为 `id_ed25519.pub` 的内容。`e2e_check.py` 测的是原生 TCP 协议路径，不覆盖 WSS。
 
 **协议级端到端检查（`e2e_check.py`）**
 
@@ -50,7 +64,7 @@ python3 scripts/ops/rustdesk/e2e_check.py --host rd.hotbargain.vip \
 - 切换只改主 API 的 `.env`：`REMOTE_MAINTENANCE_ID_SERVER=rd.hotbargain.vip:21116`、`REMOTE_MAINTENANCE_RELAY_SERVER=rd.hotbargain.vip:21117`，再按仅后端流程重建。**必须先发布带对账的 WPF 新版并确认新旧两台服务器同时在线**；旧版 WPF 不会对账，新装也会因白名单只认旧域名而失败。**没有按设备灰度的开关**：灰度靠 WPF 更新策略范围（先只发测试店 1042，在它身上翻开关，其余设备仍是旧版 WPF，不受影响），切换前先用一台真机在不改中心配置的情况下手工验证新服务器可达。
 - 已升级的设备下次启动自动对账（见 `docs/remote-maintenance-contract.md`）。过渡期设备分居两台服务器，控制端一次只能连其中一个，窗口越短越好。
 - 回滚：把 `.env` 改回 `hotbargain.vip:21116/21117` 重建主 API（**不能靠 `REMOTE_MAINTENANCE_ENABLED=false`**：关闭后 `prepare` 直接 DISABLED，设备不会改回），已对账设备下次收银员登录后自动改回；回退 WPF 版本前必须先改回 `.env` 并等设备收敛；新加坡容器与数据在全部设备收敛并观察 1–2 天之前不要停、不要删。
-- 全部收敛后再下线新加坡 hbbs/hbbr，并撤掉主站 nginx 的 `include nginx-wss.conf`（生产变更，单独授权）。
+- 全部收敛后再下线新加坡 hbbs/hbbr，并撤掉主站 nginx 的 `include nginx-wss.conf`（生产变更，单独授权）。**撤之前先确认所有控制端都已改用 rd 并打开「使用 WebSocket」**。
 - 重新生成免配置下载包：`prepare-client.py --server-host rd.hotbargain.vip …`，替换 artifacts 目录与 manifest。
 
 ## 免配置客户端
