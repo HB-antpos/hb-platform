@@ -41,6 +41,9 @@ import { ProductHeroCard } from "@/components/product-maintenance/ProductHeroCar
 import { ProductPromotionCard } from "@/components/product-maintenance/ProductPromotionCard";
 import { SearchPanel } from "@/components/product-maintenance/SearchPanel";
 import { SetCodeCompactSection } from "@/components/product-maintenance/SetCodeCompactSection";
+import { buildPriceUpdatesRoute } from "@/modules/price-updates/navigation";
+import { ProductPriceTaskCard } from "@/modules/product-price-task/ProductPriceTaskCard";
+import { useProductPriceTask } from "@/modules/product-price-task/use-product-price-task";
 import { StickyActionBar } from "@/components/product-maintenance/StickyActionBar";
 import { StoreClearancePriceCard } from "@/components/product-maintenance/StoreClearancePriceCard";
 import { PosterEntryRow } from "@/components/product-maintenance/PosterEntryRow";
@@ -4273,6 +4276,30 @@ function ProductQueryContent() {
     () => getDirtyCodeIds(detail, initialDetail),
     [detail, initialDetail],
   );
+  // 价格任务卡：只在线、有「价格和标签」权限（设备会话由后端按绑定分店校验）、已选分店时出现。
+  const priceTaskEnabled =
+    !offlineMode &&
+    Boolean(selectedStoreCode) &&
+    (isDeviceMode || access.hasPermission(PERMISSIONS.StoreProducts.PriceUpdates));
+  // 自动价弹窗里提示「本店还有价格任务」；与下方卡片同一个查询键，不会多发请求。
+  const autoPricingPriceTask = useProductPriceTask({
+    storeCode: selectedStoreCode ?? null,
+    productCode: autoPricingDialog?.detail.productCode ?? null,
+    enabled: priceTaskEnabled && Boolean(autoPricingDialog),
+  }).data;
+  const handlePriceTaskCompleted = useCallback(async () => {
+    // 改价已落库：重新读取详情，让下方价格卡显示新值（未保存修改已在卡片侧被拦住）。
+    if (detail?.productCode) {
+      await loadDetail(detail.productCode);
+    }
+  }, [detail?.productCode, loadDetail]);
+  const handleViewPriceTask = useCallback(() => {
+    router.push(
+      buildPriceUpdatesRoute({ storeCode: selectedStoreCode ?? null }) as unknown as Parameters<
+        typeof router.push
+      >[0],
+    );
+  }, [router, selectedStoreCode]);
   // 「原值」与毛利变化都以现有 baseline（initialDetail）为准，且仅在同一商品、价格有改动时显示。
   const baselineStorePrice =
     dirtyCount > 0 && initialDetail?.productCode === detail?.productCode
@@ -4610,6 +4637,17 @@ function ProductQueryContent() {
                     : handleOpenProductInsights
               }
               insightsDisabled={scannerInputBlocked}
+            />
+
+            <ProductPriceTaskCard
+              key={`${selectedStoreCode ?? ""}:${detail.productCode}`}
+              storeCode={selectedStoreCode ?? null}
+              productCode={detail.productCode}
+              enabled={priceTaskEnabled}
+              editBlocked={dirtyCount > 0 || dirtyCodeIds.size > 0}
+              onCompleted={handlePriceTaskCompleted}
+              onConnectPrinter={handleOpenPrinterSettings}
+              onViewTask={handleViewPriceTask}
             />
 
             {hasCodeSection ? (
@@ -5074,6 +5112,29 @@ function ProductQueryContent() {
                   <Text variant="bodySmall" style={styles.autoPricingHint}>
                     {t("autoPricingConfirm.discountHint")}
                   </Text>
+                  {selectedStoreCode ? (
+                    <View style={styles.autoPricingStoreTag}>
+                      <Text variant="labelMedium" style={styles.autoPricingStoreTagText}>
+                        {t("autoPricingStore.storeTag", {
+                          store: selectedStore?.storeName
+                            ? `${selectedStore.storeName} · ${selectedStoreCode}`
+                            : selectedStoreCode,
+                        })}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {autoPricingPriceTask ? (
+                    <View style={styles.autoPricingStoreTag}>
+                      <Text variant="labelMedium" style={styles.autoPricingStoreTagText}>
+                        {t("autoPricingStore.taskHint", {
+                          kind:
+                            autoPricingPriceTask.kind === "PriceUpdate"
+                              ? t("autoPricingStore.kindPriceUpdate")
+                              : t("autoPricingStore.kindLabelOnly"),
+                        })}
+                      </Text>
+                    </View>
+                  ) : null}
                   <View style={styles.autoPricingActions}>
                     <Button
                       mode="outlined"
@@ -5687,6 +5748,16 @@ const styles = StyleSheet.create({
   },
   autoPricingHint: {
     color: "#667085",
+  },
+  autoPricingStoreTag: {
+    alignSelf: "flex-start",
+    borderRadius: 8,
+    backgroundColor: "#F5F9FF",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  autoPricingStoreTagText: {
+    color: "#0958D9",
   },
   autoPricingActions: {
     flexDirection: "row",

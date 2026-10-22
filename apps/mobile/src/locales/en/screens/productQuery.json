@@ -544,5 +544,58 @@
       "clearAfter": "Clear printed",
       "resultQuestion": "Once printed, clear this batch and scan the next one."
     }
+  },
+  "priceTask": {
+    "titlePriceUpdate": "This store has a pending price task",
+    "titleLabelOnly": "This store has a shelf label to replace",
+    "overdueTag": "Overdue {{days}}d",
+    "waitingTag": "Waiting {{days}}d",
+    "storeNow": "Store price",
+    "warehouseNew": "Warehouse price",
+    "shelfLabel": "Shelf label",
+    "deltaUp": "Up {{amount}}",
+    "deltaDown": "Down {{amount}}",
+    "discountRow": "Discount: {{from}} → {{to}}",
+    "printerOffline": "Label printer not connected — only the price will be updated",
+    "connectPrinter": "Connect",
+    "dirtyBlocked": "You have unsaved price changes on this page. Save or discard them before handling this task.",
+    "actions": {
+      "applyAndPrint": "Update & print",
+      "applyOnly": "Update price only",
+      "printLabel": "Print label",
+      "markReplaced": "Mark replaced",
+      "more": "More",
+      "keepStorePrice": "Keep store price",
+      "viewTask": "View task details",
+      "reprint": "Print another",
+      "retry": "Retry"
+    },
+    "steps": {
+      "apply": "Update price",
+      "print": "Print label",
+      "complete": "Complete task",
+      "skipped": "Skipped"
+    },
+    "notice": {
+      "priceUpdatedLabelPending": "Price updated. The label is not printed yet and the task is now \"Labels to replace\".",
+      "targetChanged": "The price has changed and was refreshed. Please review it again.",
+      "applyFailed": "Failed to update the price. Please try again.",
+      "printFailed": "Price updated, but printing failed. The task stays in \"Labels to replace\".",
+      "confirmFailed": "The label was printed, but saving the task status failed. Tap Retry (it will not print again).",
+      "printerRequired": "Connect a label printer before printing.",
+      "operationFailed": "Operation failed. Please try again."
+    },
+    "done": {
+      "completed": "Task complete: price updated to {{price}} and label printed",
+      "markedReplaced": "Marked as label replaced",
+      "keptStorePrice": "Store price kept, task complete",
+      "reprinted": "Printed another label"
+    }
+  },
+  "autoPricingStore": {
+    "storeTag": "Current store: {{store}}",
+    "taskHint": "This store also has 1 warehouse price task ({{kind}}). Handle it on the page after confirming.",
+    "kindPriceUpdate": "price update",
+    "kindLabelOnly": "label to replace"
   }
 }
