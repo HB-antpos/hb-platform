@@ -348,6 +348,7 @@ import {
   applyContainerDetailAutoSavePatches,
   buildContainerDetailAutoSaveContextKey,
   createContainerDetailAutoSaveQueue,
+  ensureContainerDetailAutoSaveContextSnapshot,
   isContainerDetailAutoSaveContextCurrent,
   resolveContainerDetailAutoSaveLifecycleAction,
   type ContainerDetailAutoSaveFailure,
@@ -1481,6 +1482,17 @@ export default function ContainerDetailPage() {
     }
     if (lifecycleAction !== 'attach') return
 
+    // 空闲时切走标签会让队列释放 context 并删掉快照；切回来后草稿身份没变，
+    // restorePendingDetailDraft 不会重建，必须在 attach 前补齐，否则下一次编辑会报「保存上下文已失效」。
+    ensureContainerDetailAutoSaveContextSnapshot(autoSaveContextSnapshotsRef.current, contextKey, () => ({
+      userGuid: currentUserGuid,
+      containerGuid,
+      draftIdentity: pendingDetailDraftIdentityRef.current,
+      rows: rowsRef.current,
+      container: containerRef.current,
+      fieldVersions: { ...pendingDetailFieldVersionsRef.current },
+      fieldBaselineTokens: { ...pendingDetailFieldBaselineTokensRef.current },
+    }))
     const nextAutoSaveSnapshot = autoSaveQueueRef.current?.attachContext(contextKey)
     if (!nextAutoSaveSnapshot) return
     autoSaveSnapshotRef.current = nextAutoSaveSnapshot

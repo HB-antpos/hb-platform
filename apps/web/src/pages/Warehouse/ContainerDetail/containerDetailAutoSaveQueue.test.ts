@@ -3,6 +3,7 @@ import * as autoSaveQueueModule from './containerDetailAutoSaveQueue'
 const {
   buildContainerDetailAutoSaveContextKey,
   createContainerDetailAutoSaveQueue,
+  ensureContainerDetailAutoSaveContextSnapshot,
   isContainerDetailAutoSaveContextCurrent,
 } = autoSaveQueueModule
 
@@ -805,6 +806,53 @@ function testContextSnapshotOwnership() {
   )
 }
 
+// 回归：保存完成、队列空闲时切走标签会释放 context 并删掉页面快照；切回来再编辑必须仍能发送。
+async function testIdleTabSwitchRebuildsSnapshotBeforeNextEdit() {
+  const contextKey = buildContainerDetailAutoSaveContextKey('container-tab', 'draft-tab')
+  const snapshots = new Map<string, { rows: string[] }>([[contextKey, { rows: ['初始行'] }]])
+  const sentRows: string[][] = []
+  const queue = createContainerDetailAutoSaveQueue({
+    sendBatch: async (key) => {
+      const snapshot = snapshots.get(key)
+      if (!snapshot) throw new Error('货柜明细保存上下文已失效')
+      sentRows.push(snapshot.rows)
+    },
+    onContextDisposed: (key) => {
+      snapshots.delete(key)
+    },
+  })
+  const activate = () => {
+    ensureContainerDetailAutoSaveContextSnapshot(snapshots, contextKey, () => ({ rows: ['重建行'] }))
+    queue.attachContext(contextKey)
+  }
+
+  activate()
+  queue.enqueue(contextKey, 'row-1', { 调整浮率: 1.5 })
+  await queue.drain(contextKey)
+  assertEqual(sentRows.length, 1, '切走标签前的编辑应正常保存')
+
+  // active=false：队列空闲，context 立即释放，页面回调删除快照。
+  queue.discardContext(contextKey)
+  assertEqual(snapshots.has(contextKey), false, '空闲 discard 后页面快照会被释放（这是该回归的前提）')
+
+  // active=true：重新 attach 前补齐快照，再编辑不能报上下文失效。
+  activate()
+  queue.enqueue(contextKey, 'row-2', { 调整浮率: 2 })
+  await queue.drain(contextKey)
+  assertEqual(sentRows.length, 2, '切回标签后的编辑必须能发出保存请求')
+  assertDeepEqual(sentRows[1], ['重建行'], '切回标签后应使用重建的快照')
+  assertEqual(queue.getSnapshot(contextKey).failureCount, 0, '切回标签后的编辑不应产生保存失败')
+
+  // 快照仍存在时不得覆盖：避免冲掉正在使用的行与草稿元数据。
+  assertEqual(
+    ensureContainerDetailAutoSaveContextSnapshot(snapshots, contextKey, () => ({ rows: ['不应覆盖'] })),
+    false,
+    '已有快照时 ensure 不应重建',
+  )
+  assertDeepEqual(snapshots.get(contextKey)?.rows, ['重建行'], '已有快照内容必须保持')
+  queue.discardContext(contextKey)
+}
+
 async function run() {
   await testSingleFlightAndLatestWinsMerge()
   await testDrainIncludesWorkEnqueuedWhileWaiting()
@@ -822,6 +870,7 @@ async function run() {
   await testSuccessfulSaveInvalidatesStaleItemQueryBeforeClearingRunningOverlay()
   await testDiscardedContextDrainsPendingBatchWithOriginalPersistenceMetadata()
   testContextSnapshotOwnership()
+  await testIdleTabSwitchRebuildsSnapshotBeforeNextEdit()
   console.log('containerDetailAutoSaveQueue tests passed')
 }
 

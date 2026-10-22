@@ -4988,6 +4988,13 @@ assertEqual(
   '中包数清空时必须恢复聚焦前值且不入队，避免 undefined 被 JSON 省略后误判保存成功',
 )
 assertEqual(
+  pageSource.includes('ensureContainerDetailAutoSaveContextSnapshot(autoSaveContextSnapshotsRef.current, contextKey,') &&
+    pageSource.indexOf('ensureContainerDetailAutoSaveContextSnapshot(autoSaveContextSnapshotsRef.current, contextKey,') <
+      pageSource.indexOf('autoSaveQueueRef.current?.attachContext(contextKey)'),
+  true,
+  '切回标签 attach 自动保存队列前必须补齐被空闲 discard 删掉的快照，否则再编辑会报「保存上下文已失效」',
+)
+assertEqual(
   pageSource.includes('createContainerDetailAutoSaveQueue({') &&
     pageSource.includes('buildContainerDetailAutoSaveContextKey(containerGuid, draftIdentity)') &&
     pageSource.includes('buildContainerDetailAutoSaveUpdate(latestRow, intent.patch, contextSnapshot.container)') &&
