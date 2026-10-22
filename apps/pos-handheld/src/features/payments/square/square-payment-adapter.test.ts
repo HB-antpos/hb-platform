@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SquarePaymentAdapter } from "./square-payment-adapter";
+import { HbposApiError } from "@/core/api";
 
 import type {
   HbposEnvelope,
@@ -839,7 +840,7 @@ test("首次完成响应出现多个不同 PaymentId 时保持 Unknown，不猜�
   assert.equal(transport.calls.length, 1);
 });
 
-test("refund 使用原 PaymentId 与 attempt 幂等键；PENDING 可用同一请求恢复到 COMPLETED", async () => {
+test("refund 使用原 PaymentId 与 attempt 幂等键；PENDING 视为已受理当场完成，旧版遗留 Pending 恢复到 COMPLETED", async () => {
   const transport = new ScriptedTransport([
     ok({
       refundId: "refund-1",
@@ -865,14 +866,19 @@ test("refund 使用原 PaymentId 与 attempt 幂等键；PENDING 可用同一请
   });
 
   const pending = await adapter.refund(refundAttempt);
+  // 旧版本把 PENDING 落成 Pending；恢复时用同一幂等请求重放，得到 COMPLETED 同样完成退货。
   const completed = await adapter.recover({
     ...refundAttempt,
     state: "Pending",
     references: pending.references,
   });
 
-  assert.equal(pending.state, "Pending");
-  assert.equal("protectedSyncEvidence" in pending, false);
+  // Square 已受理（PENDING）：与 WPF #674 一致视为已发起退款，退货当场完成，结算后台跟踪。
+  assert.equal(pending.state, "Approved");
+  assert.equal(pending.responseCode, "SQUARE_REFUND_PENDING");
+  assert.equal(pending.protectedSyncEvidence?.responseText, "PENDING");
+  assert.equal(pending.protectedSyncEvidence?.refundReference, "refund-1");
+  assert.equal(pending.protectedSyncEvidence?.amountCents, 500);
   assert.equal(
     JSON.stringify(withoutProtectedEvidence(pending)).includes("refund-1"),
     false,
@@ -1185,3 +1191,170 @@ function withoutProtectedEvidence(
     Object.entries(result).filter(([key]) => key !== "protectedSyncEvidence"),
   );
 }
+
+function adapterWithClock(
+  transport: HbposTransport,
+  clock: { now: number; sleeps: number[] },
+) {
+  return new SquarePaymentAdapter(
+    transport,
+    async () => ({ environment: "Sandbox", deviceId: "device:terminal-1", locationId: "location-1" }),
+    "Sandbox",
+    {
+      nowMs: () => clock.now,
+      sleep: async (delayMs) => {
+        clock.sleeps.push(delayMs);
+        clock.now += delayMs;
+      },
+    },
+  );
+}
+
+const completedCheckout = () => ok({
+  checkoutId: "checkout-1",
+  environment: "Sandbox",
+  status: "COMPLETED",
+  paymentIds: ["payment-1"],
+});
+
+const paymentWithStatus = (status: string) => ok({
+  paymentId: "payment-1",
+  status,
+  approvedMoney: { amount: 1_250, currency: "AUD" },
+  updatedAt: "2026-07-28T10:11:12+10:00",
+});
+
+test("等待刷卡期间查询结账遇 5xx/408/429/断网保持 Pending 并保留 CheckoutId，下一轮成功即批准；4xx、未知 attempt 照旧判未知", async () => {
+  const transport = new ScriptedTransport([
+    new HbposApiError("bad gateway", { kind: "http", status: 502 }),
+    { status: 503, data: {} },
+    new HbposApiError("offline", { kind: "transport", code: "NO_HTTP_RESPONSE", networkCode: "ECONNRESET" }),
+    new HbposApiError("throttled", { kind: "http", status: 429 }),
+    new HbposApiError("timeout", { kind: "http", status: 408 }),
+    completedCheckout(),
+    paymentWithStatus("COMPLETED"),
+    new HbposApiError("bad request", { kind: "http", status: 400 }),
+    new HbposApiError("bad gateway", { kind: "http", status: 502 }),
+    new HbposApiError("bad gateway", { kind: "http", status: 502 }),
+  ]);
+  const adapter = createAdapter(transport);
+  const pending = attempt({ state: "Pending", references: references({ checkoutId: "checkout-1" }) });
+
+  for (let index = 0; index < 5; index += 1) {
+    const result = await adapter.recover(pending);
+    assert.equal(result.state, "Pending", `transient ${index}`);
+    assert.equal(result.responseCode, "SQUARE_RECOVERY_TRANSIENT_ERROR");
+    assert.equal(result.references.checkoutId, "checkout-1");
+  }
+  const approved = await adapter.recover(pending);
+  assert.equal(approved.state, "Approved");
+  assert.equal(approved.references.paymentId, "payment-1");
+
+  const clientError = await adapter.recover(pending);
+  assert.equal(clientError.state, "Unknown");
+  assert.equal(clientError.responseCode, "SQUARE_HTTP_400");
+
+  // 已是 Unknown 的记录（恢复中心）不因瞬时错误被“升级”回 Pending。
+  const stillUnknown = await adapter.recover({ ...pending, state: "Unknown" });
+  assert.equal(stillUnknown.state, "Unknown");
+
+  // 人工核查查询遇瞬时错误时不能算作已取得原交易状态。
+  const query = await adapter.queryExistingPayment(pending);
+  assert.equal(query.state, "Pending");
+  assert.equal(query.queryVerified, false);
+  assert.ok(transport.calls.every((call) => call.method === "GET"));
+});
+
+test("结账已完成时查询付款详情遇瞬时错误保持 Pending 并保留 PaymentId", async () => {
+  const transport = new ScriptedTransport([
+    completedCheckout(),
+    new HbposApiError("bad gateway", { kind: "http", status: 503 }),
+  ]);
+  const result = await createAdapter(transport).recover(
+    attempt({ state: "Pending", references: references({ checkoutId: "checkout-1" }) }),
+  );
+  assert.equal(result.state, "Pending");
+  assert.equal(result.responseCode, "SQUARE_RECOVERY_TRANSIENT_ERROR");
+  assert.equal(result.references.paymentId, "payment-1");
+});
+
+test("结账完成但付款仍 APPROVED：每 2 秒重查，转 COMPLETED 即批准；等满 30 秒仍 APPROVED 照旧判未知", async () => {
+  const clock = { now: 0, sleeps: [] as number[] };
+  const settling = new ScriptedTransport([
+    completedCheckout(),
+    paymentWithStatus("APPROVED"),
+    paymentWithStatus("APPROVED"),
+    paymentWithStatus("COMPLETED"),
+  ]);
+  const approved = await adapterWithClock(settling, clock).recover(
+    attempt({ state: "Pending", references: references({ checkoutId: "checkout-1" }) }),
+  );
+  assert.equal(approved.state, "Approved");
+  assert.deepEqual(clock.sleeps, [2_000, 2_000]);
+
+  const stuckClock = { now: 0, sleeps: [] as number[] };
+  const stuck = new ScriptedTransport([
+    completedCheckout(),
+    ...Array.from({ length: 16 }, () => paymentWithStatus("APPROVED")),
+  ]);
+  const unknownResult = await adapterWithClock(stuck, stuckClock).recover(
+    attempt({ state: "Pending", references: references({ checkoutId: "checkout-1" }) }),
+  );
+  assert.equal(unknownResult.state, "Unknown");
+  assert.equal(unknownResult.responseCode, "SQUARE_PAYMENT_APPROVED");
+  assert.equal(stuckClock.now, 30_000);
+  assert.equal(stuck.calls.length, 17);
+});
+
+test("APPROVED 等待受恢复截止时间约束：截止前提前停止并保持 Pending，不判未知", async () => {
+  const clock = { now: Date.now(), sleeps: [] as number[] };
+  const transport = new ScriptedTransport([
+    completedCheckout(),
+    paymentWithStatus("APPROVED"),
+    paymentWithStatus("APPROVED"),
+    paymentWithStatus("APPROVED"),
+  ]);
+  const result = await adapterWithClock(transport, clock).recoverWithControl(
+    attempt({ state: "Pending", references: references({ checkoutId: "checkout-1" }) }),
+    { signal: new AbortController().signal, deadlineAtMs: clock.now + 5_000 },
+  );
+  assert.equal(result.state, "Pending");
+  assert.equal(result.responseCode, "SQUARE_PAYMENT_APPROVED");
+  assert.equal(result.references.paymentId, "payment-1");
+  assert.deepEqual(clock.sleeps, [2_000, 2_000]);
+});
+
+test("退款 PENDING 但缺金额或原付款号无法核对时不当作已受理，保持 Pending", async () => {
+  const transport = new ScriptedTransport([
+    ok({ refundId: "refund-1", environment: "Sandbox", status: "PENDING", paymentId: "payment-original" }),
+    ok({ refundId: "refund-1", environment: "Sandbox", status: "PENDING", amountMoney: { amount: 500, currency: "AUD" } }),
+  ]);
+  const adapter = createAdapter(transport);
+  const refundAttempt = attempt({
+    operation: "refund",
+    amount: { currency: "AUD", cents: -500 },
+    references: references({ paymentId: "payment-original" }),
+  });
+  for (const label of ["missing amount", "missing payment id"]) {
+    const result = await adapter.refund(refundAttempt);
+    assert.equal(result.state, "Pending", label);
+    assert.equal("protectedSyncEvidence" in result, false, label);
+  }
+});
+
+test("退款结算查询只 GET 同一笔退款；退款号或环境不符时报错", async () => {
+  const transport = new ScriptedTransport([
+    ok({ refundId: "refund-1", environment: "Production", status: "completed", paymentId: "payment-original" }),
+    ok({ refundId: "refund-other", environment: "Production", status: "COMPLETED" }),
+    ok({ refundId: "refund-1", environment: "Sandbox", status: "COMPLETED" }),
+  ]);
+  const adapter = createAdapter(transport);
+
+  assert.equal(await adapter.getRefundStatus("production", "refund-1"), "COMPLETED");
+  assert.equal(transport.calls[0]?.method, "GET");
+  assert.equal(transport.calls[0]?.url, "/api/v1/square/refunds/refund-1");
+  assert.deepEqual(transport.calls[0]?.params, { environment: "Production" });
+  await assert.rejects(adapter.getRefundStatus("Production", "refund-1"), /SQUARE_REFUND_REFERENCE_CONFLICT/);
+  await assert.rejects(adapter.getRefundStatus("Production", "refund-1"), /SQUARE_REFUND_REFERENCE_CONFLICT/);
+  assert.ok(transport.calls.every((call) => call.method === "GET"));
+});

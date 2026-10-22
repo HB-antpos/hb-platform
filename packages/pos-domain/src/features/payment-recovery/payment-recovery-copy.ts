@@ -109,6 +109,19 @@ const paymentRecoveryEnglishCopy = {
   "error.RECOVERY_ACTION_FAILED": "The processing result cannot be confirmed yet. Refresh the original record and do not charge again.",
   "error.RECOVERY_BUSY": "Another recovery action is in progress. Wait for it to finish.",
   "error.action": "The processing result cannot be confirmed yet. Refresh the original record and do not charge again.",
+  "refund.title": "Square refund settlement",
+  "refund.subtitle": "Returns are already completed. Square usually returns the money to the card within hours (up to 14 days).",
+  "refund.status.settling": "Settling · accepted by Square",
+  "refund.status.rejected": "Rejected by Square · refund the customer another way",
+  "refund.order": "Return {{order}}",
+  "refund.lastChecked": "Last checked {{time}}",
+  "refund.neverChecked": "Not checked yet",
+  "refund.check": "Check now",
+  "refund.checking": "Checking…",
+  "refund.noteLabel": "How the customer was refunded",
+  "refund.notePlaceholder": "e.g. refunded $12.50 in cash",
+  "refund.resolve": "Verify supervisor · refunded another way",
+  "refund.resolving": "Saving…",
 } as const;
 
 export type PaymentRecoveryCopyKey = keyof typeof paymentRecoveryEnglishCopy;
@@ -224,6 +237,19 @@ const paymentRecoveryChineseCopy = {
   "error.RECOVERY_ACTION_FAILED": "暂时无法确认处理结果，请刷新核对原记录，勿重复扣款。",
   "error.RECOVERY_BUSY": "另一项恢复操作正在进行，请等待完成。",
   "error.action": "暂时无法确认处理结果，请刷新核对原记录，勿重复扣款。",
+  "refund.title": "Square 退款结算",
+  "refund.subtitle": "退货单均已完成。Square 通常几小时内把钱退回原卡（最长 14 天）。",
+  "refund.status.settling": "结算中 · Square 已受理",
+  "refund.status.rejected": "被 Square 拒绝 · 请改用其他方式退给顾客",
+  "refund.order": "退货单 {{order}}",
+  "refund.lastChecked": "上次检查 {{time}}",
+  "refund.neverChecked": "尚未检查",
+  "refund.check": "立即检查",
+  "refund.checking": "检查中…",
+  "refund.noteLabel": "实际退给顾客的方式",
+  "refund.notePlaceholder": "例如：已退现金 $12.50",
+  "refund.resolve": "主管验证 · 已用其他方式退款",
+  "refund.resolving": "保存中…",
 } as const satisfies Record<PaymentRecoveryCopyKey, string>;
 
 const copy = { en: paymentRecoveryEnglishCopy, zh: paymentRecoveryChineseCopy } as const;

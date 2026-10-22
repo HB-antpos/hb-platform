@@ -6,6 +6,7 @@ import type {
   PaymentRecoveryCenterState,
   PaymentRecoveryFilter,
   PaymentRecoveryRecord,
+  SquareRefundSettlementView,
 } from "./payment-recovery-types";
 
 /** 页面只持有业务接口；数据库、主管身份与支付凭据始终留在生产运行时。 */
@@ -14,11 +15,15 @@ export interface PaymentRecoveryOperations {
   recoverOriginalPayment(recordId: string): Promise<void | "completed">;
   submitManualVerification(input: ManualPaymentVerificationInput): Promise<void>;
   parkCurrent(): Promise<void>;
+  /** Square 退款结算跟踪；运行时未提供时恢复中心不展示该区块。 */
+  listRefundSettlements?(): Promise<readonly SquareRefundSettlementView[]>;
+  checkRefundSettlements?(): Promise<void>;
+  acknowledgeRefundSettlementFailure?(input: Readonly<{ attemptId: string; note: string }>): Promise<void>;
 }
 
 export class PaymentRecoveryCenterAdapter implements PaymentRecoveryCenterService {
   private state: PaymentRecoveryCenterState = {
-    filter: "pending", keyword: "", records: [], selectedRecordId: null,
+    filter: "pending", keyword: "", records: [], selectedRecordId: null, refundSettlements: [],
     loading: true, refreshing: false, action: "idle", errorCode: null,
   };
   private readonly listeners = new Set<() => void>();
@@ -42,9 +47,12 @@ export class PaymentRecoveryCenterAdapter implements PaymentRecoveryCenterServic
     const generation = ++this.generation;
     this.publish({ refreshing: true, errorCode: null });
     try {
-      const records = await this.operations.list();
+      const [records, refundSettlements] = await Promise.all([
+        this.operations.list(),
+        this.loadOpenRefundSettlements(),
+      ]);
       if (this.disposed || generation !== this.generation) return;
-      this.publish({ records, selectedRecordId: records.some((r) => r.id === this.state.selectedRecordId)
+      this.publish({ records, refundSettlements, selectedRecordId: records.some((r) => r.id === this.state.selectedRecordId)
         ? this.state.selectedRecordId : records[0]?.id ?? null });
     } catch {
       if (generation === this.generation) this.publish({ errorCode: "RECOVERY_LOAD_FAILED" });
@@ -60,6 +68,31 @@ export class PaymentRecoveryCenterAdapter implements PaymentRecoveryCenterServic
     await this.run("manual-verifying", () => this.operations.submitManualVerification(input));
     this.showProcessedRecord(input.recordId);
   }
+  public async checkRefundSettlements(): Promise<void> {
+    const check = this.operations.checkRefundSettlements;
+    if (!check) throw new Error("PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE");
+    await this.run("checking-refunds", () => check());
+  }
+  public async acknowledgeRefundSettlementFailure(input: Readonly<{ attemptId: string; note: string }>): Promise<void> {
+    const acknowledge = this.operations.acknowledgeRefundSettlementFailure;
+    if (!acknowledge) throw new Error("PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE");
+    await this.run("resolving-refund", () => acknowledge(input));
+  }
+  /** 结算记录读取失败不影响异常支付列表；只展示仍需关注的结算中/被拒记录。 */
+  private async loadOpenRefundSettlements(): Promise<readonly SquareRefundSettlementView[]> {
+    const list = this.operations.listRefundSettlements;
+    if (!list) return [];
+    try {
+      return (await list()).filter((item) => item.status === "settling" || item.status === "rejected")
+        .map((item) => ({
+          attemptId: item.attemptId, returnOrderGuid: item.returnOrderGuid, amountCents: item.amountCents,
+          status: item.status, squareStatus: item.squareStatus, lastCheckedAtIso: item.lastCheckedAtIso,
+          registeredAtIso: item.registeredAtIso,
+        }));
+    } catch {
+      return this.state.refundSettlements;
+    }
+  }
   public async startNextSale(): Promise<void> {
     await this.run("recovering", () => this.operations.parkCurrent());
   }
@@ -69,7 +102,7 @@ export class PaymentRecoveryCenterAdapter implements PaymentRecoveryCenterServic
       this.publish({ filter: "resolved", selectedRecordId: recordId });
     }
   }
-  private async run(action: "recovering" | "manual-verifying", operation: () => Promise<void>) {
+  private async run(action: Exclude<PaymentRecoveryCenterState["action"], "idle">, operation: () => Promise<void>) {
     if (this.disposed || this.state.action !== "idle") throw new Error("RECOVERY_BUSY");
     // 先失效旧列表请求，防止操作完成后被操作前的记录覆盖。
     this.generation += 1;

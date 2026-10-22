@@ -13,6 +13,7 @@ import type { LocalOrderState } from "@hb/pos-domain/core/contracts/state-machin
 
 import { POS_DATABASE_MIGRATIONS } from "./migrations";
 import { SqlitePaymentProtectedMaterialReader } from "@hb/pos-db/core/db/sqlite-payment-protected-material";
+import { SqliteSquareRefundSettlementStore } from "@hb/pos-db/core/db/sqlite-square-refund-settlement-store";
 import { createSqliteRepositories } from "./sqlite-repositories";
 import type { SqliteConnectionPort, SqlRunResult, SqlValue } from "@hb/pos-db/core/db/types";
 
@@ -990,6 +991,172 @@ test("真实 SQLite：legacy 券 token 可读，并在下一次 CAS 升级为 vo
         amountCents: -700,
       }),
       evidence,
+    );
+  } finally {
+    await connection.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("真实 SQLite：M52 已移交的异常刷卡不再挡任何 provider 的下一单，未移交仍挡", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "hb-pos-m52-unblock-"));
+  const databasePath = join(folder, "payment.db");
+  const connection = new SystemSqliteConnection(databasePath);
+  try {
+    // 先停在 M51，确认旧行为：已移交的同 provider 异常记录会挡住下一单。
+    await connection.exec(
+      POS_DATABASE_MIGRATIONS
+        .filter((migration) => migration.version <= 51)
+        .map((migration) => migration.sql)
+        .join("\n"),
+    );
+    const orders = ["m52-unknown", "m52-next", "m52-next-linkly"];
+    for (const [index, orderGuid] of orders.entries()) {
+      await insertDraftOrder(connection, orderGuid, index + 1, 500);
+      await connection.run(
+        `INSERT INTO payment_order_draft_bindings (
+          draft_id, request_fingerprint, pricing_state_json, order_guid,
+          store_code, device_code, state, created_at_iso
+        ) VALUES (?, ?, ?, ?, 'S1', 'IPAD1', 'Active', ?)`,
+        [`draft-${orderGuid}`, `fingerprint-${orderGuid}`, "{}", orderGuid, "2026-07-28T00:00:00.000Z"],
+      );
+    }
+    await insertPaymentAttemptRow(connection, {
+      attemptId: "m52-unknown-attempt",
+      orderGuid: "m52-unknown",
+      provider: "square",
+      operation: "purchase",
+      amountCents: 500,
+      state: "Unknown",
+    });
+    const nextSquare = {
+      attemptId: "m52-next-square",
+      orderGuid: "m52-next",
+      provider: "square" as const,
+      operation: "purchase" as const,
+      amountCents: 500,
+      state: "Created" as const,
+    };
+    // 未移交：同一设备真并发的防线保留。
+    await assert.rejects(() => insertPaymentAttemptRow(connection, nextSquare), /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/);
+    await connection.run(
+      `INSERT INTO payment_recovery_cases (
+        record_id, order_guid, attempt_id, store_code, device_code, state,
+        is_parked, park_action_id, opened_at_iso, updated_at_iso
+      ) VALUES ('m52-case', 'm52-unknown', 'm52-unknown-attempt', 'S1', 'IPAD1', 'pending', 1, 'm52-park', ?, ?)`,
+      ["2026-07-28T00:02:00.000Z", "2026-07-28T00:02:00.000Z"],
+    );
+    // M51：已移交但同为 square，仍按“同一物理通道”失败关闭。
+    await assert.rejects(() => insertPaymentAttemptRow(connection, nextSquare), /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/);
+
+    const M52 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 52);
+    assert.ok(M52);
+    await connection.exec(M52.sql);
+
+    // M52：已移交的记录不再挡同 provider 的下一单。
+    await insertPaymentAttemptRow(connection, nextSquare);
+    await connection.run("UPDATE payment_attempts SET state = 'Cancelled' WHERE attempt_id = 'm52-next-square'");
+    // 其它 provider 同样放行。
+    await insertPaymentAttemptRow(connection, {
+      attemptId: "m52-next-linkly",
+      orderGuid: "m52-next-linkly",
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: 500,
+      state: "Created",
+    });
+    assert.equal(await countAttempts(connection, "m52-next-linkly"), 1);
+  } finally {
+    await connection.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("真实 SQLite：M53 Square 退款 PENDING 批准时同事务登记结算跟踪，按状态机推进且不可删除", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "hb-pos-m53-refund-settlement-"));
+  const databasePath = join(folder, "payment.db");
+  const connection = new SystemSqliteConnection(databasePath);
+  try {
+    await connection.exec(POS_DATABASE_MIGRATIONS.map((migration) => migration.sql).join("\n"));
+    await insertDraftOrder(connection, "m53-return-pending", 1, 500);
+    await insertDraftOrder(connection, "m53-return-completed", 2, 500);
+    const encryptor = {
+      async encrypt(plaintext: string) { return new TextEncoder().encode(plaintext); },
+      async decrypt(ciphertext: Uint8Array) { return new TextDecoder().decode(ciphertext); },
+    };
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => "2026-07-28T00:00:00.000Z",
+      createLeaseId: () => "lease-m53",
+      encryptor,
+    });
+    const refundEvidence = (refundId: string, responseText: string) => ({
+      version: 1 as const, provider: "square" as const, operation: "refund" as const, processor: "Square" as const,
+      txnRef: "payment-original", authCode: null, cardType: null, cardBin: null, maskedCardNumber: null,
+      merchantId: null, responseCode: null, responseText, stan: null, bankDateTimeIso: null,
+      amountCents: 500, refundReference: refundId,
+    });
+    const approveRefund = async (orderGuid: string, refundId: string, responseCode: string | null, responseText: string) => {
+      const created = payment({
+        attemptId: `${orderGuid}-attempt`,
+        idempotencyKey: `${orderGuid}-idempotency`,
+        orderGuid,
+        operation: "refund",
+        amount: { currency: "AUD", cents: -500 },
+        references: { checkoutId: null, paymentId: "payment-original", sessionId: null, txnRef: null, rfn: null, voucherReservationToken: null },
+        providerEnvironment: "Sandbox",
+      });
+      assert.equal(await repositories.payments.insertIfUnblocked(created), null);
+      const submitted = { ...created, state: "Submitted" as const, updatedAtIso: "2026-07-28T00:00:01.000Z" };
+      assert.equal(await repositories.payments.compareAndUpdate(created, submitted), true);
+      const approved = { ...submitted, state: "Approved" as const, updatedAtIso: "2026-07-28T00:00:02.000Z", responseCode };
+      assert.equal(await repositories.payments.compareAndUpdate(submitted, approved, refundEvidence(refundId, responseText)), true);
+      return approved;
+    };
+
+    const pendingAttempt = await approveRefund("m53-return-pending", "refund-pending", "SQUARE_REFUND_PENDING", "PENDING");
+    // 当场 COMPLETED 的退款不需要跟踪。
+    await approveRefund("m53-return-completed", "refund-completed", null, "COMPLETED");
+
+    const store = new SqliteSquareRefundSettlementStore(connection, encryptor, () => "2026-07-28T01:00:00.000Z");
+    const scope = { storeCode: "S1", deviceCode: "IPAD1" };
+    const listed = await store.list(scope);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.attemptId, pendingAttempt.attemptId);
+    assert.equal(listed[0]?.returnOrderGuid, "m53-return-pending");
+    assert.equal(listed[0]?.amountCents, 500);
+    assert.equal(listed[0]?.status, "settling");
+    assert.equal(listed[0]?.providerEnvironment, "Sandbox");
+    assert.equal(await store.readRefundId(pendingAttempt.attemptId), "refund-pending");
+    assert.equal(await store.list({ storeCode: "S1", deviceCode: "OTHER" }).then((rows) => rows.length), 0);
+
+    assert.equal(await store.recordObservation(pendingAttempt.attemptId, { kind: "check-failed", errorCode: "SQUARE_HTTP_502" }), true);
+    assert.equal((await store.listSettling(scope))[0]?.lastErrorCode, "SQUARE_HTTP_502");
+    assert.equal(await store.recordObservation(pendingAttempt.attemptId, { kind: "rejected", squareStatus: "REJECTED" }), true);
+    assert.equal(await store.countUnresolvedRejected(scope), 1);
+    assert.equal((await store.listSettling(scope)).length, 0);
+    // 终态之后的迟到检查不能覆盖结论。
+    assert.equal(await store.recordObservation(pendingAttempt.attemptId, { kind: "settled", squareStatus: "COMPLETED" }), false);
+
+    const actor = { cashierId: "supervisor-1", cashierName: "Supervisor", userGuid: "supervisor-guid", storeCode: "S1", deviceCode: "IPAD1" };
+    await assert.rejects(
+      () => store.resolveRejected({ ...scope, attemptId: pendingAttempt.attemptId, note: "   ", actor }),
+      /SQUARE_REFUND_SETTLEMENT_NOTE_REQUIRED/,
+    );
+    const resolved = await store.resolveRejected({ ...scope, attemptId: pendingAttempt.attemptId, note: "Refunded $5.00 cash", actor });
+    assert.equal(resolved.status, "refunded-otherwise");
+    assert.equal(resolved.resolutionNote, "Refunded $5.00 cash");
+    assert.equal(await store.countUnresolvedRejected(scope), 0);
+    await assert.rejects(
+      () => store.resolveRejected({ ...scope, attemptId: pendingAttempt.attemptId, note: "again", actor }),
+      /SQUARE_REFUND_SETTLEMENT_NOT_REJECTED/,
+    );
+    await assert.rejects(
+      () => connection.run("UPDATE square_refund_settlements SET status = 'settling' WHERE attempt_id = ?", [pendingAttempt.attemptId]),
+      /SQUARE_REFUND_SETTLEMENT_INVALID_TRANSITION/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM square_refund_settlements WHERE attempt_id = ?", [pendingAttempt.attemptId]),
+      /SQUARE_REFUND_SETTLEMENT_IMMUTABLE/,
     );
   } finally {
     await connection.close();

@@ -62,14 +62,29 @@ export type ManualPaymentVerificationInput = Readonly<{
   terminalChargeAcknowledged?: boolean;
 }>;
 
+/** Square 已受理（PENDING）后在后台跟踪结算的退款；退货单本身已完成。 */
+export type SquareRefundSettlementStatus = "settling" | "settled" | "rejected" | "refunded-otherwise";
+
+export type SquareRefundSettlementView = Readonly<{
+  attemptId: string;
+  returnOrderGuid: string;
+  amountCents: number;
+  status: SquareRefundSettlementStatus;
+  squareStatus: string | null;
+  lastCheckedAtIso: string | null;
+  registeredAtIso: string;
+}>;
+
 export type PaymentRecoveryCenterState = Readonly<{
   filter: PaymentRecoveryFilter;
   keyword: string;
   records: readonly PaymentRecoveryRecord[];
   selectedRecordId: string | null;
+  /** 结算中或被拒、尚需关注的 Square 退款（已到账/已结案的不再展示）。 */
+  refundSettlements: readonly SquareRefundSettlementView[];
   loading: boolean;
   refreshing: boolean;
-  action: "idle" | "recovering" | "manual-verifying";
+  action: "idle" | "recovering" | "manual-verifying" | "checking-refunds" | "resolving-refund";
   errorCode: string | null;
 }>;
 
@@ -82,4 +97,8 @@ export interface PaymentRecoveryCenterService {
   refresh(): Promise<void>;
   recoverOriginalPayment(recordId: string): Promise<void>;
   submitManualVerification(input: ManualPaymentVerificationInput): Promise<void>;
+  /** 立即只读检查结算中的 Square 退款。 */
+  checkRefundSettlements(): Promise<void>;
+  /** 被拒的 Square 退款：主管授权确认已改用其他方式退给顾客。 */
+  acknowledgeRefundSettlementFailure(input: Readonly<{ attemptId: string; note: string }>): Promise<void>;
 }

@@ -24,10 +24,12 @@ import {
 import type {
   ManualPaymentFinding,
   PaymentRecoveryCenterService,
+  PaymentRecoveryCenterState,
   PaymentRecoveryEvent,
   PaymentRecoveryFilter,
   PaymentRecoveryRecord,
   PaymentRecoveryStatus,
+  SquareRefundSettlementView,
 } from "./payment-recovery-types";
 
 import {
@@ -174,6 +176,13 @@ export function PaymentRecoveryScreen({
               tone="quiet"
             />
           </PosKeyboardAwareScrollView>
+          <RefundSettlementPanel
+            action={state.action}
+            locale={locale}
+            onCheck={() => void service.checkRefundSettlements().catch(() => undefined)}
+            onResolve={(attemptId, note) => service.acknowledgeRefundSettlementFailure({ attemptId, note })}
+            settlements={state.refundSettlements}
+          />
           <Text style={styles.sectionTitle}>{t("list.title")}</Text>
           <ScrollView contentContainerStyle={styles.recordList} testID="payment-recovery-record-list">
             {state.loading ? (
@@ -276,7 +285,7 @@ function RecoveryDetails({
   onRecover,
   record,
 }: Readonly<{
-  action: "idle" | "recovering" | "manual-verifying";
+  action: PaymentRecoveryCenterState["action"];
   locale: PaymentRecoveryLocale;
   onManual(): void;
   onRecover(): void;
@@ -387,7 +396,7 @@ function ManualVerificationModal({
   record,
   visible,
 }: Readonly<{
-  action: "idle" | "recovering" | "manual-verifying";
+  action: PaymentRecoveryCenterState["action"];
   locale: PaymentRecoveryLocale;
   onClose(): void;
   onSubmit(draft: ManualVerificationDraft, record: PaymentRecoveryRecord): Promise<void>;
@@ -641,6 +650,106 @@ function CenteredState({ loading = false, message }: Readonly<{ loading?: boolea
   );
 }
 
+/**
+ * Square 退款结算（对齐 WPF #674）：退货单已当场完成，这里只展示仍在结算或被 Square 拒绝的退款。
+ * 被拒的需主管授权、填写实际退款方式后结案；检查只读查询同一笔退款，绝不重发。
+ */
+function RefundSettlementPanel({
+  action,
+  locale,
+  onCheck,
+  onResolve,
+  settlements,
+}: Readonly<{
+  action: PaymentRecoveryCenterState["action"];
+  locale: PaymentRecoveryLocale;
+  onCheck(): void;
+  onResolve(attemptId: string, note: string): Promise<void>;
+  settlements: readonly SquareRefundSettlementView[];
+}>) {
+  const t = (key: PaymentRecoveryCopyKey, values?: Readonly<Record<string, string | number>>) =>
+    paymentRecoveryText(locale, key, values);
+  const [notes, setNotes] = useState<Readonly<Record<string, string>>>({});
+  if (settlements.length === 0) return null;
+  const busy = action !== "idle";
+  const hasSettling = settlements.some((item) => item.status === "settling");
+  return (
+    <View style={styles.refundPanel} testID="payment-recovery-refund-settlements">
+      <View style={styles.refundPanelHeader}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.sectionTitleFlush}>{t("refund.title")}</Text>
+          <Text style={styles.recordMeta}>{t("refund.subtitle")}</Text>
+        </View>
+        {hasSettling ? (
+          <ActionButton
+            compact
+            disabled={busy}
+            label={action === "checking-refunds" ? t("refund.checking") : t("refund.check")}
+            onPress={onCheck}
+            testID="payment-recovery-refund-check"
+            tone="quiet"
+          />
+        ) : null}
+      </View>
+      {/* 备注输入需置于键盘感知滚动容器内，软键盘弹出时才不会遮挡。 */}
+      <PosKeyboardAwareScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.refundList}>
+        {settlements.map((item) => {
+          const note = notes[item.attemptId] ?? "";
+          const rejected = item.status === "rejected";
+          return (
+            <View
+              key={item.attemptId}
+              style={[styles.refundRow, rejected ? styles.statusDanger : styles.statusWarning]}
+              testID={`payment-recovery-refund-${item.attemptId}`}
+            >
+              <View style={styles.recordTopLine}>
+                <Text style={styles.refundStatus}>
+                  {t(rejected ? "refund.status.rejected" : "refund.status.settling")}
+                </Text>
+                <Text style={styles.refundAmount}>{formatAud(item.amountCents)}</Text>
+              </View>
+              <Text selectable style={styles.recordMeta}>
+                {t("refund.order", { order: shortGuid(item.returnOrderGuid) })}
+              </Text>
+              <Text style={styles.recordMeta}>
+                {item.lastCheckedAtIso
+                  ? t("refund.lastChecked", { time: formatDateTime(item.lastCheckedAtIso, locale) })
+                  : t("refund.neverChecked")}
+              </Text>
+              {rejected ? (
+                <View style={styles.refundResolve}>
+                  <PosKeyboardAwareTextInput
+                    accessibilityLabel={t("refund.noteLabel")}
+                    editable={!busy}
+                    maxLength={1000}
+                    onChangeText={(value) => setNotes((current) => ({ ...current, [item.attemptId]: value }))}
+                    placeholder={t("refund.notePlaceholder")}
+                    style={styles.searchInput}
+                    testID={`payment-recovery-refund-note-${item.attemptId}`}
+                    value={note}
+                  />
+                  <ActionButton
+                    compact
+                    disabled={busy || note.trim().length === 0}
+                    label={action === "resolving-refund" ? t("refund.resolving") : t("refund.resolve")}
+                    onPress={() => {
+                      void onResolve(item.attemptId, note.trim())
+                        .then(() => setNotes((current) => ({ ...current, [item.attemptId]: "" })))
+                        .catch(() => undefined);
+                    }}
+                    testID={`payment-recovery-refund-resolve-${item.attemptId}`}
+                    tone="secondary"
+                  />
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </PosKeyboardAwareScrollView>
+    </View>
+  );
+}
+
 function ActionButton({ compact = false, disabled = false, label, onPress, testID, tone = "primary" }: Readonly<{
   compact?: boolean;
   disabled?: boolean;
@@ -743,6 +852,14 @@ const styles = StyleSheet.create({
   searchScroll: { flexGrow: 0, flexShrink: 0 },
   searchRow: { alignItems: "center", flexDirection: "row", gap: 8, padding: 10 },
   searchInput: { backgroundColor: "#FFFFFF", borderColor: posColors.border, borderWidth: 1, color: posColors.ink, flex: 1, minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, paddingHorizontal: 10 },
+  refundPanel: { borderBottomColor: posColors.border, borderBottomWidth: 1, gap: 6, paddingBottom: 8 },
+  refundPanelHeader: { alignItems: "center", flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  refundList: { maxHeight: 260, paddingHorizontal: 8 },
+  refundRow: { borderColor: posColors.border, borderWidth: 1, gap: 2, marginBottom: 6, padding: 10 },
+  refundStatus: { color: posColors.ink, flex: 1, fontSize: 14, fontWeight: "800" },
+  refundAmount: { color: posColors.ink, fontSize: 15, fontWeight: "800" },
+  refundResolve: { gap: 6, marginTop: 6 },
+  sectionTitleFlush: { color: posColors.ink, fontSize: 15, fontWeight: "800" },
   sectionTitle: { color: posColors.ink, fontSize: 15, fontWeight: "800", paddingHorizontal: 12, paddingVertical: 9 },
   recordList: { gap: 8, padding: 10 },
   recordRow: { backgroundColor: "#FAFAF8", borderColor: posColors.border, borderWidth: 1, minHeight: 96, padding: 11 },

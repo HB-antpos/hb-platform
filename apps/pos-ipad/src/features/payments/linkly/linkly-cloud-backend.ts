@@ -34,6 +34,11 @@ type LinklyTransactionRequest =
 
 const LINKLY_HTTP_TIMEOUT_MS = 240_000;
 const LINKLY_RECOVERY_DEADLINE_MS = 180_000;
+/**
+ * 与服务端 LinklyTimeoutConstants.StaleSessionSupersedeAfter 一致：遗留会话超过 10 分钟即视为陈旧。
+ * 真实在途交易最长约 180 秒业务等待 + 240 秒 HTTP 超时，不可能这么久。
+ */
+const LINKLY_STALE_SESSION_SUPERSEDE_AFTER_MS = 10 * 60_000;
 
 export type LinklyPaymentRecoveryControl = Readonly<{
   signal: AbortSignal;
@@ -150,6 +155,10 @@ export type LinklyCloudBackendSession = Readonly<{
   notifications: readonly Readonly<{ type: string; payloadJson: string; receivedAt: string }>[];
   transactionSuccess: boolean | null;
   cardTransaction?: LinklyCardTransactionDto | null;
+  /** 会话类型（Transaction / Settlement 等）；旧后端可能缺失。 */
+  operationType?: string | null;
+  /** 会话创建时间（ISO）；用于判定遗留的陈旧活动会话，旧后端可能缺失。 */
+  createdAt?: string | null;
 }>;
 
 export type LinklyCloudBackendProviderOptions = Readonly<{
@@ -380,7 +389,12 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
       return notSubmittedDeclined(attempt, "LINKLY_NOT_SUBMITTED_ACTIVE_CHECK");
     }
     // 这是另一笔未完成交易，不能把它的 SessionId/TxnRef 绑定到当前新订单。
-    if (active) return activeSessionConflict(attempt);
+    // 业务硬要求（对齐 WPF #790）：遗留的陈旧交易会话不能挡住下一单付款——继续 POST，
+    // 由服务端在创建新会话时原子顶替（收口为 SupervisorResolved，迟到结果只记 LateFinal*）。
+    // 仍然新鲜的会话可能真在终端上刷卡，保持冲突；即使这里误判，服务端对新鲜占用也会返回 409。
+    if (active && !isStaleActiveTransactionSession(active, Date.now())) {
+      return activeSessionConflict(attempt);
+    }
 
     const request = transactionRequest(attempt, environment, selection);
     try {
@@ -1131,6 +1145,16 @@ function isSendKeyRejected(error: unknown): boolean {
   return error instanceof HbposApiError && error.kind === "http" && error.status === 400;
 }
 
+/**
+ * 遗留的交易会话已经陈旧：创建时间早于 10 分钟。响应没有 UpdatedAt，只能看创建时间；
+ * 缺失、无法解析或不是交易会话（如结算）时保守返回 false，仍按原冲突处理。
+ */
+function isStaleActiveTransactionSession(session: LinklyCloudBackendSession, nowMs: number): boolean {
+  if (session.operationType?.trim().toLowerCase() !== "transaction" || !session.createdAt) return false;
+  const createdAtMs = Date.parse(session.createdAt);
+  return Number.isFinite(createdAtMs) && nowMs - createdAtMs >= LINKLY_STALE_SESSION_SUPERSEDE_AFTER_MS;
+}
+
 function activeSessionConflict(attempt: PaymentAttempt): PaymentProviderResult {
   return {
     state: "Declined",
@@ -1307,6 +1331,8 @@ function normalizeSession(value: LinklySessionDto): LinklyCloudBackendSession {
     notifications: (value.notifications ?? []).map((notification) => ({ type: requiredText(notification.type, "notification.type"), payloadJson: requiredText(notification.payloadJson, "notification.payloadJson"), receivedAt: requiredText(notification.receivedAt, "notification.receivedAt") })),
     transactionSuccess: value.transactionSuccess ?? null,
     cardTransaction: value.cardTransaction ?? null,
+    operationType: optionalText(value.operationType),
+    createdAt: optionalText(value.createdAt),
   };
 }
 
