@@ -1,5 +1,5 @@
 import type { PricingStrategyRuleDto as Rule } from '../../../types/pricingStrategy'
-import { FIXED_MAX_COST, FIXED_RATE_MAX, FIXED_RATE_MIN, boundedPrice, finalPrice, fixedRetailPrice, rawPrice, roundMoney, safeBend, tailCeil, tailFloor } from './pricingCurve'
+import { FIXED_MAX_COST, FIXED_RATE_MAX, FIXED_RATE_MIN, boundedPrice, finalPrice, rawPrice, roundMoney, safeBend, tailCeil, tailFloor } from './pricingCurve'
 
 /**
  * 区间式定价的纯逻辑：每个区间（一条规则）自己设置进货价的上下限，并选择「固定成率」或「曲线」。
@@ -49,8 +49,8 @@ export function isLegalTail(v: number): boolean {
 
 /** 理论价（固定成率恰好是 进货价 × 成率）。 */
 export const theoryPrice = (r: Rule, cost: number) => rawPrice(r, cost)
-/** 实际售价：固定成率到分；曲线仍按 .50/.99 尾数调整。 */
-export const actualPrice = (r: Rule, cost: number) => isFixed(r) ? fixedRetailPrice(cost, r.startRate) : finalPrice(cost, rawPrice(r, cost))
+/** 实际售价：所有区间（含固定成率）都按尾数规则调整——小数进位到 .50 / .99，整数取到 .99，1 与 2 保留整数。 */
+export const actualPrice = (r: Rule, cost: number) => finalPrice(cost, rawPrice(r, cost))
 
 /** 命中的区间下标：进货价等于交界值时属于上一个区间。 */
 export function intervalAt(rules: Rule[], cost: number): number {
@@ -377,7 +377,7 @@ export type Conversion = { rules: Rule[]; notes: string[]; error?: undefined } |
 
 /**
  * 把旧版区间规则（阶梯 Step、指数 Exponential、没有节点售价的 Linear）转换成区间编辑器能编辑的「固定 / 曲线」区间。
- * - 阶梯（起止成率相同）→ 固定成率。注意：固定成率不再调整 .50/.99 尾数，售价会精确到分。
+ * - 阶梯 → 固定成率（线上对阶梯只按起始成率计价；两者都走同一套尾数规则，售价不变）。
  * - 线性 / 指数 → 曲线：两端售价 = 端点成本 × 端点成率，再吸附到合法尾数；指数的弯曲形状会变成直线。
  * - 第一个区间下限不足 0.10 时抬到 0.10（进货价低于 0.10 本来就无法计价）。
  * - 相邻区间不要求售价连续（新模型允许阶梯定价），保存时若有回落会二次确认。
@@ -397,7 +397,7 @@ export function convertLegacy(source: Rule[]): Conversion {
     if (r.algorithm === 'Step') {
       // 线上对阶梯只按起始成率计价（结束成率不生效），转换要和线上行为一致。
       out.push(makeFixed(min, max, r.startRate))
-      notes.push(`${tag}：阶梯 → 固定成率 ${r.startRate}×（不再调整 .50/.99 尾数，售价精确到分）` + (r.endRate !== r.startRate ? `；原结束成率 ${r.endRate} 在计价里本来就不生效` : ''))
+      notes.push(`${tag}：阶梯 → 固定成率 ${r.startRate}×` + (r.endRate !== r.startRate ? `（原结束成率 ${r.endRate} 在计价里本来就不生效）` : ''))
       continue
     }
     // 起点取最近的合法尾数；终点再限制在「不超过起点成率」的合法尾数内，避免两端各自吸附后成率反而上升。

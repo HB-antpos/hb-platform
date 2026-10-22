@@ -77,14 +77,11 @@ namespace BlazorApp.Api.Services.Pricing
 
         /// <summary>
         /// 计算建议零售价，先按合法尾数及倍率限幅，再将 0.99/1.99 归整为 1/2。
-        /// 固定成率（Fixed）区间例外：直接取 进货价 × 成率 并四舍五入到分，不做尾数调整。
+        /// 所有区间（含固定成率）都走同一套尾数规则：小数进位到 .50 / .99，整数取到 .99（1、2 除外）。
         /// </summary>
         public decimal CalculateRetailPrice(decimal purchasePrice, PricingStrategy? strategy)
         {
-            var (theoretical, rule) = ResolveTheoreticalRetail(purchasePrice, strategy);
-            if (rule != null && PricingCurveMath.IsFixed(rule.Algorithm))
-                return decimal.Round(theoretical, 2, MidpointRounding.AwayFromZero);
-            return PricingCurveMath.AdjustTail(purchasePrice, theoretical);
+            return PricingCurveMath.AdjustTail(purchasePrice, CalculateTheoreticalRetail(purchasePrice, strategy));
         }
 
         /// <summary>

@@ -36,8 +36,9 @@ assert.equal(intervalAt(mixed(), 50), 1)
 assert.equal(intervalAt(mixed(), 50.01), 2)
 assert.equal(intervalAt(mixed(), 0.1), 0)
 assert.equal(intervalAt(mixed(), 0.05), -1)
-assert.equal(actualPrice(mixed()[0], 10), 25)
-assert.equal(actualPrice(makeFixed(10, 50, 2.5), 10.01), 25.03, '固定成率到分，不调整尾数')
+assert.equal(actualPrice(mixed()[0], 10), 24.99, '固定成率同样走尾数规则：整数 25.00 → 24.99')
+assert.equal(actualPrice(makeFixed(10, 50, 2.5), 10.01), 25.5, '25.025 → 进位到 .50')
+assert.equal(actualPrice(makeFixed(0.1, 99999, 2.5), 8.94), 22.5, '用户反馈的实例：22.35 → 22.50')
 assert.equal(actualPrice(mixed()[1], 50), 99.99, '曲线区间仍做尾数调整')
 
 // ---- 回落检测与联动标记 ----

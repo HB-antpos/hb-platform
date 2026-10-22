@@ -115,7 +115,7 @@ export function StrategyExpanded({ record }: { record: PricingStrategyListDto })
       <div style={{ display: 'inline-block', padding: '10px 14px', background: '#fff', border: '1px solid #f0f0f0', borderRadius: 6 }}>
         零售价 = 进货价 × <b>{fmtRate(record.fixedRate)}</b>
       </div>
-      <div style={{ ...muted, marginTop: 8 }}>直接四舍五入到分，不做 .50 / .99 尾数调整；适用于进货价 0.10 以上的全部区间。</div>
+      <div style={{ ...muted, marginTop: 8 }}>再取 .50 / .99 尾数（整数取 .99，1、2 除外）；适用于进货价 0.10 以上的全部区间。</div>
     </div>
   }
   const intervals = record.intervals ?? []

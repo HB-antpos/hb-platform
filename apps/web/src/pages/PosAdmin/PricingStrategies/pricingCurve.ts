@@ -69,15 +69,11 @@ export function rulesFromNodes(nodes: PriceNode[], old: PricingStrategyRuleDto[]
   })
 }
 
-// ---- 固定成率（Fixed）：零售价 = 进货价 × 成率，四舍五入到分，不做 .50/.99 尾数调整 ----
+// ---- 固定成率（Fixed）：理论价 = 进货价 × 成率；实际售价与其他区间一样按 .50/.99 尾数调整 ----
 export const FIXED_MIN_COST = 0.1
 export const FIXED_MAX_COST = 99999
 export const FIXED_RATE_MIN = 1.5
 export const FIXED_RATE_MAX = 5
-export const FIXED_PREVIEW_COSTS = [3.33, 10, 10.1, 10.3, 99.99]
-
-/** 与后端 decimal.Round(…, 2, AwayFromZero) 对齐；先消除二进制浮点误差，避免 8.325 被舍成 8.32。 */
-export const fixedRetailPrice = (cost: number, rate: number) => Math.round(Number((cost * rate * 100).toPrecision(12))) / 100
 
 export function fixedRateError(rate: unknown): string | null {
   if (typeof rate !== 'number' || !Number.isFinite(rate)) return '请填写成率'
