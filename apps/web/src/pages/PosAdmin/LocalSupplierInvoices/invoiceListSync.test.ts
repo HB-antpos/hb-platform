@@ -78,6 +78,22 @@ assert(
   invoiceChangeAffectsListCounts(['inv-1'], [row({ isProductChecked: true })], [row({ isProductChecked: false })]),
   '粘贴新明细（已检测 → 待检测）影响待检测计数',
 )
+assert(
+  invoiceChangeAffectsListCounts(['inv-1'], [row({ newProductDetailCount: 1 })], [row({ newProductDetailCount: 0 })]),
+  '新品全部建好（有未创建 → 没有）会移出「有商品未创建」筛选，要重算计数',
+)
+assert(
+  invoiceChangeAffectsListCounts(['inv-1'], [row({ newProductDetailCount: 0 })], [row({ newProductDetailCount: 2 })]),
+  '检测出新品（没有 → 有未创建）会移入「有商品未创建」筛选，要重算计数',
+)
+assert(
+  !invoiceChangeAffectsListCounts(['inv-1'], [row({ newProductDetailCount: 1 })], [row({ newProductDetailCount: 3 })]),
+  '新品行数只是多少的变化、成员关系不变，不重算计数',
+)
+assert(
+  !invoiceChangeAffectsListCounts(['inv-1'], [row({ newProductDetailCount: undefined })], [row({ newProductDetailCount: 0 })]),
+  '新品数缺失与 0 等价',
+)
 assert(invoiceChangeAffectsListCounts(['inv-1'], [row()], [row({ storeCode: '1005' })]), '换分店要重算分店单数')
 assert(invoiceChangeAffectsListCounts(['inv-1'], [row()], [row({ orderDate: '2026-01-01' })]), '改订单日期可能移出日期区间')
 assert(invoiceChangeAffectsListCounts(['inv-1'], [row()], [row({ supplierCode: 'S2' })]), '换供应商可能移出供应商筛选')

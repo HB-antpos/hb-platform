@@ -19,6 +19,8 @@
       "datePresetLast30Days": "Last 30 days",
       "datePresetLast90Days": "Last 90 days",
       "datePresetThisYear": "This year",
+      "uncreatedFilter": "Has uncreated products",
+      "uncreatedFilterTip": "Only invoices with “New” lines (not in the product master yet). “Created here” lines are already created and do not count",
       "clearFilters": "Clear filters",
       "columnSettings": "Columns",
       "columnSettingsTitle": "Visible columns",

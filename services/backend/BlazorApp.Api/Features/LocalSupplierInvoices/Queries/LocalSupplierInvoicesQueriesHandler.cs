@@ -304,6 +304,28 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         continue;
                     }
 
+                    if (col == "HasUncreatedProducts")
+                    {
+                        // 「有商品未创建」：存在至少一条有效明细属于「新品」——检测为主档不存在且至今仍未关联商品编码。
+                        // 判定与列表聚合里的 NewProductCount（列表上的「新品 N」）完全一致，筛出来的单必有「新品 N」标签。
+                        // 注意：列表上的「本单新品 N」是商品已由本单建好，与这里相反，不算在内。
+                        // 只有 true 才收窄；false/无法解析的值忽略，避免误隐藏单据。
+                        if (bool.TryParse(f.Filter?.Trim(), out var hasUncreated) && hasUncreated)
+                        {
+                            query = query.Where((h, st, sup) =>
+                                SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                    .Where(d =>
+                                        d.IsDeleted == false
+                                        && d.InvoiceGUID == h.InvoiceGUID
+                                        && d.ExistingProductCount == 0
+                                        && d.ProductCode == null
+                                    )
+                                    .Any()
+                            );
+                        }
+                        continue;
+                    }
+
                     if (col == "IsProductChecked")
                     {
                         // 口径与列表展示一致：至少一条有效明细，且有效明细的 ExistingProductCount 全部非空才算已检测。
@@ -1287,6 +1309,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 "createdby" => "CreatedBy",
                 "productkeyword" => "ProductKeyword",
                 "isproductchecked" => "IsProductChecked",
+                "hasuncreatedproducts" => "HasUncreatedProducts",
                 "totalamount" => "TotalAmount",
                 "receivedtotalamount" => "ReceivedTotalAmount",
                 "pricechange" => "PriceChange",

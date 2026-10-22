@@ -1029,6 +1029,11 @@ button.lsi-wb-pricing:focus-visible {
   flex: 0 0 auto;
 }
 
+/* 「有商品未创建」复选项：文案不换行，工具栏空间不足时整项折到下一行而不是文字断行 */
+.lsi-uncreated-filter {
+  white-space: nowrap;
+}
+
 /* 查询类型单选按钮收窄内边距，给左侧分店栏腾出工具栏宽度 */
 .lsi-search-scope .ant-radio-button-wrapper {
   padding-inline: 12px;
