@@ -27,9 +27,23 @@
 
 1. 新机安全组放行 TCP 21115-21117、UDP 21116（SSH 仍只对管理员 IP 开放）。
 2. 在新加坡对 `/www/rustdesk-server/data/db_v2.sqlite3` 用 `sqlite3 … ".backup"` 取一致性快照（库为 WAL 模式，不要直接拷贝主文件），连同 `id_ed25519`、`id_ed25519.pub` 传到新机同路径；私钥不进 Git、不进日志，传输后核对 `.pub` 内容一致。
-3. 新机 `docker compose -f compose.yml up -d`，先用复制的 db 演练：确认官方镜像能读取旧库，再用一台测试客户端指向 `rd.hotbargain.vip` 验证注册、直连、中继与无人值守密码登录。
-4. DNSPod 添加 `rd` 的 A 记录到 `13.211.103.232`（专业版 TTL 可设 60，不走代理）。
-5. 新机做 EBS 快照并安排周期快照：RustDesk 有密钥与注册库，不再是可随时重建的无状态节点。
+3. **先**在 DNSPod 添加 `rd` 的 A 记录到 `13.211.103.232`（专业版 TTL 可设 60，不走代理），并确认解析生效（`dig +short rd.hotbargain.vip`）。**必须先于启动 hbbs**：hbbs 启动时会解析 `-r` 里的主机名，解析不到就**静默丢弃**，日志只有 `relay-servers=[]`，没有任何报错，客户端拿不到中继地址（新加坡生产的日志是 `relay-servers=["hotbargain.vip:21117"]`）。
+4. 新机 `docker compose -f compose.yml up -d`，**检查 `docker logs rustdesk-server` 里有 `relay-servers=["rd.hotbargain.vip:21117"]`**；若是 `[]`，说明启动时解析失败，确认 DNS 后重启 `rustdesk-server` 容器。同时核对日志里的 `Key:` 与 `id_ed25519.pub` 内容一致。
+5. 跑下面的协议级端到端检查，10 项全部通过才算服务端就绪。
+6. 新机做 EBS 快照并安排周期快照：RustDesk 有密钥与注册库，不再是可随时重建的无状态节点。
+
+**协议级端到端检查（`e2e_check.py`）**
+
+不改任何真实客户端配置，直接按官方协议对服务器做检查：库副本是否生效、UDP 注册、打洞时下发的设备公钥是否带有效的服务器签名（用设备配置里的公钥验签，证明私钥迁移正确）、下发的中继地址、hbbr 中继配对与转发。
+
+```bash
+python3 scripts/ops/rustdesk/e2e_check.py --host rd.hotbargain.vip \
+  --key-file <id_ed25519.pub 的本地副本> --real-id <库里已有的真实设备 ID>
+```
+
+- `--key` / `--key-file` 只用**公钥**，不要传私钥。`--real-id` 取库里确实存在的设备 ID（例如 `rustdesk --get-id` 得到的运维机 ID），用来验证库副本。
+- 检查会在服务器库里写入一条 id 以 `e2e` 开头的合成 peer，它不会成为公司设备，但请在结束后清理（脚本末尾会打印命令）：`sudo sqlite3 /www/rustdesk-server/data/db_v2.sqlite3 "delete from peer where id like 'e2e%';"`，再重启 `rustdesk-server` 容器清掉内存里的合成 peer，并再次确认 `relay-servers` 日志。
+- 脚本的纯函数部分（protobuf 编码、帧格式、ed25519 验签，含 RFC 8032 官方测试向量）有单元测试 `test_e2e_check.py`，随 PR CI 运行。
 
 **切换与回滚**
 

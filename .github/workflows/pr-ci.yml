@@ -72,8 +72,8 @@ jobs:
           node-version: 24
       - name: 验证 CI 编排器
         run: node --test scripts/ci/*.test.mjs scripts/performance/*.test.mjs
-      - name: 验证 RustDesk 回滚端口保护
-        run: python3 -B -m unittest discover -s scripts/ops/rustdesk -p test_cutover.py
+      - name: 验证 RustDesk 运维脚本（回滚端口保护、协议端到端检查的编码与验签）
+        run: python3 -B -m unittest discover -s scripts/ops/rustdesk -p "test_*.py"
       - name: 验证日结记录回填脚本
         run: python3 -B -m unittest discover -s scripts/ops/daily-close-audit-backfill -p test_backfill.py
       - name: 生成按路径执行矩阵
