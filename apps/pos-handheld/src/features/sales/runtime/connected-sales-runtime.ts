@@ -34,6 +34,7 @@ import {
   quickOrderDiscountPermission,
   type SalesOperationSecurity,
 } from "@hb/pos-domain/features/sales/runtime/sales-operation-security";
+import { getLeadingZeroBarcodeVariant } from "@hb/pos-domain/features/sales/scan/barcode-variants";
 import { scanTiming } from "@/features/sales/runtime/scan-timing";
 
 export const SALES_NEW_TRANSACTIONS_DISABLED =
@@ -45,7 +46,13 @@ export type LookupSource = "manual" | "hid" | "camera";
 export type LookupOutcome = Readonly<{
   attemptId: string;
   source: LookupSource;
-  kind: "added" | "incremented" | "not-found" | "failed-blocked";
+  kind:
+    | "added"
+    | "incremented"
+    | "not-found"
+    | "failed-blocked"
+    /** 同码同世代的远程补查仍在进行：本次扫码不加购，只提示「正在查询」。 */
+    | "lookup-in-progress";
   lineId?: string;
   /** HID 时序会话 id；业务逻辑不得读取。 */
   timingId?: string;
@@ -753,6 +760,10 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
   private readonly lookupSelectionListeners = new Set<
     (selection: SalesLookupSelection) => void
   >();
+  // 本地未命中、正在「远程补查并等待加购」的扫码，按（查询码, 交易世代, 结账围栏）登记。
+  // 同一世代只有第一次扫码等待结果并加购，补查期间重复扫到只提示不加购（对齐 WPF c7ae10476）；
+  // 清空 / 换单 / 结账后重扫属于新世代，不会被旧扫码吞掉。
+  private readonly pendingRemoteAutoAdds = new Set<string>();
   private checkoutFence = 0;
   private catalogWorkDisposed = false;
   private nextLookupAttemptId = 0;
@@ -868,7 +879,7 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         eventType: "CART_ITEM_ADD",
         getCart: () => this.cart.getSnapshot(),
         operation: async () => {
-          const candidates = await this.requireExactCatalogCandidates(
+          const candidates = await this.requireScanCatalogCandidates(
             lookupCode,
           );
           this.assertCanStartOrContinueTransaction();
@@ -897,6 +908,8 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
     let anchor: CatalogIdentity | null = null;
     let addedLineId: string | null = null;
     let selectionRequested = false;
+    // 本地命中所用的查询码：原码，或原码无结果时命中的前导 0 变体。
+    let matchedLookupCode = normalizedLookupCode;
     await this.operations.runCartMutation({
       permissionCode: SALES_PERMISSIONS.addItem,
       action: "scan-add-item",
@@ -915,12 +928,35 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         // 授权或本地查询可能跨越结账准备边界，回调真正继续前必须再次检查。
         this.preparedCheckoutGate.assertMutable();
         this.assertCanStartOrContinueTransaction();
-        candidates = candidates.filter(
-          (candidate) =>
-            candidate.storeCode === this.identity.storeCode &&
-            normalizeLookupCode(candidate.lookupCodeNormalized) ===
-              normalizedLookupCode,
+        candidates = this.scopeLookupCandidates(
+          candidates,
+          normalizedLookupCode,
         );
+        // 前导 0 回退（WPF #863）：必须原码精确无结果才试另一种写法，
+        // 生产库里 12 位 X 与 13 位 0+X 分属不同商品，不能当作等价一起查。
+        const variant =
+          candidates.length === 0
+            ? getLeadingZeroBarcodeVariant(normalizedLookupCode)
+            : null;
+        if (variant !== null) {
+          let variantCandidates: readonly LocalCatalogMatch[] = [];
+          try {
+            variantCandidates = await this.findLocalCatalogCandidates(variant);
+          } catch {
+            // 变体回查失败按原码未命中处理，仍走原码远程补查。
+          }
+          this.sessionGuard.assertActive();
+          this.preparedCheckoutGate.assertMutable();
+          this.assertCanStartOrContinueTransaction();
+          variantCandidates = this.scopeLookupCandidates(
+            variantCandidates,
+            variant,
+          );
+          if (variantCandidates.length > 0) {
+            candidates = variantCandidates;
+            matchedLookupCode = variant;
+          }
+        }
         if (candidates.length > 1) {
           // 一码多商品：不自动加购，等待收银员在候选中选择。
           selectionRequested = true;
@@ -948,9 +984,37 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       // 本地命中与 ADD 审计已经完成，但冻结后不得再登记新的目录续作。
       return addedLineId;
     }
+    if (anchor === null) {
+      // 本地未命中：远程补查结果回来会自动加购。同码同世代已有一次在等，
+      // 这次扫码不再叠加第二次加购（否则一个商品会加成两件），只提示「正在查询」。
+      const pendingKey = [
+        normalizedLookupCode,
+        transactionEpoch,
+        checkoutFence,
+      ].join("\u0000");
+      if (this.pendingRemoteAutoAdds.has(pendingKey)) {
+        this.completeLookupAttempt(attempt, { kind: "lookup-in-progress" });
+        return null;
+      }
+      this.pendingRemoteAutoAdds.add(pendingKey);
+      // 未命中仍按原码远程补查（POS API 是精确匹配，不做变体）。
+      const task = this.applyRemoteScanResult({
+        lookupCode: normalizedLookupCode,
+        anchor,
+        checkoutFence,
+        transactionEpoch,
+        attempt,
+      }).finally(() => {
+        // 无论加购、未找到、超时还是被丢弃，都要释放登记，否则这个码在本世代再也扫不进去。
+        this.pendingRemoteAutoAdds.delete(pendingKey);
+      });
+      this.trackCatalogWork(task);
+      return null;
+    }
     // 本地授权和 ADD 审计完成后才启动远程任务，避免同一价格差异被两类事件重复覆盖。
+    // 变体命中时按命中的那种写法校准，锚点身份才能对上。
     const task = this.applyRemoteScanResult({
-      lookupCode: normalizedLookupCode,
+      lookupCode: matchedLookupCode,
       anchor,
       checkoutFence,
       transactionEpoch,
@@ -1151,6 +1215,7 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
     this.scanTargetListeners.clear();
     this.lookupOutcomeListeners.clear();
     this.lookupSelectionListeners.clear();
+    this.pendingRemoteAutoAdds.clear();
   }
 
   public releasePreparedCheckout(): void {
@@ -1285,6 +1350,47 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       );
     }
     return scoped;
+  }
+
+  /**
+   * 扫码 / 精确输入查码的本地候选：原码精确无结果才回退前导 0 的另一种写法（WPF #863）。
+   * 变体也无结果时仍按原码抛出「商品不存在」。
+   */
+  private async requireScanCatalogCandidates(
+    lookupCode: string,
+  ): Promise<readonly LocalCatalogMatch[]> {
+    try {
+      return await this.requireExactCatalogCandidates(lookupCode);
+    } catch (error) {
+      const variant = getLeadingZeroBarcodeVariant(lookupCode);
+      if (
+        variant === null ||
+        !hasErrorCode(error, "CATALOG_LOOKUP_NOT_FOUND")
+      ) {
+        throw error;
+      }
+      try {
+        return await this.requireExactCatalogCandidates(variant);
+      } catch (variantError) {
+        if (hasErrorCode(variantError, "CATALOG_LOOKUP_NOT_FOUND")) {
+          throw error;
+        }
+        throw variantError;
+      }
+    }
+  }
+
+  /** 只保留本店、查询码与目标写法完全一致的候选。 */
+  private scopeLookupCandidates(
+    candidates: readonly LocalCatalogMatch[],
+    normalizedLookupCode: string,
+  ): readonly LocalCatalogMatch[] {
+    return candidates.filter(
+      (candidate) =>
+        candidate.storeCode === this.identity.storeCode &&
+        normalizeLookupCode(candidate.lookupCodeNormalized) ===
+          normalizedLookupCode,
+    );
   }
 
   /** 搜索框输入恰为冲突码时的精确候选；只作增强，读取失败时回到普通关键词搜索。 */

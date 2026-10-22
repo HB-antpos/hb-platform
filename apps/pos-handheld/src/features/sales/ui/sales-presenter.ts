@@ -1,3 +1,8 @@
+import {
+  PendingScanChoiceQueue,
+  type PendingScanChoice,
+} from "@hb/pos-domain/features/sales/scan/pending-scan-choice-queue";
+
 import { HbposApiError } from "@/core/api/hbpos-api";
 import {
   createAud,
@@ -42,7 +47,11 @@ export type SalesErrorCode =
   | "lock-failed"
   | "new-transactions-disabled"
   | "runtime-unavailable"
-  | "network-unavailable";
+  | "network-unavailable"
+  /** 还有一码多商品待选未处理：付款 / 挂单前必须先选定或放弃。 */
+  | "lookup-selection-required"
+  /** 待选队列已满：这次一码多商品扫码没有被记录。 */
+  | "lookup-selection-queue-full";
 
 /**
  * 网络传输失败（断网/服务器未启动/超时）映射为收银页友好错误码；
@@ -94,6 +103,28 @@ export type SalesLookupSelection = Readonly<{
   candidates: readonly SalesLookupCandidate[];
 }>;
 
+/**
+ * 一码多商品待选的生命周期日志（对齐 WPF PosScan pending choice created / resolved /
+ * abandoned / rejected）。路由层桥接到中心程序日志；只带查询码末 4 位与长度，不带完整条码。
+ */
+export type SalesLookupSelectionLogEvent = Readonly<{
+  action: "created" | "resolved" | "abandoned" | "rejected";
+  /** 队列内编号；rejected 时为 null（未入队）。 */
+  choiceId: number | null;
+  selectionId: string;
+  source: "manual" | "hid" | "camera";
+  lookupCodeTail: string;
+  lookupCodeLength: number;
+  candidateCount: number;
+  /** 最多前 5 个候选商品编码，逗号分隔。 */
+  candidateProducts: string;
+  queueLength: number;
+  waitedMs: number | null;
+  sameLookupCodeAsPrevious: boolean | null;
+  reason: string | null;
+  productCode: string | null;
+}>;
+
 /** 业务反馈与声音解耦；路由层仅将其映射为本地提示音。 */
 export type SalesFeedbackEvent = Readonly<{
   kind:
@@ -103,7 +134,9 @@ export type SalesFeedbackEvent = Readonly<{
     | "added"
     | "incremented"
     | "not-found"
-    | "failed-blocked";
+    | "failed-blocked"
+    /** 同码远程补查进行中再次扫到：不加购，只提示「正在查询」。 */
+    | "lookup-in-progress";
   attemptId?: string;
   source?: "manual" | "hid" | "camera";
   lineId?: string;
@@ -147,7 +180,12 @@ export type SalesPresenterState = Readonly<{
   query: string;
   searchStatus: SalesSearchStatus;
   searchResults: readonly SalesProductSearchItem[];
+  /** 待选队列队首（最早的一码多商品扫码）；队列为空时为 null。 */
   lookupSelection: SalesLookupSelection | null;
+  /** 待选队列长度（含队首）。后续扫码不会顶掉待选，付款 / 挂单前必须先处理完。 */
+  lookupSelectionQueueLength: number;
+  /** 收银员把待选收起成提示条以便继续扫码；待选仍在队列里，不会消失。 */
+  lookupSelectionCollapsed: boolean;
   /** 已点选候选、加购（含主管授权）尚未完成；期间候选弹窗保持打开但不可再选。 */
   lookupSelectionPending: boolean;
   pendingLookupCount: number;
@@ -248,6 +286,8 @@ export type SalesPresenterDependencies = Readonly<{
   createCheckoutIntentId(): string;
   /** 仅约束空购物车开始新交易；已有购物车、补传与支付恢复不得被拦截。 */
   canStartNewTransaction(): boolean;
+  /** 待选等待时长的时钟；测试可注入，默认 Date.now。 */
+  now?: () => number;
 }>;
 
 export type CashDraft = Readonly<{
@@ -291,6 +331,11 @@ export class SalesPresenter {
   private readonly unsubscribeScanTarget: () => void;
   private readonly unsubscribeLookupOutcome: () => void;
   private readonly unsubscribeLookupSelection: () => void;
+  private readonly lookupSelectionLogListeners = new Set<
+    (event: SalesLookupSelectionLogEvent) => void
+  >();
+  // 一码多商品待选队列（对齐 WPF c685663c5）：先进先出，后续扫码不顶掉，选定或放弃才出队。
+  private readonly lookupSelectionQueue: PendingScanChoiceQueue<SalesLookupSelection>;
   private cashIntentId: string | null = null;
   private cashSubmission: Promise<boolean> | null = null;
   private checkoutPreparation: Promise<CartSnapshot | null> | null = null;
@@ -303,6 +348,9 @@ export class SalesPresenter {
   private destroyed = false;
 
   public constructor(private readonly dependencies: SalesPresenterDependencies) {
+    this.lookupSelectionQueue = new PendingScanChoiceQueue<SalesLookupSelection>(
+      dependencies.now ? { now: dependencies.now } : {},
+    );
     const initialCart = dependencies.cart.getSnapshot();
     const initialLineId =
       initialCart.lines[initialCart.lines.length - 1]?.lineId ?? null;
@@ -316,6 +364,8 @@ export class SalesPresenter {
       searchStatus: "idle",
       searchResults: [],
       lookupSelection: null,
+      lookupSelectionQueueLength: 0,
+      lookupSelectionCollapsed: false,
       lookupSelectionPending: false,
       pendingLookupCount: dependencies.workflow.getPendingCatalogWorkCount(),
       cashTenderedText: "",
@@ -366,8 +416,17 @@ export class SalesPresenter {
     return () => this.feedbackListeners.delete(listener);
   };
 
+  public readonly subscribeLookupSelectionLog = (
+    listener: (event: SalesLookupSelectionLogEvent) => void,
+  ): (() => void) => {
+    this.lookupSelectionLogListeners.add(listener);
+    return () => this.lookupSelectionLogListeners.delete(listener);
+  };
+
   public destroy(): void {
     if (this.destroyed) return;
+    // 页面销毁会放弃全部待选：先记日志再拆订阅，运维才能看到「待选商品没进购物车」。
+    this.abandonAllLookupSelections("page-destroyed");
     this.destroyed = true;
     this.searchGeneration += 1;
     try {
@@ -381,6 +440,7 @@ export class SalesPresenter {
       this.unsubscribeLookupSelection();
       this.listeners.clear();
       this.feedbackListeners.clear();
+      this.lookupSelectionLogListeners.clear();
     }
   }
 
@@ -474,7 +534,6 @@ export class SalesPresenter {
 
   public addLookupCode(): Promise<boolean> {
     const lookupCode = this.state.query.trim();
-    this.dismissLookupSelection();
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt("manual");
@@ -527,7 +586,6 @@ export class SalesPresenter {
   }
 
   public addProduct(product: SalesProductSearchItem): Promise<boolean> {
-    this.dismissLookupSelection();
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt("manual");
@@ -555,8 +613,7 @@ export class SalesPresenter {
     const completeRejectedHid = () => {
       scanTiming.complete(timingId, "failure");
     };
-    // 中文注释：新的扫码取代尚未选择的一码多商品候选，避免旧弹窗遮住后续交易。
-    this.dismissLookupSelection();
+    // 中文注释：后续扫码不再顶掉尚未选择的一码多商品待选（WPF c685663c5），待选留在队列里。
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt(source);
@@ -587,27 +644,35 @@ export class SalesPresenter {
   }
 
   /**
-   * 收银员从一码多商品候选中选定商品。运行时按查询码 + 商品编码重新读取本地目录，
+   * 收银员从待选队首的一码多商品候选中选定商品。运行时按查询码 + 商品编码重新读取本地目录，
    * 经与扫码相同的授权、审计与结账围栏加购。与搜索抽屉一致，加购完成前弹窗保持打开
    * （主管授权弹窗叠在其上，避免与关闭动画竞争），期间忽略重复点选。
+   * 选定成功才出队并自动轮到下一个；加购失败时条目保留，收银员可改选或放弃（对齐 WPF）。
    */
   public chooseLookupCandidate(productCode: string): Promise<boolean> {
-    const selection = this.state.lookupSelection;
+    const entry = this.lookupSelectionQueue.current;
+    const selection = entry?.payload ?? null;
     const candidate = selection?.candidates.find(
       (current) => current.productCode === productCode,
     );
-    if (!selection || !candidate || this.state.lookupSelectionPending) {
+    if (
+      !entry ||
+      !selection ||
+      !candidate ||
+      this.state.lookupSelectionPending
+    ) {
       return Promise.resolve(false);
     }
     const workflow = this.dependencies.workflow;
     if (!this.dependencies.capabilities.catalog || !workflow.addLookupCandidate) {
-      this.dismissLookupSelection();
+      // 运行时已断开：待选无法再入车，全部放弃并留日志，避免卡住付款。
+      this.abandonAllLookupSelections("runtime-unavailable");
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt(selection.source);
       return Promise.resolve(false);
     }
     if (!this.canMutateNewTransaction()) {
-      this.dismissLookupSelection();
+      // 条目保留：策略恢复后仍可选定，或由收银员主动放弃。
       this.publishBlockedAddAttempt(selection.source);
       return Promise.resolve(false);
     }
@@ -620,7 +685,7 @@ export class SalesPresenter {
         source: selection.source,
       })
       .then((lineId) => {
-        this.finishLookupSelection(selection);
+        this.resolveLookupSelection(entry, candidate.productCode);
         this.applyCartSnapshot(this.dependencies.cart.getSnapshot());
         if (
           lineId &&
@@ -635,19 +700,52 @@ export class SalesPresenter {
         return true;
       })
       .catch((error: unknown) => {
-        this.finishLookupSelection(selection);
-        this.patchState({ errorCode: productMutationErrorCode(error) });
+        this.patchState({
+          lookupSelectionPending: false,
+          errorCode: productMutationErrorCode(error),
+        });
         return false;
       });
   }
 
-  /** 取消选择：本次查码不加入任何商品。 */
+  /**
+   * 放弃队首待选：这一次扫码不加入任何商品，自动轮到下一个。
+   * 界面须先让收银员二次确认（对齐 WPF「放弃需再点一次确认」）。
+   */
   public cancelLookupSelection(): void {
-    this.dismissLookupSelection();
+    const entry = this.lookupSelectionQueue.current;
+    if (!entry || this.state.lookupSelectionPending) return;
+    this.removeLookupSelection(entry, "abandoned", "cashier-abandon", null);
+  }
+
+  /**
+   * 取单等会替换当前购物车的入口先调用：有待选时拒绝并展开待选弹窗，返回 false。
+   */
+  public requireNoPendingLookupSelections(): boolean {
+    return !this.blockForPendingLookupSelections();
+  }
+
+  /** 收起待选弹窗，继续扫码；待选保留在队列里，提示条常驻直到处理完。 */
+  public collapseLookupSelection(): void {
+    if (
+      this.lookupSelectionQueue.size === 0 ||
+      this.state.lookupSelectionPending ||
+      this.state.lookupSelectionCollapsed
+    ) {
+      return;
+    }
+    this.patchState({ lookupSelectionCollapsed: true });
+  }
+
+  /** 从提示条重新展开待选弹窗。 */
+  public expandLookupSelection(): void {
+    if (this.lookupSelectionQueue.size === 0) return;
+    if (this.state.lookupSelectionCollapsed) {
+      this.patchState({ lookupSelectionCollapsed: false });
+    }
   }
 
   public addOpenItem(unitPriceCents: number): Promise<boolean> {
-    this.dismissLookupSelection();
     if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents <= 0) {
       this.patchState({ errorCode: "invalid-price" });
       this.publishBlockedAddAttempt("manual");
@@ -870,7 +968,11 @@ export class SalesPresenter {
     }
     return this.runCartMutation(() =>
       this.dependencies.cart.clearCart(),
-    );
+    ).then((cleared) => {
+      // 清空购物车 = 放弃这一单，残留待选一并放弃并记日志（对齐 WPF）。
+      if (cleared) this.abandonAllLookupSelections("cart-cleared");
+      return cleared;
+    });
   }
 
   public async openCash(): Promise<boolean> {
@@ -1082,6 +1184,9 @@ export class SalesPresenter {
       this.patchState({ errorCode: "empty-cart" });
       return Promise.resolve(false);
     }
+    if (this.blockForPendingLookupSelections()) {
+      return Promise.resolve(false);
+    }
 
     return this.dependencies.workflow
       .holdCart(this.state.cart)
@@ -1106,10 +1211,10 @@ export class SalesPresenter {
     return this.dependencies.workflow
       .lockTerminal()
       .then(() => {
+        // 锁屏不放弃待选（对齐 WPF「锁屏换收银员保留」）；锁屏态界面不展示待选弹窗。
         this.patchState({
           phase: "locked",
           errorCode: null,
-          lookupSelection: null,
           lookupSelectionPending: false,
         });
         return true;
@@ -1164,9 +1269,14 @@ export class SalesPresenter {
       this.dependencies.workflow.getPendingCatalogWorkCount();
     if (
       this.state.cart.lines.length === 0 &&
-      pendingLookupCount <= 0
+      pendingLookupCount <= 0 &&
+      this.lookupSelectionQueue.size === 0
     ) {
       this.patchState({ errorCode: "empty-cart" });
+      return Promise.resolve(null);
+    }
+    // 付款前必须先处理完一码多商品待选，否则选定的商品会漏收（WPF c685663c5）。
+    if (this.blockForPendingLookupSelections()) {
       return Promise.resolve(null);
     }
 
@@ -1175,8 +1285,6 @@ export class SalesPresenter {
       pendingLookupCount,
       cashTenderedText: "",
       errorCode: null,
-      lookupSelection: null,
-      lookupSelectionPending: false,
     });
     const preparation = Promise.resolve()
       .then(() =>
@@ -1188,6 +1296,17 @@ export class SalesPresenter {
       .then(() => {
         const cart = this.dependencies.cart.getSnapshot();
         if (this.destroyed || this.state.phase !== "verifying-checkout") {
+          return null;
+        }
+        if (this.lookupSelectionQueue.size > 0) {
+          // 结账准备期间迟到的远程/本地查码命中了一码多商品：退回收银态先处理待选。
+          this.releasePreparedCheckout();
+          this.patchState({
+            cart,
+            pendingLookupCount:
+              this.dependencies.workflow.getPendingCatalogWorkCount(),
+          });
+          this.blockForPendingLookupSelections();
           return null;
         }
         if (cart.lines.length === 0) {
@@ -1317,10 +1436,11 @@ export class SalesPresenter {
   private showLookupSelection(selection: SalesLookupSelection): void {
     if (this.destroyed) return;
     if (
-      this.state.phase !== "selling" ||
+      (this.state.phase !== "selling" &&
+        this.state.phase !== "verifying-checkout") ||
       selection.candidates.length < 2
     ) {
-      // 中文注释：结账准备或锁屏期间迟到的候选不能弹窗，仅给出失败反馈。
+      // 中文注释：现金页、成功页或锁屏期间迟到的候选不入队，仅给出失败反馈。
       this.publishFeedback({
         attemptId: selection.selectionId,
         source: selection.source,
@@ -1328,10 +1448,45 @@ export class SalesPresenter {
       });
       return;
     }
-    this.patchState({
-      lookupSelection: selection,
-      lookupSelectionPending: false,
+    const wasEmpty = this.lookupSelectionQueue.size === 0;
+    const entry = this.lookupSelectionQueue.tryEnqueue(
+      selection.lookupCode,
+      selection,
+    );
+    if (!entry) {
+      // 队列满了拒收并报错误音，不静默丢（正常一单只会有个位数待选）。
+      this.emitLookupSelectionLog({
+        action: "rejected",
+        choiceId: null,
+        selection,
+        queueLength: this.lookupSelectionQueue.size,
+        waitedMs: null,
+        sameLookupCodeAsPrevious: null,
+        reason: "queue-full",
+        productCode: null,
+      });
+      this.patchState({ errorCode: "lookup-selection-queue-full" });
+      this.publishFeedback({
+        attemptId: selection.selectionId,
+        source: selection.source,
+        kind: "failed-blocked",
+      });
+      return;
+    }
+    this.emitLookupSelectionLog({
+      action: "created",
+      choiceId: entry.id,
+      selection,
+      queueLength: this.lookupSelectionQueue.size,
+      waitedMs: null,
+      sameLookupCodeAsPrevious: entry.sameLookupCodeAsPrevious,
+      reason: null,
+      productCode: null,
     });
+    // 队列从空到有才自动展开；收银员已收起继续扫码时只累加提示条计数，不强行弹出。
+    this.syncLookupSelectionState(
+      wasEmpty ? { lookupSelectionCollapsed: false } : {},
+    );
     this.publishFeedback({
       attemptId: selection.selectionId,
       source: selection.source,
@@ -1339,22 +1494,116 @@ export class SalesPresenter {
     });
   }
 
-  private dismissLookupSelection(): void {
-    if (
-      this.state.lookupSelection !== null ||
-      this.state.lookupSelectionPending
-    ) {
-      this.patchState({
-        lookupSelection: null,
-        lookupSelectionPending: false,
+  /** 付款 / 挂单前有待选：拒绝并展开待选弹窗，提示收银员先处理。 */
+  private blockForPendingLookupSelections(): boolean {
+    if (this.lookupSelectionQueue.size === 0) return false;
+    this.patchState({
+      errorCode: "lookup-selection-required",
+      lookupSelectionCollapsed: false,
+    });
+    return true;
+  }
+
+  /** 选定入车成功：只移除这次点选所属的条目（期间别的条目不受影响）。 */
+  private resolveLookupSelection(
+    entry: PendingScanChoice<SalesLookupSelection>,
+    productCode: string,
+  ): void {
+    this.removeLookupSelection(entry, "resolved", null, productCode);
+  }
+
+  private removeLookupSelection(
+    entry: PendingScanChoice<SalesLookupSelection>,
+    action: "resolved" | "abandoned",
+    reason: string | null,
+    productCode: string | null,
+  ): void {
+    const removed = this.lookupSelectionQueue.remove(entry.id);
+    if (removed) {
+      this.emitLookupSelectionLog({
+        action,
+        choiceId: removed.id,
+        selection: removed.payload,
+        queueLength: this.lookupSelectionQueue.size,
+        waitedMs: this.lookupSelectionQueue.waitedMs(removed),
+        sameLookupCodeAsPrevious: removed.sameLookupCodeAsPrevious,
+        reason,
+        productCode,
       });
+    }
+    this.syncLookupSelectionState({ lookupSelectionPending: false });
+  }
+
+  /** 放弃全部待选（清空购物车、页面销毁、运行时断开），逐条记日志。 */
+  private abandonAllLookupSelections(reason: string): void {
+    const removed = this.lookupSelectionQueue.clear();
+    for (const entry of removed) {
+      this.emitLookupSelectionLog({
+        action: "abandoned",
+        choiceId: entry.id,
+        selection: entry.payload,
+        queueLength: 0,
+        waitedMs: this.lookupSelectionQueue.waitedMs(entry),
+        sameLookupCodeAsPrevious: entry.sameLookupCodeAsPrevious,
+        reason,
+        productCode: null,
+      });
+    }
+    if (removed.length > 0) {
+      this.syncLookupSelectionState({ lookupSelectionPending: false });
     }
   }
 
-  /** 只关闭本次点选所属的候选；期间已被新扫码替换的候选保持不变。 */
-  private finishLookupSelection(selection: SalesLookupSelection): void {
-    if (this.state.lookupSelection === selection) {
-      this.dismissLookupSelection();
+  /** 把队列状态投影到界面状态；队列清空时收起标记一并复位。 */
+  private syncLookupSelectionState(
+    patch: Partial<SalesPresenterState> = {},
+  ): void {
+    const head = this.lookupSelectionQueue.current;
+    this.patchState({
+      ...patch,
+      lookupSelection: head?.payload ?? null,
+      lookupSelectionQueueLength: this.lookupSelectionQueue.size,
+      ...(head === null ? { lookupSelectionCollapsed: false } : {}),
+    });
+  }
+
+  private emitLookupSelectionLog(
+    input: Readonly<{
+      action: SalesLookupSelectionLogEvent["action"];
+      choiceId: number | null;
+      selection: SalesLookupSelection;
+      queueLength: number;
+      waitedMs: number | null;
+      sameLookupCodeAsPrevious: boolean | null;
+      reason: string | null;
+      productCode: string | null;
+    }>,
+  ): void {
+    const lookupCode = input.selection.lookupCode.trim();
+    const event: SalesLookupSelectionLogEvent = Object.freeze({
+      action: input.action,
+      choiceId: input.choiceId,
+      selectionId: input.selection.selectionId,
+      source: input.selection.source,
+      lookupCodeTail: lookupCode.slice(-4),
+      lookupCodeLength: lookupCode.length,
+      candidateCount: input.selection.candidates.length,
+      candidateProducts: input.selection.candidates
+        .slice(0, 5)
+        .map((candidate) => candidate.productCode)
+        .join(","),
+      queueLength: input.queueLength,
+      waitedMs: input.waitedMs,
+      sameLookupCodeAsPrevious: input.sameLookupCodeAsPrevious,
+      reason: input.reason,
+      productCode: input.productCode,
+    });
+    for (const listener of [...this.lookupSelectionLogListeners]) {
+      try {
+        listener(event);
+      } catch {
+        // 日志是旁路，不能影响待选与购物车。
+      }
     }
   }
 

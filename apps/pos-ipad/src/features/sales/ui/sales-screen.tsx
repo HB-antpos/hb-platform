@@ -280,9 +280,12 @@ export function SalesScreen({
   const visibleSearchResults = searchResultsAreCurrent
     ? state.searchResults
     : [];
-  // 一码多商品候选只在收银态展示；结账准备、锁屏或成功页一律不弹出。
+  // 一码多商品待选只在收银态展示；结账准备、锁屏或成功页一律不弹出。
   const lookupSelection =
     state.phase === "selling" ? state.lookupSelection : null;
+  // 收起后弹窗隐藏、待选仍在队列里，由常驻提示条重新展开。
+  const lookupSelectionModalVisible =
+    lookupSelection !== null && !state.lookupSelectionCollapsed;
   const newTransactionBlocked =
     cartEmpty && newTransactionGate?.canStartNewTransaction === false;
   const checkoutVerifying = state.phase === "verifying-checkout";
@@ -1098,6 +1101,30 @@ export function SalesScreen({
         </View>
       ) : null}
 
+      {lookupSelection && !lookupSelectionModalVisible ? (
+        <PosPressable
+          accessibilityHint={t("lookupSelection.pendingHint")}
+          accessibilityLabel={t("lookupSelection.pendingBar", {
+            count: state.lookupSelectionQueueLength,
+          })}
+          accessibilityLiveRegion="polite"
+          accessibilityRole="button"
+          onPress={() => presenter.expandLookupSelection()}
+          sound="navigate"
+          style={styles.lookupPendingBar}
+          testID="sales-lookup-selection-pending-bar"
+        >
+          <Text numberOfLines={1} style={styles.lookupPendingBarTitle}>
+            {t("lookupSelection.pendingBar", {
+              count: state.lookupSelectionQueueLength,
+            })}
+          </Text>
+          <Text style={styles.lookupPendingBarAction}>
+            {t("lookupSelection.pendingAction")}
+          </Text>
+        </PosPressable>
+      ) : null}
+
       <View style={styles.workspaceRow}>
         <View style={styles.transactionPane} testID="sales-transaction-pane">
           <View style={styles.cartPane}>
@@ -1420,7 +1447,12 @@ export function SalesScreen({
               {onOpenHeldOrders ? (
                 <ActionButton
                   label={t("functions.heldSales")}
-                  onPress={onOpenHeldOrders}
+                  // 取单会替换当前购物车：有一码多商品待选时先拦下并展开待选。
+                  onPress={() => {
+                    if (presenter.requireNoPendingLookupSelections()) {
+                      onOpenHeldOrders();
+                    }
+                  }}
                   sound="navigate"
                   style={styles.functionAction}
                   testID="sales-open-held-orders"
@@ -1632,20 +1664,21 @@ export function SalesScreen({
         </View>
       </Modal>
 
-      {lookupSelection ? (
+      {lookupSelection && lookupSelectionModalVisible ? (
         <Modal
           animationType="fade"
-          onRequestClose={() => presenter.cancelLookupSelection()}
+          onRequestClose={() => presenter.collapseLookupSelection()}
           presentationStyle="overFullScreen"
           supportedOrientations={["landscape-left", "landscape-right"]}
           transparent
           visible
         >
           <View style={styles.searchDrawerBackdrop}>
+            {/* 点遮罩只收起，不放弃：待选不能因误触而丢失（WPF 放弃须二次确认）。 */}
             <PosPressable
-              accessibilityLabel={t("lookupSelection.cancel")}
+              accessibilityLabel={t("lookupSelection.later")}
               accessibilityRole="button"
-              onPress={() => presenter.cancelLookupSelection()}
+              onPress={() => presenter.collapseLookupSelection()}
               sound="navigate"
               style={styles.searchDrawerDismissArea}
               testID="sales-lookup-selection-backdrop"
@@ -1669,13 +1702,24 @@ export function SalesScreen({
                       count: lookupSelection.candidates.length,
                     })}
                   </Text>
+                  {state.lookupSelectionQueueLength > 1 ? (
+                    <Text
+                      style={styles.lookupSelectionQueue}
+                      testID="sales-lookup-selection-queue"
+                    >
+                      {t("lookupSelection.queue", {
+                        count: state.lookupSelectionQueueLength,
+                      })}
+                    </Text>
+                  ) : null}
                 </View>
-                <ActionButton
-                  label={t("lookupSelection.cancel")}
-                  onPress={() => presenter.cancelLookupSelection()}
-                  sound="navigate"
-                  testID="sales-lookup-selection-cancel"
-                  tone="quiet"
+                <LookupSelectionActions
+                  disabled={state.lookupSelectionPending}
+                  // 换到下一个待选时重置二次确认，避免确认状态落到别的条目上。
+                  key={lookupSelection.selectionId}
+                  onAbandon={() => presenter.cancelLookupSelection()}
+                  onLater={() => presenter.collapseLookupSelection()}
+                  t={t}
                 />
               </View>
               <FlatList
@@ -3012,6 +3056,60 @@ function ErrorBanner({
   );
 }
 
+/**
+ * 待选弹窗操作：「稍后选择」收起继续扫码；「放弃此项」须再点一次确认
+ * （对齐 WPF），确认态由父级按条目 key 重置。
+ */
+function LookupSelectionActions({
+  disabled,
+  onAbandon,
+  onLater,
+  t,
+}: Readonly<{
+  disabled: boolean;
+  onAbandon: () => void;
+  onLater: () => void;
+  t(
+    key: SalesCopyKey,
+    values?: Readonly<Record<string, string | number>>,
+  ): string;
+}>) {
+  const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+  return (
+    <View style={styles.lookupSelectionActions}>
+      <ActionButton
+        disabled={disabled}
+        label={t("lookupSelection.later")}
+        onPress={() => {
+          setConfirmingAbandon(false);
+          onLater();
+        }}
+        sound="navigate"
+        testID="sales-lookup-selection-later"
+        tone="quiet"
+      />
+      <ActionButton
+        disabled={disabled}
+        label={t(
+          confirmingAbandon
+            ? "lookupSelection.confirmAbandon"
+            : "lookupSelection.cancel",
+        )}
+        onPress={() => {
+          if (!confirmingAbandon) {
+            setConfirmingAbandon(true);
+            return;
+          }
+          setConfirmingAbandon(false);
+          onAbandon();
+        }}
+        testID="sales-lookup-selection-cancel"
+        tone={confirmingAbandon ? "danger" : "secondary"}
+      />
+    </View>
+  );
+}
+
 function ActionButton({
   accessibilityLabel,
   disabled = false,
@@ -3149,6 +3247,10 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.newTransactionsDisabled";
     case "network-unavailable":
       return "error.networkUnavailable";
+    case "lookup-selection-required":
+      return "error.lookupSelectionRequired";
+    case "lookup-selection-queue-full":
+      return "error.lookupSelectionQueueFull";
     case "runtime-unavailable":
     default:
       return "error.runtimeUnavailable";
@@ -3806,6 +3908,39 @@ const styles = StyleSheet.create({
     color: posColors.mutedInk,
     fontSize: 13,
     lineHeight: 18,
+    marginTop: 4,
+  },
+  lookupPendingBar: {
+    alignItems: "center",
+    backgroundColor: "#FFF4D8",
+    borderBottomColor: posColors.orange,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 16,
+    justifyContent: "space-between",
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  lookupPendingBarAction: {
+    color: posColors.orange,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  lookupPendingBarTitle: {
+    color: posColors.ink,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  lookupSelectionActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  lookupSelectionQueue: {
+    color: posColors.orange,
+    fontSize: 13,
+    fontWeight: "800",
     marginTop: 4,
   },
   modalAction: {

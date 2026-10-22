@@ -22,6 +22,18 @@ const mockSalesFeedbackSubscription: {
 } = {};
 const mockClearActiveCashier = jest.fn();
 const mockCreatePresenter = jest.fn();
+// 一码多商品待选日志：路由创建 presenter 时绑定到中心程序日志。
+let mockLookupSelectionLogListener:
+  | ((event: Readonly<Record<string, unknown>>) => void)
+  | null = null;
+const mockSubscribeLookupSelectionLog = jest.fn(
+  (listener: (event: Readonly<Record<string, unknown>>) => void) => {
+    mockLookupSelectionLogListener = listener;
+    return () => {
+      mockLookupSelectionLogListener = null;
+    };
+  },
+);
 const mockDestroyPresenter = jest.fn();
 const mockUnsubscribeSalesFeedback = jest.fn();
 const mockSubscribeSalesFeedback =
@@ -310,6 +322,7 @@ beforeEach(() => {
     setQuery: mockSetQuery,
     subscribe: mockSubscribePresenter,
     subscribeFeedback: mockSubscribeSalesFeedback,
+    subscribeLookupSelectionLog: mockSubscribeLookupSelectionLog,
   });
   mockUpdateGate = {
     state: "enabled",
@@ -351,6 +364,30 @@ test("销售路由零参数创建生产 presenter，并在卸载时销毁", asyn
 
   expect(mockCreatePresenter).toHaveBeenCalledTimes(1);
   expect(mockCreatePresenter).toHaveBeenCalledWith();
+  expect(mockSubscribeLookupSelectionLog).toHaveBeenCalledTimes(1);
+  mockRecordApplicationLog.mockClear();
+  mockLookupSelectionLogListener?.({
+    action: "abandoned",
+    choiceId: 1,
+    selectionId: "lookup-1",
+    source: "hid",
+    lookupCodeTail: "1470",
+    lookupCodeLength: 13,
+    candidateCount: 2,
+    candidateProducts: "P-FLY,P-FLOWER",
+    queueLength: 0,
+    waitedMs: 800,
+    sameLookupCodeAsPrevious: false,
+    reason: "cart-cleared",
+    productCode: null,
+  });
+  expect(mockRecordApplicationLog).toHaveBeenCalledWith(
+    expect.objectContaining({
+      level: "Warning",
+      category: "sales.scan-choice",
+      message: "Pending scan choice abandoned.",
+    }),
+  );
 
   mockSalesScreenProps.onOpenHeldOrders();
   expect(mockRouterPush).toHaveBeenCalledWith("/held-orders");

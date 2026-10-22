@@ -4622,7 +4622,7 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("TC26 窄屏一码多商品候选整行可点，列出名称、货号、编码、价格来源与价格，底部可取消", async () => {
+  it("TC26 窄屏一码多商品候选整行可点，列出名称、货号、编码、价格来源与价格；待选可收起、放弃需二次确认", async () => {
     const tc26Metrics = { width: 360, height: 592, scale: 2, fontScale: 1 };
     const defaultMetrics = { width: 390, height: 844, scale: 3, fontScale: 1 };
     let publishSelection:
@@ -4723,7 +4723,10 @@ describe("SalesScreen", () => {
       ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
       expect(
         flattenedStyle(screen.getByTestId("sales-lookup-selection-cancel")),
-      ).toMatchObject({ alignSelf: "stretch", minHeight: MIN_TOUCH_TARGET });
+      ).toMatchObject({ flex: 1, minHeight: MIN_TOUCH_TARGET });
+      expect(
+        flattenedStyle(screen.getByTestId("sales-lookup-selection-later")),
+      ).toMatchObject({ flex: 1, minHeight: MIN_TOUCH_TARGET });
 
       await fireEvent.press(row);
       expect(addLookupCandidate).toHaveBeenCalledWith({
@@ -4741,11 +4744,63 @@ describe("SalesScreen", () => {
       });
       expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
 
+      // 中文注释：两次一码多商品扫码各占一个待选，后一次不顶掉前一次。
       await act(async () => {
         publishSelection?.(selection);
+        publishSelection?.({ ...selection, selectionId: "lookup-2" });
       });
+      expect(screen.getByTestId("sales-lookup-selection-queue")).toHaveTextContent(
+        "共 2 个待选，先处理最早的一个。",
+      );
+
+      // 「稍后选择」与点遮罩只收起，常驻提示条可重新展开。
+      await fireEvent.press(screen.getByTestId("sales-lookup-selection-later"));
+      expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+      expect(
+        screen.getByTestId("sales-lookup-selection-pending-bar"),
+      ).toHaveTextContent("2 个扫码商品待选择去选择");
+      expect(
+        Number(
+          flattenedStyle(screen.getByTestId("sales-lookup-selection-pending-bar"))
+            .minHeight,
+        ),
+      ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      await fireEvent.press(
+        screen.getByTestId("sales-lookup-selection-pending-bar"),
+      );
+      expect(screen.getByTestId("sales-lookup-selection")).toBeTruthy();
+      // 遮罩与 accessibilityViewIsModal 的面板同级，读屏会隐藏它，查询须包含隐藏元素。
+      await fireEvent.press(
+        screen.getByTestId("sales-lookup-selection-backdrop", {
+          includeHiddenElements: true,
+        }),
+      );
+      expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+      expect(salesPresenter.getState().lookupSelectionQueueLength).toBe(2);
+      await fireEvent.press(
+        screen.getByTestId("sales-lookup-selection-pending-bar"),
+      );
+
+      // 放弃需再点一次确认；每次只放弃队首一个。
+      await fireEvent.press(screen.getByTestId("sales-lookup-selection-cancel"));
+      expect(screen.getByTestId("sales-lookup-selection-cancel")).toHaveTextContent(
+        "再点一次确认放弃",
+      );
+      expect(salesPresenter.getState().lookupSelectionQueueLength).toBe(2);
+      await fireEvent.press(screen.getByTestId("sales-lookup-selection-cancel"));
+      expect(salesPresenter.getState().lookupSelection?.selectionId).toBe(
+        "lookup-2",
+      );
+      expect(screen.getByTestId("sales-lookup-selection-cancel")).toHaveTextContent(
+        "放弃此项",
+      );
+      expect(screen.queryByTestId("sales-lookup-selection-queue")).toBeNull();
+      await fireEvent.press(screen.getByTestId("sales-lookup-selection-cancel"));
       await fireEvent.press(screen.getByTestId("sales-lookup-selection-cancel"));
       expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+      expect(
+        screen.queryByTestId("sales-lookup-selection-pending-bar"),
+      ).toBeNull();
       expect(addLookupCandidate).toHaveBeenCalledTimes(1);
 
       await screen.unmount();

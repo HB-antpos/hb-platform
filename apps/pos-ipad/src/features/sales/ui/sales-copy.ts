@@ -57,7 +57,13 @@ export const salesEnglishCopy = {
   "lookupSelection.title": "Choose the product",
   "lookupSelection.hint":
     "Code {{code}} matches {{count}} products. Choose the one being sold.",
-  "lookupSelection.cancel": "Cancel",
+  "lookupSelection.cancel": "Abandon this scan",
+  "lookupSelection.confirmAbandon": "Tap again to abandon",
+  "lookupSelection.later": "Choose later",
+  "lookupSelection.queue": "{{count}} scans waiting. Handling the earliest first.",
+  "lookupSelection.pendingBar": "{{count}} scanned item(s) need a product choice",
+  "lookupSelection.pendingAction": "Choose",
+  "lookupSelection.pendingHint": "Opens the pending product choice.",
   "lookupSelection.choose": "Choose",
   "lookupSelection.chooseProduct": "Choose {{product}}, {{price}}",
   "lookupSelection.lookupCode": "Code",
@@ -202,6 +208,10 @@ export const salesEnglishCopy = {
   "error.lockFailed": "The terminal could not be locked.",
   "error.newTransactionsDisabled":
     "This terminal cannot start a new sale until the update policy allows it.",
+  "error.lookupSelectionRequired":
+    "Choose or abandon the pending scanned items before continuing.",
+  "error.lookupSelectionQueueFull":
+    "Too many scans are waiting for a product choice. This scan was not recorded; handle the pending ones first.",
   "error.runtimeUnavailable": "Sales services are not connected.",
   "common.dismiss": "Dismiss",
 } as const;
@@ -263,7 +273,13 @@ const salesChineseCopy = {
   "lookupSelection.title": "选择商品",
   "lookupSelection.hint":
     "编码 {{code}} 对应 {{count}} 个商品，请选择本次实际售出的商品。",
-  "lookupSelection.cancel": "取消",
+  "lookupSelection.cancel": "放弃此项",
+  "lookupSelection.confirmAbandon": "再点一次确认放弃",
+  "lookupSelection.later": "稍后选择",
+  "lookupSelection.queue": "共 {{count}} 个待选，先处理最早的一个。",
+  "lookupSelection.pendingBar": "{{count}} 个扫码商品待选择",
+  "lookupSelection.pendingAction": "去选择",
+  "lookupSelection.pendingHint": "打开待选商品。",
   "lookupSelection.choose": "选择",
   "lookupSelection.chooseProduct": "选择 {{product}}，{{price}}",
   "lookupSelection.lookupCode": "编码",
@@ -394,6 +410,8 @@ const salesChineseCopy = {
   "error.holdFailed": "当前交易无法挂单。",
   "error.lockFailed": "终端无法锁定。",
   "error.newTransactionsDisabled": "更新策略允许前，本终端不能开始新交易。",
+  "error.lookupSelectionRequired": "还有一码多商品待选，请先选定或放弃后再继续。",
+  "error.lookupSelectionQueueFull": "待选商品已达上限，这次扫码没有记录，请先处理待选。",
   "error.runtimeUnavailable": "销售服务尚未接入。",
   "common.dismiss": "关闭",
 } as const satisfies Record<SalesCopyKey, string>;

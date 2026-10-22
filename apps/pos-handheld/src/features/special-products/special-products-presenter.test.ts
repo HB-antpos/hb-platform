@@ -340,6 +340,64 @@ test("特殊商品权限或目标前置失败时各发布一次 failed-blocked",
   ]);
 });
 
+test("特殊商品连点加购只加一件：加购进行中与成功后都锁定（WPF 28f2f0833）", async () => {
+  let releaseAdd: (() => void) | null = null;
+  const added: string[] = [];
+  const cart: SpecialProductsCartPort = {
+    async add(item) {
+      added.push(item.productCode);
+      await new Promise<void>((resolve) => {
+        releaseAdd = resolve;
+      });
+      return { lineId: item.productCode, kind: "added" };
+    },
+  };
+  const presenter = createPresenter({
+    cart,
+    repository: new MemorySpecialProductsRepository([product("A"), product("B")]),
+  });
+  const events: { kind: string }[] = [];
+  presenter.subscribeFeedback((event) => events.push(event));
+  await presenter.load();
+
+  const first = presenter.addToCart("A");
+  // 第一次加购还没回来时连点（同一商品或别的商品）都被忽略。
+  await presenter.addToCart("A");
+  await presenter.addToCart("B");
+  (releaseAdd as (() => void) | null)?.();
+  await first;
+  // 成功后路由层会返回收银台；退场期间的点击同样被忽略。
+  await presenter.addToCart("A");
+
+  assert.deepEqual(added, ["A"]);
+  assert.deepEqual(events.map((event) => event.kind), ["added"]);
+});
+
+test("特殊商品加购失败立即解锁，留在本页可重试", async () => {
+  let fail = true;
+  const added: string[] = [];
+  const cart: SpecialProductsCartPort = {
+    async add(item) {
+      if (fail) throw new Error("cart unavailable");
+      added.push(item.productCode);
+      return { lineId: item.productCode, kind: "added" };
+    },
+  };
+  const presenter = createPresenter({
+    cart,
+    repository: new MemorySpecialProductsRepository([product("A")]),
+  });
+  await presenter.load();
+
+  await presenter.addToCart("A");
+  assert.equal(presenter.getState().statusCode, "add-to-cart-failed");
+  fail = false;
+  await presenter.addToCart("A");
+
+  assert.deepEqual(added, ["A"]);
+  assert.equal(presenter.getState().statusCode, "added-to-cart");
+});
+
 function createPresenter(
   overrides: Partial<{
     cart: SpecialProductsCartPort;
