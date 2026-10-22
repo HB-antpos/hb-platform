@@ -44,8 +44,8 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 
 import IntervalEditor from './IntervalEditor'
 import { PricingCell, StrategyExpanded } from './StrategyViews'
-import { boundedPrice, defaultCurve, nodesFromRules, rulesFromNodes } from './pricingCurve'
-import { intervalsError, isEditable, priceDrops } from './pricingIntervals'
+import { defaultCurve } from './pricingCurve'
+import { convertLegacy, intervalsError, isEditable, priceDrops } from './pricingIntervals'
 
 type DataType = PricingStrategyListDto & { key: string }
 
@@ -461,14 +461,20 @@ export default function PricingStrategiesPage() {
             <Form.Item name="isEnabled" label={t('posAdmin.pricing.isEnabled', '启用')} valuePropName="checked" style={{ width: 60, marginBottom: 12 }}><Switch /></Form.Item>
           </div>
           {curveMode ? <Form.Item name="details" rules={[{ validator: (_, rules) => { const error = intervalsError(rules || []); return error ? Promise.reject(new Error(error)) : Promise.resolve() } }]}><IntervalEditor /></Form.Item> : <>
-          <Alert type="info" showIcon style={{ marginBottom: 12 }} message="原有区间规则" description="已有 Linear 计算已升级为零售价插值。打开时保留现有配置；转换按钮切换为图形编辑，并将节点吸附到合法尾数、应用 1.5～5 成率约束。编辑结果保存后生效。" action={<Button onClick={() => {
-            const old = editorForm.getFieldValue('details') as PricingStrategyRuleDto[]
-            if (!old?.length || old.some((r, i) => i > 0 && (r.minPrice !== old[i - 1].maxPrice || Math.abs(r.minPrice * r.startRate - old[i - 1].maxPrice * old[i - 1].endRate) > .000001))) { message.warning('原有区间不连续，请先对齐相邻成本与售价端点'); return }
-            const converted = rulesFromNodes(nodesFromRules(old).map(n => ({ cost: n.cost, price: boundedPrice(n.cost, n.price) })))
-            const error = intervalsError(converted)
-            if (error) { message.warning(error); return }
-            editorForm.setFieldValue('details', converted); setCurveMode(true)
-          }}>转换为曲线编辑</Button>} />
+          <Alert type="info" showIcon style={{ marginBottom: 12 }} message="原有区间规则" description="这是旧版的阶梯 / 线性 / 指数区间规则。点击「转换为区间编辑」后，每个区间可以选择固定成率或曲线，并在图上直观调整；转换只发生在编辑器里，保存之前线上策略不变。" action={<Button onClick={() => {
+            const converted = convertLegacy(editorForm.getFieldValue('details') as PricingStrategyRuleDto[])
+            if (converted.error) { message.warning(converted.error); return }
+            editorForm.setFieldValue('details', converted.rules); setCurveMode(true)
+            // 转换里有行为变化的地方（阶梯改固定成率不再调尾数、指数变直线、下限抬到 0.10、交界回落）逐条告知
+            if (converted.notes.length) Modal.info({
+              title: t('posAdmin.pricing.convertedTitle', '已转换为区间编辑'),
+              width: 520,
+              content: <div>
+                <div style={{ marginBottom: 8 }}>{t('posAdmin.pricing.convertedHint', '请核对下面几处变化，确认无误后再保存：')}</div>
+                {converted.notes.map((note) => <div key={note}>• {note}</div>)}
+              </div>,
+            })
+          }}>转换为区间编辑</Button>} />
           <Form.List name="details">
             {(fields, { add, remove }) => (
               <>

@@ -324,6 +324,48 @@ export function removeInterval(rules: Rule[], i: number): Result {
   return finish(next)
 }
 
+// ---- 旧版区间规则 → 区间编辑器 ----
+export type Conversion = { rules: Rule[]; notes: string[]; error?: undefined } | { rules?: undefined; notes: string[]; error: string }
+
+/**
+ * 把旧版区间规则（阶梯 Step、指数 Exponential、没有节点售价的 Linear）转换成区间编辑器能编辑的「固定 / 曲线」区间。
+ * - 阶梯（起止成率相同）→ 固定成率。注意：固定成率不再调整 .50/.99 尾数，售价会精确到分。
+ * - 线性 / 指数 → 曲线：两端售价 = 端点成本 × 端点成率，再吸附到合法尾数；指数的弯曲形状会变成直线。
+ * - 第一个区间下限不足 0.10 时抬到 0.10（进货价低于 0.10 本来就无法计价）。
+ * - 相邻区间不要求售价连续（新模型允许阶梯定价），保存时若有回落会二次确认。
+ * 已经是固定 / 曲线节点的规则原样保留。转换只发生在编辑器里，保存之前线上策略不变。
+ */
+export function convertLegacy(source: Rule[]): Conversion {
+  const notes: string[] = []
+  if (!source.length) return { error: '没有可转换的区间', notes }
+  const sorted = [...source].sort((a, b) => a.minPrice - b.minPrice)
+  const out: Rule[] = []
+  for (let i = 0; i < sorted.length; i++) {
+    const r = sorted[i], tag = `区间 ${i + 1}`
+    const min = i === 0 && r.minPrice < 0.1 ? 0.1 : r.minPrice, max = r.maxPrice
+    if (i === 0 && r.minPrice < 0.1) notes.push(`${tag}：下限 ${r.minPrice.toFixed(2)} 调整为 0.10（进货价低于 0.10 本来就无法计价）`)
+    if (isFixed(r) || isCurveRule(r)) { out.push({ ...r, minPrice: min }); continue }
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return { error: `${tag}：上下限无效，请先在原有规则里修正`, notes }
+    if (r.algorithm === 'Step') {
+      // 线上对阶梯只按起始成率计价（结束成率不生效），转换要和线上行为一致。
+      out.push(makeFixed(min, max, r.startRate))
+      notes.push(`${tag}：阶梯 → 固定成率 ${r.startRate}×（不再调整 .50/.99 尾数，售价精确到分）` + (r.endRate !== r.startRate ? `；原结束成率 ${r.endRate} 在计价里本来就不生效` : ''))
+      continue
+    }
+    // 起点取最近的合法尾数；终点再限制在「不超过起点成率」的合法尾数内，避免两端各自吸附后成率反而上升。
+    const p0 = snap(min, min * r.startRate), p1raw = snap(max, max * r.endRate)
+    if (Number.isNaN(p0) || Number.isNaN(p1raw)) return { error: `${tag}：端点没有满足 1.5～5 倍的尾数售价，无法转换`, notes }
+    const p1 = Math.min(p1raw, tailFloor(p0 * max / min + 1e-9))
+    out.push(makeCurve(min, max, p0, p1))
+    if (r.algorithm === 'Exponential') notes.push(`${tag}：指数 → 曲线，两端售价不变，中间价格会与原指数曲线有差异，请对照图形检查`)
+  }
+  const error = intervalsError(out)
+  if (error) return { error, notes }
+  const drops = priceDrops(out).length
+  if (drops) notes.push(`${drops} 处交界售价回落（阶梯定价），保存时需确认`)
+  return { rules: out, notes }
+}
+
 // ---- 上限输入框的显示 / 解析 ----
 /**
  * 区间上限输入框的显示文本。注意：antd InputNumber 在用户**正在输入**时传给 formatter 的是字符串（而不是数字），

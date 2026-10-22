@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { defaultCurve } from './pricingCurve'
 import {
   MAX_INTERVALS, actualPrice, addInterval, chartRange, endPrice, intervalAt, intervalsError, isEditable, isLegalTail, linkedFlags,
-  breakLink, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
+  breakLink, convertLegacy, formatBound, makeCurve, makeFixed, parseBound, priceDrops, relink, removeInterval, setBoundary, setBend, setEndpoint, setKind, setRate, setShape, startPrice,
   shiftBrokenAfterAdd, shiftBrokenAfterRemove, visibleMaxPrice, type Rule,
 } from './pricingIntervals'
 
@@ -173,5 +173,45 @@ assert.equal(parseBound('不限'), 99999)
 assert.equal(parseBound('12.5'), 12.5)
 assert.ok(Number.isNaN(parseBound('')))
 assert.ok(Number.isNaN(parseBound(undefined)))
+
+// ---- 旧版区间规则 → 区间编辑器（用线上真实形态：下限为 0 的阶梯 / 线性 / 指数）----
+function legacy(min: number, max: number, sr: number, er: number, algorithm: string): Rule {
+  return { minPrice: min, maxPrice: max, startRate: sr, endRate: er, algorithm, startRetailPrice: null, endRetailPrice: null, curveBend: null } as Rule
+}
+{
+  // GFA：阶梯 0～5 @2.625 + 线性 5～20（2.625 → 2）
+  const gfa = convertLegacy([legacy(0, 5, 2.625, 2.625, 'Step'), legacy(5, 20, 2.625, 2, 'Linear')])
+  const rules = must(gfa)
+  assert.equal(rules[0].algorithm, 'Fixed')
+  assert.equal(rules[0].minPrice, 0.1, '下限 0 抬到 0.10')
+  assert.equal(rules[0].startRate, 2.625)
+  assert.equal(rules[1].algorithm, 'Linear')
+  assert.equal(intervalsError(rules), null)
+  assert.ok(gfa.notes.some(n => n.includes('下限 0.00')) && gfa.notes.some(n => n.includes('阶梯 → 固定成率 2.625')))
+
+  // W&S：线上对阶梯只按起始成率计价，结束成率不生效 —— 转换必须和线上行为一致，交界回落如实呈现
+  const ws = convertLegacy([legacy(0, 2.5, 3.5, 3.5, 'Step'), legacy(2.5, 10, 3.5, 2.8, 'Step'), legacy(10, 9999, 2.5, 2.5, 'Step')])
+  const wsRules = must(ws)
+  assert.deepEqual(wsRules.map(r => [r.algorithm, r.startRate]), [['Fixed', 3.5], ['Fixed', 3.5], ['Fixed', 2.5]])
+  assert.ok(ws.notes.some(n => n.includes('结束成率 2.8')))
+  assert.equal(priceDrops(wsRules).length, 1)
+  assert.ok(ws.notes.some(n => n.includes('回落')))
+
+  // 默认全局：恒定成率 2.0 的最后一段，两端各自吸附会让成率上升，必须被限制住
+  const global = must(convertLegacy([legacy(0, 5, 2.5, 2.5, 'Step'), legacy(5, 20, 2.5, 2.3, 'Linear'), legacy(20, 50, 2.3, 2, 'Linear'), legacy(50, 9999, 2, 2, 'Linear')]))
+  assert.equal(global.length, 4)
+  assert.equal(intervalsError(global), null)
+  assert.equal(priceDrops(global).length, 0)
+
+  // 指数 → 曲线：两端售价保留并提示形状变化
+  const exp = convertLegacy([legacy(0, 99, 3, 2, 'Exponential')])
+  assert.equal(must(exp)[0].algorithm, 'Linear')
+  assert.ok(exp.notes.some(n => n.includes('指数 → 曲线')))
+
+  // 已经是固定 / 曲线的规则原样保留；空输入明确报错
+  const already = mixed()
+  assert.deepEqual(must(convertLegacy(already)).map(r => r.algorithm), ['Fixed', 'Linear', 'Fixed'])
+  assert.ok(convertLegacy([]).error)
+}
 
 console.log('区间式定价逻辑测试通过')
