@@ -77,6 +77,11 @@ import {
   type LinklySupervisorResolvedAcknowledger,
 } from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
 import {
+  SquareRefundSettlementTracker,
+  type SquareRefundStatusPort,
+} from "@hb/pos-payments-core/features/payments/square-refund-settlement-tracker";
+import type { SquareRefundSettlementRecord } from "@hb/pos-db/core/db/sqlite-square-refund-settlement-store";
+import {
   PaymentCheckoutRuntime,
   PaymentCheckoutRuntimeError,
   type PaymentCheckoutDraft,
@@ -154,7 +159,8 @@ export type PosPaymentRuntimeService =
 export type PaymentRecoveryAuthorizationAction =
   | "payment-recovery-paid"
   | "payment-recovery-unpaid"
-  | "payment-recovery-uncertain";
+  | "payment-recovery-uncertain"
+  | "payment-recovery-square-refund-otherwise";
 
 export type PaymentRecoveryAuthorization = Readonly<{
   authorizationId: string;
@@ -168,6 +174,12 @@ export type ProductionPaymentRecoveryCenterService = Readonly<{
   submitManualVerification(input: Omit<ManualPaymentRecoveryFindingInput,
     "storeCode" | "deviceCode" | "actionId" | "authorizationId" |
     "supervisorActor" | "requestingActor" | "reconciliationId">): Promise<void>;
+  /** Square 已受理（PENDING）后在后台跟踪结算的退款，含已到账/已结案记录。 */
+  listRefundSettlements(): Promise<readonly SquareRefundSettlementRecord[]>;
+  /** 立即只读检查结算中的退款（GET 同一笔退款，绝不重发）。 */
+  checkRefundSettlements(): Promise<void>;
+  /** 被 Square 拒绝的退款：主管授权确认已改用其他方式退给顾客。 */
+  acknowledgeRefundSettlementFailure(input: Readonly<{ attemptId: string; note: string }>): Promise<void>;
 }>;
 
 export type ProductionPaymentRuntime = Readonly<{
@@ -182,6 +194,8 @@ export type ProductionPaymentRuntime = Readonly<{
   acknowledgements: PaymentAcknowledgementRuntimePort | null;
   /** 主管结案 ACK 的补发入口，仅供组合根在退货主管结案后触发；失败只保留队列。 */
   supervisorAcknowledgements: Readonly<{ drain(): Promise<unknown> }> | null;
+  /** Square 退款结算的后台检查入口，仅供组合根定时调用；Square 未配置时为 null。 */
+  refundSettlements: Readonly<{ checkSettling(): Promise<unknown> }> | null;
   initializeRecovery(): Promise<void>;
 }>;
 
@@ -235,6 +249,12 @@ export function createProductionPaymentRuntime(
     createAuditEventId: input.createId,
   });
   const recoveryCenterStore = input.database.paymentRecoveryCenter(input.createId);
+  // 只提供部分仓储的组合（如窄测试替身）没有结算工厂时降级为“无结算记录”，不影响支付主流程。
+  const refundSettlementStore = typeof input.database.squareRefundSettlements === "function"
+    ? input.database.squareRefundSettlements(input.encryptor)
+    : null;
+  // Square provider 可用时才由 bootstrap 段赋值；恢复中心列表不依赖它。
+  let checkRefundSettlementsNow: (() => Promise<unknown>) | null = null;
   const manualPaymentCommitter = input.database.manualPaymentOrderCommitter();
   const completeManualPaid = async (completion: Readonly<{
     record: PaymentRecoveryCenterRecord;
@@ -355,6 +375,42 @@ export function createProductionPaymentRuntime(
       });
       await cartLease.clearAfterRecoveryParked(candidate.checkoutIntentId, candidate.orderGuid);
     },
+    async listRefundSettlements() {
+      requireScopedCurrentCashier(input);
+      return refundSettlementStore ? refundSettlementStore.list(terminalScope) : [];
+    },
+    async checkRefundSettlements() {
+      requireScopedCurrentCashier(input);
+      if (!checkRefundSettlementsNow) throw new Error("PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE");
+      await checkRefundSettlementsNow();
+    },
+    async acknowledgeRefundSettlementFailure(command) {
+      const commandSnapshot = Object.freeze({ ...command });
+      requireScopedCurrentCashier(input);
+      if (!refundSettlementStore) throw new Error("PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE");
+      const store = refundSettlementStore;
+      const current = (await store.list(terminalScope))
+        .find((record) => record.attemptId === commandSnapshot.attemptId);
+      if (!current) throw new Error("PAYMENT_RECOVERY_RECORD_NOT_FOUND");
+      if (current.status !== "rejected") throw new Error("SQUARE_REFUND_SETTLEMENT_NOT_REJECTED");
+      const authorize = input.authorizeRecovery;
+      if (!authorize) throw new Error("PAYMENT_RECOVERY_SUPERVISOR_REQUIRED");
+      // 主管必须在回调内授权；结案只改本地结算状态，不调用 Square、不改退货账本。
+      await authorize({
+        action: "payment-recovery-square-refund-otherwise",
+        screen: "payment-recovery",
+        orderGuid: current.returnOrderGuid,
+        attemptId: current.attemptId,
+      }, async (authorization) => {
+        requireScopedCurrentCashier(input);
+        await store.resolveRejected({
+          ...terminalScope,
+          attemptId: current.attemptId,
+          note: commandSnapshot.note,
+          actor: authorization.authorizingActor,
+        });
+      });
+    },
     async recoverOriginalPayment(recordId) {
       if (!recoverParkedPayment) throw new Error("PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE");
       return recoverParkedPayment(recordId);
@@ -453,6 +509,7 @@ export function createProductionPaymentRuntime(
       returnRefund: null,
       acknowledgements: null,
       supervisorAcknowledgements: null,
+      refundSettlements: null,
       service: {
         status: "unavailable",
         recoveryCenter,
@@ -498,6 +555,15 @@ export function createProductionPaymentRuntime(
     },
   });
   const recoveryProviders = input.bootstrap.providers;
+  const refundSettlementTracker = refundSettlementStore
+    ? new SquareRefundSettlementTracker(
+        refundSettlementStore,
+        lazySquareRefundStatusPort(input.bootstrap.providers),
+      )
+    : null;
+  if (refundSettlementTracker) {
+    checkRefundSettlementsNow = () => refundSettlementTracker.checkSettling(terminalScope);
+  }
   const createQueryOnlyAttempts = (onQueryCompleted?: (result: PaymentStatusQueryResult) => void) => new PaymentAttemptService({
     ledger: input.repositories.payments,
     actionBindings: input.database.paymentActionBindings(),
@@ -945,6 +1011,15 @@ export function createProductionPaymentRuntime(
     supervisorAcknowledgements: drainSupervisorAcknowledgements
       ? Object.freeze({ drain: () => drainSupervisorAcknowledgements!() })
       : null,
+    refundSettlements: refundSettlementTracker
+      ? Object.freeze({
+          checkSettling: async () => {
+            // 没有当前收银员（锁屏/登出）时跳过：Square 代理路由需要收银员认证。
+            try { requireScopedCurrentCashier(input); } catch { return null; }
+            return refundSettlementTracker.checkSettling(terminalScope);
+          },
+        })
+      : null,
     recoveryProbe,
     initializeRecovery: async () => {
       await cartLease.initializeRecovery();
@@ -1030,6 +1105,26 @@ function paymentAuditActor(
     cashierName: session.cashierName,
     userGuid: session.userGuid,
   });
+}
+
+/**
+ * Square 只读退款查询：真正检查时才从 provider 注册表取 Square（构造运行时不触碰 provider）。
+ * Square 未配置或不支持时抛错，由跟踪器记为该条检查失败，下一轮再试。
+ */
+function lazySquareRefundStatusPort(
+  providers: PaymentProviderRuntimeBootstrap["providers"],
+): SquareRefundStatusPort {
+  return {
+    async getRefundStatus(environment, refundId) {
+      const square = providers.get("square") as Partial<SquareRefundStatusPort>;
+      if (typeof square.getRefundStatus !== "function") {
+        throw Object.assign(new Error("Square refund status is unsupported."), {
+          code: "SQUARE_REFUND_STATUS_UNSUPPORTED",
+        });
+      }
+      return square.getRefundStatus.call(square, environment, refundId);
+    },
+  };
 }
 
 function paymentCartRecovery(

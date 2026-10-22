@@ -92,6 +92,7 @@ import {
   type PaymentDraftPersistenceIds,
 } from "./sqlite-payment-draft-recovery-store";
 import { SqlitePaymentRecoveryCenterStore } from "./sqlite-payment-recovery-center-store";
+import { SqliteSquareRefundSettlementStore } from "@hb/pos-db/core/db/sqlite-square-refund-settlement-store";
 import { SqlitePaymentProtectedMaterialReader } from "@hb/pos-db/core/db/sqlite-payment-protected-material";
 import { SqliteRefundVoucherPrintMaterial } from "./sqlite-refund-voucher-print-material";
 import {
@@ -244,6 +245,13 @@ export class PosDatabase implements DatabasePort {
       createAuditEventId,
       this.nowIso,
     );
+  }
+
+  /** Square 退款结算跟踪（M53）：退款号只从受保护卡证据解密读取，结算只读查询。 */
+  public squareRefundSettlements(
+    encryptor: Pick<SensitivePayloadEncryptor, "decrypt">,
+  ): SqliteSquareRefundSettlementStore {
+    return new SqliteSquareRefundSettlementStore(this.connection, encryptor, this.nowIso);
   }
 
   /** 主管结案后待补发的 Linkly 会话确认队列；队列行与人工结论同事务写入。 */

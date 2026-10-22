@@ -52,19 +52,38 @@ type SquareRecoveryControl = Readonly<{
   deadlineAtMs: number;
 }>;
 
+/** 可注入的时钟与等待，仅供测试推进虚拟时间；生产使用系统时钟。 */
+export type SquarePaymentAdapterOptions = Readonly<{
+  nowMs?: () => number;
+  sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+}>;
+
+/** 结账已 COMPLETED 但 payment 仍是 APPROVED（已授权未入账）时，最多再等这么久（对齐 WPF #700）。 */
+export const SQUARE_APPROVED_PAYMENT_WAIT_MS = 30_000;
+const SQUARE_APPROVED_PAYMENT_POLL_INTERVAL_MS = 2_000;
+/** 等待顾客刷卡期间幂等查询遇瞬时错误时的响应码：保持 Pending，由付款页自动轮询在其窗口内继续重查。 */
+export const SQUARE_RECOVERY_TRANSIENT_ERROR = "SQUARE_RECOVERY_TRANSIENT_ERROR";
+/** Square 已受理退款（PENDING）：退货当场完成，结算由后台跟踪（对齐 WPF #674）。 */
+export const SQUARE_REFUND_PENDING_SETTLEMENT = "SQUARE_REFUND_PENDING";
+
 /**
  * Square access token 永远只存在 Hbpos.Api；手持 POS 仅携带设备/收银员认证并调用后端代理路由。
  */
 export class SquarePaymentAdapter implements OnlinePaymentPort {
   public readonly provider = "square" as const;
   public readonly providerEnvironment: string;
+  private readonly nowMs: () => number;
+  private readonly sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 
   public constructor(
     private readonly transport: HbposTransport,
     private readonly getConfiguration: SquareTerminalConfigurationProvider,
     providerEnvironment: string,
+    options: SquarePaymentAdapterOptions = {},
   ) {
     this.providerEnvironment = requiredSquareEnvironment(providerEnvironment);
+    this.nowMs = options.nowMs ?? Date.now;
+    this.sleep = options.sleep ?? abortableDelay;
   }
 
   public submit(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
@@ -171,6 +190,27 @@ export class SquarePaymentAdapter implements OnlinePaymentPort {
     });
   }
 
+  /**
+   * 退款结算跟踪专用：只 GET 同一笔退款的当前状态（大写），绝不重新发起退款。
+   * 回包的退款号或环境与请求不符时抛错，由跟踪器记为检查失败。
+   */
+  public async getRefundStatus(environment: string, refundId: string): Promise<string> {
+    const expectedEnvironment = requiredSquareEnvironment(environment);
+    const id = requiredReference(refundId, "SQUARE_REFUND_ID_REQUIRED");
+    const refund = await this.requestData<SquareRefundResponse>({
+      method: "GET",
+      url: `/api/v1/square/refunds/${encodeURIComponent(id)}`,
+      params: { environment: expectedEnvironment },
+    });
+    if (
+      optionalText(refund.refundId) !== id ||
+      optionalText(refund.environment)?.toLowerCase() !== expectedEnvironment.toLowerCase()
+    ) {
+      throw new SquareAdapterError("SQUARE_REFUND_REFERENCE_CONFLICT");
+    }
+    return normalizedStatus(refund.status);
+  }
+
   /** 人工核实后的状态查询只读取已存在 checkout，禁止缺少 ID 时重新创建。 */
   public async queryExistingPayment(attempt: PaymentAttempt, control: SquareRecoveryControl = {
     signal: new AbortController().signal,
@@ -182,8 +222,14 @@ export class SquarePaymentAdapter implements OnlinePaymentPort {
       const configuration = environmentForAttempt(attempt);
       return this.getStatusWithConfiguration(attempt, configuration, control);
     });
-    // Unknown 包含网络、本地校验和交易证据错误，不能证明已取得有效原交易状态。
-    return { ...result, queryVerified: result.state !== "Unknown" };
+    // Unknown 包含网络、本地校验和交易证据错误，不能证明已取得有效原交易状态；
+    // 瞬时错误保持的 Pending 同样没有取得原交易状态。
+    return {
+      ...result,
+      queryVerified:
+        result.state !== "Unknown" &&
+        result.responseCode !== SQUARE_RECOVERY_TRANSIENT_ERROR,
+    };
   }
 
   private async createOrReplayCheckout(
@@ -238,14 +284,22 @@ export class SquarePaymentAdapter implements OnlinePaymentPort {
       attempt.references.checkoutId,
       "SQUARE_CHECKOUT_ID_REQUIRED",
     );
-    const checkout = await this.requestData<SquareCheckoutStatusResponse>(
-      {
-        method: "GET",
-        url: `/api/v1/square/checkouts/${encodeURIComponent(checkoutId)}`,
-        params: { environment: configuration.environment },
-      },
-      control,
-    );
+    let checkout: SquareCheckoutStatusResponse;
+    try {
+      checkout = await this.requestData<SquareCheckoutStatusResponse>(
+        {
+          method: "GET",
+          url: `/api/v1/square/checkouts/${encodeURIComponent(checkoutId)}`,
+          params: { environment: configuration.environment },
+        },
+        control,
+      );
+    } catch (error) {
+      // 顾客可能正在终端上刷卡：幂等 GET 的瞬时失败不升级为 Unknown（否则自动轮询停止），交给下一轮重查。
+      const transient = transientWhileAwaitingTerminal(attempt, attempt.references, error);
+      if (transient) return transient;
+      throw error;
+    }
     return this.mapCheckout(attempt, configuration, checkout, control);
   }
 
@@ -309,19 +363,58 @@ export class SquarePaymentAdapter implements OnlinePaymentPort {
     }
 
     try {
-      const payment = await this.requestData<SquarePaymentStatusDto>(
-        {
-          method: "GET",
-          url: `/api/v1/square/payments/${encodeURIComponent(paymentId.value)}`,
-          params: { environment: configuration.environment },
-        },
+      const settled = await this.waitForCapturedPayment(
+        paymentId.value,
+        configuration,
         control,
       );
-      return verifyPayment(attempt, paymentReferences, paymentId.value, payment);
+      if (settled.cutShort && isAwaitingTerminal(attempt)) {
+        // 恢复截止/页面卸载打断了 30 秒等待：仍是已授权未入账，保持 Pending 交给后续查询，不判未知。
+        return providerResult("Pending", paymentReferences, "SQUARE_PAYMENT_APPROVED");
+      }
+      return verifyPayment(attempt, paymentReferences, paymentId.value, settled.payment);
     } catch (error) {
+      const transient = transientWhileAwaitingTerminal(attempt, paymentReferences, error);
+      if (transient) return transient;
       // checkout 已验证的标识必须随 Unknown 保存，后续恢复才能继续查询原交易。
       return unknown(paymentReferences, errorCode(error));
     }
+  }
+
+  /**
+   * 结账 COMPLETED 后查询付款详情；仍是 APPROVED（已授权未入账）时每 2 秒重查，最多 30 秒，
+   * 避免已刷成功的卡被送进恢复中心。只有 COMPLETED 才算成功；等满仍 APPROVED 由调用方照旧判未知。
+   * 受控恢复的截止时间早于 30 秒时提前停止并标记 cutShort。
+   */
+  private async waitForCapturedPayment(
+    paymentId: string,
+    configuration: SquareEnvironmentConfiguration,
+    control: SquareRecoveryControl | undefined,
+  ): Promise<Readonly<{ payment: SquarePaymentStatusDto; cutShort: boolean }>> {
+    const query = () => this.requestData<SquarePaymentStatusDto>(
+      {
+        method: "GET",
+        url: `/api/v1/square/payments/${encodeURIComponent(paymentId)}`,
+        params: { environment: configuration.environment },
+      },
+      control,
+    );
+    let payment = await query();
+    const waitUntilMs = this.nowMs() + SQUARE_APPROVED_PAYMENT_WAIT_MS;
+    while (normalizedStatus(payment.status) === "APPROVED") {
+      const nowMs = this.nowMs();
+      const remainingMs = waitUntilMs - nowMs;
+      if (remainingMs <= 0) return { payment, cutShort: false };
+      const controlRemainingMs = control ? control.deadlineAtMs - nowMs : Number.POSITIVE_INFINITY;
+      const delayMs = Math.min(SQUARE_APPROVED_PAYMENT_POLL_INTERVAL_MS, remainingMs);
+      if (controlRemainingMs <= delayMs) return { payment, cutShort: true };
+      await this.sleep(delayMs, control?.signal);
+      if (control?.signal.aborted) {
+        throw new SquareAdapterError("SQUARE_RECOVERY_ABORTED");
+      }
+      payment = await query();
+    }
+    return { payment, cutShort: false };
   }
 
   private async refundWithConfiguration(
@@ -477,14 +570,20 @@ function verifyRefund(
   }
 
   const status = normalizedStatus(refund.status);
-  if (status === "PENDING") {
+  if (
+    status === "PENDING" &&
+    (returnedPaymentId !== expectedPaymentId || !refund.amountMoney)
+  ) {
+    // 引用或金额无法逐项核对时不能当作已受理，保留原 Pending 语义由恢复处理。
     return providerResult(
       "Pending",
       attempt.references,
-      "SQUARE_REFUND_PENDING",
+      SQUARE_REFUND_PENDING_SETTLEMENT,
     );
   }
-  if (status === "COMPLETED") {
+  if (status === "PENDING" || status === "COMPLETED") {
+    // Square 官方：PENDING = 已受理、正在退回原卡（多数几小时、最长 14 天），只有商家余额与绑定银行
+    // 账户都不足时才会 REJECTED/FAILED。与 WPF #674 一致视为已发起：退货当场完成，结算由后台只读跟踪。
     if (returnedPaymentId !== expectedPaymentId) {
       return unknown(
         attempt.references,
@@ -497,7 +596,7 @@ function verifyRefund(
         "SQUARE_REFUND_VERIFICATION_FAILED",
       );
     }
-    return approvedWithEvidence(
+    const approved = approvedWithEvidence(
       attempt.references,
       normalizeSquareRefundEvidence(
         attempt,
@@ -507,6 +606,10 @@ function verifyRefund(
         refund,
       ),
     );
+    // 已受理未结算的退款用专用响应码落库，后台结算跟踪据此登记（见 M53）。
+    return status === "PENDING" && approved.state === "Approved"
+      ? { ...approved, responseCode: SQUARE_REFUND_PENDING_SETTLEMENT }
+      : approved;
   }
   if (status === "FAILED" || status === "REJECTED") {
     return providerResult("Declined", attempt.references, `SQUARE_REFUND_${status}`);
@@ -753,6 +856,60 @@ function optionalText(value: unknown): string | null {
 
 function normalizedStatus(value: unknown): string {
   return optionalText(value)?.toUpperCase() ?? "";
+}
+
+/** 还在等终端结果（已有 checkout）的 attempt：瞬时错误只能保持 Pending，不能升级为 Unknown。 */
+function isAwaitingTerminal(attempt: PaymentAttempt): boolean {
+  return (
+    attempt.operation === "purchase" &&
+    (attempt.state === "Submitted" || attempt.state === "Pending")
+  );
+}
+
+/**
+ * 等待刷卡期间的幂等 GET 失败分类（对齐 WPF #732，参照 Linkly 后端 controlledTransportFailure）：
+ * 408/429/5xx、无 HTTP 响应的网络故障属于瞬时错误，保持 Pending 让付款页自动轮询在其窗口
+ * （约 90 秒、最多 45 次）内继续重查，窗口即重试上限；abort、截止、4xx、信封/校验错误照旧判未知。
+ */
+function transientWhileAwaitingTerminal(
+  attempt: PaymentAttempt,
+  references: PaymentProviderReferences,
+  error: unknown,
+): PaymentProviderResult | null {
+  if (!isAwaitingTerminal(attempt) || !references.checkoutId) return null;
+  if (!isTransientSquareError(error)) return null;
+  return providerResult("Pending", references, SQUARE_RECOVERY_TRANSIENT_ERROR);
+}
+
+function isTransientSquareError(error: unknown): boolean {
+  if (error instanceof SquareAdapterError) {
+    return /^SQUARE_HTTP_(408|429|5\d\d)$/.test(error.code);
+  }
+  if (!(error instanceof HbposApiError)) return false;
+  if (error.kind === "transport") return error.code === "NO_HTTP_RESPONSE";
+  return (
+    error.kind === "http" &&
+    error.status !== undefined &&
+    (error.status === 408 || error.status === 429 || error.status >= 500)
+  );
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function isPendingCheckoutStatus(status: string): boolean {

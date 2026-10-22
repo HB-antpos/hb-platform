@@ -1295,7 +1295,7 @@ test("真实 SQLite：异常刷卡移交恢复中心后不阻断新订单，人�
       draftInput({ draftId: "recovery-draft-2" }),
     );
     assert.notEqual(second.orderGuid, first.orderGuid);
-    // 已移交 Linkly 异常不能封锁其他通道的新收银，但同一 Linkly 通道仍须失败关闭。
+    // M52：已移交的 Linkly 异常留在恢复中心由主管结案，其他通道与同一 Linkly 通道的下一单都不再被挡。
     await insertAttempt(connection, {
       attemptId: "recovery-attempt-square-next",
       idempotencyKey: "recovery-key-square-next",
@@ -1305,18 +1305,15 @@ test("真实 SQLite：异常刷卡移交恢复中心后不阻断新订单，人�
       amountCents: firstInput.cart.actualAmount.cents,
       state: "Created",
     });
-    await assert.rejects(
-      () => insertAttempt(connection, {
-        attemptId: "recovery-attempt-linkly-same-lane",
-        idempotencyKey: "recovery-key-linkly-same-lane",
-        orderGuid: second.orderGuid,
-        provider: "linkly-cloud",
-        operation: "purchase",
-        amountCents: firstInput.cart.actualAmount.cents,
-        state: "Created",
-      }),
-      /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/,
-    );
+    await insertAttempt(connection, {
+      attemptId: "recovery-attempt-linkly-same-lane",
+      idempotencyKey: "recovery-key-linkly-same-lane",
+      orderGuid: second.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: firstInput.cart.actualAmount.cents,
+      state: "Created",
+    });
     assert.equal((await center.list(firstInput.identity)).length, 2);
 
     const command = {

@@ -69,6 +69,7 @@ import {
   type SupervisorBarcodeScanResult,
 } from "../../features/operation-authorization";
 import type { PaymentConnectivityPort } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
+import { SQUARE_REFUND_SETTLEMENT_CHECK_INTERVAL_MS } from "@hb/pos-payments-core/features/payments/square-refund-settlement-tracker";
 import { VoucherHbposApi } from "../../features/payments/voucher";
 import { InstallmentRefundVoucherPrintService } from "../../features/receipts/installment-refund-voucher-print-service";
 import {
@@ -1511,6 +1512,15 @@ export function createProductionPosRuntimeServices(
     },
   });
   const payments = paymentRuntime.service;
+  // Square 退款结算后台检查：约 10 分钟一次只读查询同一笔退款（对齐 WPF #674）；
+  // 失败只记在结算记录上，下一轮自然重试。组合根关闭时清除。
+  const refundSettlementTimer = paymentRuntime.refundSettlements
+    ? setInterval(() => {
+        void paymentRuntime.refundSettlements?.checkSettling().catch(() => undefined);
+      }, SQUARE_REFUND_SETTLEMENT_CHECK_INTERVAL_MS)
+    : null;
+  // Node 测试环境下不让这个后台定时器拖住进程退出；RN 的定时器没有 unref。
+  (refundSettlementTimer as { unref?: () => void } | null)?.unref?.();
   const installmentConfiguration = input.installments;
   const installmentActionStore = installmentConfiguration
     ? input.database.installmentActions(input.encryptor)
@@ -2060,6 +2070,7 @@ export function createProductionPosRuntimeServices(
         disposeDeviceScopeListener();
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
+        if (refundSettlementTimer !== null) clearInterval(refundSettlementTimer);
         shutdown ??= Promise.all([
           catalogRefreshCoordinator.shutdown(),
           sharedHeldOrderPublicationLoop?.shutdown() ?? Promise.resolve(),

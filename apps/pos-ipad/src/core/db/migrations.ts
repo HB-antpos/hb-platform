@@ -6791,6 +6791,169 @@ BEFORE DELETE ON return_supervisor_resolutions
 BEGIN SELECT RAISE(ABORT, 'RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE'); END;
 `;
 
+/**
+ * M52 未结刷卡不再阻止下一单付款（对齐 WPF #787 / #790，用户硬要求）：
+ * 单终端阻塞触发器：已移交恢复中心（is_parked = 1）的异常 attempt 不论 provider 都不再阻断新付款；
+ * 未移交的在途 attempt 仍阻断，作为同一设备真并发的防线（应用层同样要求先恢复或移交）。
+ * 同一刷卡机可能重复扣款的风险转由恢复中心与主管凭银行证据对账，与 WPF 取舍一致。
+ */
+const M52 = `
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_insert;
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_update;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_insert
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud', 'manual-card') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    -- 已由主管明确分类并恢复到原订单上下文的旧 attempt 不再永久占用其他订单。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    -- 已移交恢复中心的记录留给主管结案，任何 provider 的下一单都不再被它挡住。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases parked
+      WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_update
+BEFORE UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND NOT EXISTS (
+  SELECT 1 FROM payment_recovery_cases incoming_case
+  WHERE incoming_case.attempt_id = NEW.attempt_id
+)
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.attempt_id <> OLD.attempt_id
+    AND prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud', 'manual-card') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases parked
+      WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+`;
+
+/**
+ * M53 Square 退款结算跟踪（对齐 WPF #674）：Square 返回 PENDING 的退款已受理，退货单当场完成；
+ * 结算结果由后台只用 GET 查询同一笔退款（绝不重发）。登记由 attempt 进入 Approved 的同一条 UPDATE
+ * 触发，与退款结论同事务落库，不存在“已完成退货却漏登记”的崩溃窗口。
+ * status：settling 结算中；settled 已到账；rejected 被 Square 拒绝/失败（需主管改用其他方式退款）；
+ * refunded-otherwise 主管已确认改用其他方式退给顾客。
+ */
+const M53 = `
+CREATE TABLE square_refund_settlements (
+  attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  order_guid TEXT NOT NULL REFERENCES local_orders(order_guid) ON DELETE RESTRICT,
+  store_code TEXT NOT NULL,
+  device_code TEXT NOT NULL,
+  provider_environment TEXT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL CHECK (status IN ('settling', 'settled', 'rejected', 'refunded-otherwise')),
+  square_status TEXT NULL,
+  last_checked_at_iso TEXT NULL,
+  last_error_code TEXT NULL,
+  resolution_note TEXT NULL,
+  resolution_actor_json TEXT NULL,
+  resolved_at_iso TEXT NULL,
+  registered_at_iso TEXT NOT NULL,
+  updated_at_iso TEXT NOT NULL,
+  CHECK ((status = 'refunded-otherwise') = (resolution_note IS NOT NULL AND resolution_actor_json IS NOT NULL AND resolved_at_iso IS NOT NULL)),
+  CHECK (resolution_note IS NULL OR (TRIM(resolution_note) <> '' AND LENGTH(resolution_note) <= 1000))
+);
+CREATE INDEX ix_square_refund_settlements_scope_status
+  ON square_refund_settlements (store_code, device_code, status, registered_at_iso DESC);
+CREATE TRIGGER trg_square_refund_settlement_register
+AFTER UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.provider = 'square'
+  AND NEW.operation = 'refund'
+  AND NEW.state = 'Approved'
+  AND OLD.state <> 'Approved'
+  AND NEW.provider_response_code = 'SQUARE_REFUND_PENDING'
+BEGIN
+  INSERT OR IGNORE INTO square_refund_settlements (
+    attempt_id, order_guid, store_code, device_code, provider_environment,
+    amount_cents, status, square_status, registered_at_iso, updated_at_iso
+  )
+  SELECT NEW.attempt_id, NEW.order_guid, o.store_code, o.device_code, NEW.provider_environment,
+    ABS(NEW.amount_cents), 'settling', 'PENDING', NEW.updated_at_iso, NEW.updated_at_iso
+  FROM local_orders o
+  WHERE o.order_guid = NEW.order_guid;
+END;
+-- 结算记录只能按状态机推进，身份与金额不可改，且不可删除。
+CREATE TRIGGER trg_square_refund_settlements_identity_immutable
+BEFORE UPDATE ON square_refund_settlements
+FOR EACH ROW WHEN NEW.attempt_id <> OLD.attempt_id OR NEW.order_guid <> OLD.order_guid
+  OR NEW.store_code <> OLD.store_code OR NEW.device_code <> OLD.device_code
+  OR NEW.amount_cents <> OLD.amount_cents OR NEW.registered_at_iso <> OLD.registered_at_iso
+  OR (OLD.status <> NEW.status AND NOT (
+    (OLD.status = 'settling' AND NEW.status IN ('settled', 'rejected'))
+    OR (OLD.status = 'rejected' AND NEW.status = 'refunded-otherwise')
+  ))
+BEGIN SELECT RAISE(ABORT, 'SQUARE_REFUND_SETTLEMENT_INVALID_TRANSITION'); END;
+CREATE TRIGGER trg_square_refund_settlements_no_delete
+BEFORE DELETE ON square_refund_settlements
+BEGIN SELECT RAISE(ABORT, 'SQUARE_REFUND_SETTLEMENT_IMMUTABLE'); END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6843,6 +7006,8 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 49, name: "M49_installment_refund_voucher_print_jobs", sql: M49 },
   { version: 50, name: "M50_daily_close_upload_outbox", sql: M50 },
   { version: 51, name: "M51_payment_supervisor_session_acks", sql: M51 },
+  { version: 52, name: "M52_unblock_next_payment_after_parked_recovery", sql: M52 },
+  { version: 53, name: "M53_square_refund_settlements", sql: M53 },
 ];
 
 export async function applyMigrations(

@@ -55,6 +55,7 @@ import { SqliteDailyCloseUploadRepository } from "@hb/pos-db/core/db/sqlite-dail
 import { SqliteOrderSyncStatusRepository } from "@hb/pos-db";
 import { SqliteManualPaymentOrderCommitter } from "@hb/pos-db/core/db/sqlite-manual-payment-committer";
 import { SqlitePaymentRecoveryCenterStore } from "@hb/pos-db/core/db/sqlite-payment-recovery-center-store";
+import { SqliteSquareRefundSettlementStore } from "@hb/pos-db/core/db/sqlite-square-refund-settlement-store";
 import { SqlitePaymentSupervisorAckQueue } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
 import { SqliteReturnSupervisorResolutionStore } from "@hb/pos-db/core/db/sqlite-return-supervisor-resolution-store";
 import {
@@ -515,6 +516,13 @@ export class PosDatabase implements DatabasePort {
       createAuditEventId,
       this.nowIso,
     );
+  }
+
+  /** Square 退款结算跟踪（M53）：退款号只从受保护卡证据解密读取，结算只读查询。 */
+  public squareRefundSettlements(
+    encryptor: Pick<SensitivePayloadEncryptor, "decrypt">,
+  ): SqliteSquareRefundSettlementStore {
+    return new SqliteSquareRefundSettlementStore(this.connection, encryptor, this.nowIso);
   }
 
   /** 主管结案后待补发的 Linkly 会话确认队列；队列行与人工结论同事务写入。 */

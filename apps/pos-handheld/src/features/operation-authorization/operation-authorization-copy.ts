@@ -10,6 +10,7 @@ export type OperationAuthorizationCopyKey =
   | "paymentRecoveryPaid"
   | "paymentRecoveryUnpaid"
   | "paymentRecoveryUncertain"
+  | "paymentRecoverySquareRefundOtherwise"
   | "paymentTenderVoidUnreleased"
   | "returnResolveUnknownRefund"
   | "inputLabel"
@@ -38,6 +39,7 @@ const COPY: Readonly<
     paymentRecoveryPaid: "Manually confirm card payment received",
     paymentRecoveryUnpaid: "Manually confirm no card payment",
     paymentRecoveryUncertain: "Keep card payment awaiting verification",
+    paymentRecoverySquareRefundOtherwise: "Confirm rejected Square refund was refunded another way",
     paymentTenderVoidUnreleased: "Void blocked gift card tender",
     returnResolveUnknownRefund: "Resolve an unknown card refund",
     inputLabel: "Supervisor barcode",
@@ -68,6 +70,7 @@ const COPY: Readonly<
     paymentRecoveryPaid: "人工确认刷卡已收款",
     paymentRecoveryUnpaid: "人工确认刷卡未扣款",
     paymentRecoveryUncertain: "保留刷卡待核实状态",
+    paymentRecoverySquareRefundOtherwise: "确认被拒的 Square 退款已用其他方式退给顾客",
     paymentTenderVoidUnreleased: "作废已阻断的礼品卡付款",
     returnResolveUnknownRefund: "主管结案：退款结果未知",
     inputLabel: "主管条码",
@@ -115,6 +118,8 @@ export function operationAuthorizationActionCopyKey(
       return "paymentRecoveryUnpaid";
     case "payment-recovery-uncertain":
       return "paymentRecoveryUncertain";
+    case "payment-recovery-square-refund-otherwise":
+      return "paymentRecoverySquareRefundOtherwise";
     case "payment-tender-void-unreleased":
       return "paymentTenderVoidUnreleased";
     case "resolve-unknown-refund":

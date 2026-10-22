@@ -79,3 +79,39 @@ test("M34：投影保留终端实扣金额，金额不符与反冲正确认的�
     assert.equal(adapter.getState().errorCode, "RECOVERY_APPROVED_AMOUNT_MISMATCH");
   }
 });
+
+test("Square 退款结算：刷新只带回结算中/被拒的记录；检查与结案后重读；运行时缺能力时报不可用", async () => {
+  const settlement = (attemptId: string, status: "settling" | "settled" | "rejected" | "refunded-otherwise") => ({
+    attemptId, returnOrderGuid: `return-${attemptId}`, amountCents: 500, status,
+    squareStatus: null, lastCheckedAtIso: null, registeredAtIso: "2026-10-22T00:00:00.000Z",
+  });
+  let rows = [settlement("s1", "settling"), settlement("s2", "rejected"), settlement("s3", "settled"), settlement("s4", "refunded-otherwise")];
+  const acknowledged: { attemptId: string; note: string }[] = [];
+  let checks = 0;
+  const adapter = new PaymentRecoveryCenterAdapter(ports({
+    listRefundSettlements: async () => rows,
+    checkRefundSettlements: async () => { checks += 1; rows = rows.map((row) => row.attemptId === "s1" ? settlement("s1", "settled") : row); },
+    acknowledgeRefundSettlementFailure: async (input) => { acknowledged.push(input); },
+  }));
+  await adapter.refresh();
+  assert.deepEqual(adapter.getState().refundSettlements.map((row) => row.attemptId), ["s1", "s2"]);
+
+  await adapter.checkRefundSettlements();
+  assert.equal(checks, 1);
+  assert.deepEqual(adapter.getState().refundSettlements.map((row) => row.attemptId), ["s2"]);
+  assert.equal(adapter.getState().action, "idle");
+
+  await adapter.acknowledgeRefundSettlementFailure({ attemptId: "s2", note: "Cash" });
+  assert.deepEqual(acknowledged, [{ attemptId: "s2", note: "Cash" }]);
+
+  // 结算列表读取失败不影响异常支付列表。
+  const failing = new PaymentRecoveryCenterAdapter(ports({ listRefundSettlements: async () => { throw new Error("db"); } }));
+  await failing.refresh();
+  assert.equal(failing.getState().records.length, 1);
+  assert.deepEqual(failing.getState().refundSettlements, []);
+  assert.equal(failing.getState().errorCode, null);
+
+  const legacy = new PaymentRecoveryCenterAdapter(ports());
+  await assert.rejects(legacy.checkRefundSettlements(), /PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE/);
+  await assert.rejects(legacy.acknowledgeRefundSettlementFailure({ attemptId: "s2", note: "Cash" }), /PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE/);
+});

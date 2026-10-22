@@ -555,6 +555,38 @@ test("新支付遇到其他 active session 或 create 409 时拒绝本次，不�
   assert.equal(transport.requests.filter((request) => request.method === "POST" && request.url === "/api/v1/linkly/cloud-backend/transactions").length, 1);
 });
 
+test("陈旧的遗留交易会话不挡下一单：继续 POST 由服务端原子顶替；新鲜、结算或缺创建时间的仍按冲突拒绝", async () => {
+  const staleCreatedAt = new Date(Date.now() - 11 * 60_000).toISOString();
+  const freshCreatedAt = new Date(Date.now() - 2 * 60_000).toISOString();
+  const transport = new FakeTransport();
+  transport.responses.push(
+    // 陈旧交易会话：放行，随后 POST 创建新会话（服务端顶替旧占用）。
+    ok(session({ sessionId: "stale-session", txnRef: "STALE-TXN", status: "Pending", operationType: "Transaction", createdAt: staleCreatedAt })),
+    ok(session({ status: "Pending" })),
+    // 新鲜交易会话：可能真在终端上刷卡，仍拒绝且不发 POST。
+    ok(session({ sessionId: "fresh-session", txnRef: "FRESH-TXN", status: "Pending", operationType: "Transaction", createdAt: freshCreatedAt })),
+    // 陈旧但属于结算会话：服务端不顶替结算，客户端同样保守拒绝。
+    ok(session({ sessionId: "settlement-session", txnRef: "SETTLE-TXN", status: "Pending", operationType: "Settlement", createdAt: staleCreatedAt })),
+    // 旧后端不带 createdAt：保守沿用原冲突处理。
+    ok(session({ sessionId: "legacy-session", txnRef: "LEGACY-TXN", status: "Pending", operationType: "Transaction" })),
+  );
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+
+  const superseding = await provider.submit(attempt());
+  assert.equal(superseding.state, "Pending");
+  assert.equal(superseding.references.sessionId, "session-1");
+  assert.notEqual(superseding.references.sessionId, "stale-session");
+
+  for (const [index, expected] of ["fresh", "settlement", "legacy"].entries()) {
+    const result = await provider.submit(attempt({ attemptId: `attempt-${expected}`, idempotencyKey: `idem-${index}` }));
+    assert.equal(result.state, "Declined", expected);
+    assert.equal(result.responseCode, "LINKLY_ACTIVE_SESSION_CONFLICT", expected);
+    assert.equal(result.references.sessionId, null, expected);
+  }
+  const posts = transport.requests.filter((request) => request.method === "POST" && request.url === "/api/v1/linkly/cloud-backend/transactions");
+  assert.equal(posts.length, 1);
+});
+
 test("create 409 只精确分类 active transaction；selection conflict 独立且其他 409 是明确未提交的 Declined", async () => {
   const selectionTransport = new FakeTransport();
   selectionTransport.responses.push(

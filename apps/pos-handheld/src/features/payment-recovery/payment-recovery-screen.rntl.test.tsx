@@ -53,12 +53,16 @@ test("已有付款待补订单时保留恢复入口，不允许再次人工改�
   expect(screen.queryByTestId("payment-recovery-open-manual")).toBeNull();
 });
 
-function createService(record: PaymentRecoveryRecord = pendingRecord) {
+function createService(
+  record: PaymentRecoveryRecord = pendingRecord,
+  refundSettlements: PaymentRecoveryCenterState["refundSettlements"] = [],
+) {
   let state: PaymentRecoveryCenterState = {
     filter: "pending",
     keyword: "",
     records: [record],
     selectedRecordId: record.id,
+    refundSettlements,
     loading: false,
     refreshing: false,
     action: "idle",
@@ -67,6 +71,7 @@ function createService(record: PaymentRecoveryRecord = pendingRecord) {
   const listeners = new Set<() => void>();
   const submissions: ManualPaymentVerificationInput[] = [];
   const recoveries: string[] = [];
+  const refundResolutions: { attemptId: string; note: string }[] = [];
   const service: PaymentRecoveryCenterService = {
     getState: () => state,
     subscribe(listener) {
@@ -92,8 +97,12 @@ function createService(record: PaymentRecoveryRecord = pendingRecord) {
     submitManualVerification: jest.fn(async (input: ManualPaymentVerificationInput) => {
       submissions.push(input);
     }),
+    checkRefundSettlements: jest.fn(async () => undefined),
+    acknowledgeRefundSettlementFailure: jest.fn(async (input: { attemptId: string; note: string }) => {
+      refundResolutions.push(input);
+    }),
   };
-  return { service, submissions, recoveries };
+  return { service, submissions, recoveries, refundResolutions };
 }
 
 beforeEach(() => {
@@ -285,4 +294,51 @@ test("M34：无金额不符的记录不显示实扣警告与冲正确认", async
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
   expect(screen.queryByTestId("payment-recovery-manual-terminal-charge")).toBeNull();
   expect(screen.getByTestId("payment-recovery-finding-paid").props.accessibilityState.disabled).toBeFalsy();
+});
+
+test("Square 退款结算：只展示结算中与被拒的退款；可立即检查，被拒的须填写退款方式后才能主管结案", async () => {
+  const { service, refundResolutions } = createService(pendingRecord, [
+    {
+      attemptId: "refund-settling",
+      returnOrderGuid: "return-order-settling",
+      amountCents: 1_250,
+      status: "settling",
+      squareStatus: "PENDING",
+      lastCheckedAtIso: null,
+      registeredAtIso: "2026-10-22T01:00:00.000Z",
+    },
+    {
+      attemptId: "refund-rejected",
+      returnOrderGuid: "return-order-rejected",
+      amountCents: 500,
+      status: "rejected",
+      squareStatus: "REJECTED",
+      lastCheckedAtIso: "2026-10-22T02:00:00.000Z",
+      registeredAtIso: "2026-10-22T01:30:00.000Z",
+    },
+  ]);
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+
+  expect(screen.getByTestId("payment-recovery-refund-settlements")).toBeTruthy();
+  expect(screen.getByText("Settling · accepted by Square")).toBeTruthy();
+  expect(screen.getByText("Rejected by Square · refund the customer another way")).toBeTruthy();
+  expect(screen.getByText("Not checked yet")).toBeTruthy();
+
+  await fireEvent.press(screen.getByTestId("payment-recovery-refund-check"));
+  await waitFor(() => expect(service.checkRefundSettlements).toHaveBeenCalledTimes(1));
+
+  // 没填实际退款方式时不能结案。
+  await fireEvent.press(screen.getByTestId("payment-recovery-refund-resolve-refund-rejected"));
+  expect(service.acknowledgeRefundSettlementFailure).not.toHaveBeenCalled();
+  await fireEvent.changeText(screen.getByTestId("payment-recovery-refund-note-refund-rejected"), "  Refunded $5.00 cash  ");
+  await fireEvent.press(screen.getByTestId("payment-recovery-refund-resolve-refund-rejected"));
+  await waitFor(() => expect(refundResolutions).toEqual([{ attemptId: "refund-rejected", note: "Refunded $5.00 cash" }]));
+  // 结算中的退款没有结案入口。
+  expect(screen.queryByTestId("payment-recovery-refund-resolve-refund-settling")).toBeNull();
+});
+
+test("没有需关注的 Square 退款时不显示结算区块", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  expect(screen.queryByTestId("payment-recovery-refund-settlements")).toBeNull();
 });
