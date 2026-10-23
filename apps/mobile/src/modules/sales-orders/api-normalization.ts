@@ -26,6 +26,8 @@ const orderSchema = z.object({
   discountAmount: nullableNumber,
   actualAmount: nullableNumber,
   status: nullableNumber,
+  // 旧后端不返回该字段，缺省按不含退款商品。
+  hasRefundItems: z.boolean().nullish().transform((value) => value ?? false),
 });
 
 const listItemSchema = orderSchema.extend({
