@@ -101,6 +101,23 @@ describe("SettingsScreen", () => {
     expect(presenter.getState().paymentMethods.useManualCard).toBe(true);
   });
 
+  it("通用分区网络卡片提供只读网络检测入口，不受重新绑定权限限制", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const onOpenNetworkCheck = jest.fn();
+    const screen = await render(
+      <SettingsScreen
+        locale="zh"
+        onOpenNetworkCheck={onOpenNetworkCheck}
+        presenter={presenter}
+      />,
+    );
+    const button = screen.getByTestId("settings-network-check");
+    expect(screen.getByText("网络检测")).toBeTruthy();
+    await fireEvent.press(button);
+    expect(onOpenNetworkCheck).toHaveBeenCalledTimes(1);
+  });
+
   it("旧运行时未提供支付方式保存能力时开关保持禁用", async () => {
     const presenter = createPresenter(new ScreenSettingsPort());
     await presenter.load();

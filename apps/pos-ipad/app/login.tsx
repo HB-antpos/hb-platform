@@ -87,6 +87,7 @@ export default function LoginRoute() {
       <CashierLoginScreen
         language={i18n.resolvedLanguage ?? i18n.language}
         onManualInputFocusChange={handleManualInputFocusChange}
+        onOpenNetworkCheck={() => router.push("/network-check" as Href)}
         onSwitchLanguage={handleSwitchLanguage}
         onSuccess={() => router.replace("/sales" as Href)}
         // 登录屏幕只得到受限 runtime facade；不从路由注入门店、设备或授权票据。

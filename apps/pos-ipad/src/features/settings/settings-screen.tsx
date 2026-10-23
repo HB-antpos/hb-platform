@@ -133,6 +133,8 @@ export type SettingsScreenPresenter = Pick<
 type SettingsScreenProps = Readonly<{
   locale?: SettingsLocale;
   onBack?(): void;
+  /** 打开只读网络检测页；不传则不显示入口。 */
+  onOpenNetworkCheck?(): void;
   onOpenSyncHistory?(): void;
   presenter: SettingsScreenPresenter;
   scanner?: HidScannerRouter;
@@ -156,6 +158,7 @@ const NAV_ITEMS: readonly Readonly<{
 export function SettingsScreen({
   locale: localeOverride,
   onBack,
+  onOpenNetworkCheck,
   onOpenSyncHistory,
   presenter,
   scanner,
@@ -306,6 +309,7 @@ export function SettingsScreen({
               <SettingsPaneContent
                 locale={locale}
                 onBack={onBack}
+                onOpenNetworkCheck={onOpenNetworkCheck}
                 onOpenSyncHistory={onOpenSyncHistory}
                 presenter={presenter}
                 scanner={scanner}
@@ -379,6 +383,7 @@ export function SettingsUnavailableScreen({
 function SettingsPaneContent({
   locale,
   onBack,
+  onOpenNetworkCheck,
   onOpenSyncHistory,
   presenter,
   scanner,
@@ -386,6 +391,7 @@ function SettingsPaneContent({
 }: Readonly<{
   locale: SettingsLocale;
   onBack: (() => void) | undefined;
+  onOpenNetworkCheck: (() => void) | undefined;
   onOpenSyncHistory: (() => void) | undefined;
   presenter: SettingsScreenPresenter;
   scanner: HidScannerRouter | undefined;
@@ -417,17 +423,24 @@ function SettingsPaneContent({
       );
     default:
       return (
-        <GeneralPane locale={locale} presenter={presenter} state={state} />
+        <GeneralPane
+          locale={locale}
+          onOpenNetworkCheck={onOpenNetworkCheck}
+          presenter={presenter}
+          state={state}
+        />
       );
   }
 }
 
 function GeneralPane({
   locale,
+  onOpenNetworkCheck,
   presenter,
   state,
 }: Readonly<{
   locale: SettingsLocale;
+  onOpenNetworkCheck: (() => void) | undefined;
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
@@ -546,6 +559,16 @@ function GeneralPane({
             testID="settings-api-test"
             tone="secondary"
           />
+          {onOpenNetworkCheck ? (
+            // 网络检测只读，不受「可重新绑定设备」权限限制；确认弹窗打开时仍锁定避免误触。
+            <ActionButton
+              disabled={locked}
+              label={t("general.networkCheck")}
+              onPress={onOpenNetworkCheck}
+              testID="settings-network-check"
+              tone="secondary"
+            />
+          ) : null}
           <ActionButton
             disabled={
               locked ||

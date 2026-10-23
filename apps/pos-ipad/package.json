@@ -62,6 +62,7 @@
     "test:receipts": "tsx --test src/features/receipts/*.test.ts",
     "test:registration": "tsx --test src/features/device-registration/*.test.ts && jest src/features/device-registration/*.rntl.test.tsx --runInBand",
     "test:cashier-login": "tsx --test src/features/cashier-login/*.test.ts && jest src/features/cashier-login/*.rntl.test.tsx --runInBand",
+    "test:network-check": "tsx --test src/features/network-check/*.test.ts && jest src/features/network-check/*.rntl.test.tsx --runInBand",
     "test:cashier-lock": "tsx --test src/features/cashier-lock/*.test.ts",
     "test:operation-authorization": "tsx --test src/features/operation-authorization/*.test.ts && jest src/features/operation-authorization/*.rntl.test.tsx --runInBand",
     "test:held-orders": "tsx --test src/features/held-orders/*.test.ts && jest src/features/held-orders/*.rntl.test.tsx --runInBand",
