@@ -104,6 +104,7 @@ assertArrayEqual(
     'promotions',
     'product-query',
     'price-updates',
+    'pricing-strategies',
     'product-insights',
     'warehouse-product-insights',
     'seasonal-product-insights',
