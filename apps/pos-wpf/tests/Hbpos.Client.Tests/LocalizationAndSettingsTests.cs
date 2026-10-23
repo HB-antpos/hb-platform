@@ -91,7 +91,7 @@ public sealed class LocalizationAndSettingsTests : IDisposable
 
         Assert.Equal("Supervisor note (optional)", localization.T("cardRecovery.payment.field.note"));
         Assert.Contains(
-            "A supervisor note is optional.",
+            "supervisor note are optional.",
             localization.T("cardRecovery.payment.section.instructions"),
             StringComparison.Ordinal);
 
@@ -99,7 +99,7 @@ public sealed class LocalizationAndSettingsTests : IDisposable
 
         Assert.Equal("主管备注（选填）", localization.T("cardRecovery.payment.field.note"));
         Assert.Contains(
-            "主管备注可选",
+            "主管备注都可不填",
             localization.T("cardRecovery.payment.section.instructions"),
             StringComparison.Ordinal);
     }

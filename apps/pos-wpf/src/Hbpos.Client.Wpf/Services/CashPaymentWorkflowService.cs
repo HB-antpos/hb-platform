@@ -994,7 +994,16 @@ public sealed class CashPaymentWorkflowService(
                         session,
                         cancellationToken))
             {
-                SettingsSnapshot = settingsSnapshot
+                SettingsSnapshot = settingsSnapshot,
+                // 中文注释：LocalIp 消费收到批准小票时补写证据，供 PF/断电后的恢复与主管结案使用；退款不走这条。
+                RecordReceiptApprovalEvidenceAsync = refundSubmissionToken is not null
+                    ? null
+                    : (evidence, _) => RunLocalStoreAsync(
+                        () => cardPaymentAttemptRepository!.TryRecordReceiptApprovalEvidenceAsync(
+                            attempt.AttemptGuid,
+                            evidence.Serialize(),
+                            CancellationToken.None),
+                        CancellationToken.None)
             });
         using var squareAttemptScope = squareAttempt is null || squarePaymentAttemptContextAccessor is null
             ? null

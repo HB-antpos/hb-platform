@@ -6297,8 +6297,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
             audit.RootElement.GetProperty("reasonCode").GetString());
     }
 
+    // 确认已付款的参考号/凭据已改为选填（门店反馈参考号太长、找不到）；确认未付款仍必须有银行证据。
     [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
     [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
     public async Task ResolvePaymentAsync_requires_financial_evidence_when_note_is_empty(
         CardPaymentSupervisorDecision decision)

@@ -33,6 +33,9 @@ public sealed record CardRecoveryQueueItem(
 {
     public bool IsOpen { get; init; } = true;
 
+    // 本地 Linkly 交易过程中从小票抓到的批准证据（RRN / 批准码），恢复中心“确认已付款”据此自动预填。
+    public string? ReceiptApprovalReference { get; init; }
+
     public CardRecoveryAttemptKey Key => new(Processor, AttemptGuid);
 }
 
