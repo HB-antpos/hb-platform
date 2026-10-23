@@ -14,6 +14,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
 import type { CameraScanMode } from "@/core/contracts/scanner";
 import { businessStartupClock } from "@/core/performance/business-startup-clock";
+import {
+  formatAppVersionLabel,
+  otaVersionLabel,
+  UNKNOWN_NATIVE_APP_VERSION,
+} from "@/core/runtime/native-app-version";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import type { PosAuthorizedFulfilmentActionResult } from "@/core/runtime/production-pos-service-composition";
 import {
@@ -406,6 +411,10 @@ export default function SalesRoute() {
   }
   const services = runtime.services;
   const appStoreUrl = services.appUpdates.getPolicy()?.appStoreUrl ?? null;
+  const appVersionLabel = formatAppVersionLabel(
+    services.nativeAppVersion ?? UNKNOWN_NATIVE_APP_VERSION,
+    otaVersionLabel(services.updateIdentity),
+  );
 
   return (
     <>
@@ -422,6 +431,7 @@ export default function SalesRoute() {
       />
       <SalesSoundBridge presenter={presenter} />
       <SalesScreen
+        appVersionLabel={appVersionLabel}
         {...(scanner
           ? {
               cameraScanner: {

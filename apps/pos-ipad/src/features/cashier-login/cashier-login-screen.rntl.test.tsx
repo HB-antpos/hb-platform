@@ -63,18 +63,25 @@ function store(): CashierLoginStorePort {
   return { clearActiveCashier: jest.fn(), setActiveCashier: jest.fn() };
 }
 
-test("登录页右下角以弱提示单行显示 Runtime 和 OTA 版本且不可交互", async () => {
+test("登录页右下角以弱提示单行显示版本号、Build、Runtime 和 OTA 且不可交互", async () => {
   const screen = await render(
     <CashierLoginScreen
       controller={new CashierLoginController(store())}
       onSuccess={jest.fn()}
       runtime={runtime(async () => cashier())}
-      versionInfo={{ runtimeVersion: "0.2.0", otaVersion: "a1b2c3d4" }}
+      versionInfo={{
+        appVersion: "0.2.0",
+        buildNumber: "12",
+        runtimeVersion: "0.2.0",
+        otaVersion: "a1b2c3d4",
+      }}
     />,
   );
 
   const versionInfo = screen.getByTestId("cashier-login-version-info");
-  expect(versionInfo.props.children).toBe("Runtime: 0.2.0 · OTA: a1b2c3d4");
+  expect(versionInfo.props.children).toBe(
+    "Version 0.2.0 · Build 12 · Runtime: 0.2.0 · OTA: a1b2c3d4",
+  );
   expect(versionInfo.props.numberOfLines).toBe(1);
   expect(versionInfo.props.pointerEvents).toBe("none");
   expect(versionInfo.props.selectable).toBe(false);

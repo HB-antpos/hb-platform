@@ -3910,4 +3910,28 @@ describe("SalesScreen", () => {
     salesPresenter.destroy();
     await screen.unmount();
   });
+
+  it("头部在「收银工作台」下方显示路由传入的版本号与 Build，未传时不占位", async () => {
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const defaultProps = {
+      locale: "zh" as const,
+      presenter: salesPresenter,
+      showStatusStrip: false,
+    };
+    const screen = await render(<SalesScreen {...defaultProps} />);
+    expect(screen.queryByTestId("sales-app-version")).toBeNull();
+
+    await screen.rerender(
+      <SalesScreen
+        {...defaultProps}
+        appVersionLabel="Version 0.2.0 · Build 12"
+      />,
+    );
+    const version = screen.getByTestId("sales-app-version");
+    expect(version.props.children).toBe("Version 0.2.0 · Build 12");
+    expect(version.props.numberOfLines).toBe(1);
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
 });
