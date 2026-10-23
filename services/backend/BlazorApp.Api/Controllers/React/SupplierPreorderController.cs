@@ -83,6 +83,10 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     public Task<IActionResult> RecomputeHistory(string formGuid) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.RecomputeHistoryAsync(formGuid), "已排队重新计算去年历史");
 
+    [HttpPost("forms/{formGuid}/images/retry-failed")]
+    public Task<IActionResult> RetryFailedImages(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.RetryFailedImagesAsync(formGuid), "已重新排队转存失败的图片");
+
     [HttpGet("forms/{formGuid}/items/{itemGuid}/ref-candidates")]
     public Task<IActionResult> GetRefCandidates(string formGuid, string itemGuid, [FromQuery] string? keyword) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetRefCandidatesAsync(formGuid, itemGuid, keyword));

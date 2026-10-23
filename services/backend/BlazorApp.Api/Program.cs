@@ -1335,6 +1335,9 @@ builder.Services.AddScoped<IPreorderGateService>(provider =>
 builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderService, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderService>();
 // 去年历史快照：发布后排队计算、截止前每晚刷新（状态在快照表表头行）
 builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderHistoryWorker>();
+// 新品图片转存 COS 商品图片桶（状态在商品行的转存列）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderImageStore, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderCosImageStore>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderImageWorker>();
 builder.Services.AddScoped<IStoreProductMaintenanceReactService, StoreProductMaintenanceReactService>();
 // 移动端离线商品目录：索引缓存为进程级单例（每店保留多版本供 delta），服务按请求作用域。
 builder.Services.AddSingleton<

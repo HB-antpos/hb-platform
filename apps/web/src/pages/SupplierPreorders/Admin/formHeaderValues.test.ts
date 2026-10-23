@@ -76,6 +76,7 @@ const detail = {
   refAutoCount: 0,
   refManualCount: 0,
   needRefCount: 0,
+  imageCopy: { total: 0, done: 0, skipped: 0, pending: 0, failed: 0, configured: true },
 } as SupplierPreorderFormDetail
 const fromDetail = buildHeaderValuesFromDetail(detail)
 assert.equal(fromDetail.deadlineDate?.format('YYYY-MM-DD'), '2026-06-30')

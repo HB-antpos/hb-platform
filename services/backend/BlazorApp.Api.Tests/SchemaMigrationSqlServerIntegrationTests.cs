@@ -1151,6 +1151,40 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单图片转存五列_依赖原表_可重复执行_旧行默认值与签名门禁()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表还没建：Apply 直接报 54006，Verify 报 54007
+        var noTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql));
+        Assert.Equal(54006, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderFormItem (ItemGuid, FormGuid, Seq, SourceRowNo, SortOrder, SupplierItemCode, Name, CartonQty, Price, MatchMethod, IsActive)
+            VALUES (N'i-1', N'f-1', 1, 2, 1, N'XD1', N'Bauble', 24, 1.10, N'None', 1);
+            """);
+        var missing = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql));
+        Assert.Equal(54007, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql);
+        // 旧行：次数默认 0，其余为空
+        await ExecuteNonQueryAsync(main, """
+            IF NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderFormItem WHERE ItemGuid = N'i-1' AND ImageCopyAttempts = 0 AND ImageCosUrl IS NULL AND ImageCopyStatus IS NULL)
+                THROW 54011, 'Existing item should get default image copy columns.', 1;
+            """);
+        // 原有签名门禁不受新增列影响
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN ImageCopyError nvarchar(100) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql));
+        Assert.Equal(54007, drift.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商预订单去年历史快照表_可重复执行_保留数据且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

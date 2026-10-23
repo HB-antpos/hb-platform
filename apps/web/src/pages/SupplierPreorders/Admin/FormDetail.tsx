@@ -18,6 +18,7 @@ import {
   downloadSupplierPreorderExport,
   getSupplierPreorderForm,
   recomputeSupplierPreorderHistory,
+  retrySupplierPreorderFailedImages,
   setSupplierPreorderFormStatus,
   updateSupplierPreorderForm,
 } from '../../../services/supplierPreorderService'
@@ -67,6 +68,7 @@ export default function SupplierPreorderFormDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
+  const [retryingImages, setRetryingImages] = useState(false)
   const loadSeqRef = useRef(0)
 
   const loadDetail = useCallback(
@@ -231,6 +233,20 @@ export default function SupplierPreorderFormDetailPage() {
     })
   }
 
+  const handleRetryImages = async () => {
+    setRetryingImages(true)
+    try {
+      const next = await retrySupplierPreorderFailedImages(formGuid)
+      setDetail(next)
+      setLoadedAtMs(Date.now())
+      message.success(t('spAdmin.images.retryQueued'))
+    } catch (error) {
+      message.error(getErrorText(error, t('spAdmin.images.retryFailed')))
+    } finally {
+      setRetryingImages(false)
+    }
+  }
+
   const handleRecompute = async () => {
     setRecomputing(true)
     try {
@@ -367,6 +383,7 @@ export default function SupplierPreorderFormDetailPage() {
       </div>
 
       <HistoryStatusBar detail={detail} recomputing={recomputing} onRecompute={() => void handleRecompute()} />
+      <ImageCopyBar detail={detail} retrying={retryingImages} onRetry={() => void handleRetryImages()} />
 
       {summary.status === 'Draft' ? <Alert className="sp-admin-page-alert" type="info" showIcon message={t('spAdmin.detail.draftHint')} /> : null}
       {summary.status === 'Closed' ? <Alert className="sp-admin-page-alert" type="warning" showIcon message={t('spAdmin.detail.closedHint')} /> : null}
@@ -418,6 +435,37 @@ export default function SupplierPreorderFormDetailPage() {
           <FormHeaderFields form={editForm} supplierName={summary.supplierName} showExportQtyUnit compact />
         </Form>
       </Drawer>
+    </div>
+  )
+}
+
+/** 新品图片转存 COS：已转存 / 不需要 / 处理中 / 失败（可重试）。没有原表图片地址时不显示。 */
+function ImageCopyBar({ detail, retrying, onRetry }: { detail: SupplierPreorderFormDetail; retrying: boolean; onRetry: () => void }) {
+  const { t } = useTranslation()
+  const copy = detail.imageCopy
+  if (!copy || copy.total === 0) return null
+  return (
+    <div className="sp-admin-card sp-admin-history-bar">
+      <span className="sp-admin-strong">{t('spAdmin.images.title')}</span>
+      {copy.configured ? null : (
+        <Tag color="warning" className="sp-admin-tag">
+          {t('spAdmin.images.notConfigured')}
+        </Tag>
+      )}
+      <span className="sp-admin-history-counts sp-admin-small sp-admin-number">
+        <span>{t('spAdmin.images.done', { count: copy.done })}</span>
+        <span>{t('spAdmin.images.skipped', { count: copy.skipped })}</span>
+        <span>{t('spAdmin.images.pending', { count: copy.pending })}</span>
+        <span className={copy.failed ? 'sp-admin-history-need' : undefined}>{t('spAdmin.images.failed', { count: copy.failed })}</span>
+      </span>
+      <span className="sp-admin-toolbar-spacer" />
+      {copy.failed > 0 ? (
+        <Tooltip title={t('spAdmin.images.retryHint')}>
+          <Button size="small" icon={<ReloadOutlined />} loading={retrying} onClick={onRetry}>
+            {t('spAdmin.images.retry')}
+          </Button>
+        </Tooltip>
+      ) : null}
     </div>
   )
 }

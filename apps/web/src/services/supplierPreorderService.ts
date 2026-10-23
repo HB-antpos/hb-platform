@@ -234,6 +234,11 @@ export function downloadSupplierPreorderStoreExport(formGuid: string, storeGuid:
 
 // ---------- 去年历史与参考商品 ----------
 
+/** 管理端：把转存失败满 3 次的新品图片清零，后台重新下载 */
+export async function retrySupplierPreorderFailedImages(formGuid: string): Promise<SupplierPreorderFormDetail> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/images/retry-failed`))
+}
+
 /** 管理端：重新计算这张订单表的去年历史（排队，后台算） */
 export async function recomputeSupplierPreorderHistory(formGuid: string): Promise<SupplierPreorderFormDetail> {
   return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/history/recompute`))
