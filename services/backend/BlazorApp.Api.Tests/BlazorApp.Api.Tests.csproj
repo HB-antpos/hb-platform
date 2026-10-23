@@ -471,6 +471,7 @@
     <Compile Include="SupplierPreorderHistoryRulesTests.cs" />
     <Compile Include="SupplierPreorderHistorySqliteTests.cs" />
     <Compile Include="SupplierPreorderImageCopyTests.cs" />
+    <Compile Include="SupplierPreorderRevisionTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />

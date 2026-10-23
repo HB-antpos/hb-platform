@@ -13,6 +13,7 @@ import type {
   SupplierPreorderOrderingItem,
 } from '../../../types/supplierPreorder'
 import { toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
+import { getPreviousCartonQty, getPreviousPrice } from '../Admin/revision.logic'
 
 import { historyCellState } from './orderingHistory.logic'
 import { DiscountCell, HistoryPlaceholder, HistorySparkline, PurchaseCell, RefBadge, SalesCell } from './orderingHistoryCells'
@@ -23,6 +24,7 @@ import {
   parseCartonsInput,
   stepCartons,
 } from './orderingPage.logic'
+import { OrderingRevisionChips } from './OrderingRevisionParts'
 
 const NS = 'supplierPreorderOrdering'
 
@@ -90,12 +92,14 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
             {row.supplierItemCode}
             {row.barcode ? ` · ${row.barcode}` : null}
           </div>
-          {row.category || row.isNew || row.history?.source === 'Ref' ? (
+          {row.category || row.isNew || row.history?.source === 'Ref' || row.revisionMark ? (
             <div className="sp-order-product-meta">
               {row.category ? <span>{row.category}</span> : null}
               {row.isNew ? <Tag color="orange">{t(`${NS}.table.newTag`)}</Tag> : null}
               {/* 新品借用参考商品的去年数据：标「参考 XXX」，悬停看参考商品 */}
               {row.history?.source === 'Ref' ? <RefBadge t={t} history={row.history} ownPrice={row.price} /> : null}
+              {/* 最近一次修订的改动（新增 / 改价 / 箱规 / 改名 / 重新上架） */}
+              <OrderingRevisionChips t={t} mark={row.revisionMark} price={row.price} cartonQty={row.cartonQty} />
             </div>
           ) : null}
         </div>
@@ -106,27 +110,40 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
       title: t(`${NS}.table.colPrice`),
       width: 110,
       align: 'right',
-      render: (_, row) => (
-        <div>
-          <div className="sp-order-price">{formatAud(row.price)}</div>
-          <div className="sp-order-muted sp-order-small">
-            {row.unit ? t(`${NS}.table.priceUnit`, { unit: row.unit }) : t(`${NS}.table.priceUnitDefault`)}
+      render: (_, row) => {
+        const prevPrice = getPreviousPrice(row.revisionMark, row.price)
+        return (
+          <div>
+            {/* 修订改了价：上方划掉旧价，新价涨红跌绿 */}
+            {prevPrice !== null ? (
+              <del className="sp-order-prev-value" title={t(`${NS}.revision.prevPrice`, { price: formatAud(prevPrice) })}>
+                {formatAud(prevPrice)}
+              </del>
+            ) : null}
+            <div className={`sp-order-price${prevPrice === null ? '' : prevPrice < row.price ? ' is-up' : ' is-down'}`}>{formatAud(row.price)}</div>
+            <div className="sp-order-muted sp-order-small">
+              {row.unit ? t(`${NS}.table.priceUnit`, { unit: row.unit }) : t(`${NS}.table.priceUnitDefault`)}
+            </div>
           </div>
-        </div>
-      ),
+        )
+      },
     },
     {
       key: ORDERING_COLUMN_KEYS.carton,
       title: t(`${NS}.table.colCarton`),
       width: 110,
-      render: (_, row) => (
-        <div>
-          <div className="sp-order-number" style={{ fontWeight: 500 }}>
-            {t(`${NS}.table.cartonQty`, { count: row.cartonQty })}
+      render: (_, row) => {
+        const prevCartonQty = getPreviousCartonQty(row.revisionMark, row.cartonQty)
+        return (
+          <div>
+            {prevCartonQty !== null ? <del className="sp-order-prev-value">{t(`${NS}.revision.prevCarton`, { count: prevCartonQty })}</del> : null}
+            <div className={`sp-order-number${prevCartonQty !== null ? ' sp-order-changed-value' : ''}`} style={{ fontWeight: 500 }}>
+              {t(`${NS}.table.cartonQty`, { count: row.cartonQty })}
+            </div>
+            <div className="sp-order-muted sp-order-small">{t(`${NS}.table.moq`)}</div>
           </div>
-          <div className="sp-order-muted sp-order-small">{t(`${NS}.table.moq`)}</div>
-        </div>
-      ),
+        )
+      },
     },
     ...buildHistoryColumns(ctx),
   ]

@@ -220,6 +220,11 @@ public sealed class SupplierPreorderFormDetailDto
     public int NeedRefCount { get; set; }
     /// <summary>新品图片转存 COS 的进度。</summary>
     public SupplierPreorderImageCopyStatusDto ImageCopy { get; set; } = new();
+    /// <summary>修订版次数（0 = 原始导入）与最近一次修订时间。</summary>
+    public int Revision { get; set; }
+    public DateTime? RevisedAtUtc { get; set; }
+    /// <summary>已下架（修订版里被删掉）的款数。</summary>
+    public int RemovedCount { get; set; }
 }
 
 /// <summary>新品图片转存进度：Total = 有原表图片地址的款数；Skipped = 有我方商品图不需要转存；Pending = 还没处理或失败后等重试。</summary>
@@ -271,7 +276,8 @@ public sealed class SupplierPreorderFormItemQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 50;
     public string? Keyword { get; set; }
-    /// <summary>all / matched / new / warning / needRef（没有去年销量也没有参考）/ ref（有参考商品）。</summary>
+    /// <summary>all / matched / new / warning / needRef（没有去年销量也没有参考）/ ref（有参考商品）/
+    /// revised（最近一次修订有变动）/ removed（已下架）。</summary>
     public string? Match { get; set; }
 }
 
@@ -296,6 +302,21 @@ public sealed class SupplierPreorderFormItemDto
     /// <summary>本品自己在历史窗口内（全部分店）的销量；快照未算出时为 null。</summary>
     public decimal? OwnSalesQty { get; set; }
     public SupplierPreorderItemRefDto? Ref { get; set; }
+    /// <summary>false = 已下架（修订版里被删掉，保留已下的箱数但不计入汇总）。</summary>
+    public bool IsActive { get; set; } = true;
+    public SupplierPreorderRevisionMarkDto? RevisionMark { get; set; }
+}
+
+/// <summary>
+/// 最近一次修订对这款商品的改动（只标最近一次；以前的修订不再高亮）。
+/// Changes：Added 新增 / Restored 重新上架 / Removed 下架 / Price 改价 / Carton 改箱规 / Name 改名 / Barcode 改条码 / Image 换图。
+/// </summary>
+public sealed class SupplierPreorderRevisionMarkDto
+{
+    public int Revision { get; set; }
+    public List<string> Changes { get; set; } = new();
+    public decimal? PrevPrice { get; set; }
+    public int? PrevCartonQty { get; set; }
 }
 
 public sealed class SupplierPreorderStoreRefDto
@@ -510,6 +531,8 @@ public sealed class SupplierPreorderStoreCbmDto
 
 public sealed class SupplierPreorderOrderingSummaryDto
 {
+    /// <summary>本店下过、但已被修订版下架的商品（箱数保留，不计入汇总）。</summary>
+    public List<SupplierPreorderRemovedLineDto> RemovedLines { get; set; } = new();
     public string StoreGuid { get; set; } = string.Empty;
     public string OrderStatus { get; set; } = "None";
     public int ItemCount { get; set; }
@@ -534,7 +557,7 @@ public sealed class SupplierPreorderOrderingItemQueryDto
     public string? Keyword { get; set; }
     public string? Category { get; set; }
     /// <summary>all / mine（本店已下单）/ others（其他分店已下单）/ new（新品）/ matched（商品表已有）/
-    /// lastYearSold（本品去年本店有售，不含参考）/ lastYearDiscounted（本品去年本店打过折，不含参考）。</summary>
+    /// lastYearSold（本品去年本店有售，不含参考）/ lastYearDiscounted（本品去年本店打过折，不含参考）/ revised（最近一次修订有变动）。</summary>
     public string? Filter { get; set; }
     /// <summary>seq / priceAsc / priceDesc / othersDesc（其他分店合计箱数多的在前）/ lastYearSalesDesc（去年本店销量，含参考）。</summary>
     public string? Sort { get; set; }
@@ -566,6 +589,8 @@ public sealed class SupplierPreorderOrderingItemDto
     public List<SupplierPreorderOtherStoreCartonsDto>? OtherStores { get; set; }
     /// <summary>去年本店数据（本品或参考商品）；null = 无去年记录（或快照还没算出来）。</summary>
     public SupplierPreorderItemHistoryDto? History { get; set; }
+    /// <summary>最近一次修订的改动（价格、箱规等），没有为 null。</summary>
+    public SupplierPreorderRevisionMarkDto? RevisionMark { get; set; }
 }
 
 public sealed class SupplierPreorderSaveLineDto
@@ -760,6 +785,86 @@ public sealed class SupplierPreorderImportRefCandidatesRequestDto
     public string? Keyword { get; set; }
     /// <summary>已匹配给本订单表其他行的我方商品，不作参考候选。</summary>
     public List<string>? ExcludeProductCodes { get; set; }
+}
+
+#endregion
+
+#region 修订版与提醒（PR 3）
+
+public sealed class SupplierPreorderRemovedLineDto
+{
+    public string ItemGuid { get; set; } = string.Empty;
+    public string SupplierItemCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int Cartons { get; set; }
+}
+
+/// <summary>上传修订版：解析结果（parse-file / parse-pasted 的输出）+ 列映射。SourceFileGuid 为空（粘贴）时不再支持填回原表。</summary>
+public sealed class SupplierPreorderRevisionRequestDto
+{
+    public string? SourceFileGuid { get; set; }
+    public string? SheetName { get; set; }
+    public int HeaderRowNo { get; set; }
+    public string? HeaderSignature { get; set; }
+    public SupplierPreorderColumnMappingDto Mapping { get; set; } = new();
+    public List<SupplierPreorderParsedRowDto> Rows { get; set; } = new();
+}
+
+/// <summary>修订版里一款商品的差异。Kind：Added / Removed / Restored（之前下架又出现）/ Changed / Unchanged。</summary>
+public sealed class SupplierPreorderRevisionEntryDto
+{
+    public string Kind { get; set; } = "Unchanged";
+    public string SupplierItemCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? ItemGuid { get; set; }
+    public int? RowNo { get; set; }
+    /// <summary>Price / Carton / Name / Barcode / Image / Cbm / Category。</summary>
+    public List<string> Changes { get; set; } = new();
+    public decimal? OldPrice { get; set; }
+    public decimal? NewPrice { get; set; }
+    public int? OldCartonQty { get; set; }
+    public int? NewCartonQty { get; set; }
+    public string? OldName { get; set; }
+    /// <summary>各开启分店已订合计箱数（下架、改箱规时提醒采购）。</summary>
+    public int OrderedCartons { get; set; }
+    /// <summary>已订了这款的分店名。</summary>
+    public List<string> OrderedStores { get; set; } = new();
+}
+
+public sealed class SupplierPreorderRevisionCountsDto
+{
+    public int Total { get; set; }
+    public int Added { get; set; }
+    public int Removed { get; set; }
+    public int Restored { get; set; }
+    public int Changed { get; set; }
+    public int PriceChanged { get; set; }
+    public int CartonChanged { get; set; }
+    public int Unchanged { get; set; }
+    /// <summary>新表里不能导入（缺货号 / 名称 / 进价 / 箱规）的行，不参与对比。</summary>
+    public int Invalid { get; set; }
+    /// <summary>下架的商品里已有分店下单的款数。</summary>
+    public int RemovedWithOrders { get; set; }
+}
+
+public sealed class SupplierPreorderRevisionPreviewDto
+{
+    public int CurrentRevision { get; set; }
+    public SupplierPreorderRevisionCountsDto Counts { get; set; } = new();
+    /// <summary>只列有变化的（Added / Removed / Restored / Changed），按原表顺序。</summary>
+    public List<SupplierPreorderRevisionEntryDto> Entries { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+}
+
+/// <summary>提醒未提交分店的结果。</summary>
+public sealed class SupplierPreorderRemindResultDto
+{
+    /// <summary>没提交的开启分店数。</summary>
+    public int PendingStoreCount { get; set; }
+    /// <summary>实际发出提醒的人数。</summary>
+    public int NotifiedUserCount { get; set; }
+    /// <summary>没提交、但下单人员授权里没人能替它下单的分店（提醒不到，需采购另行联系）。</summary>
+    public List<string> StoresWithoutOrderers { get; set; } = new();
 }
 
 #endregion

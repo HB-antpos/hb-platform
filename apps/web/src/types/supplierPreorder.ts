@@ -195,6 +195,11 @@ export interface SupplierPreorderFormDetail {
   needRefCount: number
   /** 新品图片转存 COS 的进度 */
   imageCopy: SupplierPreorderImageCopyStatus
+  /** 修订版次数（0 = 原始导入）与最近一次修订时间 */
+  revision: number
+  revisedAtUtc?: string | null
+  /** 已下架（修订版里被删掉）的款数 */
+  removedCount: number
 }
 
 /** 新品图片转存进度：total = 有原表图片地址的款数；skipped = 有我方商品图不需转存；pending = 待处理或失败后等重试 */
@@ -222,7 +227,8 @@ export interface SupplierPreorderFormItemQuery {
   page?: number
   pageSize?: number
   keyword?: string
-  match?: 'all' | 'matched' | 'new' | 'warning' | 'needRef' | 'ref'
+  /** revised = 最近一次修订有变动；removed = 已下架 */
+  match?: 'all' | 'matched' | 'new' | 'warning' | 'needRef' | 'ref' | 'revised' | 'removed'
 }
 
 export interface SupplierPreorderFormItem {
@@ -246,6 +252,9 @@ export interface SupplierPreorderFormItem {
   /** 本品自己在历史窗口内（全部分店）的销量；快照未算出时为 null */
   ownSalesQty?: number | null
   ref?: SupplierPreorderItemRef | null
+  /** false = 已下架（修订版里被删掉，已下的箱数保留但不计入汇总） */
+  isActive: boolean
+  revisionMark?: SupplierPreorderRevisionMark | null
 }
 
 export interface SupplierPreorderStoreRef {
@@ -424,6 +433,8 @@ export interface SupplierPreorderStoreCbm {
 }
 
 export interface SupplierPreorderOrderingSummary {
+  /** 本店下过、但已被修订版下架的商品（箱数保留，不计入汇总） */
+  removedLines: SupplierPreorderRemovedLine[]
   storeGuid: string
   orderStatus: SupplierPreorderStoreOrderStatus
   itemCount: number
@@ -440,7 +451,8 @@ export interface SupplierPreorderOrderingSummary {
 }
 
 /** lastYearSold / lastYearDiscounted 只看本品自己的去年本店数据，不含参考商品 */
-export type SupplierPreorderOrderingFilter = 'all' | 'mine' | 'others' | 'new' | 'matched' | 'lastYearSold' | 'lastYearDiscounted'
+/** revised：最近一次修订有变动（改价、改箱规、新增等） */
+export type SupplierPreorderOrderingFilter = 'all' | 'mine' | 'others' | 'new' | 'matched' | 'lastYearSold' | 'lastYearDiscounted' | 'revised'
 /** lastYearSalesDesc：去年本店销量从高到低（含参考商品） */
 export type SupplierPreorderOrderingSort = 'seq' | 'priceAsc' | 'priceDesc' | 'othersDesc' | 'lastYearSalesDesc'
 
@@ -478,6 +490,8 @@ export interface SupplierPreorderOrderingItem {
   otherStores?: SupplierPreorderOtherStoreCartons[] | null
   /** 去年本店数据（本品或参考商品）；null = 无去年记录（或快照还没算出来） */
   history?: SupplierPreorderItemHistory | null
+  /** 最近一次修订的改动；没有为 null */
+  revisionMark?: SupplierPreorderRevisionMark | null
 }
 
 export interface SupplierPreorderSaveLineResult {
@@ -660,4 +674,82 @@ export interface SupplierPreorderImportRefCandidatesPayload {
   price: number
   keyword?: string | null
   excludeProductCodes?: string[] | null
+}
+
+// ---------- 修订版与提醒（PR 3） ----------
+
+/** Added 新增 / Restored 重新上架 / Removed 下架 / Price 改价 / Carton 改箱规 / Name 改名 / Barcode 改条码 / Image 换图 / Cbm / Category */
+export type SupplierPreorderRevisionChange = 'Added' | 'Restored' | 'Removed' | 'Price' | 'Carton' | 'Name' | 'Barcode' | 'Image' | 'Cbm' | 'Category'
+
+/** 最近一次修订对这款商品的改动（只标最近一次） */
+export interface SupplierPreorderRevisionMark {
+  revision: number
+  changes: SupplierPreorderRevisionChange[]
+  prevPrice?: number | null
+  prevCartonQty?: number | null
+}
+
+export interface SupplierPreorderRemovedLine {
+  itemGuid: string
+  supplierItemCode: string
+  name: string
+  cartons: number
+}
+
+/** 上传修订版：parse-file / parse-pasted 的结果 + 列映射；sourceFileGuid 为空（粘贴）时不再支持填回原表 */
+export interface SupplierPreorderRevisionPayload {
+  sourceFileGuid?: string | null
+  sheetName?: string | null
+  headerRowNo: number
+  headerSignature?: string | null
+  mapping: SupplierPreorderColumnMapping
+  rows: SupplierPreorderParsedRow[]
+}
+
+export type SupplierPreorderRevisionKind = 'Added' | 'Removed' | 'Restored' | 'Changed' | 'Unchanged'
+
+export interface SupplierPreorderRevisionEntry {
+  kind: SupplierPreorderRevisionKind
+  supplierItemCode: string
+  name: string
+  itemGuid?: string | null
+  rowNo?: number | null
+  changes: SupplierPreorderRevisionChange[]
+  oldPrice?: number | null
+  newPrice?: number | null
+  oldCartonQty?: number | null
+  newCartonQty?: number | null
+  oldName?: string | null
+  /** 各开启分店已订合计箱数 */
+  orderedCartons: number
+  orderedStores: string[]
+}
+
+export interface SupplierPreorderRevisionCounts {
+  total: number
+  added: number
+  removed: number
+  restored: number
+  changed: number
+  priceChanged: number
+  cartonChanged: number
+  unchanged: number
+  invalid: number
+  /** 下架的商品里已有分店下单的款数 */
+  removedWithOrders: number
+}
+
+export interface SupplierPreorderRevisionPreview {
+  currentRevision: number
+  counts: SupplierPreorderRevisionCounts
+  /** 只列有变化的，按原表顺序 */
+  entries: SupplierPreorderRevisionEntry[]
+  warnings: string[]
+}
+
+export interface SupplierPreorderRemindResult {
+  pendingStoreCount: number
+  notifiedUserCount: number
+  /** 没提交、但没人被授权替它下单的分店（提醒不到） */
+  storesWithoutOrderers: string[]
 }

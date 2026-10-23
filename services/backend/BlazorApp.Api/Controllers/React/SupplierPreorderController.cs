@@ -83,6 +83,18 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     public Task<IActionResult> RecomputeHistory(string formGuid) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.RecomputeHistoryAsync(formGuid), "已排队重新计算去年历史");
 
+    [HttpPost("forms/{formGuid}/revision/preview")]
+    public Task<IActionResult> PreviewRevision(string formGuid, [FromBody] SupplierPreorderRevisionRequestDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.PreviewRevisionAsync(formGuid, request));
+
+    [HttpPost("forms/{formGuid}/revision/apply")]
+    public Task<IActionResult> ApplyRevision(string formGuid, [FromBody] SupplierPreorderRevisionRequestDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.ApplyRevisionAsync(formGuid, request), "修订版已应用");
+
+    [HttpPost("forms/{formGuid}/remind")]
+    public Task<IActionResult> RemindPendingStores(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.RemindPendingStoresAsync(formGuid), "已发送提醒");
+
     [HttpPost("forms/{formGuid}/images/retry-failed")]
     public Task<IActionResult> RetryFailedImages(string formGuid) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.RetryFailedImagesAsync(formGuid), "已重新排队转存失败的图片");

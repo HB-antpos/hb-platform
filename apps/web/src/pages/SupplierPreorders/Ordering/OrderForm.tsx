@@ -55,6 +55,7 @@ import {
   safeStorageSet,
   storeStorageKey,
 } from './orderingPage.logic'
+import { RemovedLinesAlert } from './OrderingRevisionParts'
 import { DeadlineText, FormStatusTag, StoreStatusTag, formatHolidayYear } from './orderingShared'
 import OrderingSummaryBar from './OrderingSummaryBar'
 import './styles.css'
@@ -615,6 +616,7 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
     { label: t(`${NS}.toolbar.filterMine`), value: 'mine' },
     ...(canViewOtherStores ? [{ label: t(`${NS}.toolbar.filterOthers`), value: 'others' as const }] : []),
     { label: t(`${NS}.toolbar.filterMatched`), value: 'matched' },
+    { label: t(`${NS}.toolbar.filterRevised`), value: 'revised' },
   ]
   const sortOptions: { label: string; value: SupplierPreorderOrderingSort }[] = [
     { label: t(`${NS}.toolbar.sortLastYearSalesDesc`), value: 'lastYearSalesDesc' },
@@ -712,6 +714,9 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
         ) : readOnlyReason ? (
           <Alert className="sp-order-alert" type="info" showIcon message={readOnlyReason} />
         ) : null}
+
+        {/* 本店订过、但修订版里已下架的商品：箱数保留但不计入合计；切店时随汇总一起换（key 让展开状态跟着分店重置） */}
+        <RemovedLinesAlert key={storeGuid ?? ''} t={t} lines={summary?.removedLines} />
 
         <OrderingSummaryBar t={t} summary={summary} containerType={form.containerType} containerCapacityCbm={form.containerCapacityCbm} />
       </section>

@@ -102,7 +102,8 @@
       "historyWindow": "去年同季 {{from}} ~ {{to}}",
       "historyNoWindow": "未设置",
       "historyPending": "计算中",
-      "historyFailed": "计算失败"
+      "historyFailed": "计算失败",
+      "filterRevised": "修订有变动"
     },
     "table": {
       "colSeq": "#",
@@ -214,6 +215,39 @@
       "yes": "有",
       "no": "无",
       "discountUnknownShort": "未判定"
+    },
+    "revision": {
+      "chip": {
+        "added": "修订新增",
+        "restored": "重新上架",
+        "price": "改价 {{from}} → {{to}}",
+        "priceNoFrom": "改价",
+        "carton": "箱规 {{from}} → {{to}}",
+        "cartonNoFrom": "改箱规",
+        "name": "改名",
+        "other": "其他改动",
+        "otherTip": "{{fields}}有改动",
+        "tip": "第 {{revision}} 版修订的改动"
+      },
+      "change": {
+        "Added": "新增",
+        "Restored": "重新上架",
+        "Removed": "下架",
+        "Price": "进价",
+        "Carton": "箱规",
+        "Name": "名称",
+        "Barcode": "条码",
+        "Image": "图片",
+        "Cbm": "体积",
+        "Category": "分类"
+      },
+      "prevPrice": "原进价 {{price}}",
+      "prevCarton": "原 {{count}} 件/箱",
+      "removedTitle": "本店订过的 {{count}} 款已被供应商下架，箱数保留但不计入合计（共 {{cartons}} 箱）",
+      "removedLine": "{{code}} {{name}}：{{cartons}} 箱",
+      "removedExpand": "展开全部 {{count}} 款",
+      "removedCollapse": "收起",
+      "listSep": "、"
     }
   }
 }

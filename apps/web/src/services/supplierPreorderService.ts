@@ -15,6 +15,9 @@ import type {
   SupplierPreorderImportRefCandidatesPayload,
   SupplierPreorderItemHistoryDetail,
   SupplierPreorderRefCandidates,
+  SupplierPreorderRemindResult,
+  SupplierPreorderRevisionPayload,
+  SupplierPreorderRevisionPreview,
   SupplierPreorderSetRefPayload,
   SupplierPreorderMatrix,
   SupplierPreorderMatrixQuery,
@@ -281,4 +284,25 @@ export async function getSupplierPreorderItemHistory(
   signal?: AbortSignal,
 ): Promise<SupplierPreorderItemHistoryDetail> {
   return unwrapApiData(await request.get(`${ORDERING_BASE}/forms/${formGuid}/items/${itemGuid}/history`, { params: { storeGuid }, signal }))
+}
+
+// ---------- 修订版与提醒 ----------
+
+/** 管理端：对比修订版与当前订单表（不写库） */
+export async function previewSupplierPreorderRevision(
+  formGuid: string,
+  payload: SupplierPreorderRevisionPayload,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderRevisionPreview> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/revision/preview`, payload, { signal }))
+}
+
+/** 管理端：应用修订版（按货号对齐；已下的箱数保留；删掉的商品标为已下架） */
+export async function applySupplierPreorderRevision(formGuid: string, payload: SupplierPreorderRevisionPayload): Promise<SupplierPreorderFormDetail> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/revision/apply`, payload))
+}
+
+/** 管理端：提醒还没提交的开启分店（发给下单人员授权里能替该店下单的人） */
+export async function remindSupplierPreorderPendingStores(formGuid: string): Promise<SupplierPreorderRemindResult> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/remind`))
 }

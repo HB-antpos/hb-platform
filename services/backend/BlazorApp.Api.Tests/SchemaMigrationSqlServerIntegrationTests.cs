@@ -1151,6 +1151,40 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单修订版七列_依赖原表_可重复执行_旧行默认值与签名门禁()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var noTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql));
+        Assert.Equal(54008, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderForm (FormGuid, LocalSupplierCode, SupplierName, HolidayType, SeasonYear, Title, Status, ExportQtyUnit, ItemCount, CreatedAtUtc, UpdatedAtUtc, IsDeleted)
+            VALUES (N'f-1', N'257', N'KFC', N'Christmas', 2026, N'KFC 2026', N'Open', N'Cartons', 1, SYSUTCDATETIME(), SYSUTCDATETIME(), 0);
+            INSERT dbo.SupplierPreorderFormItem (ItemGuid, FormGuid, Seq, SourceRowNo, SortOrder, SupplierItemCode, Name, CartonQty, Price, MatchMethod, IsActive)
+            VALUES (N'i-1', N'f-1', 1, 2, 1, N'XD1', N'Bauble', 24, 1.10, N'None', 1);
+            """);
+        var missing = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql));
+        Assert.Equal(54009, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderForm WHERE FormGuid = N'f-1' AND Revision = 0 AND RevisedAtUtc IS NULL)
+               OR NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderFormItem WHERE ItemGuid = N'i-1' AND RevisionNo = 0 AND RevisionChange IS NULL AND PrevPrice IS NULL)
+                THROW 54012, 'Existing rows should get default revision columns.', 1;
+            """);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN RevisionChange nvarchar(20) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql));
+        Assert.Equal(54009, drift.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商预订单图片转存五列_依赖原表_可重复执行_旧行默认值与签名门禁()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

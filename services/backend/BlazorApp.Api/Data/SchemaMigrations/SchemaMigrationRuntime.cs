@@ -207,6 +207,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifySupplierPreorderItemImageAsync(CancellationToken cancellationToken);
 
+    Task ApplySupplierPreorderRevisionAsync(CancellationToken cancellationToken);
+
+    Task VerifySupplierPreorderRevisionAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1274,6 +1278,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             SupplierPreorderItemImageSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplySupplierPreorderRevisionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderRevisionSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 7 列签名通过后协调器才登记账本。
+        await VerifySupplierPreorderRevisionAsync(cancellationToken);
+    }
+
+    public async Task VerifySupplierPreorderRevisionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderRevisionSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
