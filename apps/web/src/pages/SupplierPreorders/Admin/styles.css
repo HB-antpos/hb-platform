@@ -98,6 +98,42 @@ textarea.sp-admin-paste { font-family: ui-monospace, SFMono-Regular, Menlo, Cons
 .sp-admin-matrix .sp-admin-col-total { background: #fafbfc; }
 .sp-admin-summary-row > td { background: #f8f9fb !important; }
 
+/* 去年历史状态条（详情页） */
+.sp-admin-history-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; }
+.sp-admin-history-counts { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: #4b5563; }
+.sp-admin-history-need { color: #cf1322; font-weight: 600; }
+.sp-admin-history-error.ant-tag { max-width: 360px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: middle; }
+
+/* 参考商品：列内显示、悬停卡片、导入校对页单元格 */
+.sp-admin-ref-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sp-admin-ref-tip { display: flex; gap: 10px; max-width: 320px; font-size: 12px; }
+.sp-admin-ref-import-cell { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.sp-admin-ref-import-cell > :first-child { flex: 1; min-width: 0; }
+.sp-admin-ref-hint { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 16px 0; }
+
+/* 选择参考商品弹窗 */
+.sp-admin-ref-picker { display: flex; flex-direction: column; gap: 12px; }
+.sp-admin-ref-self { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid #eef0f4; border-radius: 8px; background: #fafbfc; }
+.sp-admin-ref-self-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sp-admin-ref-self-current { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.sp-admin-ref-current { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.sp-admin-ref-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.sp-admin-ref-list { display: flex; flex-direction: column; gap: 6px; min-height: 120px; max-height: 420px; overflow-y: auto; }
+.sp-admin-ref-list-placeholder { min-height: 120px; }
+.sp-admin-ref-cand { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; cursor: pointer; transition: border-color 0.15s, background-color 0.15s; }
+.sp-admin-ref-cand:hover { border-color: #d3adf7; }
+.sp-admin-ref-cand:focus-visible { outline: 2px solid #9254de; outline-offset: 1px; }
+.sp-admin-ref-cand.is-selected { border-color: #9254de; background: #f9f0ff; }
+.sp-admin-ref-cand.is-weak:not(.is-selected) { background: #fcfcfd; }
+.sp-admin-ref-cand-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-admin-ref-cand-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sp-admin-ref-cand-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #4b5563; }
+.sp-admin-ref-cand-compare { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+.sp-admin-ref-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+@media (prefers-reduced-motion: reduce) {
+  .sp-admin-ref-cand { transition: none; }
+}
+
 @media (max-width: 1100px) {
   .sp-admin-import-grid { grid-template-columns: 1fr; }
   .sp-admin-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -107,4 +143,6 @@ textarea.sp-admin-paste { font-family: ui-monospace, SFMono-Regular, Menlo, Cons
   .sp-admin-form-grid.is-compact { grid-template-columns: 1fr; }
   .sp-admin-form-span2 { grid-column: auto; }
   .sp-admin-search.ant-input-search { width: 100%; }
+  .sp-admin-ref-cand { grid-template-columns: 44px minmax(0, 1fr); }
+  .sp-admin-ref-cand-compare { grid-column: 2; align-items: flex-start; }
 }

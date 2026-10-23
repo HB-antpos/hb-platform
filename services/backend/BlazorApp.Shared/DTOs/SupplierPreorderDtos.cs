@@ -157,6 +157,14 @@ public sealed class SupplierPreorderCreateFormDto
     public string? HeaderSignature { get; set; }
     public SupplierPreorderColumnMappingDto Mapping { get; set; } = new();
     public List<SupplierPreorderParsedRowDto> Rows { get; set; } = new();
+    /// <summary>导入校对页人工指定的参考商品（按原表行号）；ProductCode 为空表示「不要参考」。</summary>
+    public List<SupplierPreorderRefOverrideDto>? RefOverrides { get; set; }
+}
+
+public sealed class SupplierPreorderRefOverrideDto
+{
+    public int RowNo { get; set; }
+    public string? ProductCode { get; set; }
 }
 
 #endregion
@@ -202,6 +210,14 @@ public sealed class SupplierPreorderFormDetailDto
     public int NewCount { get; set; }
     public int WarningCount { get; set; }
     public List<string> Categories { get; set; } = new();
+    /// <summary>去年历史快照的计算状态与窗口。</summary>
+    public SupplierPreorderHistoryStatusDto History { get; set; } = new();
+    /// <summary>本品自己在窗口内有销量的款数。</summary>
+    public int OwnHistoryCount { get; set; }
+    public int RefAutoCount { get; set; }
+    public int RefManualCount { get; set; }
+    /// <summary>本品没有销量、也没有参考商品的款数（需要采购看一眼）。</summary>
+    public int NeedRefCount { get; set; }
 }
 
 public sealed class SupplierPreorderFormQueryDto
@@ -240,7 +256,7 @@ public sealed class SupplierPreorderFormItemQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 50;
     public string? Keyword { get; set; }
-    /// <summary>all / matched / new / warning。</summary>
+    /// <summary>all / matched / new / warning / needRef（没有去年销量也没有参考）/ ref（有参考商品）。</summary>
     public string? Match { get; set; }
 }
 
@@ -262,6 +278,9 @@ public sealed class SupplierPreorderFormItemDto
     public string? MatchedProductCode { get; set; }
     public string? MatchNote { get; set; }
     public int TotalCartons { get; set; }
+    /// <summary>本品自己在历史窗口内（全部分店）的销量；快照未算出时为 null。</summary>
+    public decimal? OwnSalesQty { get; set; }
+    public SupplierPreorderItemRefDto? Ref { get; set; }
 }
 
 public sealed class SupplierPreorderStoreRefDto
@@ -462,6 +481,8 @@ public sealed class SupplierPreorderOrderingContextDto
     public SupplierPreorderOrderingFormDto Form { get; set; } = new();
     public bool IsManager { get; set; }
     public bool CanViewOtherStores { get; set; }
+    /// <summary>去年历史快照状态、窗口与节日关键日期（画迷你曲线用）。</summary>
+    public SupplierPreorderHistoryStatusDto History { get; set; } = new();
     public List<string> Categories { get; set; } = new();
     public DateTime ServerNowUtc { get; set; }
 }
@@ -497,9 +518,10 @@ public sealed class SupplierPreorderOrderingItemQueryDto
     public int PageSize { get; set; } = 50;
     public string? Keyword { get; set; }
     public string? Category { get; set; }
-    /// <summary>all / mine（本店已下单）/ others（其他分店已下单）/ new（新品）/ matched（商品表已有）。</summary>
+    /// <summary>all / mine（本店已下单）/ others（其他分店已下单）/ new（新品）/ matched（商品表已有）/
+    /// lastYearSold（本品去年本店有售，不含参考）/ lastYearDiscounted（本品去年本店打过折，不含参考）。</summary>
     public string? Filter { get; set; }
-    /// <summary>seq / priceAsc / priceDesc / othersDesc（其他分店合计箱数多的在前）。</summary>
+    /// <summary>seq / priceAsc / priceDesc / othersDesc（其他分店合计箱数多的在前）/ lastYearSalesDesc（去年本店销量，含参考）。</summary>
     public string? Sort { get; set; }
 }
 
@@ -527,6 +549,8 @@ public sealed class SupplierPreorderOrderingItemDto
     public int MyCartons { get; set; }
     /// <summary>其他分店已下单；不能查看其他分店时为 null。</summary>
     public List<SupplierPreorderOtherStoreCartonsDto>? OtherStores { get; set; }
+    /// <summary>去年本店数据（本品或参考商品）；null = 无去年记录（或快照还没算出来）。</summary>
+    public SupplierPreorderItemHistoryDto? History { get; set; }
 }
 
 public sealed class SupplierPreorderSaveLineDto
@@ -539,6 +563,188 @@ public sealed class SupplierPreorderSaveLineResultDto
     public string ItemGuid { get; set; } = string.Empty;
     public int Cartons { get; set; }
     public SupplierPreorderOrderingSummaryDto Summary { get; set; } = new();
+}
+
+#endregion
+
+#region 去年历史与参考商品（PR 2）
+
+public sealed class SupplierPreorderKeyDateDto
+{
+    public DateTime Date { get; set; }
+    /// <summary>Halloween / BlackFriday / ChristmasEve / Christmas / BoxingDay / Easter。</summary>
+    public string Key { get; set; } = string.Empty;
+}
+
+public sealed class SupplierPreorderDateRangeDto
+{
+    public DateTime From { get; set; }
+    public DateTime To { get; set; }
+}
+
+/// <summary>订单表的历史快照状态。Status：None 还没排队 / Queued 排队中 / Running 计算中 / Ready 已完成 / Failed 失败 / NoWindow 没有历史窗口。</summary>
+public sealed class SupplierPreorderHistoryStatusDto
+{
+    public string Status { get; set; } = "None";
+    public DateTime? ComputedAtUtc { get; set; }
+    public DateTime? RequestedAtUtc { get; set; }
+    public string? Error { get; set; }
+    public DateTime? WindowFrom { get; set; }
+    public DateTime? WindowTo { get; set; }
+    public List<SupplierPreorderKeyDateDto> KeyDates { get; set; } = new();
+}
+
+/// <summary>商品挂的参考商品（管理端、下单端共用）。</summary>
+public sealed class SupplierPreorderItemRefDto
+{
+    /// <summary>Auto 系统推荐 / Manual 人工指定 / Cleared 人工清除（ProductCode 为空）。</summary>
+    public string Source { get; set; } = string.Empty;
+    public string? ProductCode { get; set; }
+    public string? ItemNumber { get; set; }
+    public string? Barcode { get; set; }
+    public string? Name { get; set; }
+    public decimal? PurchasePrice { get; set; }
+    public string? ImageUrl { get; set; }
+    public decimal? Score { get; set; }
+    public string? SetBy { get; set; }
+    public DateTime? SetAtUtc { get; set; }
+    /// <summary>参考商品在历史窗口内（全部分店）的销量。</summary>
+    public decimal? SalesQty { get; set; }
+}
+
+/// <summary>
+/// 下单列表里一行商品的去年本店数据。Source = Own 本品自己的 / Ref 借用参考商品的（整格紫色、标「参考 XXX」）。
+/// HasStoreData = false 表示这个商品去年在别的分店有记录、本店没有。
+/// Daily 为稀疏数组：[距窗口起点天数, 净销量, 折扣销量]。
+/// </summary>
+public sealed class SupplierPreorderItemHistoryDto
+{
+    public string Source { get; set; } = "Own";
+    public string ProductCode { get; set; } = string.Empty;
+    public SupplierPreorderItemRefDto? Ref { get; set; }
+    public bool HasStoreData { get; set; }
+    public DateTime? PurchaseFirst { get; set; }
+    public DateTime? PurchaseLast { get; set; }
+    public int PurchaseBatches { get; set; }
+    public decimal PurchaseQty { get; set; }
+    public DateTime? SalesFirst { get; set; }
+    public DateTime? SalesLast { get; set; }
+    public decimal SalesQty { get; set; }
+    public decimal? SellThrough { get; set; }
+    /// <summary>complete / partial / unknown / none。</summary>
+    public string DiscountStatus { get; set; } = "none";
+    public bool HasDiscount { get; set; }
+    public decimal? DiscountShare { get; set; }
+    public List<SupplierPreorderDateRangeDto> DiscountRanges { get; set; } = new();
+    public List<decimal[]> Daily { get; set; } = new();
+}
+
+public sealed class SupplierPreorderHistoryBatchDto
+{
+    public DateTime Date { get; set; }
+    /// <summary>warehouse 总仓配货 / supplier 供应商直送（分店进货单）。</summary>
+    public string Source { get; set; } = "warehouse";
+    public decimal Quantity { get; set; }
+    public string? DocumentNo { get; set; }
+}
+
+/// <summary>某家分店去年的数据。展开行的本店用全量（含 Daily、Batches）；各分店对比只填汇总数字。</summary>
+public sealed class SupplierPreorderStoreHistoryDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreName { get; set; } = string.Empty;
+    public bool IsCurrent { get; set; }
+    public bool HasData { get; set; }
+    public DateTime? PurchaseFirst { get; set; }
+    public DateTime? PurchaseLast { get; set; }
+    public int PurchaseBatches { get; set; }
+    public decimal PurchaseQty { get; set; }
+    public decimal WarehouseQty { get; set; }
+    public decimal SupplierQty { get; set; }
+    public DateTime? SalesFirst { get; set; }
+    public DateTime? SalesLast { get; set; }
+    public decimal SalesQty { get; set; }
+    public decimal? SellThrough { get; set; }
+    public string DiscountStatus { get; set; } = "none";
+    public bool HasDiscount { get; set; }
+    public decimal? DiscountShare { get; set; }
+    public decimal? RetailPrice { get; set; }
+    public decimal? DiscountPriceMin { get; set; }
+    public List<SupplierPreorderDateRangeDto> DiscountRanges { get; set; } = new();
+    public List<decimal[]> Daily { get; set; } = new();
+    public List<SupplierPreorderHistoryBatchDto> Batches { get; set; } = new();
+    /// <summary>今年这家店已订箱数（只算开启分店）；对比表用。</summary>
+    public int? ThisYearCartons { get; set; }
+}
+
+/// <summary>展开行：本店大图 + 小结 + 各分店去年对比（不能看其他分店时 Stores 为 null）。</summary>
+public sealed class SupplierPreorderItemHistoryDetailDto
+{
+    public string ItemGuid { get; set; } = string.Empty;
+    /// <summary>Own / Ref / None。</summary>
+    public string Source { get; set; } = "None";
+    public string? ProductCode { get; set; }
+    public SupplierPreorderItemRefDto? Ref { get; set; }
+    public DateTime? WindowFrom { get; set; }
+    public DateTime? WindowTo { get; set; }
+    public List<SupplierPreorderKeyDateDto> KeyDates { get; set; } = new();
+    public SupplierPreorderStoreHistoryDto? Store { get; set; }
+    /// <summary>去年本店销量 ÷ 箱规（只作参考，不自动填）。</summary>
+    public int? SuggestedCartons { get; set; }
+    public List<SupplierPreorderStoreHistoryDto>? Stores { get; set; }
+}
+
+/// <summary>参考商品候选（推荐或搜索结果）。</summary>
+public sealed class SupplierPreorderRefCandidateDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string? ItemNumber { get; set; }
+    public string? Barcode { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal? PurchasePrice { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? LocalSupplierCode { get; set; }
+    public decimal SalesQty { get; set; }
+    public decimal PurchaseQty { get; set; }
+    public decimal Score { get; set; }
+    public decimal NameScore { get; set; }
+    public decimal PriceScore { get; set; }
+    /// <summary>是否过了两个硬门槛（名称 ≥ 0.5、进价差 &lt; 30%）。</summary>
+    public bool Eligible { get; set; }
+    /// <summary>窗口内没有销量也没有进货：选它也看不到数据。</summary>
+    public bool HasHistory { get; set; }
+}
+
+public sealed class SupplierPreorderRefCandidatesDto
+{
+    public DateTime? WindowFrom { get; set; }
+    public DateTime? WindowTo { get; set; }
+    /// <summary>同供应商、窗口内有记录、过了门槛的前 3 个（没有关键词时）。</summary>
+    public List<SupplierPreorderRefCandidateDto> Recommended { get; set; } = new();
+    /// <summary>按货号 / 条码 / 名称搜索的结果（有关键词时，不限供应商）。</summary>
+    public List<SupplierPreorderRefCandidateDto> SearchResults { get; set; } = new();
+}
+
+public sealed class SupplierPreorderSetRefDto
+{
+    /// <summary>Manual 指定（ProductCode 必填）/ Clear 清除且不再自动带上 / Auto 交回系统推荐（下次计算时重新挑）。</summary>
+    public string Mode { get; set; } = "Manual";
+    public string? ProductCode { get; set; }
+}
+
+/// <summary>导入校对页（订单表还没建）找参考商品：按将要建的订单表的供应商与历史窗口打分。</summary>
+public sealed class SupplierPreorderImportRefCandidatesRequestDto
+{
+    public string LocalSupplierCode { get; set; } = string.Empty;
+    public string HolidayType { get; set; } = "Christmas";
+    public int SeasonYear { get; set; }
+    public DateTime? HistoryFrom { get; set; }
+    public DateTime? HistoryTo { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public string? Keyword { get; set; }
+    /// <summary>已匹配给本订单表其他行的我方商品，不作参考候选。</summary>
+    public List<string>? ExcludeProductCodes { get; set; }
 }
 
 #endregion

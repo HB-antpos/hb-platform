@@ -468,6 +468,8 @@
     <Compile Include="SupplierPreorderSheetParserTests.cs" />
     <Compile Include="SupplierPreorderRulesTests.cs" />
     <Compile Include="SupplierPreorderServiceSqliteTests.cs" />
+    <Compile Include="SupplierPreorderHistoryRulesTests.cs" />
+    <Compile Include="SupplierPreorderHistorySqliteTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />

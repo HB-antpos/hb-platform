@@ -1,9 +1,10 @@
 // 供应商节日预订单 · 下单页（/supplier-preorder-ordering/:formGuid，设计图 1）
 // 被授权的下单人员替自己的分店按「整箱」下单：步进/失焦即保存，截止后只读；
 // 可查看其他分店的人能看到其他分店已订箱数（只读）。
-// 本 PR 不含：去年进货/销售/日销曲线/折扣/展开大图/参考商品（列定义已集中在 orderingColumns.tsx，便于下一个 PR 插入）。
+// 每行带「去年本店」进货 / 销售 / 日销曲线 / 折扣（列定义在 orderingColumns.tsx）；点击行首展开，懒加载去年大图与各分店对比。
 import { ArrowLeftOutlined, DownloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Input, Result, Segmented, Select, Spin, Tag } from 'antd'
+import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -13,11 +14,14 @@ import {
   downloadSupplierPreorderStoreExport,
   getSupplierPreorderOrderingContext,
   getSupplierPreorderOrderingItems,
+  getSupplierPreorderItemHistory,
   getSupplierPreorderOrderingSummary,
   saveSupplierPreorderLine,
   submitSupplierPreorderStoreOrder,
 } from '../../../services/supplierPreorderService'
 import type {
+  SupplierPreorderHistoryStatus,
+  SupplierPreorderKeyDate,
   SupplierPreorderOrderingContext,
   SupplierPreorderOrderingFilter,
   SupplierPreorderOrderingItem,
@@ -28,6 +32,8 @@ import type {
 
 import { createLineSaveQueue, makeLineKey, parseLineKey, type LineSaveQueue } from './lineSaveQueue.logic'
 import { buildOrderingColumns } from './orderingColumns'
+import { windowDayCount } from './orderingHistory.logic'
+import OrderingHistoryExpand, { type HistoryDetailEntry } from './OrderingHistoryExpand'
 import './orderingMessages'
 import {
   ORDERING_PAGE_SIZES,
@@ -64,6 +70,24 @@ const CLOCK_TICK_MS = 15_000
 const MAX_TIMEOUT_MS = 2_147_483_647
 
 type SaveResultWithSeq = { result: SupplierPreorderSaveLineResult; seq: number; overlapped: boolean }
+
+const EMPTY_KEY_DATES: SupplierPreorderKeyDate[] = []
+
+/** 工具栏右侧的历史口径：窗口日期 + 快照状态（计算中 / 失败） */
+function HistoryWindowNote({ t, history }: { t: TFunction; history: SupplierPreorderHistoryStatus | null }) {
+  if (!history) return null
+  const pending = history.status === 'None' || history.status === 'Queued' || history.status === 'Running'
+  return (
+    <span className="sp-hist-window">
+      <span className="sp-order-muted">{t(`${NS}.toolbar.historyLabel`)}</span>
+      {history.windowFrom && history.windowTo
+        ? t(`${NS}.toolbar.historyWindow`, { from: formatBusinessDate(history.windowFrom), to: formatBusinessDate(history.windowTo) })
+        : t(`${NS}.toolbar.historyNoWindow`)}
+      {pending ? <Tag className="sp-hist-tag">{t(`${NS}.toolbar.historyPending`)}</Tag> : null}
+      {history.status === 'Failed' ? <Tag color="orange" className="sp-hist-tag">{t(`${NS}.toolbar.historyFailed`)}</Tag> : null}
+    </span>
+  )
+}
 
 /** 用最新汇总同步分店下拉里的状态与箱数/金额 */
 function applySummaryToContext(context: SupplierPreorderOrderingContext, summary: SupplierPreorderOrderingSummary): SupplierPreorderOrderingContext {
@@ -114,7 +138,8 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
   const [keyword, setKeyword] = useState('')
   const [category, setCategory] = useState<string | undefined>(undefined)
   const [filter, setFilter] = useState<SupplierPreorderOrderingFilter>('all')
-  const [sort, setSort] = useState<SupplierPreorderOrderingSort>('seq')
+  // 默认按去年本店销量从高到低（设计图 1）；本页没有记忆排序
+  const [sort, setSort] = useState<SupplierPreorderOrderingSort>('lastYearSalesDesc')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => readStoredPageSize(storage))
   const [rows, setRows] = useState<SupplierPreorderOrderingItem[]>([])
@@ -130,6 +155,12 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
   const [summary, setSummary] = useState<SupplierPreorderOrderingSummary | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [exporting, setExporting] = useState(false)
+
+  // ---------- 展开行：去年大图（按商品懒加载并缓存，只针对当前分店） ----------
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+  const [historyDetails, setHistoryDetails] = useState<Record<string, HistoryDetailEntry>>({})
+  /** 正在加载的展开行请求（商品 → 取消器）；切店、翻页、换筛选时全部取消 */
+  const historyControllersRef = useRef(new Map<string, AbortController>())
 
   const mountedRef = useRef(true)
   const formGuidRef = useRef(formGuid)
@@ -330,6 +361,69 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
     return () => window.clearTimeout(timer)
   }, [searchText, keyword])
 
+  // ---------- 展开行加载 ----------
+  /** 取消所有进行中的展开行请求，并去掉它们的「加载中」状态（下次展开会重新请求） */
+  const abortHistoryLoads = useCallback(() => {
+    const pending = [...historyControllersRef.current.keys()]
+    historyControllersRef.current.forEach((controller) => controller.abort())
+    historyControllersRef.current.clear()
+    if (!pending.length) return
+    setHistoryDetails((prev) => {
+      const next = { ...prev }
+      for (const itemGuid of pending) if (next[itemGuid]?.status === 'loading') delete next[itemGuid]
+      return next
+    })
+  }, [])
+
+  // 切换分店：取消请求、清空缓存并收起所有展开行（缓存只属于某一家分店）
+  useEffect(() => {
+    abortHistoryLoads()
+    setHistoryDetails({})
+    setExpandedKeys([])
+  }, [storeGuid, abortHistoryLoads])
+
+  // 翻页 / 换筛选 / 搜索：取消还没回来的请求并收起展开行；已加载的缓存保留（同一分店数据不变）
+  useEffect(() => {
+    abortHistoryLoads()
+    setExpandedKeys([])
+  }, [page, pageSize, keyword, category, filter, sort, abortHistoryLoads])
+
+  // 卸载时取消所有展开行请求
+  useEffect(() => () => historyControllersRef.current.forEach((controller) => controller.abort()), [])
+
+  const loadHistoryDetail = useCallback(
+    (itemGuid: string) => {
+      const currentStore = storeGuidRef.current
+      if (!currentStore) return
+      historyControllersRef.current.get(itemGuid)?.abort()
+      const controller = new AbortController()
+      historyControllersRef.current.set(itemGuid, controller)
+      setHistoryDetails((prev) => ({ ...prev, [itemGuid]: { status: 'loading' } }))
+      getSupplierPreorderItemHistory(formGuid, itemGuid, currentStore, controller.signal)
+        .then((detail) => {
+          // 已被取消（切店/翻页）或已切到别的分店：丢弃结果
+          if (controller.signal.aborted || storeGuidRef.current !== currentStore) return
+          setHistoryDetails((prev) => ({ ...prev, [itemGuid]: { status: 'ready', detail } }))
+        })
+        .catch((error: unknown) => {
+          if (isAbortError(error) || controller.signal.aborted || storeGuidRef.current !== currentStore) return
+          setHistoryDetails((prev) => ({ ...prev, [itemGuid]: { status: 'error', message: getErrorMessage(error, t(`${NS}.expand.loadFailed`)) } }))
+        })
+        .finally(() => {
+          if (historyControllersRef.current.get(itemGuid) === controller) historyControllersRef.current.delete(itemGuid)
+        })
+    },
+    [formGuid, t],
+  )
+
+  const onExpandRow = (expanded: boolean, row: SupplierPreorderOrderingItem) => {
+    setExpandedKeys((prev) => (expanded ? [...prev.filter((key) => key !== row.itemGuid), row.itemGuid] : prev.filter((key) => key !== row.itemGuid)))
+    if (!expanded) return
+    // 同一分店加载过就用缓存；失败的重新请求
+    const cached = historyDetails[row.itemGuid]
+    if (!cached || cached.status === 'error') loadHistoryDetail(row.itemGuid)
+  }
+
   // ---------- 加载商品（服务端分页） ----------
   useEffect(() => {
     if (!storeGuid || !formGuid) return
@@ -379,6 +473,9 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
 
   const onInvalidInput = useCallback(() => message.warning(t(`${NS}.table.invalidInput`)), [message, t])
 
+  const historyStatus = context?.history ?? null
+  const historyWindowDays = windowDayCount(historyStatus?.windowFrom, historyStatus?.windowTo)
+
   const columns = useMemo(
     () =>
       buildOrderingColumns({
@@ -389,8 +486,12 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
         isSaving: (itemGuid) => (storeGuid ? savingKeys.has(makeLineKey(storeGuid, itemGuid)) : false),
         onCommit,
         onInvalidInput,
+        historyStatus: historyStatus?.status ?? null,
+        historyWindowFrom: historyStatus?.windowFrom ?? null,
+        historyWindowDays,
+        historyKeyDates: historyStatus?.keyDates ?? EMPTY_KEY_DATES,
       }),
-    [t, canViewOtherStores, canEdit, drafts, savingKeys, storeGuid, onCommit, onInvalidInput],
+    [t, canViewOtherStores, canEdit, drafts, savingKeys, storeGuid, onCommit, onInvalidInput, historyStatus, historyWindowDays],
   )
 
   const currentStoreBusy = storeGuid ? [...savingKeys].some((key) => parseLineKey(key).storeGuid === storeGuid) : false
@@ -508,12 +609,15 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
 
   const filterOptions: { label: string; value: SupplierPreorderOrderingFilter }[] = [
     { label: t(`${NS}.toolbar.filterAll`), value: 'all' },
+    { label: t(`${NS}.toolbar.filterLastYearSold`), value: 'lastYearSold' },
+    { label: t(`${NS}.toolbar.filterNew`), value: 'new' },
+    { label: t(`${NS}.toolbar.filterLastYearDiscounted`), value: 'lastYearDiscounted' },
     { label: t(`${NS}.toolbar.filterMine`), value: 'mine' },
     ...(canViewOtherStores ? [{ label: t(`${NS}.toolbar.filterOthers`), value: 'others' as const }] : []),
-    { label: t(`${NS}.toolbar.filterNew`), value: 'new' },
     { label: t(`${NS}.toolbar.filterMatched`), value: 'matched' },
   ]
   const sortOptions: { label: string; value: SupplierPreorderOrderingSort }[] = [
+    { label: t(`${NS}.toolbar.sortLastYearSalesDesc`), value: 'lastYearSalesDesc' },
     { label: t(`${NS}.toolbar.sortSeq`), value: 'seq' },
     { label: t(`${NS}.toolbar.sortPriceAsc`), value: 'priceAsc' },
     { label: t(`${NS}.toolbar.sortPriceDesc`), value: 'priceDesc' },
@@ -656,6 +760,7 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
           <Button type="link" size="small" onClick={() => { setItemsReloadKey((value) => value + 1); setSummaryReloadKey((value) => value + 1) }}>
             {t(`${NS}.page.refresh`)}
           </Button>
+          <HistoryWindowNote t={t} history={historyStatus} />
         </div>
         <MeasuredTable<SupplierPreorderOrderingItem>
           metricId="supplier-preorder-ordering-items"
@@ -665,8 +770,23 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
           loading={itemsLoading}
           columns={columns}
           dataSource={rows}
-          scroll={{ x: canViewOtherStores ? 1060 : 860 }}
+          scroll={{ x: canViewOtherStores ? 1560 : 1350 }}
           rowClassName={(row) => ((drafts[row.itemGuid] ?? row.myCartons) > 0 ? 'sp-order-row-mine' : '')}
+          expandable={{
+            expandedRowKeys: expandedKeys,
+            onExpand: onExpandRow,
+            columnWidth: 36,
+            expandedRowClassName: () => 'sp-hist-expanded-row',
+            expandedRowRender: (row) => (
+              <OrderingHistoryExpand
+                t={t}
+                row={row}
+                entry={historyDetails[row.itemGuid]}
+                storeName={selectedStore?.storeName ?? ''}
+                onRetry={() => loadHistoryDetail(row.itemGuid)}
+              />
+            ),
+          }}
           locale={{ emptyText: t(`${NS}.table.empty`) }}
           pagination={{
             current: page,

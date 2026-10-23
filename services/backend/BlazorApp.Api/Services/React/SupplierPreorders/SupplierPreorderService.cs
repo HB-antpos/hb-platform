@@ -61,6 +61,13 @@ public interface ISupplierPreorderService
     Task<SupplierPreorderSaveLineResultDto> SaveLineAsync(string formGuid, string storeGuid, string itemGuid, SupplierPreorderSaveLineDto request);
     Task<SupplierPreorderOrderingSummaryDto> SubmitStoreOrderAsync(string formGuid, string storeGuid);
     Task<SupplierPreorderExportFile> ExportStoreOrderAsync(string formGuid, string storeGuid);
+
+    // 去年历史与参考商品（PR 2）
+    Task<SupplierPreorderItemHistoryDetailDto> GetOrderingItemHistoryAsync(string formGuid, string itemGuid, string storeGuid);
+    Task<SupplierPreorderFormDetailDto> RecomputeHistoryAsync(string formGuid);
+    Task<SupplierPreorderRefCandidatesDto> GetRefCandidatesAsync(string formGuid, string itemGuid, string? keyword);
+    Task<SupplierPreorderFormItemDto> SetItemRefAsync(string formGuid, string itemGuid, SupplierPreorderSetRefDto request);
+    Task<SupplierPreorderRefCandidatesDto> GetImportRefCandidatesAsync(SupplierPreorderImportRefCandidatesRequestDto request);
 }
 
 public sealed record SupplierPreorderExportFile(byte[] Content, string ContentType, string FileName);
@@ -84,6 +91,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
     private readonly IRoleService _roleService;
     private readonly ILogger<SupplierPreorderService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly SupplierPreorderHistoryService _history;
 
     public SupplierPreorderService(
         SqlSugarContext context,
@@ -115,6 +123,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         _roleService = roleService;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _history = new SupplierPreorderHistoryService(db, logger, _timeProvider);
     }
 
     private DateTime NowUtc => _timeProvider.GetUtcNow().UtcDateTime;

@@ -404,3 +404,43 @@ public class SupplierPreorderSourceFile
     [SugarColumn(Length = 100, IsNullable = true)]
     public string? UploadedBy { get; set; }
 }
+
+/// <summary>参考商品来源：Auto 系统推荐（每次计算可换）；Manual 人工指定（系统不覆盖）；Cleared 人工清除（系统不再自动带上）。</summary>
+public static class SupplierPreorderRefSources
+{
+    public const string Auto = "Auto";
+    public const string Manual = "Manual";
+    public const string Cleared = "Cleared";
+}
+
+/// <summary>
+/// 去年历史快照（迁移 20261023.002-supplier-preorder-history 建表，不进 tableTypes）。
+/// 一行 = 一张订单表 × 一家分店 × 一个我方商品（本品或参考商品）在历史窗口内的进货、日销与折扣；只存有数据的组合。
+/// 另有一行 StoreCode = ProductCode = "*" 的表头行，记录这张订单表的计算状态（排队 / 计算中 / 完成 / 失败）与窗口。
+/// </summary>
+[SugarTable("SupplierPreorderHistorySnapshot")]
+public class SupplierPreorderHistorySnapshot
+{
+    /// <summary>表头行的 StoreCode / ProductCode。</summary>
+    public const string FormMetaKey = "*";
+
+    [SugarColumn(IsPrimaryKey = true, Length = 50)]
+    public string SnapshotGuid { get; set; } = Guid.NewGuid().ToString("N");
+
+    [SugarColumn(Length = 50)]
+    public string FormGuid { get; set; } = string.Empty;
+
+    [SugarColumn(Length = 50)]
+    public string StoreCode { get; set; } = string.Empty;
+
+    [SugarColumn(Length = 100)]
+    public string ProductCode { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnDataType = StaticConfig.CodeFirst_BigString)]
+    public string PayloadJson { get; set; } = string.Empty;
+
+    public DateTime ComputedAtUtc { get; set; } = DateTime.UtcNow;
+
+    [SugarColumn(Length = 50)]
+    public string RuleVersion { get; set; } = string.Empty;
+}

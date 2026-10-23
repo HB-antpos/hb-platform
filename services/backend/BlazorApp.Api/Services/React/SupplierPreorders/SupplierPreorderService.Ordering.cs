@@ -169,6 +169,7 @@ public sealed partial class SupplierPreorderService
             CanViewOtherStores = identity.CanViewOtherStores,
             Categories = snapshot.Items.Where(i => i.IsActive).Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c).Cast<string>().ToList(),
             ServerNowUtc = NowUtc,
+            History = (await LoadHistoryStateAsync(snapshot.Form, null)).Status,
         };
     }
 
@@ -230,6 +231,11 @@ public sealed partial class SupplierPreorderService
                 .ToDictionary(g => g.Key, g => g.GroupBy(x => x.Order.StoreName).Select(s => new SupplierPreorderOtherStoreCartonsDto { StoreName = s.Key, Cartons = s.Sum(x => x.Line.Cartons) }).OrderByDescending(s => s.Cartons).ToList())
             : new Dictionary<string, List<SupplierPreorderOtherStoreCartonsDto>>();
 
+        // 去年历史：只读本店 + 全部分店合计（合计只用于判定本品有没有历史），不读其他分店
+        var history = await LoadHistoryStateAsync(snapshot.Form, new[] { store.StoreCode.Trim(), AllStoresKey });
+        var histories = snapshot.Items.Where(i => i.IsActive)
+            .ToDictionary(i => i.ItemGuid, i => BuildItemHistory(i, store.StoreCode, history, null));
+
         IEnumerable<SupplierPreorderFormItem> items = snapshot.Items.Where(i => i.IsActive);
         if (!string.IsNullOrWhiteSpace(query.Category))
         {
@@ -242,6 +248,9 @@ public sealed partial class SupplierPreorderService
             "others" when identity.CanViewOtherStores => items.Where(i => others.ContainsKey(i.ItemGuid)),
             "new" => items.Where(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             "matched" => items.Where(i => i.MatchMethod != SupplierPreorderMatchMethods.None),
+            // 去年有售 / 去年打过折：只看本品自己在本店的数据，不含参考商品
+            "lastYearSold" => items.Where(i => histories[i.ItemGuid] is { Source: "Own", SalesQty: > 0 }),
+            "lastYearDiscounted" => items.Where(i => histories[i.ItemGuid] is { Source: "Own", HasDiscount: true }),
             _ => items,
         };
         items = FilterByKeyword(items, query.Keyword);
@@ -250,11 +259,19 @@ public sealed partial class SupplierPreorderService
             "priceAsc" => items.OrderBy(i => i.Price).ThenBy(i => i.SortOrder),
             "priceDesc" => items.OrderByDescending(i => i.Price).ThenBy(i => i.SortOrder),
             "othersDesc" when identity.CanViewOtherStores => items.OrderByDescending(i => others.TryGetValue(i.ItemGuid, out var o) ? o.Sum(x => x.Cartons) : 0).ThenBy(i => i.SortOrder),
+            // 去年本店销量（含参考商品）从高到低；没有记录的排最后
+            "lastYearSalesDesc" => items
+                .OrderByDescending(i => histories[i.ItemGuid] is { HasStoreData: true } h ? h.SalesQty : decimal.MinValue)
+                .ThenBy(i => i.SortOrder),
             _ => items.OrderBy(i => i.SortOrder),
         };
 
         var paged = Page(items.ToList(), query.Page, query.PageSize);
         var images = await LoadProductImagesAsync(paged.Items!);
+        // 本页借用参考商品的行补上参考商品信息（名称、图片、进价，悬停对比用）
+        var refProducts = await _history.LoadProductsAsync(paged.Items!
+            .Where(i => histories[i.ItemGuid]?.Source == "Ref")
+            .Select(i => histories[i.ItemGuid]!.ProductCode));
         return new PagedResult<SupplierPreorderOrderingItemDto>
         {
             Total = paged.Total,
@@ -277,6 +294,7 @@ public sealed partial class SupplierPreorderService
                 IsNew = i.MatchMethod == SupplierPreorderMatchMethods.None,
                 MyCartons = myCartons.GetValueOrDefault(i.ItemGuid),
                 OtherStores = identity.CanViewOtherStores ? others.GetValueOrDefault(i.ItemGuid) ?? new List<SupplierPreorderOtherStoreCartonsDto>() : null,
+                History = histories[i.ItemGuid] is { Source: "Ref" } ? BuildItemHistory(i, store.StoreCode, history, refProducts) : histories[i.ItemGuid],
             }).ToList(),
         };
     }
