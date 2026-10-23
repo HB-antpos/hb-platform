@@ -391,6 +391,19 @@ function presenter(
   });
 }
 
+// 键盘图标现在先打开 App 内搜索键盘；系统键盘路径改由面板里的「系统键盘」键触发。
+async function requestSystemSearchKeyboard(
+  screen: Awaited<ReturnType<typeof render>>,
+  keyboardButton: ReturnType<
+    Awaited<ReturnType<typeof render>>["getByTestId"]
+  > = screen.getByTestId("sales-show-keyboard"),
+): Promise<void> {
+  await fireEvent.press(keyboardButton);
+  await fireEvent.press(
+    screen.getByTestId("sales-search-keyboard-key-system"),
+  );
+}
+
 async function pressKeypadKeys(
   screen: Awaited<ReturnType<typeof render>>,
   testIDPrefix: string,
@@ -2301,7 +2314,7 @@ describe("SalesScreen", () => {
       });
       expect(revealInput).not.toHaveBeenCalled();
 
-      await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+      await requestSystemSearchKeyboard(screen);
       await act(() => {
         jest.runOnlyPendingTimers();
       });
@@ -2352,7 +2365,7 @@ describe("SalesScreen", () => {
     jest.useFakeTimers();
     try {
       await fireEvent(searchInput, "focus");
-      await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+      await requestSystemSearchKeyboard(screen);
       expect(
         screen.getByTestId("sales-search-input").props.showSoftInputOnFocus,
       ).toBe(false);
@@ -2466,7 +2479,7 @@ describe("SalesScreen", () => {
         screen.getByTestId("sales-search-input").props.showSoftInputOnFocus,
       ).toBe(false);
 
-      await fireEvent.press(keyboardButton);
+      await requestSystemSearchKeyboard(screen, keyboardButton);
       expect(textInputPrototype.blur).toHaveBeenCalledTimes(1);
       expect(textInputPrototype.setNativeProps).toHaveBeenCalledWith({
         showSoftInputOnFocus: false,
@@ -2534,7 +2547,7 @@ describe("SalesScreen", () => {
       await fireEvent(screen.getByTestId("sales-search-input"), "focus", {
         target: 405,
       });
-      await fireEvent.press(keyboardButton);
+      await requestSystemSearchKeyboard(screen, keyboardButton);
       expect(textInputPrototype.blur).toHaveBeenCalledTimes(1);
       expect(textInputPrototype.setNativeProps).toHaveBeenCalledWith({
         showSoftInputOnFocus: false,
@@ -2624,7 +2637,7 @@ describe("SalesScreen", () => {
     textInputPrototype.setNativeProps.mockClear();
     jest.useFakeTimers();
     try {
-      await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+      await requestSystemSearchKeyboard(screen);
       expect(textInputPrototype.blur).not.toHaveBeenCalled();
       expect(
         screen.getByTestId("sales-search-input").props.showSoftInputOnFocus,
@@ -2699,7 +2712,7 @@ describe("SalesScreen", () => {
       textInputPrototype.isFocused.mockReturnValue(true);
       textInputPrototype.setNativeProps.mockClear();
 
-      await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+      await requestSystemSearchKeyboard(screen);
       await screen.rerender(
         <SalesScreen
           {...defaultProps}
@@ -2731,7 +2744,7 @@ describe("SalesScreen", () => {
       textInputPrototype.focus.mockClear();
       textInputPrototype.isFocused.mockReturnValue(false);
       textInputPrototype.setNativeProps.mockClear();
-      await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+      await requestSystemSearchKeyboard(screen);
       await screen.unmount();
       await act(() => {
         jest.runAllTimers();
@@ -3791,6 +3804,108 @@ describe("SalesScreen", () => {
     expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
     expect(screen.queryByTestId("sales-lookup-selection-pending-bar")).toBeNull();
     expect(addLookupCandidate).toHaveBeenCalledTimes(1);
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("键盘图标开关 App 内搜索键盘，按键写入搜索词且不抢 HID 焦点", async () => {
+    const onManualInputFocusChange = jest.fn();
+    const textInputPrototype = (
+      TextInput as unknown as { prototype: { focus: jest.Mock } }
+    ).prototype;
+    textInputPrototype.focus.mockClear();
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        onManualInputFocusChange={onManualInputFocusChange}
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("sales-search-keyboard")).toBeNull();
+    await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+    expect(screen.getByTestId("sales-search-keyboard")).toBeTruthy();
+    for (const key of ["M", "I", "L", "K", "space", "2", "backspace"]) {
+      await fireEvent.press(
+        screen.getByTestId(`sales-search-keyboard-key-${key}`),
+      );
+    }
+
+    expect(salesPresenter.getState().query).toBe("MILK ");
+    expect(screen.getByTestId("sales-search-input").props.value).toBe("MILK ");
+    expect(
+      screen.getByTestId("sales-search-keyboard-key-clear").props
+        .accessibilityLabel,
+    ).toBe("清空");
+    // 面板不聚焦任何输入框，隐藏 HID 输入保持焦点，扫码枪在打开期间照常可用。
+    expect(textInputPrototype.focus).not.toHaveBeenCalled();
+    expect(onManualInputFocusChange).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+    expect(screen.queryByTestId("sales-search-keyboard")).toBeNull();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("搜索键收起键盘并按当前搜索词执行搜索", async () => {
+    const searchProducts = jest.fn<SalesWorkflowPort["searchProducts"]>(
+      async () => [],
+    );
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART), {
+      workflow: { ...workflow(), searchProducts },
+    });
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+    await fireEvent.press(screen.getByTestId("sales-search-keyboard-key-A"));
+    await fireEvent.press(screen.getByTestId("sales-search-keyboard-key-1"));
+    await fireEvent.press(
+      screen.getByTestId("sales-search-keyboard-key-search"),
+    );
+
+    await waitFor(() => expect(searchProducts).toHaveBeenCalledWith("A1"));
+    expect(screen.queryByTestId("sales-search-keyboard")).toBeNull();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("交易门禁生效时自动收起搜索键盘，解除后也不会自行重开", async () => {
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const defaultProps = {
+      locale: "zh" as const,
+      presenter: salesPresenter,
+      showStatusStrip: false,
+    };
+    const screen = await render(<SalesScreen {...defaultProps} />);
+
+    await fireEvent.press(screen.getByTestId("sales-show-keyboard"));
+    expect(screen.getByTestId("sales-search-keyboard")).toBeTruthy();
+
+    await screen.rerender(
+      <SalesScreen
+        {...defaultProps}
+        newTransactionGate={{
+          state: "force-update",
+          canStartNewTransaction: false,
+          canContinueRecovery: true,
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("sales-search-keyboard")).toBeNull();
+
+    await screen.rerender(<SalesScreen {...defaultProps} />);
+    expect(screen.queryByTestId("sales-search-keyboard")).toBeNull();
 
     salesPresenter.destroy();
     await screen.unmount();

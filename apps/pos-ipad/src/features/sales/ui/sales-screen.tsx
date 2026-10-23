@@ -48,6 +48,11 @@ import {
   type SalesPresenter,
   type SalesProductSearchItem,
 } from "./sales-presenter";
+import {
+  applySalesSearchKey,
+  SalesSearchKeyboard,
+  type SalesSearchKey,
+} from "./sales-search-keyboard";
 import { SalesToolbar, type SalesToolbarAction } from "./sales-toolbar";
 import {
   DEFAULT_SALES_TOOLBAR_ORDER,
@@ -241,6 +246,7 @@ export function SalesScreen({
     result: SalesUtilityActionResult;
   }> | null>(null);
   const [searchSoftInputOnFocus, setSearchSoftInputOnFocus] = useState(false);
+  const [searchKeyboardVisible, setSearchKeyboardVisible] = useState(false);
   const searchInputRef = useRef<NativeTextInput>(null);
   const cartListRef = useRef<FlatList<CartLine>>(null);
   const cartLinesRef = useRef(state.cart.lines);
@@ -425,6 +431,33 @@ export function SalesScreen({
     scheduleSearchKeyboardEnable(requestGeneration);
   };
 
+  // 连着蓝牙扫码枪时 iPadOS 处于外接键盘模式，聚焦输入框只给工具条、不会自动弹出系统软键盘；
+  // 键盘图标因此改为开关 App 内搜索键盘，系统键盘（如需中文输入）仍可从面板的「系统键盘」键唤起。
+  const toggleSearchKeyboard = (): void => {
+    setSearchKeyboardVisible((visible) => !visible);
+  };
+
+  const handleSearchKeyboardKey = (key: SalesSearchKey): void => {
+    switch (key.kind) {
+      case "search":
+        setSearchKeyboardVisible(false);
+        runCombinedProductSearch();
+        return;
+      case "close":
+        setSearchKeyboardVisible(false);
+        return;
+      case "system":
+        setSearchKeyboardVisible(false);
+        requestSearchKeyboard();
+        return;
+      default:
+        // 读 presenter 最新状态再拼接，连续快速点按时不会基于过期的渲染值。
+        presenter.setQuery(
+          applySalesSearchKey(presenter.getState().query, key),
+        );
+    }
+  };
+
   const notifyManualInputFocused = (): void => {
     clearManualInputBlurTimer();
     if (manualInputActiveRef.current) return;
@@ -453,6 +486,7 @@ export function SalesScreen({
   };
 
   const openCameraScanner = (): void => {
+    setSearchKeyboardVisible(false);
     resetSearchInputToHidMode();
     searchInputRef.current?.blur();
     // TextInput 被连续扫码区域替换时不保证触发 onBlur，必须主动释放 HID 暂停态。
@@ -461,6 +495,7 @@ export function SalesScreen({
   };
 
   const beginNumericInput = (): void => {
+    setSearchKeyboardVisible(false);
     numericInputModalActiveRef.current = true;
     resetSearchInputToHidMode();
     searchInputRef.current?.blur();
@@ -609,6 +644,7 @@ export function SalesScreen({
 
   useEffect(() => {
     if (!catalogActionsDisabled && !manualInputTreeUnavailable) return;
+    setSearchKeyboardVisible(false);
     if (searchKeyboardTimerRef.current !== null) {
       clearTimeout(searchKeyboardTimerRef.current);
       searchKeyboardTimerRef.current = null;
@@ -1276,7 +1312,7 @@ export function SalesScreen({
                 disabled={catalogActionsDisabled}
                 icon="keyboard-outline"
                 iconTestID="sales-keyboard-icon"
-                onPress={requestSearchKeyboard}
+                onPress={toggleSearchKeyboard}
                 testID="sales-show-keyboard"
               />
             </View>
@@ -1558,6 +1594,24 @@ export function SalesScreen({
           message={t(errorCopyKey(state.errorCode))}
           onDismiss={() => presenter.dismissError()}
         />
+      ) : null}
+
+      {/* 不用 Modal：面板不抢第一响应者，隐藏 HID 输入保持聚焦，打开期间扫码枪照常可用。 */}
+      {searchKeyboardVisible && !catalogActionsDisabled ? (
+        <View style={styles.searchKeyboardDock} testID="sales-search-keyboard-dock">
+          <SalesSearchKeyboard
+            labels={{
+              title: t("searchKeyboard.title"),
+              backspace: t("searchKeyboard.backspace"),
+              space: t("searchKeyboard.space"),
+              clear: t("searchKeyboard.clear"),
+              search: t("searchKeyboard.search"),
+              close: t("searchKeyboard.close"),
+              system: t("searchKeyboard.system"),
+            }}
+            onKeyPress={handleSearchKeyboardKey}
+          />
+        </View>
       ) : null}
 
       {cameraScanner?.active && cameraScanner.mode === "single" ? (
@@ -4238,6 +4292,19 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     flexDirection: "row",
     gap: 8,
+  },
+  // 贴底整宽面板，位置与系统键盘一致；底部多留空间避开 Home 指示条。
+  searchKeyboardDock: {
+    backgroundColor: posColors.canvas,
+    borderTopColor: posColors.border,
+    borderTopWidth: 1,
+    bottom: 0,
+    left: 0,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    position: "absolute",
+    right: 0,
   },
   searchIconAction: {
     height: 48,
