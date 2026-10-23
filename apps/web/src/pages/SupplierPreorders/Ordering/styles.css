@@ -1,0 +1,177 @@
+/* ===== 供应商节日预订单 · 下单端（sp-order-*）：普通 CSS + 页面前缀，测试打包把 .css 当空模块 ===== */
+.sp-order-muted { color: #667085; }
+.sp-order-small { font-size: 12px; }
+.sp-order-number,
+.sp-order-number * { font-variant-numeric: tabular-nums; }
+.sp-order-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+/* 剩余 ≤3 天：琥珀色；已截止：灰色 */
+.sp-order-deadline.is-urgent { color: #b45309; font-weight: 600; }
+.sp-order-deadline.is-closed { color: #98a2b3; }
+
+/* ---------- 列表页：订单表卡片 ---------- */
+.sp-order-list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 12px; }
+.sp-order-list-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; cursor: pointer; text-align: left; font: inherit; color: inherit; transition: border-color .15s, box-shadow .15s; }
+.sp-order-list-card:hover { border-color: #91caff; box-shadow: 0 2px 8px rgba(22, 119, 255, .08); }
+.sp-order-list-card:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+.sp-order-list-head { display: flex; align-items: flex-start; gap: 8px; }
+.sp-order-list-title { flex: 1; min-width: 0; overflow: hidden; color: #1f2430; font-size: 15px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.sp-order-list-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: #4b5563; font-size: 13px; }
+.sp-order-list-stores { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid #f0f2f5; }
+.sp-order-list-stores-label { color: #667085; font-size: 12px; }
+.sp-order-list-store { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.sp-order-list-store-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sp-order-list-store-figures { color: #4b5563; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sp-order-list-foot { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #1554c0; font-size: 13px; font-weight: 500; }
+.sp-order-state { padding: 48px 16px; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+
+/* ---------- 下单页：页头 + 指标条 ---------- */
+.sp-order-page { display: flex; flex-direction: column; gap: 12px; }
+.sp-order-back.ant-btn { align-self: flex-start; padding-inline: 0; color: #4b5563; }
+.sp-order-head-card { background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.sp-order-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; padding: 16px 18px 12px; }
+.sp-order-head-main { flex: 1 1 420px; min-width: 0; }
+.sp-order-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sp-order-head-title h1 { margin: 0 4px 0 0; color: #1f2430; font-size: 18px; font-weight: 600; line-height: 1.4; }
+.sp-order-head-title .ant-tag { margin-inline-end: 0; }
+.sp-order-head-sub { margin-top: 4px; color: #667085; font-size: 13px; }
+.sp-order-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; }
+.sp-order-deadline-box { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; }
+.sp-order-deadline-box .sp-order-deadline { font-size: 14px; font-variant-numeric: tabular-nums; }
+.sp-order-store-select { min-width: 200px; }
+.sp-order-store-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sp-order-alert { margin: 0 18px 12px; }
+
+.sp-order-metrics { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)) minmax(240px, 2fr); border-top: 1px solid #eef0f4; }
+.sp-order-metric { min-width: 0; padding: 12px 18px; border-right: 1px solid #eef0f4; }
+.sp-order-metric:last-child { border-right: 0; }
+.sp-order-metric-label { color: #667085; font-size: 12px; }
+.sp-order-metric-value { margin-top: 2px; color: #1f2430; font-size: 22px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.sp-order-metric-value small { margin-left: 2px; color: #667085; font-size: 12px; font-weight: 400; }
+.sp-order-metric-status { margin-top: 4px; color: #1f2430; font-size: 14px; font-weight: 600; }
+.sp-order-metric-status span { color: #667085; font-size: 12px; font-weight: 400; }
+.sp-order-volume-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sp-order-volume-value { color: #1f2430; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sp-order-volume-bar { display: flex; height: 8px; margin-top: 8px; overflow: hidden; border-radius: 4px; background: #eef0f4; }
+.sp-order-volume-seg { height: 100%; }
+.sp-order-volume-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; color: #4b5563; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-order-volume-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.sp-order-swatch { width: 8px; height: 8px; border-radius: 2px; }
+
+/* ---------- 工具栏 + 表格 ---------- */
+.sp-order-table-card { background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.sp-order-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.sp-order-search.ant-input-affix-wrapper { width: 260px; max-width: 100%; }
+.sp-order-category { min-width: 160px; }
+.sp-order-sort { min-width: 190px; }
+.sp-order-table .ant-table-thead > tr > th { background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-order-th-sub { display: block; color: #98a2b3; font-size: 11px; font-weight: 400; }
+/* 本店有数量的行浅蓝底 */
+.sp-order-table .sp-order-row-mine > td { background: #f0f7ff; }
+.sp-order-table .sp-order-row-mine:hover > td { background: #e6f1ff !important; }
+.sp-order-seq { color: #98a2b3; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-order-thumb { display: inline-flex; width: 52px; height: 52px; overflow: hidden; border: 1px solid #eef0f4; border-radius: 6px; background: #f8f9fb; }
+.sp-order-thumb .ant-image,
+.sp-order-thumb img { width: 52px !important; height: 52px !important; object-fit: contain; }
+.sp-order-thumb-empty { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border: 1px dashed #d0d5dd; border-radius: 6px; color: #98a2b3; font-size: 11px; }
+.sp-order-product { min-width: 0; }
+.sp-order-product-name { display: -webkit-box; overflow: hidden; color: #1f2430; font-weight: 500; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.sp-order-product-codes { margin-top: 2px; color: #4b5563; }
+.sp-order-product-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 2px; color: #667085; font-size: 12px; }
+.sp-order-product-meta .ant-tag { margin-inline-end: 0; font-size: 11px; line-height: 18px; }
+.sp-order-price { color: #1f2430; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sp-order-others { display: flex; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+.sp-order-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; background: #f2f4f7; color: #344054; font-size: 12px; line-height: 20px; white-space: nowrap; }
+.sp-order-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 本店下单步进器 */
+.sp-order-stepper { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.sp-order-stepper-row { display: flex; align-items: center; gap: 6px; }
+.sp-order-stepper .ant-space-compact .ant-input { width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.sp-order-stepper.has-value .ant-space-compact .ant-input { color: #1554c0; font-weight: 600; }
+.sp-order-stepper-spin { width: 14px; color: #1677ff; font-size: 12px; }
+.sp-order-stepper-figures { color: #667085; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---------- 去年本店四列（sp-hist-*） ---------- */
+.sp-hist-window { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-left: auto; color: #344054; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-hist-window .ant-tag { margin-inline-end: 0; }
+.sp-hist-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-variant-numeric: tabular-nums; }
+.sp-hist-span { color: #1f2430; font-weight: 600; white-space: nowrap; }
+.sp-hist-sub { color: #667085; font-size: 12px; line-height: 1.45; }
+.sp-hist-sub.is-warn { color: #b45309; }
+.sp-hist-sub b { font-weight: 600; }
+.sp-hist-rate { color: #1f2430; font-weight: 600; }
+.sp-hist-rate.is-good { color: #15803d; }
+.sp-hist-rate.is-low { color: #c2410c; }
+.sp-hist-tag.ant-tag { align-self: flex-start; margin-inline-end: 0; font-size: 11px; line-height: 18px; }
+.sp-hist-curve { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.sp-hist-spark { display: block; overflow: visible; border-bottom: 1px solid #eef0f4; }
+/* 参考商品：整格浅紫底 */
+.sp-order-table .ant-table-tbody > tr > td.sp-hist-cell-ref { background: #f6f3ff; }
+.sp-order-table .ant-table-tbody > tr.sp-order-row-mine > td.sp-hist-cell-ref,
+.sp-order-table .ant-table-tbody > tr:hover > td.sp-hist-cell-ref { background: #efe9ff !important; }
+.sp-hist-ref-badge { display: inline-flex; align-items: center; padding: 0 6px; border: 1px solid #d6ccff; border-radius: 4px; background: #f3efff; color: #6d28d9; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: help; }
+.sp-hist-ref-badge:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 1px; }
+.sp-hist-ref-tip { display: flex; gap: 10px; max-width: 300px; padding: 2px; }
+.sp-hist-ref-tip img,
+.sp-hist-ref-tip-empty { flex: none; width: 48px; height: 48px; border: 1px solid #eef0f4; border-radius: 6px; background: #f8f9fb; object-fit: contain; }
+.sp-hist-ref-tip-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; }
+.sp-hist-ref-tip-title { color: #6d28d9; font-weight: 600; }
+.sp-hist-ref-tip-source { margin-left: 6px; color: #667085; font-weight: 400; }
+.sp-hist-ref-tip-name { color: #1f2430; }
+.sp-hist-ref-tip-price { color: #344054; font-variant-numeric: tabular-nums; }
+.sp-hist-ref-tip-note { color: #98a2b3; }
+/* 没有去年数据：四格合并后的淡色占位 */
+.sp-hist-empty { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 4px 10px; border: 1px dashed #d0d5dd; border-radius: 6px; color: #98a2b3; font-size: 12px; text-align: center; }
+.sp-hist-empty.is-pending { border-style: solid; border-color: #eef0f4; background: #f8f9fb; color: #667085; }
+.sp-hist-empty.is-large { min-height: 220px; }
+.sp-hist-empty-hint { color: #98a2b3; }
+
+/* ---------- 展开行 ---------- */
+.sp-order-table .sp-hist-expanded-row > td { background: #f8f9fb !important; }
+.sp-hist-expand { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; gap: 12px; padding: 4px 0; }
+.sp-hist-expand-state { display: flex; align-items: center; gap: 10px; padding: 12px 4px; }
+.sp-hist-card { min-width: 0; padding: 12px 14px; background: #fff; border: 1px solid #e7eaf0; border-radius: 8px; }
+.sp-hist-chart-card.is-ref { border-color: #d6ccff; }
+.sp-hist-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+.sp-hist-card-head h3 { margin: 0; color: #1f2430; font-size: 14px; font-weight: 600; }
+.sp-hist-ref-title { color: #6d28d9; cursor: help; }
+.sp-hist-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; color: #4b5563; font-size: 12px; }
+.sp-hist-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.sp-hist-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.sp-hist-legend i.is-dashed { width: 0; height: 12px; border-left: 1.5px dashed; border-radius: 0; }
+.sp-hist-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sp-hist-ref-note { margin: -2px 0 8px; padding: 4px 8px; border-radius: 4px; background: #f3efff; color: #6d28d9; font-size: 12px; }
+.sp-hist-summary { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.sp-hist-summary-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sp-hist-summary-label { flex: none; color: #667085; }
+.sp-hist-summary-value { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 6px; color: #1f2430; text-align: right; }
+.sp-hist-summary-note { flex-basis: 100%; color: #98a2b3; font-size: 11px; }
+.sp-hist-compare-wrap { overflow-x: auto; }
+.sp-hist-compare { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sp-hist-compare th { padding: 4px 6px; border-bottom: 1px solid #eef0f4; color: #667085; font-weight: 500; text-align: right; white-space: nowrap; }
+.sp-hist-compare td { padding: 5px 6px; border-bottom: 1px solid #f2f4f7; color: #344054; text-align: right; white-space: nowrap; }
+.sp-hist-compare th:first-child,
+.sp-hist-compare td:first-child { text-align: left; }
+.sp-hist-compare tr.is-current td { color: #1f2430; font-weight: 600; }
+.sp-hist-compare tr:last-child td { border-bottom: 0; }
+/* 大图 */
+.sp-hist-chart { position: relative; width: 100%; }
+.sp-hist-chart svg { display: block; overflow: visible; }
+.sp-hist-chart-tip { position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid #e7eaf0; border-radius: 6px; background: rgba(255, 255, 255, .96); box-shadow: 0 4px 12px rgba(16, 24, 40, .08); color: #1f2430; font-size: 12px; white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  /* 5 个数字指标一行，体积单独占一行 */
+  .sp-order-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .sp-order-metric { padding: 10px 14px; border-bottom: 1px solid #eef0f4; }
+  .sp-order-metric:nth-child(5) { border-right: 0; }
+  .sp-order-metric-value { font-size: 18px; }
+  .sp-order-metric-volume { grid-column: 1 / -1; border-bottom: 0; }
+  /* 展开行：大图与右侧小结上下排列 */
+  .sp-hist-expand { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .sp-order-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-order-metric:nth-child(5) { grid-column: 1 / -1; }
+  .sp-order-head-actions { justify-content: flex-start; }
+  .sp-order-deadline-box { align-items: flex-start; }
+}

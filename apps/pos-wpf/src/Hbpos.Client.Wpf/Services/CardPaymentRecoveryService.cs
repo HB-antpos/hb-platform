@@ -212,14 +212,9 @@ internal static class CardPaymentSupervisorResolutionRules
             return false;
         }
 
-        if (resolution.Decision == CardPaymentSupervisorDecision.ConfirmPaid &&
-            evidence is null &&
-            paymentReference is null)
-        {
-            error = "Enter the bank payment reference or evidence before confirming payment.";
-            return false;
-        }
-
+        // 中文注释：确认已付款不再强制填支付参考号/凭据（门店反馈参考号太长、界面上也找不到）；
+        // 主管授权本身就是结案凭据。抓到小票证据时恢复中心会自动预填 RRN / 批准码，且实时核验仍会
+        // 拦住与终端结论矛盾的决定。
         if (resolution.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
             evidence is null)
         {
@@ -1277,7 +1272,10 @@ public sealed class CardPaymentRecoveryService(
                 attempt.ResponseText,
                 attempt.PaymentReference,
                 null,
-                attempt.OperationGuid))
+                attempt.OperationGuid)
+            {
+                ReceiptApprovalReference = TryReadReceiptApprovalEvidence(attempt)?.DisplayReference
+            })
             .Select(item => item with { IsOpen = openKeys.Contains(item.Key) })
             .ToArray();
         return open.Concat(recent.Where(item => !openKeys.Contains(item.Key)))
@@ -1319,7 +1317,10 @@ public sealed class CardPaymentRecoveryService(
                 attempt.ResponseText,
                 attempt.PaymentReference,
                 null,
-                attempt.OperationGuid))
+                attempt.OperationGuid)
+            {
+                ReceiptApprovalReference = TryReadReceiptApprovalEvidence(attempt)?.DisplayReference
+            })
             .ToArray();
     }
 
@@ -1699,6 +1700,19 @@ public sealed class CardPaymentRecoveryService(
                 T("cardRecovery.linkly.unknown", "The previous card result cannot be confirmed. Ask a supervisor to confirm the Linkly backend status before continuing."),
                 DialogDetails: BuildDialogDetails(attempt),
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
+        }
+
+        // 中文注释：GetLast 答不出这笔（JH / NOT FOUND、刷卡机离线等结果未知，或回的是别的交易）时，若交易过程中
+        // 已落库与本笔 TxnRef/金额一致的批准小票证据，就凭小票按已批准建单；终端明确回答了这笔（含拒绝）时仍以终端为准。
+        if (!directCloud &&
+            !IsMatchedLocalFinalResult(attempt, authorization) &&
+            TryReadReceiptApprovalEvidence(attempt) is { } receiptEvidence)
+        {
+            ConsoleLog.WriteInformation(
+                "CardRecovery",
+                $"recover local-ip approved by receipt evidence attemptGuid={attempt.AttemptGuid} txnRef={LogValue(txnRef)} rrn={receiptEvidence.Rrn} approvalCode={LogValue(receiptEvidence.ApprovalCode)} amount={receiptEvidence.Amount:0.00} terminalStatusKey={LogValue(authorization.StatusKey)}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")));
+            authorization = LinklyTerminalClient.CreateReceiptApprovedSaleResult(receiptEvidence);
         }
 
         if (!authorization.ResultUnknown &&
@@ -2512,6 +2526,16 @@ public sealed class CardPaymentRecoveryService(
 
         // ResultUnknown 表示刷卡机/Linkly 没能回答（离线、超时、仍在处理或直连 GET 无终态）：
         // 无法证明没有迟到的结果，失败关闭。
+        // 例外在前：交易过程中已落库与本笔一致的批准小票（APPROVED 00、RRN、金额），顾客已被扣款。
+        // 只要终端没有明确回答这笔（未知、NOT FOUND、最近一笔是别的交易），就视同 Linkly 报告已批准：
+        // 拒绝“确认未付款”（10-22 1002 店事故就是这样丢单的），允许确认已付款或运行恢复建单。
+        if (!directCloud &&
+            !IsMatchedLocalFinalResult(attempt, authorization) &&
+            TryReadReceiptApprovalEvidence(attempt) is not null)
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.Approved);
+        }
+
         if (authorization.ResultUnknown)
         {
             // 例外：EFT-Client 已正常回答，只是回包不是被查的这笔（生产实测：10-02 刷卡机离线期间遗留的记录，
@@ -5752,6 +5776,23 @@ public sealed class CardPaymentRecoveryService(
         mismatchReason = string.Empty;
         return true;
     }
+
+    // 终端明确回答了这一笔（批准或失败，且 TxnRef/类型/金额都对得上）。
+    private static bool IsMatchedLocalFinalResult(
+        LocalCardPaymentAttempt attempt,
+        PaymentAuthorizationResult authorization) =>
+        !authorization.ResultUnknown &&
+        (authorization.Approved || HasLocalFinalResult(authorization)) &&
+        LocalAuthorizationMatchesAttempt(attempt, authorization);
+
+    // 本地 LocalIp 消费在交易过程中抓到的批准小票证据；与本笔 TxnRef、金额不一致或内容损坏都按没有证据处理。
+    internal static LinklyLocalReceiptApprovalEvidence? TryReadReceiptApprovalEvidence(LocalCardPaymentAttempt attempt) =>
+        string.Equals(attempt.OperationKind, "Sale", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(attempt.TxnType, "P", StringComparison.OrdinalIgnoreCase) &&
+        ResolveAttemptConnectionMode(attempt, LinklyConnectionMode.LocalIp) == LinklyConnectionMode.LocalIp &&
+        LinklyLocalTxnRef.TryNormalizeHistoricalReference(attempt.TxnRef, out var txnRef)
+            ? LinklyLocalReceiptApprovalEvidence.TryDeserializeFor(attempt.ReceiptApprovalEvidence, txnRef, attempt.Amount)
+            : null;
 
     private static LinklyConnectionMode ResolveAttemptConnectionMode(
         LocalCardPaymentAttempt attempt,

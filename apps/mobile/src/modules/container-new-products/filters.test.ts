@@ -13,7 +13,7 @@ function item(overrides: Partial<ContainerNewProductItem>): ContainerNewProductI
   return {
     productCode: "P-1", hbProductNo: null, quantity: null, imageUrl: null, barcode: null, retailPrice: null,
     containerNumber: "CSNU 7012345", containerCode: "C-1", estimatedStoreArrivalDate: "2026-10-01",
-    estimatedStoreArrivalDateEnd: "2026-10-06", warehouseArrivalDate: "2026-09-28", basis: "actual", isNewProduct: true, ...overrides,
+    estimatedStoreArrivalDateEnd: "2026-10-06", warehouseArrivalDate: "2026-09-28", basis: "actual", isNewProduct: true, isCreated: true, ...overrides,
   };
 }
 

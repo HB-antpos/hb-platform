@@ -389,8 +389,9 @@ public class NavigationServiceTests
 
         var menu = service.BuildMenu(user);
 
-        Assert.Equal(6, menu.Count);
+        Assert.Equal(7, menu.Count);
         Assert.Contains(menu, item => item.Path == "/dashboard");
+        Assert.Contains(menu, item => item.Path == "/seasonal-preorders");
         Assert.Contains(menu, item => item.Path == "/system");
         Assert.Contains(menu, item => item.Path == "/warehouse");
         Assert.Contains(menu, item => item.Path == "/domestic-purchase");
@@ -405,8 +406,9 @@ public class NavigationServiceTests
 
         var menu = _service.BuildMenu(user);
 
-        Assert.Equal(6, menu.Count);
+        Assert.Equal(7, menu.Count);
         Assert.Contains(menu, item => item.Path == "/dashboard");
+        Assert.Contains(menu, item => item.Path == "/seasonal-preorders");
         Assert.Contains(menu, item => item.Path == "/system");
         Assert.Contains(menu, item => item.Path == "/warehouse");
         Assert.Contains(menu, item => item.Path == "/domestic-purchase");
@@ -999,6 +1001,26 @@ public class NavigationServiceTests
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
         Assert.Equal(new[] { "/pos-admin/store-cash" }, posAdmin.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void BuildMenu_只有预订单下单入口也能进后台且只看到下单页()
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.SupplierPreorder.Order)));
+
+        var group = Assert.Single(menu, item => item.Path == "/seasonal-preorders");
+        Assert.Equal(new[] { "/supplier-preorder-ordering" }, group.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void BuildMenu_预订单管理权限看到下单页订单表与下单人员授权()
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.SupplierPreorder.Manage)));
+
+        var group = Assert.Single(menu, item => item.Path == "/seasonal-preorders");
+        Assert.Equal(
+            new[] { "/supplier-preorder-ordering", "/supplier-preorders", "/supplier-preorders/orderers" },
+            group.Children!.Select(item => item.Path));
     }
 
     [Fact]

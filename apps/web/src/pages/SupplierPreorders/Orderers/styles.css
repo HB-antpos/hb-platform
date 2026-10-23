@@ -1,0 +1,22 @@
+/* ===== 供应商节日预订单 · 下单人员授权（sp-orderers-*）：普通 CSS + 页面前缀；通用块复用 Admin/styles.css 的 sp-admin-* ===== */
+.sp-orderers-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sp-orderers-avatar { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: #eef5ff; color: #1554c0; font-size: 13px; font-weight: 600; }
+.sp-orderers-inactive.ant-tag { margin-inline-start: 6px; background: #f2f4f7; color: #667085; font-weight: 400; }
+.sp-orderers-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.sp-orderers-tags .ant-tag { margin-inline-end: 0; }
+.sp-orderers-store-filter.ant-select { width: 180px; }
+.sp-orderers-missing { padding: 2px 10px; border: 1px solid #f5c26b; border-radius: 6px; background: #fffbeb; color: #b45309; font-size: 12px; }
+.sp-orderers-rule-list { margin: 4px 0 0; padding-left: 20px; line-height: 1.8; }
+
+/* 添加 / 编辑弹窗 */
+.sp-orderers-modal { padding-top: 4px; }
+.sp-orderers-modal-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; text-align: left; }
+.sp-orderers-user-fixed { padding: 5px 11px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fafbfc; color: #1f2430; }
+.sp-orderers-candidate { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.sp-orderers-store-head { display: flex; align-items: center; gap: 4px; }
+.sp-orderers-store-grid.ant-checkbox-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; width: 100%; }
+.sp-orderers-view-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid #f0f2f5; cursor: pointer; }
+.sp-orderers-view-hint { display: block; margin-top: 2px; }
+@media (max-width: 640px) {
+  .sp-orderers-store-filter.ant-select { width: 100%; }
+}

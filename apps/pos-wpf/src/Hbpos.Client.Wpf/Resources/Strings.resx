@@ -1348,8 +1348,8 @@
   <data name="cardRecovery.refund.confirmedTenderRestored" xml:space="preserve"><value>The confirmed card refund was restored. Complete the remaining refund methods without refunding this card again.</value></data>
   <data name="cardRecovery.refund.confirmedCompleted" xml:space="preserve"><value>The confirmed card refund was recovered and the return was saved.</value></data>
   <data name="cardRecovery.payment.section.title" xml:space="preserve"><value>Supervisor payment reconciliation</value></data>
-  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.</value></data>
-  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>Payment reference (when available)</value></data>
+  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>Check the bank result before unlocking this payment. Confirming paid only needs supervisor authorization; confirming not paid requires evidence. The payment reference and supervisor note are optional.</value></data>
+  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)</value></data>
   <data name="cardRecovery.payment.field.evidence" xml:space="preserve"><value>Bank evidence (required when confirming not paid)</value></data>
   <data name="cardRecovery.payment.field.note" xml:space="preserve"><value>Supervisor note (optional)</value></data>
   <data name="cardRecovery.payment.action.confirmPaid" xml:space="preserve"><value>Confirm paid</value></data>

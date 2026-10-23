@@ -124,6 +124,19 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 供应商节日预订单：下单入口给被授权的下单人员，管理两页只认 SupplierPreorder.Manage。
+                Path = "/seasonal-preorders",
+                TitleKey = "menu.seasonalPreorders",
+                Icon = "GiftOutlined",
+                Children = new List<NavigationMenuDto>
+                {
+                    new() { Path = "/supplier-preorder-ordering", TitleKey = "menu.supplierPreorderOrdering", Icon = "ShoppingCartOutlined", AnyPermissions = new List<string> { Permissions.SupplierPreorder.Order, Permissions.SupplierPreorder.Manage } },
+                    new() { Path = "/supplier-preorders", TitleKey = "menu.supplierPreorders", Icon = "FileExcelOutlined", Permission = Permissions.SupplierPreorder.Manage },
+                    new() { Path = "/supplier-preorders/orderers", TitleKey = "menu.supplierPreorderOrderers", Icon = "TeamOutlined", Permission = Permissions.SupplierPreorder.Manage },
+                },
+            },
+            new()
+            {
                 Path = "/executive-sales-intelligence",
                 TitleKey = "menu.executiveSalesIntelligence",
                 Icon = "BarChartOutlined",
@@ -858,6 +871,9 @@ namespace BlazorApp.Api.Services
                 Permissions.Cash.OverviewView,
                 // 节日贺卡分店填报统计：只有该权限的总部账号也要能拿到后台菜单。
                 Permissions.SeasonalCards.Remaining.ViewAllStores,
+                // 供应商节日预订单：只有下单入口或管理权限的店长 / 采购也要能拿到后台菜单。
+                Permissions.SupplierPreorder.Order,
+                Permissions.SupplierPreorder.Manage,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );
