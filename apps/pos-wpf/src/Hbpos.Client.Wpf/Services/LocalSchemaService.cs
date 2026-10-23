@@ -1161,6 +1161,12 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalCardPaymentAttempts ADD COLUMN RecoveryTargetStatus TEXT NULL;", cancellationToken);
         }
+
+        // 小票批准证据：旧库补列，旧记录为 NULL 即“没有抓到证据”。
+        if (!columns.Contains("ReceiptApprovalEvidence"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalCardPaymentAttempts ADD COLUMN ReceiptApprovalEvidence TEXT NULL;", cancellationToken);
+        }
     }
 
     private static async Task EnsureLocalSquarePaymentAttemptColumnsAsync(
@@ -1440,7 +1446,8 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             SubmissionToken TEXT NULL,
             RefundBusinessKey TEXT NULL,
             RecoveryPhase TEXT NOT NULL DEFAULT 'None',
-            RecoveryTargetStatus TEXT NULL
+            RecoveryTargetStatus TEXT NULL,
+            ReceiptApprovalEvidence TEXT NULL
         );
         """,
         """

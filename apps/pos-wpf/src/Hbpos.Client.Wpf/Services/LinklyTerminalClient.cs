@@ -180,7 +180,8 @@ public sealed class LinklyEftClientAdapter(EFTClientIPAsync client) : ILinklyEft
 
 public sealed class LinklyTerminalClient(
     ILinklyEftClientFactory clientFactory,
-    ILocalizationService? localization = null) : ILinklyTerminalClient
+    ILocalizationService? localization = null,
+    ILinklyPaymentAttemptContextAccessor? attemptContextAccessor = null) : ILinklyTerminalClient
 {
     private const string LogCategory = "LinklyLocal";
     private const string LogSource = "local-ip";
@@ -933,7 +934,14 @@ public sealed class LinklyTerminalClient(
             using var readTimeoutCts = CreateBusinessWaitTimeoutToken(CancellationToken.None);
             using var cancelKeyRegistration = cancellationToken.Register(() =>
                 activeCancelKeyTask = SendCancelKeyDuringTransactionAsync(client, settings, txnRef));
-            var response = await ReadTransactionResponseAsync(client, receipts, readTimeoutCts.Token, settings.Environment, txnRef);
+            var response = await ReadTransactionResponseAsync(
+                client,
+                receipts,
+                readTimeoutCts.Token,
+                settings.Environment,
+                txnRef,
+                requestedAmount,
+                transactionType);
             return ToAuthorizationResult(response, requestedAmount, txnRef, receipts, transactionType);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1126,7 +1134,14 @@ public sealed class LinklyTerminalClient(
                     CancellationToken.None);
             }
 
-            var response = await ReadTransactionResponseAsync(client, receipts, cancelCts.Token, settings.Environment, txnRef);
+            var response = await ReadTransactionResponseAsync(
+                client,
+                receipts,
+                cancelCts.Token,
+                settings.Environment,
+                txnRef,
+                amount,
+                transactionType);
             return ToAuthorizationResult(response, amount, txnRef, receipts, transactionType);
         }
         catch (Exception ex) when (ex is OperationCanceledException or ConnectionException)
@@ -1376,11 +1391,14 @@ public sealed class LinklyTerminalClient(
 
     private async Task<EFTTransactionResponse> ReadTransactionResponseAsync(
         ILinklyEftClient client,
-        ICollection<string> receipts,
+        List<string> receipts,
         CancellationToken cancellationToken,
         CardTerminalEnvironment environment,
-        string txnRef)
+        string txnRef,
+        decimal requestedAmount,
+        TransactionType transactionType)
     {
+        var approvalEvidenceRecorded = false;
         while (true)
         {
             var response = await client.ReadResponseAsync(cancellationToken);
@@ -1395,6 +1413,18 @@ public sealed class LinklyTerminalClient(
                         environment,
                         txnRef,
                         response: receipt);
+                    // 中文注释：小票一到就把“已批准”证据落到本地 attempt；最终响应可能回 PF/空 TxnRef，
+                    // POS 也可能在这之后断电，重启恢复时只能凭这份证据建单。
+                    if (!approvalEvidenceRecorded)
+                    {
+                        approvalEvidenceRecorded = await TryRecordReceiptApprovalEvidenceAsync(
+                            receipts,
+                            environment,
+                            txnRef,
+                            requestedAmount,
+                            transactionType);
+                    }
+
                     break;
                 case EFTTransactionResponse transaction:
                     LogJson(
@@ -1468,6 +1498,22 @@ public sealed class LinklyTerminalClient(
             response.TxnType == transactionType;
         if (!referenceMatches || !amountMatches || !transactionTypeMatches)
         {
+            // 中文注释：生产实测（10-22 1002 店）：顾客小票已打出 APPROVED 00，最终响应却回 PF、空 TxnRef、金额 0。
+            // 只在“未回显任何引用”且小票证据与本笔 TxnRef/金额一致时按已批准处理；回显了别的引用仍按身份冲突走未知。
+            if (!response.Success &&
+                string.IsNullOrEmpty(returnedTxnRef) &&
+                TryCreateReceiptApprovedResult(
+                    receipts,
+                    requestedTxnRef,
+                    requestedAmount,
+                    transactionType,
+                    "transaction",
+                    response.ResponseCode,
+                    response.ResponseText) is { } receiptApproved)
+            {
+                return receiptApproved;
+            }
+
             return new PaymentAuthorizationResult(
                 false,
                 null,
@@ -1500,6 +1546,21 @@ public sealed class LinklyTerminalClient(
             response.TxnType == transactionType;
         if (!response.Success || !referenceMatches || !amountMatches || !transactionTypeMatches)
         {
+            // 中文注释：本次交易过程中已收到与本笔 TxnRef/金额一致的批准小票，而 GetLast 没有回答这笔
+            // （生产实测 JH / NOT FOUND、空 TxnRef，或刷卡机离线）：小票就是批准证据，按已批准处理。
+            if (string.IsNullOrEmpty(returnedTxnRef) &&
+                TryCreateReceiptApprovedResult(
+                    receipts,
+                    requestedTxnRef,
+                    requestedAmount,
+                    transactionType,
+                    "get-last-transaction",
+                    response.ResponseCode,
+                    response.ResponseText) is { } receiptApproved)
+            {
+                return receiptApproved;
+            }
+
             // 中文注释：查询上一笔时刷卡机离线，上一笔仍无法核对，必须保持结果未知；只把原因说清楚。
             var pinpadOffline = IsPinpadOfflineRejection(
                 response.Success,
@@ -1615,6 +1676,132 @@ public sealed class LinklyTerminalClient(
             sanitizedText = LinklyReceiptTextSanitizer.Sanitize(string.Join(Environment.NewLine, lines))
         };
     }
+
+    private async Task<bool> TryRecordReceiptApprovalEvidenceAsync(
+        IReadOnlyList<string> receipts,
+        CardTerminalEnvironment environment,
+        string txnRef,
+        decimal requestedAmount,
+        TransactionType transactionType)
+    {
+        if (transactionType != TransactionType.PurchaseCash ||
+            attemptContextAccessor?.Current is not { RecordReceiptApprovalEvidenceAsync: { } record } context ||
+            !string.Equals(LinklyLocalTxnRef.TrimProtocolPadding(context.TxnRef), txnRef, StringComparison.Ordinal) ||
+            !LinklyLocalReceiptApprovalEvidence.TryParse(receipts, txnRef, requestedAmount, out var evidence) ||
+            evidence is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            // 落库失败不能影响读取终端最终响应；证据仍在内存小票里，最终映射照样可用。
+            await record(evidence, CancellationToken.None);
+            LogJson(
+                "receipt-approval-evidence",
+                "recorded",
+                "response",
+                environment,
+                txnRef,
+                success: true,
+                details: BuildReceiptApprovalEvidenceLogDetails(evidence));
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogJson(
+                "receipt-approval-evidence",
+                "failed",
+                "response",
+                environment,
+                txnRef,
+                success: false,
+                reason: ex.GetType().Name,
+                details: new { ex.Message },
+                exception: ex);
+            return false;
+        }
+    }
+
+    private PaymentAuthorizationResult? TryCreateReceiptApprovedResult(
+        IReadOnlyList<string> receipts,
+        string requestedTxnRef,
+        decimal requestedAmount,
+        TransactionType transactionType,
+        string source,
+        string? terminalResponseCode,
+        string? terminalResponseText)
+    {
+        // 只覆盖普通消费：小票格式按 SALE AUD $金额 解析；退款/撤销/提现仍走原有身份核对。
+        if (transactionType != TransactionType.PurchaseCash ||
+            !LinklyLocalReceiptApprovalEvidence.TryParse(receipts, requestedTxnRef, requestedAmount, out var evidence) ||
+            evidence is null)
+        {
+            return null;
+        }
+
+        LogJson(
+            "receipt-approval-evidence",
+            "applied",
+            "response",
+            sessionId: requestedTxnRef,
+            success: true,
+            reason: source,
+            details: new
+            {
+                evidence = BuildReceiptApprovalEvidenceLogDetails(evidence),
+                terminalResponseCode = NormalizeOptional(terminalResponseCode),
+                terminalResponseText = NormalizeOptional(terminalResponseText)
+            });
+        return CreateReceiptApprovedResult(evidence, receipts, transactionType);
+    }
+
+    // 中文注释：凭小票证据构造的批准结果，与正常批准同形（Reference=ANZ:TxnRef、响应码 00），
+    // 工作流与恢复流程无需区分来源即可正常建单；恢复服务也复用这里构造落库证据的批准结果。
+    internal static PaymentAuthorizationResult CreateReceiptApprovedResult(
+        LinklyLocalReceiptApprovalEvidence evidence,
+        IReadOnlyList<string>? receipts,
+        TransactionType transactionType)
+    {
+        var transaction = new CardTransactionDto(
+            ProcessorName,
+            evidence.TxnRef,
+            evidence.ApprovalCode,
+            null,
+            null,
+            null,
+            null,
+            evidence.ResponseCode,
+            "APPROVED",
+            evidence.Stan,
+            null,
+            evidence.Amount,
+            receipts is { Count: > 0 } ? JoinReceipts(receipts) : null);
+        return new PaymentAuthorizationResult(
+            true,
+            $"ANZ:{evidence.TxnRef}",
+            "ANZ Linkly",
+            evidence.Amount,
+            [transaction],
+            ProcessorName,
+            TxnType: ToResultTxnType(transactionType),
+            TxnRef: evidence.TxnRef,
+            ResponseCode: transaction.ResponseCode,
+            ResponseText: transaction.ResponseText);
+    }
+
+    internal static PaymentAuthorizationResult CreateReceiptApprovedSaleResult(LinklyLocalReceiptApprovalEvidence evidence) =>
+        CreateReceiptApprovedResult(evidence, null, TransactionType.PurchaseCash);
+
+    private static object BuildReceiptApprovalEvidenceLogDetails(LinklyLocalReceiptApprovalEvidence evidence) => new
+    {
+        evidence.Rrn,
+        evidence.ApprovalCode,
+        evidence.Stan,
+        evidence.Invoice,
+        evidence.Amount,
+        evidence.ResponseCode
+    };
 
     private static bool IsPinpadOfflineRejection(
         bool success,

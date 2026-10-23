@@ -3436,8 +3436,8 @@
   <data name="cardRecovery.refund.confirmedTenderRestored" xml:space="preserve"><value>已恢复确认的银行卡退款。请完成其余退款方式，不要再次退这笔银行卡款。</value></data>
   <data name="cardRecovery.refund.confirmedCompleted" xml:space="preserve"><value>已恢复确认的银行卡退款并保存退货单。</value></data>
   <data name="cardRecovery.payment.section.title" xml:space="preserve"><value>主管付款核对</value></data>
-  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>解锁前请先核对银行结果。确认已付款需参考号或证据，确认未付款需银行证据；主管备注可选。</value></data>
-  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>付款参考号（如有）</value></data>
+  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>解锁前请先核对银行结果。确认已付款只需主管授权；确认未付款需银行证据；付款参考号与主管备注都可不填。</value></data>
+  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>付款参考号（选填，可填刷卡机小票上的 RRN 或 APPROVAL CODE）</value></data>
   <data name="cardRecovery.payment.field.evidence" xml:space="preserve"><value>银行证据（确认未付款时必填）</value></data>
   <data name="cardRecovery.payment.field.note" xml:space="preserve"><value>主管备注（选填）</value></data>
   <data name="cardRecovery.payment.action.confirmPaid" xml:space="preserve"><value>确认已付款</value></data>

@@ -213,7 +213,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                     IsManualExpanded = false;
                     ResolutionReason = string.Empty;
                     ResolutionEvidence = string.Empty;
-                    ResolutionReference = string.Empty;
+                    // 中文注释：交易过程中抓到了批准小票时自动带出 RRN / 批准码，主管不必去找参考号；没有就留空（选填）。
+                    ResolutionReference = value?.ReceiptApprovalReference ?? string.Empty;
                 }
 
                 var matchingRow = value is null
@@ -349,7 +350,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             : IsPaymentSelection
                 ? T(
                     "cardRecovery.payment.section.instructions",
-                    "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.")
+                    "Check the bank result before unlocking this payment. Confirming paid only needs supervisor authorization; confirming not paid requires evidence. The payment reference and supervisor note are optional.")
                 : T(
                     "cardRecovery.center.resolution.instructions",
                     "Confirm the bank or terminal evidence for this selected transaction. Each manual decision requires one-time supervisor authorization.");
@@ -386,7 +387,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         : IsRefundSelection
             ? T("cardRecovery.refund.field.refundReference", "Refund reference (when available)")
             : IsPaymentSelection
-                ? T("cardRecovery.payment.field.paymentReference", "Payment reference (when available)")
+                ? T("cardRecovery.payment.field.paymentReference", "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")
                 : T("cardRecovery.center.input.reference", "Payment or settlement reference");
     public string SelectedTypeText => MapOperationType(SelectedAttempt?.OperationKind);
     public string SelectedChannelText => MapChannel(SelectedAttempt?.Processor);
