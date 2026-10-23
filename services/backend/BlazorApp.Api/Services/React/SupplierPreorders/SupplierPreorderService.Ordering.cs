@@ -192,8 +192,18 @@ public sealed partial class SupplierPreorderService
                 .Select(l => (Line: l, Item: snapshot.ItemsByGuid[l.ItemGuid]))
                 .ToList();
         var counted = snapshot.CountedLines().ToList();
+        // 本店下过、但被修订版下架的商品：箱数保留但不计入合计，提醒店长
+        var removedLines = order is null
+            ? new List<SupplierPreorderRemovedLineDto>()
+            : snapshot.Lines
+                .Where(l => l.OrderGuid == order.OrderGuid && l.Cartons > 0 && snapshot.ItemsByGuid.TryGetValue(l.ItemGuid, out var i) && !i.IsActive)
+                .Select(l => (Line: l, Item: snapshot.ItemsByGuid[l.ItemGuid]))
+                .Select(x => new SupplierPreorderRemovedLineDto { ItemGuid = x.Item.ItemGuid, SupplierItemCode = x.Item.SupplierItemCode, Name = x.Item.Name, Cartons = x.Line.Cartons })
+                .OrderBy(l => l.SupplierItemCode)
+                .ToList();
         return new SupplierPreorderOrderingSummaryDto
         {
+            RemovedLines = removedLines,
             StoreGuid = storeGuid,
             OrderStatus = order?.Status ?? "None",
             ItemCount = mine.Count,
@@ -251,6 +261,8 @@ public sealed partial class SupplierPreorderService
             // 去年有售 / 去年打过折：只看本品自己在本店的数据，不含参考商品
             "lastYearSold" => items.Where(i => histories[i.ItemGuid] is { Source: "Own", SalesQty: > 0 }),
             "lastYearDiscounted" => items.Where(i => histories[i.ItemGuid] is { Source: "Own", HasDiscount: true }),
+            // 最近一次修订有变动（新增、改价、改箱规等）
+            "revised" => items.Where(i => !string.IsNullOrEmpty(i.RevisionChange)),
             _ => items,
         };
         items = FilterByKeyword(items, query.Keyword);
@@ -295,6 +307,7 @@ public sealed partial class SupplierPreorderService
                 MyCartons = myCartons.GetValueOrDefault(i.ItemGuid),
                 OtherStores = identity.CanViewOtherStores ? others.GetValueOrDefault(i.ItemGuid) ?? new List<SupplierPreorderOtherStoreCartonsDto>() : null,
                 History = histories[i.ItemGuid] is { Source: "Ref" } ? BuildItemHistory(i, store.StoreCode, history, refProducts) : histories[i.ItemGuid],
+                RevisionMark = ToRevisionMark(i),
             }).ToList(),
         };
     }

@@ -532,6 +532,8 @@ public sealed partial class SupplierPreorderService
             TotalCartons = totals.GetValueOrDefault(i.ItemGuid),
             OwnSalesQty = !computed ? null : i.MatchedProductCode is null ? 0m : AllStores(state, i.MatchedProductCode)?.SalesQty ?? 0m,
             Ref = ToRefDto(i, refProducts, state),
+            IsActive = i.IsActive,
+            RevisionMark = ToRevisionMark(i),
         }).ToList();
     }
 }

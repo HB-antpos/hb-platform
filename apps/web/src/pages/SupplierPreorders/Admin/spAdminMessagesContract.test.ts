@@ -64,6 +64,12 @@ const templateKeys = [
   ...['Matched', 'New', 'Warning', 'Invalid'].map((value) => `spAdmin.common.previewStatus.${value}`),
   ...[...REQUIRED_MAPPING_KEYS, ...OPTIONAL_MAPPING_KEYS].map((value) => `spAdmin.mapping.${value}`),
   ...['cartons', 'pieces', 'amount'].map((value) => `spAdmin.matrix.unit.${value}`),
+  // 修订版（PR 3）：改动字段、对比类型、计数条
+  ...['Added', 'Restored', 'Removed', 'Price', 'Carton', 'Name', 'Barcode', 'Image', 'Cbm', 'Category'].map((value) => `spAdmin.revision.change.${value}`),
+  ...['Added', 'Removed', 'Restored', 'Changed', 'Unchanged'].map((value) => `spAdmin.revision.kind.${value}`),
+  ...['added', 'removed', 'restored', 'priceChanged', 'cartonChanged', 'otherChanged', 'unchanged', 'invalid'].map(
+    (value) => `spAdmin.revision.count.${value}`,
+  ),
   ...['StatusChanged', 'FormDeleted', 'StoresUpdated', 'StoresCopied', 'OrdererAdded', 'OrdererUpdated', 'OrdererRemoved'].map(
     (value) => `spAdmin.logs.action.${value}`,
   ),

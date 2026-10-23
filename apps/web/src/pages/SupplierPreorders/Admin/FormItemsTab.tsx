@@ -14,6 +14,7 @@ import type { SupplierPreorderFormDetail, SupplierPreorderFormItem, SupplierPreo
 import { formatRefScore, getHistoryVersionKey, getRefCellState, getRefDisplayCode, getRefPriceDiffRate } from './refPicker.logic'
 import RefPickerModal, { type RefCandidatesLoader, type RefPickerResult, type RefPickerTarget } from './RefPickerModal'
 import './registerSpAdminMessages'
+import { RemovedTag, RevisionChips } from './RevisionParts'
 import { ItemThumb } from './SpAdminParts'
 import {
   DEFAULT_PAGE_SIZE,
@@ -32,12 +33,14 @@ type MatchFilter = NonNullable<SupplierPreorderFormItemQuery['match']>
 interface FormItemsTabProps {
   formGuid: string
   detail: SupplierPreorderFormDetail
+  /** 变化时重拉商品行（应用修订版后进价、箱规、上下架都会变） */
+  refreshKey?: number
   /** 指定 / 清除参考后通知详情页刷新页头计数 */
   onRefChanged?: () => void
 }
 
 /** 订单表商品：按匹配筛选 + 搜索，服务端分页；每行可指定参考商品。 */
-export default function FormItemsTab({ formGuid, detail, onRefChanged }: FormItemsTabProps) {
+export default function FormItemsTab({ formGuid, detail, refreshKey = 0, onRefChanged }: FormItemsTabProps) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [match, setMatch] = useState<MatchFilter>('all')
@@ -69,7 +72,7 @@ export default function FormItemsTab({ formGuid, detail, onRefChanged }: FormIte
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [formGuid, historyVersion, keyword, match, message, page, pageSize, t])
+  }, [formGuid, historyVersion, keyword, match, message, page, pageSize, refreshKey, t])
 
   const pickerTarget = useMemo<RefPickerTarget | null>(
     () =>
@@ -112,7 +115,23 @@ export default function FormItemsTab({ formGuid, detail, onRefChanged }: FormIte
       { title: t('spAdmin.import.colImage'), dataIndex: 'imageUrl', width: 56, render: (value?: string | null) => <ItemThumb url={value} /> },
       { title: t('spAdmin.import.colItemCode'), dataIndex: 'supplierItemCode', width: 120, className: 'sp-admin-mono' },
       { title: t('spAdmin.import.colBarcode'), dataIndex: 'barcode', width: 130, className: 'sp-admin-mono', render: (value?: string | null) => value || '--' },
-      { title: t('spAdmin.import.colName'), dataIndex: 'name', width: 260 },
+      {
+        title: t('spAdmin.import.colName'),
+        dataIndex: 'name',
+        width: 260,
+        // 名称下方一行：已下架 + 最近一次修订的改动（新增 / 改价 / 箱规 / 改名 / 重新上架）
+        render: (value: string, row) => (
+          <div className="sp-admin-cell-stack">
+            <span>{value}</span>
+            {row.isActive === false || row.revisionMark ? (
+              <span className="sp-admin-revision-chips">
+                {row.isActive === false ? <RemovedTag /> : null}
+                <RevisionChips mark={row.revisionMark} price={row.price} cartonQty={row.cartonQty} />
+              </span>
+            ) : null}
+          </div>
+        ),
+      },
       { title: t('spAdmin.import.colUnit'), dataIndex: 'unit', width: 64, render: (value?: string | null) => value || '--' },
       { title: t('spAdmin.import.colCartonQty'), dataIndex: 'cartonQty', width: 72, align: 'right', className: 'sp-admin-number' },
       { title: t('spAdmin.import.colCbm'), dataIndex: 'cartonCbm', width: 80, align: 'right', className: 'sp-admin-number', render: formatCbm },
@@ -190,6 +209,13 @@ export default function FormItemsTab({ formGuid, detail, onRefChanged }: FormIte
             { value: 'warning', label: t('spAdmin.import.filterWarning', { count: detail.warningCount }) },
             { value: 'needRef', label: t('spAdmin.ref.filterNeedRef', { count: detail.needRefCount }) },
             { value: 'ref', label: t('spAdmin.ref.filterRef', { count: detail.refAutoCount + detail.refManualCount }) },
+            // 修订过（或有下架商品）才显示两个修订筛选，原始导入的订单表不多占位置
+            ...(detail.revision > 0 || detail.removedCount > 0 || match === 'revised' || match === 'removed'
+              ? [
+                  { value: 'revised' as const, label: t('spAdmin.revision.filterRevised') },
+                  { value: 'removed' as const, label: t('spAdmin.revision.filterRemoved', { count: detail.removedCount ?? 0 }) },
+                ]
+              : []),
           ]}
         />
         <span className="sp-admin-toolbar-spacer" />
@@ -213,6 +239,7 @@ export default function FormItemsTab({ formGuid, detail, onRefChanged }: FormIte
         loading={loading}
         columns={columns}
         dataSource={items}
+        rowClassName={(row) => (row.isActive === false ? 'sp-admin-row-removed' : '')}
         scroll={{ x: 1740 }}
         pagination={{
           current: page,

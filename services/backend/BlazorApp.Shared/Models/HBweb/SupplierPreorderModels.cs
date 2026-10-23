@@ -91,6 +91,12 @@ public class SupplierPreorderForm
 
     public int ItemCount { get; set; }
 
+    /// <summary>修订版次数：0 = 原始导入，每上传一次修订版 +1（迁移 20261024.002 加列）。</summary>
+    public int Revision { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? RevisedAtUtc { get; set; }
+
     [SugarColumn(Length = 1000, IsNullable = true)]
     public string? Notes { get; set; }
 
@@ -203,6 +209,25 @@ public class SupplierPreorderFormItem
     public DateTime? RefSetAtUtc { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    // 修订版（迁移 20261024.002-supplier-preorder-revision 加列）：只记最近一次修订的改动，用来高亮
+
+    /// <summary>最近一次有改动的修订版号（0 = 原始导入后没改过）。</summary>
+    public int RevisionNo { get; set; }
+
+    /// <summary>最近一次修订的改动，逗号分隔：Added / Restored / Removed / Price / Carton / Name / Barcode / Image / Cbm / Category。</summary>
+    [SugarColumn(Length = 100, IsNullable = true)]
+    public string? RevisionChange { get; set; }
+
+    [SugarColumn(DecimalDigits = 4, Length = 18, IsNullable = true)]
+    public decimal? PrevPrice { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public int? PrevCartonQty { get; set; }
+
+    /// <summary>修订版里被删掉（下架）的时间；重新出现时清空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? RemovedAtUtc { get; set; }
 }
 
 /// <summary>某张订单表开启的分店（这张表有哪些分店参与）。关闭即删除该行，变更写入授权日志。</summary>

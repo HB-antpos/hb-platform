@@ -129,6 +129,9 @@ public sealed partial class SupplierPreorderService
             NewCount = items.Count(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             Categories = items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c).Cast<string>().ToList(),
         };
+        detail.Revision = form.Revision;
+        detail.RevisedAtUtc = AsUtc(form.RevisedAtUtc);
+        detail.RemovedCount = await _db.Queryable<SupplierPreorderFormItem>().CountAsync(i => i.FormGuid == formGuid && !i.IsActive);
         var withImage = items.Where(i => !string.IsNullOrWhiteSpace(i.ImageSourceUrl)).ToList();
         detail.ImageCopy = new SupplierPreorderImageCopyStatusDto
         {
@@ -233,9 +236,13 @@ public sealed partial class SupplierPreorderService
         var state = await LoadHistoryStateAsync(form, new[] { AllStoresKey });
         bool OwnHasSales(SupplierPreorderFormItem i) =>
             i.MatchedProductCode is not null && (AllStores(state, i.MatchedProductCode)?.SalesQty ?? 0m) > 0;
-        IEnumerable<SupplierPreorderFormItem> filtered = snapshot.Items.Where(i => i.IsActive);
+        // 已下架的只在「已下架」筛选里出现
+        IEnumerable<SupplierPreorderFormItem> filtered = query.Match == "removed"
+            ? snapshot.Items.Where(i => !i.IsActive)
+            : snapshot.Items.Where(i => i.IsActive);
         filtered = (query.Match ?? "all") switch
         {
+            "revised" => filtered.Where(i => !string.IsNullOrEmpty(i.RevisionChange)),
             "matched" => filtered.Where(i => i.MatchMethod != SupplierPreorderMatchMethods.None && i.MatchNote == null),
             "new" => filtered.Where(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             "warning" => filtered.Where(i => i.MatchNote != null),

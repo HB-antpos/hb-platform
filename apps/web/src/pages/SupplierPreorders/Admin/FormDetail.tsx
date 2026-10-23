@@ -7,6 +7,7 @@ import {
   ReloadOutlined,
   SyncOutlined,
   TeamOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { Alert, App, Button, Drawer, Dropdown, Form, Result, Spin, Tabs, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -32,6 +33,7 @@ import FormMatrixPanel from './FormMatrixPanel'
 import FormStoresPanel from './FormStoresPanel'
 import { HISTORY_POLL_INTERVAL_MS, canRecomputeHistory, getHistoryWindow, shouldPollHistory } from './refPicker.logic'
 import './registerSpAdminMessages'
+import RevisionModal from './RevisionModal'
 import { DeadlineText, FormStatusPill } from './SpAdminParts'
 import {
   canDeleteForm,
@@ -69,6 +71,10 @@ export default function SupplierPreorderFormDetailPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
   const [retryingImages, setRetryingImages] = useState(false)
+  const [revisionOpen, setRevisionOpen] = useState(false)
+  /** 应用修订版后商品页签、分店卡片要重拉（箱规 / 进价变了，金额件数都会变） */
+  const [itemsRefreshKey, setItemsRefreshKey] = useState(0)
+  const [storesRefreshKey, setStoresRefreshKey] = useState(0)
   const loadSeqRef = useRef(0)
 
   const loadDetail = useCallback(
@@ -124,6 +130,17 @@ export default function SupplierPreorderFormDetailPage() {
     setMatrixRefreshKey((value) => value + 1)
     setLogsRefreshKey((value) => value + 1)
   }, [loadDetail])
+
+  // 应用修订版：用返回的详情刷新页头，并让商品、分店卡片、矩阵、操作记录都重拉
+  const handleRevisionApplied = useCallback((next: SupplierPreorderFormDetail) => {
+    setDetail(next)
+    setLoadedAtMs(Date.now())
+    setRevisionOpen(false)
+    setItemsRefreshKey((value) => value + 1)
+    setStoresRefreshKey((value) => value + 1)
+    setMatrixRefreshKey((value) => value + 1)
+    setLogsRefreshKey((value) => value + 1)
+  }, [])
 
   if (!detail) {
     return (
@@ -325,6 +342,13 @@ export default function SupplierPreorderFormDetailPage() {
             <Button type="text" size="small" icon={<ArrowLeftOutlined />} aria-label={t('spAdmin.detail.backToList')} onClick={() => navigate('/supplier-preorders')} />
             <h2 className="sp-admin-detail-title">{summary.title}</h2>
             <FormStatusPill status={summary.status} />
+            {detail.revision > 0 ? (
+              <Tag color="purple" bordered={false} className="sp-admin-tag sp-admin-number">
+                {detail.revisedAtUtc
+                  ? t('spAdmin.revision.stamp', { revision: detail.revision, time: formatSydneyDateTime(detail.revisedAtUtc) })
+                  : t('spAdmin.revision.stampNoTime', { revision: detail.revision })}
+              </Tag>
+            ) : null}
             {summary.status !== 'Closed' ? <DeadlineText deadlineAtUtc={summary.deadlineAtUtc} nowMs={loadedAtMs} showDate={false} /> : null}
           </div>
           <div className="sp-admin-muted sp-admin-small sp-admin-number">
@@ -351,6 +375,11 @@ export default function SupplierPreorderFormDetailPage() {
           <Button icon={<EditOutlined />} onClick={openEdit}>
             {t('spAdmin.detail.edit')}
           </Button>
+          <Tooltip title={t('spAdmin.revision.uploadHint')}>
+            <Button icon={<UploadOutlined />} onClick={() => setRevisionOpen(true)}>
+              {t('spAdmin.revision.upload')}
+            </Button>
+          </Tooltip>
           <Dropdown
             trigger={['click']}
             menu={{
@@ -398,12 +427,16 @@ export default function SupplierPreorderFormDetailPage() {
             label: t('spAdmin.detail.tabStores'),
             children: (
               <div className="sp-admin-stack">
-                <FormStoresPanel formGuid={formGuid} onChanged={handleStoresChanged} />
+                <FormStoresPanel formGuid={formGuid} formStatus={summary.status} refreshKey={storesRefreshKey} onChanged={handleStoresChanged} />
                 <FormMatrixPanel formGuid={formGuid} refreshKey={matrixRefreshKey} />
               </div>
             ),
           },
-          { key: 'items', label: t('spAdmin.detail.tabItems'), children: <FormItemsTab formGuid={formGuid} detail={detail} onRefChanged={handleRefChanged} /> },
+          {
+            key: 'items',
+            label: t('spAdmin.detail.tabItems'),
+            children: <FormItemsTab formGuid={formGuid} detail={detail} refreshKey={itemsRefreshKey} onRefChanged={handleRefChanged} />,
+          },
           {
             key: 'logs',
             label: t('spAdmin.detail.tabLogs'),
@@ -415,6 +448,8 @@ export default function SupplierPreorderFormDetailPage() {
           },
         ]}
       />
+
+      <RevisionModal open={revisionOpen} detail={detail} onClose={() => setRevisionOpen(false)} onApplied={handleRevisionApplied} />
 
       <Drawer
         title={t('spAdmin.detail.editTitle')}

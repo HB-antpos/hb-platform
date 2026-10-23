@@ -64,6 +64,7 @@ public sealed class ExpoPushContentTests
     [Theory]
     [InlineData(AppNotificationTypes.StorePriceUpdates)]
     [InlineData(AppNotificationTypes.ContainerNewProducts)]
+    [InlineData(AppNotificationTypes.SupplierPreorderReminder)]
     [InlineData(AppNotificationTypes.Test)]
     public void 非敏感类型_推送用通知原本的标题正文_data合并DataJson(string type)
     {

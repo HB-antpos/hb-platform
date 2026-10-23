@@ -175,3 +175,13 @@
   .sp-order-head-actions { justify-content: flex-start; }
   .sp-order-deadline-box { align-items: flex-start; }
 }
+
+/* ---------- 修订版（PR 3）：行上修订标记、划掉的旧进价 / 旧箱规、已下架商品提示 ---------- */
+.sp-order-revision-tag.ant-tag { margin-inline-end: 0; font-variant-numeric: tabular-nums; }
+.sp-order-prev-value { display: block; color: #98a2b3; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-order-price.is-up { color: #cf1322; }
+.sp-order-price.is-down { color: #389e0d; }
+.sp-order-changed-value { color: #d46b08; }
+.sp-order-removed-lines { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.sp-order-removed-line { white-space: nowrap; }
+.sp-order-removed-toggle.ant-btn { height: auto; padding: 0; }

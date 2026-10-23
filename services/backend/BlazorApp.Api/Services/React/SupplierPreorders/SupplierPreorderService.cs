@@ -71,6 +71,11 @@ public interface ISupplierPreorderService
 
     // 新品图片转存 COS
     Task<SupplierPreorderFormDetailDto> RetryFailedImagesAsync(string formGuid);
+
+    // 修订版与提醒（PR 3）
+    Task<SupplierPreorderRevisionPreviewDto> PreviewRevisionAsync(string formGuid, SupplierPreorderRevisionRequestDto request);
+    Task<SupplierPreorderFormDetailDto> ApplyRevisionAsync(string formGuid, SupplierPreorderRevisionRequestDto request);
+    Task<SupplierPreorderRemindResultDto> RemindPendingStoresAsync(string formGuid);
 }
 
 public sealed record SupplierPreorderExportFile(byte[] Content, string ContentType, string FileName);
@@ -96,6 +101,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
     private readonly TimeProvider _timeProvider;
     private readonly SupplierPreorderHistoryService _history;
     private readonly bool _imageStoreConfigured;
+    private readonly BlazorApp.Api.Features.Notifications.INotificationPublisher? _notificationPublisher;
 
     public SupplierPreorderService(
         SqlSugarContext context,
@@ -105,9 +111,10 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         IRoleService roleService,
         ILogger<SupplierPreorderService> logger,
         TimeProvider? timeProvider = null,
-        ISupplierPreorderImageStore? imageStore = null
+        ISupplierPreorderImageStore? imageStore = null,
+        BlazorApp.Api.Features.Notifications.INotificationPublisher? notificationPublisher = null
     )
-        : this(context.Db, currentUser, authorization, httpContextAccessor, roleService, logger, timeProvider, imageStore)
+        : this(context.Db, currentUser, authorization, httpContextAccessor, roleService, logger, timeProvider, imageStore, notificationPublisher)
     {
     }
 
@@ -119,7 +126,8 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         IRoleService roleService,
         ILogger<SupplierPreorderService> logger,
         TimeProvider? timeProvider = null,
-        ISupplierPreorderImageStore? imageStore = null
+        ISupplierPreorderImageStore? imageStore = null,
+        BlazorApp.Api.Features.Notifications.INotificationPublisher? notificationPublisher = null
     )
     {
         _db = db;
@@ -132,6 +140,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         _history = new SupplierPreorderHistoryService(db, logger, _timeProvider);
         // 测试里不传：按已配置处理
         _imageStoreConfigured = imageStore?.IsConfigured ?? true;
+        _notificationPublisher = notificationPublisher;
     }
 
     private DateTime NowUtc => _timeProvider.GetUtcNow().UtcDateTime;
