@@ -1,0 +1,61 @@
+{
+  "posAdmin": {
+    "supplierPage": {
+      "subtitle": "澳洲本地供应商：联系人、商品图片模板、进货记录",
+      "searchPlaceholder": "搜索代码 / 名称",
+      "imageFilter": {
+        "all": "商品图片：全部",
+        "configured": "商品图片：已配置",
+        "missing": "商品图片：未配置"
+      },
+      "selection": {
+        "count": "已选 {{count}} 家供应商",
+        "hint": "同步会写入代码、名称、联系人与 Email",
+        "sync": "同步到 HQ",
+        "clear": "取消选择"
+      },
+      "columns": {
+        "supplier": "供应商",
+        "contact": "联系方式",
+        "image": "商品图片",
+        "lastPurchase": "最近进货",
+        "lastPurchaseHint": "最近一张进货单的订单日期与分店，只统计你能看到的分店"
+      },
+      "image": {
+        "configured": "已配置",
+        "preset": "{{name}} 预设",
+        "missing": "未配置"
+      },
+      "invoices": "进货单",
+      "drawer": {
+        "lastPurchase": "最近进货 {{date}} · {{store}}",
+        "noPurchase": "暂无进货记录",
+        "sectionBasic": "基本信息",
+        "sectionImage": "商品图片模板",
+        "sectionInvoices": "近期进货单",
+        "remarkPlaceholder": "例如：截单时间、定价约定",
+        "preset": "{{name}} 预设",
+        "cosPreset": "COS 图床",
+        "clearTemplate": "清空",
+        "templateOk": "包含 {itemNumber}，长度 {{length}} / {{max}}",
+        "templateMissingPlaceholder": "模板必须包含 {itemNumber}",
+        "templateTooLong": "模板不能超过 {{max}} 个字符",
+        "templateEmpty": "不填时，商品管理按供应商代码套用内置预设（如有）",
+        "previewLabel": "用货号试一下",
+        "previewPlaceholder": "货号，多个用空格分隔",
+        "preview": "预览",
+        "previewLoading": "加载中",
+        "previewOk": "加载成功",
+        "previewFailed": "加载失败",
+        "previewNeedsCode": "模板含 {supplierCode}，保存生成供应商代码后再预览",
+        "invoiceNo": "单号",
+        "orderDate": "订单日期",
+        "amount": "金额",
+        "viewAllInvoices": "在分店进货单中查看全部",
+        "invoicesEmpty": "暂无进货单",
+        "invoicesFailed": "进货单加载失败",
+        "readOnly": "只有查看权限，表单只读"
+      }
+    }
+  }
+}

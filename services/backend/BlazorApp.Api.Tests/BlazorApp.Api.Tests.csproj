@@ -92,6 +92,7 @@
     <Compile Include="ReactLocationControllerTests.cs" />
     <Compile Include="ReactProductWarehouseControllerTests.cs" />
     <Compile Include="DeviceRegistrationControllerTests.cs" />
+    <Compile Include="DeviceRegistrationRustDeskVersionTests.cs" />
     <Compile Include="DeviceRegistrationReactServiceTests.cs" />
     <Compile Include="DeviceActivationCodeManagementTests.cs" />
     <Compile Include="RemoteMaintenanceContractTests.cs" />
@@ -339,6 +340,7 @@
     <Compile Include="ProductMaintenanceHqProjectionWriterTests.cs" />
     <Compile Include="ProductSupplierImageBatchUpdateTests.cs" />
     <Compile Include="LocalSupplierHqSyncTests.cs" />
+    <Compile Include="LocalSupplierListLastPurchaseTests.cs" />
     <Compile Include="ProductIntegrityServiceTests.cs" />
     <Compile Include="ProductStoreSyncServiceTests.cs" />
     <Compile Include="ProductStoreSyncJobServiceTests.cs" />

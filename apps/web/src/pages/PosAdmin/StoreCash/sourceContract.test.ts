@@ -90,21 +90,22 @@ const routeBlock = routes.slice(routeStart, routes.indexOf('element:', routeStar
 assert(routeBlock.includes("title: 'menu.storeCash'"), '路由标题使用全局菜单键')
 assert(routeBlock.includes('keepAlive: true'), '路由必须 keepAlive')
 assert(routeBlock.includes("accessKey: 'canViewStoreCash'"), '路由使用本页访问键')
-assert(routeBlock.includes("icon: 'AccountBookOutlined'"), '路由图标与后端菜单一致')
+// 已并入「结算与现金」合并页：菜单图标在合并页上，本页是其中一个标签
+assert(/const SETTLEMENT_CASH_NAV_GROUP[\s\S]*?icon: 'MoneyCollectOutlined'[\s\S]*?path: '\/pos-admin\/store-cash'/.test(routes), '现金管理是「结算与现金」合并页的标签')
 assert(routes.includes("lazy(() => import('../pages/PosAdmin/StoreCash'))"), '页面必须懒加载')
 assert(routes.includes('AccountBookOutlined: <AccountBookOutlined />'), '后端菜单图标必须在 iconMap 里，否则侧边栏不显示图标')
 assert(permissions.includes("OverviewView: 'Cash.Overview.View'") && permissions.includes("AllStoresView: 'Cash.AllStores.View'"), '权限码常量')
 assert(authTypes.includes('canViewStoreCash: boolean'), 'AccessControl 新字段')
 assert(access.includes('const canViewStoreCash = hasPermission(P.Cash.OverviewView)'), 'access 必须读取本页权限')
 assert(portal.includes("defaultPath: '/pos-admin/store-cash'") && portal.includes('P.Cash.OverviewView'), '门户落地规则必须包含本页')
-assert(preview.includes("{ path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' }"), '菜单预览必须包含本页')
+assert(preview.includes("{ path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' }"), '菜单预览必须包含本页（在合并页组节点下）')
 assert(preview.includes('canViewStoreCash: [P.Cash.OverviewView]'), '菜单预览访问键映射')
 assert(expoPreview.includes('permissionCodes: [P.Cash.OverviewView]') && !expoPreview.includes("'Cash.Overview.View'"), 'App 菜单预览引用权限常量，不写死权限码')
 
 // 与后端 Web 菜单一致：同一路径、同一权限、同一图标
 assert(
-  /Path = "\/pos-admin\/store-cash".*TitleKey = "menu\.storeCash".*Icon = "AccountBookOutlined".*Permission = Permissions\.Cash\.OverviewView/.test(navigation),
-  '后端 FullMenu 应登记 /pos-admin/store-cash（menu.storeCash / AccountBookOutlined / Cash.Overview.View）',
+  /Path = "\/pos-admin\/settlement-cash".*TitleKey = "menu\.groupSettlementCash".*Icon = "MoneyCollectOutlined".*Permissions\.Cash\.OverviewView/.test(navigation),
+  '后端 FullMenu 应登记「结算与现金」合并页（Cash.Overview.View 即可见）',
 )
 
 console.log('storeCash source contract: ok')

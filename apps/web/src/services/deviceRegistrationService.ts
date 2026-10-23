@@ -228,6 +228,7 @@ function normalizeItem(raw: Record<string, unknown>): DeviceRegistrationItem {
     systemUptimeSeconds: getNullableNumber(raw, 'systemUptimeSeconds', 'SystemUptimeSeconds', '系统开机秒数'),
     processWorkingSetMb: getNullableNumber(raw, 'processWorkingSetMb', 'ProcessWorkingSetMb', '客户端内存MB'),
     processHandleCount: getNullableNumber(raw, 'processHandleCount', 'ProcessHandleCount', '客户端句柄数'),
+    rustDeskClientVersion: getNullableString(raw, 'rustDeskClientVersion', 'RustDeskClientVersion'),
   }
 }
 
@@ -419,6 +420,7 @@ export async function getDeviceRegistrations(params?: {
   const response = await request.get<
     ApiResponse<{
       devices?: Record<string, unknown>[]
+      rustDeskLatestVersion?: string | null
       pagination?: {
         page?: number
         pageSize?: number
@@ -441,6 +443,10 @@ export async function getDeviceRegistrations(params?: {
 
   return {
     devices: Array.isArray(data.devices) ? data.devices.map(normalizeItem) : [],
+    rustDeskLatestVersion:
+      typeof data.rustDeskLatestVersion === 'string' && data.rustDeskLatestVersion.trim()
+        ? data.rustDeskLatestVersion.trim()
+        : null,
     total: Number(pagination.total ?? 0),
     page: Number(pagination.page ?? params?.page ?? 1),
     pageSize: Number(pagination.pageSize ?? params?.pageSize ?? 50),

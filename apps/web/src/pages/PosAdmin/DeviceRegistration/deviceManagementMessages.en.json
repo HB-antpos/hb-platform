@@ -21,9 +21,12 @@
           "transactions": "Sales",
           "registeredAt": "Registered",
           "version": "Version",
+          "rustDeskVersion": "Remote",
           "update": "Update",
           "lastUser": "Last user"
         },
+        "rustDeskVersionHint": "RustDesk client version reported by this device; orange when below the deployed {{latest}}",
+        "rustDeskNotInstalled": "Not installed",
         "heartbeatNever": "Never reported",
         "cashier": "Cashier {{name}}",
         "uptime": {

@@ -27,6 +27,8 @@ export interface DeviceRegistrationItem {
   processWorkingSetMb?: number | null
   /** WPF 进程句柄数（随心跳上报） */
   processHandleCount?: number | null
+  /** RustDesk 客户端版本（远程维护登记时上报）；没有远程维护记录时为空，仅分页列表返回 */
+  rustDeskClientVersion?: string | null
 }
 
 export interface DeviceRegistrationDetail extends DeviceRegistrationItem {}
@@ -47,6 +49,8 @@ export interface UpdateDeviceRegistrationApiPayload {
 
 export interface DeviceRegistrationPagedResult {
   devices: DeviceRegistrationItem[]
+  /** 远程维护下发的 RustDesk 安装包版本，低于它的「远程版本」标橙；未启用远程维护时为空 */
+  rustDeskLatestVersion?: string | null
   total: number
   page: number
   pageSize: number

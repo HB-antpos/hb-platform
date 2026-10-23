@@ -15,6 +15,11 @@ namespace BlazorApp.Shared.DTOs
         public string? ImageBaseUrl { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+
+        // 最近一张分店进货单（未删除、按当前用户分店范围）；仅分页列表填充，其余接口为 null。
+        public DateTime? LastPurchaseDate { get; set; }
+        public string? LastPurchaseStoreCode { get; set; }
+        public string? LastPurchaseStoreName { get; set; }
     }
 
     public class CreateLocalSupplierDto

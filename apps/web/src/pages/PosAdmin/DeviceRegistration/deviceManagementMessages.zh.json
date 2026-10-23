@@ -21,9 +21,12 @@
           "transactions": "交易",
           "registeredAt": "注册时间",
           "version": "版本",
+          "rustDeskVersion": "远程版本",
           "update": "更新",
           "lastUser": "最近用户"
         },
+        "rustDeskVersionHint": "该设备上报的 RustDesk 客户端版本；低于远程维护下发的 {{latest}} 时标橙",
+        "rustDeskNotInstalled": "未安装",
         "heartbeatNever": "从未上报",
         "cashier": "收银员 {{name}}",
         "uptime": {

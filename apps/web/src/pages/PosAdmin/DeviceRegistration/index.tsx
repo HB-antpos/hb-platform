@@ -49,6 +49,7 @@ import {
   DEVICE_STATUS_TABS,
   buildCountedOptions,
   compareDateDesc,
+  compareDottedVersion,
   countDevicesByStatus,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
@@ -57,6 +58,7 @@ import {
   getDeviceStatusActions,
   getUptimeParts,
   isLongUptime,
+  isRustDeskVersionOutdated,
   runWithConcurrency,
   type CountedOption,
   type DeviceOnlineFilter,
@@ -152,6 +154,8 @@ export default function DeviceRegistrationPage() {
 
   const [items, setItems] = useState<DeviceRegistrationItem[]>([])
   const [serverTotal, setServerTotal] = useState(0)
+  // 远程维护下发的 RustDesk 版本：「远程版本」列低于它时标橙。
+  const [rustDeskLatestVersion, setRustDeskLatestVersion] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [statusTab, setStatusTab] = useState<DeviceStatusTab>('all')
   const [keyword, setKeyword] = useState('')
@@ -199,6 +203,7 @@ export default function DeviceRegistrationPage() {
         onSuccess: (result) => {
           setItems(result.devices)
           setServerTotal(result.total)
+          setRustDeskLatestVersion(result.rustDeskLatestVersion ?? null)
         },
         onError: (error) => {
           console.error(t('posAdmin.devices.loadFailed'), error)
@@ -514,6 +519,34 @@ export default function DeviceRegistrationPage() {
         ),
       },
       {
+        // RustDesk 客户端版本：没装 RustDesk / 没有远程维护记录的显示「未安装」，低于下发版本标橙。
+        title: (
+          <Tooltip title={t('posAdmin.devices.mgmt.rustDeskVersionHint', { latest: rustDeskLatestVersion ?? '-' })}>
+            <span>{t('posAdmin.devices.mgmt.columns.rustDeskVersion')}</span>
+          </Tooltip>
+        ),
+        dataIndex: 'rustDeskClientVersion',
+        width: 110,
+        sorter: (left, right) => {
+          if (!left.rustDeskClientVersion || !right.rustDeskClientVersion) {
+            return Number(Boolean(left.rustDeskClientVersion)) - Number(Boolean(right.rustDeskClientVersion))
+          }
+          return compareDottedVersion(left.rustDeskClientVersion, right.rustDeskClientVersion)
+            ?? left.rustDeskClientVersion.localeCompare(right.rustDeskClientVersion)
+        },
+        render: (value: string | null | undefined) =>
+          value ? (
+            <span
+              className={`dev-mgmt-mono${isRustDeskVersionOutdated(value, rustDeskLatestVersion) ? ' dev-mgmt-warn' : ''}`}
+              title={value}
+            >
+              {value}
+            </span>
+          ) : (
+            <span className="dev-mgmt-faint">{t('posAdmin.devices.mgmt.rustDeskNotInstalled')}</span>
+          ),
+      },
+      {
         title: t('posAdmin.devices.mgmt.columns.runtime'),
         key: 'runtime',
         width: 180,
@@ -631,7 +664,7 @@ export default function DeviceRegistrationPage() {
         },
       },
     ]
-  }, [canManage, actionDeviceId, storeNameMap, t])
+  }, [canManage, actionDeviceId, rustDeskLatestVersion, storeNameMap, t])
 
   const storeOptions = stores.map((store) => ({
     label: `${store.storeCode} / ${store.storeName}`,

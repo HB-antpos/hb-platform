@@ -67,6 +67,13 @@
     "en": "英文"
   },
   "menu": {
+    "groupDevicesRemote": "设备与远程",
+    "groupAccounts": "账号与权限",
+    "groupMonitoring": "系统监控",
+    "groupPaymentsInvoices": "支付与发票",
+    "groupFaceRecognition": "人脸识别",
+    "groupProductsPricing": "商品与价格",
+    "groupSettlementCash": "结算与现金",
     "dashboard": "工作台",
     "system": "系统管理",
     "systemStores": "分店管理",
