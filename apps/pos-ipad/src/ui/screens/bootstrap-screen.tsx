@@ -67,7 +67,12 @@ function ReadinessCard({ icon, label, ready, statusText }: ReadinessCardProps) {
   );
 }
 
-export function BootstrapScreen() {
+export function BootstrapScreen({
+  onOpenNetworkCheck,
+}: Readonly<{
+  /** 启动失败时显示「网络检测」入口；只有首页路由传入，其他路由的加载兜底页不显示。 */
+  onOpenNetworkCheck?: () => void;
+}> = {}) {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const { retry, state: runtime } = usePosRuntime();
@@ -316,6 +321,22 @@ export function BootstrapScreen() {
                     </Text>
                   </PosPressable>
                 ) : null}
+                {onOpenNetworkCheck ? (
+                  <PosPressable
+                    accessibilityRole="button"
+                    onPress={onOpenNetworkCheck}
+                    sound="navigate"
+                    style={({ pressed }) => [
+                      styles.networkCheckButton,
+                      pressed && styles.retryButtonPressed,
+                    ]}
+                    testID="bootstrap-network-check"
+                  >
+                    <Text style={styles.networkCheckLabel}>
+                      {t("bootstrap.networkCheck")}
+                    </Text>
+                  </PosPressable>
+                ) : null}
                 <PosPressable
                   accessibilityRole="button"
                   accessibilityState={{ disabled: startupActionBusy }}
@@ -520,6 +541,20 @@ const styles = StyleSheet.create({
   },
   abandonPendingLabel: {
     color: posColors.red,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  networkCheckButton: {
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: posColors.blue,
+    backgroundColor: posColors.surface,
+  },
+  networkCheckLabel: {
+    color: posColors.blue,
     fontSize: 13,
     fontWeight: "800",
   },

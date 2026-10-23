@@ -172,6 +172,15 @@ beforeEach(async () => {
   mockLatestCameraProps = null;
 });
 
+test("注册页提供网络检测入口", async () => {
+  const onOpenNetworkCheck = jest.fn();
+  const screen = await render(
+    <DeviceRegistrationScreen onOpenNetworkCheck={onOpenNetworkCheck} />,
+  );
+  await fireEvent.press(await screen.findByTestId("registration-network-check"));
+  expect(onOpenNetworkCheck).toHaveBeenCalledTimes(1);
+});
+
 test("待开通码读取损坏时显示恢复错误且不把它当作空记录", async () => {
   mockRestorePendingActivationCode.mockRejectedValue(
     new Error("Device activation recovery data is unavailable."),

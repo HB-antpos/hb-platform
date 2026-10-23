@@ -598,3 +598,30 @@ test("明确拒绝显示错误且不进入 sales", async () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 });
+
+test("登录页网络检测入口在终端未就绪时也可点，不传回调则不显示", async () => {
+  const onOpenNetworkCheck = jest.fn();
+  const notReady = {
+    ...runtime(async () => cashier()),
+    services: null,
+  } as unknown as CashierLoginRuntime;
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      onOpenNetworkCheck={onOpenNetworkCheck}
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  await fireEvent.press(screen.getByTestId("cashier-login-network-check"));
+  expect(onOpenNetworkCheck).toHaveBeenCalledTimes(1);
+
+  await screen.rerender(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  expect(screen.queryByTestId("cashier-login-network-check")).toBeNull();
+});

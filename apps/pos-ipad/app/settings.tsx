@@ -144,6 +144,7 @@ export default function SettingsRoute() {
   return (
     <SettingsScreen
       onBack={() => router.dismissTo("/sales" as Href)}
+      onOpenNetworkCheck={() => router.push("/network-check" as Href)}
       {...(syncHistoryAccess.canView
         ? { onOpenSyncHistory: () => router.push("/sync-history" as Href) }
         : {})}
