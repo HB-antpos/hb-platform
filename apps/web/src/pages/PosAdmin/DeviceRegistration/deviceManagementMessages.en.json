@@ -27,6 +27,13 @@
         },
         "rustDeskVersionHint": "RustDesk client version reported by this device; orange when below the deployed {{latest}}",
         "rustDeskNotInstalled": "Not installed",
+        "versionFilter": {
+          "appVersion": "App version",
+          "appVersionPlaceholder": "App version",
+          "rustDeskPlaceholder": "Remote version",
+          "notReported": "Not reported",
+          "outdated": "Older than {{latest}}"
+        },
         "heartbeatNever": "Never reported",
         "cashier": "Cashier {{name}}",
         "uptime": {

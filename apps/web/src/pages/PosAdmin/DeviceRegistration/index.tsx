@@ -48,6 +48,7 @@ import {
   DEVICE_STATUS_ACTIONS,
   DEVICE_STATUS_TABS,
   buildCountedOptions,
+  buildVersionFilterOptions,
   compareDateDesc,
   compareDottedVersion,
   countDevicesByStatus,
@@ -64,6 +65,8 @@ import {
   type DeviceOnlineFilter,
   type DeviceStatusAction,
   type DeviceStatusTab,
+  VERSION_FILTER_NONE,
+  VERSION_FILTER_OUTDATED,
 } from './deviceManagementLogic'
 import './deviceManagement.css'
 import deviceManagementMessagesEn from './deviceManagementMessages.en.json'
@@ -116,6 +119,20 @@ const BATCH_SUCCESS_KEY: Record<DeviceStatusAction, string> = {
   lock: 'posAdmin.devices.mgmt.batch.lockSucceeded',
 }
 
+/** 版本下拉里的特殊选项（未上报 / 未安装 / 低于最新版）：文字取文案，右侧同样显示台数。 */
+function renderSpecialVersionOption(value: string, text: string, count: number) {
+  return {
+    value,
+    title: text,
+    label: (
+      <span className="dev-mgmt-option">
+        <span className="dev-mgmt-option-special">{text}</span>
+        <span className="dev-mgmt-option-count">{count}</span>
+      </span>
+    ),
+  }
+}
+
 function renderCountedOption(option: CountedOption) {
   return {
     value: option.value,
@@ -162,6 +179,8 @@ export default function DeviceRegistrationPage() {
   const [deviceType, setDeviceType] = useState<string>()
   const [deviceSystem, setDeviceSystem] = useState<string>()
   const [onlineFilter, setOnlineFilter] = useState<DeviceOnlineFilter>()
+  const [appVersionFilter, setAppVersionFilter] = useState<string>()
+  const [rustDeskVersionFilter, setRustDeskVersionFilter] = useState<string>()
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
 
   const [actionDeviceId, setActionDeviceId] = useState<number | null>(null)
@@ -279,11 +298,19 @@ export default function DeviceRegistrationPage() {
     () =>
       filterDevicesExceptStatus(
         items,
-        { keyword, deviceType, deviceSystem, online: onlineFilter },
+        {
+          keyword,
+          deviceType,
+          deviceSystem,
+          online: onlineFilter,
+          appVersion: appVersionFilter,
+          rustDeskVersion: rustDeskVersionFilter,
+          rustDeskLatestVersion,
+        },
         (item) => isDeviceRuntimeOnline(item),
         getStoreName,
       ),
-    [items, keyword, deviceType, deviceSystem, onlineFilter, storeNameMap]
+    [items, keyword, deviceType, deviceSystem, onlineFilter, appVersionFilter, rustDeskVersionFilter, rustDeskLatestVersion, storeNameMap]
   )
   const statusCounts = useMemo(() => countDevicesByStatus(baseFiltered), [baseFiltered])
   const visibleItems = useMemo(() => filterDevicesByStatus(baseFiltered, statusTab), [baseFiltered, statusTab])
@@ -305,6 +332,21 @@ export default function DeviceRegistrationPage() {
     () => buildCountedOptions(items.map((item) => item.deviceSystem), deviceSystem),
     [items, deviceSystem]
   )
+  // 版本下拉与类型 / 系统同口径：取当前分店范围已加载设备里真实出现的版本，按新到旧排序。
+  const appVersionOptions = useMemo(
+    () => buildVersionFilterOptions(items.map((item) => item.appVersion), appVersionFilter),
+    [items, appVersionFilter]
+  )
+  const rustDeskVersionOptions = useMemo(
+    () => buildVersionFilterOptions(items.map((item) => item.rustDeskClientVersion), rustDeskVersionFilter, rustDeskLatestVersion),
+    [items, rustDeskVersionFilter, rustDeskLatestVersion]
+  )
+  const describeVersionFilter = (value: string, noneLabel: string) =>
+    value === VERSION_FILTER_NONE
+      ? noneLabel
+      : value === VERSION_FILTER_OUTDATED
+        ? t('posAdmin.devices.mgmt.versionFilter.outdated', { latest: rustDeskLatestVersion ?? '-' })
+        : value
 
   async function executeStatusAction(item: DeviceRegistrationItem, action: DeviceStatusAction) {
     setActionDeviceId(item.id)
@@ -708,6 +750,24 @@ export default function DeviceRegistrationPage() {
           onRemove: () => setDeviceSystem(undefined),
         }]
       : []),
+    ...(appVersionFilter
+      ? [{
+          key: 'appVersion',
+          label: t('posAdmin.devices.mgmt.versionFilter.appVersion'),
+          value: describeVersionFilter(appVersionFilter, t('posAdmin.devices.mgmt.versionFilter.notReported')),
+          source: 'toolbar' as const,
+          onRemove: () => setAppVersionFilter(undefined),
+        }]
+      : []),
+    ...(rustDeskVersionFilter
+      ? [{
+          key: 'rustDeskVersion',
+          label: t('posAdmin.devices.mgmt.columns.rustDeskVersion'),
+          value: describeVersionFilter(rustDeskVersionFilter, t('posAdmin.devices.mgmt.rustDeskNotInstalled')),
+          source: 'toolbar' as const,
+          onRemove: () => setRustDeskVersionFilter(undefined),
+        }]
+      : []),
     ...(onlineFilter
       ? [{
           key: 'online',
@@ -725,6 +785,8 @@ export default function DeviceRegistrationPage() {
     setDeviceType(undefined)
     setDeviceSystem(undefined)
     setOnlineFilter(undefined)
+    setAppVersionFilter(undefined)
+    setRustDeskVersionFilter(undefined)
     setStatusTab('all')
   }
 
@@ -809,6 +871,48 @@ export default function DeviceRegistrationPage() {
               value={deviceSystem}
               onChange={(value) => setDeviceSystem(value)}
               options={deviceSystemOptions.map(renderCountedOption)}
+            />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="title"
+              placeholder={t('posAdmin.devices.mgmt.versionFilter.appVersionPlaceholder')}
+              style={{ width: 150 }}
+              // 下拉面板放宽：「低于最新版 x.y.z」这类长选项右侧的台数不被截掉
+              popupMatchSelectWidth={220}
+              value={appVersionFilter}
+              onChange={(value) => setAppVersionFilter(value)}
+              options={[
+                ...appVersionOptions.versions.map(renderCountedOption),
+                ...(appVersionOptions.noneCount
+                  ? [renderSpecialVersionOption(VERSION_FILTER_NONE, t('posAdmin.devices.mgmt.versionFilter.notReported'), appVersionOptions.noneCount)]
+                  : []),
+              ]}
+            />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="title"
+              placeholder={t('posAdmin.devices.mgmt.versionFilter.rustDeskPlaceholder')}
+              style={{ width: 150 }}
+              // 下拉面板放宽：「低于最新版 x.y.z」这类长选项右侧的台数不被截掉
+              popupMatchSelectWidth={220}
+              value={rustDeskVersionFilter}
+              onChange={(value) => setRustDeskVersionFilter(value)}
+              options={[
+                // 「低于最新版」放最前：找出需要升级 RustDesk 的设备是最常见的用法
+                ...(rustDeskVersionOptions.outdatedCount
+                  ? [renderSpecialVersionOption(
+                      VERSION_FILTER_OUTDATED,
+                      t('posAdmin.devices.mgmt.versionFilter.outdated', { latest: rustDeskLatestVersion ?? '-' }),
+                      rustDeskVersionOptions.outdatedCount,
+                    )]
+                  : []),
+                ...rustDeskVersionOptions.versions.map(renderCountedOption),
+                ...(rustDeskVersionOptions.noneCount
+                  ? [renderSpecialVersionOption(VERSION_FILTER_NONE, t('posAdmin.devices.mgmt.rustDeskNotInstalled'), rustDeskVersionOptions.noneCount)]
+                  : []),
+              ]}
             />
             <Select<DeviceOnlineFilter>
               allowClear

@@ -27,6 +27,13 @@
         },
         "rustDeskVersionHint": "该设备上报的 RustDesk 客户端版本；低于远程维护下发的 {{latest}} 时标橙",
         "rustDeskNotInstalled": "未安装",
+        "versionFilter": {
+          "appVersion": "客户端版本",
+          "appVersionPlaceholder": "按客户端版本",
+          "rustDeskPlaceholder": "按远程版本",
+          "notReported": "未上报",
+          "outdated": "低于最新版 {{latest}}"
+        },
         "heartbeatNever": "从未上报",
         "cashier": "收银员 {{name}}",
         "uptime": {
