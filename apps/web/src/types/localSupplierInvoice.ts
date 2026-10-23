@@ -89,6 +89,11 @@ export interface LocalSupplierInvoiceItemDto {
   newAutoRetailPrice?: number
   isSpecialProduct?: boolean
   oldStoreProductCode?: string
+  /**
+   * 本单分店当前的商品自动定价状态（分店价格表），仅展示；未匹配商品或本店还没有分店价格时为空。
+   * 与 autoPricing（本行执行时要写入的定价方案）不同。
+   */
+  storeIsAutoPricing?: boolean | null
 }
 
 export interface LocalSupplierInvoiceSalesAnalysisItemDto {
