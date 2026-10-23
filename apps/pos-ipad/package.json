@@ -52,7 +52,7 @@
     "test:catalog-route": "jest src/tests/routes/catalog-maintenance-route.rntl.test.tsx --runInBand",
     "test:routes": "npm run test:index-route && npm run test:catalog-route && npm run test:sales-route && npm run test:payment-route && npm run test:returns-route && npm run test:sync-history-route && npm run test:held-orders-route && npm run test:local-history-route",
     "test:pricing": "tsx --test src/features/sales/domain/*.test.ts",
-    "test:sales-ui": "tsx --test src/features/sales/ui/sales-presenter.test.ts src/features/sales/ui/sales-toolbar-order.test.ts && jest src/features/sales/ui/sales-number-keypad.rntl.test.tsx src/features/sales/ui/sales-screen.rntl.test.tsx src/features/sales/ui/sales-toolbar.rntl.test.tsx --runInBand",
+    "test:sales-ui": "tsx --test src/features/sales/ui/sales-presenter.test.ts src/features/sales/ui/sales-toolbar-order.test.ts && jest src/features/sales/ui/sales-number-keypad.rntl.test.tsx src/features/sales/ui/sales-search-keyboard.rntl.test.tsx src/features/sales/ui/sales-screen.rntl.test.tsx src/features/sales/ui/sales-toolbar.rntl.test.tsx --runInBand",
     "test:sales-route": "jest src/tests/routes/sales-route.rntl.test.tsx --runInBand",
     "test:index-route": "jest src/tests/routes/index-route.rntl.test.tsx --runInBand",
     "test:payment-route": "jest src/tests/routes/payment-route.rntl.test.tsx --runInBand",
