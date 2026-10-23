@@ -71,6 +71,11 @@ const detail = {
   newCount: 0,
   warningCount: 0,
   categories: [],
+  history: { status: 'NoWindow', keyDates: [] },
+  ownHistoryCount: 0,
+  refAutoCount: 0,
+  refManualCount: 0,
+  needRefCount: 0,
 } as SupplierPreorderFormDetail
 const fromDetail = buildHeaderValuesFromDetail(detail)
 assert.equal(fromDetail.deadlineDate?.format('YYYY-MM-DD'), '2026-06-30')

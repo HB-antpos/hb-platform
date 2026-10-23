@@ -85,6 +85,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string WarehouseOrderReturnFieldsMigrationId =
         "20261021.001-warehouse-order-return-fields";
     internal const string SupplierPreorderMigrationId = "20261023.001-supplier-preorder";
+    internal const string SupplierPreorderHistoryMigrationId = "20261023.002-supplier-preorder-history";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -310,6 +311,11 @@ internal sealed class SchemaMigrationCoordinator
             SupplierPreorderMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplySupplierPreorderAsync(cancellationToken)
+        ),
+        new(
+            SupplierPreorderHistoryMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplySupplierPreorderHistoryAsync(cancellationToken)
         ),
     ];
 

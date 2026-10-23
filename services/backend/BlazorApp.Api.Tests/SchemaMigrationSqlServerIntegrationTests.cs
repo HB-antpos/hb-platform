@@ -1151,6 +1151,48 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单去年历史快照表_可重复执行_保留数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54003, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderHistorySnapshot (SnapshotGuid, FormGuid, StoreCode, ProductCode, PayloadJson, ComputedAtUtc, RuleVersion)
+            VALUES (N's-1', N'f-1', N'*', N'*', N'{}', SYSUTCDATETIME(), N'v1');
+            """);
+        // 重复执行是空操作，不丢已有数据
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.SupplierPreorderHistorySnapshot WHERE SnapshotGuid = N's-1') <> 1
+                THROW 54010, 'Existing history snapshot row should survive re-running the migration.', 1;
+            """);
+        // (订单表, 分店, 商品) 唯一
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderHistorySnapshot (SnapshotGuid, FormGuid, StoreCode, ProductCode, PayloadJson, ComputedAtUtc, RuleVersion)
+            VALUES (N's-2', N'f-1', N'*', N'*', N'{}', SYSUTCDATETIME(), N'v1');
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderHistorySnapshot ALTER COLUMN RuleVersion nvarchar(20) NOT NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54004, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderHistorySnapshot ALTER COLUMN RuleVersion nvarchar(50) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_SupplierPreorderHistorySnapshot_FormStoreProduct ON dbo.SupplierPreorderHistorySnapshot;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54005, indexMissing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 分店订单退货三列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

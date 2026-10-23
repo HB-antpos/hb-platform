@@ -1,15 +1,21 @@
 // 下单页表格列定义集中在这里。
-// 下一个 PR 要在「箱规」与「其他分店已下单」之间插入：去年本店进货 / 去年本店销售 / 去年日销曲线 / 折扣，
-// 以及展开大图、参考商品——只需在 buildOrderingColumns 里按 key 插入新列，不必改页面。
+// 「箱规」与「其他分店已下单」之间是去年本店四列：进货 / 销售 / 日销曲线 / 折扣（PR 2）；
+// 没有数据时四格合并成一个占位，参考商品的数据整格紫色底。展开大图见 OrderingHistoryExpand。
 import { LoadingOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Image, Input, Space, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { TFunction } from 'i18next'
 import { memo, useEffect, useState } from 'react'
 
-import type { SupplierPreorderOrderingItem } from '../../../types/supplierPreorder'
+import type {
+  SupplierPreorderHistoryState,
+  SupplierPreorderKeyDate,
+  SupplierPreorderOrderingItem,
+} from '../../../types/supplierPreorder'
 import { toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
 
+import { historyCellState } from './orderingHistory.logic'
+import { DiscountCell, HistoryPlaceholder, HistorySparkline, PurchaseCell, RefBadge, SalesCell } from './orderingHistoryCells'
 import {
   computeLineTotals,
   formatAud,
@@ -32,6 +38,14 @@ export interface OrderingColumnContext {
   isSaving: (itemGuid: string) => boolean
   onCommit: (row: SupplierPreorderOrderingItem, cartons: number) => void
   onInvalidInput: () => void
+  /** 去年历史快照状态：没有数据的行据此显示「计算中」还是「无去年记录」 */
+  historyStatus?: SupplierPreorderHistoryState | null
+  /** 历史窗口起点（日期字符串，按日期处理）；曲线下标 0 = 这一天 */
+  historyWindowFrom?: string | null
+  /** 历史窗口天数（含首尾）；迷你曲线的横轴长度 */
+  historyWindowDays: number | null
+  /** 节日关键日期（迷你曲线紫色虚线） */
+  historyKeyDates: readonly SupplierPreorderKeyDate[]
 }
 
 /** 列 key 常量：以后插列、隐藏列都按 key 处理 */
@@ -41,7 +55,10 @@ export const ORDERING_COLUMN_KEYS = {
   product: 'product',
   price: 'price',
   carton: 'carton',
-  // PR 2 在这里之后插入：lastYearPurchase / lastYearSales / lastYearCurve / discount
+  lastYearPurchase: 'lastYearPurchase',
+  lastYearSales: 'lastYearSales',
+  lastYearCurve: 'lastYearCurve',
+  discount: 'discount',
   otherStores: 'otherStores',
   mine: 'mine',
 } as const
@@ -73,10 +90,12 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
             {row.supplierItemCode}
             {row.barcode ? ` · ${row.barcode}` : null}
           </div>
-          {row.category || row.isNew ? (
+          {row.category || row.isNew || row.history?.source === 'Ref' ? (
             <div className="sp-order-product-meta">
               {row.category ? <span>{row.category}</span> : null}
               {row.isNew ? <Tag color="orange">{t(`${NS}.table.newTag`)}</Tag> : null}
+              {/* 新品借用参考商品的去年数据：标「参考 XXX」，悬停看参考商品 */}
+              {row.history?.source === 'Ref' ? <RefBadge t={t} history={row.history} ownPrice={row.price} /> : null}
             </div>
           ) : null}
         </div>
@@ -109,6 +128,7 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
         </div>
       ),
     },
+    ...buildHistoryColumns(ctx),
   ]
 
   if (ctx.canViewOtherStores) {
@@ -148,6 +168,8 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
     ),
     width: 170,
     align: 'right',
+    // 固定在右侧：加了去年四列后表格很宽，横向滚动时仍能直接下单；有固定列时展开行也会按可视宽度排版
+    fixed: 'right',
     render: (_, row) => (
       <CartonStepper
         t={t}
@@ -162,6 +184,73 @@ export function buildOrderingColumns(ctx: OrderingColumnContext): ColumnsType<Su
   })
 
   return columns
+}
+
+/** 去年本店四列共用的格子属性：没有数据时第一格横跨四格、其余隐藏；参考商品整格紫色底 */
+const HISTORY_SPAN = 4
+
+function buildHistoryColumns(ctx: OrderingColumnContext): ColumnsType<SupplierPreorderOrderingItem> {
+  const { t } = ctx
+  const stateOf = (row: SupplierPreorderOrderingItem) => historyCellState(row.history, ctx.historyStatus)
+  const cellProps = (row: SupplierPreorderOrderingItem, isFirst: boolean) => {
+    if (stateOf(row) !== 'data') return isFirst ? { colSpan: HISTORY_SPAN } : { colSpan: 0 }
+    return row.history?.source === 'Ref' ? { className: 'sp-hist-cell-ref' } : {}
+  }
+  const header = (title: string, sub: string) => (
+    <span>
+      {title}
+      <span className="sp-order-th-sub">{sub}</span>
+    </span>
+  )
+
+  return [
+    {
+      key: ORDERING_COLUMN_KEYS.lastYearPurchase,
+      title: header(t(`${NS}.table.colLastYearPurchase`), t(`${NS}.table.colLastYearPurchaseSub`)),
+      width: 124,
+      onCell: (row) => cellProps(row, true),
+      render: (_, row) => {
+        const state = stateOf(row)
+        if (state !== 'data' || !row.history) return <HistoryPlaceholder t={t} state={state} canViewOtherStores={ctx.canViewOtherStores} />
+        return <PurchaseCell t={t} history={row.history} />
+      },
+    },
+    {
+      key: ORDERING_COLUMN_KEYS.lastYearSales,
+      title: header(t(`${NS}.table.colLastYearSales`), t(`${NS}.table.colLastYearSalesSub`)),
+      width: 136,
+      onCell: (row) => cellProps(row, false),
+      render: (_, row) => (row.history && stateOf(row) === 'data' ? <SalesCell t={t} history={row.history} /> : null),
+    },
+    {
+      key: ORDERING_COLUMN_KEYS.lastYearCurve,
+      title: header(t(`${NS}.table.colLastYearCurve`), t(`${NS}.table.colLastYearCurveSub`)),
+      width: 144,
+      onCell: (row) => cellProps(row, false),
+      render: (_, row) => {
+        if (!row.history || stateOf(row) !== 'data') return null
+        return (
+          <div className="sp-hist-curve">
+            <HistorySparkline
+              t={t}
+              history={row.history}
+              windowFrom={ctx.historyWindowFrom}
+              windowDays={ctx.historyWindowDays}
+              keyDates={ctx.historyKeyDates}
+            />
+            {row.history.source === 'Ref' ? <RefBadge t={t} history={row.history} ownPrice={row.price} /> : null}
+          </div>
+        )
+      },
+    },
+    {
+      key: ORDERING_COLUMN_KEYS.discount,
+      title: t(`${NS}.table.colDiscount`),
+      width: 108,
+      onCell: (row) => cellProps(row, false),
+      render: (_, row) => (row.history && stateOf(row) === 'data' ? <DiscountCell t={t} history={row.history} /> : null),
+    },
+  ]
 }
 
 function ProductThumb({ row }: { row: SupplierPreorderOrderingItem }) {

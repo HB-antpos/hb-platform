@@ -199,6 +199,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifySupplierPreorderAsync(CancellationToken cancellationToken);
 
+    Task ApplySupplierPreorderHistoryAsync(CancellationToken cancellationToken);
+
+    Task VerifySupplierPreorderHistoryAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1222,6 +1226,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             SupplierPreorderSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplySupplierPreorderHistoryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderHistorySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 历史快照表的列签名与唯一索引通过后协调器才登记账本。
+        await VerifySupplierPreorderHistoryAsync(cancellationToken);
+    }
+
+    public async Task VerifySupplierPreorderHistoryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderHistorySchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
