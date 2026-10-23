@@ -208,6 +208,11 @@ namespace BlazorApp.Shared.DTOs
         /// WPF 进程句柄数，未上报时为空
         /// </summary>
         public int? ProcessHandleCount { get; set; }
+
+        /// <summary>
+        /// RustDesk 客户端版本（远程维护登记时上报），没有远程维护记录时为空；仅分页列表填充
+        /// </summary>
+        public string? RustDeskClientVersion { get; set; }
     }
 
     /// <summary>

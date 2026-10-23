@@ -54,12 +54,20 @@ assertEqual(
   '页面必须懒加载，不进首屏包',
 )
 assertEqual(routeBlock.includes("title: 'menu.faceMatch'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes("icon: 'SafetyCertificateOutlined'"), true, '菜单图标与后端导航一致：SafetyCertificateOutlined')
+const navGroupStart = routeSource.indexOf('const FACE_RECOGNITION_NAV_GROUP: NavGroupDefinition')
+const navGroupBlock = routeSource.slice(navGroupStart, routeSource.indexOf('\nconst ', navGroupStart + 1))
+// 已并入「人脸识别」合并页：菜单图标在合并页上，本页是其中一个标签
+assertEqual(navGroupStart >= 0 && navGroupBlock.includes(`path: '${FACE_MATCH_PATH}'`), true, '人脸比对是「人脸识别」合并页的标签')
+assertEqual(navGroupBlock.includes("icon: 'VideoCameraOutlined'"), true, '合并页菜单图标与后端导航一致：VideoCameraOutlined')
 assertEqual(routeBlock.includes('keepAlive: false'), true, '路由不能 keepAlive')
 assertEqual(routeBlock.includes("accessKey: 'canAccessFaceMatch'"), true, '路由使用独立访问键')
 assertEqual(routeSource.includes('element: <FaceMatchPage />'), true, '路由必须渲染人脸比对页')
 assertEqual(/SafetyCertificateOutlined:\s*<SafetyCertificateOutlined\s*\/>/.test(routeSource), true, '图标表里必须有 SafetyCertificateOutlined')
-assertEqual(routeStart > routeSource.indexOf("path: '/system'"), true, '路由登记在系统分组之后')
+assertEqual(
+  routeSource.indexOf('...navGroupRoutes(FACE_RECOGNITION_NAV_GROUP)') > routeSource.indexOf("path: '/system'"),
+  true,
+  '合并页登记在系统分组下',
+)
 
 // 权限码：与后端 Permissions.FaceMatch.* 完全一致
 assertEqual(P.FaceMatch.Manage, 'FaceMatch.Manage', '权限码与后端一致')
@@ -88,9 +96,9 @@ for (const code of FACE_MATCH_CODES) {
   const preview = buildWebRoleMenuPreview(only, (key) => key, { includeHidden: true })
   assertEqual(findNode(preview, FACE_MATCH_PATH)?.visible, true, `${code} 的菜单预览应显示该入口`)
   assertEqual(
-    findNode(preview, '/system')?.children?.some((child) => child.path === FACE_MATCH_PATH),
+    findNode(preview, '/system/face-recognition')?.children?.some((child) => child.path === FACE_MATCH_PATH),
     true,
-    '菜单挂在「系统」分组下',
+    '菜单挂在「系统 / 人脸识别」合并页下',
   )
 }
 

@@ -377,3 +377,29 @@ export function isLongUptime(seconds: number | null | undefined): boolean {
   const parts = getUptimeParts(seconds)
   return parts !== null && parts.unit === 'days' && parts.count >= LONG_UPTIME_WARNING_DAYS
 }
+
+/** 点分版本号按数字逐段比较（1.4.10 > 1.4.9，缺的段按 0）；任一方不是「数字.数字…」格式时无法比较，返回 null。 */
+export function compareDottedVersion(left: string | null | undefined, right: string | null | undefined): number | null {
+  const parse = (value: string | null | undefined) => {
+    const match = value?.trim().match(/^v?(\d+(?:\.\d+)*)/i)
+    return match ? match[1].split('.').map(Number) : null
+  }
+  const leftParts = parse(left)
+  const rightParts = parse(right)
+  if (!leftParts || !rightParts) {
+    return null
+  }
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (delta !== 0) {
+      return delta
+    }
+  }
+  return 0
+}
+
+/** 远程版本低于远程维护下发的最新版本时标出来；没有最新版本或版本号无法比较时不标。 */
+export function isRustDeskVersionOutdated(version: string | null | undefined, latest: string | null | undefined): boolean {
+  const delta = compareDottedVersion(version, latest)
+  return delta !== null && delta < 0
+}

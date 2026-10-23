@@ -295,15 +295,17 @@ public class NavigationServiceTests
             _service.BuildMenu(authorized),
             item => item.Path == "/system"
         );
+        // 用户管理已并入「账号与权限」合并页：合并页只认 Users.ViewWebConsole，不认 Users.View。
         var usersMenu = Assert.Single(
             authorizedSystem.Children!,
-            item => item.Path == "/system/users"
+            item => item.Path == "/system/accounts"
         );
-        Assert.Equal(Permissions.Users.ViewWebConsole, usersMenu.Permission);
+        Assert.Contains(Permissions.Users.ViewWebConsole, usersMenu.AnyPermissions!);
+        Assert.DoesNotContain(Permissions.Users.View, usersMenu.AnyPermissions!);
 
         Assert.DoesNotContain(
             _service.BuildMenu(usersViewOnly).SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
-            item => item.Path == "/system/users"
+            item => item.Path == "/system/accounts"
         );
     }
 
@@ -321,12 +323,13 @@ public class NavigationServiceTests
             _service.BuildMenu(authorized),
             item => item.Path == "/system"
         );
+        // 紧急登录密钥已并入「设备与远程」合并页：菜单项是合并页，System.ManageSettings 即可见。
         var keyMenu = Assert.Single(
             authorizedSystem.Children!,
-            item => item.Path == "/system/emergency-login-keys"
+            item => item.Path == "/system/devices"
         );
-        Assert.Equal("menu.emergencyLoginKeys", keyMenu.TitleKey);
-        Assert.Equal(Permissions.System.ManageSettings, keyMenu.Permission);
+        Assert.Equal("menu.groupDevicesRemote", keyMenu.TitleKey);
+        Assert.Contains(Permissions.System.ManageSettings, keyMenu.AnyPermissions!);
 
         var unauthorizedSystem = Assert.Single(
             _service.BuildMenu(unauthorized),
@@ -334,7 +337,7 @@ public class NavigationServiceTests
         );
         Assert.DoesNotContain(
             unauthorizedSystem.Children!,
-            item => item.Path == "/system/emergency-login-keys"
+            item => item.Path == "/system/devices"
         );
     }
 
@@ -416,11 +419,11 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.Path == "/pos-admin");
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
-        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/employee-profiles");
+        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/accounts");
         Assert.Contains(systemMenu.Children!, item => item.Path == "/system/app-downloads");
 
         var posAdminMenu = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/products");
+        Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/products-pricing");
         Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/local-supplier-invoices");
     }
 
@@ -429,21 +432,21 @@ public class NavigationServiceTests
     [InlineData("管理员")]
     [InlineData("SuperAdmin")]
     [InlineData("超级管理员")]
-    public void BuildMenu_四种系统管理员别名均显示Linkly结算(string roleName)
+    public void BuildMenu_四种系统管理员别名均显示结算与现金合并页(string roleName)
     {
         var user = CreateUser(new Claim(ClaimTypes.Role, roleName));
 
         var menu = _service.BuildMenu(user);
 
+        // Linkly 结算记录（仅管理员）已并入「结算与现金」合并页，页内标签仍按管理员身份显示。
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
         var item = Assert.Single(
             posAdmin.Children!,
-            child => child.Path == "/pos-admin/linkly-settlements"
+            child => child.Path == "/pos-admin/settlement-cash"
         );
-        Assert.Equal("menu.linklySettlements", item.TitleKey);
-        Assert.Equal("ReconciliationOutlined", item.Icon);
-        Assert.Null(item.Permission);
-        Assert.True(item.RequireAdmin);
+        Assert.Equal("menu.groupSettlementCash", item.TitleKey);
+        Assert.Equal("MoneyCollectOutlined", item.Icon);
+        Assert.DoesNotContain(posAdmin.Children!, child => child.Path == "/pos-admin/linkly-settlements");
     }
 
     [Theory]
@@ -609,11 +612,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        // 日结记录已并入「结算与现金」合并页，仅凭 DailyCloseRecords.View 即可见。
         var dailyCloses = Assert.Single(posAdmin.Children!);
-        Assert.Equal("/pos-admin/daily-closes", dailyCloses.Path);
-        Assert.Equal("menu.dailyCloses", dailyCloses.TitleKey);
+        Assert.Equal("/pos-admin/settlement-cash", dailyCloses.Path);
+        Assert.Equal("menu.groupSettlementCash", dailyCloses.TitleKey);
         Assert.Equal("MoneyCollectOutlined", dailyCloses.Icon);
-        Assert.Equal(Permissions.DailyCloseRecords.View, dailyCloses.Permission);
+        Assert.Contains(Permissions.DailyCloseRecords.View, dailyCloses.AnyPermissions!);
         Assert.False(dailyCloses.RequireAdmin);
     }
 
@@ -629,7 +633,7 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/daily-closes");
+        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/settlement-cash");
     }
 
     [Theory]
@@ -806,11 +810,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
+        // 设备管理已并入「设备与远程」合并页。
         var item = Assert.Single(
             systemMenu.Children!,
-            child => child.Path == "/system/device-registration"
+            child => child.Path == "/system/devices"
         );
-        Assert.Equal(Permissions.DeviceRegistration.View, item.Permission);
+        Assert.Contains(Permissions.DeviceRegistration.View, item.AnyPermissions!);
     }
 
     [Fact]
@@ -867,11 +872,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
+        // 员工个人信息已并入「账号与权限」合并页。
         Assert.Contains(
             systemMenu.Children!,
             item =>
-                item.Path == "/system/employee-profiles"
-                && item.Permission == Permissions.EmployeeProfiles.View
+                item.Path == "/system/accounts"
+                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
         );
     }
 
@@ -886,11 +892,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdminMenu = Assert.Single(menu, item => item.Path == "/pos-admin");
+        // 商品管理已并入「商品与价格」合并页。
         Assert.Contains(
             posAdminMenu.Children!,
             item =>
-                item.Path == "/pos-admin/products"
-                && item.Permission == Permissions.PosProducts.View
+                item.Path == "/pos-admin/products-pricing"
+                && item.AnyPermissions!.Contains(Permissions.PosProducts.View)
         );
     }
 
@@ -1000,7 +1007,8 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.Cash.OverviewView)));
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Equal(new[] { "/pos-admin/store-cash" }, posAdmin.Children!.Select(item => item.Path));
+        // 现金管理已并入「结算与现金」合并页；页内只显示有权限的标签。
+        Assert.Equal(new[] { "/pos-admin/settlement-cash" }, posAdmin.Children!.Select(item => item.Path));
     }
 
     [Fact]

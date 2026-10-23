@@ -3,6 +3,7 @@ import type { DeviceRegistrationItem } from '../../../types/deviceRegistration'
 import {
   buildCountedOptions,
   collectDistinctOptions,
+  compareDottedVersion,
   countDevicesByStatus,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
@@ -11,6 +12,7 @@ import {
   getRelativeTimeParts,
   getUptimeParts,
   isLongUptime,
+  isRustDeskVersionOutdated,
   formatDateOnly,
   mergeDeviceDetailView,
   runWithConcurrency,
@@ -204,7 +206,6 @@ assertEqual(merged.remark, '详情备注', '表单字段以详情为准')
 assertEqual(mergeDeviceDetailView(listRow, null).appVersion, '1.0.53', '详情未加载时直接展示列表行')
 assertEqual(mergeDeviceDetailView(listRow, null).remark, '列表备注', '详情未加载时备注取列表行')
 
-console.log('deviceManagementLogic.test: ok')
 
 // 抽屉视图：开机时长/内存/句柄同样是运行态字段，详情接口不带，必须以列表行为准（上次版本字段就栽在这里）
 const resourceRow = device({
@@ -246,3 +247,16 @@ assertEqual(isLongUptime(7 * 86_400), true, '满 7 天提示建议重启')
 assertEqual(isLongUptime(7 * 86_400 - 1), false, '不满 7 天不提示')
 assertEqual(isLongUptime(null), false, '未上报不提示')
 assertEqual(isLongUptime(0), false, '刚开机不提示')
+
+// 远程版本：按数字逐段比较，低于最新版本才标橙；无法比较时不标
+assertEqual(compareDottedVersion('1.4.10', '1.4.9')! > 0, true, '1.4.10 高于 1.4.9（不能按字符串比）')
+assertEqual(compareDottedVersion('1.4', '1.4.0'), 0, '缺的段按 0')
+assertEqual(compareDottedVersion('v1.4.6', '1.4.6'), 0, '允许 v 前缀')
+assertEqual(compareDottedVersion('nightly', '1.4.6'), null, '非数字版本无法比较')
+assertEqual(isRustDeskVersionOutdated('1.4.4', '1.4.6'), true, '低于最新版本标橙')
+assertEqual(isRustDeskVersionOutdated('1.4.6', '1.4.6'), false, '等于最新版本不标')
+assertEqual(isRustDeskVersionOutdated('1.4.7', '1.4.6'), false, '高于最新版本不标')
+assertEqual(isRustDeskVersionOutdated('1.4.4', null), false, '没有最新版本不标')
+assertEqual(isRustDeskVersionOutdated(null, '1.4.6'), false, '未安装不标橙')
+
+console.log('deviceManagementLogic.test: ok')
