@@ -82,7 +82,9 @@
     "branchesSelected": "{{first}} 等 {{count}} 家",
     "branchesEmpty": "没有匹配的分店",
     "branchClear": "清空",
-    "branchConfirm": "确定 ({{count}})"
+    "branchConfirm": "确定 ({{count}})",
+    "refundTier": "退款类型",
+    "refundHint": "含退款商品的订单（退款单，或订单里夹带了退货）。整单金额大于 0 为部分退款（橙色），小于 0 为整单退款（红色）。"
   },
   "detail": {
     "title": "订单详情",
@@ -116,5 +118,10 @@
   },
   "camera": {
     "title": "扫码查询订单"
+  },
+  "refund": {
+    "all": "全部退款",
+    "partial": "部分退款",
+    "full": "整单退款"
   }
 }

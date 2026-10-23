@@ -1031,8 +1031,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(43, menu.Count);
+        Assert.Equal(44, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
         Assert.Contains(menu, item => item.RouteName == "face-match-settings");
@@ -1695,6 +1696,29 @@ public class NavigationServiceTests
                 menu => menu.RouteName == "daily-closes"
             );
         }
+    }
+
+    [Fact]
+    public void BuildAppMenu_自动价格策略仅凭查看权限可见()
+    {
+        var viewer = CreateUser(new Claim("permission", Permissions.PricingStrategy.View));
+        var item = Assert.Single(_service.BuildAppMenu(viewer), menu => menu.RouteName == "pricing-strategies");
+        Assert.Equal("tabs.pricingStrategies", item.TitleKey);
+
+        // 只有编辑权限、改价任务权限、分店商品权限都不能单独打开入口（与 Web 菜单同口径：入口只认 View）。
+        foreach (var permission in new[]
+                 {
+                     Permissions.PricingStrategy.Edit,
+                     Permissions.StoreProducts.PriceUpdates,
+                     Permissions.StoreProducts.View,
+                 })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+                menu => menu.RouteName == "pricing-strategies"
+            );
+        }
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), menu => menu.RouteName == "pricing-strategies");
     }
 
     [Fact]

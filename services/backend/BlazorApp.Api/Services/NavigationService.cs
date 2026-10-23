@@ -323,6 +323,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "pricing-strategies",
+                TitleKey = "tabs.pricingStrategies",
+                Icon = "chart-bell-curve-cumulative",
+                // 移动端「自动价格策略」：与 Web /pos-admin/pricing-strategies 同一对权限码；入口只认 View，
+                // 新建 / 修改 / 删除 / 启停由接口按 PricingStrategy.Edit 再校验。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.PricingStrategy.View,
+                Order = 50,
+            },
+            new()
+            {
                 RouteName = "product-insights",
                 TitleKey = "tabs.productInsights",
                 Icon = "chart-timeline-variant",

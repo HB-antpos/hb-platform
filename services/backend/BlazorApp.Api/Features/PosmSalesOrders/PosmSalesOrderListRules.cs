@@ -40,6 +40,34 @@ public static class PosmSalesOrderListRules
         return trimmed.Length >= 4 && trimmed.All(ch => Uri.IsHexDigit(ch) || ch == '-');
     }
 
+    public const string RefundFilterAny = "any";
+    public const string RefundFilterPartial = "partial";
+    public const string RefundFilterFull = "full";
+
+    /// <summary>退款单的订单状态（旧 POS 的退款是一张独立的 Status=3 订单，明细与支付都是负数）。</summary>
+    public const int RefundOrderStatus = 3;
+
+    /// <summary>只认 any / partial / full（不区分大小写），其余一律当作不筛选，避免把任意字符串带进 SQL 分支。</summary>
+    public static string? NormalizeRefundFilter(string? raw) =>
+        raw?.Trim().ToLowerInvariant() switch
+        {
+            RefundFilterAny => RefundFilterAny,
+            RefundFilterPartial => RefundFilterPartial,
+            RefundFilterFull => RefundFilterFull,
+            _ => null,
+        };
+
+    /// <summary>
+    /// 整单金额的取值口径：以订单卡片显示的实付金额为准，实付为 0 / 空时回落到订单总金额。
+    /// 部分退款（橙）= 含退货且该金额不为负；整单退款（红）= 含退货且该金额为负。
+    /// </summary>
+    public static decimal ResolveWholeOrderAmount(decimal? actualAmount, decimal? totalAmount) =>
+        actualAmount is { } actual && actual != 0m ? actual : totalAmount ?? 0m;
+
+    /// <summary>整单金额为负视为整单退款，其余（含 0）视为部分退款。</summary>
+    public static bool IsFullRefundAmount(decimal? actualAmount, decimal? totalAmount) =>
+        ResolveWholeOrderAmount(actualAmount, totalAmount) < 0m;
+
     /// <summary>件数、种数的筛选或排序需要逐单汇总明细。</summary>
     public static bool NeedsDetailAggregates(PosmSalesOrderQueryParams query)
     {

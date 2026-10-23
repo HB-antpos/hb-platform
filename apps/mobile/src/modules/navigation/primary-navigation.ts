@@ -72,7 +72,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     return "scan";
   }
 
-  // 商品进销、仓库商品进销、订单拣货、POS 订单查询、员工操作日志、日结记录、人脸比对（合并入口 face-hub 与保留的旧三个路由）与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
+  // 商品进销、仓库商品进销、订单拣货、POS 订单查询、员工操作日志、日结记录、自动价格策略、人脸比对（合并入口 face-hub 与保留的旧三个路由）与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
   if (
     routeName === "product-insights" ||
     routeName === "warehouse-picking" ||
@@ -80,6 +80,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     routeName === "sales-orders" ||
     routeName === "legacy-employee-logs" ||
     routeName === "daily-closes" ||
+    routeName === "pricing-strategies" ||
     routeName === FACE_HUB_ROUTE_NAME ||
     isLegacyFaceRouteName(routeName) ||
     routeName === "notifications"

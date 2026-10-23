@@ -175,6 +175,11 @@ namespace BlazorApp.Shared.DTOs
         public decimal? NewAutoRetailPrice { get; set; }
         public bool? IsSpecialProduct { get; set; }
         public string? OldStoreProductCode { get; set; }
+        /// <summary>
+        /// 本单分店当前的商品自动定价状态（StoreRetailPrice.IsAutoPricing），仅查询展示；
+        /// 未匹配商品或该分店还没有分店价格记录时为空。与明细自身的 AutoPricing（执行时要写入的定价方案）不是一回事。
+        /// </summary>
+        public bool? StoreIsAutoPricing { get; set; }
     }
 
     public class UpdateLastPurchasePricesRequest

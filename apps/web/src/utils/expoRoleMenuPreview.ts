@@ -171,6 +171,7 @@ const TAB_PATHS: Record<string, string> = {
   'attendance-management': '/(shell)/attendance-management',
   'product-query': '/(shell)/product-query',
   'price-updates': '/(shell)/price-updates',
+  'pricing-strategies': '/(shell)/pricing-strategies',
   'product-insights': '/(shell)/product-insights',
   'warehouse-product-insights': '/(shell)/warehouse-product-insights',
   'seasonal-product-insights': '/(shell)/seasonal-product-insights',
@@ -217,6 +218,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
   'product-query': { zhTitle: '商品维护', enTitle: 'Products' },
   'price-updates': { zhTitle: '价格和标签', enTitle: 'Prices & labels' },
+  'pricing-strategies': { zhTitle: '自动价格策略', enTitle: 'Pricing rules' },
   'product-insights': { zhTitle: '商品进销', enTitle: 'Product Insights' },
   'warehouse-product-insights': { zhTitle: '仓库商品进销', enTitle: 'Warehouse Insights' },
   'seasonal-product-insights': { zhTitle: '季节商品查询', enTitle: 'Seasonal Products' },
@@ -364,6 +366,15 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.StoreProducts.PriceUpdates],
     order: 50,
     ...ROUTE_LABELS['price-updates'],
+  },
+  {
+    routeName: 'pricing-strategies',
+    titleKey: 'tabs.pricingStrategies',
+    icon: 'chart-bell-curve-cumulative',
+    // 与后端 FullAppMenu 一致：移动端自动价格策略入口只认 PricingStrategy.View（Edit 只决定页面里能不能改）。
+    permissionCodes: [P.PricingStrategy.View],
+    order: 50,
+    ...ROUTE_LABELS['pricing-strategies'],
   },
   {
     routeName: 'product-insights',

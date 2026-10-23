@@ -176,6 +176,7 @@
     <Compile Include="LocalSupplierInvoicesReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreateProductDetailBackfillTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreatedHereProductTests.cs" />
+    <Compile Include="LocalSupplierInvoiceStoreAutoPricingStatusTests.cs" />
     <Compile Include="LocalSupplierInvoiceUncreatedProductFilterTests.cs" />
     <Compile Include="SqliteWarehouseProductChangeHistoryTable.cs" />
     <Compile Include="LocalSupplierInvoiceAuditTimestampContractTests.cs" />

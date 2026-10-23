@@ -76,6 +76,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["promotions", "Promotions", "促销", ["Promotions.View"]],
   ["product-query", "Product query", "商品查询", ["StoreProducts.View"]],
   ["seasonal-product-insights", "Seasonal products", "季节商品查询", ["SeasonalProductInsights.View"]],
+  // 与后端 FullAppMenu 的 pricing-strategies 一致：只认 PricingStrategy.View（Edit 只决定页面里能不能改，不决定入口）。
+  ["pricing-strategies", "Pricing rules", "自动价格策略", ["PricingStrategy.View"]],
   ["container-new-products", "HB new arrivals", "HB新品", ["Container.MobileNewProductsView"]],
   ["installment-orders", "Lay-by orders", "分期订单", ["InstallmentOrders.View"]],
   ["store-vouchers", "Store vouchers", "门店代金券", ["StoreVouchers.View"]],
