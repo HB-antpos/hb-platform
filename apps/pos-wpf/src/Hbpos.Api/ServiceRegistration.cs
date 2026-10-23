@@ -156,6 +156,12 @@ public static class ServiceRegistration
         services.AddScoped<IStoreReceiptProfileService, StoreReceiptProfileService>();
         services.AddScoped<IStoreReceiptProfileReleaseRepository, SqlSugarStoreReceiptProfileReleaseRepository>();
         services.AddScoped<IStoreReceiptProfileReleaseService, StoreReceiptProfileReleaseService>();
+        // 收银入口：分店首选入口的下发（20 秒进程内缓存，单例）与设备实际入口的回显（节流表，单例）。
+        services.AddSingleton<StoreApiEntryModeCache>();
+        services.AddSingleton<DeviceApiEntryThrottle>();
+        services.AddScoped<IStoreApiEntryModeReader, SqlSugarStoreApiEntryModeReader>();
+        services.AddScoped<IDeviceApiEntryWriter, SqlSugarDeviceApiEntryWriter>();
+        services.AddScoped<IDeviceApiEntryRecorder, DeviceApiEntryRecorder>();
         services.AddScoped<IAdvertisementSchemaInitializer, SqlSugarAdvertisementSchemaInitializer>();
         services.AddScoped<IOrderSyncSchemaSqlExecutor, SqlSugarOrderSyncSchemaSqlExecutor>();
         services.AddScoped<IOrderSyncSchemaInitializer, SqlSugarOrderSyncSchemaInitializer>();

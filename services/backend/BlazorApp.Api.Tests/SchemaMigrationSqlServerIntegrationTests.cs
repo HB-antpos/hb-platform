@@ -3252,6 +3252,130 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         Assert.Equal(51971, driftedColumn.Number);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 分店收银入口首选三列加约束_依赖Store表_可重复执行且签名与约束门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // Store 表不存在：拒绝执行与校验。
+        var missingApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql));
+        Assert.Equal(54100, missingApply.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54100, missingVerify.Number);
+
+        // 迁移前形态：Store 只有旧列（桩表，含已有数据）。缺列时门禁报 54101。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.Store
+            (
+                StoreGUID nvarchar(50) NOT NULL PRIMARY KEY,
+                StoreCode nvarchar(50) NOT NULL
+            );
+            INSERT dbo.Store (StoreGUID, StoreCode) VALUES (N'g-1', N'S001');
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+        // 重复执行是空操作；旧行保留，三个新列对旧行是 NULL（= 未设置，收银端按 edge 处理）。
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.Store WHERE StoreGUID = N'g-1' AND StoreCode = N'S001'
+                AND PosApiEntryMode IS NULL AND PosApiEntryUpdatedAt IS NULL AND PosApiEntryUpdatedBy IS NULL) <> 1
+                THROW 54190, 'Existing store row was changed.', 1;
+            """);
+
+        // CHECK 约束：NULL 与三个白名单值能写入，其它值（含大小写不同、空串）被拒。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'aws' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'direct' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'edge' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = NULL WHERE StoreGUID = N'g-1';");
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(
+            main, "UPDATE dbo.Store SET PosApiEntryMode = N'tencent' WHERE StoreGUID = N'g-1';"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(
+            main, "UPDATE dbo.Store SET PosApiEntryMode = N'' WHERE StoreGUID = N'g-1';"));
+
+        // 约束被删或被禁用都必须被门禁识别；重跑 ApplySql 可补回被删的约束。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store NOCHECK CONSTRAINT CK_Store_PosApiEntryMode;");
+        var disabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, disabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store DROP CONSTRAINT CK_Store_PosApiEntryMode;");
+        var dropped = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, dropped.Number);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+
+        // 列宽漂移（nvarchar(16) → nvarchar(8)）与类型漂移（datetime2 → datetime）都被门禁识别；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store DROP CONSTRAINT CK_Store_PosApiEntryMode; ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryMode nvarchar(8) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryMode nvarchar(16) NULL;");
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryUpdatedAt datetime NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, type.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryUpdatedAt datetime2 NULL;");
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 设备入口回显两列_设备表不存在时空操作_存在时可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var posm = databases.PosmConnectionString;
+
+        // 空 POSM 库没有设备表（基线不创建它，生产库里早已存在）：Apply / Verify 都是空操作，迁移链不会因此中断。
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+
+        // 迁移前形态：设备表只有旧列（桩表，含已有数据）。
+        await ExecuteNonQueryAsync(posm, """
+            CREATE TABLE dbo.[POSM_设备注册信息表]
+            (
+                ID int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [系统设备编号] nvarchar(50) NOT NULL
+            );
+            INSERT dbo.[POSM_设备注册信息表] ([系统设备编号]) VALUES (N'POS-01');
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, """
+            IF (SELECT COUNT(*) FROM dbo.[POSM_设备注册信息表] WHERE [系统设备编号] = N'POS-01'
+                AND LastApiEntry IS NULL AND LastApiEntryAt IS NULL) <> 1
+                THROW 54190, 'Existing device row was changed.', 1;
+            """);
+
+        // 列宽漂移与类型漂移被识别。
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntry nvarchar(8) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, width.Number);
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntry nvarchar(16) NULL;");
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntryAt datetime NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, type.Number);
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntryAt datetime2 NULL;");
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )

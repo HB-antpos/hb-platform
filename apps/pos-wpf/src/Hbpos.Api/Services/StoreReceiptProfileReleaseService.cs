@@ -87,7 +87,8 @@ public static class StoreReceiptProfileClientKinds
 
 public sealed class StoreReceiptProfileReleaseService(
     IStoreReceiptProfileReleaseRepository repository,
-    TimeProvider? timeProvider = null) : IStoreReceiptProfileReleaseService
+    TimeProvider? timeProvider = null,
+    IStoreApiEntryModeReader? apiEntryModeReader = null) : IStoreReceiptProfileReleaseService
 {
     public const string StoreCodeRequiredCode = StoreReceiptProfileService.StoreCodeRequiredCode;
     public const string InvalidCharactersCode = StoreReceiptProfileService.InvalidCharactersCode;
@@ -97,6 +98,24 @@ public sealed class StoreReceiptProfileReleaseService(
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<StoreReceiptProfileSyncLookupResult> GetSyncAsync(
+        string storeCode,
+        int knownVersion,
+        CancellationToken cancellationToken)
+    {
+        var result = await GetReleaseSyncAsync(storeCode, knownVersion, cancellationToken);
+        if (result.Sync is null || apiEntryModeReader is null)
+        {
+            return result;
+        }
+
+        // 后台为本店设置的收银端 POS API 首选入口：每次响应都带当前值，与小票下发版本、Changed 是否为 true 无关
+        // （改入口不需要重新发布小票）。读取侧已按 edge / aws / direct 白名单归一化，NULL 与脏值都是 null；
+        // 同店 20 秒内共用进程内缓存，不给每分钟一次的轮询增加慢查询。
+        var mode = await apiEntryModeReader.GetModeAsync(storeCode, cancellationToken);
+        return result with { Sync = result.Sync with { ApiEntryMode = mode } };
+    }
+
+    private async Task<StoreReceiptProfileSyncLookupResult> GetReleaseSyncAsync(
         string storeCode,
         int knownVersion,
         CancellationToken cancellationToken)

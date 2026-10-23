@@ -31,14 +31,20 @@ function series(
   };
 }
 
+const HOSTS = {
+  edge: "pos.hotbargain.vip",
+  aws: "pos-syd.hotbargain.vip",
+  direct: "hotbargain.vip",
+} as const;
+
 function entry(
-  kind: "edge" | "direct",
+  kind: "edge" | "aws" | "direct",
   overrides: Partial<NetworkEntryMeasurement> = {},
 ): NetworkEntryMeasurement {
   return {
     kind,
-    host: kind === "edge" ? "pos.hotbargain.vip" : "hotbargain.vip",
-    baseUrl: `https://${kind === "edge" ? "pos.hotbargain.vip" : "hotbargain.vip"}/pos-api`,
+    host: HOSTS[kind],
+    baseUrl: `https://${HOSTS[kind]}/pos-api`,
     dns: { ms: 40, addresses: ["43.159.98.78"], failed: false },
     first: { ok: true, ms: 900, status: 200 },
     sequential: series(6, 6),
@@ -64,10 +70,12 @@ function measurements(
       first: { ok: true, ms: 80, status: 200 },
       sequential: series(5, 5, 40, 60),
     },
-    entries: [entry("edge"), entry("direct")],
+    entries: [entry("edge"), entry("aws"), entry("direct")],
     publicIp: { ip: "124.187.52.242", requestId: "req-1", failed: false },
     clockSkewMs: 1_200,
     activeEntry: "edge",
+    preferredEntry: "edge",
+    usingFallback: false,
     ...overrides,
   };
 }
@@ -85,7 +93,7 @@ test("系统报告未联网时先判本机没有网络", () => {
     verdictKey(
       measurements({
         local: { known: true, connected: false, type: "NONE", ipAddress: null },
-        entries: [entry("edge", down), entry("direct", down)],
+        entries: [entry("edge", down), entry("aws", down), entry("direct", down)],
       }),
     ),
     "noLocalNetwork",
@@ -110,7 +118,7 @@ test("两条入口和参照地址都不通：上不了外网", () => {
           first: { ok: false, ms: 10_000, error: "network" },
           sequential: series(0, 5),
         },
-        entries: [entry("edge", down), entry("direct", down)],
+        entries: [entry("edge", down), entry("aws", down), entry("direct", down)],
       }),
     ),
     "internetUnreachable",
@@ -119,7 +127,7 @@ test("两条入口和参照地址都不通：上不了外网", () => {
 
 test("参照地址正常而两条入口都不通：连不上服务器；有 HTTP 错误则判服务器报错", () => {
   assert.equal(
-    verdictKey(measurements({ entries: [entry("edge", down), entry("direct", down)] })),
+    verdictKey(measurements({ entries: [entry("edge", down), entry("aws", down), entry("direct", down)] })),
     "serverUnreachable",
   );
   assert.equal(
@@ -127,6 +135,7 @@ test("参照地址正常而两条入口都不通：连不上服务器；有 HTTP
       measurements({
         entries: [
           entry("edge", { ...down, first: { ok: false, ms: 300, status: 502, error: "http" } }),
+          entry("aws", down),
           entry("direct", down),
         ],
       }),
@@ -138,6 +147,7 @@ test("参照地址正常而两条入口都不通：连不上服务器；有 HTTP
       measurements({
         entries: [
           entry("edge", { ...down, first: { ok: false, ms: 300, status: 200, error: "notPosApi" } }),
+          entry("aws", down),
           entry("direct", down),
         ],
       }),
@@ -146,14 +156,42 @@ test("参照地址正常而两条入口都不通：连不上服务器；有 HTTP
   );
 });
 
-test("只有一条入口不通时指明是哪条", () => {
+test("有入口不通而另有入口正常时指明是哪条：首选不通与仅备用不通结论不同", () => {
+  // 默认首选 edge：edge 不通 → 首选不通。
   assert.deepEqual(
-    evaluateNetworkCheck(measurements({ entries: [entry("edge", down), entry("direct")] })),
-    { key: "edgeDown", tone: "warn", entry: "edge" },
+    evaluateNetworkCheck(measurements({ entries: [entry("edge", down), entry("aws"), entry("direct")] })),
+    { key: "entryDownPreferred", tone: "warn", entry: "edge" },
+  );
+  // 直连不通但首选正常 → 只是少一条备用。
+  assert.deepEqual(
+    evaluateNetworkCheck(measurements({ entries: [entry("edge"), entry("aws"), entry("direct", down)] })),
+    { key: "entryDownBackup", tone: "warn", entry: "direct" },
+  );
+  // 后台把首选改成 aws：aws 不通按「首选不通」报，edge 不通反而只是备用。
+  assert.deepEqual(
+    evaluateNetworkCheck(
+      measurements({
+        preferredEntry: "aws",
+        entries: [entry("edge"), entry("aws", down), entry("direct")],
+      }),
+    ),
+    { key: "entryDownPreferred", tone: "warn", entry: "aws" },
   );
   assert.deepEqual(
-    evaluateNetworkCheck(measurements({ entries: [entry("edge"), entry("direct", down)] })),
-    { key: "directDown", tone: "warn", entry: "direct" },
+    evaluateNetworkCheck(
+      measurements({
+        preferredEntry: "aws",
+        entries: [entry("edge", down), entry("aws"), entry("direct")],
+      }),
+    ),
+    { key: "entryDownBackup", tone: "warn", entry: "edge" },
+  );
+  // 两条不通、一条正常：首选在其中就按首选不通报。
+  assert.deepEqual(
+    evaluateNetworkCheck(
+      measurements({ entries: [entry("edge", down), entry("aws", down), entry("direct")] }),
+    ),
+    { key: "entryDownPreferred", tone: "warn", entry: "edge" },
   );
 });
 
@@ -164,13 +202,13 @@ test("时钟偏差超过 5 分钟", () => {
 test("入口偶发失败：参照稳定判到服务器的路丢包，参照也不稳判本机链路不稳", () => {
   const lossyEdge = entry("edge", { sequential: series(4, 6) });
   assert.deepEqual(
-    evaluateNetworkCheck(measurements({ entries: [lossyEdge, entry("direct")] })),
+    evaluateNetworkCheck(measurements({ entries: [lossyEdge, entry("aws"), entry("direct")] })),
     { key: "entryLossy", tone: "warn", entry: "edge" },
   );
   assert.equal(
     verdictKey(
       measurements({
-        entries: [lossyEdge, entry("direct")],
+        entries: [lossyEdge, entry("aws"), entry("direct")],
         reference: {
           url: "https://1.1.1.1/cdn-cgi/trace",
           first: { ok: true, ms: 80, status: 200 },
@@ -186,7 +224,7 @@ test("第一次请求失败、后面又成功也算丢包", () => {
   assert.equal(
     verdictKey(
       measurements({
-        entries: [entry("edge"), entry("direct", { first: { ok: false, ms: 10_000, error: "timeout" } })],
+        entries: [entry("edge"), entry("aws"), entry("direct", { first: { ok: false, ms: 10_000, error: "timeout" } })],
       }),
     ),
     "entryLossy",
@@ -196,7 +234,7 @@ test("第一次请求失败、后面又成功也算丢包", () => {
 test("逐个正常而同时请求失败：并发受限", () => {
   assert.deepEqual(
     evaluateNetworkCheck(
-      measurements({ entries: [entry("edge"), entry("direct", { burst: series(3, 6) })] }),
+      measurements({ entries: [entry("edge"), entry("aws"), entry("direct", { burst: series(3, 6) })] }),
     ),
     { key: "burstLimited", tone: "warn", entry: "direct" },
   );
@@ -205,13 +243,13 @@ test("逐个正常而同时请求失败：并发受限", () => {
 test("偏慢：参照也慢判外网整体慢，否则指明慢的入口（首选优先）", () => {
   const slow = { sequential: series(6, 6, 1_800, 2_100) };
   assert.deepEqual(
-    evaluateNetworkCheck(measurements({ entries: [entry("edge", slow), entry("direct", slow)] })),
+    evaluateNetworkCheck(measurements({ entries: [entry("edge", slow), entry("aws", slow), entry("direct", slow)] })),
     { key: "entrySlow", tone: "warn", entry: "edge" },
   );
   assert.equal(
     verdictKey(
       measurements({
-        entries: [entry("edge", slow), entry("direct")],
+        entries: [entry("edge", slow), entry("aws"), entry("direct")],
         reference: {
           url: "https://1.1.1.1/cdn-cgi/trace",
           first: { ok: true, ms: 1_900, status: 200 },
@@ -250,14 +288,18 @@ test("行状态：EdgeOne 52x 单独归类，逐个全失败的入口并发项�
   assert.equal(buildEntryRow(entry("edge", { dns: null }), "dns", "basics").status, "pending");
 });
 
-test("报告跟随界面语言，分别列出两条入口与 EdgeOne 日志编号，不含令牌", () => {
+test("报告跟随界面语言，分别列出三条入口、首选 / 实际 / 回退状态与 EdgeOne 日志编号，不含令牌", () => {
   const run = {
     phase: "done" as const,
     measurements: measurements({
       entries: [
         entry("edge", { first: { ok: true, ms: 800, status: 200, eoLogUuid: "15814732990385504304" } }),
+        entry("aws"),
         entry("direct", down),
       ],
+      preferredEntry: "edge",
+      activeEntry: "aws",
+      usingFallback: true,
     }),
     startedAtIso: "2026-10-23T08:00:00.000Z",
     finishedAtIso: "2026-10-23T08:00:12.000Z",
@@ -268,13 +310,18 @@ test("报告跟随界面语言，分别列出两条入口与 EdgeOne 日志编�
   assert.match(zh, /HB POS 网络检测报告/u);
   assert.match(zh, /时间：2026-10-23 19:00:12/u);
   assert.match(zh, /【EdgeOne · pos\.hotbargain\.vip】/u);
+  assert.match(zh, /【AWS 悉尼 · pos-syd\.hotbargain\.vip】/u);
   assert.match(zh, /【直连 · hotbargain\.vip】/u);
-  assert.match(zh, /结论：直连入口不通，EdgeOne 正常/u);
+  assert.match(zh, /后台设置的首选入口：EdgeOne/u);
+  assert.match(zh, /当前使用的线路：AWS 悉尼入口/u);
+  assert.match(zh, /是否回退中：是/u);
+  assert.match(zh, /结论：备用入口（直连）不通，首选入口正常/u);
   assert.match(zh, /加速入口 EdgeOne 日志编号：15814732990385504304/u);
   assert.match(zh, /公网地址：正常 · 124\.187\.52\.242/u);
   const en = buildNetworkCheckReport("en", run, context);
   assert.match(en, /HB POS network report/u);
-  assert.match(en, /Finding: Direct entry is down; EdgeOne works/u);
+  assert.match(en, /Finding: Direct \(fallback\) is down; the preferred entry works/u);
+  assert.match(en, /Fallback in use: yes/u);
   assert.doesNotMatch(en, /Bearer|token/iu);
 });
 

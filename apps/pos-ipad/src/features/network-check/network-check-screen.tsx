@@ -23,6 +23,9 @@ import {
   buildNetworkCheckReport,
   describeRowDetail,
   entryName,
+  entryRoleLabel,
+  fallbackStateLabel,
+  preferredEntryLabel,
   resolveVerdict,
   verdictAdvice,
   verdictTitle,
@@ -77,7 +80,7 @@ async function shareWithSystemSheet(report: string, title: string) {
 }
 
 /**
- * 网络检测页：左侧结论、操作和本机 / 互联网检测，右侧两条服务器入口逐项并排对比。
+ * 网络检测页：左侧结论、操作、首选 / 实际入口与本机 / 互联网检测，右侧三条服务器入口逐项并排对比。
  * 只读：只发 GET，不带令牌，不改任何设置，所以未登录、启动失败、待审批时都能打开。
  */
 export function NetworkCheckScreen({
@@ -259,8 +262,19 @@ export function NetworkCheckScreen({
               value={apiBaseUrl ?? t("summary.loadingServer")}
             />
             <SummaryLine
+              label={t("summary.preferredEntry")}
+              testID="network-check-summary-preferred"
+              value={preferredEntryLabel(locale, run) ?? "-"}
+            />
+            <SummaryLine
               label={t("summary.activeEntry")}
+              testID="network-check-summary-active"
               value={run.phase === "idle" ? "-" : activeEntryLabel(locale, run)}
+            />
+            <SummaryLine
+              label={t("summary.fallbackState")}
+              testID="network-check-summary-fallback"
+              value={fallbackStateLabel(locale, run) ?? "-"}
             />
           </View>
 
@@ -299,7 +313,7 @@ export function NetworkCheckScreen({
                         {entryName(locale, entry.kind)}
                       </Text>
                       <Text style={styles.entryRole}>
-                        {t(`entry.${entry.kind}Role` as NetworkCheckCopyKey)}
+                        {entryRoleLabel(locale, run, entry.kind)}
                       </Text>
                     </View>
                     <Text numberOfLines={1} style={styles.entryHost}>
@@ -376,11 +390,15 @@ function HeaderButton({
   );
 }
 
-function SummaryLine({ label, value }: Readonly<{ label: string; value: string }>) {
+function SummaryLine({
+  label,
+  testID,
+  value,
+}: Readonly<{ label: string; testID?: string; value: string }>) {
   return (
     <View style={styles.summaryLine}>
       <Text style={styles.summaryLabel}>{label}</Text>
-      <Text selectable style={styles.summaryValue}>
+      <Text selectable style={styles.summaryValue} testID={testID}>
         {value}
       </Text>
     </View>

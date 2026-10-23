@@ -8296,6 +8296,7 @@ export interface components {
             /** Format: int32 */
             version?: number;
             profile?: components["schemas"]["StoreReceiptProfileDto"];
+            apiEntryMode?: string | null;
         };
         StoreReceiptProfileSyncDtoApiResult: {
             success?: boolean;

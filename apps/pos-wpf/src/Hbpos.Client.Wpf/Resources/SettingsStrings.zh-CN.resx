@@ -294,6 +294,11 @@
   <data name="settings.serverAddress.blocked.deviceActivation" xml:space="preserve"><value>请先完成待恢复的设备开通，再切换服务器。</value></data>
   <data name="settings.serverAddress.blocked.sync" xml:space="preserve"><value>请先处理所有待上传、失败或同步中的订单，再切换服务器。</value></data>
   <data name="settings.serverAddress.blocked.audit" xml:space="preserve"><value>请等待操作审计记录上传完成，再切换服务器。</value></data>
+  <data name="settings.serverAddress.entry.line" xml:space="preserve"><value>总部设置的首选入口：{0} · 当前实际入口：{1}{2}</value></data>
+  <data name="settings.serverAddress.entry.fallback" xml:space="preserve"><value> · 回退中</value></data>
+  <data name="settings.serverAddress.entry.edge" xml:space="preserve"><value>EdgeOne（pos.hotbargain.vip）</value></data>
+  <data name="settings.serverAddress.entry.aws" xml:space="preserve"><value>AWS 悉尼（pos-syd.hotbargain.vip）</value></data>
+  <data name="settings.serverAddress.entry.direct" xml:space="preserve"><value>直连（hotbargain.vip）</value></data>
   <data name="settings.linkly.cloudBackend.credentialsManagedByWeb" xml:space="preserve"><value>Cloud 用户名和密码由 Web 管理后台统一维护；当前 POS 只接收不含凭据的安全终端列表。</value></data>
   <data name="settings.linkly.cloudBackend.terminal" xml:space="preserve"><value>刷卡机</value></data>
   <data name="settings.linkly.cloudBackend.refresh" xml:space="preserve"><value>刷新</value></data>

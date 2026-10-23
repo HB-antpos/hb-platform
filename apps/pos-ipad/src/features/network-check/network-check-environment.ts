@@ -15,13 +15,17 @@ import type { NetworkLocalInfo } from "./network-check-types";
 export function createExpoNetworkCheckPorts(): NetworkCheckPorts {
   const perf = (globalThis as { performance?: { now?: () => number } }).performance;
   return {
-    // 直接用全局 fetch：诊断要分别测两条入口，不能经过入口故障转移，也不能改动它的状态。
+    // 直接用全局 fetch：诊断要分别测三条入口，不能经过入口故障转移，也不能改动它的状态。
     fetch: (url, init) => fetch(url, init),
     now: typeof perf?.now === "function" ? () => perf.now!() : () => Date.now(),
     wallNow: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     readLocalNetwork,
-    isUsingFallback: () => sharedApiTransportSelector.isUsingFallback(),
+    readEntryState: () => ({
+      preferred: sharedApiTransportSelector.getPreferredMode(),
+      active: sharedApiTransportSelector.getActiveMode(),
+      usingFallback: sharedApiTransportSelector.isUsingFallback(),
+    }),
   };
 }
 

@@ -10,7 +10,7 @@ import type {
 
 /**
  * 把实测数据变成「逐项状态 + 一句结论」。纯函数，阈值与判断全部在这里，方便单测。
- * 判断顺序参照 WPF `NetworkDiagnosisRules.Evaluate`，并加上双入口对比。
+ * 判断顺序参照 WPF `NetworkDiagnosisRules.Evaluate`，并加上多入口（EdgeOne / AWS 悉尼 / 直连）对比。
  */
 
 /** 普通请求（连接已建立）超过它算慢：设备 API 只给几秒，这么慢就会表现为离线。与 WPF 一致。 */
@@ -49,8 +49,8 @@ export type NetworkVerdictKey =
   | "notPosApi"
   | "serverError"
   | "serverUnreachable"
-  | "edgeDown"
-  | "directDown"
+  | "entryDownPreferred"
+  | "entryDownBackup"
   | "clockSkew"
   | "linkUnstable"
   | "entryLossy"
@@ -286,9 +286,20 @@ function entrySlow(entry: NetworkEntryMeasurement): boolean {
   return (entry.sequential?.avgMs ?? 0) >= NETWORK_SLOW_MS;
 }
 
-/** 首选入口排在前面：同类问题先报 App 主要在用的那条。 */
-function byPriority(entries: readonly NetworkEntryMeasurement[]): NetworkEntryMeasurement[] {
-  const rank = (kind: NetworkCheckEntryKind) => (kind === "direct" ? 1 : 0);
+/** 固定的展示 / 并列时优先级，与客户端备用顺序无关，仅用于让结论稳定。 */
+const KIND_RANK: Readonly<Record<NetworkCheckEntryKind, number>> = {
+  edge: 1,
+  aws: 2,
+  direct: 3,
+  configured: 4,
+};
+
+/** 后台设置的首选入口排在最前（同类问题先报 App 主要在用的那条），其余按 EdgeOne、AWS、直连。 */
+function byPriority(
+  entries: readonly NetworkEntryMeasurement[],
+  preferred: NetworkCheckEntryKind | null,
+): NetworkEntryMeasurement[] {
+  const rank = (kind: NetworkCheckEntryKind) => (kind === preferred ? 0 : KIND_RANK[kind]);
   return [...entries].sort((left, right) => rank(left.kind) - rank(right.kind));
 }
 
@@ -296,7 +307,7 @@ export function evaluateNetworkCheck(
   measurements: NetworkCheckMeasurements,
 ): NetworkVerdict {
   const { local, reference } = measurements;
-  const entries = byPriority(measurements.entries);
+  const entries = byPriority(measurements.entries, measurements.preferredEntry);
   if (local?.known && local.connected === false) {
     return { key: "noLocalNetwork", tone: "bad" };
   }
@@ -315,13 +326,15 @@ export function evaluateNetworkCheck(
     return { key: "serverUnreachable", tone: "bad" };
   }
 
-  const edge = entries.find((entry) => entry.kind === "edge");
-  const direct = entries.find((entry) => entry.kind === "direct");
-  if (edge && direct && entryDown(edge) && !entryDown(direct)) {
-    return { key: "edgeDown", tone: "warn", entry: "edge" };
-  }
-  if (edge && direct && entryDown(direct) && !entryDown(edge)) {
-    return { key: "directDown", tone: "warn", entry: "direct" };
+  // 有入口不通但至少还有一条通：首选不通 → App 会自动回退；只是备用不通 → 收银不受影响，但少一条退路。
+  // entries 已按「首选在前」排序，所以首个不通的就是最该先报的那条。
+  const downEntry = entries.length > 1 ? entries.find(entryDown) : undefined;
+  if (downEntry && !entries.every(entryDown)) {
+    return {
+      key: downEntry.kind === measurements.preferredEntry ? "entryDownPreferred" : "entryDownBackup",
+      tone: "warn",
+      entry: downEntry.kind,
+    };
   }
 
   if (

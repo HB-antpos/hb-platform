@@ -586,7 +586,7 @@ function uploadService(
     sync,
     scope: () => SCOPE,
     clientKind: CLIENT_KIND,
-    appVersion: "0.1.2",
+    appVersion: "0.1.3",
     now,
   });
 }

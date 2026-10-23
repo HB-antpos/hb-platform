@@ -250,14 +250,16 @@ public sealed class ApiRuntimeEndpointHandler(
             var retryRequest = _transportSelector.GetFallback(configured, transport) is not null
                 ? CreateRetryRequest(request)
                 : null;
+            var retried = false;
             try
             {
                 var response = await base.SendAsync(request, linkedCancellation.Token);
-                if (IsEdgeOriginFailure(response.StatusCode))
+                if (IsEdgeOriginFailure(transport, response.StatusCode))
                 {
                     // EdgeOne 自己报告「边缘到源站」失败（522 连不上源站、523 不可达、524 回源超时、525/526 TLS 等）。
-                    // 这些非标准状态码源站从不返回，是干净的「边缘出问题」信号：本次起改走备用入口，
-                    // 读请求立即换备用入口重试一次；写请求不重试（源站可能已在处理），直接把响应交给调用方。
+                    // 这些非标准状态码源站从不返回，是干净的「边缘出问题」信号：本次起该入口进入冷却，
+                    // 读请求立即换顺序中的下一个入口重试一次；写请求不重试（源站可能已在处理），直接把响应交给调用方。
+                    // 注意：只对 EdgeOne 入口成立。AWS 边缘与直连入口不会产生这些码，也不能把它们当边缘故障。
                     _transportSelector.ReportConnectFailure(configured, transport);
                     var statusFallback = _transportSelector.GetFallback(configured, transport);
                     if (retryRequest is null || statusFallback is null)
@@ -273,15 +275,15 @@ public sealed class ApiRuntimeEndpointHandler(
                             StatusCode: (int)response.StatusCode));
                     response.Dispose();
                     retryRequest.RequestUri = new Uri(statusFallback, relativePath);
-                    var statusRetryResponse = await base.SendAsync(retryRequest, linkedCancellation.Token);
-                    _transportSelector.ReportSuccess(configured, statusFallback);
-                    return statusRetryResponse;
+                    // 已经进入重试：重试自己的连接失败由 SendRetryAsync 记录后直接抛出，不能再被下面的 catch 接住做第二次重试。
+                    retried = true;
+                    return await SendRetryAsync(retryRequest, configured, statusFallback, linkedCancellation.Token);
                 }
 
                 _transportSelector.ReportSuccess(configured, transport);
                 return response;
             }
-            catch (HttpRequestException ex) when (IsConnectFailure(ex))
+            catch (HttpRequestException ex) when (!retried && IsConnectFailure(ex))
             {
                 _transportSelector.ReportConnectFailure(configured, transport);
                 var fallback = _transportSelector.GetFallback(configured, transport);
@@ -303,9 +305,7 @@ public sealed class ApiRuntimeEndpointHandler(
                         }),
                     ex);
                 retryRequest.RequestUri = new Uri(fallback, relativePath);
-                var retryResponse = await base.SendAsync(retryRequest, linkedCancellation.Token);
-                _transportSelector.ReportSuccess(configured, fallback);
-                return retryResponse;
+                return await SendRetryAsync(retryRequest, configured, fallback, linkedCancellation.Token);
             }
             finally
             {
@@ -314,10 +314,46 @@ public sealed class ApiRuntimeEndpointHandler(
         }
     }
 
-    /// <summary>EdgeOne 回源失败专用的 520~530 状态码（源站和 ASP.NET 都不会产生）。</summary>
-    private static bool IsEdgeOriginFailure(HttpStatusCode statusCode)
+    /// <summary>
+    /// 换入口后的唯一一次重试：最多只重试这一次（不会把所有候选逐个试一遍，避免一次请求被拖到 候选数 × 建连超时）。
+    /// 重试本身连接失败时也要让该入口进入冷却，后续请求才会绕开它，然后把原始错误抛给调用方。
+    /// </summary>
+    private async Task<HttpResponseMessage> SendRetryAsync(
+        HttpRequestMessage retryRequest,
+        Uri configured,
+        Uri retryTransport,
+        CancellationToken cancellationToken)
     {
-        return (int)statusCode is >= 520 and <= 530;
+        try
+        {
+            var response = await base.SendAsync(retryRequest, cancellationToken);
+            if (IsEdgeOriginFailure(retryTransport, response.StatusCode))
+            {
+                // 重试落到 EdgeOne（例如首选是 direct 且 aws 也在冷却时绕回）又报回源失败：记入冷却，响应原样交给调用方。
+                _transportSelector.ReportConnectFailure(configured, retryTransport);
+            }
+            else
+            {
+                _transportSelector.ReportSuccess(configured, retryTransport);
+            }
+
+            return response;
+        }
+        catch (HttpRequestException ex) when (IsConnectFailure(ex))
+        {
+            _transportSelector.ReportConnectFailure(configured, retryTransport);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// EdgeOne 回源失败专用的 520~530 状态码（源站和 ASP.NET 都不会产生）。
+    /// 只对 EdgeOne 入口（pos.hotbargain.vip）生效：AWS 边缘（nginx 回源失败返回 502/504）与直连入口都不产生这些码。
+    /// </summary>
+    private static bool IsEdgeOriginFailure(Uri transport, HttpStatusCode statusCode)
+    {
+        return string.Equals(transport.Host, ApiEndpointAliases.EdgeHost, StringComparison.OrdinalIgnoreCase)
+               && (int)statusCode is >= 520 and <= 530;
     }
 
     /// <summary>
