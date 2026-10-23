@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExpoPosUpdateIdentity } from "@/core/runtime/expo-pos-runtime";
+import {
+  type NativeAppVersion,
+  otaVersionLabel,
+  UNKNOWN_NATIVE_APP_VERSION,
+} from "@/core/runtime/native-app-version";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import {
   type CashierLoginVersionInfo,
@@ -17,6 +22,7 @@ export default function LoginRoute() {
   const runtime = usePosRuntime();
   const versionInfo = toCashierLoginVersionInfo(
     runtime.services?.updateIdentity,
+    runtime.services?.nativeAppVersion,
   );
   const { i18n } = useTranslation();
   const scanInFlight = useRef(false);
@@ -99,14 +105,12 @@ export default function LoginRoute() {
 
 function toCashierLoginVersionInfo(
   identity: ExpoPosUpdateIdentity | null | undefined,
+  nativeVersion: NativeAppVersion | null | undefined,
 ): CashierLoginVersionInfo {
   const runtimeVersion = identity?.runtimeVersion.trim() || "unknown";
-  const updateId = identity?.updateId?.trim().toLowerCase();
   return Object.freeze({
+    ...(nativeVersion ?? UNKNOWN_NATIVE_APP_VERSION),
     runtimeVersion,
-    otaVersion:
-      identity?.isEmbeddedLaunch === false && updateId
-        ? updateId.slice(0, 8)
-        : "embedded",
+    otaVersion: otaVersionLabel(identity),
   });
 }

@@ -107,6 +107,10 @@ import {
 import { readCurrentUpdateGroupId } from "./expo-update-identity";
 import { resolveExpoUpdateRuntimeVersion } from "./expo-update-runtime-version";
 import { resolveLocalDeviceState } from "./local-device-state";
+import {
+  type NativeAppVersion,
+  resolveNativeAppVersion,
+} from "./native-app-version";
 import { createPaymentProviderRuntimeBootstrap } from "./payment-provider-runtime-bootstrap";
 import {
   configuredLinklyEnvironment,
@@ -176,6 +180,8 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     scanner: Readonly<{ router: HidScannerRouter }>;
     applicationLog: ApplicationLogRuntime;
     updateIdentity: ExpoPosUpdateIdentity;
+    /** 原生壳版本号与 build 号，供登录页、收银页显示，路由层无需直接加载原生模块。 */
+    nativeAppVersion: NativeAppVersion;
   }>;
 
 type ExpoSettingsDevicePresentation = Readonly<{
@@ -1275,6 +1281,13 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       scanner: Object.freeze({ router: scannerRouter }),
       applicationLog: activeApplicationLog,
       updateIdentity,
+      nativeAppVersion: resolveNativeAppVersion({
+        applicationVersion: Application.nativeApplicationVersion,
+        constantsVersion: Constants.nativeAppVersion,
+        configVersion: Constants.expoConfig?.version,
+        applicationBuild: Application.nativeBuildVersion,
+        constantsBuild: Constants.nativeBuildVersion,
+      }),
       shutdown: async () => {
         releaseClientMetricBinding?.();
         await clientMetricRuntime?.shutdown();

@@ -153,6 +153,8 @@ export type SalesScreenProps = Readonly<{
   onSwitchLanguage?: () => void;
   onToolbarOrderChange?: (order: readonly SalesToolbarActionId[]) => void;
   onManualInputFocusChange?: (focused: boolean) => void;
+  /** 原生版本号与 build 号（路由层读取），显示在头部，便于门店报告问题时核对安装的包。 */
+  appVersionLabel?: string;
   showStatusStrip?: boolean;
   toolbarOrder?: readonly SalesToolbarActionId[];
 }>;
@@ -177,6 +179,7 @@ type NumericValueDisplayProps = Readonly<{
 }>;
 
 export function SalesScreen({
+  appVersionLabel,
   presenter,
   cameraScanner,
   locale: localeOverride,
@@ -1069,6 +1072,16 @@ export function SalesScreen({
         <View>
           <Text style={styles.brand}>{t("app.title")}</Text>
           <Text style={styles.workspace}>{t("app.workspace")}</Text>
+          {appVersionLabel ? (
+            <Text
+              numberOfLines={1}
+              selectable={false}
+              style={styles.appVersion}
+              testID="sales-app-version"
+            >
+              {appVersionLabel}
+            </Text>
+          ) : null}
         </View>
         <SalesToolbar
           accessibilityCopy={{
@@ -4502,6 +4515,12 @@ const styles = StyleSheet.create({
     color: posColors.mutedInk,
     fontSize: 11,
     fontWeight: "700",
+    marginTop: 1,
+  },
+  appVersion: {
+    color: posColors.mutedInk,
+    fontSize: 10,
+    fontVariant: ["tabular-nums"],
     marginTop: 1,
   },
   workspaceRow: {

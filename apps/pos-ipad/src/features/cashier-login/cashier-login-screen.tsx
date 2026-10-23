@@ -120,11 +120,15 @@ const copy: Record<"en" | "zh", LoginCopy> = {
 };
 
 export type CashierLoginVersionInfo = Readonly<{
+  appVersion: string;
+  buildNumber: string;
   runtimeVersion: string;
   otaVersion: string;
 }>;
 
 const DEFAULT_VERSION_INFO: CashierLoginVersionInfo = Object.freeze({
+  appVersion: "unknown",
+  buildNumber: "unknown",
   runtimeVersion: "unknown",
   otaVersion: "embedded",
 });
@@ -438,7 +442,7 @@ export function CashierLoginScreen({
           style={styles.versionInfo}
           testID="cashier-login-version-info"
         >
-          {`Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
+          {`Version ${versionInfo.appVersion} · Build ${versionInfo.buildNumber} · Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
         </Text>
       </View>
     </SafeAreaView>
