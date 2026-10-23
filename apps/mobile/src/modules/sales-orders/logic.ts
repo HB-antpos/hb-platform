@@ -12,6 +12,8 @@ import type {
   SalesOrderRange,
   SalesOrderRangePreset,
   SalesOrderRangeValidation,
+  SalesOrderRefundTier,
+  SalesOrderRefundTone,
   SalesOrderSortDirection,
   SalesOrderTypeFilter,
 } from "./types";
@@ -22,6 +24,9 @@ export const SALES_ORDER_PAGE_SIZE = 20;
 export const SALES_ORDER_RANGE_PRESETS: SalesOrderRangePreset[] = [1, 7, 30];
 export const SALES_ORDER_TYPE_FILTERS: SalesOrderTypeFilter[] = [-1, 0, 1, 2, 3, 4];
 export const SALES_ORDER_VIEW_PERMISSION = "SalesOrders.View";
+/** 订单类型里「已退款」那一项；移动端把它定义为「含退款商品的订单」，再分档，不再只看状态。 */
+export const SALES_ORDER_REFUND_TYPE: SalesOrderTypeFilter = 3;
+export const SALES_ORDER_REFUND_TIERS: SalesOrderRefundTier[] = ["all", "partial", "full"];
 
 const DAY_MS = 86_400_000;
 
@@ -59,6 +64,7 @@ export function buildDefaultSalesOrderFilters(today: string): SalesOrderFilters 
     range: buildDefaultSalesOrderRange(today),
     branchCodes: [],
     orderType: -1,
+    refundTier: "all",
     sortDirection: "desc",
   };
 }
@@ -126,16 +132,33 @@ export function normalizeSalesOrderKeyword(value: string): string | null {
   return keyword ? keyword : null;
 }
 
+/**
+ * 订单含退款商品时按整单金额着色：金额口径与后端一致——取卡片显示的实付金额，实付为 0 / 空时回落订单总金额；
+ * 小于 0 为整单退款（红），其余（含 0）为部分退款（橙）。不含退款商品返回 null。
+ * 退款单（状态=已退款）一定含退款商品，即使旧后端没返回 hasRefundItems 也按状态认出来。
+ */
+export function resolveSalesOrderRefundTone(
+  order: Pick<SalesOrderListItem, "status" | "hasRefundItems" | "actualAmount" | "totalAmount">,
+): SalesOrderRefundTone | null {
+  if (!order.hasRefundItems && order.status !== SALES_ORDER_REFUND_TYPE) return null;
+  const amount =
+    order.actualAmount != null && order.actualAmount !== 0 ? order.actualAmount : (order.totalAmount ?? 0);
+  return amount < 0 ? "full" : "partial";
+}
+
 export function buildSalesOrderQueryBody(
   filters: SalesOrderFilters,
   keyword: string,
   pageNumber: number,
 ): SalesOrderQueryBody {
+  const refundType = filters.orderType === SALES_ORDER_REFUND_TYPE;
   return {
     startDate: filters.range.startDate,
     endDate: filters.range.endDate,
     branchCodes: [...filters.branchCodes],
-    orderType: filters.orderType,
+    // 「已退款」按含退款商品的订单筛（任意状态），所以订单类型发「全部」，范围交给 refundFilter。
+    orderType: refundType ? -1 : filters.orderType,
+    refundFilter: refundType ? (filters.refundTier === "all" ? "any" : filters.refundTier) : null,
     keyword: normalizeSalesOrderKeyword(keyword),
     sortDirection: filters.sortDirection,
     pageNumber,

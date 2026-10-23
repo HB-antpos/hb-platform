@@ -183,6 +183,28 @@ namespace BlazorApp.Api.Services.React
             {
                 baseQuery = baseQuery.Where(o => o.DeviceCode == queryParams.DeviceCode);
             }
+            var refundFilter = PosmSalesOrderListRules.NormalizeRefundFilter(queryParams.RefundFilter);
+            if (refundFilter != null)
+            {
+                // 与 SQL Server 路径同口径：退款单（Status=3）或订单里夹带了退货记录；退货记录表很小，先取出订单号集合。
+                var returnOrderGuids = await LoadReturnOrderGuidsAsync(null);
+                baseQuery = baseQuery.Where(o =>
+                    o.Status == PosmSalesOrderListRules.RefundOrderStatus
+                    || (o.OrderGuid != null && returnOrderGuids.Contains(o.OrderGuid))
+                );
+                if (refundFilter == PosmSalesOrderListRules.RefundFilterPartial)
+                {
+                    baseQuery = baseQuery.Where(o =>
+                        SqlFunc.IsNull(SqlFunc.IIF(o.ActualAmount != null && o.ActualAmount != 0, o.ActualAmount, o.TotalAmount), 0) >= 0
+                    );
+                }
+                else if (refundFilter == PosmSalesOrderListRules.RefundFilterFull)
+                {
+                    baseQuery = baseQuery.Where(o =>
+                        SqlFunc.IIF(o.ActualAmount != null && o.ActualAmount != 0, o.ActualAmount, o.TotalAmount) < 0
+                    );
+                }
+            }
             if (!string.IsNullOrWhiteSpace(queryParams.OrderGuidKeyword))
             {
                 var orderGuidKeyword = queryParams.OrderGuidKeyword.Trim();
@@ -406,6 +428,26 @@ namespace BlazorApp.Api.Services.React
 
             try
             {
+                // 含退货商品：退款单本身，或订单里夹带了退货记录；只按当前页订单号查小表。
+                var returnOrderGuids = await LoadReturnOrderGuidsAsync(guids);
+                foreach (var item in items)
+                {
+                    item.HasRefundItems = item.Status == PosmSalesOrderListRules.RefundOrderStatus
+                        || (item.OrderGuid != null && returnOrderGuids.Contains(item.OrderGuid));
+                }
+            }
+            catch (Exception ex)
+            {
+                // 退货标记只是展示增强：查询失败时退款单仍按状态标出，其余订单不标，不能让列表失败。
+                _logger.LogError(ex, "查询收银记录退货标记失败，列表仅按退款状态标记");
+                foreach (var item in items)
+                {
+                    item.HasRefundItems = item.Status == PosmSalesOrderListRules.RefundOrderStatus;
+                }
+            }
+
+            try
+            {
                 var payments = await _posmContext
                     .Db.Queryable<PaymentDetail>()
                     .Where(payment => payment.OrderGuid != null && guids.Contains(payment.OrderGuid))
@@ -430,6 +472,22 @@ namespace BlazorApp.Api.Services.React
                 // 支付方式只是展示增强，查询失败不能让整个列表失败。
                 _logger.LogError(ex, "查询收银记录支付方式失败，列表将不显示支付方式");
             }
+        }
+
+        /// <summary>
+        /// 取有退货记录的订单号集合（sales_return_record.ReturnOrderGuid，不区分大小写）。
+        /// orderGuids 为 null 时取全表（表只有约 1.3 万行，仅测试用的 SQLite 路径使用）；否则只查给定订单。
+        /// </summary>
+        private async Task<HashSet<string>> LoadReturnOrderGuidsAsync(List<string>? orderGuids)
+        {
+            var query = _posmContext.Db.Queryable<SalesReturnRecord>()
+                .Where(record => record.ReturnOrderGuid != null && record.ReturnOrderGuid != string.Empty);
+            if (orderGuids != null)
+            {
+                query = query.Where(record => orderGuids.Contains(record.ReturnOrderGuid));
+            }
+            var found = await query.Select(record => record.ReturnOrderGuid).Distinct().ToListAsync();
+            return new HashSet<string>(found, StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class DetailRow
@@ -749,6 +807,19 @@ namespace BlazorApp.Api.Services.React
                 );
 
                 var orderDto = _mapper.Map<PosmSalesOrderDto>(order);
+                orderDto.HasRefundItems = order.Status == PosmSalesOrderListRules.RefundOrderStatus;
+                if (!orderDto.HasRefundItems)
+                {
+                    try
+                    {
+                        orderDto.HasRefundItems = (await LoadReturnOrderGuidsAsync(new List<string> { orderGuid })).Count > 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        // 退货标记只是展示增强，查询失败不影响详情。
+                        _logger.LogError(ex, "查询订单退货标记失败");
+                    }
+                }
 
                 try
                 {
