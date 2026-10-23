@@ -1267,6 +1267,37 @@ public sealed class CardRecoveryCenterViewModelTests
     }
 
     [Fact]
+    public async Task Selecting_payment_with_receipt_evidence_prefills_rrn_and_approval_code()
+    {
+        // 交易过程中抓到了批准小票：确认已付款的参考号自动带出 RRN / 批准码，主管不用去找。
+        var withEvidence = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("44000000-0000-0000-0000-000000000020"),
+            updatedAt: Now) with
+        {
+            ReceiptApprovalReference = "RRN P29R5YNFN4XM / APPROVAL CODE 267836"
+        };
+        var withoutEvidence = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("44000000-0000-0000-0000-000000000021"),
+            updatedAt: Now.AddMinutes(-1));
+        var recovery = new RecordingRecoveryService { OpenItems = [withEvidence, withoutEvidence] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        viewModel.SelectedAttempt = withEvidence;
+        Assert.Equal("RRN P29R5YNFN4XM / APPROVAL CODE 267836", viewModel.ResolutionReference);
+
+        viewModel.SelectedAttempt = withoutEvidence;
+        Assert.Equal(string.Empty, viewModel.ResolutionReference);
+    }
+
+    [Fact]
     public async Task Culture_refresh_ignores_transient_null_and_resynchronizes_provider_scoped_selection()
     {
         var sharedAttemptGuid = Guid.Parse("44000000-0000-0000-0000-000000000099");
@@ -1309,18 +1340,18 @@ public sealed class CardRecoveryCenterViewModelTests
         CardProcessorKind.Linkly,
         "Sale",
         "Supervisor payment reconciliation",
-        "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
+        "Check the bank result before unlocking this payment. Confirming paid only needs supervisor authorization; confirming not paid requires evidence. The payment reference and supervisor note are optional.",
         "Supervisor note (optional)",
         "Bank evidence (required when confirming not paid)",
-        "Payment reference (when available)")]
+        "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")]
     [InlineData(
         CardProcessorKind.Linkly,
         "ActiveSession",
         "Supervisor payment reconciliation",
-        "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
+        "Check the bank result before unlocking this payment. Confirming paid only needs supervisor authorization; confirming not paid requires evidence. The payment reference and supervisor note are optional.",
         "Supervisor note (optional)",
         "Bank evidence (required when confirming not paid)",
-        "Payment reference (when available)")]
+        "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")]
     [InlineData(
         CardProcessorKind.Linkly,
         "Refund",
@@ -2314,8 +2345,8 @@ public sealed class CardRecoveryCenterViewModelTests
             ["cardRecovery.center.input.evidence"] = "Bank or terminal evidence",
             ["cardRecovery.center.input.reference"] = "Payment or settlement reference",
             ["cardRecovery.payment.section.title"] = "Supervisor payment reconciliation",
-            ["cardRecovery.payment.section.instructions"] = "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
-            ["cardRecovery.payment.field.paymentReference"] = "Payment reference (when available)",
+            ["cardRecovery.payment.section.instructions"] = "Check the bank result before unlocking this payment. Confirming paid only needs supervisor authorization; confirming not paid requires evidence. The payment reference and supervisor note are optional.",
+            ["cardRecovery.payment.field.paymentReference"] = "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)",
             ["cardRecovery.payment.field.evidence"] = "Bank evidence (required when confirming not paid)",
             ["cardRecovery.payment.field.note"] = "Supervisor note (optional)",
             ["cardRecovery.refund.section.title"] = "Supervisor refund reconciliation",
@@ -2346,8 +2377,8 @@ public sealed class CardRecoveryCenterViewModelTests
             ["cardRecovery.center.input.evidence"] = "银行或终端证据",
             ["cardRecovery.center.input.reference"] = "付款或结算参考号",
             ["cardRecovery.payment.section.title"] = "主管付款核对",
-            ["cardRecovery.payment.section.instructions"] = "解锁前请先核对银行结果。确认已付款需参考号或证据，确认未付款需银行证据；主管备注可选。",
-            ["cardRecovery.payment.field.paymentReference"] = "付款参考号（如有）",
+            ["cardRecovery.payment.section.instructions"] = "解锁前请先核对银行结果。确认已付款只需主管授权；确认未付款需银行证据；付款参考号与主管备注都可不填。",
+            ["cardRecovery.payment.field.paymentReference"] = "付款参考号（选填，可填刷卡机小票上的 RRN 或 APPROVAL CODE）",
             ["cardRecovery.payment.field.evidence"] = "银行证据（确认未付款时必填）",
             ["cardRecovery.payment.field.note"] = "主管备注（选填）",
             ["cardRecovery.refund.section.title"] = "主管退款核对",

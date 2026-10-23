@@ -518,7 +518,11 @@ public static class ServiceRegistration
         services.AddSingleton<ICardTerminalSettingsProvider>(sp => sp.GetRequiredService<ICardTerminalSettingsStore>());
         services.AddSingleton<ILinklyCloudSecretStore>(sp => sp.GetRequiredService<ICardTerminalSettingsStore>());
         services.AddSingleton<ILinklyEftClientFactory, LinklyEftClientFactory>();
-        services.AddSingleton<LinklyTerminalClient>();
+        // 本地 Linkly 客户端需要 attempt 上下文，才能在收到批准小票时把证据落到本笔 attempt。
+        services.AddSingleton(sp => new LinklyTerminalClient(
+            sp.GetRequiredService<ILinklyEftClientFactory>(),
+            sp.GetRequiredService<ILocalizationService>(),
+            sp.GetRequiredService<ILinklyPaymentAttemptContextAccessor>()));
         services.AddHttpClient<ILinklyCloudApiClient, LinklyCloudApiClient>(client =>
         {
             client.Timeout = LinklyTimeoutPolicy.HttpTimeout;
