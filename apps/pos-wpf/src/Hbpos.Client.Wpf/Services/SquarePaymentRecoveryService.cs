@@ -528,12 +528,12 @@ public sealed class SquarePaymentRecoveryService(
                 ResolutionPersisted: IsPersistedSquareSupervisorResolution(attempt));
         }
 
+        // 中文注释：确认已付款的参考号改为选填（与 Linkly 一致，门店反馈参考号太长、找不到）。
+        // 但 SupervisorFinancialReference 是“主管已确认付款”的持久化标记，收尾续跑与建单都靠它非空，
+        // 所以主管不填时用这笔的 Square CheckoutId（Square 后台可查）兜底，没有 CheckoutId 再用 attempt 号。
         if (decision == CardRecoverySupervisorDecision.ConfirmProcessed && normalizedReference is null)
         {
-            return new CardRecoveryResolutionResult(
-                false,
-                "Enter the real bank or terminal payment reference before confirming payment.",
-                LockRetained: true);
+            normalizedReference = BuildSupervisorFallbackPaymentReference(attempt);
         }
 
         if (decision == CardRecoverySupervisorDecision.ConfirmNotProcessed && normalizedEvidence is null)
@@ -770,6 +770,11 @@ public sealed class SquarePaymentRecoveryService(
             string.Equals(attempt.ResponseCode, CardRefundSupervisorResolutionCodes.ConfirmedNotRefunded, StringComparison.Ordinal) ||
             string.Equals(attempt.ResponseCode, CardRefundSupervisorResolutionCodes.ContinueWaiting, StringComparison.Ordinal);
     }
+
+    internal static string BuildSupervisorFallbackPaymentReference(LocalSquarePaymentAttempt attempt) =>
+        string.IsNullOrWhiteSpace(attempt.CheckoutId)
+            ? $"SQ-ATTEMPT-{attempt.AttemptGuid:N}"
+            : attempt.CheckoutId.Trim();
 
     private static bool IsTerminalSquareStatus(LocalSquarePaymentAttemptStatus status) =>
         status is LocalSquarePaymentAttemptStatus.Canceled or

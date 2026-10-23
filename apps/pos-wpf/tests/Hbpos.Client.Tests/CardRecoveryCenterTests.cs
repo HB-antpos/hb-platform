@@ -267,8 +267,8 @@ public sealed class CardRecoveryCenterTests
         Assert.False(cart.IsEmpty);
     }
 
+    // 确认已付款的参考号已改为选填（与 Linkly 一致）；确认未付款仍必须有银行证据。
     [Theory]
-    [InlineData(CardRecoverySupervisorDecision.ConfirmProcessed)]
     [InlineData(CardRecoverySupervisorDecision.ConfirmNotProcessed)]
     public async Task Square_ResolveAttemptAsync_sale_requires_linkly_equivalent_bank_evidence(
         CardRecoverySupervisorDecision decision)
@@ -961,6 +961,42 @@ public sealed class CardRecoveryCenterTests
         Assert.Equal(0, repository.TerminalizeNotPaidCount);
         Assert.True(await service.CompleteDraftHandoffAsync(attempt.AttemptGuid, cart));
         Assert.Equal(1, repository.TerminalizeNotPaidCount);
+    }
+
+    [Theory]
+    [InlineData("CHECKOUT-PAID-1", "CHECKOUT-PAID-1")]
+    [InlineData(null, "SQ-ATTEMPT-30000000000000000000000000000066")]
+    public async Task Square_ResolveAttemptAsync_sale_confirm_processed_without_reference_uses_checkout_fallback(
+        string? checkoutId,
+        string expectedReference)
+    {
+        // 主管不填参考号也能确认已付款；“主管已确认付款”的持久化标记仍要非空，用 CheckoutId / attempt 号兜底。
+        var attempt = CreateSquareAttempt(
+            Guid.Parse("30000000-0000-0000-0000-000000000066"),
+            LocalSquarePaymentAttemptStatus.Recovering,
+            "Sale",
+            "C001",
+            DateTimeOffset.Parse("2026-06-05T09:00:00+10:00"),
+            checkoutId: checkoutId,
+            draftJson: SerializeDraft());
+        var repository = new FakeSquareAttemptRepository(attempt);
+        var orders = new FakeOrderRepository();
+        var service = CreateSquareService(repository, orderRepository: orders);
+
+        var result = await service.ResolveAttemptAsync(
+            attempt.AttemptGuid,
+            CardRecoverySupervisorDecision.ConfirmProcessed,
+            reason: string.Empty,
+            evidence: null,
+            reference: null,
+            new PosCartService(),
+            Session);
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(CardPaymentRecoveryOutcome.OrderCompleted, result.RecoveryResult!.Outcome);
+        Assert.Equal(expectedReference, repository.LastPaymentResolution!.PaymentReference);
+        var payment = Assert.Single(orders.SavedOrder!.Payments);
+        Assert.Equal(expectedReference, payment.Reference);
     }
 
     [Fact]
