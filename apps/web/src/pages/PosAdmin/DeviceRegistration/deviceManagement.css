@@ -599,6 +599,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 版本下拉里的特殊选项（未上报 / 未安装 / 低于最新版），与真实版本号区分开 */
+.dev-mgmt-option-special {
+  color: var(--ant-color-warning-text, #d46b08);
+}
+
 /* 选中后回显在输入框里时不显示台数 */
 .ant-select-selection-item .dev-mgmt-option-count {
   display: none;
