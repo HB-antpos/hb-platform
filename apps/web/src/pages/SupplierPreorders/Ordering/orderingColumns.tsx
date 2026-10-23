@@ -256,8 +256,8 @@ function buildHistoryColumns(ctx: OrderingColumnContext): ColumnsType<SupplierPr
 function ProductThumb({ row }: { row: SupplierPreorderOrderingItem }) {
   const thumb = toProductThumbnailUrl(row.imageUrl, THUMB_SIZE)
   if (!thumb) return <span className="sp-order-thumb-empty">—</span>
-  // 点击预览用原图：优先供应商原表图片地址，没有时用我方图片原图
-  const previewSrc = row.imageSourceUrl?.trim() || row.imageUrl?.trim() || thumb
+  // imageUrl 已是 COS 地址（我方商品图或后台转存的原表图）时直接用它，避免再打供应商站点；还没转存时 imageUrl 就是原表地址
+  const previewSrc = row.imageUrl?.trim() || row.imageSourceUrl?.trim() || thumb
   return (
     <span className="sp-order-thumb">
       <Image src={thumb} width={52} height={52} loading="lazy" alt={row.name} preview={{ src: previewSrc }} />

@@ -378,6 +378,18 @@
       "recomputeBusy": "Queued or computing; refreshes automatically when done",
       "recomputeQueued": "Recompute queued; refreshes automatically when done",
       "recomputeFailed": "Recompute failed"
+    },
+    "images": {
+      "title": "Image copy",
+      "notConfigured": "COS image bucket not configured; using supplier image links",
+      "done": "{{count}} copied",
+      "skipped": "{{count}} use our product photo",
+      "pending": "{{count}} in progress",
+      "failed": "{{count}} failed",
+      "retry": "Retry failed",
+      "retryHint": "Queue failed images again (they will fail again if the supplier link is broken)",
+      "retryQueued": "Queued again; images will be copied in the background",
+      "retryFailed": "Could not retry"
     }
   }
 }

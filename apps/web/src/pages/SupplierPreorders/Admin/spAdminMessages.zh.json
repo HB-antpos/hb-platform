@@ -378,6 +378,18 @@
       "recomputeBusy": "正在排队或计算中，完成后自动刷新",
       "recomputeQueued": "已排队重新计算，完成后自动刷新",
       "recomputeFailed": "重新计算失败"
+    },
+    "images": {
+      "title": "新品图片转存",
+      "notConfigured": "服务器未配置 COS 图片桶，暂用原表图片地址",
+      "done": "已转存 {{count}} 张",
+      "skipped": "用我方商品图 {{count}} 张",
+      "pending": "处理中 {{count}} 张",
+      "failed": "失败 {{count}} 张",
+      "retry": "重试失败",
+      "retryHint": "把失败的图片重新排队下载（原表图片地址打不开时仍会失败）",
+      "retryQueued": "已重新排队，后台会陆续转存",
+      "retryFailed": "重试失败"
     }
   }
 }

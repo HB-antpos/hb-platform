@@ -155,6 +155,25 @@ public class SupplierPreorderFormItem
     [SugarColumn(Length = 500, IsNullable = true)]
     public string? ImageSourceUrl { get; set; }
 
+    // 新品图片转存 COS（迁移 20261024.001-supplier-preorder-item-image 加列）：原表图片单张约 700KB、可能防盗链或失效，
+    // 后台下载后转成 JPEG 存进商品图片桶，页面缩略图由 COS 数据万象按需生成。
+
+    /// <summary>转存后的 COS 地址；有我方商品图的商品不转存。</summary>
+    [SugarColumn(Length = 500, IsNullable = true)]
+    public string? ImageCosUrl { get; set; }
+
+    /// <summary>null 未处理 / Done 已转存 / Skipped 不需要（有我方商品图）/ Failed 失败（重试 3 次后停止）。</summary>
+    [SugarColumn(Length = 20, IsNullable = true)]
+    public string? ImageCopyStatus { get; set; }
+
+    public int ImageCopyAttempts { get; set; }
+
+    [SugarColumn(Length = 300, IsNullable = true)]
+    public string? ImageCopyError { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? ImageCopiedAtUtc { get; set; }
+
     [SugarColumn(Length = 500, IsNullable = true)]
     public string? Notes { get; set; }
 
@@ -403,6 +422,14 @@ public class SupplierPreorderSourceFile
 
     [SugarColumn(Length = 100, IsNullable = true)]
     public string? UploadedBy { get; set; }
+}
+
+/// <summary>新品图片转存状态。</summary>
+public static class SupplierPreorderImageCopyStatuses
+{
+    public const string Done = "Done";
+    public const string Skipped = "Skipped";
+    public const string Failed = "Failed";
 }
 
 /// <summary>参考商品来源：Auto 系统推荐（每次计算可换）；Manual 人工指定（系统不覆盖）；Cleared 人工清除（系统不再自动带上）。</summary>

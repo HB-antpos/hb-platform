@@ -218,6 +218,21 @@ public sealed class SupplierPreorderFormDetailDto
     public int RefManualCount { get; set; }
     /// <summary>本品没有销量、也没有参考商品的款数（需要采购看一眼）。</summary>
     public int NeedRefCount { get; set; }
+    /// <summary>新品图片转存 COS 的进度。</summary>
+    public SupplierPreorderImageCopyStatusDto ImageCopy { get; set; } = new();
+}
+
+/// <summary>新品图片转存进度：Total = 有原表图片地址的款数；Skipped = 有我方商品图不需要转存；Pending = 还没处理或失败后等重试。</summary>
+public sealed class SupplierPreorderImageCopyStatusDto
+{
+    public int Total { get; set; }
+    public int Done { get; set; }
+    public int Skipped { get; set; }
+    public int Pending { get; set; }
+    /// <summary>已失败 3 次、不再自动重试的款数（可点「重试失败」）。</summary>
+    public int Failed { get; set; }
+    /// <summary>后台没配 COS 图片桶时为 false（页面继续用原表图片地址）。</summary>
+    public bool Configured { get; set; } = true;
 }
 
 public sealed class SupplierPreorderFormQueryDto

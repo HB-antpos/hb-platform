@@ -112,7 +112,7 @@ public sealed partial class SupplierPreorderService
         var summary = (await BuildSummariesAsync(new List<SupplierPreorderForm> { form }))[0];
         var items = await _db.Queryable<SupplierPreorderFormItem>()
             .Where(i => i.FormGuid == formGuid && i.IsActive)
-            .Select(i => new { i.MatchMethod, i.MatchNote, i.Category })
+            .Select(i => new { i.MatchMethod, i.MatchNote, i.Category, i.ImageSourceUrl, i.ImageCopyStatus, i.ImageCopyAttempts })
             .ToListAsync();
         var detail = new SupplierPreorderFormDetailDto
         {
@@ -128,6 +128,17 @@ public sealed partial class SupplierPreorderService
             WarningCount = items.Count(i => i.MatchMethod != SupplierPreorderMatchMethods.None && i.MatchNote != null),
             NewCount = items.Count(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             Categories = items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c).Cast<string>().ToList(),
+        };
+        var withImage = items.Where(i => !string.IsNullOrWhiteSpace(i.ImageSourceUrl)).ToList();
+        detail.ImageCopy = new SupplierPreorderImageCopyStatusDto
+        {
+            Total = withImage.Count,
+            Done = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Done),
+            Skipped = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Skipped),
+            Failed = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed && i.ImageCopyAttempts >= SupplierPreorderImageCopyService.MaxAttempts),
+            Pending = withImage.Count(i => i.ImageCopyStatus is null
+                                           || (i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed && i.ImageCopyAttempts < SupplierPreorderImageCopyService.MaxAttempts)),
+            Configured = _imageStoreConfigured,
         };
         await FillHistorySummaryAsync(form, detail);
         return detail;
@@ -185,6 +196,17 @@ public sealed partial class SupplierPreorderService
             // 发布后排后台任务重算去年历史（导入时已算过一次草稿版，这里按最新的匹配与参考再算一遍）
             await TryRequestHistoryAsync(formGuid);
         }
+        return await GetFormAsync(formGuid);
+    }
+
+    /// <summary>把失败满 3 次的图片转存清零，后台任务会重新下载。</summary>
+    public async Task<SupplierPreorderFormDetailDto> RetryFailedImagesAsync(string formGuid)
+    {
+        await RequireFormAsync(formGuid);
+        await _db.Updateable<SupplierPreorderFormItem>()
+            .SetColumns(i => new SupplierPreorderFormItem { ImageCopyStatus = null, ImageCopyAttempts = 0, ImageCopyError = null })
+            .Where(i => i.FormGuid == formGuid && i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed)
+            .ExecuteCommandAsync();
         return await GetFormAsync(formGuid);
     }
 

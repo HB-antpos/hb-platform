@@ -193,6 +193,20 @@ export interface SupplierPreorderFormDetail {
   refManualCount: number
   /** 本品没有销量、也没有参考商品的款数 */
   needRefCount: number
+  /** 新品图片转存 COS 的进度 */
+  imageCopy: SupplierPreorderImageCopyStatus
+}
+
+/** 新品图片转存进度：total = 有原表图片地址的款数；skipped = 有我方商品图不需转存；pending = 待处理或失败后等重试 */
+export interface SupplierPreorderImageCopyStatus {
+  total: number
+  done: number
+  skipped: number
+  pending: number
+  /** 已失败 3 次、不再自动重试 */
+  failed: number
+  /** 后台没配 COS 图片桶时为 false（页面继续用原表图片地址） */
+  configured: boolean
 }
 
 export interface SupplierPreorderFormQuery {
