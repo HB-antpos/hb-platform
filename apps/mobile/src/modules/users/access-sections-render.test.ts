@@ -177,6 +177,45 @@ async function run() {
     await act(() => all("Searchbar")[0].props.onChangeText("zzz"));
     assert.ok(texts().includes(lookup("stores.noMatch")));
 
+    // 授权筛选：全部 / 管理 / 查看 / 未分配，带台数；与搜索叠加；选中后改档不让行消失。
+    await act(() => all("Searchbar")[0].props.onChangeText(""));
+    const storeNames = () =>
+      all("Text").map(textOf).filter((text) => ["Bankstown", "Liverpool", "Parramatta", "Campbelltown", "仓库"].includes(text));
+    const chipLabels = () =>
+      all("Pressable")
+        .filter((node) => String(node.props.testID ?? "").startsWith("access-store-filter-"))
+        .map((node) => String(node.props.accessibilityLabel));
+    assert.deepEqual(chipLabels(), ["全部 5", "管理 1", "查看 2", "未分配 2"], "筛选芯片显示各档台数（按当前草稿）");
+    const chip = (key: string) => all("Pressable").find((node) => node.props.testID === `access-store-filter-${key}`)!;
+    await act(() => chip("view").props.onPress());
+    assert.equal(chip("view").props.accessibilityState.selected, true);
+    assert.deepEqual(storeNames(), ["Liverpool", "Parramatta"], "只看「查看」分店");
+    await act(() => chip("manage").props.onPress());
+    assert.deepEqual(storeNames(), ["Bankstown"], "只看「管理」分店");
+    await act(() => chip("unassigned").props.onPress());
+    assert.deepEqual(storeNames(), ["Campbelltown", "仓库"], "只看未分配分店（含已停用）");
+    await act(() => all("Searchbar")[0].props.onChangeText("camp"));
+    assert.deepEqual(storeNames(), ["Campbelltown"], "筛选与搜索叠加");
+    // 草稿变化：Campbelltown 改成查看。台数实时更新，但「未分配」筛选里这一行仍在（直到重新点芯片）。
+    await renderStores({
+      assignments: [
+        { storeGUID: "g-b", isPrimary: true },
+        { storeGUID: "g-l", isPrimary: false },
+        { storeGUID: "g-p", isPrimary: false },
+        { storeGUID: "g-c", isPrimary: false },
+      ],
+    });
+    assert.deepEqual(chipLabels(), ["全部 5", "管理 1", "查看 3", "未分配 1"], "改档后台数实时更新");
+    assert.deepEqual(storeNames(), ["Campbelltown"], "改档后行不会立刻消失");
+    await act(() => chip("unassigned").props.onPress());
+    assert.deepEqual(storeNames(), [], "重新点芯片按最新分配取");
+    await act(() => all("Searchbar")[0].props.onChangeText(""));
+    await act(() => chip("all").props.onPress());
+    assert.equal(storeNames().length, 5, "全部");
+    // 店长（没有管理档、也没有管理分店）不显示「管理」芯片。
+    await renderStores({ canGrantManage: false, isAdmin: false, assignments: [{ storeGUID: "g-l", isPrimary: false }] });
+    assert.deepEqual(chipLabels(), ["全部 5", "查看 1", "未分配 4"], "店长看不到「管理」筛选");
+
     // ───────────── 角色分段 ─────────────
     const role = (name: string, id: string, description?: string) => ({ roleGUID: id, roleName: name, description });
     const roles = [

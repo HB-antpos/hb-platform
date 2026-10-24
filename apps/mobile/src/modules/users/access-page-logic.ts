@@ -311,6 +311,49 @@ export function filterAccessStores(stores: AccessStoreOption[], keyword: string)
   );
 }
 
+/** 分店授权筛选：全部，或按「管理 / 查看 / 未分配」。 */
+export type AccessStoreFilter = "all" | UserAccessStoreState;
+
+/** 各档分店数（按当前编辑中的分配计算，筛选芯片上的数字随改动实时变化）。 */
+export function countAccessStoresByState(
+  stores: AccessStoreOption[],
+  assignments: UserAccessStoreAssignment[],
+): Record<AccessStoreFilter, number> {
+  const counts: Record<AccessStoreFilter, number> = { all: stores.length, manage: 0, view: 0, unassigned: 0 };
+  for (const store of stores) {
+    counts[getUserAccessStoreState(assignments, store.storeGUID)] += 1;
+  }
+  return counts;
+}
+
+/**
+ * 选中某个筛选时，记下「此刻」属于该档的分店。
+ * 之后在筛选结果里把某家分店改成别的档，这一行不会立刻消失（否则一改就跳走，用户找不到刚改的那行）；
+ * 重新点筛选芯片才按最新分配重新取。选「全部」返回 null，表示不过滤。
+ */
+export function pinAccessStoresByState(
+  stores: AccessStoreOption[],
+  assignments: UserAccessStoreAssignment[],
+  filter: AccessStoreFilter,
+): ReadonlySet<string> | null {
+  if (filter === "all") return null;
+  return new Set(
+    stores
+      .filter((store) => getUserAccessStoreState(assignments, store.storeGUID) === filter)
+      .map((store) => store.storeGUID),
+  );
+}
+
+/** 先按关键字搜索，再按筛选时记下的分店集合过滤（null = 不过滤）。 */
+export function applyAccessStoreFilter(
+  stores: AccessStoreOption[],
+  keyword: string,
+  pinned: ReadonlySet<string> | null,
+): AccessStoreOption[] {
+  const matched = filterAccessStores(stores, keyword);
+  return pinned ? matched.filter((store) => pinned.has(store.storeGUID)) : matched;
+}
+
 export interface AccessStoreStateOption {
   state: UserAccessStoreState;
   disabled: boolean;
