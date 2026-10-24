@@ -2131,35 +2131,41 @@ public sealed class CardPaymentRecoveryService(
         if (!approvedEvidenceExit &&
             normalized.Decision != CardPaymentSupervisorDecision.ContinueWaiting)
         {
-            // 结案前必须向 Linkly/刷卡机实时核验一次：仍在处理中只能继续等待；已有终态时拒绝与之矛盾的决定；
-            // 查询失败按失败关闭。否则迟到的批准/拒绝会落在已结案的记录上，形成无人可见的孤儿扣款。
-            var live = await QueryLivePaymentStateAsync(settings, session, attempt, cancellationToken);
-            var liveRejection = BuildLiveResolutionRejection(live.Verdict, normalized.Decision);
-            if (liveRejection is { } rejection)
+            // 中文注释：人工确认为准（用户 10-24 决定）：主管结案不再向 Linkly / 刷卡机实时核验，也不会因为查询失败、仍在处理、
+            // 或与终端结论矛盾而拒绝主管的决定。此前这道核验在刷卡机离线 / 超时（1014 店 TI、1042 测试店）时让
+            // “确认已付款 / 未付款”都点不动。
+            // 只保留一道本机数据的保险：交易过程中已落库与本笔 TxnRef / 金额一致的批准小票（顾客已被扣款，10-22 1002 店事故），
+            // 仍拒绝“确认未付款”，避免客人被扣款却没有销售；这不是实时查询，只读本机已保存的证据。
+            if (normalized.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
+                TryReadReceiptApprovalEvidence(attempt) is not null &&
+                BuildLiveResolutionRejection(LiveResolutionVerdict.Approved, normalized.Decision) is { } receiptRejection)
             {
-                // 中文注释：实时核验拒绝了主管的结案决定。此前这里不留任何痕迹，事后无法从日志判断“为什么结不了案”
-                // （例如终端离线 / 查询失败 / 仍在处理 / 与终端结果矛盾），所以记下 attempt、决定、核验结论和拒绝文案的键。
                 ConsoleLog.WriteWarning(
                     "CardRecovery",
-                    $"supervisor resolve rejected attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} verdict={live.Verdict} rejectionKey={rejection.Key}",
+                    $"supervisor resolve rejected attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} reason=local-receipt-approval-evidence rejectionKey={receiptRejection.Key}",
                     RecoveryLogContext(attempt.AttemptGuid.ToString("D")));
-                return new CardPaymentSupervisorResolutionResult(false, rejection.Message, LockRetained: true);
+                return new CardPaymentSupervisorResolutionResult(false, receiptRejection.Message, LockRetained: true);
             }
 
-            // 中文注释：实时核验放行了这次结案决定（含 Inconclusive：终端回答了别的交易 / 没有这笔，凭银行证据结案）。
-            // 与上面的 rejected 日志成对，事后能还原“核验结论是什么、为什么允许结案”。
-            TryWriteRecoveryLog(
-                $"supervisor resolve allowed attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} verdict={live.Verdict}",
-                attemptGuid: attempt.AttemptGuid);
-
-            if (live.Status is not null &&
-                NormalizeOptional(attempt.SessionId) is null &&
-                CanBindRecoveredSession(attempt, live.Status))
+            // 只有 TxnRef、还没有 SessionId 的后端会话：尽力查询一次，把真实 SessionId 认领下来再结案，
+            // 之后的 acknowledge 才会发给真实会话，而不是拿 TxnRef 当 SessionId 去撞 404。
+            // 查询结果只用来绑定，绝不拒绝主管的决定；查不到就按现有 SessionId / TxnRef 结案。
+            if (NormalizeOptional(attempt.SessionId) is null &&
+                ResolveAttemptConnectionMode(
+                    attempt,
+                    CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode)) ==
+                    LinklyConnectionMode.CloudBackendAsync)
             {
-                // 只有 TxnRef 的 attempt：实时查询已按 TxnRef 认领到真实 SessionId，先落库，
-                // 之后的 acknowledge 才会发给真实会话，而不是拿 TxnRef 当 SessionId 去撞 404。
-                attempt = await BindRecoveredSessionAsync(attempt, live.Status, cancellationToken);
-                sessionKey = NormalizeOptional(attempt.SessionId) ?? sessionKey;
+                var live = await QueryLivePaymentStateAsync(settings, session, attempt, cancellationToken);
+                TryWriteRecoveryLog(
+                    $"supervisor resolve proceeds on manual decision attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} verdict={live.Verdict}",
+                    attemptGuid: attempt.AttemptGuid);
+
+                if (live.Status is not null && CanBindRecoveredSession(attempt, live.Status))
+                {
+                    attempt = await BindRecoveredSessionAsync(attempt, live.Status, cancellationToken);
+                    sessionKey = NormalizeOptional(attempt.SessionId) ?? sessionKey;
+                }
             }
         }
 
