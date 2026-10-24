@@ -764,7 +764,7 @@ public sealed partial class SettingsViewModelTests
     }
 
     [Fact]
-    public void Data_download_card_merges_sync_status_into_single_panel_above_action()
+    public void Data_download_card_merges_sync_status_into_single_panel_and_puts_action_in_title_row()
     {
         var xamlPath = Path.Combine(
             FindRepoRoot(),
@@ -780,22 +780,34 @@ public sealed partial class SettingsViewModelTests
         var downloadButton = Assert.Single(document.Descendants().Where(element =>
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value == "{Binding DownloadCatalogCommand}"));
-        var cardGrid = downloadButton.Parent!;
-        var statusPanel = Assert.Single(cardGrid.Elements().Where(element =>
+        // 首屏重设计：主按钮在卡片「标题行」右端（与图标、标题、状态胶囊同一行），同步块在说明下方。
+        var card = downloadButton.Ancestors().First(element =>
+            element.Name.LocalName == "Border" &&
+            element.Attribute("Style")?.Value == "{StaticResource DataMaintenanceCardStyle}");
+        var titleRow = downloadButton.Parent!;
+        Assert.Equal("Grid", titleRow.Name.LocalName);
+        Assert.Equal("4", downloadButton.Attribute("Grid.Column")?.Value);
+        Assert.Equal("48", downloadButton.Attribute("Height")?.Value);
+        var statusPanel = Assert.Single(card.Descendants().Where(element =>
             element.Attribute(xamlNamespace + "Name")?.Value == "CatalogSyncStatusPanel"));
+        // 同步块不在标题行里，按钮也不在同步块里。
+        Assert.DoesNotContain(titleRow.Descendants(), element => ReferenceEquals(element, statusPanel));
+        Assert.DoesNotContain(statusPanel.Descendants(), element => ReferenceEquals(element, downloadButton));
         var panelBindings = statusPanel.Descendants()
             .SelectMany(element => element.Attributes())
             .Select(attribute => attribute.Value)
             .ToArray();
+        var titleRowBindings = titleRow.Descendants()
+            .SelectMany(element => element.Attributes())
+            .Select(attribute => attribute.Value)
+            .ToArray();
 
-        Assert.Equal("1", statusPanel.Attribute("Grid.Row")?.Value);
-        Assert.Equal("2", downloadButton.Attribute("Grid.Row")?.Value);
+        // 同步块：上次同步标签 / 时间 + 固定状态区（同步中进度条、失败原因）。
         foreach (var binding in new[]
                  {
                      "{Binding CatalogSyncTimeLabelText}",
                      "{Binding CatalogSyncTimeText}",
                      "{Binding CatalogSyncFailureText}",
-                     "{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}",
                      "{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}",
                      "{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}"
                  })
@@ -803,8 +815,19 @@ public sealed partial class SettingsViewModelTests
             Assert.Contains(binding, panelBindings);
         }
 
+        // 已同步 / 同步中 / 同步失败 三个状态胶囊紧跟标题，在标题行里。
+        foreach (var binding in new[]
+                 {
+                     "{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}"
+                 })
+        {
+            Assert.Contains(binding, titleRowBindings);
+        }
+
         // 原卡片底部的通用状态框已并入同步信息块，页面级提示只保留在底部状态栏。
-        Assert.DoesNotContain(cardGrid.Descendants(), element =>
+        Assert.DoesNotContain(card.Descendants(), element =>
             element.Attribute("Text")?.Value == "{Binding StatusMessage}");
         Assert.Single(document.Descendants().Where(element =>
             element.Name.LocalName == "TextBlock" &&
@@ -4431,13 +4454,13 @@ public sealed partial class SettingsViewModelTests
         var button = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
             (string?)element.Attribute(x + "Name") == "RestartComputerTestButton"));
         Assert.Equal("{Binding RestartComputerCommand}", (string?)button.Attribute("Command"));
-        // 触屏最小高度，且和重启提醒开关在同一张卡片里。
+        // 触屏最小高度。首屏重设计后开关与「重启电脑」是数据维护页第三行并排的两张卡，
+        // 外层共用一个跟随 IsRestartPromptSettingVisible 的 Grid（原来在同一张卡里，显示条件不变）。
         Assert.True(double.Parse((string)button.Attribute("MinHeight")!) >= 44);
-        Assert.Same(
-            toggle.Ancestors(presentation + "Border").First(border =>
-                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"),
-            button.Ancestors(presentation + "Border").Last(border =>
-                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"));
+        var thirdRow = toggle.Ancestors(presentation + "Grid").First(grid =>
+            ((string?)grid.Attribute("Visibility") ?? string.Empty).Contains("IsRestartPromptSettingVisible", StringComparison.Ordinal));
+        Assert.Contains(button, thirdRow.Descendants());
+        Assert.Contains("IsRestartComputerTestVisible", (string?)button.Ancestors(presentation + "Border").First().Attribute("Visibility"));
 
         var keys = new[]
         {

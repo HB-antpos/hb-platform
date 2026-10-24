@@ -315,6 +315,11 @@
   <data name="settings.remoteMaintenance.restore" xml:space="preserve"><value>Check and restore</value></data>
   <data name="settings.remoteMaintenance.localStatus" xml:space="preserve"><value>Local service status</value></data>
   <data name="settings.remoteMaintenance.installHint" xml:space="preserve"><value>No separate RustDesk installation is needed. 1. Select Install remote maintenance. 2. Wait for the checks and downloads. 3. Select Yes in each Windows approval window (enter administrator credentials if asked). Keep POS open until configuration finishes.</value></data>
+  <data name="settings.remoteMaintenance.installHint.intro" xml:space="preserve"><value>No separate RustDesk installation is needed.</value></data>
+  <data name="settings.remoteMaintenance.installHint.step1" xml:space="preserve"><value>Select Install remote maintenance.</value></data>
+  <data name="settings.remoteMaintenance.installHint.step2" xml:space="preserve"><value>Wait for the checks and downloads.</value></data>
+  <data name="settings.remoteMaintenance.installHint.step3" xml:space="preserve"><value>Select Yes in each Windows approval window (enter administrator credentials if asked).</value></data>
+  <data name="settings.remoteMaintenance.installHint.keepOpen" xml:space="preserve"><value>Keep POS open until configuration finishes.</value></data>
   <data name="settings.remoteMaintenance.progress.preparing" xml:space="preserve"><value>Getting remote maintenance installation details. Please wait…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingRustDesk" xml:space="preserve"><value>Downloading and verifying RustDesk in the background (1/2)…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingStatusAgent" xml:space="preserve"><value>Downloading and verifying the status service in the background (2/2)…</value></data>
