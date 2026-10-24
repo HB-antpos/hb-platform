@@ -67,6 +67,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "advertisements", labelKey: "routes.advertisements", icon: "bullhorn-outline" },
       { routeName: "promotions", labelKey: "routes.promotions", icon: "sale-outline" },
       { routeName: "reports", labelKey: "routes.reports", icon: "chart-line" },
+      { routeName: "traffic-stats", labelKey: "routes.trafficStats", icon: "account-multiple-outline" },
       { routeName: "legacy-employee-logs", labelKey: "routes.legacyEmployeeLogs", icon: "clipboard-text-clock-outline" },
       { routeName: "daily-closes", labelKey: "routes.dailyCloses", icon: "cash-register" },
       { routeName: "notifications", labelKey: "routes.notifications", icon: "bell-outline" },

@@ -586,6 +586,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "traffic-stats",
+                TitleKey = "tabs.trafficStats",
+                Icon = "chart-line",
+                // 移动端「客流统计」：只展示门店计数（进店人次 / 估算访客），不含任何生物信息；
+                // 与 Web 客流统计共用 FaceMatch.Traffic.View，接口再按门店归属校验。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.FaceMatch.Traffic.View,
+                Order = 59,
+            },
+            new()
+            {
                 // 普通员工安装入口：只读最新正式版安装二维码，不需要管理员身份。
                 RouteName = "app-install",
                 TitleKey = "tabs.appInstall",

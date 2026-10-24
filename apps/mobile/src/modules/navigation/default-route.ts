@@ -24,6 +24,7 @@ export type AppTabPath =
   | "/(shell)/advertisements"
   | "/(shell)/promotions"
   | "/(shell)/reports"
+  | "/(shell)/traffic-stats"
   | "/(shell)/store-vouchers"
   | "/(shell)/store-cash"
   | "/(shell)/seasonal-cards"
@@ -72,6 +73,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   advertisements: "/(shell)/advertisements",
   promotions: "/(shell)/promotions",
   reports: "/(shell)/reports",
+  "traffic-stats": "/(shell)/traffic-stats",
   "store-vouchers": "/(shell)/store-vouchers",
   "store-cash": "/(shell)/store-cash",
   "seasonal-cards": "/(shell)/seasonal-cards",
@@ -139,6 +141,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "seasonal-product-insights",
   "device-management",
   "reports",
+  // 客流统计按账号的 FaceMatch.Traffic.View 与可查看门店授权，设备会话没有用户账号，设备模式不展示入口。
+  "traffic-stats",
   "user-admin",
   "roles",
   // 权限管理与角色管理同属全局管理，设备会话没有管理员身份，服务层会直接拒绝。

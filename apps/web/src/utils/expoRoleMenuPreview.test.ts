@@ -130,6 +130,7 @@ assertArrayEqual(
     'notifications',
     'device-management',
     'reports',
+    'traffic-stats',
     'app-install',
     'app-downloads',
     'wpf-versions',

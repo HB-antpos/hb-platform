@@ -76,6 +76,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["promotions", "Promotions", "促销", ["Promotions.View"]],
   ["product-query", "Product query", "商品查询", ["StoreProducts.View"]],
   ["seasonal-product-insights", "Seasonal products", "季节商品查询", ["SeasonalProductInsights.View"]],
+  // 与后端 FullAppMenu 的 traffic-stats 一致：只认 FaceMatch.Traffic.View（只读计数，不含生物信息）。
+  ["traffic-stats", "Foot traffic", "客流统计", ["FaceMatch.Traffic.View"]],
   // 与后端 FullAppMenu 的 pricing-strategies 一致：只认 PricingStrategy.View（Edit 只决定页面里能不能改，不决定入口）。
   ["pricing-strategies", "Pricing rules", "自动价格策略", ["PricingStrategy.View"]],
   ["container-new-products", "HB new arrivals", "HB新品", ["Container.MobileNewProductsView"]],

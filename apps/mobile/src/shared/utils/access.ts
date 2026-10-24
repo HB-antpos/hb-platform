@@ -30,6 +30,10 @@ export const PERMISSIONS = {
   // 人脸比对（不受欢迎人员名单、门店档案）与摄像机管理：后端 Permissions.FaceMatch.* / FaceCapture.Cameras.Manage，Admin 靠角色放行。
   FaceMatch: {
     Manage: "FaceMatch.Manage",
+    // 客流统计（只读计数，不含生物信息）：移动端「客流统计」页与后端 /face-match/traffic* 同一权限。
+    Traffic: {
+      View: "FaceMatch.Traffic.View",
+    },
     Unwelcome: {
       Manage: "FaceMatch.Unwelcome.Manage",
       Approve: "FaceMatch.Unwelcome.Approve",
