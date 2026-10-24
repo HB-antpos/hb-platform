@@ -27,7 +27,7 @@ public sealed partial class CardRecoveryCenterViewModel
 
     private int _autoCheckSecondsRemaining = AutoCheckIntervalSeconds;
     private bool _isAutoChecking;
-    private IRelayCommand<string>? _applyEvidencePresetCommand;
+    private IRelayCommand<string>? _applyNotePresetCommand;
     private IRelayCommand? _openManualCommand;
     private IRelayCommand? _closeManualCommand;
 
@@ -143,26 +143,225 @@ public sealed partial class CardRecoveryCenterViewModel
 
     public IRelayCommand CloseManualCommand => _closeManualCommand ??= new RelayCommand(() => IsManualExpanded = false);
 
-    /// <summary>证据快捷标签：把本地化的证据来源写入证据输入框，主管仍可继续编辑。</summary>
-    public IRelayCommand<string> ApplyEvidencePresetCommand => _applyEvidencePresetCommand ??= new RelayCommand<string>(key =>
+    /// <summary>备注预设：把预设文字追加到主管备注（已有内容用分号连接，同一句不重复追加），主管仍可继续编辑。</summary>
+    public IRelayCommand<string> ApplyNotePresetCommand => _applyNotePresetCommand ??= new RelayCommand<string>(text =>
     {
-        var text = key switch
-        {
-            "squareDashboard" => T("cardRecovery.v2.evidence.squareDashboard", "Square Dashboard"),
-            "terminalReceipt" => T("cardRecovery.v2.evidence.terminalReceipt", "Terminal receipt"),
-            "bankStatement" => T("cardRecovery.v2.evidence.bankStatement", "Bank statement"),
-            _ => null
-        };
-        if (text is null)
+        var preset = Normalize(text);
+        if (preset is null)
         {
             return;
         }
 
-        var current = Normalize(ResolutionEvidence);
-        ResolutionEvidence = current is null || current.Contains(text, StringComparison.OrdinalIgnoreCase)
-            ? current ?? text
-            : $"{current}; {text}";
+        var current = Normalize(ResolutionReason);
+        var separator = GetCulture() is CultureInfo { TwoLetterISOLanguageName: "zh" } ? "；" : "; ";
+        ResolutionReason = current is null || current.Contains(preset, StringComparison.OrdinalIgnoreCase)
+            ? current ?? preset
+            : $"{current}{separator}{preset}";
     });
+
+    // ---------- 结案弹窗 ----------
+    // 三个结果按钮不再直接执行，而是先打开居中弹窗：付款参考号 / 主管备注（含预设）都在弹窗里填，不再有证据输入框。
+    // 右侧面板只剩说明和三个按钮，窄屏或英文长文案下表单不会再被挤出首屏
+    // （1014 店 10-24：表单区高度为 0，主管看不到证据输入框，点“未付款”只收到一行“请填写证据”；现已取消证据）。
+    // 真正的结案仍走 ResolveSelectedAsync：弹窗里点确认才会弹出主管扫码授权。
+
+    private CardRecoverySupervisorDecision? _resolutionDialogDecision;
+    private string _resolutionDialogMessage = string.Empty;
+    private IRelayCommand? _openConfirmPaidDialogCommand;
+    private IRelayCommand? _openConfirmNotPaidDialogCommand;
+    private IRelayCommand? _openContinueWaitingDialogCommand;
+    private IRelayCommand? _cancelResolutionDialogCommand;
+    private IAsyncRelayCommand? _submitResolutionDialogCommand;
+
+    public CardRecoverySupervisorDecision? ResolutionDialogDecision
+    {
+        get => _resolutionDialogDecision;
+        private set
+        {
+            if (!SetProperty(ref _resolutionDialogDecision, value))
+            {
+                return;
+            }
+
+            foreach (var name in new[]
+                     {
+                         nameof(IsResolutionDialogOpen), nameof(ResolutionDialogTitleText),
+                         nameof(ResolutionDialogHintText), nameof(ResolutionDialogSubmitText),
+                         nameof(ShowDialogReferenceInput), nameof(ResolutionDialogPresets),
+                         nameof(HasResolutionDialogPresets), nameof(IsResolutionDialogNoteRequired)
+                     })
+            {
+                OnPropertyChanged(name);
+            }
+
+            NotifyResolutionDialogCommands();
+        }
+    }
+
+    public bool IsResolutionDialogOpen => ResolutionDialogDecision is not null;
+
+    /// <summary>提交被拒时（例如实时核验失败）显示在弹窗里；打开弹窗时清空，避免带出列表页的旧状态文案。</summary>
+    public string ResolutionDialogMessage
+    {
+        get => _resolutionDialogMessage;
+        private set
+        {
+            if (SetProperty(ref _resolutionDialogMessage, value))
+            {
+                OnPropertyChanged(nameof(HasResolutionDialogMessage));
+            }
+        }
+    }
+
+    public bool HasResolutionDialogMessage => !string.IsNullOrWhiteSpace(ResolutionDialogMessage);
+
+    public string ResolutionDialogTitleText => ResolutionDialogDecision switch
+    {
+        CardRecoverySupervisorDecision.ConfirmProcessed => ConfirmProcessedText,
+        CardRecoverySupervisorDecision.ConfirmNotProcessed => ConfirmNotProcessedText,
+        CardRecoverySupervisorDecision.ContinueWaiting =>
+            T("cardRecovery.center.action.continueWaiting", "Continue waiting"),
+        _ => string.Empty
+    };
+
+    public string ResolutionDialogHintText => ResolutionDialogDecision switch
+    {
+        CardRecoverySupervisorDecision.ConfirmProcessed => ProcessedOutcomeHintText,
+        CardRecoverySupervisorDecision.ConfirmNotProcessed => NotProcessedOutcomeHintText,
+        CardRecoverySupervisorDecision.ContinueWaiting => WaitingOutcomeHintText,
+        _ => string.Empty
+    };
+
+    public string ResolutionDialogSubmitText => ResolutionDialogTitleText;
+
+    // 付款参考号只属于“已付款 / 已退款”；“未付款”若带参考号会被服务层拒绝，所以不给输入口。
+    public bool ShowDialogReferenceInput =>
+        ShowEvidenceInputs && ResolutionDialogDecision == CardRecoverySupervisorDecision.ConfirmProcessed;
+
+    // 顾客已被扣款的记录只剩“已退款或另行处理，关闭”这一个出口：证据输入框取消后，备注就是唯一的说明，必填。
+    public bool IsResolutionDialogNoteRequired =>
+        ResolutionDialogDecision == CardRecoverySupervisorDecision.ConfirmNotProcessed &&
+        IsApprovedEvidenceSelection;
+
+    /// <summary>
+    /// 备注下方的预设（点一下写进备注）。只给普通付款的“已付款 / 未付款”提供，退款与已扣款出口没有固定说法，不提供。
+    /// </summary>
+    public IReadOnlyList<string> ResolutionDialogPresets
+    {
+        get
+        {
+            if (!IsPaymentSelection || IsApprovedEvidenceSelection || IsSettlementRejectedSelection)
+            {
+                return [];
+            }
+
+            return ResolutionDialogDecision switch
+            {
+                CardRecoverySupervisorDecision.ConfirmProcessed =>
+                [
+                    T("cardRecovery.v2.preset.paid.terminalSuccess", "Terminal shows payment successful"),
+                    T("cardRecovery.v2.preset.paid.customerRecord", "Customer showed payment record")
+                ],
+                CardRecoverySupervisorDecision.ConfirmNotProcessed =>
+                [
+                    T("cardRecovery.v2.preset.notPaid.terminalFailed", "Terminal shows failed"),
+                    T("cardRecovery.v2.preset.notPaid.terminalOffline", "Terminal offline"),
+                    T("cardRecovery.v2.preset.notPaid.terminalStuck", "Terminal stuck")
+                ],
+                _ => []
+            };
+        }
+    }
+
+    public bool HasResolutionDialogPresets => ResolutionDialogPresets.Count > 0;
+
+    public IRelayCommand OpenConfirmPaidDialogCommand => _openConfirmPaidDialogCommand ??= new RelayCommand(
+        () => OpenResolutionDialog(CardRecoverySupervisorDecision.ConfirmProcessed),
+        CanResolveWithoutApprovedEvidence);
+
+    public IRelayCommand OpenConfirmNotPaidDialogCommand => _openConfirmNotPaidDialogCommand ??= new RelayCommand(
+        () => OpenResolutionDialog(CardRecoverySupervisorDecision.ConfirmNotProcessed),
+        CanResolveSelection);
+
+    public IRelayCommand OpenContinueWaitingDialogCommand => _openContinueWaitingDialogCommand ??= new RelayCommand(
+        () => OpenResolutionDialog(CardRecoverySupervisorDecision.ContinueWaiting),
+        CanResolveWithoutApprovedEvidence);
+
+    public IRelayCommand CancelResolutionDialogCommand => _cancelResolutionDialogCommand ??= new RelayCommand(
+        CloseResolutionDialog,
+        () => !IsBusy);
+
+    public IAsyncRelayCommand SubmitResolutionDialogCommand => _submitResolutionDialogCommand ??= new AsyncRelayCommand(
+        SubmitResolutionDialogAsync,
+        CanSubmitResolutionDialog);
+
+    private void OpenResolutionDialog(CardRecoverySupervisorDecision decision)
+    {
+        // 每次打开都是一张空白表单：隐藏的输入口不能带着上次输入的内容被提交。
+        ResolutionReason = string.Empty;
+        ResolutionReference = decision == CardRecoverySupervisorDecision.ConfirmProcessed
+            ? SelectedAttempt?.ReceiptApprovalReference ?? string.Empty
+            : string.Empty;
+        ResolutionDialogMessage = string.Empty;
+        // 与原来输入框获得焦点时的约定一致：填写期间暂停自动检查，避免刷新把正在核对的交易换掉。
+        IsManualExpanded = true;
+        ResolutionDialogDecision = decision;
+    }
+
+    private void CloseResolutionDialog()
+    {
+        ResolutionDialogDecision = null;
+        ResolutionDialogMessage = string.Empty;
+        IsManualExpanded = false;
+    }
+
+    private bool CanSubmitResolutionDialog()
+    {
+        if (IsBusy || ResolutionDialogDecision is not { } decision)
+        {
+            return false;
+        }
+
+        var allowed = decision == CardRecoverySupervisorDecision.ConfirmNotProcessed
+            ? CanResolveSelection()
+            : CanResolveWithoutApprovedEvidence();
+        // 其余情况备注都是选填；只有顾客已被扣款的“关闭记录”出口要先写备注，标签已写明“必填”。
+        return allowed && (!IsResolutionDialogNoteRequired || Normalize(ResolutionReason) is not null);
+    }
+
+    private async Task SubmitResolutionDialogAsync()
+    {
+        if (ResolutionDialogDecision is not { } decision)
+        {
+            return;
+        }
+
+        // 动作名与原三个命令保持一致，授权与审计日志里的 action 不变。
+        var action = decision switch
+        {
+            CardRecoverySupervisorDecision.ConfirmProcessed => "resolve/confirm-paid",
+            CardRecoverySupervisorDecision.ConfirmNotProcessed => "resolve/confirm-not-paid",
+            _ => "resolve/continue-waiting"
+        };
+        var persisted = await ResolveSelectedAsync(decision, action);
+        if (persisted)
+        {
+            CloseResolutionDialog();
+            return;
+        }
+
+        // 没有落库（授权取消、实时核验拒绝、保存失败）：弹窗保持打开，把原因直接显示在弹窗里，输入内容保留。
+        ResolutionDialogMessage = StatusMessage;
+    }
+
+    private void NotifyResolutionDialogCommands()
+    {
+        _openConfirmPaidDialogCommand?.NotifyCanExecuteChanged();
+        _openConfirmNotPaidDialogCommand?.NotifyCanExecuteChanged();
+        _openContinueWaitingDialogCommand?.NotifyCanExecuteChanged();
+        _cancelResolutionDialogCommand?.NotifyCanExecuteChanged();
+        _submitResolutionDialogCommand?.NotifyCanExecuteChanged();
+    }
 
     public string ProcessedOutcomeHintText => IsSettlementRejectedSelection
         ? T("cardRecovery.settlement.outcome.refundedOther", "The customer was paid back by cash or another method.")

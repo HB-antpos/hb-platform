@@ -1327,12 +1327,6 @@ public sealed class LocalSquarePaymentAttemptRepository(LocalSqliteStore store) 
             throw new ArgumentException("确认已付款必须提供真实银行或终端参考号。", nameof(resolution));
         }
 
-        if (resolution.Decision == CardRecoverySupervisorDecision.ConfirmNotProcessed &&
-            string.IsNullOrWhiteSpace(resolution.Evidence))
-        {
-            throw new ArgumentException("确认未付款必须提供银行证据。", nameof(resolution));
-        }
-
         var sql = resolution.Decision switch
         {
             CardRecoverySupervisorDecision.ConfirmProcessed => """

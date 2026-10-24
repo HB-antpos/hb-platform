@@ -650,14 +650,6 @@ public sealed class SquarePaymentRecoveryService(
             normalizedReference = BuildSupervisorFallbackPaymentReference(attempt);
         }
 
-        if (decision == CardRecoverySupervisorDecision.ConfirmNotProcessed && normalizedEvidence is null)
-        {
-            return new CardRecoveryResolutionResult(
-                false,
-                "Enter bank evidence confirming that no payment was processed.",
-                LockRetained: true);
-        }
-
         var resolvedAt = DateTimeOffset.UtcNow;
         var journal = BuildSquareSaleSupervisorJournal(
             attempt,
