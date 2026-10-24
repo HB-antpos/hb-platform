@@ -374,9 +374,20 @@ public sealed partial class SettingsViewModelTests
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value.Contains("OpenLinklySetupInstructionsCommand", StringComparison.Ordinal) == true));
         Assert.Same(providerTabs[1], setupInstructionsButton.Ancestors().First(element => element.Name.LocalName == "TabItem"));
-        Assert.Equal(3, paymentSection.Descendants().Count(element =>
-            element.Name.LocalName == "Border" &&
-            element.Attribute("Style")?.Value.Contains("SettingsModeChoiceBorderStyle", StringComparison.Ordinal) == true));
+        // 首屏重设计：原「三选一单选」与「连接优先级」合并为一个 3 行模式列表（点行切换查看，⚙ 设为首选，▲▼ 调序）。
+        var modeList = Assert.Single(paymentSection.Descendants().Where(element =>
+            element.Name.LocalName == "ItemsControl" &&
+            (string?)element.Attribute("AutomationProperties.AutomationId") == "LinklyModePriorityList"));
+        Assert.Equal("{Binding LinklyModePriorityItems}", modeList.Attribute("ItemsSource")?.Value);
+        Assert.DoesNotContain(paymentSection.Descendants(), element =>
+            element.Name.LocalName == "RadioButton" &&
+            element.Attribute("GroupName")?.Value == "LinklySettingsMode");
+        foreach (var command in new[] { "SelectLinklyPriorityModeCommand", "MoveLinklyPriorityUpCommand", "MoveLinklyPriorityDownCommand" })
+        {
+            Assert.Contains(modeList.Descendants(), element =>
+                element.Name.LocalName == "Button" &&
+                element.Attribute("Command")?.Value.Contains(command, StringComparison.Ordinal) == true);
+        }
         Assert.True(paymentSection.Descendants().Count(element =>
             element.Name.LocalName == "TextBox" &&
             element.Attribute("Text")?.Value.Contains("TimeoutSecondsText", StringComparison.Ordinal) == true) >= 2);
@@ -552,17 +563,23 @@ public sealed partial class SettingsViewModelTests
             .Single(element =>
                 element.Name.LocalName == "Button" &&
                 element.Attribute("Command")?.Value.Contains("LogonLinklyCommand", StringComparison.Ordinal) == true);
+        // 首屏重设计：Linkly 的操作按钮在页面固定底栏（SettingsFooterBar）里；本地 IP 可见的三个按钮顺序仍是 测试 → 登录银行网络 → 启用。
+        Assert.Equal("SettingsFooterBar", logonButton.Parent!.Name.LocalName);
         var actionButtons = logonButton.Parent!
             .Elements()
             .Where(element => element.Name.LocalName == "Button")
             .ToArray();
+        int IndexOfCommand(string command) => Array.FindIndex(
+            actionButtons,
+            element => element.Attribute("Command")?.Value.Contains(command, StringComparison.Ordinal) == true);
 
-        Assert.Equal("WrapPanel", logonButton.Parent!.Name.LocalName);
-        Assert.Equal(3, actionButtons.Length);
-        Assert.Contains("TestLinklyCommand", actionButtons[0].Attribute("Command")?.Value, StringComparison.Ordinal);
-        Assert.Same(logonButton, actionButtons[1]);
-        Assert.Contains("SaveLinklyCommand", actionButtons[2].Attribute("Command")?.Value, StringComparison.Ordinal);
+        var test = IndexOfCommand("{Binding TestLinklyCommand}");
+        var logon = IndexOfCommand("{Binding LogonLinklyCommand}");
+        var save = IndexOfCommand("{Binding SaveLinklyCommand}");
+        Assert.True(test >= 0 && test < logon && logon < save, $"本地 IP 底栏按钮顺序应为 测试({test}) < 登录银行网络({logon}) < 启用({save})。");
         Assert.Contains("IsLinklyLocalIpMode", logonButton.Attribute("Visibility")?.Value, StringComparison.Ordinal);
+        // 测试 / 启用在本地 IP 与 Cloud 直连之间共用；后端异步模式下「测试 Linkly」隐藏（后端用「测试交易状态」）。
+        Assert.Contains("IsLinklyStandardActionMode", actionButtons[test].Attribute("Visibility")?.Value, StringComparison.Ordinal);
         Assert.Contains(
             logonButton.Descendants(),
             element =>
