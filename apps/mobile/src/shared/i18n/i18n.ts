@@ -39,6 +39,7 @@ import storeCashEn from "@/locales/en/screens/storeCash.json";
 import dailyClosesEn from "@/locales/en/screens/dailyCloses.json";
 import pricingStrategiesEn from "@/locales/en/screens/pricingStrategies.json";
 import faceMatchEn from "@/locales/en/screens/faceMatch.json";
+import trafficStatsEn from "@/locales/en/screens/trafficStats.json";
 import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
@@ -88,6 +89,7 @@ import storeCashZh from "@/locales/zh/screens/storeCash.json";
 import dailyClosesZh from "@/locales/zh/screens/dailyCloses.json";
 import pricingStrategiesZh from "@/locales/zh/screens/pricingStrategies.json";
 import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
+import trafficStatsZh from "@/locales/zh/screens/trafficStats.json";
 import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
@@ -135,6 +137,7 @@ const resources = {
     dailyCloses: dailyClosesZh,
     pricingStrategies: pricingStrategiesZh,
     faceMatch: faceMatchZh,
+    trafficStats: trafficStatsZh,
     notifications: notificationsZh,
     push: pushZh,
     productQuery: productQueryZh,
@@ -188,6 +191,7 @@ const resources = {
     dailyCloses: dailyClosesEn,
     pricingStrategies: pricingStrategiesEn,
     faceMatch: faceMatchEn,
+    trafficStats: trafficStatsEn,
     notifications: notificationsEn,
     push: pushEn,
     productQuery: productQueryEn,

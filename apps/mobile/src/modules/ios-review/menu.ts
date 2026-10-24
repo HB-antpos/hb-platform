@@ -38,6 +38,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   // 抓拍与比对含真实的生物识别照片，通知收件箱是真实账号的服务端消息，审核模式都没有离线演示数据，不展示。
   "face-capture-results",
   "notifications",
+  // 客流统计依赖真实门店摄像机计数，审核模式没有离线演示数据，不展示。
+  "traffic-stats",
   "workbench",
 ] as const;
 

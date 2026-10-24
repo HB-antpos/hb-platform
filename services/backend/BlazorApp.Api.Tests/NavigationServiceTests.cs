@@ -1039,7 +1039,7 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(44, menu.Count);
+        Assert.Equal(45, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
@@ -1066,6 +1066,7 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.RouteName == "employee-profile");
         Assert.Contains(menu, item => item.RouteName == "device-management");
         Assert.Contains(menu, item => item.RouteName == "reports");
+        Assert.Contains(menu, item => item.RouteName == "traffic-stats");
         Assert.Contains(menu, item => item.RouteName == "attendance-personal");
         Assert.Contains(menu, item => item.RouteName == "attendance-management");
         Assert.Contains(menu, item => item.RouteName == "seasonal-cards");
@@ -1378,6 +1379,29 @@ public class NavigationServiceTests
         Assert.Equal("tabs.reports", item.TitleKey);
         Assert.Equal("chart-box-outline", item.Icon);
         Assert.Equal(Permissions.Reports.ProductMovementView, item.Permission);
+    }
+
+    [Fact]
+    public void BuildAppMenu_仅凭客流统计查看权限可见客流统计入口()
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceMatch.Traffic.View)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "traffic-stats");
+        Assert.Equal("tabs.trafficStats", item.TitleKey);
+        Assert.Equal("chart-line", item.Icon);
+        Assert.Equal(Permissions.FaceMatch.Traffic.View, item.Permission);
+        // 独立入口：不顺带打开人脸比对合并入口；没有该权限则看不到客流统计。
+        Assert.DoesNotContain(menu, entry => entry.RouteName == "face-hub");
+        Assert.DoesNotContain(_service.BuildAppMenu(CreateUser()), entry => entry.RouteName == "traffic-stats");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含客流统计()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "traffic-stats");
+        }
     }
 
     [Fact]
