@@ -93,40 +93,10 @@ public sealed partial class CardPaymentRecoveryServiceTests
         public void Record(BlazorApp.Shared.DTOs.OperationAuditEventDto auditEvent) => Events.Add(auditEvent);
     }
 
-    // ───────────── H1：CloudBackendAsync 实时核验 ─────────────
-
-    [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    public async Task ResolvePaymentAsync_backend_session_still_pending_only_allows_continue_waiting(
-        CardPaymentSupervisorDecision decision)
-    {
-        var attempt = CreateAttempt("S-LIVE-PENDING", "TXN-LIVE-PENDING", LocalCardPaymentAttemptStatus.Recovering);
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var backend = new FakeLinklyBackendTerminalClient
-        {
-            Status = CreateStatus("Pending", "S-LIVE-PENDING", "TXN-LIVE-PENDING", null, null)
-        };
-        var orders = new FakeLocalOrderRepository();
-        var service = CreateService(attempts, orders, backend);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, decision, "REF-1"),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.True(result.LockRetained);
-        Assert.Contains("still processing", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Continue waiting", result.Message, StringComparison.Ordinal);
-        Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(LocalCardPaymentAttemptStatus.Recovering, attempts.Status);
-        Assert.Equal(1, backend.StatusCallCount);
-        Assert.Equal("S-LIVE-PENDING", backend.StatusSessionId);
-        Assert.Equal(0, backend.AcknowledgeCallCount);
-        Assert.Equal(0, orders.SaveCount);
-    }
+    // ───────────── 人工确认为准：主管结案不再做实时核验 ─────────────
+    // 用户 10-24 决定：刷卡机离线 / 超时（1014 店 TI、1042 测试店）时“确认已付款 / 未付款”都点不动，
+    // 所以结案不再向 Linkly / 刷卡机查询，也不会因查询失败、仍在处理或与终端结论矛盾而拒绝。
+    // 唯一保留的保险：本机已保存与本笔一致的批准小票时仍拒绝“确认未付款”（见 ReceiptApprovalEvidence 用例）。
 
     [Fact]
     public async Task ResolvePaymentAsync_continue_waiting_does_not_query_and_stays_available_while_pending()
@@ -150,97 +120,49 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.Equal(ActiveSessionSupervisorResolutionCodes.ContinueWaiting, attempts.ResponseCode);
     }
 
-    [Fact]
-    public async Task ResolvePaymentAsync_backend_approved_session_rejects_confirm_not_paid()
+    // 后端会话无论是仍在处理、已批准还是已失败，两种人工决定都直接落库，且不再向后端查询状态。
+    [Theory]
+    [InlineData("Pending", null, null, CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("Pending", null, null, CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData("Completed", true, "00", CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("Completed", true, "00", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData("Failed", null, "05", CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("Failed", null, "05", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    public async Task ResolvePaymentAsync_manual_decision_prevails_over_backend_session_state(
+        string status,
+        bool? transactionSuccess,
+        string? responseCode,
+        CardPaymentSupervisorDecision decision)
     {
-        var attempt = CreateAttempt("S-LIVE-APPROVED", "TXN-LIVE-APPROVED", LocalCardPaymentAttemptStatus.Recovering);
+        var attempt = CreateAttempt("S-LIVE-MANUAL", "TXN-LIVE-MANUAL", LocalCardPaymentAttemptStatus.Recovering);
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
         var backend = new FakeLinklyBackendTerminalClient
         {
             Status = CreateStatus(
-                "Completed", "S-LIVE-APPROVED", "TXN-LIVE-APPROVED", "00", "APPROVED", transactionSuccess: true)
+                status,
+                "S-LIVE-MANUAL",
+                "TXN-LIVE-MANUAL",
+                responseCode,
+                responseCode is null ? null : "TEXT",
+                transactionSuccess)
         };
         var service = CreateService(attempts, new FakeLocalOrderRepository(), backend);
 
         var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
+            SupervisorResolution(attempt, decision, "REF-MANUAL"),
             new PosCartService(),
             Session);
 
-        Assert.False(result.Succeeded);
-        Assert.True(result.LockRetained);
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("approved", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Run recovery", result.Message, StringComparison.Ordinal);
-        Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(LocalCardPaymentAttemptStatus.Recovering, attempts.Status);
-        Assert.Equal(0, backend.AcknowledgeCallCount);
-    }
-
-    [Fact]
-    public async Task ResolvePaymentAsync_backend_approved_session_allows_consistent_confirm_paid()
-    {
-        var attempt = CreateAttempt("S-LIVE-APPROVED-OK", "TXN-LIVE-APPROVED-OK", LocalCardPaymentAttemptStatus.Recovering);
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var backend = new FakeLinklyBackendTerminalClient
-        {
-            Status = CreateStatus(
-                "Completed", "S-LIVE-APPROVED-OK", "TXN-LIVE-APPROVED-OK", "00", "APPROVED", transactionSuccess: true)
-        };
-        var orders = new FakeLocalOrderRepository();
-        var service = CreateService(attempts, orders, backend);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmPaid, "BANK-REF-OK"),
-            new PosCartService(),
-            Session);
-
-        Assert.True(result.Succeeded);
+        Assert.True(result.ResolutionPersisted, result.Message);
         Assert.NotNull(attempts.LastPaymentJournal);
-        Assert.Equal(1, orders.SaveCount);
-        Assert.Equal(1, backend.StatusCallCount);
-    }
-
-    [Theory]
-    [InlineData("Failed")]
-    [InlineData("NotSubmitted")]
-    [InlineData("Cancelled")]
-    public async Task ResolvePaymentAsync_backend_failed_session_rejects_confirm_paid_but_allows_not_paid(
-        string finalStatus)
-    {
-        var attempt = CreateAttempt("S-LIVE-FAILED", "TXN-LIVE-FAILED", LocalCardPaymentAttemptStatus.Recovering);
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var backend = new FakeLinklyBackendTerminalClient
-        {
-            Status = CreateStatus(finalStatus, "S-LIVE-FAILED", "TXN-LIVE-FAILED", "05", "DECLINED")
-        };
-        var orders = new FakeLocalOrderRepository();
-        var service = CreateService(attempts, orders, backend);
-
-        var paid = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmPaid, "BANK-REF-FAILED"),
-            new PosCartService(),
-            Session);
-
-        Assert.False(paid.Succeeded);
-        Assert.False(paid.ResolutionPersisted);
-        Assert.Contains("not approved", paid.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(0, orders.SaveCount);
-
-        var notPaid = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
-            new PosCartService(),
-            Session);
-
-        Assert.True(notPaid.ResolutionPersisted);
-        Assert.NotNull(attempts.LastPaymentJournal);
+        Assert.Equal(0, backend.StatusCallCount);
     }
 
     [Theory]
     [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
     [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    public async Task ResolvePaymentAsync_backend_query_failure_fails_closed(CardPaymentSupervisorDecision decision)
+    public async Task ResolvePaymentAsync_manual_decision_does_not_depend_on_backend_availability(
+        CardPaymentSupervisorDecision decision)
     {
         var attempt = CreateAttempt("S-LIVE-ERROR", "TXN-LIVE-ERROR", LocalCardPaymentAttemptStatus.Recovering);
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
@@ -258,41 +180,11 @@ public sealed partial class CardPaymentRecoveryServiceTests
             new PosCartService(),
             Session);
 
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.True(result.LockRetained);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(LocalCardPaymentAttemptStatus.Recovering, attempts.Status);
-        Assert.Equal(0, backend.AcknowledgeCallCount);
+        Assert.True(result.ResolutionPersisted, result.Message);
+        Assert.NotNull(attempts.LastPaymentJournal);
     }
 
-    [Theory]
-    [InlineData("SupervisorResolved", null)]
-    [InlineData("Completed", null)]
-    public async Task ResolvePaymentAsync_backend_session_without_conclusive_result_leaves_decision_to_supervisor(
-        string status,
-        bool? transactionSuccess)
-    {
-        var attempt = CreateAttempt("S-LIVE-INCONCLUSIVE", "TXN-LIVE-INCONCLUSIVE", LocalCardPaymentAttemptStatus.Recovering);
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var backend = new FakeLinklyBackendTerminalClient
-        {
-            Status = CreateStatus(
-                status, "S-LIVE-INCONCLUSIVE", "TXN-LIVE-INCONCLUSIVE", null, null, transactionSuccess)
-        };
-        var service = CreateService(attempts, new FakeLocalOrderRepository(), backend);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
-            new PosCartService(),
-            Session);
-
-        Assert.True(result.ResolutionPersisted);
-        Assert.Equal(1, backend.StatusCallCount);
-    }
-
-    // ───────────── H1：LocalIp / CloudDirectSync 实时核验 ─────────────
+    // ───────────── LocalIp / CloudDirectSync：同样人工确认为准 ─────────────
 
     private static LocalCardPaymentAttempt CreateLocalIpPendingAttempt() =>
         CreateAttempt(
@@ -301,67 +193,41 @@ public sealed partial class CardPaymentRecoveryServiceTests
             status: LocalCardPaymentAttemptStatus.Recovering,
             connectionMode: LinklyConnectionMode.LocalIp);
 
-    [Fact]
-    public async Task ResolvePaymentAsync_local_ip_terminal_reports_approved_rejects_confirm_not_paid()
-    {
-        var attempt = CreateLocalIpPendingAttempt();
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(LocalTerminalResult(LocalIpTxnRef, true, "00", "APPROVED"));
-        var backend = new FakeLinklyBackendTerminalClient();
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            backend,
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("approved", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, terminal.RecoverCallCount);
-        Assert.Equal(LocalIpTxnRef, terminal.LastTxnRef);
-        Assert.Null(attempts.LastPaymentJournal);
-    }
-
-    [Fact]
-    public async Task ResolvePaymentAsync_local_ip_terminal_reports_decline_rejects_confirm_paid()
-    {
-        var attempt = CreateLocalIpPendingAttempt();
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(LocalTerminalResult(LocalIpTxnRef, false, "05", "DECLINED"));
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmPaid, "BANK-REF"),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("not approved", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-    }
-
+    // 刷卡机回已批准 / 已拒绝 / 离线（PF）/ 查不到（JH）/ 新鲜或老记录：两种人工决定都落库，且不再向刷卡机查询。
     [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    public async Task ResolvePaymentAsync_local_ip_unreachable_terminal_fails_closed(
+    [InlineData("approved", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData("declined", CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("offline", CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("offline", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData("freshNotFound", CardPaymentSupervisorDecision.ConfirmPaid)]
+    [InlineData("freshNotFound", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData("oldUnanswered", CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    public async Task ResolvePaymentAsync_local_ip_manual_decision_prevails_over_terminal_answer(
+        string terminalState,
         CardPaymentSupervisorDecision decision)
     {
-        var attempt = CreateLocalIpPendingAttempt();
+        var attempt = CreateLocalIpPendingAttempt() with
+        {
+            CreatedAt = terminalState == "oldUnanswered"
+                ? DateTimeOffset.UtcNow.AddDays(-12)
+                : DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(
-            LocalTerminalResult(LocalIpTxnRef, false, "00", "unknown", resultUnknown: true));
+        var terminalResult = terminalState switch
+        {
+            "approved" => LocalTerminalResult(LocalIpTxnRef, true, "00", "APPROVED"),
+            "declined" => LocalTerminalResult(LocalIpTxnRef, false, "05", "DECLINED"),
+            "offline" or "oldUnanswered" =>
+                LocalTerminalResult(LocalIpTxnRef, false, "PF", "PINpad Offline", resultUnknown: true),
+            _ => LocalTerminalResult(
+                LocalIpTxnRef,
+                false,
+                "JH",
+                "NOT FOUND",
+                resultUnknown: true,
+                statusKey: LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey)
+        };
+        var terminal = new FakeLinklyTerminalClient(terminalResult);
         var service = CreateService(
             attempts,
             new FakeLocalOrderRepository(),
@@ -374,15 +240,14 @@ public sealed partial class CardPaymentRecoveryServiceTests
             new PosCartService(),
             Session);
 
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.True(result.LockRetained);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
+        Assert.True(result.ResolutionPersisted, result.Message);
+        Assert.NotNull(attempts.LastPaymentJournal);
+        Assert.Equal(0, terminal.RecoverCallCount);
     }
 
+    // 没有可用的终端客户端时也一样：不查询，主管的决定直接生效。
     [Fact]
-    public async Task ResolvePaymentAsync_local_ip_without_terminal_client_fails_closed()
+    public async Task ResolvePaymentAsync_local_ip_without_terminal_client_still_accepts_manual_decision()
     {
         var attempt = CreateLocalIpPendingAttempt();
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
@@ -397,179 +262,21 @@ public sealed partial class CardPaymentRecoveryServiceTests
             new PosCartService(),
             Session);
 
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.ResolutionPersisted, result.Message);
     }
 
-    [Fact]
-    public async Task ResolvePaymentAsync_local_ip_terminal_showing_another_transaction_leaves_decision_to_supervisor()
-    {
-        var attempt = CreateLocalIpPendingAttempt();
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(
-            LocalTerminalResult(LocalIpTxnRef, true, "00", "APPROVED", returnedTxnRef: "P000000000000999"));
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
-            new PosCartService(),
-            Session);
-
-        Assert.True(result.ResolutionPersisted);
-        Assert.Equal(1, terminal.RecoverCallCount);
-    }
-
-    // 生产实测：10-02 刷卡机离线遗留的记录 12 天后，EFT-Client 回 Success=true、空 TxnRef、JH / NOT FOUND，
-    // 真实客户端把它映射成 ResultUnknown + 专用标记。老记录由主管凭银行证据结案，不能永远卡在“只能继续等待”。
     [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
     [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    public async Task ResolvePaymentAsync_local_ip_old_attempt_not_found_on_terminal_leaves_decision_to_supervisor(
-        CardPaymentSupervisorDecision decision)
-    {
-        var attempt = CreateLocalIpPendingAttempt() with
-        {
-            CreatedAt = DateTimeOffset.UtcNow.AddDays(-12)
-        };
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(
-            LocalTerminalResult(
-                LocalIpTxnRef,
-                false,
-                "JH",
-                "NOT FOUND",
-                resultUnknown: true,
-                statusKey: LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey));
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, decision, "BANK-REF"),
-            new PosCartService(),
-            Session);
-
-        Assert.True(result.ResolutionPersisted);
-        Assert.DoesNotContain("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, terminal.RecoverCallCount);
-    }
-
-    // 刚发起的记录：终端可能仍在处理这笔交易，查不到不能当作“已经没有迟到结果”，否则提前结案会留下孤儿扣款。
-    [Theory]
     [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    public async Task ResolvePaymentAsync_local_ip_fresh_attempt_not_found_on_terminal_still_fails_closed(
+    public async Task ResolvePaymentAsync_cloud_direct_manual_decision_does_not_query_the_terminal(
         CardPaymentSupervisorDecision decision)
-    {
-        var attempt = CreateLocalIpPendingAttempt() with
-        {
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
-        };
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(
-            LocalTerminalResult(
-                LocalIpTxnRef,
-                false,
-                "JH",
-                "NOT FOUND",
-                resultUnknown: true,
-                statusKey: LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey));
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, decision, "BANK-REF"),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.Succeeded);
-        Assert.False(result.ResolutionPersisted);
-        Assert.True(result.LockRetained);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-    }
-
-    // 老记录但刷卡机根本没回答（离线/超时，无“回答了别的交易”标记）：仍然失败关闭。
-    [Fact]
-    public async Task ResolvePaymentAsync_local_ip_old_attempt_with_unanswered_terminal_still_fails_closed()
-    {
-        var attempt = CreateLocalIpPendingAttempt() with
-        {
-            CreatedAt = DateTimeOffset.UtcNow.AddDays(-12)
-        };
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var terminal = new FakeLinklyTerminalClient(
-            LocalTerminalResult(LocalIpTxnRef, false, "PF", "PINpad Offline", resultUnknown: true));
-        var service = CreateService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
-            terminal);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid, "BANK-REF"),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-    }
-
-    [Fact]
-    public async Task ResolvePaymentAsync_cloud_direct_reports_approved_rejects_confirm_not_paid()
     {
         var attempt = CreateAttempt(
-            "SESSION-DIRECT-LIVE",
+            "SESSION-DIRECT-MANUAL",
             DirectTxnRef,
             LocalCardPaymentAttemptStatus.Recovering,
             connectionMode: LinklyConnectionMode.CloudDirectSync);
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        var direct = new QueryOnlyDirectTerminal(LocalTerminalResult(DirectTxnRef, true, "00", "APPROVED"));
-        var service = CreateDirectService(
-            attempts,
-            new FakeLocalOrderRepository(),
-            new FakeLinklyBackendTerminalClient(),
-            direct);
-
-        var result = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid),
-            new PosCartService(),
-            Session);
-
-        Assert.False(result.ResolutionPersisted);
-        Assert.Contains("approved", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, direct.QueryCount);
-        Assert.Equal("SESSION-DIRECT-LIVE", direct.SessionId);
-        Assert.Equal(DirectTxnRef, direct.TxnRef);
-    }
-
-    [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    public async Task ResolvePaymentAsync_cloud_direct_without_final_result_only_allows_continue_waiting(
-        CardPaymentSupervisorDecision decision)
-    {
-        var attempt = CreateAttempt(
-            "SESSION-DIRECT-PENDING",
-            DirectTxnRef,
-            LocalCardPaymentAttemptStatus.Recovering,
-            connectionMode: LinklyConnectionMode.CloudDirectSync);
-        var attempts = new FakeCardPaymentAttemptRepository(attempt);
-        // 直连 GET 202（仍在处理）与网络失败都收敛为 ResultUnknown：无法证明没有迟到的结果，失败关闭。
         var direct = new QueryOnlyDirectTerminal(
             LocalTerminalResult(DirectTxnRef, false, "00", "unknown", resultUnknown: true));
         var service = CreateDirectService(
@@ -583,17 +290,9 @@ public sealed partial class CardPaymentRecoveryServiceTests
             new PosCartService(),
             Session);
 
-        Assert.False(result.ResolutionPersisted);
-        Assert.True(result.LockRetained);
-        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempts.LastPaymentJournal);
-
-        var waiting = await service.ResolvePaymentAsync(
-            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ContinueWaiting),
-            new PosCartService(),
-            Session);
-        Assert.True(waiting.Succeeded);
-        Assert.Equal(1, direct.QueryCount);
+        Assert.True(result.ResolutionPersisted, result.Message);
+        Assert.NotNull(attempts.LastPaymentJournal);
+        Assert.Equal(0, direct.QueryCount);
     }
 
     // ───────────── M16：只有 TxnRef 的 attempt 结案前先认领真实 SessionId ─────────────
@@ -720,6 +419,42 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.NotNull(attempts.AcknowledgedAt);
     }
 
+    // 证据输入框取消后，顾客已被扣款的“已退款或另行处理，关闭”出口改为必填备注：既没备注也没证据时拒绝，只写备注即可放行。
+    [Fact]
+    public async Task ResolvePaymentAsync_approved_evidence_exit_requires_a_supervisor_note()
+    {
+        var attempt = CreateApprovedReviewAttempt();
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var service = CreateService(attempts, new FakeLocalOrderRepository(), new FakeLinklyBackendTerminalClient());
+
+        var rejected = await service.ResolvePaymentAsync(
+            new CardPaymentSupervisorResolution(
+                attempt.AttemptGuid,
+                CardProcessorKind.Linkly,
+                CardPaymentSupervisorDecision.ConfirmNotPaid,
+                string.Empty,
+                "MANAGER-01"),
+            new PosCartService(),
+            Session);
+
+        Assert.False(rejected.Succeeded);
+        Assert.True(rejected.LockRetained);
+        Assert.Null(attempts.LastPaymentJournal);
+
+        var accepted = await service.ResolvePaymentAsync(
+            new CardPaymentSupervisorResolution(
+                attempt.AttemptGuid,
+                CardProcessorKind.Linkly,
+                CardPaymentSupervisorDecision.ConfirmNotPaid,
+                "Refunded AU$10 in cash, receipt R-1",
+                "MANAGER-01"),
+            new PosCartService(),
+            Session);
+
+        Assert.True(accepted.Succeeded);
+        Assert.NotNull(attempts.LastPaymentJournal);
+    }
+
     [Fact]
     public async Task ResolvePaymentAsync_approved_evidence_exit_still_closes_when_draft_is_unreadable()
     {
@@ -814,6 +549,13 @@ public sealed partial class CardPaymentRecoveryServiceTests
     [InlineData("cardRecovery.center.action.closeApprovedHandled")]
     [InlineData("cardRecovery.payment.section.approvedInstructions")]
     [InlineData("cardRecovery.payment.field.approvedEvidence")]
+    [InlineData("cardRecovery.payment.field.approvedNote")]
+    [InlineData("cardRecovery.linkly.approvedExitNoteRequired")]
+    [InlineData("cardRecovery.v2.preset.paid.terminalSuccess")]
+    [InlineData("cardRecovery.v2.preset.paid.customerRecord")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalFailed")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalOffline")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalStuck")]
     public void Supervisor_live_check_and_exit_messages_are_localized_in_both_languages(string key)
     {
         var localization = new Hbpos.Client.Wpf.Localization.LocalizationService();

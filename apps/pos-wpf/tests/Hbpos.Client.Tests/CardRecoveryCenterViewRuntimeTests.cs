@@ -70,7 +70,7 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
                 AssertCommandButtonOnScreen(view, viewModel.RecoverCommand, width, height);
-                foreach (var command in new[] { viewModel.ConfirmPaidCommand, viewModel.ConfirmNotPaidCommand, viewModel.ContinueWaitingCommand })
+                foreach (var command in new[] { viewModel.OpenConfirmPaidDialogCommand, viewModel.OpenConfirmNotPaidDialogCommand, viewModel.OpenContinueWaitingDialogCommand })
                 {
                     AssertCommandButtonOnScreen(view, command, width, height);
                     var button = FindCommandButton(view, command);
@@ -78,6 +78,17 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
                 }
 
                 SaveScreenshot(view, width, height, $"manual-{culture}");
+
+                // 结案弹窗：点“未付款”后表单整体居中弹出，取消 / 确认按钮必须在屏幕内且保持触屏尺寸；
+                // 备注与预设都是选填，确认按钮一打开就可用。
+                viewModel.OpenConfirmNotPaidDialogCommand.Execute(null);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                AssertCommandButtonOnScreen(view, viewModel.CancelResolutionDialogCommand, width, height);
+                AssertCommandButtonOnScreen(view, viewModel.SubmitResolutionDialogCommand, width, height);
+                Assert.True(viewModel.SubmitResolutionDialogCommand.CanExecute(null));
+                SaveScreenshot(view, width, height, $"dialog-{culture}");
+                viewModel.CancelResolutionDialogCommand.Execute(null);
             }
             finally
             {
@@ -128,12 +139,12 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
                 Assert.Equal(rejected.Key, viewModel.SelectedAttempt?.Key);
                 Assert.True(viewModel.CanShowSupervisorResolution);
                 // 唯一的结果卡片直接在首屏内，并占满整行（不再是三分之一宽）。
-                AssertCommandButtonOnScreen(view, viewModel.ConfirmPaidCommand, width, height);
-                var confirm = FindCommandButton(view, viewModel.ConfirmPaidCommand);
+                AssertCommandButtonOnScreen(view, viewModel.OpenConfirmPaidDialogCommand, width, height);
+                var confirm = FindCommandButton(view, viewModel.OpenConfirmPaidDialogCommand);
                 Assert.True(confirm.ActualHeight >= 48);
                 Assert.DoesNotContain(
                     PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view),
-                    button => ReferenceEquals(button.Command, viewModel.ContinueWaitingCommand) && button.ActualHeight > 0);
+                    button => ReferenceEquals(button.Command, viewModel.OpenContinueWaitingDialogCommand) && button.ActualHeight > 0);
                 SaveScreenshot(view, width, height, $"settlement-rejected-{culture}");
 
                 // 结算中：在“已处理”里，可手动查询，没有主管操作。

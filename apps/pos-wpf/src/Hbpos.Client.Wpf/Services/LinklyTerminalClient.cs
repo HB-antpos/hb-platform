@@ -1821,9 +1821,13 @@ public sealed class LinklyTerminalClient(
 
     private static bool HasExplicitLinklyRejection(string? responseCode, string? responseText)
     {
-        if (string.Equals(responseCode, "05", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(responseCode, "CN", StringComparison.OrdinalIgnoreCase))
+        // 中文注释：TI = OPERATOR TIMEOUT（顾客/收银员没在时限内操作刷卡机，交易未授权、未扣款）。
+        // 能走到这里说明 GetLast 的 TxnRef、金额都对得上这一笔且 LastTransactionSuccess=false，
+        // 终端已经明确回答“这笔没成功”；若仍当结果未知，主管结案的实时核验会永久失败关闭（1014 店 10-24 实测）。
+        if (string.Equals(responseCode?.Trim(), "05", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode?.Trim(), "C0", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode?.Trim(), "CN", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode?.Trim(), "TI", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -1832,7 +1836,8 @@ public sealed class LinklyTerminalClient(
             (responseText.Contains("DECLINED", StringComparison.OrdinalIgnoreCase) ||
              responseText.Contains("REJECTED", StringComparison.OrdinalIgnoreCase) ||
              responseText.Contains("CANCELLED", StringComparison.OrdinalIgnoreCase) ||
-             responseText.Contains("CANCELED", StringComparison.OrdinalIgnoreCase));
+             responseText.Contains("CANCELED", StringComparison.OrdinalIgnoreCase) ||
+             responseText.Contains("OPERATOR TIMEOUT", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CardTransactionDto ToCardTransaction(
