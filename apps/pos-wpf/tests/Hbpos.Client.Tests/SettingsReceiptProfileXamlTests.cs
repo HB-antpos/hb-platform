@@ -73,36 +73,47 @@ public sealed class SettingsReceiptProfileXamlTests
     }
 
     [Fact]
-    public void Receipt_card_grid_rows_are_defined_once_and_every_section_has_its_own_row()
+    public void Receipt_sub_pages_stack_in_one_body_and_the_save_button_lives_in_the_footer()
     {
         var document = LoadSettingsView();
         var save = Assert.Single(
             document.Descendants(),
             element => element.Name.LocalName == "Button" &&
                        element.Attribute("Command")?.Value.Contains("SaveReceiptPrinterCommand", StringComparison.Ordinal) == true);
-        // 小票资料卡片的行网格：包含保存按钮的最近一层带 RowDefinitions 的 Grid。
-        var grid = save.Ancestors()
-            .First(element => element.Name.LocalName == "Grid" &&
-                              element.Elements().Any(child => child.Name.LocalName == "Grid.RowDefinitions"));
+        // 首屏重设计后「保存小票打印机」在固定底栏里，只在没开自动保存时显示（命令与原来相同）。
+        Assert.Contains(save.Ancestors(), element => element.Name.LocalName == "SettingsPageHost.Footer");
+        Assert.Contains(
+            "IsExplicitSaveVisible",
+            save.Attribute("Visibility")?.Value ?? string.Empty,
+            StringComparison.Ordinal);
 
-        var rowCount = grid.Element(grid.Name.Namespace + "Grid.RowDefinitions")!.Elements().Count();
-        var childRows = grid.Elements()
-            .Where(child => !child.Name.LocalName.Contains('.', StringComparison.Ordinal))
-            .Select(child => int.Parse(child.Attribute("Grid.Row")?.Value ?? "0", System.Globalization.CultureInfo.InvariantCulture))
-            .ToList();
+        // 三个分页的内容容器叠在同一个正文单元格里，各自按所选分页互斥显示，互不嵌套。
+        var hardwarePage = SubPageOf(document, "ReceiptPrinterPortText");
+        var storePage = SubPageOf(document, "ReceiptBrandNameText");
+        var termsPage = SubPageOf(document, "ReceiptVoucherTermsText");
+        Assert.Contains("IsReceiptHardwareSubTabSelected", hardwarePage.Attribute("Visibility")!.Value, StringComparison.Ordinal);
+        Assert.Contains("IsReceiptStoreSubTabSelected", storePage.Attribute("Visibility")!.Value, StringComparison.Ordinal);
+        Assert.Contains("IsReceiptTermsSubTabSelected", termsPage.Attribute("Visibility")!.Value, StringComparison.Ordinal);
+        Assert.Same(hardwarePage.Parent, storePage.Parent);
+        Assert.Same(hardwarePage.Parent, termsPage.Parent);
 
-        // 行数 = 区块数，且每个区块独占一行（新增条款区块后后面的区块行号顺延，不能叠在一起）。
-        Assert.Equal(rowCount, childRows.Count);
-        Assert.Equal(Enumerable.Range(0, rowCount), childRows.OrderBy(row => row));
-        var termsRow = ParentRowOf(grid, "ReceiptVoucherTermsText");
-        Assert.Equal(termsRow, ParentRowOf(grid, "ReceiptInstallmentTermsText"));
+        // 条款三栏（退换货政策 / 代金券 / 分期条款）都在条款分页里。
+        Assert.Same(termsPage, SubPageOf(document, "ReceiptInstallmentTermsText"));
+        Assert.Same(termsPage, SubPageOf(document, "ReceiptReturnPolicyText"));
+        // 「立即同步 / 从分店资料载入」是同一个命令，在底栏里供门店信息、小票条款两个分页共用。
+        var sync = Assert.Single(
+            document.Descendants(),
+            element => element.Name.LocalName == "Button" &&
+                       element.Attribute("Command")?.Value.Contains("LoadReceiptProfileCommand", StringComparison.Ordinal) == true);
+        Assert.Contains(sync.Ancestors(), element => element.Name.LocalName == "SettingsPageHost.Footer");
     }
 
-    private static int ParentRowOf(XElement grid, string property)
+    /// <summary>文本框所在的分页容器：最近一层按「所选分页」显示 / 折叠的祖先。</summary>
+    private static XElement SubPageOf(XDocument document, string property)
     {
-        var textBox = Assert.Single(grid.Descendants(), element => IsTextBoxBoundTo(element, property));
-        var section = textBox.Ancestors().First(element => element.Parent == grid);
-        return int.Parse(section.Attribute("Grid.Row")!.Value, System.Globalization.CultureInfo.InvariantCulture);
+        var textBox = Assert.Single(document.Descendants(), element => IsTextBoxBoundTo(element, property));
+        return textBox.Ancestors().First(element =>
+            element.Attribute("Visibility")?.Value.Contains("SubTabSelected", StringComparison.Ordinal) == true);
     }
 
     [Fact]
