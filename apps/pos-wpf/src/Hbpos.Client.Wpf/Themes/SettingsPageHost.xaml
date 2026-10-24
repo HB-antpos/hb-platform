@@ -51,7 +51,7 @@
                             <!-- 正文：作为内容超出时的兜底滚动区，触屏纵向平移 + 惯性，与旧设置页外层滚动一致。 -->
                             <ScrollViewer x:Name="PART_BodyScrollViewer"
                                           Grid.Row="1"
-                                          Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                          Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                           Focusable="False"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"

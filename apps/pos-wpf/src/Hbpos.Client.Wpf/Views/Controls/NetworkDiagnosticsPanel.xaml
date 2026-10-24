@@ -195,7 +195,7 @@
                         </Style>
                     </Border.Style>
                     <!-- 步骤多于可见高度时在这里内部滚动（触屏纵向平移）；区内没有任何按钮。 -->
-                    <ScrollViewer Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                    <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                   Focusable="False"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled"

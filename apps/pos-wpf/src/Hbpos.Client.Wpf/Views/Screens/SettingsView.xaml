@@ -1735,7 +1735,8 @@
                                                                 BorderThickness="1"
                                                                 CornerRadius="8"
                                                                 ClipToBounds="True">
-                                                            <ScrollViewer Focusable="False"
+                                                            <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                                                          Focusable="False"
                                                                           Padding="0"
                                                                           VerticalScrollBarVisibility="Auto"
                                                                           HorizontalScrollBarVisibility="Disabled"
@@ -1891,7 +1892,7 @@
 
                                         <!-- 左栏：Square 说明 + 令牌说明 + 直连 Square 说明卡（按钮在底栏）。内容异常变长时栏内可滚动，不撑高整页。 -->
                                         <ScrollViewer Grid.Column="0"
-                                                      Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                                      Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                                       Focusable="False"
                                                       VerticalScrollBarVisibility="Auto"
                                                       HorizontalScrollBarVisibility="Disabled"
@@ -2068,7 +2069,7 @@
 
                                         <!-- 右栏：⑤设备码管理。沙盒环境下输入与按钮整体禁用，底部提示槽由帮助说明换成「不支持」警告（二选一，高度不变）。 -->
                                         <ScrollViewer Grid.Column="4"
-                                                      Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                                      Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                                       Focusable="False"
                                                       VerticalScrollBarVisibility="Auto"
                                                       HorizontalScrollBarVisibility="Disabled"
@@ -2285,7 +2286,7 @@
                                                                 BorderThickness="{TemplateBinding BorderThickness}"
                                                                 CornerRadius="8"
                                                                 ClipToBounds="True">
-                                                            <ScrollViewer Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                                            <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                                                           Focusable="False"
                                                                           VerticalScrollBarVisibility="Auto"
                                                                           HorizontalScrollBarVisibility="Disabled"
@@ -3328,6 +3329,9 @@
                         </Style>
                         <!-- 「打印机端口（高级）」展开开关：无边框的平面按钮，只显示箭头 + 文字；展开时输入框出现在同一行，不增加高度。 -->
                         <Style x:Key="ReceiptAdvancedToggleStyle" TargetType="ToggleButton">
+                            <!-- 模板自己画透明底；显式声明 Transparent，避免按钮默认的系统灰底被当成图标的实际背景（Graphite 主题对比度检查）。 -->
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
                             <Setter Property="Cursor" Value="Hand" />
                             <Setter Property="Focusable" Value="True" />
                             <Setter Property="Template">
@@ -3918,7 +3922,7 @@
                                     BorderBrush="{DynamicResource PosDividerBrush}"
                                     BorderThickness="1"
                                     CornerRadius="8">
-                                <ScrollViewer Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                               Focusable="False"
                                               VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Disabled"
