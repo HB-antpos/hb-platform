@@ -856,6 +856,14 @@
     "Warehouse.CancelPriceUpdateTasks": {
       "name": "撤销价格变更任务",
       "description": "Web 页面 /warehouse/products/price-update-tasks 与移动端「价格和标签」- 撤销未完成的分店价格变更任务（按商品覆盖所有分店；只取消提醒，不修改任何价格，不可恢复）。持有「管理仓库商品」的账号自动具备"
+    },
+    "SupplierPreorder.Manage": {
+      "name": "管理供应商节日预订单",
+      "description": "Web 页面 /supplier-preorders 与 /supplier-preorders/orderers - 导入 KFC、Dats、Brazco 等节日订单表，开启参与分店，维护下单人员授权，截止锁定并导出汇总（截止后仍可修改）；默认无人具备，管理员手动授权"
+    },
+    "SupplierPreorder.Order": {
+      "name": "供应商节日预订单下单",
+      "description": "Web 页面 /supplier-preorder-ordering - 预订单下单入口；能替哪家店下单只认「下单人员授权」页，不看可管理分店或店长身份；默认无人具备，管理员手动授权"
     }
   },
   "roles": {

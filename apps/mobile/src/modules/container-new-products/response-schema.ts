@@ -23,5 +23,7 @@ export const containerNewProductsResponseSchema = z.object({
     warehouseArrivalDate: z.string().nullable().optional().transform((value) => normalizeWarehouseArrivalDate(value)),
     basis: z.enum(["actual", "estimated"]),
     isNewProduct: z.boolean().nullable().optional().transform((value) => value ?? true),
+    // 旧版后端不返回 → null（未知，放行跳转）；只有明确 false 才拦下并提示等待仓库创建
+    isCreated: z.boolean().nullable().optional().transform((value) => value ?? null),
   })),
 });

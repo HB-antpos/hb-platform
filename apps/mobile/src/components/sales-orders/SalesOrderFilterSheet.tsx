@@ -3,9 +3,12 @@ import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Icon, Text, TextInput } from "react-native-paper";
 import { InsightSheet } from "@/components/warehouse-product-insights/InsightSheet";
 import { SalesOrderBranchPicker } from "./SalesOrderBranchPicker";
+import { REFUND_TONES } from "./SalesOrderStatusTag";
 import {
   SALES_ORDER_MAX_RANGE_DAYS,
   SALES_ORDER_RANGE_PRESETS,
+  SALES_ORDER_REFUND_TIERS,
+  SALES_ORDER_REFUND_TYPE,
   SALES_ORDER_TYPE_FILTERS,
   buildDefaultSalesOrderFilters,
   buildSalesOrderPresetRange,
@@ -17,6 +20,7 @@ import {
 import type {
   SalesOrderBranch,
   SalesOrderFilters,
+  SalesOrderRefundTier,
   SalesOrderScope,
   SalesOrderTypeFilter,
 } from "@/modules/sales-orders/types";
@@ -56,6 +60,7 @@ export function SalesOrderFilterSheet({
   const [endDate, setEndDate] = useState(filters.range.endDate);
   const [selectedBranches, setSelectedBranches] = useState<string[]>(filters.branchCodes);
   const [orderType, setOrderType] = useState<SalesOrderTypeFilter>(filters.orderType);
+  const [refundTier, setRefundTier] = useState<SalesOrderRefundTier>(filters.refundTier);
 
   useEffect(() => {
     // 每次打开都从已生效的筛选重新起草，关闭未应用的改动不得残留。
@@ -63,6 +68,7 @@ export function SalesOrderFilterSheet({
     setEndDate(filters.range.endDate);
     setSelectedBranches(filters.branchCodes);
     setOrderType(filters.orderType);
+    setRefundTier(filters.refundTier);
   }, [filters, visible]);
 
   const draftRange = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
@@ -209,7 +215,11 @@ export function SalesOrderFilterSheet({
               <Pressable
                 key={type}
                 accessibilityRole="button"
-                onPress={() => setOrderType(type)}
+                onPress={() => {
+                  setOrderType(type);
+                  // 换类型时档位回到「全部」，别把上一次的档位带进别的类型。
+                  if (type !== SALES_ORDER_REFUND_TYPE) setRefundTier("all");
+                }}
                 style={[styles.chip, selected ? styles.chipSelected : null]}
               >
                 <Text style={[styles.chipText, selected ? styles.chipTextSelected : null]}>
@@ -219,6 +229,44 @@ export function SalesOrderFilterSheet({
             );
           })}
         </View>
+
+        {orderType === SALES_ORDER_REFUND_TYPE ? (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{t("filterSheet.refundTier")}</Text>
+              <Text style={styles.sectionHint}>{t("filterSheet.refundHint")}</Text>
+            </View>
+            <View style={styles.chips}>
+              {SALES_ORDER_REFUND_TIERS.map((tier) => {
+                const selected = refundTier === tier;
+                const tone = tier === "all" ? null : REFUND_TONES[tier];
+                return (
+                  <Pressable
+                    key={tier}
+                    accessibilityRole="button"
+                    onPress={() => setRefundTier(tier)}
+                    style={[
+                      styles.chip,
+                      // 档位 chip 与卡片上的标签同色，选中时用同一套橙 / 红底，选「全部」沿用品牌色。
+                      tone ? { backgroundColor: tone.background } : null,
+                      selected ? (tone ? { backgroundColor: tone.color } : styles.chipSelected) : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        tone ? { color: tone.color, fontWeight: "600" } : null,
+                        selected ? styles.chipTextSelected : null,
+                      ]}
+                    >
+                      {t(`refund.${tier}`)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
 
         <View style={styles.actions}>
           <Button
@@ -230,6 +278,7 @@ export function SalesOrderFilterSheet({
               setEndDate(defaults.range.endDate);
               setSelectedBranches(defaults.branchCodes);
               setOrderType(defaults.orderType);
+              setRefundTier(defaults.refundTier);
             }}
             style={styles.resetButton}
           >
@@ -243,6 +292,7 @@ export function SalesOrderFilterSheet({
                 range: draftRange,
                 branchCodes: normalizeSelectedBranchCodes(selectedBranches, availableCodes),
                 orderType,
+                refundTier: orderType === SALES_ORDER_REFUND_TYPE ? refundTier : "all",
                 // 排序不在面板里改，沿用当前值。
                 sortDirection: filters.sortDirection,
               })

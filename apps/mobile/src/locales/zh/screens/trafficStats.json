@@ -1,0 +1,152 @@
+{
+  "title": "客流统计",
+  "messages": {
+    "notAllowed": "没有查看客流统计的权限。需要「客流统计查看」权限。",
+    "reviewUnavailable": "审核演示模式不提供客流统计。"
+  },
+  "store": {
+    "pickerTitle": "选择门店",
+    "cancel": "取消",
+    "none": "没有可查看的门店",
+    "loading": "正在加载门店…"
+  },
+  "period": {
+    "day": "今天",
+    "week": "本周",
+    "month": "本月",
+    "previous": "上一个周期",
+    "next": "下一个周期",
+    "headline": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "thisWeek": "本周",
+      "lastWeek": "上周",
+      "thisMonth": "本月",
+      "lastMonth": "上月"
+    },
+    "sub": {
+      "dayWithWeekday": "{{date}} {{weekday}}",
+      "range": "{{from}} – {{to}}",
+      "monthToDate": "{{from}} – {{to}}（本月至今）"
+    }
+  },
+  "fresh": {
+    "updatedAt": "更新于 {{time}}",
+    "failed": "更新失败",
+    "refresh": "刷新"
+  },
+  "unit": {
+    "visits": "人次",
+    "people": "人"
+  },
+  "hero": {
+    "day": "进店人次（不含员工）",
+    "weekLive": "进店人次 · 本周至今",
+    "weekPast": "进店人次 · 本周",
+    "monthLive": "进店人次 · 本月至今",
+    "monthPast": "进店人次 · 本月"
+  },
+  "compare": {
+    "hours": "较昨日同时段（截至 {{time}}）",
+    "daysWeek": "较上周同期（已结束的 {{days}} 天）",
+    "daysMonth": "较上月同期（已结束的 {{days}} 天）",
+    "fullDay": "较前一天",
+    "fullWeek": "较上一周",
+    "fullMonth": "较上一月",
+    "noBase": "对照期没有数据，暂不比较",
+    "notYet": "还没有已结束的时间可对比"
+  },
+  "kpi": {
+    "uniqueVisitors": "独立访客",
+    "repeat": "重复到访",
+    "peakHour": "高峰时段",
+    "staffExcluded": "员工（已排除）",
+    "invalid": "无效抓拍",
+    "dailyAverage": "日均",
+    "busiestDay": "最忙一天",
+    "weekendAverage": "周末日均",
+    "averageUnique": "日均访客",
+    "estimate": "估算",
+    "none": "—"
+  },
+  "chart": {
+    "hourlyTitle": "分时进店人次",
+    "dailyTitle": "每日进店人次",
+    "profileTitle": "各时段平均进店",
+    "profileHint": "已结束的 {{days}} 天 · 日均",
+    "weekdayTitle": "按星期平均",
+    "weekdayHint": "已结束的营业日 · 日均人次",
+    "hourlyHint": "按住曲线可查看每小时明细，再点一次取消",
+    "hourlyLiveHint": "按住曲线可查看每小时明细；{{hour}} 点为进行中（虚线），截至 {{time}}",
+    "dailyHint": "按住曲线可查看每日明细",
+    "dailyLiveHint": "虚线末段与空心点是今天（进行中），之后的日子还没到",
+    "weekendHint": "灰底为周末；上月按日期对齐",
+    "averageNote": "日均与最忙一天只统计已结束且有抓拍的日子",
+    "peakNote": "高峰 {{range}}，日均 {{value}} 人次",
+    "noData": "这段时间还没有数据",
+    "noDataToday": "今天还没有数据（门店未开门，或摄像机还没上报）。灰色虚线为昨天，作对照"
+  },
+  "legend": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "selectedDay": "当日",
+    "previousDay": "前一天",
+    "thisWeek": "本周",
+    "lastWeek": "上周",
+    "selectedWeek": "该周",
+    "previousWeek": "前一周",
+    "thisMonth": "本月",
+    "lastMonth": "上月",
+    "selectedMonth": "该月",
+    "previousMonth": "前一月"
+  },
+  "tooltip": {
+    "visits": "{{label}} {{value}} 人次",
+    "unique": "独立访客 {{value}}（估算）",
+    "inProgress": "（进行中）"
+  },
+  "composition": {
+    "title": "客流构成",
+    "hint": "首次出现 + 重复到访 = 进店人次",
+    "first": "首次出现",
+    "repeat": "重复到访"
+  },
+  "table": {
+    "hourlyTitle": "分时明细",
+    "dailyTitle": "每日明细",
+    "unit": "人次",
+    "hour": "时段",
+    "date": "日期",
+    "visits": "进店",
+    "unique": "访客",
+    "delta": "差",
+    "change": "同比",
+    "inProgress": "进行中",
+    "expand": "展开全部 {{count}} 行",
+    "collapse": "收起"
+  },
+  "notice": {
+    "estimateDedup": "独立访客为估算值：同一个人换角度、戴口罩都可能被算成两个人。「进店人次」不依赖去重，更稳定。仅统计开启计数的门店，不含员工。",
+    "estimatePlain": "「进店人次」含当日重复到访，不含员工；仅统计开启计数的门店。该门店没有开启去重，所以不显示独立访客。"
+  },
+  "basis": {
+    "title": "数据口径",
+    "formula": "抓拍 {{capture}} − 员工 {{staff}} − 低质量 {{low}} − 识别失败 {{fail}} = 进店人次 {{visit}}",
+    "timezone": "时间按门店所在时区（{{zone}}）计算；夏令时切换日会少 / 多一个小时。"
+  },
+  "disabled": {
+    "title": "该门店未开启客流计数",
+    "body": "客流来自门店摄像机的计数，需要在「人脸比对 → 设置」里把该门店设为 Match 模式。没有这项权限请联系管理员。"
+  },
+  "error": {
+    "title": "加载失败",
+    "retry": "重试",
+    "stale": "刷新失败，下面是上一次的数据。"
+  },
+  "a11y": {
+    "hourlyChart": "{{store}} 分时进店人次曲线，当前合计 {{total}} 人次",
+    "dailyChart": "{{store}} 每日进店人次曲线，合计 {{total}} 人次",
+    "profileChart": "各时段平均进店曲线",
+    "weekdayChart": "按星期平均进店柱状图"
+  }
+}

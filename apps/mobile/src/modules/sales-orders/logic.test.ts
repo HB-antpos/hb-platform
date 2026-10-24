@@ -11,6 +11,7 @@ import {
   formatSalesOrderGuidTail,
   hasMoreSalesOrderPages,
   matchSalesOrderRangePreset,
+  resolveSalesOrderRefundTone,
   mergeSalesOrderPages,
   normalizeSelectedBranchCodes,
   resolveSalesOrderStatusKey,
@@ -29,6 +30,7 @@ assert.deepEqual(defaults, {
   range: { startDate: "2026-09-17", endDate: "2026-09-17" },
   branchCodes: [],
   orderType: -1,
+  refundTier: "all",
   sortDirection: "desc",
 });
 assert.equal(countActiveSalesOrderFilters(defaults, "2026-09-17"), 0);
@@ -85,6 +87,58 @@ assert.deepEqual(body.branchCodes, ["S1"]);
 assert.equal(buildSalesOrderQueryBody(defaults, "   ", 1).keyword, null);
 assert.equal("clientUtcOffsetMinutes" in body, false, "订单时间按墙钟比较，请求体不得携带设备时区偏移");
 
+// 「已退款」= 含退款商品的订单（任意状态），按档位筛选：订单类型发「全部」，范围交给 refundFilter
+const refundBody = (orderType: -1 | 1 | 3, refundTier: "all" | "partial" | "full") =>
+  buildSalesOrderQueryBody({ ...defaults, orderType, refundTier }, "", 1);
+assert.deepEqual(
+  [refundBody(3, "all").orderType, refundBody(3, "all").refundFilter],
+  [-1, "any"],
+  "已退款 + 全部档位 = 含退款商品的订单，订单类型不再限定状态=已退款",
+);
+assert.equal(refundBody(3, "partial").refundFilter, "partial");
+assert.equal(refundBody(3, "full").refundFilter, "full");
+assert.deepEqual(
+  [refundBody(1, "full").orderType, refundBody(1, "full").refundFilter],
+  [1, null],
+  "非「已退款」类型忽略残留的档位，不发 refundFilter",
+);
+assert.equal(refundBody(-1, "all").refundFilter, null);
+assert.equal(
+  countActiveSalesOrderFilters({ ...defaults, orderType: 3, refundTier: "partial" }, "2026-09-17"),
+  1,
+  "选「已退款」及档位只算一项筛选",
+);
+
+// 含退款商品的着色：整单金额（实付，为 0 / 空回落总金额）小于 0 红色，其余橙色；不含退款商品不着色
+const refundItem = (overrides: Partial<SalesOrderListItem>): SalesOrderListItem => ({
+  orderGuid: "R",
+  branchCode: null,
+  branchName: null,
+  deviceCode: null,
+  orderTime: null,
+  skuCount: null,
+  itemCount: null,
+  quantityTotal: null,
+  totalAmount: null,
+  discountAmount: null,
+  actualAmount: null,
+  status: 1,
+  hasRefundItems: true,
+  matchedProducts: [],
+  ...overrides,
+});
+assert.equal(resolveSalesOrderRefundTone(refundItem({ actualAmount: 15.5, totalAmount: 15.5 })), "partial", "整单金额大于 0：部分退款（橙）");
+assert.equal(resolveSalesOrderRefundTone(refundItem({ actualAmount: -12, totalAmount: -12 })), "full", "整单金额小于 0：整单退款（红）");
+assert.equal(resolveSalesOrderRefundTone(refundItem({ actualAmount: 0, totalAmount: -4 })), "full", "实付为 0 时回落订单总金额");
+assert.equal(resolveSalesOrderRefundTone(refundItem({ actualAmount: null, totalAmount: 7 })), "partial", "实付为空时回落订单总金额");
+assert.equal(resolveSalesOrderRefundTone(refundItem({ actualAmount: 0, totalAmount: 0 })), "partial", "金额都为 0 不算整单退款，按部分退款（橙）");
+assert.equal(resolveSalesOrderRefundTone(refundItem({ hasRefundItems: false, actualAmount: -5, totalAmount: -5 })), null, "不含退款商品不着色（负金额的普通单也不着色）");
+assert.equal(
+  resolveSalesOrderRefundTone(refundItem({ hasRefundItems: false, status: 3, actualAmount: -9, totalAmount: -9 })),
+  "full",
+  "退款单（状态=已退款）一定含退款商品，旧后端没返回 hasRefundItems 也要认出来",
+);
+
 // 分页判断与去重合并
 assert.equal(hasMoreSalesOrderPages({ pageNumber: 1, pageSize: 20, total: 21 }), true);
 assert.equal(hasMoreSalesOrderPages({ pageNumber: 2, pageSize: 20, total: 40 }), false);
@@ -101,6 +155,7 @@ const item = (orderGuid: string): SalesOrderListItem => ({
   discountAmount: null,
   actualAmount: null,
   status: 1,
+  hasRefundItems: false,
   matchedProducts: [],
 });
 assert.deepEqual(

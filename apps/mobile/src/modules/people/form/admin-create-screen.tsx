@@ -67,6 +67,7 @@ import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility
 import type { StoreUserListItem } from "@/modules/users/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { listSeparator } from "@/shared/i18n/punctuation";
@@ -121,7 +122,8 @@ export function AdminCreateScreen() {
     () => (catalogRoles.data ?? []).filter((role) => !isStoreManagerRoleName(role.roleName)),
     [catalogRoles.data]
   );
-  const storeOptions = useMemo(() => catalogStores.data ?? [], [catalogStores.data]);
+  // 分店分配列表统一按分店名字排序（接口原序不保证）。
+  const storeOptions = useMemo(() => sortStoresByName(catalogStores.data ?? [], language), [catalogStores.data, language]);
 
   const frozen = stage.kind !== "editing" || submitting;
   const leaveGuard = useLeaveGuard(isAdminCreateFormDirty(values) && stage.kind !== "done");

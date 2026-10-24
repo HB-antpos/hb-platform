@@ -1,3 +1,5 @@
+import { sortStoresByName } from "@/shared/utils/name-sort";
+
 export type NormalizedShopStore = {
   storeGUID?: string;
   storeCode: string;
@@ -110,11 +112,6 @@ export function normalizeShopStoresApiResponse(payload: unknown): NormalizedShop
 }
 
 export function sortShopStores<T extends { storeCode: string; storeName?: string }>(stores: T[]) {
-  return stores
-    .slice()
-    .sort((left, right) =>
-      (left.storeName || left.storeCode).localeCompare(right.storeName || right.storeCode, undefined, {
-        sensitivity: "base",
-      })
-    );
+  // 统一走「按名字排序」比较器（名字为空退回编号，数字按数值，同名按编号）。
+  return sortStoresByName(stores);
 }

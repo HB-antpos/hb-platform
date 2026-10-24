@@ -46,7 +46,9 @@
     "emptyDescription": "There are no stores available for this account.",
     "missingStoreGuid": "This store has no access identifier, so POS permissions cannot be opened.",
     "managerNotice": "Accounts with a \"Manage\" store get the Store manager role automatically. If no store is set to \"Manage\", the role is removed.",
-    "scopeNotice": "You can only change the stores you manage. Only admins can grant \"Manage\"."
+    "scopeNotice": "You can only change the stores you manage. Only admins can grant \"Manage\".",
+    "filterAll": "All",
+    "filterA11y": "Filter stores by access"
   },
   "roles": {
     "searchPlaceholder": "Search roles",

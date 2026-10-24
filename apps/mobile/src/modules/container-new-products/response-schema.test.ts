@@ -35,4 +35,10 @@ assert.equal(legacy.estimatedStoreArrivalDate, "2026-10-05");
 assert.equal(legacy.estimatedStoreArrivalDateEnd, "2026-10-09");
 assert.equal(legacy.isNewProduct, true);
 
+// 仓库建档标记：新版后端给 true / false 原样保留；旧版不返回或 null → null（未知，页面放行跳转）
+assert.equal(parse([row({ isCreated: true })])[0].isCreated, true);
+assert.equal(parse([row({ isCreated: false })])[0].isCreated, false);
+assert.equal(legacy.isCreated, null);
+assert.equal(parse([row({ isCreated: null })])[0].isCreated, null);
+
 console.log("container-new-products response schema tests passed");
