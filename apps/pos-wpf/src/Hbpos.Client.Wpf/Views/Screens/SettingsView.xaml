@@ -1046,25 +1046,12 @@
                 <!-- ===== PAGE: PaymentTerminal BEGIN ===== -->
                 <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
                                            Visibility="{Binding IsPaymentTerminalSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.35*" />
-                            <ColumnDefinition Width="16" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs BEGIN ===== -->
+                    <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs BEGIN ===== -->
+                    <controls:SettingsPageHost.SubTabs>
                         <!-- 分页：付款方式 / Square / ANZ Linkly；有未保存修改的分页带红点。 -->
-                        <Border Grid.Row="0" Grid.ColumnSpan="3"
+                        <Border
                                 Style="{StaticResource SettingsSegmentHostStyle}"
-                                HorizontalAlignment="Left"
-                                Margin="0,0,0,16">
+                                HorizontalAlignment="Left">
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton GroupName="PaymentSubTabs"
                                              Style="{StaticResource SettingsSubTabRadioStyle}"
@@ -1095,7 +1082,37 @@
                                 </RadioButton>
                             </StackPanel>
                         </Border>
-                        <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs END ===== -->
+                    </controls:SettingsPageHost.SubTabs>
+                    <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs END ===== -->
+                    <!-- 固定底栏：三个分页各一条，按分页互斥显示。各区块由对应分页的代理填充，互不相扰。 -->
+                    <controls:SettingsPageHost.Footer>
+                        <Grid>
+                            <!-- ===== FOOTER: PaymentMethods BEGIN ===== -->
+                            <controls:SettingsFooterBar Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}">
+                            </controls:SettingsFooterBar>
+                            <!-- ===== FOOTER: PaymentMethods END ===== -->
+                            <!-- ===== FOOTER: Square BEGIN ===== -->
+                            <controls:SettingsFooterBar Visibility="{Binding IsSquareSubTabSelected, Converter={StaticResource BoolToVis}}">
+                            </controls:SettingsFooterBar>
+                            <!-- ===== FOOTER: Square END ===== -->
+                            <!-- ===== FOOTER: Linkly BEGIN ===== -->
+                            <controls:SettingsFooterBar Visibility="{Binding IsLinklySubTabSelected, Converter={StaticResource BoolToVis}}">
+                            </controls:SettingsFooterBar>
+                            <!-- ===== FOOTER: Linkly END ===== -->
+                        </Grid>
+                    </controls:SettingsPageHost.Footer>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.35*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
 
                         <!-- ===== PAGE: PaymentTerminal / PaymentMethods BEGIN ===== -->
                         <!-- 付款方式：三个大开关（手动刷卡 / 代金券 / 付款页订单列表），共用一个保存按钮（不触发终端配置写入）。 -->
