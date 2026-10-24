@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Button, Icon, Text, TextInput } from "react-native-paper";
 import { OptionPickerSheet } from "@/components/ui/OptionPickerSheet";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { evaluatePricing } from "./api";
-import { money, parseDecimal } from "./logic";
+import { money, parseDecimal, sortNamedOptions } from "./logic";
 import { PRICING_COLORS, useApiErrorText } from "./shared";
 import type { NamedOption, PricingEvaluateResult } from "./types";
 
@@ -22,7 +22,7 @@ export function QuickTryCard({
   suppliers: NamedOption[];
   onOpenStrategy: (id: string) => void;
 }) {
-  const { t } = useAppTranslation("pricingStrategies");
+  const { t, language } = useAppTranslation("pricingStrategies");
   const errorText = useApiErrorText();
   const [storeCode, setStoreCode] = useState<string | null>(null);
   const [supplierCode, setSupplierCode] = useState<string | null>(null);
@@ -54,11 +54,14 @@ export function QuickTryCard({
   };
 
   // 选择器里第一项「不限」用空字符串表示，选中后回到 null。
+  // 其余选项按名字排序。
   const anyValue = "";
+  const sortedStores = useMemo(() => sortNamedOptions(stores, language), [stores, language]);
+  const sortedSuppliers = useMemo(() => sortNamedOptions(suppliers, language), [suppliers, language]);
   const pickerOptions =
     picker === "store"
-      ? [{ value: anyValue, label: t("quickTry.anyStore") }, ...stores.map((store) => ({ value: store.code, label: store.name }))]
-      : [{ value: anyValue, label: t("quickTry.anySupplier") }, ...suppliers.map((supplier) => ({ value: supplier.code, label: supplier.name }))];
+      ? [{ value: anyValue, label: t("quickTry.anyStore") }, ...sortedStores.map((store) => ({ value: store.code, label: store.name }))]
+      : [{ value: anyValue, label: t("quickTry.anySupplier") }, ...sortedSuppliers.map((supplier) => ({ value: supplier.code, label: supplier.name }))];
 
   return (
     <View style={styles.card}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
@@ -39,6 +39,7 @@ import {
 import { getDeviceStatusKey } from "@/modules/device-management/status";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS } from "@/shared/theme/tokens";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import { RequestGenerationGate, activationCreateGate, emergencyCreateGate } from "@/modules/device-management/request-generation-gate";
 import { isResultUnknownCreateError } from "@/modules/device-management/create-outcome";
 
@@ -272,6 +273,8 @@ export function ActivationCodePanel({
   const [kind, setKind] = useState<ActivationKind>(initialKind);
   const [grants, setGrants] = useState<DeviceActivationGrant[]>([]);
   const [stores, setStores] = useState<ManageableStore[]>([]);
+  // 分店筛选弹窗与开通分店芯片统一按分店名字排序（接口原序不保证）。
+  const sortedStores = useMemo(() => sortStoresByName(stores, language), [stores, language]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [storesError, setStoresError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -486,12 +489,12 @@ export function ActivationCodePanel({
       {storesLoading ? <Text>{t("deviceManagement:messages.loading")}</Text> : null}
       <TextInput mode="outlined" label={t("deviceManagement:activation.searchStore")} value={storeSearch} onChangeText={setStoreSearch} />
       <Button onPress={() => { setListQuery((current) => ({ ...current, page: 1, storeCode: undefined })); setStoreFilterVisible(false); }}>{t("deviceManagement:activation.allStores")}</Button>
-      {stores.filter((store) => `${store.storeCode} ${store.storeName}`.toLocaleLowerCase().includes(storeSearch.trim().toLocaleLowerCase())).map((store) => <Button key={store.storeCode} mode={listQuery.storeCode === store.storeCode ? "contained-tonal" : "text"} onPress={() => { setListQuery((current) => ({ ...current, page: 1, storeCode: store.storeCode })); setStoreFilterVisible(false); }}>{store.storeCode} · {store.storeName}</Button>)}
+      {sortedStores.filter((store) => `${store.storeCode} ${store.storeName}`.toLocaleLowerCase().includes(storeSearch.trim().toLocaleLowerCase())).map((store) => <Button key={store.storeCode} mode={listQuery.storeCode === store.storeCode ? "contained-tonal" : "text"} onPress={() => { setListQuery((current) => ({ ...current, page: 1, storeCode: store.storeCode })); setStoreFilterVisible(false); }}>{store.storeCode} · {store.storeName}</Button>)}
     </BusinessSheet>
     <BusinessSheet visible={createVisible} title={t("deviceManagement:activation.create")} onDismiss={closeCreate} dismissable={!saving} footer={<SheetFooter>{createOutcomeUnknown ? <><Button mode="outlined" disabled={loading || saving} onPress={() => void recoverCreate()}>{t("deviceManagement:activation.recoveryAction")}</Button><Button onPress={closeCreate}>{t("deviceManagement:actions.done")}</Button></> : <Button mode="contained" loading={saving} disabled={saving || !storeCode || !reasonIsValid(reason) || (kind === "Mobile" && !targetUserGuid)} onPress={() => void submitCreate()}>{t("deviceManagement:actions.create")}</Button>}</SheetFooter>}>
       {sheetMessage ? <HelperText type="error" visible>{sheetMessage}</HelperText> : null}
       {createOutcomeUnknown ? <HelperText type="error" visible>{t("deviceManagement:activation.unknownOutcomeHint")}</HelperText> : null}
-      <Text variant="labelLarge">{t("deviceManagement:activation.store")}</Text><View style={styles.chips}>{stores.map((store) => <Chip key={store.storeCode} selected={store.storeCode === storeCode} onPress={() => { setStoreCode(store.storeCode); setAccounts([]); setTargetUserGuid(""); }}>{store.storeCode} · {store.storeName}</Chip>)}</View>
+      <Text variant="labelLarge">{t("deviceManagement:activation.store")}</Text><View style={styles.chips}>{sortedStores.map((store) => <Chip key={store.storeCode} selected={store.storeCode === storeCode} onPress={() => { setStoreCode(store.storeCode); setAccounts([]); setTargetUserGuid(""); }}>{store.storeCode} · {store.storeName}</Chip>)}</View>
       <Text variant="labelLarge">{t("deviceManagement:activation.system")}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentedScroll}><SegmentedButtons value={system} onValueChange={(value) => setSystem(value as DeviceActivationSystem)} buttons={eligibleSystems.map((value) => ({ value, label: value }))} /></ScrollView>
       {kind === "Mobile" ? <><Text variant="labelLarge">{t("deviceManagement:activation.account")}</Text><View style={styles.chips}>{accounts.map((account) => <Chip key={account.userGuid} selected={account.userGuid === targetUserGuid} onPress={() => setTargetUserGuid(account.userGuid)}>{account.fullName || account.username}</Chip>)}</View><HelperText type="info">{t("deviceManagement:activation.accountHint")}</HelperText></> : null}
       <Text variant="labelLarge">{t("deviceManagement:activation.validity")}</Text><SegmentedButtons value={String(minutes)} onValueChange={(value) => setMinutes(Number(value) as 30 | 120 | 1440)} buttons={[{ value: "30", label: t("deviceManagement:activation.minutes30") }, { value: "120", label: t("deviceManagement:activation.minutes120") }, { value: "1440", label: t("deviceManagement:activation.minutes1440") }]} />

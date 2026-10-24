@@ -116,7 +116,7 @@ assert.match(pickerSource, /nestedScrollEnabled/);
 assert.match(pickerSource, /showsVerticalScrollIndicator/);
 assert.match(pickerSource, /keyboardShouldPersistTaps="handled"/);
 assert.match(pickerSource, /\{labelAll\}/);
-assert.match(pickerSource, /options\.map/);
+assert.match(pickerSource, /sortByName\(options[\s\S]*?sortedOptions\.map/, "分店选项必须按分店名字排序后再渲染");
 assert.match(pickerSource, /style=\{styles\.storeModalList\}/);
 assert.match(pickerSource, /contentContainerStyle=\{styles\.storeModalListContent\}/);
 

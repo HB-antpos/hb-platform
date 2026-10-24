@@ -1,6 +1,8 @@
+import { sortByName } from "../../shared/utils/name-sort";
 import { FIXED_MAX_COST, roundMoney } from "./pricing-curve";
 import { intervalsError, isEditable, isFixed, priceDrops, type PricingIssue } from "./pricing-intervals";
 import type {
+  NamedOption,
   PricingEvaluateResult,
   PricingListFilters,
   PricingStrategyAlgorithm,
@@ -309,3 +311,8 @@ export function parseDecimal(text: string): number {
 
 export const money = (value: number) => (Number.isFinite(value) ? roundMoney(value).toFixed(2) : "-");
 export const isUnbounded = (cost: number) => cost >= FIXED_MAX_COST;
+
+/** 分店 / 供应商下拉的选项按名字排序（名字空退回编号，同名按编号；中文界面按拼音）。返回新数组，不改入参。 */
+export function sortNamedOptions(options: readonly NamedOption[], language?: string): NamedOption[] {
+  return sortByName(options, (option) => ({ name: option.name, code: option.code }), language);
+}
