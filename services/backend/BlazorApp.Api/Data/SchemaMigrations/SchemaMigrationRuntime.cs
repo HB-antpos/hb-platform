@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services.HelpFaq;
 using BlazorApp.Api.Services.Logging;
 using BlazorApp.Api.Services.Performance;
 using BlazorApp.Api.Services.React;
@@ -215,6 +216,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStorePosApiEntryAsync(CancellationToken cancellationToken);
 
+    Task ApplyHelpFaqAsync(CancellationToken cancellationToken);
+
+    Task VerifyHelpFaqAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -268,6 +273,8 @@ internal sealed class LinklyMultiTerminalSchemaMismatchException : Exception;
 internal sealed class MobileOtaRuntimeTargetsSchemaMismatchException : Exception;
 
 internal sealed class LocalSupplierCategorySchemaMismatchException : Exception;
+
+internal sealed class HelpFaqSchemaMismatchException : Exception;
 
 internal sealed class AttendanceLocationSampleBatchSchemaMismatchException : Exception;
 
@@ -1333,6 +1340,47 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
             _commandTimeoutSeconds,
             cancellationToken
         );
+    }
+
+    public async Task ApplyHelpFaqAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            HelpFaqSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后先过精确签名，再灌种子；结构错误的同名表不会被灌入内容或误标为完成。
+        await VerifyHelpFaqAsync(cancellationToken);
+
+        // 首次内容来自嵌入资源 help-faq-seed.json：仅当 FAQ 两表都为空时单事务灌入，重复执行直接跳过。
+        var plan = HelpFaqSeedImporter.Parse(
+            HelpFaqSeedImporter.ReadEmbeddedSeedJson(),
+            DateTime.UtcNow
+        );
+        await HelpFaqSeedSqlWriter.SeedIfEmptyAsync(
+            _mainDatabase.ConnectionString,
+            plan,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task VerifyHelpFaqAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+                _mainDatabase.ConnectionString,
+                HelpFaqSchema.VerifySql,
+                _commandTimeoutSeconds,
+                cancellationToken
+            );
+        }
+        catch (SqlException exception) when (exception.Number is >= 54200 and <= 54209)
+        {
+            throw new HelpFaqSchemaMismatchException();
+        }
     }
 
     public async Task ApplyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Data.SchemaMigrations;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.HelpFaq;
 using BlazorApp.Api.Services.StoreReceiptProfiles;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.POSM;
@@ -726,6 +727,14 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         command.Parameters.AddWithValue("@TableName", tableName);
         command.Parameters.AddWithValue("@IndexName", indexName);
         return Convert.ToBoolean(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task<int> ScalarIntAsync(string connectionString, string sql)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 300 };
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task ExecuteNonQueryAsync(string connectionString, string sql)
@@ -3118,6 +3127,107 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql));
         Assert.Equal(51931, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 使用帮助FAQ两表_建表灌种子可重复执行且公开读取与签名门禁正确()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var runtime = databases.CreateRuntime();
+
+        var missing = await Assert.ThrowsAsync<HelpFaqSchemaMismatchException>(() =>
+            runtime.VerifyHelpFaqAsync(CancellationToken.None));
+        Assert.NotNull(missing);
+
+        // 首次：建表 + 灌入 11 组 / 43 问（收银端 28 + 移动端 15），全部已发布。
+        await runtime.ApplyHelpFaqAsync(CancellationToken.None);
+        await runtime.VerifyHelpFaqAsync(CancellationToken.None);
+        Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString,
+            "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Status = N'Published' AND Version = 1 AND PublishedAt IS NOT NULL AND DraftJson IS NULL AND IsDeleted = 0 AND CreatedBy = N'system-seed' AND UpdatedBy = N'system-seed'"));
+        Assert.Equal(28, await ScalarIntAsync(databases.MainConnectionString,
+            "SELECT COUNT(*) FROM dbo.HelpFaqQuestion q JOIN dbo.HelpFaqGroup g ON g.GroupGUID = q.GroupGUID WHERE g.Tab = N'pos'"));
+
+        // 重复执行：表非空直接跳过，行数不变（不重复灌入）。
+        await runtime.ApplyHelpFaqAsync(CancellationToken.None);
+        Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+
+        // 管理员删掉某题后再次执行迁移也不会补回（只要两表任一非空就跳过，绝不覆盖线上编辑）。
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "UPDATE dbo.HelpFaqQuestion SET IsDeleted = 1 WHERE Code = N'remove'");
+        await runtime.ApplyHelpFaqAsync(CancellationToken.None);
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(1, await ScalarIntAsync(databases.MainConnectionString,
+            "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Code = N'remove' AND IsDeleted = 1"));
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "UPDATE dbo.HelpFaqQuestion SET IsDeleted = 0 WHERE Code = N'remove'");
+
+        // 公开读服务在真实 SQL Server 方言下读出同样的树，且不含草稿。
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "UPDATE dbo.HelpFaqQuestion SET DraftJson = N'{\"secret\":true}'");
+        var service = new HelpFaqPublicService(
+            databases.CreateMainContext(),
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            NullLogger<HelpFaqPublicService>.Instance);
+        var snapshot = await service.GetPublishedAsync();
+        Assert.Equal(28, snapshot.Data.Tabs.Pos.Sum(g => g.Questions.Count));
+        Assert.Equal(15, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
+        Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(snapshot.Data), StringComparison.Ordinal);
+
+        // Code 全局唯一：重复锚点必须被数据库拒绝。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, """
+                INSERT dbo.HelpFaqQuestion
+                    (QuestionGUID, GroupGUID, Code, TitleZh, TitleEn, WhereZh, WhereEn, StepsZh, StepsEn, SortOrder, CreatedAt)
+                SELECT TOP 1 N'dup-guid', GroupGUID, Code, TitleZh, TitleEn, WhereZh, WhereEn, StepsZh, StepsEn, 999, SYSUTCDATETIME()
+                FROM dbo.HelpFaqQuestion;
+                """));
+        Assert.Contains(duplicate.Number, new[] { 2601, 2627 });
+
+        // 签名漂移：索引缺失 → 54203；列类型变化 → 54201；二者都被映射成专用异常。
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "DROP INDEX [UX_HelpFaqQuestion_Code] ON dbo.HelpFaqQuestion;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, HelpFaqSchema.VerifySql));
+        Assert.Equal(54203, missingIndex.Number);
+        await Assert.ThrowsAsync<HelpFaqSchemaMismatchException>(() =>
+            runtime.VerifyHelpFaqAsync(CancellationToken.None));
+
+        // 重新 Apply 补回索引（建表 SQL 幂等），签名恢复。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, HelpFaqSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, HelpFaqSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "ALTER TABLE dbo.HelpFaqGroup ALTER COLUMN TitleZh nvarchar(100) NOT NULL;");
+        var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, HelpFaqSchema.VerifySql));
+        Assert.Equal(54201, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 使用帮助FAQ_协调器迁移登记账本且启动门禁通过()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var coordinator = databases.CreateCoordinator();
+
+        var migrated = await coordinator.MigrateAsync(CancellationToken.None);
+        Assert.True(migrated.Success, migrated.DiagnosticCode);
+        await AssertHistoryTableAsync(
+            databases.MainConnectionString,
+            SqlServerSchemaMigrationRuntime.MainHistoryTable,
+            SchemaMigrationCoordinator.HelpFaqMigrationId
+        );
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.True((await coordinator.CheckAsync(CancellationToken.None)).Success);
+
+        // 再次迁移：账本已登记，整步跳过，不重复灌入。
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+
+        // 实体不在 tableTypes：全新库基线不会抢先用 CodeFirst 建出签名不符的 FAQ 表（迁移成功即证明）。
     }
 
     [SchemaMigrationSqlServerFact]
