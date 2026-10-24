@@ -2824,499 +2824,651 @@
                 <!-- ===== PAGE: PaymentTerminal END ===== -->
 
                 <!-- ===== PAGE: ReceiptPrinter BEGIN ===== -->
-                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
-                                           Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.9*" />
-                            <ColumnDefinition Width="16" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                <!-- 小票页根：左 = SettingsPageHost（二级页签条 / 正文 / 固定底栏），右 = 296 宽的独立小票预览栏（占满整页高度）。
+                     预览放在 SettingsPageHost 之外（页面级右列），这样三个分页共用同一份预览，且预览不会挤占页签条与底栏的宽度。
+                     外层 Grid 与 SettingsPageHost 绑定同一个可见性，保证框架里「六个页面容器按分类互斥显示」的约定不变。 -->
+                <Grid Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
+                    <Grid.Resources>
+                        <!-- 页面级样式（只在小票页内使用，不进共享资源区）。尺寸按 1366×632 首屏预算：分页内容区可用高度约 366。 -->
+                        <Style x:Key="ReceiptCardStyle" TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="CornerRadius" Value="10" />
+                            <Setter Property="Padding" Value="12,9" />
+                        </Style>
+                        <Style x:Key="ReceiptCardTitleStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="15" />
+                            <Setter Property="FontWeight" Value="Bold" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                            <Setter Property="Margin" Value="0,0,0,4" />
+                        </Style>
+                        <Style x:Key="ReceiptHintTextStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="12" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                            <Setter Property="TextWrapping" Value="Wrap" />
+                        </Style>
+                        <!-- 开关行：白底圆角框，最小 56 高。 -->
+                        <Style x:Key="ReceiptSwitchRowStyle" TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="CornerRadius" Value="10" />
+                            <Setter Property="Padding" Value="12,6" />
+                            <Setter Property="MinHeight" Value="56" />
+                        </Style>
+                        <Style x:Key="ReceiptSwitchTitleStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="15" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                            <Setter Property="TextWrapping" Value="Wrap" />
+                        </Style>
+                        <!-- 「打印机端口（高级）」展开开关：无边框的平面按钮，只显示箭头 + 文字；展开时输入框出现在同一行，不增加高度。 -->
+                        <Style x:Key="ReceiptAdvancedToggleStyle" TargetType="ToggleButton">
+                            <Setter Property="Cursor" Value="Hand" />
+                            <Setter Property="Focusable" Value="True" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" MinHeight="44">
+                                            <ContentPresenter VerticalAlignment="Center" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                        <Style x:Key="ReceiptAdvancedChevronStyle" TargetType="materialDesign:PackIcon">
+                            <Setter Property="Kind" Value="ChevronRight" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="True">
+                                    <Setter Property="Kind" Value="ChevronDown" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                        <!-- 顶部分页条右侧的「总部下发」锁提示：只在本机已应用过总部下发、且不在「打印机与选项」分页时显示。 -->
+                        <Style x:Key="ReceiptManagedHintBorderStyle" TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="CornerRadius" Value="8" />
+                            <Setter Property="Padding" Value="10,6" />
+                            <Setter Property="HorizontalAlignment" Value="Right" />
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsReceiptProfileManaged}" Value="True" />
+                                        <Condition Binding="{Binding IsReceiptHardwareSubTabSelected}" Value="False" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                        <!-- 底栏「立即同步 / 从分店资料载入」：只在门店信息、小票条款两个分页显示（命令相同）。 -->
+                        <Style x:Key="ReceiptSyncButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsTouchButtonHeight}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsReceiptHardwareSubTabSelected}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                        <!-- 底栏左侧「修改后自动保存」空闲提示：有测试 / 同步状态消息时让位给消息。 -->
+                        <Style x:Key="ReceiptIdleHintStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="13" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ReceiptPrinterTestStatusMessage}" Value="">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Resources>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="296" />
+                    </Grid.ColumnDefinitions>
 
+                    <controls:SettingsPageHost Grid.Column="0"
+                                               Style="{StaticResource SettingsPageHostStyle}"
+                                               Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
                         <!-- ===== PAGE: ReceiptPrinter / ReceiptSubTabs BEGIN ===== -->
-                        <!-- 分页：打印机与选项 / 门店信息 / 小票条款；右侧小票预览固定不随分页变化。 -->
-                        <Border Grid.Row="0" Grid.ColumnSpan="3"
-                                Style="{StaticResource SettingsSegmentHostStyle}"
-                                HorizontalAlignment="Left"
-                                Margin="0,0,0,16">
-                            <StackPanel Orientation="Horizontal">
-                                <RadioButton GroupName="ReceiptSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsReceiptHardwareSubTabSelected, Mode=TwoWay}">
+                        <controls:SettingsPageHost.SubTabs>
+                            <!-- 分页条：打印机与选项 / 门店信息 / 小票条款；右侧放「总部下发」锁提示和当前分页的区块保存状态。 -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource SettingsSegmentHostStyle}"
+                                        HorizontalAlignment="Left">
                                     <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Printer" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{loc:Loc settings.subtab.receiptHardware}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptHardwareUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                                <RadioButton GroupName="ReceiptSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsReceiptStoreSubTabSelected, Mode=TwoWay}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="StorefrontOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{loc:Loc settings.subtab.receiptStore}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptStoreUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                                <RadioButton GroupName="ReceiptSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsReceiptTermsSubTabSelected, Mode=TwoWay}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="FileDocumentOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{loc:Loc settings.subtab.receiptTerms}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptTermsUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                            </StackPanel>
-                        </Border>
-                        <!-- ===== PAGE: ReceiptPrinter / ReceiptSubTabs END ===== -->
-
-                        <!-- 左栏：连接、打印选项、门店信息、条款、保存，各占一行。 -->
-                        <Grid Grid.Row="1" Grid.Column="0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware BEGIN ===== -->
-                            <!-- 打印机连接：默认 USB，端口收进“高级”，测试打印做成主按钮。 -->
-                            <Border Grid.Row="0"
-                                    Style="{StaticResource SettingsActionCardStyle}"
-                                    Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}"
-                                    Margin="0,0,0,16">
-                                <StackPanel>
-                                    <DockPanel>
-                                        <TextBlock DockPanel.Dock="Right"
-                                                   Text="{Binding ReceiptHardwareSaveStateText}"
-                                                   Tag="{Binding ReceiptHardwareSaveState}"
-                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
-                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    </DockPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.help}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,14" />
-                                    <Border Background="{DynamicResource PosSurfaceAltBrush}"
-                                            BorderBrush="{DynamicResource PosBorderBrush}"
-                                            BorderThickness="1.5"
-                                            CornerRadius="12"
-                                            Padding="14,12">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="56" Height="56" CornerRadius="12"
-                                                    Background="{DynamicResource PosSurfaceBrush}"
-                                                    BorderBrush="{DynamicResource PosBorderBrush}"
-                                                    BorderThickness="1"
-                                                    Margin="0,0,14,0" VerticalAlignment="Center">
-                                                <materialDesign:PackIcon Kind="Printer" Width="28" Height="28"
-                                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
-                                                <TextBlock FontSize="16" FontWeight="Bold">
-                                                    <Run Text="{loc:Loc settings.receiptPrinter.port}" />
-                                                    <Run Text="  " />
-                                                    <Run Text="{Binding ReceiptPrinterPortText, Mode=OneWay}" FontFamily="Consolas" />
-                                                </TextBlock>
-                                                <TextBlock Text="{Binding ReceiptPrinterTestStatusMessage}"
-                                                           FontSize="12.5"
-                                                           Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                           TextWrapping="Wrap"
-                                                           Margin="0,4,0,0" />
+                                        <RadioButton GroupName="ReceiptSubTabs"
+                                                     Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                     IsChecked="{Binding IsReceiptHardwareSubTabSelected, Mode=TwoWay}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="Printer" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{loc:Loc settings.subtab.receiptHardware}" VerticalAlignment="Center" />
+                                                <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptHardwareUnsaved, Converter={StaticResource BoolToVis}}" />
                                             </StackPanel>
-                                        </Grid>
-                                    </Border>
-                                    <Expander Margin="0,10,0,0" Background="Transparent" BorderThickness="0">
-                                        <Expander.Header>
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.port.advanced}"
-                                                       FontSize="14"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                       MinHeight="40"
-                                                       Padding="0,10,0,0" />
-                                        </Expander.Header>
-                                        <StackPanel Margin="0,8,0,0">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.port}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptPrinterPortText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                                     FontFamily="Consolas" />
-                                        </StackPanel>
-                                    </Expander>
-                                </StackPanel>
-                            </Border>
+                                        </RadioButton>
+                                        <RadioButton GroupName="ReceiptSubTabs"
+                                                     Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                     IsChecked="{Binding IsReceiptStoreSubTabSelected, Mode=TwoWay}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="StorefrontOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{loc:Loc settings.subtab.receiptStore}" VerticalAlignment="Center" />
+                                                <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptStoreUnsaved, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </RadioButton>
+                                        <RadioButton GroupName="ReceiptSubTabs"
+                                                     Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                     IsChecked="{Binding IsReceiptTermsSubTabSelected, Mode=TwoWay}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="FileDocumentOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{loc:Loc settings.subtab.receiptTerms}" VerticalAlignment="Center" />
+                                                <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptTermsUnsaved, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </RadioButton>
+                                    </StackPanel>
+                                </Border>
 
-                            <!-- 第 1 行放两张卡片（打印选项、再次扫码确认）上下排列，后面的卡片不用重新编号。 -->
-                            <StackPanel Grid.Row="1" Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}">
-                            <!-- 打印选项：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
-                            <Border Style="{StaticResource SettingsActionCardStyle}"
-                                    Margin="0,0,0,16">
-                                <StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.options.title}" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,0,0,8" />
-                                    <Grid MinHeight="72">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border Width="44" Height="44" CornerRadius="12"
-                                                Background="{DynamicResource PosSurfaceAltBrush}"
-                                                Margin="0,0,14,0" VerticalAlignment="Center">
-                                            <materialDesign:PackIcon Kind="ReceiptTextOutline" Width="22" Height="22"
-                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt}"
-                                                       FontSize="16"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource PosTextBrush}" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt.help}"
-                                                       FontSize="12.5"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-                                        <ToggleButton Grid.Column="2"
-                                                      x:Name="PrintBankReceiptTextToggle"
-                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                      IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
-                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
-                                                      MinHeight="48"
-                                                      MinWidth="56"
-                                                      VerticalAlignment="Center">
-                                        </ToggleButton>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- 再次扫码确认：开启后，对应操作即使当前收银员自己有权限，也要再扫一次授权员工条码；各开关默认关闭，点“保存”后生效。 -->
-                            <Border Style="{StaticResource SettingsActionCardStyle}"
-                                    Margin="0,0,0,16">
-                                <StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.help}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,8" />
-                                    <!-- 无交易开钱箱：只管侧栏「开钱箱」按钮，收现金后的自动开钱箱不受影响。 -->
-                                    <Grid MinHeight="72">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border Width="44" Height="44" CornerRadius="12"
-                                                Background="{DynamicResource PosSurfaceAltBrush}"
-                                                Margin="0,0,14,0" VerticalAlignment="Center">
-                                            <materialDesign:PackIcon Kind="CashRegister" Width="22" Height="22"
-                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}"
-                                                       FontSize="16"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource PosTextBrush}"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan.help}"
-                                                       FontSize="12.5"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-                                        <ToggleButton Grid.Column="2"
-                                                      x:Name="NoSaleCashDrawerRescanToggle"
-                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                      IsChecked="{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}"
-                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}"
-                                                      MinHeight="48"
-                                                      MinWidth="56"
-                                                      VerticalAlignment="Center">
-                                        </ToggleButton>
-                                    </Grid>
-
-                                    <!-- 退货操作：只管侧栏「退款」进入退货页那一下；进入后加行、确认退货不再重复扫码。 -->
-                                    <Border Height="1"
-                                            Background="{DynamicResource PosDividerBrush}"
-                                            Margin="0,12,0,12" />
-                                    <Grid MinHeight="72">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border Width="44" Height="44" CornerRadius="12"
-                                                Background="{DynamicResource PosSurfaceAltBrush}"
-                                                Margin="0,0,14,0" VerticalAlignment="Center">
-                                            <materialDesign:PackIcon Kind="CashRefund" Width="22" Height="22"
-                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan}"
-                                                       FontSize="16"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource PosTextBrush}"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan.help}"
-                                                       FontSize="12.5"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-                                        <ToggleButton Grid.Column="2"
-                                                      x:Name="ReturnsRescanToggle"
-                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                      IsChecked="{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}"
-                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.returnsRescan}"
-                                                      MinHeight="48"
-                                                      MinWidth="56"
-                                                      VerticalAlignment="Center">
-                                        </ToggleButton>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-                            </StackPanel>
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware END ===== -->
-
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore BEGIN ===== -->
-                            <!-- 门店信息：总部下发后只读，提示去 Web 分店管理修改；可随时“立即同步”。 -->
-                            <Border Grid.Row="2"
-                                    Style="{StaticResource SettingsActionCardStyle}"
-                                    Visibility="{Binding IsReceiptStoreSubTabSelected, Converter={StaticResource BoolToVis}}"
-                                    Margin="0,0,0,16">
-                                <StackPanel>
-                                    <DockPanel>
-                                        <TextBlock DockPanel.Dock="Right"
-                                                   Text="{Binding ReceiptStoreSaveStateText}"
-                                                   Tag="{Binding ReceiptStoreSaveState}"
-                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
-                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    </DockPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.help}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,12" />
-                                    <Border Background="{DynamicResource PosSurfaceAltBrush}"
-                                            BorderBrush="{DynamicResource PosDividerBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="10"
-                                            Padding="14,8"
-                                            Margin="0,0,0,14">
+                                <DockPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                    <!-- 区块保存状态：只显示当前分页自己的（已保存时文字为空、自动折叠；失败红色、草稿橙色）。 -->
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding ReceiptHardwareSaveStateText}"
+                                               Tag="{Binding ReceiptHardwareSaveState}"
+                                               Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding ReceiptStoreSaveStateText}"
+                                               Tag="{Binding ReceiptStoreSaveState}"
+                                               Visibility="{Binding IsReceiptStoreSubTabSelected, Converter={StaticResource BoolToVis}}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding ReceiptTermsSaveStateText}"
+                                               Tag="{Binding ReceiptTermsSaveState}"
+                                               Visibility="{Binding IsReceiptTermsSubTabSelected, Converter={StaticResource BoolToVis}}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                    <!-- 总部下发提示：门店信息、小票条款两个分页共用（资料字段只读，请到 Web 分店管理修改）。 -->
+                                    <Border Style="{StaticResource ReceiptManagedHintBorderStyle}">
                                         <DockPanel>
-                                            <Button DockPanel.Dock="Right"
-                                                    Command="{Binding LoadReceiptProfileCommand}"
-                                                    Style="{StaticResource SettingsTouchButtonHeight}"
-                                                    Margin="12,0,0,0"
-                                                    VerticalAlignment="Center">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="20" Height="20" Margin="0,0,8,0" />
-                                                    <!-- 本机已应用过总部下发（版本 > 0）时显示「立即同步」，否则保持「从分店资料载入」。 -->
-                                                    <TextBlock Text="{Binding ReceiptProfileLoadButtonText}" />
-                                                </StackPanel>
-                                            </Button>
-                                            <materialDesign:PackIcon DockPanel.Dock="Left" Kind="LockOutline" Width="20" Height="20"
+                                            <materialDesign:PackIcon DockPanel.Dock="Left" Kind="LockOutline" Width="18" Height="18"
                                                                      Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                                     VerticalAlignment="Center" Margin="0,0,10,0"
-                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
-                                            <!-- 总部下发后资料字段只读，提示去 Web 分店管理修改。 -->
+                                                                     VerticalAlignment="Center" Margin="0,0,8,0"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{Binding ReceiptProfileManagedHintText}"
                                                        Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}"
-                                                       FontSize="13"
+                                                       FontSize="12.5"
                                                        FontWeight="SemiBold"
                                                        Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                        TextWrapping="Wrap"
                                                        VerticalAlignment="Center" />
                                         </DockPanel>
                                     </Border>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="14" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.brandName}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptBrandNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.storeName}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptStoreNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,0,12">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.address}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptStoreAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                                     Height="76"
-                                                     TextWrapping="Wrap"
-                                                     AcceptsReturn="True"
-                                                     ScrollViewer.PanningMode="VerticalFirst"
-                                                     VerticalScrollBarVisibility="Auto" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="2" Grid.Column="0">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.phone}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptStorePhoneText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="2" Grid.Column="2">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.abn}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptAbnText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore END ===== -->
+                                </DockPanel>
+                            </Grid>
+                        </controls:SettingsPageHost.SubTabs>
+                        <!-- ===== PAGE: ReceiptPrinter / ReceiptSubTabs END ===== -->
 
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms BEGIN ===== -->
-                            <!-- 小票条款：保留多行编辑，一行一条；留空＝使用内置默认文案。总部下发后只读（请在 Web 分店管理修改）。 -->
-                            <Border Grid.Row="3"
-                                    Style="{StaticResource SettingsActionCardStyle}"
-                                    Visibility="{Binding IsReceiptTermsSubTabSelected, Converter={StaticResource BoolToVis}}"
-                                    Margin="0,0,0,16">
-                                <StackPanel>
-                                    <DockPanel>
-                                        <TextBlock DockPanel.Dock="Right"
-                                                   Text="{Binding ReceiptTermsSaveStateText}"
-                                                   Tag="{Binding ReceiptTermsSaveState}"
-                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
-                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    </DockPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.subtitle}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,12" />
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.returnPolicy}" Style="{StaticResource SettingsLabelStyle}" />
-                                    <TextBox Text="{Binding ReceiptReturnPolicyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                             IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                             Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                             Height="110"
-                                             MaxLength="500"
-                                             TextWrapping="Wrap"
-                                             AcceptsReturn="True"
-                                             VerticalContentAlignment="Top"
-                                             ScrollViewer.PanningMode="VerticalFirst"
-                                             VerticalScrollBarVisibility="Auto"
-                                             Margin="0,0,0,14" />
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="14" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.voucherTerms}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptVoucherTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                                     Height="130"
-                                                     MaxLength="600"
-                                                     TextWrapping="Wrap"
-                                                     AcceptsReturn="True"
-                                                     VerticalContentAlignment="Top"
-                                                     ScrollViewer.PanningMode="VerticalFirst"
-                                                     VerticalScrollBarVisibility="Auto" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
-                                                       FontSize="12"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2">
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.installmentTerms}" Style="{StaticResource SettingsLabelStyle}" />
-                                            <TextBox Text="{Binding ReceiptInstallmentTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
-                                                     Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                                     Height="130"
-                                                     MaxLength="600"
-                                                     TextWrapping="Wrap"
-                                                     AcceptsReturn="True"
-                                                     VerticalContentAlignment="Top"
-                                                     ScrollViewer.PanningMode="VerticalFirst"
-                                                     VerticalScrollBarVisibility="Auto" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
-                                                       FontSize="12"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms END ===== -->
-
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave BEGIN ===== -->
-                            <!-- 旧的整页保存按钮：开启自动保存后隐藏。 -->
-                            <DockPanel Grid.Row="4" LastChildFill="False" Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}">
-                                <Button DockPanel.Dock="Right"
+                        <!-- 固定底栏：左侧状态文字（测试打印 / 立即同步的结果，三个分页通用；没有消息时显示「修改后自动保存」），
+                             右侧「立即同步」（门店信息、小票条款分页）和「保存小票打印机」（仅关闭自动保存时）。 -->
+                        <controls:SettingsPageHost.Footer>
+                            <controls:SettingsFooterBar>
+                                <Grid controls:SettingsFooterBar.IsFill="True" VerticalAlignment="Center">
+                                    <TextBlock Text="{loc:Loc settings.autosave.hint}" Style="{StaticResource ReceiptIdleHintStyle}" />
+                                    <TextBlock Text="{Binding ReceiptPrinterTestStatusMessage}"
+                                               ToolTip="{Binding ReceiptPrinterTestStatusMessage}"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               AutomationProperties.LiveSetting="Polite" />
+                                </Grid>
+                                <Button controls:SettingsFooterBar.IsRight="True"
+                                        Command="{Binding LoadReceiptProfileCommand}"
+                                        Style="{StaticResource ReceiptSyncButtonStyle}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <!-- 本机已应用过总部下发（版本 > 0）时显示「立即同步」，否则保持「从分店资料载入」。 -->
+                                        <TextBlock Text="{Binding ReceiptProfileLoadButtonText}" />
+                                    </StackPanel>
+                                </Button>
+                                <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave BEGIN ===== -->
+                                <!-- 旧的整页保存按钮（显式保存路径）：开启自动保存后隐藏；命令与原来完全相同。 -->
+                                <Button controls:SettingsFooterBar.IsRight="True"
                                         Command="{Binding SaveReceiptPrinterCommand}"
+                                        Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}"
                                         Style="{StaticResource PosPrimaryButtonStyle}"
-                                        Height="56"
-                                        MinWidth="200">
+                                        Height="48"
+                                        MinWidth="170"
+                                        Padding="18,0">
                                     <StackPanel Orientation="Horizontal">
                                         <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.save}" Foreground="White" FontSize="16" />
                                     </StackPanel>
                                 </Button>
-                            </DockPanel>
-                            <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave END ===== -->
-                        </Grid>
+                                <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave END ===== -->
+                            </controls:SettingsFooterBar>
+                        </controls:SettingsPageHost.Footer>
 
-                        <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview BEGIN ===== -->
-                        <!-- 右栏：80mm 小票实时预览。 -->
-                        <Border Grid.Row="1"
-                                Grid.Column="2"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                VerticalAlignment="Top"
-                                Padding="16">
-                            <StackPanel>
-                                <DockPanel Margin="0,0,0,14">
-                                    <Border DockPanel.Dock="Right"
-                                            Background="{DynamicResource PosSurfaceAltBrush}"
-                                            BorderBrush="{DynamicResource PosBorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="12"
-                                            Padding="10,3"
-                                            VerticalAlignment="Center">
-                                        <TextBlock Text="80mm" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                        <!-- 正文：三个分页叠在同一个单元格里，按所选分页互斥显示。 -->
+                        <Grid>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware BEGIN ===== -->
+                            <!-- 打印机与选项：双栏。左 = 打印机连接 + 打印选项；右 = 再次扫码确认。 -->
+                            <Grid Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <!-- 打印机连接：默认 USB，端口收进“高级”一行（固定 56 高，展开只在同一行出现输入框）。 -->
+                                    <Border Style="{StaticResource ReceiptCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.title}" Style="{StaticResource ReceiptCardTitleStyle}" />
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.help}" Style="{StaticResource ReceiptHintTextStyle}" />
+                                            <Border Background="{DynamicResource PosSurfaceBrush}"
+                                                    BorderBrush="{DynamicResource PosDividerBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8"
+                                                    Padding="10,8"
+                                                    Margin="0,8,0,0">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="44" Height="44" CornerRadius="10"
+                                                            Background="{DynamicResource PosSurfaceAltBrush}"
+                                                            BorderBrush="{DynamicResource PosDividerBrush}"
+                                                            BorderThickness="1"
+                                                            Margin="0,0,12,0" VerticalAlignment="Center">
+                                                        <materialDesign:PackIcon Kind="Printer" Width="26" Height="26"
+                                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.port}" Style="{StaticResource ReceiptHintTextStyle}" FontWeight="Bold" />
+                                                        <TextBlock FontSize="15" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" TextTrimming="CharacterEllipsis">
+                                                            <Run Text="{Binding ReceiptPrinterPortText, Mode=OneWay}" FontFamily="Consolas" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <!-- 「打印机端口（高级）」：固定 56 高。折叠时只有箭头 + 标题；展开时端口输入框出现在同一行右侧，整块高度不变。 -->
+                                            <Border Height="56"
+                                                    Margin="0,8,0,0"
+                                                    Background="{DynamicResource PosSurfaceBrush}"
+                                                    BorderBrush="{DynamicResource PosDividerBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8"
+                                                    Padding="10,0">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ToggleButton x:Name="ReceiptPrinterPortAdvancedToggle"
+                                                                  Grid.Column="0"
+                                                                  Style="{StaticResource ReceiptAdvancedToggleStyle}"
+                                                                  AutomationProperties.Name="{loc:Loc settings.receiptPrinter.port.advanced}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <materialDesign:PackIcon Style="{StaticResource ReceiptAdvancedChevronStyle}"
+                                                                                     Width="18" Height="18" Margin="0,0,6,0"
+                                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                                     VerticalAlignment="Center" />
+                                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.port.advanced}"
+                                                                       FontSize="14"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                       VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </ToggleButton>
+                                                    <TextBox Grid.Column="1"
+                                                             Margin="10,0,0,0"
+                                                             VerticalAlignment="Center"
+                                                             Visibility="{Binding IsChecked, ElementName=ReceiptPrinterPortAdvancedToggle, Converter={StaticResource BoolToVis}}"
+                                                             Text="{Binding ReceiptPrinterPortText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             AutomationProperties.Name="{loc:Loc settings.receiptPrinter.port}"
+                                                             Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                             FontFamily="Consolas" />
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
                                     </Border>
-                                    <materialDesign:PackIcon Kind="ReceiptTextOutline"
-                                                             Width="22"
-                                                             Height="22"
-                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                             Margin="0,0,9,0" />
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.preview}"
-                                               Style="{StaticResource SettingsSectionTitleStyle}"
-                                               VerticalAlignment="Center" />
-                                </DockPanel>
 
-                                <Border Background="{DynamicResource PosSurfaceAltBrush}"
-                                        BorderBrush="{DynamicResource PosDividerBrush}"
+                                    <!-- 打印选项：客人小票是否附带银行收据原文。 -->
+                                    <Border Style="{StaticResource ReceiptCardStyle}" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.options.title}" Style="{StaticResource ReceiptCardTitleStyle}" />
+                                            <Border Style="{StaticResource ReceiptSwitchRowStyle}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="10"
+                                                            Background="{DynamicResource PosPrimarySoftBrush}"
+                                                            Margin="0,0,12,0" VerticalAlignment="Center">
+                                                        <materialDesign:PackIcon Kind="ReceiptTextOutline" Width="20" Height="20"
+                                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
+                                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt.help}" Style="{StaticResource ReceiptHintTextStyle}" />
+                                                    </StackPanel>
+                                                    <ToggleButton Grid.Column="2"
+                                                                  x:Name="PrintBankReceiptTextToggle"
+                                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                                  IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
+                                                                  AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                                  MinHeight="48"
+                                                                  MinWidth="56"
+                                                                  VerticalAlignment="Center">
+                                                    </ToggleButton>
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- 再次扫码确认：开启后，对应操作即使当前收银员自己有权限，也要再扫一次授权员工条码。 -->
+                                <Border Grid.Column="2"
+                                        Style="{StaticResource ReceiptCardStyle}"
+                                        VerticalAlignment="Top">
+                                    <StackPanel>
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.title}" Style="{StaticResource ReceiptCardTitleStyle}" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.help}" Style="{StaticResource ReceiptHintTextStyle}" Margin="0,0,0,6" />
+                                        <!-- 无交易开钱箱：只管侧栏「开钱箱」按钮，收现金后的自动开钱箱不受影响。 -->
+                                        <Border Style="{StaticResource ReceiptSwitchRowStyle}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="36" Height="36" CornerRadius="10"
+                                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                                        Margin="0,0,12,0" VerticalAlignment="Center">
+                                                    <materialDesign:PackIcon Kind="CashRegister" Width="20" Height="20"
+                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
+                                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan.help}" Style="{StaticResource ReceiptHintTextStyle}" />
+                                                </StackPanel>
+                                                <ToggleButton Grid.Column="2"
+                                                              x:Name="NoSaleCashDrawerRescanToggle"
+                                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                              IsChecked="{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}"
+                                                              AutomationProperties.Name="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}"
+                                                              MinHeight="48"
+                                                              MinWidth="56"
+                                                              VerticalAlignment="Center">
+                                                </ToggleButton>
+                                            </Grid>
+                                        </Border>
+
+                                        <!-- 退货操作：只管侧栏「退款」进入退货页那一下；进入后加行、确认退货不再重复扫码。 -->
+                                        <Border Style="{StaticResource ReceiptSwitchRowStyle}" Margin="0,6,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="36" Height="36" CornerRadius="10"
+                                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                                        Margin="0,0,12,0" VerticalAlignment="Center">
+                                                    <materialDesign:PackIcon Kind="CashRefund" Width="20" Height="20"
+                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
+                                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan.help}" Style="{StaticResource ReceiptHintTextStyle}" />
+                                                </StackPanel>
+                                                <ToggleButton Grid.Column="2"
+                                                              x:Name="ReturnsRescanToggle"
+                                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                              IsChecked="{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}"
+                                                              AutomationProperties.Name="{loc:Loc settings.receiptPrinter.returnsRescan}"
+                                                              MinHeight="48"
+                                                              MinWidth="56"
+                                                              VerticalAlignment="Center">
+                                                </ToggleButton>
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware END ===== -->
+
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore BEGIN ===== -->
+                            <!-- 门店信息：品牌 | 门店名称、电话 | ABN 两列，地址整行。总部下发后全部只读（灰底 + 锁图标），提示在分页条右侧；「立即同步」在底栏。 -->
+                            <StackPanel Visibility="{Binding IsReceiptStoreSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.title}"
+                                           FontSize="15" FontWeight="ExtraBold"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.help}"
+                                           Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,2,0,10" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.brandName}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <Grid>
+                                            <TextBox Text="{Binding ReceiptBrandNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                     Padding="12,0,36,0"
+                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                            <materialDesign:PackIcon Kind="LockOutline" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                                     IsHitTestVisible="False" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.storeName}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <Grid>
+                                            <TextBox Text="{Binding ReceiptStoreNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                     Padding="12,0,36,0"
+                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                            <materialDesign:PackIcon Kind="LockOutline" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                                     IsHitTestVisible="False" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,12">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.phone}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <Grid>
+                                            <TextBox Text="{Binding ReceiptStorePhoneText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                     Padding="12,0,36,0"
+                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                            <materialDesign:PackIcon Kind="LockOutline" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                                     IsHitTestVisible="False" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,12">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.abn}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <Grid>
+                                            <TextBox Text="{Binding ReceiptAbnText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                     Padding="12,0,36,0"
+                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                            <materialDesign:PackIcon Kind="LockOutline" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                                     IsHitTestVisible="False" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2" Grid.ColumnSpan="3">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.address}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <Grid>
+                                            <TextBox Text="{Binding ReceiptStoreAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                     Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                     Padding="12,8,36,8"
+                                                     VerticalContentAlignment="Top"
+                                                     Height="76"
+                                                     TextWrapping="Wrap"
+                                                     AcceptsReturn="True"
+                                                     ScrollViewer.PanningMode="VerticalFirst"
+                                                     VerticalScrollBarVisibility="Auto" />
+                                            <materialDesign:PackIcon Kind="LockOutline" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,12,0"
+                                                                     IsHitTestVisible="False" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore END ===== -->
+
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms BEGIN ===== -->
+                            <!-- 小票条款：三栏等宽文本框（退换货政策 / 代金券使用说明 / 分期条款），一行一条；留空＝使用内置默认文案。
+                                 总部下发后只读（提示与「立即同步」同门店信息页，在分页条右侧和底栏）。
+                                 正文外层是兜底 ScrollViewer（给子元素无限高度），所以文本框用固定高度，不能靠 * 行拉伸。 -->
+                            <StackPanel Visibility="{Binding IsReceiptTermsSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.title}"
+                                           FontSize="15" FontWeight="ExtraBold"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.subtitle}"
+                                           Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,2,0,8" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.returnPolicy}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <TextBox Text="{Binding ReceiptReturnPolicyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Height="232"
+                                                 MaxLength="500"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 VerticalContentAlignment="Top"
+                                                 Padding="12,8"
+                                                 ScrollViewer.PanningMode="VerticalFirst"
+                                                 VerticalScrollBarVisibility="Auto" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.voucherTerms}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <TextBox Text="{Binding ReceiptVoucherTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Height="232"
+                                                 MaxLength="600"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 VerticalContentAlignment="Top"
+                                                 Padding="12,8"
+                                                 ScrollViewer.PanningMode="VerticalFirst"
+                                                 VerticalScrollBarVisibility="Auto" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.installmentTerms}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <TextBox Text="{Binding ReceiptInstallmentTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Height="232"
+                                                 MaxLength="600"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 VerticalContentAlignment="Top"
+                                                 Padding="12,8"
+                                                 ScrollViewer.PanningMode="VerticalFirst"
+                                                 VerticalScrollBarVisibility="Auto" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms END ===== -->
+                        </Grid>
+                    </controls:SettingsPageHost>
+
+                    <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview BEGIN ===== -->
+                    <!-- 右栏：80mm 小票实时预览。296 宽、占满整页高度，三个分页共用；内部 ScrollViewer 可滚动（只含预览，不含功能按钮）。 -->
+                    <Border Grid.Column="2"
+                            Style="{StaticResource SettingsActionCardStyle}"
+                            Padding="12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                                <Border DockPanel.Dock="Right"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosBorderBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="10"
-                                        Padding="14,18">
-                                    <Border MaxWidth="260"
-                                            MinHeight="380"
-                                            HorizontalAlignment="Stretch"
+                                        CornerRadius="12"
+                                        Padding="10,2"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="80mm" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                                </Border>
+                                <materialDesign:PackIcon Kind="ReceiptTextOutline"
+                                                         Width="22"
+                                                         Height="22"
+                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                         Margin="0,0,8,0" />
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.preview}"
+                                           FontSize="15"
+                                           FontWeight="ExtraBold"
+                                           Foreground="{DynamicResource PosTextBrush}"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
+
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource PosSurfaceAltBrush}"
+                                    BorderBrush="{DynamicResource PosDividerBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                <ScrollViewer Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                              Focusable="False"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              CanContentScroll="False"
+                                              PanningMode="VerticalOnly"
+                                              PanningDeceleration="0.0008"
+                                              PanningRatio="1.0">
+                                    <Border Width="240"
+                                            HorizontalAlignment="Center"
                                             VerticalAlignment="Top"
+                                            Margin="0,14"
                                             Background="{DynamicResource PosSurfaceBrush}"
-                                            Padding="16,20">
+                                            Padding="14,16,14,20">
                                         <Border.Effect>
                                             <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.18" Color="#FF64748B" />
                                         </Border.Effect>
@@ -3352,7 +3504,7 @@
                                             </TextBlock>
                                             <Border BorderBrush="{DynamicResource PosBorderStrongBrush}"
                                                     BorderThickness="0,1,0,0"
-                                                    Margin="0,14,0,12" />
+                                                    Margin="0,12" />
                                             <TextBlock Text="{loc:Loc settings.receiptPrinter.test}"
                                                        FontFamily="Consolas"
                                                        FontSize="14"
@@ -3360,194 +3512,291 @@
                                                        TextAlignment="Center" />
                                             <Border BorderBrush="{DynamicResource PosBorderStrongBrush}"
                                                     BorderThickness="0,1,0,0"
-                                                    Margin="0,12,0,12" />
+                                                    Margin="0,12" />
                                             <TextBlock Text="{Binding ReceiptReturnPolicyText}"
                                                        FontFamily="Consolas"
                                                        FontSize="10.5"
                                                        TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
-                                </Border>
-                            </StackPanel>
-                        </Border>
-                        <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview END ===== -->
-                    </Grid>
-                </controls:SettingsPageHost>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview END ===== -->
+                </Grid>
                 <!-- ===== PAGE: ReceiptPrinter END ===== -->
 
                 <!-- ===== PAGE: DeviceRegistration BEGIN ===== -->
+                <!-- 设备注册：三栏（API 服务器 360 ｜ 网络检测 400 ｜ 更换分店注册 余宽），主体高度固定 436（可用 437，留 1px 余量；无页签条：528 - 底栏 65 - 边线 2 - 内边距 24）。
+                     底栏三区与三栏对齐（同一组列宽）：测试连接、保存地址 ｜ 检测网络、复制报告 ｜ 更换分店重新注册（danger，与其它隔开）。
+                     诊断的「一键修复 / 确认修改 / 还原修改」文案动态且很长，是底栏例外，留在网络检测卡内的固定状态区。 -->
                 <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
                                            Visibility="{Binding IsDeviceRegistrationSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                    <controls:SettingsPageHost.Resources>
+                        <!-- 页面级样式：danger 描边按钮（白底、红描边红字），用于「更换分店重新注册」。 -->
+                        <Style x:Key="DeviceDangerOutlineButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                        </Style>
+                        <Style x:Key="DeviceCardTitleStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="15" />
+                            <Setter Property="FontWeight" Value="ExtraBold" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                        </Style>
+                        <Style x:Key="DeviceHintTextStyle" TargetType="TextBlock">
+                            <Setter Property="FontSize" Value="12" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                            <Setter Property="TextWrapping" Value="Wrap" />
+                        </Style>
+                    </controls:SettingsPageHost.Resources>
+
+                    <Grid Height="436">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="360" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="400" />
                             <ColumnDefinition Width="16" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Border Grid.Row="0"
-                                Grid.ColumnSpan="3"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                Margin="0,0,0,16">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Right"
-                                        Background="{DynamicResource PosSuccessSoftBrush}"
-                                        CornerRadius="8"
-                                        Padding="12,8"
-                                        Margin="18,0,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="CheckCircleOutline"
-                                                                 Width="19"
-                                                                 Height="19"
-                                                                 Foreground="{DynamicResource PosSuccessTextBrush}"
-                                                                 Margin="0,0,7,0" />
-                                        <TextBlock Text="{loc:Loc settings.deviceRegistration.active}"
-                                                   FontSize="11"
-                                                   FontWeight="Bold"
-                                                   Foreground="{DynamicResource PosSuccessTextBrush}"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Border>
-                                <Border DockPanel.Dock="Left"
-                                        Width="58"
-                                        Height="58"
-                                        Background="{DynamicResource PosPrimarySoftBrush}"
-                                        CornerRadius="10"
-                                        Margin="0,0,18,0">
-                                    <materialDesign:PackIcon Kind="CashRegister"
-                                                             Width="34"
-                                                             Height="34"
-                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                             HorizontalAlignment="Center"
-                                                             VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.current}"
-                                               FontSize="11"
-                                               FontWeight="Bold"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                    <TextBlock FontSize="21"
-                                               FontWeight="Black"
-                                               Foreground="{DynamicResource PosTextBrush}"
-                                               Margin="0,3,0,0">
-                                        <Run Text="{Binding Session.StoreName, Mode=OneWay}" />
-                                        <Run Text=" (" />
-                                        <Run Text="{Binding Session.StoreCode, Mode=OneWay}" />
-                                        <Run Text=")" />
-                                    </TextBlock>
-                                    <TextBlock FontSize="11"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                               Margin="0,4,0,0">
-                                        <Run Text="{loc:Loc settings.deviceRegistration.thisDevice}" />
-                                        <Run Text=": " />
-                                        <Run Text="{Binding Session.DeviceCode, Mode=OneWay}" />
-                                    </TextBlock>
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
-
+                        <!-- 第 1 栏：API 服务器（地址、填入本地 / 远程、状态消息、入口状态）；测试连接 / 保存地址在底栏。 -->
                         <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}"
-                                                         Grid.Row="1"
+                                                         IsSettingsLayout="True"
                                                          Grid.Column="0" />
 
-                        <Border Grid.Row="1"
-                                Grid.Column="2"
-                                Style="{StaticResource SettingsActionCardStyle}">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <StackPanel Grid.Row="0">
-                                    <TextBlock Text="{Binding DeviceRegistrationTitleText}"
-                                               FontSize="18"
-                                               FontWeight="Black"
-                                               Foreground="{DynamicResource PosTextBrush}" />
-                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.description}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" />
-                                </StackPanel>
+                        <!-- 第 2 栏：网络检测（步骤区固定高度内部滚动，结论 / 修复 / 确认 / 还原在卡内固定状态区）；服务缺失时整栏隐藏。 -->
+                        <Grid Grid.Column="2"
+                              Visibility="{Binding ApiServerSettings.HasNetworkDiagnostics, Converter={StaticResource BoolToVis}}">
+                            <controls:NetworkDiagnosticsPanel DataContext="{Binding ApiServerSettings.Network}" />
+                        </Grid>
 
-                                <Border Grid.Row="1"
-                                        Background="{DynamicResource PosWarningSoftBrush}"
-                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                        <!-- 第 3 栏：更换分店注册。 -->
+                        <Border Grid.Column="4"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="{Binding DeviceRegistrationTitleText}"
+                                           FontSize="17"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+
+                                <!-- 当前注册：门店名 (门店码)、当前收银设备、已启用。 -->
+                                <Border Background="{DynamicResource PosSurfaceBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
-                                        Padding="14,12"
-                                        Margin="0,18,0,18">
+                                        Padding="8"
+                                        Margin="0,8,0,0">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <materialDesign:PackIcon Grid.Column="0"
-                                                                 Kind="ShieldAccountOutline"
-                                                                 Width="20"
-                                                                 Height="20"
-                                                                 Foreground="{DynamicResource PosAccentBrush}"
-                                                                 VerticalAlignment="Top" />
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{loc:Loc settings.deviceRegistration.supervisorRequired}"
-                                                   FontSize="11"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource PosWarningTextBrush}"
-                                                   TextWrapping="Wrap" />
+                                        <Border Grid.Column="0"
+                                                Width="44"
+                                                Height="44"
+                                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                                CornerRadius="10"
+                                                Margin="0,0,10,0"
+                                                VerticalAlignment="Center">
+                                            <materialDesign:PackIcon Kind="CashRegister"
+                                                                     Width="28"
+                                                                     Height="28"
+                                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                     HorizontalAlignment="Center"
+                                                                     VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.deviceRegistration.current}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                            <TextBlock FontSize="14.5"
+                                                       FontWeight="ExtraBold"
+                                                       Foreground="{DynamicResource PosTextBrush}"
+                                                       TextWrapping="Wrap">
+                                                <Run Text="{Binding Session.StoreName, Mode=OneWay}" />
+                                                <Run Text=" (" />
+                                                <Run Text="{Binding Session.StoreCode, Mode=OneWay}" />
+                                                <Run Text=")" />
+                                            </TextBlock>
+                                            <TextBlock FontSize="12"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap">
+                                                <Run Text="{loc:Loc settings.deviceRegistration.thisDevice}" />
+                                                <Run Text=": " />
+                                                <Run Text="{Binding Session.DeviceCode, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Border Grid.Column="2"
+                                                Background="{DynamicResource PosSuccessSoftBrush}"
+                                                CornerRadius="12"
+                                                Padding="10,3"
+                                                Margin="8,0,0,0"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.deviceRegistration.active}"
+                                                       FontSize="12"
+                                                       FontWeight="Bold"
+                                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                        </Border>
                                     </Grid>
                                 </Border>
 
-                                <StackPanel Grid.Row="2" Margin="0,0,0,18">
-                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.beforeContinue}"
-                                               FontSize="13"
-                                               FontWeight="Black"
-                                               Margin="0,0,0,12" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <materialDesign:PackIcon Kind="Cart" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
-                                        <TextBlock Text="{loc:Loc settings.deviceRegistration.checkCart}"
-                                                   FontSize="11"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <materialDesign:PackIcon Kind="CreditCard" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
-                                        <TextBlock Text="{loc:Loc settings.deviceRegistration.checkPayment}"
-                                                   FontSize="11"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
+                                <!-- 需要主管授权。 -->
+                                <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="10,6"
+                                        Margin="0,8,0,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Sync" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
-                                        <TextBlock Text="{loc:Loc settings.deviceRegistration.checkSync}"
-                                                   FontSize="11"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                   TextWrapping="Wrap" />
+                                        <materialDesign:PackIcon Kind="ShieldAccountOutline"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Foreground="{DynamicResource PosAccentBrush}"
+                                                                 VerticalAlignment="Center"
+                                                                 Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.deviceRegistration.supervisorRequired}"
+                                                   FontSize="12.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource PosWarningTextBrush}"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center" />
                                     </StackPanel>
+                                </Border>
+
+                                <!-- 继续前请确认（三条）。 -->
+                                <TextBlock Text="{loc:Loc settings.deviceRegistration.beforeContinue}"
+                                           FontSize="13"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosTextBrush}"
+                                           Margin="0,10,0,2" />
+                                <StackPanel Orientation="Horizontal" MinHeight="24">
+                                    <materialDesign:PackIcon Kind="Cart" Width="18" Height="18" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.checkCart}"
+                                               FontSize="12.5"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" MinHeight="24" Margin="0,2,0,0">
+                                    <materialDesign:PackIcon Kind="CreditCard" Width="18" Height="18" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.checkPayment}"
+                                               FontSize="12.5"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" MinHeight="24" Margin="0,2,0,0">
+                                    <materialDesign:PackIcon Kind="Sync" Width="18" Height="18" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.checkSync}"
+                                               FontSize="12.5"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <StackPanel Grid.Row="3">
-                                    <Button Command="{Binding ReregisterDeviceCommand}"
-                                            Style="{StaticResource PosPrimaryButtonStyle}"
-                                            Height="46"
-                                            HorizontalAlignment="Stretch">
-                                        <StackPanel Orientation="Horizontal">
-                                            <materialDesign:PackIcon Kind="AccountSwitch" Width="18" Height="18" Margin="0,0,8,0" Foreground="White" />
-                                            <TextBlock Text="{loc:Loc settings.deviceRegistration.action}" Foreground="White" />
-                                        </StackPanel>
-                                    </Button>
-                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.deviceReuse}"
-                                               FontSize="10"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,10,0,0" />
-                                </StackPanel>
-                            </Grid>
+                                <TextBlock Text="{loc:Loc settings.deviceRegistration.description}"
+                                           Style="{StaticResource DeviceHintTextStyle}"
+                                           Margin="0,10,0,0" />
+                                <TextBlock Text="{loc:Loc settings.deviceRegistration.deviceReuse}"
+                                           Style="{StaticResource DeviceHintTextStyle}"
+                                           Margin="0,8,0,0" />
+                            </StackPanel>
                         </Border>
                     </Grid>
+
+                    <!-- 固定底栏（声明在正文之后，保持文件内「地址面板先于更换分店命令」的顺序）。
+                         三个区与上面三栏用同一组列宽，按钮落在各自栏的正下方：
+                         区 1 测试连接（44）+ 保存地址（主按钮 48）｜区 2 检测网络 + 复制报告（有检测结果才出现）｜区 3 更换分店重新注册（danger，与前两区用分隔线隔开）。
+                         命令都是原面板里那一批（ApiServerSettings.*），只是把按钮从面板内搬到了底栏。 -->
+                    <controls:SettingsPageHost.Footer>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="360" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="400" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid Grid.Column="0" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0"
+                                        Command="{Binding ApiServerSettings.TestConnectionCommand}"
+                                        AutomationProperties.Name="{loc:Loc settings.serverAddress.test}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        Padding="10,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="LanConnect" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.serverAddress.test}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="2"
+                                        Command="{Binding ApiServerSettings.SaveCommand}"
+                                        AutomationProperties.Name="{loc:Loc settings.serverAddress.save}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Height="48"
+                                        Padding="10,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                                        <TextBlock Text="{loc:Loc settings.serverAddress.save}" Foreground="White" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border Grid.Column="1" Style="{StaticResource SettingsFooterDividerStyle}" HorizontalAlignment="Center" />
+
+                            <!-- 区 2：检测网络 + 复制报告；网络检测服务缺失时整区隐藏。 -->
+                            <DockPanel Grid.Column="2"
+                                       VerticalAlignment="Center"
+                                       LastChildFill="True"
+                                       Visibility="{Binding ApiServerSettings.HasNetworkDiagnostics, Converter={StaticResource BoolToVis}}">
+                                <Button DockPanel.Dock="Right"
+                                        Command="{Binding ApiServerSettings.Network.CopyReportCommand}"
+                                        Visibility="{Binding ApiServerSettings.Network.HasResult, Converter={StaticResource BoolToVis}}"
+                                        AutomationProperties.AutomationId="NetworkCopyReportButton"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        MinWidth="140"
+                                        Margin="8,0,0,0">
+                                    <TextBlock Text="{loc:Loc settings.network.copy}" />
+                                </Button>
+                                <Button Command="{Binding ApiServerSettings.Network.DiagnoseCommand}"
+                                        AutomationProperties.AutomationId="NetworkDiagnoseButton"
+                                        AutomationProperties.Name="{loc:Loc settings.network.diagnose}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Stethoscope" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.network.diagnose}" />
+                                    </StackPanel>
+                                </Button>
+                            </DockPanel>
+
+                            <Border Grid.Column="3"
+                                    Style="{StaticResource SettingsFooterDividerStyle}"
+                                    Background="{DynamicResource PosDangerBorderBrush}"
+                                    HorizontalAlignment="Center" />
+
+                            <!-- 区 3：更换分店重新注册（danger 描边）；确认流程（主管授权、检查购物车 / 待同步订单）沿用，不变。 -->
+                            <Button Grid.Column="4"
+                                    Command="{Binding ReregisterDeviceCommand}"
+                                    Style="{StaticResource DeviceDangerOutlineButtonStyle}"
+                                    Height="48"
+                                    VerticalAlignment="Center"
+                                    Padding="10,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="AccountSwitch" Width="20" Height="20" Margin="0,0,8,0" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                    <TextBlock Text="{loc:Loc settings.deviceRegistration.action}" Foreground="{DynamicResource PosDangerTextBrush}" FontWeight="Bold" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </controls:SettingsPageHost.Footer>
                 </controls:SettingsPageHost>
                 <!-- ===== PAGE: DeviceRegistration END ===== -->
 

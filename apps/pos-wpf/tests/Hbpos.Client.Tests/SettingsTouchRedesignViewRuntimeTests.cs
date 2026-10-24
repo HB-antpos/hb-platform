@@ -108,9 +108,9 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
         {
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
             Assert.True(vm.IsReceiptPrinterSelected);
-            // 「测试打印」在顶栏（44 高），三个分页都能点；整页保存按钮只在没开自动保存时出现（这里未开启）。
+            // 「测试打印」在顶栏（44 高），三个分页都能点；整页保存按钮在固定底栏（主按钮 48 高），只在没开自动保存时出现（这里未开启）。
             AssertTouchButton(view, vm.TestReceiptPrinterCommand, 44);
-            AssertTouchButton(view, vm.SaveReceiptPrinterCommand, 56);
+            AssertTouchButton(view, vm.SaveReceiptPrinterCommand, 48);
             var toggle = Assert.IsType<ToggleButton>(view.FindName("PrintBankReceiptTextToggle"));
             Assert.True(toggle.ActualHeight >= 48);
             // 「再次扫码确认」卡片里的两个开关（无交易开钱箱、退货）同样要满足触控高度，且默认关闭。

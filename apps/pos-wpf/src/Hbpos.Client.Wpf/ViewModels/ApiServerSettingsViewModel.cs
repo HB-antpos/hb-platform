@@ -79,6 +79,8 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     public void RefreshEntryStatus()
     {
         EntryStatusText = BuildEntryStatusText();
+        // 同步刷新拆分后的首选 / 当前 / 回退三个字段（设置页两行展示用），数据来源与上面相同。
+        RefreshEntryParts();
     }
 
     private string BuildEntryStatusText()

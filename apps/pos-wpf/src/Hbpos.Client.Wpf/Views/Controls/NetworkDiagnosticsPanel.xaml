@@ -1,0 +1,419 @@
+<UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.NetworkDiagnosticsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
+    <!--
+        设置页「设备注册」第二栏：网络检测卡。DataContext 是 NetworkDiagnosticsViewModel（ApiServerSettings.Network）。
+        登录页与设备注册页仍用 ApiServerSettingsPanel 里原有的诊断块，本控件只服务设置页首屏布局。
+
+        结构（卡高由页面给定，行高分配）：
+          Row 0 标题行：听诊器图标 + 「网络检测」，右侧放运行中 / 用时 / 复制结果文字
+          Row 1 说明（只读，确认修复时折叠让出高度）
+          Row 2 步骤区（弹性高度，最小 56，内部滚动；检测前是带听诊器图标的虚线空框），区内不放任何功能按钮
+          Row 3 固定状态区：结论 + 一键修复 / 确认修改 + 取消 / 修复结果 / 已做的修改 + 还原。
+                这些按钮文案动态且很长，放不进底栏，是「所有主操作进底栏」的有意例外，留在卡内固定位置，不进滚动区。
+        「检测网络」「复制报告」在页面底栏（同一批命令）。
+    -->
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- 步骤状态圆点：ok 绿 / slow 橙 / failed 红 / 其余灰。 -->
+        <Style x:Key="StepDotStyle" TargetType="Ellipse">
+            <Setter Property="Width" Value="11" />
+            <Setter Property="Height" Value="11" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Fill" Value="{DynamicResource PosMutedForegroundBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="ok">
+                    <Setter Property="Fill" Value="{DynamicResource PosSuccessBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="slow">
+                    <Setter Property="Fill" Value="{DynamicResource PosWarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="failed">
+                    <Setter Property="Fill" Value="{DynamicResource PosDangerBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 步骤文字：「标签 + 详情」一行省略（全文在悬停提示里）；慢 / 失败的行详情是关键线索，允许换行显示全文。 -->
+        <Style x:Key="StepTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="slow">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="failed">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="StepTimeStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="10,0,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="ok">
+                    <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="slow">
+                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="failed">
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="skipped">
+                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 结论 / 结果的两套配色：warn（找到原因 / 失败）与 ok（没问题 / 成功）。 -->
+        <Style x:Key="DiagnosisNoticeBorderStyle" TargetType="Border">
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+            <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+        </Style>
+    </UserControl.Resources>
+
+    <Border Background="{DynamicResource PosSurfaceAltBrush}"
+            BorderBrush="{DynamicResource PosDividerBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="12,10">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" MinHeight="56" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 标题行：右侧文字依次是复制结果、运行中 / 用时（SummaryText 运行中是「正在检测网络...」，结果后是「用时 …」）。 -->
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <materialDesign:PackIcon Kind="Stethoscope"
+                                             Width="22"
+                                             Height="22"
+                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                             VerticalAlignment="Center"
+                                             Margin="0,0,8,0" />
+                    <TextBlock Text="{loc:Loc settings.network.title}"
+                               FontSize="15"
+                               FontWeight="ExtraBold"
+                               Foreground="{DynamicResource PosTextBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="{Binding CopyResultMessage}"
+                               Visibility="{Binding HasCopyResult, Converter={StaticResource BoolToVis}}"
+                               FontSize="12"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               Margin="0,0,8,0"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Text="{Binding SummaryText}"
+                               FontSize="12"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               AutomationProperties.LiveSetting="Polite" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 说明：确认修复时折叠，把约 30px 高度让给确认块。 -->
+            <TextBlock Grid.Row="1"
+                       Text="{loc:Loc settings.network.diagnose.hint}"
+                       FontSize="12"
+                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsConfirming}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <!-- 步骤区：检测前是虚线空框（占位，布局不变），有结果后换成可内部滚动的步骤列表。 -->
+            <Grid Grid.Row="2" Margin="0,8,0,0">
+                <Grid>
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasResult}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                    <Rectangle Stroke="{DynamicResource PosBorderBrush}"
+                               StrokeThickness="1"
+                               StrokeDashArray="4 3"
+                               RadiusX="8"
+                               RadiusY="8" />
+                    <materialDesign:PackIcon Kind="Stethoscope"
+                                             Width="44"
+                                             Height="44"
+                                             Foreground="{DynamicResource PosBorderBrush}"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center" />
+                </Grid>
+
+                <Border Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasResult}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <!-- 步骤多于可见高度时在这里内部滚动（触屏纵向平移）；区内没有任何按钮。 -->
+                    <ScrollViewer Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                  Focusable="False"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  CanContentScroll="False"
+                                  PanningMode="VerticalOnly"
+                                  PanningDeceleration="0.0008"
+                                  PanningRatio="1.0">
+                        <ItemsControl ItemsSource="{Binding Steps}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="10,3"
+                                            MinHeight="32"
+                                            BorderBrush="{DynamicResource PosDividerBrush}"
+                                            BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse Grid.Column="0" Style="{StaticResource StepDotStyle}" />
+                                            <TextBlock Grid.Column="1"
+                                                       Style="{StaticResource StepTextStyle}"
+                                                       ToolTip="{Binding Detail}">
+                                                <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Bold" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding Detail, Mode=OneWay}"
+                                                     FontSize="11.5"
+                                                     Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                            </TextBlock>
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding TimeText}"
+                                                       Style="{StaticResource StepTimeStyle}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <!-- 固定状态区：按状态互斥显示的几块，自上而下依次排列，每块上方间距 8。 -->
+            <StackPanel Grid.Row="3">
+                <!-- 结论卡片：找到原因用警告色，没问题用成功色。消息最多 2 行（全文在悬停提示里）；确认修复时只留标题。 -->
+                <Border Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource DiagnosisNoticeBorderStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding FindingSeverity}" Value="ok">
+                                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="{Binding FindingTitle}"
+                                   FontSize="13"
+                                   FontWeight="ExtraBold"
+                                   Foreground="{DynamicResource PosTextBrush}"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding FindingMessage}"
+                                   ToolTip="{Binding FindingMessage}"
+                                   FontSize="12"
+                                   LineHeight="16"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   MaxHeight="32"
+                                   TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource PosTextBrush}"
+                                   Margin="0,4,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsConfirming}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <!-- 一键修复：整行宽 44 高；文案随修复项变化（如「修复 DNS（改用 1.1.1.1 和 8.8.8.8）」）。 -->
+                        <Button Command="{Binding FixCommand}"
+                                AutomationProperties.AutomationId="NetworkFixButton"
+                                Height="44"
+                                Margin="0,6,0,0">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource PosPrimaryButtonStyle}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding HasFix}" Value="True" />
+                                                <Condition Binding="{Binding IsConfirming}" Value="False" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="{Binding FixButtonText}"
+                                       Foreground="White"
+                                       FontWeight="Bold"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- 修复前确认：写清楚改什么；批准前不会改动任何设置。 -->
+                <Border Style="{StaticResource DiagnosisNoticeBorderStyle}"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
+                        Visibility="{Binding IsConfirming, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="{loc:Loc settings.network.confirm.title}" FontSize="13" FontWeight="ExtraBold" Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{Binding PlanTarget}" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding PlanTarget}" />
+                        <TextBlock FontSize="12.5" Foreground="{DynamicResource PosTextBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                            <Run Text="{loc:Loc settings.network.confirm.now}" FontWeight="SemiBold" />
+                            <Run Text=": " />
+                            <Run Text="{Binding PlanBefore, Mode=OneWay}" Foreground="{DynamicResource PosDangerTextBrush}" />
+                        </TextBlock>
+                        <TextBlock FontSize="12.5" Foreground="{DynamicResource PosTextBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                            <Run Text="{loc:Loc settings.network.confirm.change}" FontWeight="SemiBold" />
+                            <Run Text=": " />
+                            <Run Text="{Binding PlanAfter, Mode=OneWay}" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                        </TextBlock>
+                        <!-- 说明最多 2 行，全文在悬停提示里。 -->
+                        <TextBlock Text="{Binding PlanNote}"
+                                   ToolTip="{Binding PlanNote}"
+                                   FontSize="12"
+                                   LineHeight="16"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   MaxHeight="32"
+                                   TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   Margin="0,4,0,0" />
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Command="{Binding CancelFixCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="44">
+                                <TextBlock Text="{loc:Loc common.cancel}" />
+                            </Button>
+                            <Button Grid.Column="2" Command="{Binding ConfirmFixCommand}" AutomationProperties.AutomationId="NetworkFixConfirmButton" Style="{StaticResource PosPrimaryButtonStyle}" Height="44">
+                                <TextBlock Text="{loc:Loc settings.network.confirm.apply}" Foreground="White" FontWeight="Bold" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 修复 / 还原 / 检测出错的结果消息（最多 3 行，全文在悬停提示里）。 -->
+                <Border Visibility="{Binding HasResultMessage, Converter={StaticResource BoolToVis}}">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource DiagnosisNoticeBorderStyle}">
+                            <Setter Property="Padding" Value="10,6" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ResultSeverity}" Value="ok">
+                                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding ResultMessage}"
+                               ToolTip="{Binding ResultMessage}"
+                               FontSize="12"
+                               LineHeight="16"
+                               LineStackingStrategy="BlockLineHeight"
+                               MaxHeight="48"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource PosTextBrush}"
+                               AutomationProperties.LiveSetting="Polite" />
+                </Border>
+
+                <!-- 已做的修改：始终可见（即使还没重新检测），随时还原。标题 + 摘要（单行省略）+ 还原按钮同一行。 -->
+                <Border Style="{StaticResource DiagnosisNoticeBorderStyle}"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
+                        Padding="10,4,4,4"
+                        Visibility="{Binding HasApplied, Converter={StaticResource BoolToVis}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="{loc:Loc settings.network.applied.title}"
+                                   FontSize="12"
+                                   FontWeight="ExtraBold"
+                                   Foreground="{DynamicResource PosTextBrush}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding AppliedSummary}"
+                                   ToolTip="{Binding AppliedSummary}"
+                                   FontFamily="Consolas"
+                                   FontSize="11.5"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0" />
+                        <Button Grid.Column="2"
+                                Command="{Binding UndoCommand}"
+                                AutomationProperties.AutomationId="NetworkUndoButton"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                Height="44"
+                                Padding="12,0">
+                            <TextBlock Text="{loc:Loc settings.network.undo}" Foreground="{DynamicResource PosDangerTextBrush}" FontWeight="Bold" />
+                        </Button>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

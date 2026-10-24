@@ -381,16 +381,20 @@ public sealed partial class SettingsViewModelTests
             element.Name.LocalName == "TextBox" &&
             element.Attribute("Text")?.Value.Contains("TimeoutSecondsText", StringComparison.Ordinal) == true) >= 2);
 
-        var receiptSection = Assert.Single(elements.Where(element =>
+        var receiptHost = Assert.Single(elements.Where(element =>
             element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsReceiptPrinterSelected", StringComparison.Ordinal) == true));
+        // 小票页根是外层 Grid：左 = SettingsPageHost（页签 / 正文 / 底栏），右 = 独立的 80mm 小票预览栏（SettingsPageHost 之外），
+        // 所以预览里的绑定要在页面根下找，保存按钮在 SettingsPageHost 的底栏里。
+        var receiptSection = receiptHost.Parent!;
+        Assert.Contains("IsReceiptPrinterSelected", receiptSection.Attribute("Visibility")?.Value, StringComparison.Ordinal);
         Assert.Contains(receiptSection.Descendants(), element =>
             element.Name.LocalName == "TextBlock" &&
             element.Attribute("Text")?.Value == "{Binding ReceiptBrandNameText}");
         Assert.Contains(receiptSection.Descendants(), element =>
             element.Name.LocalName == "TextBlock" &&
             element.Attribute("Text")?.Value == "{Binding ReceiptReturnPolicyText}");
-        Assert.Contains(receiptSection.Descendants(), element =>
+        Assert.Contains(receiptHost.Descendants(), element =>
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value.Contains("SaveReceiptPrinterCommand", StringComparison.Ordinal) == true);
 
