@@ -23,6 +23,47 @@ public sealed class RawScannerServiceTests
     }
 
     [Fact]
+    public void DispatchResultForDiagnostics_uses_the_configured_repeat_window_and_picks_up_changes_immediately()
+    {
+        using var logs = new ConsoleLogCapture();
+        var settings = new FakeScannerSettingsStore { RepeatWindowMs = 200 };
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor(), settings);
+        var delivered = 0;
+        service.Subscribe("pos", _ => delivered++);
+        service.SetActivePage("pos");
+        var t0 = DateTimeOffset.UtcNow;
+
+        // 窗口 200ms：350ms 后的同条码是真实重扫。
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("ABC123", "scanner-device", RawScannerCompletionKind.Enter, t0));
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("ABC123", "scanner-device", RawScannerCompletionKind.Enter, t0.AddMilliseconds(350)));
+        Assert.Equal(2, delivered);
+
+        // 调到 1000ms 后立即生效（不用重启）：同样 350ms 间隔的第二次读码被当成重复。
+        settings.RepeatWindowMs = 1000;
+        var t1 = t0.AddSeconds(5);
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("XYZ789", "scanner-device", RawScannerCompletionKind.Enter, t1));
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("XYZ789", "scanner-device", RawScannerCompletionKind.Enter, t1.AddMilliseconds(350)));
+        Assert.Equal(3, delivered);
+        Assert.Contains(logs.Lines, line => line.Contains("scan duplicate suppressed source=raw", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_loads_scanner_settings_and_survives_a_load_failure()
+    {
+        var settings = new FakeScannerSettingsStore();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor(), settings);
+
+        await service.InitializeAsync();
+        Assert.Equal(1, settings.LoadCalls);
+
+        // 读本机设置失败时扫码服务照常初始化，窗口保持当前值。
+        settings.FailLoad = true;
+        await service.InitializeAsync();
+        Assert.Equal(2, settings.LoadCalls);
+        Assert.Equal(600, settings.RepeatWindowMs);
+    }
+
+    [Fact]
     public void DispatchResultForDiagnostics_suppresses_raw_delivery_after_matching_keyboard_fallback()
     {
         using var logs = new ConsoleLogCapture();
@@ -384,6 +425,27 @@ public sealed class RawScannerServiceTests
             {
                 _lines.Add(line);
             }
+        }
+    }
+
+    private sealed class FakeScannerSettingsStore : IScannerSettingsStore
+    {
+        public int RepeatWindowMs { get; set; } = 600;
+
+        public int LoadCalls { get; private set; }
+
+        public bool FailLoad { get; set; }
+
+        public Task LoadAsync(CancellationToken cancellationToken = default)
+        {
+            LoadCalls++;
+            return FailLoad ? Task.FromException(new IOException("disk is locked")) : Task.CompletedTask;
+        }
+
+        public Task SetRepeatWindowMsAsync(int milliseconds, CancellationToken cancellationToken = default)
+        {
+            RepeatWindowMs = milliseconds;
+            return Task.CompletedTask;
         }
     }
 }

@@ -611,6 +611,7 @@
   <data name="settings.autosave.section.failed" xml:space="preserve"><value>未保存</value></data>
   <data name="settings.autosave.section.draft" xml:space="preserve"><value>已修改，尚未生效</value></data>
   <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>日结后提醒重启</value></data>
+  <data name="settings.autosave.section.scanner" xml:space="preserve"><value>扫码枪灵敏度</value></data>
   <data name="settings.autosave.section.paymentMethods" xml:space="preserve"><value>付款方式</value></data>
   <data name="settings.autosave.section.square" xml:space="preserve"><value>Square</value></data>
   <data name="settings.autosave.section.linkly" xml:space="preserve"><value>ANZ Linkly</value></data>
