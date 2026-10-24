@@ -12,6 +12,7 @@
  */
 import { resolvePersonName, type ResolvedPersonName } from "@/modules/people/person-name";
 import type { RoleMenuDefinition } from "@/modules/identity-admin/role-logic";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import {
   splitMobileMenuItems,
   userMenuPermissionState,
@@ -259,13 +260,6 @@ export function classifyAccessTargetError(error: unknown): UserAccessErrorKind {
 
 // ───────────────────────── 分店 ─────────────────────────
 
-function compareByName(left: AccessStoreOption, right: AccessStoreOption) {
-  return (left.storeName || left.storeCode).localeCompare(
-    right.storeName || right.storeCode,
-    "en-AU",
-  );
-}
-
 /** 目录 + 已分配的分店按 GUID 去重（后者覆盖前者）并按名称排序。 */
 export function mergeAccessStoreOptions(
   catalog: AccessStoreOption[] = [],
@@ -275,7 +269,8 @@ export function mergeAccessStoreOptions(
   [...catalog, ...assigned].forEach((store) => {
     if (store.storeGUID.trim()) byGuid.set(store.storeGUID, store);
   });
-  return Array.from(byGuid.values()).sort(compareByName);
+  // 统一走「按名字排序」比较器（名字为空退回编号，数字按数值，同名按编号）。
+  return sortStoresByName(Array.from(byGuid.values()));
 }
 
 /**

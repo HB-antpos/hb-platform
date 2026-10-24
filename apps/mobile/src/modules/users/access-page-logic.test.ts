@@ -178,6 +178,11 @@ assert.deepEqual(
   "同 GUID 去重、后者覆盖，并按名称排序",
 );
 assert.deepEqual(
+  mergeAccessStoreOptions([store("A10", "Store 10"), store("A2", "Store 2"), store("Z9", ""), store("B1", "bankstown")]).map((item) => item.storeCode),
+  ["B1", "A2", "A10", "Z9"],
+  "统一按名字排：忽略大小写、数字按数值、名字为空退回编号",
+);
+assert.deepEqual(
   buildAccessStoreOptions({ isAdmin: true, catalog, assigned: [], managedStoreCodes: new Set() }).map((item) => item.storeCode),
   ["B1", "L1", "P1"],
   "管理员看到全部分店",

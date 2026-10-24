@@ -125,6 +125,7 @@ import {
   type ProductReportDisplayContext,
 } from "@/modules/product-report/linked-selection";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { sortByName } from "@/shared/utils/name-sort";
 import { useAuthStore } from "@/store/auth-store";
 
 // 页面上商品卡的「商品分店数据」下钻；供应商的商品明细 / 分店数据由 SupplierDetailSheet 负责。
@@ -2441,6 +2442,11 @@ function StorePickerModal({
   onSelect: (storeCode?: string) => void;
   onDismiss: () => void;
 }) {
+  // 分店选项统一按分店名字排序（label 即分店名，名字为空退回编号 value）；不改变上游 options 的顺序。
+  const sortedOptions = useMemo(
+    () => sortByName(options, (option) => ({ name: option.label, code: option.value })),
+    [options],
+  );
   return (
     <Portal>
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
@@ -2459,7 +2465,7 @@ function StorePickerModal({
           >
             {labelAll}
           </Button>
-          {options.map((option) => (
+          {sortedOptions.map((option) => (
             <Button
               key={option.value}
               mode={selectedStoreCode === option.value ? "contained" : "outlined"}

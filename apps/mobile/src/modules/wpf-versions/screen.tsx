@@ -2,6 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -78,6 +79,7 @@ import type {
   WpfStoreOption,
 } from "./types";
 import { listSeparator } from "@/shared/i18n/punctuation";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 
 const PAGE_SIZE = 10;
 const DEVICE_PAGE_SIZE = 30;
@@ -177,7 +179,7 @@ export function WpfReleaseView({
   onBusyChange,
   onChanged,
 }: WpfReleaseViewProps) {
-  const { t } = useAppTranslation(["wpfVersions", "common"]);
+  const { t, language } = useAppTranslation(["wpfVersions", "common"]);
   const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const [query, setQuery] = useState<WpfReleaseQuery>({
     channel,
@@ -221,6 +223,8 @@ export function WpfReleaseView({
     EMPTY_POLICY(channel),
   );
   const [stores, setStores] = useState<WpfStoreOption[]>([]);
+  // 目标分店勾选列表统一按分店名字排序（接口原序不保证）。
+  const sortedStores = useMemo(() => sortStoresByName(stores, language), [stores, language]);
   const [devices, setDevices] = useState<WpfDeviceOption[]>([]);
   const [deviceKeywordDraft, setDeviceKeywordDraft] = useState("");
   const [deviceKeywordApplied, setDeviceKeywordApplied] = useState("");
@@ -1137,7 +1141,7 @@ export function WpfReleaseView({
           {targetLoading && stores.length === 0 ? (
             <ActivityIndicator />
           ) : (
-            stores.map((store) => (
+            sortedStores.map((store) => (
               <Checkbox.Item
                 key={store.storeGuid}
                 label={

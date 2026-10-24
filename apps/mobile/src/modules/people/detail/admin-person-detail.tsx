@@ -20,6 +20,7 @@ import { usePrinterStore } from "@/modules/printer/state";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { fetchActiveSessionSummary, fetchDirectPermissionSummary, updateIdentityUserStatus } from "./admin-detail-api";
@@ -189,13 +190,14 @@ export function AdminPersonDetail({
   }), [person?.active, person?.roleNames, person?.username, primaryName, storeCode, userGuid]);
   const storeSummary = useMemo(() => summarizeStoreRelations(linkedStores), [linkedStores]);
   // 收银权限按分店设置：店长级管理者只能选自己管理的分店；其他人可选目标的全部关联分店。
+  // 选择器列表统一按分店名字排序（接口原序不保证）。
   const posStores = useMemo(
-    () => selectPosStores(linkedStores, {
+    () => sortStoresByName(selectPosStores(linkedStores, {
       restrictToGuids: access.isStoreLevelManager
         ? (currentUser?.stores ?? []).filter((store) => store.isPrimary === true && store.storeGUID).map((store) => store.storeGUID as string)
         : null,
-    }),
-    [access.isStoreLevelManager, currentUser?.stores, linkedStores],
+    }), language),
+    [access.isStoreLevelManager, currentUser?.stores, language, linkedStores],
   );
 
   const openAccess = useCallback((section: "stores" | "roles" | "permissions", copy = false) => {
