@@ -397,10 +397,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
         if (HasDailyCloseDraft && IsCurrentDraftScope())
         {
-            IsDiscardDailyCloseDraftConfirmationOpen = false;
-            IsCashCountWorkspaceOpen = true;
-            StatusMessage = T("dailyClose.status.draftResumed", "Daily close draft resumed.");
-            await RefreshAutoSettlementHintAsync(cancellationToken);
+            await ResumeDailyCloseDraftAsync(cancellationToken);
             return;
         }
 
@@ -448,6 +445,48 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             {
                 IsCashCountWorkspaceOpen = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// 继续未保存的日结草稿：草稿保留期间（例如先回收银台继续结账）可能又有新销售，
+    /// 所以每次继续都重新统计并刷新汇总；已录入的点钞数量保持不变，只有应有现金等数字更新。
+    /// 重新统计失败时留在历史页并提示原因，不打开用旧数字对账的点钞页。
+    /// </summary>
+    private async Task ResumeDailyCloseDraftAsync(CancellationToken cancellationToken)
+    {
+        IsDiscardDailyCloseDraftConfirmationOpen = false;
+        IsBusy = true;
+        var resumed = false;
+
+        try
+        {
+            var previousReport = _currentReport;
+            var latestReport = await _dailyCloseService.LoadReportAsync(Session, BusinessDate, cancellationToken);
+            ApplyReport(latestReport);
+            StatusMessage = previousReport is not null && !previousReport.HasSameFiguresAs(latestReport)
+                ? T(
+                    "dailyClose.status.draftResumedRefreshed",
+                    "Daily close draft resumed. Sales changed since it was opened - figures were refreshed, please check them.")
+                : T("dailyClose.status.draftResumed", "Daily close draft resumed.");
+            resumed = true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            if (resumed)
+            {
+                IsCashCountWorkspaceOpen = true;
+            }
+        }
+
+        if (resumed)
+        {
+            await RefreshAutoSettlementHintAsync(cancellationToken);
         }
     }
 
@@ -625,7 +664,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         var returnToPosDeferred = false;
         try
         {
-            var archive = await _dailyCloseService.SaveAsync(Session, BusinessDate, BuildCashCounts(), cancellationToken);
+            // 带上点钞时界面显示的汇总快照：保存时若发现销售已变化，服务层会拒绝保存，
+            // 由下面的 DailyCloseReportChangedException 分支刷新界面让收银员重新核对。
+            var archive = await _dailyCloseService.SaveAsync(Session, BusinessDate, BuildCashCounts(), _currentReport, cancellationToken);
             // 以存档金额为准记录应有、实点与差异，避免界面草稿值与实际保存值不一致。
             OperationAuditEvents.RecordDailyCloseSave(
                 _operationAuditLogger,
@@ -694,6 +735,24 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             SelectedTabIndex = HistoryTabIndex;
             await RefreshArchivesAsync(cancellationToken, archive.DailyCloseGuid);
             StatusMessage = dailyCloseStatus;
+        }
+        catch (DailyCloseReportChangedException changed)
+        {
+            // 点钞期间有新订单/退款入账：没有保存也没有打印。草稿和已录入的点钞数量原样保留，
+            // 只把应有现金等汇总刷新成最新值，收银员核对（必要时重点）后再次保存即可。
+            ApplyReport(changed.LatestReport);
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.DailyCloseSave,
+                "Failed",
+                Session,
+                reasonCode: "REPORT_CHANGED",
+                safeMessage: nameof(DailyCloseReportChangedException),
+                correlationId: correlation.CorrelationId,
+                traceId: correlation.TraceId);
+            StatusMessage = T(
+                "dailyClose.status.reportChanged",
+                "Sales changed while counting. Figures were refreshed and nothing was saved - check Expected Cash and the difference, then save again.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

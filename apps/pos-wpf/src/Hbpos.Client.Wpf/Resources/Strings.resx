@@ -1460,6 +1460,8 @@
   <data name="dailyClose.status.draftPreparing" xml:space="preserve"><value>Preparing a new daily close...</value></data>
   <data name="dailyClose.status.draftReady" xml:space="preserve"><value>New daily close ready for cash counting.</value></data>
   <data name="dailyClose.status.draftResumed" xml:space="preserve"><value>Daily close draft resumed.</value></data>
+  <data name="dailyClose.status.draftResumedRefreshed" xml:space="preserve"><value>Daily close draft resumed. Sales changed since it was opened - figures were refreshed, please check them.</value></data>
+  <data name="dailyClose.status.reportChanged" xml:space="preserve"><value>Sales changed while counting. Figures were refreshed and nothing was saved - check Expected Cash and the difference, then save again.</value></data>
   <data name="dailyClose.status.draftPreserved" xml:space="preserve"><value>Daily close draft preserved. Select Continue Daily Close when you are ready.</value></data>
   <data name="dailyClose.status.draftDiscarded" xml:space="preserve"><value>Daily close draft discarded.</value></data>
   <data name="dailyClose.status.draftIdentityChanged" xml:space="preserve"><value>The daily close draft was discarded because the store, terminal, or cashier changed.</value></data>

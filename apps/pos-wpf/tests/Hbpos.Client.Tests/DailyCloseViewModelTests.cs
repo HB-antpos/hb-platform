@@ -581,7 +581,7 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
-    public async Task Close_and_continue_daily_close_preserve_counts_without_refreshing_summary()
+    public async Task Close_and_continue_daily_close_preserve_counts_and_refresh_summary()
     {
         var service = new FakeDailyCloseService();
         var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession());
@@ -602,7 +602,8 @@ public sealed class DailyCloseViewModelTests
 
         await viewModel.CreateOrResumeDailyCloseCommand.ExecuteAsync(null);
 
-        Assert.Equal(reportLoads, service.LoadReportCallCount);
+        // 继续草稿时重新统计一次汇总；已录入的点钞数量不受影响。
+        Assert.Equal(reportLoads + 1, service.LoadReportCallCount);
         Assert.True(viewModel.HasDailyCloseDraft);
         Assert.True(viewModel.IsCashCountWorkspaceOpen);
         Assert.Equal(3, note.Count);
@@ -631,7 +632,97 @@ public sealed class DailyCloseViewModelTests
 
         Assert.True(viewModel.IsCashCountWorkspaceOpen);
         Assert.Equal(5, coin.Count);
-        Assert.Equal(reportLoads, service.LoadReportCallCount);
+        Assert.Equal(reportLoads + 1, service.LoadReportCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_draft_refreshes_summary_when_cash_sales_were_added_while_away()
+    {
+        var service = new FakeDailyCloseService();
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession());
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        var note = viewModel.Denominations.Single(item => item.Label == "$20");
+        note.Count = 4;
+        viewModel.CloseCashCountWorkspaceCommand.Execute(null);
+        Assert.Equal(145.35m, viewModel.ExpectedCashAmount);
+
+        // 离开日结页去收银台继续结账，期间多了一笔 7.99 的现金销售。
+        service.ReportOverride = FakeDailyCloseService.CreateReportWithExtraCashSale(7.99m);
+        await viewModel.LoadAsync();
+        await viewModel.CreateOrResumeDailyCloseCommand.ExecuteAsync(null);
+
+        Assert.Equal(153.34m, viewModel.ExpectedCashAmount);
+        Assert.Equal(19, viewModel.TransactionCount);
+        Assert.True(viewModel.HasDailyCloseDraft);
+        Assert.True(viewModel.IsCashCountWorkspaceOpen);
+        Assert.Equal(4, note.Count);
+        Assert.Contains("refreshed", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Resume_draft_failure_stays_on_history_and_keeps_the_draft()
+    {
+        var service = new FakeDailyCloseService();
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession());
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        var note = viewModel.Denominations.Single(item => item.Label == "$20");
+        note.Count = 2;
+        viewModel.CloseCashCountWorkspaceCommand.Execute(null);
+        service.LoadReportException = new InvalidOperationException("summary unavailable");
+
+        await viewModel.CreateOrResumeDailyCloseCommand.ExecuteAsync(null);
+
+        // 取不到最新汇总时不打开用旧数字对账的点钞页，但草稿和点钞数量都保留，恢复后可继续。
+        Assert.False(viewModel.IsCashCountWorkspaceOpen);
+        Assert.True(viewModel.HasDailyCloseDraft);
+        Assert.Equal(2, note.Count);
+        Assert.Equal("summary unavailable", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Save_passes_the_counting_snapshot_to_the_service()
+    {
+        var service = new FakeDailyCloseService();
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession());
+        await OpenNewDailyCloseDraftAsync(viewModel);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.NotNull(service.LastExpectedReport);
+        Assert.Equal(145.35m, service.LastExpectedReport!.ExpectedCashAmount);
+        Assert.Equal(18, service.LastExpectedReport.OrderCount);
+    }
+
+    [Fact]
+    public async Task Save_with_changed_sales_refreshes_figures_without_saving_or_printing()
+    {
+        var service = new FakeDailyCloseService();
+        var printService = new FakeDailyClosePrintService();
+        var viewModel = new DailyCloseViewModel(service, printService, CreateSession());
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        var note = viewModel.Denominations.Single(item => item.Label == "$20");
+        note.Count = 3;
+        // 点钞期间又入账一笔 7.99 的现金销售：服务层保存时发现与快照不一致。
+        service.SaveChangedReport = FakeDailyCloseService.CreateReportWithExtraCashSale(7.99m);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, printService.PrintCallCount);
+        Assert.Null(service.LastSavedArchive);
+        Assert.Equal(153.34m, viewModel.ExpectedCashAmount);
+        Assert.Equal(19, viewModel.TransactionCount);
+        // 草稿、点钞页和已录入数量原样保留，收银员核对后可直接再次保存。
+        Assert.True(viewModel.HasDailyCloseDraft);
+        Assert.True(viewModel.IsCashCountWorkspaceOpen);
+        Assert.Equal(3, note.Count);
+        Assert.Contains("nothing was saved", viewModel.StatusMessage);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, printService.PrintCallCount);
+        Assert.NotNull(service.LastSavedArchive);
+        Assert.Equal(153.34m, service.LastExpectedReport!.ExpectedCashAmount);
+        Assert.False(viewModel.HasDailyCloseDraft);
     }
 
     [Fact]
@@ -1558,9 +1649,17 @@ public sealed class DailyCloseViewModelTests
 
         public int SaveCallCount { get; private set; }
 
-        public Exception? LoadReportException { get; init; }
+        public Exception? LoadReportException { get; set; }
 
         public Exception? SaveException { get; init; }
+
+        /// <summary>设置后，后续 LoadReportAsync 返回它，用来模拟点钞期间又有新订单入账。</summary>
+        public DailyCloseReport? ReportOverride { get; set; }
+
+        /// <summary>设置后，下一次 SaveAsync 抛「销售已变化」并带上这份最新汇总（只触发一次）。</summary>
+        public DailyCloseReport? SaveChangedReport { get; set; }
+
+        public DailyCloseReport? LastExpectedReport { get; private set; }
 
         public Task<DailyCloseReport> LoadReportAsync(
             PosSessionState session,
@@ -1575,16 +1674,26 @@ public sealed class DailyCloseViewModelTests
                 throw LoadReportException;
             }
 
-            return Task.FromResult(CreateReport());
+            return Task.FromResult(ReportOverride ?? CreateReport());
         }
 
         public Task<DailyCloseArchive> SaveAsync(
             PosSessionState session,
             DateTime businessDate,
             IReadOnlyList<CashDenominationCount> cashCounts,
+            DailyCloseReport? expectedReport = null,
             CancellationToken cancellationToken = default)
         {
             SaveCallCount++;
+            LastExpectedReport = expectedReport;
+            if (SaveChangedReport is not null)
+            {
+                var changed = SaveChangedReport;
+                SaveChangedReport = null;
+                ReportOverride = changed;
+                throw new DailyCloseReportChangedException(changed);
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             if (SaveException is not null)
             {
@@ -1609,6 +1718,22 @@ public sealed class DailyCloseViewModelTests
             LastArchivesRequestedDate = businessDate;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<DailyCloseArchive>>(_archives.ToArray());
+        }
+
+        /// <summary>在默认汇总上多一笔现金销售（订单数 +1，现金销售与净额各加 amount）。</summary>
+        public static DailyCloseReport CreateReportWithExtraCashSale(decimal amount)
+        {
+            var baseline = CreateReport();
+            return baseline with
+            {
+                OrderCount = baseline.OrderCount + 1,
+                PaymentSummaries =
+                [
+                    new DailyClosePaymentSummary(PaymentMethodKind.Cash, 170.65m + amount, 25.30m, 145.35m + amount, 7),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Card, 809.85m, 0m, 809.85m, 12),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Voucher, 0m, 0m, 0m, 0)
+                ]
+            };
         }
 
         private static DailyCloseReport CreateReport()

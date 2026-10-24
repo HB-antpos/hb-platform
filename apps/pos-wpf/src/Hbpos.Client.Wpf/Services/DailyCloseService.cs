@@ -61,10 +61,41 @@ public sealed record DailyCloseReport(
     // 所以实点现金必然是 5 分的整数倍，对账必须拿进位后的金额比，否则每天都会有几分钱的假差额。
     public decimal ExpectedCashAmount => Round(SystemCashAmount + CashRoundingAmount);
 
+    /// <summary>
+    /// 两份汇总的订单数和现金数字是否一致（订单数、现金销售/退款/净额、现金进位）。
+    /// 点钞草稿的快照与保存时重新统计的结果在这两项上一致，才说明收银员点钞时看到的应有现金
+    /// 就是最终写进存档和小票的应有现金；刷卡、礼券金额不影响现金对账，不参与比较
+    /// （刷卡新单也会使订单数变化，同样会被识别）。
+    /// </summary>
+    public bool HasSameFiguresAs(DailyCloseReport other)
+    {
+        if (OrderCount != other.OrderCount || CashRoundingAmount != other.CashRoundingAmount)
+        {
+            return false;
+        }
+
+        // 缺现金汇总项时按全 0 处理，避免列表缺项造成误判。
+        var mine = PaymentSummaries.FirstOrDefault(item => item.Method == PaymentMethodKind.Cash);
+        var theirs = other.PaymentSummaries.FirstOrDefault(item => item.Method == PaymentMethodKind.Cash);
+        return (mine?.SalesAmount ?? 0m) == (theirs?.SalesAmount ?? 0m) &&
+               (mine?.RefundAmount ?? 0m) == (theirs?.RefundAmount ?? 0m) &&
+               (mine?.NetAmount ?? 0m) == (theirs?.NetAmount ?? 0m);
+    }
+
     private static decimal Round(decimal amount)
     {
         return decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
     }
+}
+
+/// <summary>
+/// 保存日结时发现销售数据已和点钞时的快照不一致（点钞期间又有新订单/退款入账）。
+/// 此时不落库、不打印，由界面带着最新汇总让收银员重新核对后再保存。
+/// </summary>
+public sealed class DailyCloseReportChangedException(DailyCloseReport latestReport)
+    : InvalidOperationException("Sales changed while the daily close was open.")
+{
+    public DailyCloseReport LatestReport { get; } = latestReport;
 }
 
 public sealed record DailyCloseArchive(
@@ -109,10 +140,15 @@ public interface IDailyCloseService
         DateTime businessDate,
         CancellationToken cancellationToken = default);
 
+    /// <param name="expectedReport">
+    /// 收银员点钞时界面上看到的汇总快照。保存时会重新统计一次，数字与快照不一致就抛
+    /// <see cref="DailyCloseReportChangedException"/> 而不保存；传 null 表示不做一致性校验。
+    /// </param>
     Task<DailyCloseArchive> SaveAsync(
         PosSessionState session,
         DateTime businessDate,
         IReadOnlyList<CashDenominationCount> cashCounts,
+        DailyCloseReport? expectedReport = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DailyCloseArchive>> GetArchivesAsync(
@@ -179,6 +215,7 @@ public sealed class DailyCloseService(
         PosSessionState session,
         DateTime businessDate,
         IReadOnlyList<CashDenominationCount> cashCounts,
+        DailyCloseReport? expectedReport = null,
         CancellationToken cancellationToken = default)
     {
         var sessionSnapshot = session with { };
@@ -188,6 +225,13 @@ public sealed class DailyCloseService(
         return await Task.Run(async () =>
         {
             var report = await repository.LoadReportAsync(sessionSnapshot, businessDateSnapshot, cancellationToken);
+            // 点钞期间收银台仍可收款：保存前拿最新统计和点钞时的快照比对，不一致就拦下，
+            // 避免小票/存档上的应有现金与收银员点钞时看到的不是同一个数，造成假短款或假长款。
+            if (expectedReport is not null && !expectedReport.HasSameFiguresAs(report))
+            {
+                throw new DailyCloseReportChangedException(report);
+            }
+
             var archive = await repository.SaveAsync(report, cashCountsSnapshot, cancellationToken);
             // SaveAsync 已提交后不能再把调用方取消报告成“日结未保存”。
             await TryCheckpointWalAfterDailyCloseAsync(CancellationToken.None);
@@ -761,6 +805,7 @@ public sealed class NoopDailyCloseService : IDailyCloseService
         PosSessionState session,
         DateTime businessDate,
         IReadOnlyList<CashDenominationCount> cashCounts,
+        DailyCloseReport? expectedReport = null,
         CancellationToken cancellationToken = default)
     {
         var report = CreateEmptyReport(session, businessDate);
