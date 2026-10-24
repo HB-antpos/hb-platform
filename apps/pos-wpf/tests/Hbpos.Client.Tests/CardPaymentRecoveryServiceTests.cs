@@ -6418,8 +6418,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
             attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.FinalizePending, attempts.RecoveryPhase);
         Assert.Null(attempts.AcknowledgedAt);
-        // 结案前的实时核验只是一次只读状态查询；除此之外没有任何后端副作用。
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，既没有状态查询也没有任何后端副作用。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(originalRevision, cart.Revision);
