@@ -22,7 +22,6 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     [
         "MainWindow.xaml",
         Path.Combine("Themes", "PosTheme.xaml"),
-        Path.Combine("Themes", "SettingsPageHost.xaml"),
         Path.Combine("Views", "CardRecoveryCenterView.xaml"),
         Path.Combine("Views", "Controls", "ApiServerSettingsPanel.xaml"),
         Path.Combine("Views", "Controls", "NetworkDiagnosticsPanel.xaml"),

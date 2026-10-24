@@ -8,7 +8,7 @@ namespace Hbpos.Client.Wpf.Views.Controls;
 /// 设置页的分类页面容器（卡片）：顶部可选二级页签条（<see cref="SubTabs"/>）、中间正文（<see cref="ContentControl.Content"/>，
 /// 外包 ScrollViewer，仅作为内容超出时的兜底）、底部可选固定操作条（<see cref="Footer"/>，永不随正文滚动）。
 /// 设计目标是 1366×632 视口下正文放得下、不出现滚动条；SubTabs / Footer 为 null 时对应行整体折叠。
-/// 外观与模板见 Themes/SettingsPageHost.xaml（样式键 SettingsPageHostStyle，并注册了隐式样式）。
+/// 外观与模板见 Themes/PosTheme.xaml（样式键 SettingsPageHostStyle，并注册了隐式样式）。
 /// </summary>
 public sealed class SettingsPageHost : ContentControl
 {

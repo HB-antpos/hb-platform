@@ -504,10 +504,10 @@ public sealed partial class SettingsViewModelTests
                 element.Attribute("Visibility")?.Value.Contains(
                     "IsPaymentTerminalSelected",
                     StringComparison.Ordinal) == true);
-        // 支付页由 SettingsPageHost 承载；正文外的兜底 ScrollViewer 在它的控件模板里（Themes/SettingsPageHost.xaml）。
+        // 支付页由 SettingsPageHost 承载；正文外的兜底 ScrollViewer 在它的控件模板里（Themes/PosTheme.xaml）。
         Assert.Equal("{StaticResource SettingsPageHostStyle}", paymentSection.Attribute("Style")?.Value);
         var hostThemePath = Path.Combine(
-            Path.GetDirectoryName(xamlPath)!, "..", "..", "Themes", "SettingsPageHost.xaml");
+            Path.GetDirectoryName(xamlPath)!, "..", "..", "Themes", "PosTheme.xaml");
         var contentScrollViewer = System.Xml.Linq.XDocument.Load(hostThemePath)
             .Descendants()
             .Single(element =>
