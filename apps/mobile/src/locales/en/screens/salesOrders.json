@@ -82,7 +82,9 @@
     "branchesSelected": "{{first}} and {{count}} more",
     "branchesEmpty": "No matching stores",
     "branchClear": "Clear",
-    "branchConfirm": "Done ({{count}})"
+    "branchConfirm": "Done ({{count}})",
+    "refundTier": "Refund type",
+    "refundHint": "Orders that contain refunded items (a refund order, or an order with returns). Order amount above 0 is a partial refund (orange); below 0 is a full refund (red)."
   },
   "detail": {
     "title": "Order details",
@@ -116,5 +118,10 @@
   },
   "camera": {
     "title": "Scan to search orders"
+  },
+  "refund": {
+    "all": "All refunds",
+    "partial": "Partial refund",
+    "full": "Full refund"
   }
 }

@@ -1,16 +1,31 @@
 <UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.ApiServerSettingsPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Hbpos.Client.Wpf.Views.Controls"
              xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
+    <!-- 根 Grid 里叠两套布局，按 IsSettingsLayout 二选一：
+         1. 原布局（登录页、设备注册页沿用，完全不变）：地址、测试连接 / 保存、入口状态、网络检测与一键修复都在这一张卡里。
+         2. 设置页首屏布局（IsSettingsLayout=True）：只保留地址区；测试连接 / 保存地址 / 检测网络 / 复制报告改由设置页底栏承载（同一批命令），
+            网络检测另由 NetworkDiagnosticsPanel 放在第二栏。 -->
+    <Grid>
     <Border Background="{DynamicResource PosSurfaceBrush}"
             BorderBrush="{DynamicResource PosDividerBrush}"
             BorderThickness="1"
             CornerRadius="8"
             Padding="16">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsSettingsLayout, RelativeSource={RelativeSource AncestorType={x:Type local:ApiServerSettingsPanel}}}" Value="True">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
         <StackPanel>
             <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions>
@@ -114,6 +129,14 @@
                            TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Polite" />
             </Border>
+
+            <!-- 入口状态（只读）：总部设置的首选入口 / 当前实际入口 / 是否回退中。当前地址不在入口组内时隐藏。 -->
+            <TextBlock Text="{Binding EntryStatusText}"
+                       Visibility="{Binding HasEntryStatus, Converter={StaticResource BoolToVis}}"
+                       FontSize="12"
+                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0" />
 
             <!-- 网络检测与一键修复：检测只读；修复先确认、可还原。服务缺失时整块隐藏。 -->
             <StackPanel Margin="0,12,0,0"
@@ -333,4 +356,176 @@
             </StackPanel>
         </StackPanel>
     </Border>
+
+    <!-- 设置页首屏布局（IsSettingsLayout=True 时显示）：浅底卡片，输入与按钮统一 44 高（触屏最小），不含任何操作按钮。 -->
+    <Border Background="{DynamicResource PosSurfaceAltBrush}"
+            BorderBrush="{DynamicResource PosDividerBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="12,10">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsSettingsLayout, RelativeSource={RelativeSource AncestorType={x:Type local:ApiServerSettingsPanel}}}" Value="True">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+        <StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <materialDesign:PackIcon Kind="ServerNetwork"
+                                         Width="22"
+                                         Height="22"
+                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,8,0" />
+                <TextBlock Text="{loc:Loc settings.serverAddress.title}"
+                           FontSize="15"
+                           FontWeight="ExtraBold"
+                           Foreground="{DynamicResource PosTextBrush}"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+            <TextBlock Text="{loc:Loc settings.serverAddress.description}"
+                       FontSize="12"
+                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0" />
+
+            <TextBlock Text="{loc:Loc settings.serverAddress.address}"
+                       FontSize="12"
+                       FontWeight="Bold"
+                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                       Margin="0,8,0,4" />
+            <!-- 单行输入框不接管触摸平移，让所在页面容器的 ScrollViewer 处理纵向拖动。 -->
+            <TextBox Text="{Binding ServerAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.Name="{loc:Loc settings.serverAddress.address}"
+                     Style="{StaticResource PosSearchTextBoxStyle}"
+                     Height="44"
+                     FontSize="14"
+                     FontFamily="Consolas"
+                     ScrollViewer.PanningMode="None" />
+
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Grid.Column="0"
+                        Command="{Binding UseDevelopmentAddressCommand}"
+                        AutomationProperties.Name="{loc:Loc settings.serverAddress.useDevelopment}"
+                        Style="{StaticResource PosSecondaryButtonStyle}"
+                        Height="44"
+                        Content="{loc:Loc settings.serverAddress.useDevelopment}" />
+                <Button Grid.Column="2"
+                        Command="{Binding UseReleaseAddressCommand}"
+                        AutomationProperties.Name="{loc:Loc settings.serverAddress.useRelease}"
+                        Style="{StaticResource PosSecondaryButtonStyle}"
+                        Height="44"
+                        Content="{loc:Loc settings.serverAddress.useRelease}" />
+            </Grid>
+
+            <!-- 状态消息：需要重启时变警告色。 -->
+            <Border BorderThickness="1"
+                    CornerRadius="8"
+                    MinHeight="36"
+                    Padding="10,6"
+                    Margin="0,8,0,0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding RestartRequired}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding StatusMessage}"
+                           FontSize="12.5"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           AutomationProperties.LiveSetting="Polite" />
+            </Border>
+
+            <!-- 入口状态（只读，固定在状态消息下方）：总部设置的首选入口 / 当前实际入口两行，回退时再多一行「回退中」芯片并整块变警告色。
+                 当前地址不在入口组内（HasEntryStatus 为假）时整块折叠。读屏用 EntryStatusText 那一整句。 -->
+            <Border BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="10,8"
+                    Margin="0,8,0,0"
+                    AutomationProperties.Name="{Binding EntryStatusText}"
+                    Visibility="{Binding HasEntryStatus, Converter={StaticResource BoolToVis}}">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsEntryFallback}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Text="{loc:Loc settings.serverAddress.entry.preferred}"
+                               FontSize="12.5"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <TextBlock Grid.Row="0" Grid.Column="2"
+                               Text="{Binding PreferredEntryText}"
+                               FontSize="12.5"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource PosTextBrush}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="1" Grid.Column="0"
+                               Text="{loc:Loc settings.serverAddress.entry.current}"
+                               FontSize="12.5"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               Margin="0,3,0,0" />
+                    <TextBlock Grid.Row="1" Grid.Column="2"
+                               Text="{Binding CurrentEntryText}"
+                               FontSize="12.5"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource PosTextBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,3,0,0" />
+                    <Border Grid.Row="2" Grid.Column="2"
+                            Background="{DynamicResource PosWarningSoftBrush}"
+                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="10,1"
+                            Margin="0,4,0,0"
+                            HorizontalAlignment="Left"
+                            Visibility="{Binding IsEntryFallback, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{loc:Loc settings.serverAddress.entry.fallbackChip}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource PosWarningTextBrush}" />
+                    </Border>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </Border>
+    </Grid>
 </UserControl>

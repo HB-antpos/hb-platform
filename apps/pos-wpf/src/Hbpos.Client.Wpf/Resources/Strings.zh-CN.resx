@@ -4170,4 +4170,7 @@
   <data name="pendingChoice.prompt.confirm.all" xml:space="preserve">
     <value>放弃 {0} 项</value>
   </data>
+  <data name="payment.card.completionStalled.message" xml:space="preserve">
+    <value>刷卡已批准，但 POS 保存订单耗时过长。请勿再次刷卡，点击「打开卡交易异常中心」完成订单。</value>
+  </data>
 </root>

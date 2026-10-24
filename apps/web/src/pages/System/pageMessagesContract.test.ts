@@ -98,6 +98,9 @@ const pages = [
       'src/pages/PosAdmin/DeviceRegistration/EmergencyLoginModal.tsx',
       'src/pages/PosAdmin/DeviceRegistration/deviceCells.tsx',
       'src/pages/PosAdmin/DeviceRegistration/DeviceActivationCodePanel.tsx',
+      // 收银入口视图 + 设备列表「线路」列
+      'src/pages/PosAdmin/DeviceRegistration/PosApiEntryPanel.tsx',
+      'src/pages/PosAdmin/DeviceRegistration/posApiEntryCells.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/DeviceRegistration/deviceManagementMessages.zh.json',

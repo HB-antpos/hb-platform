@@ -50,6 +50,11 @@ namespace BlazorApp.Shared.DTOs
         public decimal? DiscountAmountMax { get; set; }
         public decimal? ActualPayMin { get; set; }
         public decimal? ActualPayMax { get; set; }
+        /// <summary>
+        /// 退货筛选：null 不限；any 含退货商品的订单（旧 POS 退款单 Status=3，或新 POS 订单里夹带的退货记录）；
+        /// partial 含退货但整单金额不为负（橙）；full 含退货且整单金额为负（红）。取值见 <c>PosmSalesOrderListRules.NormalizeRefundFilter</c>。
+        /// </summary>
+        public string? RefundFilter { get; set; }
         public string? SortField { get; set; }
         public string? SortDirection { get; set; }
         public int PageNumber { get; set; } = 1;
@@ -77,6 +82,11 @@ namespace BlazorApp.Shared.DTOs
         public decimal? DiscountAmount { get; set; }
         public decimal? ActualAmount { get; set; }
         public int? Status { get; set; }
+        /// <summary>
+        /// 订单是否含退货商品：旧 POS 的退款单（Status=3），或新 POS 订单里夹带了退货记录（sales_return_record）。
+        /// 仅列表当前页与订单详情返回；整单金额为正是「部分退款」（橙），为负是「整单退款」（红）。
+        /// </summary>
+        public bool HasRefundItems { get; set; }
         /// <summary>支付方式（去重、升序），仅列表当前页返回：1 现金、2 刷卡、3 代金券。</summary>
         public List<int>? PaymentMethods { get; set; }
         /// <summary>关键词命中的明细商品，仅带关键词的列表查询返回。</summary>
@@ -146,6 +156,8 @@ namespace BlazorApp.Shared.DTOs
         public List<string>? BranchCodes { get; set; }
         public OrderType? OrderType { get; set; }
         public string? Keyword { get; set; }
+        /// <summary>退货筛选：any / partial / full，其余按不限处理；与 OrderType 可叠加。</summary>
+        public string? RefundFilter { get; set; }
         /// <summary>按下单时间排序：asc / desc，缺省 desc（最新在前）。</summary>
         public string? SortDirection { get; set; }
         public int PageNumber { get; set; } = 1;
@@ -176,6 +188,8 @@ namespace BlazorApp.Shared.DTOs
         public decimal? DiscountAmount { get; set; }
         public decimal? ActualAmount { get; set; }
         public int? Status { get; set; }
+        /// <summary>订单含退货商品（退款单，或订单里夹带了退货记录）；颜色由整单金额正负决定。</summary>
+        public bool HasRefundItems { get; set; }
         public List<PosmSalesOrderMatchedProductDto> MatchedProducts { get; set; } = new();
 
         public static PosmSalesOrderMobileItemDto From(
@@ -196,6 +210,7 @@ namespace BlazorApp.Shared.DTOs
                 DiscountAmount = source.DiscountAmount,
                 ActualAmount = source.ActualAmount,
                 Status = source.Status,
+                HasRefundItems = source.HasRefundItems,
                 MatchedProducts = matchedProducts ?? new(),
             };
     }

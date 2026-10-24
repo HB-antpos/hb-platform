@@ -10,7 +10,9 @@ import {
 } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  SALES_ORDER_REFUND_TYPE,
   formatSalesOrderGuidTail,
+  resolveSalesOrderRefundTone,
   resolveSalesOrderStatusKey,
 } from "@/modules/sales-orders/logic";
 import type {
@@ -20,7 +22,7 @@ import type {
 } from "@/modules/sales-orders/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { SalesOrderStatusTag } from "./SalesOrderStatusTag";
+import { REFUND_TONES, SalesOrderRefundTag, SalesOrderStatusTag } from "./SalesOrderStatusTag";
 import { formatSalesOrderMoney, formatSalesOrderTime, formatShortDate } from "./format";
 
 export interface SalesOrdersViewProps {
@@ -167,7 +169,9 @@ export function SalesOrdersView({
             label={
               filters.orderType === -1
                 ? t("status.all")
-                : t(`status.${resolveSalesOrderStatusKey(filters.orderType)}`)
+                : filters.orderType === SALES_ORDER_REFUND_TYPE && filters.refundTier !== "all"
+                  ? `${t("status.refunded")} · ${t(`refund.${filters.refundTier}`)}`
+                  : t(`status.${resolveSalesOrderStatusKey(filters.orderType)}`)
             }
             active={filters.orderType !== -1}
             onPress={onOpenFilters}
@@ -290,11 +294,16 @@ function OrderCard({ item, onPress }: { item: SalesOrderListItem; onPress: () =>
   const { t } = useAppTranslation("salesOrders");
   const matched = item.matchedProducts[0];
   const extra = item.matchedProducts.length - 1;
+  // 含退款商品：整单金额不为负是部分退款（橙），为负是整单退款（红）；金额与状态标签同色。
+  const refundTone = resolveSalesOrderRefundTone(item);
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.card}>
       <View style={styles.cardRow}>
         <Text style={styles.orderGuid}>{formatSalesOrderGuidTail(item.orderGuid)}</Text>
-        <SalesOrderStatusTag status={item.status} />
+        <View style={styles.cardTags}>
+          {refundTone && item.status !== SALES_ORDER_REFUND_TYPE ? <SalesOrderRefundTag tone={refundTone} /> : null}
+          <SalesOrderStatusTag status={item.status} refundTone={refundTone} />
+        </View>
       </View>
       <View style={styles.cardRow}>
         <Text numberOfLines={1} style={[styles.cardMeta, styles.cardMetaGrow]}>
@@ -309,7 +318,9 @@ function OrderCard({ item, onPress }: { item: SalesOrderListItem; onPress: () =>
             items: item.quantityTotal ?? item.itemCount ?? 0,
           })}
         </Text>
-        <Text style={styles.cardAmount}>{formatSalesOrderMoney(item.actualAmount)}</Text>
+        <Text style={[styles.cardAmount, refundTone ? { color: REFUND_TONES[refundTone].color } : null]}>
+          {formatSalesOrderMoney(item.actualAmount)}
+        </Text>
       </View>
       {matched ? (
         <View style={styles.matched}>
@@ -423,6 +434,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cardRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  cardTags: { flexDirection: "row", alignItems: "center", gap: 6 },
   cardAmounts: { marginTop: 2 },
   orderGuid: { fontSize: 13, fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
   cardMeta: { fontSize: 12, color: HB_COLORS.textSecondary },

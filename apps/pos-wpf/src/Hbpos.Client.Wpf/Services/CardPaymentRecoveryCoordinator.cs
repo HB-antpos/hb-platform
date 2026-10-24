@@ -194,9 +194,12 @@ public sealed class CardPaymentRecoveryCoordinator(
     {
         await ReplaySupervisorAuditAsync(cancellationToken);
         var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
-        return settings.Processor == CardProcessorKind.Linkly
-            ? await linklyRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken)
-            : CardAutoRecoverySummary.None;
+        return settings.Processor switch
+        {
+            CardProcessorKind.Linkly => await linklyRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken),
+            CardProcessorKind.Square => await squareRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken),
+            _ => CardAutoRecoverySummary.None
+        };
     }
 
     public async Task<CardPaymentRecoveryResult> RecoverAsync(

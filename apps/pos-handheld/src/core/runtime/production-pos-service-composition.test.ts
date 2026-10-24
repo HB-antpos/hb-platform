@@ -126,6 +126,9 @@ import type {
   InstallmentPerformanceEvent,
   PersistedInstallmentAction,
 } from "./production-installment-runtime";
+import { createApiEntryModeCoordinator } from "@hb/pos-api-client/api-entry-mode-coordinator";
+import { ApiTransportSelector } from "@hb/pos-api-client/transport-failover";
+
 import {
   createPostCommitWorkDrain,
   createPostCommitFulfilmentCashCheckout,
@@ -3042,6 +3045,103 @@ test("下发资料后台同步（无需收银员登录）：拉取→原子写�
   );
 });
 
+test("首选入口随 receipt-profile/sync 下发：changed=true 与 changed=false 都交给入口协调器；null / 缺失 / 未知值原样传递", async () => {
+  const repository = receiptProfileRepository();
+  const { transport } = receiptProfileTransport({
+    sync: (known) => {
+      // 第一轮拉新资料并带 aws；之后一直 changed=false，分别带 direct / null / 缺失 / 未知值。
+      switch (known) {
+        case 0:
+          return { changed: true, version: 3, profile: hqProfile(3), apiEntryMode: "aws" };
+        default:
+          return syncRound.next();
+      }
+    },
+  });
+  const rounds: unknown[] = [
+    { changed: false, version: 3, apiEntryMode: "direct" },
+    { changed: false, version: 3, apiEntryMode: null },
+    { changed: false, version: 3 },
+    { changed: false, version: 3, apiEntryMode: "cloudflare" },
+  ];
+  const syncRound = { next: () => rounds.shift() };
+  const received: unknown[] = [];
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport, applyApiEntryMode: (raw) => received.push(raw) },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "updated",
+    version: 3,
+  });
+  for (let index = 0; index < 4; index += 1) {
+    assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+      status: "up-to-date",
+      version: 3,
+    });
+  }
+  // 缺失字段时回调收到 undefined（协调器按「未设置」处理），其余原样。
+  assert.deepEqual(received, ["aws", "direct", null, undefined, "cloudflare"]);
+});
+
+test("首选入口：回调抛错 / 本机持久化失败都不影响小票同步；未知值保持当前设置；null 回到 edge", async () => {
+  const repository = receiptProfileRepository();
+  const sent: unknown[] = ["direct", "weird", null];
+  const { transport } = receiptProfileTransport({
+    sync: (known) =>
+      known === 0
+        ? { changed: true, version: 3, profile: hqProfile(3), apiEntryMode: sent.shift() }
+        : { changed: false, version: 3, apiEntryMode: sent.shift() },
+  });
+  const selector = new ApiTransportSelector();
+  const coordinator = createApiEntryModeCoordinator({
+    selector,
+    storage: {
+      read: async () => null,
+      write: async () => {
+        throw new Error("secure store unavailable");
+      },
+    },
+  });
+  let throwNext = false;
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    {
+      transport,
+      applyApiEntryMode: (raw) => {
+        coordinator.apply(raw);
+        if (throwNext) throw new Error("callback exploded");
+      },
+    },
+  );
+  await services.initialize();
+
+  // 持久化失败（write 抛错）：同步照常 updated，选择器已采用 direct。
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "updated",
+    version: 3,
+  });
+  await coordinator.flush();
+  assert.equal(selector.getPreferredMode(), "direct");
+
+  // 未知值：保持 direct。回调本身抛错也不影响同步结果。
+  throwNext = true;
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "up-to-date",
+    version: 3,
+  });
+  assert.equal(selector.getPreferredMode(), "direct");
+
+  // null：后台取消设置 → edge。
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "up-to-date",
+    version: 3,
+  });
+  assert.equal(selector.getPreferredMode(), "edge");
+});
+
 test("下发资料后台同步：券使用说明与分期条款随资料落盘，冻结设置（退款券/分期补打）据此带出；总部清空后回到未定制", async () => {
   const repository = receiptProfileRepository();
   const { transport } = receiptProfileTransport({
@@ -4971,6 +5071,7 @@ function createTestComposition(
     settings?: ProductionSettingsRuntimeConfiguration;
     appUpdateTransition?: UpdateTransitionLeaseCoordinator;
     reportReceiptProfileSync?(event: ReceiptProfileSyncLogEvent): void;
+    applyApiEntryMode?(raw: unknown): void;
   }> = {},
 ) {
   let nextId = 0;
@@ -5104,6 +5205,9 @@ function createTestComposition(
         }
       : {}),
     ...(options.settings ? { settings: options.settings } : {}),
+    ...(options.applyApiEntryMode
+      ? { applyApiEntryMode: options.applyApiEntryMode }
+      : {}),
     ...(options.reportReceiptProfileSync
       ? { reportReceiptProfileSync: options.reportReceiptProfileSync }
       : {}),

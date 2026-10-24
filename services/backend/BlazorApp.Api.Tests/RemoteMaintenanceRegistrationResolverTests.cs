@@ -185,6 +185,8 @@ public sealed class RemoteMaintenanceRegistrationResolverTests
                     "系统开机秒数" INTEGER NULL,
                     "客户端内存MB" INTEGER NULL,
                     "客户端句柄数" INTEGER NULL,
+                    "LastApiEntry" TEXT NULL,
+                    "LastApiEntryAt" TEXT NULL,
                     "创建时间" TEXT NOT NULL,
                     "最后修改时间" TEXT NULL,
                     "创建人" TEXT NULL,

@@ -24,8 +24,9 @@ const basePage = {
     },
     // WhenWritingNull 会省略空字段，命中列表缺省应视为空数组
     { orderGuid: "ORDER-2", status: 3 },
+    { orderGuid: "ORDER-3", status: 1, hasRefundItems: true, actualAmount: -12 },
   ],
-  total: 2,
+  total: 3,
   pageNumber: 1,
   pageSize: 20,
   scope: "authorized-stores",
@@ -34,7 +35,10 @@ const basePage = {
 };
 
 const page = normalizeSalesOrderListPage({ success: true, data: basePage });
-assert.equal(page.items.length, 2);
+assert.equal(page.items.length, 3);
+assert.equal(page.items[0].hasRefundItems, false, "后端明确返回 false");
+assert.equal(page.items[1].hasRefundItems, false, "旧后端不返回 hasRefundItems 时按不含退款商品");
+assert.equal(page.items[2].hasRefundItems, true, "新后端标出含退款商品的订单");
 assert.equal(page.items[0].matchedProducts[0].productCode, "C9E9");
 assert.equal(page.items[0].matchedProducts[0].itemNumber, "HB10023");
 assert.deepEqual(page.items[1].matchedProducts, []);
@@ -76,6 +80,12 @@ const detail = normalizeSalesOrderDetail({
   },
 });
 assert.equal(detail.order.orderGuid, "ORDER-1");
+assert.equal(detail.order.hasRefundItems, false, "详情缺省按不含退款商品");
+assert.equal(
+  normalizeSalesOrderDetail({ success: true, data: { order: { orderGuid: "ORDER-9", status: 1, hasRefundItems: true }, orderDetails: [] } }).order.hasRefundItems,
+  true,
+  "详情订单头带上 hasRefundItems，详情金额才能着色",
+);
 assert.equal(detail.lines.length, 1);
 assert.equal(detail.lines[0].productImage, null);
 assert.equal(detail.lines[0].itemNumber, null, "主档缺失时货号为空，由界面回退显示商品编码");

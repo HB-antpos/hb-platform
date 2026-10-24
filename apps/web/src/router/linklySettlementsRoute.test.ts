@@ -45,7 +45,8 @@ assert(routeSource.includes("title: 'menu.linklySettlements'"), '列表路由必
 assert(detailRouteStart >= 0 && detailRouteEnd > detailRouteStart, '必须注册隐藏详情路由')
 assert(detailRoute.includes('hidden: true'), '详情路由必须隐藏')
 assert(detailRoute.includes("accessKey: 'isAdmin'"), '详情路由必须 admin-only')
-assert(detailRoute.includes("activeMenu: '/pos-admin/linkly-settlements'"), '详情路由必须高亮列表菜单')
+// 列表已并入「结算与现金」合并页，详情页高亮合并页菜单
+assert(detailRoute.includes('activeMenu: SETTLEMENT_CASH_NAV_GROUP.path'), '详情路由必须高亮合并页菜单')
 
 const detailPageSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/LinklySettlementDetail/index.tsx'), 'utf8')
 const largeSettlementId = '9007199254740993'

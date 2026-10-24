@@ -6,6 +6,33 @@ namespace BlazorApp.Api.Tests;
 
 public sealed class PosmSalesOrderListRulesTests
 {
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("bogus", null)]
+    [InlineData("any", "any")]
+    [InlineData(" Partial ", "partial")]
+    [InlineData("FULL", "full")]
+    public void NormalizeRefundFilter_只认三个取值其余当作不筛选(string? raw, string? expected)
+    {
+        Assert.Equal(expected, PosmSalesOrderListRules.NormalizeRefundFilter(raw));
+    }
+
+    [Theory]
+    [InlineData(10.5, 12.0, 10.5, false)] // 订单里夹带退货但整单金额为正：部分退款（橙）
+    [InlineData(-8.0, -8.0, -8.0, true)] // 整单金额为负：整单退款（红）
+    [InlineData(0.0, -5.0, -5.0, true)] // 实付为 0 时回落订单总金额
+    [InlineData(null, 7.0, 7.0, false)] // 实付为空时回落订单总金额
+    [InlineData(0.0, 0.0, 0.0, false)] // 都为 0 不算整单退款，仍按部分退款（橙）处理
+    public void 整单金额取实付并回落总金额_为负才算整单退款(double? actual, double? total, double expectedAmount, bool expectedFull)
+    {
+        var actualAmount = actual.HasValue ? (decimal)actual.Value : (decimal?)null;
+        var totalAmount = total.HasValue ? (decimal)total.Value : (decimal?)null;
+
+        Assert.Equal((decimal)expectedAmount, PosmSalesOrderListRules.ResolveWholeOrderAmount(actualAmount, totalAmount));
+        Assert.Equal(expectedFull, PosmSalesOrderListRules.IsFullRefundAmount(actualAmount, totalAmount));
+    }
+
     private static PosmSalesOrderQueryParams Range(int days, string? branchCode = null) =>
         new()
         {

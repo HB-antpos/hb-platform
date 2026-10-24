@@ -105,6 +105,19 @@ describe("BootstrapScreen", () => {
     );
   });
 
+  it("启动失败时由首页传入回调才显示网络检测入口", async () => {
+    const onOpenNetworkCheck = jest.fn();
+    const screen = await render(
+      <BootstrapScreen onOpenNetworkCheck={onOpenNetworkCheck} />,
+    );
+    await fireEvent.press(screen.getByTestId("bootstrap-network-check"));
+    expect(onOpenNetworkCheck).toHaveBeenCalledTimes(1);
+
+    await screen.rerender(<BootstrapScreen />);
+    expect(screen.queryByTestId("bootstrap-network-check")).toBeNull();
+    await screen.unmount();
+  });
+
   it("其他初始化异常显示通用本地化摘要，不暴露原始英文报错", async () => {
     mockRuntimeError =
       "Recovered pricing state does not reproduce the persisted cart.";

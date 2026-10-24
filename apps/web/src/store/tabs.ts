@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { TabItem } from '../types/router'
-import { getAffixTabs } from '../router/routes'
+import { getAffixTabs, normalizePersistedTabs, resolveRoute } from '../router/routes'
 
 interface TabsState {
   activeKey: string
@@ -38,9 +38,15 @@ export const useTabsStore = create<TabsState>()(
       setActiveKey: (key) => set({ activeKey: key }),
       setPinTabsBar: (value) => set({ pinTabsBar: value }),
       ensureTab: (tab) => {
-        const exists = get().tabs.some((item) => item.key === tab.key)
-        if (exists) {
-          set({ activeKey: tab.key })
+        const existing = get().tabs.find((item) => item.key === tab.key)
+        if (existing) {
+          // 合并页同组标签共用一个页签：切换标签时更新页签记住的地址，点页签能回到当前标签。
+          set({
+            activeKey: tab.key,
+            tabs: existing.path === tab.path
+              ? get().tabs
+              : get().tabs.map((item) => (item.key === tab.key ? { ...item, path: tab.path } : item)),
+          })
           return
         }
 
@@ -154,6 +160,15 @@ export const useTabsStore = create<TabsState>()(
     }),
     {
       name: 'react-vite-admin-tabs-v2',
+      // 读取旧版本存下的页签时，把已并入合并页的单页页签归到合并页（同组只留一个）。
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<Pick<TabsState, 'tabs' | 'activeKey' | 'pinTabsBar'>>
+        const tabs = Array.isArray(saved.tabs) ? normalizePersistedTabs(saved.tabs) : current.tabs
+        const activeKey = saved.activeKey
+          ? resolveRoute(saved.activeKey)?.meta.navGroup ?? saved.activeKey
+          : current.activeKey
+        return { ...current, ...saved, tabs, activeKey }
+      },
       partialize: (state) => ({
         tabs: state.tabs,
         activeKey: state.activeKey,

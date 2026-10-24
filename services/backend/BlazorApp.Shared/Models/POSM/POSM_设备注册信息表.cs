@@ -131,6 +131,20 @@ namespace BlazorApp.Shared.Models.POSM
         /// </summary>
         [SugarColumn(IsNullable = true)]
         public int? 客户端句柄数 { get; set; }
+
+        /// <summary>
+        /// 设备最近一次请求实际走的 POS API 入口：edge / aws / direct。
+        /// 由源站 nginx 计算后用 X-HB-Entry 请求头传给 POS API，POS API 在 receipt-profile/sync 与 runtime-status 里回写；
+        /// 只用于后台展示，不参与任何鉴权。老客户端 / 未经新 nginx 的请求不写，保持 NULL。
+        /// </summary>
+        [SugarColumn(Length = 16, IsNullable = true)]
+        public string? LastApiEntry { get; set; }
+
+        /// <summary>
+        /// <see cref="LastApiEntry"/> 最近一次写入时间（UTC）；POS API 节流写入（入口变化或距上次超过 10 分钟）。
+        /// </summary>
+        [SugarColumn(IsNullable = true, ColumnDataType = "datetime2")]
+        public DateTime? LastApiEntryAt { get; set; }
         #endregion
 
         #region 审计字段

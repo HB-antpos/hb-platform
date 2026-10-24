@@ -1,5 +1,15 @@
-import { ArrowLeftOutlined, DeleteOutlined, DownloadOutlined, DownOutlined, EditOutlined, TeamOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Drawer, Dropdown, Form, Result, Spin, Tabs, Tooltip } from 'antd'
+import {
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  DownOutlined,
+  EditOutlined,
+  ReloadOutlined,
+  SyncOutlined,
+  TeamOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
+import { Alert, App, Button, Drawer, Dropdown, Form, Result, Spin, Tabs, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -8,6 +18,8 @@ import {
   deleteSupplierPreorderForm,
   downloadSupplierPreorderExport,
   getSupplierPreorderForm,
+  recomputeSupplierPreorderHistory,
+  retrySupplierPreorderFailedImages,
   setSupplierPreorderFormStatus,
   updateSupplierPreorderForm,
 } from '../../../services/supplierPreorderService'
@@ -19,7 +31,9 @@ import { buildHeaderValuesFromDetail, toHeaderPayload, type FormHeaderValues } f
 import FormItemsTab from './FormItemsTab'
 import FormMatrixPanel from './FormMatrixPanel'
 import FormStoresPanel from './FormStoresPanel'
+import { HISTORY_POLL_INTERVAL_MS, canRecomputeHistory, getHistoryWindow, shouldPollHistory } from './refPicker.logic'
 import './registerSpAdminMessages'
+import RevisionModal from './RevisionModal'
 import { DeadlineText, FormStatusPill } from './SpAdminParts'
 import {
   canDeleteForm,
@@ -55,6 +69,12 @@ export default function SupplierPreorderFormDetailPage() {
   const [exporting, setExporting] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
+  const [recomputing, setRecomputing] = useState(false)
+  const [retryingImages, setRetryingImages] = useState(false)
+  const [revisionOpen, setRevisionOpen] = useState(false)
+  /** 应用修订版后商品页签、分店卡片要重拉（箱规 / 进价变了，金额件数都会变） */
+  const [itemsRefreshKey, setItemsRefreshKey] = useState(0)
+  const [storesRefreshKey, setStoresRefreshKey] = useState(0)
   const loadSeqRef = useRef(0)
 
   const loadDetail = useCallback(
@@ -86,12 +106,41 @@ export default function SupplierPreorderFormDetailPage() {
     return () => controller.abort()
   }, [loadDetail])
 
+  // 关键逻辑：去年历史排队中 / 计算中时每 15 秒刷新详情；页面隐藏时不发请求，回到前台立即补一次；卸载或状态结束即清理
+  const historyStatus = detail?.history?.status
+  useEffect(() => {
+    if (!shouldPollHistory(historyStatus)) return undefined
+    const tick = () => {
+      if (document.visibilityState === 'visible') loadDetail()
+    }
+    const timer = window.setInterval(tick, HISTORY_POLL_INTERVAL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [historyStatus, loadDetail])
+
+  // 指定 / 清除参考后只刷新页头计数（商品行已在商品页签局部替换）
+  const handleRefChanged = useCallback(() => loadDetail(), [loadDetail])
+
   // 分店开关 / 复制后：页头统计、矩阵列、操作记录都要刷新
   const handleStoresChanged = useCallback(() => {
     loadDetail()
     setMatrixRefreshKey((value) => value + 1)
     setLogsRefreshKey((value) => value + 1)
   }, [loadDetail])
+
+  // 应用修订版：用返回的详情刷新页头，并让商品、分店卡片、矩阵、操作记录都重拉
+  const handleRevisionApplied = useCallback((next: SupplierPreorderFormDetail) => {
+    setDetail(next)
+    setLoadedAtMs(Date.now())
+    setRevisionOpen(false)
+    setItemsRefreshKey((value) => value + 1)
+    setStoresRefreshKey((value) => value + 1)
+    setMatrixRefreshKey((value) => value + 1)
+    setLogsRefreshKey((value) => value + 1)
+  }, [])
 
   if (!detail) {
     return (
@@ -201,6 +250,34 @@ export default function SupplierPreorderFormDetailPage() {
     })
   }
 
+  const handleRetryImages = async () => {
+    setRetryingImages(true)
+    try {
+      const next = await retrySupplierPreorderFailedImages(formGuid)
+      setDetail(next)
+      setLoadedAtMs(Date.now())
+      message.success(t('spAdmin.images.retryQueued'))
+    } catch (error) {
+      message.error(getErrorText(error, t('spAdmin.images.retryFailed')))
+    } finally {
+      setRetryingImages(false)
+    }
+  }
+
+  const handleRecompute = async () => {
+    setRecomputing(true)
+    try {
+      const next = await recomputeSupplierPreorderHistory(formGuid)
+      setDetail(next)
+      setLoadedAtMs(Date.now())
+      message.success(t('spAdmin.history.recomputeQueued'))
+    } catch (error) {
+      message.error(getErrorText(error, t('spAdmin.history.recomputeFailed')))
+    } finally {
+      setRecomputing(false)
+    }
+  }
+
   const openEdit = () => {
     editForm.setFieldsValue(buildHeaderValuesFromDetail(detail))
     setEditOpen(true)
@@ -265,6 +342,13 @@ export default function SupplierPreorderFormDetailPage() {
             <Button type="text" size="small" icon={<ArrowLeftOutlined />} aria-label={t('spAdmin.detail.backToList')} onClick={() => navigate('/supplier-preorders')} />
             <h2 className="sp-admin-detail-title">{summary.title}</h2>
             <FormStatusPill status={summary.status} />
+            {detail.revision > 0 ? (
+              <Tag color="purple" bordered={false} className="sp-admin-tag sp-admin-number">
+                {detail.revisedAtUtc
+                  ? t('spAdmin.revision.stamp', { revision: detail.revision, time: formatSydneyDateTime(detail.revisedAtUtc) })
+                  : t('spAdmin.revision.stampNoTime', { revision: detail.revision })}
+              </Tag>
+            ) : null}
             {summary.status !== 'Closed' ? <DeadlineText deadlineAtUtc={summary.deadlineAtUtc} nowMs={loadedAtMs} showDate={false} /> : null}
           </div>
           <div className="sp-admin-muted sp-admin-small sp-admin-number">
@@ -291,6 +375,11 @@ export default function SupplierPreorderFormDetailPage() {
           <Button icon={<EditOutlined />} onClick={openEdit}>
             {t('spAdmin.detail.edit')}
           </Button>
+          <Tooltip title={t('spAdmin.revision.uploadHint')}>
+            <Button icon={<UploadOutlined />} onClick={() => setRevisionOpen(true)}>
+              {t('spAdmin.revision.upload')}
+            </Button>
+          </Tooltip>
           <Dropdown
             trigger={['click']}
             menu={{
@@ -322,6 +411,9 @@ export default function SupplierPreorderFormDetailPage() {
         </div>
       </div>
 
+      <HistoryStatusBar detail={detail} recomputing={recomputing} onRecompute={() => void handleRecompute()} />
+      <ImageCopyBar detail={detail} retrying={retryingImages} onRetry={() => void handleRetryImages()} />
+
       {summary.status === 'Draft' ? <Alert className="sp-admin-page-alert" type="info" showIcon message={t('spAdmin.detail.draftHint')} /> : null}
       {summary.status === 'Closed' ? <Alert className="sp-admin-page-alert" type="warning" showIcon message={t('spAdmin.detail.closedHint')} /> : null}
 
@@ -335,12 +427,16 @@ export default function SupplierPreorderFormDetailPage() {
             label: t('spAdmin.detail.tabStores'),
             children: (
               <div className="sp-admin-stack">
-                <FormStoresPanel formGuid={formGuid} onChanged={handleStoresChanged} />
+                <FormStoresPanel formGuid={formGuid} formStatus={summary.status} refreshKey={storesRefreshKey} onChanged={handleStoresChanged} />
                 <FormMatrixPanel formGuid={formGuid} refreshKey={matrixRefreshKey} />
               </div>
             ),
           },
-          { key: 'items', label: t('spAdmin.detail.tabItems'), children: <FormItemsTab formGuid={formGuid} detail={detail} /> },
+          {
+            key: 'items',
+            label: t('spAdmin.detail.tabItems'),
+            children: <FormItemsTab formGuid={formGuid} detail={detail} refreshKey={itemsRefreshKey} onRefChanged={handleRefChanged} />,
+          },
           {
             key: 'logs',
             label: t('spAdmin.detail.tabLogs'),
@@ -352,6 +448,8 @@ export default function SupplierPreorderFormDetailPage() {
           },
         ]}
       />
+
+      <RevisionModal open={revisionOpen} detail={detail} onClose={() => setRevisionOpen(false)} onApplied={handleRevisionApplied} />
 
       <Drawer
         title={t('spAdmin.detail.editTitle')}
@@ -372,6 +470,114 @@ export default function SupplierPreorderFormDetailPage() {
           <FormHeaderFields form={editForm} supplierName={summary.supplierName} showExportQtyUnit compact />
         </Form>
       </Drawer>
+    </div>
+  )
+}
+
+/** 新品图片转存 COS：已转存 / 不需要 / 处理中 / 失败（可重试）。没有原表图片地址时不显示。 */
+function ImageCopyBar({ detail, retrying, onRetry }: { detail: SupplierPreorderFormDetail; retrying: boolean; onRetry: () => void }) {
+  const { t } = useTranslation()
+  const copy = detail.imageCopy
+  if (!copy || copy.total === 0) return null
+  return (
+    <div className="sp-admin-card sp-admin-history-bar">
+      <span className="sp-admin-strong">{t('spAdmin.images.title')}</span>
+      {copy.configured ? null : (
+        <Tag color="warning" className="sp-admin-tag">
+          {t('spAdmin.images.notConfigured')}
+        </Tag>
+      )}
+      <span className="sp-admin-history-counts sp-admin-small sp-admin-number">
+        <span>{t('spAdmin.images.done', { count: copy.done })}</span>
+        <span>{t('spAdmin.images.skipped', { count: copy.skipped })}</span>
+        <span>{t('spAdmin.images.pending', { count: copy.pending })}</span>
+        <span className={copy.failed ? 'sp-admin-history-need' : undefined}>{t('spAdmin.images.failed', { count: copy.failed })}</span>
+      </span>
+      <span className="sp-admin-toolbar-spacer" />
+      {copy.failed > 0 ? (
+        <Tooltip title={t('spAdmin.images.retryHint')}>
+          <Button size="small" icon={<ReloadOutlined />} loading={retrying} onClick={onRetry}>
+            {t('spAdmin.images.retry')}
+          </Button>
+        </Tooltip>
+      ) : null}
+    </div>
+  )
+}
+
+/** 去年历史：窗口、计算状态、参考商品计数与「重新计算」。 */
+function HistoryStatusBar({
+  detail,
+  recomputing,
+  onRecompute,
+}: {
+  detail: SupplierPreorderFormDetail
+  recomputing: boolean
+  onRecompute: () => void
+}) {
+  const { t } = useTranslation()
+  const history = detail.history
+  const status = history?.status ?? 'None'
+  const range = getHistoryWindow(history, detail.historyFrom, detail.historyTo)
+
+  const statusTag = (() => {
+    switch (status) {
+      case 'Queued':
+        return <Tag className="sp-admin-tag">{t('spAdmin.history.status.Queued')}</Tag>
+      case 'Running':
+        return (
+          <Tag color="processing" icon={<SyncOutlined spin />} className="sp-admin-tag">
+            {t('spAdmin.history.status.Running')}
+          </Tag>
+        )
+      case 'Ready':
+        return (
+          <Tag color="success" className="sp-admin-tag sp-admin-number">
+            {t('spAdmin.history.status.Ready', { time: formatSydneyDateTime(history?.computedAtUtc) })}
+          </Tag>
+        )
+      case 'Failed':
+        return (
+          <Tooltip title={history?.error || undefined}>
+            <Tag color="error" className="sp-admin-tag sp-admin-history-error">
+              {t('spAdmin.history.status.Failed', { error: history?.error || t('spAdmin.history.unknownError') })}
+            </Tag>
+          </Tooltip>
+        )
+      case 'NoWindow':
+        return (
+          <Tag color="warning" className="sp-admin-tag">
+            {t('spAdmin.history.status.NoWindow')}
+          </Tag>
+        )
+      default:
+        return <Tag className="sp-admin-tag">{t('spAdmin.history.status.None')}</Tag>
+    }
+  })()
+
+  const busy = !canRecomputeHistory(status)
+
+  return (
+    <div className="sp-admin-card sp-admin-history-bar">
+      <span className="sp-admin-strong">{t('spAdmin.history.title')}</span>
+      <span className="sp-admin-number sp-admin-small">
+        {range ? t('spAdmin.history.window', { from: range.from, to: range.to }) : <span className="sp-admin-muted">{t('spAdmin.history.noWindow')}</span>}
+      </span>
+      {statusTag}
+      <span className="sp-admin-history-counts sp-admin-small sp-admin-number">
+        <span>{t('spAdmin.history.ownCount', { count: detail.ownHistoryCount ?? 0 })}</span>
+        <span>{t('spAdmin.history.refAutoCount', { count: detail.refAutoCount ?? 0 })}</span>
+        <span>{t('spAdmin.history.refManualCount', { count: detail.refManualCount ?? 0 })}</span>
+        <span className={detail.needRefCount ? 'sp-admin-history-need' : undefined}>
+          {t('spAdmin.history.needRefCount', { count: detail.needRefCount ?? 0 })}
+        </span>
+      </span>
+      <span className="sp-admin-toolbar-spacer" />
+      <Tooltip title={busy ? t('spAdmin.history.recomputeBusy') : t('spAdmin.history.recomputeHint')}>
+        <Button size="small" icon={<ReloadOutlined />} loading={recomputing} disabled={busy} onClick={onRecompute}>
+          {t('spAdmin.history.recompute')}
+        </Button>
+      </Tooltip>
     </div>
   )
 }

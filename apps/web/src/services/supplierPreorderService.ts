@@ -12,6 +12,13 @@ import type {
   SupplierPreorderFormStatus,
   SupplierPreorderFormStoreStatus,
   SupplierPreorderFormSummary,
+  SupplierPreorderImportRefCandidatesPayload,
+  SupplierPreorderItemHistoryDetail,
+  SupplierPreorderRefCandidates,
+  SupplierPreorderRemindResult,
+  SupplierPreorderRevisionPayload,
+  SupplierPreorderRevisionPreview,
+  SupplierPreorderSetRefPayload,
   SupplierPreorderMatrix,
   SupplierPreorderMatrixQuery,
   SupplierPreorderOrderersOverview,
@@ -226,4 +233,76 @@ export async function submitSupplierPreorderStoreOrder(formGuid: string, storeGu
 
 export function downloadSupplierPreorderStoreExport(formGuid: string, storeGuid: string): Promise<void> {
   return downloadFile(`${ORDERING_BASE}/forms/${formGuid}/stores/${storeGuid}/export`, 'supplier-preorder-store.xlsx')
+}
+
+// ---------- 去年历史与参考商品 ----------
+
+/** 管理端：把转存失败满 3 次的新品图片清零，后台重新下载 */
+export async function retrySupplierPreorderFailedImages(formGuid: string): Promise<SupplierPreorderFormDetail> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/images/retry-failed`))
+}
+
+/** 管理端：重新计算这张订单表的去年历史（排队，后台算） */
+export async function recomputeSupplierPreorderHistory(formGuid: string): Promise<SupplierPreorderFormDetail> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/history/recompute`))
+}
+
+/** 管理端：某款商品的参考商品候选；不带关键词时返回系统推荐前 3，带关键词时按货号/条码/名称搜索 */
+export async function getSupplierPreorderRefCandidates(
+  formGuid: string,
+  itemGuid: string,
+  keyword?: string,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderRefCandidates> {
+  return unwrapApiData(
+    await request.get(`${ADMIN_BASE}/forms/${formGuid}/items/${itemGuid}/ref-candidates`, { params: { keyword: keyword || undefined }, signal }),
+  )
+}
+
+/** 管理端：指定 / 清除 / 交回系统推荐 参考商品，返回更新后的商品行 */
+export async function setSupplierPreorderItemRef(
+  formGuid: string,
+  itemGuid: string,
+  payload: SupplierPreorderSetRefPayload,
+): Promise<SupplierPreorderFormItem> {
+  return unwrapApiData(await request.put(`${ADMIN_BASE}/forms/${formGuid}/items/${itemGuid}/ref`, payload))
+}
+
+/** 导入校对页：订单表还没建，按将要建的供应商与历史窗口找参考商品候选 */
+export async function getSupplierPreorderImportRefCandidates(
+  payload: SupplierPreorderImportRefCandidatesPayload,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderRefCandidates> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/import/ref-candidates`, payload, { signal }))
+}
+
+/** 下单端：展开行的本店大图、小结与各分店去年对比 */
+export async function getSupplierPreorderItemHistory(
+  formGuid: string,
+  itemGuid: string,
+  storeGuid: string,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderItemHistoryDetail> {
+  return unwrapApiData(await request.get(`${ORDERING_BASE}/forms/${formGuid}/items/${itemGuid}/history`, { params: { storeGuid }, signal }))
+}
+
+// ---------- 修订版与提醒 ----------
+
+/** 管理端：对比修订版与当前订单表（不写库） */
+export async function previewSupplierPreorderRevision(
+  formGuid: string,
+  payload: SupplierPreorderRevisionPayload,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderRevisionPreview> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/revision/preview`, payload, { signal }))
+}
+
+/** 管理端：应用修订版（按货号对齐；已下的箱数保留；删掉的商品标为已下架） */
+export async function applySupplierPreorderRevision(formGuid: string, payload: SupplierPreorderRevisionPayload): Promise<SupplierPreorderFormDetail> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/revision/apply`, payload))
+}
+
+/** 管理端：提醒还没提交的开启分店（发给下单人员授权里能替该店下单的人） */
+export async function remindSupplierPreorderPendingStores(formGuid: string): Promise<SupplierPreorderRemindResult> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/remind`))
 }

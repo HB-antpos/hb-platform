@@ -1027,8 +1027,9 @@ public sealed class FaceCaptureImagesPermissionRegistrationTests
         var imagesOnly = navigation.BuildMenu(CreateUser(new Claim("permission", Code)));
         var manage = navigation.BuildMenu(CreateUser(new Claim("permission", Permissions.FaceCapture.Cameras.Manage)));
 
-        Assert.DoesNotContain(imagesOnly.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-cameras");
-        Assert.Contains(manage.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-cameras");
+        // 摄像机管理已并入「人脸识别」合并页；只有查看图片权限时整个合并页都不显示。
+        Assert.DoesNotContain(imagesOnly.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-recognition");
+        Assert.Contains(manage.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-recognition");
     }
 
     private static ClaimsPrincipal CreateUser(params Claim[] claims) =>

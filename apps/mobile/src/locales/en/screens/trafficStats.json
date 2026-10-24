@@ -1,0 +1,152 @@
+{
+  "title": "Foot traffic",
+  "messages": {
+    "notAllowed": "You don't have permission to view foot traffic. The \"view foot traffic\" permission is required.",
+    "reviewUnavailable": "Foot traffic isn't available in review demo mode."
+  },
+  "store": {
+    "pickerTitle": "Select store",
+    "cancel": "Cancel",
+    "none": "No stores available",
+    "loading": "Loading stores…"
+  },
+  "period": {
+    "day": "Today",
+    "week": "Week",
+    "month": "Month",
+    "previous": "Previous period",
+    "next": "Next period",
+    "headline": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "lastWeek": "Last week",
+      "thisMonth": "This month",
+      "lastMonth": "Last month"
+    },
+    "sub": {
+      "dayWithWeekday": "{{weekday}}, {{date}}",
+      "range": "{{from}} – {{to}}",
+      "monthToDate": "{{from}} – {{to}} (month to date)"
+    }
+  },
+  "fresh": {
+    "updatedAt": "Updated {{time}}",
+    "failed": "Update failed",
+    "refresh": "Refresh"
+  },
+  "unit": {
+    "visits": "visits",
+    "people": "people"
+  },
+  "hero": {
+    "day": "Visits (staff excluded)",
+    "weekLive": "Visits · week to date",
+    "weekPast": "Visits · week",
+    "monthLive": "Visits · month to date",
+    "monthPast": "Visits · month"
+  },
+  "compare": {
+    "hours": "vs yesterday, same hours (to {{time}})",
+    "daysWeek": "vs last week ({{days}} finished days)",
+    "daysMonth": "vs last month ({{days}} finished days)",
+    "fullDay": "vs previous day",
+    "fullWeek": "vs previous week",
+    "fullMonth": "vs previous month",
+    "noBase": "No data in the comparison period",
+    "notYet": "No finished time to compare yet"
+  },
+  "kpi": {
+    "uniqueVisitors": "Visitors",
+    "repeat": "Repeat visits",
+    "peakHour": "Peak hour",
+    "staffExcluded": "Staff (excluded)",
+    "invalid": "Invalid captures",
+    "dailyAverage": "Daily avg",
+    "busiestDay": "Busiest day",
+    "weekendAverage": "Weekend avg",
+    "averageUnique": "Avg visitors",
+    "estimate": "Est.",
+    "none": "—"
+  },
+  "chart": {
+    "hourlyTitle": "Visits by hour",
+    "dailyTitle": "Visits by day",
+    "profileTitle": "Average visits by hour",
+    "profileHint": "{{days}} finished days · daily avg",
+    "weekdayTitle": "Average by weekday",
+    "weekdayHint": "Finished trading days · daily avg",
+    "hourlyHint": "Press and drag the curve for hourly details; tap again to clear",
+    "hourlyLiveHint": "Press and drag the curve for hourly details. {{hour}}:00 is in progress (dashed), as of {{time}}",
+    "dailyHint": "Press and drag the curve for daily details",
+    "dailyLiveHint": "The dashed end and hollow dot are today (in progress); later days haven't happened yet",
+    "weekendHint": "Shaded = weekend; previous month aligned by date",
+    "averageNote": "Daily average and busiest day only count finished days with captures",
+    "peakNote": "Peak {{range}}, avg {{value}} visits",
+    "noData": "No data for this period yet",
+    "noDataToday": "No data yet today (store not open, or cameras haven't reported). The grey dashed line is yesterday, for reference"
+  },
+  "legend": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "selectedDay": "Selected",
+    "previousDay": "Previous day",
+    "thisWeek": "This week",
+    "lastWeek": "Last week",
+    "selectedWeek": "Selected",
+    "previousWeek": "Previous week",
+    "thisMonth": "This month",
+    "lastMonth": "Last month",
+    "selectedMonth": "Selected",
+    "previousMonth": "Previous month"
+  },
+  "tooltip": {
+    "visits": "{{label}} {{value}} visits",
+    "unique": "Unique visitors {{value}} (est.)",
+    "inProgress": " (in progress)"
+  },
+  "composition": {
+    "title": "Visit mix",
+    "hint": "First seen + repeat = visits",
+    "first": "First seen",
+    "repeat": "Repeat"
+  },
+  "table": {
+    "hourlyTitle": "Hourly details",
+    "dailyTitle": "Daily details",
+    "unit": "visits",
+    "hour": "Hour",
+    "date": "Date",
+    "visits": "Visits",
+    "unique": "Visitors",
+    "delta": "Diff",
+    "change": "Change",
+    "inProgress": "Live",
+    "expand": "Show all {{count}} rows",
+    "collapse": "Show less"
+  },
+  "notice": {
+    "estimateDedup": "Unique visitors is an estimate: the same person from a different angle or wearing a mask can be counted twice. \"Visits\" doesn't rely on de-duplication and is more stable. Only stores with counting enabled are included; staff are excluded.",
+    "estimatePlain": "\"Visits\" includes same-day repeat visits and excludes staff; only stores with counting enabled are included. This store has de-duplication off, so unique visitors aren't shown."
+  },
+  "basis": {
+    "title": "How it's counted",
+    "formula": "Captures {{capture}} − staff {{staff}} − low quality {{low}} − recognition failed {{fail}} = visits {{visit}}",
+    "timezone": "Times use the store's time zone ({{zone}}); daylight-saving changeover days have one hour fewer / more."
+  },
+  "disabled": {
+    "title": "Foot traffic counting is off for this store",
+    "body": "Foot traffic comes from the store's camera counts. Set the store to Match mode under Face matching → Settings. Ask an administrator if you don't have that permission."
+  },
+  "error": {
+    "title": "Couldn't load",
+    "retry": "Retry",
+    "stale": "Refresh failed. Showing the last data below."
+  },
+  "a11y": {
+    "hourlyChart": "{{store}} hourly visits curve, {{total}} visits in total",
+    "dailyChart": "{{store}} daily visits curve, {{total}} visits in total",
+    "profileChart": "Average visits by hour curve",
+    "weekdayChart": "Average visits by weekday bar chart"
+  }
+}

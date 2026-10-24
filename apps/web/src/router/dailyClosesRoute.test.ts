@@ -47,7 +47,11 @@ assertEqual(
   '页面必须懒加载，不进首屏包',
 )
 assertEqual(routeBlock.includes("title: 'menu.dailyCloses'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes("icon: 'MoneyCollectOutlined'"), true, '菜单图标 MoneyCollectOutlined')
+const navGroupStart = routeSource.indexOf('const SETTLEMENT_CASH_NAV_GROUP: NavGroupDefinition')
+const navGroupBlock = routeSource.slice(navGroupStart, routeSource.indexOf('\nconst ', navGroupStart + 1))
+// 已并入「结算与现金」合并页：菜单图标在合并页上，本页是其中一个标签
+assertEqual(navGroupStart >= 0 && navGroupBlock.includes(`path: '${DAILY_CLOSES_PATH}'`), true, '日结记录是「结算与现金」合并页的标签')
+assertEqual(navGroupBlock.includes("icon: 'MoneyCollectOutlined'"), true, '合并页菜单图标 MoneyCollectOutlined')
 assertEqual(routeBlock.includes('keepAlive: true'), true, '路由必须 keepAlive')
 assertEqual(routeBlock.includes("accessKey: 'canViewDailyCloseRecords'"), true, '路由使用日结记录访问键')
 assertEqual(routeSource.includes('element: <DailyClosesPage />'), true, '路由必须渲染日结记录页')
@@ -68,11 +72,11 @@ const navigationSource = readFileSync(
   'utf8',
 )
 assertEqual(
-  /Path = "\/pos-admin\/daily-closes".*TitleKey = "menu\.dailyCloses".*Icon = "MoneyCollectOutlined".*Permission = Permissions\.DailyCloseRecords\.View/.test(
+  /Path = "\/pos-admin\/settlement-cash".*TitleKey = "menu\.groupSettlementCash".*Icon = "MoneyCollectOutlined".*Permissions\.DailyCloseRecords\.View/.test(
     navigationSource,
   ),
   true,
-  '后端 FullMenu 应登记日结记录入口，且仅凭 DailyCloseRecords.View 可见',
+  '后端 FullMenu 应登记「结算与现金」合并页，DailyCloseRecords.View 即可见',
 )
 
 // 只有日结记录权限：能进后台、登录落到日结记录页、深链（带 ?id=）被放行

@@ -105,4 +105,10 @@ public static class AppNotificationTypes
 
     /// <summary>新品到店每日推送（门店本地 8 点）：只发给该店持有 Container.MobileNewProductsView 的人，Data 只带门店、本地日期与新增数量。</summary>
     public const string ContainerNewProducts = "container.new_products";
+
+    /// <summary>
+    /// 供应商节日预订单：提醒还没提交订单的分店（截止前 72 / 24 小时自动发，采购也可手动发）。
+    /// 发给下单人员授权里能替这些店下单的人；正文为英文，只含订单表名称、分店名与截止时间。Data 只带 formGuid。
+    /// </summary>
+    public const string SupplierPreorderReminder = "supplier-preorder.reminder";
 }

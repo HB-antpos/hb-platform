@@ -9,8 +9,33 @@ export interface AppRouteMeta {
   closable?: boolean
   keepAlive?: boolean
   accessKey?: keyof AccessControl
+  /** 任一权限为真即可访问（合并页菜单：任一标签有权限即显示）；与 accessKey 同时存在时两者都要满足。 */
+  anyAccessKeys?: (keyof AccessControl)[]
   activeMenu?: string
+  /** 所属合并页的菜单路径：同组路由共用一个顶部页签，页内用标签切换。 */
+  navGroup?: string
   dynamicTitle?: (params: Record<string, string>) => string
+}
+
+/** 合并页里的一个标签：就是原来的独立页面，地址、权限不变。 */
+export interface NavGroupTab {
+  path: string
+  title: string
+  accessKey: keyof AccessControl
+  /**
+   * false：切走或离开合并页即卸载（页面内存里会短暂持有凭据、摄像机地址、照片等敏感数据）；
+   * true：切走后保留状态（筛选、分页等）。
+   */
+  keepAlive: boolean
+  element: ReactElement
+}
+
+export interface NavGroupDefinition {
+  /** 侧栏菜单项地址；直接访问时跳到第一个有权限的标签。 */
+  path: string
+  title: string
+  icon: string
+  tabs: NavGroupTab[]
 }
 
 export interface AppRouteItem {

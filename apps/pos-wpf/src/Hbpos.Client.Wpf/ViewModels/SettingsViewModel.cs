@@ -465,6 +465,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         UseLinklyCloudTerminalCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(UseLinklyCloudTerminalAsync, CanAssignLinklyCloudTerminal);
         ChangeLinklyCloudTerminalAssignmentCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(ChangeLinklyCloudTerminalAssignmentAsync, CanAssignLinklyCloudTerminal);
         UnassignLinklyCloudTerminalCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(UnassignLinklyCloudTerminalAsync, CanUnassignLinklyCloudTerminal);
+        // Linkly 后端异步 master-detail：监听线路列表变化以维护「当前聚焦线路」（见 SettingsViewModel.LinklyFirstScreen.cs）。
+        InitializeLinklyFocusedLine();
         InitializeAutoSave(autoSaveSettings, autoSaveDelay);
         // 返回收银前先确认没有保存失败 / 未保存的修改（自动保存关闭时直接返回，与原来一致）。
         BackCommand = new AsyncRelayCommand(ReturnToPosAsync, () => _returnToPos is not null);

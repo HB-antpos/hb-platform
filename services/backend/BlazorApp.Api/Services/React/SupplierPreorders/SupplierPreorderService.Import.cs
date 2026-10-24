@@ -292,6 +292,7 @@ public sealed partial class SupplierPreorderService
         }
 
         var now = NowUtc;
+        var refOverrides = await ResolveRefOverridesAsync(request.RefOverrides);
         var form = new SupplierPreorderForm
         {
             LocalSupplierCode = supplier.LocalSupplierCode,
@@ -353,6 +354,25 @@ public sealed partial class SupplierPreorderService
                 IsActive = true,
             };
         }).ToList();
+        // 导入校对页人工指定的参考商品（按原表行号）：指定 = Manual，选「不要参考」= Cleared；系统推荐在建表后的后台计算里补
+        for (var index = 0; index < items.Count; index++)
+        {
+            if (!refOverrides.TryGetValue(validRows[index].RowNo, out var refCode))
+            {
+                continue;
+            }
+
+            var item = items[index];
+            if (refCode is not null && string.Equals(refCode, item.MatchedProductCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            item.RefProductCode = refCode;
+            item.RefSource = refCode is null ? SupplierPreorderRefSources.Cleared : SupplierPreorderRefSources.Manual;
+            item.RefSetBy = CurrentUserName;
+            item.RefSetAtUtc = now;
+        }
 
         await RunInTransactionAsync(async () =>
         {
@@ -376,7 +396,40 @@ public sealed partial class SupplierPreorderService
         _logger.LogInformation(
             "供应商预订单已导入：{FormGuid} {Title}，{Count} 款，跳过不能导入 {Invalid} 行",
             form.FormGuid, form.Title, items.Count, rows.Count - validRows.Count);
+        // 草稿阶段就先算一次去年历史与系统推荐，采购发布前可在「商品」页签核对参考商品
+        await TryRequestHistoryAsync(form.FormGuid);
         return await GetFormAsync(form.FormGuid);
+    }
+
+    /// <summary>行号 → 参考商品编码（null = 不要参考）；指定的商品必须在商品表里。</summary>
+    private async Task<Dictionary<int, string?>> ResolveRefOverridesAsync(List<SupplierPreorderRefOverrideDto>? overrides)
+    {
+        var result = new Dictionary<int, string?>();
+        if (overrides is null || overrides.Count == 0)
+        {
+            return result;
+        }
+
+        var codes = overrides.Select(o => o.ProductCode?.Trim()).Where(c => !string.IsNullOrEmpty(c)).Cast<string>().ToList();
+        var products = await _history.LoadProductsAsync(codes);
+        foreach (var entry in overrides)
+        {
+            var code = entry.ProductCode?.Trim();
+            if (string.IsNullOrEmpty(code))
+            {
+                result[entry.RowNo] = null;
+                continue;
+            }
+
+            if (!products.TryGetValue(code, out var product))
+            {
+                throw new SupplierPreorderException($"第 {entry.RowNo} 行指定的参考商品 {code} 在商品表里不存在", "REF_NOT_FOUND");
+            }
+
+            result[entry.RowNo] = product.ProductCode;
+        }
+
+        return result;
     }
 
     private async Task SaveImportProfileAsync(string supplierCode, string? headerSignature, SupplierPreorderColumnMappingDto mapping, string exportQtyUnit)

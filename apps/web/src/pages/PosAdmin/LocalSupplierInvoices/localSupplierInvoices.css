@@ -922,6 +922,18 @@ button.lsi-wb-pricing:focus-visible {
   white-space: nowrap;
 }
 
+/* 本店自动定价状态标签：嵌在 12px 的副行里，压低高度避免把行撑高。 */
+.lsi-tag.lsi-wb-store-pricing {
+  height: 18px;
+  padding: 0 5px;
+}
+
+/* 本店还没有价格记录：虚线框弱化，和「自动 / 手动」两种实际状态区分开。 */
+.lsi-wb-store-pricing-none {
+  border: 1px dashed #d9dee7;
+  color: rgba(0, 0, 0, 0.45);
+}
+
 .lsi-wb-match-ok {
   color: #237804;
 }

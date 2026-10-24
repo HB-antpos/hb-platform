@@ -1766,6 +1766,27 @@
         "apps/pos-handheld"
       ],
       "reason": "整文件目录下载需要在 Hermes 上流式解压 gzip；纯 JS、零依赖、MIT，不含原生代码可随 OTA 发布"
+    },
+    {
+      "name": "@react-native-async-storage/async-storage",
+      "version": "2.2.0",
+      "workspaces": [
+        "apps/pos-ipad",
+        "apps/pos-handheld"
+      ],
+      "reason": "本机记住后台按分店设置的 POS API 首选入口（冷启动先于第一个 API 请求读取）；与员工移动端同版本（SDK 54）；含原生模块，手持需重建 APK、iPad 需出新 TestFlight 包"
+    },
+    {
+      "name": "merge-options",
+      "version": "3.0.4",
+      "workspaces": [],
+      "reason": "@react-native-async-storage/async-storage 2.2.0 的传递依赖（纯 JS）"
+    },
+    {
+      "name": "is-plain-obj",
+      "version": "2.1.0",
+      "workspaces": [],
+      "reason": "merge-options 3.0.4 的传递依赖（纯 JS）"
     }
   ]
 }

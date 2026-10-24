@@ -5,13 +5,21 @@ import { AxiosError, isAxiosError, type AxiosInstance, type AxiosRequestConfig, 
 import { isDeviceRevocationCode } from "./core/api/forbidden-response";
 import { HbposApiError, isHbposApiEnvelope, type HbposTransport, type HbposTransportRequest, type HbposTransportResponse } from "./transport-contracts";
 import {
+  API_ENTRY_HOSTS,
   classifyTransportFailure,
   entryOrigins,
   isFailoverBaseUrl,
   isTransportRetryableMethod,
+  modeForHost,
   rewriteEntryHost,
   type ApiTransportSelector,
 } from "./transport-failover";
+
+/**
+ * 读请求换入口重试时，用请求配置里的这个自定义字段把「下一个入口」明确交给 request interceptor，
+ * 而不是让它重新 resolve——重新 resolve 在多个入口同时冷却时可能又选回刚失败的那个。
+ */
+const FORCED_ENTRY_HOST_KEY = "hbposForcedEntryHost";
 
 export type HbposRequestCredentials = Readonly<{
   device?: Readonly<{
@@ -40,8 +48,8 @@ export type HbposTransportPolicy = Readonly<{
 }>;
 
 /**
- * 双入口故障转移（可选）。只有 baseUrl 属于入口组（https://hotbargain.vip/pos-api 或
- * https://pos.hotbargain.vip/pos-api）时才生效；其他地址（本地开发、局域网）完全不受影响。
+ * 多入口故障转移（可选）。只有 baseUrl 属于入口组（hotbargain.vip / pos.hotbargain.vip /
+ * pos-syd.hotbargain.vip 下的 https .../pos-api）时才生效；其他地址（本地开发、局域网）完全不受影响。
  */
 export type HbposTransportFailover = Readonly<{ selector: ApiTransportSelector }>;
 
@@ -99,8 +107,13 @@ export function createAxiosHbposTransport(
       // 凭据已就绪，现在才决定走哪个入口：配置里的身份地址 → 当前选中的传输入口。
       const identityBase = config.baseURL ?? baseUrl;
       if (isFailoverBaseUrl(identityBase)) {
-        // 写请求（POST/PUT）不当探路的：冷却结束后由读请求 / 健康探测先确认边缘入口恢复。
-        const host = selector.resolve({ probe: isTransportRetryableMethod(config.method) });
+        // 读请求换入口重试时由 dispatch 指定入口；其余按选择器当前顺序取。
+        // 写请求（POST/PUT）不当探路的：冷却结束后由读请求 / 健康探测先确认曾失败的入口恢复。
+        const forcedHost = (config as unknown as Record<string, unknown>)[FORCED_ENTRY_HOST_KEY];
+        const forcedMode = typeof forcedHost === "string" ? modeForHost(forcedHost) : null;
+        const host = forcedMode
+          ? API_ENTRY_HOSTS[forcedMode]
+          : selector.resolve({ probe: isTransportRetryableMethod(config.method) });
         config.baseURL = rewriteEntryHost(identityBase, host);
         usedHostByConfig.set(config, host);
       }
@@ -109,18 +122,22 @@ export function createAxiosHbposTransport(
   });
 
   /**
-   * 派发一次请求；启用故障转移时负责上报线路结果，并在首选入口刚被判定故障时
-   * 让读请求（GET/HEAD）换另一个入口重试一次。写请求（POST/PUT）绝不自动重试，
-   * 避免支付、同步等操作被重复提交，但失败会让后续请求改走另一个入口。
+   * 派发一次请求；启用故障转移时负责上报线路结果，并在入口刚被判定故障时
+   * 让读请求（GET/HEAD）换到顺序中的下一个入口重试一次（最多两次尝试，不把三个入口全试完）。
+   * 写请求（POST/PUT）绝不自动重试，避免支付、同步等操作被重复提交，但失败会让后续请求改走别的入口。
    */
   async function dispatch<T>(request: HbposTransportRequest): Promise<AxiosResponse<T>> {
     if (!selector) {
       return instance.request<T>(toAxiosRequest(request));
     }
     const maxAttempts = isTransportRetryableMethod(request.method) ? 2 : 1;
+    let retryHost: string | undefined;
     for (let attempt = 1; ; attempt += 1) {
       try {
-        const response = await instance.request<T>(toAxiosRequest(request));
+        const response = await instance.request<T>({
+          ...toAxiosRequest(request),
+          ...(retryHost ? { [FORCED_ENTRY_HOST_KEY]: retryHost } : {}),
+        } as AxiosRequestConfig);
         const usedHost = usedHostByConfig.get(response.config);
         if (usedHost) {
           selector.reportSuccess(usedHost);
@@ -149,6 +166,8 @@ export function createAxiosHbposTransport(
         if (!flipped || attempt >= maxAttempts) {
           throw error;
         }
+        // 只换到顺序中的下一个入口重试这一次。
+        retryHost = selector.fallbackFor(usedHost);
       }
     }
   }

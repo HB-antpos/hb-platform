@@ -34,7 +34,7 @@ public sealed class PosmSalesOrderReactServiceTests : IDisposable
                 InitKeyType = InitKeyType.Attribute,
             }
         );
-        _db.CodeFirst.InitTables(typeof(SalesOrder), typeof(SalesOrderDetail), typeof(PaymentDetail), typeof(Store), typeof(Product));
+        _db.CodeFirst.InitTables(typeof(SalesOrder), typeof(SalesOrderDetail), typeof(PaymentDetail), typeof(Store), typeof(Product), typeof(SalesReturnRecord));
     }
 
     [Fact]
@@ -51,6 +51,99 @@ public sealed class PosmSalesOrderReactServiceTests : IDisposable
         Assert.Equal(1, result.Total);
         Assert.Single(result.Items);
         Assert.Equal("ORDER-001", result.Items[0].OrderGuid);
+    }
+
+    /// <summary>
+    /// 退货订单的数据口径：旧 POS 的退款单是 Status=3 的独立订单（金额为负）；新 POS 的退货夹带在已支付订单里，
+    /// 由 sales_return_record 记录，整单金额可以为正（换货补差价）也可以为负（净退款）。
+    /// </summary>
+    private async Task SeedRefundScenarioAsync()
+    {
+        var day = new DateTime(2026, 7, 1, 9, 0, 0);
+        // 普通已支付订单：不含退货。
+        await SeedOrderAsync("ORDER-PLAIN", day, "DEVICE-A", totalAmount: 30m, discountAmount: 0m);
+        // 已支付订单里夹带退货，整单金额为正：部分退款（橙）。
+        await SeedOrderAsync("ORDER-EXCHANGE", day.AddMinutes(1), "DEVICE-A", totalAmount: 15m, discountAmount: 0m);
+        // 已支付订单里夹带退货，整单金额为负：整单退款（红）。
+        await SeedOrderAsync("ORDER-NETREFUND", day.AddMinutes(2), "DEVICE-A", totalAmount: -12m, discountAmount: 0m);
+        // 旧 POS 的退款单：Status=3，金额为负（红）。
+        await SeedOrderAsync("ORDER-OLDREFUND", day.AddMinutes(3), "DEVICE-A", totalAmount: -9m, discountAmount: 0m, status: OrderType.Refunded);
+        // 实付为 0、总金额为负的退款单：整单金额回落到总金额（红）。
+        await SeedOrderAsync("ORDER-OLDREFUND-ZERO", day.AddMinutes(4), "DEVICE-A", totalAmount: -4m, discountAmount: 0m, storedActualAmount: 0m, status: OrderType.Refunded);
+        await _db.Insertable(new List<SalesReturnRecord>
+        {
+            new() { ReturnDetailGuid = "R-1", ReturnOrderGuid = "ORDER-EXCHANGE", OriginalOrderGuid = "ORDER-PLAIN" },
+            new() { ReturnDetailGuid = "R-2", ReturnOrderGuid = "ORDER-EXCHANGE", OriginalOrderGuid = "ORDER-PLAIN" },
+            new() { ReturnDetailGuid = "R-3", ReturnOrderGuid = "ORDER-NETREFUND", OriginalOrderGuid = "ORDER-PLAIN" },
+        }).ExecuteCommandAsync();
+    }
+
+    private static List<string?> Guids(PosmSalesOrderListResultDto result) =>
+        result.Items.Select(item => item.OrderGuid).OrderBy(guid => guid).ToList();
+
+    [Fact]
+    public async Task GetSalesOrderListAsync_退货筛选any含退款单与夹带退货记录的订单()
+    {
+        await SeedRefundScenarioAsync();
+
+        var result = await CreateService().GetSalesOrderListAsync(new PosmSalesOrderQueryParams { RefundFilter = "any" });
+
+        Assert.Equal(
+            new List<string?> { "ORDER-EXCHANGE", "ORDER-NETREFUND", "ORDER-OLDREFUND", "ORDER-OLDREFUND-ZERO" },
+            Guids(result)
+        );
+        Assert.All(result.Items, item => Assert.True(item.HasRefundItems));
+    }
+
+    [Fact]
+    public async Task GetSalesOrderListAsync_退货筛选partial只留整单金额不为负的退货订单()
+    {
+        await SeedRefundScenarioAsync();
+
+        var result = await CreateService().GetSalesOrderListAsync(new PosmSalesOrderQueryParams { RefundFilter = "partial" });
+
+        Assert.Equal(new List<string?> { "ORDER-EXCHANGE" }, Guids(result));
+    }
+
+    [Fact]
+    public async Task GetSalesOrderListAsync_退货筛选full只留整单金额为负的退货订单()
+    {
+        await SeedRefundScenarioAsync();
+
+        var result = await CreateService().GetSalesOrderListAsync(new PosmSalesOrderQueryParams { RefundFilter = "full" });
+
+        Assert.Equal(
+            new List<string?> { "ORDER-NETREFUND", "ORDER-OLDREFUND", "ORDER-OLDREFUND-ZERO" },
+            Guids(result)
+        );
+    }
+
+    [Fact]
+    public async Task GetSalesOrderListAsync_无退货筛选时标出含退货商品的订单且不影响其余订单()
+    {
+        await SeedRefundScenarioAsync();
+
+        var result = await CreateService().GetSalesOrderListAsync(new PosmSalesOrderQueryParams());
+
+        Assert.Equal(5, result.Total);
+        var flags = result.Items.ToDictionary(item => item.OrderGuid!, item => item.HasRefundItems);
+        Assert.False(flags["ORDER-PLAIN"]);
+        Assert.True(flags["ORDER-EXCHANGE"]);
+        Assert.True(flags["ORDER-NETREFUND"]);
+        Assert.True(flags["ORDER-OLDREFUND"]);
+        Assert.True(flags["ORDER-OLDREFUND-ZERO"]);
+    }
+
+    [Fact]
+    public async Task GetSalesOrderListAsync_退货筛选可与订单状态叠加()
+    {
+        await SeedRefundScenarioAsync();
+
+        var result = await CreateService().GetSalesOrderListAsync(
+            new PosmSalesOrderQueryParams { RefundFilter = "any", OrderType = OrderType.Paid }
+        );
+
+        Assert.Equal(new List<string?> { "ORDER-EXCHANGE", "ORDER-NETREFUND" }, Guids(result));
     }
 
     [Fact]

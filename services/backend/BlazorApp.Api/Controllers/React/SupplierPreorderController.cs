@@ -41,6 +41,10 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     public Task<IActionResult> Preview([FromBody] SupplierPreorderPreviewRequestDto request) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.PreviewAsync(request));
 
+    [HttpPost("import/ref-candidates")]
+    public Task<IActionResult> ImportRefCandidates([FromBody] SupplierPreorderImportRefCandidatesRequestDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetImportRefCandidatesAsync(request));
+
     [HttpGet("suppliers")]
     public Task<IActionResult> Suppliers() => SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetSuppliersAsync());
 
@@ -74,6 +78,34 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     [HttpGet("forms/{formGuid}/items")]
     public Task<IActionResult> GetItems(string formGuid, [FromQuery] SupplierPreorderFormItemQueryDto query) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetFormItemsAsync(formGuid, query));
+
+    [HttpPost("forms/{formGuid}/history/recompute")]
+    public Task<IActionResult> RecomputeHistory(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.RecomputeHistoryAsync(formGuid), "已排队重新计算去年历史");
+
+    [HttpPost("forms/{formGuid}/revision/preview")]
+    public Task<IActionResult> PreviewRevision(string formGuid, [FromBody] SupplierPreorderRevisionRequestDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.PreviewRevisionAsync(formGuid, request));
+
+    [HttpPost("forms/{formGuid}/revision/apply")]
+    public Task<IActionResult> ApplyRevision(string formGuid, [FromBody] SupplierPreorderRevisionRequestDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.ApplyRevisionAsync(formGuid, request), "修订版已应用");
+
+    [HttpPost("forms/{formGuid}/remind")]
+    public Task<IActionResult> RemindPendingStores(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.RemindPendingStoresAsync(formGuid), "已发送提醒");
+
+    [HttpPost("forms/{formGuid}/images/retry-failed")]
+    public Task<IActionResult> RetryFailedImages(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.RetryFailedImagesAsync(formGuid), "已重新排队转存失败的图片");
+
+    [HttpGet("forms/{formGuid}/items/{itemGuid}/ref-candidates")]
+    public Task<IActionResult> GetRefCandidates(string formGuid, string itemGuid, [FromQuery] string? keyword) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetRefCandidatesAsync(formGuid, itemGuid, keyword));
+
+    [HttpPut("forms/{formGuid}/items/{itemGuid}/ref")]
+    public Task<IActionResult> SetItemRef(string formGuid, string itemGuid, [FromBody] SupplierPreorderSetRefDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.SetItemRefAsync(formGuid, itemGuid, request), "参考商品已保存");
 
     [HttpGet("forms/{formGuid}/stores")]
     public Task<IActionResult> GetFormStores(string formGuid) =>
@@ -145,6 +177,10 @@ public sealed class SupplierPreorderOrderingController : ControllerBase
     [HttpGet("forms/{formGuid}/items")]
     public Task<IActionResult> GetItems(string formGuid, [FromQuery] SupplierPreorderOrderingItemQueryDto query) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetOrderingItemsAsync(formGuid, query));
+
+    [HttpGet("forms/{formGuid}/items/{itemGuid}/history")]
+    public Task<IActionResult> GetItemHistory(string formGuid, string itemGuid, [FromQuery] string storeGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetOrderingItemHistoryAsync(formGuid, itemGuid, storeGuid));
 
     [HttpPut("forms/{formGuid}/stores/{storeGuid}/lines/{itemGuid}")]
     public Task<IActionResult> SaveLine(string formGuid, string storeGuid, string itemGuid, [FromBody] SupplierPreorderSaveLineDto request) =>

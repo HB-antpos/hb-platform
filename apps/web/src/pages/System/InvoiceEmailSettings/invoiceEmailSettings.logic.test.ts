@@ -57,6 +57,8 @@ const translate = (key: string, fallback?: string) => fallback ?? key
 const visibleSystemMenu = buildWebRoleMenuPreview(permissionAccess, translate)
 const invoiceEmailMenu = visibleSystemMenu
   .find((node) => node.path === '/system')
+  // 已并入「支付与发票」合并页，在组节点下
+  ?.children?.find((node) => node.path === '/system/payments-invoices')
   ?.children?.find((node) => node.path === '/system/invoice-email-settings')
 
 assert(invoiceEmailMenu, '拥有 System.ManageSettings 时系统菜单应显示发票邮箱配置')
@@ -69,6 +71,8 @@ assertEqual(
 const hiddenSystemMenu = buildWebRoleMenuPreview(deniedAccess, translate, { includeHidden: true })
 const hiddenInvoiceEmailMenu = hiddenSystemMenu
   .find((node) => node.path === '/system')
+  // 已并入「支付与发票」合并页，在组节点下
+  ?.children?.find((node) => node.path === '/system/payments-invoices')
   ?.children?.find((node) => node.path === '/system/invoice-email-settings')
 
 assertEqual(hiddenInvoiceEmailMenu?.visible, false, '缺少权限时发票邮箱配置菜单应保持隐藏')

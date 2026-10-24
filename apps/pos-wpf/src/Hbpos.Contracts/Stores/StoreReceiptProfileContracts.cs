@@ -32,11 +32,19 @@ public sealed record StoreReceiptProfileDto(
 /// <summary>
 /// 收银端按版本号轮询的同步结果：Changed=false 时 Profile 为 null（本机已是最新或从未下发），
 /// Changed=true 时 Profile 为最新下发快照。
+/// <para>
+/// ApiEntryMode 是后台为本门店设置的收银端 POS API「首选入口」：edge（EdgeOne，pos.hotbargain.vip）、
+/// aws（AWS 悉尼边缘，pos-syd.hotbargain.vip）、direct（直连新加坡，hotbargain.vip）；null＝后台未设置，
+/// 收银端按 edge 处理。它每次都带当前值，与 Changed/Version（小票下发版本）无关，所以改入口不需要重新发布小票。
+/// 放在末尾并带默认值：旧服务端（JSON 里没有该字段）与旧客户端（忽略未知字段）互相兼容；
+/// 客户端遇到不认识的取值必须保持当前设置不变。
+/// </para>
 /// </summary>
 public sealed record StoreReceiptProfileSyncDto(
     bool Changed,
     int Version,
-    StoreReceiptProfileDto? Profile);
+    StoreReceiptProfileDto? Profile,
+    string? ApiEntryMode = null);
 
 /// <summary>收银端写入本机后的回执：告知服务端本设备已应用到哪个版本。</summary>
 public sealed record StoreReceiptProfileAckRequest(int Version);

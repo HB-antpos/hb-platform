@@ -80,6 +80,20 @@ public static class DeviceRuntimeStatusSchemaMigrator
                 ALTER TABLE [dbo].[POSM_设备注册信息表]
                     ADD [客户端句柄数] INT NULL;
             END;
+
+            -- 设备实际走的 POS API 入口回显（edge / aws / direct）与最近写入时间（UTC）；与 Hbpos.Api 的运行态初始化器保持同一定义。
+            -- 已登记的生产库靠 POSM 迁移 20261024.004-pos-device-api-entry 补列，这里服务全新库的基线。
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'LastApiEntry') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [LastApiEntry] NVARCHAR(16) NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'LastApiEntryAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [LastApiEntryAt] DATETIME2(7) NULL;
+            END;
         END;
         """;
 

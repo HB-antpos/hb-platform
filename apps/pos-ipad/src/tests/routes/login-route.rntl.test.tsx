@@ -65,6 +65,7 @@ test("登录路由只传受限 runtime facade，成功后替换为销售页", as
         updateId: "A1B2C3D4-E5F6-7890",
         isEmbeddedLaunch: false,
       },
+      nativeAppVersion: { appVersion: "0.2.0", buildNumber: "12" },
     },
   };
   mockRouteCaptureProps = null;
@@ -78,7 +79,12 @@ test("登录路由只传受限 runtime facade，成功后替换为销售页", as
   expect(mockScreenProps).toMatchObject({
     language: "en",
     runtime: mockRuntime,
-    versionInfo: { runtimeVersion: "0.2.0", otaVersion: "a1b2c3d4" },
+    versionInfo: {
+      appVersion: "0.2.0",
+      buildNumber: "12",
+      runtimeVersion: "0.2.0",
+      otaVersion: "a1b2c3d4",
+    },
   });
   expect(mockScreenProps).not.toHaveProperty("storeCode");
   expect(mockScreenProps).not.toHaveProperty("deviceCode");
@@ -124,7 +130,10 @@ test.each([
   mockScreenProps = null;
   const screen = await render(<LoginRoute />);
 
+  // 旧运行时 mock 没有 nativeAppVersion 时，版本与 build 回退 unknown 而不是崩溃。
   expect(mockScreenProps.versionInfo).toEqual({
+    appVersion: "unknown",
+    buildNumber: "unknown",
     runtimeVersion: "0.2.0",
     otaVersion: "embedded",
   });
@@ -140,6 +149,8 @@ test("更新身份缺失时 Runtime 回退 unknown 且 OTA 显示 embedded", asy
   const screen = await render(<LoginRoute />);
 
   expect(mockScreenProps.versionInfo).toEqual({
+    appVersion: "unknown",
+    buildNumber: "unknown",
     runtimeVersion: "unknown",
     otaVersion: "embedded",
   });

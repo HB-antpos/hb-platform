@@ -552,6 +552,11 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   reportReceiptProfileSync?:
     | ((event: ReceiptProfileSyncLogEvent) => void)
     | undefined;
+  /**
+   * 接收后台为本店设置的 POS API 首选入口（receipt-profile/sync 顶层 apiEntryMode 的原始取值）。
+   * 每次 sync 成功都会调用，与小票 changed 无关；缺省时忽略。实现必须自行吞掉持久化错误。
+   */
+  applyApiEntryMode?: ((raw: unknown) => void) | undefined;
   /** 支付草稿冷启动降级为耐久购物车恢复时上报；缺省时静默。 */
   reportPaymentRecoveryFallback?:
     | ((fallback: PaymentCartDurableRecoveryFallback) => void)
@@ -824,8 +829,20 @@ export function createProductionPosRuntimeServices(
   const receiptProfileApi = new HbposStoreApi(input.transport);
   const receiptProfileSync = new ReceiptProfileSyncController({
     api: {
-      sync: (knownVersion, signal) =>
-        receiptProfileApi.syncReceiptProfile(knownVersion, signal),
+      sync: async (knownVersion, signal) => {
+        const response = await receiptProfileApi.syncReceiptProfile(
+          knownVersion,
+          signal,
+        );
+        // 首选入口搭 sync 的车下发，Changed=false 时也带：这里无条件交给入口协调器。
+        // 它只改内存里的入口选择并异步落盘，出任何错都不能影响小票同步与收银。
+        try {
+          input.applyApiEntryMode?.(response.apiEntryMode);
+        } catch {
+          // 忽略：入口设置不是同步成败的一部分。
+        }
+        return response;
+      },
       ack: (version, signal) =>
         receiptProfileApi.ackReceiptProfile(version, signal),
     },

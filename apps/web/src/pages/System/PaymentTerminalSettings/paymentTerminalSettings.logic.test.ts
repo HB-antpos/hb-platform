@@ -54,6 +54,8 @@ assertEqual(access.canManageSystemSettings, true, 'System.ManageSettings should 
 const menu = buildWebRoleMenuPreview(access, (key) => key)
 const paymentMenu = menu
   .find((node) => node.path === '/system')
+  // 已并入「支付与发票」合并页，在组节点下
+  ?.children?.find((node) => node.path === '/system/payments-invoices')
   ?.children?.find((node) => node.path === '/system/payment-terminal-settings')
 
 assert(paymentMenu, 'system menu should include payment terminal settings')

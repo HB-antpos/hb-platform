@@ -796,6 +796,7 @@ builder.Services.AddScoped<IRoleService, RoleService>(); // 角色管理服务
 builder.Services.AddScoped<IStoreService, StoreService>(); // 分店管理服务
 builder.Services.AddScoped<StoreSyncService>(); // 分店数据同步服务
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreReceiptProfiles.IStoreReceiptProfileService, BlazorApp.Api.Services.StoreReceiptProfiles.StoreReceiptProfileService>(); // 门店小票资料下发（快照 / 设备应用情况）
+builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryService>(); // 收银端 POS API 入口按分店设置（首选入口 + 设备实际入口统计）
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
@@ -1333,6 +1334,11 @@ builder.Services.AddScoped<IPreorderGateService>(provider =>
 );
 // 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
 builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderService, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderService>();
+// 去年历史快照：发布后排队计算、截止前每晚刷新（状态在快照表表头行）
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderHistoryWorker>();
+// 新品图片转存 COS 商品图片桶（状态在商品行的转存列）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderImageStore, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderCosImageStore>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderImageWorker>();
 builder.Services.AddScoped<IStoreProductMaintenanceReactService, StoreProductMaintenanceReactService>();
 // 移动端离线商品目录：索引缓存为进程级单例（每店保留多版本供 delta），服务按请求作用域。
 builder.Services.AddSingleton<

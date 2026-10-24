@@ -77,9 +77,13 @@ assert(
     && pageSource.includes('preserveSelectedRowKeys: true'),
   '供应商表格应以供应商代码保留跨页选择',
 )
-// 「从 HQ 同步」（HQ → HBweb）已于 2026-09-29 停用，写入 HQ 按钮只受编辑权限与选择约束。
+// 「从 HQ 同步」（HQ → HBweb）已于 2026-09-29 停用，写入 HQ 按钮只受编辑权限与选择约束：
+// 未勾选时整条同步操作条不出现，勾选后按钮仍按编辑权限禁用。
 assert(
-  pageSource.includes('disabled={!canEdit || !selectedRowKeys.length}') && !pageSource.includes('syncingFromHq'),
+  pageSource.includes('const hasSelection = selectedRowKeys.length > 0')
+    && pageSource.includes('{hasSelection ? (')
+    && /loading=\{syncingToHq\}\s*disabled=\{!canEdit\}/.test(pageSource)
+    && !pageSource.includes('syncingFromHq'),
   '无编辑权限或未选择供应商时应禁用写入 HQ',
 )
 assert(

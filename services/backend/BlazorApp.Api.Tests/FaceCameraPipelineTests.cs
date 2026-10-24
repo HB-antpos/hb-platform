@@ -356,10 +356,11 @@ public sealed class FaceCameraPermissionRegistrationTests
         var menu = _navigation.BuildMenu(CreateUser(new Claim("permission", Code)));
 
         var system = Assert.Single(menu, item => item.Path == "/system");
+        // 人脸抓拍摄像机已并入「人脸识别」合并页。
         var child = Assert.Single(system.Children!);
-        Assert.Equal("/system/face-cameras", child.Path);
-        Assert.Equal("menu.faceCameras", child.TitleKey);
-        Assert.Equal(Code, child.Permission);
+        Assert.Equal("/system/face-recognition", child.Path);
+        Assert.Equal("menu.groupFaceRecognition", child.TitleKey);
+        Assert.Contains(Code, child.AnyPermissions!);
         Assert.False(child.RequireAdmin);
     }
 
@@ -381,7 +382,7 @@ public sealed class FaceCameraPermissionRegistrationTests
     {
         var menu = _navigation.BuildMenu(CreateUser(new Claim(ClaimTypes.Role, role)));
 
-        Assert.Contains(menu.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-cameras");
+        Assert.Contains(menu.SelectMany(item => item.Children ?? []), item => item.Path == "/system/face-recognition");
     }
 
     private static ClaimsPrincipal CreateUser(params Claim[] claims) =>

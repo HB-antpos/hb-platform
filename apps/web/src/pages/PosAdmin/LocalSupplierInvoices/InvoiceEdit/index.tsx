@@ -3248,12 +3248,37 @@ export default function InvoiceEditPage() {
             </span>
           ) : null}
         </span>
-        <span className="lsi-wb-sub lsi-num">
-          {record.newAutoRetailPrice != null
-            ? t('posAdmin.invoiceWorkbench.pricingNew', { price: formatAmount(record.newAutoRetailPrice) })
-            : ''}
+        <span className="lsi-wb-pricing-line lsi-wb-sub">
+          {record.newAutoRetailPrice != null ? (
+            <span className="lsi-num">
+              {t('posAdmin.invoiceWorkbench.pricingNew', { price: formatAmount(record.newAutoRetailPrice) })}
+            </span>
+          ) : null}
+          {renderStoreAutoPricing(record)}
         </span>
       </>
+    )
+  }
+
+  // 本单分店当前的自动定价状态（读分店价格表），和上一行的「本行定价方案」分开显示，避免两者混淆。
+  const renderStoreAutoPricing = (record: LocalSupplierInvoiceItemDto) => {
+    // 没有匹配到商品时谈不上分店状态，不显示。
+    if (!record.productCode) return null
+    if (record.storeIsAutoPricing == null) {
+      return (
+        <span className="lsi-tag lsi-wb-store-pricing lsi-wb-store-pricing-none" title={t('posAdmin.invoiceWorkbench.pricingStoreNoneTip')}>
+          {t('posAdmin.invoiceWorkbench.pricingStoreNone')}
+        </span>
+      )
+    }
+    return record.storeIsAutoPricing ? (
+      <span className="lsi-tag lsi-tag-green lsi-wb-store-pricing" title={t('posAdmin.invoiceWorkbench.pricingStoreAutoTip')}>
+        {t('posAdmin.invoiceWorkbench.pricingStoreAuto')}
+      </span>
+    ) : (
+      <span className="lsi-tag lsi-tag-neutral lsi-wb-store-pricing" title={t('posAdmin.invoiceWorkbench.pricingStoreManualTip')}>
+        {t('posAdmin.invoiceWorkbench.pricingStoreManual')}
+      </span>
     )
   }
 
@@ -3482,10 +3507,12 @@ export default function InvoiceEditPage() {
     },
     {
       // 定价列合并自动定价、定价浮率、新自动零售价、特殊商品、折扣率；点击打开定价弹窗统一修改。
+      // 第二行另外显示本单分店当前的自动定价状态（只读，弹窗不改它）。
       title: t('posAdmin.invoiceWorkbench.colPricing'),
       dataIndex: 'autoPricing',
       key: 'autoPricing',
-      width: 140,
+      // 第二行要并排放「新价」和本店自动定价状态，比原来的 140 稍宽。
+      width: 164,
       filters: [
         { text: t('posAdmin.invoiceDetail.auto', '自动'), value: true },
         { text: t('posAdmin.invoiceDetail.manual', '手动'), value: false },

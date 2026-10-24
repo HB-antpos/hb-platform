@@ -2303,19 +2303,46 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         await CompletePaymentFromTendersAsync();
     }
 
+    /// <summary>
+    /// 完成订单超过该时间仍未返回，就判定为“卡住”：写诊断日志，并（有已批准的卡付款时）
+    /// 弹出带“打开异常中心”入口的恢复提示。正常完成通常不到 1 秒；1031 店曾停 42 秒到 3 分钟以上。
+    /// </summary>
+    internal TimeSpan CompletionStallTimeout { get; set; } = TimeSpan.FromSeconds(20);
+
+    // 完成动作是否正在运行；用来区分“正在完成中的正常加锁”与“没人持有的残留锁”。
+    private bool _completionInFlight;
+
+    // 看门狗是否已为本次完成弹出恢复提示；后台完成最终成功时据此撤销。
+    private bool _completionStallRecoveryShown;
+
+    // 本次完成是否以“已批准卡款无法安全落盘”结束：此时恢复锁是真实的，不能被看门狗的撤销逻辑清掉。
+    private bool _completionEndedWithPersistenceUnknown;
+
     private async Task CompletePaymentFromTendersAsync()
     {
         if (IsPaymentInteractionLocked)
         {
+            HandleCompletionBlockedByLock();
             return;
         }
 
         // 中文注释：自动完成和人工确认共用此入口，首次等待前同步上锁，防止同一订单并发结算。
         IsPaymentInteractionLocked = true;
+        _completionInFlight = true;
+        _completionStallRecoveryShown = false;
+        _completionEndedWithPersistenceUnknown = false;
         var preservePaymentInteractionLock = false;
+        var trace = PaymentCompletionTrace.Begin(
+            $"store={Session.StoreCode} device={Session.DeviceCode} amount={PaymentTenders.Sum(tender => tender.Amount):0.00} methods={FormatPaymentMethods(PaymentTenders.ToList())}");
         try
         {
-            await CompletePaymentFromTendersCoreAsync();
+            await RunCompletionWithWatchdogAsync(trace);
+            if (_completionStallRecoveryShown && !_completionEndedWithPersistenceUnknown)
+            {
+                // 看门狗提示后，完成动作最终返回：成功（付款明细已清空）或普通失败（如代金券上传失败，页面应回到可重试状态），
+                // 都撤销看门狗加的“结果未知”锁与提示；只有“已批准卡款无法落盘”才保留恢复锁。
+                _cardSession.ClearCompletionStalledRecovery();
+            }
         }
         catch (Exception ex) when (ex is OutOfMemoryException or StackOverflowException)
         {
@@ -2325,12 +2352,91 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            _completionInFlight = false;
+            _completionStallRecoveryShown = false;
+            trace.MarkStep("finished");
+            trace.Detach();
             // 结算期间若发现已批准卡款无法安全落盘，finally 不能覆盖待恢复锁。
             IsPaymentInteractionLocked =
                 preservePaymentInteractionLock ||
                 IsManualCardSavePending ||
                 IsShuttingDown ||
                 _cardSession.HasUnknownResult;
+        }
+    }
+
+    /// <summary>
+    /// 运行完成动作并计时：超过 <see cref="CompletionStallTimeout"/> 仍未返回就触发看门狗，
+    /// 但不取消底层动作——订单可能正在落盘，强行取消会造成“扣了款没订单”或重复订单；
+    /// 动作最终返回后照常收尾。
+    /// </summary>
+    private async Task RunCompletionWithWatchdogAsync(PaymentCompletionTrace trace)
+    {
+        var core = CompletePaymentFromTendersCoreAsync();
+        if (core.IsCompleted)
+        {
+            await core;
+            return;
+        }
+
+        using var delayCancellation = new CancellationTokenSource();
+        var delay = Task.Delay(CompletionStallTimeout, delayCancellation.Token);
+        if (await Task.WhenAny(core, delay) == core)
+        {
+            delayCancellation.Cancel();
+            await core;
+            return;
+        }
+
+        OnCompletionStalled(trace);
+        await core;
+    }
+
+    private void OnCompletionStalled(PaymentCompletionTrace trace)
+    {
+        var hasCardTender = PaymentTenders.Any(tender => tender.Method == PaymentMethodKind.Card);
+        ConsoleLog.WriteWarning(
+            "PaymentCompletion",
+            $"complete payment stalled lastStep={trace.LastStep} sinceLastStepMs={trace.SinceLastStep.TotalMilliseconds:0} " +
+            $"elapsedMs={trace.Elapsed.TotalMilliseconds:0} timeoutMs={CompletionStallTimeout.TotalMilliseconds:0} " +
+            $"tenders={PaymentTenders.Count} cardTender={hasCardTender}");
+        if (!hasCardTender || IsShuttingDown)
+        {
+            return;
+        }
+
+        // 已批准的卡款不能丢：给出出口，同时继续等待后台完成。
+        _completionStallRecoveryShown = true;
+        _cardSession.ShowCompletionStalledRecovery(T("payment.card.completionStalled.message"));
+    }
+
+    /// <summary>
+    /// 完成入口被付款锁挡掉。正常情况下是另一次完成正在进行；
+    /// 但 1031 店的现场（刷卡成功、金额已收齐、三个按钮全灰、日志静默）不排除“残留锁”这种情形，
+    /// 所以这里一律留下日志，并在能确认没有任何持有者时给出异常中心出口，而不是静默返回。
+    /// </summary>
+    private void HandleCompletionBlockedByLock()
+    {
+        var holderlessLock =
+            !_completionInFlight &&
+            !_cardSession.IsActive &&
+            !_cardSession.HasUnknownResult &&
+            !_cardSession.HasPendingFallbackPrompt &&
+            !IsManualCardDialogOpen &&
+            !IsManualCardSavePending &&
+            !IsInstallmentPaymentEnabled &&
+            !IsShuttingDown &&
+            CardPaymentErrorOverlay?.IsOpen != true &&
+            PaymentTenders.Any(tender => tender.Method == PaymentMethodKind.Card) &&
+            IsSettlementComplete();
+        ConsoleLog.WriteWarning(
+            "PaymentCompletion",
+            $"complete payment skipped: interaction locked inFlight={_completionInFlight} cardActive={_cardSession.IsActive} " +
+            $"unknownResult={_cardSession.HasUnknownResult} manualSave={IsManualCardSavePending} shuttingDown={IsShuttingDown} " +
+            $"tenders={PaymentTenders.Count} holderlessLock={holderlessLock}");
+        if (holderlessLock)
+        {
+            _cardSession.ShowCompletionStalledRecovery(T("payment.card.completionStalled.message"));
         }
     }
 
@@ -2385,6 +2491,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
         catch (CardPaymentPersistenceUnknownException ex)
         {
+            _completionEndedWithPersistenceUnknown = true;
             if (tenderSnapshot.Any(tender => ManualCardPaymentReference.IsManual(tender.Reference)))
             {
                 // 手动款只能重试保存同一订单，不能转到 Linkly/Square 查询或让收银员再次刷卡。

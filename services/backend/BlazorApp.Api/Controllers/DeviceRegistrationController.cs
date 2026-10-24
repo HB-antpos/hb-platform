@@ -30,6 +30,7 @@ namespace BlazorApp.Api.Controllers
         private readonly UserLoginDeviceAuditService? _loginDeviceAuditService;
         private readonly DeviceActivationOptions _deviceActivationOptions;
         private readonly MobileDeviceActivationOptions _mobileDeviceActivationOptions;
+        private readonly RemoteMaintenanceService? _remoteMaintenanceService;
 
         public DeviceRegistrationController(
             IDeviceRegistrationService deviceService,
@@ -38,7 +39,8 @@ namespace BlazorApp.Api.Controllers
             IStoreService storeService,
             UserLoginDeviceAuditService? loginDeviceAuditService = null,
             IOptions<DeviceActivationOptions>? deviceActivationOptions = null,
-            IOptions<MobileDeviceActivationOptions>? mobileDeviceActivationOptions = null
+            IOptions<MobileDeviceActivationOptions>? mobileDeviceActivationOptions = null,
+            RemoteMaintenanceService? remoteMaintenanceService = null
         )
         {
             _deviceService = deviceService;
@@ -49,6 +51,7 @@ namespace BlazorApp.Api.Controllers
             _deviceActivationOptions = deviceActivationOptions?.Value ?? new DeviceActivationOptions();
             _mobileDeviceActivationOptions =
                 mobileDeviceActivationOptions?.Value ?? new MobileDeviceActivationOptions();
+            _remoteMaintenanceService = remoteMaintenanceService;
         }
 
         /// <summary>
@@ -100,6 +103,22 @@ namespace BlazorApp.Api.Controllers
                 );
                 var deviceDtos = _mapper.Map<List<DeviceListItemDto>>(devices);
 
+                // 远程版本：只为本页设备批量取 RustDesk 客户端版本号，不带任何远程维护凭据。
+                string? rustDeskLatestVersion = null;
+                if (_remoteMaintenanceService != null && deviceDtos.Count > 0)
+                {
+                    var versions = await _remoteMaintenanceService.GetClientVersionsAsync(
+                        deviceDtos.Select(d => (d.Id, (string?)d.HardwareId)).ToList(),
+                        HttpContext?.RequestAborted ?? CancellationToken.None
+                    );
+                    foreach (var dto in deviceDtos)
+                    {
+                        if (versions.TryGetValue(dto.Id, out var version))
+                            dto.RustDeskClientVersion = version;
+                    }
+                    rustDeskLatestVersion = _remoteMaintenanceService.GetConfiguredRustdeskVersion();
+                }
+
                 return Ok(
                     new
                     {
@@ -107,6 +126,7 @@ namespace BlazorApp.Api.Controllers
                         data = new
                         {
                             devices = deviceDtos,
+                            rustDeskLatestVersion,
                             pagination = new
                             {
                                 page = page,

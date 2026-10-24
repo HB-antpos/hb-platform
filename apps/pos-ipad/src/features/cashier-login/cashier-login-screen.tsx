@@ -57,6 +57,7 @@ type LoginCopy = Readonly<{
   emergencyWrongStore: string;
   emergencyKeyUnknown: string;
   emergencyInvalid: string;
+  networkCheck: string;
 }>;
 
 const copy: Record<"en" | "zh", LoginCopy> = {
@@ -90,6 +91,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     emergencyKeyUnknown:
       "The emergency signing key is unavailable. Connect this iPad and refresh its security keys.",
     emergencyInvalid: "This emergency sign-in QR is invalid.",
+    networkCheck: "Network check",
   },
   zh: {
     eyebrow: "收银员登录",
@@ -116,15 +118,20 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     emergencyWrongStore: "紧急登录二维码不属于当前门店。",
     emergencyKeyUnknown: "紧急登录签名密钥不可用，请联网刷新安全密钥。",
     emergencyInvalid: "紧急登录二维码无效。",
+    networkCheck: "网络检测",
   },
 };
 
 export type CashierLoginVersionInfo = Readonly<{
+  appVersion: string;
+  buildNumber: string;
   runtimeVersion: string;
   otaVersion: string;
 }>;
 
 const DEFAULT_VERSION_INFO: CashierLoginVersionInfo = Object.freeze({
+  appVersion: "unknown",
+  buildNumber: "unknown",
   runtimeVersion: "unknown",
   otaVersion: "embedded",
 });
@@ -133,6 +140,7 @@ export function CashierLoginScreen({
   controller,
   language = "zh",
   onManualInputFocusChange,
+  onOpenNetworkCheck,
   onSwitchLanguage,
   onSuccess,
   runtime,
@@ -141,6 +149,8 @@ export function CashierLoginScreen({
   controller?: CashierLoginController;
   language?: string;
   onManualInputFocusChange?(focused: boolean): void;
+  /** 打开只读网络检测页；登录前就能用，不受终端就绪状态限制。 */
+  onOpenNetworkCheck?(): void;
   onSwitchLanguage?: () => void;
   onSuccess(): void;
   runtime: CashierLoginRuntime;
@@ -430,6 +440,28 @@ export function CashierLoginScreen({
             />
             <Text style={styles.offlineText}>{text.offline}</Text>
           </View>
+          {onOpenNetworkCheck ? (
+            <PosPressable
+              accessibilityLabel={text.networkCheck}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: submitting }}
+              disabled={submitting}
+              onPress={onOpenNetworkCheck}
+              sound="navigate"
+              style={({ pressed }) => [
+                styles.networkCheckButton,
+                (pressed || submitting) && styles.networkCheckButtonPressed,
+              ]}
+              testID="cashier-login-network-check"
+            >
+              <MaterialCommunityIcons
+                color={posColors.blue}
+                name="access-point-network"
+                size={20}
+              />
+              <Text style={styles.networkCheckLabel}>{text.networkCheck}</Text>
+            </PosPressable>
+          ) : null}
         </PosKeyboardAwareScrollView>
         <Text
           numberOfLines={1}
@@ -438,7 +470,7 @@ export function CashierLoginScreen({
           style={styles.versionInfo}
           testID="cashier-login-version-info"
         >
-          {`Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
+          {`Version ${versionInfo.appVersion} · Build ${versionInfo.buildNumber} · Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
         </Text>
       </View>
     </SafeAreaView>
@@ -625,6 +657,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  networkCheckButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 18,
+    minHeight: 44,
+  },
+  networkCheckButtonPressed: { opacity: 0.62 },
+  networkCheckLabel: { color: posColors.blue, fontSize: 15, fontWeight: "800" },
   versionInfo: {
     bottom: 20,
     color: posColors.mutedInk,

@@ -91,6 +91,12 @@ public class SupplierPreorderForm
 
     public int ItemCount { get; set; }
 
+    /// <summary>修订版次数：0 = 原始导入，每上传一次修订版 +1（迁移 20261024.002 加列）。</summary>
+    public int Revision { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? RevisedAtUtc { get; set; }
+
     [SugarColumn(Length = 1000, IsNullable = true)]
     public string? Notes { get; set; }
 
@@ -155,6 +161,25 @@ public class SupplierPreorderFormItem
     [SugarColumn(Length = 500, IsNullable = true)]
     public string? ImageSourceUrl { get; set; }
 
+    // 新品图片转存 COS（迁移 20261024.001-supplier-preorder-item-image 加列）：原表图片单张约 700KB、可能防盗链或失效，
+    // 后台下载后转成 JPEG 存进商品图片桶，页面缩略图由 COS 数据万象按需生成。
+
+    /// <summary>转存后的 COS 地址；有我方商品图的商品不转存。</summary>
+    [SugarColumn(Length = 500, IsNullable = true)]
+    public string? ImageCosUrl { get; set; }
+
+    /// <summary>null 未处理 / Done 已转存 / Skipped 不需要（有我方商品图）/ Failed 失败（重试 3 次后停止）。</summary>
+    [SugarColumn(Length = 20, IsNullable = true)]
+    public string? ImageCopyStatus { get; set; }
+
+    public int ImageCopyAttempts { get; set; }
+
+    [SugarColumn(Length = 300, IsNullable = true)]
+    public string? ImageCopyError { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? ImageCopiedAtUtc { get; set; }
+
     [SugarColumn(Length = 500, IsNullable = true)]
     public string? Notes { get; set; }
 
@@ -184,6 +209,25 @@ public class SupplierPreorderFormItem
     public DateTime? RefSetAtUtc { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    // 修订版（迁移 20261024.002-supplier-preorder-revision 加列）：只记最近一次修订的改动，用来高亮
+
+    /// <summary>最近一次有改动的修订版号（0 = 原始导入后没改过）。</summary>
+    public int RevisionNo { get; set; }
+
+    /// <summary>最近一次修订的改动，逗号分隔：Added / Restored / Removed / Price / Carton / Name / Barcode / Image / Cbm / Category。</summary>
+    [SugarColumn(Length = 100, IsNullable = true)]
+    public string? RevisionChange { get; set; }
+
+    [SugarColumn(DecimalDigits = 4, Length = 18, IsNullable = true)]
+    public decimal? PrevPrice { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public int? PrevCartonQty { get; set; }
+
+    /// <summary>修订版里被删掉（下架）的时间；重新出现时清空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? RemovedAtUtc { get; set; }
 }
 
 /// <summary>某张订单表开启的分店（这张表有哪些分店参与）。关闭即删除该行，变更写入授权日志。</summary>
@@ -403,4 +447,52 @@ public class SupplierPreorderSourceFile
 
     [SugarColumn(Length = 100, IsNullable = true)]
     public string? UploadedBy { get; set; }
+}
+
+/// <summary>新品图片转存状态。</summary>
+public static class SupplierPreorderImageCopyStatuses
+{
+    public const string Done = "Done";
+    public const string Skipped = "Skipped";
+    public const string Failed = "Failed";
+}
+
+/// <summary>参考商品来源：Auto 系统推荐（每次计算可换）；Manual 人工指定（系统不覆盖）；Cleared 人工清除（系统不再自动带上）。</summary>
+public static class SupplierPreorderRefSources
+{
+    public const string Auto = "Auto";
+    public const string Manual = "Manual";
+    public const string Cleared = "Cleared";
+}
+
+/// <summary>
+/// 去年历史快照（迁移 20261023.002-supplier-preorder-history 建表，不进 tableTypes）。
+/// 一行 = 一张订单表 × 一家分店 × 一个我方商品（本品或参考商品）在历史窗口内的进货、日销与折扣；只存有数据的组合。
+/// 另有一行 StoreCode = ProductCode = "*" 的表头行，记录这张订单表的计算状态（排队 / 计算中 / 完成 / 失败）与窗口。
+/// </summary>
+[SugarTable("SupplierPreorderHistorySnapshot")]
+public class SupplierPreorderHistorySnapshot
+{
+    /// <summary>表头行的 StoreCode / ProductCode。</summary>
+    public const string FormMetaKey = "*";
+
+    [SugarColumn(IsPrimaryKey = true, Length = 50)]
+    public string SnapshotGuid { get; set; } = Guid.NewGuid().ToString("N");
+
+    [SugarColumn(Length = 50)]
+    public string FormGuid { get; set; } = string.Empty;
+
+    [SugarColumn(Length = 50)]
+    public string StoreCode { get; set; } = string.Empty;
+
+    [SugarColumn(Length = 100)]
+    public string ProductCode { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnDataType = StaticConfig.CodeFirst_BigString)]
+    public string PayloadJson { get; set; } = string.Empty;
+
+    public DateTime ComputedAtUtc { get; set; } = DateTime.UtcNow;
+
+    [SugarColumn(Length = 50)]
+    public string RuleVersion { get; set; } = string.Empty;
 }

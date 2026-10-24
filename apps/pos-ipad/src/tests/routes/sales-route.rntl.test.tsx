@@ -377,6 +377,11 @@ test("销售路由零参数创建生产 presenter，并在卸载时销毁", asyn
     }),
   );
 
+  // 运行时 mock 未提供 nativeAppVersion / updateIdentity：路由仍传版本行并回退 unknown。
+  expect(mockSalesScreenProps.appVersionLabel).toBe(
+    "Version unknown · Build unknown",
+  );
+
   mockSalesScreenProps.onOpenHeldOrders();
   expect(mockRouterPush).toHaveBeenCalledWith("/held-orders");
   mockSalesScreenProps.onOpenDailyClose();

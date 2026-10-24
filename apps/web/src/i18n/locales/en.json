@@ -67,6 +67,13 @@
     "en": "EN"
   },
   "menu": {
+    "groupDevicesRemote": "Devices & Remote",
+    "groupAccounts": "Accounts & Access",
+    "groupMonitoring": "System Monitoring",
+    "groupPaymentsInvoices": "Payments & Invoices",
+    "groupFaceRecognition": "Face Recognition",
+    "groupProductsPricing": "Products & Pricing",
+    "groupSettlementCash": "Settlement & Cash",
     "dashboard": "Dashboard",
     "system": "System",
     "systemStores": "Stores",

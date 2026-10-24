@@ -55,11 +55,28 @@ public sealed class SqlSugarStoreSchemaInitializer(
         END;
         """;
 
+    // 后台按分店设置收银端 POS API 首选入口（edge / aws / direct，NULL＝未设置）的三列；与 VoucherTerms 同样的处理方式：
+    // 启动时幂等补齐旧库列，不回填任何旧行。**迁移须先于代码上线**：正式迁移 20261024.003-store-pos-api-entry
+    // 由 HBweb 主 API 的 --schema=migrate 执行，它还会加 CHECK 约束 CK_Store_PosApiEntryMode（只允许 NULL/edge/aws/direct）；
+    // 这里只补列、不建约束，所以先发 Hbpos.Api 也不会因列缺失而 500，但约束要等迁移执行后才有。
+    internal const string EnsurePosApiEntryColumnsSql = """
+        IF OBJECT_ID(N'[dbo].[Store]', N'U') IS NOT NULL
+        BEGIN
+            IF COL_LENGTH(N'dbo.Store', N'PosApiEntryMode') IS NULL
+                ALTER TABLE [dbo].[Store] ADD [PosApiEntryMode] NVARCHAR(16) NULL;
+            IF COL_LENGTH(N'dbo.Store', N'PosApiEntryUpdatedAt') IS NULL
+                ALTER TABLE [dbo].[Store] ADD [PosApiEntryUpdatedAt] DATETIME2 NULL;
+            IF COL_LENGTH(N'dbo.Store', N'PosApiEntryUpdatedBy') IS NULL
+                ALTER TABLE [dbo].[Store] ADD [PosApiEntryUpdatedBy] NVARCHAR(64) NULL;
+        END;
+        """;
+
     public Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         return sqlExecutor.ExecuteAsync(
             EnsureContactEmailColumnSql + "\n" + EnsureReturnPolicyColumnSql
-                + "\n" + EnsureVoucherTermsColumnSql + "\n" + EnsureInstallmentTermsColumnSql,
+                + "\n" + EnsureVoucherTermsColumnSql + "\n" + EnsureInstallmentTermsColumnSql
+                + "\n" + EnsurePosApiEntryColumnsSql,
             cancellationToken);
     }
 }

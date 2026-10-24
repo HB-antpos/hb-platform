@@ -2,7 +2,9 @@ import type { DeviceRegistrationItem } from '../../../types/deviceRegistration'
 
 import {
   buildCountedOptions,
+  buildVersionFilterOptions,
   collectDistinctOptions,
+  compareDottedVersion,
   countDevicesByStatus,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
@@ -11,6 +13,10 @@ import {
   getRelativeTimeParts,
   getUptimeParts,
   isLongUptime,
+  isRustDeskVersionOutdated,
+  matchesVersionFilter,
+  VERSION_FILTER_NONE,
+  VERSION_FILTER_OUTDATED,
   formatDateOnly,
   mergeDeviceDetailView,
   runWithConcurrency,
@@ -204,7 +210,6 @@ assertEqual(merged.remark, '详情备注', '表单字段以详情为准')
 assertEqual(mergeDeviceDetailView(listRow, null).appVersion, '1.0.53', '详情未加载时直接展示列表行')
 assertEqual(mergeDeviceDetailView(listRow, null).remark, '列表备注', '详情未加载时备注取列表行')
 
-console.log('deviceManagementLogic.test: ok')
 
 // 抽屉视图：开机时长/内存/句柄同样是运行态字段，详情接口不带，必须以列表行为准（上次版本字段就栽在这里）
 const resourceRow = device({
@@ -246,3 +251,75 @@ assertEqual(isLongUptime(7 * 86_400), true, '满 7 天提示建议重启')
 assertEqual(isLongUptime(7 * 86_400 - 1), false, '不满 7 天不提示')
 assertEqual(isLongUptime(null), false, '未上报不提示')
 assertEqual(isLongUptime(0), false, '刚开机不提示')
+
+// 远程版本：按数字逐段比较，低于最新版本才标橙；无法比较时不标
+assertEqual(compareDottedVersion('1.4.10', '1.4.9')! > 0, true, '1.4.10 高于 1.4.9（不能按字符串比）')
+assertEqual(compareDottedVersion('1.4', '1.4.0'), 0, '缺的段按 0')
+assertEqual(compareDottedVersion('v1.4.6', '1.4.6'), 0, '允许 v 前缀')
+assertEqual(compareDottedVersion('nightly', '1.4.6'), null, '非数字版本无法比较')
+assertEqual(isRustDeskVersionOutdated('1.4.4', '1.4.6'), true, '低于最新版本标橙')
+assertEqual(isRustDeskVersionOutdated('1.4.6', '1.4.6'), false, '等于最新版本不标')
+assertEqual(isRustDeskVersionOutdated('1.4.7', '1.4.6'), false, '高于最新版本不标')
+assertEqual(isRustDeskVersionOutdated('1.4.4', null), false, '没有最新版本不标')
+assertEqual(isRustDeskVersionOutdated(null, '1.4.6'), false, '未安装不标橙')
+
+// 版本筛选：客户端版本与远程版本，「未上报 / 未安装」「低于最新版」两个特殊选项
+assertEqual(matchesVersionFilter('1.0.88', undefined), true, '未选版本不过滤')
+assertEqual(matchesVersionFilter('1.0.88', '1.0.88'), true, '同版本匹配')
+assertEqual(matchesVersionFilter('V1.4.6', 'v1.4.6'), true, '版本匹配不区分大小写')
+assertEqual(matchesVersionFilter('1.0.87', '1.0.88'), false, '不同版本不匹配')
+assertEqual(matchesVersionFilter(null, VERSION_FILTER_NONE), true, '空版本匹配「未上报 / 未安装」')
+assertEqual(matchesVersionFilter('  ', VERSION_FILTER_NONE), true, '空白视为未上报')
+assertEqual(matchesVersionFilter('1.4.4', VERSION_FILTER_NONE), false, '有版本不算未安装')
+assertEqual(matchesVersionFilter('1.4.4', VERSION_FILTER_OUTDATED, '1.4.6'), true, '低于最新版')
+assertEqual(matchesVersionFilter('1.4.6', VERSION_FILTER_OUTDATED, '1.4.6'), false, '等于最新版不算低于')
+assertEqual(matchesVersionFilter(null, VERSION_FILTER_OUTDATED, '1.4.6'), false, '未安装不算低于最新版')
+assertEqual(matchesVersionFilter('1.4.4', VERSION_FILTER_OUTDATED, null), false, '没有最新版本时「低于最新版」筛不出')
+
+const versionItems = [
+  device({ id: 11, appVersion: '1.0.88', rustDeskClientVersion: '1.4.6' }),
+  device({ id: 12, appVersion: '1.0.87', rustDeskClientVersion: '1.4.4' }),
+  device({ id: 13, appVersion: '1.0.88', rustDeskClientVersion: null, deviceSystem: 'Android' }),
+  device({ id: 14, appVersion: null, rustDeskClientVersion: '1.4.10' }),
+]
+assertEqual(
+  filterDevicesExceptStatus(versionItems, { keyword: '', appVersion: '1.0.88' }, isOnline).map((d) => d.id).join(','),
+  '11,13',
+  '按客户端版本筛选',
+)
+assertEqual(
+  filterDevicesExceptStatus(versionItems, { keyword: '', appVersion: VERSION_FILTER_NONE }, isOnline).map((d) => d.id).join(','),
+  '14',
+  '客户端版本未上报',
+)
+assertEqual(
+  filterDevicesExceptStatus(
+    versionItems,
+    { keyword: '', rustDeskVersion: VERSION_FILTER_OUTDATED, rustDeskLatestVersion: '1.4.6' },
+    isOnline,
+  ).map((d) => d.id).join(','),
+  '12',
+  '远程版本低于最新版（1.4.10 高于 1.4.6，不能按字符串比）',
+)
+assertEqual(
+  filterDevicesExceptStatus(
+    versionItems,
+    { keyword: '', appVersion: '1.0.88', rustDeskVersion: VERSION_FILTER_NONE, deviceSystem: 'android' },
+    isOnline,
+  ).map((d) => d.id).join(','),
+  '13',
+  '版本筛选与类型 / 系统等条件叠加',
+)
+
+const rustOptions = buildVersionFilterOptions(versionItems.map((d) => d.rustDeskClientVersion), undefined, '1.4.6')
+assertEqual(rustOptions.versions.map((o) => `${o.value}:${o.count}`).join(','), '1.4.10:1,1.4.6:1,1.4.4:1', '版本按新到旧排序')
+assertEqual(rustOptions.noneCount, 1, '未安装台数')
+assertEqual(rustOptions.outdatedCount, 1, '低于最新版台数')
+assertEqual(buildVersionFilterOptions(['1.0.88', '1.0.88', 'dev-build', '1.0.9'], undefined).versions.map((o) => o.value).join(','),
+  '1.0.88,1.0.9,dev-build', '无法解析的版本排最后')
+assertEqual(buildVersionFilterOptions(['1.0.88'], '1.0.70').versions.some((o) => o.value === '1.0.70' && o.count === 0), true,
+  '选中的版本换分店后仍保留')
+assertEqual(buildVersionFilterOptions(['1.0.88'], VERSION_FILTER_NONE).versions.length, 1, '特殊选项不混进版本列表')
+assertEqual(buildVersionFilterOptions(['1.4.4'], undefined, null).outdatedCount, 0, '没有最新版本时不统计低于最新版')
+
+console.log('deviceManagementLogic.test: ok')

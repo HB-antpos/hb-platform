@@ -10,6 +10,15 @@ export interface SalesOrderRangeInfo extends SalesOrderRange {
 /** 与后端 OrderType 枚举一致：-1 表示全部，其余对应订单 Status。 */
 export type SalesOrderTypeFilter = -1 | 0 | 1 | 2 | 3 | 4;
 
+/**
+ * 「已退款」筛选的档位：all 全部含退款商品的订单；partial 部分退款（整单金额不为负，橙色）；
+ * full 整单退款（整单金额为负，红色）。只在订单类型选「已退款」时生效。
+ */
+export type SalesOrderRefundTier = "all" | "partial" | "full";
+
+/** 订单含退款商品时的着色：partial 橙色、full 红色；不含退款商品为 null。 */
+export type SalesOrderRefundTone = "partial" | "full";
+
 export type SalesOrderSortDirection = "asc" | "desc";
 
 export type SalesOrderScope = "all-stores" | "authorized-stores";
@@ -19,6 +28,8 @@ export interface SalesOrderFilters {
   /** 空数组表示不限分店（在授权范围内）。 */
   branchCodes: string[];
   orderType: SalesOrderTypeFilter;
+  /** 订单类型选「已退款」时的档位；其它类型下恒为 all。 */
+  refundTier: SalesOrderRefundTier;
   sortDirection: SalesOrderSortDirection;
 }
 
@@ -46,6 +57,11 @@ export interface SalesOrderListItem {
   discountAmount: number | null;
   actualAmount: number | null;
   status: number | null;
+  /**
+   * 订单含退款商品：旧 POS 的退款单（状态=已退款），或订单里夹带了退货记录。
+   * 颜色看整单金额正负（见 resolveSalesOrderRefundTone）。旧后端不返回时按 false。
+   */
+  hasRefundItems: boolean;
   matchedProducts: SalesOrderMatchedProduct[];
 }
 
@@ -98,6 +114,8 @@ export interface SalesOrderQueryBody {
   endDate: string;
   branchCodes: string[];
   orderType: SalesOrderTypeFilter;
+  /** 退货筛选：any / partial / full；不筛选为 null。选「已退款」时 orderType 发 -1，由它决定范围。 */
+  refundFilter: "any" | "partial" | "full" | null;
   keyword: string | null;
   sortDirection: SalesOrderSortDirection;
   pageNumber: number;

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Data;
 using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Constants;
@@ -14,22 +15,35 @@ namespace BlazorApp.Api.Controllers.React
     {
         private readonly ILocalSuppliersReactService _service;
         private readonly ILogger<LocalSuppliersController> _logger;
+        private readonly SqlSugarContext? _dbContext;
 
-        public LocalSuppliersController(ILocalSuppliersReactService service, ILogger<LocalSuppliersController> logger)
+        public LocalSuppliersController(
+            ILocalSuppliersReactService service,
+            ILogger<LocalSuppliersController> logger,
+            SqlSugarContext? dbContext = null
+        )
         {
             _service = service;
             _logger = logger;
+            _dbContext = dbContext;
         }
 
         // 分页列表是 /pos-admin/suppliers 页面专用，按 AustralianSuppliers.View 授权；
         // active / check-code 是多个页面的下拉数据源，保持登录即可访问。
         [HttpGet]
         [Authorize(Policy = Permissions.AustralianSuppliers.View)]
-        public async Task<IActionResult> GetList([FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20, [FromQuery] string? keyword = null, [FromQuery] int? status = null, [FromQuery] string? sortBy = null, [FromQuery] string? sortOrder = null)
+        public async Task<IActionResult> GetList([FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20, [FromQuery] string? keyword = null, [FromQuery] int? status = null, [FromQuery] string? sortBy = null, [FromQuery] string? sortOrder = null, [FromQuery] string? imageTemplate = null)
         {
             try
             {
-                var res = await _service.GetSuppliersAsync(pageIndex, pageSize, keyword, status, sortBy, sortOrder);
+                // 「最近进货」与分店进货单列表同口径：全店用户不限；其余只看自己绑定的分店。
+                // 未注入数据库上下文时（仅单测）非全店用户按无分店处理，宁可不显示也不越权。
+                List<string>? allowedStoreCodes = LocalSupplierInvoiceStoreScope.IsFullStoreAccessUser(User)
+                    ? null
+                    : _dbContext == null
+                        ? new List<string>()
+                        : await LocalSupplierInvoiceStoreScope.GetCurrentUserStoreCodesAsync(_dbContext.Db, User);
+                var res = await _service.GetSuppliersAsync(pageIndex, pageSize, keyword, status, sortBy, sortOrder, imageTemplate, allowedStoreCodes);
                 return Ok(new { success = true, data = new { items = res.Items, total = res.Total }, message = "获取成功" });
             }
             catch (Exception ex)

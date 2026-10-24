@@ -61,6 +61,7 @@ public sealed class FaceMatchControllerTests
         [nameof(FaceMatchController.WithdrawEnrollment), Permissions.FaceMatch.Manage],
         [nameof(FaceMatchController.Audit), Permissions.FaceMatch.Manage],
         [nameof(FaceMatchController.Traffic), Permissions.FaceMatch.Traffic.View],
+        [nameof(FaceMatchController.TrafficOverview), Permissions.FaceMatch.Traffic.View],
         [nameof(FaceMatchController.CreateEntry), Permissions.FaceMatch.Unwelcome.Manage],
         [nameof(FaceMatchController.WithdrawEntry), Permissions.FaceMatch.Unwelcome.Manage],
         [nameof(FaceMatchController.SetDisputeNote), Permissions.FaceMatch.Unwelcome.Manage],

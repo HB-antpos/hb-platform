@@ -774,6 +774,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
                 await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
+                await MarkStoreAutoPricingAsync(db, list);
                 return ApiResponse<List<LocalSupplierInvoiceItemDto>>.OK(list);
             }
             catch (Exception ex)
@@ -869,6 +870,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
                 await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
+                await MarkStoreAutoPricingAsync(db, list);
                 return GridResponseDto<LocalSupplierInvoiceItemDto>.OK(list, total);
             }
             catch (Exception ex)
@@ -1264,6 +1266,64 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             foreach (var item in list)
             {
                 item.IsCreatedByThisInvoice = createdHere.Contains(item.DetailGUID);
+            }
+        }
+
+        /// <summary>
+        /// 回填本单分店当前的商品自动定价状态。分店价格表没有 (分店, 商品) 唯一约束，
+        /// 直接 LeftJoin 可能把一行明细翻成多行，所以分页查完后再按本页商品批量查一次；
+        /// 同一商品有多条有效记录时取最近更新的那条，与「当前状态」的含义一致。
+        /// </summary>
+        private static async Task MarkStoreAutoPricingAsync(
+            ISqlSugarClient db,
+            List<LocalSupplierInvoiceItemDto> list
+        )
+        {
+            var storeCodes = list
+                .Select(item => item.StoreCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var productCodes = list
+                .Select(item => item.ProductCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (storeCodes.Count == 0 || productCodes.Count == 0)
+                return;
+
+            var statusByKey = new Dictionary<string, bool>(StringComparer.Ordinal);
+            // 按 1000 个商品一批查询，避免整单明细很多时 IN 参数超过 SQL Server 上限。
+            foreach (var chunk in productCodes.Chunk(1000))
+            {
+                var chunkCodes = chunk.ToList();
+                var rows = await db.Queryable<StoreRetailPrice>()
+                    .Where(x =>
+                        x.ProductCode != null
+                        && x.StoreCode != null
+                        && chunkCodes.Contains(x.ProductCode)
+                        && storeCodes.Contains(x.StoreCode)
+                        && x.IsDeleted == false
+                    )
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.IsAutoPricing, x.UpdatedAt, x.CreatedAt })
+                    .ToListAsync();
+                foreach (var group in rows.GroupBy(x => $"{x.StoreCode}\u001f{x.ProductCode}"))
+                {
+                    statusByKey[group.Key] = group
+                        .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
+                        .First()
+                        .IsAutoPricing;
+                }
+            }
+
+            foreach (var item in list)
+            {
+                if (string.IsNullOrWhiteSpace(item.StoreCode) || string.IsNullOrWhiteSpace(item.ProductCode))
+                    continue;
+                if (statusByKey.TryGetValue($"{item.StoreCode}\u001f{item.ProductCode}", out var isAuto))
+                    item.StoreIsAutoPricing = isAuto;
             }
         }
 

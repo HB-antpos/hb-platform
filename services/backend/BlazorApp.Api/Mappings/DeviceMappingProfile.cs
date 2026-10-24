@@ -72,7 +72,15 @@ namespace BlazorApp.Api.Mappings
                 .ForMember(dest => dest.AppVersion, opt => opt.MapFrom(src => src.应用版本))
                 .ForMember(dest => dest.SystemUptimeSeconds, opt => opt.MapFrom(src => src.系统开机秒数))
                 .ForMember(dest => dest.ProcessWorkingSetMb, opt => opt.MapFrom(src => src.客户端内存MB))
-                .ForMember(dest => dest.ProcessHandleCount, opt => opt.MapFrom(src => src.客户端句柄数));
+                .ForMember(dest => dest.ProcessHandleCount, opt => opt.MapFrom(src => src.客户端句柄数))
+                .ForMember(dest => dest.LastApiEntry, opt => opt.MapFrom(src => src.LastApiEntry))
+                .ForMember(
+                    dest => dest.LastApiEntryAt,
+                    // 库里是 UTC 但 Kind 不明，同心跳时间一样标成 UTC。
+                    opt => opt.MapFrom(src => DeviceRuntimeTime.AsUtc(src.LastApiEntryAt))
+                )
+                // 远程版本来自远程维护表，由控制器按页批量补齐。
+                .ForMember(dest => dest.RustDeskClientVersion, opt => opt.Ignore());
         }
 
         /// <summary>

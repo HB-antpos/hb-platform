@@ -362,6 +362,36 @@ public static class PosmSalesOrderSqlServerListQuery
         {
             where.Add($"DATEDIFF(second, CAST(o.[OrderTime] AS date), o.[OrderTime]) <= {param("@TimeEndSeconds", (int)query.TimeEnd.Value.TotalSeconds, DbType.Int32, null)}");
         }
+        // 退货筛选：旧 POS 的退款单（Status=3）或新 POS 订单里夹带的退货记录（sales_return_record，仅 1.3 万行）。
+        // 不能写成 `Status = 3 OR EXISTS (...)`：OR 让优化器对范围内每一单逐行探测，30 天全分店汇总 1.2~1.6 秒（生产实测）；
+        // 先把「退货记录订单号 ∪ 区间内退款单订单号」做成一个集合再 IN，同一汇总只要 0.23 秒，且不用改各处 FROM。
+        // partial / full 再按整单金额正负分档，金额口径与列表卡片一致：实付为 0 / 空时回落订单总金额。
+        var refundFilter = PosmSalesOrderListRules.NormalizeRefundFilter(query.RefundFilter);
+        if (refundFilter != null)
+        {
+            // 退款单分支带上同一时间区间，避免扫全表；@Start / @EndExclusive 已在上面按需登记。
+            var refundOrderRange = new StringBuilder();
+            if (query.StartDate.HasValue)
+            {
+                refundOrderRange.Append(" AND s.[OrderTime] >= @Start");
+            }
+            if (query.EndDate.HasValue)
+            {
+                refundOrderRange.Append(" AND s.[OrderTime] < @EndExclusive");
+            }
+            where.Add(
+                $"o.[OrderGuid] IN (SELECT rr.[ReturnOrderGuid] FROM [dbo].[sales_return_record] AS rr WITH (NOLOCK) "
+                    + $"UNION ALL SELECT s.[OrderGuid] FROM [dbo].[sales_order] AS s WITH (NOLOCK) WHERE s.[Status] = {PosmSalesOrderListRules.RefundOrderStatus}{refundOrderRange})"
+            );
+            if (refundFilter == PosmSalesOrderListRules.RefundFilterPartial)
+            {
+                where.Add("COALESCE(NULLIF(o.[ActualAmount], 0), o.[TotalAmount], 0) >= 0");
+            }
+            else if (refundFilter == PosmSalesOrderListRules.RefundFilterFull)
+            {
+                where.Add("COALESCE(NULLIF(o.[ActualAmount], 0), o.[TotalAmount], 0) < 0");
+            }
+        }
         AddRange(where, "o.[ItemCount]", query.ItemCountMin, query.ItemCountMax, "@ItemCount", DbType.Int32, param);
         AddRange(where, "o.[TotalAmount]", query.TotalAmountMin, query.TotalAmountMax, "@TotalAmount", DbType.Decimal, param);
         AddRange(where, "o.[DiscountAmount]", query.DiscountAmountMin, query.DiscountAmountMax, "@DiscountAmount", DbType.Decimal, param);

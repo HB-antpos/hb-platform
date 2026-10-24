@@ -43,6 +43,53 @@ public sealed class PosmSalesOrderSqlServerListQueryTests
         Assert.Equal(new DateTime(2026, 9, 20), command.Parameters.Single(parameter => parameter.Name == "@EndExclusive").Value);
     }
 
+    [Theory]
+    [InlineData(null, false, null)]
+    [InlineData("bogus", false, null)]
+    [InlineData("any", true, null)]
+    [InlineData("ANY", true, null)]
+    [InlineData("partial", true, ">= 0")]
+    [InlineData("full", true, "< 0")]
+    public void 退货筛选按退款单或退货记录判定并按整单金额正负分档(string? refundFilter, bool expectsRefundPredicate, string? amountCondition)
+    {
+        var query = Today();
+        query.RefundFilter = refundFilter;
+
+        var command = PosmSalesOrderSqlServerListQuery.Build(query, null, null, 0, 20);
+
+        Assert.Equal("plain", command.Path);
+        Assert.Equal(expectsRefundPredicate, command.Sql.Contains("[dbo].[sales_return_record]"));
+        if (expectsRefundPredicate)
+        {
+            // 退款单（Status=3）或订单里夹带了退货记录，做成订单号集合再 IN；
+            // 不能用 `OR EXISTS`（生产实测汇总慢 5 倍以上），也不对明细表做扫描。
+            Assert.Contains("o.[OrderGuid] IN (SELECT rr.[ReturnOrderGuid] FROM [dbo].[sales_return_record]", command.Sql);
+            Assert.Contains("UNION ALL SELECT s.[OrderGuid] FROM [dbo].[sales_order] AS s WITH (NOLOCK) WHERE s.[Status] = 3", command.Sql);
+            // 退款单分支带同一时间区间，避免扫全表。
+            Assert.Contains("AND s.[OrderTime] >= @Start AND s.[OrderTime] < @EndExclusive", command.Sql);
+            Assert.DoesNotContain("OR EXISTS", command.Sql);
+            Assert.DoesNotContain("sales_order_detail", command.Sql);
+        }
+        // 汇总与取页共用同一份订单条件，所以两条语句都带退货条件。
+        Assert.Equal(expectsRefundPredicate ? 2 : 0, CountOccurrences(command.Sql, "[dbo].[sales_return_record]"));
+        // 整单金额口径与卡片一致：实付为 0 / 空时回落订单总金额。
+        const string amountExpression = "COALESCE(NULLIF(o.[ActualAmount], 0), o.[TotalAmount], 0)";
+        Assert.Equal(amountCondition == null ? 0 : 2, CountOccurrences(command.Sql, $"{amountExpression} {amountCondition}"));
+    }
+
+    [Fact]
+    public void 退货筛选与关键词路径同样带上退货条件()
+    {
+        var query = Today();
+        query.RefundFilter = "full";
+
+        var command = PosmSalesOrderSqlServerListQuery.Build(query, "squishy", new[] { "P-1" }, 0, 20);
+
+        Assert.NotEqual("plain", command.Path);
+        Assert.Contains("[dbo].[sales_return_record]", command.Sql);
+        Assert.Contains("COALESCE(NULLIF(o.[ActualAmount], 0), o.[TotalAmount], 0) < 0", command.Sql);
+    }
+
     [Fact]
     public void 商品关键词落临时表并按成本在逐单与商品侧之间选路()
     {

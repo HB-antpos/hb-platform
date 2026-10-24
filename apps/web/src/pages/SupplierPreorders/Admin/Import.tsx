@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, CheckOutlined, InboxOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, Radio, Segmented, Select, Spin, Steps, Upload } from 'antd'
+import { Alert, App, Button, Form, Input, Radio, Segmented, Select, Spin, Steps, Tag, Tooltip, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -9,6 +9,7 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 import PageContainer from '../../../components/PageContainer'
 import {
   createSupplierPreorderForm,
+  getSupplierPreorderImportRefCandidates,
   getSupplierPreorderSuppliers,
   parseSupplierPreorderFile,
   parseSupplierPreorderPasted,
@@ -16,6 +17,7 @@ import {
 } from '../../../services/supplierPreorderService'
 import type {
   SupplierPreorderColumnMapping,
+  SupplierPreorderHolidayType,
   SupplierPreorderExportQtyUnit,
   SupplierPreorderParseResult,
   SupplierPreorderPreviewItem,
@@ -25,6 +27,16 @@ import type {
 
 import FormHeaderFields from './FormHeaderFields'
 import { buildHeaderValuesFromParse, toHeaderPayload, type FormHeaderValues } from './formHeaderValues'
+import {
+  buildRefOverrides,
+  collectMatchedProductCodes,
+  getRefDisplayCode,
+  importChoiceToItemRef,
+  resolveImportRefContext,
+  toImportRefChoice,
+  type ImportRefChoice,
+} from './refPicker.logic'
+import RefPickerModal, { type RefCandidatesLoader, type RefPickerResult, type RefPickerTarget } from './RefPickerModal'
 import './registerSpAdminMessages'
 import { ItemThumb, PreviewStatusTag } from './SpAdminParts'
 import {
@@ -85,6 +97,13 @@ export default function SupplierPreorderImportPage() {
   const [previewPage, setPreviewPage] = useState(1)
   const [previewPageSize, setPreviewPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [submitting, setSubmitting] = useState(false)
+  /** 校对页人工指定的参考商品（按原表行号）；建表时作为 refOverrides 提交 */
+  const [refChoices, setRefChoices] = useState<Record<number, ImportRefChoice>>({})
+  const [refPickingRow, setRefPickingRow] = useState<SupplierPreorderPreviewItem | null>(null)
+  // 第 3 步的表单解析后就已回填（表单一直挂载），第 2 步直接读；preserve 保证字段没渲染时也能取到
+  const watchedHoliday = Form.useWatch<SupplierPreorderHolidayType | undefined>('holidayType', { form, preserve: true })
+  const watchedYear = Form.useWatch<number | undefined>('seasonYear', { form, preserve: true })
+  const watchedHistory = Form.useWatch<FormHeaderValues['historyRange']>('historyRange', { form, preserve: true })
 
   useEffect(() => {
     setSuppliersLoading(true)
@@ -147,6 +166,8 @@ export default function SupplierPreorderImportPage() {
       setPreview(null)
       setPreviewFilter('all')
       setPreviewPage(1)
+      // 换了来源：行号不再对应，之前指定的参考作废
+      setRefChoices({})
       const name = suppliers.find((item) => item.code === code)?.name ?? null
       form.setFieldsValue(buildHeaderValuesFromParse(result.headerInfo ?? {}, name, unit, new Date().getFullYear()))
       setStep(1)
@@ -202,6 +223,7 @@ export default function SupplierPreorderImportPage() {
     }
     // getFieldsValue(true) 取整个表单存储：柜型等未渲染字段（选了 40GP 预设时）也要带上
     const values = form.getFieldsValue(true) as FormHeaderValues
+    const refOverrides = buildRefOverrides(refChoices, preview.items)
     const create = async () => {
       setSubmitting(true)
       try {
@@ -215,6 +237,7 @@ export default function SupplierPreorderImportPage() {
           headerSignature: parseResult.headerSignature,
           mapping,
           rows: parseResult.rows,
+          refOverrides: refOverrides.length ? refOverrides : null,
         })
         message.success(t('spAdmin.import.created'))
         navigate(`/supplier-preorders/forms/${detail.summary.formGuid}`)
@@ -286,6 +309,71 @@ export default function SupplierPreorderImportPage() {
     )
   }
 
+  // ---------- 参考商品（人工指定） ----------
+
+  const refContext = useMemo(
+    () =>
+      resolveImportRefContext({
+        supplierCode,
+        holidayType: watchedHoliday,
+        seasonYear: watchedYear,
+        historyFrom: watchedHistory?.[0]?.format('YYYY-MM-DD') ?? null,
+        historyTo: watchedHistory?.[1]?.format('YYYY-MM-DD') ?? null,
+        headerInfo: parseResult?.headerInfo,
+      }),
+    [parseResult, supplierCode, watchedHistory, watchedHoliday, watchedYear],
+  )
+  const excludeProductCodes = useMemo(() => collectMatchedProductCodes(preview?.items ?? []), [preview])
+  const refChoiceCount = Object.keys(refChoices).length
+
+  const refPickerTarget = useMemo<RefPickerTarget | null>(
+    () =>
+      refPickingRow
+        ? {
+            key: String(refPickingRow.rowNo),
+            name: refPickingRow.name,
+            supplierItemCode: refPickingRow.supplierItemCode,
+            price: refPickingRow.price,
+            currentRef: importChoiceToItemRef(refChoices[refPickingRow.rowNo]),
+          }
+        : null,
+    [refChoices, refPickingRow],
+  )
+
+  const refLoader = useCallback<RefCandidatesLoader>(
+    (keyword, signal) => {
+      if (!refPickingRow || !refContext.ok) return Promise.reject(new Error(t('spAdmin.ref.importContextMissing')))
+      return getSupplierPreorderImportRefCandidates(
+        {
+          ...refContext.context,
+          name: refPickingRow.name,
+          price: refPickingRow.price,
+          keyword: keyword ?? null,
+          excludeProductCodes,
+        },
+        signal,
+      )
+    },
+    [excludeProductCodes, refContext, refPickingRow, t],
+  )
+
+  // 导入页只记本地：选定 → 记下；清除 → 记「不要参考」；交回系统推荐 → 删掉这行的人工记录
+  const handleRefPicked = useCallback(
+    (result: RefPickerResult) => {
+      if (!refPickingRow) return
+      const rowNo = refPickingRow.rowNo
+      setRefChoices((current) => {
+        const next = { ...current }
+        if (result.mode === 'Manual') next[rowNo] = toImportRefChoice(result.candidate)
+        else if (result.mode === 'Clear') next[rowNo] = { kind: 'cleared' }
+        else delete next[rowNo]
+        return next
+      })
+      setRefPickingRow(null)
+    },
+    [refPickingRow],
+  )
+
   // ---------- 校对预览表 ----------
 
   const filteredPreviewItems = useMemo(() => filterPreviewItems(preview?.items ?? [], previewFilter), [preview, previewFilter])
@@ -347,8 +435,54 @@ export default function SupplierPreorderImportPage() {
           )
         },
       },
+      {
+        title: t('spAdmin.ref.colRef'),
+        key: 'ref',
+        width: 260,
+        render: (_, row) => {
+          if (row.status === 'Invalid') return <span className="sp-admin-faint">—</span>
+          const choice = refChoices[row.rowNo]
+          const disabledReason = refContext.ok
+            ? null
+            : refContext.reason === 'supplier'
+              ? t('spAdmin.ref.importNeedSupplier')
+              : t('spAdmin.ref.importNeedSeason')
+          let content
+          if (choice?.kind === 'manual') {
+            content = (
+              <div className="sp-admin-cell-stack">
+                <span className="sp-admin-ref-line">
+                  <Tag color="purple" className="sp-admin-tag sp-admin-mono">
+                    {t('spAdmin.ref.tag', { code: getRefDisplayCode(choice) })}
+                  </Tag>
+                  <span className="sp-admin-ellipsis sp-admin-small" title={choice.name}>
+                    {choice.name}
+                  </span>
+                </span>
+                <span className="sp-admin-muted sp-admin-small">{t('spAdmin.ref.importManual')}</span>
+              </div>
+            )
+          } else if (choice?.kind === 'cleared') {
+            content = <span className="sp-admin-muted sp-admin-small">{t('spAdmin.ref.importCleared')}</span>
+          } else {
+            content = (
+              <span className="sp-admin-faint sp-admin-small">{row.status === 'New' ? t('spAdmin.ref.importAutoLater') : '—'}</span>
+            )
+          }
+          return (
+            <div className="sp-admin-ref-import-cell">
+              {content}
+              <Tooltip title={disabledReason}>
+                <Button size="small" type="link" disabled={Boolean(disabledReason)} onClick={() => setRefPickingRow(row)}>
+                  {t('spAdmin.ref.assign')}
+                </Button>
+              </Tooltip>
+            </div>
+          )
+        },
+      },
     ],
-    [t],
+    [refChoices, refContext, t],
   )
 
   const previewCounts = preview?.counts
@@ -575,6 +709,12 @@ export default function SupplierPreorderImportPage() {
               <span className="sp-admin-toolbar-spacer" />
               <span className="sp-admin-muted sp-admin-small">{t('spAdmin.import.matchOrder')}</span>
             </div>
+            {preview ? (
+              <div className="sp-admin-ref-hint sp-admin-small">
+                <span className="sp-admin-muted">{t('spAdmin.ref.importHint')}</span>
+                {refChoiceCount ? <span className="sp-admin-number">{t('spAdmin.ref.importChosenCount', { count: refChoiceCount })}</span> : null}
+              </div>
+            ) : null}
             {missingMappings.length ? (
               <Alert
                 className="sp-admin-inline-alert"
@@ -607,7 +747,7 @@ export default function SupplierPreorderImportPage() {
               columns={previewColumns}
               dataSource={filteredPreviewItems}
               rowClassName={(row) => (row.status === 'Invalid' ? 'sp-admin-row-invalid' : '')}
-              scroll={{ x: 1400 }}
+              scroll={{ x: 1660 }}
               locale={{ emptyText: preview ? t('spAdmin.import.previewEmpty') : t('spAdmin.import.previewWaiting') }}
               pagination={{
                 current: previewPage,
@@ -625,6 +765,7 @@ export default function SupplierPreorderImportPage() {
                 },
               }}
             />
+            <RefPickerModal target={refPickerTarget} loader={refLoader} onSubmit={handleRefPicked} onClose={() => setRefPickingRow(null)} />
           </div>
 
           <div className="sp-admin-card sp-admin-card-pad sp-admin-footer-bar">

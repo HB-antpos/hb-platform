@@ -232,6 +232,7 @@ namespace BlazorApp.Api.Controllers.React
                         EndDate = range.EndDate,
                         BranchCodes = branchCodes,
                         OrderType = PosmSalesOrderMobileRules.NormalizeOrderType(query.OrderType),
+                        RefundFilter = PosmSalesOrderListRules.NormalizeRefundFilter(query.RefundFilter),
                         Keyword = string.IsNullOrEmpty(keyword) ? null : keyword,
                         SortField = "orderTime",
                         SortDirection = sortDirection,

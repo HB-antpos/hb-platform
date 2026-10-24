@@ -1,4 +1,4 @@
-import { Redirect, type Href } from "expo-router";
+import { Redirect, router, type Href } from "expo-router";
 
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import {
@@ -18,5 +18,9 @@ export default function IndexScreen() {
     return <Redirect href={target as Href} />;
   }
 
-  return <BootstrapScreen />;
+  return (
+    <BootstrapScreen
+      onOpenNetworkCheck={() => router.push("/network-check" as Href)}
+    />
+  );
 }

@@ -53,7 +53,12 @@ type ActivationPreview = Readonly<{
   response: DeviceActivationPreviewResponse;
 }>;
 
-export function DeviceRegistrationScreen() {
+export function DeviceRegistrationScreen({
+  onOpenNetworkCheck,
+}: Readonly<{
+  /** 开通 / 待审批时也能打开只读网络检测，排查连不上服务器的问题。 */
+  onOpenNetworkCheck?: () => void;
+}> = {}) {
   const { t } = useTranslation();
   const runtime = usePosRuntime();
   const [session, setSession] = useState<DeviceSessionState | null>(null);
@@ -745,6 +750,22 @@ export function DeviceRegistrationScreen() {
                 }}
               />
             </View>
+          ) : null}
+          {onOpenNetworkCheck ? (
+            <PosPressable
+              accessibilityRole="button"
+              onPress={onOpenNetworkCheck}
+              sound="navigate"
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.secondaryButtonPressed,
+              ]}
+              testID="registration-network-check"
+            >
+              <Text style={styles.secondaryButtonLabel}>
+                {t("registration.networkCheck")}
+              </Text>
+            </PosPressable>
           ) : null}
         </PosKeyboardAwareScrollView>
       </View>

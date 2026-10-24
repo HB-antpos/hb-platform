@@ -328,6 +328,80 @@ public sealed class StoreReceiptProfileReleaseTests
     }
 
     [Fact]
+    public async Task Sync_records_the_whitelisted_entry_header_with_claim_identity_and_never_trusts_the_client_for_it()
+    {
+        var recorder = new PosApiEntryTests.RecordingRecorder();
+        var controller = new StoresController(new NoopProfileService(), new CapturingReleaseService(), recorder);
+        SetClaims(controller, storeCode: "S001", deviceCode: "POS-07");
+        controller.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = "AWS";
+
+        var result = await controller.SyncCurrentReceiptProfile("1", CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        // 设备 / 门店来自认证声明；入口来自白名单头，已归一化为小写。
+        var call = Assert.Single(recorder.Calls);
+        Assert.Equal(("POS-07", "S001", "aws"), (call.DeviceCode, call.StoreCode, call.Entry));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("bogus")]
+    [InlineData("edge, aws")]
+    public async Task Sync_passes_no_entry_to_the_recorder_for_missing_or_invalid_headers(string? header)
+    {
+        var recorder = new PosApiEntryTests.RecordingRecorder();
+        var controller = new StoresController(new NoopProfileService(), new CapturingReleaseService(), recorder);
+        SetClaims(controller, storeCode: "S001", deviceCode: "POS-07");
+        if (header is not null)
+        {
+            controller.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = header;
+        }
+
+        var result = await controller.SyncCurrentReceiptProfile("1", CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Null(Assert.Single(recorder.Calls).Entry);
+    }
+
+    [Fact]
+    public async Task Sync_does_not_record_when_the_lookup_fails_and_the_response_ignores_recorder_state()
+    {
+        var recorder = new PosApiEntryTests.RecordingRecorder();
+        var release = new CapturingReleaseService
+        {
+            SyncResult = new StoreReceiptProfileSyncLookupResult(null, "STORE_PROFILE_INVALID_CHARACTERS", "x"),
+        };
+        var failing = new StoresController(new NoopProfileService(), release, recorder);
+        SetClaims(failing, storeCode: "S001");
+        failing.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = "aws";
+        Assert.IsType<BadRequestObjectResult>((await failing.SyncCurrentReceiptProfile("1", CancellationToken.None)).Result);
+        Assert.Empty(recorder.Calls);
+
+        // 没有 recorder（旧的两参构造）时同样正常响应。
+        var plain = new StoresController(new NoopProfileService(), new CapturingReleaseService());
+        SetClaims(plain, storeCode: "S001");
+        Assert.IsType<OkObjectResult>((await plain.SyncCurrentReceiptProfile("1", CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task Sync_response_carries_the_api_entry_mode_from_the_service_unchanged()
+    {
+        var release = new CapturingReleaseService
+        {
+            SyncResult = new StoreReceiptProfileSyncLookupResult(new StoreReceiptProfileSyncDto(false, 4, null, "direct")),
+        };
+        var controller = new StoresController(new NoopProfileService(), release);
+        SetClaims(controller, storeCode: "S001");
+
+        var result = await controller.SyncCurrentReceiptProfile("4", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<ApiResult<StoreReceiptProfileSyncDto>>(ok.Value).Data!;
+        Assert.False(dto.Changed);
+        Assert.Equal("direct", dto.ApiEntryMode);
+    }
+
+    [Fact]
     public async Task Sync_returns_401_when_store_claim_is_missing()
     {
         var controller = new StoresController(new NoopProfileService(), new CapturingReleaseService());
@@ -488,7 +562,8 @@ public sealed class StoreReceiptProfileReleaseTests
         var ack = JsonSerializer.Serialize(new StoreReceiptProfileAckResultDto(3), options);
         var request = JsonSerializer.Deserialize<StoreReceiptProfileAckRequest>("""{"version":4}""", options);
 
-        Assert.Equal("""{"changed":false,"version":3,"profile":null}""", sync);
+        // apiEntryMode 是新增的末尾字段：后台未设置时为 null，旧客户端忽略未知字段。
+        Assert.Equal("""{"changed":false,"version":3,"profile":null,"apiEntryMode":null}""", sync);
         Assert.Equal("""{"appliedVersion":3}""", ack);
         Assert.Equal(4, request!.Version);
     }
@@ -516,6 +591,8 @@ public sealed class StoreReceiptProfileReleaseTests
         {
             claims.Add(new Claim(DeviceAuthConstants.DeviceSystemClaim, deviceSystem));
         }
+
+        claims.Add(new Claim(DeviceAuthConstants.HardwareIdClaim, "HW-TEST"));
 
         controller.ControllerContext = new ControllerContext
         {

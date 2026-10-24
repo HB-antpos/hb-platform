@@ -54,7 +54,7 @@ import {
   type HTMLAttributes,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { useAuthStore } from '../../../store/auth'
@@ -447,6 +447,17 @@ export default function LocalSupplierInvoicesPage() {
   // 筛选条件
   const [storeCode, setStoreCode] = useState<string | undefined>(undefined)
   const [supplierCode, setSupplierCode] = useState<string | undefined>(undefined)
+  // 从供应商管理「查看全部进货单」跳来时带 ?supplierCode=：预选该供应商并清空默认 90 天日期，
+  // 否则较早的进货单会被默认日期筛掉（页面保活，地址参数变化时也要同步）。
+  const location = useLocation()
+  useEffect(() => {
+    if (location.pathname !== '/pos-admin/local-supplier-invoices') return
+    const requestedSupplierCode = new URLSearchParams(location.search).get('supplierCode')?.trim()
+    if (!requestedSupplierCode) return
+    setSupplierCode(requestedSupplierCode)
+    setDateRange(null)
+    setPage(1)
+  }, [location.pathname, location.search])
   const [invoiceNo, setInvoiceNo] = useState('')
   const [keyword, setKeyword] = useState('')
   const [productChecked, setProductChecked] = useState<boolean | undefined>(undefined)

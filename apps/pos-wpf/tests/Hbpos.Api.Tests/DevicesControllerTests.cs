@@ -342,8 +342,10 @@ public sealed class DevicesControllerTests
         Assert.Equal(new DeviceResourceSnapshot(null, null, null), service.LastRuntimeStatusResources);
     }
 
-    private static DevicesController CreateRuntimeStatusController(FakeDeviceService service) =>
-        new(service)
+    private static DevicesController CreateRuntimeStatusController(
+        FakeDeviceService service,
+        IDeviceApiEntryRecorder? apiEntryRecorder = null) =>
+        new(service, null, apiEntryRecorder)
         {
             ControllerContext = new ControllerContext
             {
@@ -358,6 +360,44 @@ public sealed class DevicesControllerTests
                 }
             }
         };
+
+    [Fact]
+    public async Task ReportRuntimeStatus_RecordsWhitelistedApiEntryAfterTheUpdateSucceeds()
+    {
+        var service = new FakeDeviceService();
+        var recorder = new PosApiEntryTests.RecordingRecorder();
+        var controller = CreateRuntimeStatusController(service, recorder);
+        controller.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = "direct";
+
+        var result = await controller.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, "CASHIER-1", "Alice", "1.0.89"),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var call = Assert.Single(recorder.Calls);
+        Assert.Equal(("POS_1042_0247", "1042", "INSTALL-1042", "direct"), (call.DeviceCode, call.StoreCode, call.HardwareId, call.Entry));
+    }
+
+    [Fact]
+    public async Task ReportRuntimeStatus_IgnoresInvalidApiEntryHeaderAndNeverRecordsForUnknownDevices()
+    {
+        var recorder = new PosApiEntryTests.RecordingRecorder();
+        var invalid = CreateRuntimeStatusController(new FakeDeviceService(), recorder);
+        invalid.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = "bogus";
+        var ok = await invalid.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, null, null), CancellationToken.None);
+        Assert.IsType<OkObjectResult>(ok.Result);
+        Assert.Null(Assert.Single(recorder.Calls).Entry);
+
+        // 设备不存在（更新 0 行）时不记录入口，仍按原逻辑返回 404。
+        var missingRecorder = new PosApiEntryTests.RecordingRecorder();
+        var missing = CreateRuntimeStatusController(new FakeDeviceService { RuntimeStatusUpdated = false }, missingRecorder);
+        missing.ControllerContext.HttpContext.Request.Headers[PosApiEntryModes.HeaderName] = "aws";
+        var notFound = await missing.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, null, null), CancellationToken.None);
+        Assert.IsType<NotFoundObjectResult>(notFound.Result);
+        Assert.Empty(missingRecorder.Calls);
+    }
 
     [Fact]
     public void CreateDeviceCode_UsesStoreCodeAndLocalHourMinute()
@@ -416,6 +456,8 @@ public sealed class DevicesControllerTests
 
         public DeviceResourceSnapshot? LastRuntimeStatusResources { get; private set; }
 
+        public bool RuntimeStatusUpdated { get; init; } = true;
+
         public Task<bool> UpdateRuntimeStatusAsync(
             string hardwareId,
             string deviceCode,
@@ -429,7 +471,7 @@ public sealed class DevicesControllerTests
         {
             LastRuntimeStatusAppVersion = appVersion;
             LastRuntimeStatusResources = resources;
-            return Task.FromResult(true);
+            return Task.FromResult(RuntimeStatusUpdated);
         }
 
         public Task<DeviceRegisterResponse> RegisterAsync(

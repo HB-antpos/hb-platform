@@ -292,6 +292,9 @@ export class HbposStoreApi {
             installmentTerms: profile.installmentTerms ?? "",
           })
         : null,
+      // 后台为本店设置的 POS API 首选入口：每次都带，与小票 changed 无关。原样透传（缺失时不出现该键），
+      // 由 api-entry-mode-coordinator 判定合法 / 未设置 / 未知，未知值不改变当前设置。
+      ...(data.apiEntryMode !== undefined ? { apiEntryMode: data.apiEntryMode } : {}),
     });
   }
 
@@ -319,6 +322,8 @@ export type StoreReceiptProfileSyncResult = Readonly<{
   profile:
     | (StoreReceiptProfile & Readonly<{ version: number }>)
     | null;
+  /** 后台设置的首选入口原始取值（"edge" | "aws" | "direct" | null）；旧服务端缺失时无此键。 */
+  apiEntryMode?: string | null;
 }>;
 
 function nonNegativeInteger(value: unknown): number {

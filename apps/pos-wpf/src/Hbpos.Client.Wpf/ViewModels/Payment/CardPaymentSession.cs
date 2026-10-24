@@ -262,6 +262,40 @@ internal sealed class CardPaymentSession
         _vm.NotifyPaymentCommandStates();
     }
 
+    /// <summary>
+    /// 刷卡已批准、但「完成订单」久未返回（看门狗超时）：沿用“结果未知”的锁定与恢复入口，
+    /// 弹出带“打开异常中心”按钮的提示。页面保持锁定（不能删付款、不能重复刷卡），
+    /// 但收银员不再被困在一个没有出口的页面。后台完成动作若随后成功，由 <see cref="ClearCompletionStalledRecovery"/> 撤销。
+    /// </summary>
+    public void ShowCompletionStalledRecovery(string message)
+    {
+        SetResultUnknownRecoveryRequired(true);
+        _cardPaymentHandoffCandidate = null;
+        _cardPaymentHandoffQualificationPending = false;
+        _unknownResultStatusKey = "payment.card.resultUnknown";
+        _unknownResultStatusMessage = message;
+        _vm.IsPaymentInteractionLocked = true;
+        RestoreUnknownResultStatus();
+
+        var overlay = CreateUnqualifiedRecoveryOverlay();
+        overlay.MessageTextOverride = message;
+        overlay.IsOpen = true;
+        ConfigureRecoveryCenterPrimaryAction(overlay);
+        _vm.CardPaymentErrorOverlay = overlay;
+        _vm.CardPaymentErrorPrimaryActionCommand.NotifyCanExecuteChanged();
+        _vm.NotifyPaymentCommandStates();
+    }
+
+    /// <summary>后台完成动作最终成功时撤销看门狗加上的“结果未知”锁定与提示。</summary>
+    public void ClearCompletionStalledRecovery()
+    {
+        // SetResultUnknownRecoveryRequired(false) 会同时收起 RecoverPrevious 类型的提示。
+        SetResultUnknownRecoveryRequired(false);
+        _vm.IsPaymentInteractionLocked = _vm.IsShuttingDown;
+        _vm.CardPaymentErrorPrimaryActionCommand.NotifyCanExecuteChanged();
+        _vm.NotifyPaymentCommandStates();
+    }
+
     // ── Result classification ──
 
     public async Task<bool> TryHandleCancelledResultAsync(

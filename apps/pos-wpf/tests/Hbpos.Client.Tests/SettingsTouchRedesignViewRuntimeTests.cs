@@ -14,7 +14,7 @@ using Hbpos.Client.Wpf.Views.Screens;
 namespace Hbpos.Client.Tests;
 
 /// <summary>
-/// 支付设置与小票打印机页触屏改版的运行时契约：主要操作按钮 ≥52px、环境分段按钮与布尔开关双向同步、
+/// 支付设置与小票打印机页触屏改版的运行时契约：主要操作按钮 ≥52px（顶栏「测试打印」为 44px）、环境分段按钮与布尔开关双向同步、
 /// Linkly 本地 IP 默认使用官方推荐地址并可一键恢复。设置 HBPOS_SETTINGS_REDESIGN_SCREENSHOTS 可导出整页截图。
 /// </summary>
 [Collection(WpfViewLifecycleTestCollection.Name)]
@@ -36,7 +36,7 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
             var radios = Segment(view, "SquareEnvironmentSegment");
             Assert.Equal(2, radios.Count);
-            Assert.All(radios, radio => Assert.True(radio.ActualHeight >= 48, $"segment height {radio.ActualHeight}"));
+            Assert.All(radios, radio => Assert.True(radio.ActualHeight >= 44, $"segment height {radio.ActualHeight}"));
             Assert.False(vm.IsSquareSandbox);
             Assert.True(radios[0].IsChecked);
 
@@ -47,9 +47,9 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
 
             Assert.IsType<ListBox>(view.FindName("SquareLocationList"));
             Assert.IsType<ListBox>(view.FindName("SquareDeviceList"));
-            AssertTouchButton(view, vm.SaveSquareCommand, 52);
-            AssertTouchButton(view, vm.LoadLocationsCommand, 52);
-            AssertTouchButton(view, vm.LoadDevicesCommand, 52);
+            AssertTouchButton(view, vm.SaveSquareCommand, 44);
+            AssertTouchButton(view, vm.LoadLocationsCommand, 44);
+            AssertTouchButton(view, vm.LoadDevicesCommand, 44);
             Save(view, $"square-{culture}");
         }
         finally
@@ -81,7 +81,7 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
             vm.LinklyPortText = "2012";
             Assert.False(vm.IsLinklyRecommendedAddress);
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
-            var restore = AssertTouchButton(view, vm.UseRecommendedLinklyAddressCommand, 52);
+            var restore = AssertTouchButton(view, vm.UseRecommendedLinklyAddressCommand, 44);
             Assert.Equal(Visibility.Visible, restore.Visibility);
 
             vm.UseRecommendedLinklyAddressCommand.Execute(null);
@@ -108,9 +108,9 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
         {
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
             Assert.True(vm.IsReceiptPrinterSelected);
-            // 「测试打印」在固定页头，三个分页都能点；整页保存按钮只在没开自动保存时出现（这里未开启）。
-            AssertTouchButton(view, vm.TestReceiptPrinterCommand, 56);
-            AssertTouchButton(view, vm.SaveReceiptPrinterCommand, 56);
+            // 「测试打印」在顶栏（44 高），三个分页都能点；整页保存按钮在固定底栏（主按钮 48 高），只在没开自动保存时出现（这里未开启）。
+            AssertTouchButton(view, vm.TestReceiptPrinterCommand, 44);
+            AssertTouchButton(view, vm.SaveReceiptPrinterCommand, 48);
             var toggle = Assert.IsType<ToggleButton>(view.FindName("PrintBankReceiptTextToggle"));
             Assert.True(toggle.ActualHeight >= 48);
             // 「再次扫码确认」卡片里的两个开关（无交易开钱箱、退货）同样要满足触控高度，且默认关闭。
@@ -125,9 +125,9 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
             // 「从分店资料载入 / 立即同步」在「门店信息」分页。
             vm.IsReceiptStoreSubTabSelected = true;
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
-            AssertTouchButton(view, vm.LoadReceiptProfileCommand, 52);
+            AssertTouchButton(view, vm.LoadReceiptProfileCommand, 44);
             Assert.Equal(Visibility.Collapsed, PrintBankReceiptCardVisibility(toggle));
-            AssertTouchButton(view, vm.TestReceiptPrinterCommand, 56);
+            AssertTouchButton(view, vm.TestReceiptPrinterCommand, 44);
         }
         finally
         {

@@ -112,9 +112,9 @@ public sealed partial class SupplierPreorderService
         var summary = (await BuildSummariesAsync(new List<SupplierPreorderForm> { form }))[0];
         var items = await _db.Queryable<SupplierPreorderFormItem>()
             .Where(i => i.FormGuid == formGuid && i.IsActive)
-            .Select(i => new { i.MatchMethod, i.MatchNote, i.Category })
+            .Select(i => new { i.MatchMethod, i.MatchNote, i.Category, i.ImageSourceUrl, i.ImageCopyStatus, i.ImageCopyAttempts })
             .ToListAsync();
-        return new SupplierPreorderFormDetailDto
+        var detail = new SupplierPreorderFormDetailDto
         {
             Summary = summary,
             OfferDate = form.OfferDate,
@@ -129,12 +129,31 @@ public sealed partial class SupplierPreorderService
             NewCount = items.Count(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             Categories = items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c).Cast<string>().ToList(),
         };
+        detail.Revision = form.Revision;
+        detail.RevisedAtUtc = AsUtc(form.RevisedAtUtc);
+        detail.RemovedCount = await _db.Queryable<SupplierPreorderFormItem>().CountAsync(i => i.FormGuid == formGuid && !i.IsActive);
+        var withImage = items.Where(i => !string.IsNullOrWhiteSpace(i.ImageSourceUrl)).ToList();
+        detail.ImageCopy = new SupplierPreorderImageCopyStatusDto
+        {
+            Total = withImage.Count,
+            Done = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Done),
+            Skipped = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Skipped),
+            Failed = withImage.Count(i => i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed && i.ImageCopyAttempts >= SupplierPreorderImageCopyService.MaxAttempts),
+            Pending = withImage.Count(i => i.ImageCopyStatus is null
+                                           || (i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed && i.ImageCopyAttempts < SupplierPreorderImageCopyService.MaxAttempts)),
+            Configured = _imageStoreConfigured,
+        };
+        await FillHistorySummaryAsync(form, detail);
+        return detail;
     }
 
     public async Task<SupplierPreorderFormDetailDto> UpdateFormAsync(string formGuid, SupplierPreorderUpdateFormDto request)
     {
         var form = await RequireFormAsync(formGuid);
         var header = ValidateHeader(request.Title, request.HolidayType, request.SeasonYear, request.ContainerCapacityCbm, request.ExportQtyUnit);
+        // 历史窗口（或决定默认窗口的节日 / 年份）变了：排队重算去年历史
+        var windowBefore = SupplierPreorderHistoryRules.ResolveWindow(form.HistoryFrom, form.HistoryTo, form.HolidayType, form.SeasonYear);
+        var windowAfter = SupplierPreorderHistoryRules.ResolveWindow(request.HistoryFrom?.Date, request.HistoryTo?.Date, header.HolidayType, request.SeasonYear);
         form.Title = header.Title;
         form.HolidayType = header.HolidayType;
         form.SeasonYear = request.SeasonYear;
@@ -151,6 +170,11 @@ public sealed partial class SupplierPreorderService
         form.UpdatedAtUtc = NowUtc;
         form.UpdatedBy = CurrentUserName;
         await _db.Updateable(form).ExecuteCommandAsync();
+        if (windowBefore != windowAfter)
+        {
+            await TryRequestHistoryAsync(formGuid);
+        }
+
         return await GetFormAsync(formGuid);
     }
 
@@ -170,6 +194,22 @@ public sealed partial class SupplierPreorderService
         form.UpdatedBy = CurrentUserName;
         await _db.Updateable(form).UpdateColumns(f => new { f.Status, f.UpdatedAtUtc, f.UpdatedBy }).ExecuteCommandAsync();
         await WriteAuthLogAsync("FormStore", "StatusChanged", $"{from} → {request.Status}", formGuid);
+        if (from == SupplierPreorderFormStatuses.Draft && request.Status == SupplierPreorderFormStatuses.Open)
+        {
+            // 发布后排后台任务重算去年历史（导入时已算过一次草稿版，这里按最新的匹配与参考再算一遍）
+            await TryRequestHistoryAsync(formGuid);
+        }
+        return await GetFormAsync(formGuid);
+    }
+
+    /// <summary>把失败满 3 次的图片转存清零，后台任务会重新下载。</summary>
+    public async Task<SupplierPreorderFormDetailDto> RetryFailedImagesAsync(string formGuid)
+    {
+        await RequireFormAsync(formGuid);
+        await _db.Updateable<SupplierPreorderFormItem>()
+            .SetColumns(i => new SupplierPreorderFormItem { ImageCopyStatus = null, ImageCopyAttempts = 0, ImageCopyError = null })
+            .Where(i => i.FormGuid == formGuid && i.ImageCopyStatus == SupplierPreorderImageCopyStatuses.Failed)
+            .ExecuteCommandAsync();
         return await GetFormAsync(formGuid);
     }
 
@@ -193,41 +233,29 @@ public sealed partial class SupplierPreorderService
     {
         var form = await RequireFormAsync(formGuid);
         var snapshot = await LoadSnapshotAsync(form);
-        var totals = snapshot.CountedLines()
-            .GroupBy(x => x.Item.ItemGuid)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Line.Cartons));
-        IEnumerable<SupplierPreorderFormItem> filtered = snapshot.Items.Where(i => i.IsActive);
+        var state = await LoadHistoryStateAsync(form, new[] { AllStoresKey });
+        bool OwnHasSales(SupplierPreorderFormItem i) =>
+            i.MatchedProductCode is not null && (AllStores(state, i.MatchedProductCode)?.SalesQty ?? 0m) > 0;
+        // 已下架的只在「已下架」筛选里出现
+        IEnumerable<SupplierPreorderFormItem> filtered = query.Match == "removed"
+            ? snapshot.Items.Where(i => !i.IsActive)
+            : snapshot.Items.Where(i => i.IsActive);
         filtered = (query.Match ?? "all") switch
         {
+            "revised" => filtered.Where(i => !string.IsNullOrEmpty(i.RevisionChange)),
             "matched" => filtered.Where(i => i.MatchMethod != SupplierPreorderMatchMethods.None && i.MatchNote == null),
             "new" => filtered.Where(i => i.MatchMethod == SupplierPreorderMatchMethods.None),
             "warning" => filtered.Where(i => i.MatchNote != null),
+            // 需要参考：本品去年没有销量，也没有挂参考商品（快照没算出来前无法判断，返回空）
+            "needRef" => state.Status.ComputedAtUtc is null ? Enumerable.Empty<SupplierPreorderFormItem>() : filtered.Where(i => !OwnHasSales(i) && i.RefProductCode is null),
+            "ref" => filtered.Where(i => i.RefProductCode is not null),
             _ => filtered,
         };
         filtered = FilterByKeyword(filtered, query.Keyword);
         var paged = Page(filtered.ToList(), query.Page, query.PageSize);
-        var images = await LoadProductImagesAsync(paged.Items!);
         return new PagedResult<SupplierPreorderFormItemDto>
         {
-            Items = paged.Items!.Select(i => new SupplierPreorderFormItemDto
-            {
-                ItemGuid = i.ItemGuid,
-                Seq = i.Seq,
-                SupplierItemCode = i.SupplierItemCode,
-                Barcode = i.Barcode,
-                Name = i.Name,
-                Unit = i.Unit,
-                CartonQty = i.CartonQty,
-                CartonCbm = i.CartonCbm,
-                Price = i.Price,
-                Category = i.Category,
-                ImageUrl = ResolveImageUrl(i, images),
-                ImageSourceUrl = i.ImageSourceUrl,
-                MatchMethod = i.MatchMethod,
-                MatchedProductCode = i.MatchedProductCode,
-                MatchNote = i.MatchNote,
-                TotalCartons = totals.GetValueOrDefault(i.ItemGuid),
-            }).ToList(),
+            Items = await BuildFormItemDtosAsync(snapshot, paged.Items!, state),
             Total = paged.Total,
             Page = paged.Page,
             PageSize = paged.PageSize,

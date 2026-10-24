@@ -1273,6 +1273,79 @@ public sealed class SquarePaymentRecoveryServiceTests
         Assert.Null(saved.RecoveryTargetStatus);
     }
 
+    [Fact]
+    public async Task AutoRecoverDeterministicAsync_completes_verified_square_attempt_without_calling_square()
+    {
+        // 1031 店现场：Square 已扣款并核实（PaymentVerified），订单没落盘就被重启；启动后应自动补成订单。
+        var attempts = new FakeSquarePaymentAttemptRepository(CreateVerifiedAttempt());
+        var orders = new FakeLocalOrderRepository();
+        var terminal = new FakeSquareTerminalPaymentClient();
+        var service = CreateService(attempts, orders, terminal);
+
+        var summary = await service.AutoRecoverDeterministicAsync(Session);
+
+        Assert.Equal(1, summary.Examined);
+        Assert.Equal(1, summary.RecoveredOrders);
+        Assert.Equal(1, orders.SaveCount);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.OrderCompleted, attempts.Status);
+        // 已核实的付款不需要再向 Square 查询或发起任何扣款。
+        Assert.Equal(0, terminal.GetCheckoutCallCount);
+    }
+
+    [Fact]
+    public async Task AutoRecoverDeterministicAsync_skips_recently_updated_attempt_that_may_still_be_in_flight()
+    {
+        var attempts = new FakeSquarePaymentAttemptRepository(
+            CreateVerifiedAttempt() with { UpdatedAt = DateTimeOffset.UtcNow });
+        var orders = new FakeLocalOrderRepository();
+        var service = CreateService(attempts, orders, new FakeSquareTerminalPaymentClient());
+
+        var summary = await service.AutoRecoverDeterministicAsync(Session);
+
+        Assert.Equal(0, summary.Examined);
+        Assert.Equal(0, orders.SaveCount);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.PaymentVerified, attempts.Status);
+    }
+
+    [Theory]
+    [InlineData("checkout-created")]
+    [InlineData("payment-not-completed")]
+    [InlineData("no-payment-id")]
+    [InlineData("supervisor-not-paid")]
+    [InlineData("supervisor-paid")]
+    [InlineData("refund")]
+    [InlineData("invalid-draft")]
+    public void IsDeterministicAutoRecoveryCandidate_rejects_attempts_that_need_a_human(string scenario)
+    {
+        var verified = CreateVerifiedAttempt();
+        var attempt = scenario switch
+        {
+            "checkout-created" => verified with { Status = LocalSquarePaymentAttemptStatus.CheckoutCreated },
+            "payment-not-completed" => verified with { PaymentStatus = "PENDING" },
+            "no-payment-id" => verified with { PaymentId = null },
+            "supervisor-not-paid" => verified with { ResponseCode = ActiveSessionSupervisorResolutionCodes.ConfirmedNotPaid },
+            "supervisor-paid" => verified with { ResponseCode = ActiveSessionSupervisorResolutionCodes.ConfirmedPaid },
+            "refund" => verified with { OperationKind = "Refund" },
+            "invalid-draft" => verified with { OrderDraftJson = "{}" },
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+        };
+
+        Assert.False(SquarePaymentRecoveryService.IsDeterministicAutoRecoveryCandidate(
+            attempt,
+            DateTimeOffset.UtcNow));
+        // 对照：未改动的“已核实扣款、静置足够久”的记录是候选。
+        Assert.True(SquarePaymentRecoveryService.IsDeterministicAutoRecoveryCandidate(
+            verified,
+            DateTimeOffset.UtcNow));
+    }
+
+    private static LocalSquarePaymentAttempt CreateVerifiedAttempt() =>
+        CreateSquareAttempt(LocalSquarePaymentAttemptStatus.PaymentVerified, "CHECKOUT-001") with
+        {
+            PaymentId = "PAYMENT-001",
+            PaymentStatus = "COMPLETED"
+        };
+
     private static SquarePaymentRecoveryService CreateService(
         FakeSquarePaymentAttemptRepository attempts,
         FakeLocalOrderRepository orders,
@@ -2069,6 +2142,17 @@ public sealed class SquarePaymentRecoveryServiceTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_attempt);
+        }
+
+        public Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetOpenAttemptsAsync(
+            string storeCode,
+            string deviceCode,
+            string environment,
+            CancellationToken cancellationToken = default)
+        {
+            var attempt = _attempt;
+            return Task.FromResult<IReadOnlyList<LocalSquarePaymentAttempt>>(
+                attempt is not null && !IsTerminalSquareStatus(attempt.Status) ? [attempt] : []);
         }
 
         public Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetOpenRefundAttemptsAsync(

@@ -15155,6 +15155,10 @@
           },
           "profile": {
             "$ref": "#/components/schemas/StoreReceiptProfileDto"
+          },
+          "apiEntryMode": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

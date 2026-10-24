@@ -1040,7 +1040,8 @@ const roleReaderWebPreview = buildWebRoleMenuPreview(
   translate,
 )
 const systemMenu = roleReaderWebPreview.find((node) => node.path === '/system')
-const rolesMenu = systemMenu?.children?.find((node) => node.path === '/system/roles')
+// 角色管理等页面已并入合并页，按路径递归查找。
+const rolesMenu = systemMenu ? findWebMenuNode([systemMenu], '/system/roles') : undefined
 const adminWebMenuPreview = buildWebRoleMenuPreview(adminAccess, translate, {
   includeHidden: true,
 })
@@ -1094,8 +1095,8 @@ const roleReaderCompleteWebPreview = buildWebRoleMenuPreview(
   },
 )
 const completeSystemMenu = roleReaderCompleteWebPreview.find((node) => node.path === '/system')
-const scheduledStatisticsMenu = completeSystemMenu?.children?.find((node) => node.path === '/system/scheduled-statistics')
-const invoiceEmailSettingsMenu = completeSystemMenu?.children?.find((node) => node.path === '/system/invoice-email-settings')
+const scheduledStatisticsMenu = completeSystemMenu ? findWebMenuNode([completeSystemMenu], '/system/scheduled-statistics') : undefined
+const invoiceEmailSettingsMenu = completeSystemMenu ? findWebMenuNode([completeSystemMenu], '/system/invoice-email-settings') : undefined
 const roleReaderVisibleWebPreview = filterWebMenuNodesByVisibility(roleReaderCompleteWebPreview, 'visible')
 const roleReaderHiddenWebPreview = filterWebMenuNodesByVisibility(roleReaderCompleteWebPreview, 'hidden')
 
@@ -1447,9 +1448,7 @@ assertEqual(
 )
 
 const superAdminWebPreview = buildWebRoleMenuPreview(superAdminPreviewAccess, translate)
-const superAdminDeviceMenu = superAdminWebPreview
-  .find((node) => node.path === '/system')
-  ?.children?.find((node) => node.path === '/system/device-registration')
+const superAdminDeviceMenu = findWebMenuNode(superAdminWebPreview, '/system/device-registration')
 
 assertEqual(
   superAdminDeviceMenu?.permissionCodes.join(','),

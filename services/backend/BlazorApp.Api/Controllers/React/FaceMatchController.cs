@@ -149,6 +149,13 @@ public sealed class FaceMatchController(
         [FromQuery] string? store, [FromQuery] string? from, [FromQuery] string? to, CancellationToken cancellationToken) =>
         RunAsync(() => trafficService.GetTrafficAsync(store ?? string.Empty, from, to, ResolveActor(), cancellationToken));
 
+    /// <summary>移动端客流统计总览：period = day / week / month，anchor 缺省为门店本地今天；一次返回当期与对照期。</summary>
+    [HttpGet("traffic/overview")]
+    [Authorize(Policy = Permissions.FaceMatch.Traffic.View)]
+    public Task<IActionResult> TrafficOverview(
+        [FromQuery] string? store, [FromQuery] string? period, [FromQuery] string? anchor, CancellationToken cancellationToken) =>
+        RunAsync(() => trafficService.GetOverviewAsync(store ?? string.Empty, period, anchor, ResolveActor(), cancellationToken));
+
     [HttpGet("audit")]
     [Authorize(Policy = Permissions.FaceMatch.Manage)]
     public Task<IActionResult> Audit(

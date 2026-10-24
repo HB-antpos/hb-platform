@@ -38,7 +38,7 @@ type HbposExtraConfig = Readonly<{
  * 解析当前 API 基础地址（与组合根 createExpoPosRuntimeServices 一致：
  * Keychain 持久化配置优先，app.config extra 兜底）。
  */
-async function resolveCurrentApiBaseUrl(): Promise<string> {
+export async function resolveCurrentApiBaseUrl(): Promise<string> {
   const extra = Constants.expoConfig?.extra as HbposExtraConfig | undefined;
   const trustedApiOrigins = normalizeTrustedApiOrigins([
     ...(extra?.hbpos?.trustedApiOrigins ?? []),

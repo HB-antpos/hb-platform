@@ -45,7 +45,8 @@ public sealed class DeviceActivationCodeManagementTests
         var menu = new NavigationService().BuildMenu(principal);
 
         var system = Assert.Single(menu, item => item.Path == "/system");
-        Assert.Contains(system.Children!, item => item.Path == "/system/device-registration");
+        // 设备管理已并入「设备与远程」合并页。
+        Assert.Contains(system.Children!, item => item.Path == "/system/devices");
     }
 
     [Fact]

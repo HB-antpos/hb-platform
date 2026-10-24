@@ -1788,4 +1788,5 @@ Logged with reference {2}</value></data>
   <data name="pendingChoice.prompt.confirm.recall" xml:space="preserve"><value>Discard {0} and recall</value></data>
   <data name="pendingChoice.prompt.confirm.exit" xml:space="preserve"><value>Discard {0} and exit</value></data>
   <data name="pendingChoice.prompt.confirm.all" xml:space="preserve"><value>Discard {0}</value></data>
+  <data name="payment.card.completionStalled.message" xml:space="preserve"><value>The card payment was approved, but POS is taking too long to save the order. Do NOT charge the card again. Open card transaction recovery to finish the order.</value></data>
 </root>

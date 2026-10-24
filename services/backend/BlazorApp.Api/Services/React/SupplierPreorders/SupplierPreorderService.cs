@@ -61,6 +61,21 @@ public interface ISupplierPreorderService
     Task<SupplierPreorderSaveLineResultDto> SaveLineAsync(string formGuid, string storeGuid, string itemGuid, SupplierPreorderSaveLineDto request);
     Task<SupplierPreorderOrderingSummaryDto> SubmitStoreOrderAsync(string formGuid, string storeGuid);
     Task<SupplierPreorderExportFile> ExportStoreOrderAsync(string formGuid, string storeGuid);
+
+    // 去年历史与参考商品（PR 2）
+    Task<SupplierPreorderItemHistoryDetailDto> GetOrderingItemHistoryAsync(string formGuid, string itemGuid, string storeGuid);
+    Task<SupplierPreorderFormDetailDto> RecomputeHistoryAsync(string formGuid);
+    Task<SupplierPreorderRefCandidatesDto> GetRefCandidatesAsync(string formGuid, string itemGuid, string? keyword);
+    Task<SupplierPreorderFormItemDto> SetItemRefAsync(string formGuid, string itemGuid, SupplierPreorderSetRefDto request);
+    Task<SupplierPreorderRefCandidatesDto> GetImportRefCandidatesAsync(SupplierPreorderImportRefCandidatesRequestDto request);
+
+    // 新品图片转存 COS
+    Task<SupplierPreorderFormDetailDto> RetryFailedImagesAsync(string formGuid);
+
+    // 修订版与提醒（PR 3）
+    Task<SupplierPreorderRevisionPreviewDto> PreviewRevisionAsync(string formGuid, SupplierPreorderRevisionRequestDto request);
+    Task<SupplierPreorderFormDetailDto> ApplyRevisionAsync(string formGuid, SupplierPreorderRevisionRequestDto request);
+    Task<SupplierPreorderRemindResultDto> RemindPendingStoresAsync(string formGuid);
 }
 
 public sealed record SupplierPreorderExportFile(byte[] Content, string ContentType, string FileName);
@@ -84,6 +99,9 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
     private readonly IRoleService _roleService;
     private readonly ILogger<SupplierPreorderService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly SupplierPreorderHistoryService _history;
+    private readonly bool _imageStoreConfigured;
+    private readonly BlazorApp.Api.Features.Notifications.INotificationPublisher? _notificationPublisher;
 
     public SupplierPreorderService(
         SqlSugarContext context,
@@ -92,9 +110,11 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         IHttpContextAccessor httpContextAccessor,
         IRoleService roleService,
         ILogger<SupplierPreorderService> logger,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        ISupplierPreorderImageStore? imageStore = null,
+        BlazorApp.Api.Features.Notifications.INotificationPublisher? notificationPublisher = null
     )
-        : this(context.Db, currentUser, authorization, httpContextAccessor, roleService, logger, timeProvider)
+        : this(context.Db, currentUser, authorization, httpContextAccessor, roleService, logger, timeProvider, imageStore, notificationPublisher)
     {
     }
 
@@ -105,7 +125,9 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         IHttpContextAccessor httpContextAccessor,
         IRoleService roleService,
         ILogger<SupplierPreorderService> logger,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        ISupplierPreorderImageStore? imageStore = null,
+        BlazorApp.Api.Features.Notifications.INotificationPublisher? notificationPublisher = null
     )
     {
         _db = db;
@@ -115,6 +137,10 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
         _roleService = roleService;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _history = new SupplierPreorderHistoryService(db, logger, _timeProvider);
+        // 测试里不传：按已配置处理
+        _imageStoreConfigured = imageStore?.IsConfigured ?? true;
+        _notificationPublisher = notificationPublisher;
     }
 
     private DateTime NowUtc => _timeProvider.GetUtcNow().UtcDateTime;
@@ -254,7 +280,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
 
     private static string? ResolveImageUrl(SupplierPreorderFormItem item, IReadOnlyDictionary<string, string?> productImages)
     {
-        // 优先我方商品图（COS，体积小）；没有时用原表图片地址（供应商站点，单张约 700KB，前端懒加载）
+        // 优先我方商品图（COS，体积小）；其次后台转存到 COS 的原表图片；都没有时用原表图片地址（供应商站点，单张约 700KB，前端懒加载）
         if (item.MatchedProductCode is not null
             && productImages.TryGetValue(item.MatchedProductCode, out var image)
             && !string.IsNullOrWhiteSpace(image)
@@ -263,7 +289,7 @@ public sealed partial class SupplierPreorderService : ISupplierPreorderService
             return image.Trim();
         }
 
-        return item.ImageSourceUrl;
+        return string.IsNullOrWhiteSpace(item.ImageCosUrl) ? item.ImageSourceUrl : item.ImageCosUrl;
     }
 
     private async Task<Dictionary<string, string?>> LoadProductImagesAsync(IEnumerable<SupplierPreorderFormItem> items)

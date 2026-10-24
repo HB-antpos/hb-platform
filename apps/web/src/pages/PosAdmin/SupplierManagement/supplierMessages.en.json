@@ -1,0 +1,61 @@
+{
+  "posAdmin": {
+    "supplierPage": {
+      "subtitle": "Australian suppliers: contacts, product image templates and purchases",
+      "searchPlaceholder": "Search code / name",
+      "imageFilter": {
+        "all": "Images: all",
+        "configured": "Images: set",
+        "missing": "Images: not set"
+      },
+      "selection": {
+        "count": "{{count}} suppliers selected",
+        "hint": "Sync writes code, name, contact and email",
+        "sync": "Sync to HQ",
+        "clear": "Clear selection"
+      },
+      "columns": {
+        "supplier": "Supplier",
+        "contact": "Contact",
+        "image": "Product images",
+        "lastPurchase": "Last purchase",
+        "lastPurchaseHint": "Order date and store of the latest invoice, counting only stores you can see"
+      },
+      "image": {
+        "configured": "Set",
+        "preset": "{{name}} preset",
+        "missing": "Not set"
+      },
+      "invoices": "Invoices",
+      "drawer": {
+        "lastPurchase": "Last purchase {{date}} · {{store}}",
+        "noPurchase": "No purchases yet",
+        "sectionBasic": "Details",
+        "sectionImage": "Product image template",
+        "sectionInvoices": "Recent invoices",
+        "remarkPlaceholder": "e.g. order cut-off, pricing agreement",
+        "preset": "{{name}} preset",
+        "cosPreset": "COS storage",
+        "clearTemplate": "Clear",
+        "templateOk": "Contains {itemNumber}, {{length}} / {{max}} characters",
+        "templateMissingPlaceholder": "The template must contain {itemNumber}",
+        "templateTooLong": "The template cannot exceed {{max}} characters",
+        "templateEmpty": "When empty, product management falls back to the built-in preset for this supplier (if any)",
+        "previewLabel": "Try item numbers",
+        "previewPlaceholder": "Item numbers, separated by spaces",
+        "preview": "Preview",
+        "previewLoading": "Loading",
+        "previewOk": "Loaded",
+        "previewFailed": "Failed",
+        "previewNeedsCode": "The template uses {supplierCode}; save first to get a supplier code, then preview",
+        "invoiceNo": "Invoice no.",
+        "orderDate": "Order date",
+        "amount": "Amount",
+        "viewAllInvoices": "View all in store invoices",
+        "invoicesEmpty": "No invoices yet",
+        "invoicesFailed": "Failed to load invoices",
+        "readOnly": "View only — the form cannot be edited"
+      }
+    }
+  }
+}
