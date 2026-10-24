@@ -376,12 +376,9 @@ public sealed partial class CardPaymentRecoveryServiceTests
     }
 
     // ------------------------------------------------------------------
-    // 主管结案前的后端实时核验（QueryLiveBackendStateAsync）：状态 → 结论
-    //   approved     已批准：不允许「确认未付款」，允许「确认已付款」
-    //   failed       明确未批准：允许「确认未付款」，不允许「确认已付款」
-    //   pending      仍在途：两种结案都不允许
-    //   inconclusive 无结论：两种结案都由主管自行决定
-    // 用两次独立调用（确认未付款 / 确认已付款）各自是否落库来反推结论。
+    // 主管结案不再做实时核验（用户 10-24 决定：人工确认为准）：
+    // 无论后端会话处于哪种状态（已批准 / 已失败 / 仍在途 / 无结论），“确认未付款”与“确认已付款”都直接落库。
+    // 原先按状态 → 结论（approved / failed / pending / inconclusive）拒绝其中一种或两种的矩阵不再成立。
     // ------------------------------------------------------------------
 
     [Theory]
@@ -402,7 +399,7 @@ public sealed partial class CardPaymentRecoveryServiceTests
     [InlineData("TokenRefreshRequired", null, null, "none", "pending")]
     [InlineData("Weird", true, "00", "none", "pending")]
     [InlineData(" Completed", true, "00", "none", "pending")]
-    public async Task ResolvePaymentAsync_live_backend_verdict_matrix(
+    public async Task ResolvePaymentAsync_manual_decision_persists_for_every_backend_status(
         string status,
         bool? transactionSuccess,
         string? responseCode,
@@ -434,14 +431,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         var notPaid = await ResolveAsync(CardPaymentSupervisorDecision.ConfirmNotPaid);
         var paid = await ResolveAsync(CardPaymentSupervisorDecision.ConfirmPaid);
 
-        var expected = expectedVerdict switch
-        {
-            "approved" => (NotPaidPersisted: false, PaidPersisted: true),
-            "failed" => (NotPaidPersisted: true, PaidPersisted: false),
-            "pending" => (NotPaidPersisted: false, PaidPersisted: false),
-            "inconclusive" => (NotPaidPersisted: true, PaidPersisted: true),
-            _ => throw new ArgumentOutOfRangeException(nameof(expectedVerdict), expectedVerdict, null)
-        };
-        Assert.Equal(expected, (notPaid.ResolutionPersisted, paid.ResolutionPersisted));
+        // expectedVerdict 只描述这个状态在旧实时核验里的分类，保留数据行是为了证明每一种状态现在都不再拦截主管。
+        Assert.True(notPaid.ResolutionPersisted, $"{expectedVerdict}: {notPaid.Message}");
+        Assert.True(paid.ResolutionPersisted, $"{expectedVerdict}: {paid.Message}");
     }
 }
