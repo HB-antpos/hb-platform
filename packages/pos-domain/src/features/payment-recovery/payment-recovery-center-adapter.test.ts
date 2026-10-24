@@ -80,6 +80,26 @@ test("M34：投影保留终端实扣金额，金额不符与反冲正确认的�
   }
 });
 
+// 证据输入取消、备注选填：适配器补占位值，账本的非空 CHECK 约束和同步契约保持不变。
+test("人工核实不填证据与备注时补占位值；写了备注则规范化后原样传下去", async () => {
+  const sent: { evidenceReference?: string | undefined; note: string }[] = [];
+  const adapter = new PaymentRecoveryCenterAdapter(ports({
+    submitManualVerification: async (input) => { sent.push({ evidenceReference: input.evidenceReference, note: input.note }); },
+  }));
+  await adapter.submitManualVerification({ recordId: "attempt-1", finding: "unpaid", verifiedAmountCents: null, note: "" });
+  await adapter.submitManualVerification({
+    recordId: "attempt-1", finding: "unpaid", verifiedAmountCents: null, note: " 刷卡机离线\n刷卡机卡住了 ",
+  });
+  await adapter.submitManualVerification({
+    recordId: "attempt-1", finding: "unpaid", verifiedAmountCents: null, evidenceReference: " R-42 ", note: "n",
+  });
+  assert.deepEqual(sent, [
+    { evidenceReference: "-", note: "Supervisor confirmed (no note entered)." },
+    { evidenceReference: "-", note: "刷卡机离线 刷卡机卡住了" },
+    { evidenceReference: "R-42", note: "n" },
+  ]);
+});
+
 test("Square 退款结算：刷新只带回结算中/被拒的记录；检查与结案后重读；运行时缺能力时报不可用", async () => {
   const settlement = (attemptId: string, status: "settling" | "settled" | "rejected" | "refunded-otherwise") => ({
     attemptId, returnOrderGuid: `return-${attemptId}`, amountCents: 500, status,
