@@ -3548,6 +3548,8 @@
   <data name="dailyClose.status.draftPreparing" xml:space="preserve"><value>正在准备新日结……</value></data>
   <data name="dailyClose.status.draftReady" xml:space="preserve"><value>新日结已准备好，可以开始现金统计。</value></data>
   <data name="dailyClose.status.draftResumed" xml:space="preserve"><value>已继续未完成的日结草稿。</value></data>
+  <data name="dailyClose.status.draftResumedRefreshed" xml:space="preserve"><value>已继续未完成的日结草稿。开单后销售有变化，数据已刷新，请核对。</value></data>
+  <data name="dailyClose.status.reportChanged" xml:space="preserve"><value>点钞期间销售有变化，数据已刷新，本次未保存。请核对应有现金和差额后再次保存。</value></data>
   <data name="dailyClose.status.draftPreserved" xml:space="preserve"><value>日结草稿已保留，准备好后请选择“继续日结”。</value></data>
   <data name="dailyClose.status.draftDiscarded" xml:space="preserve"><value>日结草稿已放弃。</value></data>
   <data name="dailyClose.status.draftIdentityChanged" xml:space="preserve"><value>门店、终端或收银员已变化，原日结草稿已清除。</value></data>

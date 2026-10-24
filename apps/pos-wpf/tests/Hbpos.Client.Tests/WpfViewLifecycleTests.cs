@@ -1087,6 +1087,7 @@ public sealed class WpfViewLifecycleTests
             PosSessionState session,
             DateTime businessDate,
             IReadOnlyList<CashDenominationCount> cashCounts,
+            DailyCloseReport? expectedReport = null,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException("运行时弹窗测试不应保存日结。");
