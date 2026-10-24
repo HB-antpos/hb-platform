@@ -184,22 +184,24 @@ public sealed partial class SettingsViewModelTests
         Assert.Equal("{Binding CanChangeEnvironment}", (string?)manual.Attribute("IsEnabled"));
         Assert.Equal("{Binding CanChangeEnvironment}", (string?)voucher.Attribute("IsEnabled"));
 
-        // 同一张「付款方式」卡片、同一个保存按钮；行顺序：手动刷卡 → 代金券 → 订单列表 → 保存按钮。
-        var card = manual.Ancestors(presentation + "StackPanel").First();
-        Assert.Same(card, voucher.Ancestors(presentation + "StackPanel").First());
-        Assert.Same(card, orderList.Ancestors(presentation + "StackPanel").First());
-        var rows = card.Elements().ToList();
+        // 首屏重设计后：三个开关各占一张独立的开关行卡片（Border，样式 PaymentMethodRowStyle），同属「付款方式」左列；
+        // 行顺序：手动刷卡 → 代金券 → 订单列表；「保存付款方式」按钮移到固定底栏（FOOTER: PaymentMethods）。
+        var card = manual.Ancestors(presentation + "StackPanel").Last(panel =>
+            panel.Elements(presentation + "Border").Any(row => (string?)row.Attribute("Style") == "{StaticResource PaymentMethodRowStyle}"));
+        var rows = card.Elements(presentation + "Border")
+            .Where(row => (string?)row.Attribute("Style") == "{StaticResource PaymentMethodRowStyle}").ToList();
+        Assert.Equal(3, rows.Count);
         var manualRow = rows.Single(row => row.Descendants().Contains(manual));
         var voucherRow = rows.Single(row => row.Descendants().Contains(voucher));
         var orderListRow = rows.Single(row => row.Descendants().Contains(orderList));
-        var saveButton = rows.Single(row => row.Name == presentation + "Button" &&
-            (string?)row.Attribute("Command") == "{Binding SavePaymentMethodsCommand}");
         Assert.True(rows.IndexOf(manualRow) < rows.IndexOf(voucherRow));
         Assert.True(rows.IndexOf(voucherRow) < rows.IndexOf(orderListRow));
-        Assert.True(rows.IndexOf(orderListRow) < rows.IndexOf(saveButton));
-        // 与上一行（代金券）之间同样有分隔线。
-        Assert.Equal(presentation + "Border", rows[rows.IndexOf(orderListRow) - 1].Name);
-        Assert.Equal("1", (string?)rows[rows.IndexOf(orderListRow) - 1].Attribute("Height"));
+        var saveButton = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
+            (string?)element.Attribute("Command") == "{Binding SavePaymentMethodsCommand}"));
+        Assert.DoesNotContain(card.Descendants(), element => element == saveButton);
+        Assert.Contains(saveButton.Ancestors(), ancestor => ancestor.Name.LocalName == "SettingsFooterBar");
+        Assert.Equal("{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}",
+            (string?)saveButton.Attribute("Visibility"));
 
         // 行内：图标块 + 标题 / 说明文案，样式与上一行一致。
         // PackIcon 来自 materialDesign 命名空间，这里按本地名匹配。
@@ -209,7 +211,7 @@ public sealed partial class SettingsViewModelTests
             .Select(text => (string?)text.Attribute("Text")).ToArray();
         Assert.Contains("{loc:Loc settings.payment.methods.orderList}", texts);
         Assert.Contains("{loc:Loc settings.payment.methods.orderList.help}", texts);
-        Assert.Equal((string?)voucherRow.Attribute("MinHeight"), (string?)orderListRow.Attribute("MinHeight"));
+        Assert.Equal((string?)voucherRow.Attribute("Style"), (string?)orderListRow.Attribute("Style"));
 
         // 颜色全部走色板 DynamicResource，行内不得出现硬编码十六进制颜色。
         var hardcoded = orderListRow.DescendantsAndSelf().SelectMany(element => element.Attributes())

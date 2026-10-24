@@ -1142,51 +1142,187 @@
                                            Visibility="{Binding IsPaymentTerminalSelected, Converter={StaticResource BoolToVis}}">
                     <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs BEGIN ===== -->
                     <controls:SettingsPageHost.SubTabs>
-                        <!-- 分页：付款方式 / Square / ANZ Linkly；有未保存修改的分页带红点。 -->
-                        <Border
-                                Style="{StaticResource SettingsSegmentHostStyle}"
-                                HorizontalAlignment="Left">
-                            <StackPanel Orientation="Horizontal">
-                                <RadioButton GroupName="PaymentSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsPaymentMethodsSubTabSelected, Mode=TwoWay}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="TuneVariant" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{loc:Loc settings.subtab.paymentMethods}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasPaymentMethodsUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                                <RadioButton GroupName="PaymentSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsSquareSubTabSelected, Mode=TwoWay}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="SquareRoundedOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{Binding SquareTitleText}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasSquareUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                                <RadioButton GroupName="PaymentSubTabs"
-                                             Style="{StaticResource SettingsSubTabRadioStyle}"
-                                             IsChecked="{Binding IsLinklySubTabSelected, Mode=TwoWay}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="CreditCardWirelessOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{Binding LinklyTitleText}" VerticalAlignment="Center" />
-                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasLinklyUnsaved, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </RadioButton>
-                            </StackPanel>
-                        </Border>
+                        <!-- 二级页签条：左边是分页（付款方式 / Square / ANZ Linkly；有未保存修改的分页带红点），
+                             右边是随分页切换的「环境」分段（Production / Sandbox）：Square 分页显示 Square 的，Linkly 分页显示 Linkly 的，
+                             付款方式分页右侧留空。 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Style="{StaticResource SettingsSegmentHostStyle}"
+                                    HorizontalAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton GroupName="PaymentSubTabs"
+                                                 Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                 IsChecked="{Binding IsPaymentMethodsSubTabSelected, Mode=TwoWay}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="TuneVariant" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{loc:Loc settings.subtab.paymentMethods}" VerticalAlignment="Center" />
+                                            <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasPaymentMethodsUnsaved, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <RadioButton GroupName="PaymentSubTabs"
+                                                 Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                 IsChecked="{Binding IsSquareSubTabSelected, Mode=TwoWay}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="SquareRoundedOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding SquareTitleText}" VerticalAlignment="Center" />
+                                            <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasSquareUnsaved, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <RadioButton GroupName="PaymentSubTabs"
+                                                 Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                 IsChecked="{Binding IsLinklySubTabSelected, Mode=TwoWay}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="CreditCardWirelessOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding LinklyTitleText}" VerticalAlignment="Center" />
+                                            <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasLinklyUnsaved, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </RadioButton>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 右侧环境分段容器：两个可见性互斥的占位块（Square / Linkly），按分页切换。 -->
+                            <Grid Grid.Column="2" VerticalAlignment="Center">
+                                <!-- Square 环境分段：①环境 + Production / Sandbox 测试，沿用原 IsSquareSandbox 与 CanChangeEnvironment 绑定。 -->
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IsSquareSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                    <Border Style="{StaticResource SettingsStepBadgeStyle}" Width="22" Height="22" CornerRadius="11" Margin="0,0,8,0">
+                                        <TextBlock Text="1" Style="{StaticResource SettingsStepBadgeTextStyle}" FontSize="12.5" />
+                                    </Border>
+                                    <TextBlock Text="{loc:Loc settings.payment.environment}"
+                                               Style="{StaticResource SettingsSectionTitleStyle}"
+                                               FontSize="15"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,12,0" />
+                                    <Border Style="{StaticResource SettingsSegmentHostStyle}" IsEnabled="{Binding CanChangeEnvironment}">
+                                        <UniformGrid Rows="1">
+                                            <RadioButton GroupName="SquareEnvironmentSegment"
+                                                         Style="{StaticResource SettingsSegmentRadioStyle}"
+                                                         MinWidth="100"
+                                                         IsChecked="{Binding IsSquareSandbox, Mode=TwoWay, Converter={StaticResource InverseBool}}"
+                                                         Content="{loc:Loc settings.payment.environment.production}" />
+                                            <RadioButton GroupName="SquareEnvironmentSegment"
+                                                         Style="{StaticResource SettingsSegmentRadioStyle}"
+                                                         MinWidth="100"
+                                                         IsChecked="{Binding IsSquareSandbox, Mode=TwoWay}"
+                                                         Content="{loc:Loc settings.payment.environment.sandbox}" />
+                                        </UniformGrid>
+                                    </Border>
+                                </StackPanel>
+                                <!-- LINKLY ENV SEGMENT 占位：Linkly 分页选中时显示。由 Linkly 代理填充，Square 一侧不要动。 -->
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IsLinklySubTabSelected, Converter={StaticResource BoolToVis}}">
+                                    <!-- LINKLY ENV SEGMENT: 由 Linkly 代理填充 -->
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
                     </controls:SettingsPageHost.SubTabs>
                     <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs END ===== -->
                     <!-- 固定底栏：三个分页各一条，按分页互斥显示。各区块由对应分页的代理填充，互不相扰。 -->
                     <controls:SettingsPageHost.Footer>
                         <Grid>
                             <!-- ===== FOOTER: PaymentMethods BEGIN ===== -->
+                            <!-- 付款方式底栏：自动保存时只显示「修改后自动保存」提示；非自动保存（显式保存）时提示折叠，
+                                 「保存付款方式」出现在右侧。底栏最小高度固定 65，两种情况都不跳高。 -->
                             <controls:SettingsFooterBar Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock controls:SettingsFooterBar.IsFill="True"
+                                           Text="{loc:Loc settings.autosave.hint}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                            <Style.Triggers>
+                                                <!-- 显式保存模式下「自动保存」提示不成立，折叠。 -->
+                                                <DataTrigger Binding="{Binding IsExplicitSaveVisible}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Button controls:SettingsFooterBar.IsRight="True"
+                                        Command="{Binding SavePaymentMethodsCommand}"
+                                        Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Height="48" MinWidth="176" Padding="18,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                                        <TextBlock Text="{loc:Loc settings.payment.methods.save}" Foreground="White" FontSize="16" />
+                                    </StackPanel>
+                                </Button>
                             </controls:SettingsFooterBar>
                             <!-- ===== FOOTER: PaymentMethods END ===== -->
                             <!-- ===== FOOTER: Square BEGIN ===== -->
+                            <!-- Square 底栏：直连 Square 分组（开启/关闭直连 + 刷新直连状态）｜说明文字｜草稿芯片「已修改，尚未生效」｜右侧「保存 Square」。 -->
                             <controls:SettingsFooterBar Visibility="{Binding IsSquareSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{loc:Loc settings.square.direct.group}"
+                                           FontSize="13"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                                <Button Command="{Binding ToggleSquareDirectCommand}"
+                                        Content="{Binding SquareDirectToggleText}"
+                                        Style="{StaticResource PosSecondaryButtonStyle}"
+                                        BorderBrush="{DynamicResource PosPrimaryBrush}"
+                                        Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                        FontWeight="Bold"
+                                        Height="44"
+                                        MinWidth="120"
+                                        Padding="14,0" />
+                                <Button Command="{Binding RefreshSquareDirectCommand}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        Padding="14,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.square.direct.refresh}" />
+                                    </StackPanel>
+                                </Button>
+                                <Border Style="{StaticResource SettingsFooterDividerStyle}" />
+                                <TextBlock controls:SettingsFooterBar.IsFill="True"
+                                           Text="{loc:Loc settings.square.switchHelp}"
+                                           ToolTip="{loc:Loc settings.square.switchHelp}"
+                                           FontSize="12.5"
+                                           LineHeight="16"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxHeight="32"
+                                           Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                <!-- 草稿芯片：Square 有未保存的修改（草稿或保存失败）时出现；文字取 SquareSaveStateText。 -->
+                                <Border Visibility="{Binding HasSquareUnsaved, Converter={StaticResource BoolToVis}}"
+                                        Background="{DynamicResource PosWarningSoftBrush}"
+                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Height="24"
+                                        Padding="10,0"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding SquareSaveStateText}"
+                                               FontSize="12"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource PosWarningTextBrush}" />
+                                </Border>
+                                <Button controls:SettingsFooterBar.IsRight="True"
+                                        Command="{Binding SaveSquareCommand}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Height="48"
+                                        MinWidth="176"
+                                        Padding="18,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                                        <TextBlock Text="{loc:Loc settings.square.save}" Foreground="White" FontSize="16" />
+                                    </StackPanel>
+                                </Button>
                             </controls:SettingsFooterBar>
                             <!-- ===== FOOTER: Square END ===== -->
                             <!-- ===== FOOTER: Linkly BEGIN ===== -->
@@ -1209,30 +1345,52 @@
 
 
                         <!-- ===== PAGE: PaymentTerminal / PaymentMethods BEGIN ===== -->
-                        <!-- 付款方式：三个大开关（手动刷卡 / 代金券 / 付款页订单列表），共用一个保存按钮（不触发终端配置写入）。 -->
-                        <Border Grid.Row="1" Grid.Column="0"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}"
-                                Margin="0,0,0,16">
-                            <StackPanel>
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right"
-                                               Text="{Binding PaymentMethodsSaveStateText}"
-                                               Tag="{Binding PaymentMethodsSaveState}"
-                                               Style="{StaticResource SettingsSectionStateTextStyle}" />
-                                    <TextBlock Text="{loc:Loc settings.payment.methods.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                </DockPanel>
-                                <TextBlock Text="{loc:Loc settings.payment.methods.description}"
-                                           Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,10" />
-                                <Grid MinHeight="72">
+                        <!-- 付款方式（首屏重设计）：左列三个开关行（手动刷卡 / 代金券 / 付款页订单列表，行高 ≥72，开关点击区 ≥48×56），
+                             右列「当前付款服务商」摘要卡。保存状态：顶栏芯片 + 本区块标题右侧小字 + 底栏提示；
+                             生产装配是自动保存，「保存付款方式」只在非自动保存时出现在底栏右侧（见 FOOTER: PaymentMethods）。 -->
+                        <StackPanel Grid.Row="1" Grid.Column="0"
+                                    Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}">
+                            <StackPanel.Resources>
+                                <!-- 页面级样式：开关行卡片与图标块。 -->
+                                <Style x:Key="PaymentMethodRowStyle" TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="CornerRadius" Value="10" />
+                                    <Setter Property="Padding" Value="12,6" />
+                                    <Setter Property="MinHeight" Value="72" />
+                                    <Setter Property="Margin" Value="0,0,0,8" />
+                                </Style>
+                                <Style x:Key="PaymentMethodIconBoxStyle" TargetType="Border">
+                                    <Setter Property="Width" Value="44" />
+                                    <Setter Property="Height" Value="44" />
+                                    <Setter Property="CornerRadius" Value="12" />
+                                    <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="Margin" Value="0,0,14,0" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                </Style>
+                            </StackPanel.Resources>
+
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{loc:Loc settings.payment.methods.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <TextBlock Text="{Binding PaymentMethodsSaveStateText}"
+                                           Tag="{Binding PaymentMethodsSaveState}"
+                                           Style="{StaticResource SettingsSectionStateTextStyle}" />
+                            </StackPanel>
+                            <TextBlock Text="{loc:Loc settings.payment.methods.description}"
+                                       Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,10" />
+
+                            <!-- 开关行 1：使用手动刷卡（受环境锁 CanChangeEnvironment 控制）。 -->
+                            <Border Style="{StaticResource PaymentMethodRowStyle}">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="44" Height="44" CornerRadius="12"
-                                            Background="{DynamicResource PosSurfaceAltBrush}"
-                                            Margin="0,0,14,0" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource PaymentMethodIconBoxStyle}">
                                         <materialDesign:PackIcon Kind="CreditCardOutline" Width="22" Height="22"
                                                                  Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -1241,7 +1399,7 @@
                                         <TextBlock Text="{loc:Loc settings.payment.methods.manualCard}" FontSize="16" FontWeight="SemiBold" />
                                         <TextBlock Text="{loc:Loc settings.payment.methods.manualCard.help}"
                                                    TextWrapping="Wrap" FontSize="12.5"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <ToggleButton Grid.Column="2" x:Name="ManualCardSettingToggle"
                                                   Style="{StaticResource MaterialDesignSwitchToggleButton}"
@@ -1251,16 +1409,17 @@
                                                   MinHeight="48" MinWidth="56" VerticalAlignment="Center">
                                     </ToggleButton>
                                 </Grid>
-                                <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6" />
-                                <Grid MinHeight="72">
+                            </Border>
+
+                            <!-- 开关行 2：启用代金券（受环境锁控制）。 -->
+                            <Border Style="{StaticResource PaymentMethodRowStyle}">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="44" Height="44" CornerRadius="12"
-                                            Background="{DynamicResource PosSurfaceAltBrush}"
-                                            Margin="0,0,14,0" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource PaymentMethodIconBoxStyle}">
                                         <materialDesign:PackIcon Kind="TicketPercentOutline" Width="22" Height="22"
                                                                  Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -1269,7 +1428,7 @@
                                         <TextBlock Text="{loc:Loc settings.payment.methods.voucher}" FontSize="16" FontWeight="SemiBold" />
                                         <TextBlock Text="{loc:Loc settings.payment.methods.voucher.help}"
                                                    TextWrapping="Wrap" FontSize="12.5"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <ToggleButton Grid.Column="2" x:Name="VoucherSettingToggle"
                                                   Style="{StaticResource MaterialDesignSwitchToggleButton}"
@@ -1279,18 +1438,18 @@
                                                   MinHeight="48" MinWidth="56" VerticalAlignment="Center">
                                     </ToggleButton>
                                 </Grid>
-                                <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6" />
-                                <!-- 付款页显示订单列表：默认开启，按本机保存，与上面两项共用同一个保存按钮。
-                                     它只是付款页的布局偏好，不涉及支付环境，所以不绑定 CanChangeEnvironment，始终可切换。 -->
-                                <Grid MinHeight="72">
+                            </Border>
+
+                            <!-- 开关行 3：付款页显示订单列表：默认开启，按本机保存，与上面两项共用同一套保存（自动保存 / 底栏保存按钮）。
+                                 它只是付款页的布局偏好，不涉及支付环境，所以不绑定 CanChangeEnvironment，始终可切换。 -->
+                            <Border Style="{StaticResource PaymentMethodRowStyle}">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="44" Height="44" CornerRadius="12"
-                                            Background="{DynamicResource PosSurfaceAltBrush}"
-                                            Margin="0,0,14,0" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource PaymentMethodIconBoxStyle}">
                                         <materialDesign:PackIcon Kind="FormatListBulleted" Width="22" Height="22"
                                                                  Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -1299,7 +1458,7 @@
                                         <TextBlock Text="{loc:Loc settings.payment.methods.orderList}" FontSize="16" FontWeight="SemiBold" />
                                         <TextBlock Text="{loc:Loc settings.payment.methods.orderList.help}"
                                                    TextWrapping="Wrap" FontSize="12.5"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <ToggleButton Grid.Column="2" x:Name="OrderListSettingToggle"
                                                   Style="{StaticResource MaterialDesignSwitchToggleButton}"
@@ -1308,20 +1467,15 @@
                                                   MinHeight="48" MinWidth="56" VerticalAlignment="Center">
                                     </ToggleButton>
                                 </Grid>
-                                <Button Command="{Binding SavePaymentMethodsCommand}"
-                                        Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}"
-                                        Style="{StaticResource PosPrimaryButtonStyle}"
-                                        HorizontalAlignment="Right" MinHeight="52" MinWidth="168" Margin="0,10,0,0">
-                                    <TextBlock Text="{loc:Loc settings.payment.methods.save}" Foreground="White" />
-                                </Button>
-                            </StackPanel>
-                        </Border>
+                            </Border>
+                        </StackPanel>
 
-                        <!-- 当前生效的服务商摘要。 -->
+                        <!-- 当前生效的服务商摘要（右列，顶对齐，不随左列拉高）。 -->
                         <Border Grid.Row="1" Grid.Column="2"
                                 Style="{StaticResource SettingsActionCardStyle}"
                                 Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}"
-                                Margin="0,0,0,16">
+                                VerticalAlignment="Top"
+                                Padding="16">
                             <StackPanel>
                                 <DockPanel>
                                     <Border DockPanel.Dock="Left"
@@ -1347,7 +1501,7 @@
                                            Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            LineHeight="20"
-                                           Margin="0,14,0,0" />
+                                           Margin="0,12,0,0" />
                             </StackPanel>
                         </Border>
                         <!-- ===== PAGE: PaymentTerminal / PaymentMethods END ===== -->
@@ -1382,273 +1536,395 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </TabItem.Header>
-                                <Border Style="{StaticResource SettingsActionCardStyle}">
-                                    <StackPanel>
-                                        <StackPanel Margin="0,0,0,14">
-                                            <TextBlock Text="{Binding SquareTitleText}" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                            <TextBlock Text="{loc:Loc settings.square.description}"
-                                                       FontSize="12.5"
-                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                            <TextBlock Text="{loc:Loc settings.square.switchHelp}"
-                                                       FontSize="12.5"
-                                                       Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,6,0,0" />
-                                        </StackPanel>
+                                <!-- Square 首屏版式（1366×632 内正文不滚动）：
+                                     顶部连接条（环境①在二级页签条右侧；本条放②终端超时秒数 + 令牌来源）
+                                     + 三栏（左：说明与直连 Square 说明｜中：③门店位置 + ④设备｜右：⑤设备码管理）。
+                                     操作按钮（直连开关 / 刷新直连状态 / 保存 Square）全部在固定底栏 FOOTER: Square。
+                                     高度预算：正文可用 368 = 顶部条 48 + 间距 12 + 三栏 302（门店/设备列表各固定 98 高内部滚动，列表行内不放按钮）。 -->
+                                <Grid>
+                                    <Grid.Resources>
+                                        <!-- 页面级样式：紧凑单选列表（固定高度内部滚动，行高 ≥48，选中行浅蓝底 + 左侧 3px 蓝条）。 -->
+                                        <Style x:Key="SquareCompactListBoxStyle" TargetType="ListBox">
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Setter Property="BorderThickness" Value="0" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBox">
+                                                        <Border Background="{DynamicResource PosSurfaceBrush}"
+                                                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="8"
+                                                                ClipToBounds="True">
+                                                            <ScrollViewer Focusable="False"
+                                                                          Padding="0"
+                                                                          VerticalScrollBarVisibility="Auto"
+                                                                          HorizontalScrollBarVisibility="Disabled"
+                                                                          CanContentScroll="False"
+                                                                          PanningMode="VerticalOnly">
+                                                                <ItemsPresenter />
+                                                            </ScrollViewer>
+                                                        </Border>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Setter Property="ItemContainerStyle">
+                                                <Setter.Value>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                                                        <Setter Property="MinHeight" Value="48" />
+                                                        <Setter Property="Padding" Value="12,6" />
+                                                        <Setter Property="Cursor" Value="Hand" />
+                                                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="ListBoxItem">
+                                                                    <Border x:Name="ItemBorder"
+                                                                            Background="Transparent"
+                                                                            BorderBrush="{DynamicResource PosDividerBrush}"
+                                                                            BorderThickness="0,0,0,1"
+                                                                            MinHeight="{TemplateBinding MinHeight}"
+                                                                            Padding="{TemplateBinding Padding}">
+                                                                        <Grid>
+                                                                            <Border x:Name="SelectedBar"
+                                                                                    Width="3"
+                                                                                    Margin="-12,-6,0,-6"
+                                                                                    HorizontalAlignment="Left"
+                                                                                    Background="{DynamicResource PosPrimaryBrush}"
+                                                                                    Visibility="Collapsed" />
+                                                                            <DockPanel>
+                                                                                <Border x:Name="RadioOuter"
+                                                                                        DockPanel.Dock="Left"
+                                                                                        Width="18"
+                                                                                        Height="18"
+                                                                                        CornerRadius="9"
+                                                                                        BorderThickness="2"
+                                                                                        BorderBrush="{DynamicResource PosBorderStrongBrush}"
+                                                                                        Background="{DynamicResource PosSurfaceBrush}"
+                                                                                        VerticalAlignment="Center"
+                                                                                        Margin="0,0,10,0">
+                                                                                    <Ellipse x:Name="RadioDot"
+                                                                                             Width="8"
+                                                                                             Height="8"
+                                                                                             Fill="{DynamicResource PosPrimaryBrush}"
+                                                                                             Visibility="Collapsed" />
+                                                                                </Border>
+                                                                                <ContentPresenter VerticalAlignment="Center" />
+                                                                            </DockPanel>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsSelected" Value="True">
+                                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                                                            <Setter TargetName="RadioOuter" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                                                            <Setter TargetName="RadioDot" Property="Visibility" Value="Visible" />
+                                                                            <Setter TargetName="SelectedBar" Property="Visibility" Value="Visible" />
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
 
+                                        <!-- 列表为空时居中显示的提示文字（叠在列表上，列表有项时折叠）。 -->
+                                        <Style x:Key="SquareListEmptyTextStyle" TargetType="TextBlock">
+                                            <Setter Property="FontSize" Value="13" />
+                                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                            <Setter Property="TextWrapping" Value="Wrap" />
+                                            <Setter Property="TextAlignment" Value="Center" />
+                                            <Setter Property="HorizontalAlignment" Value="Center" />
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Margin" Value="16,0" />
+                                            <Setter Property="IsHitTestVisible" Value="False" />
+                                        </Style>
+                                    </Grid.Resources>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="48" />
+                                        <RowDefinition Height="12" />
+                                        <RowDefinition Height="302" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- ===== 顶部连接条（48）：②终端超时秒数 + 令牌来源（只读状态块）。①环境分段在二级页签条右侧。 ===== -->
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Style="{StaticResource SettingsStepBadgeStyle}" Width="22" Height="22" CornerRadius="11" Margin="0,0,8,0">
+                                                <TextBlock Text="2" Style="{StaticResource SettingsStepBadgeTextStyle}" FontSize="12.5" />
+                                            </Border>
+                                            <TextBlock Text="{loc:Loc settings.square.timeoutSeconds}"
+                                                       Style="{StaticResource SettingsSectionTitleStyle}"
+                                                       FontSize="15"
+                                                       VerticalAlignment="Center"
+                                                       MaxWidth="150"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="17"
+                                                       LineStackingStrategy="BlockLineHeight" />
+                                        </StackPanel>
+                                        <TextBox Grid.Column="1"
+                                                 Text="{Binding TimeoutSecondsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Width="96"
+                                                 Height="44"
+                                                 VerticalAlignment="Center"
+                                                 Margin="12,0,20,0" />
                                         <!-- 令牌由后台统一管理，收银机只显示状态。 -->
-                                        <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                        <Border Grid.Column="2"
+                                                Height="48"
+                                                Background="{DynamicResource PosSurfaceAltBrush}"
                                                 BorderBrush="{DynamicResource PosDividerBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="10"
-                                                Padding="14,10"
-                                                Margin="0,0,0,18">
+                                                Padding="12,3">
                                             <DockPanel>
                                                 <materialDesign:PackIcon DockPanel.Dock="Left" Kind="ShieldKeyOutline" Width="22" Height="22"
                                                                          Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                         VerticalAlignment="Center" Margin="0,0,12,0" />
-                                                <StackPanel>
-                                                    <TextBlock Text="{loc:Loc settings.square.tokenSource}" FontSize="13" FontWeight="Bold" />
-                                                    <TextBlock Text="{Binding SquareTokenStatusText}"
-                                                               FontSize="13"
-                                                               Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                               TextWrapping="Wrap" Margin="0,2,0,0" />
-                                                    <TextBlock Text="{loc:Loc settings.square.tokenHelp}"
-                                                               FontSize="12"
-                                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                               TextWrapping="Wrap" Margin="0,2,0,0" />
-                                                </StackPanel>
+                                                                         VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                <TextBlock VerticalAlignment="Center"
+                                                           FontSize="13"
+                                                           LineHeight="16"
+                                                           LineStackingStrategy="BlockLineHeight"
+                                                           TextWrapping="Wrap"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource PosTextSecondaryBrush}">
+                                                    <Run Text="{loc:Loc settings.square.tokenSource}" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" /><Run Text="  " /><Run Text="{Binding SquareTokenStatusText, Mode=OneWay}" />
+                                                </TextBlock>
                                             </DockPanel>
                                         </Border>
+                                    </Grid>
 
-                                        <!-- 直连 Square（默认关闭）：本地开关 + 服务端门店开关 + 令牌剩余有效期。 -->
-                                        <Border Background="{DynamicResource PosSurfaceAltBrush}"
-                                                BorderBrush="{DynamicResource PosDividerBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="10"
-                                                Padding="14,10"
-                                                Margin="0,0,0,18">
+                                    <!-- ===== 三栏（302）：左 340 : 中 300 : 右 390（按星号比例缩放），栏间 1px 竖线 ===== -->
+                                    <Grid Grid.Row="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="340*" />
+                                            <ColumnDefinition Width="33" />
+                                            <ColumnDefinition Width="300*" />
+                                            <ColumnDefinition Width="33" />
+                                            <ColumnDefinition Width="390*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- 左栏：Square 说明 + 令牌说明 + 直连 Square 说明卡（按钮在底栏）。内容异常变长时栏内可滚动，不撑高整页。 -->
+                                        <ScrollViewer Grid.Column="0"
+                                                      Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                                      Focusable="False"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      PanningMode="VerticalOnly">
                                             <StackPanel>
-                                                <TextBlock Text="{loc:Loc settings.square.direct.title}" FontSize="13" FontWeight="Bold" />
-                                                <TextBlock Text="{loc:Loc settings.square.direct.description}"
+                                                <TextBlock Text="{loc:Loc settings.square.description}"
                                                            FontSize="12"
+                                                           LineHeight="16"
+                                                           LineStackingStrategy="BlockLineHeight"
                                                            Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                           TextWrapping="Wrap" Margin="0,2,0,6" />
-                                                <TextBlock Text="{Binding SquareDirectStatusText}"
-                                                           FontSize="13"
-                                                           Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                            TextWrapping="Wrap" />
-                                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                                    <Button Command="{Binding ToggleSquareDirectCommand}"
-                                                            Content="{Binding SquareDirectToggleText}"
-                                                            Style="{StaticResource PosPrimaryButtonStyle}"
-                                                            Height="44"
-                                                            MinWidth="160"
-                                                            Margin="0,0,10,0" />
-                                                    <Button Command="{Binding RefreshSquareDirectCommand}"
-                                                            Content="{loc:Loc settings.square.direct.refresh}"
-                                                            Height="44"
-                                                            MinWidth="120" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <!-- ① 环境 + 等待超时 -->
-                                        <Grid Margin="0,0,0,18">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="18" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0">
-                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}">
-                                                        <TextBlock Text="1" Style="{StaticResource SettingsStepBadgeTextStyle}" />
-                                                    </Border>
-                                                    <TextBlock Text="{loc:Loc settings.payment.environment}" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
-                                                </StackPanel>
-                                                <Border Style="{StaticResource SettingsSegmentHostStyle}" IsEnabled="{Binding CanChangeEnvironment}">
-                                                    <UniformGrid Rows="1">
-                                                        <RadioButton GroupName="SquareEnvironmentSegment"
-                                                                     Style="{StaticResource SettingsSegmentRadioStyle}"
-                                                                     IsChecked="{Binding IsSquareSandbox, Mode=TwoWay, Converter={StaticResource InverseBool}}"
-                                                                     Content="{loc:Loc settings.payment.environment.production}" />
-                                                        <RadioButton GroupName="SquareEnvironmentSegment"
-                                                                     Style="{StaticResource SettingsSegmentRadioStyle}"
-                                                                     IsChecked="{Binding IsSquareSandbox, Mode=TwoWay}"
-                                                                     Content="{loc:Loc settings.payment.environment.sandbox}" />
-                                                    </UniformGrid>
-                                                </Border>
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="2">
-                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}">
-                                                        <TextBlock Text="2" Style="{StaticResource SettingsStepBadgeTextStyle}" />
-                                                    </Border>
-                                                    <TextBlock Text="{loc:Loc settings.square.timeoutSeconds}" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <TextBox Text="{Binding TimeoutSecondsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                         Style="{StaticResource SettingsFieldTextBoxStyle}"
-                                                         Height="58" />
-                                            </StackPanel>
-                                        </Grid>
-
-                                        <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,0,0,16" />
-
-                                        <!-- ③ 门店位置 -->
-                                        <DockPanel Margin="0,0,0,12">
-                                            <Button DockPanel.Dock="Right"
-                                                    Command="{Binding LoadLocationsCommand}"
-                                                    services:ButtonFeedback.Cue="Download"
-                                                    Style="{StaticResource SettingsTouchButtonHeight}"
-                                                    ToolTip="{loc:Loc settings.square.loadLocations.tooltip}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="20" Height="20" Margin="0,0,8,0" />
-                                                    <TextBlock Text="{loc:Loc settings.square.loadLocations}" />
-                                                </StackPanel>
-                                            </Button>
-                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <Border Style="{StaticResource SettingsStepBadgeStyle}">
-                                                    <TextBlock Text="3" Style="{StaticResource SettingsStepBadgeTextStyle}" />
-                                                </Border>
-                                                <TextBlock Text="{loc:Loc settings.square.location}" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </DockPanel>
-                                        <ListBox x:Name="SquareLocationList"
-                                                 ItemsSource="{Binding SquareLocations}"
-                                                 SelectedItem="{Binding SelectedSquareLocation, Mode=TwoWay}"
-                                                 Style="{StaticResource SettingsTouchListBoxStyle}">
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontSize="15.5" FontWeight="Bold" />
-                                                        <TextBlock Text="{Binding Id}" FontSize="12" FontFamily="Consolas"
-                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
-                                                    </StackPanel>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
-                                        <TextBlock Text="{loc:Loc settings.square.location.empty}" Margin="0,0,0,10">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                    <Setter Property="FontSize" Value="13" />
-                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding HasItems, ElementName=SquareLocationList}" Value="False">
-                                                            <Setter Property="Visibility" Value="Visible" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-
-                                        <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6,0,16" />
-
-                                        <!-- ④ 刷卡设备 -->
-                                        <DockPanel Margin="0,0,0,12">
-                                            <Button DockPanel.Dock="Right"
-                                                    Command="{Binding LoadDevicesCommand}"
-                                                    Style="{StaticResource SettingsTouchButtonHeight}"
-                                                    ToolTip="{loc:Loc settings.square.loadDevices.tooltip}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" Margin="0,0,8,0" />
-                                                    <TextBlock Text="{loc:Loc settings.square.loadDevices}" />
-                                                </StackPanel>
-                                            </Button>
-                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <Border Style="{StaticResource SettingsStepBadgeStyle}">
-                                                    <TextBlock Text="4" Style="{StaticResource SettingsStepBadgeTextStyle}" />
-                                                </Border>
-                                                <TextBlock Text="{loc:Loc settings.square.device}" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </DockPanel>
-                                        <ListBox x:Name="SquareDeviceList"
-                                                 ItemsSource="{Binding SquareDevices}"
-                                                 SelectedItem="{Binding SelectedSquareDevice, Mode=TwoWay}"
-                                                 Style="{StaticResource SettingsTouchListBoxStyle}">
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <DockPanel>
-                                                        <Border DockPanel.Dock="Right"
-                                                                Background="{DynamicResource PosSurfaceAltBrush}"
-                                                                BorderBrush="{DynamicResource PosBorderBrush}"
-                                                                BorderThickness="1"
-                                                                CornerRadius="14"
-                                                                Padding="12,4"
-                                                                VerticalAlignment="Center">
-                                                            <TextBlock Text="{Binding StatusDisplayName}" FontSize="12.5" FontWeight="Bold"
-                                                                       Foreground="{DynamicResource PosTextSecondaryBrush}" />
-                                                        </Border>
-                                                        <StackPanel Margin="0,0,12,0">
-                                                            <TextBlock Text="{Binding Name}" FontSize="15.5" FontWeight="Bold" />
-                                                            <TextBlock Text="{Binding Id}" FontSize="12" FontFamily="Consolas"
-                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
-                                                        </StackPanel>
-                                                    </DockPanel>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
-                                        <TextBlock Text="{loc:Loc settings.square.device.empty}" Margin="0,0,0,10">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                    <Setter Property="FontSize" Value="13" />
-                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding HasItems, ElementName=SquareDeviceList}" Value="False">
-                                                            <Setter Property="Visibility" Value="Visible" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-
-                                        <!-- ⑤ 配对新终端（设备码） -->
-                                        <Border Background="{DynamicResource PosSurfaceAltBrush}"
-                                                BorderBrush="{DynamicResource PosDividerBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="12"
-                                                Padding="16"
-                                                Margin="0,8,0,18">
-                                            <StackPanel>
-                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}">
-                                                        <TextBlock Text="5" Style="{StaticResource SettingsStepBadgeTextStyle}" />
-                                                    </Border>
-                                                    <TextBlock Text="{loc:Loc settings.square.deviceCodes}" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
-                                                </StackPanel>
-
-                                                <Border Background="{DynamicResource PosWarningSoftBrush}"
-                                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                                                <TextBlock Text="{loc:Loc settings.square.tokenHelp}"
+                                                           FontSize="12"
+                                                           LineHeight="16"
+                                                           LineStackingStrategy="BlockLineHeight"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                           TextWrapping="Wrap" />
+                                                <!-- 直连 Square（默认关闭）：本地开关 + 服务端门店开关 + 令牌剩余有效期；开关与刷新按钮在底栏。 -->
+                                                <Border Margin="0,8,0,0"
+                                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                                        BorderBrush="{DynamicResource PosDividerBrush}"
                                                         BorderThickness="1"
-                                                        CornerRadius="8"
-                                                        Padding="12,8"
-                                                        Margin="0,0,0,12"
-                                                        Visibility="{Binding IsSquareDeviceCodesUnsupported, Converter={StaticResource BoolToVis}}">
-                                                    <TextBlock Text="{Binding SquareDeviceCodesUnavailableText}"
-                                                               FontSize="12.5"
-                                                               Foreground="{DynamicResource PosWarningTextBrush}"
-                                                               TextWrapping="Wrap" />
+                                                        CornerRadius="10"
+                                                        Padding="12,10">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{loc:Loc settings.square.direct.title}" FontSize="13" FontWeight="Bold" />
+                                                        <TextBlock Text="{loc:Loc settings.square.direct.description}"
+                                                                   FontSize="12"
+                                                                   LineHeight="16"
+                                                                   LineStackingStrategy="BlockLineHeight"
+                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                   TextWrapping="Wrap" Margin="0,6,0,6" />
+                                                        <TextBlock Text="{Binding SquareDirectStatusText}"
+                                                                   FontSize="13"
+                                                                   Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
                                                 </Border>
+                                            </StackPanel>
+                                        </ScrollViewer>
+
+                                        <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource PosDividerBrush}" />
+
+                                        <!-- 中栏：③门店位置 + ④设备。标题行右端各带「加载…」按钮（放在列表头部、不进滚动区），
+                                             下面是固定 98 高的内部滚动列表（约 2 行 + 滚动条），列表行内没有功能按钮。 -->
+                                        <StackPanel Grid.Column="2">
+                                            <!-- ③ 门店位置 -->
+                                            <Grid Height="44">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}" Width="22" Height="22" CornerRadius="11" Margin="0,0,8,0">
+                                                        <TextBlock Text="3" Style="{StaticResource SettingsStepBadgeTextStyle}" FontSize="12.5" />
+                                                    </Border>
+                                                    <TextBlock Text="{loc:Loc settings.square.location}"
+                                                               Style="{StaticResource SettingsSectionTitleStyle}"
+                                                               FontSize="15"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1"
+                                                        Command="{Binding LoadLocationsCommand}"
+                                                        services:ButtonFeedback.Cue="Download"
+                                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                                        Padding="14,0"
+                                                        ToolTip="{loc:Loc settings.square.loadLocations.tooltip}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="20" Height="20" Margin="0,0,8,0" />
+                                                        <TextBlock Text="{loc:Loc settings.square.loadLocations}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                            <Grid Height="98" Margin="0,4,0,0">
+                                                <ListBox x:Name="SquareLocationList"
+                                                         ItemsSource="{Binding SquareLocations}"
+                                                         SelectedItem="{Binding SelectedSquareLocation, Mode=TwoWay}"
+                                                         Style="{StaticResource SquareCompactListBoxStyle}">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Id}" FontSize="12" FontFamily="Consolas"
+                                                                           Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                                <TextBlock Text="{loc:Loc settings.square.location.empty}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource SquareListEmptyTextStyle}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasItems, ElementName=SquareLocationList}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+
+                                            <!-- ④ 刷卡设备 -->
+                                            <Grid Height="44" Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}" Width="22" Height="22" CornerRadius="11" Margin="0,0,8,0">
+                                                        <TextBlock Text="4" Style="{StaticResource SettingsStepBadgeTextStyle}" FontSize="12.5" />
+                                                    </Border>
+                                                    <TextBlock Text="{loc:Loc settings.square.device}"
+                                                               Style="{StaticResource SettingsSectionTitleStyle}"
+                                                               FontSize="15"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1"
+                                                        Command="{Binding LoadDevicesCommand}"
+                                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                                        Padding="14,0"
+                                                        ToolTip="{loc:Loc settings.square.loadDevices.tooltip}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" Margin="0,0,8,0" />
+                                                        <TextBlock Text="{loc:Loc settings.square.loadDevices}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                            <Grid Height="98" Margin="0,4,0,0">
+                                                <ListBox x:Name="SquareDeviceList"
+                                                         ItemsSource="{Binding SquareDevices}"
+                                                         SelectedItem="{Binding SelectedSquareDevice, Mode=TwoWay}"
+                                                         Style="{StaticResource SquareCompactListBoxStyle}">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <DockPanel>
+                                                                <Border DockPanel.Dock="Right"
+                                                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                                                        BorderBrush="{DynamicResource PosBorderBrush}"
+                                                                        BorderThickness="1"
+                                                                        CornerRadius="13"
+                                                                        Padding="10,2"
+                                                                        VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding StatusDisplayName}" FontSize="12.5" FontWeight="Bold"
+                                                                               Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                                                                </Border>
+                                                                <StackPanel Margin="0,0,10,0">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding Id}" FontSize="12" FontFamily="Consolas"
+                                                                               Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </DockPanel>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                                <TextBlock Text="{loc:Loc settings.square.device.empty}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource SquareListEmptyTextStyle}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasItems, ElementName=SquareDeviceList}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+                                        </StackPanel>
+
+                                        <Border Grid.Column="3" Width="1" HorizontalAlignment="Center" Background="{DynamicResource PosDividerBrush}" />
+
+                                        <!-- 右栏：⑤设备码管理。沙盒环境下输入与按钮整体禁用，底部提示槽由帮助说明换成「不支持」警告（二选一，高度不变）。 -->
+                                        <ScrollViewer Grid.Column="4"
+                                                      Style="{DynamicResource PosVerticalTouchScrollViewerStyle}"
+                                                      Focusable="False"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      PanningMode="VerticalOnly">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal" Height="24" Margin="0,0,0,8">
+                                                    <Border Style="{StaticResource SettingsStepBadgeStyle}" Width="22" Height="22" CornerRadius="11" Margin="0,0,8,0">
+                                                        <TextBlock Text="5" Style="{StaticResource SettingsStepBadgeTextStyle}" FontSize="12.5" />
+                                                    </Border>
+                                                    <TextBlock Text="{loc:Loc settings.square.deviceCodes}"
+                                                               Style="{StaticResource SettingsSectionTitleStyle}"
+                                                               FontSize="15"
+                                                               VerticalAlignment="Center" />
+                                                </StackPanel>
 
                                                 <StackPanel IsEnabled="{Binding IsSquareDeviceCodesSupported}">
-                                                    <TextBlock Text="{loc:Loc settings.square.deviceCodeName}" Style="{StaticResource SettingsLabelStyle}" />
-                                                    <Grid Margin="0,0,0,12">
+                                                    <!-- 第一行：新设备码名称 + 创建设备码 -->
+                                                    <Grid Margin="0,0,0,8">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
-                                                        <TextBox Text="{Binding SquareDeviceCodeNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                 Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                                        <StackPanel>
+                                                            <TextBlock Text="{loc:Loc settings.square.deviceCodeName}" Style="{StaticResource SettingsLabelStyle}" Margin="0,0,0,2" />
+                                                            <TextBox Text="{Binding SquareDeviceCodeNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                     Style="{StaticResource SettingsFieldTextBoxStyle}" />
+                                                        </StackPanel>
                                                         <Button Grid.Column="1"
                                                                 Command="{Binding CreateDeviceCodeCommand}"
                                                                 Style="{StaticResource PosPrimaryButtonStyle}"
-                                                                Height="52"
-                                                                Padding="18,0"
-                                                                Margin="12,0,0,0">
+                                                                Height="48"
+                                                                Padding="16,0"
+                                                                VerticalAlignment="Bottom"
+                                                                Margin="8,0,0,-2">
                                                             <StackPanel Orientation="Horizontal">
                                                                 <materialDesign:PackIcon Kind="PlusCircleOutline" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
                                                                 <TextBlock Text="{loc:Loc settings.square.createDeviceCode}" Foreground="White" />
@@ -1656,58 +1932,58 @@
                                                         </Button>
                                                     </Grid>
 
-                                                    <TextBlock Text="{loc:Loc settings.square.deviceCodeList}" Style="{StaticResource SettingsLabelStyle}" />
-                                                    <Grid Margin="0,0,0,12">
+                                                    <!-- 第二行：设备码列表下拉 + 加载设备码 + 刷新状态（设备码的刷新，与直连的「刷新直连状态」不同） -->
+                                                    <Grid Margin="0,0,0,8">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
-                                                        <ComboBox ItemsSource="{Binding SquareDeviceCodes}"
-                                                                  SelectedItem="{Binding SelectedSquareDeviceCode, Mode=TwoWay}"
-                                                                  Style="{StaticResource SettingsComboBoxStyle}">
-                                                            <ComboBox.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <StackPanel>
-                                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                                                                        <TextBlock FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}">
-                                                                            <Run Text="{Binding Code}" />
-                                                                            <Run Text="  " />
-                                                                            <Run Text="{Binding Status}" />
-                                                                            <Run Text="  " />
-                                                                            <Run Text="{Binding DeviceId}" />
-                                                                        </TextBlock>
-                                                                    </StackPanel>
-                                                                </DataTemplate>
-                                                            </ComboBox.ItemTemplate>
-                                                        </ComboBox>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{loc:Loc settings.square.deviceCodeList}" Style="{StaticResource SettingsLabelStyle}" Margin="0,0,0,2" />
+                                                            <ComboBox ItemsSource="{Binding SquareDeviceCodes}"
+                                                                      SelectedItem="{Binding SelectedSquareDeviceCode, Mode=TwoWay}"
+                                                                      Style="{StaticResource SettingsComboBoxStyle}">
+                                                                <ComboBox.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <StackPanel>
+                                                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                                                                            <TextBlock FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}">
+                                                                                <Run Text="{Binding Code}" />
+                                                                                <Run Text="  " />
+                                                                                <Run Text="{Binding Status}" />
+                                                                                <Run Text="  " />
+                                                                                <Run Text="{Binding DeviceId}" />
+                                                                            </TextBlock>
+                                                                        </StackPanel>
+                                                                    </DataTemplate>
+                                                                </ComboBox.ItemTemplate>
+                                                            </ComboBox>
+                                                        </StackPanel>
                                                         <Button Grid.Column="1"
                                                                 Command="{Binding LoadDeviceCodesCommand}"
                                                                 Style="{StaticResource SettingsTouchButtonHeight}"
-                                                                Margin="12,0,0,0">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <materialDesign:PackIcon Kind="ViewListOutline" Width="20" Height="20" Margin="0,0,8,0" />
-                                                                <TextBlock Text="{loc:Loc settings.square.loadDeviceCodes}" />
-                                                            </StackPanel>
+                                                                Padding="14,0"
+                                                                VerticalAlignment="Bottom"
+                                                                Margin="8,0,0,0">
+                                                            <TextBlock Text="{loc:Loc settings.square.loadDeviceCodes}" />
                                                         </Button>
                                                         <Button Grid.Column="2"
                                                                 Command="{Binding RefreshDeviceCodeStatusCommand}"
                                                                 Style="{StaticResource SettingsTouchButtonHeight}"
-                                                                Margin="12,0,0,0">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" Margin="0,0,8,0" />
-                                                                <TextBlock Text="{loc:Loc settings.square.refreshDeviceCode}" />
-                                                            </StackPanel>
+                                                                Padding="14,0"
+                                                                VerticalAlignment="Bottom"
+                                                                Margin="8,0,0,0">
+                                                            <TextBlock Text="{loc:Loc settings.square.refreshDeviceCode}" />
                                                         </Button>
                                                     </Grid>
 
-                                                    <!-- 选中设备码时放大显示，方便在终端上照着输入。 -->
-                                                    <Border Background="{DynamicResource PosSurfaceBrush}"
+                                                    <!-- 选中设备码时放大显示（固定 60 高），方便在终端上照着输入。 -->
+                                                    <Border Height="60"
+                                                            Background="{DynamicResource PosSurfaceBrush}"
                                                             BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
                                                             BorderThickness="2"
-                                                            CornerRadius="12"
-                                                            Padding="14"
-                                                            Margin="0,0,0,12">
+                                                            CornerRadius="12">
                                                         <Border.Style>
                                                             <Style TargetType="Border">
                                                                 <Style.Triggers>
@@ -1717,14 +1993,14 @@
                                                                 </Style.Triggers>
                                                             </Style>
                                                         </Border.Style>
-                                                        <StackPanel HorizontalAlignment="Center">
+                                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                                             <TextBlock Text="{Binding SelectedSquareDeviceCode.Code}"
                                                                        FontFamily="Consolas"
-                                                                       FontSize="40"
+                                                                       FontSize="34"
                                                                        FontWeight="Bold"
                                                                        Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                       HorizontalAlignment="Center" />
-                                                            <TextBlock HorizontalAlignment="Center" FontSize="12.5" Margin="0,4,0,0"
+                                                                       VerticalAlignment="Center" />
+                                                            <TextBlock FontSize="12.5" Margin="16,0,0,0" VerticalAlignment="Center"
                                                                        Foreground="{DynamicResource PosMutedForegroundBrush}">
                                                                 <Run Text="{Binding SelectedSquareDeviceCode.Name, Mode=OneWay}" />
                                                                 <Run Text=" · " />
@@ -1732,27 +2008,35 @@
                                                             </TextBlock>
                                                         </StackPanel>
                                                     </Border>
+                                                </StackPanel>
 
+                                                <!-- 提示槽（最小高 50）：生产环境显示帮助说明，沙盒环境换成「仅支持 Production」警告，二选一。 -->
+                                                <Grid MinHeight="50" Margin="0,6,0,0">
                                                     <TextBlock Text="{loc:Loc settings.square.deviceCodesHelp}"
                                                                FontSize="12"
+                                                               LineHeight="16"
+                                                               LineStackingStrategy="BlockLineHeight"
                                                                Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                               TextWrapping="Wrap" />
-                                                </StackPanel>
+                                                               TextWrapping="Wrap"
+                                                               VerticalAlignment="Center"
+                                                               Visibility="{Binding IsSquareDeviceCodesSupported, Converter={StaticResource BoolToVis}}" />
+                                                    <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="8"
+                                                            Padding="10,6"
+                                                            VerticalAlignment="Center"
+                                                            Visibility="{Binding IsSquareDeviceCodesUnsupported, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding SquareDeviceCodesUnavailableText}"
+                                                                   FontSize="12.5"
+                                                                   Foreground="{DynamicResource PosWarningTextBrush}"
+                                                                   TextWrapping="Wrap" />
+                                                    </Border>
+                                                </Grid>
                                             </StackPanel>
-                                        </Border>
-
-                                        <Button Command="{Binding SaveSquareCommand}"
-                                                Style="{StaticResource PosPrimaryButtonStyle}"
-                                                Height="56"
-                                                HorizontalAlignment="Right"
-                                                MinWidth="200">
-                                            <StackPanel Orientation="Horizontal">
-                                                <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
-                                                <TextBlock Text="{loc:Loc settings.square.save}" Foreground="White" FontSize="16" />
-                                            </StackPanel>
-                                        </Button>
-                                    </StackPanel>
-                                </Border>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
                             </TabItem>
                             <!-- ===== PAGE: PaymentTerminal / Square END ===== -->
 

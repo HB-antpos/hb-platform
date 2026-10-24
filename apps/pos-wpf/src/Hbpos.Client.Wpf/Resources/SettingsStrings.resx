@@ -40,7 +40,8 @@
   <data name="settings.square.direct.description" xml:space="preserve"><value>When this is on and head office has enabled it for this store, the register talks to Square directly for faster card payments. If anything fails it automatically falls back to the normal route, and it never charges twice. Refunds and payment recovery always go through the server.</value></data>
   <data name="settings.square.direct.turnOn" xml:space="preserve"><value>Turn on direct mode</value></data>
   <data name="settings.square.direct.turnOff" xml:space="preserve"><value>Turn off direct mode</value></data>
-  <data name="settings.square.direct.refresh" xml:space="preserve"><value>Refresh status</value></data>
+  <data name="settings.square.direct.group" xml:space="preserve"><value>Direct to Square</value></data>
+  <data name="settings.square.direct.refresh" xml:space="preserve"><value>Refresh direct status</value></data>
   <data name="settings.square.direct.local.on" xml:space="preserve"><value>This register: direct mode is ON</value></data>
   <data name="settings.square.direct.local.off" xml:space="preserve"><value>This register: direct mode is OFF</value></data>
   <data name="settings.square.direct.server.on" xml:space="preserve"><value>Store switch (head office): ON</value></data>
