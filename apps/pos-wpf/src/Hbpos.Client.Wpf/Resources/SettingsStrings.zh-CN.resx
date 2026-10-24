@@ -9,7 +9,6 @@
   <data name="settings.subtitle.paymentTerminal" xml:space="preserve"><value>&#x5237;&#x5361;&#x7EC8;&#x7AEF;&#x8BBE;&#x7F6E;</value></data>
   <data name="settings.subtitle.receiptPrinter" xml:space="preserve"><value>&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;&#x8BBE;&#x7F6E;</value></data>
   <data name="settings.subtitle.deviceRegistration" xml:space="preserve"><value>更换分店重新注册</value></data>
-  <data name="settings.category.title" xml:space="preserve"><value>&#x5206;&#x7C7B;</value></data>
   <data name="settings.category.dataMaintenance" xml:space="preserve"><value>&#x6570;&#x636E;&#x7EF4;&#x62A4;</value></data>
   <data name="settings.category.paymentTerminal" xml:space="preserve"><value>&#x652F;&#x4ED8;&#x7EC8;&#x7AEF;</value></data>
   <data name="settings.category.receiptPrinter" xml:space="preserve"><value>&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>

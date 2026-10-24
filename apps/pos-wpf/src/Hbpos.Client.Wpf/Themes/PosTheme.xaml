@@ -7,6 +7,8 @@
         <!-- 尺寸标准值：始终加载；长者主题的放大值由 WpfColorThemeApplier 追加到应用资源末尾覆盖。 -->
         <ResourceDictionary Source="Metrics/Home.Standard.xaml" />
         <ResourceDictionary Source="Metrics/Payment.Standard.xaml" />
+        <!-- 设置页分类页面容器 SettingsPageHost 的样式与模板（含隐式样式），应用级资源里始终存在。 -->
+        <ResourceDictionary Source="SettingsPageHost.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <!-- 收银主界面的颜色都在 Themes/Palettes/*.xaml 色板中，按主题整体替换；本文件只能用 DynamicResource 引用它们。 -->

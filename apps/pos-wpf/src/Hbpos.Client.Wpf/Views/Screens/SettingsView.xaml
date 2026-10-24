@@ -9,7 +9,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:services="clr-namespace:Hbpos.Client.Wpf.Services"
              mc:Ignorable="d"
-             d:DesignHeight="688"
+             d:DesignHeight="632"
              d:DesignWidth="1366"
              FontFamily="Segoe UI"
              Background="{DynamicResource PosScreenBackgroundBrush}">
@@ -26,9 +26,9 @@
             <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
 
-        <!-- 单行输入框不接管触摸平移，让设置页外层 ScrollViewer 处理纵向拖动。 -->
+        <!-- 单行输入框不接管触摸平移，让所在页面容器（SettingsPageHost）内的 ScrollViewer 处理纵向拖动。 -->
         <Style x:Key="SettingsFieldTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource PosSearchTextBoxStyle}">
-            <Setter Property="Height" Value="52" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="ScrollViewer.PanningMode" Value="None" />
             <!-- 只读（例如总部下发的小票资料）用浅一级底色提示不可编辑，文字仍可选中复制。 -->
@@ -40,7 +40,7 @@
         </Style>
 
         <Style x:Key="SettingsFieldPasswordBoxStyle" TargetType="PasswordBox">
-            <Setter Property="Height" Value="52" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="Padding" Value="12,0" />
             <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
@@ -54,7 +54,7 @@
         <!-- 系统默认下拉框模板的底色写死为浅灰渐变，深色主题下会变成浅字压浅底；
              改为继承 MaterialDesign 下拉框（与历史、卡交易异常中心一致），底色与弹出层随主题切换。 -->
         <Style x:Key="SettingsComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
-            <Setter Property="Height" Value="52" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="Padding" Value="10,0" />
             <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
@@ -63,12 +63,15 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
+        <!-- 左侧导航项：固定 48 高、间距 6，字号 15 SemiBold（选中 Bold）；英文长标签在项内换行，不截断。 -->
         <Style x:Key="SettingsCategoryButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
-            <Setter Property="Height" Value="64" />
-            <Setter Property="Margin" Value="0,0,0,12" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="Margin" Value="0,0,0,6" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Padding" Value="18,0" />
-            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="BorderThickness" Value="1" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="True">
@@ -76,7 +79,9 @@
                     <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                     <Setter Property="BorderThickness" Value="4,1,1,1" />
                     <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
-                    <Setter Property="Padding" Value="15,0,18,0" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                    <!-- 选中态左边线 4px（平时 1px），左内边距相应少 3px，文字不位移。 -->
+                    <Setter Property="Padding" Value="9,0,12,0" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -100,14 +105,6 @@
             <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,4,0,0" />
-        </Style>
-
-        <Style x:Key="SettingsContextBadgeStyle" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="14,9" />
         </Style>
 
         <!-- 服务商选择做成大卡片：整卡可点，选中时蓝框+浅蓝底，适合触屏。 -->
@@ -175,7 +172,7 @@
             <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="MinHeight" Value="44" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
@@ -207,7 +204,7 @@
             </Setter>
         </Style>
 
-        <!-- 触屏选择列表：每项是一张 64px 高的卡片，左侧单选圆点；不带内部滚动，交给设置页外层滚动。 -->
+        <!-- 触屏选择列表：每项是一张 64px 高的卡片，左侧单选圆点；不带内部滚动，交给页面容器（SettingsPageHost）的兜底滚动。 -->
         <Style x:Key="SettingsTouchListBoxStyle" TargetType="ListBox">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -300,7 +297,7 @@
         </Style>
 
         <Style x:Key="SettingsTouchButtonHeight" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
-            <Setter Property="Height" Value="52" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="Padding" Value="18,0" />
         </Style>
         <!-- 页头保存状态：已保存（绿）/ 正在保存（灰）/ 未保存（红）。 -->
@@ -386,290 +383,318 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="52" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
+        <!-- 顶栏（52）：返回收银 | 面包屑「设置 / 页面名」| 页面说明（单行省略）| 保存状态芯片 + 小票页「测试打印」。
+             取代旧的顶部条、固定页头和右上角上下文徽标（徽标只是重复标题，不是功能）。 -->
         <Border Grid.Row="0"
                 Background="{DynamicResource PosSurfaceBrush}"
                 BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="24,14">
+                Padding="16,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Button Grid.Column="0"
                         Command="{Binding BackCommand}"
                         Style="{StaticResource PosSecondaryButtonStyle}"
-                        Height="44">
+                        Height="40"
+                        VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
                         <materialDesign:PackIcon Kind="ArrowLeft" Width="18" Height="18" Margin="0,0,8,0" />
                         <TextBlock Text="{loc:Loc shell.backToPos}" />
                     </StackPanel>
                 </Button>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- 面包屑：设置 / 当前页面名（二级页签名不放这里）。 -->
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="16,0,0,0">
                     <TextBlock Text="{Binding ScreenTitleText}"
-                               FontSize="12"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
                                Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                    <TextBlock Text="/" Margin="12,0" FontSize="12" Foreground="{DynamicResource PosSubtleForegroundBrush}" />
-                    <TextBlock Text="{Binding SettingsSubtitleText}"
-                               FontSize="12"
-                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <TextBlock Text="/"
+                               Margin="8,0"
+                               FontSize="14"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource PosSubtleForegroundBrush}" />
+                    <TextBlock Text="{Binding PageTitleText}"
+                               FontSize="18"
+                               FontWeight="Black"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource PosTextBrush}" />
                 </StackPanel>
-                <Border Grid.Column="3"
-                        Style="{StaticResource SettingsContextBadgeStyle}">
-                    <Grid>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsDataMaintenanceSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="DatabaseSyncOutline" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding DataMaintenanceTitleText}" FontWeight="Bold" />
+                <!-- 页面说明：面包屑右侧单行，放不下时省略。 -->
+                <TextBlock Grid.Column="2"
+                           Text="{Binding PageDescriptionText}"
+                           Margin="16,0"
+                           FontSize="12.5"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                           TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Style="{StaticResource SettingsSaveChipStyle}"
+                            Visibility="{Binding IsPageSaveStatusVisible, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding PageSaveStatusText}"
+                                       Style="{StaticResource SettingsSaveChipTextStyle}" />
+                            <Button Command="{Binding RetryFailedSavesCommand}"
+                                    Visibility="{Binding CanRetryPageSaves, Converter={StaticResource BoolToVis}}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                    MinHeight="32"
+                                    Height="32"
+                                    Padding="12,0"
+                                    Margin="10,0,0,0">
+                                <TextBlock Text="{loc:Loc settings.autosave.page.retry}" FontSize="13" />
+                            </Button>
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsPaymentTerminalSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="ContactlessPayment" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding CardTerminalTitleText}" FontWeight="Bold" />
+                    </Border>
+                    <!-- 测试打印放在顶栏：小票页三个分页都能直接点；小票设置已自动保存，测试只打印。 -->
+                    <Button Command="{Binding TestReceiptPrinterCommand}"
+                            Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}"
+                            Style="{StaticResource PosPrimaryButtonStyle}"
+                            Height="44"
+                            MinWidth="150"
+                            Padding="18,0">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Printer" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                            <TextBlock Text="{loc:Loc settings.receiptPrinter.test}" Foreground="White" FontSize="16" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="Printer" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding ReceiptPrinterTitleText}" FontWeight="Bold" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsDeviceRegistrationSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="ServerNetwork" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding DeviceRegistrationTitleText}" FontWeight="Bold" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsRemoteMaintenanceSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="RemoteDesktop" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding RemoteMaintenanceTitleText}" FontWeight="Bold" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal"
-                                    Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
-                            <materialDesign:PackIcon Kind="CellphoneArrowDown" Width="18" Height="18" Margin="0,0,8,0" />
-                            <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}" FontWeight="Bold" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="18">
+        <!-- 内容区外框：边距 12；导航列 200 宽、与内容间距 12。 -->
+        <Grid Grid.Row="1" Margin="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="272" />
-                <ColumnDefinition Width="18" />
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
 
-            <!-- 导航先于内容声明，使键盘 Tab 顺序与左到右的视觉顺序一致。 -->
+            <!-- 导航先于内容声明，使键盘 Tab 顺序与左到右的视觉顺序一致。
+                 六项（48 高、间距 6、内边距 10）合计 6×48 + 5×6 + 20 ≈ 340，在 632 高度内完整可见。 -->
             <Border Grid.Column="0"
-                    Grid.RowSpan="2"
+                    VerticalAlignment="Top"
                     Background="{DynamicResource PosSurfaceBrush}"
                     BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
-                    Padding="16">
+                    Padding="10">
                 <StackPanel>
-                    <TextBlock Text="{loc:Loc settings.category.title}"
-                               FontSize="13"
-                               FontWeight="Black"
-                               Foreground="{DynamicResource PosTextBrush}"
-                               Margin="2,0,0,12" />
+                <Button Command="{Binding SelectDataMaintenanceCommand}"
+                        Tag="{Binding IsDataMaintenanceSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="DatabaseSyncOutline"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding DataMaintenanceTitleText}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <Border Grid.Column="2"
+                                Style="{StaticResource SettingsNavBadgeStyle}"
+                                Visibility="{Binding HasDataMaintenanceUnsaved, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding DataMaintenanceUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </Button>
 
-                    <Button Command="{Binding SelectDataMaintenanceCommand}"
-                            Tag="{Binding IsDataMaintenanceSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="DatabaseSyncOutline"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{Binding DataMaintenanceTitleText}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
-                                    Visibility="{Binding HasDataMaintenanceUnsaved, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding DataMaintenanceUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                    </Button>
+                <Button Command="{Binding SelectPaymentTerminalCommand}"
+                        Tag="{Binding IsPaymentTerminalSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="ContactlessPayment"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{loc:Loc settings.category.paymentTerminal}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <Border Grid.Column="2"
+                                Style="{StaticResource SettingsNavBadgeStyle}"
+                                Visibility="{Binding HasPaymentTerminalUnsaved, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding PaymentTerminalUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </Button>
 
-                    <Button Command="{Binding SelectPaymentTerminalCommand}"
-                            Tag="{Binding IsPaymentTerminalSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="ContactlessPayment"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{loc:Loc settings.category.paymentTerminal}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
-                                    Visibility="{Binding HasPaymentTerminalUnsaved, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding PaymentTerminalUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                    </Button>
+                <Button Command="{Binding SelectReceiptPrinterCommand}"
+                        Tag="{Binding IsReceiptPrinterSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="Printer"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{loc:Loc settings.category.receiptPrinter}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <Border Grid.Column="2"
+                                Style="{StaticResource SettingsNavBadgeStyle}"
+                                Visibility="{Binding HasReceiptPrinterUnsaved, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding ReceiptPrinterUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </Button>
 
-                    <Button Command="{Binding SelectReceiptPrinterCommand}"
-                            Tag="{Binding IsReceiptPrinterSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="Printer"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{loc:Loc settings.category.receiptPrinter}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
-                                    Visibility="{Binding HasReceiptPrinterUnsaved, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding ReceiptPrinterUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                    </Button>
+                <Button Command="{Binding SelectDeviceRegistrationCommand}"
+                        Tag="{Binding IsDeviceRegistrationSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="CashRegister"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{loc:Loc settings.category.deviceRegistrationNav}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <Border Grid.Column="2"
+                                Style="{StaticResource SettingsNavBadgeStyle}"
+                                Visibility="{Binding HasDeviceRegistrationUnsaved, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding DeviceRegistrationUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </Button>
 
-                    <Button Command="{Binding SelectDeviceRegistrationCommand}"
-                            Tag="{Binding IsDeviceRegistrationSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="CashRegister"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{loc:Loc settings.category.deviceRegistrationNav}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
-                                    Visibility="{Binding HasDeviceRegistrationUnsaved, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding DeviceRegistrationUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                    </Button>
+                <Button Command="{Binding SelectRemoteMaintenanceCommand}"
+                        Tag="{Binding IsRemoteMaintenanceSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="RemoteDesktop"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding RemoteMaintenanceTitleText}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Grid>
+                </Button>
 
-                    <Button Command="{Binding SelectRemoteMaintenanceCommand}"
-                            Tag="{Binding IsRemoteMaintenanceSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="RemoteDesktop"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{Binding RemoteMaintenanceTitleText}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                        </StackPanel>
-                    </Button>
-
-                    <Button Command="{Binding SelectMobileAppDownloadCommand}"
-                            Tag="{Binding IsMobileAppDownloadSelected}"
-                            Style="{StaticResource SettingsCategoryButtonStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="CellphoneArrowDown"
-                                                     Width="21"
-                                                     Height="21"
-                                                     Margin="0,0,12,0"
-                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                            <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                        </StackPanel>
-                    </Button>
+                <Button Command="{Binding SelectMobileAppDownloadCommand}"
+                        Tag="{Binding IsMobileAppDownloadSelected}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}"
+                        Margin="0">
+                    <!-- 内容宽度固定 152 = 导航项宽 178 - 左右边线/内边距（选中与未选中都是 152）：Button 模板把内容居中，固定宽度才能让图标、文字左对齐、角标靠右。 -->
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="CellphoneArrowDown"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <!-- 英文长标签允许换行（行高 1.15，按钮固定 48 高可容纳两行）。 -->
+                        <TextBlock Grid.Column="1"
+                                   Text="{loc:Loc settings.category.mobileAppDownload}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Grid>
+                </Button>
                 </StackPanel>
             </Border>
 
-
-            <!-- 固定页头：本页标题与说明、保存状态（未保存可重试）、页级主操作；不随内容滚动，保证操作按钮在首屏。 -->
-            <Border Grid.Row="0"
-                    Grid.Column="2"
-                    Background="{DynamicResource PosSurfaceBrush}"
-                    BorderBrush="{DynamicResource PosDividerBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="20,10"
-                    Margin="0,0,0,14">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Style="{StaticResource SettingsSaveChipStyle}"
-                                Visibility="{Binding IsPageSaveStatusVisible, Converter={StaticResource BoolToVis}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding PageSaveStatusText}"
-                                           Style="{StaticResource SettingsSaveChipTextStyle}" />
-                                <Button Command="{Binding RetryFailedSavesCommand}"
-                                        Visibility="{Binding CanRetryPageSaves, Converter={StaticResource BoolToVis}}"
-                                        Style="{StaticResource PosSecondaryButtonStyle}"
-                                        MinHeight="32"
-                                        Height="32"
-                                        Padding="12,0"
-                                        Margin="10,0,0,0">
-                                    <TextBlock Text="{loc:Loc settings.autosave.page.retry}" FontSize="13" />
-                                </Button>
-                            </StackPanel>
-                        </Border>
-                        <!-- 测试打印放在页头：三个分页都能直接点；小票设置已自动保存，测试只打印。 -->
-                        <Button Command="{Binding TestReceiptPrinterCommand}"
-                                Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}"
-                                Style="{StaticResource PosPrimaryButtonStyle}"
-                                Height="56"
-                                MinWidth="150"
-                                Padding="18,0">
-                            <StackPanel Orientation="Horizontal">
-                                <materialDesign:PackIcon Kind="Printer" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
-                                <TextBlock Text="{loc:Loc settings.receiptPrinter.test}" Foreground="White" FontSize="16" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                        <TextBlock Text="{Binding PageTitleText}"
-                                   FontSize="21"
-                                   FontWeight="Black"
-                                   Foreground="{DynamicResource PosTextBrush}" />
-                        <TextBlock Text="{Binding PageDescriptionText}"
-                                   FontSize="12.5"
-                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                   TextTrimming="CharacterEllipsis"
-                                   Margin="0,3,0,0" />
-                    </StackPanel>
-                </DockPanel>
-            </Border>
-
-            <!-- 启用 WPF 原生垂直触摸平移和惯性，保留鼠标滚轮及子控件点击行为。 -->
-            <ScrollViewer Grid.Row="1"
-                          Grid.Column="2"
-                          Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          CanContentScroll="False"
-                          PanningMode="VerticalOnly"
-                          PanningDeceleration="0.0008"
-                          PanningRatio="1.0">
-                <Grid>
-                    <Grid Visibility="{Binding IsDataMaintenanceSelected, Converter={StaticResource BoolToVis}}">
+            <!-- 六个分类页面并列放在同一个单元格里，靠各自的 Visibility 绑定互斥显示；
+                 不再有外层 ScrollViewer，每页由 SettingsPageHost 自带兜底滚动与固定底栏。 -->
+            <Grid Grid.Column="2">
+                <!-- ===== PAGE: DataMaintenance BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsDataMaintenanceSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -1015,8 +1040,14 @@
                             </StackPanel>
                         </Border>
                     </Grid>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: DataMaintenance END ===== -->
 
-                    <Grid Visibility="{Binding IsPaymentTerminalSelected, Converter={StaticResource BoolToVis}}">
+                <!-- ===== PAGE: PaymentTerminal BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsPaymentTerminalSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -1028,6 +1059,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
+                        <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs BEGIN ===== -->
                         <!-- 分页：付款方式 / Square / ANZ Linkly；有未保存修改的分页带红点。 -->
                         <Border Grid.Row="0" Grid.ColumnSpan="3"
                                 Style="{StaticResource SettingsSegmentHostStyle}"
@@ -1063,7 +1095,9 @@
                                 </RadioButton>
                             </StackPanel>
                         </Border>
+                        <!-- ===== PAGE: PaymentTerminal / PaymentSubTabs END ===== -->
 
+                        <!-- ===== PAGE: PaymentTerminal / PaymentMethods BEGIN ===== -->
                         <!-- 付款方式：三个大开关（手动刷卡 / 代金券 / 付款页订单列表），共用一个保存按钮（不触发终端配置写入）。 -->
                         <Border Grid.Row="1" Grid.Column="0"
                                 Style="{StaticResource SettingsActionCardStyle}"
@@ -1205,6 +1239,7 @@
                                            Margin="0,14,0,0" />
                             </StackPanel>
                         </Border>
+                        <!-- ===== PAGE: PaymentTerminal / PaymentMethods END ===== -->
 
                         <TabControl Grid.Row="2"
                                     Grid.ColumnSpan="3"
@@ -1220,6 +1255,7 @@
                                     <Setter Property="Visibility" Value="Collapsed" />
                                 </Style>
                             </TabControl.Resources>
+                            <!-- ===== PAGE: PaymentTerminal / Square BEGIN ===== -->
                             <TabItem>
                                 <TabItem.Header>
                                     <StackPanel Orientation="Horizontal">
@@ -1607,7 +1643,9 @@
                                     </StackPanel>
                                 </Border>
                             </TabItem>
+                            <!-- ===== PAGE: PaymentTerminal / Square END ===== -->
 
+                            <!-- ===== PAGE: PaymentTerminal / Linkly BEGIN ===== -->
                             <TabItem>
                                 <TabItem.Header>
                                     <StackPanel Orientation="Horizontal">
@@ -1636,6 +1674,7 @@
                                     <ColumnDefinition Width="1.08*" />
                                 </Grid.ColumnDefinitions>
 
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.Common (header / priority list / mode picker / SOP) BEGIN ===== -->
                                 <DockPanel Grid.Row="0"
                                            Grid.ColumnSpan="3"
                                            Margin="0,0,0,16"
@@ -2050,7 +2089,9 @@
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Expander>
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.Common (header / priority list / mode picker / SOP) END ===== -->
 
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.LocalIp BEGIN ===== -->
                                 <StackPanel Visibility="{Binding IsLinklyLocalIpMode, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Text="{loc:Loc settings.linkly.localIp.title}"
                                                FontSize="14"
@@ -2223,7 +2264,9 @@
                                         </DockPanel>
                                     </Border>
                                 </StackPanel>
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.LocalIp END ===== -->
 
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.CloudDirectSync BEGIN ===== -->
                                 <StackPanel Visibility="{Binding IsLinklyCloudDirectSyncMode, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Text="{loc:Loc settings.linkly.cloudDirect.title}"
                                                FontSize="14"
@@ -2363,7 +2406,9 @@
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.CloudDirectSync END ===== -->
 
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.CloudBackendAsync BEGIN ===== -->
                                 <StackPanel Visibility="{Binding IsLinklyCloudBackendAsyncMode, Converter={StaticResource BoolToVis}}">
                                     <Border Background="{DynamicResource PosSurfaceBrush}"
                                             BorderBrush="{DynamicResource PosBorderBrush}"
@@ -2545,7 +2590,7 @@
                                                                                 <TextBlock Text="{Binding LaneLabel}" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                                                             </Border>
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.selected}" VerticalAlignment="Center"
-                                                                                       Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                                       Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                                         </WrapPanel>
                                                                     </StackPanel>
                                                                 </DockPanel>
@@ -2622,10 +2667,10 @@
                                                                     </Button>
                                                                 </WrapPanel>
                                                                 <Border Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="4" Padding="14" Margin="0,10,0,0"
-                                                                        Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                                                        Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
                                                                     <StackPanel>
                                                                         <TextBlock Text="{loc:Loc settings.linkly.lines.working}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,10"
-                                                                                   Visibility="{Binding IsOperationBusy, Converter={StaticResource BoolToVis}}" />
+                                                                   Visibility="{Binding IsOperationBusy, Converter={StaticResource BoolToVis}}" />
                                                                         <StackPanel Visibility="{Binding IsEnteringCode, Converter={StaticResource BoolToVis}}">
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.enterTitle}" FontSize="15" FontWeight="SemiBold" />
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.enterHelp}" TextWrapping="Wrap" Margin="0,6,0,12" />
@@ -2700,7 +2745,9 @@
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.CloudBackendAsync END ===== -->
 
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.StandardActions (local IP / cloud direct bottom actions + test status) BEGIN ===== -->
                                 <WrapPanel Visibility="{Binding IsLinklyStandardActionMode, Converter={StaticResource BoolToVis}}">
                                     <Button Command="{Binding TestLinklyCommand}"
                                             Style="{StaticResource PosSecondaryButtonStyle}"
@@ -2748,14 +2795,22 @@
                                                Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap" />
                                 </Border>
+                                <!-- ===== PAGE: PaymentTerminal / Linkly.StandardActions (local IP / cloud direct bottom actions + test status) END ===== -->
                             </StackPanel>
                             </Grid>
                                 </Border>
                             </TabItem>
+                            <!-- ===== PAGE: PaymentTerminal / Linkly END ===== -->
                         </TabControl>
                     </Grid>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: PaymentTerminal END ===== -->
 
-                    <Grid Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
+                <!-- ===== PAGE: ReceiptPrinter BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -2766,6 +2821,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
+                        <!-- ===== PAGE: ReceiptPrinter / ReceiptSubTabs BEGIN ===== -->
                         <!-- 分页：打印机与选项 / 门店信息 / 小票条款；右侧小票预览固定不随分页变化。 -->
                         <Border Grid.Row="0" Grid.ColumnSpan="3"
                                 Style="{StaticResource SettingsSegmentHostStyle}"
@@ -2801,6 +2857,7 @@
                                 </RadioButton>
                             </StackPanel>
                         </Border>
+                        <!-- ===== PAGE: ReceiptPrinter / ReceiptSubTabs END ===== -->
 
                         <!-- 左栏：连接、打印选项、门店信息、条款、保存，各占一行。 -->
                         <Grid Grid.Row="1" Grid.Column="0">
@@ -2812,6 +2869,7 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware BEGIN ===== -->
                             <!-- 打印机连接：默认 USB，端口收进“高级”，测试打印做成主按钮。 -->
                             <Border Grid.Row="0"
                                     Style="{StaticResource SettingsActionCardStyle}"
@@ -3010,7 +3068,9 @@
                                 </StackPanel>
                             </Border>
                             </StackPanel>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptHardware END ===== -->
 
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore BEGIN ===== -->
                             <!-- 门店信息：总部下发后只读，提示去 Web 分店管理修改；可随时“立即同步”。 -->
                             <Border Grid.Row="2"
                                     Style="{StaticResource SettingsActionCardStyle}"
@@ -3047,7 +3107,7 @@
                                             <materialDesign:PackIcon DockPanel.Dock="Left" Kind="LockOutline" Width="20" Height="20"
                                                                      Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                                      VerticalAlignment="Center" Margin="0,0,10,0"
-                                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
+                                                     Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}" />
                                             <!-- 总部下发后资料字段只读，提示去 Web 分店管理修改。 -->
                                             <TextBlock Text="{Binding ReceiptProfileManagedHintText}"
                                                        Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}"
@@ -3107,7 +3167,9 @@
                                     </Grid>
                                 </StackPanel>
                             </Border>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptStore END ===== -->
 
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms BEGIN ===== -->
                             <!-- 小票条款：保留多行编辑，一行一条；留空＝使用内置默认文案。总部下发后只读（请在 Web 分店管理修改）。 -->
                             <Border Grid.Row="3"
                                     Style="{StaticResource SettingsActionCardStyle}"
@@ -3180,7 +3242,9 @@
                                     </Grid>
                                 </StackPanel>
                             </Border>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptTerms END ===== -->
 
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave BEGIN ===== -->
                             <!-- 旧的整页保存按钮：开启自动保存后隐藏。 -->
                             <DockPanel Grid.Row="4" LastChildFill="False" Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}">
                                 <Button DockPanel.Dock="Right"
@@ -3194,8 +3258,10 @@
                                     </StackPanel>
                                 </Button>
                             </DockPanel>
+                            <!-- ===== PAGE: ReceiptPrinter / ReceiptLegacySave END ===== -->
                         </Grid>
 
+                        <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview BEGIN ===== -->
                         <!-- 右栏：80mm 小票实时预览。 -->
                         <Border Grid.Row="1"
                                 Grid.Column="2"
@@ -3287,9 +3353,16 @@
                                 </Border>
                             </StackPanel>
                         </Border>
+                        <!-- ===== PAGE: ReceiptPrinter / ReceiptPreview END ===== -->
                     </Grid>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: ReceiptPrinter END ===== -->
 
-                    <Grid Visibility="{Binding IsDeviceRegistrationSelected, Converter={StaticResource BoolToVis}}">
+                <!-- ===== PAGE: DeviceRegistration BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsDeviceRegistrationSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -3458,8 +3531,14 @@
                             </Grid>
                         </Border>
                     </Grid>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: DeviceRegistration END ===== -->
 
-                    <Grid Visibility="{Binding IsRemoteMaintenanceSelected, Converter={StaticResource BoolToVis}}">
+                <!-- ===== PAGE: RemoteMaintenance BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsRemoteMaintenanceSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -3553,9 +3632,15 @@
                             </Grid>
                         </Border>
                     </Grid>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: RemoteMaintenance END ===== -->
 
-                    <!-- 员工 App 下载：iPhone 与安卓（含 PDA）各一张二维码卡片，所有收银员可见。 -->
-                    <Grid Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
+                <!-- 员工 App 下载：iPhone 与安卓（含 PDA）各一张二维码卡片，所有收银员可见。 -->
+                <!-- ===== PAGE: MobileAppDownload BEGIN ===== -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
+                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <Grid>
                         <Grid DataContext="{Binding MobileAppDownload}">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -3731,19 +3816,21 @@
                             </Grid>
                         </Grid>
                     </Grid>
-                </Grid>
-            </ScrollViewer>
+                </controls:SettingsPageHost>
+                <!-- ===== PAGE: MobileAppDownload END ===== -->
+            </Grid>
         </Grid>
 
+        <!-- 底部状态条（28）：状态文字 + 忙碌进度条。 -->
         <Border Grid.Row="2"
                 Background="{DynamicResource PosSurfaceAltBrush}"
                 BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,1,0,0"
-                Padding="24,10">
-            <StackPanel Orientation="Horizontal">
+                Padding="16,0">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <materialDesign:PackIcon Kind="InformationOutline"
-                                         Width="16"
-                                         Height="16"
+                                         Width="14"
+                                         Height="14"
                                          Foreground="{DynamicResource PosMutedForegroundBrush}"
                                          Margin="0,0,8,0" />
                 <TextBlock Text="{Binding StatusMessage}"

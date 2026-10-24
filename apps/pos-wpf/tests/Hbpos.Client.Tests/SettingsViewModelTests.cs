@@ -343,13 +343,16 @@ public sealed partial class SettingsViewModelTests
             deviceRegistrationNavigationText.Attribute("Text")?.Value);
 
         var paymentSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsPaymentTerminalSelected", StringComparison.Ordinal) == true));
-        var contentScrollViewer = paymentSection.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
+        // 六个页面并列放在内容列的同一个 Grid 里（不再有外层 ScrollViewer），导航必须先于内容列声明。
+        var contentColumn = paymentSection.Parent!;
+        Assert.Equal("2", contentColumn.Attribute("Grid.Column")?.Value);
+        Assert.DoesNotContain(paymentSection.Ancestors(), element => element.Name.LocalName == "ScrollViewer");
         var settingsBodyChildren = navigationBorder.Parent!.Elements().ToArray();
         Assert.True(
-            Array.IndexOf(settingsBodyChildren, navigationBorder) < Array.IndexOf(settingsBodyChildren, contentScrollViewer),
-            "The category navigation must precede the content scroller so keyboard focus follows the visual order.");
+            Array.IndexOf(settingsBodyChildren, navigationBorder) < Array.IndexOf(settingsBodyChildren, contentColumn),
+            "The category navigation must precede the page column so keyboard focus follows the visual order.");
 
         var providerTabs = paymentSection.Descendants().Where(element => element.Name.LocalName == "TabItem").ToArray();
         Assert.Equal(2, providerTabs.Length);
@@ -379,7 +382,7 @@ public sealed partial class SettingsViewModelTests
             element.Attribute("Text")?.Value.Contains("TimeoutSecondsText", StringComparison.Ordinal) == true) >= 2);
 
         var receiptSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsReceiptPrinterSelected", StringComparison.Ordinal) == true));
         Assert.Contains(receiptSection.Descendants(), element =>
             element.Name.LocalName == "TextBlock" &&
@@ -392,7 +395,7 @@ public sealed partial class SettingsViewModelTests
             element.Attribute("Command")?.Value.Contains("SaveReceiptPrinterCommand", StringComparison.Ordinal) == true);
 
         var registrationSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsDeviceRegistrationSelected", StringComparison.Ordinal) == true));
         foreach (var binding in new[] { "Session.StoreName", "Session.StoreCode", "Session.DeviceCode" })
         {
@@ -480,13 +483,19 @@ public sealed partial class SettingsViewModelTests
         var paymentSection = document
             .Descendants()
             .Single(element =>
-                element.Name.LocalName == "Grid" &&
+                element.Name.LocalName == "SettingsPageHost" &&
                 element.Attribute("Visibility")?.Value.Contains(
                     "IsPaymentTerminalSelected",
                     StringComparison.Ordinal) == true);
-        var contentScrollViewer = paymentSection
-            .Ancestors()
-            .First(element => element.Name.LocalName == "ScrollViewer");
+        // 支付页由 SettingsPageHost 承载；正文外的兜底 ScrollViewer 在它的控件模板里（Themes/SettingsPageHost.xaml）。
+        Assert.Equal("{StaticResource SettingsPageHostStyle}", paymentSection.Attribute("Style")?.Value);
+        var hostThemePath = Path.Combine(
+            Path.GetDirectoryName(xamlPath)!, "..", "..", "Themes", "SettingsPageHost.xaml");
+        var contentScrollViewer = System.Xml.Linq.XDocument.Load(hostThemePath)
+            .Descendants()
+            .Single(element =>
+                element.Name.LocalName == "ScrollViewer" &&
+                element.Attribute(System.Xml.Linq.XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name")?.Value == "PART_BodyScrollViewer");
         var xamlNamespace = System.Xml.Linq.XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
         var singleLineInputStyles = new[]
         {

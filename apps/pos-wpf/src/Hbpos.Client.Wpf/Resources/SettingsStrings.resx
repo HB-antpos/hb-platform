@@ -9,7 +9,6 @@
   <data name="settings.subtitle.paymentTerminal" xml:space="preserve"><value>Card terminal settings</value></data>
   <data name="settings.subtitle.receiptPrinter" xml:space="preserve"><value>Receipt printer settings</value></data>
   <data name="settings.subtitle.deviceRegistration" xml:space="preserve"><value>Change store registration</value></data>
-  <data name="settings.category.title" xml:space="preserve"><value>Categories</value></data>
   <data name="settings.category.dataMaintenance" xml:space="preserve"><value>Data maintenance</value></data>
   <data name="settings.category.paymentTerminal" xml:space="preserve"><value>Payment terminal</value></data>
   <data name="settings.category.receiptPrinter" xml:space="preserve"><value>Receipt printer</value></data>
