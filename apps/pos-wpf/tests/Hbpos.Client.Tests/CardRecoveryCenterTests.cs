@@ -267,11 +267,9 @@ public sealed class CardRecoveryCenterTests
         Assert.False(cart.IsEmpty);
     }
 
-    // 确认已付款的参考号已改为选填（与 Linkly 一致）；确认未付款仍必须有银行证据。
-    [Theory]
-    [InlineData(CardRecoverySupervisorDecision.ConfirmNotProcessed)]
-    public async Task Square_ResolveAttemptAsync_sale_requires_linkly_equivalent_bank_evidence(
-        CardRecoverySupervisorDecision decision)
+    // 确认已付款的参考号已改为选填（与 Linkly 一致）；证据输入框取消后，确认未付款也不再要求银行证据。
+    [Fact]
+    public async Task Square_ResolveAttemptAsync_sale_confirm_not_processed_needs_no_evidence()
     {
         var attempt = CreateSquareAttempt(
             Guid.Parse("30000000-0000-0000-0000-000000000034"),
@@ -285,16 +283,16 @@ public sealed class CardRecoveryCenterTests
 
         var result = await service.ResolveAttemptAsync(
             attempt.AttemptGuid,
-            decision,
+            CardRecoverySupervisorDecision.ConfirmNotProcessed,
             reason: string.Empty,
             evidence: null,
             reference: null,
             new PosCartService(),
             Session);
 
-        Assert.False(result.Succeeded);
-        Assert.True(result.LockRetained);
-        Assert.Null(repository.LastPaymentResolution);
+        Assert.True(result.Succeeded);
+        Assert.NotNull(repository.LastPaymentResolution);
+        Assert.Null(repository.LastPaymentResolution!.Evidence);
     }
 
     [Fact]

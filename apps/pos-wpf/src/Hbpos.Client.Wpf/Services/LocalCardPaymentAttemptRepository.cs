@@ -1708,11 +1708,14 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
 
         // 中文注释：ConfirmPaid 的支付参考号/凭据为选填（与 CardPaymentSupervisorResolutionRules 一致）；
         // 没填时建单沿用本笔 TxnRef 作为付款引用。
+        // 中文注释：普通“确认未付款”不再强制证据；顾客已被扣款的批准证据出口仍须留下备注或证据。
         if (resolution.Decision == ActiveSessionSupervisorDecision.ConfirmNotPaid &&
-            string.IsNullOrWhiteSpace(resolution.Evidence))
+            resolution.AllowApprovedEvidence &&
+            string.IsNullOrWhiteSpace(resolution.Evidence) &&
+            string.IsNullOrWhiteSpace(resolution.Reason))
         {
             throw new ArgumentException(
-                "ConfirmNotPaid requires bank evidence.",
+                "Approved-evidence closure requires a supervisor note or evidence.",
                 nameof(resolution));
         }
 

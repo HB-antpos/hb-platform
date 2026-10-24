@@ -720,6 +720,42 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.NotNull(attempts.AcknowledgedAt);
     }
 
+    // 证据输入框取消后，顾客已被扣款的“已退款或另行处理，关闭”出口改为必填备注：既没备注也没证据时拒绝，只写备注即可放行。
+    [Fact]
+    public async Task ResolvePaymentAsync_approved_evidence_exit_requires_a_supervisor_note()
+    {
+        var attempt = CreateApprovedReviewAttempt();
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var service = CreateService(attempts, new FakeLocalOrderRepository(), new FakeLinklyBackendTerminalClient());
+
+        var rejected = await service.ResolvePaymentAsync(
+            new CardPaymentSupervisorResolution(
+                attempt.AttemptGuid,
+                CardProcessorKind.Linkly,
+                CardPaymentSupervisorDecision.ConfirmNotPaid,
+                string.Empty,
+                "MANAGER-01"),
+            new PosCartService(),
+            Session);
+
+        Assert.False(rejected.Succeeded);
+        Assert.True(rejected.LockRetained);
+        Assert.Null(attempts.LastPaymentJournal);
+
+        var accepted = await service.ResolvePaymentAsync(
+            new CardPaymentSupervisorResolution(
+                attempt.AttemptGuid,
+                CardProcessorKind.Linkly,
+                CardPaymentSupervisorDecision.ConfirmNotPaid,
+                "Refunded AU$10 in cash, receipt R-1",
+                "MANAGER-01"),
+            new PosCartService(),
+            Session);
+
+        Assert.True(accepted.Succeeded);
+        Assert.NotNull(attempts.LastPaymentJournal);
+    }
+
     [Fact]
     public async Task ResolvePaymentAsync_approved_evidence_exit_still_closes_when_draft_is_unreadable()
     {
@@ -814,6 +850,13 @@ public sealed partial class CardPaymentRecoveryServiceTests
     [InlineData("cardRecovery.center.action.closeApprovedHandled")]
     [InlineData("cardRecovery.payment.section.approvedInstructions")]
     [InlineData("cardRecovery.payment.field.approvedEvidence")]
+    [InlineData("cardRecovery.payment.field.approvedNote")]
+    [InlineData("cardRecovery.linkly.approvedExitNoteRequired")]
+    [InlineData("cardRecovery.v2.preset.paid.terminalSuccess")]
+    [InlineData("cardRecovery.v2.preset.paid.customerRecord")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalFailed")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalOffline")]
+    [InlineData("cardRecovery.v2.preset.notPaid.terminalStuck")]
     public void Supervisor_live_check_and_exit_messages_are_localized_in_both_languages(string key)
     {
         var localization = new Hbpos.Client.Wpf.Localization.LocalizationService();

@@ -68,17 +68,19 @@ public sealed class CardPaymentSupervisorResolutionRulesTests
         Assert.Null(normalized.PaymentReference);
     }
 
+    // 证据输入框已取消：确认未付款既不要证据也不要备注，带了旧调用方传来的证据仍照常规范化。
     [Fact]
-    public void Confirm_not_paid_requires_bank_evidence()
+    public void Confirm_not_paid_needs_neither_evidence_nor_note()
     {
         var resolution = Create(
             CardPaymentSupervisorDecision.ConfirmNotPaid,
-            reason: "Terminal says declined",
+            reason: "",
             evidence: null,
             paymentReference: null);
 
-        Assert.False(CardPaymentSupervisorResolutionRules.TryNormalize(resolution, out _, out var error));
-        Assert.Equal("Enter bank evidence confirming that no payment was processed.", error);
+        Assert.True(CardPaymentSupervisorResolutionRules.TryNormalize(resolution, out var bare, out var bareError));
+        Assert.Equal(string.Empty, bareError);
+        Assert.Null(bare.Evidence);
 
         var withEvidence = resolution with { Evidence = " No settlement entry " };
         Assert.True(CardPaymentSupervisorResolutionRules.TryNormalize(withEvidence, out var normalized, out _));

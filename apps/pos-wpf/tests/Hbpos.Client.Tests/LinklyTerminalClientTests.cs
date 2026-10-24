@@ -667,6 +667,53 @@ public sealed class LinklyTerminalClientTests
         Assert.Contains("DECLINED", result.Message);
     }
 
+    // 1014 店 10-24 实测回包：TxnRef/金额都对得上，LastTransactionSuccess=false，TI / “OPERATOR TIMEOUT”（带协议空格填充）。
+    // 终端已明确回答这笔没成功，不能再当“结果未知”，否则主管结案的实时核验永远失败关闭。
+    [Fact]
+    public async Task RecoverLastTransactionAsync_returns_a_known_failure_for_a_matched_operator_timeout()
+    {
+        const string requestedReference = "P123456789012345";
+        var eftClient = new FakeLinklyEftClient(new EFTGetLastTransactionResponse
+        {
+            Success = true,
+            LastTransactionSuccess = false,
+            TxnRef = requestedReference,
+            TxnType = TransactionType.PurchaseCash,
+            AmtPurchase = 10m,
+            ResponseCode = "TI",
+            ResponseText = "OPERATOR TIMEOUT    "
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.RecoverLastTransactionAsync(10m, CreateSession(), CreateSettings(), requestedReference);
+
+        Assert.False(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal("TI", result.ResponseCode);
+    }
+
+    [Fact]
+    public async Task RecoverLastTransactionAsync_keeps_an_operator_timeout_for_another_reference_unknown()
+    {
+        const string requestedReference = "P123456789012345";
+        var eftClient = new FakeLinklyEftClient(new EFTGetLastTransactionResponse
+        {
+            Success = true,
+            LastTransactionSuccess = false,
+            TxnRef = "P123456789012346",
+            TxnType = TransactionType.PurchaseCash,
+            AmtPurchase = 10m,
+            ResponseCode = "TI",
+            ResponseText = "OPERATOR TIMEOUT"
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.RecoverLastTransactionAsync(10m, CreateSession(), CreateSettings(), requestedReference);
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+    }
+
     [Fact]
     public async Task Declined_transaction_with_a_nonzero_mismatched_amount_is_unknown()
     {

@@ -135,12 +135,8 @@ internal static class CardRefundSupervisorResolutionRules
             return false;
         }
 
-        if (resolution.Decision == CardRefundSupervisorDecision.ConfirmNotRefunded &&
-            evidence is null)
-        {
-            error = "Enter the bank evidence confirming that no refund was processed.";
-            return false;
-        }
+        // 中文注释：确认未退款不再强制填银行证据（门店反馈：证据输入框难填，改为只留选填的主管备注）。
+        // 主管扫码授权与审计日志仍是结案凭据；实时核验仍会拦住与终端结论矛盾的决定。
 
         if (resolution.Decision == CardRefundSupervisorDecision.ContinueWaiting &&
             reason is null)
@@ -215,12 +211,8 @@ internal static class CardPaymentSupervisorResolutionRules
         // 中文注释：确认已付款不再强制填支付参考号/凭据（门店反馈参考号太长、界面上也找不到）；
         // 主管授权本身就是结案凭据。抓到小票证据时恢复中心会自动预填 RRN / 批准码，且实时核验仍会
         // 拦住与终端结论矛盾的决定。
-        if (resolution.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
-            evidence is null)
-        {
-            error = "Enter bank evidence confirming that no payment was processed.";
-            return false;
-        }
+        // 中文注释：确认未付款同样不再强制填银行证据，改为选填的主管备注（弹窗给“刷卡机显示失败 / 离线 / 卡住了”预设）。
+        // 注意：已带批准证据（顾客已被扣款）的“已退款或另行处理，关闭”出口仍要求备注，见 ResolvePaymentAsync。
 
         if (resolution.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
             paymentReference is not null)
@@ -2111,6 +2103,18 @@ public sealed class CardPaymentRecoveryService(
             if (normalized.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
                 IsApprovedEvidenceExitEligible(attempt))
             {
+                // 中文注释：这类记录里顾客确实被扣了款，关闭前至少要有一句备注说明怎么退的 / 怎么处理的。
+                // （原来是必填“证据”，证据输入框取消后改为必填备注；兼容仍带证据的旧调用方。）
+                if (normalized.Reason.Length == 0 && normalized.Evidence is null)
+                {
+                    return new CardPaymentSupervisorResolutionResult(
+                        false,
+                        T(
+                            "cardRecovery.linkly.approvedExitNoteRequired",
+                            "Enter a supervisor note describing how the customer was refunded or the payment was handled before closing this record."),
+                        LockRetained: true);
+                }
+
                 approvedEvidenceExit = true;
             }
             else
@@ -5921,6 +5925,7 @@ public sealed class CardPaymentRecoveryService(
     private static bool IsTimeoutResponseCode(string? responseCode)
     {
         return string.Equals(responseCode, "TO", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "TI", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "TIMEOUT", StringComparison.OrdinalIgnoreCase);
     }
 
