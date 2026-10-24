@@ -115,6 +115,14 @@
                            AutomationProperties.LiveSetting="Polite" />
             </Border>
 
+            <!-- 入口状态（只读）：总部设置的首选入口 / 当前实际入口 / 是否回退中。当前地址不在入口组内时隐藏。 -->
+            <TextBlock Text="{Binding EntryStatusText}"
+                       Visibility="{Binding HasEntryStatus, Converter={StaticResource BoolToVis}}"
+                       FontSize="12"
+                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0" />
+
             <!-- 网络检测与一键修复：检测只读；修复先确认、可还原。服务缺失时整块隐藏。 -->
             <StackPanel Margin="0,12,0,0"
                         Visibility="{Binding HasNetworkDiagnostics, Converter={StaticResource BoolToVis}}">

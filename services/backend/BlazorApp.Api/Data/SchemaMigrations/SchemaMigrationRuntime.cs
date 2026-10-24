@@ -211,6 +211,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifySupplierPreorderRevisionAsync(CancellationToken cancellationToken);
 
+    Task ApplyStorePosApiEntryAsync(CancellationToken cancellationToken);
+
+    Task VerifyStorePosApiEntryAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -230,6 +234,10 @@ internal interface ISchemaMigrationRuntime
     Task ApplyPosOperationAuditRiskAsync(CancellationToken cancellationToken);
 
     Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken);
+
+    Task ApplyPosDeviceApiEntryAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosDeviceApiEntryAsync(CancellationToken cancellationToken);
 }
 
 internal interface ISchemaMigrationSession : IAsyncDisposable
@@ -1305,6 +1313,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         );
     }
 
+    public async Task ApplyStorePosApiEntryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            StorePosApiEntrySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 三列签名与 CHECK 约束通过后协调器才登记账本。
+        await VerifyStorePosApiEntryAsync(cancellationToken);
+    }
+
+    public async Task VerifyStorePosApiEntryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            StorePosApiEntrySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
     public async Task ApplyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)
     {
         await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
@@ -1638,6 +1668,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         {
             throw new PosOperationAuditRiskSchemaMismatchException();
         }
+    }
+
+    public async Task ApplyPosDeviceApiEntryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _posmDatabase.ConnectionString,
+            PosDeviceApiEntrySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 两列签名通过后协调器才登记 POSM 账本。
+        await VerifyPosDeviceApiEntryAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosDeviceApiEntryAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _posmDatabase.ConnectionString,
+            PosDeviceApiEntrySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
     }
 
     private DatabaseDefinition GetDefinition(SchemaDatabase database) =>

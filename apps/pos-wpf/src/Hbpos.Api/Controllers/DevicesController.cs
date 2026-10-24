@@ -15,7 +15,8 @@ namespace Hbpos.Api.Controllers;
 [Route("api/v1/devices")]
 public sealed class DevicesController(
     IDeviceService deviceService,
-    IOptions<DeviceActivationOptions>? deviceActivationOptions = null) : ControllerBase
+    IOptions<DeviceActivationOptions>? deviceActivationOptions = null,
+    IDeviceApiEntryRecorder? apiEntryRecorder = null) : ControllerBase
 {
     // AppVersion 与三项资源字段都可选：旧版客户端不带时，服务端保留库里上次上报的值，不会被清空。
     public sealed record DeviceRuntimeStatusRequest(
@@ -181,6 +182,17 @@ public sealed class DevicesController(
         if (!updated)
         {
             return NotFound(ApiResult<object>.Fail("DEVICE_NOT_FOUND", "Device was not found."));
+        }
+
+        if (apiEntryRecorder is not null)
+        {
+            // WPF 心跳顺带记录设备实际走的入口（X-HB-Entry，仅白名单值有效，节流且不影响本响应）。
+            await apiEntryRecorder.RecordAsync(
+                deviceCode,
+                storeCode,
+                hardwareId,
+                PosApiEntryModes.ReadFromRequest(Request),
+                cancellationToken);
         }
 
         return Ok(ApiResult<object>.Ok(new { }));

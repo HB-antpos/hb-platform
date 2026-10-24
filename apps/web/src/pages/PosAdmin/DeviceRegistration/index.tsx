@@ -25,13 +25,16 @@ import {
   lockDevice,
 } from '../../../services/deviceRegistrationService'
 import { useAuthStore } from '../../../store/auth'
+import { getPosApiEntryStores } from '../../../services/posApiEntryService'
 import type { DeviceRegistrationItem, StoreOption } from '../../../types/deviceRegistration'
+import type { PosApiEntryStoreItem } from '../../../types/posApiEntry'
 import { P } from '../../../types/permissions'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 
 import AppUsagePanel from './AppUsagePanel'
 import DeviceActivationCodePanel from './DeviceActivationCodePanel'
 import EmergencyLoginModal from './EmergencyLoginModal'
+import PosApiEntryPanel from './PosApiEntryPanel'
 import { supportsTransactionGate } from './deviceSystemOptions'
 import {
   DeviceStatusPill,
@@ -68,6 +71,15 @@ import {
   VERSION_FILTER_NONE,
   VERSION_FILTER_OUTDATED,
 } from './deviceManagementLogic'
+import { DeviceRouteCell, MODE_LABEL_KEY } from './posApiEntryCells'
+import {
+  POS_API_ENTRY_MODES,
+  buildPreferredModeMap,
+  getDeviceRouteState,
+  lookupPreferredMode,
+  matchesRouteFilter,
+  type DeviceRouteFilter,
+} from './posApiEntryLogic'
 import './deviceManagement.css'
 import deviceManagementMessagesEn from './deviceManagementMessages.en.json'
 import deviceManagementMessagesZh from './deviceManagementMessages.zh.json'
@@ -94,7 +106,7 @@ const STATUS_ACTION_REQUEST: Record<DeviceStatusAction, (id: number) => Promise<
   lock: lockDevice,
 }
 
-type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes'
+type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes' | 'posApiEntry'
 
 // 文案键写成字面量，页面文案契约测试才能扫描到并校验中英文都存在
 const BATCH_ACTION_LABEL_KEY: Record<DeviceStatusAction, string> = {
@@ -181,6 +193,9 @@ export default function DeviceRegistrationPage() {
   const [onlineFilter, setOnlineFilter] = useState<DeviceOnlineFilter>()
   const [appVersionFilter, setAppVersionFilter] = useState<string>()
   const [rustDeskVersionFilter, setRustDeskVersionFilter] = useState<string>()
+  const [routeFilter, setRouteFilter] = useState<DeviceRouteFilter>()
+  // 各分店的收银入口首选：只用于「线路」列判断是否回退，加载失败静默降级为不做回退判断
+  const [entryStores, setEntryStores] = useState<PosApiEntryStoreItem[]>([])
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
 
   const [actionDeviceId, setActionDeviceId] = useState<number | null>(null)
@@ -242,6 +257,30 @@ export default function DeviceRegistrationPage() {
     }
   }, [canViewLegacyDeviceRegistration])
 
+  // 每次回到设备列表视图时取一次（用户可能刚在「收银入口」里改过首选）；不跟随 15 秒轮询
+  useEffect(() => {
+    if (viewMode !== 'registered' || !canViewLegacyDeviceRegistration) {
+      return
+    }
+    let cancelled = false
+    getPosApiEntryStores()
+      .then((result) => {
+        if (!cancelled) {
+          setEntryStores(result)
+        }
+      })
+      .catch((error) => {
+        // 静默降级：拿不到首选时只显示实际线路，不判断回退
+        console.error('load pos api entry stores failed', error)
+        if (!cancelled) {
+          setEntryStores([])
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [viewMode, canViewLegacyDeviceRegistration])
+
   useEffect(() => {
     if (!canViewLegacyDeviceRegistration && viewMode !== 'activationCodes') {
       setViewMode('activationCodes')
@@ -268,7 +307,7 @@ export default function DeviceRegistrationPage() {
   useEffect(() => {
     setPagination((current) => (current.current === 1 ? current : { ...current, current: 1 }))
     setSelectedIds((current) => (current.length ? [] : current))
-  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter, viewMode])
+  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter, routeFilter, viewMode])
 
   // 轮询/操作后重新拉取时，剔除已不在列表里的勾选（设备被删除或换了分店）
   useEffect(() => {
@@ -294,24 +333,28 @@ export default function DeviceRegistrationPage() {
   const getStoreName = (storeCode?: string | null) =>
     storeCode ? storeNameMap[storeCode] : undefined
 
-  const baseFiltered = useMemo(
-    () =>
-      filterDevicesExceptStatus(
-        items,
-        {
-          keyword,
-          deviceType,
-          deviceSystem,
-          online: onlineFilter,
-          appVersion: appVersionFilter,
-          rustDeskVersion: rustDeskVersionFilter,
-          rustDeskLatestVersion,
-        },
-        (item) => isDeviceRuntimeOnline(item),
-        getStoreName,
-      ),
-    [items, keyword, deviceType, deviceSystem, onlineFilter, appVersionFilter, rustDeskVersionFilter, rustDeskLatestVersion, storeNameMap]
-  )
+  const preferredModeMap = useMemo(() => buildPreferredModeMap(entryStores), [entryStores])
+  const getRouteState = (item: DeviceRegistrationItem) =>
+    getDeviceRouteState(item, lookupPreferredMode(preferredModeMap, item.storeCode), isDeviceRuntimeOnline(item))
+
+  const baseFiltered = useMemo(() => {
+    const filtered = filterDevicesExceptStatus(
+      items,
+      {
+        keyword,
+        deviceType,
+        deviceSystem,
+        online: onlineFilter,
+        appVersion: appVersionFilter,
+        rustDeskVersion: rustDeskVersionFilter,
+        rustDeskLatestVersion,
+      },
+      (item) => isDeviceRuntimeOnline(item),
+      getStoreName,
+    )
+    // 线路筛选单独叠加，不改动既有的 filterDevicesExceptStatus
+    return routeFilter ? filtered.filter((item) => matchesRouteFilter(getRouteState(item), routeFilter)) : filtered
+  }, [items, keyword, deviceType, deviceSystem, onlineFilter, appVersionFilter, rustDeskVersionFilter, rustDeskLatestVersion, routeFilter, preferredModeMap, storeNameMap])
   const statusCounts = useMemo(() => countDevicesByStatus(baseFiltered), [baseFiltered])
   const visibleItems = useMemo(() => filterDevicesByStatus(baseFiltered, statusTab), [baseFiltered, statusTab])
   const scopeCounts = useMemo(
@@ -614,6 +657,17 @@ export default function DeviceRegistrationPage() {
         },
       },
       {
+        // 线路：设备最近一次请求实际走的入口；与所属分店首选不同 → 回退中；WPF 版本过低 → 不认设置
+        title: (
+          <Tooltip title={t('posAdmin.devices.apiEntry.route.columnHint')}>
+            <span>{t('posAdmin.devices.apiEntry.route.column')}</span>
+          </Tooltip>
+        ),
+        key: 'route',
+        width: 200,
+        render: (_value, record) => <DeviceRouteCell state={getRouteState(record)} t={t} />,
+      },
+      {
         title: t('column.status'),
         dataIndex: 'status',
         width: 100,
@@ -706,7 +760,7 @@ export default function DeviceRegistrationPage() {
         },
       },
     ]
-  }, [canManage, actionDeviceId, rustDeskLatestVersion, storeNameMap, t])
+  }, [canManage, actionDeviceId, rustDeskLatestVersion, storeNameMap, preferredModeMap, t])
 
   const storeOptions = stores.map((store) => ({
     label: `${store.storeCode} / ${store.storeName}`,
@@ -768,6 +822,17 @@ export default function DeviceRegistrationPage() {
           onRemove: () => setRustDeskVersionFilter(undefined),
         }]
       : []),
+    ...(routeFilter
+      ? [{
+          key: 'route',
+          label: t('posAdmin.devices.apiEntry.route.filterLabel'),
+          value: routeFilter === 'fallback'
+            ? t('posAdmin.devices.apiEntry.route.filterFallback')
+            : t(MODE_LABEL_KEY[routeFilter]),
+          source: 'toolbar' as const,
+          onRemove: () => setRouteFilter(undefined),
+        }]
+      : []),
     ...(onlineFilter
       ? [{
           key: 'online',
@@ -787,6 +852,7 @@ export default function DeviceRegistrationPage() {
     setOnlineFilter(undefined)
     setAppVersionFilter(undefined)
     setRustDeskVersionFilter(undefined)
+    setRouteFilter(undefined)
     setStatusTab('all')
   }
 
@@ -799,6 +865,9 @@ export default function DeviceRegistrationPage() {
       : []),
     ...(canManageAnyActivationCodes
       ? [{ label: t('posAdmin.devices.activation.view'), value: 'activationCodes' as const }]
+      : []),
+    ...(canViewLegacyDeviceRegistration
+      ? [{ label: t('posAdmin.devices.viewPosApiEntry'), value: 'posApiEntry' as const }]
       : []),
   ]
 
@@ -828,6 +897,8 @@ export default function DeviceRegistrationPage() {
             canManageMobile={canManageMobileActivationCodes}
           />
         </div>
+      ) : viewMode === 'posApiEntry' ? (
+        <PosApiEntryPanel canManage={canManage} />
       ) : viewMode === 'appUsage' ? (
         <AppUsagePanel
           stores={stores}
@@ -923,6 +994,17 @@ export default function DeviceRegistrationPage() {
               options={[
                 { label: t('posAdmin.devices.online'), value: 'online' },
                 { label: t('posAdmin.devices.offline'), value: 'offline' },
+              ]}
+            />
+            <Select<DeviceRouteFilter>
+              allowClear
+              placeholder={t('posAdmin.devices.apiEntry.route.filterPlaceholder')}
+              style={{ width: 130 }}
+              value={routeFilter}
+              onChange={(value) => setRouteFilter(value)}
+              options={[
+                ...POS_API_ENTRY_MODES.map((mode) => ({ label: t(MODE_LABEL_KEY[mode]), value: mode })),
+                { label: t('posAdmin.devices.apiEntry.route.filterFallback'), value: 'fallback' as const },
               ]}
             />
             <span className="dev-mgmt-toolbar-spacer" />
@@ -1038,7 +1120,7 @@ export default function DeviceRegistrationPage() {
               getCheckboxProps: () => ({ disabled: batchAction !== null }),
               onChange: (keys) => setSelectedIds(keys.map(Number)),
             } : undefined}
-            scroll={{ x: canManage ? 1394 : 1200 }}
+            scroll={{ x: canManage ? 1594 : 1400 }}
             rowClassName={() => 'dev-mgmt-row-clickable'}
             onRow={(record) => ({
               onClick: (event) => {

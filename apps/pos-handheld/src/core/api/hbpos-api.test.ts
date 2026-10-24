@@ -470,6 +470,31 @@ test("下发资料轮询对生成类型里全部可选的字段容错：changed 
   );
 });
 
+test("下发资料轮询透传后台设置的首选入口 apiEntryMode：合法值 / null / 未知值原样，字段缺失时结果里没有该键；Changed=false 也带", async () => {
+  const respond = (data: unknown): HbposTransport => ({
+    async request<T>() {
+      return { status: 200, data: { success: true, data } as T };
+    },
+  });
+
+  assert.deepEqual(
+    await new HbposStoreApi(respond({ changed: false, version: 5, apiEntryMode: "aws" })).syncReceiptProfile(5),
+    { changed: false, version: 5, profile: null, apiEntryMode: "aws" },
+  );
+  assert.deepEqual(
+    await new HbposStoreApi(respond({ changed: false, version: 5, apiEntryMode: null })).syncReceiptProfile(5),
+    { changed: false, version: 5, profile: null, apiEntryMode: null },
+  );
+  // 未知值不在这里过滤：交给入口协调器判定并保持当前设置。
+  assert.equal(
+    (await new HbposStoreApi(respond({ changed: false, version: 5, apiEntryMode: "cloudflare" })).syncReceiptProfile(5))
+      .apiEntryMode,
+    "cloudflare",
+  );
+  const missing = await new HbposStoreApi(respond({ changed: false, version: 5 })).syncReceiptProfile(5);
+  assert.equal("apiEntryMode" in missing, false);
+});
+
 test("下发资料轮询的 knownVersion 脏值（负数/小数/非数字）一律按 0 发送", async () => {
   const sent: unknown[] = [];
   const transport: HbposTransport = {

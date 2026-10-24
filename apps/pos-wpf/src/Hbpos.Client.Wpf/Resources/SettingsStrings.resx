@@ -294,6 +294,11 @@
   <data name="settings.serverAddress.blocked.deviceActivation" xml:space="preserve"><value>Finish recovering the pending device activation before switching servers.</value></data>
   <data name="settings.serverAddress.blocked.sync" xml:space="preserve"><value>Resolve all pending, failed, or syncing orders before switching servers.</value></data>
   <data name="settings.serverAddress.blocked.audit" xml:space="preserve"><value>Wait for pending operation audit events to upload before switching servers.</value></data>
+  <data name="settings.serverAddress.entry.line" xml:space="preserve"><value>Entry set by head office: {0} · In use now: {1}{2}</value></data>
+  <data name="settings.serverAddress.entry.fallback" xml:space="preserve"><value> · falling back</value></data>
+  <data name="settings.serverAddress.entry.edge" xml:space="preserve"><value>EdgeOne (pos.hotbargain.vip)</value></data>
+  <data name="settings.serverAddress.entry.aws" xml:space="preserve"><value>AWS Sydney (pos-syd.hotbargain.vip)</value></data>
+  <data name="settings.serverAddress.entry.direct" xml:space="preserve"><value>Direct (hotbargain.vip)</value></data>
   <data name="settings.linkly.cloudBackend.credentialsManagedByWeb" xml:space="preserve"><value>Cloud usernames and passwords are managed centrally in Web Admin. This POS only receives a safe terminal list.</value></data>
   <data name="settings.linkly.cloudBackend.terminal" xml:space="preserve"><value>Card terminal</value></data>
   <data name="settings.linkly.cloudBackend.refresh" xml:space="preserve"><value>Refresh</value></data>

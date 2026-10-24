@@ -58,7 +58,7 @@ function createPorts(
       type: "WIFI",
       ipAddress: "192.168.1.20",
     }),
-    isUsingFallback: () => false,
+    readEntryState: () => ({ preferred: "edge", active: "edge", usingFallback: false }),
     ...overrides,
   };
 }
@@ -103,10 +103,19 @@ async function run(
   return { final, updates };
 }
 
-test("入口组内地址拆成 EdgeOne 与直连两条，路径保持 /pos-api", () => {
+test("入口组内地址拆成 EdgeOne、AWS 悉尼、直连三条，路径保持 /pos-api", () => {
   assert.deepEqual(
     resolveNetworkCheckTargets("https://hotbargain.vip/pos-api/").map((target) => target.baseUrl),
-    ["https://pos.hotbargain.vip/pos-api", "https://hotbargain.vip/pos-api"],
+    [
+      "https://pos.hotbargain.vip/pos-api",
+      "https://pos-syd.hotbargain.vip/pos-api",
+      "https://hotbargain.vip/pos-api",
+    ],
+  );
+  // 从任一入口域名配置进来，结果都一样。
+  assert.deepEqual(
+    resolveNetworkCheckTargets("https://pos-syd.hotbargain.vip/pos-api").map((target) => target.kind),
+    ["edge", "aws", "direct"],
   );
   assert.deepEqual(resolveNetworkCheckTargets("http://192.168.1.8:5002"), [
     { kind: "configured", host: "192.168.1.8", baseUrl: "http://192.168.1.8:5002", literal: true },
@@ -134,24 +143,31 @@ test("DoH 只取 A 记录", () => {
   assert.deepEqual(parseDohAddresses("not json"), []);
 });
 
-test("完整检测：两条入口分别测、记录 eo-log-uuid、公网 IP 与时钟偏差", async () => {
+test("完整检测：三条入口分别测、记录 eo-log-uuid、公网 IP 与时钟偏差", async () => {
   const ports = createPorts(defaultReply);
   const { final, updates } = await run("https://hotbargain.vip/pos-api", ports);
 
   assert.equal(final.phase, "done");
   assert.ok(updates.some((update) => update.phase === "stability"));
-  const [edge, direct] = final.measurements.entries;
+  const [edge, aws, direct] = final.measurements.entries;
   assert.equal(edge?.kind, "edge");
+  assert.equal(aws?.kind, "aws");
+  assert.equal(aws?.host, "pos-syd.hotbargain.vip");
   assert.equal(edge?.first?.eoLogUuid, "eo-123");
+  assert.equal(aws?.first?.eoLogUuid, undefined, "只有 EdgeOne 会带 eo-log-uuid");
   assert.deepEqual(edge?.dns?.addresses, ["43.159.98.78"]);
+  assert.deepEqual(aws?.dns?.addresses, ["43.159.98.78"]);
   assert.deepEqual(direct?.dns?.addresses, ["43.160.208.238"]);
+  assert.equal(aws?.burst?.succeeded, NETWORK_CHECK_BURST_ATTEMPTS);
   assert.equal(edge?.sequential?.attempts, NETWORK_CHECK_SEQUENTIAL_ATTEMPTS);
   assert.equal(direct?.burst?.succeeded, NETWORK_CHECK_BURST_ATTEMPTS);
   assert.equal(final.measurements.publicIp?.ip, "124.187.52.242");
   assert.equal(final.measurements.activeEntry, "edge");
+  assert.equal(final.measurements.preferredEntry, "edge");
+  assert.equal(final.measurements.usingFallback, false);
   assert.equal(final.measurements.local?.type, "WIFI");
-  // 本机时钟比服务器快 2 秒，再加上半个请求耗时的校正。
-  assert.ok(Math.abs((final.measurements.clockSkewMs ?? 0) - 2_000) < 100);
+  // 本机时钟比服务器快 2 秒，再加上半个请求耗时的校正（假时钟每个请求加 50ms，并发请求越多耗时越大，所以容差给宽）。
+  assert.ok(Math.abs((final.measurements.clockSkewMs ?? 0) - 2_000) < 500);
 
   const healthHosts = new Set(
     ports.requests
@@ -159,22 +175,41 @@ test("完整检测：两条入口分别测、记录 eo-log-uuid、公网 IP 与�
       .filter((url) => url.pathname === "/pos-api/api/v1/health")
       .map((url) => url.hostname),
   );
-  assert.deepEqual([...healthHosts].sort(), ["hotbargain.vip", "pos.hotbargain.vip"]);
+  assert.deepEqual([...healthHosts].sort(), [
+    "hotbargain.vip",
+    "pos-syd.hotbargain.vip",
+    "pos.hotbargain.vip",
+  ]);
   assert.ok(ports.requests.some((url) => url.startsWith(NETWORK_CHECK_PUBLIC_IP_URL)));
   // 每次请求都带防缓存参数。
   assert.ok(ports.requests.filter((url) => url.includes("/api/v1/health")).every((url) => url.includes("_t=")));
 });
 
-test("EdgeOne 不通时直连照常测，不通的入口不做并发测试", async () => {
+test("EdgeOne 不通时 AWS 与直连照常测，不通的入口不做并发测试", async () => {
   const ports = createPorts((url) =>
     url.hostname === "pos.hotbargain.vip" ? "network" : defaultReply(url),
   );
   const { final } = await run("https://pos.hotbargain.vip/pos-api", ports);
-  const [edge, direct] = final.measurements.entries;
+  const [edge, aws, direct] = final.measurements.entries;
   assert.equal(edge?.first?.error, "network");
   assert.equal(edge?.sequential?.succeeded, 0);
   assert.equal(edge?.burst, null);
+  assert.equal(aws?.burst?.succeeded, NETWORK_CHECK_BURST_ATTEMPTS);
   assert.equal(direct?.burst?.succeeded, NETWORK_CHECK_BURST_ATTEMPTS);
+});
+
+test("只有 AWS 悉尼入口不通：该入口标失败，其余两条不受影响", async () => {
+  const ports = createPorts((url) =>
+    url.hostname === "pos-syd.hotbargain.vip" ? { status: 502, body: "" } : defaultReply(url),
+  );
+  const { final } = await run("https://hotbargain.vip/pos-api", ports);
+  const [edge, aws, direct] = final.measurements.entries;
+  // AWS 的 nginx 回源失败返回 502：按普通 HTTP 错误归类，不当成 EdgeOne 的 52x。
+  assert.equal(aws?.first?.error, "http");
+  assert.equal(aws?.sequential?.succeeded, 0);
+  assert.equal(aws?.burst, null);
+  assert.equal(edge?.sequential?.succeeded, NETWORK_CHECK_SEQUENTIAL_ATTEMPTS);
+  assert.equal(direct?.sequential?.succeeded, NETWORK_CHECK_SEQUENTIAL_ATTEMPTS);
 });
 
 test("诊断不经过也不改动共享的入口选择器", async () => {
@@ -187,12 +222,22 @@ test("诊断不经过也不改动共享的入口选择器", async () => {
   assert.equal(sharedApiTransportSelector.resolve({ probe: false }), before);
 });
 
-test("App 已切到备用入口时显示直连", async () => {
+test("App 已回退时显示后台设置的首选、实际在用的入口与回退状态", async () => {
   const selector = new ApiTransportSelector();
-  selector.reportFailure("pos.hotbargain.vip", "network");
-  const ports = createPorts(defaultReply, { isUsingFallback: () => selector.isUsingFallback() });
+  selector.setPreferredMode("aws");
+  selector.reportFailure("pos-syd.hotbargain.vip", "network");
+  const ports = createPorts(defaultReply, {
+    readEntryState: () => ({
+      preferred: selector.getPreferredMode(),
+      active: selector.getActiveMode(),
+      usingFallback: selector.isUsingFallback(),
+    }),
+  });
   const { final } = await run("https://hotbargain.vip/pos-api", ports);
-  assert.equal(final.measurements.activeEntry, "direct");
+  assert.equal(final.measurements.preferredEntry, "aws");
+  // 首选 aws 故障 → 顺序 aws,edge,direct 里下一个是 edge。
+  assert.equal(final.measurements.activeEntry, "edge");
+  assert.equal(final.measurements.usingFallback, true);
 });
 
 test("配置地址不在入口组：只测这一个地址，不查公网 IP 与 DNS", async () => {
@@ -202,6 +247,8 @@ test("配置地址不在入口组：只测这一个地址，不查公网 IP 与 
   assert.equal(final.measurements.entries[0]?.dns, null);
   assert.equal(final.measurements.publicIp, null);
   assert.equal(final.measurements.activeEntry, null);
+  assert.equal(final.measurements.preferredEntry, null);
+  assert.equal(final.measurements.usingFallback, false);
   assert.ok(!ports.requests.some((url) => url.startsWith(NETWORK_CHECK_PUBLIC_IP_URL)));
 });
 

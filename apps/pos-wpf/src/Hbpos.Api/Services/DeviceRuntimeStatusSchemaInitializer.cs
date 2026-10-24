@@ -92,6 +92,21 @@ public sealed class SqlSugarDeviceRuntimeStatusSchemaInitializer(
                     ADD [客户端句柄数] INT NULL;
             END;
 
+            -- 设备实际走的 POS API 入口回显（edge / aws / direct）与最近写入时间（UTC）；可空，老数据保持 NULL。
+            -- 只用于后台设备管理页展示。正式迁移 20261024.004-pos-device-api-entry 由主 API 的 --schema=migrate 执行，
+            -- 迁移须先于代码上线；这里启动时幂等补列，先发 Hbpos.Api 也不会因列缺失而写入失败。
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'LastApiEntry') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [LastApiEntry] NVARCHAR(16) NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'LastApiEntryAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [LastApiEntryAt] DATETIME2(7) NULL;
+            END;
+
             BEGIN TRY
                 IF NOT EXISTS (
                     SELECT 1

@@ -467,6 +467,25 @@ public sealed class NetworkDiagnosisRulesTests
         Assert.NotEqual(DiagnosticStepStatus.Failed, trust.Status);
     }
 
+    [Theory]
+    [InlineData("CN=R11, O=Let's Encrypt, C=US")]
+    [InlineData("CN=E8, O=\"Let's Encrypt\", C=US")]
+    public void A_lets_encrypt_certificate_is_an_expected_issuer_for_the_aws_and_direct_entries(string issuer)
+    {
+        // pos-syd.hotbargain.vip（AWS 边缘）与 hotbargain.vip（直连）用 Let's Encrypt：不能误报「HTTPS 被重签」。
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            CertificateIssuer = issuer
+        };
+
+        Assert.NotEqual(DiagnosisKind.HttpsIntercepted, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var trust = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.CertificateTrust);
+        Assert.NotEqual(DiagnosticStepStatus.Failed, trust.Status);
+    }
+
     [Fact]
     public void A_certificate_from_an_unexpected_issuer_means_something_is_re_signing_https()
     {

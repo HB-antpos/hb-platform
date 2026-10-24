@@ -3,8 +3,23 @@
  * 没有网关 ping、系统 DNS、原始 TCP 建连与 TLS / 证书检查（iOS 沙盒里的 JS 拿不到）。
  */
 
-/** 入口类型：EdgeOne（首选）、直连（备用）；配置地址不在入口组时只有一个「当前地址」。 */
-export type NetworkCheckEntryKind = "edge" | "direct" | "configured";
+import type { ApiEntryMode } from "@hb/pos-api-client/transport-failover";
+
+/**
+ * 入口类型：EdgeOne、AWS 悉尼、直连三条入口之一；配置地址不在入口组时只有一个「当前地址」。
+ * 哪条是首选由后台按分店设置（见 NetworkCheckEntryState），不再固定。
+ */
+export type NetworkCheckEntryKind = ApiEntryMode | "configured";
+
+/** App 业务请求当前的入口状态（读共享的入口选择器）。 */
+export interface NetworkCheckEntryState {
+  /** 后台设置的首选入口（后台未设置时为默认 edge）。 */
+  preferred: ApiEntryMode;
+  /** 业务请求此刻实际会走的入口。 */
+  active: ApiEntryMode;
+  /** 首选入口是否因故障正处于冷却，业务请求已落到备用入口。 */
+  usingFallback: boolean;
+}
 
 /**
  * 单次请求失败原因：
@@ -93,8 +108,12 @@ export interface NetworkCheckMeasurements {
   publicIp: NetworkPublicIpResult | null;
   /** 本机时间减服务器时间（毫秒，已按请求耗时一半校正）；拿不到服务器时间为 null。 */
   clockSkewMs: number | null;
-  /** App 业务请求当前走的入口（读共享的入口选择器）；配置地址不在入口组时为 null。 */
-  activeEntry: "edge" | "direct" | null;
+  /** App 业务请求当前实际走的入口（读共享的入口选择器）；配置地址不在入口组时为 null。 */
+  activeEntry: ApiEntryMode | null;
+  /** 后台设置的首选入口；配置地址不在入口组时为 null。 */
+  preferredEntry: ApiEntryMode | null;
+  /** 是否正在回退（首选入口故障，业务请求落到备用入口）。 */
+  usingFallback: boolean;
 }
 
 export type NetworkCheckPhase =

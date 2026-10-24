@@ -49,7 +49,7 @@ function createPorts(): NetworkCheckPorts & { requests: string[] } {
       type: "WIFI",
       ipAddress: "192.168.1.20",
     }),
-    isUsingFallback: () => false,
+    readEntryState: () => ({ preferred: "aws", active: "aws", usingFallback: false }),
   };
 }
 
@@ -60,7 +60,7 @@ const context = {
 };
 
 describe("NetworkCheckScreen", () => {
-  it("拿到服务器地址后自动检测，并排显示两条入口并给出结论", async () => {
+  it("拿到服务器地址后自动检测，并排显示三条入口、首选 / 实际入口并给出结论", async () => {
     const ports = createPorts();
     const screen = await render(
       <NetworkCheckScreen
@@ -73,9 +73,14 @@ describe("NetworkCheckScreen", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("network-check-verdict-title").props.children).toBe(
-        "加速入口 EdgeOne 不通，直连正常",
+        "备用入口（EdgeOne）不通，首选入口正常",
       ),
     );
+    // 后台首选 AWS 悉尼：顶部显示首选、当前实际入口与是否回退中。
+    expect(screen.getByTestId("network-check-summary-preferred").props.children).toBe("AWS 悉尼");
+    expect(screen.getByTestId("network-check-summary-active").props.children).toBe("AWS 悉尼入口");
+    expect(screen.getByTestId("network-check-summary-fallback").props.children).toBe("否，正在用首选入口");
+    expect(screen.getByTestId("network-check-aws-first-status").props.children).toBe("正常");
     expect(screen.getByTestId("network-check-edge-first-status").props.children).toBe("失败");
     expect(screen.getByTestId("network-check-direct-first-status").props.children).toBe("正常");
     expect(screen.getByTestId("network-check-edge-burst-status").props.children).toBe("跳过");

@@ -1,11 +1,11 @@
 import {
-  DIRECT_API_HOST,
-  EDGE_API_HOST,
+  API_ENTRY_HOSTS,
   parseEntryUrl,
 } from "@hb/pos-api-client/transport-failover";
 
 import type {
   NetworkCheckEntryKind,
+  NetworkCheckEntryState,
   NetworkCheckMeasurements,
   NetworkCheckRun,
   NetworkDnsResult,
@@ -69,8 +69,8 @@ export interface NetworkCheckPorts {
   wallNow(): number;
   sleep(ms: number): Promise<void>;
   readLocalNetwork(): Promise<NetworkLocalInfo>;
-  /** App 业务请求是否已切到备用入口（直连）。 */
-  isUsingFallback(): boolean;
+  /** App 业务请求的入口状态：后台设置的首选、实际在用的入口、是否回退中。 */
+  readEntryState(): NetworkCheckEntryState;
 }
 
 export type NetworkCheckTarget = Readonly<{
@@ -81,20 +81,18 @@ export type NetworkCheckTarget = Readonly<{
   literal: boolean;
 }>;
 
-/** 规范化 API 基础地址并列出要测的入口：入口组内测 EdgeOne + 直连两条，否则只测配置地址。 */
+/** 规范化 API 基础地址并列出要测的入口：入口组内逐条测 EdgeOne、AWS 悉尼、直连三条，否则只测配置地址。 */
 export function resolveNetworkCheckTargets(
   apiBaseUrl: string,
 ): NetworkCheckTarget[] {
   const normalized = apiBaseUrl.trim().replace(/\/+$/u, "");
   const entry = parseEntryUrl(normalized);
   if (entry) {
-    return [
-      { kind: "edge", host: EDGE_API_HOST, literal: false },
-      { kind: "direct", host: DIRECT_API_HOST, literal: false },
-    ].map((target) => ({
-      ...target,
-      kind: target.kind as NetworkCheckEntryKind,
-      baseUrl: entry.withHost(target.host).replace(/\/+$/u, ""),
+    return (["edge", "aws", "direct"] as const).map((kind) => ({
+      kind,
+      host: API_ENTRY_HOSTS[kind],
+      literal: false,
+      baseUrl: entry.withHost(API_ENTRY_HOSTS[kind]).replace(/\/+$/u, ""),
     }));
   }
   let host = normalized;
@@ -130,6 +128,8 @@ export function emptyMeasurements(): NetworkCheckMeasurements {
     publicIp: null,
     clockSkewMs: null,
     activeEntry: null,
+    preferredEntry: null,
+    usingFallback: false,
   };
 }
 
@@ -297,7 +297,7 @@ export interface RunNetworkCheckOptions {
 }
 
 /**
- * 只读检测，分三段：
+ * 只读检测（入口组内逐条测三个入口），分三段：
  * 1. 基础（并行）：本机网络、公网 IP、各入口公共 DNS、参照地址与各入口的第一次请求；
  * 2. 稳定性：各入口与参照地址各自逐个请求若干次（不同主机之间并行）；
  * 3. 并发：各入口依次「同时发 6 个请求」，看是否被路由器 / 防火墙限制并发。
@@ -309,6 +309,7 @@ export async function runNetworkCheck(
   const { ports, signal } = options;
   const targets = resolveNetworkCheckTargets(options.apiBaseUrl);
   const inGroup = targets.some((target) => target.kind !== "configured");
+  const entryState = inGroup ? ports.readEntryState() : null;
   const startedAt = ports.now();
   let run: NetworkCheckRun = {
     phase: "basics",
@@ -328,11 +329,9 @@ export async function runNetworkCheck(
         first: null,
         sequential: null,
       },
-      activeEntry: inGroup
-        ? ports.isUsingFallback()
-          ? "direct"
-          : "edge"
-        : null,
+      activeEntry: entryState?.active ?? null,
+      preferredEntry: entryState?.preferred ?? null,
+      usingFallback: entryState?.usingFallback ?? false,
     },
     startedAtIso: options.nowIso(),
     finishedAtIso: null,

@@ -141,6 +141,7 @@ public sealed class ReceiptProfileSyncService : IReceiptProfileSyncService
     private readonly IStoreReceiptProfileApiClient _apiClient;
     private readonly DeviceAuthorizationState _authorization;
     private readonly TimeProvider _timeProvider;
+    private readonly IApiEntryPreferenceService? _entryPreference;
 
     private readonly object _gate = new();
     private Task<ReceiptProfileSyncResult>? _inFlight;
@@ -156,12 +157,14 @@ public sealed class ReceiptProfileSyncService : IReceiptProfileSyncService
         IReceiptProfileLocalStore store,
         IStoreReceiptProfileApiClient apiClient,
         DeviceAuthorizationState authorization,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IApiEntryPreferenceService? entryPreference = null)
     {
         _store = store;
         _apiClient = apiClient;
         _authorization = authorization;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _entryPreference = entryPreference;
     }
 
     public event EventHandler<ReceiptProfileAppliedEventArgs>? ProfileApplied;
@@ -335,6 +338,15 @@ public sealed class ReceiptProfileSyncService : IReceiptProfileSyncService
         {
             // 接口可用了：恢复 60 秒节奏。
             _backoffUntil = DateTimeOffset.MinValue;
+        }
+
+        // 后台为本店设置的 POS API 首选入口：每次响应都带当前值，与小票版本（Changed/Version）无关，
+        // 所以放在 Changed 分支之前处理——小票已是最新、甚至响应后面会被丢弃时也要生效。
+        // 请求期间设备换了店则不应用（这是旧店的设置）；应用过程不抛出，不影响小票同步。
+        if (_entryPreference is not null &&
+            string.Equals(CurrentStoreCode(), storeCode, StringComparison.Ordinal))
+        {
+            _entryPreference.Apply(sync.ApiEntryMode);
         }
 
         // 容错：字段缺失按 changed=false / version=0 / 无资料处理（DTO 反序列化已给默认值）。

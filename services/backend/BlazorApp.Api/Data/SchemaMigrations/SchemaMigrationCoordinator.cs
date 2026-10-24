@@ -88,6 +88,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string SupplierPreorderHistoryMigrationId = "20261023.002-supplier-preorder-history";
     internal const string SupplierPreorderItemImageMigrationId = "20261024.001-supplier-preorder-item-image";
     internal const string SupplierPreorderRevisionMigrationId = "20261024.002-supplier-preorder-revision";
+    internal const string StorePosApiEntryMigrationId = "20261024.003-store-pos-api-entry";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -97,6 +98,7 @@ internal sealed class SchemaMigrationCoordinator
         "20261001.001-legacy-employee-log-risk";
     internal const string PosOperationAuditRiskMigrationId =
         "20261002.001-pos-operation-audit-risk";
+    internal const string PosDeviceApiEntryMigrationId = "20261024.004-pos-device-api-entry";
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> MainMigrationSteps =
     [
@@ -329,6 +331,11 @@ internal sealed class SchemaMigrationCoordinator
             static (runtime, cancellationToken) =>
                 runtime.ApplySupplierPreorderRevisionAsync(cancellationToken)
         ),
+        new(
+            StorePosApiEntryMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyStorePosApiEntryAsync(cancellationToken)
+        ),
     ];
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> PosmMigrationSteps =
@@ -357,6 +364,11 @@ internal sealed class SchemaMigrationCoordinator
             PosOperationAuditRiskMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPosOperationAuditRiskAsync(cancellationToken)
+        ),
+        new(
+            PosDeviceApiEntryMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosDeviceApiEntryAsync(cancellationToken)
         ),
     ];
 

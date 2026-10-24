@@ -1,3 +1,5 @@
+import type { PosApiEntryMode } from './posApiEntry'
+
 export interface DeviceRegistrationItem {
   id: number
   hardwareId: string
@@ -29,6 +31,10 @@ export interface DeviceRegistrationItem {
   processHandleCount?: number | null
   /** RustDesk 客户端版本（远程维护登记时上报）；没有远程维护记录时为空，仅分页列表返回 */
   rustDeskClientVersion?: string | null
+  /** 最近一次请求实际走的 POS API 入口（服务器按请求来源识别）；没有记录时为空 */
+  lastApiEntry?: PosApiEntryMode | null
+  /** lastApiEntry 的记录时间（入口变化或距上次超过 10 分钟才会刷新，不是「回退开始时间」） */
+  lastApiEntryAt?: string | null
 }
 
 export interface DeviceRegistrationDetail extends DeviceRegistrationItem {}

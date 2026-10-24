@@ -14,7 +14,8 @@ namespace Hbpos.Api.Controllers;
 [Authorize]
 public sealed class StoresController(
     IStoreReceiptProfileService receiptProfileService,
-    IStoreReceiptProfileReleaseService receiptProfileReleaseService) : ControllerBase
+    IStoreReceiptProfileReleaseService receiptProfileReleaseService,
+    IDeviceApiEntryRecorder? apiEntryRecorder = null) : ControllerBase
 {
     [Authorize(Policy = CashierAuthorizationPolicies.ReceiptPrinter)]
     [HttpGet("current/receipt-profile")]
@@ -73,6 +74,18 @@ public sealed class StoresController(
         // 缺省、非数字或负数都按 0（本机从未应用过下发）处理，不让客户端的脏值变成 400。
         var known = int.TryParse(knownVersion, out var parsed) && parsed > 0 ? parsed : 0;
         var result = await receiptProfileReleaseService.GetSyncAsync(storeCode, known, cancellationToken);
+        if (result.Sync is not null && apiEntryRecorder is not null)
+        {
+            // 三端都会每分钟调一次这个接口：顺带记录设备实际走的入口（源站 nginx 传来的 X-HB-Entry，
+            // 仅白名单值有效）。recorder 内部节流且吞掉写库异常，绝不影响本响应；该头不参与任何鉴权。
+            await apiEntryRecorder.RecordAsync(
+                User.FindFirstValue(DeviceAuthConstants.DeviceCodeClaim),
+                storeCode,
+                User.FindFirstValue(DeviceAuthConstants.HardwareIdClaim),
+                PosApiEntryModes.ReadFromRequest(Request),
+                cancellationToken);
+        }
+
         return result.Sync is not null
             ? Ok(ApiResult<StoreReceiptProfileSyncDto>.Ok(result.Sync))
             : BadRequest(ApiResult<StoreReceiptProfileSyncDto>.Fail(

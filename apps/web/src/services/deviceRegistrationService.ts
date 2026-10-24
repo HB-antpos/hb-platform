@@ -16,6 +16,8 @@ import type {
 } from '../types/deviceRegistration'
 import request, { unwrapApiData } from '../utils/request'
 
+import { normalizePosApiEntryMode } from './posApiEntryService'
+
 const DEVICE_API_BASE = '/api'
 const REACT_API_BASE = '/api/react/v1/device-registration'
 const EMERGENCY_LOGIN_GRANT_API_BASE = '/api/react/v1/emergency-login-grants'
@@ -229,6 +231,8 @@ function normalizeItem(raw: Record<string, unknown>): DeviceRegistrationItem {
     processWorkingSetMb: getNullableNumber(raw, 'processWorkingSetMb', 'ProcessWorkingSetMb', '客户端内存MB'),
     processHandleCount: getNullableNumber(raw, 'processHandleCount', 'ProcessHandleCount', '客户端句柄数'),
     rustDeskClientVersion: getNullableString(raw, 'rustDeskClientVersion', 'RustDeskClientVersion'),
+    lastApiEntry: normalizePosApiEntryMode(getNullableString(raw, 'lastApiEntry', 'LastApiEntry')),
+    lastApiEntryAt: getNullableString(raw, 'lastApiEntryAt', 'LastApiEntryAt'),
   }
 }
 

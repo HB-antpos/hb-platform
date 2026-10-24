@@ -30,6 +30,7 @@ export type NetworkCheckReportContext = Readonly<{
 
 const ENTRY_NAME_KEYS: Record<NetworkCheckEntryKind, NetworkCheckCopyKey> = {
   edge: "entry.edge",
+  aws: "entry.aws",
   direct: "entry.direct",
   configured: "entry.configured",
 };
@@ -102,6 +103,7 @@ export function buildDeviceRows(
   ];
 }
 
+/** 业务请求当前实际走的入口名称；配置地址不在入口组时是「当前配置地址」。 */
 export function activeEntryLabel(
   locale: NetworkCheckLocale,
   run: NetworkCheckRun,
@@ -109,11 +111,41 @@ export function activeEntryLabel(
   const active = run.measurements.activeEntry;
   return networkCheckText(
     locale,
-    active === "direct"
-      ? "activeEntry.direct"
-      : active === "edge"
-        ? "activeEntry.edge"
-        : "activeEntry.configured",
+    active ? (`activeEntry.${active}` as NetworkCheckCopyKey) : "activeEntry.configured",
+  );
+}
+
+/** 后台设置的首选入口名称；配置地址不在入口组时没有首选，返回 null。 */
+export function preferredEntryLabel(
+  locale: NetworkCheckLocale,
+  run: NetworkCheckRun,
+): string | null {
+  const preferred = run.measurements.preferredEntry;
+  return preferred ? entryName(locale, preferred) : null;
+}
+
+/** 是否回退中：是 / 否（配置地址不在入口组时不适用，返回 null）。 */
+export function fallbackStateLabel(
+  locale: NetworkCheckLocale,
+  run: NetworkCheckRun,
+): string | null {
+  if (run.measurements.preferredEntry === null) return null;
+  return networkCheckText(
+    locale,
+    run.measurements.usingFallback ? "fallback.on" : "fallback.off",
+  );
+}
+
+/** 入口在页面上的角色：首选 / 备用 / 唯一入口。 */
+export function entryRoleLabel(
+  locale: NetworkCheckLocale,
+  run: NetworkCheckRun,
+  kind: NetworkCheckEntryKind,
+): string {
+  if (kind === "configured") return networkCheckText(locale, "entry.configuredRole");
+  return networkCheckText(
+    locale,
+    kind === run.measurements.preferredEntry ? "entry.preferredRole" : "entry.fallbackRole",
   );
 }
 
@@ -168,6 +200,14 @@ export function buildNetworkCheckReport(
     t("report.device", { value: context.deviceLabel }),
     t("report.app", { value: context.appLabel }),
     t("report.server", { value: context.serverLabel }),
+    ...(run.measurements.preferredEntry === null
+      ? []
+      : [
+          t("report.preferredEntry", { value: preferredEntryLabel(locale, run) ?? "-" }),
+          t("report.fallback", {
+            value: t(run.measurements.usingFallback ? "report.yes" : "report.no"),
+          }),
+        ]),
     t("report.activeEntry", { value: activeEntryLabel(locale, run) }),
     t("report.verdict", { value: verdictTitle(locale, run, verdict) }),
     "",
