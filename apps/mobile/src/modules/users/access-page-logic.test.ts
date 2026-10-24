@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import {
   ACCESS_SAVE_ORDER,
   accessTargetFromIdentityUser,
+  applyAccessStoreFilter,
+  countAccessStoresByState,
+  pinAccessStoresByState,
   accessTargetFromStoreUser,
   buildAccessChangeSummary,
   buildAccessMenuModel,
@@ -204,6 +207,45 @@ assert.deepEqual(
 );
 assert.deepEqual(filterAccessStores(catalog, "p1").map((item) => item.storeCode), ["P1"], "也能按编码搜");
 assert.equal(filterAccessStores(catalog, "").length, 3);
+
+// 分店授权筛选：各档台数随编辑实时变；选中筛选时记下当时属于该档的分店，之后改档不让行消失。
+{
+  const assigned = [
+    { storeGUID: catalog[0].storeGUID, isPrimary: true },
+    { storeGUID: catalog[2].storeGUID, isPrimary: false },
+  ];
+  assert.deepEqual(
+    countAccessStoresByState(catalog, assigned),
+    { all: 3, manage: 1, view: 1, unassigned: 1 },
+    "全部 / 管理 / 查看 / 未分配 的台数",
+  );
+  const pinnedManage = pinAccessStoresByState(catalog, assigned, "manage");
+  assert.deepEqual(applyAccessStoreFilter(catalog, "", pinnedManage).map((item) => item.storeCode), ["B1"], "只看管理");
+  assert.deepEqual(
+    applyAccessStoreFilter(catalog, "", pinAccessStoresByState(catalog, assigned, "unassigned")).map((item) => item.storeCode),
+    ["L1"],
+    "只看未分配",
+  );
+  // 在「管理」筛选里把 B1 改成查看：台数变了，但这一行仍留在列表里，直到重新点筛选。
+  const edited = [
+    { storeGUID: catalog[0].storeGUID, isPrimary: false },
+    { storeGUID: catalog[2].storeGUID, isPrimary: false },
+  ];
+  assert.equal(countAccessStoresByState(catalog, edited).manage, 0, "改档后台数实时更新");
+  assert.deepEqual(applyAccessStoreFilter(catalog, "", pinnedManage).map((item) => item.storeCode), ["B1"], "改档后行不消失");
+  assert.deepEqual(
+    applyAccessStoreFilter(catalog, "", pinAccessStoresByState(catalog, edited, "view")).map((item) => item.storeCode),
+    ["B1", "P1"],
+    "重新点筛选按最新分配取",
+  );
+  assert.equal(pinAccessStoresByState(catalog, assigned, "all"), null, "全部不过滤");
+  assert.deepEqual(
+    applyAccessStoreFilter(catalog, "parra", pinAccessStoresByState(catalog, assigned, "view")).map((item) => item.storeCode),
+    ["P1"],
+    "与关键字搜索叠加",
+  );
+  assert.equal(applyAccessStoreFilter(catalog, "bank", pinAccessStoresByState(catalog, assigned, "view")).length, 0, "叠加后可能为空");
+}
 
 // 三档按钮：管理员三档；店长没有「管理」档；目标已是「管理」时店长看到只读。
 assert.deepEqual(resolveStoreStateOptions({ currentState: "view", canGrantManage: true, editable: true }), [
