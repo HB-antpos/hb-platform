@@ -1755,6 +1755,12 @@ Logged with reference {2}</value></data>
   <data name="settings.restartPrompt.description" xml:space="preserve"><value>After daily close, remind to restart this POS when it has been running for 7 days or more.</value></data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Remind to restart after daily close</value></data>
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>The POS only restarts after the cashier confirms and every safety check passes. Saved for this device only.</value></data>
+  <data name="settings.scanner.title" xml:space="preserve"><value>Scanner sensitivity</value></data>
+  <data name="settings.scanner.description" xml:space="preserve"><value>A second read of the same barcode within this time is ignored, so one scan never adds an item twice.</value></data>
+  <data name="settings.scanner.help" xml:space="preserve"><value>Raise it if one scan adds an item twice; lower it if scanning two identical items quickly only adds one. Saved for this device only.</value></data>
+  <data name="settings.scanner.valueFormat" xml:space="preserve"><value>{0} ms</value></data>
+  <data name="settings.scanner.decrease" xml:space="preserve"><value>Decrease scanner repeat window</value></data>
+  <data name="settings.scanner.increase" xml:space="preserve"><value>Increase scanner repeat window</value></data>
   <data name="settings.restartTest.title" xml:space="preserve"><value>Restart computer (test)</value></data>
   <data name="settings.restartTest.help" xml:space="preserve"><value>Runs the same flow as the reminder after daily close: safety checks, a 30-second countdown you can cancel, then a real restart of this computer.</value></data>
   <data name="settings.restartTest.button" xml:space="preserve"><value>Restart computer</value></data>

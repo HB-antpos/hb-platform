@@ -4067,6 +4067,24 @@
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
     <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
   </data>
+  <data name="settings.scanner.title" xml:space="preserve">
+    <value>扫码枪灵敏度</value>
+  </data>
+  <data name="settings.scanner.description" xml:space="preserve">
+    <value>同一个条码在这段时间内被读到第二次会忽略，避免扫一次加购两次。</value>
+  </data>
+  <data name="settings.scanner.help" xml:space="preserve">
+    <value>同一商品总是加购两次就调大；快速连扫相同商品却只进一个就调小。仅保存在本机。</value>
+  </data>
+  <data name="settings.scanner.valueFormat" xml:space="preserve">
+    <value>{0} 毫秒</value>
+  </data>
+  <data name="settings.scanner.decrease" xml:space="preserve">
+    <value>调小重复读码忽略时间</value>
+  </data>
+  <data name="settings.scanner.increase" xml:space="preserve">
+    <value>调大重复读码忽略时间</value>
+  </data>
   <data name="settings.restartTest.title" xml:space="preserve">
     <value>重启电脑（测试）</value>
   </data>
