@@ -691,354 +691,448 @@
                  不再有外层 ScrollViewer，每页由 SettingsPageHost 自带兜底滚动与固定底栏。 -->
             <Grid Grid.Column="2">
                 <!-- ===== PAGE: DataMaintenance BEGIN ===== -->
+                <!-- 数据维护（首屏重设计）：本页内容放得下 1366×632（内容区目标 ≤ 502px），不设固定底栏，
+                     5 个操作按钮各自留在所属说明卡内：数据下载 / 数据重置在卡标题行右端，检查更新 / 重置销售数据（Debug）/ 重启电脑在卡右端垂直居中。
+                     忙碌时按钮禁用沿用各命令自带的 !IsBusy 条件，确认 / 授权流程在命令里，不在这里。
+                     页面说明句已在顶栏显示（PageDescriptionText），正文不重复。 -->
                 <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
                                            Visibility="{Binding IsDataMaintenanceSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
                     <Grid>
+                        <!-- 页面级样式：只在本页使用，不进文件顶部共享资源区。 -->
+                        <Grid.Resources>
+                            <!-- 紧凑说明卡：浅一级底色，内边距 14,12。 -->
+                            <Style x:Key="DataMaintenanceCardStyle" TargetType="Border" BasedOn="{StaticResource SettingsActionCardStyle}">
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                <Setter Property="Padding" Value="14,12" />
+                            </Style>
+                            <!-- 更新卡：Debug 时与「重置测试销售数据」各占一半；非 Debug 时通栏（跨三列）。 -->
+                            <Style x:Key="DataMaintenanceUpdateCardStyle" TargetType="Border" BasedOn="{StaticResource DataMaintenanceCardStyle}">
+                                <Setter Property="Grid.ColumnSpan" Value="3" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDebugTestSalesDataResetVisible}" Value="True">
+                                        <Setter Property="Grid.ColumnSpan" Value="1" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                            <!-- 开关卡：没有「重启电脑」卡时通栏。 -->
+                            <Style x:Key="DataMaintenanceRestartPromptCardStyle" TargetType="Border" BasedOn="{StaticResource DataMaintenanceCardStyle}">
+                                <Setter Property="Grid.ColumnSpan" Value="3" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRestartComputerTestVisible}" Value="True">
+                                        <Setter Property="Grid.ColumnSpan" Value="1" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                            <!-- 36px 图标方块。 -->
+                            <Style x:Key="DataMaintenanceIconBoxStyle" TargetType="Border">
+                                <Setter Property="Width" Value="36" />
+                                <Setter Property="Height" Value="36" />
+                                <Setter Property="CornerRadius" Value="10" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="DataMaintenanceTitleStyle" TargetType="TextBlock">
+                                <Setter Property="FontSize" Value="16" />
+                                <Setter Property="FontWeight" Value="Black" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="DataMaintenanceDescriptionStyle" TargetType="TextBlock">
+                                <Setter Property="FontSize" Value="12.5" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                <Setter Property="TextWrapping" Value="Wrap" />
+                            </Style>
+                            <!-- 危险操作按钮：白底红边红字，高 44（触屏最小）。 -->
+                            <Style x:Key="DataMaintenanceDangerButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                                <Setter Property="Height" Value="44" />
+                                <Setter Property="MinWidth" Value="138" />
+                                <Setter Property="Padding" Value="16,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                            </Style>
+                            <!-- 普通操作按钮（检查更新）：高 44。 -->
+                            <Style x:Key="DataMaintenanceNormalButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                                <Setter Property="Height" Value="44" />
+                                <Setter Property="MinWidth" Value="138" />
+                                <Setter Property="Padding" Value="16,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                            </Style>
+                            <!-- 数据下载卡里的同步状态胶囊。 -->
+                            <Style x:Key="DataMaintenanceChipStyle" TargetType="Border">
+                                <Setter Property="Height" Value="24" />
+                                <Setter Property="CornerRadius" Value="12" />
+                                <Setter Property="Padding" Value="10,0" />
+                                <Setter Property="Margin" Value="10,0,0,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <!-- 同步块下方 36px 状态区：同步中显示进度条、失败显示红字，正常留空；仅有内容时才画上分隔线。 -->
+                            <Style x:Key="DataMaintenanceStateZoneStyle" TargetType="Border">
+                                <Setter Property="Height" Value="36" />
+                                <Setter Property="BorderThickness" Value="0,1,0,0" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCatalogSyncing}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsCatalogSyncFailed}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Resources>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.2*" />
-                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Border Grid.Row="1"
+                        <!-- 第一行左：数据下载。标题行 = 图标 + 标题 + 同步状态胶囊 + （右端）主按钮；下面是说明与同步块。 -->
+                        <Border Grid.Row="0"
                                 Grid.Column="0"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                MinHeight="208">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid Grid.Row="0">
+                                Style="{StaticResource DataMaintenanceCardStyle}">
+                            <StackPanel>
+                                <Grid MinHeight="48">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <materialDesign:PackIcon Grid.Column="0"
-                                                             Kind="CloudDownloadOutline"
-                                                             Width="48"
-                                                             Height="48"
-                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                             HorizontalAlignment="Center"
-                                                             VerticalAlignment="Top" />
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.title}"
-                                                   FontSize="18"
-                                                   FontWeight="Black"
-                                                   Foreground="{DynamicResource PosTextBrush}" />
-                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.description}"
-                                                   Style="{StaticResource SettingsPageDescriptionStyle}" />
-                                    </StackPanel>
+                                    <Border Grid.Column="0"
+                                            Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                            Background="{DynamicResource PosPrimarySoftBrush}">
+                                        <materialDesign:PackIcon Kind="CloudDownloadOutline"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{loc:Loc settings.section.dataDownload.title}"
+                                               Style="{StaticResource DataMaintenanceTitleStyle}" />
+                                    <!-- 已同步 / 同步中 / 同步失败 三选一的状态胶囊，紧跟标题。 -->
+                                    <Grid Grid.Column="2" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource DataMaintenanceChipStyle}"
+                                                Background="{DynamicResource PosSuccessSoftBrush}"
+                                                Visibility="{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <materialDesign:PackIcon Kind="CheckCircleOutline" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                                <TextBlock Text="{loc:Loc settings.section.dataDownload.state.synced}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource DataMaintenanceChipStyle}"
+                                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                                Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <materialDesign:PackIcon Kind="Sync" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                                <TextBlock Text="{loc:Loc settings.section.dataDownload.state.syncing}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource DataMaintenanceChipStyle}"
+                                                Background="{DynamicResource PosDangerSoftBrush}"
+                                                Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <materialDesign:PackIcon Kind="AlertCircleOutline" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                                <TextBlock Text="{loc:Loc settings.section.dataDownload.state.failed}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Button Grid.Column="4"
+                                            Command="{Binding DownloadCatalogCommand}"
+                                            services:ButtonFeedback.Cue="Download"
+                                            Style="{StaticResource PosPrimaryButtonStyle}"
+                                            Height="48"
+                                            MinWidth="138"
+                                            Padding="16,0"
+                                            VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="White" />
+                                            <TextBlock Text="{loc:Loc settings.section.dataDownload.action}" Foreground="White" FontWeight="Bold" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
-                                <!-- 同步时间与同步状态合并展示；页面级操作提示仍由底部状态栏显示。 -->
+                                <TextBlock Text="{loc:Loc settings.section.dataDownload.description}"
+                                           Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                           Margin="0,8,0,0" />
+                                <!-- 同步时间与同步状态合并展示（上次同步时间 + 36px 固定状态区）；页面级操作提示仍由底部状态栏显示。 -->
                                 <Border x:Name="CatalogSyncStatusPanel"
-                                        Grid.Row="1"
-                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        Background="{DynamicResource PosSurfaceBrush}"
                                         BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
-                                        Padding="12,10"
-                                        Margin="72,14,0,0">
+                                        Margin="0,8,0,0">
                                     <StackPanel>
-                                        <DockPanel LastChildFill="False">
-                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                        <Grid MinHeight="44" Margin="12,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <materialDesign:PackIcon Kind="ClockOutline"
-                                                                         Width="14"
-                                                                         Height="14"
+                                                                         Width="16"
+                                                                         Height="16"
                                                                          Margin="0,0,6,0"
                                                                          VerticalAlignment="Center"
                                                                          Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                 <TextBlock Text="{Binding CatalogSyncTimeLabelText}"
-                                                           FontSize="11"
+                                                           FontSize="12.5"
                                                            FontWeight="SemiBold"
                                                            VerticalAlignment="Center"
                                                            Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                             </StackPanel>
-                                            <Grid DockPanel.Dock="Right">
-                                                <Border Background="{DynamicResource PosSuccessSoftBrush}"
-                                                        CornerRadius="10"
-                                                        Padding="8,2"
-                                                        Visibility="{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <materialDesign:PackIcon Kind="CheckCircleOutline" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosSuccessTextBrush}" />
-                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.synced}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosSuccessTextBrush}" />
-                                                    </StackPanel>
-                                                </Border>
-                                                <Border Background="{DynamicResource PosPrimarySoftBrush}"
-                                                        CornerRadius="10"
-                                                        Padding="8,2"
-                                                        Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <materialDesign:PackIcon Kind="Sync" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}" />
-                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.syncing}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
-                                                    </StackPanel>
-                                                </Border>
-                                                <Border Background="{DynamicResource PosDangerSoftBrush}"
-                                                        CornerRadius="10"
-                                                        Padding="8,2"
-                                                        Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <materialDesign:PackIcon Kind="AlertCircleOutline" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosDangerTextBrush}" />
-                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.failed}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosDangerTextBrush}" />
-                                                    </StackPanel>
-                                                </Border>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding CatalogSyncTimeText}"
+                                                       FontSize="18"
+                                                       FontWeight="Bold"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource PosTextBrush}" />
+                                        </Grid>
+                                        <Border Style="{StaticResource DataMaintenanceStateZoneStyle}">
+                                            <Grid Margin="12,0" VerticalAlignment="Center">
+                                                <ProgressBar Height="4"
+                                                             IsIndeterminate="True"
+                                                             Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}" />
+                                                <!-- 失败原因最多两行，放不下的部分省略，完整文字在鼠标悬停提示里。 -->
+                                                <TextBlock Text="{Binding CatalogSyncFailureText}"
+                                                           ToolTip="{Binding CatalogSyncFailureText}"
+                                                           FontSize="11.5"
+                                                           LineHeight="14"
+                                                           LineStackingStrategy="BlockLineHeight"
+                                                           MaxHeight="28"
+                                                           TextWrapping="Wrap"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource PosDangerTextBrush}"
+                                                           Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}" />
                                             </Grid>
-                                        </DockPanel>
-                                        <TextBlock Text="{Binding CatalogSyncTimeText}"
-                                                   FontSize="18"
-                                                   FontWeight="Bold"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource PosTextBrush}" />
-                                        <ProgressBar Height="4"
-                                                     Margin="0,8,0,0"
-                                                     IsIndeterminate="True"
-                                                     Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}" />
-                                        <TextBlock Text="{Binding CatalogSyncFailureText}"
-                                                   FontSize="11"
-                                                   Margin="0,4,0,0"
-                                                   TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource PosDangerTextBrush}"
-                                                   Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}" />
+                                        </Border>
                                     </StackPanel>
                                 </Border>
-                                <Button Grid.Row="2"
-                                        Command="{Binding DownloadCatalogCommand}"
-                                        services:ButtonFeedback.Cue="Download"
-                                        Style="{StaticResource PosPrimaryButtonStyle}"
-                                        Height="42"
-                                        MinWidth="138"
-                                        HorizontalAlignment="Left"
-                                        Margin="72,14,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="White" />
-                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.action}" Foreground="White" />
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
+                            </StackPanel>
                         </Border>
 
-                        <Border Grid.Row="1"
+                        <!-- 第一行右：数据重置（授权 / 确认沿用命令内流程）。 -->
+                        <Border Grid.Row="0"
                                 Grid.Column="2"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                MinHeight="208">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid Grid.Row="0">
+                                Style="{StaticResource DataMaintenanceCardStyle}">
+                            <StackPanel>
+                                <Grid MinHeight="48">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <materialDesign:PackIcon Grid.Column="0"
-                                                             Kind="DatabaseRefreshOutline"
-                                                             Width="48"
-                                                             Height="48"
-                                                             Foreground="{DynamicResource PosAccentBrush}"
-                                                             HorizontalAlignment="Center"
-                                                             VerticalAlignment="Top" />
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="{loc:Loc settings.section.dataReset.title}"
-                                                   FontSize="18"
-                                                   FontWeight="Black"
-                                                   Foreground="{DynamicResource PosTextBrush}" />
-                                        <TextBlock Text="{loc:Loc settings.section.dataReset.description}"
-                                                   Style="{StaticResource SettingsPageDescriptionStyle}" />
-                                    </StackPanel>
+                                    <Border Grid.Column="0"
+                                            Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                            Background="{DynamicResource PosWarningSoftBrush}">
+                                        <materialDesign:PackIcon Kind="DatabaseRefreshOutline"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Foreground="{DynamicResource PosWarningTextBrush}"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{loc:Loc settings.section.dataReset.title}"
+                                               Style="{StaticResource DataMaintenanceTitleStyle}" />
+                                    <Button Grid.Column="2"
+                                            Command="{Binding ResetCatalogCommand}"
+                                            Style="{StaticResource DataMaintenanceDangerButtonStyle}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="DatabaseRefreshOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                            <TextBlock Text="{loc:Loc settings.section.dataReset.action}" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
-                                <Button Grid.Row="2"
-                                        Command="{Binding ResetCatalogCommand}"
-                                        Style="{StaticResource PosSecondaryButtonStyle}"
-                                        Height="42"
-                                        MinWidth="154"
-                                        HorizontalAlignment="Center"
-                                        Margin="0,18,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="DatabaseRefreshOutline" Width="18" Height="18" Margin="0,0,8,0" />
-                                        <TextBlock Text="{loc:Loc settings.section.dataReset.action}" />
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
+                                <TextBlock Text="{loc:Loc settings.section.dataReset.description}"
+                                           Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                           Margin="0,8,0,0" />
+                            </StackPanel>
                         </Border>
 
-                        <Border Grid.Row="2"
-                                Grid.ColumnSpan="3"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                Margin="0,16,0,0">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Left"
-                                        Width="52"
-                                        Height="52"
-                                        Background="{DynamicResource PosSuccessSoftBrush}"
-                                        CornerRadius="10"
-                                        Margin="0,0,16,0">
+                        <!-- 第二行：软件更新（非 Debug 通栏；Debug 与「重置测试销售数据」各占一半）。通道作为第三行小字，按钮在右端垂直居中。 -->
+                        <Border Grid.Row="1"
+                                Grid.Column="0"
+                                Style="{StaticResource DataMaintenanceUpdateCardStyle}"
+                                Margin="0,10,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0"
+                                        Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                        Background="{DynamicResource PosSuccessSoftBrush}">
                                     <materialDesign:PackIcon Kind="Update"
-                                                             Width="28"
-                                                             Height="28"
+                                                             Width="20"
+                                                             Height="20"
                                                              Foreground="{DynamicResource PosSuccessTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
-                                <Button DockPanel.Dock="Right"
-                                        Command="{Binding CheckForAppUpdateCommand}"
-                                        Style="{StaticResource PosSecondaryButtonStyle}"
-                                        Height="42"
-                                        MinWidth="154"
-                                        Margin="18,0,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Update" Width="18" Height="18" Margin="0,0,8,0" />
-                                        <TextBlock Text="{loc:Loc settings.section.appUpdate.action}" />
-                                    </StackPanel>
-                                </Button>
-                                <StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
                                     <TextBlock Text="{loc:Loc settings.section.appUpdate.title}"
-                                               FontSize="18"
-                                               FontWeight="Black"
-                                               Foreground="{DynamicResource PosTextBrush}" />
+                                               Style="{StaticResource DataMaintenanceTitleStyle}" />
                                     <TextBlock Text="{loc:Loc settings.section.appUpdate.description}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" />
-                                    <TextBlock FontSize="11"
+                                               Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                               Margin="0,2,0,0" />
+                                    <TextBlock FontSize="11.5"
                                                Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                               Margin="0,5,0,0">
+                                               Margin="0,4,0,0">
                                         <Run Text="{loc:Loc settings.section.appUpdate.channel}" />
                                         <Run Text=": " />
                                         <Run Text="{Binding AppUpdateChannelText, Mode=OneWay}" />
                                     </TextBlock>
                                 </StackPanel>
-                            </DockPanel>
+                                <Button Grid.Column="2"
+                                        Command="{Binding CheckForAppUpdateCommand}"
+                                        Style="{StaticResource DataMaintenanceNormalButtonStyle}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Update" Width="18" Height="18" Margin="0,0,8,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                        <TextBlock Text="{loc:Loc settings.section.appUpdate.action}" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
                         </Border>
 
-                        <Border Grid.Row="3"
-                                Grid.ColumnSpan="3"
-                                Style="{StaticResource SettingsActionCardStyle}"
+                        <!-- 仅 Debug 可见：重置测试销售数据（红底卡，按钮在卡右端；确认框沿用命令内流程）。 -->
+                        <Border Grid.Row="1"
+                                Grid.Column="2"
+                                Style="{StaticResource DataMaintenanceCardStyle}"
                                 Background="{DynamicResource PosDangerSoftBrush}"
                                 BorderBrush="{DynamicResource PosDangerBorderBrush}"
-                                Margin="0,16,0,0"
+                                Margin="0,10,0,0"
                                 Visibility="{Binding IsDebugTestSalesDataResetVisible, Converter={StaticResource BoolToVis}}">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Left"
-                                        Width="52"
-                                        Height="52"
-                                        Background="{DynamicResource PosDangerSoftBrush}"
-                                        CornerRadius="10"
-                                        Margin="0,0,16,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0"
+                                        Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                        Background="{DynamicResource PosSurfaceBrush}">
                                     <materialDesign:PackIcon Kind="DeleteOutline"
-                                                             Width="28"
-                                                             Height="28"
+                                                             Width="20"
+                                                             Height="20"
                                                              Foreground="{DynamicResource PosDangerTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
-                                <Button DockPanel.Dock="Right"
-                                        Command="{Binding ResetTestSalesDataCommand}"
-                                        services:ButtonFeedback.Cue="Delete"
-                                        Style="{StaticResource PosSecondaryButtonStyle}"
-                                        Height="42"
-                                        MinWidth="168"
-                                        Margin="18,0,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="DeleteOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="{DynamicResource PosDangerTextBrush}" />
-                                        <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.action}" Foreground="{DynamicResource PosDangerTextBrush}" />
-                                    </StackPanel>
-                                </Button>
-                                <StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
                                     <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.title}"
-                                               FontSize="18"
-                                               FontWeight="Black"
+                                               Style="{StaticResource DataMaintenanceTitleStyle}"
                                                Foreground="{DynamicResource PosDangerTextBrush}" />
                                     <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.description}"
-                                               Style="{StaticResource SettingsPageDescriptionStyle}" />
+                                               Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                               Margin="0,2,0,0" />
                                 </StackPanel>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- 日结后提醒重启：设备级开关，立即保存，默认开启。 -->
-                        <Border Grid.Row="4"
-                                Grid.ColumnSpan="3"
-                                Style="{StaticResource SettingsActionCardStyle}"
-                                Margin="0,16,0,0"
-                                Visibility="{Binding IsRestartPromptSettingVisible, Converter={StaticResource BoolToVis}}">
-                            <StackPanel>
-                            <Grid MinHeight="72">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="12"
-                                        Background="{DynamicResource PosSurfaceAltBrush}"
-                                        Margin="0,0,14,0" VerticalAlignment="Center">
-                                    <materialDesign:PackIcon Kind="Restart" Width="22" Height="22"
-                                                             Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{loc:Loc settings.restartPrompt.toggle}" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="{loc:Loc settings.restartPrompt.description}"
-                                               TextWrapping="Wrap" FontSize="12.5"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
-                                    <TextBlock Text="{loc:Loc settings.restartPrompt.toggle.help}"
-                                               TextWrapping="Wrap" FontSize="12.5"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding RestartPromptSaveStateText}"
-                                               Tag="{Binding RestartPromptSaveState}"
-                                               Style="{StaticResource SettingsSectionStateTextStyle}"
-                                               Margin="0,0,12,0" />
-                                    <ToggleButton x:Name="RestartPromptSettingToggle"
-                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                  IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
-                                                  AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
-                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Grid>
-                            <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6"
-                                    Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}" />
-                            <Grid MinHeight="72"
-                                  Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="12"
-                                        Background="{DynamicResource PosSurfaceAltBrush}"
-                                        Margin="0,0,14,0" VerticalAlignment="Center">
-                                    <materialDesign:PackIcon Kind="PowerCycle" Width="22" Height="22"
-                                                             Foreground="{DynamicResource PosTextSecondaryBrush}"
-                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{loc:Loc settings.restartTest.title}" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="{loc:Loc settings.restartTest.help}"
-                                               TextWrapping="Wrap" FontSize="12.5"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
-                                </StackPanel>
-                                <Button Grid.Column="2" x:Name="RestartComputerTestButton"
-                                        Command="{Binding RestartComputerCommand}"
-                                        Style="{StaticResource PosSecondaryButtonStyle}"
-                                        MinHeight="48" MinWidth="168" VerticalAlignment="Center">
+                                <Button Grid.Column="2"
+                                        Command="{Binding ResetTestSalesDataCommand}"
+                                        services:ButtonFeedback.Cue="Delete"
+                                        Style="{StaticResource DataMaintenanceDangerButtonStyle}">
                                     <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Restart" Width="18" Height="18" Margin="0,0,8,0"
-                                                                 Foreground="{DynamicResource PosDangerTextBrush}" />
-                                        <TextBlock Text="{loc:Loc settings.restartTest.button}" Foreground="{DynamicResource PosDangerTextBrush}" FontWeight="Bold" />
+                                        <materialDesign:PackIcon Kind="DeleteOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                        <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.action}" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
                                     </StackPanel>
                                 </Button>
                             </Grid>
-                            </StackPanel>
                         </Border>
+
+                        <!-- 第三行：日结后提醒重启（设备级开关，立即保存，默认开启）｜重启电脑（测试）。
+                             整行跟随 IsRestartPromptSettingVisible（原来两项在同一张卡里，行为不变）；没有「重启电脑」时开关卡通栏。 -->
+                        <Grid Grid.Row="2"
+                              Grid.ColumnSpan="3"
+                              Margin="0,10,0,0"
+                              Visibility="{Binding IsRestartPromptSettingVisible, Converter={StaticResource BoolToVis}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Style="{StaticResource DataMaintenanceRestartPromptCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                            Background="{DynamicResource PosSurfaceAltBrush}">
+                                        <materialDesign:PackIcon Kind="Restart" Width="20" Height="20"
+                                                                 Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:Loc settings.restartPrompt.toggle}" FontSize="15" FontWeight="Bold" />
+                                        <TextBlock Text="{loc:Loc settings.restartPrompt.description}"
+                                                   Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                                   Margin="0,2,0,0" />
+                                        <TextBlock Text="{loc:Loc settings.restartPrompt.toggle.help}"
+                                                   Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                                   Margin="0,1,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding RestartPromptSaveStateText}"
+                                                   Tag="{Binding RestartPromptSaveState}"
+                                                   Style="{StaticResource SettingsSectionStateTextStyle}"
+                                                   Margin="0,0,12,0" />
+                                        <ToggleButton x:Name="RestartPromptSettingToggle"
+                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                      IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
+                                                      AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
+                                                      MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2"
+                                    Style="{StaticResource DataMaintenanceCardStyle}"
+                                    Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                            Background="{DynamicResource PosDangerSoftBrush}">
+                                        <materialDesign:PackIcon Kind="PowerCycle" Width="20" Height="20"
+                                                                 Foreground="{DynamicResource PosDangerTextBrush}"
+                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:Loc settings.restartTest.title}" FontSize="15" FontWeight="Bold" />
+                                        <TextBlock Text="{loc:Loc settings.restartTest.help}"
+                                                   Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                                   Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" x:Name="RestartComputerTestButton"
+                                            Command="{Binding RestartComputerCommand}"
+                                            Style="{StaticResource DataMaintenanceDangerButtonStyle}"
+                                            MinHeight="44">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="Restart" Width="18" Height="18" Margin="0,0,8,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                            <TextBlock Text="{loc:Loc settings.restartTest.button}" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </Grid>
                 </controls:SettingsPageHost>
                 <!-- ===== PAGE: DataMaintenance END ===== -->
@@ -3552,99 +3646,213 @@
                 <!-- ===== PAGE: DeviceRegistration END ===== -->
 
                 <!-- ===== PAGE: RemoteMaintenance BEGIN ===== -->
+                <!-- 远程维护（首屏重设计）：上排左「标题卡 + 本机服务状态卡」、右「安装步骤卡（① ② ③）」，
+                     下方通栏固定 76px 状态区（进度条 + 阶段 / 结果文案都落在这里，长错误文案最多两行放得下），
+                     固定底栏只放一个主按钮（InstallRemoteMaintenanceCommand，文案随 RemoteMaintenanceActionText 切换，安装中由命令禁用）。 -->
                 <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
                                            Visibility="{Binding IsRemoteMaintenanceSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
+                    <controls:SettingsPageHost.Footer>
+                        <controls:SettingsFooterBar>
+                            <Button controls:SettingsFooterBar.IsRight="True"
+                                    Command="{Binding InstallRemoteMaintenanceCommand}"
+                                    Style="{StaticResource PosPrimaryButtonStyle}"
+                                    Height="48"
+                                    MinWidth="210"
+                                    Padding="20,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="Download"
+                                                             Width="18"
+                                                             Height="18"
+                                                             Margin="0,0,8,0"
+                                                             Foreground="White" />
+                                    <TextBlock Text="{Binding RemoteMaintenanceActionText}" Foreground="White" FontWeight="Bold" />
+                                </StackPanel>
+                            </Button>
+                        </controls:SettingsFooterBar>
+                    </controls:SettingsPageHost.Footer>
                     <Grid>
+                        <!-- 页面级样式：只在本页使用。 -->
+                        <Grid.Resources>
+                            <Style x:Key="RemoteMaintenanceCardStyle" TargetType="Border" BasedOn="{StaticResource SettingsActionCardStyle}">
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                <Setter Property="Padding" Value="16,14" />
+                            </Style>
+                            <!-- 安装步骤行：白底圆角，最小高 44，左边是蓝色圆形序号。 -->
+                            <Style x:Key="RemoteMaintenanceStepStyle" TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="CornerRadius" Value="8" />
+                                <Setter Property="MinHeight" Value="44" />
+                                <Setter Property="Padding" Value="12,6" />
+                                <Setter Property="Margin" Value="0,6,0,0" />
+                            </Style>
+                            <Style x:Key="RemoteMaintenanceStepNumberStyle" TargetType="Border">
+                                <Setter Property="Width" Value="26" />
+                                <Setter Property="Height" Value="26" />
+                                <Setter Property="CornerRadius" Value="13" />
+                                <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter Property="Margin" Value="0,0,10,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="RemoteMaintenanceStepNumberTextStyle" TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="White" />
+                                <Setter Property="FontSize" Value="13" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                                <Setter Property="HorizontalAlignment" Value="Center" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="RemoteMaintenanceStepTextStyle" TargetType="TextBlock">
+                                <Setter Property="FontSize" Value="13.5" />
+                                <Setter Property="TextWrapping" Value="Wrap" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                            </Style>
+                            <!-- 空闲时状态区里的「—」占位：有进度 / 结果文案时折叠。 -->
+                            <Style x:Key="RemoteMaintenanceIdlePlaceholderStyle" TargetType="TextBlock">
+                                <Setter Property="Text" Value="—" />
+                                <Setter Property="FontSize" Value="13.5" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRemoteMaintenanceProgress}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Resources>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Style="{StaticResource SettingsActionCardStyle}" Margin="0,0,0,16">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Left"
-                                        Width="58"
-                                        Height="58"
-                                        Background="{DynamicResource PosPrimarySoftBrush}"
-                                        CornerRadius="10"
-                                        Margin="0,0,18,0">
-                                    <materialDesign:PackIcon Kind="RemoteDesktop"
-                                                             Width="34"
-                                                             Height="34"
-                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                             HorizontalAlignment="Center"
-                                                             VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding RemoteMaintenanceTitleText}" FontSize="21" FontWeight="Black" />
-                                    <TextBlock Text="{Binding RemoteMaintenanceDescriptionText}"
-                                               FontSize="11"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,4,0,0" />
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
-                        <Border Grid.Row="1" Style="{StaticResource SettingsActionCardStyle}">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0" Text="{loc:Loc settings.remoteMaintenance.localStatus}" Style="{StaticResource SettingsLabelStyle}" />
-                                <Border Grid.Row="1"
-                                        Background="{DynamicResource PosSurfaceAltBrush}"
-                                        BorderBrush="{DynamicResource PosBorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Padding="14,12"
-                                        Margin="0,0,0,18">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding RemoteMaintenanceStatusText}"
-                                                   FontSize="18"
-                                                   FontWeight="Black"
-                                                   Foreground="{DynamicResource PosTextBrush}" />
-                                        <TextBlock Text="{Binding RemoteMaintenanceDetailText}"
-                                                   FontSize="11"
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左列：标题卡 + 本机服务状态卡。 -->
+                        <StackPanel Grid.Row="0" Grid.Column="0">
+                            <Border Style="{StaticResource RemoteMaintenanceCardStyle}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Left"
+                                            Width="56"
+                                            Height="56"
+                                            Background="{DynamicResource PosPrimarySoftBrush}"
+                                            CornerRadius="12"
+                                            Margin="0,0,14,0">
+                                        <materialDesign:PackIcon Kind="RemoteDesktop"
+                                                                 Width="32"
+                                                                 Height="32"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding RemoteMaintenanceTitleText}" FontSize="21" FontWeight="Black" />
+                                        <TextBlock Text="{Binding RemoteMaintenanceDescriptionText}"
+                                                   FontSize="12.5"
                                                    Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
-                                                   Margin="0,5,0,0" />
+                                                   Margin="0,4,0,0" />
                                     </StackPanel>
-                                </Border>
-                                <StackPanel Grid.Row="2">
-                                    <Button Command="{Binding InstallRemoteMaintenanceCommand}"
-                                            Style="{StaticResource PosPrimaryButtonStyle}"
-                                            Height="46"
-                                            HorizontalAlignment="Left"
-                                            MinWidth="190">
-                                        <StackPanel Orientation="Horizontal">
-                                            <materialDesign:PackIcon Kind="Download"
-                                                                     Width="18"
-                                                                     Height="18"
-                                                                     Margin="0,0,8,0"
-                                                                     Foreground="White" />
-                                            <TextBlock Text="{Binding RemoteMaintenanceActionText}" Foreground="White" />
+                                </DockPanel>
+                            </Border>
+                            <Border Style="{StaticResource RemoteMaintenanceCardStyle}" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc settings.remoteMaintenance.localStatus}"
+                                               Style="{StaticResource SettingsLabelStyle}"
+                                               Margin="0,0,0,10" />
+                                    <Border Background="{DynamicResource PosSurfaceBrush}"
+                                            BorderBrush="{DynamicResource PosBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="14,10">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding RemoteMaintenanceStatusText}"
+                                                       FontSize="18"
+                                                       FontWeight="Black"
+                                                       Foreground="{DynamicResource PosTextBrush}" />
+                                            <TextBlock Text="{Binding RemoteMaintenanceDetailText}"
+                                                       FontSize="12.5"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,0,0" />
                                         </StackPanel>
-                                    </Button>
-                                    <StackPanel Margin="0,12,0,0"
-                                                Visibility="{Binding HasRemoteMaintenanceProgress, Converter={StaticResource BoolToVis}}">
-                                        <ProgressBar Height="4"
-                                                     IsIndeterminate="{Binding IsRemoteMaintenanceInstalling}"
-                                                     Visibility="{Binding IsRemoteMaintenanceInstalling, Converter={StaticResource BoolToVis}}"
-                                                     Margin="0,0,0,8" />
-                                        <TextBlock Text="{Binding RemoteMaintenanceProgressText}"
-                                                   FontSize="12"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource PosTextBrush}"
-                                                   TextWrapping="Wrap"
-                                                   AutomationProperties.LiveSetting="Polite" />
-                                    </StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint}"
-                                               FontSize="10"
-                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- 右列：安装步骤卡（原 installHint 整段文字拆成「说明 + ① ② ③ + 保持 POS 打开」）。 -->
+                        <Border Grid.Row="0"
+                                Grid.Column="2"
+                                Style="{StaticResource RemoteMaintenanceCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint.intro}"
+                                           FontSize="13"
+                                           FontWeight="Bold"
+                                           TextWrapping="Wrap" />
+                                <Border Style="{StaticResource RemoteMaintenanceStepStyle}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Left" Style="{StaticResource RemoteMaintenanceStepNumberStyle}">
+                                            <TextBlock Text="1" Style="{StaticResource RemoteMaintenanceStepNumberTextStyle}" />
+                                        </Border>
+                                        <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint.step1}" Style="{StaticResource RemoteMaintenanceStepTextStyle}" />
+                                    </DockPanel>
+                                </Border>
+                                <Border Style="{StaticResource RemoteMaintenanceStepStyle}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Left" Style="{StaticResource RemoteMaintenanceStepNumberStyle}">
+                                            <TextBlock Text="2" Style="{StaticResource RemoteMaintenanceStepNumberTextStyle}" />
+                                        </Border>
+                                        <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint.step2}" Style="{StaticResource RemoteMaintenanceStepTextStyle}" />
+                                    </DockPanel>
+                                </Border>
+                                <Border Style="{StaticResource RemoteMaintenanceStepStyle}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Left" Style="{StaticResource RemoteMaintenanceStepNumberStyle}">
+                                            <TextBlock Text="3" Style="{StaticResource RemoteMaintenanceStepNumberTextStyle}" />
+                                        </Border>
+                                        <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint.step3}" Style="{StaticResource RemoteMaintenanceStepTextStyle}" />
+                                    </DockPanel>
+                                </Border>
+                                <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint.keepOpen}"
+                                           FontSize="12.5"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,10,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 通栏固定 76px 状态区：空闲显示「—」；安装中 = 进度条 + 阶段文案；结束后同一位置显示最终结果（进度文案本身就是结果文案）。
+                             固定高度，进度条 / 长文案出现与消失都不会让页面跳动；按钮不在这里，永远在底栏。 -->
+                        <Border x:Name="RemoteMaintenanceStatusZone"
+                                Grid.Row="1"
+                                Grid.ColumnSpan="3"
+                                Height="76"
+                                Margin="0,12,0,0"
+                                Padding="16,10"
+                                ClipToBounds="True"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10">
+                            <Grid VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource RemoteMaintenanceIdlePlaceholderStyle}" />
+                                <StackPanel Visibility="{Binding HasRemoteMaintenanceProgress, Converter={StaticResource BoolToVis}}">
+                                    <ProgressBar Height="4"
+                                                 IsIndeterminate="{Binding IsRemoteMaintenanceInstalling}"
+                                                 Visibility="{Binding IsRemoteMaintenanceInstalling, Converter={StaticResource BoolToVis}}"
+                                                 Margin="0,0,0,8" />
+                                    <TextBlock Text="{Binding RemoteMaintenanceProgressText}"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               LineHeight="18"
+                                               LineStackingStrategy="BlockLineHeight"
+                                               Foreground="{DynamicResource PosTextBrush}"
                                                TextWrapping="Wrap"
-                                               Margin="0,10,0,0" />
+                                               AutomationProperties.LiveSetting="Polite" />
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -3654,183 +3862,256 @@
 
                 <!-- 员工 App 下载：iPhone 与安卓（含 PDA）各一张二维码卡片，所有收银员可见。 -->
                 <!-- ===== PAGE: MobileAppDownload BEGIN ===== -->
+                <!-- 员工 App 下载（首屏重设计）：两张横排卡（左 = 240px 白底二维码框 + 提示，右 = 图标标题 / 版本 / 链接框 + 复制链接 / 安卓首次安装提示），
+                     二维码本体 222px 画在 240px 白底外框（内边距 8 + 1px 边线）内，留足白边保证可扫；整张二维码仍是点击放大入口（放大层在页面之外，沿用现有）。
+                     「复制链接」是和链接框配对的行内操作，留在卡内；固定底栏只放页面级的「刷新」+ 状态文字（联网状态 / 复制反馈）。
+                     两张卡合计约 312px，1366×632 下无需滚动。页面说明句已在顶栏显示（PageDescriptionText），正文不重复。 -->
                 <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
                                            Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
-                    <!-- SettingsPageHost 槽位：SubTabs（二级页签条）/ Footer（固定底部操作条）；阶段 A 暂不使用，阶段 B 逐页迁移。 -->
-                    <Grid>
-                        <Grid DataContext="{Binding MobileAppDownload}">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <Grid Grid.Row="1">
+                    <controls:SettingsPageHost.Footer>
+                        <!-- 底栏跟随页面一样绑定到 MobileAppDownload 子 ViewModel。 -->
+                        <controls:SettingsFooterBar DataContext="{Binding MobileAppDownload}">
+                            <!-- 状态区（占满中间）：加载进度条 / 离线警告图标 / StatusText / 复制反馈。 -->
+                            <Grid controls:SettingsFooterBar.IsFill="True" VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+                                <ProgressBar Grid.Column="0" Width="60" Height="4" IsIndeterminate="True" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
+                                <materialDesign:PackIcon Grid.Column="1" Kind="AlertCircleOutline" Width="16" Height="16" Margin="0,0,6,0" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" Visibility="{Binding IsOfflineWarning, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Grid.Column="2" Text="{Binding StatusText}" FontSize="12.5" Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Grid.Column="3" Text="{Binding CopyFeedbackText}" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource PosSuccessBrush}" Margin="14,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasCopyFeedback, Converter={StaticResource BoolToVis}}" AutomationProperties.LiveSetting="Polite" />
+                            </Grid>
+                            <Button controls:SettingsFooterBar.IsRight="True"
+                                    Command="{Binding RefreshCommand}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                    Height="44"
+                                    MinWidth="110"
+                                    Padding="18,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="Refresh" Width="18" Height="18" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                    <TextBlock Text="{loc:Loc mobileApp.refresh}" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                </StackPanel>
+                            </Button>
+                        </controls:SettingsFooterBar>
+                    </controls:SettingsPageHost.Footer>
+                    <Grid>
+                        <!-- 页面级样式：只在本页使用。 -->
+                        <Grid.Resources>
+                            <Style x:Key="MobileAppCardStyle" TargetType="Border" BasedOn="{StaticResource SettingsActionCardStyle}">
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                <Setter Property="Padding" Value="14" />
+                            </Style>
+                            <!-- 二维码背板固定纯白，不随主题：深色主题下白底留边才保证手机相机扫得到（主题测试只禁止直接写颜色名，这里走资源）。 -->
+                            <SolidColorBrush x:Key="MobileAppQrBackdropBrush" Color="#FFFFFFFF" />
+                            <!-- 二维码按钮：240×240 白底外框，二维码本体 222px 居中，四周白边 8px（含 1px 边线）。 -->
+                            <Style x:Key="MobileAppQrButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                                <Setter Property="Width" Value="240" />
+                                <Setter Property="Height" Value="240" />
+                                <Setter Property="Padding" Value="8" />
+                                <Setter Property="Background" Value="{StaticResource MobileAppQrBackdropBrush}" />
+                                <Setter Property="HorizontalAlignment" Value="Center" />
+                                <Setter Property="VerticalAlignment" Value="Top" />
+                            </Style>
+                            <!-- 链接框：44 高，与「复制链接」按钮同高。 -->
+                            <Style x:Key="MobileAppLinkBoxStyle" TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="CornerRadius" Value="6" />
+                                <Setter Property="Padding" Value="10,0" />
+                                <Setter Property="Height" Value="44" />
+                            </Style>
+                            <Style x:Key="MobileAppCopyButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                                <Setter Property="Height" Value="44" />
+                                <Setter Property="Padding" Value="12,0" />
+                                <Setter Property="Margin" Value="0,8,0,0" />
+                            </Style>
+                            <Style x:Key="MobileAppIconBoxStyle" TargetType="Border">
+                                <Setter Property="Width" Value="36" />
+                                <Setter Property="Height" Value="36" />
+                                <Setter Property="CornerRadius" Value="10" />
+                                <Setter Property="Margin" Value="0,0,10,0" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                            <Style x:Key="MobileAppQrHintStyle" TargetType="TextBlock">
+                                <Setter Property="FontSize" Value="13" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                                <Setter Property="TextAlignment" Value="Center" />
+                                <Setter Property="TextWrapping" Value="Wrap" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                        </Grid.Resources>
+                        <Grid DataContext="{Binding MobileAppDownload}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                                <!-- iPhone / iPad -->
-                                <Border Grid.Column="0" Style="{StaticResource SettingsActionCardStyle}" Padding="14">
-                                    <StackPanel>
-                                        <DockPanel Margin="0,0,0,8">
-                                            <Border DockPanel.Dock="Left" Width="40" Height="40" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="9" Margin="0,0,12,0">
-                                                <materialDesign:PackIcon Kind="AppleIos" Width="24" Height="24" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <StackPanel VerticalAlignment="Center">
-                                                <TextBlock Text="{loc:Loc mobileApp.ios.title}" FontSize="15" FontWeight="Bold" />
-                                                <TextBlock Text="{loc:Loc mobileApp.ios.subtitle}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                            </StackPanel>
-                                        </DockPanel>
+                            <!-- iPhone / iPad -->
+                            <Border Grid.Column="0" Style="{StaticResource MobileAppCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="240" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <!-- 左：二维码（240 框 + 放大镜徽标）+ 其下一句提示（固定 34 高，英文两行也放得下）。 -->
+                                    <Grid Grid.Column="0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="240" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="34" />
+                                        </Grid.RowDefinitions>
                                         <Button Command="{Binding EnlargeCommand}"
                                                 CommandParameter="ios"
-                                                Style="{StaticResource PosSecondaryButtonStyle}"
-                                                Width="200"
-                                                Height="200"
-                                                Padding="0"
-                                                Background="{DynamicResource PosSurfaceBrush}"
-                                                HorizontalAlignment="Center"
+                                                Style="{StaticResource MobileAppQrButtonStyle}"
                                                 AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}">
-                                            <Grid>
-                                                <Image Source="{Binding IosQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=190}"
+                                            <!-- 内层固定 222×222：放大镜徽标贴在二维码画布右下角，图片小于画布时落在白边里。 -->
+                                            <Grid Width="222" Height="222">
+                                                <Image Source="{Binding IosQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=222}"
                                                        Stretch="None"
                                                        RenderOptions.BitmapScalingMode="NearestNeighbor"
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center" />
-                                                <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,6,6">
+                                                <Border Width="36" Height="36" CornerRadius="18" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2">
                                                     <materialDesign:PackIcon Kind="MagnifyPlus" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
                                             </Grid>
                                         </Button>
-                                        <TextBlock Text="{loc:Loc mobileApp.ios.hint}" FontSize="13" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,4" />
-                                        <Grid Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Left" />
-                                            <TextBlock Text="{Binding IosVersionText}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                                        </Grid>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,0" Height="40" Margin="0,0,8,0">
-                                                <TextBlock Text="{Binding IosLinkText}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                            </Border>
-                                            <Button Grid.Column="1" Command="{Binding CopyLinkCommand}" CommandParameter="ios" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="12,0">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <materialDesign:PackIcon Kind="ContentCopy" Width="16" Height="16" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                                                    <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="12" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                                                </StackPanel>
-                                            </Button>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- 安卓手机 / PDA：二维码指向总部匿名下载入口，扫码后直接下载最新安装包。 -->
-                                <Border Grid.Column="2" Style="{StaticResource SettingsActionCardStyle}" Padding="14">
-                                    <StackPanel>
-                                        <DockPanel Margin="0,0,0,8">
-                                            <Border DockPanel.Dock="Left" Width="40" Height="40" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="9" Margin="0,0,12,0">
-                                                <materialDesign:PackIcon Kind="Android" Width="24" Height="24" Foreground="{DynamicResource PosSuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <Border DockPanel.Dock="Right" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="11" Padding="9,3" VerticalAlignment="Center">
-                                                <TextBlock Text="{loc:Loc mobileApp.android.badge}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                        <TextBlock Grid.Row="2" Text="{loc:Loc mobileApp.ios.hint}" Style="{StaticResource MobileAppQrHintStyle}" />
+                                    </Grid>
+                                    <!-- 右：图标标题 / 最新版本 / 链接框 + 整宽复制按钮。 -->
+                                    <StackPanel Grid.Column="2">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource MobileAppIconBoxStyle}" Background="{DynamicResource PosPrimarySoftBrush}">
+                                                <materialDesign:PackIcon Kind="AppleIos" Width="22" Height="22" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <StackPanel VerticalAlignment="Center">
-                                                <TextBlock Text="{loc:Loc mobileApp.android.title}" FontSize="15" FontWeight="Bold" />
-                                                <TextBlock Text="{loc:Loc mobileApp.android.subtitle}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                <TextBlock Text="{loc:Loc mobileApp.ios.title}" FontSize="15" FontWeight="Bold" />
+                                                <TextBlock Text="{loc:Loc mobileApp.ios.subtitle}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                             </StackPanel>
                                         </DockPanel>
+                                        <Grid Margin="0,8,0,0">
+                                            <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12.5" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Left" />
+                                            <TextBlock Text="{Binding IosVersionText}" FontSize="12.5" FontWeight="Bold" HorizontalAlignment="Right" />
+                                        </Grid>
+                                        <Border Style="{StaticResource MobileAppLinkBoxStyle}" Margin="0,8,0,0">
+                                            <TextBlock Text="{Binding IosLinkText}" FontSize="11.5" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </Border>
+                                        <Button Command="{Binding CopyLinkCommand}" CommandParameter="ios" Style="{StaticResource MobileAppCopyButtonStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="ContentCopy" Width="16" Height="16" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="13.5" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- 安卓手机 / PDA：二维码指向总部匿名下载入口，扫码后直接下载最新安装包。 -->
+                            <Border Grid.Column="2" Style="{StaticResource MobileAppCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="240" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <!-- 左：二维码（同样 240 框）或「暂无安装包」占位（同尺寸同位置）+ 提示。 -->
+                                    <Grid Grid.Column="0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="240" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="34" />
+                                        </Grid.RowDefinitions>
                                         <Button Command="{Binding EnlargeCommand}"
                                                 CommandParameter="android"
-                                                Style="{StaticResource PosSecondaryButtonStyle}"
-                                                Width="200"
-                                                Height="200"
-                                                Padding="0"
-                                                Background="{DynamicResource PosSurfaceBrush}"
-                                                HorizontalAlignment="Center"
+                                                Style="{StaticResource MobileAppQrButtonStyle}"
                                                 AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}"
                                                 Visibility="{Binding IsAndroidAvailable, Converter={StaticResource BoolToVis}}">
-                                            <Grid>
-                                                <Image Source="{Binding AndroidQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=190}"
+                                            <!-- 内层固定 222×222：放大镜徽标贴在二维码画布右下角，图片小于画布时落在白边里。 -->
+                                            <Grid Width="222" Height="222">
+                                                <Image Source="{Binding AndroidQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=222}"
                                                        Stretch="None"
                                                        RenderOptions.BitmapScalingMode="NearestNeighbor"
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center" />
-                                                <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,6,6">
+                                                <Border Width="36" Height="36" CornerRadius="18" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2">
                                                     <materialDesign:PackIcon Kind="MagnifyPlus" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
                                             </Grid>
                                         </Button>
                                         <!-- 总部确认没有可下载的安卓包时，不显示会扫出 404 的二维码，改为说明与重试。 -->
-                                        <Border Width="200"
-                                                Height="200"
+                                        <Border Width="240"
+                                                Height="240"
                                                 HorizontalAlignment="Center"
-                                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                                VerticalAlignment="Top"
+                                                Background="{DynamicResource PosSurfaceBrush}"
                                                 BorderBrush="{DynamicResource PosDividerBrush}"
                                                 BorderThickness="1"
-                                                CornerRadius="8"
+                                                CornerRadius="10"
                                                 Visibility="{Binding IsAndroidNotPublished, Converter={StaticResource BoolToVis}}">
-                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,0">
                                                 <materialDesign:PackIcon Kind="PackageVariantClosed" Width="40" Height="40" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Center" />
-                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublished}" FontSize="14" FontWeight="Bold" TextAlignment="Center" Margin="0,10,0,2" />
-                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublishedHint}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" TextAlignment="Center" />
-                                                <Button Command="{Binding RefreshCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="16,0" HorizontalAlignment="Center" Margin="0,12,0,0">
+                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublished}" FontSize="14" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,2" />
+                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublishedHint}" FontSize="11.5" Foreground="{DynamicResource PosMutedForegroundBrush}" TextAlignment="Center" TextWrapping="Wrap" />
+                                                <Button Command="{Binding RefreshCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="44" Padding="20,0" HorizontalAlignment="Center" Margin="0,10,0,0">
                                                     <TextBlock Text="{loc:Loc mobileApp.retry}" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
                                                 </Button>
                                             </StackPanel>
                                         </Border>
-                                        <TextBlock Text="{loc:Loc mobileApp.android.hint}" FontSize="13" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,4" />
-                                        <!-- 版本与包大小合成一行，让两张卡片在 1366×688 下一屏放得下。 -->
-                                        <Grid Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Left" />
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <TextBlock Text="{Binding AndroidVersionText}" FontSize="12" FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding AndroidSizeText}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="10,0,0,0" Visibility="{Binding HasAndroidSize, Converter={StaticResource BoolToVis}}" />
-                                            </StackPanel>
-                                        </Grid>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,0" Height="40" Margin="0,0,8,0">
-                                                <TextBlock Text="{Binding AndroidLinkText}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Row="2" Text="{loc:Loc mobileApp.android.hint}" Style="{StaticResource MobileAppQrHintStyle}" />
+                                    </Grid>
+                                    <!-- 右：图标标题 + 「PDA 扫这张」徽章 / 最新版本（含构建号、包大小，放不下自动折行）/ 链接框 + 复制 / 底部首次安装提示。 -->
+                                    <Grid Grid.Column="2">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Row="0">
+                                            <DockPanel>
+                                                <Border DockPanel.Dock="Left" Style="{StaticResource MobileAppIconBoxStyle}" Background="{DynamicResource PosSuccessSoftBrush}">
+                                                    <materialDesign:PackIcon Kind="Android" Width="22" Height="22" Foreground="{DynamicResource PosSuccessTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{loc:Loc mobileApp.android.title}" FontSize="15" FontWeight="Bold" />
+                                                    <TextBlock Text="{loc:Loc mobileApp.android.subtitle}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <!-- 徽章独立一行，英文长文案不挤标题。 -->
+                                            <Border Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="12" Padding="10,3" HorizontalAlignment="Left" Margin="0,8,0,0">
+                                                <TextBlock Text="{loc:Loc mobileApp.android.badge}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                             </Border>
-                                            <Button Grid.Column="1" Command="{Binding CopyLinkCommand}" CommandParameter="android" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="12,0">
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12.5" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Top" Margin="0,0,8,0" />
+                                                <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding AndroidVersionText}" FontSize="12.5" FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding AndroidSizeText}" FontSize="12.5" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="8,0,0,0" Visibility="{Binding HasAndroidSize, Converter={StaticResource BoolToVis}}" />
+                                                </WrapPanel>
+                                            </Grid>
+                                            <Border Style="{StaticResource MobileAppLinkBoxStyle}" Margin="0,8,0,0">
+                                                <TextBlock Text="{Binding AndroidLinkText}" FontSize="11.5" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </Border>
+                                            <Button Command="{Binding CopyLinkCommand}" CommandParameter="android" Style="{StaticResource MobileAppCopyButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <materialDesign:PackIcon Kind="ContentCopy" Width="16" Height="16" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                                                    <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="12" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                    <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="13.5" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
                                                 </StackPanel>
                                             </Button>
-                                        </Grid>
-                                        <Border Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,8,0,0">
-                                            <TextBlock Text="{loc:Loc mobileApp.android.note}" FontSize="11" Foreground="{DynamicResource PosWarningTextBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Border Grid.Row="1" VerticalAlignment="Bottom" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,8,0,0">
+                                            <TextBlock Text="{loc:Loc mobileApp.android.note}" FontSize="12.5" Foreground="{DynamicResource PosWarningTextBrush}" TextWrapping="Wrap" />
                                         </Border>
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-
-                            <!-- 底部状态：联网状态文案、复制反馈、刷新。 -->
-                            <Grid Grid.Row="2" Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <ProgressBar Width="60" Height="4" IsIndeterminate="True" Margin="0,0,10,0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
-                                    <materialDesign:PackIcon Kind="AlertCircleOutline" Width="16" Height="16" Margin="0,0,6,0" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" Visibility="{Binding IsOfflineWarning, Converter={StaticResource BoolToVis}}" />
-                                    <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-                                    <TextBlock Text="{Binding CopyFeedbackText}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosSuccessBrush}" Margin="14,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasCopyFeedback, Converter={StaticResource BoolToVis}}" AutomationProperties.LiveSetting="Polite" />
-                                </StackPanel>
-                                <Button Grid.Column="1" Command="{Binding RefreshCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="14,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Refresh" Width="18" Height="18" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                                        <TextBlock Text="{loc:Loc mobileApp.refresh}" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
+                                    </Grid>
+                                </Grid>
+                            </Border>
                         </Grid>
                     </Grid>
                 </controls:SettingsPageHost>

@@ -315,6 +315,11 @@
   <data name="settings.remoteMaintenance.restore" xml:space="preserve"><value>检查并恢复</value></data>
   <data name="settings.remoteMaintenance.localStatus" xml:space="preserve"><value>本机服务状态</value></data>
   <data name="settings.remoteMaintenance.installHint" xml:space="preserve"><value>无需单独安装 RustDesk。① 点击“安装远程维护”。② 等待检查和下载完成。③ 在每次 Windows 授权窗口中选择“是”（如有提示，请输入管理员凭据）。请保持 POS 打开，直到提示配置完成。</value></data>
+  <data name="settings.remoteMaintenance.installHint.intro" xml:space="preserve"><value>无需单独安装 RustDesk。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step1" xml:space="preserve"><value>点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step2" xml:space="preserve"><value>等待检查和下载完成。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step3" xml:space="preserve"><value>在每次 Windows 授权窗口中选择“是”（如有提示，请输入管理员凭据）。</value></data>
+  <data name="settings.remoteMaintenance.installHint.keepOpen" xml:space="preserve"><value>请保持 POS 打开，直到提示配置完成。</value></data>
   <data name="settings.remoteMaintenance.progress.preparing" xml:space="preserve"><value>正在获取远程维护安装信息，请稍候…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingRustDesk" xml:space="preserve"><value>正在后台下载并校验 RustDesk（1/2）…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingStatusAgent" xml:space="preserve"><value>正在后台下载并校验状态服务（2/2）…</value></data>
