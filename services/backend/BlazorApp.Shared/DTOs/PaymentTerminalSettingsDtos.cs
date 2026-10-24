@@ -11,6 +11,27 @@ namespace BlazorApp.Shared.DTOs
         public List<PaymentTerminalStoreOptionDto> Stores { get; set; } = new();
         public string? SelectedStoreCode { get; set; }
         public List<LinklyCloudCredentialAdminDto> Linkly { get; set; } = new();
+        // 当前所选门店的「收银机直连 Square」开关状态；未选门店时为 null。
+        public PaymentTerminalSquareDirectStatusDto? SquareDirect { get; set; }
+    }
+
+    public class PaymentTerminalSquareDirectStatusDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        // 直连开关表是否已存在：由 POS API 启动时建表，未部署新版 POS API 时为 false，此时不能开启。
+        public bool Available { get; set; }
+        public bool Enabled { get; set; }
+        public DateTime? UpdatedAtUtc { get; set; }
+        public string? UpdatedBy { get; set; }
+    }
+
+    public class UpdateSquareDirectDto
+    {
+        [Required(ErrorMessage = "门店编码不能为空")]
+        [StringLength(32, ErrorMessage = "门店编码长度不能超过32个字符")]
+        public string StoreCode { get; set; } = string.Empty;
+
+        public bool Enabled { get; set; }
     }
 
     public class PaymentTerminalEnvironmentStatusDto

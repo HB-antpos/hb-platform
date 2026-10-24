@@ -451,6 +451,10 @@ export interface ContainerDetailManualDraftSummary {
   total: number
   importPrice: number
   retailPrice: number
+  /** 已有进口价草稿（保存明细时回写仓库表 / 主档 / 分店进货价）。 */
+  warehouseImportPrice: number
+  /** 已有零售价草稿（保存明细时回写仓库表 / 主档，可联动分店价与价格任务）。 */
+  warehouseRetailPrice: number
   englishName: number
   other: number
 }
@@ -466,7 +470,9 @@ export function summarizeContainerDetailManualDraft(
   pendingPatches: PendingContainerDetailPatchMap,
   autoSaveUnsettledPatches: ContainerDetailAutoSavePatchMap,
 ): ContainerDetailManualDraftSummary {
-  const summary: ContainerDetailManualDraftSummary = { total: 0, importPrice: 0, retailPrice: 0, englishName: 0, other: 0 }
+  const summary: ContainerDetailManualDraftSummary = {
+    total: 0, importPrice: 0, retailPrice: 0, warehouseImportPrice: 0, warehouseRetailPrice: 0, englishName: 0, other: 0,
+  }
   Object.values(pendingPatches).forEach((patch) => {
     const unsettled = autoSaveUnsettledPatches[patch.hguid] ?? {}
     getSubmittedContainerDetailFields(patch).forEach((field) => {
@@ -474,6 +480,8 @@ export function summarizeContainerDetailManualDraft(
       summary.total += 1
       if (field === '进口价格') summary.importPrice += 1
       else if (field === '贴牌价格') summary.retailPrice += 1
+      else if (field === '仓库进口价') summary.warehouseImportPrice += 1
+      else if (field === '仓库零售价') summary.warehouseRetailPrice += 1
       else if (field === '英文名称') summary.englishName += 1
       else summary.other += 1
     })

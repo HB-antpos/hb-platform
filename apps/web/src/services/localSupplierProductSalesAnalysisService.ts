@@ -1,5 +1,6 @@
 import type {
   LocalSupplierProductSalesAnalysisBranch,
+  LocalSupplierProductSalesAnalysisBranchPurchase,
   LocalSupplierProductSalesAnalysisBootstrap,
   LocalSupplierProductSalesAnalysisCandidate,
   LocalSupplierProductSalesAnalysisDaily,
@@ -185,4 +186,11 @@ export function queryLocalSupplierProductSalesAnalysisSummary(body: LocalSupplie
 export function queryLocalSupplierProductSalesAnalysisProductDaily(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/product-daily', body, (raw) => Array.isArray(raw) ? raw.map(daily).filter((item): item is LocalSupplierProductSalesAnalysisDaily => !!item) : [], signal) }
 export function queryLocalSupplierProductSalesAnalysisInvoiceDetails(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/invoice-details', body, (raw) => paged(raw, detail), signal) }
 export function queryLocalSupplierProductSalesAnalysisBranches(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/branches', body, (raw) => Array.isArray(raw) ? raw.map(branch).filter((item): item is LocalSupplierProductSalesAnalysisBranch => !!item) : [], signal) }
+function branchPurchase(raw: unknown): LocalSupplierProductSalesAnalysisBranchPurchase | null {
+  const record = asRecord(raw); const branchCode = record && stringValue(pick(record, 'branchCode', 'BranchCode'))
+  if (!record || !branchCode) return null
+  return { branchCode, branchName: stringValue(pick(record, 'branchName', 'BranchName')), purchaseQuantity: numberValue(pick(record, 'purchaseQuantity', 'PurchaseQuantity')) }
+}
+// 分店排行的「进货」列：进货区间独立于筛选日期，只随当前商品与进货区间变化。
+export function queryLocalSupplierProductSalesAnalysisBranchPurchases(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/branch-purchases', body, (raw) => Array.isArray(raw) ? raw.map(branchPurchase).filter((item): item is LocalSupplierProductSalesAnalysisBranchPurchase => !!item) : [], signal) }
 export function queryLocalSupplierProductSalesAnalysisBranchDaily(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/branch-daily', body, (raw) => Array.isArray(raw) ? raw.map(daily).filter((item): item is LocalSupplierProductSalesAnalysisDaily => !!item) : [], signal) }

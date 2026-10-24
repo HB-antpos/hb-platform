@@ -686,6 +686,10 @@ public interface IFaceTrafficService
 {
     Task<FaceTrafficDto> GetTrafficAsync(string storeCode, string? from, string? to, FaceMatchActor actor, CancellationToken cancellationToken = default);
 
+    /// <summary>移动端客流总览：按周期（day / week / month）一次返回当期与对照期，口径（今天、周起点、对照期）全部由服务端按门店时区算。</summary>
+    Task<FaceTrafficOverviewDto> GetOverviewAsync(
+        string storeCode, string? period, string? anchor, FaceMatchActor actor, CancellationToken cancellationToken = default);
+
     Task<FaceMatchPageDto<FaceAuditItemDto>> ListAuditAsync(
         string? storeCode, string? action, DateTime? fromUtc, DateTime? toUtc, int page, int pageSize, CancellationToken cancellationToken = default);
 }

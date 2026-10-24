@@ -40,8 +40,9 @@
   gap: 12px 24px;
 }
 
-/* 共用行与门店专用行之间用分隔线隔开。 */
-.pts-square-store {
+/* 共用行、门店专用行、直连行之间用分隔线隔开。 */
+.pts-square-store,
+.pts-square-direct {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #eaecf0;

@@ -5,6 +5,8 @@
 .field { display: flex; flex: 0 1 auto; flex-direction: column; gap: 2px; min-width: 0; color: #65758b; font-size: 12px; }
 .field > span { font-weight: 600; }
 .storeSelect { width: 220px; }
+/* 销售、进货两个日期并排，定宽让筛选栏在 1280 宽度下仍保持一行。 */
+.rangePicker { width: 236px; }
 .layout { display: grid; grid-template-areas: "products total branch-trend" "products daily branch-sales"; grid-template-columns: 240px repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .column { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .leftColumn { grid-area: products; }
@@ -94,6 +96,12 @@
 .branchButton:hover, .branchButton:focus-visible { color: #1677ff; text-decoration: underline; outline: none; }
 .branchTotals { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; color: #53667e; font-size: 12px; font-variant-numeric: tabular-nums; }
 .branchTotals b { margin-left: 3px; color: #263a56; }
+/* 进货量统一用紫色，与正价蓝、折扣橙、销售额绿区分；销量与进货在同一行内并列时一眼可辨。 */
+.branchTotals .purchase, .branchTotals .purchase b, .purchaseText, .tableWrap :global(td.ant-table-cell).purchaseCell { color: #6f42c1; }
+.branchTotals .purchase { border-radius: 3px; outline: none; cursor: help; }
+.branchTotals .purchase:focus-visible { box-shadow: 0 0 0 2px rgb(111 66 193 / 35%); }
+.productQuantities { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; }
+.productQuantities small { font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .warning { margin-bottom: 8px; }
 .coverageDetails { margin-top: 6px; font-size: 12px; }
 .coverageDetails summary { cursor: pointer; color: #3c6fae; }
@@ -111,7 +119,7 @@
 
 /* 桌面端在商品列表之外始终均分两个分析区，确保总销量与分店趋势各占 50%。 */
 @media (max-width: 1439px) and (min-width: 1344px) { .metrics { gap: 6px 9px; } }
-@media (max-width: 899px) { .toolbar { align-items: stretch; flex-direction: column; } .field, .storeSelect { width: 100%; } .layout { grid-template-areas: "products" "total" "daily" "branch-trend" "branch-sales"; grid-template-columns: 1fr; } .metrics { margin-left: 0; } .tableFilters { align-items: stretch; flex-wrap: wrap; } }
+@media (max-width: 899px) { .toolbar { align-items: stretch; flex-direction: column; } .field, .storeSelect, .rangePicker { width: 100%; } .layout { grid-template-areas: "products" "total" "daily" "branch-trend" "branch-sales"; grid-template-columns: 1fr; } .metrics { margin-left: 0; } .tableFilters { align-items: stretch; flex-wrap: wrap; } }
 @media (max-width: 520px) { .panel { padding: 10px; } .currentProduct { align-items: flex-start; flex-wrap: wrap; } .metrics { width: 100%; grid-template-columns: repeat(2, 1fr); } .metrics > div { align-items: flex-start; } :global(.batch-product-sales-chart-legend) { gap: 8px; font-size: 11px; } }
 @media (prefers-reduced-motion: reduce) { .productRow { transition: none; } }
 

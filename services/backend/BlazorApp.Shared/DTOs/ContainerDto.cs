@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
@@ -23,6 +24,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 货柜编号
         /// </summary>
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? 货柜编号 { get; set; }
 
         /// <summary>
@@ -735,6 +737,28 @@ namespace BlazorApp.Shared.DTOs
         /// 跳过商品主数据和关联价格表同步，仅更新货柜明细
         /// </summary>
         public bool? SkipRelatedProductSync { get; set; }
+
+        /// <summary>
+        /// 已有进口价：只回写已有商品的仓库进货价 / 商品主档进货价 / 分店进货价，
+        /// 不改货柜明细自己的「本次进口价」（ImportPrice）。优先于 <see cref="进口价格"/> 的同步语义。
+        /// </summary>
+        public decimal? 仓库进口价 { get; set; }
+
+        /// <summary>
+        /// 已有零售价：只回写已有商品的仓库零售价 / 商品主档零售价（可按开关联动分店价与价格任务），
+        /// 不改货柜明细自己的「本次零售价」（OEMPrice）。优先于 <see cref="贴牌价格"/> 的同步语义。
+        /// </summary>
+        public decimal? 仓库零售价 { get; set; }
+
+        /// <summary>
+        /// 提交 <see cref="仓库进口价"/> 时前端看到的仓库进货价；与锁内当前值不一致说明已被他人修改，该字段被拒绝。
+        /// </summary>
+        public decimal? ExpectedWarehouseImportPrice { get; set; }
+
+        /// <summary>
+        /// 提交 <see cref="仓库零售价"/> 时前端看到的仓库零售价；与锁内当前值不一致说明已被他人修改，该字段被拒绝。
+        /// </summary>
+        public decimal? ExpectedWarehouseOemPrice { get; set; }
     }
 
     /// <summary>
@@ -1035,6 +1059,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 货柜编号
         /// </summary>
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? 货柜编号 { get; set; }
 
         /// <summary>

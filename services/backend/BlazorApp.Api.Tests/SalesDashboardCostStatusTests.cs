@@ -98,6 +98,8 @@ public sealed class SalesDashboardCostStatusTests
                 },
             };
             var ado = new Mock<IAdo>(MockBehavior.Strict);
+            // 月 / 日投影表不存在：走日统计原路径，本用例验证的就是原路径的映射。
+            ado.Setup(value => value.GetIntAsync(It.IsAny<string>(), It.IsAny<SugarParameter[]>())).ReturnsAsync(0);
             ado.Setup(value => value.SqlQueryAsync<SalesDashboardReactService.ProductReportPagingSqlRow>(
                     It.IsAny<string>(), It.IsAny<SugarParameter[]>()))
                 .ReturnsAsync(sqlRows.ToList());
@@ -151,6 +153,8 @@ public sealed class SalesDashboardCostStatusTests
         var sort = ProductReportSort.Parse(sortField, sortOrder);
         string? capturedSql = null;
         var ado = new Mock<IAdo>(MockBehavior.Strict);
+        // 月 / 日投影表不存在：走日统计原路径，本用例验证的就是原路径的排序 SQL。
+        ado.Setup(value => value.GetIntAsync(It.IsAny<string>(), It.IsAny<SugarParameter[]>())).ReturnsAsync(0);
         ado.Setup(value => value.SqlQueryAsync<SalesDashboardReactService.ProductReportPagingSqlRow>(
                 It.IsAny<string>(), It.IsAny<SugarParameter[]>()))
             .Callback<string, SugarParameter[]>((sql, _) => capturedSql = sql)
@@ -191,6 +195,94 @@ public sealed class SalesDashboardCostStatusTests
         Assert.Equal(0, page.Total);
         ado.Verify(value => value.SqlQueryAsync<SalesDashboardReactService.ProductReportPagingSqlRow>(
             It.IsAny<string>(), It.IsAny<SugarParameter[]>()), Times.Once);
+    }
+
+    private static async Task<string?> CaptureProductPagingSqlAsync(
+        bool projectionReady,
+        DateRangeDto range,
+        List<string>? branchCodes = null,
+        string? productSearch = null
+    )
+    {
+        string? capturedSql = null;
+        var ado = new Mock<IAdo>(MockBehavior.Strict);
+        ado.Setup(value => value.GetIntAsync(It.IsAny<string>(), It.IsAny<SugarParameter[]>()))
+            .ReturnsAsync(projectionReady ? 1 : 0);
+        ado.Setup(value => value.SqlQueryAsync<SalesDashboardReactService.ProductReportPagingSqlRow>(
+                It.IsAny<string>(), It.IsAny<SugarParameter[]>()))
+            .Callback<string, SugarParameter[]>((sql, _) => capturedSql = sql)
+            .ReturnsAsync(new List<SalesDashboardReactService.ProductReportPagingSqlRow>
+            {
+                new() { HasData = false, TotalCount = 0 },
+            });
+        var reportDb = new Mock<ISqlSugarClient>(MockBehavior.Strict);
+        reportDb.SetupGet(value => value.CurrentConnectionConfig)
+            .Returns(new ConnectionConfig { DbType = DbType.SqlServer });
+        reportDb.SetupGet(value => value.Ado).Returns(ado.Object);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = CreateService(reportDb.Object, cache);
+        await service.GetEnhancedSalesProductDetailsSqlServerAsync(
+            range, branchCodes, null, null, 1, 20, productSearch, false, default);
+        return capturedSql;
+    }
+
+    private static DateRangeDto YearWithCompare() => new()
+    {
+        StartDate = new DateTime(2025, 10, 21),
+        EndDate = new DateTime(2026, 10, 21),
+        CompareStartDate = new DateTime(2024, 10, 22),
+        CompareEndDate = new DateTime(2025, 10, 22),
+    };
+
+    [Fact]
+    public async Task 投影就绪且全部分店无关键词时执行投影版分页SQL()
+    {
+        var sql = await CaptureProductPagingSqlAsync(projectionReady: true, YearWithCompare());
+
+        Assert.Equal(SalesDashboardReactService.BuildProductReportProjectionPagingSql(includeCompare: true), sql);
+    }
+
+    [Fact]
+    public async Task 投影表不存在时退回日统计原路径()
+    {
+        var sql = await CaptureProductPagingSqlAsync(projectionReady: false, YearWithCompare());
+
+        Assert.Equal(SalesDashboardReactService.BuildProductReportPagingSql(includeCompare: true), sql);
+    }
+
+    [Fact]
+    public async Task 选了具体分店时即使投影就绪也走原路径()
+    {
+        // 月 / 日投影没有门店维度，选分店必须读日统计。
+        var sql = await CaptureProductPagingSqlAsync(
+            projectionReady: true, YearWithCompare(), branchCodes: new List<string> { "1003" });
+
+        Assert.Equal(SalesDashboardReactService.BuildProductReportPagingSql(includeCompare: true), sql);
+    }
+
+    [Fact]
+    public async Task 带货号或条码关键词时即使投影就绪也走原路径()
+    {
+        // 投影没有条码，关键词匹配必须读日统计。
+        var sql = await CaptureProductPagingSqlAsync(
+            projectionReady: true, YearWithCompare(), productSearch: "8801234");
+
+        Assert.Equal(SalesDashboardReactService.BuildProductReportPagingSql(includeCompare: true), sql);
+    }
+
+    [Fact]
+    public async Task 区间超过731天时即使投影就绪也走原路径()
+    {
+        var range = new DateRangeDto
+        {
+            StartDate = new DateTime(2024, 1, 1),
+            EndDate = new DateTime(2026, 1, 1),
+        };
+
+        var sql = await CaptureProductPagingSqlAsync(projectionReady: true, range);
+
+        Assert.Equal(SalesDashboardReactService.BuildProductReportPagingSql(includeCompare: false), sql);
     }
 
     [SalesCostBackfillSqlServerFact]

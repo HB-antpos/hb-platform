@@ -1,8 +1,10 @@
+using BlazorApp.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 
 namespace BlazorApp.Api.Controllers
 {
@@ -12,6 +14,8 @@ namespace BlazorApp.Api.Controllers
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
+    // 旧接口同样返回货柜编号：无「查看完整货柜编号」权限的账号只拿到后 4 位。
+    [MaskContainerNumbers]
     public class ContainerController : ControllerBase
     {
         private readonly IContainerService _containerService;
@@ -90,6 +94,18 @@ namespace BlazorApp.Api.Controllers
                 if (dto == null)
                 {
                     return BadRequest(new { success = false, message = "更新数据不能为空" });
+                }
+
+                // 与 React 接口一致：遮罩值或无「查看完整货柜编号」权限时不修改货柜编号。
+                if (
+                    dto.货柜编号 != null
+                    && (
+                        ContainerNumberMasking.IsMasked(dto.货柜编号)
+                        || !await HttpContext.CanViewFullContainerNumberAsync()
+                    )
+                )
+                {
+                    dto.货柜编号 = null;
                 }
 
                 var result = await _containerService.UpdateContainerAsync(containerGuid, dto);

@@ -114,6 +114,58 @@ public sealed class StoreProductMaintenanceLookupTests : IDisposable
         Assert.Empty(await Lookup("item", new List<string>()));
     }
 
+    [Theory]
+    [InlineData("0810812024527", "810812024527")]
+    [InlineData("810812024527", "0810812024527")]
+    public async Task Lookup_条码前导零写法不同时回退匹配(string stored, string scanned)
+    {
+        // 生产实例：商品库存 0810812024527，相机扫码得到去掉前导 0 的 810812024527。
+        await SeedProduct("product", "NMATS42BK", stored);
+        var item = Assert.Single(await Lookup(scanned));
+        Assert.Equal("product", item.ProductCode);
+        Assert.Equal("ProductBarcode", item.MatchSource);
+        Assert.Equal(stored, item.Barcode);
+    }
+
+    [Fact]
+    public async Task Lookup_条码精确命中优先_不把12位与13位当作等价合并()
+    {
+        // 生产库有 12 位 X 与 13 位 0+X 分属不同商品的情况：两种写法各自只返回自己的商品。
+        await SeedProduct("twelve", "A", "661799090520");
+        await SeedProduct("thirteen", "B", "0661799090520");
+        Assert.Equal("twelve", Assert.Single(await Lookup("661799090520")).ProductCode);
+        Assert.Equal("thirteen", Assert.Single(await Lookup("0661799090520")).ProductCode);
+    }
+
+    [Fact]
+    public async Task Lookup_条码变体回退只比条码_不命中数字货号()
+    {
+        await SeedProduct("by-item-number", "0810812024527");
+        Assert.Empty(await Lookup("810812024527"));
+    }
+
+    [Fact]
+    public async Task Lookup_条码变体回退遵守门店范围并排除删除商品()
+    {
+        await SeedProduct("deleted", "item", "0810812024527", deleted: true);
+        await _db.Insertable(new StoreClearancePrice { ProductCode = "product", StoreCode = "other", ClearanceBarcode = "0810812024528" }).ExecuteCommandAsync();
+        Assert.Empty(await Lookup("810812024527"));
+        Assert.Empty(await Lookup("810812024528"));
+    }
+
+    [Theory]
+    [InlineData("810812024527", "0810812024527")]
+    [InlineData("0810812024527", "810812024527")]
+    [InlineData("1810812024527", null)]
+    [InlineData("81081202452", null)]
+    [InlineData("81081202452A", null)]
+    [InlineData("08108120245271", null)]
+    [InlineData("ABC", null)]
+    public void BarcodeVariants_仅处理12位补零和13位去前导零(string keyword, string? expected)
+    {
+        Assert.Equal(expected, BlazorApp.Api.Utils.BarcodeVariants.GetLeadingZeroVariant(keyword));
+    }
+
     [Fact]
     public async Task Lookup_普通无空格货号和条码保持可查询()
     {

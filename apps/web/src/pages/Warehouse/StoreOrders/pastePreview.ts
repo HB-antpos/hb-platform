@@ -159,7 +159,8 @@ export function createPastePreviewItems(
       valid: Boolean(product) && canImportQuantity,
       status,
       // 默认覆盖，用户可在预览中批量或逐条改成追加/跳过。
-      action: 'replace',
+      // 已是退货行（发货数为负）的商品默认跳过：Excel 粘贴一期不支持退货，覆盖会把退货数量冲成正数。
+      action: Number(existingLine?.allocQuantity ?? 0) < 0 ? 'skip' : 'replace',
       existingQuantity: existingLine?.quantity,
       existingAllocQuantity: existingLine?.allocQuantity,
     }

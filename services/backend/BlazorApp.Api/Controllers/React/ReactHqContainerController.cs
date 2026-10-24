@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,8 @@ namespace BlazorApp.Api.Controllers.React
     [ApiController]
     [Route("api/react/v1/hq-containers")]
     [Authorize]
+    // 旧接口同样返回货柜编号：无「查看完整货柜编号」权限的账号只拿到后 4 位。
+    [MaskContainerNumbers]
     public class ReactHqContainerController : ControllerBase
     {
         private readonly IHqContainerReactService _service;

@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs
 {
     /// <summary>
@@ -173,6 +176,7 @@ namespace BlazorApp.Shared.DTOs
 
     public class WarehouseProductFlowContainerDto
     {
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string ContainerNumber { get; set; } = string.Empty;
 
         public DateTime? ArrivalDate { get; set; }

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.StoreOrders.OrderManagement.Domain;
 using BlazorApp.Api.Features.StoreOrders.OrderManagement.Infrastructure;
 using BlazorApp.Shared.DTOs;
@@ -24,7 +25,12 @@ internal sealed class BatchAddOrderLineValidator
                 new AddOrderLineItemInput(
                     item.ProductCode,
                     item.Quantity,
-                    item.ImportPrice
+                    item.ImportPrice,
+                    new StoreOrderReturnLineRequest(
+                        item.ReturnReason,
+                        item.ReturnDisposition,
+                        item.ReturnNote
+                    )
                 )
             )
             .ToList();

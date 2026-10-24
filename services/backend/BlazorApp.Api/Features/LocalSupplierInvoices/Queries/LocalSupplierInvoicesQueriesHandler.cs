@@ -304,6 +304,28 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         continue;
                     }
 
+                    if (col == "HasUncreatedProducts")
+                    {
+                        // 「有商品未创建」：存在至少一条有效明细属于「新品」——检测为主档不存在且至今仍未关联商品编码。
+                        // 判定与列表聚合里的 NewProductCount（列表上的「新品 N」）完全一致，筛出来的单必有「新品 N」标签。
+                        // 注意：列表上的「本单新品 N」是商品已由本单建好，与这里相反，不算在内。
+                        // 只有 true 才收窄；false/无法解析的值忽略，避免误隐藏单据。
+                        if (bool.TryParse(f.Filter?.Trim(), out var hasUncreated) && hasUncreated)
+                        {
+                            query = query.Where((h, st, sup) =>
+                                SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                    .Where(d =>
+                                        d.IsDeleted == false
+                                        && d.InvoiceGUID == h.InvoiceGUID
+                                        && d.ExistingProductCount == 0
+                                        && d.ProductCode == null
+                                    )
+                                    .Any()
+                            );
+                        }
+                        continue;
+                    }
+
                     if (col == "IsProductChecked")
                     {
                         // 口径与列表展示一致：至少一条有效明细，且有效明细的 ExistingProductCount 全部非空才算已检测。
@@ -752,6 +774,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
                 await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
+                await MarkStoreAutoPricingAsync(db, list);
                 return ApiResponse<List<LocalSupplierInvoiceItemDto>>.OK(list);
             }
             catch (Exception ex)
@@ -847,6 +870,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
                 await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
+                await MarkStoreAutoPricingAsync(db, list);
                 return GridResponseDto<LocalSupplierInvoiceItemDto>.OK(list, total);
             }
             catch (Exception ex)
@@ -1245,6 +1269,64 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             }
         }
 
+        /// <summary>
+        /// 回填本单分店当前的商品自动定价状态。分店价格表没有 (分店, 商品) 唯一约束，
+        /// 直接 LeftJoin 可能把一行明细翻成多行，所以分页查完后再按本页商品批量查一次；
+        /// 同一商品有多条有效记录时取最近更新的那条，与「当前状态」的含义一致。
+        /// </summary>
+        private static async Task MarkStoreAutoPricingAsync(
+            ISqlSugarClient db,
+            List<LocalSupplierInvoiceItemDto> list
+        )
+        {
+            var storeCodes = list
+                .Select(item => item.StoreCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var productCodes = list
+                .Select(item => item.ProductCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (storeCodes.Count == 0 || productCodes.Count == 0)
+                return;
+
+            var statusByKey = new Dictionary<string, bool>(StringComparer.Ordinal);
+            // 按 1000 个商品一批查询，避免整单明细很多时 IN 参数超过 SQL Server 上限。
+            foreach (var chunk in productCodes.Chunk(1000))
+            {
+                var chunkCodes = chunk.ToList();
+                var rows = await db.Queryable<StoreRetailPrice>()
+                    .Where(x =>
+                        x.ProductCode != null
+                        && x.StoreCode != null
+                        && chunkCodes.Contains(x.ProductCode)
+                        && storeCodes.Contains(x.StoreCode)
+                        && x.IsDeleted == false
+                    )
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.IsAutoPricing, x.UpdatedAt, x.CreatedAt })
+                    .ToListAsync();
+                foreach (var group in rows.GroupBy(x => $"{x.StoreCode}\u001f{x.ProductCode}"))
+                {
+                    statusByKey[group.Key] = group
+                        .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
+                        .First()
+                        .IsAutoPricing;
+                }
+            }
+
+            foreach (var item in list)
+            {
+                if (string.IsNullOrWhiteSpace(item.StoreCode) || string.IsNullOrWhiteSpace(item.ProductCode))
+                    continue;
+                if (statusByKey.TryGetValue($"{item.StoreCode}\u001f{item.ProductCode}", out var isAuto))
+                    item.StoreIsAutoPricing = isAuto;
+            }
+        }
+
         private static int ClampGridPageSize(int requested, int fallback, params int[] allowed)
         {
             return allowed.Contains(requested) ? requested : fallback;
@@ -1287,6 +1369,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 "createdby" => "CreatedBy",
                 "productkeyword" => "ProductKeyword",
                 "isproductchecked" => "IsProductChecked",
+                "hasuncreatedproducts" => "HasUncreatedProducts",
                 "totalamount" => "TotalAmount",
                 "receivedtotalamount" => "ReceivedTotalAmount",
                 "pricechange" => "PriceChange",

@@ -1,0 +1,193 @@
+/* ===== 供应商节日预订单 · 管理端（sp-admin-*）：普通 CSS + 页面前缀，测试打包把 .css 当空模块 ===== */
+.sp-admin-muted { color: #667085; }
+.sp-admin-faint { color: #b4bac5; }
+.sp-admin-small { font-size: 12px; }
+.sp-admin-strong { font-weight: 600; color: #1f2430; }
+.sp-admin-danger { color: #cf1322; }
+.sp-admin-urgent { color: #b45309; font-weight: 600; }
+.sp-admin-number,
+.sp-admin-number * { font-variant-numeric: tabular-nums; }
+.sp-admin-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.sp-admin-ellipsis { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.sp-admin-cell-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-admin-cell-stack > .ant-tag { align-self: flex-start; }
+.sp-admin-link-text { color: #1554c0; font-weight: 500; }
+.sp-admin-gap-top { margin-top: 12px; }
+.sp-admin-stack { display: flex; flex-direction: column; gap: 16px; }
+.sp-admin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sp-admin-row-actions { display: flex; align-items: center; gap: 2px; }
+.sp-admin-row-actions .ant-btn { padding-inline: 4px; }
+.sp-admin-tag.ant-tag { margin-inline-end: 0; }
+.sp-admin-loading { display: flex; justify-content: center; padding: 80px 0; }
+.sp-admin-plain-list { margin: 0; padding-left: 18px; }
+
+/* 卡片与工具条 */
+.sp-admin-card { min-width: 0; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+/* .page-container 自带 16px 纵向 gap；只有同一包裹层里相邻的卡片需要补间距 */
+.sp-admin-step { display: flex; flex-direction: column; gap: 16px; }
+.sp-admin-card-pad { padding: 16px; }
+.sp-admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.sp-admin-toolbar-spacer { flex: 1; }
+.sp-admin-search.ant-input-search { width: 260px; max-width: 100%; }
+.sp-admin-section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
+.sp-admin-section-title { margin: 0; color: #1f2430; font-size: 15px; font-weight: 600; }
+.sp-admin-card-pad > .sp-admin-section-title { margin-bottom: 12px; }
+.sp-admin-table .ant-table-thead > tr > th { background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-admin-clickable-row { cursor: pointer; }
+.sp-admin-row-invalid > td { background: #fff1f0 !important; }
+.sp-admin-inline-alert { margin: 12px 16px 0; }
+.sp-admin-switch-label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* 缩略图 */
+.sp-admin-thumb { border-radius: 4px; border: 1px solid #eef0f4; background: #fafbfc; }
+.sp-admin-thumb-empty { display: inline-block; border-radius: 4px; border: 1px solid #eef0f4; background: #fafbfc; }
+
+/* 截止 */
+.sp-admin-deadline { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; }
+
+/* 导入向导 */
+.sp-admin-steps-card { padding: 14px 20px; }
+.sp-admin-source-card { max-width: 860px; }
+.sp-admin-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.sp-admin-field-label { color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-admin-source-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 10px; padding: 2px 10px; overflow: hidden; border: 1px solid #b8d4ff; border-radius: 6px; background: #eef5ff; color: #1554c0; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-paste-head { margin: 16px 0 6px; color: #4b5563; font-size: 12px; }
+.sp-admin-paste textarea,
+textarea.sp-admin-paste { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; }
+.sp-admin-footer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sp-admin-import-grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.sp-admin-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; font-size: 13px; }
+.sp-admin-kv dt { color: #667085; }
+.sp-admin-kv dd { margin: 0; text-align: right; color: #1f2430; font-weight: 500; }
+.sp-admin-mapping-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.sp-admin-mapping-field { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; }
+.sp-admin-mapping-field.is-missing { border-color: #ffccc7; background: #fffafa; }
+.sp-admin-mapping-label { color: #4b5563; font-size: 12px; }
+.sp-admin-required { margin-left: 2px; color: #cf1322; }
+.sp-admin-mapping-option { min-width: 0; line-height: 1.4; }
+.sp-admin-export-unit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+.sp-admin-footer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sp-admin-footer-inner { margin-top: 4px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+
+/* 订单表信息表单（导入第 3 步 / 编辑抽屉） */
+.sp-admin-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 16px; }
+.sp-admin-form-grid.is-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sp-admin-form-span2 { grid-column: span 2; }
+.sp-admin-form-span-all { grid-column: 1 / -1; }
+.sp-admin-header-form .ant-form-item { margin-bottom: 14px; }
+
+/* 详情页头 */
+.sp-admin-detail-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }
+.sp-admin-detail-title-block { display: flex; flex: 1 1 420px; flex-direction: column; gap: 4px; min-width: 0; }
+.sp-admin-detail-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.sp-admin-detail-title { margin: 0; color: #1f2430; font-size: 20px; font-weight: 600; }
+.sp-admin-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+
+/* 分店开启卡片 */
+.sp-admin-store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 10px; }
+.sp-admin-store-grid-placeholder { min-height: 120px; }
+.sp-admin-store-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; }
+.sp-admin-store-card.is-disabled { border-style: dashed; background: #fafbfc; }
+.sp-admin-store-card.is-disabled .sp-admin-store-figures,
+.sp-admin-store-card.is-disabled .sp-admin-store-figures .sp-admin-strong { color: #b4bac5; }
+.sp-admin-store-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sp-admin-store-name { overflow: hidden; color: #1f2430; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-store-figures { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #1f2430; font-size: 13px; }
+
+/* 下单矩阵 */
+.sp-admin-matrix .sp-admin-col-total { background: #fafbfc; }
+.sp-admin-summary-row > td { background: #f8f9fb !important; }
+
+/* 去年历史状态条（详情页） */
+.sp-admin-history-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; }
+.sp-admin-history-counts { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: #4b5563; }
+.sp-admin-history-need { color: #cf1322; font-weight: 600; }
+.sp-admin-history-error.ant-tag { max-width: 360px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: middle; }
+
+/* 参考商品：列内显示、悬停卡片、导入校对页单元格 */
+.sp-admin-ref-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sp-admin-ref-tip { display: flex; gap: 10px; max-width: 320px; font-size: 12px; }
+.sp-admin-ref-import-cell { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.sp-admin-ref-import-cell > :first-child { flex: 1; min-width: 0; }
+.sp-admin-ref-hint { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 16px 0; }
+
+/* 选择参考商品弹窗 */
+.sp-admin-ref-picker { display: flex; flex-direction: column; gap: 12px; }
+.sp-admin-ref-self { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid #eef0f4; border-radius: 8px; background: #fafbfc; }
+.sp-admin-ref-self-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sp-admin-ref-self-current { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.sp-admin-ref-current { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.sp-admin-ref-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.sp-admin-ref-list { display: flex; flex-direction: column; gap: 6px; min-height: 120px; max-height: 420px; overflow-y: auto; }
+.sp-admin-ref-list-placeholder { min-height: 120px; }
+.sp-admin-ref-cand { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; cursor: pointer; transition: border-color 0.15s, background-color 0.15s; }
+.sp-admin-ref-cand:hover { border-color: #d3adf7; }
+.sp-admin-ref-cand:focus-visible { outline: 2px solid #9254de; outline-offset: 1px; }
+.sp-admin-ref-cand.is-selected { border-color: #9254de; background: #f9f0ff; }
+.sp-admin-ref-cand.is-weak:not(.is-selected) { background: #fcfcfd; }
+.sp-admin-ref-cand-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-admin-ref-cand-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sp-admin-ref-cand-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #4b5563; }
+.sp-admin-ref-cand-compare { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+.sp-admin-ref-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+@media (prefers-reduced-motion: reduce) {
+  .sp-admin-ref-cand { transition: none; }
+}
+
+/* 修订版（PR 3）：商品行标记、已下架行、改动对比弹窗、提醒按钮 */
+.sp-admin-revision-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sp-admin-revision-removed-tag.ant-tag { border-color: #d0d5dd; background: #f2f4f7; color: #475467; }
+/* 已下架：整行置灰（数据保留但不计入汇总），悬停仍可看清 */
+.sp-admin-table .sp-admin-row-removed > td { background: #fafbfc; color: #98a2b3; }
+.sp-admin-table .sp-admin-row-removed .sp-admin-thumb { opacity: 0.45; filter: grayscale(1); }
+.sp-admin-table .sp-admin-row-removed .sp-admin-strong { color: #98a2b3; }
+.sp-admin-price-up { color: #cf1322; font-weight: 600; }
+.sp-admin-price-down { color: #389e0d; font-weight: 600; }
+.sp-admin-revision { display: flex; flex-direction: column; gap: 14px; }
+.sp-admin-revision-source { display: flex; flex-direction: column; gap: 10px; }
+.sp-admin-revision-source .sp-admin-source-chip { margin-top: 0; align-self: flex-start; }
+.sp-admin-revision-step { display: flex; flex-direction: column; gap: 12px; }
+.sp-admin-revision-source-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.sp-admin-revision-source-line .sp-admin-source-chip { margin-top: 0; max-width: 360px; }
+.sp-admin-revision-section { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid #f0f2f5; }
+.sp-admin-revision-section > .sp-admin-section-head { margin-bottom: 0; }
+.sp-admin-revision-optional-toggle.ant-btn { align-self: flex-start; padding-inline: 0; }
+.sp-admin-revision-alerts { display: flex; flex-direction: column; gap: 8px; }
+.sp-admin-revision-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.sp-admin-revision-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 8px 10px; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; color: #1f2430; font: inherit; text-align: left; cursor: pointer; transition: border-color 0.15s, background-color 0.15s; }
+.sp-admin-revision-stat:hover:not(:disabled):not(.is-static) { border-color: #91caff; }
+.sp-admin-revision-stat:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; }
+.sp-admin-revision-stat:disabled { cursor: default; opacity: 0.6; }
+.sp-admin-revision-stat.is-static { cursor: default; background: #fafbfc; }
+.sp-admin-revision-stat.is-active { border-color: #1677ff; background: #eef5ff; }
+.sp-admin-revision-stat-label { color: #667085; font-size: 12px; }
+.sp-admin-revision-stat-value { font-size: 18px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.sp-admin-revision-stat.is-added .sp-admin-revision-stat-value,
+.sp-admin-revision-stat.is-restored .sp-admin-revision-stat-value { color: #722ed1; }
+.sp-admin-revision-stat.is-removed .sp-admin-revision-stat-value,
+.sp-admin-revision-stat.is-invalid .sp-admin-revision-stat-value { color: #cf1322; }
+.sp-admin-revision-stat.is-priceChanged .sp-admin-revision-stat-value,
+.sp-admin-revision-stat.is-cartonChanged .sp-admin-revision-stat-value { color: #d46b08; }
+.sp-admin-revision-stat.is-zero .sp-admin-revision-stat-value { color: #b4bac5; }
+.sp-admin-revision-name { display: block; overflow-wrap: anywhere; }
+.sp-admin-revision-ordered-danger { color: #cf1322; font-weight: 600; }
+.sp-admin-revision-confirm { gap: 6px; }
+.sp-admin-disabled-wrap { display: inline-block; cursor: not-allowed; }
+.sp-admin-remind-confirm { max-width: 300px; }
+@media (prefers-reduced-motion: reduce) {
+  .sp-admin-revision-stat { transition: none; }
+}
+
+@media (max-width: 1100px) {
+  .sp-admin-import-grid { grid-template-columns: 1fr; }
+  .sp-admin-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .sp-admin-form-grid,
+  .sp-admin-form-grid.is-compact { grid-template-columns: 1fr; }
+  .sp-admin-form-span2 { grid-column: auto; }
+  .sp-admin-search.ant-input-search { width: 100%; }
+  .sp-admin-ref-cand { grid-template-columns: 44px minmax(0, 1fr); }
+  .sp-admin-ref-cand-compare { grid-column: 2; align-items: flex-start; }
+}
+.sp-admin-revision-warnings { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }

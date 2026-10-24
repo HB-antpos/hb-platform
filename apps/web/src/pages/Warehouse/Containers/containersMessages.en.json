@@ -37,6 +37,7 @@
       "selectionSummary": "{{pieces}} pcs · {{volume}} m³",
       "columnPieces": "Pieces",
       "columnAmount": "Domestic ¥",
+      "columnFreight": "Freight $",
       "columnVolumeLoad": "Volume · fill",
       "sortedDescTitle": "Sorted by {{field}}, newest first (follows the date type)",
       "etaToday": "Arriving today",

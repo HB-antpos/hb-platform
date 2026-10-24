@@ -275,6 +275,48 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
             withExisting.Items.Select(x => (x.ProductCode, x.IsNewProduct)).OrderBy(x => x.ProductCode));
     }
 
+    [Fact]
+    public async Task GetAsync_IsCreated只看商品主档_软删视为未建档_与是否新商品无关()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-8", StoreCode = "S-8", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-8", UserGUID = "user-8", StoreGUID = "store-8", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-READY", ContainerNumber = "READY", ActualArrivalDate = today }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "K1", ContainerCode = "C-READY", ProductCode = "P-PENDING" },
+            new ContainerDetail { DetailCode = "K2", ContainerCode = "C-READY", ProductCode = "P-MASTER" },
+            new ContainerDetail { DetailCode = "K3", ContainerCode = "C-READY", ProductCode = "P-SOFTDEL" },
+            new ContainerDetail { DetailCode = "K4", ContainerCode = "C-READY", ProductCode = "P-RESTOCK2" },
+        }).ExecuteCommand();
+        // P-MASTER 由本柜新建（新商品且已建档）；P-RESTOCK2 是已建档的补货商品；P-SOFTDEL 主档已软删
+        database.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P-MASTER" },
+            new WarehouseProduct { ProductCode = "P-RESTOCK2" },
+        }).ExecuteCommand();
+        database.Insertable(new WarehouseProductChangeHistory { ProductCode = "P-MASTER", Source = "ContainerSubmit", Action = "Create", SourceReference = "C-READY" }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new Product { ProductCode = "P-MASTER" },
+            new Product { ProductCode = "P-RESTOCK2" },
+            new Product { ProductCode = "P-SOFTDEL", IsDeleted = true },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-8").GetAsync("S-8", includeExisting: true);
+
+        Assert.Equal(
+            new[]
+            {
+                ("P-MASTER", true, true),
+                ("P-PENDING", true, false),
+                ("P-RESTOCK2", false, true),
+                ("P-SOFTDEL", true, false),
+            },
+            result.Items.Select(x => (x.ProductCode, x.IsNewProduct, x.IsCreated)).OrderBy(x => x.ProductCode));
+    }
+
     // ───────── 窗口依据 windowBasis ─────────
 
     [Fact]

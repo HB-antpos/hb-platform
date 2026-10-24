@@ -381,6 +381,42 @@ export function mergeTranslationsById(
   return { ...result, editedCount }
 }
 
+/**
+ * 看图生成英文名的合并：结果按行 id 给出（每行图片不同，不能再按中文名查表），
+ * 其余规则与 mergeTranslationsById 一致——只覆盖名称与英文名自点击以来没被改过的行，
+ * 空结果、未变化或仍含中文的结果计入 skippedCount。
+ */
+export function mergeEnglishNamesById(
+  currentProducts: ProductImportItem[],
+  targets: readonly TranslationTarget[],
+  englishNameById: Readonly<Record<string, string | undefined>>,
+): MergeTranslationsResult {
+  const targetById = new Map(targets.map((target) => [target.id, target]))
+  let appliedCount = 0
+  let skippedCount = 0
+  let editedCount = 0
+
+  const products = currentProducts.map((row) => {
+    const target = targetById.get(row.id)
+    if (!target) return row
+    const nameNow = (row.newProduct.productName ?? '').trim()
+    const englishNow = (row.newProduct.englishName ?? '').trim()
+    if (nameNow !== target.productName || englishNow !== target.englishName) {
+      editedCount += 1
+      return row
+    }
+    const englishName = englishNameById[row.id]?.trim()
+    if (!englishName || englishName === englishNow || containsChineseText(englishName)) {
+      skippedCount += 1
+      return row
+    }
+    appliedCount += 1
+    return { ...row, newProduct: { ...row.newProduct, englishName } }
+  })
+
+  return { products: appliedCount > 0 ? products : currentProducts, appliedCount, skippedCount, editedCount }
+}
+
 /* ------------------------------------------------------------------ */
 /* 货柜冲突                                                             */
 /* ------------------------------------------------------------------ */

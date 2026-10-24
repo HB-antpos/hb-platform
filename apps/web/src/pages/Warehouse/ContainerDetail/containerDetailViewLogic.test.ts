@@ -3,7 +3,6 @@ import type { ContainerDetail } from '../../../types/container'
 import { buildWarehouseCategoryLookup } from '../Products/categoryPath'
 import {
   buildContainerDetailTagStats,
-  buildContainerDetailWarehouseImportPriceUpdates,
   matchesContainerDetailSelectedTags,
   moveContainerDetailColumnOrder,
   type ContainerDetailTableColumnKey,
@@ -164,21 +163,6 @@ assertDeepEqual(
   ['down'],
   '涨跌组与其他标签组取交集',
 )
-assertDeepEqual(
-  buildContainerDetailWarehouseImportPriceUpdates([
-    ...trendRows,
-    { id: 6, hguid: 'up-dup', 商品编码: 'P-UP', 进口价格: 9, warehouseImportPrice: 1.19 },
-    { id: 7, hguid: 'nested-code', 商品信息: { 商品编码: ' P-NESTED ' }, 进口价格: 3 },
-    { id: 8, hguid: 'zero', 商品编码: 'P-ZERO', 进口价格: 0, warehouseImportPrice: 1 },
-  ]),
-  [
-    { productCode: 'P-UP', importPrice: 1.37 },
-    { productCode: 'P-DOWN', importPrice: 1.66 },
-    { productCode: 'P-NESTED', importPrice: 3 },
-  ],
-  '更新仓库进货价只取已有商品、进口价 > 0 且与实时进货价不同的行，同一商品只取第一行',
-)
-
 // ---- 分类列一律显示英文名 ----
 
 const categoryLookup = buildWarehouseCategoryLookup([
@@ -345,6 +329,7 @@ const manualSummary = summarizeContainerDetailManualDraft(
     'row-1': { hguid: 'row-1', 进口价格: 3.5, 单件装箱数: 24 },
     'row-2': { hguid: 'row-2', 贴牌价格: 9.99, ClearEnglishName: true },
     'row-3': { hguid: 'row-3', 备注: '旧草稿', ProductCategoryGUID: 'cat-1' },
+    'row-4': { hguid: 'row-4', 仓库进口价: 4.2, 仓库零售价: 6.5 },
   },
   {
     // row-1 的单件装箱数还在自动保存队列里，由自动保存状态展示。
@@ -353,12 +338,12 @@ const manualSummary = summarizeContainerDetailManualDraft(
 )
 assertDeepEqual(
   manualSummary,
-  { total: 5, importPrice: 1, retailPrice: 1, englishName: 1, other: 2 },
-  '队列里的自动保存字段不计入待保存；清除英文名称算英文名称；不在队列里的旧自动保存字段与分类算其他',
+  { total: 7, importPrice: 1, retailPrice: 1, warehouseImportPrice: 1, warehouseRetailPrice: 1, englishName: 1, other: 2 },
+  '队列里的自动保存字段不计入待保存；已有进口价 / 已有零售价单独计数；清除英文名称算英文名称；不在队列里的旧自动保存字段与分类算其他',
 )
 assertDeepEqual(
   summarizeContainerDetailManualDraft({}, {}),
-  { total: 0, importPrice: 0, retailPrice: 0, englishName: 0, other: 0 },
+  { total: 0, importPrice: 0, retailPrice: 0, warehouseImportPrice: 0, warehouseRetailPrice: 0, englishName: 0, other: 0 },
   '没有草稿时全为 0',
 )
 

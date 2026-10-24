@@ -17,6 +17,8 @@ import type {
   BatchSalesLockedScope,
   BatchSalesProduct,
   BatchSalesProductSummary,
+  BatchSalesPurchaseRequest,
+  BatchSalesPurchaseResult,
   BatchSalesQuery,
   BatchSalesQueryResult,
   BatchSalesScope,
@@ -318,6 +320,23 @@ function normalizeDiscountOverview(raw: unknown): BatchSalesDiscountOverview {
   return { ...normalizeResponseScope(record), productCodes: requiredStringArray(pick(record, 'productCodes', 'ProductCodes'), '商品编码'), coverage: normalizeCoverage(pick(record, 'coverage', 'Coverage')), overview: normalizeOverview(pick(record, 'overview', 'Overview')), branch: branch === null || branch === undefined ? undefined : normalizeBranch(branch), products: products === null || products === undefined ? undefined : requiredArray(products, '商品贡献').map((entry) => { const product = asRecord(entry, '商品贡献'); return { ...normalizeProduct(product), metrics: normalizeMetrics(pick(product, 'metrics', 'Metrics')) } }), discountStatisticStatus: optionalString(pick(record, 'discountStatisticStatus', 'DiscountStatisticStatus')), discountUpdatedAt: optionalString(pick(record, 'discountUpdatedAt', 'DiscountUpdatedAt')), warnings: requiredStringArray(pick(record, 'warnings', 'Warnings'), '警告') }
 }
 
+function normalizePurchaseResult(raw: unknown): BatchSalesPurchaseResult {
+  const record = asRecord(raw, '进货量响应')
+  return {
+    ...normalizeResponseScope(record),
+    productCodes: requiredStringArray(pick(record, 'productCodes', 'ProductCodes'), '商品编码'),
+    rows: requiredArray(pick(record, 'rows', 'Rows'), '进货量').map((entry, index) => {
+      const row = asRecord(entry, `进货量[${index}]`)
+      return {
+        productCode: requiredString(pick(row, 'productCode', 'ProductCode'), `进货量[${index}].商品编码`),
+        branchCode: requiredString(pick(row, 'branchCode', 'BranchCode'), `进货量[${index}].分店编码`),
+        warehouseQuantity: requiredNumber(pick(row, 'warehouseQuantity', 'WarehouseQuantity'), `进货量[${index}].总仓配货`),
+        supplierQuantity: requiredNumber(pick(row, 'supplierQuantity', 'SupplierQuantity'), `进货量[${index}].供应商进货`),
+      }
+    }),
+  }
+}
+
 function normalizeDetail(raw: unknown): BatchSalesDetail {
   const record = asRecord(raw, '详情响应')
   return {
@@ -399,4 +418,11 @@ async function exportDetail(input: BatchSalesLockedScope, signal?: AbortSignal):
   return request.post<string>(`${API_BASE}/export/detail`, input, { signal })
 }
 
-export const batchProductSalesApi: BatchProductSalesApi = { getOptions, query, getDetail, getBranchOverview, getDiscounts, exportDetail }
+async function getPurchases(input: BatchSalesPurchaseRequest, signal?: AbortSignal): Promise<BatchSalesPurchaseResult> {
+  validateScope(input)
+  if (!requiredStringArray(input.productCodes, '商品编码').length) throw new Error('缺少商品编码')
+  const response = await request.post<ApiResponse<unknown> | unknown>(`${API_BASE}/purchases`, input, { signal })
+  return normalizePurchaseResult(unwrapPayload(response))
+}
+
+export const batchProductSalesApi: BatchProductSalesApi = { getOptions, query, getDetail, getBranchOverview, getDiscounts, exportDetail, getPurchases }

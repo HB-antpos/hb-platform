@@ -3,6 +3,7 @@ using System.Diagnostics;
 using BlazorApp.Api.Features.LegacyEmployeeLogs.Risk;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
+using Microsoft.Extensions.Caching.Memory;
 using SqlSugar;
 
 namespace BlazorApp.Api.Features.LegacyEmployeeLogs;
@@ -41,18 +42,22 @@ public sealed class LegacyEmployeeLogQueryService
     private readonly ICurrentUserManageableStoreScopeService _storeScopeService;
     private readonly ILogger<LegacyEmployeeLogQueryService> _logger;
     private readonly int _keywordScanRowLimit;
+    // 仅角标接口使用；为空（测试替身）时不缓存。
+    private readonly IMemoryCache? _cache;
 
     public LegacyEmployeeLogQueryService(
         ISqlSugarClient posmDb,
         ICurrentUserManageableStoreScopeService storeScopeService,
         ILogger<LegacyEmployeeLogQueryService> logger,
-        int keywordScanRowLimit = LegacyEmployeeLogSqlServerQuery.DefaultKeywordScanRowLimit
+        int keywordScanRowLimit = LegacyEmployeeLogSqlServerQuery.DefaultKeywordScanRowLimit,
+        IMemoryCache? cache = null
     )
     {
         _posmDb = posmDb;
         _storeScopeService = storeScopeService;
         _logger = logger;
         _keywordScanRowLimit = keywordScanRowLimit;
+        _cache = cache;
     }
 
     public async Task<LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>> QueryAsync(
@@ -183,7 +188,7 @@ public sealed class LegacyEmployeeLogQueryService
             return LegacyEmployeeLogResult<LegacyEmployeeLogEmployeeSummaryResultDto>.Forbidden();
         }
 
-        var employees = await LegacyEmployeeLogSqlServerQuery.ExecuteEmployeeSummaryAsync(
+        var (employees, devices) = await LegacyEmployeeLogSqlServerQuery.ExecuteEmployeeSummaryAsync(
             GetSqlServerConnection(),
             LegacyEmployeeLogSqlServerQuery.BuildEmployeeSummary(query),
             cancellationToken
@@ -199,6 +204,44 @@ public sealed class LegacyEmployeeLogQueryService
             Employees = ordered,
             Total = ordered.Sum(row => row.Total),
             DangerTotal = ordered.Sum(row => row.DangerCount),
+            // 与列表接口的设备选项同排序（按设备编码升序）。
+            Devices = devices.OrderBy(row => row.DeviceCode, StringComparer.OrdinalIgnoreCase).ToList(),
+        });
+    }
+
+    /// <summary>
+    /// 工作台角标：最近 days 天（1~31，默认 7）内、当前账号可见分店内待核查的异常记录数，及其中危险操作数。
+    /// 分店范围由服务端按账号取（管理员全部、店长全部关联分店），不接收分店参数；无可见分店返回 0。
+    /// 只做一条计数 SQL，并按「可见分店范围 + 天数」缓存 <see cref="EmployeeLogBadgeSupport.CacheDuration"/>。
+    /// </summary>
+    public async Task<EmployeeLogBadgeSummaryDto> GetBadgeSummaryAsync(
+        int? days = null,
+        DateTime? utcNow = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var window = EmployeeLogBadgeSupport.NormalizeDays(days);
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
+        var storeCodes = scope.StoreCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        // 非管理员且没有任何关联分店时不查库：没有可见范围就没有待核查。
+        if (!scope.IsAllowed || (!scope.IsAdmin && storeCodes.Count == 0))
+        {
+            return new EmployeeLogBadgeSummaryDto();
+        }
+
+        var key = EmployeeLogBadgeSupport.BuildCacheKey("legacy-employee-log-badge", scope.IsAdmin, storeCodes, window);
+        return await EmployeeLogBadgeSupport.GetOrLoadAsync(_cache, key, async () =>
+        {
+            var from = EmployeeLogBadgeSupport.WallClockWindowStart(utcNow ?? DateTime.UtcNow, window);
+            return await LegacyEmployeeLogSqlServerQuery.ExecuteBadgeSummaryAsync(
+                GetSqlServerConnection(),
+                LegacyEmployeeLogSqlServerQuery.BuildBadgeSummary(scope.IsAdmin ? null : storeCodes, from),
+                cancellationToken
+            );
         });
     }
 

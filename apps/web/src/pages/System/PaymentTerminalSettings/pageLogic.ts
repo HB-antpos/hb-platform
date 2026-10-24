@@ -7,6 +7,7 @@ import type {
   LinklyTerminalManagementDto,
   PaymentTerminalEnvironment,
   PaymentTerminalEnvironmentStatusDto,
+  PaymentTerminalSettingsDto,
   UpdateLinklyTerminalRequest,
   UpdateSquareTokenRequest,
 } from '../../../types/paymentTerminalSettings'
@@ -171,6 +172,31 @@ export function isConfiguredStatus(status?: PaymentTerminalEnvironmentStatusDto 
     return false
   }
   return 'hasPassword' in status ? status.hasPassword : status.configured
+}
+
+export type SquareDirectBlockReason = 'noStore' | 'notReady' | 'noToken'
+
+/**
+ * 「收银机直连 Square」开关的可操作状态。关闭永远允许（紧急止损）；
+ * 开启要求：已选门店、POS API 已建开关表、该店有生效的 Square Token（专用或共用，任一环境）。
+ */
+export function getSquareDirectToggleState(settings: PaymentTerminalSettingsDto | null | undefined): {
+  enabled: boolean
+  canEnable: boolean
+  blockReason: SquareDirectBlockReason | null
+} {
+  const direct = settings?.squareDirect
+  if (!settings?.selectedStoreCode || !direct) {
+    return { enabled: false, canEnable: false, blockReason: 'noStore' }
+  }
+  if (!direct.available) {
+    return { enabled: false, canEnable: false, blockReason: 'notReady' }
+  }
+  const hasToken = [...(settings.square ?? []), ...(settings.storeSquare ?? [])].some((item) => item.configured)
+  if (!hasToken) {
+    return { enabled: direct.enabled, canEnable: false, blockReason: 'noToken' }
+  }
+  return { enabled: direct.enabled, canEnable: true, blockReason: null }
 }
 
 export function resolvePaymentTerminalSettingsErrorMessage(error: unknown, fallback: string) {

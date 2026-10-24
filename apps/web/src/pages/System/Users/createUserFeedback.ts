@@ -33,6 +33,32 @@ function getUnknownResultFeedback(t: TFunction): CreateUserErrorFeedback {
   }
 }
 
+export interface UserFieldErrorFeedback {
+  field: CreateUserFeedbackField
+  message: string
+}
+
+/**
+ * 「资料 → 保存基本信息」失败时，把后端的用户名 / 邮箱重复错误码映射到对应字段的中文提示；
+ * 其他错误返回 null，由调用方沿用原来的通用提示。
+ */
+export function getUpdateUserFieldError(error: unknown, t: TFunction): UserFieldErrorFeedback | null {
+  const code = getErrorCode(error)
+  if (code === 'USERNAME_EXISTS') {
+    return {
+      field: 'username',
+      message: t('system.users.updateUserUsernameExists', '该用户名已被使用，请更换用户名后再保存。'),
+    }
+  }
+  if (code === 'EMAIL_EXISTS') {
+    return {
+      field: 'email',
+      message: t('system.users.updateUserEmailExists', '该邮箱已被其他账号使用，请更换邮箱后再保存。'),
+    }
+  }
+  return null
+}
+
 export function getCreateUserErrorFeedback(error: unknown, t: TFunction): CreateUserErrorFeedback | null {
   const code = getErrorCode(error)
   const status = getErrorStatus(error)

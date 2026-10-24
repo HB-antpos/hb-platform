@@ -56,6 +56,8 @@ export interface LinklySettlementDetail extends LinklySettlementListItem {
   clientRevision: string
   cardTotals: LinklySettlementCardTotal[]
   receipts: string[]
+  /** 后端按结算数据生成的 GRAND TOTALS 汇总（非终端原文），金额未解析时为空 */
+  generatedSummary?: string | null
 }
 
 export interface LinklySettlementFilters {
@@ -80,4 +82,10 @@ export interface LinklySettlementListQuery extends LinklySettlementFilters {
 export interface LinklySettlementExportResult {
   blob: Blob
   fileName: string
+}
+
+/** 筛选用「门店 + 设备」候选，来自已同步的结算记录。 */
+export interface LinklySettlementDeviceOption {
+  storeCode: string
+  deviceCode: string
 }

@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs;
 
 /// <summary>移动端仓库商品进销查询的日期区间；天数含首尾。</summary>
@@ -56,6 +59,7 @@ public sealed class WarehouseProductInsightBranchDto
 
 public sealed class WarehouseProductInsightContainerDto
 {
+    [JsonConverter(typeof(ContainerNumberJsonConverter))]
     public string ContainerNumber { get; set; } = string.Empty;
     public DateTime ArrivalDate { get; set; }
     /// <summary>true 表示该日期是预计到岸日，货柜尚未实际到货，不计入进货合计。</summary>

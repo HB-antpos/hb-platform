@@ -63,6 +63,14 @@ export const P = {
     // 仓库员工打印/下载配货单时自动「开始配货」（已提交 → 配货中）的独立权限；
     // 与订单编辑分开授权，且没有别名：持有 Warehouse.Manage 等宽泛权限不会自动具备，需显式授予。
     StartPicking: 'Warehouse.StartPicking',
+    // 在分店订货单里用负数发货录入退货（退货冲减金额，净额为负时开退款单）；
+    // 与 Warehouse.StartPicking 一样没有别名：持有 Warehouse.Manage / ManageOrders 不会自动具备，需管理员显式授予。
+    StoreOrderReturn: 'Warehouse.StoreOrderReturn',
+  },
+  // 供应商节日预订单：两码都没有别名，需显式授予。能替哪家店下单另由「下单人员授权」页决定，不靠权限码。
+  SupplierPreorder: {
+    Manage: 'SupplierPreorder.Manage',
+    Order: 'SupplierPreorder.Order',
   },
   Container: {
     View: 'Container.View',
@@ -71,6 +79,8 @@ export const P = {
     Delete: 'Container.Delete',
     // 移动端「新品到店」页面专用权限，与后端 Permissions.Container.MobileNewProductsView 一致。
     MobileNewProductsView: 'Container.MobileNewProductsView',
+    // 查看完整货柜编号：没有它时后端只返回后 4 位；有它时界面默认仍遮罩，点眼睛按钮才显示完整编号。
+    ViewFullNumber: 'Container.ViewFullNumber',
   },
   SalesOrders: {
     View: 'SalesOrders.View',

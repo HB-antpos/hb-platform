@@ -95,7 +95,8 @@ async function main() {
 
   const excelFileNameFailure = await runTest('发票 Excel 导出文件名应固定使用大写 INVOICE 前缀', () => {
     assert(
-      invoiceSource.includes("link.download = buildDocumentFileName(\n    'INVOICE',"),
+      // 退款单（净额 < 0）改用 ADJUSTMENT_NOTE 前缀，其余仍固定 INVOICE。
+      invoiceSource.includes("link.download = buildDocumentFileName(\n    isCreditNote ? t('warehouseUi.storeOrderInvoice.excelFileNameCredit') : 'INVOICE',"),
       '发票 Excel 导出文件名应使用 INVOICE 前缀',
     )
     assert(invoiceSource.includes('const invoiceDateSource = order?.outboundDate || order?.orderDate'), '发票日期应优先使用出库日期，订单日期只做兜底')
@@ -105,7 +106,7 @@ async function main() {
   if (excelFileNameFailure) failures.push(excelFileNameFailure)
 
   const excelHeaderFailure = await runTest('发票 Excel 导出应在明细前添加订单基础信息页头', () => {
-    assert(invoiceSource.includes("const titleRow = worksheet.addRow(['INVOICE'])"), 'Excel 应添加 INVOICE 标题行')
+    assert(invoiceSource.includes("const titleRow = worksheet.addRow([") && invoiceSource.includes(": 'INVOICE',"), 'Excel 应添加 INVOICE 标题行（退款单改写 ADJUSTMENT NOTE）')
     assert(invoiceSource.includes('worksheet.mergeCells(titleRow.number, 1, titleRow.number, 9)'), 'Excel 标题行应覆盖新增 RRP 后的 9 列')
     assert(invoiceSource.includes('worksheet.mergeCells(2, 5, 2, 9)'), 'Excel 日期页头应覆盖新增 RRP 后的右侧 5 列')
     assert(invoiceSource.includes("t('warehouse.invoice.invoiceNo'"), 'Excel 页头应包含发票号')

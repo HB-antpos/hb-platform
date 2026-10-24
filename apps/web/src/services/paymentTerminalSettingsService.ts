@@ -8,6 +8,7 @@ import type {
   PaymentTerminalEnvironment,
   UpdateLinklyDeviceSelectionRequest,
   UpdateLinklyTerminalRequest,
+  UpdateSquareDirectRequest,
   UpdateSquareTokenRequest,
 } from '../types/paymentTerminalSettings'
 import request, { unwrapApiData } from '../utils/request'
@@ -25,6 +26,11 @@ export async function saveSquareToken(payload: UpdateSquareTokenRequest, storeCo
   const response = await request.put<ApiResponse<PaymentTerminalSettingsDto>>(`${API_BASE}/square`, payload, {
     params: { storeCode },
   })
+  return unwrapApiData(response)
+}
+
+export async function saveSquareDirect(payload: UpdateSquareDirectRequest) {
+  const response = await request.put<ApiResponse<PaymentTerminalSettingsDto>>(`${API_BASE}/square-direct`, payload)
   return unwrapApiData(response)
 }
 

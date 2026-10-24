@@ -185,6 +185,18 @@ namespace BlazorApp.Api.Interfaces.React
             List<string>? warehouseCategoryGuids = null);
 
         /// <summary>
+        /// 销售明细商品抽屉的销售曲线（日）：窗口（销售开始日前 60 天 ~ 销售结束日）内该商品在授权分店或所选单店的每日销量。
+        /// </summary>
+        Task<ProductReportResponseDto<SalesDetailProductTrendDto>> GetSalesDetailProductTrendAsync(
+            DateRangeDto salesRange, string productCode, List<string>? branchCodes, string? selectedBranchCode,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>销售明细商品抽屉的进货明细：窗口内每一批总仓配货与供应商进货单。</summary>
+        Task<SalesDetailProductPurchasesDto> GetSalesDetailProductPurchasesAsync(
+            DateRangeDto salesRange, string productCode, List<string>? branchCodes,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// 销售明细「澳洲供应商分类」页签：所选供应商按各自分类树汇总本期/同期；指定节点时附带该节点商品分页。
         /// </summary>
         Task<ProductReportResponseDto<SalesDetailCategoryReportDto>> GetSalesDetailCategoryReportAsync(

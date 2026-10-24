@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using System.Text.Json.Serialization;
 
 namespace BlazorApp.Shared.DTOs;
@@ -30,6 +31,7 @@ public class ContainerAllocationSalesBranchesQueryRequest
 public class ContainerAllocationSalesReportResponse
 {
     public string ContainerGuid { get; set; } = string.Empty;
+    [JsonConverter(typeof(ContainerNumberJsonConverter))]
     public string? ContainerNumber { get; set; }
     public DateTime? ArrivalDate { get; set; }
     public ContainerArrivalDateBasis? ArrivalDateBasis { get; set; }

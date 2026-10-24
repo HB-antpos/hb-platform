@@ -1,4 +1,5 @@
 using System.Text;
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.StoreOrders.Invoice;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.Pdf;
@@ -27,6 +28,12 @@ namespace BlazorApp.Api.Services.React
         // 公司收款 BSB 需保留银行分隔符，PDF/邮件附件与网页发票保持一致。
         private const string PaymentBsb = "012-532";
         private const string PaymentAccount = "208034605";
+        // 退款单 / 带退货调整项发票的固定说明文案，取自设计图 ③（版式示意，字段与措辞以会计确认为准）。
+        private const string ReturnReference = "Return of goods previously supplied";
+        private const string CreditNoteFooterText =
+            "This credit adjusts the GST previously charged on the returned goods.";
+        private const string InvoiceWithReturnsFooterText =
+            "Returned goods are credited at the price supplied and netted against this invoice.";
         private const string PaymentDisclaimer =
             "All products remain the property of Hot Bargain International Pty Ltd until payment is received in full for the invoiced amount. Payment strictly within 30 days of the invoice date.";
 
@@ -75,6 +82,7 @@ namespace BlazorApp.Api.Services.React
                         OrderGUID = order.OrderGUID,
                         OrderNo = order.OrderNo,
                         StoreCode = order.StoreCode,
+                        DocumentType = ResolveDocumentType(order),
                         Attachments = new List<StoreOrderInvoiceEmailAttachment>
                         {
                             new()
@@ -107,25 +115,41 @@ namespace BlazorApp.Api.Services.React
         private static byte[] GenerateExcel(StoreOrderCartDto order)
         {
             using var workbook = new XLWorkbook();
-            var worksheet = workbook.Worksheets.Add("Invoice");
+            var isCreditNote = IsCreditNote(order);
+            var (goodsItems, returnItems) = SplitItems(order, isCreditNote);
+            var hasReturns = returnItems.Count > 0;
+            var worksheet = workbook.Worksheets.Add(isCreditNote ? "Credit Note" : "Invoice");
             var invoiceDate = FormatInvoiceDate(order);
+            // 有退货行时多一列 Reason；没有退货行的普通发票列结构与之前完全一致。
+            var lastColumn = hasReturns ? 10 : 9;
 
-            worksheet.Cell(1, 1).Value = "INVOICE";
-            var titleRange = worksheet.Range(1, 1, 1, 9).Merge();
+            worksheet.Cell(1, 1).Value = isCreditNote ? "ADJUSTMENT NOTE" : "INVOICE";
+            var titleRange = worksheet.Range(1, 1, 1, lastColumn).Merge();
             titleRange.Style.Font.Bold = true;
             titleRange.Style.Font.FontSize = 14;
 
-            worksheet.Cell(2, 1).Value = $"INVOICE NO. {order.OrderNo ?? order.OrderGUID}";
+            worksheet.Cell(2, 1).Value = isCreditNote
+                ? $"ADJUSTMENT NOTE NO. {order.OrderNo ?? order.OrderGUID}"
+                : $"INVOICE NO. {order.OrderNo ?? order.OrderGUID}";
             worksheet.Range(2, 1, 2, 4).Merge();
-            worksheet.Cell(2, 5).Value = $"INVOICE DATE: {invoiceDate}";
-            worksheet.Range(2, 5, 2, 9).Merge();
-            worksheet.Cell(3, 1).Value = "CUSTOMER:";
+            worksheet.Cell(2, 5).Value = isCreditNote
+                ? $"DATE: {invoiceDate}"
+                : $"INVOICE DATE: {invoiceDate}";
+            worksheet.Range(2, 5, 2, lastColumn).Merge();
+            worksheet.Cell(3, 1).Value = isCreditNote ? "CREDIT TO:" : "CUSTOMER:";
             worksheet.Cell(3, 2).Value = order.StoreName ?? order.StoreCode ?? "--";
             worksheet.Cell(4, 1).Value = "CUSTOMER CONTACT:";
             worksheet.Cell(4, 2).Value = order.StoreContactEmail ?? "--";
             worksheet.Cell(5, 1).Value = "ADDRESS:";
             worksheet.Cell(5, 2).Value = order.StoreAddress ?? "--";
             worksheet.Range(3, 1, 5, 1).Style.Font.Bold = true;
+            if (isCreditNote)
+            {
+                // 空着的第 6 行放参考说明（版式示意，字段以会计确认为准）。
+                worksheet.Cell(6, 1).Value = "REFERENCE:";
+                worksheet.Cell(6, 1).Style.Font.Bold = true;
+                worksheet.Cell(6, 2).Value = ReturnReference;
+            }
 
             // Excel 附件页头与前端导出保持同一核对口径，明细表从基础信息后开始。
             var headerRowIndex = 7;
@@ -138,11 +162,16 @@ namespace BlazorApp.Api.Services.React
             worksheet.Cell(headerRowIndex, 7).Value = "Order Qty";
             worksheet.Cell(headerRowIndex, 8).Value = "Ship Qty";
             worksheet.Cell(headerRowIndex, 9).Value = "Subtotal";
-            worksheet.Range(headerRowIndex, 1, headerRowIndex, 9).Style.Font.Bold = true;
+            if (hasReturns)
+            {
+                worksheet.Cell(headerRowIndex, 10).Value = "Reason";
+            }
+            worksheet.Range(headerRowIndex, 1, headerRowIndex, lastColumn).Style.Font.Bold = true;
 
             var rowIndex = headerRowIndex + 1;
             var itemIndex = 1;
-            foreach (var item in SortItems(order.Items))
+
+            void WriteItemRow(StoreOrderCartItemDto item, bool isReturnRow)
             {
                 var orderQuantity = item.Quantity;
                 var allocQuantity = item.AllocQuantity ?? 0m;
@@ -160,10 +189,47 @@ namespace BlazorApp.Api.Services.React
                 worksheet.Cell(rowIndex, 7).Value = orderQuantity;
                 worksheet.Cell(rowIndex, 8).Value = allocQuantity;
                 worksheet.Cell(rowIndex, 9).Value = subtotal;
+                if (isReturnRow)
+                {
+                    worksheet.Cell(rowIndex, 10).Value =
+                        StoreOrderReturnRules.ToDocumentReason(item.ReturnReason) ?? string.Empty;
+                }
                 rowIndex += 1;
                 itemIndex += 1;
             }
 
+            void WriteSectionRow(string title)
+            {
+                worksheet.Cell(rowIndex, 1).Value = title;
+                var sectionRange = worksheet.Range(rowIndex, 1, rowIndex, lastColumn).Merge();
+                sectionRange.Style.Font.Bold = true;
+                sectionRange.Style.Fill.BackgroundColor = XLColor.FromHtml(
+                    title == ReturnedGoodsSectionTitle(isCreditNote) ? "#FDECEC" : "#F2F2F2"
+                );
+                rowIndex += 1;
+            }
+
+            if (hasReturns && goodsItems.Count > 0)
+            {
+                WriteSectionRow("Goods supplied");
+            }
+
+            foreach (var item in goodsItems)
+            {
+                WriteItemRow(item, isReturnRow: false);
+            }
+
+            if (hasReturns)
+            {
+                // 退货行单独成段（Adjustments / Returned goods），带原因英文文案；按原价冲减，金额为负。
+                WriteSectionRow(ReturnedGoodsSectionTitle(isCreditNote));
+                foreach (var item in returnItems)
+                {
+                    WriteItemRow(item, isReturnRow: true);
+                }
+            }
+
+            // 所有金额都用同一个净额（TotalAllocatedImportAmount = 各行 发货数量 × 进口价 之和）；GST 对负数同向冲减。
             var subTotal = order.TotalAllocatedImportAmount;
             var gst = decimal.Round(subTotal * 0.1m, 2);
             var freight = order.ShippingFee ?? 0m;
@@ -176,12 +242,22 @@ namespace BlazorApp.Api.Services.React
             worksheet.Cell(rowIndex - 1, 9).Value = gst;
             worksheet.Cell(rowIndex++, 3).Value = "Freight:";
             worksheet.Cell(rowIndex - 1, 9).Value = freight;
-            worksheet.Cell(rowIndex++, 3).Value = "Total:";
+            worksheet.Cell(rowIndex++, 3).Value = isCreditNote ? "Total Credit:" : "Total:";
             worksheet.Cell(rowIndex - 1, 9).Value = total;
             worksheet.Cell(rowIndex + 1, 3).Value = "Remarks";
             worksheet.Cell(rowIndex + 1, 4).Value = string.IsNullOrWhiteSpace(order.Remarks)
                 ? "Image for reference only, actual product may vary"
                 : order.Remarks.Trim();
+            if (isCreditNote)
+            {
+                worksheet.Cell(rowIndex + 2, 3).Value = "Note";
+                worksheet.Cell(rowIndex + 2, 4).Value = CreditNoteFooterText;
+            }
+            else if (hasReturns)
+            {
+                worksheet.Cell(rowIndex + 2, 3).Value = "Note";
+                worksheet.Cell(rowIndex + 2, 4).Value = InvoiceWithReturnsFooterText;
+            }
 
             worksheet.Columns().AdjustToContents();
             worksheet.Column(5).Style.NumberFormat.Format = "$#,##0.00";
@@ -230,58 +306,42 @@ namespace BlazorApp.Api.Services.React
                 iTextSharp.text.Font.BOLD
             );
 
+            // 单据类型按净额判定（净额 < 0 为退款单）；退货行单独成段。所有金额都用同一个净额。
+            var isCreditNote = IsCreditNote(order);
+            var (goodsItems, returnItems) = SplitItems(order, isCreditNote);
+            var hasReturns = returnItems.Count > 0;
+
             AddInvoiceHeader(document, englishTitleFont, englishHeaderFont, englishBodyFont);
             AddDivider(document);
-            AddInvoiceSummary(document, order, englishTitleFont);
+            if (isCreditNote)
+            {
+                AddCreditNoteBanner(document, englishTitleFont);
+            }
+            AddInvoiceSummary(document, order, englishTitleFont, isCreditNote);
 
             var infoTable = new PdfPTable(4) { WidthPercentage = 100, SpacingAfter = 10 };
             infoTable.SetWidths(new float[] { 1.2f, 2.2f, 1.2f, 2.2f });
-            AddLabelCell(infoTable, "CUSTOMER:", englishBoldFont);
+            AddLabelCell(infoTable, isCreditNote ? "CREDIT TO:" : "CUSTOMER:", englishBoldFont);
             AddValueCell(infoTable, order.StoreCode ?? "--", englishBodyFont);
             AddLabelCell(infoTable, "CUSTOMER CONTACT:", englishBoldFont);
             AddValueCell(infoTable, order.StoreContactEmail ?? "--", englishBodyFont);
             AddLabelCell(infoTable, "ADDRESS:", englishBoldFont);
             AddValueCell(infoTable, order.StoreAddress ?? "--", bodyFont);
-            AddLabelCell(infoTable, string.Empty, englishBoldFont);
-            AddValueCell(infoTable, string.Empty, englishBodyFont);
+            AddLabelCell(infoTable, isCreditNote ? "REFERENCE:" : string.Empty, englishBoldFont);
+            AddValueCell(infoTable, isCreditNote ? ReturnReference : string.Empty, englishBodyFont);
             document.Add(infoTable);
 
-            var detailTable = new PdfPTable(9) { WidthPercentage = 100, SpacingAfter = 10 };
-            detailTable.SetWidths(new float[] { 0.45f, 1.05f, 1.45f, 2.9f, 0.85f, 0.85f, 0.85f, 0.85f, 1.1f });
-            foreach (var header in new[]
-                     {
-                         "#",
-                         "Item No.",
-                         "Barcode",
-                         "Name",
-                         "Cost",
-                         "RRP",
-                         "Order Qty",
-                         "Ship Qty",
-                         "Subtotal",
-                     })
-            {
-                AddHeaderCell(detailTable, header, headerFont);
-            }
+            AddDetailTable(
+                document,
+                goodsItems,
+                returnItems,
+                isCreditNote,
+                headerFont,
+                bodyFont,
+                englishBoldFont
+            );
 
-            var itemIndex = 1;
-            foreach (var item in SortItems(order.Items))
-            {
-                var allocQuantity = item.AllocQuantity ?? 0m;
-                var subtotal = decimal.Round(item.AllocatedImportAmount, 2);
-                AddValueCell(detailTable, itemIndex.ToString(), bodyFont);
-                AddValueCell(detailTable, item.ItemNumber ?? string.Empty, bodyFont);
-                AddValueCell(detailTable, item.Barcode ?? item.ProductCode, bodyFont);
-                AddValueCell(detailTable, item.ProductName ?? string.Empty, bodyFont);
-                AddValueCell(detailTable, FormatCurrency(item.ImportPrice), bodyFont);
-                AddValueCell(detailTable, FormatOptionalCurrency(item.RRP), bodyFont);
-                AddValueCell(detailTable, item.Quantity.ToString("0.##"), bodyFont);
-                AddValueCell(detailTable, allocQuantity.ToString("0.##"), bodyFont);
-                AddValueCell(detailTable, FormatCurrency(subtotal), bodyFont);
-                itemIndex += 1;
-            }
-            document.Add(detailTable);
-
+            // 净额 = 各行 发货数量 × 进口价 之和（ex GST）；GST 对负数同向冲减，Total 与 Excel / 前端同一口径。
             var subTotal = order.TotalAllocatedImportAmount;
             var gst = decimal.Round(subTotal * 0.1m, 2);
             var freight = order.ShippingFee ?? 0m;
@@ -293,8 +353,13 @@ namespace BlazorApp.Api.Services.React
                 freight,
                 total,
                 englishBoldFont,
-                englishBodyFont
+                englishBodyFont,
+                isCreditNote
             );
+            if (hasReturns && !isCreditNote)
+            {
+                document.Add(new Paragraph(InvoiceWithReturnsFooterText, englishBodyFont));
+            }
             if (!string.IsNullOrWhiteSpace(order.Remarks))
             {
                 document.Add(
@@ -304,6 +369,164 @@ namespace BlazorApp.Api.Services.React
 
             document.Close();
             return stream.ToArray();
+        }
+
+        /// <summary>
+        /// 明细表：没有退货行时与原发票完全一致（9 列）；有退货行时在商品行之后加「Adjustments / Returned goods」段，
+        /// 退货行金额为负并带原因英文文案；退款单（净额 &lt; 0）用 7 列（Price / Qty / Credit）。
+        /// </summary>
+        private static void AddDetailTable(
+            Document document,
+            IReadOnlyList<StoreOrderCartItemDto> goodsItems,
+            IReadOnlyList<StoreOrderCartItemDto> returnItems,
+            bool isCreditNote,
+            iTextSharp.text.Font headerFont,
+            iTextSharp.text.Font bodyFont,
+            iTextSharp.text.Font sectionFont
+        )
+        {
+            var hasReturns = returnItems.Count > 0;
+            var columnCount = isCreditNote ? 7 : 9;
+            var detailTable = new PdfPTable(columnCount) { WidthPercentage = 100, SpacingAfter = 10 };
+            detailTable.SetWidths(
+                isCreditNote
+                    ? new float[] { 0.45f, 1.05f, 1.45f, 3.4f, 0.9f, 0.8f, 1.1f }
+                    : new float[] { 0.45f, 1.05f, 1.45f, 2.9f, 0.85f, 0.85f, 0.85f, 0.85f, 1.1f }
+            );
+            var headers = isCreditNote
+                ? new[] { "#", "Item No.", "Barcode", "Name", "Price", "Qty", "Credit" }
+                : new[]
+                {
+                    "#",
+                    "Item No.",
+                    "Barcode",
+                    "Name",
+                    "Cost",
+                    "RRP",
+                    "Order Qty",
+                    "Ship Qty",
+                    "Subtotal",
+                };
+            foreach (var header in headers)
+            {
+                AddHeaderCell(detailTable, header, headerFont);
+            }
+
+            // 原因文案是英文，用英文字体（同 section 行字体）。
+            var reasonFont = new iTextSharp.text.Font(
+                sectionFont.BaseFont,
+                7,
+                iTextSharp.text.Font.NORMAL,
+                new BaseColor(120, 120, 120)
+            );
+            var itemIndex = 1;
+
+            void AddItemRow(StoreOrderCartItemDto item, bool isReturnRow)
+            {
+                var allocQuantity = item.AllocQuantity ?? 0m;
+                var subtotal = decimal.Round(item.AllocatedImportAmount, 2);
+                AddValueCell(detailTable, itemIndex.ToString(), bodyFont);
+                AddValueCell(detailTable, item.ItemNumber ?? string.Empty, bodyFont);
+                AddValueCell(detailTable, item.Barcode ?? item.ProductCode, bodyFont);
+                if (isReturnRow)
+                {
+                    // 退货行：商品名下面再起一行 Reason: 英文原因文案。
+                    var nameCell = new Phrase(
+                        SanitizePdfText(item.ProductName ?? string.Empty),
+                        bodyFont
+                    );
+                    var reason = StoreOrderReturnRules.ToDocumentReason(item.ReturnReason);
+                    if (!string.IsNullOrEmpty(reason))
+                    {
+                        nameCell.Add(new Chunk($"\nReason: {reason}", reasonFont));
+                    }
+                    detailTable.AddCell(
+                        new PdfPCell(nameCell)
+                        {
+                            Padding = 4,
+                            BorderColor = new BaseColor(220, 220, 220),
+                        }
+                    );
+                }
+                else
+                {
+                    AddValueCell(detailTable, item.ProductName ?? string.Empty, bodyFont);
+                }
+
+                AddValueCell(detailTable, FormatCurrency(item.ImportPrice), bodyFont);
+                if (!isCreditNote)
+                {
+                    AddValueCell(detailTable, FormatOptionalCurrency(item.RRP), bodyFont);
+                    AddValueCell(detailTable, item.Quantity.ToString("0.##"), bodyFont);
+                }
+                AddValueCell(detailTable, allocQuantity.ToString("0.##"), bodyFont);
+                AddValueCell(detailTable, FormatCurrency(subtotal), bodyFont);
+                itemIndex += 1;
+            }
+
+            void AddSectionRow(string title, bool isReturnSection)
+            {
+                detailTable.AddCell(
+                    new PdfPCell(new Phrase(title, sectionFont))
+                    {
+                        Colspan = columnCount,
+                        Padding = 4,
+                        BackgroundColor = isReturnSection
+                            ? new BaseColor(253, 236, 236)
+                            : new BaseColor(242, 242, 242),
+                        BorderColor = new BaseColor(220, 220, 220),
+                    }
+                );
+            }
+
+            if (hasReturns && goodsItems.Count > 0)
+            {
+                AddSectionRow("Goods supplied", isReturnSection: false);
+            }
+
+            foreach (var item in goodsItems)
+            {
+                AddItemRow(item, isReturnRow: false);
+            }
+
+            if (hasReturns)
+            {
+                AddSectionRow(ReturnedGoodsSectionTitle(isCreditNote), isReturnSection: true);
+                foreach (var item in returnItems)
+                {
+                    AddItemRow(item, isReturnRow: true);
+                }
+            }
+
+            document.Add(detailTable);
+        }
+
+        /// <summary>退款单顶部醒目标识：红色 ADJUSTMENT NOTE + CREDIT，避免被当成普通发票付款。</summary>
+        private static void AddCreditNoteBanner(Document document, iTextSharp.text.Font titleFont)
+        {
+            var red = new BaseColor(200, 16, 46);
+            var redTitleFont = new iTextSharp.text.Font(titleFont.BaseFont, 16, iTextSharp.text.Font.BOLD, red);
+            var stampFont = new iTextSharp.text.Font(titleFont.BaseFont, 11, iTextSharp.text.Font.BOLD, red);
+            var banner = new PdfPTable(2) { WidthPercentage = 100, SpacingAfter = 6 };
+            banner.SetWidths(new float[] { 3f, 1f });
+            banner.AddCell(
+                new PdfPCell(new Phrase("ADJUSTMENT NOTE", redTitleFont))
+                {
+                    Border = Rectangle.NO_BORDER,
+                    Padding = 4,
+                }
+            );
+            banner.AddCell(
+                new PdfPCell(new Phrase("CREDIT", stampFont))
+                {
+                    Border = Rectangle.BOX,
+                    BorderColor = red,
+                    BorderWidth = 1.5f,
+                    HorizontalAlignment = Element.ALIGN_CENTER,
+                    Padding = 4,
+                }
+            );
+            document.Add(banner);
         }
 
         private void AddInvoiceHeader(
@@ -419,15 +642,18 @@ namespace BlazorApp.Api.Services.React
         private static void AddInvoiceSummary(
             Document document,
             StoreOrderCartDto order,
-            iTextSharp.text.Font font
+            iTextSharp.text.Font font,
+            bool isCreditNote
         )
         {
             var summaryTable = new PdfPTable(2) { WidthPercentage = 100, SpacingAfter = 8 };
             summaryTable.SetWidths(new float[] { 1f, 1f });
+            var documentNumberLabel = isCreditNote ? "ADJUSTMENT NOTE NO." : "INVOICE NO.";
+            var dateLabel = isCreditNote ? "DATE:" : "INVOICE DATE:";
             summaryTable.AddCell(
                 new PdfPCell(
                     new Phrase(
-                        SanitizePdfText($"INVOICE NO. {order.OrderNo ?? order.OrderGUID}"),
+                        SanitizePdfText($"{documentNumberLabel} {order.OrderNo ?? order.OrderGUID}"),
                         font
                     )
                 )
@@ -438,7 +664,7 @@ namespace BlazorApp.Api.Services.React
                 }
             );
             summaryTable.AddCell(
-                new PdfPCell(new Phrase($"INVOICE DATE: {FormatInvoiceDate(order)}", font))
+                new PdfPCell(new Phrase($"{dateLabel} {FormatInvoiceDate(order)}", font))
                 {
                     Border = Rectangle.BOTTOM_BORDER,
                     BorderColorBottom = new BaseColor(130, 130, 130),
@@ -456,37 +682,48 @@ namespace BlazorApp.Api.Services.React
             decimal freight,
             decimal total,
             iTextSharp.text.Font boldFont,
-            iTextSharp.text.Font bodyFont
+            iTextSharp.text.Font bodyFont,
+            bool isCreditNote
         )
         {
             var footerTable = new PdfPTable(2) { WidthPercentage = 100, SpacingAfter = 8 };
             footerTable.SetWidths(new float[] { 1.55f, 1f });
 
             var paymentCell = CreateNoBorderCell();
-            paymentCell.AddElement(
-                new Paragraph(PaymentDetailTitle, boldFont) { SpacingAfter = 8 }
-            );
-
-            var paymentTable = new PdfPTable(2)
+            if (isCreditNote)
             {
-                WidthPercentage = 65,
-                HorizontalAlignment = Element.ALIGN_LEFT,
-            };
-            paymentTable.SetWidths(new float[] { 0.8f, 2f });
-            AddNoBorderLabelCell(paymentTable, "NAME:", boldFont);
-            AddNoBorderValueCell(paymentTable, PaymentName, bodyFont);
-            AddNoBorderLabelCell(paymentTable, "BSB:", boldFont);
-            AddNoBorderValueCell(paymentTable, PaymentBsb, bodyFont);
-            AddNoBorderLabelCell(paymentTable, "ACCOUNT:", boldFont);
-            AddNoBorderValueCell(paymentTable, PaymentAccount, bodyFont);
-            paymentCell.AddElement(paymentTable);
-            paymentCell.AddElement(
-                new Paragraph(PaymentDisclaimer, bodyFont)
+                // 退款单不是付款通知：不带收款账户与「30 天内付款」条款，只说明这是对已收 GST 的冲减。
+                paymentCell.AddElement(
+                    new Paragraph(CreditNoteFooterText, bodyFont) { Leading = 11 }
+                );
+            }
+            else
+            {
+                paymentCell.AddElement(
+                    new Paragraph(PaymentDetailTitle, boldFont) { SpacingAfter = 8 }
+                );
+
+                var paymentTable = new PdfPTable(2)
                 {
-                    SpacingBefore = 8,
-                    Leading = 11,
-                }
-            );
+                    WidthPercentage = 65,
+                    HorizontalAlignment = Element.ALIGN_LEFT,
+                };
+                paymentTable.SetWidths(new float[] { 0.8f, 2f });
+                AddNoBorderLabelCell(paymentTable, "NAME:", boldFont);
+                AddNoBorderValueCell(paymentTable, PaymentName, bodyFont);
+                AddNoBorderLabelCell(paymentTable, "BSB:", boldFont);
+                AddNoBorderValueCell(paymentTable, PaymentBsb, bodyFont);
+                AddNoBorderLabelCell(paymentTable, "ACCOUNT:", boldFont);
+                AddNoBorderValueCell(paymentTable, PaymentAccount, bodyFont);
+                paymentCell.AddElement(paymentTable);
+                paymentCell.AddElement(
+                    new Paragraph(PaymentDisclaimer, bodyFont)
+                    {
+                        SpacingBefore = 8,
+                        Leading = 11,
+                    }
+                );
+            }
             footerTable.AddCell(paymentCell);
 
             var totalTable = new PdfPTable(2) { WidthPercentage = 100 };
@@ -498,7 +735,11 @@ namespace BlazorApp.Api.Services.React
             AddNoBorderLabelCell(totalTable, "Freight:", bodyFont);
             AddNoBorderRightValueCell(totalTable, FormatCurrency(freight), bodyFont);
             AddTotalDividerRow(totalTable);
-            AddNoBorderLabelCell(totalTable, "Total Before Discount:", boldFont);
+            AddNoBorderLabelCell(
+                totalTable,
+                isCreditNote ? "Total Credit:" : "Total Before Discount:",
+                boldFont
+            );
             AddNoBorderRightValueCell(totalTable, FormatCurrency(total), boldFont);
 
             var totalsCell = CreateNoBorderCell();
@@ -517,12 +758,49 @@ namespace BlazorApp.Api.Services.React
                 .ToList();
         }
 
+        /// <summary>单据类型按净额判定：全站共用 StoreOrderReturnRules.ResolveDocumentType。</summary>
+        private static string ResolveDocumentType(StoreOrderCartDto order)
+        {
+            return StoreOrderReturnRules.ResolveDocumentType(order.TotalAllocatedImportAmount);
+        }
+
+        private static bool IsCreditNote(StoreOrderCartDto order)
+        {
+            return ResolveDocumentType(order) == StoreOrderReturnRules.DocumentTypeCreditNote;
+        }
+
+        private static string ReturnedGoodsSectionTitle(bool isCreditNote)
+        {
+            return isCreditNote ? "Returned goods" : "Adjustments / Returned goods";
+        }
+
+        /// <summary>
+        /// 把明细拆成「发货商品」与「退货行」（发货数量为负）。退款单里没有发货的行（发货数量 0）没有意义，不输出。
+        /// </summary>
+        private static (List<StoreOrderCartItemDto> Goods, List<StoreOrderCartItemDto> Returns) SplitItems(
+            StoreOrderCartDto order,
+            bool isCreditNote
+        )
+        {
+            var sorted = SortItems(order.Items);
+            var returns = sorted
+                .Where(item => StoreOrderReturnRules.IsReturnLine(item.AllocQuantity))
+                .ToList();
+            var goods = sorted
+                .Where(item => !StoreOrderReturnRules.IsReturnLine(item.AllocQuantity))
+                .Where(item => !isCreditNote || (item.AllocQuantity ?? 0m) != 0m)
+                .ToList();
+            return (goods, returns);
+        }
+
         private static string BuildBaseFileName(StoreOrderCartDto order)
         {
             var storePart = SanitizeFileNamePart(order.StoreCode ?? "UnknownStore");
             var orderPart = SanitizeFileNamePart(order.OrderNo ?? order.OrderGUID);
             var datePart = SanitizeFileNamePart(FormatInvoiceFileDate(order));
-            return $"Invoice_{storePart}_{orderPart}_{datePart}";
+            // 附件名与单据类型同步切换，避免退款单被当成发票归档。
+            var prefix = IsCreditNote(order) ? "CreditNote" : "Invoice";
+            return $"{prefix}_{storePart}_{orderPart}_{datePart}";
         }
 
         private static DateTime ResolveInvoiceDate(StoreOrderCartDto order)
@@ -555,7 +833,9 @@ namespace BlazorApp.Api.Services.React
 
         private static string FormatCurrency(decimal value)
         {
-            return $"${value:0.00}";
+            // 负数写成 -$7.50（符号在 $ 前，退货 / 退款单上一眼可见）；四舍五入后为 0 的不显示负零。
+            var rounded = decimal.Round(value, 2);
+            return rounded < 0 ? $"-${Math.Abs(rounded):0.00}" : $"${rounded:0.00}";
         }
 
         private static string FormatOptionalCurrency(decimal? value)

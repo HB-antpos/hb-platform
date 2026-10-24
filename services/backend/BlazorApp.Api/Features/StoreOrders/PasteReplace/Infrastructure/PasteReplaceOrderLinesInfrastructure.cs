@@ -133,6 +133,24 @@ internal sealed class PasteReplaceOrderLinesInfrastructure(
                     MinOrderQuantity = 1,
                 };
 
+            // 退货行（发货数量为负）不属于粘贴范围：粘贴不能录入退货，也不能覆盖 / 清零已有退货行。
+            // 活的退货行整行跳过；已软删的退货行被「复活」时先清掉退货痕迹，当作普通空行处理。
+            if (
+                detailByProductCode.TryGetValue(item.ProductCode, out var returnLine)
+                && (returnLine.AllocQuantity ?? 0) < 0
+            )
+            {
+                if (!returnLine.IsDeleted)
+                {
+                    continue;
+                }
+
+                returnLine.AllocQuantity = 0;
+                returnLine.ReturnReason = null;
+                returnLine.ReturnDisposition = null;
+                returnLine.ReturnNote = null;
+            }
+
             var isNewDetail = false;
             if (!detailByProductCode.TryGetValue(item.ProductCode, out var detail))
             {
@@ -210,7 +228,8 @@ internal sealed class PasteReplaceOrderLinesInfrastructure(
             detail.UpdatedAt = now;
             detail.UpdatedBy = currentUser;
 
-            if ((detail.Quantity ?? 0) <= 0 && allocQuantity <= 0)
+            // 空行 = 订货数量 <= 0 且发货数量恰好为 0（发货数量为负的是退货行，上面已跳过，不会走到这里）。
+            if ((detail.Quantity ?? 0) <= 0 && allocQuantity == 0)
             {
                 if (!isNewDetail && !string.IsNullOrWhiteSpace(detail.DetailGUID))
                 {

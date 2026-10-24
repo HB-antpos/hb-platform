@@ -205,6 +205,8 @@ public sealed class ContainerNewProductsReactService(
                 WarehouseArrivalDate = DateOnly.FromDateTime(ContainerWarehouseArrival.ResolveDate(container.ActualArrivalDate, container.EstimatedArrivalDate)!.Value),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
                 IsNewProduct = isNewProduct,
+                // localProducts 只收未删除的主档行，命中即商品查询页能查到（本店没有分店价时查询页会补建）
+                IsCreated = localProduct != null,
             });
         }
 

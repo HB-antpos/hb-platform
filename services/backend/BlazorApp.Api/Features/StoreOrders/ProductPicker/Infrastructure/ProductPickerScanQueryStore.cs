@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.StoreOrders.ProductPicker.Domain;
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using SqlSugar;
@@ -39,6 +40,23 @@ internal sealed class ProductPickerScanQueryStore(
             useSqlServerCaseInsensitiveCollation
         );
         var matchType = allMatches.Count > 0 ? "barcode" : null;
+
+        if (allMatches.Count == 0)
+        {
+            // iOS 相机会把 0 开头的 EAN-13 去成 12 位；精确条码没有结果才回退前导 0 的另一种写法，
+            // 先于货号 / 商品编码回退，避免纯数字条码被当成货号碰撞。
+            var barcodeVariant = BarcodeVariants.GetLeadingZeroVariant(barcode);
+            if (barcodeVariant != null)
+            {
+                allMatches = await QueryMatchesAsync(
+                    barcodeVariant,
+                    new List<string> { barcodeVariant },
+                    "barcode",
+                    useSqlServerCaseInsensitiveCollation
+                );
+                matchType = allMatches.Count > 0 ? "barcode" : null;
+            }
+        }
 
         if (allMatches.Count == 0)
         {

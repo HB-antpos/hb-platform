@@ -440,6 +440,7 @@ builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
 builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
 builder.Services.AddRateLimiter(PasswordResetRateLimits.Configure);
+builder.Services.AddRateLimiter(NetworkDiagnosticsRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
 // --------------------- JWT认证配置 ---------------------
@@ -667,7 +668,8 @@ builder.Services.AddScoped<OperationAuditQueryService>(sp =>
         sp.GetRequiredService<IHttpContextAccessor>(),
         // 商品图片在 HBweb 主档里。
         sp.GetRequiredService<SqlSugarContext>().Db,
-        sp.GetRequiredService<ILogger<OperationAuditQueryService>>()
+        sp.GetRequiredService<ILogger<OperationAuditQueryService>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()
     )
 );
 builder.Services.AddScoped<OperationAuditReviewService>(sp =>
@@ -684,7 +686,8 @@ builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmplo
     new BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService(
         sp.GetRequiredService<POSMSqlSugarContext>().Db,
         sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
-        sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>()
+        sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>(),
+        cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()
     )
 );
 builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService>(sp =>
@@ -767,6 +770,7 @@ builder.Services.AddScoped<
 >();
 builder.Services.AddScoped<IMobileDeviceAccountTokenIssuer, MobileDeviceAccountTokenIssuer>();
 builder.Services.AddSingleton<IClientIpResolver, ClientIpResolver>(); // 登录公网 IP 解析
+builder.Services.AddScoped<INetworkDiagnosticsProbe, NetworkDiagnosticsProbe>(); // 移动端网络测试：数据库往返耗时
 builder.Services.AddScoped<IServiceApiTokenService, ServiceApiTokenService>(); // 后台自动化 service API token
 builder.Services.AddScoped<IUserService, UserService>(); // 用户管理服务
 builder.Services.AddScoped<
@@ -792,6 +796,7 @@ builder.Services.AddScoped<IRoleService, RoleService>(); // 角色管理服务
 builder.Services.AddScoped<IStoreService, StoreService>(); // 分店管理服务
 builder.Services.AddScoped<StoreSyncService>(); // 分店数据同步服务
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreReceiptProfiles.IStoreReceiptProfileService, BlazorApp.Api.Services.StoreReceiptProfiles.StoreReceiptProfileService>(); // 门店小票资料下发（快照 / 设备应用情况）
+builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryService>(); // 收银端 POS API 入口按分店设置（首选入口 + 设备实际入口统计）
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
@@ -845,6 +850,28 @@ builder.Services.AddScoped<IContainerService, ContainerService>(); // 货柜服�
 builder.Services.AddScoped<IYiwuContainerService, YiwuContainerService>();
 builder.Services.AddScoped<ContainerExportService>(); // 义乌货柜服务
 builder.Services.AddScoped<ITranslationService, TranslationService>(); // 翻译服务
+// 看图生成英文商品名（Claude）：密钥走环境变量 ProductVision__Anthropic__ApiKey；未配置时自动退回文字翻译。
+builder.Services.Configure<BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionOptions.SectionName)
+);
+// 商品图片下载客户端：只连公网地址（每次连接都校验 IP），总时限由服务按配置控制。
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(30)
+    )
+    .ConfigurePrimaryHttpMessageHandler(BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher.CreatePrimaryHandler);
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.ProductDescriptions.IProductImageFetcher,
+    BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher
+>();
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.ProductDescriptions.IProductVisionClient,
+    BlazorApp.Api.Features.ProductDescriptions.ClaudeProductVisionClient
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.ProductDescriptions.IProductImageDescriptionService,
+    BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionService
+>();
 builder.Services.AddScoped<IYiwuOrderService, YiwuOrderService>(); // 义乌订单服务
 builder.Services.AddScoped<IPostgreSqlService, PostgreSqlService>(); // PostgreSQL数据库服务
 builder.Services.AddScoped<IProductPrefixCodeService, ProductPrefixCodeService>(); // 商品前缀管理服务
@@ -1305,6 +1332,13 @@ builder.Services.AddScoped<IPreorderReactService>(provider =>
 builder.Services.AddScoped<IPreorderGateService>(provider =>
     provider.GetRequiredService<PreorderReactService>()
 );
+// 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderService, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderService>();
+// 去年历史快照：发布后排队计算、截止前每晚刷新（状态在快照表表头行）
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderHistoryWorker>();
+// 新品图片转存 COS 商品图片桶（状态在商品行的转存列）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderImageStore, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderCosImageStore>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderImageWorker>();
 builder.Services.AddScoped<IStoreProductMaintenanceReactService, StoreProductMaintenanceReactService>();
 // 移动端离线商品目录：索引缓存为进程级单例（每店保留多版本供 delta），服务按请求作用域。
 builder.Services.AddSingleton<

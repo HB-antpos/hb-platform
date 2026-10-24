@@ -739,6 +739,125 @@ public class ReactContainerControllerSyncContractTests
         AssertPayload(serverError.Value, false, "服务器内部错误", null, "INTERNAL_ERROR");
     }
 
+    [Theory]
+    [InlineData(false, false, "*******8793")]
+    [InlineData(false, true, "*******8793")]
+    [InlineData(true, false, "*******8793")]
+    [InlineData(true, true, "FFAU8228793")]
+    public async Task ExportContainerProducts_货柜编号默认遮罩_有权限且要求完整时才写完整编号(
+        bool hasViewFullPermission,
+        bool requestFull,
+        string expectedNumber
+    )
+    {
+        var container = CreateContainer();
+        container.货柜编号 = "FFAU8228793";
+        var containerService = new Mock<IContainerReactService>();
+        containerService
+            .Setup(service => service.GetContainerDetailAsync("ROUTE-GUID"))
+            .ReturnsAsync(container);
+        containerService
+            .Setup(service => service.QueryContainerDetailsAsync(
+                It.IsAny<ContainerDetailQueryDto>(),
+                It.IsAny<CancellationToken>()
+            ))
+            .ReturnsAsync(
+                new ContainerDetailQueryResultDto
+                {
+                    Items = new List<ContainerDetailDto> { CreateDetail("DETAIL-1", "HB-001") },
+                    HasMore = false,
+                }
+            );
+        var permissions = hasViewFullPermission
+            ? new[] { Permissions.Container.ViewFullNumber }
+            : Array.Empty<string>();
+        var controller = CreateController(
+            containerService: containerService.Object,
+            authorizationService: CreateAuthorizationService(permissions).Object
+        );
+
+        var response = await controller.ExportContainerProducts(
+            "ROUTE-GUID",
+            new ReactContainerDetailsExportRequest
+            {
+                Format = "excel",
+                Columns = new List<string> { "Index", "ItemNumber" },
+                ShowFullContainerNumber = requestFull,
+            }
+        );
+
+        var file = Assert.IsType<FileContentResult>(response);
+        using var workbook = new XLWorkbook(new MemoryStream(file.FileContents));
+        var worksheet = workbook.Worksheets.First();
+        Assert.Equal("货柜编号", worksheet.Cell(1, 1).GetString());
+        Assert.Equal(expectedNumber, worksheet.Cell(1, 2).GetString());
+        // 工作表名与文件名不能含 *：遮罩时只留后 4 位。
+        Assert.DoesNotContain("*", worksheet.Name);
+        Assert.DoesNotContain("*", file.FileDownloadName);
+        Assert.StartsWith(
+            $"货柜明细_{expectedNumber.Replace("*", string.Empty)}_",
+            file.FileDownloadName
+        );
+    }
+
+    [Theory]
+    [InlineData(true, "*******8793", null)]
+    [InlineData(false, "NEWU1234567", null)]
+    [InlineData(true, "NEWU1234567", "NEWU1234567")]
+    public async Task UpdateContainer_遮罩值或无完整编号权限时不修改货柜编号(
+        bool hasViewFullPermission,
+        string submittedNumber,
+        string? expectedNumber
+    )
+    {
+        UpdateContainerDto? actualDto = null;
+        var containerService = new Mock<IContainerReactService>();
+        containerService
+            .Setup(service => service.UpdateContainerAsync("ROUTE-GUID", It.IsAny<UpdateContainerDto>()))
+            .Callback<string, UpdateContainerDto>((_, dto) => actualDto = dto)
+            .ReturnsAsync(true);
+        var permissions = hasViewFullPermission
+            ? new[] { Permissions.Container.ViewFullNumber }
+            : Array.Empty<string>();
+        var controller = CreateController(
+            containerService: containerService.Object,
+            authorizationService: CreateAuthorizationService(permissions).Object
+        );
+
+        var result = await controller.UpdateContainer(
+            "ROUTE-GUID",
+            new UpdateContainerDto { 货柜编号 = submittedNumber, 备注 = "remark" }
+        );
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(actualDto);
+        Assert.Equal(expectedNumber, actualDto!.货柜编号);
+        Assert.Equal("remark", actualDto.备注);
+    }
+
+    [Fact]
+    public async Task CreateContainer_货柜编号含遮罩字符时拒绝()
+    {
+        var containerService = new Mock<IContainerReactService>(MockBehavior.Strict);
+        var controller = CreateController(containerService: containerService.Object);
+
+        var result = await controller.CreateContainer(new CreateContainerDto { 货柜编号 = "****8793" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Theory]
+    [InlineData(nameof(ReactContainerController.GetContainers))]
+    [InlineData(nameof(ReactContainerController.GetContainerDetail))]
+    [InlineData(nameof(ReactContainerController.QueryAllocationSales))]
+    [InlineData(nameof(ReactContainerController.GetComingSoonContainerSummaries))]
+    [InlineData(nameof(ReactContainerController.GetComingSoonContainers))]
+    public void 返回货柜编号的接口_挂遮罩过滤器(string methodName)
+    {
+        var method = typeof(ReactContainerController).GetMethod(methodName);
+        Assert.NotNull(method!.GetCustomAttribute<BlazorApp.Api.Filters.MaskContainerNumbersAttribute>());
+    }
+
     private static ReactContainerController CreateController(
         IContainerHqSyncService? syncService = null,
         IContainerReactService? containerService = null,

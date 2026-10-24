@@ -74,6 +74,7 @@
       "givenName": "名",
       "middleName": "中间名",
       "nickname": "昵称",
+      "nicknameHint": "会显示在小票和员工码上，新建时默认与名相同",
       "fullNameAutoHint": "填写或修改下方的姓、名、中间名后，保存时姓名会按它们自动生成"
     },
     "usersBatch": {

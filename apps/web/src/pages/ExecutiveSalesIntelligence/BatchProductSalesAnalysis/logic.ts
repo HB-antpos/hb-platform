@@ -1,4 +1,4 @@
-import type { BatchSalesBranch, BatchSalesCoverage, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesLockedScope, BatchSalesMetrics, BatchSalesProduct, BatchSalesScope } from '../../../types/batchProductSalesAnalysis'
+import type { BatchSalesBranch, BatchSalesCoverage, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesLockedScope, BatchSalesMetrics, BatchSalesProduct, BatchSalesPurchaseRow, BatchSalesScope } from '../../../types/batchProductSalesAnalysis'
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
@@ -197,6 +197,81 @@ export function buildBatchProductSalesAnalysis(details: readonly BatchSalesDetai
     branches,
     productContributions,
   }
+}
+
+export interface BatchProductSalesPurchaseQuantity {
+  /** 总仓配货 + 供应商进货单。 */
+  total: number
+  warehouse: number
+  supplier: number
+}
+
+/** 进货量按商品、分店、商品×分店预先汇总，页面切换商品或分店时只做查表。 */
+export interface BatchProductSalesPurchaseIndex {
+  total: BatchProductSalesPurchaseQuantity
+  byProduct: Map<string, BatchProductSalesPurchaseQuantity>
+  byBranch: Map<string, BatchProductSalesPurchaseQuantity>
+  byProductBranch: Map<string, BatchProductSalesPurchaseQuantity>
+  /** 每个商品有进货的分店，用于在单品分店排行里补上「有进货、无销量」的分店。 */
+  branchesByProduct: Map<string, string[]>
+}
+
+const ZERO_PURCHASE: BatchProductSalesPurchaseQuantity = { total: 0, warehouse: 0, supplier: 0 }
+
+function purchaseKey(productCode: string, branchCode: string) {
+  return `${productCode}\u0001${branchCode}`
+}
+
+function addPurchase(map: Map<string, BatchProductSalesPurchaseQuantity>, key: string, warehouse: number, supplier: number) {
+  const current = map.get(key) ?? ZERO_PURCHASE
+  map.set(key, { total: current.total + warehouse + supplier, warehouse: current.warehouse + warehouse, supplier: current.supplier + supplier })
+}
+
+export function buildBatchProductSalesPurchaseIndex(rows: readonly BatchSalesPurchaseRow[]): BatchProductSalesPurchaseIndex {
+  const byProduct = new Map<string, BatchProductSalesPurchaseQuantity>()
+  const byBranch = new Map<string, BatchProductSalesPurchaseQuantity>()
+  const byProductBranch = new Map<string, BatchProductSalesPurchaseQuantity>()
+  const branchesByProduct = new Map<string, string[]>()
+  let warehouse = 0
+  let supplier = 0
+  rows.forEach((row) => {
+    addPurchase(byProduct, row.productCode, row.warehouseQuantity, row.supplierQuantity)
+    addPurchase(byBranch, row.branchCode, row.warehouseQuantity, row.supplierQuantity)
+    const key = purchaseKey(row.productCode, row.branchCode)
+    if (!byProductBranch.has(key)) branchesByProduct.set(row.productCode, [...(branchesByProduct.get(row.productCode) ?? []), row.branchCode])
+    addPurchase(byProductBranch, key, row.warehouseQuantity, row.supplierQuantity)
+    warehouse += row.warehouseQuantity
+    supplier += row.supplierQuantity
+  })
+  return { total: { total: warehouse + supplier, warehouse, supplier }, byProduct, byBranch, byProductBranch, branchesByProduct }
+}
+
+/** 服务端只返回非零组合，查不到即真实 0；商品/分店未指定表示「全部」。 */
+export function getBatchProductSalesPurchase(index: BatchProductSalesPurchaseIndex, filters: BatchProductSalesAnalysisFilters = {}): BatchProductSalesPurchaseQuantity {
+  if (filters.productCode && filters.branchCode) return index.byProductBranch.get(purchaseKey(filters.productCode, filters.branchCode)) ?? ZERO_PURCHASE
+  if (filters.productCode) return index.byProduct.get(filters.productCode) ?? ZERO_PURCHASE
+  if (filters.branchCode) return index.byBranch.get(filters.branchCode) ?? ZERO_PURCHASE
+  return index.total
+}
+
+/**
+ * 单品分店排行只含有销量的分店；把当前商品范围内有进货、却没有销量的分店补在末尾（销量记 0），
+ * 避免「进了货却没卖出去」的分店被藏起来。全部商品视图的总览已包含全部分店，通常不会新增。
+ */
+export function appendBatchProductSalesPurchaseOnlyBranches(
+  branches: readonly BatchSalesBranch[],
+  index: BatchProductSalesPurchaseIndex | undefined,
+  productCode: string | undefined,
+  branchNames: ReadonlyMap<string, string>,
+): BatchSalesBranch[] {
+  if (!index) return [...branches]
+  const known = new Set(branches.map((branch) => branch.branchCode))
+  const purchased = productCode ? index.branchesByProduct.get(productCode) ?? [] : [...index.byBranch.keys()]
+  const extra = purchased
+    .filter((branchCode) => !known.has(branchCode) && getBatchProductSalesPurchase(index, { productCode, branchCode }).total !== 0)
+    .sort((left, right) => getBatchProductSalesPurchase(index, { productCode, branchCode: right }).total - getBatchProductSalesPurchase(index, { productCode, branchCode: left }).total)
+    .map((branchCode) => ({ branchCode, branchName: branchNames.get(branchCode) ?? branchCode, metrics: emptyMetrics(), daily: [] }))
+  return [...branches, ...extra]
 }
 
 /**

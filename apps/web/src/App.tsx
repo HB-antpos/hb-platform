@@ -35,6 +35,7 @@ const ShopOrderDetailPage = lazy(() => import('./pages/ShopOrderDetail'))
 const ShopOrdersPage = lazy(() => import('./pages/ShopOrders'))
 const ShopPreorderPage = lazy(() => import('./pages/ShopPreorder'))
 const ShopPurchaseSalesAnalysisPage = lazy(() => import('./pages/ShopPurchaseSalesAnalysis'))
+const StoreHelpFaqPage = lazy(() => import('./pages/StoreHelpFaq'))
 
 function AppBootstrap() {
   const { t } = useTranslation()
@@ -104,6 +105,10 @@ function AppBootstrap() {
       <Route
         path="/support/hb-supplier-order"
         element={<RouteLoadBoundary resetKey="hb-supplier-order-support"><HbSupplierOrderSupportPage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/support/faq"
+        element={<RouteLoadBoundary resetKey="store-help-faq"><StoreHelpFaqPage /></RouteLoadBoundary>}
       />
       <Route
         path={WEB_NO_ACCESS_PATH}

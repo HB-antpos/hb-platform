@@ -53,6 +53,17 @@ public sealed class PosOperationAuditController : ControllerBase
         return Ok(ApiResponse<OperationAuditEmployeeSummaryResultDto>.OK(result));
     }
 
+    /// <summary>
+    /// 工作台角标：最近 days 天（默认 7，限制 1~31）内可见分店范围内待核查的异常数及其中危险操作数。
+    /// 不接收分店参数，范围由服务端按账号决定；结果缓存约 45 秒。
+    /// </summary>
+    [HttpGet("badge-summary")]
+    public async Task<ActionResult<ApiResponse<EmployeeLogBadgeSummaryDto>>> GetBadgeSummary([FromQuery] int? days)
+    {
+        var result = await _service.GetBadgeSummaryAsync(days);
+        return Ok(ApiResponse<EmployeeLogBadgeSummaryDto>.OK(result));
+    }
+
     /// <summary>单条事件及同设备前后若干分钟（默认 5，可选 10、15）内的操作。</summary>
     [HttpGet("{eventId:guid}/context")]
     public async Task<ActionResult<ApiResponse<OperationAuditContextDto>>> GetContext(

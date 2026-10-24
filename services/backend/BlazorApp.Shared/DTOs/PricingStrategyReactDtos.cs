@@ -11,6 +11,37 @@ namespace BlazorApp.Shared.DTOs
         public List<string> SupplierCodes { get; set; } = new();
         public int DetailsCount { get; set; }
         public int TargetsCount { get; set; }
+
+        /// <summary>定价方式：Fixed 单区间固定成率 / Curve 曲线 / Mixed 分段（含固定区间的多区间）/ Legacy 旧版区间规则 / Empty 无区间。</summary>
+        public string PricingMode { get; set; } = "Empty";
+        /// <summary>仅 Fixed 有值：统一成率。</summary>
+        public decimal? FixedRate { get; set; }
+        /// <summary>最低进货价区间的起始成率，列表用于展示「成率 a → b」。</summary>
+        public decimal? StartRate { get; set; }
+        /// <summary>最高进货价区间的结束成率。</summary>
+        public decimal? EndRate { get; set; }
+        /// <summary>曲线/旧版规则的节点（成本 → 零售价），用于列表里的缩略图；Fixed 为空。</summary>
+        public List<PricingStrategyNodeDto> Nodes { get; set; } = new();
+        /// <summary>按进货价从低到高的区间摘要，列表缩略图与展开行使用。</summary>
+        public List<PricingStrategyIntervalDto> Intervals { get; set; } = new();
+    }
+
+    public class PricingStrategyIntervalDto
+    {
+        public decimal MinPrice { get; set; }
+        public decimal MaxPrice { get; set; }
+        /// <summary>Fixed 固定成率 / Curve 曲线 / Legacy 旧版规则。</summary>
+        public string Type { get; set; } = "Curve";
+        /// <summary>仅 Fixed 有值。</summary>
+        public decimal? Rate { get; set; }
+        public decimal StartPrice { get; set; }
+        public decimal EndPrice { get; set; }
+    }
+
+    public class PricingStrategyNodeDto
+    {
+        public decimal Cost { get; set; }
+        public decimal Price { get; set; }
     }
 
     public class PricingStrategyRuleDto
@@ -77,6 +108,7 @@ namespace BlazorApp.Shared.DTOs
         public decimal Rate { get; set; }
         public decimal EffectiveRate { get; set; }
         public string? StrategyId { get; set; }
+        public string? StrategyName { get; set; }
         public PricingEvaluateRuleInfo? Rule { get; set; }
     }
 

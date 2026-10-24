@@ -204,7 +204,7 @@ public sealed class ContainerDetailRetailPriceSyncTests : IDisposable
     }
 
     [Fact]
-    public async Task 批量设价apply_prices_请求里的两个开关同样生效()
+    public async Task 批量设价apply_prices_只写货柜明细_不回写仓库价和分店价()
     {
         await SeedScenarioAsync("P-APPLY");
         var fixtures = new ServiceFixtures();
@@ -214,41 +214,179 @@ public sealed class ContainerDetailRetailPriceSyncTests : IDisposable
             new ContainerDetailApplyPricesRequestDto
             {
                 SelectedHguids = new List<string> { "D-P-APPLY" },
+                ImportPrice = 4.4m,
                 OemPrice = 7.77m,
+                // 旧客户端仍会带开关；本次价只落明细，开关不再生效。
                 SyncStoreRetailPrices = true,
-                GenerateTasks = false,
+                GenerateTasks = true,
             }
         );
 
         Assert.Equal(1, updated);
-        Assert.Equal(7.77m, (await WarehouseProductAsync("P-APPLY")).OEMPrice);
-        Assert.Equal(7.77m, await StoreRetailAsync("P-APPLY", "S01"));
-        Assert.Equal(7.77m, await StoreRetailAsync("P-APPLY", "S02"));
+        var detail = await _localDb.Queryable<ContainerDetail>().SingleAsync(d => d.DetailCode == "D-P-APPLY");
+        Assert.Equal(4.4m, detail.ImportPrice);
+        Assert.Equal(7.77m, detail.OEMPrice);
+        var warehouse = await WarehouseProductAsync("P-APPLY");
+        Assert.Equal(3.3m, warehouse.ImportPrice);
+        Assert.Equal(2.2m, warehouse.OEMPrice);
+        Assert.Equal(2.2m, await StoreRetailAsync("P-APPLY", "S01"));
+        Assert.Equal(2.2m, await StoreRetailAsync("P-APPLY", "S02"));
         Assert.Empty(fixtures.OverwriteBatches);
-        // 新价 7.77 与 S-SAME 的现价 6.66 不同，所以这次 S-SAME 也被改价并入队（其余跳过规则不变）。
-        Assert.Equal(new[] { "S-SAME", "S01", "S02" }, Assert.Single(fixtures.Enqueuer.Calls).StoreCodes);
+        Assert.Empty(fixtures.Enqueuer.Calls);
+    }
+
+    [Fact]
+    public async Task 已有零售价_默认开关_只改仓库价主档和分店价_不动明细本次零售价()
+    {
+        await SeedScenarioAsync("P-WH-OEM");
+        var fixtures = new ServiceFixtures();
+
+        var result = await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
+            ContainerCode,
+            new List<UpdateContainerDetailDto>
+            {
+                new() { HGUID = "D-P-WH-OEM", 仓库零售价 = 6.66m, ExpectedWarehouseOemPrice = 2.2m },
+            }
+        );
+
+        Assert.Empty(result.ValidationErrors);
+        Assert.Equal(1, result.TotalUpdated);
+        Assert.Equal(6.66m, (await WarehouseProductAsync("P-WH-OEM")).OEMPrice);
+        Assert.Equal(6.66m, (await _localDb.Queryable<Product>().SingleAsync(p => p.ProductCode == "P-WH-OEM")).RetailPrice);
+        // 明细自己的「本次零售价」保持不变：它只是新商品建档数据。
+        Assert.Equal(2.2m, (await _localDb.Queryable<ContainerDetail>().SingleAsync(d => d.DetailCode == "D-P-WH-OEM")).OEMPrice);
+        // 两个开关默认勾选：直接改启用分店价并发待换标签任务。
+        Assert.Equal(6.66m, await StoreRetailAsync("P-WH-OEM", "S01"));
+        Assert.Equal(6.66m, await StoreRetailAsync("P-WH-OEM", "S02"));
+        Assert.Single(fixtures.OverwriteBatches);
+        Assert.All(fixtures.HistoryContexts, context => Assert.False(context.SkipPriceTasks));
+    }
+
+    [Fact]
+    public async Task 已有零售价_不同步分店且不生成任务_只改仓库价()
+    {
+        await SeedScenarioAsync("P-WH-OEM-ONLY");
+        var fixtures = new ServiceFixtures();
+
+        await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
+            ContainerCode,
+            new List<UpdateContainerDetailDto>
+            {
+                new() { HGUID = "D-P-WH-OEM-ONLY", 仓库零售价 = 6.66m, ExpectedWarehouseOemPrice = 2.2m },
+            },
+            new WarehousePriceSyncPolicy(SyncStoreRetailPrices: false, GenerateTasks: false)
+        );
+
+        Assert.Equal(6.66m, (await WarehouseProductAsync("P-WH-OEM-ONLY")).OEMPrice);
+        Assert.Equal(2.2m, await StoreRetailAsync("P-WH-OEM-ONLY", "S01"));
+        Assert.Empty(fixtures.OverwriteBatches);
+        Assert.Empty(fixtures.Enqueuer.Calls);
         Assert.All(fixtures.HistoryContexts, context => Assert.True(context.SkipPriceTasks));
     }
 
     [Fact]
-    public async Task 批量设价apply_prices_不传开关_按两个都勾选处理()
+    public async Task 已有进口价_回写仓库价主档和分店进货价_不动明细本次进口价()
     {
-        await SeedScenarioAsync("P-APPLY-DEFAULT");
+        await SeedScenarioAsync("P-WH-IMP");
         var fixtures = new ServiceFixtures();
 
-        await fixtures.CreateService(this).ApplyPricesByScopeAsync(
+        var result = await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
             ContainerCode,
-            new ContainerDetailApplyPricesRequestDto
+            new List<UpdateContainerDetailDto>
             {
-                SelectedHguids = new List<string> { "D-P-APPLY-DEFAULT" },
-                OemPrice = 7.77m,
+                new() { HGUID = "D-P-WH-IMP", 仓库进口价 = 4.4m, ExpectedWarehouseImportPrice = 3.3m },
             }
         );
 
-        Assert.Equal(7.77m, await StoreRetailAsync("P-APPLY-DEFAULT", "S01"));
-        Assert.Single(fixtures.OverwriteBatches);
-        Assert.Empty(fixtures.Enqueuer.Calls);
-        Assert.All(fixtures.HistoryContexts, context => Assert.False(context.SkipPriceTasks));
+        Assert.Empty(result.ValidationErrors);
+        Assert.Equal(1, result.TotalUpdated);
+        Assert.Equal(4.4m, (await WarehouseProductAsync("P-WH-IMP")).ImportPrice);
+        Assert.Equal(4.4m, (await _localDb.Queryable<Product>().SingleAsync(p => p.ProductCode == "P-WH-IMP")).PurchasePrice);
+        var storePurchasePrices = await _localDb.Queryable<StoreRetailPrice>()
+            .Where(price => price.ProductCode == "P-WH-IMP")
+            .Select(price => price.PurchasePrice)
+            .ToListAsync();
+        Assert.All(storePurchasePrices, price => Assert.Equal(4.4m, price));
+        // 明细自己的「本次进口价」保持不变；零售价与分店零售价也不受影响。
+        Assert.Equal(3.3m, (await _localDb.Queryable<ContainerDetail>().SingleAsync(d => d.DetailCode == "D-P-WH-IMP")).ImportPrice);
+        Assert.Equal(2.2m, (await WarehouseProductAsync("P-WH-IMP")).OEMPrice);
+        Assert.Equal(2.2m, await StoreRetailAsync("P-WH-IMP", "S01"));
+        Assert.Empty(fixtures.OverwriteBatches);
+    }
+
+    [Fact]
+    public async Task 已有价_仓库当前值与前端看到的旧值不一致_该字段被拒绝且不写库()
+    {
+        await SeedScenarioAsync("P-WH-STALE");
+        var fixtures = new ServiceFixtures();
+
+        var result = await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
+            ContainerCode,
+            new List<UpdateContainerDetailDto>
+            {
+                new()
+                {
+                    HGUID = "D-P-WH-STALE",
+                    仓库进口价 = 4.4m,
+                    ExpectedWarehouseImportPrice = 9.9m,
+                    仓库零售价 = 6.66m,
+                    ExpectedWarehouseOemPrice = 2.2m,
+                },
+            }
+        );
+
+        // 进口价基线过期被拒；同一行的零售价基线一致，仍照常保存（字段级部分成功）。
+        var error = Assert.Single(result.ValidationErrors);
+        Assert.Equal("仓库进口价", error.Field);
+        Assert.Equal("WAREHOUSE_PRICE_CHANGED", error.Code);
+        var warehouse = await WarehouseProductAsync("P-WH-STALE");
+        Assert.Equal(3.3m, warehouse.ImportPrice);
+        Assert.Equal(6.66m, warehouse.OEMPrice);
+    }
+
+    [Fact]
+    public async Task 已有价_商品没有仓库记录_新商品_被拒绝()
+    {
+        await SeedScenarioAsync("P-WH-NEW");
+        // 模拟「新商品」：明细存在，但仓库商品记录不存在。
+        await _localDb.Deleteable<WarehouseProduct>().Where(item => item.ProductCode == "P-WH-NEW").ExecuteCommandAsync();
+        var fixtures = new ServiceFixtures();
+
+        var result = await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
+            ContainerCode,
+            new List<UpdateContainerDetailDto>
+            {
+                new() { HGUID = "D-P-WH-NEW", 仓库零售价 = 6.66m, ExpectedWarehouseOemPrice = 2.2m },
+            }
+        );
+
+        var error = Assert.Single(result.ValidationErrors);
+        Assert.Equal("仓库零售价", error.Field);
+        Assert.Equal("WAREHOUSE_PRODUCT_NOT_FOUND", error.Code);
+        Assert.Equal(2.2m, (await _localDb.Queryable<Product>().SingleAsync(p => p.ProductCode == "P-WH-NEW")).RetailPrice);
+        Assert.Empty(fixtures.OverwriteBatches);
+    }
+
+    [Fact]
+    public async Task 已有价_有仓库记录但缺少商品主档_被拒绝且不静默跳过()
+    {
+        await SeedScenarioAsync("P-WH-NO-MASTER");
+        await _localDb.Deleteable<Product>().Where(item => item.ProductCode == "P-WH-NO-MASTER").ExecuteCommandAsync();
+        var fixtures = new ServiceFixtures();
+
+        var result = await fixtures.CreateService(this).BatchUpdateDetailsDetailedAsync(
+            ContainerCode,
+            new List<UpdateContainerDetailDto>
+            {
+                new() { HGUID = "D-P-WH-NO-MASTER", 仓库进口价 = 4.4m, ExpectedWarehouseImportPrice = 3.3m },
+            }
+        );
+
+        // 回写要同时落仓库表和商品主档；缺主档时必须返回字段级错误，前端才不会把草稿当成已保存清掉。
+        var error = Assert.Single(result.ValidationErrors);
+        Assert.Equal("仓库进口价", error.Field);
+        Assert.Equal("WAREHOUSE_PRODUCT_NOT_FOUND", error.Code);
+        Assert.Equal(3.3m, (await WarehouseProductAsync("P-WH-NO-MASTER")).ImportPrice);
     }
 
     // ---------- 场景与断言辅助 ----------

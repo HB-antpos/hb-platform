@@ -385,6 +385,20 @@ namespace BlazorApp.Shared.Constants
             public const string CancelPriceUpdateTasks = "Warehouse.CancelPriceUpdateTasks";
         }
 
+        /// <summary>
+        /// 供应商节日预订单（KFC / Dats / Brazco 等圣诞、万圣节订单表）。两码都刻意不设别名，需显式授予。
+        /// </summary>
+        public static class SupplierPreorder
+        {
+            /// <summary>导入订单表、开启分店、维护下单人员授权、截止锁定、导出汇总；截止后仍可修改。</summary>
+            public const string Manage = "SupplierPreorder.Manage";
+            /// <summary>
+            /// 「预订单下单」入口。只决定能否看到菜单和进入页面；能替哪家店下单只认「下单人员授权」，
+            /// 不看可管理分店、不看是否店长。
+            /// </summary>
+            public const string Order = "SupplierPreorder.Order";
+        }
+
         public static class DomesticPurchase
         {
             public const string ManageSuppliers = "DomesticPurchase.ManageSuppliers";

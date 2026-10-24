@@ -1,4 +1,6 @@
 import {
+  buildLinklyDeviceSelectOptions,
+  buildReceiptAmountRows,
   canExportLinklySettlementRange,
   createLatestAbortableRequestGuard,
   formatAmountMinor,
@@ -101,5 +103,35 @@ assertEqual(
   true,
   '列表 rowKey 必须直接使用字符串 ID',
 )
+
+const deviceCandidates = [
+  { storeCode: '1002', deviceCode: 'POS_1002_2111' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0239' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0222' },
+  { storeCode: '1013', deviceCode: 'POS_1013_0222' },
+]
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates, '1013').map((item) => item.value).join(','),
+  'POS_1013_0222,POS_1013_0239',
+  '选了门店时只列该门店设备并去重排序',
+)
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates).length,
+  3,
+  '未选门店时列出全部设备（去重）',
+)
+assertEqual(
+  buildLinklyDeviceSelectOptions(deviceCandidates)[0].label,
+  'POS_1002_2111 · 1002',
+  '未选门店时选项文案带门店',
+)
+
+const receiptRows = buildReceiptAmountRows(
+  [{ cardName: 'VISA', purchaseAmountMinor: 100 }],
+  { purchaseAmountMinor: 100, totalAmountMinor: 100 },
+  '合计',
+)
+assertEqual(receiptRows.map((row) => row.cardName).join(','), 'VISA,合计', '回单金额数据：卡种在前、合计在最后')
+assertEqual(buildReceiptAmountRows(undefined, undefined, '合计').length, 0, '没有金额数据时不产生行')
 
 console.log('LinklySettlements logic.test: ok')

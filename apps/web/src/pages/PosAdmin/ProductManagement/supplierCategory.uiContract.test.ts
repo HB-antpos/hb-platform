@@ -30,7 +30,23 @@ function collectKeys(value: unknown, prefix = ''): string[] {
 const zh = JSON.parse(read(`${pageDir}/messages.zh.json`)) as { posAdmin: { products: { supplierCategory: Record<string, string> } } }
 const en = JSON.parse(read(`${pageDir}/messages.en.json`)) as { posAdmin: { products: { supplierCategory: Record<string, string> } } }
 assert.deepEqual(Object.keys(zh), ['posAdmin'], '页面文案只放 posAdmin 命名空间')
-assert.deepEqual(Object.keys(zh.posAdmin.products), ['supplierCategory'], '页面文案只新增 posAdmin.products.supplierCategory')
+assert.deepEqual(Object.keys(zh.posAdmin.products), ['supplierCategory', 'imageNames'], '页面文案只新增 posAdmin.products.supplierCategory 与 imageNames（看图生成英文名）')
+
+// 看图生成英文名：页面与预览弹窗引用的 imageNames 键必须中英文都存在
+const imageNameSources = [pageSource, read(`${pageDir}/ImageEnglishNamePreviewModal.tsx`)]
+const imageNameKeys = new Set<string>()
+for (const source of imageNameSources) {
+  for (const match of source.matchAll(/'posAdmin\.products\.imageNames\.([A-Za-z]+)'/g)) imageNameKeys.add(match[1])
+  if (source.includes("const I18N = 'posAdmin.products.imageNames'")) {
+    for (const match of source.matchAll(/`\$\{I18N\}\.([A-Za-z]+)`/g)) imageNameKeys.add(match[1])
+  }
+}
+assert.ok(imageNameKeys.size >= 8, '应能从源码中提取到看图生成英文名的文案键')
+const zhImageNames = (zh.posAdmin.products as unknown as { imageNames: Record<string, string> }).imageNames
+const enImageNames = (en.posAdmin.products as unknown as { imageNames: Record<string, string> }).imageNames
+for (const key of imageNameKeys) {
+  assert.ok(typeof zhImageNames[key] === 'string' && typeof enImageNames[key] === 'string', `缺少文案 posAdmin.products.imageNames.${key}`)
+}
 const zhKeys = collectKeys(zh).sort()
 const enKeys = collectKeys(en).sort()
 assert.ok(zhKeys.length > 30, '应有足够的文案键')

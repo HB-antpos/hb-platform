@@ -11,6 +11,7 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
 {
     private const int MaxExportRows = 5_000;
     private const int ExportBatchSize = 200;
+    private const int MaxDeviceOptions = 2_000;
     private static readonly IReadOnlySet<string> ConnectionModes =
         new HashSet<string>(["LocalIp", "CloudDirectSync", "CloudBackendAsync"], StringComparer.Ordinal);
     private static readonly IReadOnlySet<string> Environments =
@@ -55,6 +56,27 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
             PageNumber = normalized.PageNumber,
             PageSize = normalized.PageSize,
         };
+    }
+
+    public async Task<IReadOnlyList<LinklySettlementDeviceOptionDto>> GetDeviceOptionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // 关键逻辑：只在库内按 门店+设备 去重取两个短字段，避免读取 SettlementData 等大字段；
+        // 设备数量有限（每店几台），上限仅用于防止异常数据撑爆下拉。
+        var rows = await _db.Queryable<PosmLinklySettlement>()
+            .GroupBy(item => new { item.StoreCode, item.DeviceCode })
+            .Select(item => new LinklySettlementDeviceOptionDto
+            {
+                StoreCode = item.StoreCode,
+                DeviceCode = item.DeviceCode,
+            })
+            .ToListAsync(cancellationToken);
+        return rows
+            .Where(item => !string.IsNullOrWhiteSpace(item.DeviceCode))
+            .OrderBy(item => item.StoreCode, StringComparer.Ordinal)
+            .ThenBy(item => item.DeviceCode, StringComparer.Ordinal)
+            .Take(MaxDeviceOptions)
+            .ToList();
     }
 
     public async Task<LinklySettlementDetailDto?> GetDetailAsync(
@@ -102,7 +124,8 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
             LastPrintedAtUtc = AsNullableUtc(row.LastPrintedAtUtc),
             ClientRevision = row.ClientRevision.ToString(CultureInfo.InvariantCulture),
             CardTotals = parsed.CardTotals.ToList(),
-            Receipts = LinklySettlementReceiptSanitizer.ParseAndSanitize(row.ReceiptTextsJson),
+            Receipts = LinklySettlementReceiptReader.ParseReceipts(row.ReceiptTextsJson),
+            GeneratedSummary = LinklySettlementSummaryReceipt.Build(parsed.Summary, parsed.CardTotals),
         };
     }
 
@@ -260,7 +283,7 @@ internal sealed class LinklySettlementQueryService : ILinklySettlementQueryServi
         CompletedAtUtc = AsNullableUtc(row.CompletedAtUtc),
         ResponseCode = row.ResponseCode,
         ResponseText = row.ResponseText,
-        ReceiptCount = LinklySettlementReceiptSanitizer.Count(row.ReceiptTextsJson),
+        ReceiptCount = LinklySettlementReceiptReader.Count(row.ReceiptTextsJson),
         PrintCount = row.PrintCount,
         LastPrintError = row.LastPrintError,
         ReceivedAtUtc = AsUtc(row.ReceivedAtUtc),

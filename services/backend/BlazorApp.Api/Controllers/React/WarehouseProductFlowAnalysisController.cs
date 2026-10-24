@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using System.Security.Claims;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -261,6 +262,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("containers")]
         [Authorize(Policy = Permissions.SalesDashboard.WarehouseFlowView)]
+        [MaskContainerNumbers]
         public async Task<IActionResult> GetContainers(
             [FromBody] WarehouseProductFlowAnalysisRequest request
         )

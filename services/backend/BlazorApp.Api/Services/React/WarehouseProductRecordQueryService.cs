@@ -268,7 +268,8 @@ namespace BlazorApp.Api.Services.React
             if (request.Statuses is { Count: > 0 })
             {
                 var statuses = request.Statuses.Distinct().ToList();
-                query = query.Where((d, c) => c.Status.HasValue && statuses.Contains(c.Status.Value));
+                // 不能写 c.Status.HasValue：SqlSugar 会生成 [Status]<>''，SQL Server 里 '' 转 int 为 0，会把状态码 0（已装柜）排除掉。
+                query = query.Where((d, c) => statuses.Contains(c.Status!.Value));
             }
             else
             {

@@ -32,6 +32,22 @@ export interface PaymentTerminalSettingsDto {
   stores: PaymentTerminalStoreOptionDto[]
   selectedStoreCode?: string | null
   linkly: LinklyCloudCredentialAdminDto[]
+  // 当前所选门店的「收银机直连 Square」开关；未选门店时为空
+  squareDirect?: SquareDirectStatusDto | null
+}
+
+export interface SquareDirectStatusDto {
+  storeCode: string
+  // false = POS API 还没建开关表（未部署新版 POS API），此时不能开启
+  available: boolean
+  enabled: boolean
+  updatedAtUtc?: string | null
+  updatedBy?: string | null
+}
+
+export interface UpdateSquareDirectRequest {
+  storeCode: string
+  enabled: boolean
 }
 
 export interface UpdateSquareTokenRequest {

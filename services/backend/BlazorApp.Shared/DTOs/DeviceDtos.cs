@@ -208,6 +208,21 @@ namespace BlazorApp.Shared.DTOs
         /// WPF 进程句柄数，未上报时为空
         /// </summary>
         public int? ProcessHandleCount { get; set; }
+
+        /// <summary>
+        /// RustDesk 客户端版本（远程维护登记时上报），没有远程维护记录时为空；仅分页列表填充
+        /// </summary>
+        public string? RustDeskClientVersion { get; set; }
+
+        /// <summary>
+        /// 设备最近一次请求实际走的 POS API 入口（edge / aws / direct），后台「入口」列展示用；未上报（老客户端 / 尚未经新入口）时为空
+        /// </summary>
+        public string? LastApiEntry { get; set; }
+
+        /// <summary>
+        /// <see cref="LastApiEntry"/> 最近一次写入时间（UTC）；POS API 节流写入，约每 10 分钟刷新，未上报时为空
+        /// </summary>
+        public DateTime? LastApiEntryAt { get; set; }
     }
 
     /// <summary>

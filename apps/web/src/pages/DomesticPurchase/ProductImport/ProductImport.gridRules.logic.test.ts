@@ -13,6 +13,7 @@ import {
   getImportRowErrors,
   isBlankImportRow,
   matchesImportFilter,
+  mergeEnglishNamesById,
   mergeTranslationsById,
   resolveImportRowKind,
   snapshotTranslationTargets,
@@ -213,6 +214,33 @@ const mergedEnglish = mergeTranslationsById(afterEnglish, targets, translations)
 assertEqual(mergedEnglish.appliedCount, 1, '只有未被改动的 A 被写入')
 assertEqual(mergedEnglish.editedCount, 1, 'B 因英文名被手填而跳过')
 assertDeepEqual(mergedEnglish.products.map((row) => row.newProduct.englishName), ['Modeling Clay', 'My Box', 'Canvas Frame'], '手填的英文名保留')
+
+/* ------------------------------ 看图英文名按 id 合并 ------------------------------ */
+
+// 看图结果按行 id 给出：同名不同图的两行可以拿到不同英文名
+const sameNameRows = [
+  makeRow('X', { productCode: 'X', productName: '收纳盒' }),
+  makeRow('Y', { productCode: 'Y', productName: '收纳盒' }),
+]
+const sameNameTargets = snapshotTranslationTargets(sameNameRows, [])
+const byId = mergeEnglishNamesById(sameNameRows, sameNameTargets, { X: 'Blue Plastic Storage Box', Y: 'Clear Storage Box 3 Pack' })
+assertEqual(byId.appliedCount, 2, '按 id 合并时两行都写入')
+assertDeepEqual(byId.products.map((row) => row.newProduct.englishName), ['Blue Plastic Storage Box', 'Clear Storage Box 3 Pack'], '同名不同图的行各自拿到自己的英文名')
+
+// 期间改名 / 手填英文名的行不覆盖；空结果与仍含中文的结果计入 skipped
+const imageMerged = mergeEnglishNamesById(afterEnglish, targets, { A: 'Modeling Clay Set', B: 'Storage Box' })
+assertEqual(imageMerged.appliedCount, 1, '只有未被改动的 A 被写入')
+assertEqual(imageMerged.editedCount, 1, 'B 因英文名被手填而跳过')
+assertDeepEqual(imageMerged.products.map((row) => row.newProduct.englishName), ['Modeling Clay Set', 'My Box', 'Canvas Frame'], '手填的英文名保留')
+
+const imageSkipped = mergeEnglishNamesById(translationRows, targets, { A: '塑形泥', B: undefined })
+assertEqual(imageSkipped.appliedCount, 0, '无效结果不写入')
+assertEqual(imageSkipped.skippedCount, 2, '含中文与空结果都计入跳过')
+assertEqual(imageSkipped.products, translationRows, '没有写入时返回原数组，避免无谓重渲染')
+
+const imageAfterDelete = mergeEnglishNamesById(afterEdit, targets, { A: 'Modeling Clay', B: 'Storage Box' })
+assertEqual(imageAfterDelete.editedCount, 1, '期间被删除的 B 直接忽略，只统计被改名的 A')
+assertEqual(imageAfterDelete.products[0], afterEdit[0], '期间新增的行对象原样保留')
 
 // 期间无编辑：与原函数行为一致
 const mergedPlain = mergeTranslationsById(translationRows, targets, translations)

@@ -225,6 +225,7 @@ function normalizeCompactStore(raw: unknown): CompactSalesBoardStore | null {
     australianSupplierCode: readString(record.australianSupplierCode ?? record.AustralianSupplierCode) ?? '200',
     australianSupplierName: readString(record.australianSupplierName ?? record.AustralianSupplierName) ?? '200-hotbargain',
     productCount: readNumber(record.productCount ?? record.ProductCount),
+    purchaseQuantity: readNumber(record.purchaseQuantity ?? record.PurchaseQuantity),
   }
 }
 
@@ -407,6 +408,8 @@ export async function getCompactSalesBoard(
       params: {
         startDate: query.dateRange.startDate,
         endDate: query.dateRange.endDate,
+        purchaseStartDate: query.purchaseDateRange?.startDate,
+        purchaseEndDate: query.purchaseDateRange?.endDate,
         branchCodes: query.branchCodes,
         selectedBranchCode: query.selectedBranchCode,
         selectedChinaSupplierCode: query.selectedChinaSupplierCode,

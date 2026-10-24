@@ -18,6 +18,7 @@ import type { Dayjs } from 'dayjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import { queryWarehouseProductContainers } from '../../../services/warehouseProductRecordsService'
 import type {
   WarehouseProductContainerItem,
@@ -54,6 +55,7 @@ function getStatusColor(status: number | null): string {
 
 export default function ContainersPanel({ productCode, enabled }: ContainersPanelProps) {
   const { t } = useTranslation()
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
   const [arrivalRange, setArrivalRange] = useState<[Dayjs, Dayjs] | null>(null)
@@ -174,7 +176,12 @@ export default function ContainersPanel({ productCode, enabled }: ContainersPane
       render: (value: string) => <Typography.Text>{value}</Typography.Text>,
     },
     {
-      title: t('warehouseProductRecords.containerNumber'),
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          {t('warehouseProductRecords.containerNumber')}
+          <ContainerNumberRevealButton />
+        </span>
+      ),
       dataIndex: 'containerNumber',
       key: 'containerNumber',
       width: 140,
@@ -182,7 +189,7 @@ export default function ContainersPanel({ productCode, enabled }: ContainersPane
       sortOrder: sortBy === 'containerNumber' ? (sortDirection === 'asc' ? 'ascend' : 'descend') : null,
       render: (value: string | null, record) => (
         value
-          ? <Typography.Link onClick={() => navigate(getContainerDetailPath(record.containerCode))}>{value}</Typography.Link>
+          ? <Typography.Link onClick={() => navigate(getContainerDetailPath(record.containerCode))}>{formatContainerNumber(value)}</Typography.Link>
           : '-'
       ),
     },

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
@@ -9,6 +10,7 @@ namespace BlazorApp.Api.Controllers.React;
 [ApiController]
 [Route("api/react/v1/container-new-products")]
 [Authorize(Policy = Permissions.Container.MobileNewProductsView)]
+[MaskContainerNumbers]
 public sealed class ContainerNewProductsController(IContainerNewProductsReactService service) : ControllerBase
 {
     /// <param name="windowBasis">

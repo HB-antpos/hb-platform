@@ -7464,6 +7464,12 @@ namespace BlazorApp.Api.Services.React
             ValidateDateRange(dateRange);
             if ((dateRange.EndDate.Date - dateRange.StartDate.Date).TotalDays + 1 > CompactSalesBoardMaxDays)
                 throw new ArgumentException($"紧凑销售看板日期范围不能超过 {CompactSalesBoardMaxDays} 天。");
+            // 分店栏「进货」的区间与销售区间相互独立，未传时与销售区间相同；上限同样 731 天。
+            var purchaseRange = query.PurchaseDateRange ?? dateRange;
+            ValidateDateRange(purchaseRange);
+            if ((purchaseRange.EndDate.Date - purchaseRange.StartDate.Date).TotalDays + 1 > CompactSalesBoardMaxDays)
+                throw new ArgumentException($"进货日期范围不能超过 {CompactSalesBoardMaxDays} 天。");
+            purchaseRange = new DateRangeDto { StartDate = purchaseRange.StartDate.Date, EndDate = purchaseRange.EndDate.Date };
 
             var pageIndex = Math.Max(1, query.PageIndex);
             var pageSize = Math.Clamp(query.PageSize, 20, CompactSalesBoardMaxPageSize);
@@ -7490,7 +7496,7 @@ namespace BlazorApp.Api.Services.React
             if (UsesCompactBoardServerAggregation(out var posmDatabase))
             {
                 return await GetCompactSalesBoardOnServerAsync(
-                    board, posmDatabase, boardRange, status.CacheVersion, branchScope, query, pageIndex, pageSize, expectedGeneration);
+                    board, posmDatabase, boardRange, purchaseRange, status.CacheVersion, branchScope, query, pageIndex, pageSize, expectedGeneration);
             }
 
             // 立方体缓存键不含授权范围与筛选：所有用户、所有点选共享同一份聚合，授权过滤在下方内存中完成。
@@ -7514,6 +7520,8 @@ namespace BlazorApp.Api.Services.React
             }
 
             FillCompactSalesBoard(board, cube, branchScope, query, pageIndex, pageSize);
+            // 先补进货（可能新增只有进货的分店），再补分店总营业额，新增的分店也有占比分母。
+            await FillCompactSalesBoardPurchasesAsync(board, purchaseRange, branchScope, query.SelectedChinaSupplierCode, query.SelectedProductCode);
             await FillCompactSalesBoardBranchTotalsAsync(board.Stores, boardRange);
             return board;
         }

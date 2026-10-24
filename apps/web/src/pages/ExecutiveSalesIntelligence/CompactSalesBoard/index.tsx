@@ -109,6 +109,7 @@ function buildBoardRequest(filterState: BoardFilterState, managedStoreCodes: str
   // 中文注释：branchCodes 只传授权范围；页面选中的分店单独传，服务端据此让分店栏不被自身收窄。
   return {
     dateRange: filterState.dateRange,
+    purchaseDateRange: filterState.purchaseDateRange,
     branchCodes: managedStoreCodes,
     selectedBranchCode: filterState.branch?.code,
     selectedChinaSupplierCode: filterState.supplier?.code,
@@ -168,6 +169,8 @@ const CompactSalesBoardPage: React.FC = () => {
   )
   const [quickRange, setQuickRange] = useState<QuickRange | null>('today')
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => resolveQuickRange('today'))
+  // 中文注释：进货区间默认跟随销售区间（null）；单独选过之后与销售区间相互独立，点「同销售」恢复跟随。
+  const [purchaseRangeOverride, setPurchaseRangeOverride] = useState<[Dayjs, Dayjs] | null>(null)
   const [board, setBoard] = useState<CompactSalesBoard>(emptyBoard)
   const [loadedKeys, setLoadedKeys] = useState<PanelKeys | null>(null)
   const [loading, setLoading] = useState(false)
@@ -231,8 +234,12 @@ const CompactSalesBoardPage: React.FC = () => {
   useEffect(() => () => exportAbortRef.current?.abort(), [])
 
   const dateRangeParams = useMemo(() => toDateRange(dateRange), [dateRange])
+  const purchaseRange = purchaseRangeOverride ?? dateRange
+  const purchaseFollowsSales = purchaseRangeOverride === null
+  const purchaseRangeParams = useMemo(() => toDateRange(purchaseRange), [purchaseRange])
   const filterState = useMemo<BoardFilterState>(() => ({
     dateRange: dateRangeParams,
+    purchaseDateRange: purchaseRangeParams,
     scopeKey: managedStoreCodesKey,
     branch: selectedBranch,
     supplier: selectedSupplier,
@@ -241,7 +248,7 @@ const CompactSalesBoardPage: React.FC = () => {
     productSort,
     pageIndex,
     pageSize,
-  }), [dateRangeParams, keyword, managedStoreCodesKey, pageIndex, pageSize, productSort, selectedBranch, selectedProduct, selectedSupplier])
+  }), [dateRangeParams, keyword, managedStoreCodesKey, pageIndex, pageSize, productSort, purchaseRangeParams, selectedBranch, selectedProduct, selectedSupplier])
   const panelKeys = useMemo(() => buildPanelKeys(filterState), [filterState])
 
   const loadBoard = useCallback(async (signal?: AbortSignal) => {
@@ -282,9 +289,9 @@ const CompactSalesBoardPage: React.FC = () => {
       if (!signal?.aborted && (error as { name?: string })?.name !== 'AbortError') {
         setBoard(emptyBoard)
         setLoadedKeys(requestPanelKeys)
-        setLoadError('销售看板数据加载失败，请重试。')
+        setLoadError('仓库销售看板数据加载失败，请重试。')
         setCacheState('error')
-        message.error('销售看板数据加载失败')
+        message.error('仓库销售看板数据加载失败')
       }
     } finally {
       if (!signal?.aborted) setLoading(false)
@@ -364,6 +371,16 @@ const CompactSalesBoardPage: React.FC = () => {
     setPageIndex(1)
   }, [])
 
+  // 中文注释：进货区间只影响分店栏的「进货」列，不回到商品第一页。
+  const handlePurchaseRangeChange = useCallback((value: [Dayjs | null, Dayjs | null] | null) => {
+    if (!value?.[0] || !value[1]) return
+    if (value[1].diff(value[0], 'day') + 1 > maxSalesDateRangeDays) {
+      message.warning(`日期范围最多 ${maxSalesDateRangeDays} 天`)
+      return
+    }
+    setPurchaseRangeOverride([value[0], value[1]])
+  }, [])
+
   const forceRefresh = useCallback(() => {
     forceRefreshRef.current = true
     setReloadKey((key) => key + 1)
@@ -396,6 +413,8 @@ const CompactSalesBoardPage: React.FC = () => {
     { title: <Tooltip title="分母为本栏合计">占比</Tooltip>, key: 'share', width: sideCompact ? 60 : 96, render: (_, record) => <ShareBar value={record.totalAmount} total={supplierTotal} compact={sideCompact} /> },
   ], [amountWidth, quantityWidth, sideCompact, supplierTotal])
 
+  const purchaseRangeLabel = `${purchaseRangeParams.startDate} ~ ${purchaseRangeParams.endDate}`
+  const purchaseHint = `仓库订单配货数量（非草稿订单，按出库日期，未出库按订单日期），进货区间 ${purchaseRangeLabel}${purchaseFollowsSales ? '（跟随销售日期）' : ''}。选中供应商或商品后同样收窄；只有进货、没有销售的分店也会列出。`
   const branchColumns = useMemo<ColumnsType<CompactSalesBoardStore>>(() => [
     {
       title: '分店', dataIndex: 'branchName', key: 'branchName', ellipsis: true,
@@ -403,7 +422,27 @@ const CompactSalesBoardPage: React.FC = () => {
       render: (_, record) => <div className={styles.primaryCell}><span>{record.branchName || record.branchCode}</span><small>{record.branchCode}<i>·</i>{formatInteger(record.productCount)} 款</small></div>,
     },
     { title: '金额', dataIndex: 'totalAmount', key: 'totalAmount', align: 'right', width: amountWidth, className: styles.numCell, defaultSortOrder: 'descend', sorter: (a, b) => a.totalAmount - b.totalAmount, sortDirections: ['descend', 'ascend'], render: (value: number) => <span className={styles.num}>{formatCurrency(value)}</span> },
-    { title: '数量', dataIndex: 'totalQuantity', key: 'totalQuantity', align: 'right', width: quantityWidth, className: styles.numCell, sorter: (a, b) => a.totalQuantity - b.totalQuantity, sortDirections: ['descend', 'ascend'], render: formatInteger },
+    // 中文注释：进货 = 进货区间内该分店从仓库进的货（仓库订单配货数量，口径同进货金额看板），与销量并排便于对比到货与卖出。
+    // 笔记本宽度三栏放不下第四个数字列：进货叠在销量下方第二行（不单独排序），栏宽保持原比例。
+    compact
+      ? {
+        title: <Tooltip title={`上行销量，下行进货：${purchaseHint}`}>销量</Tooltip>,
+        dataIndex: 'totalQuantity', key: 'totalQuantity', align: 'right', width: quantityWidth + 8, className: styles.numCell,
+        sorter: (a, b) => a.totalQuantity - b.totalQuantity, sortDirections: ['descend', 'ascend'],
+        render: (_, record) => (
+          <div className={styles.qtyStack}>
+            <span>{formatInteger(record.totalQuantity)}</span>
+            <small className={record.purchaseQuantity ? undefined : styles.zeroNum}>进 {formatInteger(record.purchaseQuantity)}</small>
+          </div>
+        ),
+      }
+      : { title: '销量', dataIndex: 'totalQuantity', key: 'totalQuantity', align: 'right', width: quantityWidth, className: styles.numCell, sorter: (a, b) => a.totalQuantity - b.totalQuantity, sortDirections: ['descend', 'ascend'], render: formatInteger },
+    ...(compact ? [] : [{
+      title: <Tooltip title={purchaseHint}><span className={styles.headerHint}>进货{!sideCompact && <InfoCircleOutlined />}</span></Tooltip>,
+      dataIndex: 'purchaseQuantity', key: 'purchaseQuantity', align: 'right' as const, width: quantityWidth, className: styles.numCell,
+      sorter: (a: CompactSalesBoardStore, b: CompactSalesBoardStore) => a.purchaseQuantity - b.purchaseQuantity, sortDirections: ['descend' as const, 'ascend' as const],
+      render: (value: number) => value ? formatInteger(value) : <span className={styles.zeroNum}>0</span>,
+    }]),
     // 中文注释：占比 = 国内商品营业额 ÷ 该分店总营业额（营业额日报口径，含全部供应商）；选中供应商、商品只收窄分子，分母不变。
     {
       title: <Tooltip title="国内商品营业额 ÷ 分店总营业额（含全部供应商的商品）。选中供应商或商品后分子随之收窄，分母不变。"><span className={styles.headerHint}>{sideCompact ? '占比' : '占分店营业额'}{!sideCompact && <InfoCircleOutlined />}</span></Tooltip>,
@@ -412,7 +451,7 @@ const CompactSalesBoardPage: React.FC = () => {
       sorter: (a, b) => shareOf(a.totalAmount, a.branchTotalAmount) - shareOf(b.totalAmount, b.branchTotalAmount), sortDirections: ['descend', 'ascend'],
       render: (_, record) => <ShareBar value={record.totalAmount} total={record.branchTotalAmount} compact={sideCompact} title={`国内 ${formatCurrency(record.totalAmount)} ÷ 分店总营业额 ${formatCurrency(record.branchTotalAmount)}`} />,
     },
-  ], [amountWidth, quantityWidth, sideCompact])
+  ], [amountWidth, compact, purchaseHint, quantityWidth, sideCompact])
 
   const productRankOffset = (board.productDetails.pageIndex - 1) * board.productDetails.pageSize
   const productColumns = useMemo<ColumnsType<CompactSalesBoardProduct>>(() => [
@@ -535,6 +574,8 @@ const CompactSalesBoardPage: React.FC = () => {
   const [rangeStart, rangeEnd] = pageRange(board.productDetails.pageIndex, board.productDetails.pageSize, board.productDetails.total)
   const statisticTime = formatStatisticTime(board.statisticUpdatedAt)
   const branchHint = selectedProduct ? '该商品在各分店的销售' : selectedSupplier ? '该供应商在各分店的销售' : ''
+  // 中文注释：进货区间与销售不同时在分店栏标题旁写明，避免把两段时间的数字当成同一段比较。
+  const branchPanelHint = [branchHint, purchaseFollowsSales ? '' : `进货 ${purchaseRangeLabel}`].filter(Boolean).join(' · ')
   const supplierHint = selectedProduct ? '该商品的供应商' : selectedBranch ? '该分店的供应商销售' : ''
   const rangeDays = dateRange[1].diff(dateRange[0], 'day') + 1
   const productTotal = board.productDetails.total
@@ -629,7 +670,7 @@ const CompactSalesBoardPage: React.FC = () => {
       <header className={styles.boardHead}>
         <div className={styles.toolbar}>
           <div className={styles.titleBlock}>
-            <h1>销售看板</h1>
+            <h1>仓库销售看板</h1>
             {isFilterActive ? (
               <div className={styles.toolbarFilters} aria-label="联动筛选">
                 <span className={styles.filterLabel}>联动筛选</span>
@@ -643,9 +684,27 @@ const CompactSalesBoardPage: React.FC = () => {
           </div>
           <div className={styles.toolbarControls}>
             <Segmented size="small" value={quickRange ?? undefined} options={quickRangeOptions} onChange={(value) => { const nextRange = value as QuickRange; setQuickRange(nextRange); setDateRange(resolveQuickRange(nextRange)); setPageIndex(1) }} />
-            <RangePicker size="small" value={dateRange} allowClear={false} disabledDate={isDisabledDate} onChange={handleRangeChange} />
+            <RangePicker size="small" prefix={<span className={styles.pickerLabel}>销售</span>} aria-label="销售日期" value={dateRange} allowClear={false} disabledDate={isDisabledDate} onChange={handleRangeChange} />
+            {/* 中文注释：进货区间跟随销售时文字变淡，表示还没单独选；单独选过后出现「同销售」恢复跟随。 */}
+            <div className={styles.purchaseRange}>
+              <Tooltip title={purchaseFollowsSales ? '进货日期默认跟随销售日期，单独选择后独立' : undefined}>
+                <RangePicker
+                  size="small"
+                  prefix={<span className={styles.pickerLabel}>进货</span>}
+                  aria-label="进货日期"
+                  className={purchaseFollowsSales ? styles.pickerFollowing : undefined}
+                  value={purchaseRange}
+                  allowClear={false}
+                  disabledDate={isDisabledDate}
+                  onChange={handlePurchaseRangeChange}
+                />
+              </Tooltip>
+              {!purchaseFollowsSales && (
+                <Button type="link" size="small" className={styles.followButton} aria-label="进货日期恢复跟随销售日期" onClick={() => setPurchaseRangeOverride(null)}>同销售</Button>
+              )}
+            </div>
             <Tooltip title="强制刷新（绕过缓存）">
-              <Button size="small" type="primary" icon={<ReloadOutlined />} aria-label="强制刷新销售看板" loading={loading && cacheState === 'refreshing'} onClick={forceRefresh} />
+              <Button size="small" type="primary" icon={<ReloadOutlined />} aria-label="强制刷新仓库销售看板" loading={loading && cacheState === 'refreshing'} onClick={forceRefresh} />
             </Tooltip>
           </div>
         </div>
@@ -680,7 +739,7 @@ const CompactSalesBoardPage: React.FC = () => {
           <div className={styles.progress} aria-hidden="true" />
           <div className={styles.panelHeader}>
             <div className={styles.panelTitle}><i /><h2>分店销售</h2><span><b>{board.stores.length}</b> 家</span></div>
-            {branchHint && <span className={styles.panelHint}>{branchHint}</span>}
+            {branchPanelHint && <span className={styles.panelHint} title={branchPanelHint}>{branchPanelHint}</span>}
           </div>
           <MeasuredTable
             metricId="compact-sales-board.stores"
@@ -769,7 +828,7 @@ const CompactSalesBoardPage: React.FC = () => {
             <div className={styles.statsHead}>
               <div className={styles.statsTitle}>
                 <h2>统计概览</h2>
-                <span>{dateRangeParams.startDate} ~ {dateRangeParams.endDate} · {rangeDays} 天 · 澳洲供应商 200-hotbargain · 已映射国内供应商的商品</span>
+                <span>{dateRangeParams.startDate} ~ {dateRangeParams.endDate} · {rangeDays} 天{purchaseFollowsSales ? '' : ` · 进货 ${purchaseRangeLabel}`} · 澳洲供应商 200-hotbargain · 已映射国内供应商的商品</span>
               </div>
               {statsToggle}
             </div>

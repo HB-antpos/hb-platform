@@ -12,6 +12,7 @@ internal static class StoreOrderAccessPolicyServiceCollectionExtensions
         services.AddStoreOrderCommon();
         services.TryAddScoped<IStoreOrderAccessOrderReader, SqlSugarStoreOrderAccessOrderReader>();
         services.TryAddScoped<IStoreOrderAccessPolicy, StoreOrderAccessPolicy>();
+        services.TryAddScoped<IStoreOrderReturnPermission, StoreOrderReturnPermission>();
         return services;
     }
 }

@@ -724,6 +724,13 @@ try {
     'HQ container translation should send container numbers in the request body',
   )
 
+  await translateHqProductNamesByContainerNumber({ containerGuid: 'GUID-1', containerNumber: '*******1647' })
+  assertDeepEqual(
+    JSON.parse(String(capturedInit?.body)),
+    { ContainerNumbers: [], ContainerGuids: ['GUID-1'], OverwriteExisting: false },
+    'HQ container translation should send the container GUID and drop masked container numbers',
+  )
+
   globalThis.fetch = (async () => new Response(JSON.stringify({
     success: true,
     data: {

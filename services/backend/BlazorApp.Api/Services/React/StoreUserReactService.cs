@@ -278,18 +278,13 @@ namespace BlazorApp.Api.Services.React
 
                 var username = dto.Username.Trim().ToLowerInvariant();
                 var email = ResolveEmail(dto.Email, username, targetStore.StoreCode);
-                var existingUser = await _db.Queryable<User>()
-                    .Where(u => !u.IsDeleted && (u.Username.ToLower() == username || u.Email == email))
-                    .FirstAsync();
-
-                if (existingUser != null)
+                // 用户名、邮箱都不能与已有账号重复（口径同 UserIdentityUniqueness：含软删除账号、忽略大小写）。
+                var conflictError = UserIdentityUniqueness.ToError<StoreUserDetailDto>(
+                    await UserIdentityUniqueness.FindConflictAsync(_db, username, email)
+                );
+                if (conflictError != null)
                 {
-                    if (existingUser.Username.Equals(username, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return ApiResponse<StoreUserDetailDto>.Error("用户名已存在", "USERNAME_EXISTS");
-                    }
-
-                    return ApiResponse<StoreUserDetailDto>.Error("邮箱已存在", "EMAIL_EXISTS");
+                    return conflictError;
                 }
 
                 var storeStaffRole = await GetStoreStaffRoleAsync();
@@ -423,6 +418,18 @@ namespace BlazorApp.Api.Services.React
             }
             catch (Exception ex)
             {
+                // 并发建号时后到者撞唯一索引：重新判定是哪个字段重复，给出字段级提示而不是笼统失败。
+                var conflictError = await UserIdentityUniqueness.TryMapWriteFailureAsync<StoreUserDetailDto>(
+                    _db,
+                    ex,
+                    dto.Username,
+                    dto.Email
+                );
+                if (conflictError != null)
+                {
+                    return conflictError;
+                }
+
                 _logger.LogError(ex, "创建店员失败，Username: {Username}", dto.Username);
                 return ApiResponse<StoreUserDetailDto>.Error("创建店员失败", "CREATE_STORE_USER_FAILED");
             }
@@ -475,21 +482,13 @@ namespace BlazorApp.Api.Services.React
                     : dto.Username.Trim().ToLowerInvariant();
                 var nextEmail = ResolveEmail(dto.Email, nextUsername, targetStore.StoreCode, user.Email);
 
-                var existingUser = await _db.Queryable<User>()
-                    .Where(item =>
-                        item.UserGUID != userGuid
-                        && !item.IsDeleted
-                        && (item.Username.ToLower() == nextUsername || item.Email == nextEmail)
-                    )
-                    .FirstAsync();
-                if (existingUser != null)
+                // 排除自己：保持原用户名 / 邮箱保存不算重复。
+                var conflictError = UserIdentityUniqueness.ToError<StoreUserDetailDto>(
+                    await UserIdentityUniqueness.FindConflictAsync(_db, nextUsername, nextEmail, userGuid)
+                );
+                if (conflictError != null)
                 {
-                    if (existingUser.Username.Equals(nextUsername, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return ApiResponse<StoreUserDetailDto>.Error("用户名已存在", "USERNAME_EXISTS");
-                    }
-
-                    return ApiResponse<StoreUserDetailDto>.Error("邮箱已存在", "EMAIL_EXISTS");
+                    return conflictError;
                 }
 
                 var now = DateTime.UtcNow;
@@ -566,6 +565,19 @@ namespace BlazorApp.Api.Services.React
             }
             catch (Exception ex)
             {
+                // 并发改名撞唯一索引时（事务已回滚），重新判定重复字段给出友好提示。
+                var conflictError = await UserIdentityUniqueness.TryMapWriteFailureAsync<StoreUserDetailDto>(
+                    _db,
+                    ex,
+                    dto.Username,
+                    dto.Email,
+                    userGuid
+                );
+                if (conflictError != null)
+                {
+                    return conflictError;
+                }
+
                 _logger.LogError(ex, "更新店员失败，UserGuid: {UserGuid}", userGuid);
                 return ApiResponse<StoreUserDetailDto>.Error("更新店员失败", "UPDATE_STORE_USER_FAILED");
             }

@@ -4,6 +4,7 @@
  * 职责边界：
  * - 把剪贴板文本解析成单列值（多列数据直接拒绝，避免错位写入）
  * - 按当前显示顺序，从起始行向下把每个值解析为目标列的行补丁
+ * - 单元格拖拽填充也复用同一套计划：把源单元格的值重复成一列值，再按目标范围生成补丁
  * - 不触碰 React 状态和保存队列；页面层负责把结果送入自动保存或“保存明细”草稿通道
  */
 
@@ -12,7 +13,11 @@ import { parseProductImportPasteText } from '../../DomesticPurchase/ProductImpor
 import {
   containsChineseText,
   getContainerDetailEnglishName,
+  getContainerDetailRealtimeImportPrice,
+  getContainerDetailRealtimeRetailPrice,
   getContainerDetailVisibleOemPrice,
+  isContainerDetailExistingPriceEditable,
+  isContainerDetailThisPriceEditable,
 } from './containerDetailLogic'
 
 export const CONTAINER_DETAIL_COLUMN_PASTE_KEYS = [
@@ -21,6 +26,8 @@ export const CONTAINER_DETAIL_COLUMN_PASTE_KEYS = [
   'unitVolume',
   'middlePackQuantity',
   'floatRate',
+  'warehouseImportPrice',
+  'lastOEMPrice',
   'importPrice',
   'oemPrice',
   'remark',
@@ -34,6 +41,8 @@ export type ContainerDetailColumnPasteField =
   | '单件体积'
   | '中包数'
   | '调整浮率'
+  | '仓库进口价'
+  | '仓库零售价'
   | '进口价格'
   | '贴牌价格'
   | '备注'
@@ -60,6 +69,9 @@ export const CONTAINER_DETAIL_COLUMN_PASTE_TARGETS: Record<ContainerDetailColumn
   unitVolume: { field: '单件体积', kind: 'decimal', precision: 3, min: 0, channel: 'autoSave', requiresCostParameters: true },
   middlePackQuantity: { field: '中包数', kind: 'integer', min: 0, channel: 'autoSave', requiresCostParameters: false },
   floatRate: { field: '调整浮率', kind: 'decimal', precision: 2, channel: 'autoSave', requiresCostParameters: true },
+  // 已有价：保存明细时回写仓库表 / 商品主档 / 分店表（零售价还会联动分店价与价格任务）。
+  warehouseImportPrice: { field: '仓库进口价', kind: 'decimal', precision: 2, min: 0, channel: 'pendingDraft', requiresCostParameters: false },
+  lastOEMPrice: { field: '仓库零售价', kind: 'decimal', precision: 2, min: 0, channel: 'pendingDraft', requiresCostParameters: false },
   importPrice: { field: '进口价格', kind: 'decimal', precision: 2, min: 0, channel: 'pendingDraft', requiresCostParameters: false },
   oemPrice: { field: '贴牌价格', kind: 'decimal', precision: 2, min: 0, channel: 'pendingDraft', requiresCostParameters: false },
   remark: { field: '备注', kind: 'text', channel: 'autoSave', requiresCostParameters: false },
@@ -123,6 +135,28 @@ export function parseContainerDetailColumnPasteValue(
   return { ok: true, value: Number(parsed.toFixed(target.precision)) }
 }
 
+/**
+ * 目标列在该行是否可编辑：
+ * - 已有进口价 / 已有零售价：只有已有商品（新商品还没有仓库记录）
+ * - 本次进口价 / 本次零售价：只有新商品（已有商品的价格要改「已有」两列）
+ * 粘贴与拖拽填充遇到不可编辑的行直接跳过，不算无效值。
+ */
+export function isContainerDetailColumnEditableForRow(
+  columnKey: ContainerDetailColumnPasteKey,
+  row: ContainerDetail,
+): boolean {
+  switch (columnKey) {
+    case 'warehouseImportPrice':
+    case 'lastOEMPrice':
+      return isContainerDetailExistingPriceEditable(row)
+    case 'importPrice':
+    case 'oemPrice':
+      return isContainerDetailThisPriceEditable(row)
+    default:
+      return true
+  }
+}
+
 /** 取目标列当前显示值，用于跳过与现值相同的粘贴项，避免无意义的保存请求。 */
 export function getContainerDetailColumnPasteCurrentValue(
   columnKey: ContainerDetailColumnPasteKey,
@@ -131,12 +165,16 @@ export function getContainerDetailColumnPasteCurrentValue(
   switch (columnKey) {
     case 'englishName':
       return getContainerDetailEnglishName(row)?.trim() || undefined
+    case 'warehouseImportPrice':
+      return getContainerDetailRealtimeImportPrice(row)
+    case 'lastOEMPrice':
+      return getContainerDetailRealtimeRetailPrice(row)
     case 'oemPrice':
       return getContainerDetailVisibleOemPrice(row)
     case 'remark':
       return row.备注?.trim() || undefined
     default:
-      return row[CONTAINER_DETAIL_COLUMN_PASTE_TARGETS[columnKey].field] as number | undefined
+      return (row as unknown as Record<string, unknown>)[CONTAINER_DETAIL_COLUMN_PASTE_TARGETS[columnKey].field] as number | undefined
   }
 }
 
@@ -150,6 +188,8 @@ export type ContainerDetailColumnPastePlan = {
   entries: ContainerDetailColumnPasteEntry[]
   appliedCount: number
   unchangedCount: number
+  /** 目标列在该行不可编辑（如已有商品的「本次价」、新商品的「已有价」）而跳过的行数。 */
+  notEditableCount: number
   skippedBlankCount: number
   invalidCount: number
   /** 无效值在粘贴数据中的行号（从 1 开始），用于提示用户回查 Excel。 */
@@ -177,6 +217,7 @@ export function buildContainerDetailColumnPastePlan(params: {
     entries: [],
     appliedCount: 0,
     unchangedCount: 0,
+    notEditableCount: 0,
     skippedBlankCount: 0,
     invalidCount: 0,
     invalidRowNumbers: [],
@@ -198,6 +239,10 @@ export function buildContainerDetailColumnPastePlan(params: {
       plan.skippedBlankCount += 1
       return
     }
+    if (!isContainerDetailColumnEditableForRow(columnKey, row)) {
+      plan.notEditableCount += 1
+      return
+    }
     const parsed = parseContainerDetailColumnPasteValue(columnKey, rawValue)
     if (!parsed.ok || !row.hguid) {
       plan.invalidCount += 1
@@ -213,4 +258,59 @@ export function buildContainerDetailColumnPastePlan(params: {
   })
 
   return plan
+}
+
+/**
+ * 拖拽填充（Excel 式填充柄）的目标范围：从源行出发向上或向下拖到 endRowKey，返回被覆盖的行，
+ * 按「离源行由近到远」排序，不含源行本身；源行或终点行不在当前列表里返回空数组。
+ */
+export function resolveContainerDetailFillTargetRows(params: {
+  rows: readonly ContainerDetail[]
+  sourceRowKey: string
+  endRowKey: string
+  getRowKey: (row: ContainerDetail) => string
+}): ContainerDetail[] {
+  const { rows, sourceRowKey, endRowKey, getRowKey } = params
+  const sourceIndex = rows.findIndex((row) => getRowKey(row) === sourceRowKey)
+  const endIndex = rows.findIndex((row) => getRowKey(row) === endRowKey)
+  if (sourceIndex < 0 || endIndex < 0 || sourceIndex === endIndex) return []
+  return endIndex > sourceIndex
+    ? rows.slice(sourceIndex + 1, endIndex + 1)
+    : rows.slice(endIndex, sourceIndex).reverse()
+}
+
+/**
+ * 把源单元格的值复制到目标行，复用列粘贴的解析 / 校验 / 同值跳过 / 不可编辑跳过规则。
+ * 源值取源行目标列的当前显示值；源值为空时不生成任何补丁（空值不会清空目标格）。
+ */
+export function buildContainerDetailFillPlan(params: {
+  columnKey: ContainerDetailColumnPasteKey
+  sourceRow: ContainerDetail
+  targetRows: readonly ContainerDetail[]
+  getRowKey: (row: ContainerDetail) => string
+}): ContainerDetailColumnPastePlan {
+  const { columnKey, sourceRow, targetRows, getRowKey } = params
+  const sourceValue = getContainerDetailColumnPasteCurrentValue(columnKey, sourceRow)
+  const sourceText = sourceValue == null ? '' : String(sourceValue)
+  if (!targetRows.length) {
+    return {
+      entries: [],
+      appliedCount: 0,
+      unchangedCount: 0,
+      notEditableCount: 0,
+      skippedBlankCount: 0,
+      invalidCount: 0,
+      invalidRowNumbers: [],
+      overflowCount: 0,
+    }
+  }
+  // 复用粘贴计划：目标行集合就是「按显示顺序的一段连续行」，起点取第一行，值重复到每一行。
+  // 目标行可能是向上拖得到的倒序，这里按目标集合自身顺序构造，不依赖全表顺序。
+  return buildContainerDetailColumnPastePlan({
+    columnKey,
+    values: targetRows.map(() => sourceText),
+    rows: targetRows,
+    startRowKey: getRowKey(targetRows[0]),
+    getRowKey,
+  })
 }

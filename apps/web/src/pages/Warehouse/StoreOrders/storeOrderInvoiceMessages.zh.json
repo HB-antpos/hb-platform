@@ -1,0 +1,37 @@
+{
+  "warehouseUi": {
+    "storeOrderInvoice": {
+      "docTitleInvoice": "TAX INVOICE",
+      "docTitleCredit": "ADJUSTMENT NOTE",
+      "creditStamp": "CREDIT",
+      "docNoCredit": "ADJUSTMENT NOTE NO. {{orderNo}}",
+      "docDateCredit": "DATE: {{date}}",
+      "creditReference": "REFERENCE:",
+      "creditReferenceValue": "Return of goods previously supplied",
+      "sectionSupplied": "Goods supplied",
+      "sectionAdjustments": "Adjustments · returned goods",
+      "sectionReturned": "Returned goods",
+      "reasonLine": "Reason: {{reason}}",
+      "totalCredit": "Total Credit:",
+      "invoiceFootnote": "Returned goods are credited at the price supplied and netted against this invoice.",
+      "creditFootnote": "This credit adjusts the GST previously charged on the returned goods.",
+      "reason": {
+        "damaged": "damaged",
+        "wrongItem": "wrong item sent",
+        "overShipped": "over shipped",
+        "quality": "quality issue",
+        "nearExpiry": "near expiry",
+        "other": "other"
+      },
+      "excelFileNameCredit": "ADJUSTMENT_NOTE",
+      "creditTitle": "退款单",
+      "creditTitleWithStore": "退款单 - {{storeName}} - {{orderNo}}",
+      "creditFileName": "退款单",
+      "creditEmailModalTitle": "发送退款单邮件",
+      "creditPrintButton": "打印退款单",
+      "creditEmailSubject": "Credit note {{orderNo}} · {{storeName}}",
+      "creditEmailBody": "您好，\n\n附件是 {{storeName}} 的退款单（Adjustment Note）{{orderNo}}，请查收。\n\n谢谢。",
+      "creditEmailSubmitted": "退款单邮件发送任务已提交"
+    }
+  }
+}

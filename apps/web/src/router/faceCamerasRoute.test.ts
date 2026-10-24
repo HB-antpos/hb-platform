@@ -47,13 +47,21 @@ assertEqual(
   '页面必须懒加载，不进首屏包',
 )
 assertEqual(routeBlock.includes("title: 'menu.faceCameras'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes("icon: 'VideoCameraOutlined'"), true, '菜单图标 VideoCameraOutlined')
+const navGroupStart = routeSource.indexOf('const FACE_RECOGNITION_NAV_GROUP: NavGroupDefinition')
+const navGroupBlock = routeSource.slice(navGroupStart, routeSource.indexOf('\nconst ', navGroupStart + 1))
+// 已并入「人脸识别」合并页：菜单图标在合并页上，本页是其中一个标签
+assertEqual(navGroupStart >= 0 && navGroupBlock.includes(`path: '${FACE_CAMERAS_PATH}'`), true, '人脸抓拍摄像机是「人脸识别」合并页的标签')
+assertEqual(navGroupBlock.includes("icon: 'VideoCameraOutlined'"), true, '合并页菜单图标 VideoCameraOutlined')
 assertEqual(routeBlock.includes('keepAlive: false'), true, '路由不能 keepAlive')
 assertEqual(routeBlock.includes("accessKey: 'canManageFaceCameras'"), true, '路由使用独立访问键')
 assertEqual(routeSource.includes('element: <FaceCamerasPage />'), true, '路由必须渲染人脸抓拍摄像机页')
 assertEqual(/VideoCameraOutlined:\s*<VideoCameraOutlined\s*\/>/.test(routeSource), true, '图标表里必须有 VideoCameraOutlined')
 // 路由登记在「系统」分组下（与紧急登录密钥等系统页并列）
-assertEqual(routeStart > routeSource.indexOf("path: '/system'"), true, '路由登记在系统分组之后')
+assertEqual(
+  routeSource.indexOf('...navGroupRoutes(FACE_RECOGNITION_NAV_GROUP)') > routeSource.indexOf("path: '/system'"),
+  true,
+  '合并页登记在系统分组下',
+)
 
 // 独立顶层权限码：与后端 Permissions.FaceCapture.Cameras.Manage 一致
 assertEqual(P.FaceCapture.CamerasManage, 'FaceCapture.Cameras.Manage', '权限码与后端一致')
@@ -77,9 +85,9 @@ const onlyPreview = buildWebRoleMenuPreview(only, (key) => key, { includeHidden:
 assertEqual(findNode(onlyPreview, FACE_CAMERAS_PATH)?.visible, true, '角色菜单预览应显示该入口')
 assertEqual(findNode(onlyPreview, FACE_CAMERAS_PATH)?.permissionCodes.join(','), P.FaceCapture.CamerasManage, '预览节点只要求本权限')
 assertEqual(
-  findNode(onlyPreview, '/system')?.children?.some((child) => child.path === FACE_CAMERAS_PATH),
+  findNode(onlyPreview, '/system/face-recognition')?.children?.some((child) => child.path === FACE_CAMERAS_PATH),
   true,
-  '菜单挂在「系统」分组下',
+  '菜单挂在「系统 / 人脸识别」合并页下',
 )
 
 // 其它系统类权限都不能打开它

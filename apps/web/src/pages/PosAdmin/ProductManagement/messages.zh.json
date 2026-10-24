@@ -55,6 +55,19 @@
         "unmarkPromotional": "取消促销",
         "promotionalDone": "已更新促销标记：重新归类 {{reassigned}} 个商品，清除 {{cleared}} 个",
         "promotionalFailed": "更新促销标记失败"
+      },
+      "imageNames": {
+        "action": "看图生成英文名",
+        "progress": "正在看图生成英文名 {{done}}/{{total}}…",
+        "failed": "{{count}} 个商品没有生成英文名（没有图片也没有名称，或调用失败）",
+        "requestFailed": "看图生成英文名失败",
+        "previewTitle": "确认看图生成的英文名",
+        "previewHint": "保存后会同时覆盖商品名称和英文名称；取消勾选的商品不会修改。",
+        "previewConfirm": "保存 {{count}} 个",
+        "columnImage": "图片",
+        "columnCurrent": "当前名称",
+        "columnNew": "新英文名",
+        "sourceText": "无图，按名称翻译"
       }
     }
   }

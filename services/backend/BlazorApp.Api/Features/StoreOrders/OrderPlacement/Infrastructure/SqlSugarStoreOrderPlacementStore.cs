@@ -123,7 +123,11 @@ internal sealed class SqlSugarStoreOrderPlacementStore(SqlSugarContext context)
             Remarks = $"Copied from {source.OrderNo}",
         };
 
-        var newDetails = source.Details.Select(sourceDetail =>
+        // 退货行（发货数量为负）不随复制订单带走：退货是针对原订单发生的一次性事实，
+        // 复制过去既丢了原因（复制不带退货字段），又会让新订单凭空多出一笔冲减。
+        var newDetails = source.Details
+            .Where(sourceDetail => (sourceDetail.AllocQuantity ?? 0) >= 0)
+            .Select(sourceDetail =>
         {
             var detail = new WareHouseOrderDetails
             {
@@ -151,7 +155,10 @@ internal sealed class SqlSugarStoreOrderPlacementStore(SqlSugarContext context)
         newOrder.OEMTotalAmount = newDetails.Sum(detail => detail.OEMAmount);
         newOrder.ImportTotalAmount = newDetails.Sum(detail => detail.ImportAmount);
         await _db.Insertable(newOrder).ExecuteCommandAsync();
-        await _db.Insertable(newDetails).ExecuteCommandAsync();
+        if (newDetails.Count > 0)
+        {
+            await _db.Insertable(newDetails).ExecuteCommandAsync();
+        }
 
         return new CopyOrderResultDto
         {

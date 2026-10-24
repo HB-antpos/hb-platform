@@ -32,7 +32,7 @@ namespace BlazorApp.Shared.Models.HBweb
         public decimal? CurveBend { get; set; }
 
         /// <summary>
-        /// Linear, ArcUp, ArcDown, Exponential, Step
+        /// Linear, ArcUp, ArcDown, Exponential, Step, Fixed
         /// </summary>
         [SugarColumn(Length = 20)]
         public string Algorithm { get; set; } = "Linear";

@@ -1523,6 +1523,66 @@ public sealed class StoreOrderProductListTests : IDisposable
         );
     }
 
+    [Theory]
+    [InlineData("0810812024527", "810812024527")]
+    [InlineData("810812024527", "0810812024527")]
+    public async Task ScanLookupProductsAsync_条码前导零写法不同时回退匹配(string stored, string scanned)
+    {
+        // 生产实例：库里 13 位 0810812024527，iOS 相机扫出去掉前导 0 的 12 位。
+        await SeedProductAsync("P-VARIANT", "ITEM-VARIANT", barcode: stored);
+        await SeedWarehouseProductAsync("P-VARIANT");
+
+        var result = await CreateService().ScanLookupProductsAsync(
+            new StoreOrderScanLookupRequestDto { Barcode = scanned }
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("barcode", result.Data!.MatchType);
+        Assert.Equal("P-VARIANT", Assert.Single(result.Data.Items).ProductCode);
+    }
+
+    [Fact]
+    public async Task ScanLookupProductsAsync_条码精确命中优先_不把12位与13位当作等价合并()
+    {
+        // 生产库有 12 位 X 与 13 位 0+X 分属不同商品的情况，各自只返回自己的商品。
+        await SeedProductAsync("P-TWELVE", "ITEM-A", barcode: "661799090520");
+        await SeedWarehouseProductAsync("P-TWELVE");
+        await SeedProductAsync("P-THIRTEEN", "ITEM-B", barcode: "0661799090520");
+        await SeedWarehouseProductAsync("P-THIRTEEN");
+
+        var twelve = await CreateService().ScanLookupProductsAsync(
+            new StoreOrderScanLookupRequestDto { Barcode = "661799090520" }
+        );
+        var thirteen = await CreateService().ScanLookupProductsAsync(
+            new StoreOrderScanLookupRequestDto { Barcode = "0661799090520" }
+        );
+
+        Assert.Equal("P-TWELVE", Assert.Single(twelve.Data!.Items).ProductCode);
+        Assert.Equal("P-THIRTEEN", Assert.Single(thirteen.Data!.Items).ProductCode);
+    }
+
+    [Fact]
+    public async Task ScanLookupProductsAsync_条码变体回退先于货号回退且不命中其它长度()
+    {
+        await SeedProductAsync("P-ITEM-NO", "0810812024527", barcode: "OTHER");
+        await SeedWarehouseProductAsync("P-ITEM-NO");
+        await SeedProductAsync("P-ELEVEN", "ITEM-E", barcode: "10812024527");
+        await SeedWarehouseProductAsync("P-ELEVEN");
+
+        // 12 位 810812024527 的变体 0810812024527 没有条码商品，只能按货号回退命中。
+        var viaItemNumber = await CreateService().ScanLookupProductsAsync(
+            new StoreOrderScanLookupRequestDto { Barcode = "0810812024527" }
+        );
+        Assert.Equal("fallback", viaItemNumber.Data!.MatchType);
+        Assert.Equal("P-ITEM-NO", Assert.Single(viaItemNumber.Data.Items).ProductCode);
+
+        // 11 位与 12 位之间不做变体匹配。
+        var noVariant = await CreateService().ScanLookupProductsAsync(
+            new StoreOrderScanLookupRequestDto { Barcode = "010812024527" }
+        );
+        Assert.Empty(noVariant.Data!.Items);
+    }
+
     [Fact]
     public async Task ScanLookupAndAddToCartMutationAsync_商品未命中后货位去重补Grade并保留多候选()
     {

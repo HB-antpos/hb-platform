@@ -1,0 +1,164 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+import { STORE_HELP_FAQ_GROUPS, STORE_HELP_FAQ_PATH, type StoreHelpFaqLanguage, type StoreHelpFaqTab } from './faqContent'
+import {
+  buildStoreHelpFaqNumbering,
+  filterStoreHelpFaqGroups,
+  findStoreHelpFaqTabByQuestionId,
+  fromStoreHelpFaqAnchor,
+  isStoreHelpFaqHeading,
+  parseStoreHelpFaqText,
+  resolveStoreHelpFaqLanguage,
+  resolveStoreHelpFaqTab,
+  toStoreHelpFaqAnchor,
+} from './faqText'
+
+const appSource = readFileSync('src/App.tsx', 'utf8')
+const publicPathSource = readFileSync('src/pages/MobilePrivacy/publicPath.ts', 'utf8')
+
+// 路由：懒加载 + 免登录白名单
+assert.equal(STORE_HELP_FAQ_PATH, '/support/faq')
+assert.ok(appSource.includes("const StoreHelpFaqPage = lazy(() => import('./pages/StoreHelpFaq'))"))
+assert.ok(appSource.includes('path="/support/faq"'))
+assert.ok(publicPathSource.includes("'/support/faq'"))
+
+// 记号解析：中文页主显中文并附英文小字，英文页只显示英文
+assert.deepEqual(parseStoreHelpFaqText('点 [p:Pay Now|立即付款]。', 'zh'), [
+  { kind: 'text', text: '点 ' },
+  { kind: 'control', variant: 'p', label: '立即付款', secondary: 'Pay Now' },
+  { kind: 'text', text: '。' },
+])
+assert.deepEqual(parseStoreHelpFaqText('Tap [p:Pay Now|立即付款].', 'en'), [
+  { kind: 'text', text: 'Tap ' },
+  { kind: 'control', variant: 'p', label: 'Pay Now' },
+  { kind: 'text', text: '.' },
+])
+// 非字母开头的英文（数字、符号、中英混排）不重复附注
+assert.deepEqual(parseStoreHelpFaqText('[k:10%]', 'zh'), [{ kind: 'control', variant: 'k', label: '10%' }])
+assert.deepEqual(parseStoreHelpFaqText('[k:中 / EN]', 'zh'), [{ kind: 'control', variant: 'k', label: '中 / EN' }])
+assert.deepEqual(parseStoreHelpFaqText('[tab:iOS]', 'zh'), [{ kind: 'control', variant: 'tab', label: 'iOS' }])
+assert.deepEqual(parseStoreHelpFaqText('[tab:Lay-bys|分期订单]', 'zh'), [
+  { kind: 'control', variant: 'tab', label: '分期订单', secondary: 'Lay-bys' },
+])
+
+// 内容完整性：中英齐全、id 唯一、记号全部可解析
+const tabs = Object.keys(STORE_HELP_FAQ_GROUPS) as StoreHelpFaqTab[]
+const languages: StoreHelpFaqLanguage[] = ['en', 'zh']
+const seenIds = new Set<string>()
+for (const tab of tabs) {
+  for (const group of STORE_HELP_FAQ_GROUPS[tab]) {
+    assert.ok(group.questions.length > 0, `${tab}/${group.id} 没有问题`)
+    for (const question of group.questions) {
+      assert.ok(!seenIds.has(question.id), `重复的问题 id: ${question.id}`)
+      seenIds.add(question.id)
+      assert.equal(question.steps.en.length, question.steps.zh.length, `${question.id} 中英步骤数不一致`)
+      assert.equal(question.steps.en.filter(isStoreHelpFaqHeading).length, question.steps.zh.filter(isStoreHelpFaqHeading).length)
+      if (question.tips) {
+        assert.equal(question.tips.en.length, question.tips.zh.length, `${question.id} 中英提示数不一致`)
+      }
+      for (const language of languages) {
+        assert.ok(question.title[language].trim(), `${question.id} 缺 ${language} 标题`)
+        const texts = [
+          question.where[language],
+          ...question.steps[language],
+          ...(question.tips?.[language] ?? []),
+          ...(question.related?.[language].map((item) => item.body) ?? []),
+        ]
+        for (const text of texts) {
+          for (const segment of parseStoreHelpFaqText(text, language)) {
+            if (segment.kind === 'text') {
+              assert.ok(!/\[(k|p|t|d|i|g|tab):/.test(segment.text), `${question.id} 有未解析的记号: ${text}`)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
+assert.equal(countQuestions('pos'), 28)
+assert.equal(countQuestions('mobile'), 15)
+
+// 编号跨分组连续，过滤后保持原编号
+const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
+assert.equal(posNumbering.get('remove'), 1)
+assert.equal(posNumbering.get('hold-recall'), 4)
+assert.equal(posNumbering.get('voucher'), 7)
+assert.equal(posNumbering.get('card-failure'), 8)
+assert.equal(posNumbering.get('pos-daily-close'), 13)
+assert.equal(posNumbering.get('return-scan'), 19)
+assert.equal(posNumbering.get('scanner-double-scan'), 20)
+assert.equal(posNumbering.get('anz-terminal-unresponsive'), 22)
+assert.equal(posNumbering.get('advertisement-manage'), 24)
+assert.equal(posNumbering.get('advertisement-not-playing'), 25)
+assert.equal(posNumbering.get('app-update'), 26)
+assert.equal(posNumbering.get('remote-assist'), 27)
+assert.equal(posNumbering.get('pda-product-sync'), 28)
+const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
+assert.equal(mobileNumbering.get('revenue-report'), 5)
+assert.equal(mobileNumbering.get('product-report'), 6)
+assert.equal(mobileNumbering.get('supplier-invoices'), 10)
+assert.equal(mobileNumbering.get('floating-button'), 14)
+assert.equal(mobileNumbering.get('app-download'), 15)
+
+// 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
+const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(refundHits.includes('refund'))
+assert.ok(refundHits.includes('no-receipt-refund'))
+const englishLabelHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'whole order', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(englishLabelHits.includes('order-discount'))
+const holdHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '挂单', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(holdHits.includes('hold-recall') && holdHits.includes('held-other-till'))
+const squareHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'square', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.deepEqual(squareHits, ['card-terminal-pairing'])
+const dailyCloseHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '日结', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(dailyCloseHits.includes('pos-daily-close'))
+const settleHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'settle & print', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(settleHits.includes('pos-daily-close'))
+const remoteHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '设备号', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(remoteHits.includes('remote-assist'))
+const remoteEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'remote maintenance', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(remoteEnHits.includes('remote-assist'))
+const frozenHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '死机', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.deepEqual(frozenHits, ['anz-terminal-unresponsive'])
+const funcClearHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'func clear', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(funcClearHits.includes('anz-terminal-unresponsive'))
+const pdaHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'PDA 改价', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(pdaHits.includes('pda-product-sync'))
+const dataDownloadHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'data download', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(dataDownloadHits.includes('pda-product-sync'))
+const adHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '广告', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(adHits.includes('advertisement-manage') && adHits.includes('advertisement-not-playing'))
+const adEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'advertisements', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(adEnHits.includes('advertisement-manage'))
+const reportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '营业额报告', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(reportHits.includes('revenue-report'))
+const productReportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'product report', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(productReportHits.includes('product-report'))
+const scannerHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '扫码枪灵敏度', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(scannerHits.includes('scanner-double-scan'))
+const scannerEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'scanner sensitivity', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(scannerEnHits.includes('scanner-double-scan'))
+assert.deepEqual(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'zzz-no-match', 'en'), [])
+assert.equal(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '   ', 'en'), STORE_HELP_FAQ_GROUPS.mobile)
+
+// 语言与标签解析
+assert.equal(resolveStoreHelpFaqLanguage('en', 'zh-CN'), 'en')
+assert.equal(resolveStoreHelpFaqLanguage(null, 'zh-CN'), 'zh')
+assert.equal(resolveStoreHelpFaqLanguage('fr', 'en-AU'), 'en')
+assert.equal(resolveStoreHelpFaqTab('mobile'), 'mobile')
+assert.equal(resolveStoreHelpFaqTab('other'), 'pos')
+
+// 锚点：分享链接能定位到问题所在标签
+assert.equal(toStoreHelpFaqAnchor('daily-closes'), 'faq-daily-closes')
+assert.equal(fromStoreHelpFaqAnchor('#faq-daily-closes'), 'daily-closes')
+assert.equal(fromStoreHelpFaqAnchor('#other'), undefined)
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'daily-closes'), 'mobile')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'revenue-report'), 'mobile')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'product-report'), 'mobile')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'lay-by-continue'), 'pos')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'pos-daily-close'), 'pos')
+assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'missing'), undefined)
+
+console.log('store help FAQ tests passed')

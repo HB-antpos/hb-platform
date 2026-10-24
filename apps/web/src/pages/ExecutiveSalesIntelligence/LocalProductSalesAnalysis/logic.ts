@@ -1,5 +1,6 @@
 import type {
   LocalSupplierProductSalesAnalysisBranch,
+  LocalSupplierProductSalesAnalysisBranchPurchase,
   LocalSupplierProductSalesAnalysisBootstrap,
   LocalSupplierProductSalesAnalysisCandidate,
   LocalSupplierProductSalesAnalysisDaily,
@@ -317,6 +318,47 @@ export function getSellThroughLevel(rate: number | null | undefined): SellThroug
 export interface BranchPriceTier { price: number; branchCount: number }
 
 /** 按分店均价（四舍五入到分）归档，用于提示同一商品在各分店的定价是否一致。 */
+export interface LocalProductBranchRankingRow extends LocalSupplierProductSalesAnalysisBranch {
+  purchaseQuantity: number
+  /** 区间内只有进货、没有销售的分店 */
+  purchaseOnly: boolean
+}
+
+/**
+ * 分店排行合并进货：有销售的分店保持原排行顺序并填上进货量；只有进货的分店追加在后面，按进货量从多到少、再按代码。
+ * 分店代码去空格、不区分大小写对齐。
+ */
+export function mergeBranchPurchases(
+  branches: readonly LocalSupplierProductSalesAnalysisBranch[],
+  purchases: readonly LocalSupplierProductSalesAnalysisBranchPurchase[],
+): LocalProductBranchRankingRow[] {
+  const key = (code: string) => code.trim().toUpperCase()
+  const byCode = new Map<string, LocalSupplierProductSalesAnalysisBranchPurchase>()
+  purchases.forEach((item) => {
+    const existing = byCode.get(key(item.branchCode))
+    byCode.set(key(item.branchCode), existing ? { ...existing, purchaseQuantity: existing.purchaseQuantity + item.purchaseQuantity } : item)
+  })
+  const rows: LocalProductBranchRankingRow[] = branches.map((branch) => ({
+    ...branch,
+    purchaseQuantity: byCode.get(key(branch.branchCode))?.purchaseQuantity ?? 0,
+    purchaseOnly: false,
+  }))
+  const listed = new Set(branches.map((branch) => key(branch.branchCode)))
+  const extra = [...byCode.values()]
+    .filter((item) => item.purchaseQuantity !== 0 && !listed.has(key(item.branchCode)))
+    .sort((a, b) => b.purchaseQuantity - a.purchaseQuantity || a.branchCode.localeCompare(b.branchCode))
+    .map((item): LocalProductBranchRankingRow => ({
+      branchCode: item.branchCode,
+      branchName: item.branchName,
+      netSalesQuantity: 0,
+      netSalesAmount: 0,
+      averageUnitPrice: null,
+      purchaseQuantity: item.purchaseQuantity,
+      purchaseOnly: true,
+    }))
+  return [...rows, ...extra]
+}
+
 export function buildBranchPriceTiers(branches: readonly Pick<LocalSupplierProductSalesAnalysisBranch, 'averageUnitPrice'>[]): BranchPriceTier[] {
   const tiers = new Map<number, number>()
   for (const branch of branches) {

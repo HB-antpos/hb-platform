@@ -57,7 +57,10 @@ public sealed class CompactSalesBoardSharedBuildCancellationTests : IDisposable
             typeof(StoreSalesStatistic),
             typeof(ProductStoreDailySalesStatistic),
             typeof(SalesStatisticRefreshState),
-            typeof(ChinaSupplier)
+            typeof(ChinaSupplier),
+            // 看板分店栏的「进货」读仓库订单。
+            typeof(WareHouseOrder),
+            typeof(WareHouseOrderDetails)
         );
         _posmDb.CodeFirst.InitTables(typeof(PosmProductSupplierMapping));
     }

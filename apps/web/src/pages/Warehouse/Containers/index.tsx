@@ -32,6 +32,7 @@ import dayjs from 'dayjs'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Key, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
 import MoreFiltersButton from '../../../components/listToolbar/MoreFiltersButton'
@@ -155,6 +156,11 @@ const NUMBER_RANGE_FILTERS: Array<{
 
 function formatAmount(value?: number) {
   return value == null ? '--' : `¥${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// 运费以美元计价（与详情页 / 编辑表单一致），列表里和国内金额 ¥ 并排，所以单独带 $ 前缀。
+function formatUsd(value?: number) {
+  return value == null ? '--' : `$${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function formatNumber(value?: number, digits = 0) {
@@ -323,6 +329,8 @@ export default function ContainersPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const access = useAuthStore((state) => state.access)
+  // 货柜编号默认只显示后 4 位；有权限的账号点眼睛按钮后显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const [loading, setLoading] = useState(false)
   const [containers, setContainers] = useState<ContainerMain[]>([])
   const [total, setTotal] = useState(0)
@@ -645,7 +653,7 @@ export default function ContainersPage() {
   const confirmContainerStatusChange = (record: ContainerMain, nextStatus: number) => {
     Modal.confirm({
       title: t('warehouseUi.containers.changeStatusTitle', {
-        number: record.货柜编号 || record.hguid,
+        number: record.货柜编号 ? formatContainerNumber(record.货柜编号) : record.hguid,
         status: getStatusLabel(nextStatus, t),
       }),
       content: t('warehouseUi.containers.changeStatusContent', { current: getStatusLabel(record.状态, t) }),
@@ -879,7 +887,12 @@ export default function ContainersPage() {
 
   const columns: ColumnsType<ContainerMain> = [
     {
-      title: t('containers.fields.containerNumber'),
+      title: (
+        <span className="wh-containers-number-title">
+          {t('containers.fields.containerNumber')}
+          <ContainerNumberRevealButton />
+        </span>
+      ),
       dataIndex: '货柜编号',
       key: 'containerNumber',
       width: 172,
@@ -889,10 +902,10 @@ export default function ContainersPage() {
           <div className="wh-containers-number-cell">
             {record.hguid ? (
               <Link className="wh-containers-number" to={`/warehouse/container/detail/${record.hguid}`}>
-                {text || record.hguid}
+                {text ? formatContainerNumber(text) : record.hguid}
               </Link>
             ) : (
-              <span className="wh-containers-number">{text || '--'}</span>
+              <span className="wh-containers-number">{text ? formatContainerNumber(text) : '--'}</span>
             )}
             {/* 备注并入货柜编号第二行，原来单独一列常年只显示 -- */}
             {remark ? <div className="wh-containers-sub" title={remark}>{remark}</div> : null}
@@ -960,6 +973,14 @@ export default function ContainersPage() {
       width: 120,
       align: 'right',
       render: (value?: number) => <span className="wh-containers-num">{formatAmount(value)}</span>,
+    },
+    {
+      title: t('warehouseUi.containers.columnFreight'),
+      dataIndex: '运费',
+      key: 'freight',
+      width: 116,
+      align: 'right',
+      render: (value?: number) => <span className="wh-containers-num">{formatUsd(value)}</span>,
     },
     {
       title: t('warehouseUi.containers.columnVolumeLoad'),
@@ -1036,7 +1057,9 @@ export default function ContainersPage() {
                   type="text"
                   icon={<MoreOutlined />}
                   loading={statusUpdatingKeys.includes(recordKey)}
-                  aria-label={t('warehouseUi.containers.actionMore', { number: record.货柜编号 || record.hguid })}
+                  aria-label={t('warehouseUi.containers.actionMore', {
+                    number: record.货柜编号 ? formatContainerNumber(record.货柜编号) : record.hguid,
+                  })}
                 />
               </Dropdown>
             ) : null}
@@ -1087,6 +1110,7 @@ export default function ContainersPage() {
                 {t('containers.status.loaded')}
               </span>
             </span>
+            <ContainerNumberRevealButton className="wh-containers-calendar-reveal" />
           </div>
           {calendar ? (
             <div className="wh-containers-calendar-scroll">
@@ -1115,7 +1139,9 @@ export default function ContainersPage() {
                         ) : null}
                       </div>
                       {column.items.map(({ container, eta, volume }) => {
-                        const number = container.货柜编号 || container.hguid
+                        const number = container.货柜编号
+                          ? formatContainerNumber(container.货柜编号)
+                          : container.hguid
                         const content = (
                           <>
                             <span className="wh-containers-chip-number">
@@ -1304,8 +1330,8 @@ export default function ContainersPage() {
             columns={columns}
             dataSource={containers}
             rowSelection={rowSelectionEnabled ? { selectedRowKeys, onChange: setSelectedRowKeys, columnWidth: 40 } : undefined}
-            // 默认列宽合计约 1068px（含勾选列），1440 宽屏且出现纵向滚动条时也不需要横向滚动。
-            scroll={{ x: 1068 }}
+            // 默认列宽合计约 1184px（含勾选列，新增运费列 116px）；1440 宽屏且出现纵向滚动条时也不需要横向滚动。
+            scroll={{ x: 1184 }}
             summary={() =>
               containers.length ? (
                 // 只有当前页数据，合计必须写明「本页合计」，不能当成筛选结果合计。
@@ -1321,10 +1347,14 @@ export default function ContainersPage() {
                   <MeasuredTable.Summary.Cell index={summaryOffset + 6} align="right">
                     <span className="wh-containers-summary-value">{formatAmount(pageTotals.amount)}</span>
                   </MeasuredTable.Summary.Cell>
-                  <MeasuredTable.Summary.Cell index={summaryOffset + 7}>
+                  {/* 运费列在国内金额之后；合计行的单元格索引必须与列顺序一一对应，否则体积合计会错位到运费列下。 */}
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 7} align="right">
+                    <span className="wh-containers-summary-value">{formatUsd(pageTotals.freight)}</span>
+                  </MeasuredTable.Summary.Cell>
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 8}>
                     <span className="wh-containers-summary-value">{formatNumber(pageTotals.volume, 2)} m³</span>
                   </MeasuredTable.Summary.Cell>
-                  <MeasuredTable.Summary.Cell index={summaryOffset + 8} />
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 9} />
                 </MeasuredTable.Summary.Row>
               ) : null
             }

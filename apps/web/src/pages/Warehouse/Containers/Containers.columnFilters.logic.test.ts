@@ -111,7 +111,10 @@ async function main() {
     assert(columnsStart >= 0 && columnsEnd > columnsStart, '无法定位货柜列表 columns 定义')
 
     const columnsSource = normalizedPageSource.slice(columnsStart, columnsEnd)
-    assert(columnsSource.includes("title: t('containers.fields.containerNumber')"), '货柜列表列定义缺少货柜编号列')
+    // 货柜编号列头带「显示完整编号」眼睛按钮，标题改为 JSX。
+    assert(columnsSource.includes("{t('containers.fields.containerNumber')}"), '货柜列表列定义缺少货柜编号列')
+    assert(columnsSource.includes('<ContainerNumberRevealButton />'), '货柜编号列头缺少显示完整编号按钮')
+    assert(columnsSource.includes('formatContainerNumber(text)'), '货柜编号列应按权限遮罩显示')
     assert(columnsSource.includes('const remark = record.备注?.trim()'), '货柜编号列应读取备注字段')
     assert(columnsSource.includes('{remark ? <div className="wh-containers-sub" title={remark}>{remark}</div> : null}'), '备注应显示在货柜编号第二行')
   })

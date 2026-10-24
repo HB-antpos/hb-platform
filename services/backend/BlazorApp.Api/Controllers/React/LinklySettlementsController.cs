@@ -29,6 +29,14 @@ public sealed class LinklySettlementsController(ILinklySettlementQueryService se
         }
     }
 
+    [HttpGet("devices")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<LinklySettlementDeviceOptionDto>>>> GetDeviceOptions(
+        CancellationToken cancellationToken)
+    {
+        var result = await service.GetDeviceOptionsAsync(cancellationToken);
+        return Ok(ApiResponse<IReadOnlyList<LinklySettlementDeviceOptionDto>>.OK(result));
+    }
+
     [HttpGet("{id:long}")]
     public async Task<ActionResult<ApiResponse<LinklySettlementDetailDto>>> GetDetail(
         long id,

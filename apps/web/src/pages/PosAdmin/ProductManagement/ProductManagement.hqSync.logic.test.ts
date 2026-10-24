@@ -1394,46 +1394,49 @@ async function main() {
   })
   if (selectedFromHqFailure) failures.push(selectedFromHqFailure)
 
-  const batchTranslateFailure = await runTest('选中商品批量翻译应默认中文到英文并覆盖商品名称', () => {
+  const batchTranslateFailure = await runTest('选中商品看图生成英文名应先预览确认，再同时覆盖商品名称和英文名称', () => {
     assert(
-      pageSource.includes("../../../services/translationService") &&
-        pageSource.includes('batchTranslate'),
-      '页面应引入批量翻译服务',
+      pageSource.includes("../../../services/productDescriptionService") &&
+        pageSource.includes('describeProductsFromImages') &&
+        !pageSource.includes("../../../services/translationService"),
+      '页面应改用看图生成英文名服务',
     )
     assert(
       pageSource.includes('const [translating, setTranslating] = useState(false)') &&
         pageSource.includes('setTranslating(true)') &&
         pageSource.includes('setTranslating(false)'),
-      '页面应维护批量翻译 loading 状态',
-    )
-    assert(
-      pageSource.includes('containsChineseText') &&
-        pageSource.includes('buildProductNameTranslationUpdates') &&
-        pageSource.includes('!containsChineseText(translatedName)'),
-      '批量翻译应过滤空结果、未变化结果和仍包含中文的结果',
+      '页面应维护看图生成的 loading 状态',
     )
     assert(
       pageSource.includes('const selectedRows = data.filter((row) => selectedRowKeys.includes(row.key))') &&
-        pageSource.includes('Array.from(new Set(selectedRows.map((row) => row.productName.trim())') &&
-        pageSource.includes('const translations = await batchTranslate(names)'),
-      '批量翻译应只使用当前页选中商品名称去重后调用翻译接口',
+        pageSource.includes('const items = buildPosProductImageDescriptionItems(selectedRows)') &&
+        pageSource.includes('const summary = await describeProductsFromImages(items, showProgress)'),
+      '看图生成应只使用当前页选中商品',
     )
     assert(
-      pageSource.includes('const result = await batchUpdateProducts(updates)') &&
-        pageSource.includes('productCode: row.productCode') &&
-        pageSource.includes('productName: translatedName') &&
-        pageSource.includes('englishName: translatedName'),
-      '批量翻译应通过批量更新接口提交 productCode、翻译后的 productName 和 englishName',
+      pageSource.includes('const previewRows = buildImageEnglishNamePreviewRows(selectedRows, summary)') &&
+        pageSource.includes('setImageNamePreview(previewRows)') &&
+        pageSource.includes('<ImageEnglishNamePreviewModal') &&
+        !pageSource.slice(
+          pageSource.indexOf('const handleBatchTranslate = async () => {'),
+          pageSource.indexOf('const handleConfirmImageNames = async'),
+        ).includes('batchUpdateProducts('),
+      '看图结果应先进预览弹窗，不能直接落库',
+    )
+    assert(
+      pageSource.includes('const updates = buildImageEnglishNameUpdates(rows)') &&
+        pageSource.includes('const result = await batchUpdateProducts(updates)'),
+      '确认后应通过批量更新接口提交',
     )
     assert(
       typeSource.includes('englishName?: string'),
       '批量更新商品 DTO 应声明 englishName 字段以同步写入后端 EnglishName',
     )
     assert(
-      pageSource.includes("t('posAdmin.products.batchTranslate', '批量翻译')") &&
+      pageSource.includes("t('posAdmin.products.imageNames.action', '看图生成英文名')") &&
         pageSource.includes('disabled={!selectedRowKeys.length || translating}') &&
         pageSource.includes('loading={translating}'),
-      '工具栏应提供受选中状态和 loading 控制的批量翻译按钮',
+      '工具栏应提供受选中状态和 loading 控制的看图生成英文名按钮',
     )
   })
   if (batchTranslateFailure) failures.push(batchTranslateFailure)

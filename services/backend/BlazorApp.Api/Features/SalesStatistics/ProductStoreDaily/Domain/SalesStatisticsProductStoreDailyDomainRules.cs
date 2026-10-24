@@ -21,6 +21,39 @@ internal static class SalesStatisticsProductStoreDailyDomainRules
             : SalesStatisticsCodeRules.UnknownSupplierCode;
     }
 
+    /// <summary>已支付但没有商品明细的订单（只有表头）；按订单号去重后用于计算对账扣除项。</summary>
+    internal readonly record struct HeaderOnlyOrder(string? OrderGuid, string? BranchCode, string? DeviceCode);
+
+    /// <summary>
+    /// 「无明细订单」的分店营业额扣除项（负数，按分店汇总）。
+    /// POSM 偶有已支付订单只有表头、明细没有上传：分店营业额按订单支付金额计入，商品统计却无法把它归属到任何商品，
+    /// 对账差额恰好等于这些订单的支付金额。差额一旦超过容差，当天商品统计与供应商统计会永久 Failed，
+    /// 区间包含这一天的商品报告整份打不开。这类订单本来就不可能归属商品，所以对账前先从分店营业额里扣掉；
+    /// 扣除后仍对不上的差额才是真异常，照常失败。
+    /// 金额用支付金额，与商品统计「按订单支付金额分摊」的口径一致；查不到支付记录的订单不扣
+    /// （对账口径是按支付计，查不到本来就算 0）；数量不扣（分店数量口径不参与失败判定）。
+    /// </summary>
+    internal static List<ProductStoreDailyBranchRollup> BuildHeaderOnlyOrderDeductions(
+        IEnumerable<HeaderOnlyOrder> orders,
+        IReadOnlyDictionary<string, string> deviceBranchMap,
+        IReadOnlyDictionary<string, decimal> paymentAmounts) =>
+        orders
+            .Where(order => !string.IsNullOrWhiteSpace(order.OrderGuid))
+            .GroupBy(order => SalesStatisticsCodeRules.Normalize(order.OrderGuid), StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new
+                {
+                    BranchCode = SalesStatisticsCodeRules.ResolveBranchCode(first.BranchCode, first.DeviceCode, deviceBranchMap),
+                    PaymentAmount = paymentAmounts.TryGetValue(group.Key, out var amount) ? amount : 0m,
+                };
+            })
+            .Where(order => !string.IsNullOrWhiteSpace(order.BranchCode) && order.PaymentAmount != 0m)
+            .GroupBy(order => order.BranchCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ProductStoreDailyBranchRollup(group.Key, -group.Sum(order => order.PaymentAmount), 0))
+            .ToList();
+
     internal static Dictionary<string, decimal> BuildOrderAmountMap(IEnumerable<OrderAmountRow> rows) =>
         rows
             .Where(row => !string.IsNullOrWhiteSpace(row.OrderGuid))

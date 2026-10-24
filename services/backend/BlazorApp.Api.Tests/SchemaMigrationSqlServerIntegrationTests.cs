@@ -1051,6 +1051,233 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 分店订单退货三列_依赖原表_可重复执行_不丢存量数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表不存在：拒绝执行，提示先跑基线。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql));
+        Assert.Equal(53900, missingTable.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53900, missingVerify.Number);
+
+        // 迁移前形态：没有退货三列的订单明细表与一行存量明细（含一条负发货的历史脏数据也不应被改动）。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.WareHouseOrderDetails
+            (
+                DetailGUID nvarchar(200) NOT NULL PRIMARY KEY,
+                OrderGUID nvarchar(50) NULL,
+                AllocQuantity decimal(18,2) NULL
+            );
+            INSERT dbo.WareHouseOrderDetails (DetailGUID, OrderGUID, AllocQuantity) VALUES (N'd-1', N'o-1', 5);
+            """);
+        // 缺列时门禁报 53901。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+        // 写入退货字段后重复执行：不得丢数据；存量明细三列为 NULL（迁移不回填）。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.WareHouseOrderDetails (DetailGUID, OrderGUID, AllocQuantity, ReturnReason, ReturnDisposition, ReturnNote)
+            VALUES (N'd-2', N'o-1', -3, N'damaged', 1, N'box crushed');
+            """);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.WareHouseOrderDetails WHERE DetailGUID = N'd-1' AND AllocQuantity = 5
+                AND ReturnReason IS NULL AND ReturnDisposition IS NULL AND ReturnNote IS NULL) <> 1
+                THROW 53910, 'Existing detail row should keep its data after the migration.', 1;
+            IF (SELECT COUNT(*) FROM dbo.WareHouseOrderDetails WHERE DetailGUID = N'd-2' AND ReturnReason = N'damaged'
+                AND ReturnDisposition = 1 AND ReturnNote = N'box crushed') <> 1
+                THROW 53911, 'Return line should keep its return fields after re-running the migration.', 1;
+            """);
+
+        // 长度漂移与类型漂移都要被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnReason nvarchar(64) NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnReason nvarchar(32) NULL;");
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WareHouseOrderDetails ALTER COLUMN ReturnDisposition bigint NULL;");
+        var typeMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql));
+        Assert.Equal(53901, typeMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商节日预订单十张表_可重复执行_保留数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54000, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderOrderer (UserGuid, CanViewOtherStores, CreatedAtUtc, UpdatedAtUtc)
+            VALUES (N'u-1', 1, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """);
+        // 重复执行是空操作，不丢已有数据
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.SupplierPreorderOrderer WHERE UserGuid = N'u-1' AND CanViewOtherStores = 1) <> 1
+                THROW 54010, 'Existing orderer row should survive re-running the migration.', 1;
+            """);
+
+        // 列长度漂移
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN SupplierItemCode nvarchar(50) NOT NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54001, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN SupplierItemCode nvarchar(100) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        // 唯一索引被删（会导致同一分店重复建单）
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_SupplierPreorderStoreOrder_FormStore ON dbo.SupplierPreorderStoreOrder;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql));
+        Assert.Equal(54002, indexMissing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单修订版七列_依赖原表_可重复执行_旧行默认值与签名门禁()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var noTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql));
+        Assert.Equal(54008, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderForm (FormGuid, LocalSupplierCode, SupplierName, HolidayType, SeasonYear, Title, Status, ExportQtyUnit, ItemCount, CreatedAtUtc, UpdatedAtUtc, IsDeleted)
+            VALUES (N'f-1', N'257', N'KFC', N'Christmas', 2026, N'KFC 2026', N'Open', N'Cartons', 1, SYSUTCDATETIME(), SYSUTCDATETIME(), 0);
+            INSERT dbo.SupplierPreorderFormItem (ItemGuid, FormGuid, Seq, SourceRowNo, SortOrder, SupplierItemCode, Name, CartonQty, Price, MatchMethod, IsActive)
+            VALUES (N'i-1', N'f-1', 1, 2, 1, N'XD1', N'Bauble', 24, 1.10, N'None', 1);
+            """);
+        var missing = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql));
+        Assert.Equal(54009, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderForm WHERE FormGuid = N'f-1' AND Revision = 0 AND RevisedAtUtc IS NULL)
+               OR NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderFormItem WHERE ItemGuid = N'i-1' AND RevisionNo = 0 AND RevisionChange IS NULL AND PrevPrice IS NULL)
+                THROW 54012, 'Existing rows should get default revision columns.', 1;
+            """);
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN RevisionChange nvarchar(20) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderRevisionSchema.VerifySql));
+        Assert.Equal(54009, drift.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单图片转存五列_依赖原表_可重复执行_旧行默认值与签名门禁()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表还没建：Apply 直接报 54006，Verify 报 54007
+        var noTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql));
+        Assert.Equal(54006, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderFormItem (ItemGuid, FormGuid, Seq, SourceRowNo, SortOrder, SupplierItemCode, Name, CartonQty, Price, MatchMethod, IsActive)
+            VALUES (N'i-1', N'f-1', 1, 2, 1, N'XD1', N'Bauble', 24, 1.10, N'None', 1);
+            """);
+        var missing = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql));
+        Assert.Equal(54007, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql);
+        // 旧行：次数默认 0，其余为空
+        await ExecuteNonQueryAsync(main, """
+            IF NOT EXISTS (SELECT 1 FROM dbo.SupplierPreorderFormItem WHERE ItemGuid = N'i-1' AND ImageCopyAttempts = 0 AND ImageCosUrl IS NULL AND ImageCopyStatus IS NULL)
+                THROW 54011, 'Existing item should get default image copy columns.', 1;
+            """);
+        // 原有签名门禁不受新增列影响
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderFormItem ALTER COLUMN ImageCopyError nvarchar(100) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, SupplierPreorderItemImageSchema.VerifySql));
+        Assert.Equal(54007, drift.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商预订单去年历史快照表_可重复执行_保留数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54003, missing.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderHistorySnapshot (SnapshotGuid, FormGuid, StoreCode, ProductCode, PayloadJson, ComputedAtUtc, RuleVersion)
+            VALUES (N's-1', N'f-1', N'*', N'*', N'{}', SYSUTCDATETIME(), N'v1');
+            """);
+        // 重复执行是空操作，不丢已有数据
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.SupplierPreorderHistorySnapshot WHERE SnapshotGuid = N's-1') <> 1
+                THROW 54010, 'Existing history snapshot row should survive re-running the migration.', 1;
+            """);
+        // (订单表, 分店, 商品) 唯一
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderHistorySnapshot (SnapshotGuid, FormGuid, StoreCode, ProductCode, PayloadJson, ComputedAtUtc, RuleVersion)
+            VALUES (N's-2', N'f-1', N'*', N'*', N'{}', SYSUTCDATETIME(), N'v1');
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderHistorySnapshot ALTER COLUMN RuleVersion nvarchar(20) NOT NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54004, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderHistorySnapshot ALTER COLUMN RuleVersion nvarchar(50) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_SupplierPreorderHistorySnapshot_FormStoreProduct ON dbo.SupplierPreorderHistorySnapshot;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHistorySchema.VerifySql));
+        Assert.Equal(54005, indexMissing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 分店订单退货三列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 关键约束：CheckCoreAsync 只查账本、不比较实体与库列，实体 [SugarColumn(Length = 32/200)] 必须与迁移 SQL 的
+        // nvarchar(32) / int / nvarchar(200) NULL 一致。这里让 SqlSugar 按实体直接建表，再用迁移门禁验证两边没有漂移。
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.WareHouseOrderDetails>();
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+
+        // CodeFirst 抢先建列后，迁移 ApplySql 是空操作且门禁仍然通过。
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderReturnFieldsSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -3023,6 +3250,130 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
         Assert.Equal(51971, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 分店收银入口首选三列加约束_依赖Store表_可重复执行且签名与约束门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // Store 表不存在：拒绝执行与校验。
+        var missingApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql));
+        Assert.Equal(54100, missingApply.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54100, missingVerify.Number);
+
+        // 迁移前形态：Store 只有旧列（桩表，含已有数据）。缺列时门禁报 54101。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.Store
+            (
+                StoreGUID nvarchar(50) NOT NULL PRIMARY KEY,
+                StoreCode nvarchar(50) NOT NULL
+            );
+            INSERT dbo.Store (StoreGUID, StoreCode) VALUES (N'g-1', N'S001');
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+        // 重复执行是空操作；旧行保留，三个新列对旧行是 NULL（= 未设置，收银端按 edge 处理）。
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.Store WHERE StoreGUID = N'g-1' AND StoreCode = N'S001'
+                AND PosApiEntryMode IS NULL AND PosApiEntryUpdatedAt IS NULL AND PosApiEntryUpdatedBy IS NULL) <> 1
+                THROW 54190, 'Existing store row was changed.', 1;
+            """);
+
+        // CHECK 约束：NULL 与三个白名单值能写入，其它值（含大小写不同、空串）被拒。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'aws' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'direct' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = N'edge' WHERE StoreGUID = N'g-1';");
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET PosApiEntryMode = NULL WHERE StoreGUID = N'g-1';");
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(
+            main, "UPDATE dbo.Store SET PosApiEntryMode = N'tencent' WHERE StoreGUID = N'g-1';"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(
+            main, "UPDATE dbo.Store SET PosApiEntryMode = N'' WHERE StoreGUID = N'g-1';"));
+
+        // 约束被删或被禁用都必须被门禁识别；重跑 ApplySql 可补回被删的约束。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store NOCHECK CONSTRAINT CK_Store_PosApiEntryMode;");
+        var disabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, disabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store DROP CONSTRAINT CK_Store_PosApiEntryMode;");
+        var dropped = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, dropped.Number);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+
+        // 列宽漂移（nvarchar(16) → nvarchar(8)）与类型漂移（datetime2 → datetime）都被门禁识别；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store DROP CONSTRAINT CK_Store_PosApiEntryMode; ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryMode nvarchar(8) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryMode nvarchar(16) NULL;");
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryUpdatedAt datetime NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql));
+        Assert.Equal(54101, type.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN PosApiEntryUpdatedAt datetime2 NULL;");
+        await ExecuteNonQueryAsync(main, StorePosApiEntrySchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 设备入口回显两列_设备表不存在时空操作_存在时可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var posm = databases.PosmConnectionString;
+
+        // 空 POSM 库没有设备表（基线不创建它，生产库里早已存在）：Apply / Verify 都是空操作，迁移链不会因此中断。
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+
+        // 迁移前形态：设备表只有旧列（桩表，含已有数据）。
+        await ExecuteNonQueryAsync(posm, """
+            CREATE TABLE dbo.[POSM_设备注册信息表]
+            (
+                ID int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [系统设备编号] nvarchar(50) NOT NULL
+            );
+            INSERT dbo.[POSM_设备注册信息表] ([系统设备编号]) VALUES (N'POS-01');
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, """
+            IF (SELECT COUNT(*) FROM dbo.[POSM_设备注册信息表] WHERE [系统设备编号] = N'POS-01'
+                AND LastApiEntry IS NULL AND LastApiEntryAt IS NULL) <> 1
+                THROW 54190, 'Existing device row was changed.', 1;
+            """);
+
+        // 列宽漂移与类型漂移被识别。
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntry nvarchar(8) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, width.Number);
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntry nvarchar(16) NULL;");
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntryAt datetime NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql));
+        Assert.Equal(54111, type.Number);
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.[POSM_设备注册信息表] ALTER COLUMN LastApiEntryAt datetime2 NULL;");
+        await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
     }
 
     private static async Task<string> RunApiUntilListeningAsync(

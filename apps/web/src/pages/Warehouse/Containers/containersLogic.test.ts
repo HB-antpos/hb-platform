@@ -102,13 +102,13 @@ async function main() {
 
   push(await runTest('合计只汇总传入的货柜（本页或勾选），空值按 0 计', () => {
     const totals = summarizeContainers([
-      container({ 合计件数: 1186, 合计金额: 428640, 总体积: 63.6 }),
-      container({ 合计件数: 1286, 总体积: 66.8 }),
+      container({ 合计件数: 1186, 合计金额: 428640, 运费: 14835.88, 总体积: 63.6 }),
+      container({ 合计件数: 1286, 运费: 15200, 总体积: 66.8 }),
       container({}),
     ])
     assertEqual(
-      { ...totals, volume: Number(totals.volume.toFixed(2)) },
-      { count: 3, pieces: 2472, amount: 428640, volume: 130.4 },
+      { ...totals, freight: Number(totals.freight.toFixed(2)), volume: Number(totals.volume.toFixed(2)) },
+      { count: 3, pieces: 2472, amount: 428640, freight: 30035.88, volume: 130.4 },
       '合计应逐项相加',
     )
   }))

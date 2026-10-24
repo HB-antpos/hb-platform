@@ -80,12 +80,16 @@ function createEmptyAccess(): AccessControl {
     canManageWarehouseProducts: false,
     canManageWarehouseOrders: false,
     canManageStoreOrderImportPriceVariance: false,
+    canReturnStoreOrderGoods: false,
+    canManageSupplierPreorders: false,
+    canOrderSupplierPreorders: false,
     canManageWarehouseCategories: false,
     canManageWarehouseLocations: false,
     canViewContainers: false,
     canCreateContainer: false,
     canEditContainer: false,
     canDeleteContainer: false,
+    canViewFullContainerNumber: false,
     canManageStoreProducts: false,
     canEditStoreProducts: false,
     canCreateStoreProducts: false,
@@ -284,6 +288,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 首柜价差异报表暴露全局基准差异和可编辑价格入口，纯 WarehouseStaff 仍只保留分店订货文档入口。
   const canManageStoreOrderImportPriceVariance =
     canManageWarehouseOrders && !isWarehouseStaffOnly
+  // 退货（负数发货）单独授权：不继承 Warehouse.Manage / ManageOrders，管理员由 hasPermission 统一放行；
+  // 页面里还要同时具备订货管理写权限才会真正放开负数输入。
+  const canReturnStoreOrderGoods = hasPermission(P.Warehouse.StoreOrderReturn)
+  // 供应商节日预订单：不继承任何仓库权限（管理员由 hasPermission 统一放行）；下单入口持有 Manage 也可进入。
+  const canManageSupplierPreorders = hasPermission(P.SupplierPreorder.Manage)
+  const canOrderSupplierPreorders = canManageSupplierPreorders || hasPermission(P.SupplierPreorder.Order)
   const canManageWarehouseCategories =
     isAdmin || hasPermission(P.Warehouse.ManageCategories) || hasPermission(P.Warehouse.Manage)
   const canManageWarehouseLocations =
@@ -292,6 +302,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canCreateContainer = isAdmin || hasPermission(P.Container.Create)
   const canEditContainer = isAdmin || hasPermission(P.Container.Edit)
   const canDeleteContainer = isAdmin || hasPermission(P.Container.Delete)
+  const canViewFullContainerNumber = isAdmin || hasPermission(P.Container.ViewFullNumber)
 
   // 分店商品
   const canManageStoreProducts = isAdmin || hasPermission(P.StoreProducts.View)
@@ -421,6 +432,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
       canViewPerformanceBaseline,
       canViewOperationAudits,
       canViewDeviceRegistration,
+      canManageSupplierPreorders,
+      canOrderSupplierPreorders,
       hasPermission,
     })
   const canAccessOrderFront =
@@ -476,12 +489,16 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageWarehouseProducts,
     canManageWarehouseOrders,
     canManageStoreOrderImportPriceVariance,
+    canReturnStoreOrderGoods,
+    canManageSupplierPreorders,
+    canOrderSupplierPreorders,
     canManageWarehouseCategories,
     canManageWarehouseLocations,
     canViewContainers,
     canCreateContainer,
     canEditContainer,
     canDeleteContainer,
+    canViewFullContainerNumber,
     canManageStoreProducts,
     canEditStoreProducts,
     canCreateStoreProducts,

@@ -628,6 +628,57 @@ namespace BlazorApp.Api.Services
             }
         }
 
+        /// <summary>商品图片桶（ImageBucketName / ImageRegion）是否配置齐全；该桶已开通数据万象，前端可用 imageMogr2 取缩略图。</summary>
+        public bool HasImageBucketConfiguration() =>
+            !string.IsNullOrWhiteSpace(_settings.SecretId)
+            && !string.IsNullOrWhiteSpace(_settings.SecretKey)
+            && !string.IsNullOrWhiteSpace(_settings.ImageBucketName)
+            && !string.IsNullOrWhiteSpace(_settings.ImageRegion);
+
+        /// <summary>
+        /// 服务端把一张图片写进商品图片桶，返回公开地址。与 UploadStreamAsync（写主桶）分开，不影响现有调用方。
+        /// </summary>
+        public async Task<ApiResponse<UploadResult>> UploadImageBucketBytesAsync(
+            string objectKey,
+            string contentType,
+            byte[] content,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (!HasImageBucketConfiguration())
+            {
+                return ApiResponse<UploadResult>.Error("腾讯云图片桶配置不完整", "COS_NOT_CONFIGURED");
+            }
+
+            try
+            {
+                var url = GeneratePresignedPutUrl(objectKey, contentType, 3600, _settings.ImageBucketName, _settings.ImageRegion);
+                using var request = new HttpRequestMessage(HttpMethod.Put, url);
+                request.Content = new ByteArrayContent(content);
+                request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                return ApiResponse<UploadResult>.OK(
+                    new UploadResult
+                    {
+                        ObjectKey = objectKey,
+                        DownloadUrl = $"https://{_settings.ImageBucketName}.cos.{_settings.ImageRegion}.myqcloud.com/{objectKey}",
+                        FileSize = content.Length,
+                    },
+                    "文件上传成功"
+                );
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "服务端上传图片到 COS 图片桶失败，ObjectKey: {ObjectKey}", objectKey);
+                return ApiResponse<UploadResult>.Error("服务端上传图片到 COS 失败", "COS_UPLOAD_FAILED", ex.Message);
+            }
+        }
+
         private string GeneratePresignedPutUrl(
             string objectKey,
             string contentType,

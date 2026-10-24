@@ -5,18 +5,19 @@ import type { ColumnsType } from 'antd/es/table'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import { assignProductsToContainer, checkContainerConflicts, getContainerList } from '../../../services/containerService'
 import { batchDetectProducts, batchImportConfirm, batchUpdateDomesticProducts, fixProductImage, sendToHq, syncToHBSales, updateHbwebProductNames } from '../../../services/domesticProductImportService'
-import { batchTranslate } from '../../../services/translationService'
+import { describeProductsFromImages, getDescribedEnglishName } from '../../../services/productDescriptionService'
 import type { ContainerMain } from '../../../types/container'
 import { isValidEAN13 } from '../../../utils/barcode'
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import type { ProductImportItem, DuplicateGroup } from './types'
 import { buildAssignContainerItems, buildHbwebProductNameSyncNotificationDecision, buildHbwebProductNameUpdates, calculateStatistics, createEmptyProduct, detectDuplicates, findInvalidAssignContainerItems, generateImageUrl, getHbwebProductNameSyncConfirmationKeys, mergeDuplicateProducts, parseProductImportPasteText, stripAssignContainerItemsForRequest, summarizeAssignProductsResult, summarizeHbwebProductNameSyncResponse, updateCalculatedFields } from './utils'
-import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportRowClassName, getImportRowErrors, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeTranslationsById, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
+import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportRowClassName, getImportRowErrors, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeEnglishNamesById, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
 import type { ConflictSelection, ContainerConflictRow, ImportDiffField, ImportStatusFilter } from './importGridLogic'
 import { applyImportPaste, clearImportColumn, findRowIndexById, toEditableColumn } from './importPasteLogic'
 import type { ImportEditableColumn } from './importPasteLogic'
@@ -107,7 +108,9 @@ export default function ProductImportPage() {
   const [containers, setContainers] = useState<ContainerMain[]>([])
   const [loadingContainers, setLoadingContainers] = useState(false)
   const [syncProductNamesToHq, setSyncProductNamesToHq] = useState(false)
+  // 选中的是货柜 GUID（hguid）：货柜编号可能是遮罩值且允许重复，不能作为发送货柜的业务键。
   const [selectedContainerId, setSelectedContainerId] = useState('')
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false)
   const [conflictRows, setConflictRows] = useState<ContainerConflictRow[]>([])
   const [pendingSend, setPendingSend] = useState<{ containerId: string; notes: string; products: ProductImportItem[] } | null>(null)
@@ -400,18 +403,32 @@ export default function ProductImportPage() {
   const handleBatchTranslate = useCallback(() => runExclusive('translate', async () => {
     // 点击那一刻的快照：目标行与它们当时的名称，用来在结果回来时判断哪些行期间被改过
     const targets = snapshotTranslationTargets(stateRef.current.products, stateRef.current.selectedIds)
-    const names = Array.from(new Set(targets.map((target) => target.productName)))
-
-    if (names.length === 0) {
+    if (targets.length === 0) {
       message.warning(t('productImport.noNamesToTranslate', '没有可翻译的商品名称'))
       return
     }
 
-    try {
-      const translations = await batchTranslate(names)
-      // 按 id 合并进「当前」的行：翻译期间用户的编辑、粘贴、删除都不会被旧数组覆盖
-      const merged = mergeTranslationsById(stateRef.current.products, targets, translations)
+    // 每行按自己的商品图看图生成（中文名作参考，没图或看图失败时后端按中文名翻译兜底）
+    const imageById = new Map(stateRef.current.products.map((row) => [row.id, row.imageUrl]))
+    const items = targets.map((target) => ({ key: target.id, imageUrl: imageById.get(target.id), chineseName: target.productName }))
+    const progressKey = 'product-import-describe-from-images'
+    const showProgress = (done: number, total: number) => message.loading({
+      key: progressKey,
+      duration: 0,
+      content: t('productImport.imageNamesProgress', '正在看图生成英文名 {{done}}/{{total}}…', { done, total }),
+    })
 
+    try {
+      showProgress(0, items.length)
+      const summary = await describeProductsFromImages(items, showProgress)
+      message.destroy(progressKey)
+      const englishNameById = Object.fromEntries(items.map((item) => [item.key, getDescribedEnglishName(summary, item.key)]))
+      // 按 id 合并进「当前」的行：看图期间用户的编辑、粘贴、删除都不会被旧数组覆盖
+      const merged = mergeEnglishNamesById(stateRef.current.products, targets, englishNameById)
+
+      if (summary.failedCount > 0) {
+        message.warning(t('productImport.imageNamesFailed', '{{count}} 行没有生成英文名（没有图片也没有中文名，或调用失败）', { count: summary.failedCount }))
+      }
       if (merged.appliedCount === 0) {
         message.warning(merged.editedCount > 0
           ? t('productImport.translateRowsEditedSkipped', '有 {{count}} 行在翻译期间被修改，未覆盖', { count: merged.editedCount })
@@ -421,18 +438,20 @@ export default function ProductImportPage() {
 
       setState((prev) => ({
         ...prev,
-        products: mergeTranslationsById(prev.products, targets, translations).products,
+        products: mergeEnglishNamesById(prev.products, targets, englishNameById).products,
         needsDetection: true,
       }))
-      message.success(t('productImport.batchTranslateSuccess', '成功翻译 {{count}} 个商品名称', { count: merged.appliedCount }))
-      if (merged.skippedCount > 0) {
-        message.warning(t('productImport.invalidTranslatedNamesSkipped', '有 {{count}} 条翻译结果仍包含中文或无变化，已跳过', { count: merged.skippedCount }))
-      }
+      message.success(t('productImport.imageNamesApplied', '已生成 {{count}} 条英文名（看图 {{image}} 条，文字翻译 {{text}} 条）', {
+        count: merged.appliedCount,
+        image: summary.imageCount,
+        text: summary.textCount,
+      }))
       if (merged.editedCount > 0) {
         message.warning(t('productImport.translateRowsEditedSkipped', '有 {{count}} 行在翻译期间被修改，未覆盖', { count: merged.editedCount }))
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : t('productImport.batchTranslateFailed', '批量翻译失败'))
+      message.destroy(progressKey)
+      message.error(error instanceof Error ? error.message : t('productImport.imageNamesRequestFailed', '看图生成英文名失败'))
     }
   }), [runExclusive, t])
 
@@ -832,11 +851,16 @@ export default function ProductImportPage() {
     : ''
 
   const containerOptions = useMemo(() => containers
-    .filter((c) => c.货柜编号)
+    .filter((c) => c.货柜编号 && c.hguid)
     .map((c) => ({
-      label: t('productImport.containerOptionLabel', '{{code}} · 装柜 {{date}}', { code: c.货柜编号, date: formatDate(c.装柜日期) }),
-      value: c.货柜编号 as string,
-    })), [containers, t])
+      label: t('productImport.containerOptionLabel', '{{code}} · 装柜 {{date}}', { code: formatContainerNumber(c.货柜编号), date: formatDate(c.装柜日期) }),
+      value: c.hguid,
+    })), [containers, formatContainerNumber, t])
+  const pendingSendContainerLabel = useMemo(() => {
+    if (!pendingSend) return undefined
+    const target = containers.find((c) => c.hguid === pendingSend.containerId)
+    return target?.货柜编号 ? formatContainerNumber(target.货柜编号) : undefined
+  }, [containers, formatContainerNumber, pendingSend])
 
   const supplierOptions = useMemo(() => [...suppliers].sort((a, b) => (a.supplierCode || '').localeCompare(b.supplierCode || '')).map((s) => ({
     label: `${s.supplierCode} - ${s.supplierName}${s.shopNumber ? ` - ${s.shopNumber}` : ''}`,
@@ -1282,7 +1306,7 @@ export default function ProductImportPage() {
             <div className="pi-group">
               <Button size="small" icon={<PlusOutlined />} onClick={() => addEmptyRows(10)} disabled={busy}>{t('productImport.addRowsButton', '{{count}} 行', { count: 10 })}</Button>
               <Button size="small" icon={<TranslationOutlined />} onClick={() => void handleBatchTranslate()} loading={busyAction === 'translate'} disabled={busy || state.products.length === 0}>
-                {state.selectedIds.length > 0 ? t('productImport.translateSelected', '翻译选中') : t('productImport.translateAll', '翻译全部')}
+                {state.selectedIds.length > 0 ? t('productImport.describeSelected', '看图生成英文名（选中）') : t('productImport.describeAll', '看图生成英文名（全部）')}
               </Button>
               <Button size="small" danger onClick={deleteAllRows} disabled={state.products.length === 0 || busy}>{t('productImport.deleteAll', '删除全部')}</Button>
             </div>
@@ -1423,7 +1447,7 @@ export default function ProductImportPage() {
       <DuplicateDialog open={duplicateDialogOpen} duplicateGroups={duplicateGroups} onClose={() => setDuplicateDialogOpen(false)} onConfirm={handleMergeDuplicates} />
       <ConflictResolutionDialog
         open={conflictDialogOpen}
-        containerCode={pendingSend?.containerId}
+        containerCode={pendingSendContainerLabel}
         conflicts={conflictRows}
         totalSendCount={pendingSend?.products.length ?? 0}
         confirming={busyAction === 'send'}

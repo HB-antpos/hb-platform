@@ -130,6 +130,7 @@ namespace BlazorApp.Api.Controllers.React
                 Rate = rate,
                 EffectiveRate = retail / req.PurchasePrice,
                 StrategyId = strategy?.Id,
+                StrategyName = strategy?.Name,
                 Rule = ruleInfo,
             };
             return Ok(ApiResponse<PricingEvaluateResponse>.OK(resp));

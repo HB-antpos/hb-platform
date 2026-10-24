@@ -33,6 +33,7 @@ public partial class SalesDashboardReactService
         CompactSalesBoardDto board,
         string posmDatabase,
         DateRangeDto boardRange,
+        DateRangeDto purchaseRange,
         string cacheVersion,
         HashSet<string>? branchScope,
         CompactSalesBoardQuery query,
@@ -56,12 +57,14 @@ public partial class SalesDashboardReactService
         var selectedProduct = Selected(query.SelectedProductCode);
         var scopeCodes = branchScope?.OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray();
 
-        // 结果只有几百行，按全部参数缓存；统计水位变化即换键。强制刷新绕过。
+        // 结果只有几百行，按全部参数缓存（含进货区间）；统计水位变化即换键。强制刷新绕过。
+        // 仓库订单不随统计水位换键，进货量最多随视图缓存滞后 10 分钟。
         var viewKey = SalesDashboardCacheKeys.CompactSalesBoardView(
             boardRange,
             cacheVersion,
             scopeCodes == null ? "*" : string.Join(",", scopeCodes),
             $"{selectedBranch}|{selectedSupplier}|{selectedProduct}|{string.Join(" ", keywordTerms)}|{sortField}|{descending}|{pageIndex}|{pageSize}"
+                + $"|{purchaseRange.StartDate:yyyyMMdd}-{purchaseRange.EndDate:yyyyMMdd}"
         );
         if (!query.ForceRefresh
             && _cache.TryGetValue<CompactSalesBoardDto>(viewKey, out var cachedView)
@@ -226,7 +229,8 @@ public partial class SalesDashboardReactService
             PageSize = pageSize,
             ScopeAmount = scopeAmount,
         };
-        // 写视图缓存前补上分店总营业额，命中缓存时不必再查。
+        // 写视图缓存前补上分店进货量与总营业额，命中缓存时不必再查；先补进货（可能新增只有进货的分店）。
+        await FillCompactSalesBoardPurchasesAsync(board, purchaseRange, branchScope, selectedSupplier, selectedProduct);
         await FillCompactSalesBoardBranchTotalsAsync(board.Stores, boardRange);
 
         SalesDashboardCacheKeys.TryExecuteProductSalesAnalysisCacheWrite(

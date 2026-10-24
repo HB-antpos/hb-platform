@@ -182,7 +182,7 @@ for (const token of ['.categoryHint', '.categoryFooter']) {
   assert(css.includes(token), `供应商分类下拉缺少说明或操作区样式：${token}`)
 }
 
-for (const token of ['grid-template-columns: 330px minmax(0, 1fr) 340px', '@container (max-width: 760px)', '@media (max-width: 1199px)', '@media (max-width: 768px)']) {
+for (const token of ['grid-template-columns: 330px minmax(0, 1fr) clamp(360px, 24vw, 420px)', '@container (max-width: 760px)', '@media (max-width: 1199px)', '@media (max-width: 768px)']) {
   if (!css.includes(token)) throw new Error(`页面缺少响应式三栏契约：${token}`)
 }
 

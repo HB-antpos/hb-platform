@@ -44,8 +44,10 @@ services:
       - WpfAppUpdate__CheckApiKey=${WPF_APP_UPDATE_CHECK_API_KEY:?required}
       # 远程维护仅在迁移、安装包校验与客户端验收准备好后启用；秘密只从服务器注入。
       - RemoteMaintenance__Enabled=${REMOTE_MAINTENANCE_ENABLED:-false}
-      - RemoteMaintenance__IdServer=hotbargain.vip:21116
-      - RemoteMaintenance__RelayServer=hotbargain.vip:21117
+      # 下发给已安装/新装 RustDesk 的服务器地址：这是 WPF 启动对账的唯一开关。
+      # 默认保持历史地址；切换到专用域名只改 .env，不需要发版（见 docs/remote-maintenance-contract.md）。
+      - RemoteMaintenance__IdServer=${REMOTE_MAINTENANCE_ID_SERVER:-hotbargain.vip:21116}
+      - RemoteMaintenance__RelayServer=${REMOTE_MAINTENANCE_RELAY_SERVER:-hotbargain.vip:21117}
       - RemoteMaintenance__PublicKey=${REMOTE_MAINTENANCE_PUBLIC_KEY:-}
       - RemoteMaintenance__InterApiKey=${REMOTE_MAINTENANCE_INTER_API_KEY:-}
       - RemoteMaintenance__HeartbeatBaseUrl=https://hotbargain.vip
@@ -133,6 +135,8 @@ services:
       - Translation__Provider=deepseek
       # 生产翻译密钥只从服务器 .env 注入，避免在 compose 中写入明文或占位值。
       - Translation__DeepSeek__ApiKey=${DEEPSEEK_API_KEY}
+      # 看图生成英文商品名（Claude）。未配置时各页面「看图生成英文名」自动退回上面的文字翻译。
+      - ProductVision__Anthropic__ApiKey=${PRODUCT_VISION_ANTHROPIC_API_KEY:-}
       - TencentCloud__SecretId=${TENCENT_SECRET_ID}
       - TencentCloud__SecretKey=${TENCENT_SECRET_KEY}
       - TencentCloud__BucketName=${TENCENT_BUCKET_NAME}

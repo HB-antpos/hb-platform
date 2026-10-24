@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 
@@ -51,6 +53,7 @@ namespace BlazorApp.Shared.DTOs
     {
         public string DetailCode { get; set; } = string.Empty;
         public string ContainerCode { get; set; } = string.Empty;
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? ContainerNumber { get; set; }
         public DateTime? LoadingDate { get; set; }
         public DateTime? EstimatedArrivalDate { get; set; }

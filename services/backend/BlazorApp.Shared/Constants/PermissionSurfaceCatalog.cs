@@ -83,6 +83,8 @@ namespace BlazorApp.Shared.Constants
             "Stores.Delete",
             "Stores.Edit",
             "Stores.Sync",
+            "SupplierPreorder.Manage",
+            "SupplierPreorder.Order",
             "System.ManageAppDownloads",
             "System.ManagePerformanceBaseline",
             "System.ManageScheduledTasks",
@@ -91,6 +93,7 @@ namespace BlazorApp.Shared.Constants
             "Users.Delete",
             "Users.ViewWebConsole",
             "Warehouse.StartPicking",
+            "Warehouse.StoreOrderReturn",
             "Warehouse.View",
         };
 

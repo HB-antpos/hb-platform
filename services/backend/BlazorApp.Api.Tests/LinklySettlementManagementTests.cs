@@ -180,6 +180,90 @@ public sealed class LinklySettlementAmountParserTests
         Assert.Equal(LinklySettlementAmountParseStatus.Invalid, _parser.Parse(json).Status);
     }
 
+    [Fact]
+    public void ParseFixedWidth_AcceptsTotalsNameAndSpaceSignFromRealTerminal()
+    {
+        // 真实终端：汇总行名称为 TOTALS，非负合计的符号位是空格而不是 +。
+        var value = FixedWidth(
+            [Record("VISA", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4).Remove(56, 1).Insert(56, " ")],
+            Record("TOTALS", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4).Remove(56, 1).Insert(56, " "));
+
+        var result = _parser.Parse(value);
+
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, result.Status);
+        Assert.Equal(11_000, result.Summary!.TotalAmountMinor);
+        Assert.Equal("VISA", Assert.Single(result.CardTotals).CardName);
+    }
+
+    [Fact]
+    public void ParseMasked_RebuildsTotalsFromPreviouslySanitizedProductionData()
+    {
+        // 生产存量记录（旧版脱敏器把合计 12 位数字串误当卡号）；汇总行前一条的残留为「笔数末位 + 069」。
+        const string masked =
+            "****3207MASTERCARD          000040050038000000000000000000000000 ****0038" +
+            "VISA                000041520038000000000000000000000000 ****0038" +
+            "DEBIT               000001600001000000000000000000000000 ****1069" +
+            "TOTALS              000083170077000000000000000000000000 ****0077";
+
+        var result = _parser.Parse(masked);
+
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, result.Status);
+        Assert.Equal(83_170, result.Summary!.PurchaseAmountMinor);
+        Assert.Equal(83_170, result.Summary.TotalAmountMinor);
+        Assert.Equal(77, result.Summary.TotalCount);
+        Assert.Equal(["MASTERCARD", "VISA", "DEBIT"], result.CardTotals.Select(item => item.CardName));
+    }
+
+    [Fact]
+    public void ParseMasked_ReconcilesRefundsAndRejectsInconsistentResidue()
+    {
+        // 含退款：VISA 购买 517.02 / 34 笔，退款 17.48 / 2 笔 → 合计末位 4、笔数 036。
+        const string withRefund =
+            "****2138VISA                000051702034000000000000000001748002 ****4036" +
+            "DEBIT               000000500001000000000000000000000000 ****1069" +
+            "TOTALS              000052202035000000000000000001748002 ****4037";
+        Assert.Equal(LinklySettlementAmountParseStatus.Parsed, _parser.Parse(withRefund).Status);
+
+        // 残留末位与重算结果对不上时不得猜测金额。
+        Assert.Equal(
+            LinklySettlementAmountParseStatus.Invalid,
+            _parser.Parse(withRefund.Replace("****4036", "****9036")).Status);
+    }
+
+    [Fact]
+    public void SummaryReceipt_BuildsTwentyFourColumnGrandTotalsFromParsedData()
+    {
+        var value = FixedWidth(
+            [Record("VISA", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4)],
+            Record("TOTALS", 100_00, 2, 20_00, 1, 10_00, 1, 110_00, 4));
+        var parsed = _parser.Parse(value);
+
+        var text = LinklySettlementSummaryReceipt.Build(parsed.Summary, parsed.CardTotals);
+
+        Assert.NotNull(text);
+        var lines = text.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        Assert.Equal("GRAND TOTALS", lines[0]);
+        Assert.Equal("Sales      2     $100.00", lines[1]);
+        Assert.Equal("Cash       1      $20.00", lines[2]);
+        Assert.Equal("Refund     1      $10.00", lines[3]);
+        Assert.Equal(new string('-', 24), lines[4]);
+        Assert.Equal("Net Amount       $110.00", lines[5]);
+        Assert.All(lines.Take(6), line => Assert.True(line.Length <= 24, line));
+        Assert.Contains("VISA", lines[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SummaryReceipt_FormatsNegativeNetAndThousandsAndSkipsUnparsed()
+    {
+        var summary = new LinklySettlementAmountDto { PurchaseAmountMinor = 123_456_78, TotalAmountMinor = -5_00 };
+
+        var text = LinklySettlementSummaryReceipt.Build(summary, []);
+
+        Assert.Contains("$123,456.78", text, StringComparison.Ordinal);
+        Assert.Contains("-$5.00", text, StringComparison.Ordinal);
+        Assert.Null(LinklySettlementSummaryReceipt.Build(null, []));
+    }
+
     internal static string FixedWidth(IReadOnlyList<string> cards, string total)
     {
         var cardData = string.Concat(cards);
@@ -304,6 +388,21 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDeviceOptionsAsync_ReturnsDistinctStoreDevicePairsInOrder()
+    {
+        await InsertAsync(1, "S02", "POS-2", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(2, "S01", "POS-9", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(3, "S01", "POS-1", new DateTime(2026, 8, 1), DateTime.UtcNow, "");
+        await InsertAsync(4, "S01", "POS-1", new DateTime(2026, 8, 2), DateTime.UtcNow, "");
+
+        var result = await CreateService().GetDeviceOptionsAsync();
+
+        Assert.Equal(
+            ["S01/POS-1", "S01/POS-9", "S02/POS-2"],
+            result.Select(item => $"{item.StoreCode}/{item.DeviceCode}"));
+    }
+
+    [Fact]
     public async Task GetListAsync_PreservesNullableProviderSubmissionState()
     {
         await InsertAsync(
@@ -321,7 +420,7 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDetailAsync_ReturnsOrderedStringReceiptsWithDefensiveRedaction()
+    public async Task GetDetailAsync_ReturnsOrderedStringReceiptsAsStored()
     {
         var id = await InsertAsync(
             10,
@@ -344,52 +443,17 @@ public sealed class LinklySettlementQueryServiceTests : IDisposable
 
         Assert.NotNull(result);
         Assert.Equal(3, result.Receipts.Length);
+        Assert.Contains("GRAND TOTALS", result.GeneratedSummary, StringComparison.Ordinal);
         Assert.StartsWith("FIRST", result.Receipts[0], StringComparison.Ordinal);
         Assert.Equal("LAST", result.Receipts[2]);
-        var combined = string.Join('\n', result.Receipts);
-        Assert.DoesNotContain("4111111111111111", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("4111 1111 1111 1111", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("123", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("secret-token", combined, StringComparison.Ordinal);
+        // 按用户要求，后台详情展示存库回单原文，不做展示层脱敏。
+        Assert.Equal("FIRST PAN 4111 1111 1111 1111", result.Receipts[0]);
+        Assert.Contains("CVV: 123", result.Receipts[1], StringComparison.Ordinal);
         Assert.DoesNotContain("SettlementData", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ReceiptTextsJson", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(DateTimeKind.Utc, result.RequestedAtUtc.Kind);
         Assert.Equal(DateTimeKind.Utc, result.ReceivedAtUtc.Kind);
         Assert.Contains("Z\"", JsonSerializer.Serialize(result), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetDetailAsync_RedactsAllWpfPanSeparatorsAndCredentialShapes()
-    {
-        var nbsp = '\u00A0';
-        var id = await InsertAsync(
-            12,
-            "S01",
-            "POS-1",
-            new DateTime(2026, 8, 1),
-            DateTime.UtcNow,
-            "",
-            JsonSerializer.Serialize(new[]
-            {
-                "DOT 1234.5678.9012",
-                "TAB 1234\t5678\t9012",
-                $"NBSP 1234{nbsp}5678{nbsp}9012",
-                "Authorization: Bearer auth-secret",
-                "Bearer raw-secret",
-                "access_token=access-secret refreshToken=refresh-secret",
-            }));
-
-        var result = await CreateService().GetDetailAsync(id);
-
-        var combined = string.Join('\n', result!.Receipts);
-        Assert.DoesNotContain("1234.5678.9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("1234\t5678\t9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain($"1234{nbsp}5678{nbsp}9012", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("auth-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("raw-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("access-secret", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("refresh-secret", combined, StringComparison.Ordinal);
-        Assert.Equal(3, combined.Split("[REDACTED PAN]", StringSplitOptions.None).Length - 1);
     }
 
     [Theory]
@@ -883,6 +947,10 @@ public sealed class LinklySettlementControllerContractTests
             LinklySettlementQueryDto request,
             CancellationToken cancellationToken = default) =>
             throw new LinklySettlementRequestException("INVALID_QUERY", "查询无效");
+
+        public Task<IReadOnlyList<LinklySettlementDeviceOptionDto>> GetDeviceOptionsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LinklySettlementDeviceOptionDto>>([]);
 
         public Task<LinklySettlementDetailDto?> GetDetailAsync(
             long id,

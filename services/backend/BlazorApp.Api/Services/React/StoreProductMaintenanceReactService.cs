@@ -90,11 +90,20 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 var matchSw = Stopwatch.StartNew();
-                var hits = (await QueryLookupHitsAsync(keyword, selectedStoreCodes))
-                    // SQL Server 的排序规则可能忽略大小写；保留原快照字典的精确编码匹配语义。
-                    .Where(item => !string.IsNullOrWhiteSpace(item.ProductCode)
-                        && string.Equals(item.ProductCode, item.MatchedProductCode, StringComparison.Ordinal))
-                    .ToList();
+                var hits = FilterExactCodeHits(await QueryLookupHitsAsync(keyword, selectedStoreCodes));
+                if (hits.Count == 0)
+                {
+                    // 扫码枪 / 相机会把 EAN-13 前导 0 去掉成 12 位（UPC-A），库里却可能按 13 位存放（反之亦然）。
+                    // 只有精确匹配完全没有结果时才回退到另一种写法：生产库里存在 12 位 X 与 13 位 0+X
+                    // 分属不同商品的情况，精确命中必须优先，不能把两种写法当作等价一起查。
+                    var barcodeVariant = BarcodeVariants.GetLeadingZeroVariant(keyword);
+                    if (barcodeVariant != null)
+                    {
+                        hits = FilterExactCodeHits(
+                            await QueryLookupHitsAsync(barcodeVariant, selectedStoreCodes, barcodeOnly: true)
+                        );
+                    }
+                }
                 matchSw.Stop();
 
                 var productMatches = hits.Count(item =>
@@ -3530,17 +3539,26 @@ namespace BlazorApp.Api.Services.React
             };
         }
 
+        // SQL Server 的排序规则可能忽略大小写；保留原快照字典的精确编码匹配语义。
+        private static List<LookupHit> FilterExactCodeHits(List<LookupHit> hits) =>
+            hits
+                .Where(item => !string.IsNullOrWhiteSpace(item.ProductCode)
+                    && string.Equals(item.ProductCode, item.MatchedProductCode, StringComparison.Ordinal))
+                .ToList();
+
         private async Task<List<LookupHit>> QueryLookupHitsAsync(
             string keyword,
-            List<string>? selectedStoreCodes
+            List<string>? selectedStoreCodes,
+            bool barcodeOnly = false
         )
         {
             var parameters = new List<SugarParameter>
             {
                 new("@Keyword", keyword),
             };
-            var itemNumberPredicate = "p.ItemNumber = @Keyword";
-            if (keyword.Any(character => character == ' ' || ItemNumberSpaceVariants.Contains(character)))
+            // 变体回退只比对条码列，避免纯数字货号被变体误命中。
+            var itemNumberPredicate = barcodeOnly ? "1 = 0" : "p.ItemNumber = @Keyword";
+            if (!barcodeOnly && keyword.Any(character => character == ' ' || ItemNumberSpaceVariants.Contains(character)))
             {
                 // 仅含空格的货号启用兼容查询，普通货号及所有条码继续走原来的精确匹配。
                 var normalizedKeyword = keyword;

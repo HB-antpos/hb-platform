@@ -20,6 +20,15 @@ public sealed class LinklySettlementQueryDto
     public int PageSize { get; set; } = 20;
 }
 
+/// <summary>
+/// 结算筛选用的「门店 + 设备」候选，来自已同步到服务器的结算记录。
+/// </summary>
+public sealed class LinklySettlementDeviceOptionDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string DeviceCode { get; set; } = string.Empty;
+}
+
 public class LinklySettlementAmountDto
 {
     public string CurrencyCode { get; set; } = "AUD";
@@ -71,4 +80,9 @@ public sealed class LinklySettlementDetailDto : LinklySettlementListItemDto
     public string ClientRevision { get; set; } = string.Empty;
     public List<LinklySettlementCardTotalDto> CardTotals { get; set; } = [];
     public string[] Receipts { get; set; } = [];
+
+    /// <summary>
+    /// 后端按结算数据生成的 GRAND TOTALS 汇总文本（非终端原文）；金额未能解析时为 null。
+    /// </summary>
+    public string? GeneratedSummary { get; set; }
 }
