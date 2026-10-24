@@ -787,6 +787,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.2*" />
@@ -1133,6 +1134,82 @@
                                 </Grid>
                             </Border>
                         </Grid>
+
+                        <!-- 第四行：扫码枪灵敏度（设备级，改了直接保存，默认 600 毫秒）。
+                             滑块与 −/+ 绑定同一个值：范围 100～1000 毫秒、步进 100；Raw Input 通道里同一条码在这段时间内的第二次读码按重复忽略。
+                             整行跟随 IsScannerSettingVisible（没有存储时隐藏）。
+                             数据维护页有 ≤ 502px 的首屏预算（见页头注释与 SettingsFirstScreenDataRemoteAppTests），所以这张卡压得很紧：
+                             上下内边距 8、只留标题 + 一句说明、控件高 44；调节建议放在悬浮提示里。 -->
+                        <Border Grid.Row="3"
+                                Grid.ColumnSpan="3"
+                                Margin="0,10,0,0"
+                                Padding="14,8"
+                                Style="{StaticResource DataMaintenanceCardStyle}"
+                                ToolTip="{loc:Loc settings.scanner.help}"
+                                Visibility="{Binding IsScannerSettingVisible, Converter={StaticResource BoolToVis}}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0"
+                                        Style="{StaticResource DataMaintenanceIconBoxStyle}"
+                                        Background="{DynamicResource PosSurfaceAltBrush}">
+                                    <materialDesign:PackIcon Kind="BarcodeScan" Width="20" Height="20"
+                                                             Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{loc:Loc settings.scanner.title}" FontSize="15" FontWeight="Bold" />
+                                    <TextBlock Text="{loc:Loc settings.scanner.description}"
+                                               Style="{StaticResource DataMaintenanceDescriptionStyle}"
+                                               Margin="0,2,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding ScannerSaveStateText}"
+                                               Tag="{Binding ScannerSaveState}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}"
+                                               Margin="0,0,12,0" />
+                                    <Button x:Name="ScannerRepeatWindowDecreaseButton"
+                                            Command="{Binding DecreaseScannerRepeatWindowCommand}"
+                                            Style="{StaticResource PosSecondaryButtonStyle}"
+                                            AutomationProperties.Name="{loc:Loc settings.scanner.decrease}"
+                                            Content="−"
+                                            FontSize="20"
+                                            MinHeight="44" MinWidth="44" />
+                                    <Slider x:Name="ScannerRepeatWindowSlider"
+                                            Width="240"
+                                            Margin="10,0"
+                                            MinHeight="44"
+                                            VerticalAlignment="Center"
+                                            Minimum="{Binding ScannerRepeatWindowMinMs, Mode=OneTime}"
+                                            Maximum="{Binding ScannerRepeatWindowMaxMs, Mode=OneTime}"
+                                            TickFrequency="{Binding ScannerRepeatWindowStepMs, Mode=OneTime}"
+                                            SmallChange="{Binding ScannerRepeatWindowStepMs, Mode=OneTime}"
+                                            LargeChange="{Binding ScannerRepeatWindowStepMs, Mode=OneTime}"
+                                            IsSnapToTickEnabled="True"
+                                            TickPlacement="BottomRight"
+                                            Value="{Binding ScannerRepeatWindowMs, Mode=TwoWay}"
+                                            AutomationProperties.Name="{loc:Loc settings.scanner.title}" />
+                                    <Button x:Name="ScannerRepeatWindowIncreaseButton"
+                                            Command="{Binding IncreaseScannerRepeatWindowCommand}"
+                                            Style="{StaticResource PosSecondaryButtonStyle}"
+                                            AutomationProperties.Name="{loc:Loc settings.scanner.increase}"
+                                            Content="+"
+                                            FontSize="20"
+                                            MinHeight="44" MinWidth="44" />
+                                    <TextBlock x:Name="ScannerRepeatWindowValueText"
+                                               Text="{Binding ScannerRepeatWindowText}"
+                                               MinWidth="84"
+                                               Margin="12,0,0,0"
+                                               FontSize="15"
+                                               FontWeight="Bold"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                     </Grid>
                 </controls:SettingsPageHost>
                 <!-- ===== PAGE: DataMaintenance END ===== -->

@@ -685,6 +685,41 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
         },
         permissions: ['Settings.ReceiptPrinter', 'Returns.View'],
       },
+      {
+        id: 'scanner-double-scan',
+        title: {
+          zh: '扫一次商品却加购了两次（或快速连扫被漏掉），怎么调扫码枪灵敏度？',
+          en: 'One scan adds the same item twice (or a quick re-scan is missed) — how do I adjust scanner sensitivity?',
+        },
+        where: {
+          zh: '[k:Settings|设置] → [k:Data maintenance|数据维护] → [d:Scanner sensitivity|扫码枪灵敏度]',
+          en: '[k:Settings|设置] → [k:Data maintenance|数据维护] → [d:Scanner sensitivity|扫码枪灵敏度]',
+        },
+        steps: {
+          zh: [
+            '点 [k:Settings|设置] → [k:Data maintenance|数据维护]，找到 [d:Scanner sensitivity|扫码枪灵敏度]。',
+            '拖动滑块，或点 [k:−] / [k:+]，每次调整 100 毫秒；范围 100～1000 毫秒，默认 600 毫秒。改完自动保存，马上生效，不用重启。',
+            '同一个商品总是被加购两次：把数值调大一档，再扫一次试试。',
+            '正常快速连扫两个相同商品却只进了一个：把数值调小一档。',
+          ],
+          en: [
+            'Tap [k:Settings|设置] → [k:Data maintenance|数据维护] and find [d:Scanner sensitivity|扫码枪灵敏度].',
+            'Drag the slider, or tap [k:−] / [k:+]. It moves in steps of 100 ms, from 100 to 1000 ms; the default is 600 ms. Changes save automatically and apply at once, no restart needed.',
+            'If the same item keeps being added twice, raise the value one step and scan again.',
+            'If scanning two identical items quickly only adds one, lower the value one step.',
+          ],
+        },
+        tips: {
+          zh: [
+            '含义：同一个条码在这段时间内被扫码枪读到第二次，会当成扫码枪重复读码而忽略；扫不同的商品不受影响。',
+            '只对这台收银机生效。数值越大越不容易重复加购，但相同商品要隔得更久才能再扫一次。',
+          ],
+          en: [
+            'How it works: if the scanner reads the same barcode again within this time, the second read is treated as a repeat and ignored. Different items are never affected.',
+            'Set per till. A larger value avoids double adds but makes you wait longer before re-scanning the same item.',
+          ],
+        },
+      },
     ],
   },
   {

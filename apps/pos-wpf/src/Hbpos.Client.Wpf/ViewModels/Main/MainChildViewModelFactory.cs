@@ -427,6 +427,9 @@ internal sealed class MainChildViewModelFactory
     /// <summary>设置页「日结后提醒重启」开关的存储；同样在 MainViewModel 构造完成后配置。</summary>
     public ISystemRestartSettingsStore? SystemRestartSettingsStore { get; set; }
 
+    /// <summary>设置页「扫码枪灵敏度」的存储；同样在 MainViewModel 构造完成后配置。</summary>
+    public IScannerSettingsStore? ScannerSettingsStore { get; set; }
+
     public DailyCloseViewModel CreateDailyCloseViewModel(
         PosSessionState session,
         Action? returnToPos = null,
@@ -487,6 +490,7 @@ internal sealed class MainChildViewModelFactory
             mobileAppDownloadService: _mobileAppDownloadService,
             systemRestartSettingsStore: SystemRestartSettingsStore,
             restartCoordinatorProvider: RestartCoordinatorProvider,
+            scannerSettingsStore: ScannerSettingsStore,
             // 设置页改了直接保存；离开时有保存失败 / 未生效的修改会提示。
             autoSaveSettings: true);
     }

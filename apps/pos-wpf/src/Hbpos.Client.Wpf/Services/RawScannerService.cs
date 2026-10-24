@@ -81,11 +81,25 @@ internal sealed class ScannerInputDuplicateGuard
     // 固定 200ms 窗口会漏掉而让同一次扫码加购两次；配对额度留 1.5 秒余量，过期未被配对的额度作废，不会吞掉之后的真实扫码。
     private static readonly TimeSpan RawPairingMaxAge = TimeSpan.FromMilliseconds(1500);
 
+    // 扫码枪对着条码多停一会儿会连读：生产日志（10-17～10-24，同设备同商品连续自动加购的间隔）里 Raw 通道在 100～500ms 有一个
+    // 明显的小峰（峰值约 250ms，7 天 242 次、集中在 11 台机器），500ms 之后才是正常的人工重扫曲线；
+    // 没有 Raw 通道的键盘兜底机器 500ms 内只有 4 次。所以 Raw 通道同条码窗口内的第二次读码按重复丢弃，
+    // 窗口默认 600ms，门店可在设置页的 100～1000ms 内手动调节（见 IScannerSettingsStore）。
+    private readonly Func<TimeSpan> _rawRepeatWindowProvider;
+
     private readonly object _gate = new();
     private readonly List<(string Barcode, DateTimeOffset AcceptedAt)> _unpairedRawDeliveries = [];
     private string? _lastBarcode;
     private string? _lastSource;
     private DateTimeOffset _lastAcceptedAt = DateTimeOffset.MinValue;
+    private string? _lastRawBarcode;
+    private DateTimeOffset _lastRawAt = DateTimeOffset.MinValue;
+
+    public ScannerInputDuplicateGuard(Func<TimeSpan>? rawRepeatWindowProvider = null)
+    {
+        _rawRepeatWindowProvider = rawRepeatWindowProvider ??
+            (() => TimeSpan.FromMilliseconds(ScannerSettingsStore.DefaultRepeatWindowMs));
+    }
 
     public bool TryAccept(string barcode, string source, DateTimeOffset timestamp)
     {
@@ -106,6 +120,24 @@ internal sealed class ScannerInputDuplicateGuard
                 return false;
             }
 
+            if (isRaw)
+            {
+                var isRawRepeat =
+                    string.Equals(_lastRawBarcode, normalizedBarcode, StringComparison.OrdinalIgnoreCase) &&
+                    (timestamp - _lastRawAt).Duration() <= _rawRepeatWindowProvider();
+                // 无论放行与否都刷新基准：扫码枪持续对着条码连读时，每次间隔都在窗口内，整串连读只放行第一次。
+                _lastRawBarcode = normalizedBarcode;
+                _lastRawAt = timestamp;
+                if (isRawRepeat)
+                {
+                    // 关键逻辑：这次重复读码在键盘通道同样会留下一份拷贝，照样登记一次配对额度让它被抵消，
+                    // 否则拷贝会被当成「没有 Raw 对应的真实键盘扫码」放行，同一商品仍被加购两次。
+                    PruneExpiredRawDeliveries(timestamp);
+                    _unpairedRawDeliveries.Add((normalizedBarcode, timestamp));
+                    return false;
+                }
+            }
+
             var isCrossSourceDuplicate =
                 !string.Equals(_lastSource, source, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(_lastBarcode, normalizedBarcode, StringComparison.OrdinalIgnoreCase) &&
@@ -115,7 +147,8 @@ internal sealed class ScannerInputDuplicateGuard
                 return false;
             }
 
-            // 同一来源的连续扫码必须保留；只消除 Raw Input 与键盘兜底产生的同一次跨来源提交。
+            // 非 Raw 来源的同来源连续扫码必须保留；Raw 通道只丢过滤窗口内的同条码连读（见上），
+            // 其余只消除 Raw Input 与键盘兜底产生的同一次跨来源提交。
             _lastBarcode = normalizedBarcode;
             _lastSource = source;
             _lastAcceptedAt = timestamp;
@@ -157,7 +190,8 @@ internal sealed class ScannerInputDuplicateGuard
 
 public sealed class RawScannerService(
     IScannerBindingService bindingService,
-    RawScannerInputProcessor inputProcessor) : IRawScannerService, IScannerInputDeduplicator
+    RawScannerInputProcessor inputProcessor,
+    IScannerSettingsStore? scannerSettings = null) : IRawScannerService, IScannerInputDeduplicator
 {
     private const int RidInput = 0x10000003;
     private const int RidiDevicename = 0x20000007;
@@ -178,7 +212,9 @@ public sealed class RawScannerService(
 
     private readonly Dictionary<string, Action<RawBarcodeScannedEventArgs>> _handlers = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _flushTimer = new() { Interval = TimeSpan.FromMilliseconds(40) };
-    private readonly ScannerInputDuplicateGuard _duplicateGuard = new();
+    // 窗口每次扫码现取：设置页改完立即生效，不用重启。
+    private readonly ScannerInputDuplicateGuard _duplicateGuard = new(() =>
+        TimeSpan.FromMilliseconds(scannerSettings?.RepeatWindowMs ?? ScannerSettingsStore.DefaultRepeatWindowMs));
     private readonly DispatcherTimer _diagnosticsTimer = new() { Interval = DiagnosticsInterval };
     private readonly RawScannerDiagnostics _diagnostics = new();
     private IntPtr _registeredHwnd;
@@ -226,6 +262,7 @@ public sealed class RawScannerService(
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _boundDevicePath = await bindingService.GetBoundDevicePathAsync(cancellationToken);
+        await LoadScannerSettingsAsync(cancellationToken);
         _isInitialized = true;
         if (string.IsNullOrWhiteSpace(_boundDevicePath))
         {
@@ -234,6 +271,25 @@ public sealed class RawScannerService(
         else
         {
             ConsoleLog.Write("RawScanner", $"loaded bound scanner device path={_boundDevicePath}");
+        }
+    }
+
+    private async Task LoadScannerSettingsAsync(CancellationToken cancellationToken)
+    {
+        if (scannerSettings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await scannerSettings.LoadAsync(cancellationToken);
+            ConsoleLog.Write("RawScanner", $"loaded scanner repeat window ms={scannerSettings.RepeatWindowMs}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 读不到就用默认窗口，扫码照常工作。
+            ConsoleLog.WriteWarning("RawScanner", $"load scanner settings failed error={ex.GetType().Name}");
         }
     }
 

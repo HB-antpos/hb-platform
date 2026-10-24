@@ -846,6 +846,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _mainChildViewModelFactory.SystemRestartSettingsStore = settingsStore;
     }
 
+    /// <summary>配置设置页「扫码枪灵敏度」的存储（见 <see cref="MainChildViewModelFactory.ScannerSettingsStore"/>）。</summary>
+    internal void ConfigureScannerSettings(IScannerSettingsStore? settingsStore)
+    {
+        _mainChildViewModelFactory.ScannerSettingsStore = settingsStore;
+    }
+
     private ScreenNavigator CreateScreenNavigator() =>
         new(
             _mainChildViewModelFactory,

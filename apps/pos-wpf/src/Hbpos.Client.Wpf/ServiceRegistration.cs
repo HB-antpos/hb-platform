@@ -714,6 +714,7 @@ public static class ServiceRegistration
         services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
         services.AddSingleton<RawScannerInputProcessor>();
+        services.AddSingleton<IScannerSettingsStore, ScannerSettingsStore>();
         services.AddSingleton<IRawScannerService, RawScannerService>();
         services.AddSingleton<LocalSellableItemIndex>();
         services.AddSingleton<PosCartService>();
@@ -809,6 +810,7 @@ public static class ServiceRegistration
             viewModel.ConfigureRestartPrompt(
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
+            viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

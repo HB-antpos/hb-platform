@@ -28,6 +28,7 @@ public sealed record SettingsLeaveItem(string LocationText, string DetailText, b
 public sealed partial class SettingsViewModel
 {
     internal const string RestartPromptSaveKey = "data.restartPrompt";
+    internal const string ScannerSaveKey = "data.scanner";
     internal const string PaymentMethodsSaveKey = "payment.methods";
     internal const string SquareSaveKey = "payment.square";
     internal const string LinklySaveKey = "payment.linkly";
@@ -95,6 +96,7 @@ public sealed partial class SettingsViewModel
         }
 
         _autoSave.Register(RestartPromptSaveKey, SettingsCategory.DataMaintenance, "settings.autosave.section.restartPrompt", SaveRestartPromptForAutoSaveAsync);
+        _autoSave.Register(ScannerSaveKey, SettingsCategory.DataMaintenance, "settings.autosave.section.scanner", SaveScannerForAutoSaveAsync);
         _autoSave.Register(PaymentMethodsSaveKey, SettingsCategory.PaymentTerminal, "settings.autosave.section.paymentMethods", SavePaymentMethodsForAutoSaveAsync);
         _autoSave.RegisterExplicit(SquareSaveKey, SettingsCategory.PaymentTerminal, "settings.autosave.section.square");
         _autoSave.RegisterExplicit(LinklySaveKey, SettingsCategory.PaymentTerminal, "settings.autosave.section.linkly");
@@ -157,6 +159,8 @@ public sealed partial class SettingsViewModel
 
     public string RestartPromptSaveStateText => SectionStateText(RestartPromptSaveKey);
 
+    public string ScannerSaveStateText => SectionStateText(ScannerSaveKey);
+
     public string PaymentMethodsSaveStateText => SectionStateText(PaymentMethodsSaveKey);
 
     public string SquareSaveStateText => SectionStateText(SquareSaveKey);
@@ -172,6 +176,8 @@ public sealed partial class SettingsViewModel
     public string ServerAddressSaveStateText => SectionStateText(ServerAddressSaveKey);
 
     public string RestartPromptSaveState => _autoSave.GetState(RestartPromptSaveKey).ToString();
+
+    public string ScannerSaveState => _autoSave.GetState(ScannerSaveKey).ToString();
 
     public string PaymentMethodsSaveState => _autoSave.GetState(PaymentMethodsSaveKey).ToString();
 
@@ -212,10 +218,10 @@ public sealed partial class SettingsViewModel
         RaiseSubTabUnsavedProperties();
         foreach (var name in new[]
                  {
-                     nameof(RestartPromptSaveStateText), nameof(PaymentMethodsSaveStateText), nameof(SquareSaveStateText),
+                     nameof(RestartPromptSaveStateText), nameof(ScannerSaveStateText), nameof(PaymentMethodsSaveStateText), nameof(SquareSaveStateText),
                      nameof(LinklySaveStateText), nameof(ReceiptHardwareSaveStateText), nameof(ReceiptStoreSaveStateText),
                      nameof(ReceiptTermsSaveStateText), nameof(ServerAddressSaveStateText),
-                     nameof(RestartPromptSaveState), nameof(PaymentMethodsSaveState), nameof(SquareSaveState),
+                     nameof(RestartPromptSaveState), nameof(ScannerSaveState), nameof(PaymentMethodsSaveState), nameof(SquareSaveState),
                      nameof(LinklySaveState), nameof(ReceiptHardwareSaveState), nameof(ReceiptStoreSaveState),
                      nameof(ReceiptTermsSaveState), nameof(ServerAddressSaveState)
                  })

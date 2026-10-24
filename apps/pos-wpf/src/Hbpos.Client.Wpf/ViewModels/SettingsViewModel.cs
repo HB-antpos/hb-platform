@@ -333,12 +333,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IMobileAppDownloadService? mobileAppDownloadService = null,
         ISystemRestartSettingsStore? systemRestartSettingsStore = null,
         Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null,
+        IScannerSettingsStore? scannerSettingsStore = null,
         bool autoSaveSettings = false,
         Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null)
     {
         _setupService = setupService;
         _systemRestartSettingsStore = systemRestartSettingsStore;
         _restartCoordinatorProvider = restartCoordinatorProvider;
+        _scannerSettingsStore = scannerSettingsStore;
+        InitializeScannerCommands();
         RestartComputerCommand = new AsyncRelayCommand(RestartComputerAsync, CanRestartComputer);
         _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
@@ -882,6 +885,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             await LoadPaymentMethodsAsync();
             await LoadRestartPromptAsync();
+            await LoadScannerSettingsAsync();
             _loadedConfiguration = await _setupService.LoadConfigurationAsync();
             await LoadReceiptPrinterSettingsAsync();
             IsSquareSandbox = _loadedConfiguration.Environment == CardTerminalEnvironment.Sandbox;
