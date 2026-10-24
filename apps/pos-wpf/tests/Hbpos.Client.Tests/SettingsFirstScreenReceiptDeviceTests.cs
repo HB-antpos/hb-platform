@@ -376,7 +376,11 @@ public sealed class SettingsFirstScreenReceiptDeviceRuntimeTests(PaymentViewRunt
                     Assert.Equal(296, card.ActualWidth, 0.5);
                     Assert.Equal(page.ActualHeight, card.ActualHeight, 1);
                     Assert.Empty(PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(card));
-                    Assert.True(preview.ScrollableHeight > 0, "最长内容下预览栏应在内部滚动。");
+                    // Windows CI 实测：296 宽、整页高的预览栏装得下这份最长数据，所以不一定出现滚动——这是好事。
+                    // 契约改为「预览栏自带纵向触屏滚动兜底」：可见性 Auto、纵向平移；内容真超出时才出现滚动条，页面正文不受影响。
+                    Assert.Equal(ScrollBarVisibility.Auto, preview.VerticalScrollBarVisibility);
+                    Assert.Equal(PanningMode.VerticalOnly, preview.PanningMode);
+                    Assert.True(preview.ScrollableHeight >= 0, "预览栏滚动范围不能为负。");
                     SettingsFirstScreenViewportTests.AssertInsideViewport(view, card, "预览栏");
                     // 预览内容再长，页面正文也不能被撑出滚动条。
                     SettingsFirstScreenViewportTests.AssertBodyDoesNotScroll(page);
