@@ -15,6 +15,7 @@ import { FloatingAction } from "@/modules/people/ui";
 import { localizeAccessRoleName } from "@/modules/users/access-permission-presentation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import {
   DEFAULT_ADMIN_USER_FILTERS,
   buildAdminCountQuery,
@@ -76,11 +77,12 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
   });
   const storeOptions = useMemo(
     () =>
-      (scoped ? managedIdentityStores(user) : storesQuery.data ?? []).map((store) => ({
+      // 分店筛选项统一按分店名字排序（接口 / 用户资料里的原序不保证）。
+      sortStoresByName(scoped ? managedIdentityStores(user) : storesQuery.data ?? [], language).map((store) => ({
         value: store.storeGUID,
         label: `${store.storeName} · ${store.storeCode}`,
       })),
-    [scoped, storesQuery.data, user]
+    [language, scoped, storesQuery.data, user]
   );
   const roleOptions = useMemo(
     () =>

@@ -17,6 +17,9 @@ import {
 } from "./payment-recovery-copy";
 import {
   EMPTY_MANUAL_VERIFICATION_DRAFT,
+  MANUAL_NOTE_PRESETS,
+  appendManualNotePreset,
+  isManualEvidencePlaceholder,
   validateManualVerification,
   normalizeVerificationNote,
   type ManualVerificationDraft,
@@ -224,7 +227,6 @@ export function PaymentRecoveryScreen({
               recordId: record.id,
               finding: draft.finding,
               verifiedAmountCents: validation.amountCents,
-              evidenceReference: draft.evidenceReference.trim(),
               note: normalizeVerificationNote(draft.note),
               ...(draft.finding === "unpaid" && draft.terminalChargeAcknowledged
                 ? { terminalChargeAcknowledged: true }
@@ -381,6 +383,7 @@ function RecoveryEventRow({ event, locale }: Readonly<{ event: PaymentRecoveryEv
         {(["evidenceReference", "note", "supervisorName"] as const).map((field) => {
           const value = event.params?.[field];
           const key = field === "evidenceReference" ? "details.evidence" : field === "note" ? "details.note" : "details.supervisor";
+          if (field === "evidenceReference" && isManualEvidencePlaceholder(value === undefined ? null : String(value))) return null;
           return value ? <Text key={field} selectable style={styles.recordMeta}>{paymentRecoveryText(locale, key, { value })}</Text> : null;
         })}
       </View>
@@ -422,6 +425,8 @@ function ManualVerificationModal({
     }));
   };
 
+  // 备注预设按核实结果提供：已扣款 2 条、未扣款 3 条、仍无法确认没有。
+  const presets = draft.finding ? MANUAL_NOTE_PRESETS[draft.finding] : [];
   if (!record || !visible) return null;
   const submitKey = draft.finding ? `action.submit.${draft.finding}` as const : "action.submit.paid";
   return (
@@ -487,18 +492,6 @@ function ManualVerificationModal({
               </FormField>
             ) : null}
 
-            <FormField label={t("manual.evidence")}> 
-              <PosKeyboardAwareTextInput
-                accessibilityLabel={t("manual.evidence")}
-                autoCapitalize="characters"
-                maxLength={256}
-                onChangeText={(value) => update("evidenceReference", value)}
-                placeholder={t("manual.evidencePlaceholder")}
-                style={styles.textInput}
-                testID="payment-recovery-manual-evidence"
-                value={draft.evidenceReference}
-              />
-            </FormField>
             <FormField label={t("manual.note")}>
               <PosKeyboardAwareTextInput
                 accessibilityLabel={t("manual.note")}
@@ -510,6 +503,24 @@ function ManualVerificationModal({
                 testID="payment-recovery-manual-note"
                 value={draft.note}
               />
+              {presets.length > 0 ? (
+                <View style={styles.presetRow} testID="payment-recovery-manual-presets">
+                  {presets.map((id) => (
+                    <ActionButton
+                      compact
+                      key={id}
+                      label={t(`manual.preset.${id}`)}
+                      onPress={() => update("note", appendManualNotePreset(
+                        draft.note,
+                        t(`manual.preset.${id}`),
+                        locale === "zh" ? "；" : "; ",
+                      ))}
+                      testID={`payment-recovery-manual-preset-${id}`}
+                      tone="secondary"
+                    />
+                  ))}
+                </View>
+              ) : null}
             </FormField>
 
             {record.terminalAmountMismatchCents && draft.finding === "unpaid" ? (
@@ -925,6 +936,7 @@ const styles = StyleSheet.create({
   formField: { marginTop: 2 },
   textInput: { backgroundColor: "#FFFFFF", borderColor: posColors.border, borderWidth: 1, color: posColors.ink, minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, paddingHorizontal: 10, paddingVertical: 8 },
   noteInput: { minHeight: 74, textAlignVertical: "top" },
+  presetRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   inputError: { borderColor: posColors.red },
   validationText: { color: posColors.red, fontSize: 12, marginTop: 4 },
   checkboxRow: { alignItems: "flex-start", borderColor: posColors.border, borderWidth: 1, flexDirection: "row", gap: 10, minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, padding: 10 },

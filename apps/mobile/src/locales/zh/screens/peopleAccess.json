@@ -46,7 +46,9 @@
     "emptyDescription": "当前没有可用于此账号的分店。",
     "missingStoreGuid": "此分店缺少授权标识，无法进入收银权限。",
     "managerNotice": "有「管理」分店的账号自动获得店长角色；改成都没有「管理」时，店长角色自动移除。",
-    "scopeNotice": "你只能调整自己管理的分店；「管理」只有管理员能授予。"
+    "scopeNotice": "你只能调整自己管理的分店；「管理」只有管理员能授予。",
+    "filterAll": "全部",
+    "filterA11y": "按授权筛选分店"
   },
   "roles": {
     "searchPlaceholder": "搜索角色",

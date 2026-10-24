@@ -56,7 +56,9 @@ export type ManualPaymentVerificationInput = Readonly<{
   recordId: string;
   finding: ManualPaymentFinding;
   verifiedAmountCents: number | null;
-  evidenceReference: string;
+  /** 已取消证据输入；仅为兼容旧调用方保留，缺省时由适配器补占位值。 */
+  evidenceReference?: string;
+  /** 选填；缺省时由适配器补默认说明。 */
   note: string;
   /** 终端已批准不同金额时，主管明确知晓终端已扣款且需总部冲正（仅 unpaid 结论使用）。 */
   terminalChargeAcknowledged?: boolean;

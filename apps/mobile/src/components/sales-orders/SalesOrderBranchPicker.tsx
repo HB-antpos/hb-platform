@@ -7,6 +7,7 @@ import type { SalesOrderBranch } from "@/modules/sales-orders/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { listSeparator } from "@/shared/i18n/punctuation";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 
 export interface SalesOrderBranchPickerProps {
   branches: SalesOrderBranch[];
@@ -23,7 +24,7 @@ export function SalesOrderBranchPicker({
   selected,
   onChange,
 }: SalesOrderBranchPickerProps) {
-  const { t } = useAppTranslation("salesOrders");
+  const { t, language } = useAppTranslation("salesOrders");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string[]>(selected);
   const [keyword, setKeyword] = useState("");
@@ -41,14 +42,16 @@ export function SalesOrderBranchPicker({
     return selected.map((code) => byCode.get(code) ?? code);
   }, [branches, selected]);
   const filtered = useMemo(() => {
+    // 分店多选列表统一按分店名字排序（接口原序不保证）。
+    const sorted = sortStoresByName(branches, language);
     const needle = keyword.trim().toLowerCase();
-    if (!needle) return branches;
-    return branches.filter(
+    if (!needle) return sorted;
+    return sorted.filter(
       (branch) =>
         branch.storeName.toLowerCase().includes(needle) ||
         branch.storeCode.toLowerCase().includes(needle),
     );
-  }, [branches, keyword]);
+  }, [branches, keyword, language]);
   const allSelected = draft.length === 0;
 
   const summary = loading

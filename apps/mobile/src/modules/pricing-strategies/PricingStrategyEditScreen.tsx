@@ -12,7 +12,7 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { createPricingStrategy, deletePricingStrategy, updatePricingStrategy } from "./api";
 import { IntervalChart } from "./IntervalChart";
 import { IntervalSheet } from "./IntervalSheet";
-import { buildSavePayload, draftFromDetail, money, summarizeDraftRules, validateDraft, type StrategyDraft } from "./logic";
+import { buildSavePayload, draftFromDetail, money, sortNamedOptions, summarizeDraftRules, validateDraft, type StrategyDraft } from "./logic";
 import { MultiSelectSheet } from "./MultiSelectSheet";
 import { defaultCurve, fixedRules, fmtRate } from "./pricing-curve";
 import {
@@ -102,12 +102,15 @@ function Header({ title, onBack, right }: { title: string; onBack: () => void; r
 type Confirm = { kind: "drops"; drops: PriceDrop[] } | { kind: "delete" } | { kind: "preset"; preset: "fixed" | "curve" };
 
 function Editor({ id, initial, canEdit, onBack }: { id: string | null; initial: StrategyDraft; canEdit: boolean; onBack: () => void }) {
-  const { t } = useAppTranslation("pricingStrategies");
+  const { t, language } = useAppTranslation("pricingStrategies");
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const issueText = useIssueText();
   const errorText = useApiErrorText();
   const { stores, suppliers, storeNames, supplierNames } = usePricingScopeOptions();
+  // 适用供应商多选列表按名字排序（分店多选不在本次范围内，保持原样）。
+  const sortedSuppliers = useMemo(() => sortNamedOptions(suppliers, language), [suppliers, language]);
+  const sortedStores = useMemo(() => sortNamedOptions(stores, language), [stores, language]);
   const [draft, setDraft] = useState<StrategyDraft>(initial);
   const [selected, setSelected] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -443,7 +446,7 @@ function Editor({ id, initial, canEdit, onBack }: { id: string | null; initial: 
       {scopeSheet ? (
         <MultiSelectSheet
           title={scopeSheet === "stores" ? t("editor.stores") : t("editor.suppliers")}
-          options={scopeSheet === "stores" ? stores : suppliers}
+          options={scopeSheet === "stores" ? sortedStores : sortedSuppliers}
           selected={scopeSheet === "stores" ? draft.storeCodes : draft.supplierCodes}
           onClose={() => setScopeSheet(null)}
           onDone={(codes) => {

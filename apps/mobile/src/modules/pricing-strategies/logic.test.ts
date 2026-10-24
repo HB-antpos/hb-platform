@@ -11,6 +11,7 @@ import {
   normalizeListPage,
   parseDecimal,
   parsePriority,
+  sortNamedOptions,
   sparkSegments,
   summarizeDraftRules,
   summarizePricing,
@@ -151,5 +152,25 @@ assert.ok(Number.isNaN(parseDecimal("")));
 assert.ok(Number.isNaN(parseDecimal(".")));
 assert.ok(Number.isNaN(parseDecimal("不限")));
 assert.ok(Number.isNaN(parseDecimal("1.2.3")));
+
+// ---- 分店 / 供应商下拉按名字排序 ----
+const scopeOptions = [
+  { code: "SP10", name: "Zed" },
+  { code: "SP2", name: "alpha" },
+  { code: "SP3", name: "" },
+  { code: "SP1", name: "Beta 10" },
+  { code: "SP4", name: "Beta 2" },
+];
+assert.deepEqual(
+  sortNamedOptions(scopeOptions, "en").map((option) => option.code),
+  ["SP2", "SP4", "SP1", "SP3", "SP10"],
+  "按名字排（忽略大小写、数字按数值），名字为空退回编号",
+);
+assert.equal(scopeOptions[0].code, "SP10", "不修改入参");
+assert.deepEqual(
+  sortNamedOptions([{ code: "B", name: "张三" }, { code: "A", name: "阿里" }, { code: "C", name: "李四" }], "zh-CN").map((option) => option.code),
+  ["A", "C", "B"],
+  "中文界面按拼音排序",
+);
 
 console.log("pricing-strategies logic.test.ts: ok");
