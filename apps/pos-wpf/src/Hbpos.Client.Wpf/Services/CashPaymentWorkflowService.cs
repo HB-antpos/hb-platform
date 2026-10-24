@@ -424,6 +424,7 @@ public sealed class CashPaymentWorkflowService(
         // 中文注释：在离开 UI 线程前固定付款明细，后台 SQLite 不得枚举可能继续变化的界面集合。
         var tenderSnapshot = tenders.ToArray();
         var cartSnapshot = cart.CreateSnapshot();
+        PaymentCompletionTrace.Mark("create-order");
         var result = checkout.CreatePaymentOrder(cart, session, tenderSnapshot, cashTenderedAmount);
         // 退款代金券先以待发券状态落本地，确保崩溃后仍能沿用原始幂等键恢复。
         var orderForPersistence = PrepareOrderForVoucherRefundPersistence(result.Order);
@@ -441,6 +442,7 @@ public sealed class CashPaymentWorkflowService(
         LocalOrder order;
         try
         {
+            PaymentCompletionTrace.Mark("persist-prepare");
             var preparedPersistence = await RunLocalStoreAsync(
                 () => PrepareOrderForRecoverableCardPersistenceAsync(
                     orderForPersistence,
@@ -454,7 +456,9 @@ public sealed class CashPaymentWorkflowService(
             if (!preparedPersistence.AlreadyPersisted)
             {
                 // 共享挂单取单完成：混合付款路径与 LocalOrder 同一事务写入来源/完成 claim/消费本地挂单。
+                PaymentCompletionTrace.Mark("held-order-resolve");
                 var heldOrder = await TryResolveHeldOrderAsync(session, cartSnapshot, persistenceCancellationToken);
+                PaymentCompletionTrace.Mark("save-pending-order");
                 await RunLocalStoreAsync(
                     () => heldOrder is null
                         ? orderRepository.SavePendingOrderAsync(order, persistenceCancellationToken)
@@ -488,6 +492,7 @@ public sealed class CashPaymentWorkflowService(
                 ex);
         }
         // 订单已落盘：后续收尾（退款券、代金券上传、标记完成、清购物车、计数）与重试路径共用同一实现。
+        PaymentCompletionTrace.Mark("order-persisted");
         return await FinalizePersistedOrderAsync(
             order,
             cart,
@@ -554,6 +559,7 @@ public sealed class CashPaymentWorkflowService(
     {
         try
         {
+            PaymentCompletionTrace.Mark("issue-refund-vouchers");
             order = await IssuePendingRefundVouchersAsync(order, session, cancellationToken);
         }
         catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
@@ -579,6 +585,7 @@ public sealed class CashPaymentWorkflowService(
 
             try
             {
+                PaymentCompletionTrace.Mark("upload-voucher-order");
                 await orderUploadService.UploadOrderAsync(order.OrderGuid, cancellationToken);
             }
             catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
@@ -604,6 +611,7 @@ public sealed class CashPaymentWorkflowService(
         var hasPostCommitWarning = false;
         try
         {
+            PaymentCompletionTrace.Mark("mark-card-attempt");
             await MarkCompletedCardAttemptsAsync(
                 cart,
                 completionTenders,
@@ -619,6 +627,7 @@ public sealed class CashPaymentWorkflowService(
 
         try
         {
+            PaymentCompletionTrace.Mark("mark-square-attempt");
             await MarkCompletedSquareAttemptsAsync(
                 cart,
                 completionTenders,
@@ -632,7 +641,9 @@ public sealed class CashPaymentWorkflowService(
             LogPostCommitWarning($"{logOperationPrefix}mark-square-attempt-completed", order.OrderGuid, ex);
         }
 
+        PaymentCompletionTrace.Mark("clear-cart");
         hasPostCommitWarning |= TryClearCartAfterCommit(cart, order.OrderGuid);
+        PaymentCompletionTrace.Mark("read-pending-sync");
         var pendingSyncResult = await ReadPendingSyncCountAfterCommitAsync(session, cancellationToken);
         hasPostCommitWarning |= pendingSyncResult.HasPostCommitWarning;
         var pendingSyncCount = pendingSyncResult.PendingSyncCount;

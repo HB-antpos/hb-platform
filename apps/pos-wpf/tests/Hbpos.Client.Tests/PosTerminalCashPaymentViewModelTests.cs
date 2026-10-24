@@ -3633,6 +3633,69 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.False(viewModel.IsPaymentInteractionLocked);
     }
 
+    [Fact]
+    public async Task Payment_page_completion_stall_opens_recovery_exit_then_clears_when_completion_finishes()
+    {
+        // 1031 店现场：刷卡已批准、金额已收齐，但完成订单久不返回，页面所有按钮都灰、没有出口。
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-STALL", "Stalled Completion Tea", "930STALL", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            TenderToAdd = new PaymentTender(PaymentMethodKind.Card, 10m, "CARD-STALL"),
+            CompletePaymentResult = new CashPaymentWorkflowResult(CreateCompletedOrder(10m), 10m, 0m, 0, Session),
+            CompletePaymentStarted = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            CompletePaymentRelease = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var viewModel = new PaymentViewModel(cart, workflow, Session)
+        {
+            CompletionStallTimeout = TimeSpan.FromMilliseconds(50)
+        };
+
+        var automaticCompletion = viewModel.SelectCardCommand.ExecuteAsync(null);
+        await workflow.CompletePaymentStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        // 超时后：仍然锁定（不能删付款、不能重复刷卡），但出现“恢复”提示作为出口。
+        await AsyncTestWaitSupport.WaitUntilAsync(() => viewModel.IsCardPaymentRecoveryRequired);
+        Assert.True(viewModel.IsPaymentInteractionLocked);
+        Assert.NotNull(viewModel.CardPaymentErrorOverlay);
+        Assert.True(viewModel.CardPaymentErrorOverlay!.IsOpen);
+        Assert.Equal(
+            CardPaymentErrorOverlayPrimaryActionKind.RecoverPrevious,
+            viewModel.CardPaymentErrorOverlay.PrimaryActionKind);
+        Assert.Equal(1, workflow.CompletePaymentCallCount);
+
+        // 后台完成最终成功：撤销看门狗加的恢复锁与提示。
+        workflow.CompletePaymentRelease.SetResult();
+        await automaticCompletion;
+
+        Assert.False(viewModel.IsCardPaymentRecoveryRequired);
+        Assert.False(viewModel.IsPaymentInteractionLocked);
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(1, workflow.CompletePaymentCallCount);
+    }
+
+    [Fact]
+    public async Task Payment_page_fast_completion_never_opens_stall_recovery()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-NOSTALL", "Fast Completion Tea", "930NOSTALL", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            TenderToAdd = new PaymentTender(PaymentMethodKind.Card, 10m, "CARD-NOSTALL"),
+            CompletePaymentResult = new CashPaymentWorkflowResult(CreateCompletedOrder(10m), 10m, 0m, 0, Session)
+        };
+        var viewModel = new PaymentViewModel(cart, workflow, Session)
+        {
+            CompletionStallTimeout = TimeSpan.FromSeconds(30)
+        };
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsCardPaymentRecoveryRequired);
+        Assert.False(viewModel.IsPaymentInteractionLocked);
+        Assert.Null(viewModel.CardPaymentErrorOverlay);
+    }
+
     [Theory]
     [InlineData("oom")]
     [InlineData("stack")]
