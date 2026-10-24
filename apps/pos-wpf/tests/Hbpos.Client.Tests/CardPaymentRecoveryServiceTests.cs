@@ -6471,7 +6471,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Equal(ActiveSessionSupervisorResolutionCodes.ContinueWaiting, attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.None, attempts.RecoveryPhase);
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，没有状态查询。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);
@@ -6513,7 +6514,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Null(result.RecoveryResult);
         Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，没有状态查询。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);
