@@ -7,9 +7,9 @@ import {
 
 import {
   STORE_HELP_FAQ_COPY,
-  STORE_HELP_FAQ_GROUPS,
   STORE_HELP_FAQ_MAPS,
   STORE_HELP_FAQ_PATH,
+  type StoreHelpFaqGroup,
   type StoreHelpFaqLanguage,
   type StoreHelpFaqQuestion,
   type StoreHelpFaqTab,
@@ -25,10 +25,13 @@ import {
   resolveStoreHelpFaqTab,
   toStoreHelpFaqAnchor,
 } from './faqText'
+import { useStoreHelpFaqGroups } from './useStoreHelpFaqGroups'
 import './storeHelpFaq.css'
 
 const TABS: StoreHelpFaqTab[] = ['pos', 'mobile']
 const COMPACT_QUERY = '(max-width: 767px)'
+// 数据未到达时用同一个空数组引用，避免 useMemo 依赖每次变化
+const NO_GROUPS: StoreHelpFaqGroup[] = []
 
 function useCompactLayout() {
   const [compact, setCompact] = useState(() =>
@@ -138,6 +141,21 @@ function MobileMap({ language }: { language: StoreHelpFaqLanguage }) {
   )
 }
 
+/** 问题列表加载中的占位卡片，版式与问题卡一致，避免数据到达时页面跳动。 */
+function QuestionSkeleton({ label }: { label: string }) {
+  return (
+    <div className="store-faq-skeleton" role="status" aria-busy="true" aria-label={label}>
+      {[0, 1, 2].map((index) => (
+        <div key={index} className="store-faq-card store-faq-skeleton-card" aria-hidden="true">
+          <span className="store-faq-skeleton-bar is-title" />
+          <span className="store-faq-skeleton-bar" />
+          <span className="store-faq-skeleton-bar is-short" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 type QuestionCardProps = {
   question: StoreHelpFaqQuestion
   number: number
@@ -232,23 +250,22 @@ export default function StoreHelpFaqPage() {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const [language, setLanguage] = useState<StoreHelpFaqLanguage>(() =>
     resolveStoreHelpFaqLanguage(initialParams.get('lang'), window.navigator.language))
-  const [tab, setTab] = useState<StoreHelpFaqTab>(() => {
-    // 带问题锚点的分享链接优先打开锚点所在标签
-    const anchoredId = fromStoreHelpFaqAnchor(window.location.hash)
-    const anchoredTab = anchoredId ? findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, anchoredId) : undefined
-    return anchoredTab ?? resolveStoreHelpFaqTab(initialParams.get('tab'))
-  })
+  // 初始标签只看 ?tab=；带问题锚点的分享链接要等问题数据到达后才能知道锚点属于哪个标签（见下方锚点 effect）
+  const [tab, setTab] = useState<StoreHelpFaqTab>(() => resolveStoreHelpFaqTab(initialParams.get('tab')))
   const [query, setQuery] = useState('')
   const compact = useCompactLayout()
-  const [openIds, setOpenIds] = useState<Set<string>>(() => {
-    const anchoredId = fromStoreHelpFaqAnchor(window.location.hash)
-    return new Set(anchoredId ? [anchoredId] : [])
-  })
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set())
   const [activeId, setActiveId] = useState<string>()
   const tabRefs = useRef<Record<StoreHelpFaqTab, HTMLButtonElement | null>>({ pos: null, mobile: null })
+  const { state: faqState, reload: reloadFaq } = useStoreHelpFaqGroups()
+  const groupsByTab = faqState.status === 'ready' ? faqState.groups : undefined
+  // 进入页面时 URL 里的问题锚点，数据到达后只处理这一次
+  const [initialAnchorId] = useState(() => fromStoreHelpFaqAnchor(window.location.hash))
+  const anchorHandledRef = useRef(false)
+  const [scrollTargetId, setScrollTargetId] = useState<string>()
 
   const copy = STORE_HELP_FAQ_COPY[language]
-  const allGroups = STORE_HELP_FAQ_GROUPS[tab]
+  const allGroups = groupsByTab?.[tab] ?? NO_GROUPS
   const numbering = useMemo(() => buildStoreHelpFaqNumbering(allGroups), [allGroups])
   const groups = useMemo(() => filterStoreHelpFaqGroups(allGroups, query, language), [allGroups, language, query])
   const searching = query.trim().length > 0
@@ -260,22 +277,43 @@ export default function StoreHelpFaqPage() {
     return restoreMetadata
   }, [copy.documentTitle, language])
 
-  // 语言与标签写回地址栏，复制链接给同事时能打开同一视图
+  // 语言与标签写回地址栏，复制链接给同事时能打开同一视图。
+  // 数据到达前不写：带锚点的链接此时标签还没按锚点切换，提前写会把 ?tab= 改成默认值
+  const ready = groupsByTab !== undefined
   useEffect(() => {
+    if (!ready) {
+      return
+    }
     const params = new URLSearchParams(window.location.search)
     params.set('lang', language)
     params.set('tab', tab)
     window.history.replaceState(window.history.state, '', `${STORE_HELP_FAQ_PATH}?${params.toString()}${window.location.hash}`)
-  }, [language, tab])
+  }, [language, ready, tab])
 
-  // 首次进入带锚点时，等内容渲染后滚到对应问题
+  // 问题数据到达后处理 #faq-<id> 深链：锚点所在标签优先于 ?tab=，并展开、定位该问题。
+  // 锚点在数据里找不到（题被下线或链接过期）就保持默认标签，不报错
   useEffect(() => {
-    const anchoredId = fromStoreHelpFaqAnchor(window.location.hash)
-    if (anchoredId) {
-      document.getElementById(toStoreHelpFaqAnchor(anchoredId))?.scrollIntoView({ block: 'start' })
-      setActiveId(anchoredId)
+    if (!groupsByTab || anchorHandledRef.current) {
+      return
     }
-  }, [])
+    anchorHandledRef.current = true
+    const anchoredTab = initialAnchorId ? findStoreHelpFaqTabByQuestionId(groupsByTab, initialAnchorId) : undefined
+    if (initialAnchorId && anchoredTab) {
+      setTab(anchoredTab)
+      setOpenIds(new Set([initialAnchorId]))
+      setActiveId(initialAnchorId)
+      setScrollTargetId(initialAnchorId)
+    }
+  }, [groupsByTab, initialAnchorId])
+
+  // 标签切换后的内容渲染完成，再滚到锚点问题
+  useEffect(() => {
+    if (!scrollTargetId) {
+      return
+    }
+    document.getElementById(toStoreHelpFaqAnchor(scrollTargetId))?.scrollIntoView({ block: 'start' })
+    setScrollTargetId(undefined)
+  }, [scrollTargetId, tab])
 
   // 桌面端目录高亮当前阅读的问题
   useEffect(() => {
@@ -367,9 +405,11 @@ export default function StoreHelpFaqPage() {
               >
                 <span className={`store-faq-tab-icon store-faq-tab-icon-${item}`} aria-hidden="true" />
                 {copy.tabs[item]}
-                <span className="store-faq-tab-count">
-                  {STORE_HELP_FAQ_GROUPS[item].reduce((total, group) => total + group.questions.length, 0)}
-                </span>
+                {groupsByTab ? (
+                  <span className="store-faq-tab-count">
+                    {groupsByTab[item].reduce((total, group) => total + group.questions.length, 0)}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -393,6 +433,11 @@ export default function StoreHelpFaqPage() {
         <aside className="store-faq-toc">
           <nav className="store-faq-card store-faq-toc-box" aria-label={copy.tocTitle}>
             <h2>{copy.tocTitle}</h2>
+            {!ready ? (
+              <div className="store-faq-toc-skeleton" aria-hidden="true">
+                {[0, 1, 2, 3, 4].map((index) => <span key={index} className="store-faq-skeleton-bar" />)}
+              </div>
+            ) : null}
             {groups.map((group) => (
               <Fragment key={group.id}>
                 <h3>{group.title[language]}<span>{group.questions.length}</span></h3>
@@ -436,7 +481,15 @@ export default function StoreHelpFaqPage() {
             <span><RichText text={tab === 'pos' ? copy.posNote : copy.mobileNote} language={language} /></span>
           </p>
 
-          {groups.length === 0 ? (
+          {faqState.status === 'loading' ? (
+            <QuestionSkeleton label={copy.loadingLabel} />
+          ) : faqState.status === 'error' ? (
+            <div className="store-faq-card store-faq-empty" role="alert">
+              <strong>{copy.loadFailedTitle}</strong>
+              <span>{copy.loadFailedBody}</span>
+              <button type="button" className="store-faq-retry" onClick={reloadFaq}>{copy.retry}</button>
+            </div>
+          ) : groups.length === 0 ? (
             <div className="store-faq-card store-faq-empty" role="status">
               <strong>{copy.noResultsTitle}</strong>
               <span>{copy.noResultsBody}</span>

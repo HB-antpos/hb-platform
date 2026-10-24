@@ -268,6 +268,7 @@
     <Compile Include="ContainerAllocationSalesReportServiceTests.cs" />
     <Compile Include="ContainerAllocationSalesAuthorizationPipelineTests.cs" />
     <Compile Include="BrowserExtensionTests.cs" />
+    <Compile Include="HelpFaqTests.cs" />
     <Compile Include="LocalSupplierCategoryLogicTests.cs" />
     <Compile Include="LocalSupplierCategoryServiceTests.cs" />
     <Compile Include="LocalSupplierCategorySqlServerIntegrationTests.cs" />

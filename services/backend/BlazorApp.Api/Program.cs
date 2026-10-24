@@ -1325,6 +1325,11 @@ builder.Services.AddScoped<IBrowserExtensionAccessService, BrowserExtensionAcces
 builder.Services.AddScoped<IBrowserExtensionService, BrowserExtensionService>();
 builder.Services.AddScoped<ILocalSupplierCategoryCaptureService, LocalSupplierCategoryCaptureService>();
 builder.Services.AddScoped<ILocalSupplierCategoryReactService, LocalSupplierCategoryReactService>();
+// 使用帮助 FAQ 公开读服务（缓存在共享的 IMemoryCache 里，P2 写操作后调用 Invalidate）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Services.HelpFaq.IHelpFaqPublicService,
+    BlazorApp.Api.Services.HelpFaq.HelpFaqPublicService
+>();
 builder.Services.AddScoped<PreorderReactService>();
 builder.Services.AddScoped<IPreorderReactService>(provider =>
     provider.GetRequiredService<PreorderReactService>()

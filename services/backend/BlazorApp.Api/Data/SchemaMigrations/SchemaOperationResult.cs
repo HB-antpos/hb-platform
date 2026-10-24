@@ -28,6 +28,7 @@ internal static class SchemaDiagnosticCodes
         "SCHEMA_MOBILE_OTA_RUNTIME_TARGETS_INCOMPATIBLE";
     public const string LocalSupplierCategoryIncompatible =
         "SCHEMA_LOCAL_SUPPLIER_CATEGORY_INCOMPATIBLE";
+    public const string HelpFaqIncompatible = "SCHEMA_HELP_FAQ_INCOMPATIBLE";
     public const string AttendanceLocationSampleBatchIncompatible =
         "SCHEMA_ATTENDANCE_LOCATION_SAMPLE_BATCH_INCOMPATIBLE";
     public const string LegacyEmployeeLogRiskIncompatible =
