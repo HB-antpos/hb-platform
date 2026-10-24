@@ -90,6 +90,9 @@
   <data name="settings.linkly.mode.cloudDirectSync.help" xml:space="preserve"><value>直接配对 Linkly Cloud，但 POS 侧只返回交易状态结果。</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync" xml:space="preserve"><value>Cloud 后端异步</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync.help" xml:space="preserve"><value>走后端异步流程，支持 display、receipt、sendkey 和签名授权。保存该模式后，下一笔付款使用 Linkly 云后端，不使用 Square token。</value></data>
+  <data name="settings.linkly.mode.localIp.short" xml:space="preserve"><value>连接本机或局域网的 EFT-Client 网关</value></data>
+  <data name="settings.linkly.mode.cloudDirectSync.short" xml:space="preserve"><value>直连 Linkly Cloud，仅返回交易状态</value></data>
+  <data name="settings.linkly.mode.cloudBackendAsync.short" xml:space="preserve"><value>走后端异步流程，含签名授权等能力</value></data>
   <data name="settings.linkly.priority.title" xml:space="preserve"><value>连接优先级</value></data>
   <data name="settings.linkly.priority.primary" xml:space="preserve"><value>首选</value></data>
   <data name="settings.linkly.priority.fallback" xml:space="preserve"><value>兜底</value></data>

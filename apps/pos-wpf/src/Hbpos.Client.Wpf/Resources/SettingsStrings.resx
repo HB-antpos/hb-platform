@@ -90,6 +90,9 @@
   <data name="settings.linkly.mode.cloudDirectSync.help" xml:space="preserve"><value>Pair directly to Linkly Cloud. This mode only returns transaction status results.</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync" xml:space="preserve"><value>Cloud backend async</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync.help" xml:space="preserve"><value>Use the backend async workflow with display, receipt, sendkey, and signature authorization support. Saving this mode makes the next payment use Linkly Cloud backend, not a Square token.</value></data>
+  <data name="settings.linkly.mode.localIp.short" xml:space="preserve"><value>Connect to the EFT-Client gateway on this PC or the LAN</value></data>
+  <data name="settings.linkly.mode.cloudDirectSync.short" xml:space="preserve"><value>Direct to Linkly Cloud, status results only</value></data>
+  <data name="settings.linkly.mode.cloudBackendAsync.short" xml:space="preserve"><value>Backend async flow with signature authorization</value></data>
   <data name="settings.linkly.priority.title" xml:space="preserve"><value>Connection priority</value></data>
   <data name="settings.linkly.priority.primary" xml:space="preserve"><value>Primary</value></data>
   <data name="settings.linkly.priority.fallback" xml:space="preserve"><value>Fallback</value></data>
