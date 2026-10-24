@@ -40,7 +40,8 @@
   <data name="settings.square.direct.description" xml:space="preserve"><value>开启后，如果总部也为本门店打开了直连，收银机会直接和 Square 通信，刷卡更快。任何一步失败都会自动回落到原来的中转路径，并且不会重复扣款。退款和付款恢复始终走服务端。</value></data>
   <data name="settings.square.direct.turnOn" xml:space="preserve"><value>开启直连</value></data>
   <data name="settings.square.direct.turnOff" xml:space="preserve"><value>关闭直连</value></data>
-  <data name="settings.square.direct.refresh" xml:space="preserve"><value>刷新状态</value></data>
+  <data name="settings.square.direct.group" xml:space="preserve"><value>直连 Square</value></data>
+  <data name="settings.square.direct.refresh" xml:space="preserve"><value>刷新直连状态</value></data>
   <data name="settings.square.direct.local.on" xml:space="preserve"><value>本机开关：已开启</value></data>
   <data name="settings.square.direct.local.off" xml:space="preserve"><value>本机开关：已关闭</value></data>
   <data name="settings.square.direct.server.on" xml:space="preserve"><value>门店开关（总部）：已开启</value></data>
