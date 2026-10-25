@@ -5,11 +5,12 @@ import test from "node:test";
 
 import {
   API_ENTRY_MODE_STORAGE_KEY,
+  API_ENTRY_OVERRIDE_STORAGE_KEY,
   type AsyncKeyValueStorage,
 } from "@hb/pos-api-client/api-entry-mode-coordinator";
 import { sharedApiTransportSelector } from "@hb/pos-api-client/transport-failover";
 
-import { createApiEntryModeCoordinatorFor } from "./api-entry-mode-store";
+import { createApiEntryModeCoordinatorFor, getApiEntryModeCoordinator } from "./api-entry-mode-store";
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
@@ -68,4 +69,33 @@ test("源码契约：存储用 AsyncStorage 且延迟 require，不再使用 Sec
     manifest.dependencies["@react-native-async-storage/async-storage"],
     mobile.dependencies["@react-native-async-storage/async-storage"],
   );
+});
+
+test("本机手动覆盖走独立 key：优先于后台下发值，不被同步覆盖，选自动后删键并回到后台值", async () => {
+  const { storage, values } = memoryStorage({
+    [API_ENTRY_MODE_STORAGE_KEY]: "aws",
+    [API_ENTRY_OVERRIDE_STORAGE_KEY]: "direct",
+  });
+  try {
+    const coordinator = createApiEntryModeCoordinatorFor(storage);
+    await coordinator.restore();
+    assert.equal(sharedApiTransportSelector.getPreferredMode(), "direct");
+
+    coordinator.apply("edge");
+    await coordinator.flush();
+    assert.equal(sharedApiTransportSelector.getPreferredMode(), "direct", "后台同步不得覆盖本机手动选择");
+    assert.equal(values.get(API_ENTRY_MODE_STORAGE_KEY), "edge");
+    assert.equal(values.get(API_ENTRY_OVERRIDE_STORAGE_KEY), "direct");
+
+    coordinator.setManualMode(null);
+    await coordinator.flush();
+    assert.equal(sharedApiTransportSelector.getPreferredMode(), "edge");
+    assert.equal(values.has(API_ENTRY_OVERRIDE_STORAGE_KEY), false);
+  } finally {
+    sharedApiTransportSelector.setPreferredMode(null);
+  }
+});
+
+test("运行时与设置页共用同一个进程内协调器（单例）", () => {
+  assert.equal(getApiEntryModeCoordinator(), getApiEntryModeCoordinator());
 });

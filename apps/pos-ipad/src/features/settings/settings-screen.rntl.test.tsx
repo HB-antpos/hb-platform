@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, render, waitFor, within } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react-native";
 import { Linking, StyleSheet } from "react-native";
 
+import {
+  API_ENTRY_OVERRIDE_STORAGE_KEY,
+  createApiEntryModeCoordinator,
+  createAsyncStorageApiEntryModeStorage,
+  type AsyncKeyValueStorage,
+} from "@hb/pos-api-client/api-entry-mode-coordinator";
+import { ApiTransportSelector } from "@hb/pos-api-client/transport-failover";
 import {
   derivePendingWorkBlockers,
   type PendingWorkSnapshot,
@@ -2738,6 +2745,166 @@ describe("SettingsScreen", () => {
   });
 
 });
+
+describe("SettingsScreen 收银入口（线路）", () => {
+  it("运行时未接线（不传 apiEntry）时不显示该设置", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+
+    expect(screen.queryByTestId("settings-api-entry")).toBeNull();
+  });
+
+  it("后台未指定：显示实际在用线路与默认来源，选中「自动」", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const { coordinator } = createApiEntryController();
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+
+    expect(screen.getByText("EdgeOne · pos.hotbargain.vip")).toBeTruthy();
+    expect(
+      screen.getByText("Auto — head office not set, default EdgeOne"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("settings-api-entry-auto").props.accessibilityState,
+    ).toMatchObject({ selected: true });
+    expect(screen.queryByTestId("settings-api-entry-fallback")).toBeNull();
+  });
+
+  it("手动指定覆盖后台值并立即生效；后台再下发新值不改写；选自动回到后台值", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const { coordinator, selector } = createApiEntryController();
+    coordinator.apply("aws");
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+    expect(screen.getByText("AWS 悉尼 · pos-syd.hotbargain.vip")).toBeTruthy();
+    expect(screen.getByText("自动：后台指定为 AWS 悉尼")).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId("settings-api-entry-direct"));
+    expect(selector.getPreferredMode()).toBe("direct");
+    expect(screen.getByText("直连 · hotbargain.vip")).toBeTruthy();
+    expect(screen.getByText("本机手动指定")).toBeTruthy();
+    expect(
+      screen.getByTestId("settings-api-entry-direct").props.accessibilityState,
+    ).toMatchObject({ selected: true });
+
+    // 后台下发了别的线路：本机手动选择不变。
+    await act(async () => {
+      coordinator.apply("edge");
+    });
+    expect(selector.getPreferredMode()).toBe("direct");
+    expect(screen.getByText("本机手动指定")).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId("settings-api-entry-auto"));
+    expect(selector.getPreferredMode()).toBe("edge");
+    expect(screen.getByText("自动：后台指定为 EdgeOne")).toBeTruthy();
+    expect(
+      screen.getByTestId("settings-api-entry-auto").props.accessibilityState,
+    ).toMatchObject({ selected: true });
+  });
+
+  it("首选线路不通时显示已临时切到备用线路", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const { coordinator, selector } = createApiEntryController();
+    coordinator.setManualMode("direct");
+    selector.reportFailure("hotbargain.vip", "network");
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+
+    expect(screen.getByText("AWS Sydney · pos-syd.hotbargain.vip")).toBeTruthy();
+    expect(screen.getByTestId("settings-api-entry-fallback")).toBeTruthy();
+  });
+
+  it("没有设备管理权限：只读展示，选项禁用", async () => {
+    const presenter = new SettingsPresenter({
+      permissions: [SETTINGS_VIEW_PERMISSION],
+      port: new ScreenSettingsPort(),
+    });
+    presenters.push(presenter);
+    await presenter.load();
+    const { coordinator, selector } = createApiEntryController();
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+
+    expect(screen.getByTestId("settings-api-entry-no-permission")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("settings-api-entry-aws"));
+    expect(selector.getPreferredMode()).toBe("edge");
+    expect(coordinator.getSnapshot().manualMode).toBeNull();
+  });
+
+  it("使用自定义 API 地址（不在三条线路内）：提示不适用，选项禁用", async () => {
+    const port = new ScreenSettingsPort();
+    port.snapshotValue = { ...snapshot(), apiBaseUrl: "http://192.168.31.246:5003" };
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const { coordinator } = createApiEntryController();
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+
+    expect(screen.getByTestId("settings-api-entry-unsupported")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("settings-api-entry-aws"));
+    expect(coordinator.getSnapshot().manualMode).toBeNull();
+  });
+
+  it("手动设置保存失败时提示重启后会丢失", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const { coordinator, storageState } = createApiEntryController();
+    storageState.fail = true;
+    const screen = await render(
+      <SettingsScreen apiEntry={coordinator} locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-api-entry");
+
+    await fireEvent.press(screen.getByTestId("settings-api-entry-aws"));
+    await act(async () => {
+      await coordinator.flush();
+    });
+    expect(await screen.findByTestId("settings-api-entry-save-failed")).toBeTruthy();
+  });
+});
+
+function createApiEntryController() {
+  const values = new Map<string, string>();
+  const storageState = { fail: false };
+  const storage: AsyncKeyValueStorage = {
+    getItem: async (key) => values.get(key) ?? null,
+    setItem: async (key, value) => {
+      if (storageState.fail) throw new Error("storage unavailable");
+      values.set(key, value);
+    },
+    removeItem: async (key) => {
+      if (storageState.fail) throw new Error("storage unavailable");
+      values.delete(key);
+    },
+  };
+  const selector = new ApiTransportSelector();
+  const coordinator = createApiEntryModeCoordinator({
+    selector,
+    storage: createAsyncStorageApiEntryModeStorage(storage),
+    overrideStorage: createAsyncStorageApiEntryModeStorage(
+      storage,
+      API_ENTRY_OVERRIDE_STORAGE_KEY,
+    ),
+  });
+  return { coordinator, selector, storageState, values };
+}
 
 function createPresenter(port: ScreenSettingsPort): SettingsPresenter {
   const presenter = new SettingsPresenter({
