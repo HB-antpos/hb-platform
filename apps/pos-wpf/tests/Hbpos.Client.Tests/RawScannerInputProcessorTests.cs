@@ -4,6 +4,46 @@ namespace Hbpos.Client.Tests;
 
 public sealed class RawScannerInputProcessorTests
 {
+    [Theory]
+    // 默认最小长度 5：短于 5 位（含 3~4 位内部短码）一律视为误触丢弃，恰好 5 位及以上正常识别。
+    [InlineData("L303", false)]
+    [InlineData("1234", false)]
+    [InlineData("12345", true)]
+    [InlineData("5550001234567", true)]
+    public void Default_processor_requires_at_least_five_characters_for_enter_and_timeout_completion(string barcode, bool accepted)
+    {
+        Assert.Equal(5, RawScannerInputProcessor.DefaultMinBarcodeLength);
+
+        foreach (var completeByTimeout in new[] { false, true })
+        {
+            var processor = new RawScannerInputProcessor();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var character in barcode)
+            {
+                Assert.Null(processor.ProcessCharacter("scanner-device", character, now, boundDevicePath: null));
+                now = now.AddMilliseconds(10);
+            }
+
+            RawScannerInputResult? result;
+            if (completeByTimeout)
+            {
+                result = processor
+                    .FlushExpired(now + RawScannerInputProcessor.DefaultScanTimeout, boundDevicePath: null)
+                    .SingleOrDefault();
+            }
+            else
+            {
+                result = processor.ProcessEnter("scanner-device", now, boundDevicePath: null);
+            }
+
+            Assert.Equal(accepted, result is not null);
+            if (accepted)
+            {
+                Assert.Equal(barcode, result!.Barcode);
+            }
+        }
+    }
+
     [Fact]
     public void Unbound_scanner_learns_from_enter_completed_scan()
     {

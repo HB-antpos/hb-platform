@@ -1335,7 +1335,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 internal sealed class KeyboardScannerFallbackBuffer
 {
     private static readonly TimeSpan ScanTimeout = TimeSpan.FromMilliseconds(120);
-    private const int MinBarcodeLength = 3;
+    private const int MinBarcodeLength = RawScannerInputProcessor.DefaultMinBarcodeLength;
     private readonly System.Text.StringBuilder _buffer = new();
     private DateTimeOffset _lastInputAt = DateTimeOffset.MinValue;
 
