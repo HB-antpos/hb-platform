@@ -280,6 +280,15 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
             return null;
         }
 
+        // 中文注释：折扣保护。分店价里折扣率有两种写法：0~1 小数，或 >1 的百分数（50 = 50%）。
+        // 原来 1 当成「100%」、100 当成「100%」，结果该行 $0（1002 店 10-24/25：admin 写入的 1.0）。
+        // 目录折扣是自动给的，不能全免：值恰好为 1 本身有歧义（1% 还是 100%），连同 100 一律不下发，
+        // 客户端按原价卖；真要打折用 (0,1) 之间的小数或 (1,100) 之间的百分数。
+        if (value == 1m || value >= 100m)
+        {
+            return null;
+        }
+
         return value <= 1m
             ? value.Value
             : value.Value / 100m;

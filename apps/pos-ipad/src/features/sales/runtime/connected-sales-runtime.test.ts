@@ -269,6 +269,37 @@ test("本地、搜索和远程目录结果都把 discountRate 转为目录基线
   assert.equal(refreshed.cart.getSnapshot().lines[0]?.discount.cents, 140);
 });
 
+test("折扣保护：目录折扣率 ≥ 1 或为负的脏数据被忽略，按原价加购，不会变成 0 元", async () => {
+  for (const discountRate of [1, 1.5, 100, -0.2]) {
+    const current = item({ retailPriceCents: 399, discountRate });
+    const catalog: LocalCatalogPort = {
+      findExact: async () => current,
+      searchByName: async () => [current],
+    };
+    const dependencies = connected({ catalog });
+
+    const [searchResult] = await dependencies.workflow.searchProducts("tea");
+    await dependencies.workflow.addProduct(searchResult!);
+
+    const line = dependencies.cart.getSnapshot().lines[0]!;
+    assert.equal(line.discount.cents, 0, `折扣率 ${discountRate} 不应产生折扣`);
+    assert.equal(line.actualAmount.cents, 399, `折扣率 ${discountRate} 应按原价 399`);
+  }
+
+  // 四舍五入到 100% 的小数（0.99996）封顶 9999 基点，行仍至少剩 1 分。
+  const nearlyFull = item({ retailPriceCents: 10_000, discountRate: 0.99996 });
+  const nearlyFullCatalog: LocalCatalogPort = {
+    findExact: async () => nearlyFull,
+    searchByName: async () => [nearlyFull],
+  };
+  const capped = connected({ catalog: nearlyFullCatalog });
+  const [cappedResult] = await capped.workflow.searchProducts("tea");
+  await capped.workflow.addProduct(cappedResult!);
+  const cappedLine = capped.cart.getSnapshot().lines[0]!;
+  assert.equal(cappedLine.discount.cents, 9_999);
+  assert.equal(cappedLine.actualAmount.cents, 1);
+});
+
 test("搜索重扫使用最新本地目录折扣，支持同价变更与移除", async () => {
   let current = item({ retailPriceCents: 699, discountRate: 0.2 });
   const catalog: LocalCatalogPort = {
