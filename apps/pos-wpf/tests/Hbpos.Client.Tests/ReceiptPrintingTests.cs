@@ -9,6 +9,27 @@ namespace Hbpos.Client.Tests;
 
 public sealed class ReceiptPrintingTests
 {
+    [Theory]
+    // 终端批准（00/08/11）却回了超时/取消类文案：展示层以批准码为准，统一显示 APPROVED（10-25 1033 店实测）。
+    [InlineData("00", "OPERATOR TIMEOUT    ", "VISA | Auth 437169 | APPROVED")]
+    [InlineData("11", "OPERATOR CANCELLED", "VISA | Auth 437169 | APPROVED")]
+    // 本来就含 APPROVED 的文案（含 08 的 APPROVED SIGNATURE）保持原样。
+    [InlineData("00", "APPROVED", "VISA | Auth 437169 | APPROVED")]
+    [InlineData("08", "APPROVED SIGNATURE", "VISA | Auth 437169 | APPROVED SIGNATURE")]
+    // 非批准码不改写，避免掩盖真实的拒绝/超时。
+    [InlineData("TI", "OPERATOR TIMEOUT", "VISA | Auth 437169 | OPERATOR TIMEOUT")]
+    [InlineData(null, "COMPLETED", "VISA | Auth 437169 | COMPLETED")]
+    public void FormatCardSummary_prefers_approval_code_over_odd_terminal_response_text(
+        string? responseCode,
+        string responseText,
+        string expected)
+    {
+        var transaction = new CardTransactionDto(
+            "ANZ", "TXN-1", "437169", "VISA", null, null, null, responseCode, responseText, null, null, 2.99m, null);
+
+        Assert.Equal(expected, PaymentReferenceDisplay.FormatCardSummary(transaction));
+    }
+
     [Fact]
     public void Installment_receipt_mapper_builds_deposit_receipt_document()
     {
