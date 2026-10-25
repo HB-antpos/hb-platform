@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import {
   applyAttendanceTrackingLifecycle,
   buildAttendanceQrPunchPayload,
-  resolveExpectedPunchType,
   canOpenAttendanceQrScanner,
   canSubmitAttendanceQrPunch,
   getAttendancePunchErrorKey,
@@ -149,19 +148,6 @@ const errorCases: Record<string, string> = {
 for (const [code, key] of Object.entries(errorCases)) {
   assert.equal(getAttendancePunchErrorKey(code), key, `${code} 应映射明确文案`);
 }
-
-// 期望打卡类型：只带 ClockIn / ClockOut；类型不一致按预期类型细分「已上班 / 已下班」。
-assert.equal(resolveExpectedPunchType("ClockIn"), "ClockIn");
-assert.equal(resolveExpectedPunchType("DayComplete"), undefined);
-assert.equal(
-  buildAttendanceQrPunchPayload("qr", undefined, {}, undefined, "ClockOut").expectedPunchType,
-  "ClockOut",
-);
-assert.equal("expectedPunchType" in buildAttendanceQrPunchPayload("qr", undefined, {}), false,
-  "没有预期类型时保持旧 payload，旧后端不受影响");
-assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH", "ClockIn"), "messages.punchTypeMismatchClockedIn");
-assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH", "ClockOut"), "messages.punchTypeMismatchClockedOut");
-assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH"), "messages.punchTypeMismatch");
 assert.equal(
   getAttendancePunchErrorCode(Object.assign(new Error("二维码已过期"), { code: "ATTENDANCE_QR_EXPIRED" })),
   "ATTENDANCE_QR_EXPIRED",

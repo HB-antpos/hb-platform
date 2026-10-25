@@ -307,8 +307,6 @@ export interface AttendancePunchPayload {
   locationCapturedAtUtc?: string;
   /** 扫码前员工对缺休息的回答；旧后端忽略此字段。 */
   mealDeclaration?: AttendanceMealDeclaration;
-  /** 客户端期望的打卡类型；为空＝旧客户端，服务端按原逻辑判定。 */
-  expectedPunchType?: AttendancePunchType;
 }
 
 export interface AttendanceQrResolveResult {

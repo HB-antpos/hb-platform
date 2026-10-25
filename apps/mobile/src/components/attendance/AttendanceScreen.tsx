@@ -73,7 +73,6 @@ import {
   getAttendancePunchErrorKey,
   normalizeAttendanceQrTokenInput,
   prepareAttendanceQrPunch,
-  resolveExpectedPunchType,
   resolveAttendanceQrStore,
   shouldEnableAttendanceQrScanning,
   validateAttendanceQrToken,
@@ -1213,15 +1212,11 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           preparation.verification.payload,
           // 只有下班才带用餐回答；上班卡即使误带，后端也会忽略。
           qrToday.nextPunchType === "ClockOut" ? pendingMealDeclarationRef.current : undefined,
-          resolveExpectedPunchType(qrToday.nextPunchType),
         ),
       ));
     } catch (error) {
       if (attendanceScannerSessionGate.isActive(session)) {
-        const errorCode = getAttendancePunchErrorCode(error);
-        const errorKey = getAttendancePunchErrorKey(errorCode, qrToday.nextPunchType);
-        // 本机状态过期（别的设备已打过卡）：刷新今日状态，员工重扫即可按最新类型打卡。
-        if (errorCode === "PUNCH_TYPE_MISMATCH") void invalidateEmployeeData();
+        const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error));
         failAttendanceQrProcessing(
           session,
           errorKey ? t(errorKey) : getErrorMessage(error, "messages.punchFailed"),
