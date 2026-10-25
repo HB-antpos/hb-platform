@@ -57,6 +57,10 @@
       "name": "审核管理分店考勤",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "审核本人考勤申请",
+      "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 持有者可审核自己提交的考勤申请，审核记录标记「本人审批」"
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "查看管理分店审核记录",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"

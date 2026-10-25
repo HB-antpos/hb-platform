@@ -247,6 +247,7 @@ export const P = {
     PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
+    ApprovalReviewSelf: 'Attendance.Approval.ReviewSelf',
     HolidayViewStore: 'Attendance.Holiday.ViewStore',
     HolidayEditManagedStore: 'Attendance.Holiday.EditManagedStore',
     LeaveApplySelf: 'Attendance.Leave.ApplySelf',

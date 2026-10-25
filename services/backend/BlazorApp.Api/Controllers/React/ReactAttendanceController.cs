@@ -72,6 +72,17 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> DeleteSchedule(string scheduleGuid) =>
             Ok(await _service.DeleteScheduleAsync(scheduleGuid));
 
+        // 软删除的排班列表与找回；恢复后重新对账派生审批。
+        [HttpGet("schedules/deleted")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> GetDeletedSchedules([FromQuery] AttendanceScheduleQueryDto query) =>
+            Ok(await _service.GetDeletedSchedulesAsync(query));
+
+        [HttpPost("schedules/{scheduleGuid}/restore")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> RestoreSchedule(string scheduleGuid) =>
+            Ok(await _service.RestoreScheduleAsync(scheduleGuid));
+
         [HttpGet("my/today")]
         [Authorize(Policy = Permissions.Attendance.Schedule.ViewSelf)]
         public async Task<IActionResult> GetMyToday(

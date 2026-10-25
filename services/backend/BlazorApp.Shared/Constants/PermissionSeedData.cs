@@ -28,6 +28,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Punch.AdjustManagedStore, "补卡与修改管理分店打卡", "排班考勤", "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"),
                 new(Permissions.Attendance.Approval.ViewManagedStore, "查看管理分店审核记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"),
                 new(Permissions.Attendance.Approval.ReviewManagedStore, "审核管理分店考勤", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"),
+                // 仅注册，不写入任何角色模板：审批类权限在生产手动授权；入库由版本号迁移 20261026.001 幂等完成。
+                new(Permissions.Attendance.Approval.ReviewSelf, "审核本人考勤申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 持有者可审核自己提交的考勤申请，审核记录标记「本人审批」"),
                 new(Permissions.Attendance.Holiday.ViewStore, "查看分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看分店公共假期"),
                 new(Permissions.Attendance.Holiday.EditManagedStore, "编辑管理分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 编辑管理分店公共假期"),
                 new(Permissions.Attendance.Leave.ApplySelf, "本人提交请假申请", "排班考勤", "移动端「个人考勤」- 本人提交请假申请"),
