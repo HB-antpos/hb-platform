@@ -2357,6 +2357,51 @@ public sealed partial class CardPaymentRecoveryServiceTests
     }
 
     [Fact]
+    public async Task RecoverLatestAsync_local_ip_get_last_operator_cancelled_tm_restores_draft_as_cancelled()
+    {
+        // TM = OPERATOR CANCELLED：收银员/顾客在刷卡机上取消，不是银行拒绝，终态应为 Cancelled（10-25 1033 店实测曾被标成 Declined）。
+        var draft = CreateDraft(cardAmount: 8m, currentTenders: [new PaymentTender(PaymentMethodKind.Cash, 2m)]);
+        var attempt = CreateAttempt(
+            sessionId: null,
+            txnRef: "P000000000000009",
+            connectionMode: LinklyConnectionMode.LocalIp);
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var orders = new FakeLocalOrderRepository();
+        var backend = new FakeLinklyBackendTerminalClient();
+        var localTerminal = new FakeLinklyTerminalClient(new PaymentAuthorizationResult(
+            false,
+            "ANZ:P000000000000009",
+            "OPERATOR CANCELLED",
+            10m,
+            [CreateLocalCardTransaction("P000000000000009", "TM", "OPERATOR CANCELLED")],
+            "ANZ",
+            "Sandbox",
+            LinklyConnectionMode.LocalIp.ToString(),
+            "P",
+            null,
+            "P000000000000009",
+            "TM",
+            "OPERATOR CANCELLED"));
+        var cart = new PosCartService();
+        var service = CreateService(
+            attempts,
+            orders,
+            backend,
+            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
+            localTerminal);
+
+        var result = await service.RecoverLatestAsync(cart, Session);
+
+        Assert.Equal(CardPaymentRecoveryOutcome.DraftRestored, result.Outcome);
+        Assert.Equal(LocalCardPaymentAttemptStatus.Cancelled.ToString(), attempts.RecoveryTargetStatus);
+        Assert.Equal("TM", attempts.ResponseCode);
+        Assert.Equal(0, orders.SaveCount);
+
+        Assert.True(await service.CompleteDraftHandoffAsync(attempt.AttemptGuid, cart));
+        Assert.Equal(LocalCardPaymentAttemptStatus.Cancelled, attempts.Status);
+    }
+
+    [Fact]
     public async Task RecoverLatestAsync_local_ip_get_last_code_only_decline_restores_draft_as_declined()
     {
         var attempt = CreateAttempt(

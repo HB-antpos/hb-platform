@@ -2910,7 +2910,8 @@ public sealed class CashPaymentWorkflowServiceTests
 
     [Theory]
     [InlineData("C0", "TXN CANCELLED", LocalCardPaymentAttemptStatus.Cancelled)]
-    [InlineData("TM", "OPERATOR CANCELLED", LocalCardPaymentAttemptStatus.Declined)]
+    [InlineData("TM", "OPERATOR CANCELLED", LocalCardPaymentAttemptStatus.Cancelled)]
+    [InlineData("TI", "OPERATOR TIMEOUT", LocalCardPaymentAttemptStatus.TimedOut)]
     public async Task Definitive_cloud_card_failure_acknowledges_session_after_final_result_is_persisted(
         string responseCode,
         string responseText,
