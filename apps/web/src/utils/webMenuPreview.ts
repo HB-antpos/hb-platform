@@ -90,7 +90,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManagePromotions: [P.Promotions.View],
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
-  canReviewAttendance: [P.Attendance.ApprovalReviewManagedStore, P.Attendance.LeaveReviewManagedStore],
+  // 与 access.ts 一致：审核入口只认 Approval.ReviewManagedStore（请假审核也走同一接口）
+  canReviewAttendance: [P.Attendance.ApprovalReviewManagedStore],
   // 任一权限可见；从菜单授予时只补第一个（打卡查看＝工时统计），工资需另授 Payroll.View
   canViewAttendanceHours: [P.Attendance.PunchViewManagedStore, P.Attendance.PayrollView],
   canManageStoreOps: [P.Store.ManageOperations],
