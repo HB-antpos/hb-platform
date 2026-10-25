@@ -57,6 +57,10 @@
       "name": "Approve attendance for managed stores",
       "description": "Review and approve attendance for the stores you manage, on the web admin and in the app."
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "Approve own attendance requests",
+      "description": "Approve or reject attendance requests you submitted yourself; such reviews are marked as self-approved."
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "View attendance approvals for managed stores",
       "description": "View attendance approval history for the stores you manage, on the web admin and in the app."

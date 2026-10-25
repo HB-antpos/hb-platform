@@ -191,11 +191,6 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<AttendanceScheduleDto>.Error("员工不存在或不属于该分店", "EMPLOYEE_NOT_IN_STORE");
             }
 
-            if (await HasOverlappingScheduleAsync(null, request.StoreCode, request.UserGuid, request.WorkDate.Date, request.StartTime, request.EndTime))
-            {
-                return ApiResponse<AttendanceScheduleDto>.Error("同员工同分店同日排班时间不能重叠", "SCHEDULE_OVERLAP");
-            }
-
             var now = DateTime.UtcNow;
             var model = new AttendanceSchedule
             {
@@ -214,7 +209,33 @@ namespace BlazorApp.Api.Services.React
                 UpdatedBy = _currentUserService.GetCurrentUsername(),
             };
 
-            await _db.Insertable(model).ExecuteCommandAsync();
+            // 与 UpdateScheduleAsync 一致：重叠检查和写入必须在同一把员工锁和事务里，
+            // 否则两个并发新建请求都能通过检查，落出两条重叠排班。
+            var mutationResource = AttendanceDailyMutationLock.BuildResource(
+                model.UserGuid,
+                model.StoreCode,
+                model.WorkDate);
+            await using (await AttendanceDailyMutationLock.AcquireProcessAsync(mutationResource))
+            {
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await AttendanceDailyMutationLock.AcquireDatabaseAsync(_db, mutationResource);
+                    if (await HasOverlappingScheduleAsync(null, model.StoreCode, model.UserGuid, model.WorkDate, model.StartTime, model.EndTime))
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return ApiResponse<AttendanceScheduleDto>.Error("同员工同分店同日排班时间不能重叠", "SCHEDULE_OVERLAP");
+                    }
+
+                    await _db.Insertable(model).ExecuteCommandAsync();
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
+            }
             var result = ToDto(model);
             result.MinorCompliance = await EvaluateMinorEmploymentAsync(model.UserGuid, model);
             if (result.MinorCompliance != null)
@@ -347,8 +368,8 @@ namespace BlazorApp.Api.Services.React
                 model.WorkDate);
             await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                 mutationResource);
-            // 排班失效时被一并取消的用餐申报；事务提交后据此撤回审批人手里的待办通知。
-            var cancelledMealClaimGuids = new List<string>();
+            // 排班失效时被一并取消的用餐申报与待审补卡；事务提交后据此撤回审批人手里的待办通知。
+            var cancelledSources = CancelledScheduleSources.Empty;
             await _db.Ado.BeginTranAsync();
             try
             {
@@ -397,7 +418,7 @@ namespace BlazorApp.Api.Services.React
                 }
                 else
                 {
-                    cancelledMealClaimGuids = await CancelScheduleDerivedApprovalsAsync(
+                    cancelledSources = await CancelScheduleDerivedApprovalsAsync(
                         model.ScheduleGuid,
                         "排班已失效，相关待审考勤已自动取消");
                 }
@@ -409,9 +430,7 @@ namespace BlazorApp.Api.Services.React
                 throw;
             }
             // 走到这里事务已提交；撤回推送在事务之外，失败只记日志。
-            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
-                AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
-                cancelledMealClaimGuids);
+            await RevokeCancelledScheduleSourceNotificationsAsync(cancelledSources);
             var result = ToDto(model);
             result.MinorCompliance = await EvaluateMinorEmploymentAsync(model.UserGuid, model);
             if (result.MinorCompliance != null)
@@ -490,8 +509,8 @@ namespace BlazorApp.Api.Services.React
                 model.WorkDate);
             await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                 mutationResource);
-            // 排班删除时被一并取消的用餐申报；事务提交后据此撤回审批人手里的待办通知。
-            var cancelledMealClaimGuids = new List<string>();
+            // 排班删除时被一并取消的用餐申报与待审补卡；事务提交后据此撤回审批人手里的待办通知。
+            var cancelledSources = CancelledScheduleSources.Empty;
             await _db.Ado.BeginTranAsync();
             try
             {
@@ -504,12 +523,17 @@ namespace BlazorApp.Api.Services.React
                     return ApiResponse<bool>.Error("排班不存在", "NOT_FOUND");
                 }
 
+                // 只做软删除并留痕：有打卡的排班也允许删除，之后可在「已删除排班」里找回。
+                var deletedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                var deletedBy = _currentUserService.GetCurrentUsername();
                 model.Status = "Cancelled";
                 model.IsDeleted = true;
-                model.UpdatedAt = DateTime.UtcNow;
-                model.UpdatedBy = _currentUserService.GetCurrentUsername();
+                model.DeletedAt = deletedAt;
+                model.DeletedBy = deletedBy;
+                model.UpdatedAt = deletedAt;
+                model.UpdatedBy = deletedBy;
                 await _db.Updateable(model).ExecuteCommandAsync();
-                cancelledMealClaimGuids = await CancelScheduleDerivedApprovalsAsync(
+                cancelledSources = await CancelScheduleDerivedApprovalsAsync(
                     model.ScheduleGuid,
                     "排班已删除，相关待审考勤已自动取消");
                 await _db.Ado.CommitTranAsync();
@@ -520,9 +544,7 @@ namespace BlazorApp.Api.Services.React
                 throw;
             }
             // 走到这里事务已提交；撤回推送在事务之外，失败只记日志。
-            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
-                AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
-                cancelledMealClaimGuids);
+            await RevokeCancelledScheduleSourceNotificationsAsync(cancelledSources);
             return ApiResponse<bool>.OK(true, "排班已取消");
         }
 
@@ -695,6 +717,12 @@ namespace BlazorApp.Api.Services.React
             CreateAttendanceAvailabilityDto request
         )
         {
+            // 空分店会让关联门店校验放行（视为「全部关联门店」），随后落出 StoreCode 为空的脏记录，必须先拦下。
+            if (string.IsNullOrWhiteSpace(request.StoreCode))
+            {
+                return ApiResponse<List<AttendanceAvailabilityDto>>.Error("请选择分店", "STORE_REQUIRED");
+            }
+
             var userGuid = ResolveCurrentUserGuid();
             var access = await ResolveRelatedStoreAccessAsync(userGuid, request.StoreCode);
             if (!access.Success)
@@ -759,6 +787,11 @@ namespace BlazorApp.Api.Services.React
             if (!access.Success)
             {
                 return ApiResponse<AttendanceAvailabilityDto>.Error(access.Message, access.ErrorCode);
+            }
+
+            if (request.StartTime >= request.EndTime)
+            {
+                return ApiResponse<AttendanceAvailabilityDto>.Error("可上班结束时间必须晚于开始时间", "INVALID_TIME_RANGE");
             }
 
             model.AvailableDate = request.AvailableDate.Date;
@@ -1059,6 +1092,18 @@ namespace BlazorApp.Api.Services.React
                     && (existingSession.Segments.Count >= segmentLimit
                         || punchLocal.TimeOfDay >= schedule.EndTime.Subtract(
                             TimeSpan.FromMinutes(settings.EarlyLeaveGraceMinutes)));
+            }
+            // 客户端按今日状态带上期望的打卡类型；与服务端判定不一致说明手机上的状态已过期（例如另一台设备刚打过卡），
+            // 直接拒绝，避免员工以为在上班却记成了下班。旧客户端不带该字段，按原逻辑。
+            if (!string.IsNullOrWhiteSpace(request.ExpectedPunchType)
+                && !string.Equals(request.ExpectedPunchType.Trim(), punchType, StringComparison.OrdinalIgnoreCase))
+            {
+                await _db.Ado.RollbackTranAsync();
+                return ApiResponse<AttendancePunchDto>.Error(
+                    punchType == "ClockOut"
+                        ? "系统记录你已上班，这次扫码将记为下班；请刷新后再试"
+                        : "系统记录你已下班，这次扫码将记为上班；请刷新后再试",
+                    "PUNCH_TYPE_MISMATCH");
             }
             if (punchType == "ClockIn"
                 && CountEffectiveStoreSegments(todayPunches) >= segmentLimit)
@@ -1851,6 +1896,12 @@ namespace BlazorApp.Api.Services.React
             CreateAttendanceLeaveRequestDto request
         )
         {
+            var validation = ValidateSelfLeaveRequest(request);
+            if (!validation.Success)
+            {
+                return ApiResponse<AttendanceLeaveRequestDto>.Error(validation.Message, validation.ErrorCode);
+            }
+
             var userGuid = ResolveCurrentUserGuid();
             var access = await ResolveRelatedStoreAccessAsync(userGuid, request.StoreCode);
             if (!access.Success)
@@ -1864,13 +1915,15 @@ namespace BlazorApp.Api.Services.React
                 LeaveGuid = Guid.NewGuid().ToString(),
                 StoreCode = request.StoreCode.Trim(),
                 UserGuid = userGuid,
-                LeaveType = request.LeaveType.Trim(),
+                LeaveType = NormalizeManagedLeaveType(request.LeaveType),
                 StartDate = request.StartDate.Date,
                 EndDate = request.EndDate.Date,
                 StartTime = request.StartTime,
                 EndTime = request.EndTime,
                 Reason = request.Reason,
-                AttachmentUrl = request.AttachmentUrl,
+                AttachmentUrl = string.IsNullOrWhiteSpace(request.AttachmentUrl)
+                    ? null
+                    : request.AttachmentUrl.Trim(),
                 Status = "Pending",
                 CreatedAt = now,
                 CreatedBy = _currentUserService.GetCurrentUsername(),
@@ -1954,23 +2007,62 @@ namespace BlazorApp.Api.Services.React
         public async Task<ApiResponse<bool>> CancelMyLeaveRequestAsync(string leaveGuid)
         {
             var userGuid = ResolveCurrentUserGuid();
-            var model = await _db.Queryable<AttendanceLeaveRequest>()
-                .FirstAsync(item => item.LeaveGuid == leaveGuid && item.UserGuid == userGuid && !item.IsDeleted);
-            if (model == null)
+            if (string.IsNullOrWhiteSpace(userGuid))
             {
-                return ApiResponse<bool>.Error("请假申请不存在", "NOT_FOUND");
+                return ApiResponse<bool>.Error("无法识别当前员工", "USER_NOT_FOUND");
             }
 
-            model.Status = "Cancelled";
-            model.IsDeleted = true;
-            model.UpdatedAt = DateTime.UtcNow;
-            model.UpdatedBy = _currentUserService.GetCurrentUsername();
-            await _db.Updateable(model).ExecuteCommandAsync();
-            await _db.Updateable<AttendanceApproval>()
-                .SetColumns(item => item.ReviewStatus == "Cancelled")
-                .Where(item => item.SourceType == "Leave" && item.SourceGuid == leaveGuid && item.ReviewStatus == "Pending")
-                .ExecuteCommandAsync();
-            // 申请已撤销，审批人手里的待办失效（该方法无事务，上面的写入已落库）。
+            // 与审批同一把员工锁：撤销和店长批准并发时只能有一方生效，不能出现「已批准却被撤销」。
+            var mutationResource = AttendanceDailyMutationLock.BuildResource(userGuid, string.Empty, default);
+            await using (await AttendanceDailyMutationLock.AcquireProcessAsync(mutationResource))
+            {
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await AttendanceDailyMutationLock.AcquireDatabaseAsync(_db, mutationResource);
+                    var model = await _db.Queryable<AttendanceLeaveRequest>()
+                        .FirstAsync(item => item.LeaveGuid == leaveGuid && item.UserGuid == userGuid && !item.IsDeleted);
+                    if (model == null)
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error("请假申请不存在", "NOT_FOUND");
+                    }
+                    // 已批准 / 已拒绝的请假是审批结论，员工不能自行撤销（需要店长处理）。
+                    if (!string.Equals(model.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error("只能撤销待审核的请假申请", "LEAVE_NOT_PENDING");
+                    }
+
+                    var now = _timeProvider.GetUtcNow().UtcDateTime;
+                    var username = _currentUserService.GetCurrentUsername();
+                    var cancelled = await _db.Updateable<AttendanceLeaveRequest>()
+                        .SetColumns(item => item.Status == "Cancelled")
+                        .SetColumns(item => item.IsDeleted == true)
+                        .SetColumns(item => item.UpdatedAt == now)
+                        .SetColumns(item => item.UpdatedBy == username)
+                        .Where(item => item.LeaveGuid == leaveGuid && !item.IsDeleted && item.Status == "Pending")
+                        .ExecuteCommandAsync();
+                    if (cancelled != 1)
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error("只能撤销待审核的请假申请", "LEAVE_NOT_PENDING");
+                    }
+                    await _db.Updateable<AttendanceApproval>()
+                        .SetColumns(item => item.ReviewStatus == "Cancelled")
+                        .SetColumns(item => item.UpdatedAt == now)
+                        .SetColumns(item => item.UpdatedBy == username)
+                        .Where(item => item.SourceType == "Leave" && item.SourceGuid == leaveGuid && item.ReviewStatus == "Pending")
+                        .ExecuteCommandAsync();
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
+            }
+            // 申请已撤销且事务已提交，审批人手里的待办失效；撤回绝不抛异常。
             await RevokeApprovalSubmittedNotificationsForSourcesAsync("Leave", new[] { leaveGuid });
             return ApiResponse<bool>.OK(true, "请假申请已取消");
         }
@@ -2014,10 +2106,19 @@ namespace BlazorApp.Api.Services.React
                 .WhereIF(string.IsNullOrWhiteSpace(query.StoreCode) && storeAccess.StoreCodes.Count > 0, item => storeAccess.StoreCodes.Contains(item.StoreCode))
                 .WhereIF(!string.IsNullOrWhiteSpace(query.UserGuid), item => item.UserGuid == query.UserGuid!.Trim())
                 .WhereIF(query.WeekStartDate.HasValue, item => item.WeekStartDate >= query.WeekStartDate!.Value.Date && item.WeekStartDate < query.WeekStartDate!.Value.Date.AddDays(1))
+                .WhereIF(query.FromDate.HasValue, item => item.AvailableDate >= query.FromDate!.Value.Date)
+                .WhereIF(query.ToDate.HasValue, item => item.AvailableDate < query.ToDate!.Value.Date.AddDays(1))
                 .OrderBy(item => item.AvailableDate)
                 .OrderBy(item => item.StartTime)
                 .ToListAsync();
-            return ApiResponse<List<AttendanceAvailabilityDto>>.OK(rows.Select(ToDto).ToList());
+            // 管理端列表要显示员工名，否则只能看到 GUID。
+            var userNames = await ResolveUserDisplayNamesAsync(rows.Select(item => (string?)item.UserGuid));
+            return ApiResponse<List<AttendanceAvailabilityDto>>.OK(rows.Select(item =>
+            {
+                var dto = ToDto(item);
+                dto.UserName = userNames.GetValueOrDefault(item.UserGuid);
+                return dto;
+            }).ToList());
         }
 
         public async Task<ApiResponse<List<AttendancePunchDto>>> GetPunchesAsync(
@@ -2123,6 +2224,7 @@ namespace BlazorApp.Api.Services.React
                 .WhereIF(string.IsNullOrWhiteSpace(query.StoreCode) && storeAccess.StoreCodes.Count > 0, item => storeAccess.StoreCodes.Contains(item.StoreCode))
                 .WhereIF(!string.IsNullOrWhiteSpace(query.SourceType), item => item.SourceType == query.SourceType!.Trim())
                 .WhereIF(!string.IsNullOrWhiteSpace(query.ReviewStatus), item => item.ReviewStatus == query.ReviewStatus!.Trim())
+                .WhereIF(query.IsSelfReview.HasValue, item => item.IsSelfReview == query.IsSelfReview!.Value)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToListAsync();
             var result = rows.Select(ToDto).ToList();
@@ -2130,12 +2232,65 @@ namespace BlazorApp.Api.Services.React
             return ApiResponse<List<AttendanceApprovalDto>>.OK(result);
         }
 
-        public Task<ApiResponse<List<AttendanceApprovalDto>>> GetPendingApprovalsAsync(
+        public async Task<ApiResponse<List<AttendanceApprovalDto>>> GetPendingApprovalsAsync(
             AttendanceApprovalQueryDto query
         )
         {
+            var storeAccess = await ResolveManagedStoreAccessAsync(query.StoreCode);
+            if (storeAccess.Success)
+            {
+                await ReconcileRecentStoreSchedulesForReviewAsync(storeAccess.StoreCodes);
+            }
+
             query.ReviewStatus = "Pending";
-            return GetApprovalsAsync(query);
+            return await GetApprovalsAsync(query);
+        }
+
+        /// <summary>对账回看天数：店长打开审核列表时，近 14 天的漏下班 / 加班就地生成。</summary>
+        internal const int PendingReviewReconcileDays = 14;
+
+        /// <summary>
+        /// 店长打开审核列表时，先对这些分店近 14 天（门店本地日期，含今天）的有效排班做一次派生审批对账，
+        /// 让漏下班、加班不必等员工自己打开「今日」才生成。对账逐员工加锁；任何失败只记日志，绝不阻断列表。
+        /// 未指定分店且范围为空（Admin 看全部）时不做全量对账，避免一次请求扫全公司。
+        /// </summary>
+        private async Task ReconcileRecentStoreSchedulesForReviewAsync(IReadOnlyCollection<string> storeCodes)
+        {
+            if (storeCodes.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var schedules = new List<AttendanceSchedule>();
+                var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                foreach (var storeCode in storeCodes.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var storeToday = ConvertUtcToStoreLocal(
+                        nowUtc,
+                        await ResolveStoreTimeZoneAsync(storeCode, null)).Date;
+                    var from = storeToday.AddDays(-(PendingReviewReconcileDays - 1));
+                    var until = storeToday.AddDays(1);
+                    schedules.AddRange(await _db.Queryable<AttendanceSchedule>()
+                        .Where(item =>
+                            !item.IsDeleted
+                            && item.Status == "Active"
+                            && item.StoreCode == storeCode
+                            && item.WorkDate >= from
+                            && item.WorkDate < until)
+                        .ToListAsync());
+                }
+
+                await ReconcileDerivedApprovalsUnderEmployeeLocksAsync(schedules);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "打开审核列表前的考勤对账失败，列表照常返回: StoreCodes={StoreCodes}",
+                    string.Join(",", storeCodes));
+            }
         }
 
         public Task<ApiResponse<AttendanceApprovalDto>> ApproveAsync(
@@ -2385,6 +2540,19 @@ namespace BlazorApp.Api.Services.React
             settings.RequireApprovalForEarlyLeave = request.RequireApprovalForEarlyLeave;
             settings.RequireApprovalForNoSchedule = request.RequireApprovalForNoSchedule;
             settings.RequireApprovalForDuplicate = request.RequireApprovalForDuplicate;
+            // 新字段可空：旧客户端不带时保持原值，避免把段数上限冲回默认。
+            if (request.EmployeeSegmentLimit.HasValue)
+            {
+                settings.EmployeeSegmentLimit = Math.Clamp(request.EmployeeSegmentLimit.Value, 1, MaxSegmentLimit);
+            }
+            if (request.ManagerSegmentLimit.HasValue)
+            {
+                settings.ManagerSegmentLimit = Math.Clamp(request.ManagerSegmentLimit.Value, 1, MaxSegmentLimit);
+            }
+            if (request.AutoClockOutAtMidnight.HasValue)
+            {
+                settings.AutoClockOutAtMidnight = request.AutoClockOutAtMidnight.Value;
+            }
             settings.UpdatedAt = DateTime.UtcNow;
             settings.UpdatedBy = _currentUserService.GetCurrentUsername();
             await _db.Updateable(settings).ExecuteCommandAsync();
@@ -2416,7 +2584,10 @@ namespace BlazorApp.Api.Services.React
             {
                 return ApiResponse<AttendanceApprovalDto>.Error("审核记录已处理", "APPROVAL_ALREADY_REVIEWED");
             }
-            if (model.ApplicantUserGuid.Equals(reviewer, StringComparison.OrdinalIgnoreCase))
+            // 申请人默认不能审自己；持 Attendance.Approval.ReviewSelf（默认不授予任何角色）时允许，并标记「本人审批」。
+            var isSelfReview = model.ApplicantUserGuid.Equals(reviewer, StringComparison.OrdinalIgnoreCase);
+            if (isSelfReview
+                && !await CurrentUserHasPermissionAsync(Permissions.Attendance.Approval.ReviewSelf))
             {
                 return ApiResponse<AttendanceApprovalDto>.Error(
                     "申请人不能审核自己的考勤申请",
@@ -2439,7 +2610,8 @@ namespace BlazorApp.Api.Services.React
             AttendanceMealClaim? mealClaim = null;
             var reviewedAt = _timeProvider.GetUtcNow().UtcDateTime;
             var updatedBy = _currentUserService.GetCurrentUsername();
-            var mutationResource = model.SourceType is "Punch" or "MissingClockOut" or "Overtime" or "PunchAdjustment" or "MealBreak"
+            // 请假也进员工锁：与员工撤销请假（CancelMyLeaveRequestAsync）互斥。
+            var mutationResource = model.SourceType is "Punch" or "MissingClockOut" or "Overtime" or "PunchAdjustment" or "MealBreak" or "Leave"
                 ? AttendanceDailyMutationLock.BuildResource(
                     model.ApplicantUserGuid,
                     model.StoreCode,
@@ -2643,6 +2815,7 @@ namespace BlazorApp.Api.Services.React
                     .SetColumns(item => item.ReviewerUserGuid == reviewer)
                     .SetColumns(item => item.ReviewedAt == reviewedAt)
                     .SetColumns(item => item.ApprovedOvertimeMinutes == model.ApprovedOvertimeMinutes)
+                    .SetColumns(item => item.IsSelfReview == isSelfReview)
                     .SetColumns(item => item.UpdatedAt == reviewedAt)
                     .SetColumns(item => item.UpdatedBy == updatedBy)
                     .Where(item =>
@@ -2715,6 +2888,7 @@ namespace BlazorApp.Api.Services.React
                 model.ReviewRemark = reviewRemark;
                 model.ReviewerUserGuid = reviewer;
                 model.ReviewedAt = reviewedAt;
+                model.IsSelfReview = isSelfReview;
                 model.UpdatedAt = reviewedAt;
                 model.UpdatedBy = updatedBy;
             }
@@ -2773,10 +2947,16 @@ namespace BlazorApp.Api.Services.React
                 && item.SourceType == sourceType
                 && item.SourceGuid == sourceGuid);
 
-            // 漏下班和加班允许终态后重新生成待审记录，其他来源继续按任意历史记录去重。
-            if (sourceType is "MissingClockOut" or "Overtime")
+            if (sourceType == "Overtime")
             {
+                // 加班按「已处理水位」重开剩余分钟（见 ReconcileOvertimeApprovalAsync），这里只防重复的待审。
                 query = query.Where(item => item.ReviewStatus == "Pending");
+            }
+            else if (sourceType is "MissingClockOut" or "Punch")
+            {
+                // 漏下班 / 打卡异常：已批准或已拒绝就是结案，不再重开；
+                // 系统自动取消（状态消失、排班失效后恢复等）不算结案，状态再次出现时要能重新生成。
+                query = query.Where(item => item.ReviewStatus != "Cancelled");
             }
 
             return query;
@@ -2858,10 +3038,10 @@ namespace BlazorApp.Api.Services.React
         }
 
         /// <summary>
-        /// 排班失效时取消它名下所有待审的派生记录。返回被取消的用餐申报 ClaimGuid：
-        /// 只有用餐申报是员工发起、会推送给审批人的审批，调用方在事务提交后据此撤回待办通知。
+        /// 排班失效时取消它名下所有待审的派生记录。返回被取消的用餐申报 ClaimGuid 与补卡 AdjustmentGuid：
+        /// 这两类是员工发起、会推送给审批人的审批，调用方在事务提交后据此撤回待办通知。
         /// </summary>
-        private async Task<List<string>> CancelScheduleDerivedApprovalsAsync(
+        private async Task<CancelledScheduleSources> CancelScheduleDerivedApprovalsAsync(
             string scheduleGuid,
             string reason)
         {
@@ -2875,7 +3055,57 @@ namespace BlazorApp.Api.Services.React
             }
             await CancelPendingApprovalsAsync("Overtime", scheduleGuid, reason);
             await CancelPendingApprovalsAsync("MissingClockOut", scheduleGuid, reason);
-            return await CancelMealClaimsForScheduleAsync(scheduleGuid, reason);
+            var adjustmentGuids = await CancelPendingAdjustmentsForScheduleAsync(scheduleGuid, reason);
+            var mealClaimGuids = await CancelMealClaimsForScheduleAsync(scheduleGuid, reason);
+            return new CancelledScheduleSources(mealClaimGuids, adjustmentGuids);
+        }
+
+        /// <summary>
+        /// 排班删除 / 作废后，挂在它下面的待审补卡已无法批准（批准时排班校验必失败），
+        /// 与审批一起改为 Cancelled，避免店长在审核列表里看到注定失败的申请。
+        /// </summary>
+        private async Task<List<string>> CancelPendingAdjustmentsForScheduleAsync(
+            string scheduleGuid,
+            string reason)
+        {
+            var adjustmentGuids = await _db.Queryable<AttendancePunchAdjustment>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.ScheduleGuid == scheduleGuid
+                    && item.Status == "Pending")
+                .Select(item => item.AdjustmentGuid)
+                .ToListAsync();
+            if (adjustmentGuids.Count == 0)
+            {
+                return adjustmentGuids;
+            }
+
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            await _db.Updateable<AttendancePunchAdjustment>()
+                .SetColumns(item => item.Status == "Cancelled")
+                .SetColumns(item => item.UpdatedAt == now)
+                .SetColumns(item => item.UpdatedBy == "system")
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status == "Pending"
+                    && adjustmentGuids.Contains(item.AdjustmentGuid))
+                .ExecuteCommandAsync();
+            foreach (var adjustmentGuid in adjustmentGuids)
+            {
+                await CancelPendingApprovalsAsync("PunchAdjustment", adjustmentGuid, reason);
+            }
+            return adjustmentGuids;
+        }
+
+        /// <summary>事务提交后撤回排班失效带走的用餐申报与补卡待办（绝不抛异常）。</summary>
+        private async Task RevokeCancelledScheduleSourceNotificationsAsync(CancelledScheduleSources sources)
+        {
+            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
+                AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
+                sources.MealClaimGuids);
+            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
+                AttendanceApprovalNotificationPolicy.SourceTypePunchAdjustment,
+                sources.AdjustmentGuids);
         }
 
         private async Task ReconcileOvertimeApprovalAsync(
@@ -3185,7 +3415,8 @@ namespace BlazorApp.Api.Services.React
                     }
                 }
             }
-            if (isManaged && requestedPunchTimeUtc > nowUtc)
+            // 补卡只能补已经发生的打卡：本人、店长代补、Admin 所有路径一律禁止未来时间。
+            if (requestedPunchTimeUtc > nowUtc)
             {
                 return PunchAdjustmentContext.Error("补卡时间不能晚于当前时间", "PUNCH_TIME_IN_FUTURE");
             }
@@ -3457,8 +3688,38 @@ namespace BlazorApp.Api.Services.React
                     "Punch",
                     adjustment.OriginalPunchGuid,
                     "原打卡已被补卡覆盖，待审异常已自动取消");
+                var supersededAutoClockOut = await _db.Queryable<AttendancePunch>().AnyAsync(item =>
+                    item.PunchGuid == adjustment.OriginalPunchGuid && item.IsSystemAutoClockOut);
+                if (supersededAutoClockOut && !string.IsNullOrWhiteSpace(adjustment.ScheduleGuid))
+                {
+                    await CloseMissingClockOutAfterActualTimeAsync(adjustment);
+                }
             }
             return punch;
+        }
+
+        /// <summary>
+        /// 午夜自动下班卡被「实际下班时间」覆盖：该排班的漏下班待处理以「已批准」结案（审核人＝批准补卡的人），
+        /// 结案后 BuildPendingApprovalExistenceQuery 视为终态，不再重开。
+        /// </summary>
+        private async Task CloseMissingClockOutAfterActualTimeAsync(AttendancePunchAdjustment adjustment)
+        {
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            var reviewer = adjustment.ReviewedByUserGuid ?? ResolveCurrentUserGuid();
+            var updatedBy = _currentUserService.GetCurrentUsername();
+            await _db.Updateable<AttendanceApproval>()
+                .SetColumns(item => item.ReviewStatus == "Approved")
+                .SetColumns(item => item.ReviewRemark == "已填写实际下班时间，漏下班已结案")
+                .SetColumns(item => item.ReviewerUserGuid == reviewer)
+                .SetColumns(item => item.ReviewedAt == now)
+                .SetColumns(item => item.UpdatedAt == now)
+                .SetColumns(item => item.UpdatedBy == updatedBy)
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.SourceType == "MissingClockOut"
+                    && item.SourceGuid == adjustment.ScheduleGuid
+                    && item.ReviewStatus == "Pending")
+                .ExecuteCommandAsync();
         }
 
         private async Task<bool> IsCurrentUserManagerForStoreAsync(string storeCode)
@@ -3482,6 +3743,7 @@ namespace BlazorApp.Api.Services.React
 
         private async Task<int> ResolveSegmentLimitAsync(string userGuid, string storeCode)
         {
+            var settings = await GetOrCreateSettingsModelAsync();
             var roleNames = await _db.Queryable<UserRole>()
                 .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
                 .Where((userRole, role) =>
@@ -3495,10 +3757,10 @@ namespace BlazorApp.Api.Services.React
                     roleName,
                     StringComparer.OrdinalIgnoreCase)))
             {
-                return 2;
+                return ResolveEmployeeSegmentLimit(settings);
             }
 
-            // 任一仍有效的店长管理关系即可获得三段上限，不把上限错误收窄到当前门店。
+            // 任一仍有效的店长管理关系即可获得店长上限，不把上限错误收窄到当前门店。
             var hasActiveManagementRelation = await _db.Queryable<UserStore>()
                 .InnerJoin<Store>((userStore, store) => userStore.StoreGUID == store.StoreGUID)
                 .Where((userStore, store) =>
@@ -3507,8 +3769,19 @@ namespace BlazorApp.Api.Services.React
                     && userStore.IsPrimary
                     && userStore.UserGUID == userGuid)
                 .AnyAsync();
-            return hasActiveManagementRelation ? 3 : 2;
+            return hasActiveManagementRelation
+                ? ResolveManagerSegmentLimit(settings)
+                : ResolveEmployeeSegmentLimit(settings);
         }
+
+        // 段数上限可在考勤设置里调（列默认员工 4、店长 6）；防御历史脏值，至少 1 段、最多 MaxSegmentLimit 段。
+        internal const int MaxSegmentLimit = 10;
+
+        internal static int ResolveEmployeeSegmentLimit(AttendanceSettings settings) =>
+            Math.Clamp(settings.EmployeeSegmentLimit, 1, MaxSegmentLimit);
+
+        internal static int ResolveManagerSegmentLimit(AttendanceSettings settings) =>
+            Math.Clamp(settings.ManagerSegmentLimit, 1, MaxSegmentLimit);
 
         private static ValidationResult ValidateEffectivePunchSequence(
             List<AttendancePunch> punches,
@@ -3673,7 +3946,9 @@ namespace BlazorApp.Api.Services.React
                 for (var index = 0; index + 1 < ordered.Count; index += 2)
                 {
                     if (ordered[index].PunchType != "ClockIn"
-                        || ordered[index + 1].PunchType != "ClockOut")
+                        || ordered[index + 1].PunchType != "ClockOut"
+                        // 午夜自动下班卡补的是 24:00，不代表真实在岗；拿它判重叠会挡住员工在别的店的正常补卡。
+                        || ordered[index + 1].IsSystemAutoClockOut)
                     {
                         continue;
                     }
@@ -3894,6 +4169,9 @@ namespace BlazorApp.Api.Services.React
                 RequireApprovalForEarlyLeave = true,
                 RequireApprovalForNoSchedule = true,
                 RequireApprovalForDuplicate = true,
+                EmployeeSegmentLimit = 4,
+                ManagerSegmentLimit = 6,
+                AutoClockOutAtMidnight = true,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "system",
             };
@@ -4114,28 +4392,30 @@ namespace BlazorApp.Api.Services.React
         private async Task ReconcileDerivedApprovalsUnderEmployeeLocksAsync(
             IEnumerable<AttendanceSchedule> scheduleSnapshots)
         {
-            // 对账会在读接口（GET 今日 / 排班列表）里顺手取消已失效排班名下的用餐申报。
-            // 收集「已提交事务」里被取消的申报，循环全部结束后统一撤回审批人手里的待办通知；
+            // 对账会在读接口（GET 今日 / 排班列表）里顺手取消已失效排班名下的用餐申报与待审补卡。
+            // 收集「已提交事务」里被取消的来源，循环全部结束后统一撤回审批人手里的待办通知；
             // 撤回在事务之外且绝不抛异常，GET 不会因为推送失败而报错。用 finally 保证中途某个员工的事务失败时，
             // 前面已提交的取消也不会漏撤回。
             var cancelledMealClaimGuids = new List<string>();
+            var cancelledAdjustmentGuids = new List<string>();
             try
             {
                 await ReconcileDerivedApprovalsUnderEmployeeLocksCoreAsync(
                     scheduleSnapshots,
-                    cancelledMealClaimGuids);
+                    cancelledMealClaimGuids,
+                    cancelledAdjustmentGuids);
             }
             finally
             {
-                await RevokeApprovalSubmittedNotificationsForSourcesAsync(
-                    AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
-                    cancelledMealClaimGuids);
+                await RevokeCancelledScheduleSourceNotificationsAsync(
+                    new CancelledScheduleSources(cancelledMealClaimGuids, cancelledAdjustmentGuids));
             }
         }
 
         private async Task ReconcileDerivedApprovalsUnderEmployeeLocksCoreAsync(
             IEnumerable<AttendanceSchedule> scheduleSnapshots,
-            List<string> committedCancelledMealClaimGuids)
+            List<string> committedCancelledMealClaimGuids,
+            List<string> committedCancelledAdjustmentGuids)
         {
             foreach (var userSchedules in scheduleSnapshots
                 .GroupBy(item => item.UserGuid, StringComparer.OrdinalIgnoreCase))
@@ -4155,8 +4435,9 @@ namespace BlazorApp.Api.Services.React
                     default);
                 await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                     mutationResource);
-                // 本轮事务里被取消的用餐申报；提交成功后才并入 committedCancelledMealClaimGuids（回滚的不算）。
+                // 本轮事务里被取消的用餐申报与补卡；提交成功后才并入 committed 列表（回滚的不算）。
                 var iterationCancelledMealClaimGuids = new List<string>();
+                var iterationCancelledAdjustmentGuids = new List<string>();
                 await _db.Ado.BeginTranAsync();
                 try
                 {
@@ -4174,9 +4455,11 @@ namespace BlazorApp.Api.Services.React
                     foreach (var staleScheduleGuid in scheduleGuids
                         .Where(scheduleGuid => !activeScheduleGuids.Contains(scheduleGuid)))
                     {
-                        iterationCancelledMealClaimGuids.AddRange(await CancelScheduleDerivedApprovalsAsync(
+                        var cancelled = await CancelScheduleDerivedApprovalsAsync(
                             staleScheduleGuid,
-                            "排班已失效，相关待审考勤已自动取消"));
+                            "排班已失效，相关待审考勤已自动取消");
+                        iterationCancelledMealClaimGuids.AddRange(cancelled.MealClaimGuids);
+                        iterationCancelledAdjustmentGuids.AddRange(cancelled.AdjustmentGuids);
                     }
 
                     if (activeSchedules.Count > 0)
@@ -4195,7 +4478,9 @@ namespace BlazorApp.Api.Services.React
                             var session = AttendanceWorkSessionCalculator.Calculate(
                                 schedule,
                                 lockedPunches,
-                                segmentLimitMap.GetValueOrDefault(schedule.UserGuid, 2),
+                                segmentLimitMap.GetValueOrDefault(
+                                    schedule.UserGuid,
+                                    ResolveEmployeeSegmentLimit(settings)),
                                 ConvertUtcToStoreLocal(_timeProvider.GetUtcNow().UtcDateTime, timeZone),
                                 settings.EarlyLeaveGraceMinutes,
                                 settings.LateGraceMinutes);
@@ -4207,6 +4492,7 @@ namespace BlazorApp.Api.Services.React
 
                     await _db.Ado.CommitTranAsync();
                     committedCancelledMealClaimGuids.AddRange(iterationCancelledMealClaimGuids);
+                    committedCancelledAdjustmentGuids.AddRange(iterationCancelledAdjustmentGuids);
                 }
                 catch
                 {
@@ -4287,7 +4573,9 @@ namespace BlazorApp.Api.Services.React
                     continue;
                 }
 
-                var segmentLimit = segmentLimitMap.GetValueOrDefault(schedule.UserGuid, 2);
+                var segmentLimit = segmentLimitMap.GetValueOrDefault(
+                    schedule.UserGuid,
+                    ResolveEmployeeSegmentLimit(settings));
                 var timeZone = timeZoneMap.GetValueOrDefault(schedule.StoreCode, DefaultStoreTimeZone);
                 var nowLocal = ConvertUtcToStoreLocal(_timeProvider.GetUtcNow().UtcDateTime, timeZone);
                 var session = AttendanceWorkSessionCalculator.Calculate(
@@ -4383,9 +4671,14 @@ namespace BlazorApp.Api.Services.React
                 .Select((userStore, store) => userStore.UserGUID)
                 .ToListAsync();
             var managedUserSet = managedUsers.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var settings = await GetOrCreateSettingsModelAsync();
+            var employeeLimit = ResolveEmployeeSegmentLimit(settings);
+            var managerLimit = ResolveManagerSegmentLimit(settings);
             return userGuids.ToDictionary(
                 userGuid => userGuid,
-                userGuid => managerUsers.Contains(userGuid) && managedUserSet.Contains(userGuid) ? 3 : 2,
+                userGuid => managerUsers.Contains(userGuid) && managedUserSet.Contains(userGuid)
+                    ? managerLimit
+                    : employeeLimit,
                 StringComparer.OrdinalIgnoreCase);
         }
 
@@ -4698,6 +4991,46 @@ namespace BlazorApp.Api.Services.React
             if (leaveType == "SickLeave" && !IsManagedLeaveAttachmentUrl(request.AttachmentUrl))
             {
                 return ValidationResult.Error("病假附件地址无效", "INVALID_ATTACHMENT_URL");
+            }
+
+            return ValidationResult.OK();
+        }
+
+        /// <summary>
+        /// 本人请假：分店必填、日期先后、时段先后、类型只认年假 / 病假；附件可不传（移动端病假暂不上传），
+        /// 但传了就必须是考勤请假附件目录下的地址，防止把任意外链当作证明存进来。
+        /// </summary>
+        private static ValidationResult ValidateSelfLeaveRequest(CreateAttendanceLeaveRequestDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.StoreCode))
+            {
+                return ValidationResult.Error("分店代码不能为空", "STORE_REQUIRED");
+            }
+
+            if (request.StartDate == default || request.EndDate == default)
+            {
+                return ValidationResult.Error("请假日期不能为空", "DATE_REQUIRED");
+            }
+
+            if (request.StartDate.Date > request.EndDate.Date)
+            {
+                return ValidationResult.Error("结束日期不能早于开始日期", "INVALID_DATE_RANGE");
+            }
+
+            if (request.StartTime.HasValue && request.EndTime.HasValue && request.StartTime >= request.EndTime)
+            {
+                return ValidationResult.Error("请假结束时间必须晚于开始时间", "INVALID_TIME_RANGE");
+            }
+
+            if (NormalizeManagedLeaveType(request.LeaveType) is not "AnnualLeave" and not "SickLeave")
+            {
+                return ValidationResult.Error("请假类型无效", "INVALID_LEAVE_TYPE");
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.AttachmentUrl)
+                && !IsManagedLeaveAttachmentUrl(request.AttachmentUrl))
+            {
+                return ValidationResult.Error("请假附件地址无效", "INVALID_ATTACHMENT_URL");
             }
 
             return ValidationResult.OK();
@@ -5254,6 +5587,7 @@ namespace BlazorApp.Api.Services.React
                 SigningKeyId = item.SigningKeyId,
                 SupersedesPunchGuid = item.SupersedesPunchGuid,
                 AdjustmentGuid = item.AdjustmentGuid,
+                IsSystemAutoClockOut = item.IsSystemAutoClockOut,
                 EmployeeName = employeeName,
                 StoreName = storeName,
                 ServerTimeUtc = serverTimeUtc,
@@ -5292,6 +5626,7 @@ namespace BlazorApp.Api.Services.React
             CreatedAt = item.CreatedAt,
             CandidateOvertimeMinutes = item.CandidateOvertimeMinutes,
             ApprovedOvertimeMinutes = item.ApprovedOvertimeMinutes,
+            IsSelfReview = item.IsSelfReview,
         };
 
         private static AttendancePunchAdjustmentDto ToDto(
@@ -5357,6 +5692,9 @@ namespace BlazorApp.Api.Services.React
             RequireApprovalForEarlyLeave = item.RequireApprovalForEarlyLeave,
             RequireApprovalForNoSchedule = item.RequireApprovalForNoSchedule,
             RequireApprovalForDuplicate = item.RequireApprovalForDuplicate,
+            EmployeeSegmentLimit = ResolveEmployeeSegmentLimit(item),
+            ManagerSegmentLimit = ResolveManagerSegmentLimit(item),
+            AutoClockOutAtMidnight = item.AutoClockOutAtMidnight,
         };
 
         private sealed class StoreAccessResult
@@ -5418,6 +5756,16 @@ namespace BlazorApp.Api.Services.React
                 AttendanceSchedule schedule,
                 AttendancePunch proposedPunch) =>
                 new(true, string.Empty, null, schedule, proposedPunch);
+        }
+
+        /// <summary>排班失效时被系统取消、需要撤回待办通知的来源。</summary>
+        private sealed record CancelledScheduleSources(
+            IReadOnlyCollection<string> MealClaimGuids,
+            IReadOnlyCollection<string> AdjustmentGuids)
+        {
+            public static CancelledScheduleSources Empty { get; } = new(
+                Array.Empty<string>(),
+                Array.Empty<string>());
         }
 
         private sealed class ValidationResult

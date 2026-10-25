@@ -197,12 +197,6 @@ const ATTENDANCE_MANAGEMENT_PERMISSIONS = [
   PERMISSIONS.Attendance.AdminView,
 ];
 
-const ATTENDANCE_REVIEW_PERMISSIONS = [
-  PERMISSIONS.Attendance.ApprovalReviewManagedStore,
-  PERMISSIONS.Attendance.LeaveReviewManagedStore,
-  PERMISSIONS.Attendance.AdminView,
-];
-
 function resolvePermissionAliases(permission: string) {
   const normalizedPermission = permission.toLowerCase();
   const group = PERMISSION_ALIAS_GROUPS.find(({ canonicalCode, aliasCodes }) =>
@@ -428,11 +422,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     ATTENDANCE_MANAGEMENT_PERMISSIONS.some((permission) =>
       hasPermission(permission)
     );
+  // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口），
+  // 只有「请假审核」或「查看全部考勤」的人看到按钮也会被 403。
   const canReviewAttendance =
-    isAdmin ||
-    ATTENDANCE_REVIEW_PERMISSIONS.some((permission) =>
-      hasPermission(permission)
-    );
+    isAdmin || hasPermission(PERMISSIONS.Attendance.ApprovalReviewManagedStore);
   const canEditAttendanceHoliday =
     isAdmin || hasPermission(PERMISSIONS.Attendance.HolidayEditManagedStore);
   const canEditAttendanceSettings =

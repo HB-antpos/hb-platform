@@ -295,6 +295,11 @@ export interface AttendancePunchPayload {
   locationCapturedAtUtc?: string;
   /** 扫码前员工对缺休息的回答；旧后端忽略此字段。 */
   mealDeclaration?: AttendanceMealDeclaration;
+  /**
+   * 按今日状态期望的打卡类型；与服务端判定不一致时后端拒绝（PUNCH_TYPE_MISMATCH），
+   * 防止手机上的状态过期时把「上班」记成「下班」。旧后端忽略此字段。
+   */
+  expectedPunchType?: AttendancePunchType;
 }
 
 export interface AttendanceQrResolveResult {

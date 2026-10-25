@@ -1,0 +1,45 @@
+/* Web 页面骨架与角标（工时统计 / 工资表 / 时薪表共用） */
+.screen{width:1440px;background:#F5F7FA;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(16,24,40,.16);border:1px solid var(--line2)}
+.top{height:48px;background:#fff;border-bottom:1px solid var(--line2);display:flex;align-items:center;padding:0 16px;gap:12px;font-size:14px}
+.logo{width:28px;height:28px;border-radius:6px;background:var(--brand);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:12px}
+.crumb{color:var(--t3)} .crumb b{color:var(--t1);font-weight:600}
+.body{display:flex}
+.side{width:56px;background:#fff;border-right:1px solid var(--line2);padding:10px 8px;display:flex;flex-direction:column;gap:6px;align-items:center;color:var(--t2);font-size:19px}
+.side div{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative}
+.side .on{background:#E6F4FF;color:var(--brand)}
+.side .bd{position:absolute;top:3px;right:2px;background:var(--bad);color:#fff;font-size:9px;border-radius:7px;padding:0 4px;font-weight:700}
+.main{flex:1;padding:14px 20px 20px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ph{display:flex;align-items:center;gap:10px}
+.ph h2{font-size:20px;font-weight:700;margin-right:6px}
+.sel{height:32px;border:1px solid var(--line);border-radius:6px;background:#fff;display:inline-flex;align-items:center;gap:6px;padding:0 10px;font-size:13.5px;white-space:nowrap}
+.sel i{color:var(--t3)}
+.segc{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:13px;background:#fff}
+.segc span{padding:0 12px;height:30px;display:flex;align-items:center;white-space:nowrap}
+.segc .on{background:var(--brand);color:#fff;font-weight:600}
+.ptabs{display:flex;gap:24px;border-bottom:1px solid var(--line2);font-size:14px;margin-top:-4px}
+.ptabs div{padding:6px 0 9px;color:var(--t2)}
+.ptabs .on{color:var(--brand);font-weight:600;border-bottom:2px solid var(--brand)}
+.bn{display:flex;align-items:center;gap:8px;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.45}
+.bn .btn{height:28px;font-size:12.5px;padding:0 10px}
+.bn.teal{background:#F0FDF9;border:1px solid #99F6E0;color:#107569}
+.bn.amber{background:var(--warnbg);border:1px solid #FEDF89;color:var(--warn)}
+.bn.pink{background:#FDF2FA;border:1px solid #FCCEEE;color:#C11574}
+.bn i{font-size:17px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{background:#fff;border:1px solid var(--line2);border-radius:8px;padding:10px 14px}
+.kpi .l{font-size:12.5px;color:var(--t2)} .kpi .v{font-size:21px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums} .kpi .s{font-size:12px;color:var(--t3);margin-top:2px}
+.kpi.warn{background:var(--warnbg);border-color:#FEDF89} .kpi.warn .v{color:var(--warn)}
+.note-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px;width:1440px}
+.bg{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 3px;border-radius:4px;font-size:10.5px;font-weight:700;line-height:1;white-space:nowrap}
+.b-ph{background:#FFF4ED;color:#C4320A;border:1px solid #F9DBAF}
+.b-sick{background:var(--badbg);color:var(--bad);border:1px solid #FECDCA}
+.b-al{background:var(--violetbg);color:var(--violet);border:1px solid #D9D6FE}
+.b-co{background:#F0FDF9;color:#107569;border:1px solid #99F6E0}
+.b-bd{background:#FDF2FA;color:#C11574;border:1px solid #FCCEEE}
+.b-st{background:#ECFDFF;color:#0E7090;border:1px solid #A5F0FC}
+.b-pd{background:var(--warnbg);color:var(--warn);border:1px dashed #F79009}
+.b-ok{background:var(--okbg);color:var(--ok);border:1px solid #ABEFC6}
+.b-age{background:var(--warnbg);color:var(--warn);border:1px solid #FEDF89}
+.b-ty{background:var(--muted);color:var(--t2);border:1px solid var(--line2);font-weight:600}
+.mode{display:inline-block;font-size:11.5px;font-weight:600;border-radius:4px;padding:1px 6px}
+.m-transfer{background:#EFF8FF;color:var(--acc)} .m-cash{background:#F0FDF9;color:#107569} .m-mix{background:var(--violetbg);color:var(--violet)}

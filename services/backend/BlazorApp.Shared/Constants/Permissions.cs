@@ -580,6 +580,8 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string ViewManagedStore = "Attendance.Approval.ViewManagedStore";
                 public const string ReviewManagedStore = "Attendance.Approval.ReviewManagedStore";
+                // 审核本人提交的考勤申请；默认不授予任何角色，由管理员在生产手动授权（迁移 20261026.001 入库）。
+                public const string ReviewSelf = "Attendance.Approval.ReviewSelf";
             }
 
             public static class Holiday

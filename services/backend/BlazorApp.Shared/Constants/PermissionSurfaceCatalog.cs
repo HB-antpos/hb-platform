@@ -134,6 +134,7 @@ namespace BlazorApp.Shared.Constants
             "Advertisements.View",
             "Attendance.Admin.View",
             "Attendance.Approval.ReviewManagedStore",
+            "Attendance.Approval.ReviewSelf",
             "Attendance.Approval.ViewManagedStore",
             "Attendance.Availability.ViewManagedStore",
             "Attendance.Holiday.EditManagedStore",

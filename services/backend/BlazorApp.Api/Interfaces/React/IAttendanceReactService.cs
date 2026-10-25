@@ -13,6 +13,10 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<int>> PublishWeekAsync(PublishAttendanceWeekDto request);
         Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(CopyAttendanceScheduleWeekDto request);
         Task<ApiResponse<bool>> DeleteScheduleAsync(string scheduleGuid);
+        Task<ApiResponse<List<AttendanceScheduleDto>>> GetDeletedSchedulesAsync(AttendanceScheduleQueryDto query);
+        Task<ApiResponse<AttendanceScheduleDto>> RestoreScheduleAsync(string scheduleGuid);
+        /// <summary>午夜自动下班（后台任务调用）：为门店时区已过 00:00 仍未闭合的班段补系统下班卡，返回补卡张数。</summary>
+        Task<int> RunMidnightAutoClockOutAsync(CancellationToken cancellationToken = default);
         Task<ApiResponse<AttendanceTodayDto>> GetMyTodayAsync(DateTime? workDate = null, string? storeCode = null);
         Task<ApiResponse<List<AttendanceScheduleDto>>> GetMyWeekAsync(DateTime? weekStartDate, string? storeCode = null);
         Task<ApiResponse<List<AttendanceAvailabilityDto>>> GetMyAvailabilityAsync(DateTime? weekStartDate, string? storeCode = null);
