@@ -4271,7 +4271,7 @@ namespace BlazorApp.Api.Services.React
             // HQ 多码成本不是本地最终值；关系同步完成后 Type1 统一分摊，Type2 推送时回退已校正主成本。
             local.PurchasePrice = null;
             local.MultiCodeRetailPrice = hqRow.H一品多码零售价;
-            local.DiscountRate = hqRow.H折扣率;
+            local.DiscountRate = StoreDiscountRate.Normalize(hqRow.H折扣率);
             local.IsAutoPricing = hqRow.H是否自动定价 ?? false;
             local.IsSpecialProduct = hqRow.H是否特殊商品 ?? false;
             local.IsActive = hqRow.H使用状态 ?? true;

@@ -3853,7 +3853,7 @@ namespace BlazorApp.Api.Services.React
                 // HQ 普通多码属于 Type2 关系时，外部成本不是最终值；保留为空以便推送回退到已校正主成本。
                 localRow.PurchasePrice = null;
                 localRow.MultiCodeRetailPrice = hqRow.H一品多码零售价;
-                localRow.DiscountRate = hqRow.H折扣率;
+                localRow.DiscountRate = StoreDiscountRate.Normalize(hqRow.H折扣率);
                 localRow.IsActive = hqRow.H使用状态 ?? true;
                 localRow.IsAutoPricing = hqRow.H是否自动定价 ?? false;
                 localRow.IsSpecialProduct = hqRow.H是否特殊商品 ?? false;

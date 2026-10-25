@@ -141,10 +141,10 @@ namespace BlazorApp.Api.Data
 
             _db.Aop.DataExecuting = (oldValue, entityInfo) =>
             {
-                // 折扣率统一保护：整实体写入 StoreRetailPrice 时，一律归一化成标准小数（百分数换算、
+                // 折扣率统一保护：整实体写入 StoreRetailPrice / StoreMultiCodeProduct 时，一律归一化成标准小数（百分数换算、
                 // 0/负数/≥1 的脏值置空），任何调用方都绕不过。SetColumns / BulkCopy 不经过这里，已在服务层单独处理。
                 if (
-                    entityInfo.EntityValue is StoreRetailPrice
+                    (entityInfo.EntityValue is StoreRetailPrice || entityInfo.EntityValue is StoreMultiCodeProduct)
                     && entityInfo.PropertyName == nameof(StoreRetailPrice.DiscountRate)
                     && (
                         entityInfo.OperationType == DataFilterType.InsertByObject
