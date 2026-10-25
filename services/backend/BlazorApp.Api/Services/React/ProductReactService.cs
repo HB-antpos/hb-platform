@@ -1941,7 +1941,11 @@ namespace BlazorApp.Api.Services.React
             if (changes.StoreRetailPriceValue.HasValue)
                 update = update.SetColumns(record => record.StoreRetailPriceValue == changes.StoreRetailPriceValue.Value);
             if (changes.DiscountRate.HasValue)
-                update = update.SetColumns(record => record.DiscountRate == changes.DiscountRate.Value);
+            {
+                // SetColumns 绕过实体 AOP，这里显式校验；表达式里只放局部变量，避免 SqlSugar 解析方法调用。
+                var discountRate = StoreDiscountRate.RequireValid(changes.DiscountRate.Value);
+                update = update.SetColumns(record => record.DiscountRate == discountRate);
+            }
             if (changes.IsAutoPricing.HasValue)
                 update = update.SetColumns(record => record.IsAutoPricing == changes.IsAutoPricing.Value);
             if (changes.IsSpecialProduct.HasValue)
@@ -3726,7 +3730,8 @@ namespace BlazorApp.Api.Services.React
                 localRow.SupplierCode = hqRow.H供应商编码;
                 localRow.PurchasePrice = hqRow.H进货价;
                 localRow.StoreRetailPriceValue = hqRow.H分店零售价;
-                localRow.DiscountRate = hqRow.H折扣率;
+                // 总部折扣率可能是百分数（50）或脏值（1 / 100），入库前统一成标准小数。
+                localRow.DiscountRate = StoreDiscountRate.Normalize(hqRow.H折扣率);
                 localRow.IsActive = hqRow.H使用状态;
                 localRow.IsAutoPricing = hqRow.H是否自动定价;
                 localRow.IsSpecialProduct = hqRow.H是否特殊商品;
@@ -3848,7 +3853,7 @@ namespace BlazorApp.Api.Services.React
                 // HQ 普通多码属于 Type2 关系时，外部成本不是最终值；保留为空以便推送回退到已校正主成本。
                 localRow.PurchasePrice = null;
                 localRow.MultiCodeRetailPrice = hqRow.H一品多码零售价;
-                localRow.DiscountRate = hqRow.H折扣率;
+                localRow.DiscountRate = StoreDiscountRate.Normalize(hqRow.H折扣率);
                 localRow.IsActive = hqRow.H使用状态 ?? true;
                 localRow.IsAutoPricing = hqRow.H是否自动定价 ?? false;
                 localRow.IsSpecialProduct = hqRow.H是否特殊商品 ?? false;

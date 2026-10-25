@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="StoreDiscountRateTests.cs" />
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
     <Compile Include="ProductImageDescriptionTests.cs" />
     <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
