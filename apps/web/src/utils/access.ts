@@ -361,11 +361,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.PunchViewManagedStore)
-  const canReviewAttendance =
-    isAdmin ||
-    hasPermission(P.Attendance.AdminView) ||
-    hasPermission(P.Attendance.ApprovalReviewManagedStore) ||
-    hasPermission(P.Attendance.LeaveReviewManagedStore)
+  // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口）。
+  const canReviewAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewManagedStore)
   const canEditAttendanceHoliday =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||

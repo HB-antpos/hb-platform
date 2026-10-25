@@ -244,6 +244,18 @@ assertEqual(
   "review managed attendance permission enables review capability"
 );
 
+// 后端审批接口只认 Approval.ReviewManagedStore：只有请假审核或查看全部考勤，不能显示审核按钮。
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.Attendance.LeaveReviewManagedStore])).canReviewAttendance,
+  false,
+  "leave review permission alone does not enable attendance approval actions"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.Attendance.AdminView])).canReviewAttendance,
+  false,
+  "attendance admin view alone does not enable attendance approval actions"
+);
+
 const attendanceHolidayEditorAccess = buildAccess(
   createUser([PERMISSIONS.Attendance.HolidayEditManagedStore])
 );

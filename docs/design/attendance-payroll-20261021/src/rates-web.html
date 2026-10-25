@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="shell.css">
+<style>
+.wrap{display:flex;gap:12px;align-items:flex-start}
+.tbl{flex:1;background:#fff;border:1px solid var(--line2);border-radius:8px;overflow:hidden;min-width:0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#FAFAFA;font-weight:600;color:var(--t2);font-size:12px;padding:8px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap}
+td{border-bottom:1px solid #F0F0F0;padding:9px 7px;font-size:12.5px;vertical-align:middle;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.r,th.r{text-align:right}
+tr.cur td{background:#F5F9FF} tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+.emp{display:flex;gap:7px;align-items:center}
+.emp .av{width:28px;height:28px;font-size:10.5px}
+.dw{width:430px;background:#fff;border:1px solid var(--line2);border-radius:8px;box-shadow:-8px 0 24px rgba(16,24,40,.08);display:flex;flex-direction:column}
+.dh{padding:12px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:10px}
+.db{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.fl{font-size:12.5px;color:var(--t2);margin-bottom:5px}
+.in{height:34px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;padding:0 10px;font-size:13.5px;font-variant-numeric:tabular-nums;background:#fff}
+.in .u{margin-left:auto;color:var(--t3);font-size:12px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.rad{display:flex;gap:6px}
+.rad span{flex:1;height:32px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px}
+.rad .on{border:2px solid var(--action);color:var(--action);font-weight:600;background:#F5F9FF}
+.pv{background:var(--muted);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.7;font-variant-numeric:tabular-nums}
+.pv b{color:var(--t1)}
+.hist{font-size:12.5px;color:var(--t2);line-height:1.8}
+.hist div{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line2)}
+.df{padding:10px 16px;border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:flex-end}
+.set{width:1440px;margin-top:16px;background:#fff;border:1px solid var(--line2);border-radius:10px;padding:14px 16px}
+.set h3{font-size:15px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.si{border:1px solid var(--line2);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.7}
+.si b{display:block;font-size:13px;margin-bottom:2px}
+.v{display:inline-flex;min-width:34px;height:24px;border:1px solid var(--line);border-radius:5px;align-items:center;justify-content:center;padding:0 6px;font-weight:700;font-variant-numeric:tabular-nums;margin:0 2px;background:#fff}
+.rk{font-weight:600;margin-right:6px}
+</style></head>
+<body><div class="canvas" id="cv">
+<h1>个人时薪表 · Web ＋ 新增设置参数</h1>
+<div class="sub">每人一行，记录发放方式、转账四档时薪（平日 / 周六 / 周日 / 公假）和一个现金时薪；点一行在右边编辑，改动按「生效日期」留历史，工资表按工作日当天有效的时薪来算。下方是新增的考勤设置参数（都可以改）。</div>
+<div class="screen">
+  <div class="top"><div class="logo">HB</div><span class="crumb">门店运营 / 排班考勤 / <b>工时与工资</b></span><span style="margin-left:auto;color:var(--t2)">Sarah Kim</span></div>
+  <div class="body">
+    <div class="side"><div><i class="ti ti-calendar-week"></i></div><div><i class="ti ti-checklist"></i><span class="bd">7</span></div><div class="on"><i class="ti ti-table"></i></div><div><i class="ti ti-fingerprint"></i></div><div><i class="ti ti-calendar-user"></i></div><div><i class="ti ti-beach"></i></div><div><i class="ti ti-settings"></i></div></div>
+    <div class="main">
+      <div class="ph"><h2>工时与工资</h2><span class="sel"><i class="ti ti-building-store"></i>Chermside<i class="ti ti-chevron-down"></i></span><span class="sel"><i class="ti ti-search"></i><span style="color:var(--t3)">员工姓名</span></span><span style="flex:1"></span><span class="btn" style="height:32px"><i class="ti ti-download"></i>导出</span></div>
+      <div class="ptabs"><div>工时统计</div><div>工资表</div><div class="on">个人时薪表</div></div>
+      <div class="bn pink"><i class="ti ti-cake"></i><span><b>Mia Robinson 10-16 已满 17 岁</b>，时薪还是 16 岁时设的，请核对后填新的生效记录。</span></div>
+      <div class="wrap">
+        <div class="tbl"><table id="rt"></table>
+        <div style="padding:9px 12px;font-size:12px;color:var(--t2);border-top:1px solid var(--line2)">「最低时薪」由你按员工适用的 award 级别和年龄自己填，任一档时薪低于它就标红；未成年人过生日后提示更新。</div>
+        </div>
+        <div class="dw">
+          <div class="dh"><div class="av" style="background:#0E9384;width:30px;height:30px;font-size:11px">JN</div><div style="flex:1"><div style="font-weight:700">Jack Nguyen</div><div style="font-size:12px;color:var(--t2)">全职（来自员工资料）</div></div><i class="ti ti-x" style="color:var(--t3);font-size:18px"></i></div>
+          <div class="db">
+            <div><div class="fl">发放方式</div><div class="rad"><span>全转账</span><span>全现金</span><span class="on">转账+现金</span></div></div>
+            <div class="g2"><div><div class="fl">固定转账工时</div><div class="in">30<span class="u">h / 周</span></div></div><div><div class="fl">生效日期</div><div class="in">2026-10-05<span class="u"><i class="ti ti-calendar"></i></span></div></div></div>
+            <div><div class="fl">时薪（$ / h）</div>
+              <div style="display:grid;grid-template-columns:44px repeat(4,1fr);gap:6px;align-items:center;font-size:12px;color:var(--t2)">
+                <span></span><span style="text-align:center">平日</span><span style="text-align:center">周六</span><span style="text-align:center">周日</span><span style="text-align:center">公假</span>
+                <span>转账</span><div class="in" style="padding:0 6px;justify-content:center">28.50</div><div class="in" style="padding:0 6px;justify-content:center">35.63</div><div class="in" style="padding:0 6px;justify-content:center">42.75</div><div class="in" style="padding:0 6px;justify-content:center">64.13</div>
+                <span>现金</span><div class="in" style="padding:0 6px;justify-content:center;grid-column:span 4">28.50<span class="u">不分周末 / 公假</span></div>
+              </div><div style="font-size:11.5px;color:var(--t3);margin-top:5px">带薪假期按平日转账时薪；全现金员工所有工时都按现金时薪</div></div>
+            <div class="g2"><div><div class="fl">现金补贴（每期，负数＝扣回）</div><div class="in">−20.00<span class="u">$</span></div></div><div><div class="fl">最低时薪（自填）</div><div class="in">28.00<span class="u">$ / h</span></div></div></div>
+            <div><div class="fl">备注</div><div class="in" style="color:var(--t2)">扣回 10-09 借支 $20</div></div>
+            <div class="pv">按本期（10-05 ~ 10-18）应付 <b>65.88 h</b> 试算：<br>转账 <b>60 h</b>＝日 3.5 + 六 8 + 假 15.6 + 平 32.9 → <b>$1,816.92</b><br>现金 <b>5.88 h</b> × $28.50 → <b>$167.58</b>　补贴 <b style="color:var(--bad)">−$20.00</b><br>合计 <b>$1,964.50</b></div>
+            <div><div class="fl">历史</div><div class="hist"><div><span>2026-10-05 起 · 30 h · 平日 $28.50 / $28.50</span><span>Sarah Kim</span></div><div><span>2026-07-01 起 · 30 h · 平日 $27.80 / $27.80</span><span>Admin</span></div></div></div>
+          </div>
+          <div class="df"><span class="btn">取消</span><span class="btn pri">保存为新生效记录</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="set">
+  <h3><i class="ti ti-settings"></i>考勤设置 · 新增参数 <span class="need">默认值按你说的填，都可以改</span></h3>
+  <div class="sg">
+    <div class="si"><b>统计周期</b>默认 <span class="v">1 周</span>，可切 2 周<br>双周起始日 <span class="v">2026-10-05</span>；提交后锁定</div>
+    <div class="si"><b>工时显示</b>十进制小时，最多 <span class="v">2</span> 位小数；先舍工时再乘时薪</div>
+    <div class="si"><b>带薪公假提醒</b>过去 <span class="v">10</span> 周同一星期几排班 ≥ <span class="v">7</span> 次<br>仅全职 / 兼职</div>
+    <div class="si"><b>周末 / 公假与转账顺序</b>按实际工时，不乘系数；转账用周六、周日、公假时薪，现金只有一个价<br>转账装填：周日 → 周六 → 带薪假 → 公假 → 平日</div>
+    <div class="si"><b>带薪病假</b>只能选有排班的日子；生病当天起 <span class="v">4</span> 天内提交；必须拍医嘱；工时 = 当天排班工时扣餐</div>
+    <div class="si"><b>带薪年假（休息）</b>提前 ≥ <span class="v">4</span> 周；单次 ≤ <span class="v">2</span> 周；每个工作日 <span class="v">8</span> h，周末、公假不算；期间自动「不能上班」；财务核定</div>
+    <div class="si"><b>年假发放（照常上班）</b>提前 ≥ <span class="v">2</span> 天；单次 ≤ <span class="v">4</span> 周；财务核定 <span class="need">合规需确认</span></div>
+    <div class="si"><b>生日提醒</b>提前 <span class="v">3</span> 天；未成年人生日提示核对时薪</div>
+  </div>
+</div>
+</div>
+<script>
+const rows=[
+ ['#6941C6','SK','Sarah Kim','全职 · 店长','','mix','38','32.00 / 40.00 / 48.00 / 72.00','32.00','<span style="color:var(--ok)">+$50</span>','$30.00 ✓','07-01',''],
+ ['#1570EF','EW','Emma Walsh','兼职','','transfer','—','29.50 / 36.88 / 44.25 / 66.38','','—','$28.00 ✓','07-01',''],
+ ['#0E9384','JN','Jack Nguyen','全职','','mix','30','28.50 / 35.63 / 42.75 / 64.13','28.50','<span style="color:var(--bad)">−$20</span>','$28.00 ✓','10-05','cur'],
+ ['#C11574','OC','Olivia Chen','兼职','','transfer','—','29.00 / 36.25 / 43.50 / 65.25','','—','$28.00 ✓','07-01',''],
+ ['#4E5BA6','MR','Mia Robinson','临时','<span class="bg b-bd">🎂 10-16</span> <span class="bg b-age">17 岁</span>','cash','—','','23.10','—','<span class="bg b-pd">17 岁未填</span>','01-10',''],
+ ['#DC6803','LP','Liam Patel','临时','','mix','10','27.00 / 33.75 / 40.50 / 60.75','27.00','—','$26.50 ✓','07-01',''],
+];
+const ML={mix:'<span class="mode m-mix">转账+现金</span>',transfer:'<span class="mode m-transfer">全转账</span>',cash:'<span class="mode m-cash">全现金</span>'};
+let t='<tr><th>员工</th><th>发放方式</th><th class="r">固定转账<br>h / 周</th><th class="r">转账时薪 $（平日 / 六 / 日 / 公）</th><th class="r">现金时薪 $</th><th class="r">补贴<br>/ 期</th><th class="r">最低时薪<br>（自填）</th><th>生效</th></tr>';
+for(const [c,av,nm,ty,bd,md,fx,tr,cr,al,mn,ef,cur] of rows){
+  const rate=tr||'—', cash=cr||'—';
+  t+=`<tr class="${cur}"><td><div class="emp"><div class="av" style="background:${c}">${av}</div><div><div>${nm}</div><div style="font-size:11.5px;color:var(--t3)">${ty} ${bd}</div></div></div></td><td>${ML[md]}</td><td class="r">${fx}</td><td class="r">${rate}</td><td class="r">${cash}</td><td class="r">${al}</td><td class="r">${mn}</td><td>${ef}</td></tr>`;
+}
+document.getElementById('rt').innerHTML=t;
+document.body.setAttribute('data-h',document.getElementById('cv').offsetHeight);
+</script>
+</body></html>

@@ -1364,6 +1364,9 @@ builder.Services.AddScoped<BlazorApp.Api.Features.PromoPosters.IPromoPosterServi
 builder.Services.AddScoped<IAustralianPublicHolidayProvider, AustralianPublicHolidayProvider>();
 builder.Services.AddScoped<IAttendancePublicHolidaySyncService, AttendancePublicHolidaySyncService>();
 builder.Services.AddScoped<IAttendanceReactService, AttendanceReactService>();
+// 午夜自动下班：按门店时区 00:00 为未闭合班段补系统下班卡（AttendanceSettings.AutoClockOutAtMidnight 可关）。
+// 配置节 AttendanceAutoClockOut（Enabled / IntervalMinutes）。依赖迁移 20261026.001 的新列。
+builder.Services.AddHostedService<BlazorApp.Api.Services.Background.AttendanceAutoClockOutWorker>();
 // 考勤审批推送（N3-c）：审批人解析按审批接口的真实授权口径，通知器负责提交 / 结果 / 失效撤回；
 // 考勤服务以可选依赖持有通知器，只在业务事务提交后调用，推送失败不影响业务结果。
 builder.Services.AddScoped<IAttendanceApproverResolver, AttendanceApproverResolver>();
