@@ -108,6 +108,7 @@
         }
       },
       "viewPosApiEntry": "收银入口",
+      "viewPosApiUsage": "线路用量",
       "apiEntry": {
         "intro": "收银端（WPF / 手持 / iPad）访问 POS API 有三条线路：<b>EdgeOne</b>、<b>AWS 悉尼</b>、<b>直连新加坡</b>，三条都通向同一个后台。这里为每家分店选<b>首选</b>线路，另外两条自动当备用：首选连不上时立刻换下一条，恢复后自动切回。修改后约 1 分钟内生效（夜间更慢），不需要重启收银机，也不影响正在进行的收款。",
         "modes": {
@@ -205,6 +206,72 @@
           "filterFallback": "回退中",
           "filterLabel": "线路"
         }
+      },
+      "apiUsage": {
+        "intro": "统计收银端访问 POS API 的<b>请求数</b>，按线路（EdgeOne / AWS 悉尼 / 直连）区分，由服务器按请求来源识别，收银端无需上报。日期按悉尼时间，周从周一算起；数据约每分钟更新一次，统计从上线后开始累计，无法补录历史。",
+        "granularity": {
+          "day": "按日",
+          "week": "按周",
+          "month": "按月"
+        },
+        "toolbar": {
+          "granularityAria": "统计粒度",
+          "rangeAria": "统计日期范围",
+          "storePlaceholder": "全部分店"
+        },
+        "presets": {
+          "last7": "近 7 天",
+          "last30": "近 30 天",
+          "last90": "近 90 天",
+          "thisMonth": "本月",
+          "lastMonth": "上月",
+          "last12Months": "近 12 个月"
+        },
+        "rangeProblem": {
+          "invalid": "日期格式不正确",
+          "reversed": "开始日期不能晚于结束日期",
+          "tooLarge": "查询范围最多 {{max}} 天，请缩短范围"
+        },
+        "entries": {
+          "unknown": "未识别"
+        },
+        "entryHints": {
+          "unknown": "没带线路标记的请求，例如绕过入口服务器直接访问源站"
+        },
+        "summary": {
+          "total": "请求总数",
+          "requestUnit": "次",
+          "share": "占比 {{share}}",
+          "errors": "4xx {{s4xx}} · 5xx {{s5xx}}"
+        },
+        "chart": {
+          "title": "请求趋势",
+          "aria": "各线路请求数堆叠柱图，共 {{count}} 个时间段：{{summary}}",
+          "tooltipTotal": "合计 {{count}}",
+          "tooltipPartial": "（不完整：只含所选范围内的日期）",
+          "empty": "所选范围内暂无用量数据"
+        },
+        "sections": {
+          "buckets": "时间明细",
+          "stores": "分店明细"
+        },
+        "columns": {
+          "period": "时间",
+          "store": "分店",
+          "total": "合计",
+          "status4xx": "4xx",
+          "status5xx": "5xx",
+          "errorRate": "5xx 占比"
+        },
+        "partialTag": "不完整",
+        "partialHint": "这一周 / 月只有部分日期在所选范围内，合计只含范围内的日期",
+        "unassignedStore": "未归属分店",
+        "unassignedHint": "未鉴权的请求（如健康检查、激活），无法确定分店",
+        "empty": "所选范围内暂无用量数据。",
+        "messages": {
+          "loadFailed": "加载线路用量失败"
+        },
+        "footer": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段、{{stores}} 家分店（含未归属）"
       }
     }
   }

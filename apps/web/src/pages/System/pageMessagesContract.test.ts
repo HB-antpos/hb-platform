@@ -101,6 +101,8 @@ const pages = [
       // 收银入口视图 + 设备列表「线路」列
       'src/pages/PosAdmin/DeviceRegistration/PosApiEntryPanel.tsx',
       'src/pages/PosAdmin/DeviceRegistration/posApiEntryCells.tsx',
+      // 线路用量视图（日 / 周 / 月）
+      'src/pages/PosAdmin/DeviceRegistration/PosApiEntryUsagePanel.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/DeviceRegistration/deviceManagementMessages.zh.json',

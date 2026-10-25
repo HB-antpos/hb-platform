@@ -3641,6 +3641,83 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(posm, PosDeviceApiEntrySchema.VerifySql);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 收银入口按日用量表_可重复执行_主键与入口约束生效_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表不存在：校验报 54300。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54300, missing.Number);
+
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
+        // 重复执行是空操作：已写入的数据不受影响。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosApiEntryUsageDaily (UsageDate, StoreCode, Entry, RequestCount, Status4xxCount, Status5xxCount, UpdatedAt)
+            VALUES ('2026-10-25', N'S001', N'edge', 10, 2, 1, SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.PosApiEntryUsageDaily WHERE RequestCount = 10 AND Status4xxCount = 2 AND Status5xxCount = 1) <> 1
+                THROW 54390, 'Existing usage row was changed.', 1;
+            """);
+
+        // 主键：同一 (日期, 分店, 入口) 不能重复；未鉴权请求的分店为空串，是合法键值。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosApiEntryUsageDaily (UsageDate, StoreCode, Entry, UpdatedAt)
+            VALUES ('2026-10-25', N'S001', N'edge', SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosApiEntryUsageDaily (UsageDate, StoreCode, Entry, UpdatedAt)
+            VALUES ('2026-10-25', N'', N'unknown', SYSUTCDATETIME());
+            """);
+
+        // 入口 CHECK 白名单：只允许 edge / aws / direct / unknown。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosApiEntryUsageDaily (UsageDate, StoreCode, Entry, UpdatedAt)
+            VALUES ('2026-10-25', N'S001', N'tencent', SYSUTCDATETIME());
+            """));
+
+        // 约束被禁用 / 删除都必须被门禁识别（54303）；重跑 ApplySql 不会补回约束（只建表），需显式修复后再通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily NOCHECK CONSTRAINT CK_PosApiEntryUsageDaily_Entry;");
+        var disabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54303, disabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily WITH CHECK CHECK CONSTRAINT CK_PosApiEntryUsageDaily_Entry;");
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
+
+        // 列宽漂移（nvarchar(16) → nvarchar(8)）与类型漂移（datetime2 → datetime，二者 max_length 都是 8，只能靠类型名识别）被识别（54301）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily DROP CONSTRAINT CK_PosApiEntryUsageDaily_Entry;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily DROP CONSTRAINT PK_PosApiEntryUsageDaily;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ALTER COLUMN Entry nvarchar(8) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54301, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ALTER COLUMN Entry nvarchar(16) NOT NULL;");
+
+        // 主键缺失 → 54302；补回主键后再缺约束 → 54303。
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54302, noPrimaryKey.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ADD CONSTRAINT PK_PosApiEntryUsageDaily PRIMARY KEY CLUSTERED (UsageDate, StoreCode, Entry);");
+        var noCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54303, noCheck.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ADD CONSTRAINT CK_PosApiEntryUsageDaily_Entry CHECK (Entry IN (N'edge', N'aws', N'direct', N'unknown'));");
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ALTER COLUMN UpdatedAt datetime NOT NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54301, type.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosApiEntryUsageDaily ALTER COLUMN UpdatedAt datetime2 NOT NULL;");
+        await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )
