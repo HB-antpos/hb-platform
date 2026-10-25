@@ -1,0 +1,171 @@
+{
+  "attendanceReview": {
+    "title": "考勤审核",
+    "reconciledHint": "打开时已核对近 14 天排班，生成漏下班与加班待处理 · {{time}}",
+    "allStores": "全部管理分店",
+    "searchPlaceholder": "员工姓名",
+    "tabs": {
+      "pending": "待审核",
+      "processed": "已处理",
+      "self": "本人审批记录",
+      "all": "全部"
+    },
+    "category": {
+      "all": "全部",
+      "PunchAdjustment": "补卡",
+      "Overtime": "加班",
+      "MissingClockOut": "漏下班",
+      "MealBreak": "用餐",
+      "Leave": "请假",
+      "Punch": "打卡异常",
+      "PaidSick": "病假",
+      "PaidAnnual": "年假",
+      "AnnualCashOut": "年假发放",
+      "PublicHolidayPay": "带薪公假",
+      "Other": "其他"
+    },
+    "sortByWorkDate": "排序：工作日",
+    "batch": {
+      "selected": "已选 {{count}} 项",
+      "approve": "批量批准",
+      "reject": "批量拒绝",
+      "hint": "仅补卡、请假、打卡异常可批量；加班、用餐、漏下班和带薪假要逐条看",
+      "rejectTitle": "批量拒绝 {{count}} 项"
+    },
+    "columns": {
+      "type": "类型",
+      "employee": "员工",
+      "workDate": "工作日",
+      "content": "内容",
+      "submitted": "提交",
+      "status": "结果"
+    },
+    "weekdayShort": {
+      "0": "周日",
+      "1": "周一",
+      "2": "周二",
+      "3": "周三",
+      "4": "周四",
+      "5": "周五",
+      "6": "周六"
+    },
+    "tier": {
+      "saturday": "周六时薪",
+      "sunday": "周日时薪",
+      "publicHoliday": "公假时薪",
+      "weekday": "平日时薪"
+    },
+    "punchType": {
+      "ClockIn": "上班卡",
+      "ClockOut": "下班卡"
+    },
+    "status": {
+      "Pending": "待审核",
+      "Approved": "已批准",
+      "Rejected": "已拒绝",
+      "Cancelled": "已撤回"
+    },
+    "submitted": {
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}} 分钟前",
+      "hoursAgo": "{{count}} 小时前",
+      "yesterday": "昨天 {{time}}"
+    },
+    "you": "你",
+    "youSuffix": "（你）",
+    "system": "系统",
+    "selfLocked": "本人申请，需其他审核人",
+    "selfLockedDetail": "这是你本人的申请，需要其他审核人处理（持「审核本人申请」权限才能自己审）。",
+    "selfReviewTag": "本人审核",
+    "selfReviewedTag": "本人审批",
+    "hoursValue": "{{value}} h",
+    "minutesUnit": "分钟",
+    "empty": "没有需要处理的审批",
+    "summary": {
+      "missingClockOut": "上班 {{clockIn}} · 00:00 系统自动下班",
+      "missingClockOutSub": "排班 {{start}}—{{end}}，待填实际下班时间",
+      "overtime": "候选 {{minutes}} 分钟",
+      "mealBreak": "应休 {{expected}} 次、休了 {{recorded}} 次，申请加回 {{minutes}} 分",
+      "leave": "{{type}} {{days}} 天",
+      "attachments": "附件 {{count}}",
+      "conflicts": "与已发布排班冲突 {{count}} 天（{{detail}}）",
+      "publicHolidayPay": "{{name}} 当天没排班",
+      "publicHolidayPaySub": "过去 {{weeks}} 周同一星期几排班 {{count}} 次，建议带薪 {{hours}} h"
+    },
+    "detail": {
+      "dayPunches": "当天打卡",
+      "segments": "{{count}} 段 / 上限 {{limit}} 段",
+      "schedule": "排班",
+      "actual": "实际",
+      "proposedLegend": "绿色虚线：批准后 {{start}} → {{end}}；",
+      "autoLegend": "原来系统在 00:00 自动下班",
+      "autoOnlyLegend": "灰色：系统在 00:00 自动下班，该时段不计薪",
+      "changes": "改动",
+      "now": "现在",
+      "after": "批准后",
+      "none": "无",
+      "reason": "原因：{{reason}}",
+      "approvedOvertime": "批准加班",
+      "overtimeHint": "候选 {{minutes}} 分钟，按 15 分钟取整；少批要写备注",
+      "actualClockOut": "实际下班时间",
+      "actualClockOutHint": "批准即补卡并结案，结案后不再重开",
+      "mealClaim": "用餐声明",
+      "publicHolidayPay": "带薪公假确认",
+      "publicHolidayRule": "{{date}} {{name}}：过去 {{weeks}} 周同一星期几排班 {{count}} 次",
+      "publicHolidayHint": "确认带薪工时；不适用就点「不适用」",
+      "leaveRange": "{{start}} ~ {{end}}，共 {{days}} 天",
+      "paidHours": {
+        "sick": "带薪工时 {{hours}} h（当天排班工时扣餐）",
+        "annual": "申请工时 {{hours}} h（每个工作日 8 h，周末、公假不算）",
+        "cashOut": "年假发放 {{hours}} h（照常上班）",
+        "other": "带薪工时 {{hours}} h"
+      },
+      "annualFinanceHint": "最终发多少由财务在工资表核定",
+      "cashOutCompliance": "年假发放是否合规需会计确认，系统只做提示",
+      "certificate": "医嘱",
+      "attachments": "附件",
+      "certificateMissing": "带薪病假必须附医嘱，这条没有附件",
+      "exception": "打卡异常",
+      "hoursAfter": "批准后当天工时",
+      "reviewedOnly": "只计已审核",
+      "worked": "实际工时",
+      "paid": "计薪工时",
+      "byTier": {
+        "weekday": "按平日时薪",
+        "saturday": "按周六时薪",
+        "sunday": "按周日时薪",
+        "publicHoliday": "按公假时薪"
+      },
+      "remark": "审核备注",
+      "remarkHint": "拒绝时必填",
+      "remarkPlaceholder": "选填",
+      "reviewResult": "审核结果",
+      "scheduleRange": "排班 {{start}}—{{end}}"
+    },
+    "actions": {
+      "previous": "上一条",
+      "next": "下一条",
+      "reject": "拒绝",
+      "notApplicable": "不适用",
+      "approveNext": "批准并下一条"
+    },
+    "validation": {
+      "remarkRequired": "拒绝必须填写审核备注",
+      "paidHoursRequired": "请填写带薪工时",
+      "clockOutRequired": "请填写实际下班时间",
+      "overtime": {
+        "outOfRange": "批准分钟不能超过候选加班",
+        "invalidIncrement": "加班按 15 分钟取整",
+        "remarkRequired": "少批或拒绝加班须填写备注"
+      }
+    },
+    "messages": {
+      "loadFailed": "加载审核列表失败",
+      "reviewFailed": "审核失败",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "batchDone": "已处理 {{count}} 项",
+      "batchPartial": "已处理 {{done}} 项，{{failed}} 项失败，留在列表里"
+    }
+  }
+}

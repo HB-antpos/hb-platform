@@ -1,0 +1,171 @@
+{
+  "attendanceReview": {
+    "title": "Attendance review",
+    "reconciledHint": "Schedules for the last 14 days were reconciled on open; missed clock-outs and overtime added · {{time}}",
+    "allStores": "All managed stores",
+    "searchPlaceholder": "Staff name",
+    "tabs": {
+      "pending": "Pending",
+      "processed": "Processed",
+      "self": "My own approvals",
+      "all": "All"
+    },
+    "category": {
+      "all": "All",
+      "PunchAdjustment": "Punch fix",
+      "Overtime": "Overtime",
+      "MissingClockOut": "Missed clock-out",
+      "MealBreak": "Meal break",
+      "Leave": "Leave",
+      "Punch": "Punch exception",
+      "PaidSick": "Sick leave",
+      "PaidAnnual": "Annual leave",
+      "AnnualCashOut": "Annual leave payout",
+      "PublicHolidayPay": "Paid public holiday",
+      "Other": "Other"
+    },
+    "sortByWorkDate": "Sort: work date",
+    "batch": {
+      "selected": "{{count}} selected",
+      "approve": "Approve selected",
+      "reject": "Reject selected",
+      "hint": "Only punch fixes, leave and punch exceptions can be batched; overtime, meal breaks, missed clock-outs and paid leave are reviewed one by one",
+      "rejectTitle": "Reject {{count}} items"
+    },
+    "columns": {
+      "type": "Type",
+      "employee": "Staff",
+      "workDate": "Work date",
+      "content": "Details",
+      "submitted": "Submitted",
+      "status": "Result"
+    },
+    "weekdayShort": {
+      "0": "Sun",
+      "1": "Mon",
+      "2": "Tue",
+      "3": "Wed",
+      "4": "Thu",
+      "5": "Fri",
+      "6": "Sat"
+    },
+    "tier": {
+      "saturday": "Saturday rate",
+      "sunday": "Sunday rate",
+      "publicHoliday": "Public holiday rate",
+      "weekday": "Weekday rate"
+    },
+    "punchType": {
+      "ClockIn": "Clock in",
+      "ClockOut": "Clock out"
+    },
+    "status": {
+      "Pending": "Pending",
+      "Approved": "Approved",
+      "Rejected": "Rejected",
+      "Cancelled": "Withdrawn"
+    },
+    "submitted": {
+      "justNow": "Just now",
+      "minutesAgo": "{{count}} min ago",
+      "hoursAgo": "{{count}} h ago",
+      "yesterday": "Yesterday {{time}}"
+    },
+    "you": "You",
+    "youSuffix": " (you)",
+    "system": "System",
+    "selfLocked": "Your own request — another reviewer is needed",
+    "selfLockedDetail": "This is your own request and must be reviewed by someone else (the Review own requests permission allows self-review).",
+    "selfReviewTag": "Self review",
+    "selfReviewedTag": "Self-approved",
+    "hoursValue": "{{value}} h",
+    "minutesUnit": "min",
+    "empty": "Nothing to review",
+    "summary": {
+      "missingClockOut": "Clocked in {{clockIn}} · auto clock-out at 00:00",
+      "missingClockOutSub": "Roster {{start}}–{{end}}; enter the actual clock-out time",
+      "overtime": "{{minutes}} min candidate overtime",
+      "mealBreak": "{{expected}} breaks due, {{recorded}} taken; claims {{minutes}} min back",
+      "leave": "{{type}} · {{days}} days",
+      "attachments": "{{count}} attachment(s)",
+      "conflicts": "Clashes with the published roster on {{count}} day(s) ({{detail}})",
+      "publicHolidayPay": "Not rostered on {{name}}",
+      "publicHolidayPaySub": "Rostered {{count}} times on this weekday in the last {{weeks}} weeks; suggested {{hours}} h paid"
+    },
+    "detail": {
+      "dayPunches": "Punches that day",
+      "segments": "{{count}} of {{limit}} segments",
+      "schedule": "Roster",
+      "actual": "Actual",
+      "proposedLegend": "Green dashes: after approval {{start}} → {{end}}; ",
+      "autoLegend": "previously auto clocked out at 00:00",
+      "autoOnlyLegend": "Grey: auto clock-out at 00:00, not paid",
+      "changes": "Changes",
+      "now": "Now",
+      "after": "After approval",
+      "none": "None",
+      "reason": "Reason: {{reason}}",
+      "approvedOvertime": "Approved overtime",
+      "overtimeHint": "{{minutes}} min candidate, in 15-minute steps; add a remark if approving less",
+      "actualClockOut": "Actual clock-out",
+      "actualClockOutHint": "Approving adds the punch and closes the case for good",
+      "mealClaim": "Meal break claim",
+      "publicHolidayPay": "Paid public holiday",
+      "publicHolidayRule": "{{date}} {{name}}: rostered {{count}} times on this weekday in the last {{weeks}} weeks",
+      "publicHolidayHint": "Confirm the paid hours, or choose Not applicable",
+      "leaveRange": "{{start}} to {{end}}, {{days}} days",
+      "paidHours": {
+        "sick": "{{hours}} h paid (rostered hours minus meal breaks)",
+        "annual": "{{hours}} h requested (8 h per weekday; weekends and public holidays excluded)",
+        "cashOut": "{{hours}} h payout (working as usual)",
+        "other": "{{hours}} h paid"
+      },
+      "annualFinanceHint": "Finance confirms the final hours on the pay sheet",
+      "cashOutCompliance": "Check annual leave payouts with your accountant; the system only flags them",
+      "certificate": "Medical certificate",
+      "attachments": "Attachments",
+      "certificateMissing": "Paid sick leave needs a medical certificate; none attached",
+      "exception": "Punch exception",
+      "hoursAfter": "Hours after approval",
+      "reviewedOnly": "Reviewed only",
+      "worked": "Worked",
+      "paid": "Paid",
+      "byTier": {
+        "weekday": "Weekday rate",
+        "saturday": "Saturday rate",
+        "sunday": "Sunday rate",
+        "publicHoliday": "Public holiday rate"
+      },
+      "remark": "Review remark",
+      "remarkHint": "Required to reject",
+      "remarkPlaceholder": "Optional",
+      "reviewResult": "Review result",
+      "scheduleRange": "Roster {{start}}–{{end}}"
+    },
+    "actions": {
+      "previous": "Previous",
+      "next": "Next",
+      "reject": "Reject",
+      "notApplicable": "Not applicable",
+      "approveNext": "Approve & next"
+    },
+    "validation": {
+      "remarkRequired": "Enter a remark to reject",
+      "paidHoursRequired": "Enter the paid hours",
+      "clockOutRequired": "Enter the actual clock-out time",
+      "overtime": {
+        "outOfRange": "Approved minutes cannot exceed the candidate overtime",
+        "invalidIncrement": "Overtime is approved in 15-minute steps",
+        "remarkRequired": "Add a remark when approving less or rejecting"
+      }
+    },
+    "messages": {
+      "loadFailed": "Could not load reviews",
+      "reviewFailed": "Review failed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "batchDone": "{{count}} items processed",
+      "batchPartial": "{{done}} processed, {{failed}} failed and kept in the list"
+    }
+  }
+}

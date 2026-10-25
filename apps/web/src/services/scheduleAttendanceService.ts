@@ -207,6 +207,11 @@ export function normalizeAttendanceApproval(value: unknown): AttendanceApprovalD
     approvedOvertimeMinutes: readCompat<number>(source, 'approvedOvertimeMinutes', 'ApprovedOvertimeMinutes'),
     adjustment: adjustment ? normalizeAttendanceAdjustment(adjustment) : undefined,
     mealClaim: normalizeAttendanceMealClaim(readCompat<unknown>(source, 'mealClaim', 'MealClaim')),
+    isSelfReview: readCompat<boolean>(source, 'isSelfReview', 'IsSelfReview'),
+    applicantRole: readCompat<string>(source, 'applicantRole', 'ApplicantRole'),
+    leave: readCompat<AttendanceApprovalDto['leave']>(source, 'leave', 'Leave'),
+    publicHolidayPay: readCompat<AttendanceApprovalDto['publicHolidayPay']>(source, 'publicHolidayPay', 'PublicHolidayPay'),
+    dayPreview: readCompat<AttendanceApprovalDto['dayPreview']>(source, 'dayPreview', 'DayPreview'),
   }
 }
 
@@ -271,6 +276,34 @@ export function normalizeAttendancePunchAdjustment(value: unknown): AttendancePu
   }
 }
 
+// 规格第 1 节新增的考勤参数（卡 B）；旧后端不返回时保持 undefined，设置页据此隐藏这一组。
+const PAYROLL_SETTING_KEYS = [
+  'defaultPeriodWeeks',
+  'fortnightAnchorDate',
+  'publicHolidayLookbackWeeks',
+  'publicHolidayMinCount',
+  'sickLeaveSubmitDays',
+  'annualLeaveLeadWeeks',
+  'annualLeaveMaxWeeks',
+  'annualCashOutLeadDays',
+  'annualCashOutMaxWeeks',
+  'birthdayRemindDays',
+  'employeeSegmentLimit',
+  'managerSegmentLimit',
+  'autoClockOutAtMidnight',
+] as const satisfies readonly (keyof AttendanceSettingsDto)[]
+
+function normalizeAttendancePayrollSettings(source: UnknownRecord): Partial<AttendanceSettingsDto> {
+  const result: Record<string, unknown> = {}
+  for (const key of PAYROLL_SETTING_KEYS) {
+    const value = readCompat<unknown>(source, key, key.charAt(0).toUpperCase() + key.slice(1))
+    if (value !== undefined && value !== null) result[key] = value
+  }
+  // 日期统一成 YYYY-MM-DD，方便 DatePicker 解析
+  if (typeof result.fortnightAnchorDate === 'string') result.fortnightAnchorDate = result.fortnightAnchorDate.slice(0, 10)
+  return result as Partial<AttendanceSettingsDto>
+}
+
 export function normalizeAttendanceSettings(value: unknown): AttendanceSettingsDto {
   const source = asRecord(value)
   return {
@@ -285,6 +318,7 @@ export function normalizeAttendanceSettings(value: unknown): AttendanceSettingsD
     overtimeMinimumMinutes: readCompat<number>(source, 'overtimeMinimumMinutes', 'OvertimeMinimumMinutes'),
     requireOvertimeApproval: readCompat<boolean>(source, 'requireOvertimeApproval', 'RequireOvertimeApproval'),
     allowManagerDirectOwnAdjustment: readCompat<boolean>(source, 'allowManagerDirectOwnAdjustment', 'AllowManagerDirectOwnAdjustment'),
+    ...normalizeAttendancePayrollSettings(source),
   }
 }
 

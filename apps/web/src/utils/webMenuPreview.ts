@@ -90,6 +90,9 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManagePromotions: [P.Promotions.View],
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
+  canReviewAttendance: [P.Attendance.ApprovalReviewManagedStore, P.Attendance.LeaveReviewManagedStore],
+  // 任一权限可见；从菜单授予时只补第一个（打卡查看＝工时统计），工资需另授 Payroll.View
+  canViewAttendanceHours: [P.Attendance.PunchViewManagedStore, P.Attendance.PayrollView],
   canManageStoreOps: [P.Store.ManageOperations],
   canViewStoreCash: [P.Cash.OverviewView],
   canViewOperationAudits: [P.PosTerminal.AuditView],
@@ -241,6 +244,8 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       },
       { path: '/pos-admin/advertisements', title: 'menu.advertisements', accessKey: 'canManageAdvertisements' },
       { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
+      { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
+      { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },

@@ -1,0 +1,282 @@
+/* 考勤审核工作台：左列表 + 右详情（窄屏上下堆叠）。类名统一 atr- 前缀，避免与全局样式冲突。 */
+.atr-page {
+  padding: 4px 0 16px;
+}
+
+.atr-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.atr-title.ant-typography {
+  margin: 0 0 4px;
+}
+
+.atr-muted {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.atr-small {
+  font-size: 12px;
+}
+
+.atr-tab-count {
+  margin-left: 4px;
+  color: #cf1322;
+  font-weight: 600;
+}
+
+.atr-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  gap: 16px;
+  align-items: start;
+}
+
+.atr-list,
+.atr-detail {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.atr-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+
+.atr-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #f0f7ff;
+  border-top: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+
+.atr-list .ant-table-row {
+  cursor: pointer;
+}
+
+.atr-list .atr-row-active > td {
+  background: #f5f9ff !important;
+}
+
+.atr-list .atr-row-active > td:first-child {
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.atr-list .atr-row-locked > td {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.atr-summary-main {
+  font-weight: 500;
+}
+
+/* 右侧详情：固定在视口内滚动，底部操作条常驻 */
+.atr-detail {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 140px);
+}
+
+.atr-detail-empty {
+  padding: 48px 16px;
+}
+
+.atr-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.atr-detail-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.atr-detail-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.atr-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 16px;
+}
+
+.atr-detail-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.atr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.atr-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 当天时间线：排班灰条、实际蓝条、批准后绿虚线、系统自动下班灰斜纹 */
+.atr-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atr-timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atr-timeline-label {
+  width: 32px;
+  flex: none;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.atr-timeline-track {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  border-radius: 6px;
+  background: #f5f5f5;
+}
+
+.atr-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.atr-bar-schedule {
+  background: #98a2b3;
+}
+
+.atr-bar-actual {
+  background: #1677ff;
+}
+
+.atr-bar-proposed {
+  background: repeating-linear-gradient(90deg, #22c55e 0 6px, #bbf7d0 6px 9px);
+}
+
+.atr-bar-auto {
+  background: repeating-linear-gradient(135deg, #d0d5dd 0 4px, #f2f4f7 4px 8px);
+}
+
+.atr-timeline-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 40px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.atr-change-table {
+  width: 100%;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+.atr-change-table th,
+.atr-change-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.atr-change-table tr:last-child td {
+  border-bottom: none;
+}
+
+.atr-change-table th {
+  background: #fafafa;
+  font-weight: 500;
+}
+
+.atr-change-table .atr-after {
+  background: #f6ffed;
+  color: #237804;
+  font-weight: 500;
+}
+
+.atr-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.atr-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f7f8fa;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.atr-stat strong {
+  font-size: 18px;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.atr-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atr-thumb {
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #f0f0f0;
+}
+
+.atr-inline-alert {
+  padding: 6px 10px;
+}
+
+@media (max-width: 1200px) {
+  .atr-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .atr-detail {
+    position: static;
+    max-height: none;
+  }
+}
