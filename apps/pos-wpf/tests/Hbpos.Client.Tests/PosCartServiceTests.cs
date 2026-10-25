@@ -271,11 +271,13 @@ public sealed class PosCartServiceTests
         var cart = new PosCartService();
         var first = cart.AddItem(CreateItem(productCode: "SKU-ORDER-1", lookupCode: "ORDER-1", price: 0.01m));
         var second = cart.AddItem(CreateItem(productCode: "SKU-ORDER-2", lookupCode: "ORDER-2", price: 0.01m));
+        // 折扣保护后目录折扣不能把行折成 0 元（旧写法 0.01 元 + 100% 折扣会被忽略），
+        // 改用 0.02 元 + 50%：目录折扣恰好 0.01，行仍剩 0.01。
         var catalog = cart.AddItem(CreateItem(
             productCode: "SKU-ORDER-CATALOG",
             lookupCode: "ORDER-CATALOG",
-            price: 0.01m,
-            discountRate: 1m));
+            price: 0.02m,
+            discountRate: 0.5m));
 
         Assert.Equal(0.01m, catalog.DiscountAmount);
         Assert.True(cart.SetOrderDiscountPercent(50m));
@@ -849,8 +851,9 @@ public sealed class PosCartServiceTests
         var line = cart.AddItem(CreateItem(
             productCode: "SKU-CATALOG-CENT",
             lookupCode: "CATALOG-CENT",
-            price: 0.01m,
-            discountRate: 1m));
+            // 折扣保护后目录折扣不能把行折成 0 元：用 0.02 元 + 50%，目录折扣 0.01，行仍剩 0.01。
+            price: 0.02m,
+            discountRate: 0.5m));
 
         Assert.Equal(0.01m, line.DiscountAmount);
         Assert.Equal(CartLineDiscountSource.Catalog, line.DiscountSource);
@@ -858,12 +861,12 @@ public sealed class PosCartServiceTests
         Assert.True(cart.SetOrderDiscountPercent(0.01m));
         Assert.Equal(0m, line.DiscountAmount);
         Assert.Equal(CartLineDiscountSource.Manual, line.DiscountSource);
-        Assert.Equal(0.01m, cart.ActualAmount);
+        Assert.Equal(0.02m, cart.ActualAmount);
 
         Assert.True(cart.SetOrderDiscountPercent(0m));
         Assert.Equal(0.01m, line.DiscountAmount);
         Assert.Equal(CartLineDiscountSource.Catalog, line.DiscountSource);
-        Assert.Equal(0m, cart.ActualAmount);
+        Assert.Equal(0.01m, cart.ActualAmount);
     }
 
     [Fact]
