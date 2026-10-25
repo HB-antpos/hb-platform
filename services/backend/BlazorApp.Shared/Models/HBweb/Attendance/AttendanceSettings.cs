@@ -28,5 +28,17 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = false)]
         public bool RequireApprovalForDuplicate { get; set; } = true;
+
+        /// <summary>员工每天每店的打卡段数上限（默认 4）。以下三列由迁移 20261026.001 添加。</summary>
+        [SugarColumn(IsNullable = false)]
+        public int EmployeeSegmentLimit { get; set; } = 4;
+
+        /// <summary>管理本店的店长每天每店的打卡段数上限（默认 6）。</summary>
+        [SugarColumn(IsNullable = false)]
+        public int ManagerSegmentLimit { get; set; } = 6;
+
+        /// <summary>门店时区 00:00 是否为未闭合班段补系统下班卡（默认开）。</summary>
+        [SugarColumn(IsNullable = false)]
+        public bool AutoClockOutAtMidnight { get; set; } = true;
     }
 }

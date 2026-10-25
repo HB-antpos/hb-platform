@@ -1212,11 +1212,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           preparation.verification.payload,
           // 只有下班才带用餐回答；上班卡即使误带，后端也会忽略。
           qrToday.nextPunchType === "ClockOut" ? pendingMealDeclarationRef.current : undefined,
+          qrToday.nextPunchType,
         ),
       ));
     } catch (error) {
       if (attendanceScannerSessionGate.isActive(session)) {
-        const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error));
+        const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error), qrToday.nextPunchType);
         failAttendanceQrProcessing(
           session,
           errorKey ? t(errorKey) : getErrorMessage(error, "messages.punchFailed"),
