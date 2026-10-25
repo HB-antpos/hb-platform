@@ -4236,7 +4236,8 @@ namespace BlazorApp.Api.Services.React
                 hqRow.H进货价
             );
             local.StoreRetailPriceValue = hqRow.H分店零售价;
-            local.DiscountRate = hqRow.H折扣率;
+            // 总部折扣率可能是百分数（50）或脏值（1 / 100），入库前统一成标准小数。
+            local.DiscountRate = StoreDiscountRate.Normalize(hqRow.H折扣率);
             local.IsActive = hqRow.H使用状态;
             local.IsAutoPricing = hqRow.H是否自动定价;
             local.IsSpecialProduct = hqRow.H是否特殊商品;

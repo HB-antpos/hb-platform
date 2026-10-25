@@ -85,7 +85,7 @@ namespace BlazorApp.Shared.DTOs
         public decimal? PurchasePrice { get; set; }
         [Range(0, double.MaxValue, ErrorMessage = "StoreRetailPriceValue 必须大于或等于 0")]
         public decimal? StoreRetailPriceValue { get; set; }
-        [Range(0, 1, ErrorMessage = "DiscountRate 必须在 0 到 1 之间")]
+        [Range(0, 0.9999, ErrorMessage = "DiscountRate 必须在 0 到 0.9999 之间（0.2 表示减 20%，1 即全免不允许）")]
         public decimal? DiscountRate { get; set; }
         public bool? IsActive { get; set; }
         public bool? IsAutoPricing { get; set; }
