@@ -6,7 +6,10 @@ import {
 } from "@/modules/attendance/attendance-qr";
 import type {
   AttendanceApproval,
+  AttendanceApprovalLeaveDetail,
   AttendanceApprovalPayload,
+  AttendanceApprovalReconcileSummary,
+  AttendancePendingApprovalBoard,
   AttendanceDirectUploadRequest,
   AttendanceDirectUploadSignature,
   AttendanceAvailability,
@@ -56,6 +59,7 @@ import {
   normalizeAttendancePunchAdjustmentPreview,
 } from "@/modules/attendance/attendance-punch-adjustment";
 import { buildAttendanceApprovalReviewRequest } from "@/modules/attendance/attendance-approval";
+import { asStringArray } from "@/modules/attendance/raw-fields";
 import {
   createAvailabilityBatch as runAvailabilityBatch,
   verifyAvailabilityBatch as runVerifyAvailabilityBatch,
@@ -227,6 +231,43 @@ function normalizePunch(raw: ApiRecord): AttendancePunch {
   };
 }
 
+function normalizeApprovalLeave(value: unknown): AttendanceApprovalLeaveDetail | undefined {
+  if (!isRecord(value)) return undefined;
+  const schedules = pick(value, "schedules", "Schedules");
+  return {
+    leaveType: asString(pick(value, "leaveType", "LeaveType"), "AnnualLeave"),
+    startDate: asOptionalString(pick(value, "startDate", "StartDate"))?.slice(0, 10),
+    endDate: asOptionalString(pick(value, "endDate", "EndDate"))?.slice(0, 10),
+    paidHours: asOptionalNumber(pick(value, "paidHours", "PaidHours")),
+    reason: asOptionalString(pick(value, "reason", "Reason")),
+    attachmentUrls: (() => {
+      const urls = asStringArray(pick(value, "attachmentUrls", "AttachmentUrls"));
+      const single = asOptionalString(pick(value, "attachmentUrl", "AttachmentUrl"));
+      return single && !urls.includes(single) ? [single, ...urls] : urls;
+    })(),
+    attachmentTakenAt: asOptionalString(pick(value, "attachmentTakenAt", "AttachmentTakenAt")),
+    schedules: (Array.isArray(schedules) ? schedules.filter(isRecord) : []).map((item) => ({
+      scheduleGuid: asOptionalString(pick(item, "scheduleGuid", "ScheduleGuid")),
+      workDate: asDateString(pick(item, "workDate", "WorkDate")),
+      startTime: asOptionalString(pick(item, "startTime", "StartTime")),
+      endTime: asOptionalString(pick(item, "endTime", "EndTime")),
+      hasPunch: asBoolean(pick(item, "hasPunch", "HasPunch")),
+    })),
+  };
+}
+
+/** 对账摘要：后端放在列表信封的 reconcile 字段；旧后端没有时返回 undefined（不显示提示条）。 */
+function normalizeApprovalReconcile(value: unknown): AttendanceApprovalReconcileSummary | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    createdMissingClockOutCount: asNumber(pick(value, "createdMissingClockOutCount", "CreatedMissingClockOutCount")),
+    createdOvertimeCount: asNumber(pick(value, "createdOvertimeCount", "CreatedOvertimeCount")),
+    lookbackDays: asNumber(pick(value, "lookbackDays", "LookbackDays"), 14),
+    reconciledAt: asOptionalString(pick(value, "reconciledAt", "ReconciledAt")),
+    failed: asBoolean(pick(value, "failed", "Failed")),
+  };
+}
+
 export function normalizeHoliday(payload: unknown): AttendanceStoreHoliday {
   const raw = isRecord(payload) ? payload : {};
   return {
@@ -359,6 +400,14 @@ function normalizeLeaveRequest(raw: ApiRecord): AttendanceLeaveRequest {
     endTime: asOptionalString(pick(raw, "endTime", "EndTime")),
     reason: asOptionalString(pick(raw, "reason", "Reason")),
     attachmentUrl: asOptionalString(pick(raw, "attachmentUrl", "AttachmentUrl")),
+    attachmentUrls: (() => {
+      // 新字段为数组（或 JSON 字符串）；旧数据只有单字段时也并进来，界面统一按多张处理。
+      const urls = asStringArray(pick(raw, "attachmentUrls", "AttachmentUrls"));
+      const single = asOptionalString(pick(raw, "attachmentUrl", "AttachmentUrl"));
+      return single && !urls.includes(single) ? [single, ...urls] : urls;
+    })(),
+    paidHours: asOptionalNumber(pick(raw, "paidHours", "PaidHours")),
+    approvedPaidHours: asOptionalNumber(pick(raw, "approvedPaidHours", "ApprovedPaidHours", "approvedHours", "ApprovedHours")),
     status: asString(pick(raw, "status", "Status"), "Pending"),
     submittedAt: asOptionalString(pick(raw, "submittedAt", "SubmittedAt", "createdAt", "CreatedAt")),
     reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt")),
@@ -411,6 +460,19 @@ function normalizeApproval(raw: ApiRecord): AttendanceApproval {
       ? normalizeAttendancePunchAdjustment(pick(raw, "adjustment", "Adjustment"))
       : undefined,
     mealClaim: normalizeAttendanceMealClaim(pick(raw, "mealClaim", "MealClaim")),
+    applicantUserGuid: asOptionalString(pick(raw, "applicantUserGuid", "ApplicantUserGuid")),
+    isSelf: pick(raw, "isSelf", "IsSelf") === undefined ? undefined : asBoolean(pick(raw, "isSelf", "IsSelf")),
+    isStoreManager: asBoolean(pick(raw, "isStoreManager", "IsStoreManager", "applicantIsStoreManager", "ApplicantIsStoreManager")),
+    employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
+    scheduleStartTime: asOptionalString(pick(raw, "scheduleStartTime", "ScheduleStartTime")),
+    scheduleEndTime: asOptionalString(pick(raw, "scheduleEndTime", "ScheduleEndTime")),
+    clockInTime: asOptionalString(pick(raw, "clockInTime", "ClockInTime", "lastClockInTime", "LastClockInTime")),
+    holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
+    reviewedByName: asOptionalString(pick(raw, "reviewedByName", "ReviewedByName", "reviewerName", "ReviewerName")),
+    reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt")),
+    reviewRemark: asOptionalString(pick(raw, "reviewRemark", "ReviewRemark")),
+    isSelfReview: asBoolean(pick(raw, "isSelfReview", "IsSelfReview")),
+    leave: normalizeApprovalLeave(pick(raw, "leave", "Leave")),
   };
 }
 
@@ -539,6 +601,9 @@ function toLeaveRequestPayload(payload: AttendanceLeaveRequestPayload) {
     endTime: payload.endTime,
     reason: payload.reason,
     attachmentUrl: payload.attachmentUrl,
+    // 数组字段不经过字符串修剪；空数组不发送，旧后端保持原样。
+    ...(payload.attachmentUrls?.length ? { attachmentUrls: payload.attachmentUrls } : {}),
+    ...(payload.scheduleGuids?.length ? { scheduleGuids: payload.scheduleGuids } : {}),
   });
 }
 
@@ -781,8 +846,30 @@ export async function getAttendanceLeaveAttachmentUploadSignature(
 }
 
 export async function getPendingApprovals(storeCode?: string): Promise<AttendanceApproval[]> {
+  return (await getPendingApprovalBoard(storeCode)).items;
+}
+
+/**
+ * 待审列表 + 打开时对账结果。后端 A 卡把列表包成 { items, reconcile }；
+ * 旧后端仍直接返回数组，getArray 两种都能读。
+ */
+export async function getPendingApprovalBoard(storeCode?: string): Promise<AttendancePendingApprovalBoard> {
   const response = await apiClient.get(`${ATTENDANCE_BASE}/approvals/pending`, { params: { storeCode } });
-  return getArray(response.data).map(normalizeApproval);
+  return {
+    items: getArray(response.data).map(normalizeApproval),
+    reconcile: isRecord(response.data)
+      ? normalizeApprovalReconcile(pick(response.data, "reconcile", "Reconcile"))
+      : undefined,
+  };
+}
+
+/** 「已处理」页签：本店已批准 / 已拒绝的审批，按审核时间倒序。 */
+export async function getProcessedApprovals(storeCode?: string): Promise<AttendanceApproval[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/approvals`, { params: { storeCode } });
+  return getArray(response.data)
+    .map(normalizeApproval)
+    .filter((item) => item.status.toLowerCase() !== "pending")
+    .sort((left, right) => (right.reviewedAt ?? "").localeCompare(left.reviewedAt ?? ""));
 }
 
 export async function approveAttendanceApproval(payload: AttendanceApprovalPayload): Promise<void> {

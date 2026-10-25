@@ -1039,7 +1039,7 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(45, menu.Count);
+        Assert.Equal(46, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
@@ -1069,6 +1069,7 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.RouteName == "traffic-stats");
         Assert.Contains(menu, item => item.RouteName == "attendance-personal");
         Assert.Contains(menu, item => item.RouteName == "attendance-management");
+        Assert.Contains(menu, item => item.RouteName == "attendance-hours");
         Assert.Contains(menu, item => item.RouteName == "seasonal-cards");
         Assert.Contains(menu, item => item.RouteName == "advertisements");
         Assert.Contains(menu, item => item.RouteName == "promotions");
@@ -1451,6 +1452,30 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅凭查看管理分店打卡权限可见工时统计入口()
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Punch.ViewManagedStore)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "attendance-hours");
+        Assert.Equal("tabs.attendanceHours", item.TitleKey);
+        Assert.Equal("clock-outline", item.Icon);
+        Assert.Equal(Permissions.Attendance.Punch.ViewManagedStore, item.Permission);
+        // 只有审核权限、没有查看打卡权限的账号看不到工时统计。
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore))),
+            entry => entry.RouteName == "attendance-hours");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含工时统计()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "attendance-hours");
+        }
+    }
+
+    [Fact]
     public void BuildAppMenu_HidesAttendanceRoutesWithoutAttendancePermissions()
     {
         var user = CreateUser(new Claim("permission", Permissions.Orders.View));
@@ -1459,6 +1484,7 @@ public class NavigationServiceTests
 
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-personal");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-management");
+        Assert.DoesNotContain(menu, item => item.RouteName == "attendance-hours");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance");
     }
 

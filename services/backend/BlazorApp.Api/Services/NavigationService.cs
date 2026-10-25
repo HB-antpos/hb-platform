@@ -396,6 +396,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "attendance-hours",
+                TitleKey = "tabs.attendanceHours",
+                Icon = "clock-outline",
+                // 移动端店长「工时统计」：与 Web 工时页签同用 Punch.ViewManagedStore，接口再按管理分店校验；
+                // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.Attendance.Punch.ViewManagedStore,
+                Order = 56,
+            },
+            new()
+            {
                 RouteName = "seasonal-cards",
                 TitleKey = "tabs.seasonalCards",
                 Icon = "gift-outline",

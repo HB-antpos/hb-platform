@@ -3,6 +3,7 @@ import type {
   AttendancePunch,
   AttendancePunchMutationResult,
   AttendancePunchPayload,
+  AttendancePunchType,
   AttendancePunchVerificationPayload,
   AttendancePunchVerificationState,
   AttendanceQrResolveResult,
@@ -184,9 +185,12 @@ export function buildAttendanceQrPunchPayload(
   punchAuthorizationToken: string | undefined,
   verification: AttendancePunchVerificationPayload,
   mealDeclaration?: AttendanceMealDeclaration,
+  expectedPunchType?: AttendancePunchType,
 ): AttendancePunchPayload {
   return {
     qrToken,
+    // 客户端按「今日状态」预期的打卡类型；服务端判定不一致时拒绝（PUNCH_TYPE_MISMATCH），避免重复上班/下班。
+    ...(expectedPunchType ? { expectedPunchType } : {}),
     ...(punchAuthorizationToken ? { punchAuthorizationToken } : {}),
     locationLatitude: verification.locationLatitude,
     locationLongitude: verification.locationLongitude,
@@ -311,6 +315,8 @@ const ATTENDANCE_ERROR_KEYS: Record<string, string> = {
   ERR_NETWORK: "messages.qrNetworkRequired",
   ECONNABORTED: "messages.qrNetworkRequired",
   DAY_COMPLETE: "messages.qrDayComplete",
+  // 服务端记录与客户端预期的上/下班类型不一致；具体文案由调用方按预期类型细分。
+  PUNCH_TYPE_MISMATCH: "messages.punchTypeMismatch",
   QR_REQUIRED: "messages.qrRequired",
   // 当班开始/结束休息的错误码。
   NO_OPEN_SEGMENT: "messages.mealNoOpenSegment",
@@ -318,8 +324,19 @@ const ATTENDANCE_ERROR_KEYS: Record<string, string> = {
   MEAL_BREAK_ALREADY_OPEN: "messages.mealBreakAlreadyOpen",
 };
 
-export function getAttendancePunchErrorKey(errorCode?: string) {
+export function getAttendancePunchErrorKey(errorCode?: string, expectedPunchType?: string) {
+  // 类型不一致时按客户端预期细分：预期上班却被拒＝系统记录已上班，反之＝已下班。
+  if (errorCode === "PUNCH_TYPE_MISMATCH" && (expectedPunchType === "ClockIn" || expectedPunchType === "ClockOut")) {
+    return expectedPunchType === "ClockIn"
+      ? "messages.punchTypeMismatchClockedIn"
+      : "messages.punchTypeMismatchClockedOut";
+  }
   return errorCode ? ATTENDANCE_ERROR_KEYS[errorCode] : undefined;
+}
+
+/** 今日状态给出的下一次打卡类型只认 ClockIn / ClockOut；其他值（如 DayComplete）不随请求发送。 */
+export function resolveExpectedPunchType(nextPunchType?: string): AttendancePunchType | undefined {
+  return nextPunchType === "ClockIn" || nextPunchType === "ClockOut" ? nextPunchType : undefined;
 }
 
 export function getAttendancePunchErrorCode(error: unknown) {

@@ -137,6 +137,8 @@ export const PERMISSIONS = {
     PunchAdjustManagedStore: "Attendance.Punch.AdjustManagedStore",
     ApprovalViewManagedStore: "Attendance.Approval.ViewManagedStore",
     ApprovalReviewManagedStore: "Attendance.Approval.ReviewManagedStore",
+    // 店长审核本人申请；默认不授予任何角色，生产手动授权（规格 0.1-1）。
+    ApprovalReviewSelf: "Attendance.Approval.ReviewSelf",
     HolidayViewStore: "Attendance.Holiday.ViewStore",
     HolidayEditManagedStore: "Attendance.Holiday.EditManagedStore",
     LeaveApplySelf: "Attendance.Leave.ApplySelf",
@@ -266,6 +268,7 @@ function createEmptyAccess(): AccessControl {
     canViewAttendancePersonal: false,
     canViewAttendanceManagement: false,
     canReviewAttendance: false,
+    canReviewOwnAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
     canViewAttendancePunchRecords: false,
@@ -433,6 +436,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     ATTENDANCE_REVIEW_PERMISSIONS.some((permission) =>
       hasPermission(permission)
     );
+  // 只认显式授权（不因管理员角色默认放开），没有时维持「申请人不能审自己」。
+  const canReviewOwnAttendance = hasPermission(PERMISSIONS.Attendance.ApprovalReviewSelf);
   const canEditAttendanceHoliday =
     isAdmin || hasPermission(PERMISSIONS.Attendance.HolidayEditManagedStore);
   const canEditAttendanceSettings =
@@ -508,6 +513,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewAttendancePersonal,
     canViewAttendanceManagement,
     canReviewAttendance,
+    canReviewOwnAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
     canViewAttendancePunchRecords,

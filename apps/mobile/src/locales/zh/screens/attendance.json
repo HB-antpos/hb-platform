@@ -293,6 +293,167 @@
     "mealBreakDetail": "排班用餐 {{expected}} 次，记录到 {{recorded}} 次",
     "mealBreakValidation": {
       "remarkRequired": "拒绝用餐加工时必须填写审核备注。"
+    },
+    "board": {
+      "tabPending": "待审核",
+      "tabProcessed": "已处理",
+      "reconcile": {
+        "created": "打开时已核对近 {{days}} 天排班，新增{{items}}",
+        "none": "打开时已核对近 {{days}} 天排班，没有新增",
+        "failed": "这次核对排班没成功，新的漏下班、加班可能还没列出来；下拉刷新可重试",
+        "missingClockOut_one": "漏下班 {{count}} 条",
+        "missingClockOut_other": "漏下班 {{count}} 条",
+        "overtime_one": "加班 {{count}} 条",
+        "overtime_other": "加班 {{count}} 条"
+      },
+      "filters": {
+        "PunchAdjustment": "补卡",
+        "Overtime": "加班",
+        "MissingClockOut": "漏下班",
+        "MealBreak": "用餐",
+        "Leave": "请假",
+        "Punch": "打卡"
+      },
+      "weekdayDate": "{{weekday}} {{month}}-{{day}}",
+      "weekdays": {
+        "0": "周一",
+        "1": "周二",
+        "2": "周三",
+        "3": "周四",
+        "4": "周五",
+        "5": "周六",
+        "6": "周日"
+      },
+      "itemCount_one": "{{count}} 项",
+      "itemCount_other": "{{count}} 项",
+      "noDate": "未注明日期",
+      "tierRate": {
+        "weekday": "平日时薪",
+        "saturday": "周六时薪",
+        "sunday": "周日时薪",
+        "publicHoliday": "公假时薪"
+      },
+      "tierBy": {
+        "weekday": "按平日时薪",
+        "saturday": "按周六时薪",
+        "sunday": "按周日时薪",
+        "publicHoliday": "按公假时薪"
+      },
+      "submitted": {
+        "justNow": "刚刚",
+        "minutes_one": "{{count}} 分钟前",
+        "minutes_other": "{{count}} 分钟前",
+        "hours_one": "{{count}} 小时前",
+        "hours_other": "{{count}} 小时前",
+        "yesterday": "昨天 {{time}}",
+        "date": "{{month}}-{{day}} {{time}}"
+      },
+      "roleStaff": "员工",
+      "roleManager": "店长",
+      "employmentTypes": {
+        "FullTime": "全职",
+        "PartTime": "兼职",
+        "Casual": "临时工"
+      },
+      "scheduleWindow": "排班 {{start}}—{{end}}",
+      "selfName": "{{name}}（你）",
+      "punchCard": {
+        "ClockIn": "上班卡",
+        "ClockOut": "下班卡"
+      },
+      "addPunchCard": "补{{punch}} ",
+      "autoTime": "{{time}} 自动",
+      "reasonLine": "原因：{{reason}}",
+      "approve": "批准",
+      "overtimeCardLine": "比排班多 {{minutes}} 分钟，待定批准多少",
+      "overtimeApprovedLine": "候选 {{candidate}} 分钟，批准 {{approved}} 分钟",
+      "openDetail": {
+        "overtime": "看时间轴并审批",
+        "missingClockOut": "填实际下班时间",
+        "sickLeave": "看医嘱并审批"
+      },
+      "result": {
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "other": "已处理"
+      },
+      "reviewedBy": "{{name}} 审核",
+      "processedEmpty": "最近没有已处理的审批",
+      "selfReview": {
+        "tag": "本人审核",
+        "recorded": "本人审批",
+        "locked": "本人申请，需由同店其他有审核权限的人处理",
+        "approve": "本人审核批准",
+        "confirmTitle": "确认审核自己的申请？",
+        "confirmMessage": "这条记录会标为「本人审批」，Web 上可以筛选出来。",
+        "confirmAction": "确认批准"
+      },
+      "statusPending": "待审核",
+      "statusNeedsAction": "待处理",
+      "systemGenerated": "系统生成",
+      "overtimeTitle": "加班审核",
+      "dayPunches": "当天打卡",
+      "segmentLimit": "{{count}} 段 / 上限 {{limit}} 段",
+      "timelineSchedule": "排班",
+      "timelineActual": "实际",
+      "timelineUnavailable": "没找到这一班的打卡记录，可能已被删除或改期",
+      "gapCountsAsMeal": "空档 {{minutes}} 分钟，算 1 次用餐",
+      "statSchedule": "排班",
+      "statWorked": "实际工时",
+      "statCandidate": "候选加班",
+      "minutesValue": "{{minutes}} 分",
+      "approveMinutesTitle": "批准分钟",
+      "overtimeSplit": "早到 {{early}} + 晚走 {{late}}，按 15 分取整",
+      "roundTo15": "按 15 分取整",
+      "remarkWhenReduced": "备注（少于 {{minutes}} 分钟时必填）",
+      "approveMinutes": "批准 {{minutes}} 分钟",
+      "storeTime": "门店时间",
+      "missingClockOut": {
+        "title": "漏下班",
+        "cardLine": "上班 {{time}}，系统已在 00:00 自动下班",
+        "cardLineNoTime": "系统已在 00:00 自动下班",
+        "cardHint": "请填写实际下班时间后处理",
+        "alertTitle": "系统已在 {{time}} 自动下班",
+        "alertBody": "{{name}} {{date}} 上班 {{time}} 后没有扫下班码。自动下班的时间不计薪，请填写实际下班时间。",
+        "legend": "蓝色：按填写的下班时间计；红虚线：自动下班补出的时段（不计）",
+        "actualTitle": "实际下班时间",
+        "reasonPlaceholder": "原因（必填），例如：员工说 21:30 关店后离开",
+        "reasonRequired": "请先写原因",
+        "previewReason": "店长按实际下班时间补卡",
+        "previewWorked": "工时 {{worked}} · 扣餐 {{meal}} 分",
+        "previewPaid": "计薪 {{paid}}",
+        "previewPending": "正在计算工时…",
+        "needsAdjustPermission": "你没有修改打卡的权限，只能选「不计这段」",
+        "exclude": "不计这段",
+        "resolve": "按 {{time}} 补下班并处理",
+        "resolved": "已按 {{time}} 补下班卡并结案"
+      },
+      "sick": {
+        "title": "病假审核",
+        "submittedAt": "提交于 {{month}}-{{day}} {{time}}",
+        "dayAfter_one": "生病后第 {{count}} 天",
+        "dayAfter_other": "生病后第 {{count}} 天",
+        "datesTitle": "病假日期",
+        "noSchedule": "没有排班",
+        "dayPunch": "当天打卡",
+        "none": "无",
+        "punched": "有打卡",
+        "paidHours": "带薪工时",
+        "certificateTitle": "医嘱",
+        "tapToZoom": "点开看大图",
+        "openPhoto": "查看第 {{index}} 张医嘱",
+        "photoCount_one": "医嘱 {{count}} 张",
+        "photoCount_other": "医嘱 {{count}} 张",
+        "takenAt": "{{month}}-{{day}} {{time}} 拍摄",
+        "note": "备注：{{note}}",
+        "noCertificate": "没有医嘱照片",
+        "checkWithin_one": "{{count}} 天内提交",
+        "checkWithin_other": "{{count}} 天内提交",
+        "checkScheduled": "当天有排班、没打卡",
+        "remarkPlaceholder": "审核备注（拒绝时必填），例如：医嘱看不清，请重拍",
+        "rejectReasonRequired": "拒绝必须写原因，例如「医嘱看不清，请重拍」",
+        "approve": "批准 {{hours}} 带薪病假"
+      }
     }
   },
   "holidayManagement": {
@@ -603,7 +764,10 @@
   "leaveTypes": {
     "AnnualLeave": "年假",
     "SickLeave": "病假",
-    "PublicHoliday": "公共假期"
+    "PublicHoliday": "公共假期",
+    "PaidSick": "带薪病假",
+    "PaidAnnual": "带薪年假 · 休息",
+    "AnnualCashOut": "带薪年假 · 发放"
   },
   "sourceTypes": {
     "Punch": "打卡",
@@ -669,6 +833,9 @@
     "qrNetworkRequired": "手机必须联网后才能提交扫码打卡",
     "qrCameraPermissionRequired": "扫码打卡需要相机权限",
     "qrDayComplete": "今天的上班和下班打卡均已完成",
+    "punchTypeMismatch": "系统记录与本机不一致，请刷新后再打卡",
+    "punchTypeMismatchClockedIn": "系统记录你已上班，这次不能再打上班卡；请刷新后打下班卡",
+    "punchTypeMismatchClockedOut": "系统记录你已下班，这次不能再打下班卡；请刷新后再打卡",
     "punchVerificationSentForReview": "定位或网络校验未完成，已按复核信息一并提交。",
     "locationRequiredForPunch": "打卡需要采集当前位置。请允许精确定位后重试。",
     "backgroundLocationRequiredForClockIn": "活动班次期间的考勤核对需要定位权限，请允许定位后重试。",

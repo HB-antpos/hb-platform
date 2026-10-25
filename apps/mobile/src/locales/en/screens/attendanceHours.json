@@ -1,0 +1,127 @@
+{
+  "title": "Hours",
+  "messages": {
+    "notAllowed": "You don't have permission to view staff hours.",
+    "reviewUnavailable": "Hours aren't available in the review demo.",
+    "noStore": "No stores to manage.",
+    "loadFailed": "Couldn't load hours",
+    "retry": "Retry",
+    "empty": "No staff hours for this period.",
+    "employeeMissing": "No hours for this staff member in this period.",
+    "submitted": "This period has been submitted and locked. Hours can no longer be changed.",
+    "merged": "Including hours from other stores (view only)."
+  },
+  "store": {
+    "pickerTitle": "Choose store",
+    "cancel": "Cancel",
+    "loading": "Loading stores…"
+  },
+  "period": {
+    "oneWeek": "1 wk",
+    "twoWeeks": "2 wks",
+    "week": "Week {{week}}",
+    "weeks": "Weeks {{first}}–{{last}}",
+    "range": "{{from}} – {{to}}",
+    "previous": "Previous period",
+    "next": "Next period",
+    "weeksSwitch": "Period length"
+  },
+  "summary": {
+    "paid": "Paid hours",
+    "weekendOf": "Weekend",
+    "paidLeave": "Paid leave",
+    "weekendPublic": "Wknd / PH",
+    "pending": "Pending",
+    "hours": "{{value}} h"
+  },
+  "tier": {
+    "weekday": "Ord",
+    "saturday": "Sat",
+    "sunday": "Sun",
+    "publicHoliday": "PH",
+    "leave": "Leave"
+  },
+  "employment": {
+    "FullTime": "Full-time",
+    "PartTime": "Part-time",
+    "Casual": "Casual",
+    "age": "Age {{age}}",
+    "multiStore": "Multi-store"
+  },
+  "weekday": {
+    "short1": "Mon",
+    "short2": "Tue",
+    "short3": "Wed",
+    "short4": "Thu",
+    "short5": "Fri",
+    "short6": "Sat",
+    "short7": "Sun"
+  },
+  "cell": {
+    "sick": "Sick {{hours}}",
+    "annual": "AL {{hours}}",
+    "publicHoliday": "PH {{hours}}",
+    "publicHolidayPending": "PH ?",
+    "unavailable": "N/A",
+    "cashOutBadge": "$",
+    "a11yRest": "Day off",
+    "a11yHours": "{{hours}} hours",
+    "a11yPending": "pending",
+    "a11yCashOut": "annual leave cash-out",
+    "a11yBirthday": "birthday"
+  },
+  "alerts": {
+    "minorBirthday": "{{name}} turns {{age}} on {{date}} – check the pay rate",
+    "birthday": "{{name}}'s birthday is on {{date}}",
+    "pending": "{{count}} pending – not counted yet",
+    "publicHolidayPay": "{{count}} public holiday pay to confirm",
+    "otherStores": "{{name}} also clocked in at another store",
+    "otherStoresAnonymous": "Some staff also clocked in at another store",
+    "review": "Review",
+    "merge": "Combine",
+    "unmerge": "This store only"
+  },
+  "detail": {
+    "rest": "Day off",
+    "unavailable": "Unavailable",
+    "noPunch": "No clock-ins",
+    "paidSick": "Paid sick leave",
+    "sickLeave": "Sick leave, unpaid",
+    "certificate": "Medical certificate",
+    "paidAnnual": "Paid annual leave",
+    "annualLeave": "Annual leave, unpaid",
+    "cashOut": "Annual leave cash-out {{hours}} h",
+    "publicHolidayBadge": "PH",
+    "sickBadge": "Sick",
+    "annualBadge": "AL",
+    "publicHolidayPay": "Public holiday pay",
+    "publicHolidayPayPending": "Public holiday pay to confirm",
+    "publicHoliday": "Public holiday",
+    "auto": "auto",
+    "otherStore": "Also {{hours}} h at {{store}}",
+    "birthday": "Birthday",
+    "weekTitle": "Week {{week}} · {{from}} – {{to}}"
+  },
+  "pending": {
+    "late": "Late – pending",
+    "punch": "Clock-in pending",
+    "punchAdjustment": "Adjustment pending",
+    "overtime": "Overtime pending",
+    "missingClockOut": "No clock-out – pending",
+    "mealBreak": "Meal break pending",
+    "leave": "Leave pending",
+    "publicHolidayPay": "PH pay to confirm",
+    "other": "Pending"
+  },
+  "legend": {
+    "title": "Key",
+    "weekend": "Weekend",
+    "pending": "Pending",
+    "annual": "Annual leave",
+    "sick": "Sick leave",
+    "unavailable": "Unavailable",
+    "rest": "Not rostered",
+    "cashOut": "Cash-out",
+    "birthday": "Birthday"
+  }
+}
