@@ -479,6 +479,8 @@ namespace BlazorApp.Shared.Constants
                         Permissions.AustralianSuppliers.View,
                         Permissions.AustralianSuppliers.Edit,
                         Permissions.Dashboard.View,
+                        // 仓库管理可维护任意分店员工的 POS 业务权限；服务层仍限定员工目标和业务白名单。
+                        Permissions.Users.ManagePosTerminalPermissions,
                     }
                 ),
                 new(

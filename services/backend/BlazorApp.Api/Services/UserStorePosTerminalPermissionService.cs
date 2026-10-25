@@ -298,7 +298,20 @@ public sealed class UserStorePosTerminalPermissionService(
                 StringComparer.OrdinalIgnoreCase
             )
         );
-        if (!isStoreManager || !scope.IsAllowed || !scope.CanAccessStoreGuid(storeGuid))
+        // 仓库管理与店长同属「受限委派」：只能维护员工目标的 POS 业务权限，不能碰高权限账号和系统级覆盖。
+        // 区别在分店范围：仓库管理在范围服务里是不限分店（IsAdmin），店长只限主分店，
+        // 所以两者统一用 CanAccessStoreGuid 判断，不再单独放行。
+        var isWarehouseManager = actorRoles.Any(role =>
+            CurrentUserManageableStoreScopeService.WarehouseManagerRoleAliases.Contains(
+                role,
+                StringComparer.OrdinalIgnoreCase
+            )
+        );
+        if (
+            !(isStoreManager || isWarehouseManager)
+            || !scope.IsAllowed
+            || !scope.CanAccessStoreGuid(storeGuid)
+        )
         {
             return AccessResult.Denied("当前账号不能管理该分店", "POS_PERMISSION_FORBIDDEN");
         }
@@ -315,6 +328,17 @@ public sealed class UserStorePosTerminalPermissionService(
             return AccessResult.Denied(
                 "店长只能维护员工的 POS 收银权限",
                 "EMPLOYEE_TARGET_REQUIRED"
+            );
+        }
+
+        // 仓库管理自己不使用收银端，角色模板里没有任何 POS 业务码；若仍按「本人持有」收口，
+        // 可分配范围永远为空，入口形同虚设。因此仓库管理可分配完整的 POS 业务白名单（仍不含系统级权限）。
+        // 店长维持原规则：POS 业务白名单 ∩ 本人有效权限，防止越权授予自己没有的能力。
+        if (isWarehouseManager && !isStoreManager)
+        {
+            return AccessResult.Allowed(
+                false,
+                PermissionSeedData.PosTerminalBusinessPermissionCodes.ToArray()
             );
         }
 
