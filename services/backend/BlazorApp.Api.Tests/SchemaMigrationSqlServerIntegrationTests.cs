@@ -3718,6 +3718,164 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(main, PosApiEntryUsageSchema.VerifySql);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 主API入口按日用量表_可重复执行_主键与两个约束生效_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表不存在：校验报 54320。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54320, missing.Number);
+
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql);
+        // 重复执行是空操作：已写入的数据不受影响。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MainApiEntryUsageDaily (UsageDate, Entry, ClientKind, RequestCount, Status4xxCount, Status5xxCount, UpdatedAt)
+            VALUES ('2026-10-27', N'direct', N'web', 10, 2, 1, SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.MainApiEntryUsageDaily WHERE RequestCount = 10 AND Status4xxCount = 2 AND Status5xxCount = 1) <> 1
+                THROW 54390, 'Existing usage row was changed.', 1;
+            """);
+
+        // 主键：同一 (日期, 入口, 类别) 不能重复。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MainApiEntryUsageDaily (UsageDate, Entry, ClientKind, UpdatedAt)
+            VALUES ('2026-10-27', N'direct', N'web', SYSUTCDATETIME());
+            """));
+
+        // 两个 CHECK 白名单：入口只允许 edge / aws / direct / unknown，类别只允许 web / app / other。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MainApiEntryUsageDaily (UsageDate, Entry, ClientKind, UpdatedAt)
+            VALUES ('2026-10-27', N'tencent', N'web', SYSUTCDATETIME());
+            """));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MainApiEntryUsageDaily (UsageDate, Entry, ClientKind, UpdatedAt)
+            VALUES ('2026-10-27', N'edge', N'Mozilla/5.0', SYSUTCDATETIME());
+            """));
+
+        // 约束被禁用 → 54323 / 54324；修复后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily NOCHECK CONSTRAINT CK_MainApiEntryUsageDaily_Entry;");
+        var entryDisabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54323, entryDisabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily WITH CHECK CHECK CONSTRAINT CK_MainApiEntryUsageDaily_Entry;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily NOCHECK CONSTRAINT CK_MainApiEntryUsageDaily_ClientKind;");
+        var kindDisabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54324, kindDisabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily WITH CHECK CHECK CONSTRAINT CK_MainApiEntryUsageDaily_ClientKind;");
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql);
+
+        // 列宽漂移（nvarchar(16) → nvarchar(8)）与类型漂移（datetime2 → datetime）被识别（54321）；主键缺失 → 54322。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily DROP CONSTRAINT CK_MainApiEntryUsageDaily_ClientKind;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily DROP CONSTRAINT CK_MainApiEntryUsageDaily_Entry;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily DROP CONSTRAINT PK_MainApiEntryUsageDaily;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ALTER COLUMN ClientKind nvarchar(8) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54321, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ALTER COLUMN ClientKind nvarchar(16) NOT NULL;");
+
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54322, noPrimaryKey.Number);
+        // 键列顺序不对（Entry 在前）同样被识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ADD CONSTRAINT PK_MainApiEntryUsageDaily PRIMARY KEY CLUSTERED (Entry, UsageDate, ClientKind);");
+        var wrongOrder = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54322, wrongOrder.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily DROP CONSTRAINT PK_MainApiEntryUsageDaily;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ADD CONSTRAINT PK_MainApiEntryUsageDaily PRIMARY KEY CLUSTERED (UsageDate, Entry, ClientKind);");
+
+        var noEntryCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54323, noEntryCheck.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ADD CONSTRAINT CK_MainApiEntryUsageDaily_Entry CHECK (Entry IN (N'edge', N'aws', N'direct', N'unknown'));");
+        var noKindCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54324, noKindCheck.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ADD CONSTRAINT CK_MainApiEntryUsageDaily_ClientKind CHECK (ClientKind IN (N'web', N'app', N'other'));");
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ALTER COLUMN UpdatedAt datetime NOT NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql));
+        Assert.Equal(54321, type.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MainApiEntryUsageDaily ALTER COLUMN UpdatedAt datetime2 NOT NULL;");
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        await ExecuteNonQueryAsync(main, MainApiEntryUsageSchema.ApplySql);
+
+        static SqlSugar.SqlSugarClient NewClient(string connectionString) =>
+            new(new SqlSugar.ConnectionConfig
+            {
+                ConnectionString = connectionString,
+                DbType = SqlSugar.DbType.SqlServer,
+                IsAutoCloseConnection = true,
+                InitKeyType = SqlSugar.InitKeyType.Attribute,
+            });
+        static KeyValuePair<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageKey, BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageDelta> Row(
+            DateOnly date, string entry, string kind, long requests, long s4xx = 0, long s5xx = 0) =>
+            new(new(date, entry, kind), new(requests, s4xx, s5xx));
+
+        var day1 = new DateOnly(2026, 10, 27);
+        var day2 = new DateOnly(2026, 10, 28);
+        var now = new DateTime(2026, 10, 27, 5, 0, 0, DateTimeKind.Utc);
+        var writer = new BlazorApp.Api.Services.MainApiEntry.SqlSugarMainApiEntryUsageWriter(NewClient(main));
+
+        async Task<string> ReadAsync(DateOnly date, string entry, string kind)
+        {
+            await using var connection = new SqlConnection(main);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand(
+                "SELECT CONCAT(RequestCount, '/', Status4xxCount, '/', Status5xxCount) FROM dbo.MainApiEntryUsageDaily WHERE UsageDate = @D AND Entry = @E AND ClientKind = @K",
+                connection);
+            command.Parameters.Add(new SqlParameter("@D", System.Data.SqlDbType.Date) { Value = date.ToDateTime(TimeOnly.MinValue) });
+            command.Parameters.AddWithValue("@E", entry);
+            command.Parameters.AddWithValue("@K", kind);
+            return Convert.ToString(await command.ExecuteScalarAsync()) ?? "";
+        }
+
+        // 新行插入，再来一批同键增量是累加而不是覆盖。
+        await writer.UpsertAsync([Row(day1, "direct", "web", 10, 2, 1), Row(day1, "unknown", "other", 3, 3, 0)], now, CancellationToken.None);
+        Assert.Equal("10/2/1", await ReadAsync(day1, "direct", "web"));
+        await writer.UpsertAsync([Row(day1, "direct", "web", 5, 0, 4), Row(day2, "edge", "app", 1)], now.AddMinutes(1), CancellationToken.None);
+        Assert.Equal("15/2/5", await ReadAsync(day1, "direct", "web"));
+        Assert.Equal("1/0/0", await ReadAsync(day2, "edge", "app"));
+        Assert.Equal("3/3/0", await ReadAsync(day1, "unknown", "other"));
+
+        // 多个写入方同时写同一批键：不丢数、不撞主键。
+        var tasks = Enumerable.Range(0, 6).Select(_ => Task.Run(async () =>
+        {
+            var concurrentWriter = new BlazorApp.Api.Services.MainApiEntry.SqlSugarMainApiEntryUsageWriter(NewClient(main));
+            for (var round = 0; round < 5; round++)
+            {
+                await concurrentWriter.UpsertAsync(
+                    [Row(day2, "aws", "web", 1, 1, 0), Row(day2, "aws", "app", 2, 0, 1)], now, CancellationToken.None);
+            }
+        })).ToArray();
+        await Task.WhenAll(tasks);
+        Assert.Equal("30/30/0", await ReadAsync(day2, "aws", "web"));
+        Assert.Equal("60/0/30", await ReadAsync(day2, "aws", "app"));
+
+        // 失败整批回滚：第二行违反 CHECK，第一行的累加也不能留下。
+        await Assert.ThrowsAnyAsync<Exception>(() => writer.UpsertAsync(
+            [Row(day1, "direct", "web", 5), Row(day1, "tencent", "web", 1)], now, CancellationToken.None));
+        Assert.Equal("15/2/5", await ReadAsync(day1, "direct", "web"));
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )

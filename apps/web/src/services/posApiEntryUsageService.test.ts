@@ -1,4 +1,10 @@
-import { getPosApiEntryUsage, normalizePosApiEntryUsage } from './posApiEntryService'
+import {
+  getMainApiEntryUsage,
+  getPosApiEntryUsage,
+  normalizeMainApiClientKind,
+  normalizeMainApiEntryUsage,
+  normalizePosApiEntryUsage,
+} from './posApiEntryService'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -120,6 +126,88 @@ try {
   assertEqual((calls[1] ?? '').includes('storeCode'), false, '不筛分店时不带 storeCode 参数')
 } finally {
   globalThis.fetch = originalFetch
+}
+
+// ───────── 主 API 用量：客户端类别固定三项，未知值并入 other，请求总数守恒 ─────────
+
+assertEqual(normalizeMainApiClientKind(' WEB '), 'web', '类别大小写 / 空白不敏感')
+assertEqual(normalizeMainApiClientKind('robot'), 'other', '未知类别并入 other')
+assertEqual(normalizeMainApiClientKind(undefined), 'other', '缺类别并入 other')
+
+const mainEmpty = normalizeMainApiEntryUsage(undefined, query)
+assertDeepEqual(mainEmpty.clientKinds.map((item) => item.clientKind), ['web', 'app', 'other'], '空响应也输出固定三个类别')
+assertDeepEqual(mainEmpty.entries.map((item) => item.entry), ['edge', 'aws', 'direct', 'unknown'], '空响应也输出固定四项线路')
+assertEqual(mainEmpty.clientKind, '', '缺类别筛选回显为空串')
+
+const mainNormalized = normalizeMainApiEntryUsage(
+  {
+    startDate: '2026-10-20',
+    endDate: '2026-10-21',
+    granularity: 'week',
+    clientKind: '',
+    total: { requests: 110, status4xx: 5, status5xx: 1 },
+    entries: [
+      { entry: 'direct', requests: 70, status4xx: 3, status5xx: 1, share: 0.7 },
+      { entry: 'edge', requests: 40, status4xx: 2, status5xx: 0, share: 0.4 },
+    ],
+    buckets: [{ bucketStart: '2026-10-19', bucketEnd: '2026-10-25', partial: true, total: { requests: 110 }, entries: [] }],
+    clientKinds: [
+      {
+        clientKind: 'web',
+        total: { requests: 70, status4xx: 3, status5xx: 1 },
+        share: 9,
+        entries: [{ entry: 'direct', requests: 70, status4xx: 3, status5xx: 1 }],
+      },
+      { clientKind: 'app', total: { requests: 30 }, entries: [{ entry: 'edge', requests: 30 }] },
+      // 未知类别并入 other，保证请求总数守恒
+      { clientKind: 'tablet', total: { requests: 6 }, entries: [{ entry: 'edge', requests: 6 }] },
+      { clientKind: 'other', total: { requests: 4 }, entries: [{ entry: 'unknown', requests: 4 }] },
+      null,
+    ],
+  },
+  query,
+)
+assertEqual(mainNormalized.granularity, 'week', '主 API 采用后端粒度')
+assertEqual(
+  mainNormalized.clientKinds.reduce((sum, item) => sum + item.total.requests, 0),
+  110,
+  '类别规整前后请求总数守恒',
+)
+assertEqual(mainNormalized.clientKinds.find((item) => item.clientKind === 'other')?.total.requests, 10, '未知类别并入 other（6 + 4）')
+assertEqual(
+  Math.round((mainNormalized.clientKinds.find((item) => item.clientKind === 'web')?.share ?? 0) * 1000),
+  636,
+  '类别占比按规整后的数据重算',
+)
+assertEqual(
+  mainNormalized.clientKinds.find((item) => item.clientKind === 'app')?.entries.find((item) => item.entry === 'edge')?.share,
+  1,
+  '类别内线路占比以该类别自身请求数为分母',
+)
+assertEqual(mainNormalized.buckets[0]?.partial, true, '主 API 桶沿用不完整标记')
+
+const originalFetchMain = globalThis.fetch
+try {
+  const mainCalls: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    mainCalls.push(String(input))
+    return new Response(
+      JSON.stringify({ success: true, data: { total: { requests: 9, status4xx: 0, status5xx: 0 }, clientKinds: [] } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+  }) as typeof fetch
+
+  const mainResult = await getMainApiEntryUsage({ ...query, granularity: 'week', clientKind: 'app' })
+  assertEqual(mainResult.total.requests, 9, '主 API 读取合计')
+  const mainUrl = mainCalls[0] ?? ''
+  assertEqual(mainUrl.includes('/api/react/v1/main-api-entry/usage'), true, '主 API 请求路径')
+  assertEqual(mainUrl.includes('granularity=week'), true, '主 API 带粒度')
+  assertEqual(mainUrl.includes('clientKind=app'), true, '主 API 带客户端类别')
+
+  await getMainApiEntryUsage(query)
+  assertEqual((mainCalls[1] ?? '').includes('clientKind'), false, '不筛类别时不带 clientKind 参数')
+} finally {
+  globalThis.fetch = originalFetchMain
 }
 
 console.log('posApiEntryUsageService tests passed')

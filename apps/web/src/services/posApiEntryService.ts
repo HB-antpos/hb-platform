@@ -1,5 +1,9 @@
 import type { ApiResponse } from '../types/api'
 import type {
+  MainApiClientKind,
+  MainApiEntryUsageClientKindItem,
+  MainApiEntryUsageQuery,
+  MainApiEntryUsageResult,
   PosApiEntryDeviceStats,
   PosApiEntryMode,
   PosApiEntryStoreItem,
@@ -226,4 +230,85 @@ export async function getPosApiEntryUsage(query: PosApiEntryUsageQuery): Promise
     },
   })
   return normalizePosApiEntryUsage(unwrapApiData(response), query)
+}
+
+// ───────────────────────── 主 API（Web 后台 + 员工 App）线路用量 ─────────────────────────
+// 与上面的收银端用量同构：同样按日 / 周 / 月汇总各线路的请求数、4xx、5xx 与占比，但没有分店维度，改为客户端类别拆分。
+
+const MAIN_API_ENTRY_BASE = '/api/react/v1/main-api-entry'
+
+/** 客户端类别的固定输出顺序（与后端 MainApiClientKinds.All 一致）。 */
+export const MAIN_API_CLIENT_KINDS: readonly MainApiClientKind[] = ['web', 'app', 'other']
+
+/** 未知值并入 other：旧后端或后端新增类别时前端不崩，请求数也不丢。 */
+export function normalizeMainApiClientKind(value: unknown): MainApiClientKind {
+  if (typeof value !== 'string') {
+    return 'other'
+  }
+  const normalized = value.trim().toLowerCase()
+  return normalized === 'web' || normalized === 'app' ? normalized : 'other'
+}
+
+/** 规整成固定 web / app / other 三项（缺的补 0、重复 / 未知的并入对应项）；share 以规整后的总请求数重新计算。 */
+function normalizeClientKinds(raw: unknown): MainApiEntryUsageClientKindItem[] {
+  const merged = new Map<MainApiClientKind, { total: PosApiEntryUsageCounts; entries: unknown[] }>(
+    MAIN_API_CLIENT_KINDS.map((kind) => [kind, { total: { requests: 0, status4xx: 0, status5xx: 0 }, entries: [] }]),
+  )
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') {
+        continue
+      }
+      const record = item as Record<string, unknown>
+      const target = merged.get(normalizeMainApiClientKind(record.clientKind))!
+      const counts = normalizeCounts(record.total)
+      target.total.requests += counts.requests
+      target.total.status4xx += counts.status4xx
+      target.total.status5xx += counts.status5xx
+      if (Array.isArray(record.entries)) {
+        target.entries.push(...record.entries)
+      }
+    }
+  }
+  const grandTotal = [...merged.values()].reduce((sum, item) => sum + item.total.requests, 0)
+  return MAIN_API_CLIENT_KINDS.map((clientKind) => {
+    const item = merged.get(clientKind)!
+    return {
+      clientKind,
+      total: item.total,
+      share: grandTotal > 0 ? item.total.requests / grandTotal : 0,
+      entries: normalizeUsageEntries(item.entries),
+    }
+  })
+}
+
+export function normalizeMainApiEntryUsage(payload: unknown, query: MainApiEntryUsageQuery): MainApiEntryUsageResult {
+  const record = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>
+  const buckets = (Array.isArray(record.buckets) ? record.buckets : [])
+    .map(normalizeUsageBucket)
+    .filter((bucket): bucket is PosApiEntryUsageBucket => bucket !== null)
+  return {
+    startDate: text(record.startDate) || query.startDate,
+    endDate: text(record.endDate) || query.endDate,
+    granularity: normalizeGranularity(record.granularity, query.granularity),
+    timeZone: text(record.timeZone) || 'Australia/Sydney',
+    clientKind: text(record.clientKind),
+    total: normalizeCounts(record.total),
+    entries: normalizeUsageEntries(record.entries),
+    buckets,
+    clientKinds: normalizeClientKinds(record.clientKinds),
+  }
+}
+
+/** 主 API 的线路用量：按日 / 周 / 月汇总各线路的请求数、4xx、5xx 与占比，另按客户端类别（Web / 员工 App / 其他）拆分；日期为悉尼日期。 */
+export async function getMainApiEntryUsage(query: MainApiEntryUsageQuery): Promise<MainApiEntryUsageResult> {
+  const response = await request.get<ApiResponse<unknown>>(`${MAIN_API_ENTRY_BASE}/usage`, {
+    params: {
+      startDate: query.startDate,
+      endDate: query.endDate,
+      granularity: query.granularity,
+      ...(query.clientKind ? { clientKind: query.clientKind } : {}),
+    },
+  })
+  return normalizeMainApiEntryUsage(unwrapApiData(response), query)
 }

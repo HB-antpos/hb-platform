@@ -217,7 +217,8 @@
         "toolbar": {
           "granularityAria": "Granularity",
           "rangeAria": "Date range",
-          "storePlaceholder": "All stores"
+          "storePlaceholder": "All stores",
+          "clientKindPlaceholder": "All clients"
         },
         "presets": {
           "last7": "Last 7 days",
@@ -253,7 +254,8 @@
         },
         "sections": {
           "buckets": "By period",
-          "stores": "By store"
+          "stores": "By store",
+          "clients": "By client"
         },
         "columns": {
           "period": "Period",
@@ -261,7 +263,9 @@
           "total": "Total",
           "status4xx": "4xx",
           "status5xx": "5xx",
-          "errorRate": "5xx rate"
+          "errorRate": "5xx rate",
+          "clientKind": "Client",
+          "kindShare": "Share of total"
         },
         "partialTag": "Partial",
         "partialHint": "Only some days of this week / month fall inside the selected range; the totals cover those days only",
@@ -271,7 +275,24 @@
         "messages": {
           "loadFailed": "Failed to load route usage"
         },
-        "footer": "Time zone: {{timeZone}} · Range {{start}} ~ {{end}} · 4xx / 5xx are subsets of requests · {{buckets}} periods, {{stores}} stores (incl. unassigned)"
+        "footer": "Time zone: {{timeZone}} · Range {{start}} ~ {{end}} · 4xx / 5xx are subsets of requests · {{buckets}} periods, {{stores}} stores (incl. unassigned)",
+        "source": {
+          "aria": "Usage source",
+          "pos": "POS API (registers)",
+          "main": "Main API (Web & staff app)"
+        },
+        "mainIntro": "Counts <b>requests</b> to the main API (the /api endpoints used by the web back office and the staff app), split by route (EdgeOne / AWS Sydney / Direct) and by client type (Web back office / Staff app / Other). The origin server identifies the route; the client type is a rough split from the request's browser identifier, and only counts are stored - never the identifier text, IP or user. Dates use Sydney time and weeks start on Monday. Data refreshes about once a minute and starts accumulating after release; history cannot be backfilled. Until the origin server is configured to mark the route, all requests show as Unidentified.",
+        "clientKinds": {
+          "web": "Web back office",
+          "app": "Staff app",
+          "other": "Other"
+        },
+        "clientKindHints": {
+          "web": "Browsers using the web back office",
+          "app": "Staff app (iOS / Android)",
+          "other": "Scripts, uptime monitors and other unrecognised clients"
+        },
+        "mainFooter": "Time zone: {{timeZone}} · Range {{start}} ~ {{end}} · 4xx / 5xx are subsets of requests · {{buckets}} periods"
       }
     }
   }
