@@ -39,6 +39,8 @@ export interface DetailActorFacts {
   roleNames: readonly string[];
   isAdmin: boolean;
   isStoreManager: boolean;
+  /** 仓库管理：不限分店的受限委派者，授权页按「全部分店 + 可授管理关系」处理。 */
+  isWarehouseManager?: boolean;
   /** 店长级管理者：只能在自己的分店范围内操作，不能动本人和更高权限账号。 */
   isStoreLevelManager: boolean;
   hasPermission: (permission: string) => boolean;
@@ -132,6 +134,7 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     isDeviceMode: scope.isDeviceMode,
     isAdmin: actor.isAdmin,
     isStoreManager: actor.isStoreManager,
+    isWarehouseManager: actor.isWarehouseManager,
     canManageStores: actor.hasPermission(PERMISSIONS.Users.ManageStores),
     canManageRoles: actor.hasPermission(PERMISSIONS.Users.ManageRoles),
     canManagePos: actor.hasPermission(PERMISSIONS.Users.ManagePos),

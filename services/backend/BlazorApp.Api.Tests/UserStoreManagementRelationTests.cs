@@ -1534,7 +1534,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task AssignRolesToUserAsync_WarehouseAliasCannotBypassPrimaryStoreScope()
+        public async Task AssignRolesToUserAsync_WarehouseAliasHasAllStoreScopeButStaysEmployeeOnly()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();
             await SeedAliasedStoreManagerAsync(
@@ -1553,13 +1553,14 @@ namespace BlazorApp.Api.Tests
                 })
             );
 
+            // 策略变更（用户要求仓库管理可调整用户角色 / 分店）：仓库管理不限分店，跨店目标不再因范围被拒；
+            // 它仍是受限委派者，角色只能是员工角色，见 WarehouseManagerUserAccessTests。
             var result = await service.AssignRolesToUserAsync(
                 "foreign-user",
                 new UserRoleAssignmentDto()
             );
 
-            Assert.False(result.Success);
-            Assert.Equal("ACCESS_DELEGATOR_DENIED", result.ErrorCode);
+            Assert.True(result.Success, result.Message);
         }
 
         [Fact]
@@ -3690,7 +3691,7 @@ namespace BlazorApp.Api.Tests
         [InlineData("Warehouse")]
         [InlineData("仓库管理员")]
         [InlineData("WarehouseAdmin")]
-        public async Task GetUserStores_WarehouseAliasWithoutPrimaryStoreCannotBypassScope(
+        public async Task GetUserStores_WarehouseAliasReadsAnyNonProtectedTargetWithoutPrimaryStore(
             string roleName
         )
         {
@@ -3726,11 +3727,12 @@ namespace BlazorApp.Api.Tests
                 new FakeCurrentUserService("warehouse-1")
             );
 
-            Assert.IsType<ForbidResult>(result);
+            // 策略变更：仓库管理不限分店，没有主分店也能读非受保护目标的分店关系（仍要求委派权限）。
+            Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
-        public async Task GetUserStores_WarehouseAliasUsesPrimaryStoreIntersection()
+        public async Task GetUserStores_WarehouseAliasReadsAllTargetStoresInsteadOfPrimaryIntersection()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();
             await SeedAliasedStoreManagerAsync(
@@ -3767,7 +3769,12 @@ namespace BlazorApp.Api.Tests
                 new FakeCurrentUserService("warehouse-1")
             );
 
-            Assert.IsType<ForbidResult>(result);
+            // 策略变更：不再与操作者主分店取交集，返回目标的全部分店关系。
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var payload = Assert.IsType<ApiResponse<List<UserStoreDto>>>(ok.Value);
+            var expectedCount = await _db.Queryable<UserStore>()
+                .CountAsync(item => item.UserGUID == "dual-user" && !item.IsDeleted);
+            Assert.Equal(expectedCount, payload.Data!.Count);
         }
 
         [Theory]

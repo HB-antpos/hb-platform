@@ -45,6 +45,7 @@ namespace BlazorApp.Api.Services
             }
 
             var accessRoleNames = Permissions.SuperAdminRoleNames
+                .Concat(Permissions.WarehouseManagerRoleNames)
                 .Concat(Permissions.StoreManagerRoleNames)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -68,6 +69,14 @@ namespace BlazorApp.Api.Services
             )
             {
                 return UserAccessMutationActor.Admin(userGuid);
+            }
+
+            // 仓库管理是「不限分店、但不是超管」的受限委派者：和范围服务里的口径一致（看全部分店），
+            // 但提权相关的动作（授 Admin / 仓库管理角色、改管理员账号）都由下面各校验单独拦住。
+            // 同时有店长角色时以仓库管理为准（范围更大），店长身份仍由主分店关系派生保留。
+            if (actorRoleNames.Any(IsWarehouseManagerRoleName))
+            {
+                return UserAccessMutationActor.WarehouseManager(userGuid);
             }
 
             if (!actorRoleNames.Any(Permissions.IsStoreManagerRole))
@@ -126,7 +135,11 @@ namespace BlazorApp.Api.Services
                 return new(false, "不能修改本人的访问权限", "SELF_ACCESS_MANAGEMENT_DENIED");
             }
 
-            var targetIsHighPrivilege = await IsHighPrivilegeTargetAsync(db, targetUserGuid);
+            // 店长按完整的高权限口径保护（含店长账号自己）；仓库管理要能把店长改成店员，
+            // 所以只保护管理员、仓库管理账号和带提升类权限码的账号，店长账号可以改。
+            var targetIsHighPrivilege = actor.IsWarehouseManager
+                ? await IsWarehouseProtectedTargetAsync(db, targetUserGuid)
+                : await IsHighPrivilegeTargetAsync(db, targetUserGuid);
             if (targetIsHighPrivilege)
             {
                 return new(false, "不能修改高权限账号", "HIGH_PRIVILEGE_TARGET_DENIED");
@@ -164,7 +177,8 @@ namespace BlazorApp.Api.Services
         )
         {
             var targetDecision = await ValidateTargetAsync(db, actor, targetUserGuid);
-            if (!targetDecision.IsAllowed || !actor.IsEnforced || actor.IsSuperAdmin)
+            // 不限分店的操作者（管理员、仓库管理）不需要再做跨店越界检查；目标保护已在上面完成。
+            if (!targetDecision.IsAllowed || !actor.IsEnforced || actor.HasUnrestrictedStoreScope)
             {
                 return targetDecision;
             }
@@ -195,6 +209,24 @@ namespace BlazorApp.Api.Services
             if (!actor.IsSuperAdmin)
             {
                 return new(false, "只有管理员可以修改用户角色或分店", "ADMIN_REQUIRED");
+            }
+
+            return await ValidateTargetAsync(db, actor, targetUserGuid);
+        }
+
+        /// <summary>
+        /// 分店关系（只动 UserStore，不碰角色定义）的目标校验：管理员不受限；仓库管理可以操作任意分店，
+        /// 但目标保护、本人保护照常生效；店长及其他账号一律要求管理员。
+        /// </summary>
+        internal static async Task<UserAccessMutationDecision> ValidateStoreRelationTargetAsync(
+            ISqlSugarClient db,
+            UserAccessMutationActor actor,
+            string targetUserGuid
+        )
+        {
+            if (!actor.IsSuperAdmin && !actor.IsWarehouseManager)
+            {
+                return new(false, "只有管理员或仓库管理可以修改用户分店", "ADMIN_REQUIRED");
             }
 
             return await ValidateTargetAsync(db, actor, targetUserGuid);
@@ -252,6 +284,15 @@ namespace BlazorApp.Api.Services
             if (actor.IsSuperAdmin)
             {
                 return UserAccessReadDecision.Unrestricted;
+            }
+
+            // 仓库管理能读除管理员 / 仓库管理账号外的任意账号（含店长，要把店长改成店员就得先读到），
+            // 不限分店，但仍要求持有控制器指定的委派权限（Users.ManageRoles / ManageStores / ManagePos 之一）。
+            if (actor.IsWarehouseManager)
+            {
+                return await IsWarehouseProtectedTargetAsync(db, targetUserGuid)
+                    ? UserAccessReadDecision.Forbidden
+                    : UserAccessReadDecision.DelegatedAllStores;
             }
 
             var targetStoreGuids = await db.Queryable<UserStore>()
@@ -361,9 +402,49 @@ namespace BlazorApp.Api.Services
             return UserAccessMutationDecision.Allow;
         }
 
+        // 仓库管理委派场景下的「提升类」权限码：持有任一项的账号能改角色定义 / 系统设置 / 别人的角色，
+        // 不能被仓库管理修改。店长角色自带的 Users.Create / ManageStores / ResetPassword 等不在其中，
+        // 所以店长账号不受此规则保护。
+        private static readonly string[] WarehouseProtectedPermissionCodes =
+        {
+            Permissions.Roles.Create,
+            Permissions.Roles.Edit,
+            Permissions.Roles.Delete,
+            Permissions.Roles.ManagePermissions,
+            Permissions.Roles.ManageUsers,
+            Permissions.System.ManageSettings,
+            Permissions.Users.Delete,
+            Permissions.Users.ManageRoles,
+        };
+
+        internal static bool IsWarehouseManagerRoleName(string? roleName) =>
+            !string.IsNullOrWhiteSpace(roleName)
+            && Permissions.WarehouseManagerRoleNames.Contains(
+                roleName,
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        /// <summary>
+        /// 仓库管理不能操作的目标：管理员、仓库管理账号（按角色名），以及直接 / 经角色持有提升类权限码的账号。
+        /// 比 <see cref="IsHighPrivilegeTargetAsync"/> 窄：店长账号不算受保护，仓库管理可以调整店长。
+        /// </summary>
+        internal static async Task<bool> IsWarehouseProtectedTargetAsync(
+            ISqlSugarClient db,
+            string targetUserGuid
+        )
+        {
+            var targets = await GetHighPrivilegeUserGuidsAsync(
+                db,
+                new[] { targetUserGuid },
+                warehouseDelegation: true
+            );
+            return targets.Contains(targetUserGuid);
+        }
+
         internal static async Task<HashSet<string>> GetHighPrivilegeUserGuidsAsync(
             ISqlSugarClient db,
-            IReadOnlyCollection<string>? candidateUserGuids = null
+            IReadOnlyCollection<string>? candidateUserGuids = null,
+            bool warehouseDelegation = false
         )
         {
             var candidates = candidateUserGuids?
@@ -375,7 +456,13 @@ namespace BlazorApp.Api.Services
                 return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
 
-            var highPrivilegeRoleNames = Permissions.HighPrivilegeRoleNames.ToArray();
+            // 仓库管理委派场景只按「管理员 + 仓库管理」角色名保护；其余沿用完整高权限口径。
+            var highPrivilegeRoleNames = warehouseDelegation
+                ? Permissions.SuperAdminRoleNames
+                    .Concat(Permissions.WarehouseManagerRoleNames)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+                : Permissions.HighPrivilegeRoleNames.ToArray();
             var highRoleQuery = db.Queryable<UserRole>()
                 .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
                 .Where((userRole, role) =>
@@ -421,6 +508,14 @@ namespace BlazorApp.Api.Services
                 },
                 StringComparer.OrdinalIgnoreCase
             );
+            if (warehouseDelegation)
+            {
+                // 仓库管理委派场景：只认提升类权限码，店长角色的 Users.* 店员管理码不再触发保护。
+                highPrivilegePermissionCodes = new HashSet<string>(
+                    WarehouseProtectedPermissionCodes,
+                    StringComparer.OrdinalIgnoreCase
+                );
+            }
             var rolePermissionQuery = db.Queryable<UserRole>()
                 .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
                 .InnerJoin<SysRolePermission>((userRole, role, permission) =>
@@ -607,6 +702,9 @@ namespace BlazorApp.Api.Services
         Denied,
         Admin,
         StoreManager,
+        // 仓库管理：不限分店，但不是超管。凡是写 `!IsSuperAdmin` 的受限分支对它仍然生效（只能授员工角色、
+        // 只能分配 POS 业务权限），只有「授分店 / 读目标」这些明确放行的地方才按不限分店处理。
+        WarehouseManager,
     }
 
     internal sealed record UserAccessMutationActor(
@@ -618,7 +716,10 @@ namespace BlazorApp.Api.Services
         internal bool IsEnforced => true;
         internal bool IsSuperAdmin => Kind == UserAccessMutationActorKind.Admin;
         internal bool IsStoreManager => Kind == UserAccessMutationActorKind.StoreManager;
-        internal bool HasUnrestrictedStoreScope => IsSuperAdmin;
+        internal bool IsWarehouseManager => Kind == UserAccessMutationActorKind.WarehouseManager;
+        internal bool HasUnrestrictedStoreScope => IsSuperAdmin || IsWarehouseManager;
+        // 能授予「管理」分店关系（主分店，会派生店长角色）：管理员和仓库管理；店长只能授查看关系。
+        internal bool CanGrantManageableStores => IsSuperAdmin || IsWarehouseManager;
 
         internal static UserAccessMutationActor Denied { get; } =
             new(UserAccessMutationActorKind.Denied, string.Empty, Array.Empty<string>());
@@ -633,6 +734,9 @@ namespace BlazorApp.Api.Services
             string userGuid,
             IReadOnlyCollection<string> storeGuids
         ) => new(UserAccessMutationActorKind.StoreManager, userGuid, storeGuids);
+
+        internal static UserAccessMutationActor WarehouseManager(string userGuid) =>
+            new(UserAccessMutationActorKind.WarehouseManager, userGuid, Array.Empty<string>());
     }
 
     internal sealed record UserAccessMutationDecision(
@@ -654,6 +758,9 @@ namespace BlazorApp.Api.Services
     {
         internal static UserAccessReadDecision Unrestricted { get; } =
             new(true, false, false, null);
+        // 不限分店，但调用方仍须持有控制器指定的委派权限（仓库管理读取目标的角色 / 分店）。
+        internal static UserAccessReadDecision DelegatedAllStores { get; } =
+            new(true, false, true, null);
         internal static UserAccessReadDecision Forbidden { get; } =
             new(false, false, false, Array.Empty<string>());
         internal static UserAccessReadDecision NotFound { get; } =

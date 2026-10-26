@@ -96,21 +96,23 @@ export function useAccessEditor({
   // 只有账号会话才把操作者绑进请求；iOS 审核会话带这个绑定会被拦截器拒绝。
   const boundActorKey = sessionKind === "account" ? actorUserGuid : "";
 
+  // 管理员与仓库管理都是「不限分店」的操作者；仓库管理在登录态里的分店 isPrimary 恒为 false，不能按它算范围。
+  const hasAllStoreScope = access.isAdmin || access.isWarehouseManager;
   const managedStoreCodes = useMemo(
     () =>
-      access.isAdmin
+      hasAllStoreScope
         ? null
         : (currentUser?.stores ?? [])
             .filter((store) => store.isPrimary === true)
             .map((store) => store.storeCode)
             .filter(Boolean),
-    [access.isAdmin, currentUser?.stores],
+    [currentUser?.stores, hasAllStoreScope],
   );
   const managedStoreCodeSet = useMemo(
     () => new Set(managedStoreCodes?.map((code) => code.toLowerCase()) ?? []),
     [managedStoreCodes],
   );
-  const hasManageableStores = access.isAdmin || Boolean(managedStoreCodes?.length);
+  const hasManageableStores = hasAllStoreScope || Boolean(managedStoreCodes?.length);
   const canManageStores = access.hasPermission(PERMISSIONS.Users.ManageStores);
   const canManageRoles = access.hasPermission(PERMISSIONS.Users.ManageRoles);
   const canManagePos = access.hasPermission(PERMISSIONS.Users.ManagePos);
@@ -132,6 +134,7 @@ export function useAccessEditor({
         isDeviceMode,
         isAdmin: access.isAdmin,
         isStoreManager: access.isStoreManager,
+        isWarehouseManager: access.isWarehouseManager,
         canManageStores,
         canManageRoles,
         canManagePos,
@@ -144,6 +147,7 @@ export function useAccessEditor({
     [
       access.isAdmin,
       access.isStoreManager,
+      access.isWarehouseManager,
       canManagePos,
       canManageRoles,
       canManageStores,
@@ -160,7 +164,7 @@ export function useAccessEditor({
   );
   const storesEnabled = queryEnabled && routeEligibility.storesMode !== "hidden";
   // 受限操作者直接使用登录态中的可管理分店，避免 POS-only 账号被全分店目录接口拒绝。
-  const storeCatalogEnabled = storesEnabled && access.isAdmin;
+  const storeCatalogEnabled = storesEnabled && hasAllStoreScope;
   const rolesEnabled = queryEnabled && routeEligibility.rolesMode !== "hidden";
 
   const storesQuery = useUserAccessStores(userGuid, storesEnabled, boundActorKey);
@@ -177,6 +181,7 @@ export function useAccessEditor({
         isDeviceMode,
         isAdmin: access.isAdmin,
         isStoreManager: access.isStoreManager,
+        isWarehouseManager: access.isWarehouseManager,
         canManageStores,
         canManageRoles,
         canManagePos,
@@ -189,6 +194,7 @@ export function useAccessEditor({
     [
       access.isAdmin,
       access.isStoreManager,
+      access.isWarehouseManager,
       canManagePos,
       canManageRoles,
       canManageStores,
@@ -370,7 +376,7 @@ export function useAccessEditor({
   // ───────────── 页面展示用的数据 ─────────────
   const actorManagedStoreOptions = useMemo<AccessStoreOption[]>(
     () =>
-      access.isAdmin
+      hasAllStoreScope
         ? []
         : (currentUser?.stores ?? []).flatMap((store) => {
             const storeGUID = store.storeGUID?.trim();
@@ -384,20 +390,20 @@ export function useAccessEditor({
               },
             ];
           }),
-    [access.isAdmin, currentUser?.stores],
+    [currentUser?.stores, hasAllStoreScope],
   );
   const storeOptions = useMemo(
     () =>
       buildAccessStoreOptions({
-        isAdmin: access.isAdmin,
+        isAdmin: hasAllStoreScope,
         catalog: storeCatalogQuery.data,
         actorManaged: actorManagedStoreOptions,
         assigned: storesQuery.data,
         managedStoreCodes: managedStoreCodeSet,
       }),
     [
-      access.isAdmin,
       actorManagedStoreOptions,
+      hasAllStoreScope,
       managedStoreCodeSet,
       storeCatalogQuery.data,
       storesQuery.data,
