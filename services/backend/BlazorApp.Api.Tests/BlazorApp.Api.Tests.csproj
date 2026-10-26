@@ -484,6 +484,7 @@
     <Compile Include="SupplierPreorderImageCopyTests.cs" />
     <Compile Include="SupplierPreorderRevisionTests.cs" />
     <Compile Include="PosApiEntryTests.cs" />
+    <Compile Include="PosApiEntryUsageTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />

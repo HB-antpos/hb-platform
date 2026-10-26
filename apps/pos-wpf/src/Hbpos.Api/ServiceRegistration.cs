@@ -162,6 +162,10 @@ public static class ServiceRegistration
         services.AddScoped<IStoreApiEntryModeReader, SqlSugarStoreApiEntryModeReader>();
         services.AddScoped<IDeviceApiEntryWriter, SqlSugarDeviceApiEntryWriter>();
         services.AddScoped<IDeviceApiEntryRecorder, DeviceApiEntryRecorder>();
+        // 收银入口用量统计：进程内计数器（单例）+ 每 60 秒批量落库的后台服务；中间件在 Program.cs 里挂载。
+        services.AddSingleton<PosApiEntryUsageCounter>();
+        services.AddScoped<IPosApiEntryUsageWriter, SqlSugarPosApiEntryUsageWriter>();
+        services.AddHostedService<PosApiEntryUsageFlushService>();
         services.AddScoped<IAdvertisementSchemaInitializer, SqlSugarAdvertisementSchemaInitializer>();
         services.AddScoped<IOrderSyncSchemaSqlExecutor, SqlSugarOrderSyncSchemaSqlExecutor>();
         services.AddScoped<IOrderSyncSchemaInitializer, SqlSugarOrderSyncSchemaInitializer>();

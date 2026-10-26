@@ -5,9 +5,9 @@ import {
   SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
-import { Alert, Button, Dropdown, Input, Modal, Segmented, Select, Tooltip, message } from 'antd'
+import { Alert, Button, Dropdown, Input, Modal, Segmented, Select, Spin, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar'
@@ -106,7 +106,10 @@ const STATUS_ACTION_REQUEST: Record<DeviceStatusAction, (id: number) => Promise<
   lock: lockDevice,
 }
 
-type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes' | 'posApiEntry'
+type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes' | 'posApiEntry' | 'posApiUsage'
+
+// 线路用量带图表与大表格，只有切到该视图时才加载，不进设备管理页的首屏代码
+const PosApiEntryUsagePanel = lazy(() => import('./PosApiEntryUsagePanel'))
 
 // 文案键写成字面量，页面文案契约测试才能扫描到并校验中英文都存在
 const BATCH_ACTION_LABEL_KEY: Record<DeviceStatusAction, string> = {
@@ -867,7 +870,10 @@ export default function DeviceRegistrationPage() {
       ? [{ label: t('posAdmin.devices.activation.view'), value: 'activationCodes' as const }]
       : []),
     ...(canViewLegacyDeviceRegistration
-      ? [{ label: t('posAdmin.devices.viewPosApiEntry'), value: 'posApiEntry' as const }]
+      ? [
+          { label: t('posAdmin.devices.viewPosApiEntry'), value: 'posApiEntry' as const },
+          { label: t('posAdmin.devices.viewPosApiUsage'), value: 'posApiUsage' as const },
+        ]
       : []),
   ]
 
@@ -899,6 +905,16 @@ export default function DeviceRegistrationPage() {
         </div>
       ) : viewMode === 'posApiEntry' ? (
         <PosApiEntryPanel canManage={canManage} />
+      ) : viewMode === 'posApiUsage' ? (
+        <Suspense
+          fallback={
+            <div className="dev-mgmt-card" style={{ textAlign: 'center', padding: 48 }}>
+              <Spin />
+            </div>
+          }
+        >
+          <PosApiEntryUsagePanel stores={stores} />
+        </Suspense>
       ) : viewMode === 'appUsage' ? (
         <AppUsagePanel
           stores={stores}
