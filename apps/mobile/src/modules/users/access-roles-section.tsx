@@ -28,6 +28,8 @@ interface AccessRolesSectionProps {
   selectedRoleGuids: string[];
   hasManagedStoreAssignment: boolean;
   isAdmin: boolean;
+  /** 仓库管理：提示文案不同（可设置店长，但只能把角色设为店员）。 */
+  isWarehouseManager?: boolean;
   rolesEditable: boolean;
   storesEditable: boolean;
   canGrantStoreManagement: boolean;
@@ -46,6 +48,7 @@ export function AccessRolesSection({
   selectedRoleGuids,
   hasManagedStoreAssignment,
   isAdmin,
+  isWarehouseManager = false,
   rolesEditable,
   storesEditable,
   canGrantStoreManagement,
@@ -65,7 +68,11 @@ export function AccessRolesSection({
 
   return (
     <View style={accessSectionStyles.stack}>
-      {!isAdmin ? <NoticeBox tone="blue">{t("roles.managerLimit")}</NoticeBox> : null}
+      {!isAdmin ? (
+        <NoticeBox tone="blue">
+          {t(isWarehouseManager ? "roles.warehouseLimit" : "roles.managerLimit")}
+        </NoticeBox>
+      ) : null}
       {roles.length >= ROLE_SEARCH_MIN ? (
         <AccessSearchBox
           value={query}
