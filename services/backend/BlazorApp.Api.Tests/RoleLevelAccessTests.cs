@@ -142,6 +142,23 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task UpdateUserByGuidAsync_WarehouseManager_CanEditStoreManagerButNotAdminOrPeer()
+        {
+            await SeedAsync();
+            var service = CreateUserService(Scope("whm-1")); // 仓库经理 80，高于店长 70
+
+            var storeManager = await service.UpdateUserByGuidAsync("sm-1", EditDto("sm-1"));
+            Assert.True(storeManager.Success);
+
+            foreach (var blocked in new[] { "admin-1", "whm-2" }) // 管理员 100、同级仓库经理 80
+            {
+                var denied = await service.UpdateUserByGuidAsync(blocked, EditDto(blocked));
+                Assert.False(denied.Success);
+                Assert.Equal("TARGET_LEVEL_DENIED", denied.ErrorCode);
+            }
+        }
+
+        [Fact]
         public async Task UpdateUserPasswordByGuidAsync_NonAdminGlobalEditor_CannotResetHigherLevelPassword()
         {
             await SeedAsync();
@@ -244,7 +261,7 @@ namespace BlazorApp.Api.Tests
         {
             var userGuids = new[]
             {
-                "admin-1", "whm-1", "sm-1", "hr-1", "hr-2", "staff-1", "auditor-1", "clerk-1",
+                "admin-1", "whm-1", "whm-2", "sm-1", "hr-1", "hr-2", "staff-1", "auditor-1", "clerk-1",
                 "norole-1", "ghost-1", "multi-1", "deleted-link-1",
             };
             await _db.Insertable(userGuids.Select(guid => new User
@@ -273,6 +290,7 @@ namespace BlazorApp.Api.Tests
             {
                 Link("admin-1", "role-admin"),
                 Link("whm-1", "role-whm"),
+                Link("whm-2", "role-whm"),
                 Link("sm-1", "role-sm"),
                 Link("hr-1", "role-hr"),
                 Link("hr-2", "role-hr"),

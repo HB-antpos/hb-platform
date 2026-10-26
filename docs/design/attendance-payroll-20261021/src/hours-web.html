@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="shell.css">
+<style>
+.tbl{background:#fff;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+th{background:#FAFAFA;font-weight:600;color:var(--t2);font-size:12px;padding:6px 4px;border-bottom:1px solid var(--line2);text-align:center;line-height:1.3}
+th.wkh{font-size:12.5px;color:var(--t1);background:#F2F4F7;padding:5px}
+th.we{color:var(--warn)} th.phc{background:#FFF4ED;color:#C4320A}
+th small{display:block;font-weight:500;font-size:10.5px;color:var(--t3)}
+th.phc small{color:#C4320A}
+td{border-bottom:1px solid #F0F0F0;padding:3px;vertical-align:top;height:62px}
+td.sep,th.sep{border-left:2px solid var(--line)}
+td.phc{background:#FFFAF5}
+td.sum{text-align:right;padding:6px 5px;vertical-align:middle;font-variant-numeric:tabular-nums;font-size:12.5px}
+td.big{font-weight:700;font-size:14.5px}
+.emp{display:flex;gap:7px;align-items:flex-start;padding:4px 2px}
+.emp .av{width:28px;height:28px;font-size:10.5px;margin-top:2px}
+.emp .nm{font-size:13.5px;font-weight:600;white-space:nowrap}
+.emp .tg{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px}
+.c{height:100%;border-radius:6px;padding:4px 4px 3px;display:flex;flex-direction:column;gap:3px;background:#F6F9FF;border:1px solid #DCE8FB}
+.c .h{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center}
+.c .bs{display:flex;gap:2px;flex-wrap:wrap;justify-content:center}
+.c.p{background:var(--warnbg);border:1px dashed #F79009}
+.c.off{background:transparent;border:1px dashed #EAECF0;color:#C0C6D0;align-items:center;justify-content:center;font-size:11.5px}
+.c.un{background:repeating-linear-gradient(135deg,#F2F4F7 0 5px,#fff 5px 10px);border:1px solid var(--line2);color:var(--t2);align-items:center;justify-content:center;font-size:11px}
+.c.lv-al{background:var(--violetbg);border:1px solid #D9D6FE}
+.c.lv-sick{background:var(--badbg);border:1px solid #FECDCA}
+.c.phd{background:#FFF4ED;border:1px solid #F9DBAF}
+.c.phask{background:var(--warnbg);border:1px dashed #F79009}
+tr.tot td{background:#FAFAFA;font-weight:700;height:auto;padding:8px 4px;text-align:center;font-variant-numeric:tabular-nums;font-size:12.5px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--t2);align-items:center;padding:9px 12px;border-top:1px solid var(--line2);flex-wrap:wrap}
+.legend span{display:inline-flex;gap:4px;align-items:center}
+</style></head>
+<body><div class="canvas" id="cv">
+<h1>工时统计 · Web（两周视图，十进制小时）</h1>
+<div class="sub">默认 1 周，这张图切到了 2 周（10-05 ~ 10-18），因为 10-05 是 QLD 公共假期 King's Birthday。工时一律十进制小时，最多 2 位小数（7:59 → 7.98）。只计已审核，只算已批准的加班。周末、公假<b>按实际工时</b>，不乘系数，由时薪表里的周六 / 周日 / 公假时薪区分。年假休息每个工作日记 8 h。</div>
+<div class="screen">
+  <div class="top"><div class="logo">HB</div><span class="crumb">门店运营 / 排班考勤 / <b>工时与工资</b></span><span style="margin-left:auto;color:var(--t2)">Sarah Kim</span></div>
+  <div class="body">
+    <div class="side"><div><i class="ti ti-calendar-week"></i></div><div><i class="ti ti-checklist"></i><span class="bd">7</span></div><div class="on"><i class="ti ti-table"></i></div><div><i class="ti ti-fingerprint"></i></div><div><i class="ti ti-calendar-user"></i></div><div><i class="ti ti-beach"></i></div><div><i class="ti ti-settings"></i></div></div>
+    <div class="main">
+      <div class="ph">
+        <h2>工时与工资</h2>
+        <span class="segc"><span>1 周</span><span class="on">2 周</span></span>
+        <span class="sel"><i class="ti ti-chevron-left"></i><b>第 41–42 周</b> · 10-05 ~ 10-18<i class="ti ti-chevron-right"></i></span>
+        <span class="sel"><i class="ti ti-building-store"></i>Chermside<i class="ti ti-chevron-down"></i></span>
+        <span class="segc"><span class="on">只计已审核</span><span>含待审</span></span>
+        <span style="flex:1"></span>
+        <span class="btn" style="height:32px"><i class="ti ti-download"></i>导出 Excel</span>
+        <span class="btn dis" style="height:32px"><i class="ti ti-lock"></i>提交并锁定 · 还有 6 项待处理</span>
+      </div>
+      <div class="ptabs"><div class="on">工时统计</div><div>工资表</div><div>个人时薪表</div></div>
+      <div class="bn teal"><i class="ti ti-building-community"></i><span><b>2 人在其他分店也有打卡</b>：Sarah Kim 10-08 在 Sunnybank 4 h、Liam Patel 10-07 在 Sunnybank 5.5 h，现在没算进本表。</span><span style="flex:1"></span><span class="btn">保持分开</span><span class="btn pri">合并到本表</span></div>
+      <div class="bn amber"><i class="ti ti-flag"></i><span><b>10-05 King's Birthday</b>：Olivia Chen（兼职）过去 10 周有 7 个周一排班（规则：≥7 次），可能有带薪公假 6 h。</span><span style="flex:1"></span><span class="btn">不适用</span><span class="btn pri">确认带薪 6 h</span></div>
+      <div class="bn pink"><i class="ti ti-cake"></i><span><b>Mia Robinson 10-16 生日，满 17 岁</b>（未成年）：按年龄计的时薪可能要调整，去个人时薪表核对。</span><span style="flex:1"></span><span class="btn">知道了</span><span class="btn pri">打开时薪表</span></div>
+      <div class="kpis" id="kpis"></div>
+      <div class="tbl"><table id="t"></table>
+        <div class="legend">
+          <span><span class="bg b-ph">公</span>公共假期（上班按公假时薪）</span>
+          <span><span class="bg b-ph">公 7.6</span>带薪公假（没上班）</span>
+          <span><span class="bg b-sick">病</span>带薪病假 <i class="ti ti-paperclip"></i>=医嘱</span>
+          <span><span class="bg b-al">年</span>带薪年假（休息，每工作日 8 h）</span>
+          <span><span class="bg b-co">发</span>年假发放（照常上班）</span>
+          <span><span class="bg b-bd">🎂</span>生日</span>
+          <span><span class="bg b-st">SB 4</span>另一店打卡（未合并）</span>
+          <span><span class="bg b-pd">待审</span>有待处理，不计入</span>
+          <span style="margin-left:auto">格子数字 = 当天计薪工时（h）；假期格数字 = 申请的带薪工时，最终以财务核定为准</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note-grid">
+  <div class="notes"><b>周期与显示</b><ol><li>右上角「1 周 / 2 周」切换，默认 1 周；2 周的起点由设置里的「双周起始日」决定（示例 10-05），和发薪周期对齐。</li><li>工时全部十进制小时、最多 2 位小数，导出 Excel 也一样。</li><li>员工列显示类型（全职 / 兼职 / 临时）、未成年周岁和多店角标。</li></ol></div>
+  <div class="notes"><b>提醒条（处理后消失）</b><ol><li><b>多店</b>：店长或员工在别的店也有打卡时提示，选「合并」后另一店的工时并进本表。</li><li><b>带薪公假</b>：全职 / 兼职在公假当天没排班，但过去 N 周同一星期几排班 ≥ M 次（默认 10 周 7 次，可设置），就提示确认。</li><li><b>生日</b>：生日当天格子带 🎂；未成年人生日额外提示核对时薪。</li></ol></div>
+  <div class="notes"><b>带薪假期</b><ol><li>病假按当天排班工时扣餐；年假休息每个工作日 8 h，周末和公假不算；公假按确认的工时。</li><li>本表显示<b>申请的</b>带薪工时；年假最终发多少，由财务在工资表按累计带薪小时核定。</li><li>临时工（Casual）没有带薪假，申请入口不出现。</li></ol></div>
+</div>
+</div>
+<script src="period-data.js"></script>
+<script>
+const R=P.map(e=>({e,...prow(e,0,14)}));
+const S=k=>R.reduce((a,r)=>a+r[k],0); const HS=k=>R.reduce((a,r)=>a+r.H[k],0);
+// 工时统计用申请工时：总计 = 实际计薪 + 申请的带薪假
+const reqTotal=r=>+(r.H.wd+r.H.sat+r.H.sun+r.H.ph+r.leave).toFixed(2);
+document.getElementById('kpis').innerHTML=`
+ <div class="kpi"><div class="l">计薪工时合计</div><div class="v">${dec(S('paid'))} h</div><div class="s">${R.length} 人 · 2 周 · 实际工时 · 不含其他分店</div></div>
+ <div class="kpi"><div class="l">按时薪档（h）</div><div class="v" style="font-size:14px;margin-top:7px">平日 ${hrs(HS('wd'))} · 六 ${hrs(HS('sat'))} · 日 ${hrs(HS('sun'))} · 公 ${hrs(HS('ph'))}</div><div class="s">周末、公假按实际工时，各用各的时薪</div></div>
+ <div class="kpi"><div class="l">带薪假期（申请）</div><div class="v">${hrs(S('leave'))} h</div><div class="s">病 ${hrs(S('sick'))} · 年 ${hrs(S('annual'))} · 公 ${hrs(S('ph'))} · 发 ${hrs(S('cash'))}</div></div>
+ <div class="kpi warn"><div class="l">待处理</div><div class="v">${S('pend')} 项 <span style="font-size:13px">去审核 →</span></div><div class="s" style="color:var(--warn)">含 1 条公假确认；清零后才能提交</div></div>`;
+let h=`<colgroup><col style="width:178px">${PDAYS.map(()=>'<col>').join('')}<col style="width:48px"><col style="width:46px"><col style="width:46px"><col style="width:46px"><col style="width:50px"><col style="width:56px"></colgroup>`;
+h+=`<tr><th class="wkh" style="text-align:left">员工</th><th class="wkh" colspan="7">第 41 周 · 10-05 ~ 10-11</th><th class="wkh sep" colspan="7">第 42 周 · 10-12 ~ 10-18</th><th class="wkh sep" colspan="6">2 周合计（h）</th></tr>`;
+h+=`<tr><th></th>${PDAYS.map((d,i)=>{const cls=[i===PH_IDX?'phc':(i%7>4?'we':''),i===7?'sep':''].join(' ');const sub=i===PH_IDX?'公假时薪':(i%7===5?'周六时薪':i%7===6?'周日时薪':'&nbsp;');return `<th class="${cls}">${PWD[i]} ${d}<small>${sub}</small></th>`}).join('')}<th class="sep">平日</th><th class="we">六</th><th class="we">日</th><th class="phc">公</th><th>带薪假</th><th>合计</th></tr>`;
+for(const r of R){
+  const e=r.e;
+  const tags=[`<span class="bg b-ty">${e.type}</span>`];
+  if(e.role==='Manager') tags.push(`<span class="bg b-ty">店长</span>`);
+  if(e.age) tags.push(`<span class="bg b-age">${e.age} 岁</span>`);
+  if(r.other) tags.push(`<span class="bg b-st">多店</span>`);
+  h+=`<tr><td><div class="emp"><div class="av" style="background:${e.c}">${e.av}</div><div><div class="nm">${e.name}</div><div class="tg">${tags.join('')}</div></div></div></td>`;
+  r.idx.forEach(i=>{
+    const d=e.days[i], c=r.cs[i], sep=i===7?' sep':'', phc=i===PH_IDX?' phc':'';
+    const bs=[];
+    if(d&&d.ph&&c) bs.push('<span class="bg b-ph">公</span>');
+    if(d&&d.cash) bs.push(`<span class="bg b-co">发 ${d.cash}</span>`);
+    if(e.bday===i) bs.push('<span class="bg b-bd">🎂</span>');
+    if(d&&d.other) bs.push(`<span class="bg b-st">SB ${d.other.h}</span>`);
+    if(d&&d.pend) bs.push('<span class="bg b-pd">待审</span>');
+    if(d&&d.ok) bs.push('<span class="bg b-ok">✓</span>');
+    let cell;
+    if(!d) cell=`<div class="c off">休</div>`;
+    else if(d.unavail) cell=`<div class="c un">不能<br>上班</div>`;
+    else if(d.leave) cell=`<div class="c ${d.leave.t==='病'?'lv-sick':'lv-al'}"><div class="h">${d.leave.h}</div><div class="bs"><span class="bg ${d.leave.t==='病'?'b-sick':'b-al'}">${d.leave.t}${d.leave.cert?' <i class="ti ti-paperclip" style="font-size:10px"></i>':''}</span></div></div>`;
+    else if(d.phPaid) cell=`<div class="c ${d.phPaid.state==='ok'?'phd':'phask'}"><div class="h">${d.phPaid.state==='ok'?d.phPaid.h:'?'}</div><div class="bs"><span class="bg ${d.phPaid.state==='ok'?'b-ph':'b-pd'}">公${d.phPaid.state==='ok'?' ✓':' 待确认'}</span></div></div>`;
+    else if(d.off&&d.other) cell=`<div class="c off" style="gap:3px">休<span class="bg b-st">SB ${d.other.h}</span></div>`;
+    else if(d.off) cell=`<div class="c off">休</div>`;
+    else cell=`<div class="c ${d.pend?'p':''}"><div class="h">${dec(c.paid)}</div><div class="bs">${bs.join('')}</div></div>`;
+    h+=`<td class="${sep}${phc}">${cell}</td>`;
+  });
+  const z=v=>v?hrs(v):'—';
+  h+=`<td class="sum sep">${z(r.H.wd)}</td><td class="sum">${z(r.H.sat)}</td><td class="sum">${z(r.H.sun)}</td><td class="sum">${z(r.H.ph)}</td><td class="sum">${z(r.leave)}</td><td class="sum big">${reqTotal(r)}</td></tr>`;
+}
+const dt=PDAYS.map((_,i)=>R.reduce((a,r)=>a+(r.cs[i]?r.cs[i].paid:0),0));
+h+=`<tr class="tot"><td style="text-align:left">合计 · ${R.length} 人</td>${dt.map((v,i)=>`<td class="${i===7?'sep':''}">${dec(v)}</td>`).join('')}<td class="sep" style="text-align:right">${hrs(HS('wd'))}</td><td style="text-align:right">${hrs(HS('sat'))}</td><td style="text-align:right">${hrs(HS('sun'))}</td><td style="text-align:right">${hrs(HS('ph'))}</td><td style="text-align:right">${hrs(S('leave'))}</td><td style="text-align:right">${hrs(R.reduce((a,r)=>a+reqTotal(r),0))}</td></tr>`;
+document.getElementById('t').innerHTML=h;
+document.body.setAttribute('data-h',document.getElementById('cv').offsetHeight);
+</script>
+</body></html>

@@ -4,7 +4,7 @@ import * as Crypto from "expo-crypto";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
-import { ActivityIndicator, Button, HelperText, Icon, Surface, Text } from "react-native-paper";
+import { ActivityIndicator, Button, HelperText, Icon, SegmentedButtons, Surface, Text } from "react-native-paper";
 
 import {
   confirmMyCashierBarcodePrintApi,
@@ -27,7 +27,11 @@ import {
   type PendingCashierBarcodePrintConfirmation,
 } from "./cashier-barcode";
 import { getCashierBarcodeQueryKey } from "./cache-keys";
+import { Ean13Barcode } from "./Ean13Barcode";
+import { isValidEan13 } from "./ean13-modules";
 import { PersonalCodePrintBusyError, runPersonalCodePrintExclusive } from "@/modules/printer/personal-code-print-lock";
+import { personalCodeSymbology, usePersonalCodeSymbology } from "@/modules/printer/use-personal-code-symbology";
+import type { PersonalCodeSymbology } from "@/modules/printer/personal-code-symbology";
 import { printEmployeeCashierBarcodeLabel } from "@/modules/printer/api";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { SecureStorage } from "@/shared/storage/secure";
@@ -79,6 +83,7 @@ export function CashierBarcodeCard({
   const mismatchHandledRef = useRef("");
   const queryKey = useMemo(() => getCashierBarcodeQueryKey(userIdentity), [userIdentity]);
   const barcodeQuery = useQuery({ queryKey, queryFn: getMyCashierBarcodeApi });
+  const [symbology, setSymbology] = usePersonalCodeSymbology();
 
   const persistPendingConfirmation = useCallback(async (
     value: PendingCashierBarcodePrintConfirmation | null
@@ -141,6 +146,8 @@ export function CashierBarcodeCard({
             employeeName,
             username,
             barcode: value,
+            // 打印前确保偏好已读取完毕，避免刚进页面就点打印时误用默认值。
+            symbology: await personalCodeSymbology.hydrate(),
           });
           if (!printed) {
             throw new Error(t("cashierBarcode.printFailed"));
@@ -268,6 +275,8 @@ export function CashierBarcodeCard({
   const busy = refreshMutation.isPending || printMutation.isPending || !pendingLoaded;
   const refreshAllowed = canRefreshCashierBarcode(pendingConfirmation, pendingLoaded);
   const barcodeValue = barcodeQuery.data?.barcode?.trim() ?? "";
+  // 偏好为条码但值不是合法 EAN13 时，屏幕回退到二维码（此时打印也会因校验失败而中止）。
+  const showLinearBarcode = symbology === "barcode" && isValidEan13(barcodeValue);
   const detail = (
     <Surface style={styles.card} elevation={0}>
       <View style={styles.header}>
@@ -291,18 +300,32 @@ export function CashierBarcodeCard({
         </View>
       ) : barcodeQuery.data?.exists && barcodeValue ? (
         <View style={styles.qrPreview}>
+          <SegmentedButtons
+            density="small"
+            value={symbology}
+            onValueChange={(next) => void setSymbology(next as PersonalCodeSymbology)}
+            buttons={[
+              { value: "qr", label: t("cashierBarcode.symbology.qr"), disabled: busy },
+              { value: "barcode", label: t("cashierBarcode.symbology.barcode"), disabled: busy },
+            ]}
+            style={styles.symbologySwitch}
+          />
           <View
             accessible
             accessibilityRole="image"
             accessibilityLabel={`${t("cashierBarcode.title")}: ${barcodeValue}`}
-            style={styles.qrCanvas}
+            style={showLinearBarcode ? styles.barcodeCanvas : styles.qrCanvas}
           >
-            <QRCode
-              value={barcodeValue}
-              size={168}
-              backgroundColor="#FFFFFF"
-              color="#111111"
-            />
+            {showLinearBarcode ? (
+              <Ean13Barcode value={barcodeValue} width={260} />
+            ) : (
+              <QRCode
+                value={barcodeValue}
+                size={168}
+                backgroundColor="#FFFFFF"
+                color="#111111"
+              />
+            )}
           </View>
           <Text accessible={false} selectable variant="labelSmall" style={styles.qrValue}>
             {barcodeValue}
@@ -360,7 +383,15 @@ export function CashierBarcodeCard({
           {barcodeQuery.isLoading ? (
             <ActivityIndicator />
           ) : barcodeValue && !barcodeQuery.isError ? (
-            <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+            showLinearBarcode ? (
+              // 磁贴只是入口缩略图：条码模式下按 104px 宽显示并带编号，扫码请进弹层。
+              <View style={styles.tileBarcode}>
+                <Ean13Barcode value={barcodeValue} width={104} />
+                <Text variant="labelSmall" style={styles.tileBarcodeValue}>{barcodeValue}</Text>
+              </View>
+            ) : (
+              <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+            )
           ) : (
             // 加载失败 / 还没生成：整块仍可点，进弹层里重试或生成。
             <Text variant="labelSmall" style={styles.tileMessage}>
@@ -388,7 +419,11 @@ export function CashierBarcodeCard({
           <View style={styles.compactQr}>
             {barcodeQuery.isLoading ? <ActivityIndicator /> : barcodeValue && !barcodeQuery.isError ? (
               <>
-                <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+                {showLinearBarcode ? (
+                  <Ean13Barcode value={barcodeValue} width={160} />
+                ) : (
+                  <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+                )}
                 <Text variant="labelSmall" style={styles.compactValue}>{barcodeValue}</Text>
               </>
             ) : null}
@@ -428,6 +463,8 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   tileMessage: { color: "#667085", textAlign: "center" },
+  tileBarcode: { alignItems: "center", gap: 4 },
+  tileBarcodeValue: { color: "#667085", fontSize: 9, fontVariant: ["tabular-nums"] },
   tileZoom: {
     position: "absolute",
     right: -7,
@@ -451,6 +488,9 @@ const styles = StyleSheet.create({
   centered: { alignItems: "center", justifyContent: "center", gap: 8, minHeight: 72 },
   qrPreview: { alignItems: "center", gap: 6 },
   qrCanvas: { backgroundColor: "#FFFFFF", padding: 32 },
+  // 与二维码画布等高（168 + 上下各 32），切换时弹窗高度不跳动。
+  barcodeCanvas: { backgroundColor: "#FFFFFF", paddingVertical: 32, minHeight: 232, justifyContent: "center" },
+  symbologySwitch: { alignSelf: "stretch" },
   qrValue: {
     color: "#667085",
     fontVariant: ["tabular-nums"],

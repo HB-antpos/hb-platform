@@ -113,6 +113,21 @@ const mealPayload = buildAttendanceQrPunchPayload(token, punchAuthorizationToken
 assert.deepEqual(mealPayload.mealDeclaration, { notTakenCount: 1 },
   "扫码前回答「没休息」必须随下班打卡提交");
 
+const expectedPayload = buildAttendanceQrPunchPayload(token, punchAuthorizationToken, {
+  locationLatitude: -27.47,
+  locationLongitude: 153.03,
+  locationCapturedAtUtc: "2026-07-16T00:00:00Z",
+}, undefined, "ClockOut");
+assert.equal(expectedPayload.expectedPunchType, "ClockOut",
+  "按今日状态带上期望的打卡类型，后端不一致时拒绝");
+assert.equal("expectedPunchType" in legacyPayload, false,
+  "没有今日状态时不带期望类型，后端按原逻辑判定");
+assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH", "ClockIn"), "messages.punchTypeMismatchAlreadyIn",
+  "期望上班被拒说明系统记录已上班");
+assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH", "ClockOut"), "messages.punchTypeMismatchAlreadyOut",
+  "期望下班被拒说明系统记录已下班");
+assert.equal(getAttendancePunchErrorKey("PUNCH_TYPE_MISMATCH"), "messages.punchTypeMismatch");
+
 assert.equal(canOpenAttendanceQrScanner({ isLoading: false, isPunching: false, isToday: true, hasAuthorizedStores: true }), true);
 assert.equal(canOpenAttendanceQrScanner({ isLoading: false, isPunching: false, isToday: true, hasAuthorizedStores: false }), false);
 assert.equal(canSubmitAttendanceQrPunch({ hasCurrentLocation: true, isOnline: true, hasBackgroundLocationPermission: false }), false);

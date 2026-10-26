@@ -87,7 +87,22 @@ namespace BlazorApp.Api.Tests
                 // 考勤审批推送（见 AttendanceReactServiceApprovalNotificationTests.cs）落库到通知平台的两张表。
                 ,typeof(AppNotification)
                 ,typeof(AppNotificationRecipient)
+                // 带薪假与工资五张表：生产由迁移 20261026.002 创建；测试库用 CodeFirst 建同样的表。
+                ,typeof(EmployeePayRate)
+                ,typeof(AttendancePayPeriod)
+                ,typeof(AttendancePayPeriodNote)
+                ,typeof(AttendancePayPeriodLeaveApproval)
+                ,typeof(AttendancePublicHolidayPay)
             );
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_EmployeePayRate_User_EffectiveFrom "
+                + "ON EmployeePayRate(UserGuid, EffectiveFrom)");
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendancePayPeriod_Store_Period "
+                + "ON AttendancePayPeriod(StoreCode, PeriodStart, Weeks)");
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendancePublicHolidayPay_User_Store_Date "
+                + "ON AttendancePublicHolidayPay(UserGuid, StoreCode, HolidayDate)");
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AppNotification_DedupeKey "
                 + "ON AppNotification(DedupeKey) WHERE DedupeKey IS NOT NULL");
@@ -577,15 +592,17 @@ namespace BlazorApp.Api.Tests
             Assert.Contains("BeginTranAsync(IsolationLevel.Serializable)", methodSource);
         }
 
+        // 加班只防重复待审（按水位重开）；漏下班 / 打卡异常排除系统取消的记录（终态不重开、取消后可重生）；
+        // 请假、补卡按任意历史记录去重。
         [Theory]
-        [InlineData("Punch", false)]
-        [InlineData("Leave", false)]
-        [InlineData("PunchAdjustment", false)]
-        [InlineData("MissingClockOut", true)]
-        [InlineData("Overtime", true)]
+        [InlineData("Punch", "Cancelled")]
+        [InlineData("Leave", null)]
+        [InlineData("PunchAdjustment", null)]
+        [InlineData("MissingClockOut", "Cancelled")]
+        [InlineData("Overtime", "Pending")]
         public void BuildPendingApprovalExistenceQuery_SqlServer方言_不生成布尔Or条件(
             string sourceType,
-            bool expectsPendingFilter)
+            string? expectedStatusParameter)
         {
             using var sqlServerDb = new SqlSugarClient(new ConnectionConfig
             {
@@ -602,9 +619,18 @@ namespace BlazorApp.Api.Tests
                 "source-1");
             var sql = query.ToSql();
 
-            Assert.Equal(
-                expectsPendingFilter,
-                sql.Value.Any(parameter => Equals(parameter.Value, "Pending")));
+            var statusParameters = sql.Value
+                .Where(parameter => parameter.Value is "Pending" or "Cancelled")
+                .Select(parameter => (string)parameter.Value)
+                .ToList();
+            if (expectedStatusParameter == null)
+            {
+                Assert.Empty(statusParameters);
+            }
+            else
+            {
+                Assert.Equal(expectedStatusParameter, Assert.Single(statusParameters));
+            }
             Assert.DoesNotContain(" OR ", sql.Key, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(sql.Value, parameter => parameter.Value is bool);
         }
@@ -1591,6 +1617,8 @@ namespace BlazorApp.Api.Tests
         public async Task PunchAsync_ActiveSchedule_AllowsTwoSegmentsAndTreatsMiddleOutAsBreak()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedScheduleAsync();
             var service = CreateService("staff-user", "staff", "StoreStaff");
 
@@ -2668,7 +2696,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task GetMyTodayAsync_ManagerWithAnyActiveManagementRelation_GetsThreeSegmentLimit()
+        public async Task GetMyTodayAsync_ManagerWithAnyActiveManagementRelation_GetsManagerSegmentLimit()
         {
             await SeedStoreScopeAsync();
             await SeedStoreManagerRoleAsync("manager-user");
@@ -2684,7 +2712,8 @@ namespace BlazorApp.Api.Tests
                 .GetMyTodayAsync(new DateTime(2026, 5, 18), "BRI");
 
             Assert.True(result.Success, result.Message);
-            Assert.Equal(3, Assert.Single(result.Data!.Schedules).SegmentLimit);
+            // 口径⑦：店长默认 6 段（AttendanceSettings.ManagerSegmentLimit）。
+            Assert.Equal(6, Assert.Single(result.Data!.Schedules).SegmentLimit);
         }
 
         [Fact]
@@ -2980,6 +3009,8 @@ namespace BlazorApp.Api.Tests
         public async Task ApproveAsync_WhenApplicantReviewsOwnOvertime_ReturnsForbidden()
         {
             await SeedStoreScopeAsync();
+            // 没有「审核本人考勤申请」权限时维持申请人不能审自己。
+            _deniedPermissions.Add(Permissions.Attendance.Approval.ReviewSelf);
             await _db.Insertable(new AttendanceApproval
             {
                 ApprovalGuid = "self-overtime",
@@ -3489,6 +3520,8 @@ namespace BlazorApp.Api.Tests
         public async Task PunchAsync_SameStoreSchedulesShareDailySegmentLimit()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedScheduleAsync("morning", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(8, 0, 0), new TimeSpan(10, 0, 0));
             await SeedScheduleAsync("afternoon", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(11, 0, 0), new TimeSpan(13, 0, 0));
             await SeedScheduleAsync("evening", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(17, 0, 0), new TimeSpan(20, 0, 0));
@@ -3544,6 +3577,8 @@ namespace BlazorApp.Api.Tests
         public async Task PunchAdjustment_DailySegmentLimitIsSharedPerStoreButIndependentAcrossStores()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedManagerStoreAccessAsync("staff-user", "store-other");
             await SeedScheduleAsync("first", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(8, 0, 0), new TimeSpan(10, 0, 0));
             await SeedScheduleAsync("second", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(11, 0, 0), new TimeSpan(13, 0, 0));
@@ -3579,6 +3614,8 @@ namespace BlazorApp.Api.Tests
         public async Task ApproveAsync_WhenOtherScheduleConsumesDailyLimit_RollsBackClaim()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedScheduleAsync("first", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(8, 0, 0), new TimeSpan(10, 0, 0));
             await SeedScheduleAsync("second", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(11, 0, 0), new TimeSpan(13, 0, 0));
             await SeedScheduleAsync("third", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(17, 0, 0), new TimeSpan(20, 0, 0));
@@ -3618,6 +3655,8 @@ namespace BlazorApp.Api.Tests
         public async Task ApproveAsync_ConcurrentAdjustmentsForLastSegment_OnlyOneApplies()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedScheduleAsync("first", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(8, 0, 0), new TimeSpan(10, 0, 0));
             await SeedScheduleAsync("second", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(11, 0, 0), new TimeSpan(13, 0, 0));
             await SeedScheduleAsync("third", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(17, 0, 0), new TimeSpan(20, 0, 0));
@@ -3664,6 +3703,8 @@ namespace BlazorApp.Api.Tests
         public async Task CreateMyPunchAdjustmentAsync_ConcurrentManagerDirectForLastSegment_OnlyOneApplies()
         {
             await SeedStoreScopeAsync();
+            // 用例按旧上限（员工 2 段、店长 3 段）构造边界，显式写进设置，只验证「到上限即拒绝」本身。
+            await SeedSegmentLimitsAsync(employeeLimit: 2, managerLimit: 3);
             await SeedStoreManagerRoleAsync("manager-user");
             await SeedScheduleAsync("first", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(8, 0, 0), new TimeSpan(10, 0, 0));
             await SeedScheduleAsync("second", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active", new TimeSpan(11, 0, 0), new TimeSpan(13, 0, 0));
@@ -5134,6 +5175,16 @@ namespace BlazorApp.Api.Tests
                 StartTime = startTime ?? new TimeSpan(9, 0, 0),
                 EndTime = endTime ?? new TimeSpan(17, 0, 0),
                 Status = status,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+        }
+
+        private async Task SeedSegmentLimitsAsync(int employeeLimit, int managerLimit)
+        {
+            await _db.Insertable(new AttendanceSettings
+            {
+                EmployeeSegmentLimit = employeeLimit,
+                ManagerSegmentLimit = managerLimit,
                 CreatedAt = DateTime.UtcNow,
             }).ExecuteCommandAsync();
         }

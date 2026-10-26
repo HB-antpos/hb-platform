@@ -134,6 +134,8 @@
     "seasonalCardStats": "Seasonal Card Stats",
     "storeCash": "Cash management",
     "scheduleAttendance": "Schedule Attendance",
+    "attendanceReview": "Attendance review",
+    "attendancePayroll": "Hours & pay",
     "deviceRegistration": "Device Management",
     "appDownloads": "Release Center",
     "remoteMaintenance": "RustDesk Remote Maintenance",

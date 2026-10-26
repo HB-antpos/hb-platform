@@ -1,7 +1,7 @@
 namespace BlazorApp.Api.Data.SchemaMigrations;
 
 /// <summary>
-/// 角色等级（迁移 20261026.001-role-level）：dbo.Role 加一列 Level int NOT NULL DEFAULT 0，
+/// 角色等级（迁移 20261026.003-role-level）：dbo.Role 加一列 Level int NOT NULL DEFAULT 0，
 /// 并按角色名把已知角色回填为基准等级（与 Permissions.RoleLevels.ForRoleName 保持一致）：
 /// 超级管理员 100 / 仓库经理 80 / 店长 70 / Manager 60 / 员工与订货、仓库员工 30 / User 10。
 /// 回填只更新 Level = 0 的行：重复执行不会覆盖已设置（大于 0）的等级；若已知角色被手工调回 0，

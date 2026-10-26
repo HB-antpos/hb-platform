@@ -1043,6 +1043,161 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 考勤审核与午夜自动下班七列_旧表补列带默认值_权限码入库_可重复执行且识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.ApplySql));
+        Assert.Equal(54300, missingTable.Number);
+
+        // 迁移前形态：四张考勤表各有一行存量数据，权限表存在但没有新权限码。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.AttendancePunch (Id int IDENTITY(1,1) PRIMARY KEY, PunchGuid nvarchar(50) NOT NULL);
+            CREATE TABLE dbo.AttendanceSchedule (Id int IDENTITY(1,1) PRIMARY KEY, ScheduleGuid nvarchar(50) NOT NULL);
+            CREATE TABLE dbo.AttendanceApproval (Id int IDENTITY(1,1) PRIMARY KEY, ApprovalGuid nvarchar(50) NOT NULL);
+            CREATE TABLE dbo.AttendanceSettings (Id int IDENTITY(1,1) PRIMARY KEY, LateGraceMinutes int NOT NULL);
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(36) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NULL,
+                Category nvarchar(100) NULL, Description nvarchar(1000) NULL, CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL, IsDeleted bit NOT NULL);
+            INSERT dbo.AttendancePunch (PunchGuid) VALUES (N'p-1');
+            INSERT dbo.AttendanceSchedule (ScheduleGuid) VALUES (N's-1');
+            INSERT dbo.AttendanceApproval (ApprovalGuid) VALUES (N'a-1');
+            INSERT dbo.AttendanceSettings (LateGraceMinutes) VALUES (5);
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql));
+        Assert.Equal(54301, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql);
+
+        // 存量行按默认值补齐：不是自动下班、不是本人审批、员工 4 段、店长 6 段、自动下班开启。
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendancePunch WHERE IsSystemAutoClockOut = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendanceApproval WHERE IsSelfReview = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendanceSchedule WHERE DeletedAt IS NULL AND DeletedBy IS NULL"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE EmployeeSegmentLimit = 4 AND ManagerSegmentLimit = 6 AND AutoClockOutAtMidnight = 1"));
+        // 重复执行只入库一次新权限码。
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Attendance.Approval.ReviewSelf' AND Category = N'排班考勤'"));
+
+        // 可空性漂移要被门禁识别（存量行先补值，才能把列改成 NOT NULL 来模拟漂移）。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.AttendanceSchedule SET DeletedBy = N'manager';");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceSchedule ALTER COLUMN DeletedBy nvarchar(100) NOT NULL;");
+        var nullabilityMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql));
+        Assert.Equal(54301, nullabilityMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤审核与午夜自动下班七列_实体CodeFirst建出的列与迁移签名一致()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 全新库由 CodeFirst 按实体建表（DateTime? 落成 datetime）；门禁必须接受，迁移是空操作。
+        mainDb.CodeFirst.InitTables(
+            typeof(BlazorApp.Shared.Models.AttendancePunch),
+            typeof(BlazorApp.Shared.Models.AttendanceSchedule),
+            typeof(BlazorApp.Shared.Models.AttendanceApproval),
+            typeof(BlazorApp.Shared.Models.AttendanceSettings));
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceReviewAutoClockOutSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤带薪假与工资_五张新表与旧表补列_权限码入库_可重复执行且识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.ApplySql));
+        Assert.Equal(54310, missingTable.Number);
+
+        // 迁移前形态：三张旧考勤表各有一行存量数据，权限表存在但没有新权限码。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.AttendanceLeaveRequest (Id int IDENTITY(1,1) PRIMARY KEY, LeaveGuid nvarchar(50) NOT NULL);
+            CREATE TABLE dbo.AttendanceAvailability (Id int IDENTITY(1,1) PRIMARY KEY, AvailabilityGuid nvarchar(50) NOT NULL);
+            CREATE TABLE dbo.AttendanceSettings (Id int IDENTITY(1,1) PRIMARY KEY, LateGraceMinutes int NOT NULL);
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(36) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NULL,
+                Category nvarchar(100) NULL, Description nvarchar(1000) NULL, CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL, IsDeleted bit NOT NULL);
+            INSERT dbo.AttendanceLeaveRequest (LeaveGuid) VALUES (N'l-1');
+            INSERT dbo.AttendanceAvailability (AvailabilityGuid) VALUES (N'a-1');
+            INSERT dbo.AttendanceSettings (LateGraceMinutes) VALUES (5);
+            """);
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.VerifySql));
+        Assert.Equal(54310, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.VerifySql);
+
+        // 存量设置行按默认值补齐；存量请假 / 可上班行新列为空。
+        Assert.Equal(1, await ScalarIntAsync(main, """
+            SELECT COUNT(*) FROM dbo.AttendanceSettings
+            WHERE DefaultPeriodWeeks = 1 AND FortnightAnchorDate IS NULL AND PublicHolidayLookbackWeeks = 10
+              AND PublicHolidayMinCount = 7 AND SickLeaveSubmitDays = 4 AND AnnualLeaveLeadWeeks = 4
+              AND AnnualLeaveMaxWeeks = 2 AND AnnualCashOutLeadDays = 2 AND AnnualCashOutMaxWeeks = 4
+              AND BirthdayRemindDays = 3
+            """));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendanceLeaveRequest WHERE PaidHours IS NULL AND AttachmentUrls IS NULL AND ScheduleGuids IS NULL"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.AttendanceAvailability WHERE SourceLeaveGuid IS NULL"));
+        // 重复执行只入库一次三个新权限码。
+        Assert.Equal(3, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code LIKE N'Attendance.Payroll.%' AND Category = N'排班考勤'"));
+
+        // 唯一索引真正防重复：同一人同一生效日期的时薪只能有一条。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.EmployeePayRate (RateGuid, UserGuid, PayMode, EffectiveFrom, CreatedAt)
+            VALUES (N'r-1', N'u-1', N'Transfer', '2026-10-05', SYSUTCDATETIME());
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.EmployeePayRate (RateGuid, UserGuid, PayMode, EffectiveFrom, CreatedAt)
+            VALUES (N'r-2', N'u-1', N'Cash', '2026-10-05', SYSUTCDATETIME());
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 精度漂移要被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceLeaveRequest ALTER COLUMN PaidHours decimal(8,2) NULL;");
+        var precisionMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.VerifySql));
+        Assert.Equal(54311, precisionMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤带薪假与工资_旧表实体CodeFirst建出的新列与迁移签名一致()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 全新库三张旧考勤表由 CodeFirst 按实体建出（含新列）；迁移只建五张新表，门禁必须接受。
+        mainDb.CodeFirst.InitTables(
+            typeof(BlazorApp.Shared.Models.AttendanceLeaveRequest),
+            typeof(BlazorApp.Shared.Models.AttendanceAvailability),
+            typeof(BlazorApp.Shared.Models.AttendanceSettings));
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendancePayrollLeaveSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 用户姓名拆分四列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

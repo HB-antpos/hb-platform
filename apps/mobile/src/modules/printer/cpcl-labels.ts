@@ -247,6 +247,34 @@ export function buildProductLabelCommand(payload: ProductLabelPrintPayload, prin
   return command(lines);
 }
 
+// 一维码版面：窄条 3 点 × 95 模块 = 285 点宽；左侧留 ≥11 模块（33 点）静区。
+const EMPLOYEE_EAN13_UNIT = 3;
+const EMPLOYEE_EAN13_X = 36;
+const EMPLOYEE_EAN13_Y = 104;
+const EMPLOYEE_EAN13_HEIGHT = 70;
+
+function buildEmployeeCashierEan13LabelCommand(
+  payload: EmployeeCashierBarcodeLabelPrintPayload,
+  barcodeValue: string
+) {
+  // 一维码放在下方，姓名和用户名可以使用整行宽度，不必像左右布局那样收窄。
+  const employeeName = truncateTextByWidth(cpclText(payload.employeeName) || "--", 530, 7);
+  const rawUsername = cpclText(payload.username);
+  const username = truncateTextByWidth(rawUsername ? `@${rawUsername}` : "--", 530, 4);
+  return command([
+    `! 0 200 200 ${STANDARD_HEIGHT} 1`,
+    `PAGE-WIDTH ${STANDARD_WIDTH}`,
+    text(7, 20, 16, employeeName),
+    text(4, 20, 60, username),
+    // 由打印机在条码下方自带可读数字（约 y=179~204，仍在价格标签单张安全高度内）。
+    "BARCODE-TEXT 7 0 5",
+    `BARCODE EAN13 ${EMPLOYEE_EAN13_UNIT} 2 ${EMPLOYEE_EAN13_HEIGHT} ${EMPLOYEE_EAN13_X} ${EMPLOYEE_EAN13_Y} ${barcodeValue}`,
+    // BARCODE-TEXT 会跨标签保持，用完立即关闭，避免影响后续标签。
+    "BARCODE-TEXT OFF",
+    "PRINT",
+  ]);
+}
+
 export function buildEmployeeCashierBarcodeLabelCommand(
   payload: EmployeeCashierBarcodeLabelPrintPayload
 ) {
@@ -256,6 +284,9 @@ export function buildEmployeeCashierBarcodeLabelCommand(
   const barcodeValue = cpclText(payload.barcode);
   if (!isValidEan13(barcodeValue)) {
     throw new Error("Employee cashier barcode must be a valid EAN13 value.");
+  }
+  if (payload.symbology === "barcode") {
+    return buildEmployeeCashierEan13LabelCommand(payload, barcodeValue);
   }
 
   const qrUnitWidth = 8;

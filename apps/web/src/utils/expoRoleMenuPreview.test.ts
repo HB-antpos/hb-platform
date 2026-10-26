@@ -113,6 +113,7 @@ assertArrayEqual(
     'store-cash',
     'attendance-personal',
     'attendance-management',
+    'attendance-hours',
     'seasonal-cards',
     'users',
     'legacy-employee-logs',

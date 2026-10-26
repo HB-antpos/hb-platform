@@ -12,6 +12,9 @@ import {
 } from "@/modules/people/person-list-item";
 import { resolveRowPosition } from "@/modules/people/list-position";
 import { FloatingAction } from "@/modules/people/ui";
+import { getPosEnabledStores } from "@/modules/shop/store-scope";
+import { useStores } from "@/modules/shop/use-stores";
+import { StoreSwitchSheet } from "@/modules/users/store-switch-sheet";
 import { localizeAccessRoleName } from "@/modules/users/access-permission-presentation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
@@ -58,6 +61,10 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
     sort: DEFAULT_ADMIN_USER_FILTERS.sort,
   });
   const [sheetVisible, setSheetVisible] = useState(false);
+  // 仓库管理新增员工：先在这个弹层里选分店。
+  const [createStorePickerVisible, setCreateStorePickerVisible] = useState(false);
+  const { stores: sessionStores } = useStores();
+  const createStores = useMemo(() => getPosEnabledStores(sessionStores), [sessionStores]);
   const filters = useMemo<AdminUserFilters>(() => ({ search, ...applied }), [applied, search]);
   const scoped = access.isStoreLevelManager;
 
@@ -184,9 +191,26 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
     [router]
   );
   const openCreate = useCallback(() => {
+    // 仓库管理没有「管理员版」新增（角色与多分店只有管理员能选）：先选一家分店，再进创建员工页。
+    if (!access.isAdmin) {
+      setCreateStorePickerVisible(true);
+      return;
+    }
     // 管理员版新增：不带 storeCode（带 storeCode 会进入店长版表单）。
     router.push({ pathname: "/users/new" } as unknown as Parameters<typeof router.push>[0]);
-  }, [router]);
+  }, [access.isAdmin, router]);
+  const handleCreateStoreSelected = useCallback(
+    (store: { storeCode: string } | null) => {
+      setCreateStorePickerVisible(false);
+      if (!store) return;
+      // 带 storeCode 进入店长版表单：固定该分店的店员，走店员接口。
+      router.push({
+        pathname: "/users/new",
+        params: { storeCode: store.storeCode },
+      } as unknown as Parameters<typeof router.push>[0]);
+    },
+    [router],
+  );
 
   const selectedStoreLabel = storeOptions.find((option) => option.value === filters.storeGuid)?.label.split(" · ")[0];
   const selectedRoleLabel = roleOptions.find((option) => option.value === filters.roleGuid)?.label;
@@ -195,7 +219,11 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
   }, []);
   const showStoreSection = scoped ? storeOptions.length > 0 : true;
   const showRoleSection = canReadRoleOptions;
-  const canCreate = access.isAdmin && access.hasPermission("Users.Create");
+  const canCreate =
+    (access.isAdmin && access.hasPermission("Users.Create"))
+    // 仓库管理：可以为任意分店新增员工（服务端按范围服务判定，对它不限分店）。
+    || (access.isWarehouseManager
+      && (access.hasPermission("Users.Create") || access.hasPermission("Users.CreateStoreStaff")));
 
   if (!allowed) {
     return (
@@ -307,6 +335,19 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
       )}
 
       {canCreate ? <FloatingAction label={t("people:admin.create")} icon="plus" onPress={openCreate} /> : null}
+
+      {!access.isAdmin && access.isWarehouseManager ? (
+        <StoreSwitchSheet
+          visible={createStorePickerVisible}
+          stores={createStores}
+          manageableStores={createStores}
+          selectedStoreCode={null}
+          includeAllOption={false}
+          counts={null}
+          onDismiss={() => setCreateStorePickerVisible(false)}
+          onSelectStore={handleCreateStoreSelected}
+        />
+      ) : null}
 
       <AdminUserFilterSheet
         visible={sheetVisible}

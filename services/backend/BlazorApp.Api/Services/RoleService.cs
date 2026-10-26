@@ -2385,18 +2385,23 @@ namespace BlazorApp.Api.Services
                     );
                 }
 
-                if (
-                    !actor.IsSuperAdmin
-                    && !await UserAccessMutationSecurity.IsEmployeeTargetAsync(
-                        db,
-                        targetUserGuid
-                    )
-                )
+                PermissionDelegation? delegation = null;
+                if (!actor.IsSuperAdmin)
                 {
-                    return ApiResponse<UserAccessPermissionDto>.Error(
-                        "店长只能维护员工的 POS 收银权限",
-                        "EMPLOYEE_TARGET_REQUIRED"
+                    delegation = await UserAccessMutationSecurity.ResolvePermissionDelegationAsync(
+                        db,
+                        actor,
+                        targetUserGuid
                     );
+                    if (!delegation.TargetAllowed)
+                    {
+                        return ApiResponse<UserAccessPermissionDto>.Error(
+                            actor.IsWarehouseManager
+                                ? "仓库管理只能维护员工和店长的权限"
+                                : "店长只能维护员工的 POS 收银权限",
+                            "EMPLOYEE_TARGET_REQUIRED"
+                        );
+                    }
                 }
 
                 var stateResult = await GetUserPermissionStateCoreAsync(targetUserGuid);
@@ -2429,15 +2434,9 @@ namespace BlazorApp.Api.Services
                     );
                 }
 
-                var actorPermissionCodes = await UserAccessMutationSecurity.GetEffectivePermissionCodesAsync(
-                    db,
-                    actor.UserGuid
-                );
-                var delegatedPermissionCodes = PermissionSeedData.PosTerminalBusinessPermissionCodes
-                    .Where(actorPermissionCodes.Contains)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                // 店长只看到本人拥有的 POS 收银业务权限；目标越界权限不泄露且保存时保留。
+                // 店长只看到本人拥有的 POS 收银业务权限；仓库管理看店长目标时是本人拥有且非提升类的权限；
+                // 目标越界权限不泄露且保存时保留。
+                var delegatedPermissionCodes = delegation!.DelegableCodes;
                 var scopedState = new UserPermissionStateDto
                 {
                     UserGuid = stateResult.Data.UserGuid,
@@ -2544,29 +2543,28 @@ namespace BlazorApp.Api.Services
 
                 if (isRestrictedActor)
                 {
-                    if (
-                        !await UserAccessMutationSecurity.IsEmployeeTargetAsync(db, userGuid)
-                    )
+                    var delegation = await UserAccessMutationSecurity.ResolvePermissionDelegationAsync(
+                        db,
+                        actor,
+                        userGuid
+                    );
+                    if (!delegation.TargetAllowed)
                     {
                         return ApiResponse<bool>.Error(
-                            "店长只能维护员工的 POS 收银权限",
+                            actor.IsWarehouseManager
+                                ? "仓库管理只能维护员工和店长的权限"
+                                : "店长只能维护员工的 POS 收银权限",
                             "EMPLOYEE_TARGET_REQUIRED"
                         );
                     }
 
-                    var actorPermissionCodes = await UserAccessMutationSecurity.GetEffectivePermissionCodesAsync(
-                        db,
-                        actor.UserGuid
-                    );
-                    var posBusinessCodes = PermissionSeedData.PosTerminalBusinessPermissionCodes
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    delegatedPermissionCodes = posBusinessCodes
-                        .Where(actorPermissionCodes.Contains)
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    if (requestedCodes.Any(code => !posBusinessCodes.Contains(code)))
+                    delegatedPermissionCodes = delegation.DelegableCodes;
+                    if (requestedCodes.Any(code => !delegation.IsDelegableCatalogCode(code)))
                     {
                         return ApiResponse<bool>.Error(
-                            "店长只能分配 POS 收银业务权限",
+                            actor.IsWarehouseManager && delegation.TargetIsStoreManager
+                                ? "仓库管理不能授予角色管理、系统设置类权限和 POS 系统级权限"
+                                : "店长只能分配 POS 收银业务权限",
                             "POS_PERMISSION_DELEGATION_DENIED"
                         );
                     }
@@ -2621,40 +2619,35 @@ namespace BlazorApp.Api.Services
 
                     if (transactionRestrictedActor)
                     {
-                        if (
-                            !await UserAccessMutationSecurity.IsEmployeeTargetAsync(
+                        var transactionDelegation =
+                            await UserAccessMutationSecurity.ResolvePermissionDelegationAsync(
                                 db,
+                                transactionActor,
                                 userGuid
-                            )
-                        )
+                            );
+                        if (!transactionDelegation.TargetAllowed)
                         {
                             await db.Ado.RollbackTranAsync();
                             return ApiResponse<bool>.Error(
-                                "店长只能维护员工的 POS 收银权限",
+                                transactionActor.IsWarehouseManager
+                                    ? "仓库管理只能维护员工和店长的权限"
+                                    : "店长只能维护员工的 POS 收银权限",
                                 "EMPLOYEE_TARGET_REQUIRED"
                             );
                         }
 
-                        var transactionPosBusinessCodes = PermissionSeedData
-                            .PosTerminalBusinessPermissionCodes
-                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                        if (requestedCodes.Any(code => !transactionPosBusinessCodes.Contains(code)))
+                        if (requestedCodes.Any(code => !transactionDelegation.IsDelegableCatalogCode(code)))
                         {
                             await db.Ado.RollbackTranAsync();
                             return ApiResponse<bool>.Error(
-                                "店长只能分配 POS 收银业务权限",
+                                transactionActor.IsWarehouseManager && transactionDelegation.TargetIsStoreManager
+                                    ? "仓库管理不能授予角色管理、系统设置类权限和 POS 系统级权限"
+                                    : "店长只能分配 POS 收银业务权限",
                                 "POS_PERMISSION_DELEGATION_DENIED"
                             );
                         }
 
-                        var transactionActorPermissionCodes =
-                            await UserAccessMutationSecurity.GetEffectivePermissionCodesAsync(
-                            db,
-                            transactionActor.UserGuid
-                        );
-                        transactionDelegatedPermissionCodes = transactionPosBusinessCodes
-                            .Where(transactionActorPermissionCodes.Contains)
-                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        transactionDelegatedPermissionCodes = transactionDelegation.DelegableCodes;
                         if (
                             requestedCodes.Any(code =>
                                 !transactionDelegatedPermissionCodes.Contains(code)

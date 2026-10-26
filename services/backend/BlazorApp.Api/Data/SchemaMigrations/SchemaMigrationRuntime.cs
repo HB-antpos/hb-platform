@@ -220,6 +220,14 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyHelpFaqAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken);
+
+    Task ApplyAttendancePayrollLeaveAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendancePayrollLeaveAsync(CancellationToken cancellationToken);
+
     Task ApplyRoleLevelAsync(CancellationToken cancellationToken);
 
     Task VerifyRoleLevelAsync(CancellationToken cancellationToken);
@@ -1407,6 +1415,50 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         {
             throw new HelpFaqSchemaMismatchException();
         }
+    }
+
+    public async Task ApplyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceReviewAutoClockOutSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/可空性不符的列不会被误标为完成。
+        await VerifyAttendanceReviewAutoClockOutAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceReviewAutoClockOutSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendancePayrollLeaveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayrollLeaveSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本。
+        await VerifyAttendancePayrollLeaveAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendancePayrollLeaveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayrollLeaveSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
     }
 
     public async Task ApplyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)

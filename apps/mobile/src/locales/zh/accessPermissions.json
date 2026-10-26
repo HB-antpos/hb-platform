@@ -57,6 +57,10 @@
       "name": "审核管理分店考勤",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "审核本人考勤申请",
+      "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 持有者可审核自己提交的考勤申请，审核记录标记「本人审批」"
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "查看管理分店审核记录",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"
@@ -88,6 +92,18 @@
     "Attendance.Leave.ViewManagedStore": {
       "name": "查看管理分店请假申请",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"
+    },
+    "Attendance.Payroll.Edit": {
+      "name": "编辑时薪、工资备注与提交锁定",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 新增时薪生效记录、填写工资备注与年假核定工时、提交并锁定发薪周期"
+    },
+    "Attendance.Payroll.Unlock": {
+      "name": "解锁已提交的发薪周期",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 解锁已提交的发薪周期（需填写原因，留操作记录）"
+    },
+    "Attendance.Payroll.View": {
+      "name": "查看工资表与时薪表",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 查看工资表、个人时薪表"
     },
     "Attendance.Punch.AdjustManagedStore": {
       "name": "补卡与修改管理分店打卡",

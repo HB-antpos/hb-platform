@@ -1842,4 +1842,21 @@ assertEqual(
   '其他后台页面从菜单授予时仍连带授予工作台（行为不变）',
 )
 
+// 考勤审核按钮与后端审批接口同口径：只认 Attendance.Approval.ReviewManagedStore。
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.Attendance.ApprovalReviewManagedStore] })).canReviewAttendance,
+  true,
+  '审核管理分店考勤权限可以审核',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.Attendance.LeaveReviewManagedStore] })).canReviewAttendance,
+  false,
+  '只有请假审核权限不能显示考勤审核按钮（后端审批接口会 403）',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.Attendance.AdminView] })).canReviewAttendance,
+  false,
+  '只有查看全部考勤权限不能显示考勤审核按钮',
+)
+
 console.log('access.permission.test: ok')
