@@ -69,6 +69,33 @@
         "restoreFailed": "Restore failed",
         "loadFailed": "Could not load deleted rosters",
         "empty": "No deleted rosters this week"
+      },
+      "cellEditor": {
+        "searchPlaceholder": "Search staff name",
+        "loadingStaff": "Loading staff…",
+        "loadedStaff": "{{count}} active staff loaded",
+        "filteredStaff": "Showing {{count}}",
+        "editing": "Edit shift",
+        "creating": "New shift",
+        "presets": "Common shifts",
+        "presetNames": {
+          "morning": "Early",
+          "midday": "Mid",
+          "evening": "Late",
+          "fullDay": "Full day"
+        },
+        "shiftTime": "Shift time",
+        "hours": "{{hours}} h total",
+        "optional": "Optional",
+        "remarkPlaceholder": "e.g. cover a gap, training day",
+        "applyToOthers": "Also apply to other days this week",
+        "workdays": "Weekdays",
+        "allEmpty": "All empty days",
+        "occupied": "Already has a shift that day",
+        "hintDraft": "Saved as a draft. It only takes effect for staff after you click \"Publish week\".",
+        "hintActive": "This shift is published. Changes take effect on save.",
+        "shortcuts": "Enter saves · Esc closes",
+        "partialFailed": "Saved {{ok}} day(s); {{failed}} failed ({{dates}})"
       }
     }
   }

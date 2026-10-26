@@ -112,13 +112,14 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/DeviceRegistration/index.tsx',
   },
   {
-    // 排班考勤页既有文案在全局；用餐未休息加工时（meal.*）、工资参数（payrollSettings.*）、已删除排班（deletedSchedules.*）新增键在页面级消息文件。
+    // 排班考勤页既有文案在全局；用餐未休息加工时（meal.*）、工资参数（payrollSettings.*）、已删除排班（deletedSchedules.*）、周排班单元格就地编辑（cellEditor.*）新增键在页面级消息文件。
     name: '排班考勤',
-    keyPattern: /['"`](posAdmin\.scheduleAttendance\.(?:meal|payrollSettings|deletedSchedules)\.[A-Za-z0-9_.]+)['"`]/g,
+    keyPattern: /['"`](posAdmin\.scheduleAttendance\.(?:meal|payrollSettings|deletedSchedules|cellEditor)\.[A-Za-z0-9_.]+)['"`]/g,
     sources: [
       'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
       'src/pages/PosAdmin/ScheduleAttendance/AttendancePayrollSettingsFields.tsx',
       'src/pages/PosAdmin/ScheduleAttendance/DeletedSchedulesDrawer.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/ScheduleCellEditor.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json',

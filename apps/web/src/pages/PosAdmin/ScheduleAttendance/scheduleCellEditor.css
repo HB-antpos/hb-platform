@@ -1,0 +1,361 @@
+/* 周排班单元格就地编辑：类名统一 sce- 前缀，避免与全局样式冲突。 */
+
+/* 单元格：空白格默认只留虚线框，悬停/聚焦才露出「添加班次」，减少整张表的视觉噪音 */
+.sce-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.sce-empty {
+  width: 100%;
+  min-height: 58px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  background: #fafafa;
+  color: #bfbfbf;
+  font-size: 13px;
+  cursor: default;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+
+.sce-empty--editable {
+  color: transparent;
+  cursor: pointer;
+}
+
+.sce-empty--editable:hover,
+.sce-empty--editable:focus-visible,
+.sce-empty--active {
+  border-color: #1677ff;
+  background: #f0f7ff;
+  color: #1677ff;
+}
+
+.sce-empty--readonly {
+  border-style: solid;
+  border-color: #f0f0f0;
+  background: #f5f5f5;
+}
+
+/* 班次块：左侧状态色条 + 时间 + 状态，颜色沿用原来的 草稿金 / 有效蓝 / 已取消红 */
+.sce-chip {
+  position: relative;
+  width: 100%;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #e6f4ff;
+  padding: 6px 8px 6px 12px;
+  text-align: left;
+  color: #0958d9;
+  cursor: default;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+
+.sce-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: #1677ff;
+}
+
+.sce-chip--Draft {
+  border-color: #ffe58f;
+  background: #fffbe6;
+  color: #ad6800;
+}
+
+.sce-chip--Draft::before {
+  background: #faad14;
+}
+
+.sce-chip--Cancelled {
+  border-color: #ffccc7;
+  background: #fff1f0;
+  color: #cf1322;
+}
+
+.sce-chip--Cancelled::before {
+  background: #ff4d4f;
+}
+
+.sce-chip--Cancelled .sce-chip-time {
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.sce-chip--editable {
+  cursor: pointer;
+}
+
+.sce-chip--editable:hover,
+.sce-chip--editable:focus-visible {
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.18);
+}
+
+.sce-chip--active {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.sce-chip-time {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-chip-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sce-chip-remark {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+/* 已有班次的格子里再加一班：只在悬停/聚焦该格时出现 */
+.sce-add-more {
+  width: 100%;
+  height: 24px;
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.sce-cell:hover .sce-add-more,
+.sce-cell:focus-within .sce-add-more,
+.sce-add-more--active {
+  border-color: #91caff;
+  background: #f0f7ff;
+  color: #1677ff;
+}
+
+/* 表格上方的「已加载员工」提示条 */
+.sce-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.sce-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid;
+  border-radius: 3px;
+}
+
+.sce-legend i.is-Draft {
+  background: #fffbe6;
+  border-color: #ffe58f;
+}
+
+.sce-legend i.is-Active {
+  background: #e6f4ff;
+  border-color: #91caff;
+}
+
+.sce-legend i.is-Cancelled {
+  background: #fff1f0;
+  border-color: #ffccc7;
+}
+
+/* 浮层内容 */
+.sce-editor {
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  outline: none;
+}
+
+.sce-editor-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.sce-editor-who {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sce-editor-when {
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 0 5px;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sce-preset {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.sce-preset:hover {
+  border-color: #69b1ff;
+}
+
+.sce-preset--on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+}
+
+.sce-preset-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sce-preset-time {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sce-time-row .ant-picker {
+  flex: 1;
+}
+
+.sce-duration {
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sce-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sce-day {
+  min-width: 40px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 15px;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sce-day--lock {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+  font-weight: 600;
+  cursor: default;
+}
+
+.sce-day--on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #0958d9;
+  font-weight: 600;
+}
+
+.sce-day:disabled:not(.sce-day--lock) {
+  border-color: #f0f0f0;
+  background: #f5f5f5;
+  color: #bfbfbf;
+  cursor: not-allowed;
+}
+
+.sce-quick {
+  display: inline-flex;
+  gap: 12px;
+}
+
+.sce-quick button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1677ff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sce-hint {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.sce-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sce-foot-tip {
+  margin-right: auto;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sce-empty,
+  .sce-chip,
+  .sce-add-more,
+  .sce-preset {
+    transition: none;
+  }
+}
