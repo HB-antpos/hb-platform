@@ -114,7 +114,7 @@ function permissionsFor(input: Partial<DetailPermissionInput> & Pick<DetailPermi
   for (const roleName of ["Admin", "WarehouseManager"]) {
     p = permissionsFor({ actor: warehouse, scope: noManageable, target: target({ roleNames: [roleName] }) });
     assertEqual(p.canOpenAccess, false, `仓库管理不能管理 ${roleName} 账号`);
-    assertEqual(p.canOpenPos, false);
+    assertEqual(p.canOpenPos, false, `仓库管理不能维护 ${roleName} 账号的 POS 权限`);
   }
 
   // 店长级管理者对店长目标仍然只读。
