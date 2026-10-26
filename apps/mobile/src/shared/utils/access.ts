@@ -98,6 +98,11 @@ export const PERMISSIONS = {
     Void: "Cash.Void",
     AllStoresView: "Cash.AllStores.View",
   },
+  Promotions: {
+    // 促销：看 = View；本店独享促销的新建 / 编辑 / 启停 / 提前结束 / 复制到本店 = Edit（与后端店级接口策略一致）。
+    View: "Promotions.View",
+    Edit: "Promotions.Edit",
+  },
   StoreProducts: {
     View: "StoreProducts.View",
     Create: "StoreProducts.Create",

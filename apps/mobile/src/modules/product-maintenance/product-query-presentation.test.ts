@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { PromotionListItem } from "../promotions/types";
 import {
   calcGrossMarginPercent,
   getDirtyCodeIds,
@@ -12,7 +11,6 @@ import {
   resolveBarcodeDisclosure,
   resolveCodeSections,
   resolveOriginalDisplay,
-  summarizePromotions,
 } from "./product-query-presentation";
 import type { MultiCodeEditableItem, ProductSetCodeItem } from "./types";
 
@@ -123,18 +121,5 @@ assert.equal(isCodeAddDraftValid("multi", " ", ""), false);
 assert.equal(parseOptionalPrice(" 3.5 "), 3.5);
 assert.equal(parseOptionalPrice(""), null);
 assert.equal(parseOptionalPrice("x"), null);
-
-// 促销摘要：第一条规则 + 最早结束日期 + 其余数量。
-const promotion = (id: string, end: string, qty: number, price: number): PromotionListItem => ({
-  id, name: `P${id}`, effectiveStart: "2026-01-01T00:00:00", effectiveEnd: end, isEnabled: true,
-  isExclusive: false, priority: 0, applyQuantity: qty, fixedPrice: price, productsCount: 1, storesCount: 1,
-  products: [], stores: [], scopeType: null, canEditInStoreScope: false, canCopyToStore: false,
-});
-assert.equal(summarizePromotions([]), null);
-assert.deepEqual(
-  summarizePromotions([promotion("1", "2026-10-31T23:59:59", 2, 5), promotion("2", "2026-10-15T00:00:00", 3, 9)]),
-  { name: "P1", applyQuantity: 2, fixedPrice: "5.00", endDate: "2026-10-15", extraCount: 1 },
-);
-assert.equal(summarizePromotions([promotion("1", "", 2, 5)])?.endDate, null, "结束日期缺失时不显示");
 
 console.log("product-query-presentation.test.ts: ok");

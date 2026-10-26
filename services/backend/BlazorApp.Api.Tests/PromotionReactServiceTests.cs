@@ -111,7 +111,7 @@ public sealed class PromotionReactServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetValidByProductAndStoreAsync_ReturnsCurrentStoreAndHeadquartersPromotionsInStableOrder()
+    public async Task GetValidByProductAndStoreAsync_ReturnsOnlyPromotionsBoundToCurrentStoreInStableOrder()
     {
         var now = new DateTime(2026, 7, 28, 3, 0, 0, DateTimeKind.Utc);
 
@@ -342,14 +342,14 @@ public sealed class PromotionReactServiceTests : IDisposable
 
         Assert.True(result.Success);
         var items = Assert.IsType<List<PromotionListDto>>(result.Data);
+        // 未绑定任何分店的促销（headquarters-*）收银端不计算，这里也不再返回。
         Assert.Equal(
-            new[] { "store-only", "multi-store", "headquarters-early", "headquarters-a", "headquarters-b" },
+            new[] { "store-only", "multi-store" },
             items.Select(item => item.Id).ToArray()
         );
         Assert.Equal(1, items.Single(item => item.Id == "store-only").ProductsCount);
         Assert.Equal(1, items.Single(item => item.Id == "store-only").StoresCount);
         Assert.Equal(2, items.Single(item => item.Id == "multi-store").StoresCount);
-        Assert.Equal(0, items.Single(item => item.Id == "headquarters-a").StoresCount);
     }
 
     [Fact]
@@ -373,9 +373,10 @@ public sealed class PromotionReactServiceTests : IDisposable
         );
 
         Assert.True(result.Success);
-        Assert.Equal(3, result.Total);
+        // 未绑定分店的促销不属于任何分店，店级列表不显示。
+        Assert.Equal(2, result.Total);
         Assert.Equal(
-            new[] { "headquarters", "multi-store", "store-only" },
+            new[] { "multi-store", "store-only" },
             result.Items!.Select(item => item.Id).OrderBy(item => item).ToArray()
         );
 
@@ -388,11 +389,6 @@ public sealed class PromotionReactServiceTests : IDisposable
         Assert.Equal(PromotionStoreScopeTypes.MultiStore, multiStore.ScopeType);
         Assert.False(multiStore.CanEditInStoreScope);
         Assert.True(multiStore.CanCopyToStore);
-
-        var headquarters = result.Items!.Single(item => item.Id == "headquarters");
-        Assert.Equal(PromotionStoreScopeTypes.Headquarters, headquarters.ScopeType);
-        Assert.False(headquarters.CanEditInStoreScope);
-        Assert.True(headquarters.CanCopyToStore);
     }
 
     [Fact]
@@ -458,22 +454,22 @@ public sealed class PromotionReactServiceTests : IDisposable
     public async Task CopyToStoreAsync_CopiesTemplateAsStoreOnlyWithDefaultPriority()
     {
         var now = DateTime.UtcNow;
-        await SeedPromotionWithStoresAsync("headquarters", "总部促销", Array.Empty<string>(), now, priority: 8);
-        await SeedPromotionProductAsync("headquarters", "P99", 3);
+        await SeedPromotionWithStoresAsync("multi-store", "多店促销", new[] { "S01", "S02" }, now, priority: 8);
+        await SeedPromotionProductAsync("multi-store", "P99", 3);
         var service = CreateService(new[] { "S01" });
 
         var result = await service.CopyToStoreAsync(
             new CopyStorePromotionRequestDto
             {
-                SourcePromotionId = "headquarters",
+                SourcePromotionId = "multi-store",
                 StoreCode = "S01",
             }
         );
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
-        Assert.NotEqual("headquarters", result.Data!.Id);
-        Assert.Equal("总部促销 - 本店副本", result.Data.Name);
+        Assert.NotEqual("multi-store", result.Data!.Id);
+        Assert.Equal("多店促销 - 本店副本", result.Data.Name);
         Assert.Equal(0, result.Data.Priority);
         Assert.False(result.Data.IsEnabled);
         Assert.Single(result.Data.Stores);
@@ -552,6 +548,178 @@ public sealed class PromotionReactServiceTests : IDisposable
         Assert.Equal("STORE_FORBIDDEN", update.ErrorCode);
         Assert.Equal("STORE_FORBIDDEN", copy.ErrorCode);
         Assert.Equal("STORE_FORBIDDEN", enable.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RequiresAtLeastOneStoreAndNormalizesStoreCodes()
+    {
+        var now = DateTime.UtcNow;
+        var service = CreateService(new[] { "S01" });
+
+        var empty = BuildCreateDto("未选分店", now);
+        empty.Stores = new List<PromotionStoreItemDto> { new() { StoreCode = "  " } };
+        var rejected = await service.CreateAsync(empty);
+        Assert.False(rejected.Success);
+        Assert.Equal(PromotionReactService.PromotionStoreRequiredErrorCode, rejected.ErrorCode);
+        Assert.Equal(0, await _db.Queryable<Promotion>().CountAsync());
+
+        var dto = BuildCreateDto("两家分店", now);
+        dto.Stores = new List<PromotionStoreItemDto>
+        {
+            new() { StoreCode = " S01 " },
+            new() { StoreCode = "s01" },
+            new() { StoreCode = "S02" },
+            new() { StoreCode = "" },
+        };
+        var created = await service.CreateAsync(dto);
+        Assert.True(created.Success);
+        Assert.Equal(
+            new[] { "S01", "S02" },
+            created.Data!.Stores.Select(item => item.StoreCode).OrderBy(code => code).ToArray());
+    }
+
+    [Fact]
+    public async Task UpdateAsync_RejectsEmptyStoresWithoutTouchingExistingPromotion()
+    {
+        var now = DateTime.UtcNow;
+        await SeedPromotionWithStoresAsync("multi", "多店促销", new[] { "S01", "S02" }, now);
+        await SeedPromotionProductAsync("multi", "P01", 1);
+        var service = CreateService(new[] { "S01" });
+
+        var dto = BuildUpdateDto("改成没分店", now);
+        dto.Stores = new List<PromotionStoreItemDto>();
+        var result = await service.UpdateAsync("multi", dto);
+
+        Assert.False(result.Success);
+        Assert.Equal(PromotionReactService.PromotionStoreRequiredErrorCode, result.ErrorCode);
+        var promotion = await _db.Queryable<Promotion>().InSingleAsync("multi");
+        Assert.Equal("多店促销", promotion.Name);
+        Assert.Equal(2, await _db.Queryable<PromotionStore>().Where(item => item.PromotionId == "multi").CountAsync());
+        Assert.Equal(1, await _db.Queryable<PromotionProduct>().Where(item => item.PromotionId == "multi").CountAsync());
+    }
+
+    [Fact]
+    public async Task CopyToStoreAsync_RejectsPromotionWithoutStoreBinding()
+    {
+        var now = DateTime.UtcNow;
+        await SeedPromotionWithStoresAsync("unbound", "未绑定分店促销", Array.Empty<string>(), now);
+        var service = CreateService(new[] { "S01" });
+
+        var result = await service.CopyToStoreAsync(
+            new CopyStorePromotionRequestDto { SourcePromotionId = "unbound", StoreCode = "S01" }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("PROMOTION_NOT_COPYABLE", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetStoreByIdAsync_TreatsPromotionWithoutStoreBindingAsUnrelated()
+    {
+        var now = DateTime.UtcNow;
+        await SeedPromotionWithStoresAsync("unbound", "未绑定分店促销", Array.Empty<string>(), now);
+        var service = CreateService(new[] { "S01" });
+
+        var result = await service.GetStoreByIdAsync("unbound", "S01");
+
+        Assert.False(result.Success);
+        Assert.Equal("PROMOTION_NOT_RELATED", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetStoreGridAsync_FiltersByStatusAndCountsMatchEachSegment()
+    {
+        var now = DateTime.UtcNow;
+        await SeedPromotionWithStoresAsync("active", "生效中", new[] { "S01" }, now);
+        await SeedPromotionWithStoresAsync(
+            "upcoming", "未开始", new[] { "S01", "S02" }, now,
+            effectiveStart: now.AddDays(2), effectiveEnd: now.AddDays(9));
+        await SeedPromotionWithStoresAsync("disabled", "已停用", new[] { "S01" }, now, isEnabled: false);
+        await SeedPromotionWithStoresAsync(
+            "ended", "已结束", new[] { "S01" }, now,
+            effectiveStart: now.AddDays(-9), effectiveEnd: now.AddDays(-2));
+        await SeedPromotionWithStoresAsync(
+            "ended-disabled", "已结束且停用", new[] { "S01" }, now,
+            effectiveStart: now.AddDays(-9), effectiveEnd: now.AddDays(-2), isEnabled: false);
+        await SeedPromotionWithStoresAsync("other-store", "其他门店", new[] { "S02" }, now);
+        await SeedPromotionWithStoresAsync("unbound", "未绑定分店", Array.Empty<string>(), now);
+        var service = CreateService(new[] { "S01" });
+
+        async Task<string[]> Ids(string? status)
+        {
+            var grid = await service.GetStoreGridAsync(
+                new StorePromotionGridRequestDto { StoreCode = "S01", StartRow = 0, PageSize = 50, Status = status });
+            Assert.True(grid.Success);
+            return grid.Items!.Select(item => item.Id).OrderBy(id => id).ToArray();
+        }
+
+        Assert.Equal(new[] { "active" }, await Ids(PromotionStoreStatusFilters.Active));
+        Assert.Equal(new[] { "upcoming" }, await Ids(PromotionStoreStatusFilters.Upcoming));
+        Assert.Equal(new[] { "disabled" }, await Ids(PromotionStoreStatusFilters.Disabled));
+        // 已结束不论启停，避免同一条同时出现在「已停用」和「已结束」两个分段里。
+        Assert.Equal(new[] { "ended", "ended-disabled" }, await Ids(PromotionStoreStatusFilters.Ended));
+        Assert.Equal(
+            new[] { "active", "disabled", "ended", "ended-disabled", "upcoming" },
+            await Ids(null));
+
+        var counts = await service.GetStoreStatusCountsAsync("S01");
+        Assert.True(counts.Success);
+        Assert.Equal(1, counts.Data!.Active);
+        Assert.Equal(1, counts.Data.Upcoming);
+        Assert.Equal(1, counts.Data.Disabled);
+        Assert.Equal(2, counts.Data.Ended);
+        Assert.Equal(5, counts.Data.Total);
+
+        var forbidden = await service.GetStoreStatusCountsAsync("S02");
+        Assert.Equal("STORE_FORBIDDEN", forbidden.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetStoreProductPromotionsAsync_ReturnsUnfinishedPromotionsOfProductForCurrentStore()
+    {
+        var now = DateTime.UtcNow;
+        await SeedPromotionWithStoresAsync("store-only", "本店独享", new[] { "S01" }, now);
+        await SeedPromotionWithStoresAsync(
+            "multi-upcoming", "多店未开始", new[] { "S01", "S02" }, now,
+            effectiveStart: now.AddDays(3), effectiveEnd: now.AddDays(10));
+        await SeedPromotionWithStoresAsync("disabled", "已停用", new[] { "S01" }, now, isEnabled: false);
+        await SeedPromotionWithStoresAsync(
+            "ended", "已结束", new[] { "S01" }, now,
+            effectiveStart: now.AddDays(-9), effectiveEnd: now.AddDays(-1));
+        await SeedPromotionWithStoresAsync("other-store", "其他门店", new[] { "S02" }, now);
+        await SeedPromotionWithStoresAsync("unbound", "未绑定分店", Array.Empty<string>(), now);
+        await SeedPromotionWithStoresAsync("other-product", "别的商品", new[] { "S01" }, now);
+        foreach (var id in new[] { "store-only", "multi-upcoming", "disabled", "ended", "other-store", "unbound" })
+        {
+            await SeedPromotionProductAsync(id, "P01", 1);
+        }
+        await SeedPromotionProductAsync("other-product", "P02", 1);
+        await SeedPromotionProductAsync("store-only", "P03", 1);
+        var service = CreateService(new[] { "S01" });
+
+        var result = await service.GetStoreProductPromotionsAsync(" P01 ", "S01");
+
+        Assert.True(result.Success);
+        var items = result.Data!;
+        Assert.Equal(
+            new[] { "disabled", "multi-upcoming", "store-only" },
+            items.Select(item => item.Id).OrderBy(id => id).ToArray());
+        var storeOnly = items.Single(item => item.Id == "store-only");
+        Assert.Equal(PromotionStoreScopeTypes.StoreOnly, storeOnly.ScopeType);
+        Assert.True(storeOnly.CanEditInStoreScope);
+        Assert.False(storeOnly.CanCopyToStore);
+        Assert.Equal(2, storeOnly.ProductsCount);
+        var multi = items.Single(item => item.Id == "multi-upcoming");
+        Assert.Equal(PromotionStoreScopeTypes.MultiStore, multi.ScopeType);
+        Assert.False(multi.CanEditInStoreScope);
+        Assert.True(multi.CanCopyToStore);
+        Assert.Equal(2, multi.StoresCount);
+
+        var forbidden = await service.GetStoreProductPromotionsAsync("P01", "S02");
+        Assert.Equal("STORE_FORBIDDEN", forbidden.ErrorCode);
+        var empty = await service.GetStoreProductPromotionsAsync("  ", "S01");
+        Assert.True(empty.Success);
+        Assert.Empty(empty.Data!);
     }
 
     [Fact]
@@ -670,7 +838,10 @@ public sealed class PromotionReactServiceTests : IDisposable
         string name,
         IReadOnlyCollection<string> storeCodes,
         DateTime now,
-        int priority = 0
+        int priority = 0,
+        DateTime? effectiveStart = null,
+        DateTime? effectiveEnd = null,
+        bool isEnabled = true
     )
     {
         await _db.Insertable(
@@ -678,9 +849,9 @@ public sealed class PromotionReactServiceTests : IDisposable
             {
                 Id = id,
                 Name = name,
-                EffectiveStart = now.AddDays(-1),
-                EffectiveEnd = now.AddDays(1),
-                IsEnabled = true,
+                EffectiveStart = effectiveStart ?? now.AddDays(-1),
+                EffectiveEnd = effectiveEnd ?? now.AddDays(1),
+                IsEnabled = isEnabled,
                 IsExclusive = true,
                 Priority = priority,
                 ApplyQuantity = 2,

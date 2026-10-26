@@ -1,4 +1,3 @@
-import type { PromotionListItem } from "@/modules/promotions/types";
 import type { ProductDetail } from "./types";
 
 /** 毛利变化方向：相对修改前的基线。null 表示无可比数据或没有变化。 */
@@ -128,21 +127,4 @@ export function parseOptionalPrice(value: string): number | null {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** 促销折叠条摘要：取第一条活动的规则，结束日期取所有活动中最早结束的一天（YYYY-MM-DD）。 */
-export function summarizePromotions(items: readonly PromotionListItem[]) {
-  if (!items.length) return null;
-  const first = items[0];
-  const endDates = items
-    .map((item) => item.effectiveEnd?.slice(0, 10))
-    .filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value)))
-    .sort();
-  return {
-    name: first.name,
-    applyQuantity: first.applyQuantity,
-    fixedPrice: Number.isFinite(first.fixedPrice) ? first.fixedPrice.toFixed(2) : "0.00",
-    endDate: endDates[0] ?? null,
-    extraCount: items.length - 1,
-  };
 }

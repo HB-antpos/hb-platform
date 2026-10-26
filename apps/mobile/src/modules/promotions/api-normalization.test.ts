@@ -4,6 +4,7 @@ import {
   buildPromotionPayload,
   normalizePromotionDetail,
   normalizePromotionsResponse,
+  normalizeStatusCounts,
   normalizeValidPromotionsResponse,
 } from "./api";
 
@@ -180,3 +181,19 @@ const directValidPromotions = normalizeValidPromotionsResponse([
 
 assertEqual(directValidPromotions.length, 1, "有效商品促销归一化支持已解包的直接数组");
 assertEqual(directValidPromotions[0]?.fixedPrice, 20, "直接数组组合价保持数值");
+
+// 状态分段：「全部」不传参数（旧后端兼容），其余原样透传；非法值丢弃。
+assertEqual(buildPromotionGridPayload({ storeCode: "1033", status: "active" }).status, "active", "状态分段透传");
+assertEqual(buildPromotionGridPayload({ storeCode: "1033", status: "all" }).status, undefined, "全部不传状态");
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "1033", status: "bogus" as never }).status,
+  undefined,
+  "非法状态丢弃",
+);
+
+const counts = normalizeStatusCounts({ Active: 12, upcoming: "3", disabled: -1, ended: null, total: 20 });
+assertEqual(counts.active, 12, "数量兼容大写字段");
+assertEqual(counts.upcoming, 3, "数量兼容字符串");
+assertEqual(counts.disabled, 0, "负数归零");
+assertEqual(counts.ended, 0, "空值归零");
+assertEqual(counts.total, 20, "合计");

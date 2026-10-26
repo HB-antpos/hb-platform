@@ -1,497 +1,225 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import {
-  ActivityIndicator,
-  Button,
-  Card,
-  Chip,
-  Divider,
-  IconButton,
-  Modal,
-  Portal,
-  Snackbar,
-  Switch,
-  Text,
-  TextInput,
-} from "react-native-paper";
+/**
+ * 移动端「促销管理」页：同一路由内切换三屏（列表 / 新建编辑 / 只读详情），不新增路由，避免牵连菜单登记。
+ * - 查看需 Promotions.View（菜单已控制）；新建、编辑、启停、提前结束、复制到本店需 Promotions.Edit。
+ * - 分店只列当前账号能管理的店；后端店级接口对无权分店也会返回 STORE_FORBIDDEN。
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BackHandler, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Snackbar } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
-import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
-import { HB_COLORS } from "@/shared/theme/tokens";
-import {
-  copyPromotionToStore,
-  createPromotion,
-  fetchPromotionDetail,
-  fetchPromotions,
-  setPromotionEnabled,
-  updatePromotion,
-} from "@/modules/promotions/api";
-import type {
-  PromotionDetail,
-  PromotionFormValues,
-  PromotionListItem,
-  PromotionProductItem,
-  PromotionScopeType,
-} from "@/modules/promotions/types";
+import { getManageableStoresForSession } from "@/modules/shop/store-scope";
 import type { Store } from "@/modules/shop/types";
 import { useStores } from "@/modules/shop/use-stores";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
+import { resolveLocaleTag } from "@/shared/i18n/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { PERMISSIONS } from "@/shared/utils/access";
+import { useAuthStore } from "@/store/auth-store";
+import { fetchPromotionDetail } from "./api";
+import { PromotionDetailView } from "./promotion-detail-view";
+import { PromotionEditorView } from "./promotion-editor-view";
+import { PromotionListView } from "./promotion-list-view";
+import { canEditPromotionInStore } from "./promotion-logic";
+import { getPromotionErrorKind } from "./promotion-screen-model";
+import type { PromotionDetail, PromotionListItem } from "./types";
 
-const PAGE_SIZE = 20;
-
-const EMPTY_FORM: PromotionFormValues = {
-  name: "",
-  description: "",
-  storeCode: "",
-  effectiveStart: "",
-  effectiveEnd: "",
-  isEnabled: true,
-  isExclusive: true,
-  priority: 0,
-  applyQuantity: 0,
-  fixedPrice: 0,
-  maxApplicationsPerOrder: null,
-  products: [{ productCode: "", unitWeight: 1 }],
-};
-
-function scopeTone(scopeType: PromotionScopeType | null) {
-  if (scopeType === "StoreOnly") {
-    return { backgroundColor: "#E6F4FF", textColor: "#0958D9" };
-  }
-  if (scopeType === "MultiStore") {
-    return { backgroundColor: "#FFF7E6", textColor: "#AD6800" };
-  }
-  return { backgroundColor: "#F6FFED", textColor: "#237804" };
-}
-
-function toNumberInput(value: number | string | null | undefined) {
-  return value == null ? "" : String(value);
-}
-
-function formatDate(value?: string) {
-  if (!value) {
-    return "--";
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
-
-function createDefaultForm(storeCode: string): PromotionFormValues {
-  const now = new Date();
-  const end = new Date(now);
-  end.setDate(end.getDate() + 30);
-  return {
-    ...EMPTY_FORM,
-    storeCode,
-    effectiveStart: now.toISOString(),
-    effectiveEnd: end.toISOString(),
-    products: [{ productCode: "", unitWeight: 1 }],
-  };
-}
-
-function formFromDetail(detail: PromotionDetail, storeCode: string): PromotionFormValues {
-  return {
-    id: detail.id,
-    name: detail.name,
-    description: detail.description,
-    storeCode,
-    effectiveStart: detail.effectiveStart,
-    effectiveEnd: detail.effectiveEnd,
-    isEnabled: detail.isEnabled,
-    isExclusive: detail.isExclusive,
-    priority: detail.priority,
-    applyQuantity: detail.applyQuantity,
-    fixedPrice: detail.fixedPrice,
-    maxApplicationsPerOrder: detail.maxApplicationsPerOrder ?? null,
-    products: detail.products.length ? detail.products : [{ productCode: "", unitWeight: 1 }],
-  };
-}
-
-function PromotionScopeTag({
-  scopeType,
-  label,
-}: {
-  scopeType: PromotionScopeType | null;
-  label: string;
-}) {
-  const tone = scopeTone(scopeType);
-  return (
-    <Chip
-      compact
-      style={[styles.scopeChip, { backgroundColor: tone.backgroundColor }]}
-      textStyle={[styles.scopeChipText, { color: tone.textColor }]}
-    >
-      {label}
-    </Chip>
-  );
-}
+type ScreenView =
+  | { kind: "list" }
+  | { kind: "editor"; detail: PromotionDetail | null; key: number }
+  | { kind: "detail"; detail: PromotionDetail };
 
 export function PromotionsScreen() {
   const { t, language } = useAppTranslation(["promotions", "common"]);
-  const {
-    stores,
-    selectedStore,
-    selectedStoreCode,
-    isLoading: storesLoading,
-    selectStore,
-  } = useStores();
+  const access = useAuthStore((state) => state.access);
+  const { stores, selectedStoreCode, isDeviceMode, deviceBoundStore, selectStore } = useStores();
   const [storePickerVisible, setStorePickerVisible] = useState(false);
-  const [keyword, setKeyword] = useState("");
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<PromotionListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [formVisible, setFormVisible] = useState(false);
-  const [formValues, setFormValues] = useState<PromotionFormValues>(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
+  const [view, setView] = useState<ScreenView>({ kind: "list" });
+  const [opening, setOpening] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const [snackbar, setSnackbar] = useState("");
-  const [copySource, setCopySource] = useState<PromotionListItem | null>(null);
+  const editorBackHandler = useRef<(() => void) | null>(null);
 
-  const selectedStoreLabel = selectedStore?.storeName || selectedStoreCode || t("store.empty");
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const canEdit = access.hasPermission(PERMISSIONS.Promotions.Edit);
+
+  // 只列当前账号能管理的分店（与人员管理等页面同一口径；仓库管理后端不限分店）。
+  const manageableStores = useMemo(
+    () =>
+      getManageableStoresForSession({
+        stores,
+        isDeviceMode,
+        deviceBoundStore,
+        isAdmin: access.isAdmin || access.isWarehouseManager,
+      }),
+    [access.isAdmin, access.isWarehouseManager, deviceBoundStore, isDeviceMode, stores],
+  );
+  // 全局所选分店不在可管理范围时，退回第一家可管理分店（不改全局选择）。
+  const store: Store | null =
+    manageableStores.find((item) => item.storeCode === selectedStoreCode) ?? manageableStores[0] ?? null;
+  const storeCode = store?.storeCode ?? null;
+  const storeName = store?.storeName || storeCode || "";
+  const canSwitchStore = !isDeviceMode && manageableStores.length > 1;
+
+  const localeTag = resolveLocaleTag(language);
+  const weekdayLabels = useMemo(() => {
+    // 2026-01-05 是周一：依次取周一到周日的窄星期名。
+    const formatter = new Intl.DateTimeFormat(localeTag, { weekday: "narrow" });
+    return Array.from({ length: 7 }, (_, index) => formatter.format(new Date(2026, 0, 5 + index)));
+  }, [localeTag]);
 
   const getErrorMessage = useCallback(
-    (error: unknown, fallbackKey: string) =>
-      resolveLocalizedErrorMessage(error, {
-        language,
-        t,
-        fallbackKey,
-      }),
-    [language, t]
-  );
-
-  const loadPromotions = useCallback(
-    async (nextPage: number, options?: { refreshing?: boolean }) => {
-      if (!selectedStoreCode) {
-        setItems([]);
-        setTotal(0);
-        return;
-      }
-
-      if (options?.refreshing) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      try {
-        const result = await fetchPromotions({
-          storeCode: selectedStoreCode,
-          keyword,
-          page: nextPage,
-          pageSize: PAGE_SIZE,
-        });
-        setItems(result.items);
-        setTotal(result.total);
-        setPage(nextPage);
-      } catch (error) {
-        setSnackbar(getErrorMessage(error, "messages.loadFailed"));
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
+    (error: unknown, fallbackKey: string) => {
+      if (getPromotionErrorKind(error) === "storeForbidden") return t("messages.storeForbidden");
+      return resolveLocalizedErrorMessage(error, { language, t, fallbackKey });
     },
-    [getErrorMessage, keyword, selectedStoreCode]
+    [language, t],
   );
 
+  const backToList = useCallback((reload: boolean) => {
+    setView({ kind: "list" });
+    if (reload) setReloadToken((token) => token + 1);
+  }, []);
+
+  // Android 返回键：编辑页先走「放弃修改」确认，详情页回列表。
   useEffect(() => {
-    void loadPromotions(1);
-  }, [loadPromotions, selectedStoreCode]);
+    if (view.kind === "list") return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (view.kind === "editor") {
+        editorBackHandler.current?.();
+      } else {
+        backToList(false);
+      }
+      return true;
+    });
+    return () => subscription.remove();
+  }, [backToList, view.kind]);
 
-  const openCreate = useCallback(() => {
-    if (!selectedStoreCode) {
-      setSnackbar(t("messages.selectStoreFirst"));
-      return;
-    }
-    setFormValues(createDefaultForm(selectedStoreCode));
-    setFormVisible(true);
-  }, [selectedStoreCode, t]);
+  // 切换分店时回到列表（编辑中的内容属于原分店）。
+  useEffect(() => {
+    setView({ kind: "list" });
+  }, [storeCode]);
 
-  const openEdit = useCallback(
+  const openItem = useCallback(
     async (item: PromotionListItem) => {
-      if (!selectedStoreCode) {
-        setSnackbar(t("messages.selectStoreFirst"));
-        return;
-      }
-      if (!item.canEditInStoreScope) {
-        setSnackbar(t("messages.copyBeforeEdit"));
-        return;
-      }
-      setLoading(true);
+      if (!storeCode) return;
+      setOpening(true);
       try {
-        const detail = await fetchPromotionDetail(item.id, selectedStoreCode);
+        // 列表行可能不带商品明细，统一取完整详情。
+        const detail = await fetchPromotionDetail(item.id, storeCode);
         if (!detail) {
           setSnackbar(t("messages.detailMissing"));
           return;
         }
-        setFormValues(formFromDetail(detail, selectedStoreCode));
-        setFormVisible(true);
+        if (canEdit && canEditPromotionInStore(detail)) {
+          setView({ kind: "editor", detail, key: Date.now() });
+        } else {
+          setView({ kind: "detail", detail });
+        }
       } catch (error) {
         setSnackbar(getErrorMessage(error, "messages.detailFailed"));
       } finally {
-        setLoading(false);
+        setOpening(false);
       }
     },
-    [getErrorMessage, selectedStoreCode, t]
+    [canEdit, getErrorMessage, storeCode, t],
   );
 
-  const savePromotion = useCallback(async () => {
-    if (!selectedStoreCode) {
-      setSnackbar(t("messages.selectStoreFirst"));
-      return;
-    }
-    if (!formValues.name.trim()) {
-      setSnackbar(t("messages.nameRequired"));
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const payload = { ...formValues, storeCode: selectedStoreCode };
-      if (formValues.id) {
-        await updatePromotion(formValues.id, payload);
-      } else {
-        await createPromotion(payload);
+  const handleCopied = useCallback(
+    async (copied: PromotionDetail | null) => {
+      setReloadToken((token) => token + 1);
+      if (copied?.id && storeCode) {
+        // 复制接口返回的就是新促销；再取一次店级详情，确保范围 / 可编辑标记是本店口径。
+        try {
+          const fresh = (await fetchPromotionDetail(copied.id, storeCode)) ?? copied;
+          setView({ kind: "editor", detail: fresh, key: Date.now() });
+          return;
+        } catch {
+          setView({ kind: "editor", detail: copied, key: Date.now() });
+          return;
+        }
       }
-      setFormVisible(false);
-      setSnackbar(t("messages.saved"));
-      await loadPromotions(page);
-    } catch (error) {
-      setSnackbar(getErrorMessage(error, "messages.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  }, [formValues, getErrorMessage, loadPromotions, page, selectedStoreCode, t]);
-
-  const copyToStore = useCallback(async () => {
-    if (!copySource || !selectedStoreCode) {
-      return;
-    }
-    setSaving(true);
-    try {
-      const detail = await copyPromotionToStore({
-        sourcePromotionId: copySource.id,
-        storeCode: selectedStoreCode,
-      });
-      setCopySource(null);
-      setSnackbar(t("messages.copied"));
-      await loadPromotions(1);
-      if (detail) {
-        setFormValues(formFromDetail(detail, selectedStoreCode));
-        setFormVisible(true);
-      }
-    } catch (error) {
-      setSnackbar(getErrorMessage(error, "messages.copyFailed"));
-    } finally {
-      setSaving(false);
-    }
-  }, [copySource, getErrorMessage, loadPromotions, selectedStoreCode, t]);
-
-  const toggleEnabled = useCallback(
-    async (item: PromotionListItem) => {
-      if (!selectedStoreCode || !item.canEditInStoreScope) {
-        setSnackbar(t("messages.copyBeforeEdit"));
-        return;
-      }
-      try {
-        await setPromotionEnabled(item.id, selectedStoreCode, !item.isEnabled);
-        await loadPromotions(page);
-      } catch (error) {
-        setSnackbar(getErrorMessage(error, "messages.enableFailed"));
-      }
+      setView({ kind: "list" });
     },
-    [getErrorMessage, loadPromotions, page, selectedStoreCode, t]
+    [storeCode],
   );
 
-  const updateProduct = useCallback(
-    (index: number, patch: Partial<PromotionProductItem>) => {
-      setFormValues((current) => {
-        const products = [...(current.products ?? [])];
-        products[index] = { productCode: "", unitWeight: 1, ...products[index], ...patch };
-        return { ...current, products };
-      });
-    },
-    []
-  );
-
-  const removeProduct = useCallback((index: number) => {
-    setFormValues((current) => {
-      const products = [...(current.products ?? [])];
-      products.splice(index, 1);
-      return { ...current, products: products.length ? products : [{ productCode: "", unitWeight: 1 }] };
-    });
+  const registerBackHandler = useCallback((handler: (() => void) | null) => {
+    editorBackHandler.current = handler;
   }, []);
-
-  const scopeLabels = useMemo(
-    () => ({
-      StoreOnly: t("scope.storeOnly"),
-      MultiStore: t("scope.multiStore"),
-      Headquarters: t("scope.headquarters"),
-    }),
-    [t]
-  );
-
-  const renderCard = (item: PromotionListItem) => {
-    const scopeLabel = item.scopeType ? scopeLabels[item.scopeType] : t("scope.unknown");
-    return (
-      <Card key={item.id} style={styles.card} mode="outlined">
-        <Card.Title
-          title={item.name || t("fields.unnamed")}
-          subtitle={`${formatDate(item.effectiveStart)} - ${formatDate(item.effectiveEnd)}`}
-          right={() => (
-            <IconButton
-              icon={item.isEnabled ? "toggle-switch" : "toggle-switch-off-outline"}
-              disabled={!item.canEditInStoreScope}
-              onPress={() => void toggleEnabled(item)}
-            />
-          )}
-        />
-        <Card.Content style={styles.cardContent}>
-          <View style={styles.tagRow}>
-            <PromotionScopeTag scopeType={item.scopeType} label={scopeLabel} />
-            <Chip compact>{item.isEnabled ? t("status.enabled") : t("status.disabled")}</Chip>
-            <Chip compact>{item.isExclusive ? t("status.exclusive") : t("status.stackable")}</Chip>
-          </View>
-          <View style={styles.metricRow}>
-            <Text variant="bodyMedium">{t("fields.priorityValue", { value: item.priority })}</Text>
-            <Text variant="bodyMedium">{t("fields.ruleValue", { count: item.applyQuantity, price: item.fixedPrice.toFixed(2) })}</Text>
-          </View>
-          <Text variant="bodySmall" style={styles.mutedText}>
-            {t("fields.productsAndStores", { products: item.productsCount, stores: item.storesCount })}
-          </Text>
-          <View style={styles.cardActions}>
-            {item.canEditInStoreScope ? (
-              <Button mode="contained-tonal" icon="pencil" onPress={() => void openEdit(item)}>
-                {t("actions.edit")}
-              </Button>
-            ) : (
-              <Button mode="contained-tonal" icon="content-copy" onPress={() => setCopySource(item)}>
-                {t("actions.copyToStore")}
-              </Button>
-            )}
-          </View>
-        </Card.Content>
-      </Card>
-    );
-  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text variant="headlineSmall" style={BUSINESS_UI.title}>{t("title")}</Text>
-          <Text variant="bodyMedium" style={styles.mutedText}>
-            {t("subtitle", { store: selectedStoreLabel })}
-          </Text>
-        </View>
-        <Button mode="contained" icon="plus" onPress={openCreate} disabled={!selectedStoreCode}>
-          {t("actions.create")}
-        </Button>
-      </View>
-
-      <View style={styles.filters}>
-        <Button mode="outlined" icon="storefront-outline" onPress={() => setStorePickerVisible(true)}>
-          {selectedStoreLabel}
-        </Button>
-        <TextInput
-          mode="outlined"
-          dense
-          value={keyword}
-          placeholder={t("filters.keyword")}
-          onChangeText={setKeyword}
-          style={styles.searchInput}
-          right={<TextInput.Icon icon="magnify" onPress={() => void loadPromotions(1)} />}
-          onSubmitEditing={() => void loadPromotions(1)}
+      {/* 列表常驻（隐藏而不卸载），从编辑 / 详情返回时保留分段、搜索与滚动位置。 */}
+      <View style={[styles.flex, view.kind !== "list" && styles.hidden]}>
+        <PromotionListView
+          t={t}
+          storeCode={storeCode}
+          store={store}
+          canSwitchStore={canSwitchStore}
+          canEdit={canEdit}
+          reloadToken={reloadToken}
+          onOpenStorePicker={() => setStorePickerVisible(true)}
+          onOpenItem={(item) => void openItem(item)}
+          onCreate={() => setView({ kind: "editor", detail: null, key: Date.now() })}
+          onMessage={setSnackbar}
+          getErrorMessage={getErrorMessage}
         />
       </View>
 
-      {loading && !refreshing ? (
-        <ActivityIndicator style={styles.loading} />
-      ) : (
-        <ScrollView
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => void loadPromotions(page, { refreshing: true })} />
-          }
-          contentContainerStyle={styles.content}
-        >
-          {!selectedStoreCode ? (
-            <EmptyState title={t("empty.selectStoreTitle")} description={t("empty.selectStoreDescription")} />
-          ) : items.length === 0 ? (
-            <EmptyState title={t("empty.noDataTitle")} description={t("empty.noDataDescription")} />
-          ) : (
-            items.map(renderCard)
-          )}
-          {items.length > 0 ? (
-            <View style={styles.pagination}>
-              <Button disabled={page <= 1} onPress={() => void loadPromotions(page - 1)}>
-                {t("pagination.previous")}
-              </Button>
-              <Text variant="bodyMedium">{t("pagination.page", { page, pageCount })}</Text>
-              <Button disabled={page >= pageCount} onPress={() => void loadPromotions(page + 1)}>
-                {t("pagination.next")}
-              </Button>
-            </View>
-          ) : null}
-        </ScrollView>
-      )}
+      {view.kind === "editor" && storeCode ? (
+        <View style={styles.flex}>
+          <PromotionEditorView
+            key={view.key}
+            t={t}
+            storeCode={storeCode}
+            storeName={storeName}
+            detail={view.detail}
+            localeTag={localeTag}
+            weekdayLabels={weekdayLabels}
+            onClose={({ saved }) => backToList(saved)}
+            onMessage={setSnackbar}
+            getErrorMessage={getErrorMessage}
+            registerBackHandler={registerBackHandler}
+          />
+        </View>
+      ) : null}
 
-      <StorePickerModal presentation="sheet"
+      {view.kind === "detail" && storeCode ? (
+        <View style={styles.flex}>
+          <PromotionDetailView
+            t={t}
+            storeCode={storeCode}
+            storeName={storeName}
+            detail={view.detail}
+            canEdit={canEdit}
+            onBack={() => backToList(false)}
+            onCopied={(copied) => void handleCopied(copied)}
+            onMessage={setSnackbar}
+            getErrorMessage={getErrorMessage}
+          />
+        </View>
+      ) : null}
+
+      {opening ? (
+        <View style={styles.opening} pointerEvents="auto">
+          <ActivityIndicator size="large" />
+        </View>
+      ) : null}
+
+      <StorePickerModal
+        presentation="sheet"
         visible={storePickerVisible}
-        stores={stores}
-        selectedStoreCode={selectedStoreCode}
+        stores={manageableStores}
+        selectedStoreCode={storeCode}
         title={t("common:labels.selectStore")}
         cancelLabel={t("common:actions.cancel")}
         onDismiss={() => setStorePickerVisible(false)}
-        onSelectStore={async (store: Store | null) => {
-          await selectStore(store);
+        onSelectStore={async (next: Store | null) => {
+          if (next) await selectStore(next);
           setStorePickerVisible(false);
-          setPage(1);
         }}
       />
-
-      <PromotionFormModal
-        visible={formVisible}
-        formValues={formValues}
-        saving={saving}
-        feedback={snackbar}
-        storeLabel={selectedStoreLabel}
-        t={t}
-        onChange={setFormValues}
-        onDismiss={() => setFormVisible(false)}
-        onSave={() => void savePromotion()}
-        onAddProduct={() =>
-          setFormValues((current) => ({
-            ...current,
-            products: [...(current.products ?? []), { productCode: "", unitWeight: 1 }],
-          }))
-        }
-        onRemoveProduct={removeProduct}
-        onUpdateProduct={updateProduct}
-      />
-
-      <Portal>
-        <Modal
-          visible={Boolean(copySource)}
-          style={{ justifyContent: "flex-end" }}
-          onDismiss={() => setCopySource(null)}
-          contentContainerStyle={styles.modal}
-        >
-          <Text variant="titleLarge">{t("copy.title")}</Text>
-          <Text variant="bodyMedium" style={styles.modalText}>
-            {t("copy.description", { name: copySource?.name ?? "" })}
-          </Text>
-          <View style={styles.modalActions}>
-            <Button onPress={() => setCopySource(null)}>{t("common:actions.cancel")}</Button>
-            <Button mode="contained" loading={saving} onPress={() => void copyToStore()}>
-              {t("actions.copyToStore")}
-            </Button>
-          </View>
-        </Modal>
-      </Portal>
 
       <Snackbar visible={Boolean(snackbar)} onDismiss={() => setSnackbar("")} duration={4000}>
         {snackbar}
@@ -500,226 +228,14 @@ export function PromotionsScreen() {
   );
 }
 
-function PromotionFormModal({
-  visible,
-  formValues,
-  saving,
-  feedback,
-  storeLabel,
-  t,
-  onChange,
-  onDismiss,
-  onSave,
-  onAddProduct,
-  onRemoveProduct,
-  onUpdateProduct,
-}: {
-  visible: boolean;
-  formValues: PromotionFormValues;
-  saving: boolean;
-  feedback?: string;
-  storeLabel: string;
-  t: (key: string, options?: Record<string, unknown>) => string;
-  onChange: (values: PromotionFormValues) => void;
-  onDismiss: () => void;
-  onSave: () => void;
-  onAddProduct: () => void;
-  onRemoveProduct: (index: number) => void;
-  onUpdateProduct: (index: number, patch: Partial<PromotionProductItem>) => void;
-}) {
-  const products = formValues.products ?? [];
-  return (
-    <BusinessSheet
-      visible={visible}
-      title={formValues.id ? t("form.editTitle") : t("form.createTitle")}
-      onDismiss={onDismiss}
-      footer={
-        <View style={{ gap: 8 }}>
-        {feedback ? <Text accessibilityRole="alert" style={{ color: HB_COLORS.danger }}>{feedback}</Text> : null}
-        <View style={styles.formFooter}>
-          <Button onPress={onDismiss}>{t("common:actions.cancel")}</Button>
-          <Button mode="contained" loading={saving} onPress={onSave} contentStyle={BUSINESS_UI.buttonContent}>
-            {t("common:actions.save")}
-          </Button>
-        </View>
-        </View>
-      }
-    >
-          <Text variant="bodyMedium" style={styles.mutedText}>
-            {t("form.storeReadonly", { store: storeLabel })}
-          </Text>
-          <TextInput
-            mode="outlined"
-            label={t("fields.name")}
-            value={formValues.name}
-            onChangeText={(name) => onChange({ ...formValues, name })}
-            style={styles.input}
-          />
-          <TextInput
-            mode="outlined"
-            label={t("fields.description")}
-            value={formValues.description ?? ""}
-            onChangeText={(description) => onChange({ ...formValues, description })}
-            style={styles.input}
-          />
-          <View style={styles.twoColumn}>
-            <TextInput
-              mode="outlined"
-              label={t("fields.effectiveStart")}
-              value={formValues.effectiveStart ?? ""}
-              onChangeText={(effectiveStart) => onChange({ ...formValues, effectiveStart })}
-              style={styles.flexInput}
-            />
-            <TextInput
-              mode="outlined"
-              label={t("fields.effectiveEnd")}
-              value={formValues.effectiveEnd ?? ""}
-              onChangeText={(effectiveEnd) => onChange({ ...formValues, effectiveEnd })}
-              style={styles.flexInput}
-            />
-          </View>
-          <View style={styles.twoColumn}>
-            <TextInput
-              mode="outlined"
-              keyboardType="numeric"
-              label={t("fields.applyQuantity")}
-              value={toNumberInput(formValues.applyQuantity)}
-              onChangeText={(value) => onChange({ ...formValues, applyQuantity: Number(value) || 0 })}
-              style={styles.flexInput}
-            />
-            <TextInput
-              mode="outlined"
-              keyboardType="numeric"
-              label={t("fields.fixedPrice")}
-              value={toNumberInput(formValues.fixedPrice)}
-              onChangeText={(value) => onChange({ ...formValues, fixedPrice: Number(value) || 0 })}
-              style={styles.flexInput}
-            />
-          </View>
-          <TextInput
-            mode="outlined"
-            keyboardType="numeric"
-            label={t("fields.priority")}
-            value={toNumberInput(formValues.priority)}
-            onChangeText={(value) => onChange({ ...formValues, priority: Number(value) || 0 })}
-            style={styles.input}
-          />
-          <Text variant="bodySmall" style={styles.mutedText}>
-            {t("form.priorityHint")}
-          </Text>
-          <View style={styles.switchRow}>
-            <Text>{t("fields.enabled")}</Text>
-            <Switch value={formValues.isEnabled ?? true} onValueChange={(isEnabled) => onChange({ ...formValues, isEnabled })} />
-          </View>
-          <View style={styles.switchRow}>
-            <Text>{t("fields.exclusive")}</Text>
-            <Switch value={formValues.isExclusive ?? true} onValueChange={(isExclusive) => onChange({ ...formValues, isExclusive })} />
-          </View>
-          <Divider style={styles.divider} />
-          <View style={styles.productHeader}>
-            <Text variant="titleMedium">{t("form.products")}</Text>
-            <Button icon="plus" onPress={onAddProduct}>
-              {t("actions.addProduct")}
-            </Button>
-          </View>
-          {products.map((product, index) => (
-            <View key={`${index}-${product.id ?? ""}`} style={styles.productRow}>
-              <TextInput
-                mode="outlined"
-                label={t("fields.productCode")}
-                value={product.productCode ?? ""}
-                onChangeText={(productCode) => onUpdateProduct(index, { productCode })}
-                style={styles.productCodeInput}
-              />
-              <TextInput
-                mode="outlined"
-                keyboardType="numeric"
-                label={t("fields.unitWeight")}
-                value={toNumberInput(product.unitWeight)}
-                onChangeText={(value) => onUpdateProduct(index, { unitWeight: Number(value) || 1 })}
-                style={styles.weightInput}
-              />
-              <IconButton icon="delete-outline" onPress={() => onRemoveProduct(index)} />
-            </View>
-          ))}
-    </BusinessSheet>
-  );
-}
-
 const styles = StyleSheet.create({
   safeArea: BUSINESS_UI.screen,
-  header: {
+  flex: { flex: 1 },
+  hidden: { display: "none" },
+  opening: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: 16,
-  },
-  headerText: { flex: 1, minWidth: 0 },
-  filters: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  searchInput: { flex: 1, backgroundColor: "#FFFFFF" },
-  content: { gap: 12, padding: 16, paddingBottom: 32 },
-  loading: { marginTop: 48 },
-  card: BUSINESS_UI.section,
-  cardContent: { gap: 10 },
-  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  scopeChip: { borderRadius: 8 },
-  scopeChipText: { fontWeight: "700" },
-  metricRow: { flexDirection: "row", flexWrap: "wrap", gap: 12, backgroundColor: HB_COLORS.surfaceMuted, borderRadius: 8, padding: 10 },
-  mutedText: { color: HB_COLORS.textSecondary },
-  cardActions: { flexDirection: "row", justifyContent: "flex-end" },
-  pagination: {
-    alignItems: "center",
-    flexDirection: "row",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.5)",
   },
-  modal: {
-    alignSelf: "center",
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 16,
-    paddingBottom: 28,
-    width: "100%",
-    maxWidth: 680,
-  },
-  modalText: { marginTop: 8 },
-  modalActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 16,
-  },
-  formFooter: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
-  input: { backgroundColor: "#FFFFFF", marginTop: 10 },
-  twoColumn: { flexDirection: "row", gap: 8, marginTop: 10 },
-  flexInput: { backgroundColor: "#FFFFFF", flex: 1 },
-  switchRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 12,
-  },
-  divider: { marginVertical: 16 },
-  productHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  productRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 8,
-  },
-  productCodeInput: { backgroundColor: "#FFFFFF", flex: 1 },
-  weightInput: { backgroundColor: "#FFFFFF", width: 96 },
 });
