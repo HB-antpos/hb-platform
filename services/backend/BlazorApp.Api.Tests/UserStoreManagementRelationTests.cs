@@ -220,6 +220,11 @@ namespace BlazorApp.Api.Tests
         public async Task UpdateUserByGuidAsync_GlobalNonAdminExplicitScopeCanEditTarget()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();
+            // 角色等级上线后，全局编辑者只能修改等级严格低于自己的账号：Viewer 设为 50，高于店员基准 30。
+            await _db.Updateable<Role>()
+                .SetColumns(role => new Role { Level = 50 })
+                .Where(role => role.RoleGUID == "role-viewer")
+                .ExecuteCommandAsync();
             var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
             {
                 IsAllowed = true, IsAuthenticated = true, UserGuid = "viewer-1",
@@ -232,6 +237,26 @@ namespace BlazorApp.Api.Tests
 
             Assert.True(result.Success);
             Assert.Equal("foreign-user-edited", (await _db.Queryable<User>().InSingleAsync("foreign-user"))!.Username);
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_GlobalNonAdminWithoutHigherLevelCannotEditTarget()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            // Viewer 未设置等级（0），低于店员基准 30：持有全局 Users.Edit 也不能修改。
+            var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, UserGuid = "viewer-1",
+            }));
+
+            var result = await service.UpdateUserByGuidAsync("foreign-user", new UpdateUserDto
+            {
+                Username = "foreign-user-edited", Email = "foreign-edited@example.com", IsActive = true,
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal("TARGET_LEVEL_DENIED", result.ErrorCode);
+            Assert.Equal("foreign-user", (await _db.Queryable<User>().InSingleAsync("foreign-user"))!.Username);
         }
 
         [Fact]

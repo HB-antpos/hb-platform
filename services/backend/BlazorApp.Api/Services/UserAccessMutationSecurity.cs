@@ -145,6 +145,13 @@ namespace BlazorApp.Api.Services
                 return new(false, "不能修改高权限账号", "HIGH_PRIVILEGE_TARGET_DENIED");
             }
 
+            // 等级校验叠加在高权限校验之后：只会比原规则更严，不改变既有错误码。
+            var levelDecision = await ValidateTargetLevelAsync(db, actor.UserGuid, targetUserGuid);
+            if (!levelDecision.IsAllowed)
+            {
+                return levelDecision;
+            }
+
             if (actor.HasUnrestrictedStoreScope)
             {
                 return UserAccessMutationDecision.Allow;
@@ -322,6 +329,123 @@ namespace BlazorApp.Api.Services
             return visibleStoreGuids.Length == 0
                 ? UserAccessReadDecision.Forbidden
                 : UserAccessReadDecision.Delegated(visibleStoreGuids);
+        }
+
+        internal const string TargetLevelDeniedCode = "TARGET_LEVEL_DENIED";
+        internal const string RoleLevelDeniedCode = "ROLE_LEVEL_DENIED";
+
+        /// <summary>
+        /// 单个角色的有效等级：Level 大于 0 取库里的值；Level 为 0 视为未设置，回退到按角色名的基准等级。
+        /// 超级管理员角色至少按最高等级算，避免 Admin 角色等级被误调低后被低等级账号修改。
+        /// </summary>
+        internal static int EffectiveRoleLevel(string? roleName, int level)
+        {
+            if (Permissions.IsSuperAdminRole(roleName))
+            {
+                return Math.Max(level, Permissions.RoleLevels.SuperAdmin);
+            }
+
+            return level > 0 ? level : Permissions.RoleLevels.ForRoleName(roleName);
+        }
+
+        /// <summary>
+        /// 批量计算账号等级：取其所有有效角色（未删除且启用）的最高有效等级；没有任何有效角色的账号为 0。
+        /// 每次从库里实时计算，不进 JWT，调整角色等级后立即生效。
+        /// </summary>
+        internal static async Task<Dictionary<string, int>> GetUserLevelsAsync(
+            ISqlSugarClient db,
+            IReadOnlyCollection<string> userGuids
+        )
+        {
+            var levels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var candidates = userGuids
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                return levels;
+            }
+
+            var rows = await db.Queryable<UserRole>()
+                .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+                .Where((userRole, role) =>
+                    candidates.Contains(userRole.UserGUID)
+                    && !userRole.IsDeleted
+                    && !role.IsDeleted
+                    && role.IsActive
+                )
+                .Select((userRole, role) => new
+                {
+                    UserGuid = userRole.UserGUID,
+                    role.RoleName,
+                    role.Level,
+                })
+                .ToListAsync();
+
+            foreach (var row in rows)
+            {
+                var effective = EffectiveRoleLevel(row.RoleName, row.Level);
+                levels[row.UserGuid] = levels.TryGetValue(row.UserGuid, out var current)
+                    ? Math.Max(current, effective)
+                    : effective;
+            }
+
+            return levels;
+        }
+
+        internal static async Task<int> GetUserLevelAsync(ISqlSugarClient db, string userGuid)
+        {
+            var levels = await GetUserLevelsAsync(db, new[] { userGuid });
+            return levels.GetValueOrDefault(userGuid);
+        }
+
+        /// <summary>
+        /// 目标账号等级必须严格低于操作者等级；本人不在此处判断（本人规则由各调用方单独处理）。
+        /// 超级管理员由调用方在更早处放行，不经过这里。
+        /// </summary>
+        internal static async Task<UserAccessMutationDecision> ValidateTargetLevelAsync(
+            ISqlSugarClient db,
+            string actorUserGuid,
+            string targetUserGuid
+        )
+        {
+            if (string.IsNullOrWhiteSpace(actorUserGuid))
+            {
+                return new(false, "无法确认当前账号等级", TargetLevelDeniedCode);
+            }
+
+            if (string.Equals(actorUserGuid, targetUserGuid, StringComparison.OrdinalIgnoreCase))
+            {
+                return UserAccessMutationDecision.Allow;
+            }
+
+            var levels = await GetUserLevelsAsync(db, new[] { actorUserGuid, targetUserGuid });
+            var actorLevel = levels.GetValueOrDefault(actorUserGuid);
+            var targetLevel = levels.GetValueOrDefault(targetUserGuid);
+            return actorLevel > targetLevel
+                ? UserAccessMutationDecision.Allow
+                : new(false, "不能修改等级不低于自己的账号", TargetLevelDeniedCode);
+        }
+
+        /// <summary>
+        /// 授予角色时，被授予角色的有效等级必须严格低于操作者等级，防止越级授权或自我升级；超级管理员不受限。
+        /// </summary>
+        internal static async Task<UserAccessMutationDecision> ValidateRoleGrantLevelAsync(
+            ISqlSugarClient db,
+            UserAccessMutationActor actor,
+            IEnumerable<Role> rolesToGrant
+        )
+        {
+            if (actor.IsSuperAdmin)
+            {
+                return UserAccessMutationDecision.Allow;
+            }
+
+            var actorLevel = await GetUserLevelAsync(db, actor.UserGuid);
+            return rolesToGrant.Any(role => EffectiveRoleLevel(role.RoleName, role.Level) >= actorLevel)
+                ? new(false, "不能授予等级不低于自己的角色", RoleLevelDeniedCode)
+                : UserAccessMutationDecision.Allow;
         }
 
         internal static async Task<HashSet<string>> GetEffectivePermissionCodesAsync(

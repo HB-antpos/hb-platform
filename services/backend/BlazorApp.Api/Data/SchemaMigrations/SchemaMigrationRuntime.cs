@@ -228,6 +228,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendancePayrollLeaveAsync(CancellationToken cancellationToken);
 
+    Task ApplyRoleLevelAsync(CancellationToken cancellationToken);
+
+    Task VerifyRoleLevelAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1345,6 +1349,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StorePosApiEntrySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyRoleLevelAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            RoleLevelSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/可空性不符的列不会被误标为完成。
+        await VerifyRoleLevelAsync(cancellationToken);
+    }
+
+    public async Task VerifyRoleLevelAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            RoleLevelSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

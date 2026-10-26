@@ -112,7 +112,7 @@ import {
   splitPermissionCategoriesByPlatform,
 } from './userPermissions'
 import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPermissions'
-import { getCreateUserErrorFeedback, getUpdateUserFieldError } from './createUserFeedback'
+import { getCreateUserErrorFeedback, getLevelDeniedMessage, getUpdateUserFieldError } from './createUserFeedback'
 import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
   LOGIN_TOGGLE_ERROR_MESSAGES,
@@ -971,7 +971,7 @@ export default function SystemUsersPage() {
           form.setFields([{ name: fieldError.field, errors: [fieldError.message] }])
           form.scrollToField(fieldError.field)
         } else {
-          message.error(t('system.users.updateFailed', '更新用户失败'))
+          message.error(getLevelDeniedMessage(error, t) ?? t('system.users.updateFailed', '更新用户失败'))
         }
       }
     } finally {
@@ -999,7 +999,7 @@ export default function SystemUsersPage() {
       } catch (error) {
         if (isCurrentEditingSession(targetUserGuid, editSessionId)) {
           console.error(error)
-          message.error(t('system.users.roleAssignFailed', '角色分配失败'))
+          message.error(getLevelDeniedMessage(error, t) ?? t('system.users.roleAssignFailed', '角色分配失败'))
         }
         return
       }
@@ -1305,7 +1305,7 @@ export default function SystemUsersPage() {
           if (detailUser?.userGUID === updated.userGUID) setDetailUser(updated)
         } catch (error) {
           console.error(error)
-          message.error(t('system.users.updateFailed', '更新用户失败'))
+          message.error(getLevelDeniedMessage(error, t) ?? t('system.users.updateFailed', '更新用户失败'))
         }
       },
     })

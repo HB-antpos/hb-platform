@@ -652,6 +652,42 @@ namespace BlazorApp.Shared.Constants
             public const string BatchProductSalesView = "OrderFront.BatchProductSales.View";
         }
 
+        /// <summary>
+        /// 角色等级基准值（数值越大等级越高）。迁移回填与新环境种子共用，必须与
+        /// RoleLevelSchema.ApplySql 的回填保持一致；未登记的自定义角色默认为 0，由管理员在角色页设置。
+        /// </summary>
+        public static class RoleLevels
+        {
+            public const int SuperAdmin = 100;
+            public const int WarehouseManager = 80;
+            public const int StoreManager = 70;
+            public const int Manager = 60;
+            public const int Staff = 30;
+            public const int User = 10;
+            public const int Max = 100;
+
+            public static int ForRoleName(string? roleName)
+            {
+                if (string.IsNullOrWhiteSpace(roleName))
+                {
+                    return 0;
+                }
+
+                if (IsSuperAdminRole(roleName)) return SuperAdmin;
+                if (WarehouseManagerRoleNames.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+                    return WarehouseManager;
+                if (IsStoreManagerRole(roleName)) return StoreManager;
+                if (string.Equals(roleName, "Manager", StringComparison.OrdinalIgnoreCase))
+                    return Manager;
+                if (IsEmployeeRole(roleName)
+                    || string.Equals(roleName, "Order", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(roleName, "WarehouseStaff", StringComparison.OrdinalIgnoreCase))
+                    return Staff;
+                if (string.Equals(roleName, "User", StringComparison.OrdinalIgnoreCase)) return User;
+                return 0;
+            }
+        }
+
         public static bool IsSuperAdminRole(string? roleName)
         {
             return !string.IsNullOrWhiteSpace(roleName)

@@ -94,6 +94,7 @@ internal sealed class SchemaMigrationCoordinator
         "20261026.001-attendance-review-auto-clock-out";
     internal const string AttendancePayrollLeaveMigrationId =
         "20261026.002-attendance-payroll-leave";
+    internal const string RoleLevelMigrationId = "20261026.003-role-level";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -355,6 +356,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendancePayrollLeaveMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendancePayrollLeaveAsync(cancellationToken)
+        ),
+        new(
+            RoleLevelMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyRoleLevelAsync(cancellationToken)
         ),
     ];
 

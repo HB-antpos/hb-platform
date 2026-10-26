@@ -455,6 +455,7 @@ namespace BlazorApp.Api.Services
                         RoleName = r.RoleName,
                         Description = r.Description,
                         IsActive = r.IsActive,
+                        Level = r.Level,
                         CreatedAt = r.CreatedAt,
                         UpdatedAt = r.UpdatedAt ?? r.CreatedAt, // 处理可空DateTime
                     })
@@ -526,6 +527,7 @@ namespace BlazorApp.Api.Services
                                     RoleName = r.RoleName,
                                     Description = r.Description,
                                     IsActive = r.IsActive,
+                                    Level = r.Level,
                                     CreatedAt = r.CreatedAt,
                                     UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                                 },
@@ -715,6 +717,7 @@ namespace BlazorApp.Api.Services
                         RoleName = r.RoleName,
                         Description = r.Description,
                         IsActive = r.IsActive,
+                        Level = r.Level,
                         CreatedAt = r.CreatedAt,
                         UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                     })
@@ -755,6 +758,7 @@ namespace BlazorApp.Api.Services
                     RoleName = role.RoleName,
                     Description = role.Description,
                     IsActive = role.IsActive,
+                    Level = role.Level,
                     CreatedAt = role.CreatedAt,
                     UpdatedAt = role.UpdatedAt ?? role.CreatedAt,
                 };
@@ -830,6 +834,7 @@ namespace BlazorApp.Api.Services
                         RoleName = r.RoleName,
                         Description = r.Description,
                         IsActive = r.IsActive,
+                        Level = r.Level,
                         CreatedAt = r.CreatedAt,
                         UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                     })
@@ -886,6 +891,7 @@ namespace BlazorApp.Api.Services
                     RoleName = dto.RoleName,
                     Description = dto.Description,
                     IsActive = dto.IsActive,
+                    Level = dto.Level,
                     CreatedAt = DateTime.Now,
                     UpdatedAt = DateTime.Now,
                 };
@@ -898,6 +904,7 @@ namespace BlazorApp.Api.Services
                     RoleName = role.RoleName,
                     Description = role.Description,
                     IsActive = role.IsActive,
+                    Level = role.Level,
                     CreatedAt = role.CreatedAt,
                     UpdatedAt = role.UpdatedAt ?? role.CreatedAt,
                     UserCount = 0,
@@ -964,6 +971,11 @@ namespace BlazorApp.Api.Services
                 role.RoleName = dto.RoleName;
                 role.Description = dto.Description;
                 role.IsActive = dto.IsActive;
+                // 旧客户端不传 Level 时保持原值，避免角色等级被意外清零。
+                if (dto.Level.HasValue)
+                {
+                    role.Level = dto.Level.Value;
+                }
                 role.UpdatedAt = DateTime.UtcNow;
 
                 await db.Updateable(role).ExecuteCommandAsync();
@@ -974,6 +986,7 @@ namespace BlazorApp.Api.Services
                     RoleName = role.RoleName,
                     Description = role.Description,
                     IsActive = role.IsActive,
+                    Level = role.Level,
                     CreatedAt = role.CreatedAt,
                     UpdatedAt = role.UpdatedAt ?? role.CreatedAt,
                 };
@@ -2968,6 +2981,7 @@ namespace BlazorApp.Api.Services
                     RoleName = newRoleName,
                     Description = newDescription ?? sourceRole.Description,
                     IsActive = sourceRole.IsActive,
+                    Level = sourceRole.Level,
                     CreatedAt = DateTime.Now,
                     UpdatedAt = DateTime.Now,
                 };
@@ -2980,6 +2994,7 @@ namespace BlazorApp.Api.Services
                     RoleName = newRole.RoleName,
                     Description = newRole.Description,
                     IsActive = newRole.IsActive,
+                    Level = newRole.Level,
                     CreatedAt = newRole.CreatedAt,
                     UpdatedAt = newRole.UpdatedAt ?? newRole.CreatedAt,
                     UserCount = 0,
@@ -3070,6 +3085,7 @@ namespace BlazorApp.Api.Services
                         RoleName = r.RoleName,
                         Description = r.Description,
                         IsActive = r.IsActive,
+                        Level = r.Level,
                         CreatedAt = r.CreatedAt,
                         UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                     })

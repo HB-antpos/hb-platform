@@ -59,6 +59,21 @@ export function getUpdateUserFieldError(error: unknown, t: TFunction): UserField
   return null
 }
 
+/**
+ * 角色等级校验失败（后端 TARGET_LEVEL_DENIED / ROLE_LEVEL_DENIED）时的中文提示，
+ * 让操作者知道是「等级不够」而不是笼统的保存失败；其他错误返回 null，由调用方沿用原提示。
+ */
+export function getLevelDeniedMessage(error: unknown, t: TFunction): string | null {
+  const code = getErrorCode(error)
+  if (code === 'TARGET_LEVEL_DENIED') {
+    return t('system.users.levelDeniedTarget', '该账号的角色等级不低于你，无权修改。')
+  }
+  if (code === 'ROLE_LEVEL_DENIED') {
+    return t('system.users.levelDeniedRole', '不能授予等级不低于你自己的角色。')
+  }
+  return null
+}
+
 export function getCreateUserErrorFeedback(error: unknown, t: TFunction): CreateUserErrorFeedback | null {
   const code = getErrorCode(error)
   const status = getErrorStatus(error)
