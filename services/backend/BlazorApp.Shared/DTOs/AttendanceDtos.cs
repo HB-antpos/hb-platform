@@ -434,6 +434,8 @@ namespace BlazorApp.Shared.DTOs
     {
         public string? ReviewRemark { get; set; }
         public int? ApprovedOvertimeMinutes { get; set; }
+        /// <summary>带薪公假确认（SourceType = PublicHolidayPay）批准时的确认工时；null 时用建议工时。</summary>
+        public decimal? ApprovedPaidHours { get; set; }
     }
 
     public class AttendanceApprovalDto
@@ -460,6 +462,47 @@ namespace BlazorApp.Shared.DTOs
         public AttendancePunchAdjustmentDto? Adjustment { get; set; }
         /// <summary>SourceType = MealBreak 时的用餐声明（缺几次、申请加回多少分钟）。</summary>
         public AttendanceMealClaimDto? MealClaim { get; set; }
+        /// <summary>SourceType = Leave 时的结构化请假信息（病假审核一屏要用）。</summary>
+        public AttendanceApprovalLeaveDto? Leave { get; set; }
+        /// <summary>SourceType = PublicHolidayPay 时的带薪公假确认信息。</summary>
+        public AttendanceApprovalPublicHolidayPayDto? PublicHolidayPay { get; set; }
+    }
+
+    public class AttendanceApprovalLeaveDto
+    {
+        public string LeaveType { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
+        public int DayCount { get; set; }
+        public decimal? PaidHours { get; set; }
+        public string? Reason { get; set; }
+        public List<string> AttachmentUrls { get; set; } = new();
+        /// <summary>病假所选排班（含当天是否已打卡）。</summary>
+        public List<AttendanceLeaveScheduleDto> Schedules { get; set; } = new();
+        /// <summary>请假区间内已有的有效排班，格式 "YYYY-MM-DD HH:mm-HH:mm"（年假休息提示店长）。</summary>
+        public List<string> ScheduleConflicts { get; set; } = new();
+    }
+
+    public class AttendanceLeaveScheduleDto
+    {
+        public string ScheduleGuid { get; set; } = string.Empty;
+        public DateTime WorkDate { get; set; }
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; }
+        /// <summary>带薪工时 = 排班工时扣餐。</summary>
+        public decimal PaidHours { get; set; }
+        public bool HasPunch { get; set; }
+    }
+
+    public class AttendanceApprovalPublicHolidayPayDto
+    {
+        public DateTime HolidayDate { get; set; }
+        public string? HolidayName { get; set; }
+        public int OrdinaryCount { get; set; }
+        public int LookbackWeeks { get; set; }
+        public decimal? SuggestedHours { get; set; }
+        public decimal? Hours { get; set; }
+        public string Status { get; set; } = string.Empty;
     }
 
     public class CreateAttendancePunchAdjustmentDto
@@ -629,6 +672,10 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan? EndTime { get; set; }
         public string? Reason { get; set; }
         public string? AttachmentUrl { get; set; }
+        /// <summary>附件地址（病假医嘱 1–3 张）；旧客户端只传 AttachmentUrl。</summary>
+        public List<string>? AttachmentUrls { get; set; }
+        /// <summary>带薪病假所选排班；PaidSick 必填，日期以排班为准。</summary>
+        public List<string>? ScheduleGuids { get; set; }
     }
 
     public class CreateManagedAttendanceLeaveRequestDto
@@ -662,6 +709,10 @@ namespace BlazorApp.Shared.DTOs
         public string? ReviewedByName { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewRemark { get; set; }
+        /// <summary>申请的带薪工时（无薪类型为 null）；年假最终发多少以工资表财务核定为准。</summary>
+        public decimal? PaidHours { get; set; }
+        public List<string> AttachmentUrls { get; set; } = new();
+        public List<string> ScheduleGuids { get; set; } = new();
     }
 
     public class UpdateAttendanceSettingsDto
@@ -679,6 +730,17 @@ namespace BlazorApp.Shared.DTOs
         public int? ManagerSegmentLimit { get; set; }
         /// <summary>午夜自动下班开关；null＝不修改。</summary>
         public bool? AutoClockOutAtMidnight { get; set; }
+        // 以下为带薪假与工时统计参数（规格第 1 节）；null＝不修改。
+        public int? DefaultPeriodWeeks { get; set; }
+        public DateTime? FortnightAnchorDate { get; set; }
+        public int? PublicHolidayLookbackWeeks { get; set; }
+        public int? PublicHolidayMinCount { get; set; }
+        public int? SickLeaveSubmitDays { get; set; }
+        public int? AnnualLeaveLeadWeeks { get; set; }
+        public int? AnnualLeaveMaxWeeks { get; set; }
+        public int? AnnualCashOutLeadDays { get; set; }
+        public int? AnnualCashOutMaxWeeks { get; set; }
+        public int? BirthdayRemindDays { get; set; }
     }
 
     public class AttendanceSettingsDto : UpdateAttendanceSettingsDto { }

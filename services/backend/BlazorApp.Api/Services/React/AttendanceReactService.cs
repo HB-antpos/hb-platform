@@ -190,6 +190,16 @@ namespace BlazorApp.Api.Services.React
             {
                 return ApiResponse<AttendanceScheduleDto>.Error("员工不存在或不属于该分店", "EMPLOYEE_NOT_IN_STORE");
             }
+            if (await IsPayPeriodLockedAsync(request.StoreCode.Trim(), request.WorkDate))
+            {
+                return PayPeriodLocked<AttendanceScheduleDto>();
+            }
+            if (await IsBlockedByAnnualLeaveAsync(request.StoreCode.Trim(), request.UserGuid.Trim(), request.WorkDate))
+            {
+                return ApiResponse<AttendanceScheduleDto>.Error(
+                    "员工这天休带薪年假（已批准），不能排班",
+                    "ANNUAL_LEAVE_UNAVAILABLE");
+            }
 
             var now = DateTime.UtcNow;
             var model = new AttendanceSchedule
@@ -266,6 +276,10 @@ namespace BlazorApp.Api.Services.React
             if (sourceStart == targetStart)
             {
                 return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error("来源周与目标周不能相同", "SAME_WEEK");
+            }
+            if (await IsPayPeriodLockedAsync(storeCode, targetStart, targetStart.AddDays(6)))
+            {
+                return PayPeriodLocked<CopyAttendanceScheduleWeekResultDto>();
             }
 
             var sourceRows = await _db.Queryable<AttendanceSchedule>()
@@ -361,6 +375,19 @@ namespace BlazorApp.Api.Services.React
             {
                 return InvalidMealBreakCountError();
             }
+            if (await IsPayPeriodLockedAsync(model.StoreCode, model.WorkDate)
+                || await IsPayPeriodLockedAsync(model.StoreCode, request.WorkDate))
+            {
+                return PayPeriodLocked<AttendanceScheduleDto>();
+            }
+            if (request.WorkDate != default
+                && request.WorkDate.Date != model.WorkDate.Date
+                && await IsBlockedByAnnualLeaveAsync(model.StoreCode, model.UserGuid, request.WorkDate))
+            {
+                return ApiResponse<AttendanceScheduleDto>.Error(
+                    "员工这天休带薪年假（已批准），不能排班",
+                    "ANNUAL_LEAVE_UNAVAILABLE");
+            }
 
             var mutationResource = AttendanceDailyMutationLock.BuildResource(
                 model.UserGuid,
@@ -454,6 +481,10 @@ namespace BlazorApp.Api.Services.React
 
             var weekStart = request.WeekStartDate.Date;
             var weekEnd = weekStart.AddDays(6);
+            if (await IsPayPeriodLockedAsync(storeCode, weekStart, weekEnd))
+            {
+                return PayPeriodLocked<int>();
+            }
             var now = DateTime.UtcNow;
             var username = _currentUserService.GetCurrentUsername();
             var affected = await _db.Updateable<AttendanceSchedule>()
@@ -501,6 +532,10 @@ namespace BlazorApp.Api.Services.React
             if (!storeAccess.Success)
             {
                 return ApiResponse<bool>.Error(storeAccess.Message, storeAccess.ErrorCode);
+            }
+            if (await IsPayPeriodLockedAsync(model.StoreCode, model.WorkDate))
+            {
+                return PayPeriodLocked<bool>();
             }
 
             var mutationResource = AttendanceDailyMutationLock.BuildResource(
@@ -988,6 +1023,11 @@ namespace BlazorApp.Api.Services.React
             var punchUtc = DateTime.SpecifyKind(serverNow, DateTimeKind.Utc);
             var punchLocal = ConvertUtcToStoreLocal(punchUtc, storeTimeZone);
             var workDate = punchLocal.Date;
+            // 该店这一期工资已锁定：打卡也算改动锁定期数据。
+            if (await IsPayPeriodLockedAsync(storeCode, workDate))
+            {
+                return PayPeriodLocked<AttendancePunchDto>();
+            }
             var observedPunchCount = await _db.Queryable<AttendancePunch>().CountAsync(item =>
                 !item.IsDeleted
                 && item.UserGuid == userGuid
@@ -1556,6 +1596,10 @@ namespace BlazorApp.Api.Services.React
                     context.Message,
                     context.ErrorCode);
             }
+            if (await IsPayPeriodLockedAsync(context.Schedule!.StoreCode, context.Schedule.WorkDate))
+            {
+                return PayPeriodLocked<AttendancePunchAdjustmentDto>();
+            }
             if (string.IsNullOrWhiteSpace(request.PreviewRevision))
             {
                 return ApiResponse<AttendancePunchAdjustmentDto>.Error(
@@ -1909,21 +1953,49 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<AttendanceLeaveRequestDto>.Error(access.Message, access.ErrorCode);
             }
 
+            var storeCode = request.StoreCode.Trim();
+            var leaveType = NormalizeManagedLeaveType(request.LeaveType);
+            var startDate = request.StartDate.Date;
+            var endDate = request.EndDate.Date;
+            decimal? paidHours = null;
+            var scheduleGuids = new List<string>();
+            var attachmentUrls = CollectAttachmentUrls(request);
+            if (IsPaidLeaveType(leaveType))
+            {
+                // 带薪假：按设置参数校验并在申请时算好带薪工时；病假日期以所选排班为准。
+                var paid = await ValidatePaidLeaveAsync(request, userGuid, storeCode, leaveType);
+                if (paid.Error != null)
+                {
+                    return paid.Error;
+                }
+                startDate = paid.StartDate;
+                endDate = paid.EndDate;
+                paidHours = paid.PaidHours;
+                scheduleGuids = paid.ScheduleGuids;
+                attachmentUrls = paid.AttachmentUrls;
+            }
+            if (await IsPayPeriodLockedAsync(storeCode, startDate, endDate))
+            {
+                return PayPeriodLocked<AttendanceLeaveRequestDto>();
+            }
+
             var now = DateTime.UtcNow;
             var model = new AttendanceLeaveRequest
             {
                 LeaveGuid = Guid.NewGuid().ToString(),
-                StoreCode = request.StoreCode.Trim(),
+                StoreCode = storeCode,
                 UserGuid = userGuid,
-                LeaveType = NormalizeManagedLeaveType(request.LeaveType),
-                StartDate = request.StartDate.Date,
-                EndDate = request.EndDate.Date,
-                StartTime = request.StartTime,
-                EndTime = request.EndTime,
+                LeaveType = leaveType,
+                StartDate = startDate,
+                EndDate = endDate,
+                StartTime = IsPaidLeaveType(leaveType) ? null : request.StartTime,
+                EndTime = IsPaidLeaveType(leaveType) ? null : request.EndTime,
                 Reason = request.Reason,
-                AttachmentUrl = string.IsNullOrWhiteSpace(request.AttachmentUrl)
-                    ? null
-                    : request.AttachmentUrl.Trim(),
+                // 旧单字段写第一张，兼容旧客户端读取。
+                AttachmentUrl = attachmentUrls.FirstOrDefault(),
+                AttachmentUrls = SerializeStringList(attachmentUrls),
+                ScheduleGuids = SerializeStringList(scheduleGuids),
+                PaidHours = paidHours,
                 Status = "Pending",
                 CreatedAt = now,
                 CreatedBy = _currentUserService.GetCurrentUsername(),
@@ -1980,6 +2052,10 @@ namespace BlazorApp.Api.Services.React
                     "INVALID_EMPLOYMENT_TYPE"
                 );
             }
+            if (await IsPayPeriodLockedAsync(storeCode, request.StartDate, request.EndDate))
+            {
+                return PayPeriodLocked<AttendanceLeaveRequestDto>();
+            }
 
             var now = DateTime.UtcNow;
             var model = new AttendanceLeaveRequest
@@ -2033,6 +2109,11 @@ namespace BlazorApp.Api.Services.React
                         await _db.Ado.RollbackTranAsync();
                         return ApiResponse<bool>.Error("只能撤销待审核的请假申请", "LEAVE_NOT_PENDING");
                     }
+                    if (await IsPayPeriodLockedAsync(model.StoreCode, model.StartDate, model.EndDate))
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return PayPeriodLocked<bool>();
+                    }
 
                     var now = _timeProvider.GetUtcNow().UtcDateTime;
                     var username = _currentUserService.GetCurrentUsername();
@@ -2054,6 +2135,8 @@ namespace BlazorApp.Api.Services.React
                         .SetColumns(item => item.UpdatedBy == username)
                         .Where(item => item.SourceType == "Leave" && item.SourceGuid == leaveGuid && item.ReviewStatus == "Pending")
                         .ExecuteCommandAsync();
+                    // 待审请假本不会有自动写入的「不能上班」；保险起见一并清除。
+                    await ClearLeaveUnavailabilityAsync(leaveGuid, now, username);
                     await _db.Ado.CommitTranAsync();
                 }
                 catch
@@ -2067,27 +2150,44 @@ namespace BlazorApp.Api.Services.React
             return ApiResponse<bool>.OK(true, "请假申请已取消");
         }
 
-        public Task<ApiResponse<DirectUploadSignature>> GetLeaveAttachmentUploadSignatureAsync(
+        /// <summary>
+        /// 请假附件直传签名：店长（Leave.ReviewManagedStore）沿用原行为；员工本人（Leave.ApplySelf）也可以拿签名，
+        /// 但对象键只能落在本人目录 attendance/leave-attachments/{userGuid}/ 下，传别的键一律改写成本人目录。
+        /// </summary>
+        public async Task<ApiResponse<DirectUploadSignature>> GetLeaveAttachmentUploadSignatureAsync(
             DirectUploadRequest request
         )
         {
             if (request == null || string.IsNullOrWhiteSpace(request.FileName))
             {
-                return Task.FromResult(
-                    ApiResponse<DirectUploadSignature>.Error("文件名不能为空", "INVALID_REQUEST")
-                );
+                return ApiResponse<DirectUploadSignature>.Error("文件名不能为空", "INVALID_REQUEST");
             }
 
-            var objectKey = request.ObjectKey;
-            if (string.IsNullOrWhiteSpace(objectKey))
+            var canManage = await CurrentUserHasPermissionAsync(Permissions.Attendance.Leave.ReviewManagedStore);
+            if (!canManage && !await CurrentUserHasPermissionAsync(Permissions.Attendance.Leave.ApplySelf))
+            {
+                return ApiResponse<DirectUploadSignature>.Error("没有权限上传请假附件", "FORBIDDEN");
+            }
+            var userGuid = ResolveCurrentUserGuid();
+            if (string.IsNullOrWhiteSpace(userGuid))
+            {
+                return ApiResponse<DirectUploadSignature>.Error("无法识别当前员工", "USER_NOT_FOUND");
+            }
+
+            var ownPrefix = $"{LeaveAttachmentPathPrefix}{userGuid}/";
+            var objectKey = request.ObjectKey?.Trim().TrimStart('/');
+            var keyIsOwn = !string.IsNullOrWhiteSpace(objectKey)
+                && objectKey.StartsWith(ownPrefix, StringComparison.OrdinalIgnoreCase)
+                && !objectKey.Contains("..", StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(objectKey) || (!canManage && !keyIsOwn))
             {
                 var safeFileName = SanitizeFileName(request.FileName);
-                objectKey = $"attendance/leave-attachments/{DateTime.Now:yyyyMMddHHmmss}-{safeFileName}";
+                objectKey = $"{ownPrefix}{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}-{safeFileName}";
             }
 
             var signature = _uploadService.GetDirectUploadSignature(objectKey, request.ContentType);
 
-            return Task.FromResult(ApiResponse<DirectUploadSignature>.OK(signature, "签名生成成功"));
+            return ApiResponse<DirectUploadSignature>.OK(signature, "签名生成成功");
         }
 
         public async Task<ApiResponse<List<AttendanceAvailabilityDto>>> GetAvailabilityAsync(
@@ -2240,6 +2340,8 @@ namespace BlazorApp.Api.Services.React
             if (storeAccess.Success)
             {
                 await ReconcileRecentStoreSchedulesForReviewAsync(storeAccess.StoreCodes);
+                // 带薪公假确认也在店长打开审核列表时生成（同一回看窗口；失败只记日志）。
+                await GenerateRecentPublicHolidayPayApprovalsAsync(storeAccess.StoreCodes);
             }
 
             query.ReviewStatus = "Pending";
@@ -2300,12 +2402,13 @@ namespace BlazorApp.Api.Services.React
             approvalGuid,
             "Approved",
             request.ReviewRemark,
-            request.ApprovedOvertimeMinutes);
+            request.ApprovedOvertimeMinutes,
+            request.ApprovedPaidHours);
 
         public Task<ApiResponse<AttendanceApprovalDto>> RejectAsync(
             string approvalGuid,
             ReviewAttendanceApprovalDto request
-        ) => ReviewApprovalAsync(approvalGuid, "Rejected", request.ReviewRemark, null);
+        ) => ReviewApprovalAsync(approvalGuid, "Rejected", request.ReviewRemark, null, null);
 
         public async Task<ApiResponse<List<AttendanceStoreHolidayDto>>> GetHolidaysAsync(
             AttendanceStoreHolidayQueryDto query
@@ -2553,6 +2656,48 @@ namespace BlazorApp.Api.Services.React
             {
                 settings.AutoClockOutAtMidnight = request.AutoClockOutAtMidnight.Value;
             }
+            // 带薪假与工时统计参数：可空，旧客户端不带时保持原值；范围夹在合理区间。
+            if (request.DefaultPeriodWeeks.HasValue)
+            {
+                settings.DefaultPeriodWeeks = request.DefaultPeriodWeeks.Value == 2 ? 2 : 1;
+            }
+            if (request.FortnightAnchorDate.HasValue)
+            {
+                // 双周起始日统一存为所在周的周一。
+                settings.FortnightAnchorDate = GetWeekStart(request.FortnightAnchorDate.Value.Date);
+            }
+            if (request.PublicHolidayLookbackWeeks.HasValue)
+            {
+                settings.PublicHolidayLookbackWeeks = Math.Clamp(request.PublicHolidayLookbackWeeks.Value, 1, 52);
+            }
+            if (request.PublicHolidayMinCount.HasValue)
+            {
+                settings.PublicHolidayMinCount = Math.Clamp(request.PublicHolidayMinCount.Value, 1, 52);
+            }
+            if (request.SickLeaveSubmitDays.HasValue)
+            {
+                settings.SickLeaveSubmitDays = Math.Clamp(request.SickLeaveSubmitDays.Value, 0, 60);
+            }
+            if (request.AnnualLeaveLeadWeeks.HasValue)
+            {
+                settings.AnnualLeaveLeadWeeks = Math.Clamp(request.AnnualLeaveLeadWeeks.Value, 0, 52);
+            }
+            if (request.AnnualLeaveMaxWeeks.HasValue)
+            {
+                settings.AnnualLeaveMaxWeeks = Math.Clamp(request.AnnualLeaveMaxWeeks.Value, 1, 52);
+            }
+            if (request.AnnualCashOutLeadDays.HasValue)
+            {
+                settings.AnnualCashOutLeadDays = Math.Clamp(request.AnnualCashOutLeadDays.Value, 0, 365);
+            }
+            if (request.AnnualCashOutMaxWeeks.HasValue)
+            {
+                settings.AnnualCashOutMaxWeeks = Math.Clamp(request.AnnualCashOutMaxWeeks.Value, 1, 52);
+            }
+            if (request.BirthdayRemindDays.HasValue)
+            {
+                settings.BirthdayRemindDays = Math.Clamp(request.BirthdayRemindDays.Value, 0, 60);
+            }
             settings.UpdatedAt = DateTime.UtcNow;
             settings.UpdatedBy = _currentUserService.GetCurrentUsername();
             await _db.Updateable(settings).ExecuteCommandAsync();
@@ -2563,7 +2708,8 @@ namespace BlazorApp.Api.Services.React
             string approvalGuid,
             string reviewStatus,
             string? reviewRemark,
-            int? approvedOvertimeMinutes
+            int? approvedOvertimeMinutes,
+            decimal? approvedPaidHours = null
         )
         {
             var model = await _db.Queryable<AttendanceApproval>()
@@ -2593,6 +2739,14 @@ namespace BlazorApp.Api.Services.React
                     "申请人不能审核自己的考勤申请",
                     "SELF_REVIEW_FORBIDDEN");
             }
+            // 锁定期内的审批结论会改动该期工资，必须先解锁。
+            var approvalRange = (await ResolveApprovalDateRangesAsync(new[] { model }))
+                .GetValueOrDefault(model.ApprovalGuid);
+            if (approvalRange != default
+                && await IsPayPeriodLockedAsync(model.StoreCode, approvalRange.From, approvalRange.To))
+            {
+                return PayPeriodLocked<AttendanceApprovalDto>();
+            }
 
             AttendancePunchAdjustment? adjustment = null;
             if (model.SourceType == "PunchAdjustment")
@@ -2608,6 +2762,8 @@ namespace BlazorApp.Api.Services.React
             }
             AttendanceSchedule? overtimeSchedule = null;
             AttendanceMealClaim? mealClaim = null;
+            AttendancePublicHolidayPay? holidayPay = null;
+            decimal? confirmedHolidayHours = null;
             var reviewedAt = _timeProvider.GetUtcNow().UtcDateTime;
             var updatedBy = _currentUserService.GetCurrentUsername();
             // 请假也进员工锁：与员工撤销请假（CancelMyLeaveRequestAsync）互斥。
@@ -2808,6 +2964,33 @@ namespace BlazorApp.Api.Services.React
                     }
                     mealClaim = claim;
                 }
+                if (model.SourceType == PublicHolidayPaySourceType)
+                {
+                    holidayPay = await _db.Queryable<AttendancePublicHolidayPay>()
+                        .FirstAsync(item => item.PayGuid == model.SourceGuid);
+                    if (holidayPay == null || holidayPay.Status != PublicHolidayPayStatusPending)
+                    {
+                        await CancelPendingApprovalAsync(model.ApprovalGuid, "带薪公假确认已失效，待审记录已自动取消");
+                        await _db.Ado.CommitTranAsync();
+                        return ApiResponse<AttendanceApprovalDto>.Error(
+                            "带薪公假确认已失效，不能处理",
+                            "PUBLIC_HOLIDAY_PAY_STALE");
+                    }
+                    if (reviewStatus == "Approved")
+                    {
+                        // 确认工时：店长填的优先，没填用建议工时；最多 2 位小数、0 < h ≤ 24。
+                        confirmedHolidayHours = approvedPaidHours.HasValue
+                            ? PayrollCalculator.Round2(approvedPaidHours.Value)
+                            : holidayPay.SuggestedHours;
+                        if (confirmedHolidayHours is not > 0 || confirmedHolidayHours > 24)
+                        {
+                            await _db.Ado.RollbackTranAsync();
+                            return ApiResponse<AttendanceApprovalDto>.Error(
+                                "带薪公假工时必须大于 0 且不超过 24 小时",
+                                "INVALID_PAID_HOURS");
+                        }
+                    }
+                }
                 // 条件更新是审批的原子领取点；并发请求只有一个能把 Pending 改为终态。
                 var claimed = await _db.Updateable<AttendanceApproval>()
                     .SetColumns(item => item.ReviewStatus == reviewStatus)
@@ -2859,6 +3042,28 @@ namespace BlazorApp.Api.Services.React
                         .SetColumns(item => item.ReviewedAt == reviewedAt)
                         .SetColumns(item => item.ReviewRemark == reviewRemark)
                         .Where(item => item.LeaveGuid == model.SourceGuid)
+                        .ExecuteCommandAsync();
+                    // 带薪年假（休息）批准后，区间内每天自动标「不能上班」，排班时被拦。
+                    var approvedLeave = reviewStatus == "Approved"
+                        ? await _db.Queryable<AttendanceLeaveRequest>()
+                            .FirstAsync(item => item.LeaveGuid == model.SourceGuid && !item.IsDeleted)
+                        : null;
+                    if (approvedLeave?.LeaveType == PaidAnnualLeaveType)
+                    {
+                        await ApplyAnnualLeaveUnavailabilityAsync(approvedLeave, reviewedAt, updatedBy);
+                    }
+                }
+                else if (holidayPay != null)
+                {
+                    var holidayStatus = reviewStatus == "Approved"
+                        ? PublicHolidayPayStatusConfirmed
+                        : PublicHolidayPayStatusNotApplicable;
+                    await _db.Updateable<AttendancePublicHolidayPay>()
+                        .SetColumns(item => item.Status == holidayStatus)
+                        .SetColumns(item => item.Hours == confirmedHolidayHours)
+                        .SetColumns(item => item.ReviewedBy == reviewer)
+                        .SetColumns(item => item.ReviewedAt == reviewedAt)
+                        .Where(item => item.PayGuid == holidayPay.PayGuid && item.Status == PublicHolidayPayStatusPending)
                         .ExecuteCommandAsync();
                 }
                 else if (mealClaim != null)
@@ -4873,6 +5078,8 @@ namespace BlazorApp.Api.Services.React
                     approval.Title = approval.SourceType;
                 }
             }
+
+            await PopulatePaidLeaveApprovalFieldsAsync(approvals);
         }
 
         private string ResolveCurrentUserGuid()
@@ -5007,12 +5214,14 @@ namespace BlazorApp.Api.Services.React
                 return ValidationResult.Error("分店代码不能为空", "STORE_REQUIRED");
             }
 
-            if (request.StartDate == default || request.EndDate == default)
+            // 带薪病假的日期以所选排班为准，不要求客户端传日期。
+            var isPaidSick = NormalizeManagedLeaveType(request.LeaveType) == PaidSickLeaveType;
+            if (!isPaidSick && (request.StartDate == default || request.EndDate == default))
             {
                 return ValidationResult.Error("请假日期不能为空", "DATE_REQUIRED");
             }
 
-            if (request.StartDate.Date > request.EndDate.Date)
+            if (!isPaidSick && request.StartDate.Date > request.EndDate.Date)
             {
                 return ValidationResult.Error("结束日期不能早于开始日期", "INVALID_DATE_RANGE");
             }
@@ -5022,13 +5231,15 @@ namespace BlazorApp.Api.Services.React
                 return ValidationResult.Error("请假结束时间必须晚于开始时间", "INVALID_TIME_RANGE");
             }
 
-            if (NormalizeManagedLeaveType(request.LeaveType) is not "AnnualLeave" and not "SickLeave")
+            var leaveType = NormalizeManagedLeaveType(request.LeaveType);
+            if (leaveType is not "AnnualLeave" and not "SickLeave" && !IsPaidLeaveType(leaveType))
             {
                 return ValidationResult.Error("请假类型无效", "INVALID_LEAVE_TYPE");
             }
 
-            if (!string.IsNullOrWhiteSpace(request.AttachmentUrl)
-                && !IsManagedLeaveAttachmentUrl(request.AttachmentUrl))
+            // 带薪假的附件在 ValidatePaidLeaveAsync 里按本人目录校验。
+            if (!IsPaidLeaveType(leaveType)
+                && CollectAttachmentUrls(request).Any(item => !IsManagedLeaveAttachmentUrl(item)))
             {
                 return ValidationResult.Error("请假附件地址无效", "INVALID_ATTACHMENT_URL");
             }
@@ -5222,6 +5433,9 @@ namespace BlazorApp.Api.Services.React
             {
                 "AnnualLeave" => "AnnualLeave",
                 "SickLeave" => "SickLeave",
+                PaidSickLeaveType => PaidSickLeaveType,
+                PaidAnnualLeaveType => PaidAnnualLeaveType,
+                AnnualCashOutLeaveType => AnnualCashOutLeaveType,
                 _ => normalized ?? string.Empty,
             };
         }
@@ -5681,6 +5895,9 @@ namespace BlazorApp.Api.Services.React
             ReviewedBy = item.ReviewedBy,
             ReviewedAt = item.ReviewedAt,
             ReviewRemark = item.ReviewRemark,
+            PaidHours = item.PaidHours,
+            AttachmentUrls = ParseAttachmentUrls(item),
+            ScheduleGuids = ParseJsonStringList(item.ScheduleGuids),
         };
 
         private static AttendanceSettingsDto ToDto(AttendanceSettings item) => new()
@@ -5695,6 +5912,16 @@ namespace BlazorApp.Api.Services.React
             EmployeeSegmentLimit = ResolveEmployeeSegmentLimit(item),
             ManagerSegmentLimit = ResolveManagerSegmentLimit(item),
             AutoClockOutAtMidnight = item.AutoClockOutAtMidnight,
+            DefaultPeriodWeeks = item.DefaultPeriodWeeks == 2 ? 2 : 1,
+            FortnightAnchorDate = (item.FortnightAnchorDate ?? DefaultFortnightAnchorDate).Date,
+            PublicHolidayLookbackWeeks = item.PublicHolidayLookbackWeeks,
+            PublicHolidayMinCount = item.PublicHolidayMinCount,
+            SickLeaveSubmitDays = item.SickLeaveSubmitDays,
+            AnnualLeaveLeadWeeks = item.AnnualLeaveLeadWeeks,
+            AnnualLeaveMaxWeeks = item.AnnualLeaveMaxWeeks,
+            AnnualCashOutLeadDays = item.AnnualCashOutLeadDays,
+            AnnualCashOutMaxWeeks = item.AnnualCashOutMaxWeeks,
+            BirthdayRemindDays = item.BirthdayRemindDays,
         };
 
         private sealed class StoreAccessResult

@@ -247,6 +247,180 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
         Assert.NotNull(result.Data);
     }
 
+    [Fact]
+    public async Task WarehouseManager_可维护任意分店员工的Pos业务权限且不依赖本人持有()
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        // 仓库管理不属于目标员工的主分店，也没有任何 POS 业务码；范围服务把它视为不限分店。
+        await SeedStoreAsync("store-b");
+        await SeedUserStoreAsync("target", "store-b");
+        var service = CreateWarehouseService();
+
+        var state = await service.GetAsync("target", "store-b");
+        var updated = await service.UpdateAsync(
+            "target",
+            "store-b",
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes = [Permissions.PosTerminal.Sales.AddOpenItem],
+            }
+        );
+
+        Assert.True(state.Success);
+        // 可分配范围 = 完整业务白名单，而不是「本人持有」的空集合。
+        Assert.Equal(
+            PermissionSeedData.PosTerminalBusinessPermissionCodes.OrderBy(item => item),
+            state.Data!.AssignablePermissions.Select(item => item.Code).OrderBy(item => item)
+        );
+        Assert.True(updated.Success);
+        Assert.Contains(
+            Permissions.PosTerminal.Sales.AddOpenItem,
+            updated.Data!.GrantedPermissionCodes
+        );
+    }
+
+    [Fact]
+    public async Task WarehouseManager_不能分配系统级Pos权限并保留既有系统级覆盖()
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        await _db.Insertable(new SysUserStorePosPermission
+        {
+            Id = "admin-system-override",
+            UserGuid = "target",
+            StoreGuid = "store-a",
+            PermissionCode = Permissions.PosTerminal.Settings.AppUpdate,
+            IsGranted = true,
+        }).ExecuteCommandAsync();
+        var service = CreateWarehouseService();
+
+        var denied = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes = [Permissions.PosTerminal.Settings.AppUpdate],
+            }
+        );
+        var saved = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest()
+        );
+
+        Assert.False(denied.Success);
+        Assert.Equal("POS_PERMISSION_INVALID_CODES", denied.ErrorCode);
+        Assert.True(saved.Success);
+        Assert.True(await _db.Queryable<SysUserStorePosPermission>().AnyAsync(item =>
+            item.Id == "admin-system-override" && item.IsGranted));
+    }
+
+    [Theory]
+    [InlineData("StoreManager")]
+    [InlineData("WarehouseManager")]
+    [InlineData("Admin")]
+    public async Task WarehouseManager_拒绝高权限和非员工目标(string targetRoleName)
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        await _db.Insertable(new Role
+        {
+            RoleGUID = "role-privileged",
+            RoleName = targetRoleName,
+            IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new UserRole
+        {
+            UserRoleGUID = "target-privileged-role",
+            UserGUID = "target",
+            RoleGUID = "role-privileged",
+        }).ExecuteCommandAsync();
+
+        var result = await CreateWarehouseService().GetAsync("target", "store-a");
+
+        Assert.False(result.Success);
+        Assert.Equal("POS_PERMISSION_FORBIDDEN", result.ErrorCode);
+
+        // 目标去掉员工角色后（只剩非员工角色）同样不能维护。
+        await _db.Deleteable<UserRole>()
+            .Where(item => item.UserGUID == "target" && item.RoleGUID == "role-staff")
+            .ExecuteCommandAsync();
+        await _db.Deleteable<UserRole>()
+            .Where(item => item.UserGUID == "target" && item.RoleGUID == "role-privileged")
+            .ExecuteCommandAsync();
+        var nonEmployee = await CreateWarehouseService().GetAsync("target", "store-a");
+        Assert.False(nonEmployee.Success);
+        Assert.Equal("EMPLOYEE_TARGET_REQUIRED", nonEmployee.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 既非店长也非仓库管理的账号仍被拒绝()
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        // 操作者降为普通员工角色，即使范围服务放行也不能改别人的 POS 权限。
+        await _db.Deleteable<UserRole>()
+            .Where(item => item.UserGUID == "actor")
+            .ExecuteCommandAsync();
+        await _db.Insertable(new UserRole
+        {
+            UserRoleGUID = "actor-staff-role",
+            UserGUID = "actor",
+            RoleGUID = "role-staff",
+        }).ExecuteCommandAsync();
+
+        var result = await CreateWarehouseService().GetAsync("target", "store-a");
+
+        Assert.False(result.Success);
+        Assert.Equal("POS_PERMISSION_FORBIDDEN", result.ErrorCode);
+    }
+
+    [Fact]
+    public void WarehouseManager模板包含管理Pos权限且不含其他员工管理码()
+    {
+        var template = Assert.Single(
+            PermissionSeedData.RolePermissionTemplates,
+            item => item.RoleName == "WarehouseManager"
+        );
+
+        Assert.Contains(Permissions.Users.ManagePosTerminalPermissions, template.PermissionCodes);
+        Assert.DoesNotContain(Permissions.Users.EditStoreStaff, template.PermissionCodes);
+        Assert.DoesNotContain(Permissions.Users.ManageRoles, template.PermissionCodes);
+        Assert.DoesNotContain(Permissions.Users.ManageStores, template.PermissionCodes);
+    }
+
+    private async Task SeedWarehouseActorAndTargetAsync()
+    {
+        await SeedActorAndTargetAsync();
+        // 复用店长场景的目标员工与分店，只把操作者换成仓库管理并去掉其店长身份和本人 POS 权限。
+        await _db.Deleteable<UserRole>().Where(item => item.UserGUID == "actor").ExecuteCommandAsync();
+        await _db.Deleteable<SysRolePermission>().Where(item => item.RoleGuid == "role-manager").ExecuteCommandAsync();
+        await _db.Deleteable<UserStore>().Where(item => item.UserGUID == "actor").ExecuteCommandAsync();
+        await _db.Insertable(new Role
+        {
+            RoleGUID = "role-warehouse-manager",
+            RoleName = "WarehouseManager",
+            IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new UserRole
+        {
+            UserRoleGUID = "actor-warehouse-role",
+            UserGUID = "actor",
+            RoleGUID = "role-warehouse-manager",
+        }).ExecuteCommandAsync();
+    }
+
+    private UserStorePosTerminalPermissionService CreateWarehouseService() =>
+        new(
+            CreateContext(_db),
+            new FakeScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                // 与 CurrentUserManageableStoreScopeService 对仓库管理的真实输出一致：不限分店。
+                IsAdmin = true,
+                UserGuid = "actor",
+            }),
+            new FakeCurrentUserService()
+        );
+
     private async Task SeedActorAndTargetAsync()
     {
         await SeedStoreAsync("store-a");

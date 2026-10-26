@@ -87,7 +87,22 @@ namespace BlazorApp.Api.Tests
                 // 考勤审批推送（见 AttendanceReactServiceApprovalNotificationTests.cs）落库到通知平台的两张表。
                 ,typeof(AppNotification)
                 ,typeof(AppNotificationRecipient)
+                // 带薪假与工资五张表：生产由迁移 20261026.002 创建；测试库用 CodeFirst 建同样的表。
+                ,typeof(EmployeePayRate)
+                ,typeof(AttendancePayPeriod)
+                ,typeof(AttendancePayPeriodNote)
+                ,typeof(AttendancePayPeriodLeaveApproval)
+                ,typeof(AttendancePublicHolidayPay)
             );
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_EmployeePayRate_User_EffectiveFrom "
+                + "ON EmployeePayRate(UserGuid, EffectiveFrom)");
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendancePayPeriod_Store_Period "
+                + "ON AttendancePayPeriod(StoreCode, PeriodStart, Weeks)");
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendancePublicHolidayPay_User_Store_Date "
+                + "ON AttendancePublicHolidayPay(UserGuid, StoreCode, HolidayDate)");
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AppNotification_DedupeKey "
                 + "ON AppNotification(DedupeKey) WHERE DedupeKey IS NOT NULL");
