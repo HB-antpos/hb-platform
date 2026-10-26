@@ -21,6 +21,15 @@ public interface IShellCatalogService
         bool forceFullDownload,
         IProgress<CatalogSyncProgress>? progress = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 轻量刷新本店促销规则（不碰商品目录），供收银端定时调用。规则有变化并已应用到购物车时返回 true；
+    /// 目录同步进行中、规则无变化或不支持时返回 false（目录同步自己会刷新促销）。
+    /// </summary>
+    Task<bool> RefreshPromotionsAsync(string storeCode, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(false);
+    }
 }
 
 public sealed class ShellCatalogService(
@@ -47,6 +56,8 @@ public sealed class ShellCatalogService(
     private int _activeSyncCount;
     // 上一次整表加载进扫码索引的目录；同步结果无变化时直接复用，避免重读几十万行。
     private LoadedCatalog? _loadedCatalog;
+    // 最近一次应用到购物车的促销规则指纹；定时刷新据此判断规则是否真的变了，没变就不触发购物车重算。
+    private string? _appliedPromotionRulesSignature;
 
     public bool IsCatalogSyncActive => Volatile.Read(ref _activeSyncCount) > 0;
 
@@ -69,6 +80,35 @@ public sealed class ShellCatalogService(
         var result = await LoadAndReplaceLocalCatalogOnBackgroundAsync(storeCode, cancellationToken);
         ApplyPromotionRules(result.PromotionRules);
         return result.Items;
+    }
+
+    public async Task<bool> RefreshPromotionsAsync(string storeCode, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        // 目录同步（含重置）进行中时由它自己刷新促销，这里不抢同步锁也不并发写库。
+        if (IsCatalogSyncActive)
+        {
+            return false;
+        }
+
+        var rules = await Task.Run(
+            () => catalogSync.RefreshPromotionRulesAsync(storeCode, cancellationToken),
+            cancellationToken);
+        if (rules is null)
+        {
+            return false;
+        }
+
+        // 中文注释：与目录同步一致，在调用方上下文（UI 线程）上应用，因为规则变化会触发购物车事件。
+        // 规则没变就不应用：SetAutomaticPromotionRules 每次都会通知购物车刷新，每分钟一次会无谓打扰收银。
+        var signature = ComputePromotionRulesSignature(rules);
+        if (string.Equals(signature, _appliedPromotionRulesSignature, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ApplyPromotionRules(rules);
+        return true;
     }
 
     public async Task<IReadOnlyList<SellableItemDto>> SyncCatalogAndReloadAsync(
@@ -288,6 +328,13 @@ public sealed class ShellCatalogService(
     {
         // 满减规则会触发购物车事件，必须回到调用方上下文后再应用，避免后台线程更新 WPF 绑定集合。
         cart.SetAutomaticPromotionRules(promotionRules);
+        _appliedPromotionRulesSignature = ComputePromotionRulesSignature(promotionRules);
+    }
+
+    /// <summary>规则内容指纹：DTO 里的商品列表按引用比较，不能直接用 record 相等，改用 JSON 序列化后比较。</summary>
+    private static string ComputePromotionRulesSignature(IReadOnlyList<CatalogPromotionRuleDto> rules)
+    {
+        return System.Text.Json.JsonSerializer.Serialize(rules);
     }
 
     private sealed class CatalogSyncProgressSink(
