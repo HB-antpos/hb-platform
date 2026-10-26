@@ -18,6 +18,7 @@ import RouteKeepAlive, { type RouteKeepAliveRef } from '../components/RouteKeepA
 import { useIsMobile } from '../hooks/useIsMobile'
 import MobileLayout from './MobileLayout'
 import { resolveRouteKeepAliveState } from './adminKeepAlive'
+import { ATTENDANCE_REVIEW_MENU_KEY, useAttendancePendingCount, withMenuCountBadge } from './attendancePendingBadge'
 import {
   buildMenus,
   getBreadcrumbItems,
@@ -58,7 +59,11 @@ function DesktopAdminLayout() {
   const currentRoute = getCurrentRoute(location.pathname, access)
   const currentTab = tabs.find((item) => item.key === routeTab?.key || item.key === currentRoute?.path) ?? routeTab
   const currentElement = getCurrentElement(location.pathname, access)
-  const menus = useMemo(() => buildMenus(access, navigationMenu), [access, navigationMenu, i18n.language])
+  const attendancePendingCount = useAttendancePendingCount(access.canReviewAttendance, location.pathname)
+  const menus = useMemo(
+    () => withMenuCountBadge(buildMenus(access, navigationMenu), ATTENDANCE_REVIEW_MENU_KEY, attendancePendingCount),
+    [access, navigationMenu, i18n.language, attendancePendingCount],
+  )
   const selectedKeys = getSelectedMenuKeys(location.pathname, access)
   // KeepAlive 必须跟随当前 URL，而不是提前变化的 tabs store activeKey。
   const { activeCacheKey, cacheKeys } = resolveRouteKeepAliveState({

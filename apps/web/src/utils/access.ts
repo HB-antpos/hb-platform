@@ -116,6 +116,12 @@ function createEmptyAccess(): AccessControl {
     canReviewAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
+    canReviewOwnAttendance: false,
+    canViewAttendancePayroll: false,
+    canViewAttendanceHours: false,
+    canAdjustAttendancePunches: false,
+    canEditAttendancePayroll: false,
+    canUnlockAttendancePayroll: false,
     canViewEmployeeProfiles: false,
     canViewSystemLogs: false,
     canViewPerformanceBaseline: false,
@@ -368,6 +374,15 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.HolidayEditManagedStore)
   const canEditAttendanceSettings = isAdmin || hasPermission(P.Attendance.SettingsEdit)
+  // 本人审核、工资三项都是新权限，默认谁都没有；不随 Attendance.Admin.View 自动获得
+  const canReviewOwnAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewSelf)
+  const canEditAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollEdit)
+  const canUnlockAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollUnlock)
+  const canViewAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollView)
+  // 「工时与工资」页：工时统计只要打卡查看权限，工资表 / 时薪表另要 Payroll.View，任一即可进页
+  const canViewAttendanceHours = canViewAttendancePunches || canViewAttendancePayroll
+  // 店长代员工补卡（审核台填漏下班的实际下班时间）：后端 managed/punch-adjustments 只认这一个权限
+  const canAdjustAttendancePunches = isAdmin || hasPermission(P.Attendance.PunchAdjustManagedStore)
   const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.View)
   const canViewSystemLogs = isAdmin || hasPermission(P.System.ViewLogs)
   const canViewPerformanceBaseline =
@@ -522,6 +537,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canReviewAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
+    canReviewOwnAttendance,
+    canViewAttendancePayroll,
+    canViewAttendanceHours,
+    canAdjustAttendancePunches,
+    canEditAttendancePayroll,
+    canUnlockAttendancePayroll,
     canViewEmployeeProfiles,
     canViewSystemLogs,
     canViewPerformanceBaseline,

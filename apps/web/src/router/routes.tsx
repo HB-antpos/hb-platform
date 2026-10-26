@@ -79,6 +79,8 @@ const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashR
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
+const PosAdminAttendanceReviewPage = lazy(() => import('../pages/PosAdmin/AttendanceReview'))
+const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
 const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/SupplierManagement'))
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
@@ -851,6 +853,28 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewAttendanceSchedule',
         },
         element: <PosAdminScheduleAttendancePage />,
+      },
+      {
+        // 考勤审核工作台：从排班考勤页的页签升级为独立菜单项，菜单带待审数角标（见 AdminLayout）。
+        path: '/pos-admin/attendance-review',
+        meta: {
+          title: 'menu.attendanceReview',
+          icon: 'FileDoneOutlined',
+          keepAlive: true,
+          accessKey: 'canReviewAttendance',
+        },
+        element: <PosAdminAttendanceReviewPage />,
+      },
+      {
+        // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
+        path: '/pos-admin/attendance-payroll',
+        meta: {
+          title: 'menu.attendancePayroll',
+          icon: 'AccountBookOutlined',
+          keepAlive: true,
+          accessKey: 'canViewAttendanceHours',
+        },
+        element: <PosAdminAttendancePayrollPage />,
       },
       {
         path: '/pos-admin/cash-register-users',

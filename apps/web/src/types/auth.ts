@@ -116,6 +116,12 @@ export interface AccessControl {
   canReviewAttendance: boolean
   canEditAttendanceHoliday: boolean
   canEditAttendanceSettings: boolean
+  canReviewOwnAttendance: boolean
+  canViewAttendancePayroll: boolean
+  canViewAttendanceHours: boolean
+  canAdjustAttendancePunches: boolean
+  canEditAttendancePayroll: boolean
+  canUnlockAttendancePayroll: boolean
   canViewEmployeeProfiles: boolean
   canViewSystemLogs: boolean
   canViewPerformanceBaseline: boolean

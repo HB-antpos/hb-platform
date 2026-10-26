@@ -110,16 +110,50 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/DeviceRegistration/index.tsx',
   },
   {
-    // 排班考勤页既有文案在全局；用餐未休息加工时新增的 meal.* 键在页面级消息文件。
+    // 排班考勤页既有文案在全局；用餐未休息加工时（meal.*）、工资参数（payrollSettings.*）、已删除排班（deletedSchedules.*）新增键在页面级消息文件。
     name: '排班考勤',
-    keyPattern: /['"`](posAdmin\.scheduleAttendance\.meal\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/PosAdmin/ScheduleAttendance/index.tsx'],
+    keyPattern: /['"`](posAdmin\.scheduleAttendance\.(?:meal|payrollSettings|deletedSchedules)\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/AttendancePayrollSettingsFields.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/DeletedSchedulesDrawer.tsx',
+    ],
     messages: {
       zh: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json',
       en: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.en.json',
     },
     registerImport: "from './scheduleAttendanceMessages.zh.json'",
     registerSource: 'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
+  },
+  {
+    // 考勤审核工作台：文案全部在页面级消息文件
+    name: '考勤审核',
+    keyPattern: /['"`](attendanceReview\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: ['src/pages/PosAdmin/AttendanceReview/index.tsx'],
+    messages: {
+      zh: 'src/pages/PosAdmin/AttendanceReview/attendanceReviewMessages.zh.json',
+      en: 'src/pages/PosAdmin/AttendanceReview/attendanceReviewMessages.en.json',
+    },
+    registerImport: "from './attendanceReviewMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/AttendanceReview/index.tsx',
+  },
+  {
+    // 工时与工资（工时统计 / 工资表 / 个人时薪表）：文案全部在页面级消息文件
+    name: '工时与工资',
+    keyPattern: /['"`](attendancePayroll\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/AttendancePayroll/index.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/HoursTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/PayTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/RatesTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/payrollExport.ts',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/AttendancePayroll/attendancePayrollMessages.zh.json',
+      en: 'src/pages/PosAdmin/AttendancePayroll/attendancePayrollMessages.en.json',
+    },
+    registerImport: "from './attendancePayrollMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/AttendancePayroll/index.tsx',
   },
   {
     name: '支付终端配置',
