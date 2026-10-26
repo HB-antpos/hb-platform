@@ -33,7 +33,7 @@ export function PickCameraSheet({
   });
 
   return (
-    <CameraScanSheet visible={visible} title={title} mode={mode} onModeChange={setMode} onDismiss={onDismiss}>
+    <CameraScanSheet visible={visible} title={title} mode={mode} onModeChange={setMode} onDismiss={onDismiss} libraryPicker={camera.libraryPicker}>
       {camera.permission?.granted ? (
         <CameraView style={styles.camera} {...camera.cameraProps} />
       ) : (

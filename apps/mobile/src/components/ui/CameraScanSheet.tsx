@@ -14,11 +14,13 @@ interface CameraScanSheetProps {
   mode: CameraScanMode;
   onModeChange: (mode: CameraScanMode) => void;
   onDismiss: () => void;
+  /** 相机扫码 hook 返回的相册识别入口；为空（平台 / 原生包不支持）时不显示按钮。 */
+  libraryPicker?: { onPress: () => void; busy: boolean } | null;
   children: ReactNode;
 }
 
 /** 扫码设置属于当前相机会话，各页面继续持有自己的识别和业务处理逻辑。 */
-export function CameraScanSheet({ visible, title, subtitle, mode, onModeChange, onDismiss, children }: CameraScanSheetProps) {
+export function CameraScanSheet({ visible, title, subtitle, mode, onModeChange, onDismiss, libraryPicker, children }: CameraScanSheetProps) {
   const { t } = useAppTranslation("common");
   return (
     <BusinessSheet
@@ -36,6 +38,19 @@ export function CameraScanSheet({ visible, title, subtitle, mode, onModeChange, 
         </Text>
       </View>
       <View style={styles.camera}>{children}</View>
+      {libraryPicker ? (
+        <Button
+          mode="outlined"
+          icon="image-outline"
+          onPress={libraryPicker.onPress}
+          loading={libraryPicker.busy}
+          disabled={libraryPicker.busy}
+          contentStyle={styles.closeButton}
+          style={styles.libraryButton}
+        >
+          {t("scanner.pickFromLibrary")}
+        </Button>
+      ) : null}
     </BusinessSheet>
   );
 }
@@ -47,4 +62,5 @@ const styles = StyleSheet.create({
   hint: { color: HB_COLORS.textSecondary, lineHeight: 18 },
   camera: { overflow: "hidden", borderRadius: HB_RADIUS.surface },
   closeButton: { minHeight: 48 },
+  libraryButton: { marginTop: 12 },
 });
