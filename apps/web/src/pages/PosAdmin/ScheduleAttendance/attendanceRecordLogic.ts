@@ -1,20 +1,10 @@
 import type {
-  AttendanceApprovalSourceType,
   AttendancePunchType,
   AttendancePunchAdjustmentPreviewDto,
   AttendanceScheduleDto,
   AttendanceScheduleSegmentDto,
   SaveAttendancePunchAdjustmentPayload,
 } from '../../../types/scheduleAttendance'
-
-const knownAttendanceApprovalSourceTypes = new Set<AttendanceApprovalSourceType>([
-  'Punch',
-  'Leave',
-  'PunchAdjustment',
-  'Overtime',
-  'MissingClockOut',
-  'MealBreak',
-])
 
 export function getAttendanceWeekdayIndex(value?: string): number | undefined {
   const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/)
@@ -41,30 +31,6 @@ export function insertAttendanceWeekday(displayText: string, weekdayLabel?: stri
   if (!match) return displayText
 
   return `${match[1]} ${weekdayLabel}${match[2]}`
-}
-
-export function insertAttendanceWeekdaysInText(
-  text: string,
-  resolveWeekdayLabel: (dateText: string) => string | undefined,
-): string {
-  return text.replace(/\b\d{4}-\d{2}-\d{2}\b/g, (dateText) => (
-    insertAttendanceWeekday(dateText, resolveWeekdayLabel(dateText))
-  ))
-}
-
-export function isKnownAttendanceApprovalSourceType(value: string): value is AttendanceApprovalSourceType {
-  return knownAttendanceApprovalSourceTypes.has(value as AttendanceApprovalSourceType)
-}
-
-export function getSupplementalAttendanceApprovalDetail(input: {
-  sourceType: string
-  detail?: string
-  displayedTitle: string
-}): string | undefined {
-  if (input.sourceType !== 'Punch' && input.sourceType !== 'Leave') return undefined
-  const detail = input.detail?.trim()
-  if (!detail || detail === input.displayedTitle.trim()) return undefined
-  return detail
 }
 
 export interface AttendanceRecordSummary {
@@ -270,11 +236,6 @@ export function validateOvertimeApproval(input: OvertimeApprovalInput): Overtime
     return 'remarkRequired'
   }
   return null
-}
-
-/** 用餐未休息加工时：批准按申请分钟全额加回，拒绝必须填写审核备注（与后端 REVIEW_REMARK_REQUIRED 一致）。 */
-export function validateMealBreakApproval(input: { action: 'approve' | 'reject'; remark?: string }): 'remarkRequired' | null {
-  return input.action === 'reject' && !input.remark?.trim() ? 'remarkRequired' : null
 }
 
 export interface AttendanceMealPaySummary {
