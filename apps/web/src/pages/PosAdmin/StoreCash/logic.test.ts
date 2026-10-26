@@ -15,6 +15,7 @@ import {
   formatSignedAud,
   formatStoreDateTime,
   isDateDisabled,
+  classifyVariance,
   isNegativeAmount,
   isReasonValid,
   parseCashSearch,
@@ -180,6 +181,15 @@ assert.equal(formatSignedAud(null), '—')
 assert.equal(isNegativeAmount(-0.01), true)
 assert.equal(isNegativeAmount(-0.001), false)
 assert.equal(isNegativeAmount(null), false)
+// 日结差额三态：按分判定，负短款 / 正长款 / 0 已平 / 空为无金额
+assert.equal(classifyVariance(-0.01), 'short')
+assert.equal(classifyVariance(12.5), 'over')
+assert.equal(classifyVariance(0), 'even')
+assert.equal(classifyVariance(-0.004), 'even', '不足 1 分的残差算已平')
+assert.equal(classifyVariance(0.004), 'even')
+assert.equal(classifyVariance(null), 'none')
+assert.equal(classifyVariance(undefined), 'none')
+assert.equal(classifyVariance(Number.NaN), 'none')
 assert.deepEqual([3, null, -1, undefined, 2].sort(compareNullableNumber), [-1, 2, 3, null, undefined], 'null 排最后')
 
 // ---------------------------------------------------------------------------

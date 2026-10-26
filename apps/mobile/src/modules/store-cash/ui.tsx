@@ -8,7 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { MonthDatePicker } from "@/components/attendance/MonthDatePicker";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { sanitizeMoneyInput } from "./money";
+import { classifyVariance, formatSignedAud, sanitizeMoneyInput, type VarianceKind } from "./money";
 
 export const CASH_SOFT = {
   accent: "#EAF2FF",
@@ -152,6 +152,36 @@ export function ValueRow({
       <Text style={[styles.valueText, strong ? styles.valueStrong : null, muted ? styles.mutedText : null, valueStyle]}>
         {value}
       </Text>
+    </View>
+  );
+}
+
+/** 日结差额三态配色与图标：短款=危险红、长款=警示橙、已平=成功绿（与「日结记录」页一致）。 */
+const VARIANCE_STYLE: Record<VarianceKind, { tone: CashTone; icon: IconName }> = {
+  short: { tone: "danger", icon: "triangle-small-down" },
+  over: { tone: "warning", icon: "triangle-small-up" },
+  even: { tone: "success", icon: "check-bold" },
+};
+
+/**
+ * 日结差额一行：「标签 ……… ▼ -$5.00 [短款]」。
+ * 颜色只是辅助，图标 + 带正负号的金额 + 文字标签一起出现，色弱也能分清短款与长款。
+ */
+export function VarianceRow({ label, value, statusLabels }: { label: string; value: number; statusLabels: Record<VarianceKind, string> }) {
+  const kind = classifyVariance(value);
+  const { tone, icon } = VARIANCE_STYLE[kind];
+  const color = TONES[tone].foreground;
+  const amount = formatSignedAud(value);
+  return (
+    <View style={styles.valueRow} accessible accessibilityLabel={`${label} ${statusLabels[kind]} ${amount}`}>
+      <Text style={styles.valueLabel} numberOfLines={2}>
+        {label}
+      </Text>
+      <View style={styles.varianceValue}>
+        <MaterialCommunityIcons name={icon} size={16} color={color} />
+        <Text style={[styles.valueText, { color }]}>{amount}</Text>
+        <StatusChip tone={tone} label={statusLabels[kind]} />
+      </View>
     </View>
   );
 }
@@ -346,6 +376,7 @@ const styles = StyleSheet.create({
   valueLabel: { flex: 1, minWidth: 0, color: HB_COLORS.textSecondary, fontSize: 14 },
   valueText: { color: HB_COLORS.textPrimary, fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "600", flexShrink: 0 },
   valueStrong: { fontSize: 17, fontWeight: "700" },
+  varianceValue: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   mutedText: { color: HB_COLORS.textSecondary },
   choice: {
     minHeight: 40,
