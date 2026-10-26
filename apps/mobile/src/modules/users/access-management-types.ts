@@ -122,6 +122,8 @@ export interface UserAccessEligibilityContext {
   isDeviceMode: boolean;
   isAdmin: boolean;
   isStoreManager: boolean;
+  /** 仓库管理：不限分店的受限委派者（可授员工角色、授管理 / 查看分店关系，但不能碰管理员与仓库管理账号）。 */
+  isWarehouseManager?: boolean;
   canManageStores: boolean;
   canManageRoles: boolean;
   canManagePos: boolean;

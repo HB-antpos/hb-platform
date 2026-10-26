@@ -40,6 +40,8 @@ import dailyClosesEn from "@/locales/en/screens/dailyCloses.json";
 import pricingStrategiesEn from "@/locales/en/screens/pricingStrategies.json";
 import faceMatchEn from "@/locales/en/screens/faceMatch.json";
 import trafficStatsEn from "@/locales/en/screens/trafficStats.json";
+import attendanceLeaveEn from "@/locales/en/screens/attendanceLeave.json";
+import attendanceHoursEn from "@/locales/en/screens/attendanceHours.json";
 import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
@@ -90,6 +92,8 @@ import dailyClosesZh from "@/locales/zh/screens/dailyCloses.json";
 import pricingStrategiesZh from "@/locales/zh/screens/pricingStrategies.json";
 import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
 import trafficStatsZh from "@/locales/zh/screens/trafficStats.json";
+import attendanceLeaveZh from "@/locales/zh/screens/attendanceLeave.json";
+import attendanceHoursZh from "@/locales/zh/screens/attendanceHours.json";
 import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
@@ -138,6 +142,8 @@ const resources = {
     pricingStrategies: pricingStrategiesZh,
     faceMatch: faceMatchZh,
     trafficStats: trafficStatsZh,
+    attendanceLeave: attendanceLeaveZh,
+    attendanceHours: attendanceHoursZh,
     notifications: notificationsZh,
     push: pushZh,
     productQuery: productQueryZh,
@@ -192,6 +198,8 @@ const resources = {
     pricingStrategies: pricingStrategiesEn,
     faceMatch: faceMatchEn,
     trafficStats: trafficStatsEn,
+    attendanceLeave: attendanceLeaveEn,
+    attendanceHours: attendanceHoursEn,
     notifications: notificationsEn,
     push: pushEn,
     productQuery: productQueryEn,

@@ -122,6 +122,7 @@ export function StorePersonDetail({
         roleNames: currentUser?.roleNames ?? [],
         isAdmin: access.isAdmin,
         isStoreManager: access.isStoreManager,
+        isWarehouseManager: access.isWarehouseManager,
         isStoreLevelManager: access.isStoreLevelManager,
         hasPermission: access.hasPermission,
       },
