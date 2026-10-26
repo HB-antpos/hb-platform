@@ -130,6 +130,7 @@ import {
   getVerifiedScanPrintTarget,
   resolveMultiCodeLabelPrice,
   resolveScannedCodeLabel,
+  shouldAutoPrintDiscountLabel,
   type CodeLabelTarget,
 } from "@/modules/product-maintenance/scan-label";
 import {
@@ -361,6 +362,8 @@ interface AutoPricingDialogState {
   /** 本次扫到的码：确认调价后要按它打子项标签，而不是一律打主档标签。手动查询为 null。 */
   scanKeyword?: string | null;
   printTarget?: ScanLabelPrintTarget | null;
+  /** 自动打印开关打开时才在确认调价打完普通标签后补打折扣标签；手动查询或关着自动打印时为 false。 */
+  autoPrintEnabled?: boolean;
 }
 
 interface AutoPricingDialogResolution {
@@ -1855,6 +1858,8 @@ function ProductQueryContent() {
         discountRate?: number | null;
         action?: PrintAction;
         printType?: string | null;
+        /** 自动打印链路专用：普通标签打完后，有折扣就接着补打折扣标签（手动按钮不传）。 */
+        withDiscountLabel?: boolean;
       },
     ) => {
       const savedPrinter = await getSavedPrinter();
@@ -1904,6 +1909,32 @@ function ProductQueryContent() {
           quantity: qty,
           elapsedMs: Date.now() - printStartedAt,
         });
+        // 折扣率口径与 printProductLabel 的 buildPayload 一致：显式值（含 0）优先，缺省回退门店价折扣。
+        const discountRate = options?.discountRate ?? targetDetail.storePrice?.discountRate;
+        if (options?.withDiscountLabel && shouldAutoPrintDiscountLabel(discountRate)) {
+          try {
+            // 份数与普通标签一致（与手动「折扣标签」按钮同口径）。
+            for (let i = 0; i < qty; i++) {
+              await printDiscountLabel(targetDetail, options.printType, {
+                barcode: options.barcode,
+                retailPrice: options.retailPrice,
+                discountRate: options.discountRate,
+              });
+            }
+          } catch (error) {
+            // 普通标签已经打出：返回 true，调用方不会重打；这里只单独提示折扣标签失败。
+            console.error("[product-query] auto discount label failed", {
+              action,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            setSnackbarMessage(getErrorMessage(error, "messages.discountAutoPrintFailed"));
+            playQueryFeedback("error");
+            if (quantitySingleUse && qty > 1) {
+              setPrintQuantity(1);
+            }
+            return true;
+          }
+        }
         setSnackbarMessage(t("messages.printSuccess"));
         if (quantitySingleUse && qty > 1) {
           setPrintQuantity(1);
@@ -1935,7 +1966,12 @@ function ProductQueryContent() {
 
   /** 打印套装 / 多码子项标签；子项没有可用价格时拒绝打印，避免打印层回退成主档价。 */
   const sendCodeLabel = useCallback(
-    async (targetDetail: ProductDetail, target: CodeLabelTarget, printType: string | null) => {
+    async (
+      targetDetail: ProductDetail,
+      target: CodeLabelTarget,
+      printType: string | null,
+      withDiscountLabel = false,
+    ) => {
       if (target.retailPrice == null || !Number.isFinite(target.retailPrice)) {
         setSnackbarMessage(t(target.kind === "set"
           ? "messages.setCodeRetailRequired"
@@ -1949,6 +1985,7 @@ function ProductQueryContent() {
         discountRate: target.discountRate,
         action: `${target.kind}:${target.codeId}`,
         printType,
+        withDiscountLabel,
       });
     },
     [playQueryFeedback, sendProductLabel, t],
@@ -1962,6 +1999,8 @@ function ProductQueryContent() {
     async (savedDetail: ProductDetail, dialog: AutoPricingDialogState) => {
       const printType = smallLabel ? "small" : null;
       const target = dialog.printTarget;
+      // 只有「自动打印」开着时才补打折扣标签；折扣率是否大于 0 由 sendProductLabel 判定。
+      const withDiscountLabel = dialog.autoPrintEnabled === true;
       if (target?.kind === "set" && target.codeId) {
         return sendCodeLabel(savedDetail, {
           kind: "set",
@@ -1969,7 +2008,7 @@ function ProductQueryContent() {
           barcode: target.barcode,
           retailPrice: target.retailPrice,
           discountRate: 0,
-        }, printType);
+        }, printType, withDiscountLabel);
       }
       if (target?.kind === "multi" && target.codeId) {
         return sendCodeLabel(savedDetail, {
@@ -1977,7 +2016,7 @@ function ProductQueryContent() {
           codeId: target.codeId,
           barcode: target.barcode,
           ...resolveMultiCodeLabelPrice(savedDetail),
-        }, printType);
+        }, printType, withDiscountLabel);
       }
       const keyword = dialog.scanKeyword?.trim();
       if (!target && keyword) {
@@ -1991,14 +2030,14 @@ function ProductQueryContent() {
           keyword,
         );
         if (resolved?.kind === "set" || resolved?.kind === "multi") {
-          return sendCodeLabel(savedDetail, resolved, printType);
+          return sendCodeLabel(savedDetail, resolved, printType, withDiscountLabel);
         }
         if (!resolved) {
           setSnackbarMessage(t("messages.codesLoadFailed"));
           return false;
         }
       }
-      return sendProductLabel(savedDetail);
+      return sendProductLabel(savedDetail, { withDiscountLabel });
     },
     [sendCodeLabel, sendProductLabel, smallLabel, t],
   );
@@ -2021,6 +2060,8 @@ function ProductQueryContent() {
             : `${printTarget.kind}:${printTarget.codeId}` as PrintAction,
           // 主条码（product）与套码、多码一样遵循「小标签」开关，否则扫主条码总是打普通标签。
           printType: smallLabel ? "small" : null,
+          // 自动打印：普通标签之后，有折扣再补打折扣标签。
+          withDiscountLabel: true,
         });
       }
 
@@ -2028,7 +2069,7 @@ function ProductQueryContent() {
       // 套装子项打套装条码 + 套装价（不印折扣），多码打多码条码 + 主档价 + 主档折扣。
       const resolved = printTarget ? null : resolveScannedCodeLabel(targetDetail, kw);
       if (resolved?.kind === "set" || resolved?.kind === "multi") {
-        return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null);
+        return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null, true);
       }
       if (!printTarget && !resolved) {
         // 扫到的码不在已加载的码表里（如码表分页未加载到）时，不能回退打印主档条码和价格。
@@ -2056,7 +2097,7 @@ function ProductQueryContent() {
       }
 
       // 扫到的是主条码 / 货号等主档码：打主档标签，同样要带上小标签开关。
-      return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null });
+      return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null, withDiscountLabel: true });
     },
     [
       getErrorMessage,
@@ -2077,6 +2118,7 @@ function ProductQueryContent() {
         scanSource?: ScanSource | null;
         scanKeyword?: string | null;
         printTarget?: ScanLabelPrintTarget | null;
+        autoPrintEnabled?: boolean;
       },
     ): Promise<LookupFlowResult> => {
       const storePrice = targetDetail.storePrice;
@@ -2110,6 +2152,7 @@ function ProductQueryContent() {
             // 只有扫码才按扫到的码打子项标签；手动查询的关键字可能是商品名，仍打主档标签。
             scanKeyword: scanSource ? options?.scanKeyword ?? null : null,
             printTarget: options?.printTarget ?? null,
+            autoPrintEnabled: options?.autoPrintEnabled === true,
           });
 
           return {
@@ -2194,6 +2237,7 @@ function ProductQueryContent() {
           scanSource: options.scanSource,
           scanKeyword: options.scanKeyword,
           printTarget: options.printTarget,
+          autoPrintEnabled: options.autoPrintEnabled,
         });
         if (autoPricingResult.autoPricingStatus === "no_action") {
           playQueryFeedback("found");
