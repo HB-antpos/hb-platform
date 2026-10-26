@@ -602,6 +602,15 @@ namespace BlazorApp.Shared.Constants
                 public const string Edit = "Attendance.Settings.Edit";
             }
 
+            // 工资表 / 时薪表；默认不授予任何角色，由管理员在生产手动授权（迁移 20261026.002 入库）。
+            // Edit / Unlock 不隐含 View；Attendance.Admin.View 也不连带这三项。
+            public static class Payroll
+            {
+                public const string View = "Attendance.Payroll.View";
+                public const string Edit = "Attendance.Payroll.Edit";
+                public const string Unlock = "Attendance.Payroll.Unlock";
+            }
+
             public static class Admin
             {
                 public const string View = "Attendance.Admin.View";

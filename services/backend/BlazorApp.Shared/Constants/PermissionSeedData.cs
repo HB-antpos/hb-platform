@@ -36,6 +36,10 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Leave.ViewManagedStore, "查看管理分店请假申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"),
                 new(Permissions.Attendance.Leave.ReviewManagedStore, "审核管理分店请假申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店请假申请"),
                 new(Permissions.Attendance.Settings.Edit, "编辑考勤设置", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 编辑考勤设置"),
+                // 工资三项仅注册，不写入任何角色模板：默认谁都没有、生产手动授权；入库由版本号迁移 20261026.002 幂等完成。
+                new(Permissions.Attendance.Payroll.View, "查看工资表与时薪表", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 查看工资表、个人时薪表"),
+                new(Permissions.Attendance.Payroll.Edit, "编辑时薪、工资备注与提交锁定", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 新增时薪生效记录、填写工资备注与年假核定工时、提交并锁定发薪周期"),
+                new(Permissions.Attendance.Payroll.Unlock, "解锁已提交的发薪周期", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 解锁已提交的发薪周期（需填写原因，留操作记录）"),
                 new(Permissions.Attendance.Admin.View, "查看全部考勤管理", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看全部分店考勤管理"),
             };
 
