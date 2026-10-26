@@ -89,6 +89,12 @@ internal sealed class SchemaMigrationCoordinator
     internal const string SupplierPreorderItemImageMigrationId = "20261024.001-supplier-preorder-item-image";
     internal const string SupplierPreorderRevisionMigrationId = "20261024.002-supplier-preorder-revision";
     internal const string StorePosApiEntryMigrationId = "20261024.003-store-pos-api-entry";
+    internal const string HelpFaqMigrationId = "20261025.001-help-faq";
+    internal const string AttendanceReviewAutoClockOutMigrationId =
+        "20261026.001-attendance-review-auto-clock-out";
+    internal const string AttendancePayrollLeaveMigrationId =
+        "20261026.002-attendance-payroll-leave";
+    internal const string RoleLevelMigrationId = "20261026.003-role-level";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -336,6 +342,26 @@ internal sealed class SchemaMigrationCoordinator
             static (runtime, cancellationToken) =>
                 runtime.ApplyStorePosApiEntryAsync(cancellationToken)
         ),
+        new(
+            HelpFaqMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyHelpFaqAsync(cancellationToken)
+        ),
+        new(
+            AttendanceReviewAutoClockOutMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceReviewAutoClockOutAsync(cancellationToken)
+        ),
+        new(
+            AttendancePayrollLeaveMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendancePayrollLeaveAsync(cancellationToken)
+        ),
+        new(
+            RoleLevelMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyRoleLevelAsync(cancellationToken)
+        ),
     ];
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> PosmMigrationSteps =
@@ -389,6 +415,7 @@ internal sealed class SchemaMigrationCoordinator
         "mobile-ota-runtime-targets-schema-signature";
     private const string LocalSupplierCategorySignatureId =
         "local-supplier-category-schema-signature";
+    private const string HelpFaqSignatureId = "help-faq-schema-signature";
     private const string AttendanceLocationSampleBatchSignatureId =
         "attendance-location-sample-batch-schema-signature";
     private const string LegacyEmployeeLogRiskSignatureId =
@@ -529,6 +556,13 @@ internal sealed class SchemaMigrationCoordinator
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
             );
         }
+        catch (HelpFaqSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.HelpFaqIncompatible
+            );
+        }
         catch (AttendanceLocationSampleBatchSchemaMismatchException)
         {
             return SchemaOperationResult.Failure(
@@ -649,6 +683,13 @@ internal sealed class SchemaMigrationCoordinator
             return SchemaOperationResult.Failure(
                 SchemaExitCodes.SchemaNotReady,
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
+            );
+        }
+        catch (HelpFaqSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.HelpFaqIncompatible
             );
         }
         catch (AttendanceLocationSampleBatchSchemaMismatchException)
@@ -822,6 +863,7 @@ internal sealed class SchemaMigrationCoordinator
             await _runtime.VerifySalesDetailQueryProjectionAsync(cancellationToken);
             await VerifyMobileOtaRuntimeTargetsAsync(cancellationToken);
             await VerifyLocalSupplierCategoryAsync(cancellationToken);
+            await VerifyHelpFaqAsync(cancellationToken);
             await VerifyAttendanceLocationSampleBatchAsync(cancellationToken);
         }
         if (posmApplied)
@@ -908,6 +950,39 @@ internal sealed class SchemaMigrationCoordinator
                     OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
                     LocalSupplierCategorySchemaMismatchException =>
                         SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible,
+                    _ => SchemaDiagnosticCodes.DatabaseFailure,
+                }
+            );
+            throw;
+        }
+    }
+
+    private async Task VerifyHelpFaqAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await _runtime.VerifyHelpFaqAsync(cancellationToken);
+            LogResult(
+                MainScope,
+                HelpFaqSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Ready",
+                SchemaDiagnosticCodes.Ready
+            );
+        }
+        catch (Exception exception)
+        {
+            LogResult(
+                MainScope,
+                HelpFaqSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Failed",
+                exception switch
+                {
+                    OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
+                    HelpFaqSchemaMismatchException =>
+                        SchemaDiagnosticCodes.HelpFaqIncompatible,
                     _ => SchemaDiagnosticCodes.DatabaseFailure,
                 }
             );

@@ -31,7 +31,7 @@ namespace BlazorApp.Api.Mappings.Profiles.React
                     dest => dest.MultiCodeRetailPrice,
                     opt => opt.MapFrom(src => src.H一品多码零售价)
                 )
-                .ForMember(dest => dest.DiscountRate, opt => opt.MapFrom(src => src.H折扣率))
+                .ForMember(dest => dest.DiscountRate, opt => opt.MapFrom(src => BlazorApp.Shared.Helper.StoreDiscountRate.Normalize(src.H折扣率)))
                 .ForMember(
                     dest => dest.IsAutoPricing,
                     opt => opt.MapFrom(src => src.H是否自动定价 ?? false)

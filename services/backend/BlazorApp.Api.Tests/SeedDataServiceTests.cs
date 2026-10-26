@@ -360,12 +360,16 @@ namespace BlazorApp.Api.Tests
                 Permissions.Attendance.Punch.AdjustManagedStore,
                 Permissions.Attendance.Approval.ViewManagedStore,
                 Permissions.Attendance.Approval.ReviewManagedStore,
+                Permissions.Attendance.Approval.ReviewSelf,
                 Permissions.Attendance.Holiday.ViewStore,
                 Permissions.Attendance.Holiday.EditManagedStore,
                 Permissions.Attendance.Leave.ApplySelf,
                 Permissions.Attendance.Leave.ViewManagedStore,
                 Permissions.Attendance.Leave.ReviewManagedStore,
                 Permissions.Attendance.Settings.Edit,
+                Permissions.Attendance.Payroll.View,
+                Permissions.Attendance.Payroll.Edit,
+                Permissions.Attendance.Payroll.Unlock,
                 Permissions.Attendance.Admin.View,
             };
 
@@ -793,7 +797,7 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(firstPassActivePermissionCount, activeRolePermissions.Count);
             Assert.Equal(firstPassActivePermissionSnapshot, secondPassActivePermissionSnapshot);
             Assert.Equal(allPermissionRows.Count, allPermissionRows.Select(item => item.Code).Distinct().Count());
-            Assert.Equal(17, attendanceRows.Count);
+            Assert.Equal(21, attendanceRows.Count);
             Assert.Empty(adminPermissionCodes);
             Assert.All(PermissionSeedData.AttendancePermissions, seed =>
             {

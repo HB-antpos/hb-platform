@@ -3208,6 +3208,77 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_明细无零售价时多码价跟随主条码分店价()
+        {
+            // 生产形态（SW0126）：进货单明细 RetailPrice 为空；Type2 多码与分店投影必须跟随主条码价，不能写成 NULL。
+            await SeedStoreAndSupplierAsync();
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-guid-2",
+                StoreCode = "S02",
+                StoreName = "Second Store",
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await InsertInvoiceAsync("invoice-multi-follow", "INV-MULTI-FOLLOW", new DateTime(2026, 10, 14));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-follow",
+                ProductCode = "P-MULTI-FOLLOW",
+                ItemNumber = "SW0126",
+                Barcode = "9333527454072",
+                ProductName = "Wrapping Paper Kraft",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 1.22m,
+                RetailPrice = 4m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreRetailPrice
+            {
+                UUID = "srp-multi-follow-s01",
+                StoreCode = "S01",
+                ProductCode = "P-MULTI-FOLLOW",
+                PurchasePrice = 1.22m,
+                StoreRetailPriceValue = 3.5m,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-follow",
+                InvoiceGUID = "invoice-multi-follow",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-FOLLOW",
+                ItemNumber = "SW0126",
+                Barcode = "9333527365828",
+                ProductName = "Wrapping Paper Kraft",
+                PurchasePrice = 1.22m,
+                RetailPrice = null,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-follow",
+                new List<string> { "detail-multi-follow" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            var global = await _db.Queryable<ProductSetCode>()
+                .SingleAsync(x => x.ProductCode == "P-MULTI-FOLLOW" && x.SetBarcode == "9333527365828");
+            var projections = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P-MULTI-FOLLOW")
+                .ToListAsync();
+            Assert.Equal(2, global.SetType);
+            Assert.Equal(3.5m, global.SetRetailPrice);
+            Assert.Equal(3.5m, projections.Single(x => x.StoreCode == "S01").MultiCodeRetailPrice);
+            // S02 没有分店价：回退商品主档价。
+            Assert.Equal(4m, projections.Single(x => x.StoreCode == "S02").MultiCodeRetailPrice);
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_AddMultiCode_副条码被其他商品占用时回滚()
         {
             await SeedStoreAndSupplierAsync();

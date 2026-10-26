@@ -87,6 +87,28 @@ body {
   white-space: nowrap;
 }
 
+.admin-menu-count-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 考勤审核待审数角标 */
+.admin-menu-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
 .admin-side-menu {
   flex: 1;
   min-height: 0;

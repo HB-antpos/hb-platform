@@ -213,3 +213,17 @@ assert(pageSource.includes("reviewTarget.sourceType === 'MealBreak'")
 assert(pageSource.includes('record.mealClaim'), '用餐加工时审批必须展示员工声明的次数与原因')
 
 console.log('attendanceRecordUiContract.test.ts: ok')
+
+// 编辑排班时员工、分店锁定（后端 UpdateSchedule 不改这两项）；可上班时间按日期范围查询、列表显示后端回填的员工名。
+assert(
+  /name="storeCode"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
+  '编辑排班时分店应禁用',
+)
+assert(
+  /name="userGuid"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
+  '编辑排班时员工应禁用',
+)
+assert(
+  pageSource.includes('getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })'),
+  '可上班时间应按 fromDate / toDate 查询，不再带 weekStartDate',
+)

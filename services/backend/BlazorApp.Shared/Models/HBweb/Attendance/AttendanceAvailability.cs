@@ -38,5 +38,12 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = true, Length = 500)]
         public string? Remark { get; set; }
+
+        /// <summary>
+        /// 由带薪年假（休息）批准自动写入的「不能上班」行指向来源请假；撤销请假时按它一并清除。
+        /// 员工自己上报的行为 null。列由迁移 20261026.002-attendance-payroll-leave 添加。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? SourceLeaveGuid { get; set; }
     }
 }
