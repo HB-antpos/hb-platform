@@ -32,6 +32,7 @@ import {
 import { staffBarcodeQueueSecureStorage } from "@/modules/users/staff-barcode/storage";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { hydrateSavedPrinter, printEmployeeCashierBarcodeLabel } from "@/modules/printer/api";
+import { personalCodeSymbology } from "@/modules/printer/use-personal-code-symbology";
 import { runPersonalCodePrintExclusive } from "@/modules/printer/personal-code-print-lock";
 import { usePrinterStore } from "@/modules/printer/state";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -77,6 +78,8 @@ function dependencies(
         employeeName: target.employeeName,
         username: target.username,
         barcode,
+        // 与本人码卡片共用设备偏好；批量打印每张都读最新值，默认二维码。
+        symbology: await personalCodeSymbology.hydrate(),
       });
       if (!printed) throw new Error("STAFF_BARCODE_PRINT_NOT_ACCEPTED");
     },
