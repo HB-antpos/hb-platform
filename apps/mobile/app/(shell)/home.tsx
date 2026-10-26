@@ -1818,6 +1818,7 @@ export default function Home() {
         })}
         mode={cameraScanMode}
         onModeChange={handleCameraScanModeChange}
+        libraryPicker={cameraScan.libraryPicker}
         onDismiss={() => {
           cameraResultGenerationRef.current = null;
           setCameraScanHandling(false);

@@ -162,7 +162,7 @@ export function PromotionScanSheet({
   });
 
   return (
-    <CameraScanSheet visible={visible} title={title} subtitle={subtitle} mode={mode} onModeChange={setMode} onDismiss={onDismiss}>
+    <CameraScanSheet visible={visible} title={title} subtitle={subtitle} mode={mode} onModeChange={setMode} onDismiss={onDismiss} libraryPicker={cameraScan.libraryPicker}>
       {cameraScan.permission?.granted ? (
         <CameraView style={styles.camera} {...cameraScan.cameraProps} />
       ) : (

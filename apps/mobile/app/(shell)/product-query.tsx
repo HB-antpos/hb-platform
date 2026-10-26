@@ -5503,6 +5503,7 @@ function ProductQueryContent() {
         subtitle={selectedStore?.storeName}
         mode={cameraScanMode}
         onModeChange={handleCameraScanModeChange}
+        libraryPicker={cameraScan.libraryPicker}
         onDismiss={() => {
           cameraForegroundGenerationRef.current = null;
           updateCameraSheetSession(

@@ -2878,6 +2878,7 @@ export default function WarehouseScreen() {
         mode={cameraScanMode}
         onModeChange={handleCameraScanModeChange}
         onDismiss={invalidateCameraScanSession}
+        libraryPicker={cameraScan.libraryPicker}
       >
         {renderCameraScanner()}
       </CameraScanSheet>
