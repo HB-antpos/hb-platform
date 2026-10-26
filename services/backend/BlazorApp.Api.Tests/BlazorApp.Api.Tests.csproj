@@ -163,6 +163,7 @@
     <Compile Include="SeedDataServiceTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionContractTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionServiceTests.cs" />
+    <Compile Include="WarehouseManagerUserAccessTests.cs" />
     <Compile Include="NavigationServiceTests.cs" />
     <Compile Include="StoreProductInsightRulesTests.cs" />
     <Compile Include="StoreProductInsightQueryServiceTests.cs" />
