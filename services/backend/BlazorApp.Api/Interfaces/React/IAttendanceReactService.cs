@@ -54,5 +54,18 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<bool>> DeleteHolidayAsync(string holidayGuid);
         Task<ApiResponse<AttendanceSettingsDto>> GetSettingsAsync();
         Task<ApiResponse<AttendanceSettingsDto>> UpdateSettingsAsync(UpdateAttendanceSettingsDto request);
+
+        // 带薪假与工资（规格第 2 节）
+        Task<ApiResponse<AttendanceLeaveOptionsDto>> GetMyLeaveOptionsAsync(string? storeCode);
+        Task<ApiResponse<bool>> RevokeManagedLeaveRequestAsync(string leaveGuid, ReviewAttendanceApprovalDto request);
+        Task<ApiResponse<AttendancePayrollHoursDto>> GetPayrollHoursAsync(AttendancePayrollQueryDto query);
+        Task<ApiResponse<AttendancePayrollPayDto>> GetPayrollPayAsync(AttendancePayrollQueryDto query);
+        Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRatesAsync(AttendancePayRateQueryDto query);
+        Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRateHistoryAsync(string userGuid, string? storeCode);
+        Task<ApiResponse<AttendancePayRateDto>> CreatePayRateAsync(CreateEmployeePayRateDto request);
+        Task<ApiResponse<AttendancePayPeriodNoteDto>> UpsertPayPeriodNoteAsync(UpsertAttendancePayPeriodNoteDto request);
+        Task<ApiResponse<AttendancePayPeriodLeaveApprovalDto>> UpsertPayPeriodLeaveApprovalAsync(UpsertAttendancePayPeriodLeaveApprovalDto request);
+        Task<ApiResponse<AttendancePayPeriodDto>> SubmitPayPeriodAsync(AttendancePayPeriodKeyDto request);
+        Task<ApiResponse<AttendancePayPeriodDto>> UnlockPayPeriodAsync(UnlockAttendancePayPeriodDto request);
     }
 }

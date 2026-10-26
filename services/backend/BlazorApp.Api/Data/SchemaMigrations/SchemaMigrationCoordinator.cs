@@ -92,6 +92,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string HelpFaqMigrationId = "20261025.001-help-faq";
     internal const string AttendanceReviewAutoClockOutMigrationId =
         "20261026.001-attendance-review-auto-clock-out";
+    internal const string AttendancePayrollLeaveMigrationId =
+        "20261026.002-attendance-payroll-leave";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -348,6 +350,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendanceReviewAutoClockOutMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendanceReviewAutoClockOutAsync(cancellationToken)
+        ),
+        new(
+            AttendancePayrollLeaveMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendancePayrollLeaveAsync(cancellationToken)
         ),
     ];
 
