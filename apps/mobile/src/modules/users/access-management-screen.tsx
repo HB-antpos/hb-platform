@@ -528,6 +528,7 @@ function AccessManagementPage({
             counts={editor.permissionCounts}
             implicitAll={editor.implicitAll}
             isAdmin={editor.isAdmin}
+            isWarehouseManager={editor.isWarehouseManager}
             inheritedSourceMap={editor.inheritedSourceMap}
             editable={eligibility.permissionsMode === "editable"}
             busy={editor.busy}

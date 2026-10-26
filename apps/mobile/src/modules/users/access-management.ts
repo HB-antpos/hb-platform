@@ -333,9 +333,14 @@ export function getUserAccessEligibility(
   // 仓库管理在服务端是不限分店的，不依赖登录态里的主分店（后端对仓库管理返回的分店 isPrimary 恒为 false）。
   const canUseStoreScope =
     context.isAdmin || isWarehouseDelegate || context.hasManageableStores;
-  const targetIsEmployee = context.targetRoleNames.some((roleName) =>
+  const targetIsStoreStaff = context.targetRoleNames.some((roleName) =>
     isStoreStaffRoleName(roleName),
   );
+  // 仓库管理还可以维护店长账号的权限（服务端限定：本人拥有且非提升类的权限）；店长操作者只能维护员工。
+  const targetIsEmployee =
+    targetIsStoreStaff ||
+    (isWarehouseDelegate &&
+      context.targetRoleNames.some((roleName) => isStoreManagerRoleName(roleName)));
   const storesMode = context.isAdmin
     ? "editable"
     : canUseStoreScope

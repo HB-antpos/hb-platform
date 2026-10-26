@@ -85,6 +85,43 @@ function permissionsFor(input: Partial<DetailPermissionInput> & Pick<DetailPermi
   });
 }
 
+// ───────────── 仓库管理（不限分店的受限委派者） ─────────────
+{
+  const warehouse: DetailActorFacts = {
+    userGuid: "wh-1",
+    roleNames: ["WarehouseManager", "StoreManager"],
+    isAdmin: false,
+    isStoreManager: true,
+    isWarehouseManager: true,
+    // 同时有仓库管理和店长角色（线上 sean 账号）：不属于「店长级」，走管理员版详情。
+    isStoreLevelManager: false,
+    hasPermission: () => true,
+  };
+  // 后端对仓库管理返回的分店 isPrimary 恒为 false，所以可管理分店为 0——资格不能依赖它。
+  const noManageable = scope({ hasManageableStores: false });
+
+  let p = permissionsFor({ actor: warehouse, scope: noManageable });
+  assertEqual(p.canOpenAccess, true, "仓库管理对店员可进授权页（不依赖可管理分店）");
+  assertEqual(p.canOpenPos, true, "仓库管理对店员可进 POS 权限");
+  assertEqual(p.canCopyPermissions, true, "仓库管理对店员可复制权限");
+
+  p = permissionsFor({ actor: warehouse, scope: noManageable, target: target({ roleNames: ["StoreManager"] }) });
+  assertEqual(p.canOpenAccess, true, "仓库管理可管理店长账号的授权");
+  assertEqual(p.canOpenPos, true, "仓库管理可维护店长的按店 POS 权限");
+  assertEqual(p.access.permissionsMode, "editable", "仓库管理可维护店长的直接权限");
+  assertEqual(p.canCopyPermissions, false, "复制权限服务端只支持员工目标：店长目标不显示入口");
+
+  for (const roleName of ["Admin", "WarehouseManager"]) {
+    p = permissionsFor({ actor: warehouse, scope: noManageable, target: target({ roleNames: [roleName] }) });
+    assertEqual(p.canOpenAccess, false, `仓库管理不能管理 ${roleName} 账号`);
+    assertEqual(p.canOpenPos, false);
+  }
+
+  // 店长级管理者对店长目标仍然只读。
+  p = permissionsFor({ actor: actor("manager"), target: target({ roleNames: ["StoreManager"] }) });
+  assertEqual(p.canOpenAccess, false, "店长不能管理店长账号");
+}
+
 // ───────────── 变体选择 ─────────────
 
 assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, isIosReview: false }), "admin", "全局用户权限 + account 会话 = 管理员版");

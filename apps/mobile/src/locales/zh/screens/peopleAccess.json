@@ -78,6 +78,7 @@
     "copyFromColleague": "从同事复制",
     "copyToOthers": "复制给他人",
     "managerLimit": "店长只能授予自己拥有的权限。",
+    "warehouseLimit": "仓库管理只能授予自己拥有的权限，不含角色管理、系统设置类权限。",
     "implicitNotice": "该账号是管理员，默认拥有全部权限，不需要单独授权。",
     "source": {
       "inherited": "继承自 {{roles}}",

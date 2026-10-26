@@ -170,7 +170,11 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     canPrintBarcode,
     canOpenAccess,
     canOpenPos: !isSelf && access.canManagePos,
-    canCopyPermissions: canOpenAccess && access.permissionsMode === "editable",
+    // 复制权限在服务端只支持员工目标；仓库管理可编辑店长的权限，但店长账号不开放「复制」。
+    canCopyPermissions:
+      canOpenAccess
+      && access.permissionsMode === "editable"
+      && (actor.isAdmin || targetRoles.some((roleName) => isStoreStaffRoleName(roleName))),
     canViewLoginRecords: variant === "admin" && actor.hasPermission(PERMISSIONS.Users.View),
     access,
   };

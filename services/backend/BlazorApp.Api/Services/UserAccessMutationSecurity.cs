@@ -384,6 +384,87 @@ namespace BlazorApp.Api.Services
                 .AnyAsync();
         }
 
+        internal static async Task<bool> IsStoreManagerTargetAsync(
+            ISqlSugarClient db,
+            string targetUserGuid
+        )
+        {
+            var isActiveUser = await db.Queryable<User>()
+                .AnyAsync(user =>
+                    user.UserGUID == targetUserGuid
+                    && user.IsActive
+                    && !user.IsDeleted
+                );
+            if (!isActiveUser)
+            {
+                return false;
+            }
+
+            var managerRoleNames = Permissions.StoreManagerRoleNames.ToArray();
+            return await db.Queryable<UserRole>()
+                .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+                .Where((userRole, role) =>
+                    userRole.UserGUID == targetUserGuid
+                    && !userRole.IsDeleted
+                    && role.IsActive
+                    && !role.IsDeleted
+                    && managerRoleNames.Contains(role.RoleName)
+                )
+                .AnyAsync();
+        }
+
+        /// <summary>
+        /// 受限操作者（店长、仓库管理）维护目标「直接权限」时的委派范围，三处共用：读可分配权限、保存、校验。
+        /// - 店长：目标必须是员工；可授 = POS 业务权限 ∩ 本人持有。
+        /// - 仓库管理：目标可以是员工或店长。员工同店长口径；店长目标可授 = 本人持有的权限，
+        ///   去掉提升类权限码（<see cref="WarehouseProtectedPermissionCodes"/>）和非业务的 POS 系统级权限，
+        ///   所以任何情况下都不会授出超过仓库管理自己的权限，也不会授出能改角色 / 系统设置的权限。
+        /// </summary>
+        internal static async Task<PermissionDelegation> ResolvePermissionDelegationAsync(
+            ISqlSugarClient db,
+            UserAccessMutationActor actor,
+            string targetUserGuid
+        )
+        {
+            var posBusinessCodes = PermissionSeedData.PosTerminalBusinessPermissionCodes
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var targetIsEmployee = await IsEmployeeTargetAsync(db, targetUserGuid);
+            var targetIsStoreManager =
+                actor.IsWarehouseManager && await IsStoreManagerTargetAsync(db, targetUserGuid);
+            if (!targetIsEmployee && !targetIsStoreManager)
+            {
+                return PermissionDelegation.TargetDenied;
+            }
+
+            var actorCodes = await GetEffectivePermissionCodesAsync(db, actor.UserGuid);
+            if (!targetIsStoreManager)
+            {
+                return new PermissionDelegation(
+                    true,
+                    false,
+                    code => posBusinessCodes.Contains(code),
+                    posBusinessCodes.Where(actorCodes.Contains)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                );
+            }
+
+            var elevated = WarehouseProtectedPermissionCodes
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool IsDelegableCatalogCode(string code) =>
+                !elevated.Contains(code)
+                && (
+                    !code.StartsWith("Permissions.PosTerminal.", StringComparison.OrdinalIgnoreCase)
+                    || posBusinessCodes.Contains(code)
+                );
+            return new PermissionDelegation(
+                true,
+                true,
+                IsDelegableCatalogCode,
+                actorCodes.Where(IsDelegableCatalogCode)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            );
+        }
+
         internal static async Task<UserAccessMutationDecision> ValidateStoreTargetMutationAsync(
             ISqlSugarClient db,
             ICurrentUserManageableStoreScopeService? manageableStoreScopeService,
@@ -737,6 +818,22 @@ namespace BlazorApp.Api.Services
 
         internal static UserAccessMutationActor WarehouseManager(string userGuid) =>
             new(UserAccessMutationActorKind.WarehouseManager, userGuid, Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// 受限操作者对某个目标的「直接权限」委派范围。
+    /// IsDelegableCatalogCode：该权限码在类别上允许被委派（与操作者是否持有无关，用来区分「越类别」与「越权」两种错误）；
+    /// DelegableCodes：真正可授 = 类别允许 ∩ 操作者本人持有。
+    /// </summary>
+    internal sealed record PermissionDelegation(
+        bool TargetAllowed,
+        bool TargetIsStoreManager,
+        Func<string, bool> IsDelegableCatalogCode,
+        HashSet<string> DelegableCodes
+    )
+    {
+        internal static PermissionDelegation TargetDenied { get; } =
+            new(false, false, _ => false, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
 
     internal sealed record UserAccessMutationDecision(
