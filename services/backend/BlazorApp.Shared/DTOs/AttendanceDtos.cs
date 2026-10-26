@@ -78,6 +78,10 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan EndTime { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? Remark { get; set; }
+        /// <summary>软删除时间（UTC），仅「已删除排班」列表返回。</summary>
+        public DateTime? DeletedAt { get; set; }
+        /// <summary>软删除操作者，仅「已删除排班」列表返回。</summary>
+        public string? DeletedBy { get; set; }
         /// <summary>店长指定的用餐次数；null 表示按班次时长自动计算。</summary>
         public int? MealBreakCount { get; set; }
         /// <summary>排班的有效用餐次数：店长指定值，否则按班次时长默认（超 4.5 小时 1 次、超 9 小时 2 次）。后端统一计算，移动端以此为准。</summary>
@@ -155,6 +159,9 @@ namespace BlazorApp.Shared.DTOs
         public string? StoreCode { get; set; }
         public string? UserGuid { get; set; }
         public DateTime? WeekStartDate { get; set; }
+        /// <summary>按可上班日期过滤的起止（含当天）；可与 WeekStartDate 同时使用。</summary>
+        public DateTime? FromDate { get; set; }
+        public DateTime? ToDate { get; set; }
     }
 
     public class AttendanceAvailabilitySegmentDto
@@ -189,6 +196,8 @@ namespace BlazorApp.Shared.DTOs
         public string AvailabilityGuid { get; set; } = string.Empty;
         public string StoreCode { get; set; } = string.Empty;
         public string UserGuid { get; set; } = string.Empty;
+        /// <summary>员工显示名（全名，缺省用户名）；管理端列表填充。</summary>
+        public string? UserName { get; set; }
         public DateTime WeekStartDate { get; set; }
         public DateTime AvailableDate { get; set; }
         public TimeSpan StartTime { get; set; }
@@ -215,6 +224,11 @@ namespace BlazorApp.Shared.DTOs
         public string? Remark { get; set; }
         /// <summary>下班时对「缺休息」的声明；旧版 App 不带，服务端按「已休息」处理。</summary>
         public AttendanceMealDeclarationDto? MealDeclaration { get; set; }
+        /// <summary>
+        /// 客户端按今日状态期望的打卡类型（ClockIn / ClockOut）；null＝旧客户端，按服务端判定。
+        /// 与服务端判定不一致时拒绝，错误码 PUNCH_TYPE_MISMATCH。
+        /// </summary>
+        public string? ExpectedPunchType { get; set; }
     }
 
     public class AttendanceQrResolveRequestDto
@@ -276,6 +290,8 @@ namespace BlazorApp.Shared.DTOs
         public bool IsBreakBoundary { get; set; }
         public string? SupersedesPunchGuid { get; set; }
         public string? AdjustmentGuid { get; set; }
+        /// <summary>系统在门店时区 00:00 补的自动下班卡；它闭合的班段不计薪，等店长填实际下班时间。</summary>
+        public bool IsSystemAutoClockOut { get; set; }
         public int? EarlyArrivalMinutes { get; set; }
         public int? LateMinutes { get; set; }
         public int? EarlyLeaveMinutes { get; set; }
@@ -410,12 +426,16 @@ namespace BlazorApp.Shared.DTOs
         public string? StoreCode { get; set; }
         public string? SourceType { get; set; }
         public string? ReviewStatus { get; set; }
+        /// <summary>只看（true）或排除（false）本人审批的记录；null 不过滤。</summary>
+        public bool? IsSelfReview { get; set; }
     }
 
     public class ReviewAttendanceApprovalDto
     {
         public string? ReviewRemark { get; set; }
         public int? ApprovedOvertimeMinutes { get; set; }
+        /// <summary>带薪公假确认（SourceType = PublicHolidayPay）批准时的确认工时；null 时用建议工时。</summary>
+        public decimal? ApprovedPaidHours { get; set; }
     }
 
     public class AttendanceApprovalDto
@@ -437,9 +457,52 @@ namespace BlazorApp.Shared.DTOs
         public DateTime CreatedAt { get; set; }
         public int? CandidateOvertimeMinutes { get; set; }
         public int? ApprovedOvertimeMinutes { get; set; }
+        /// <summary>本人审批：审核人持 Attendance.Approval.ReviewSelf 处理了自己的申请。</summary>
+        public bool IsSelfReview { get; set; }
         public AttendancePunchAdjustmentDto? Adjustment { get; set; }
         /// <summary>SourceType = MealBreak 时的用餐声明（缺几次、申请加回多少分钟）。</summary>
         public AttendanceMealClaimDto? MealClaim { get; set; }
+        /// <summary>SourceType = Leave 时的结构化请假信息（病假审核一屏要用）。</summary>
+        public AttendanceApprovalLeaveDto? Leave { get; set; }
+        /// <summary>SourceType = PublicHolidayPay 时的带薪公假确认信息。</summary>
+        public AttendanceApprovalPublicHolidayPayDto? PublicHolidayPay { get; set; }
+    }
+
+    public class AttendanceApprovalLeaveDto
+    {
+        public string LeaveType { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
+        public int DayCount { get; set; }
+        public decimal? PaidHours { get; set; }
+        public string? Reason { get; set; }
+        public List<string> AttachmentUrls { get; set; } = new();
+        /// <summary>病假所选排班（含当天是否已打卡）。</summary>
+        public List<AttendanceLeaveScheduleDto> Schedules { get; set; } = new();
+        /// <summary>请假区间内已有的有效排班，格式 "YYYY-MM-DD HH:mm-HH:mm"（年假休息提示店长）。</summary>
+        public List<string> ScheduleConflicts { get; set; } = new();
+    }
+
+    public class AttendanceLeaveScheduleDto
+    {
+        public string ScheduleGuid { get; set; } = string.Empty;
+        public DateTime WorkDate { get; set; }
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; }
+        /// <summary>带薪工时 = 排班工时扣餐。</summary>
+        public decimal PaidHours { get; set; }
+        public bool HasPunch { get; set; }
+    }
+
+    public class AttendanceApprovalPublicHolidayPayDto
+    {
+        public DateTime HolidayDate { get; set; }
+        public string? HolidayName { get; set; }
+        public int OrdinaryCount { get; set; }
+        public int LookbackWeeks { get; set; }
+        public decimal? SuggestedHours { get; set; }
+        public decimal? Hours { get; set; }
+        public string Status { get; set; } = string.Empty;
     }
 
     public class CreateAttendancePunchAdjustmentDto
@@ -609,6 +672,10 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan? EndTime { get; set; }
         public string? Reason { get; set; }
         public string? AttachmentUrl { get; set; }
+        /// <summary>附件地址（病假医嘱 1–3 张）；旧客户端只传 AttachmentUrl。</summary>
+        public List<string>? AttachmentUrls { get; set; }
+        /// <summary>带薪病假所选排班；PaidSick 必填，日期以排班为准。</summary>
+        public List<string>? ScheduleGuids { get; set; }
     }
 
     public class CreateManagedAttendanceLeaveRequestDto
@@ -642,6 +709,10 @@ namespace BlazorApp.Shared.DTOs
         public string? ReviewedByName { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewRemark { get; set; }
+        /// <summary>申请的带薪工时（无薪类型为 null）；年假最终发多少以工资表财务核定为准。</summary>
+        public decimal? PaidHours { get; set; }
+        public List<string> AttachmentUrls { get; set; } = new();
+        public List<string> ScheduleGuids { get; set; } = new();
     }
 
     public class UpdateAttendanceSettingsDto
@@ -653,6 +724,23 @@ namespace BlazorApp.Shared.DTOs
         public bool RequireApprovalForEarlyLeave { get; set; } = true;
         public bool RequireApprovalForNoSchedule { get; set; } = true;
         public bool RequireApprovalForDuplicate { get; set; } = true;
+        /// <summary>员工每日每店段数上限；null＝不修改（兼容不带该字段的旧客户端）。</summary>
+        public int? EmployeeSegmentLimit { get; set; }
+        /// <summary>店长每日每店段数上限；null＝不修改。</summary>
+        public int? ManagerSegmentLimit { get; set; }
+        /// <summary>午夜自动下班开关；null＝不修改。</summary>
+        public bool? AutoClockOutAtMidnight { get; set; }
+        // 以下为带薪假与工时统计参数（规格第 1 节）；null＝不修改。
+        public int? DefaultPeriodWeeks { get; set; }
+        public DateTime? FortnightAnchorDate { get; set; }
+        public int? PublicHolidayLookbackWeeks { get; set; }
+        public int? PublicHolidayMinCount { get; set; }
+        public int? SickLeaveSubmitDays { get; set; }
+        public int? AnnualLeaveLeadWeeks { get; set; }
+        public int? AnnualLeaveMaxWeeks { get; set; }
+        public int? AnnualCashOutLeadDays { get; set; }
+        public int? AnnualCashOutMaxWeeks { get; set; }
+        public int? BirthdayRemindDays { get; set; }
     }
 
     public class AttendanceSettingsDto : UpdateAttendanceSettingsDto { }

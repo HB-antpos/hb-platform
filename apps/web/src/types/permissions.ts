@@ -247,12 +247,18 @@ export const P = {
     PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
+    // 审核本人申请：默认不授予任何角色，生产手动授权
+    ApprovalReviewSelf: 'Attendance.Approval.ReviewSelf',
     HolidayViewStore: 'Attendance.Holiday.ViewStore',
     HolidayEditManagedStore: 'Attendance.Holiday.EditManagedStore',
     LeaveApplySelf: 'Attendance.Leave.ApplySelf',
     LeaveViewManagedStore: 'Attendance.Leave.ViewManagedStore',
     LeaveReviewManagedStore: 'Attendance.Leave.ReviewManagedStore',
     SettingsEdit: 'Attendance.Settings.Edit',
+    // 工资：查看工资表 / 时薪表、编辑与提交锁定、解锁已提交周期；默认谁都没有
+    PayrollView: 'Attendance.Payroll.View',
+    PayrollEdit: 'Attendance.Payroll.Edit',
+    PayrollUnlock: 'Attendance.Payroll.Unlock',
     AdminView: 'Attendance.Admin.View',
   },
 } as const

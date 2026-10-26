@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="StoreDiscountRateTests.cs" />
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
     <Compile Include="ProductImageDescriptionTests.cs" />
     <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
@@ -143,10 +144,14 @@
     <Compile Include="UserNamePartsTests.cs" />
     <Compile Include="StoreUserCashierBarcodeServiceTests.cs" />
     <Compile Include="UserStoreManagementRelationTests.cs" />
+    <Compile Include="RoleLevelAccessTests.cs" />
     <Compile Include="AttendanceReactServiceTests.cs" />
     <Compile Include="AttendanceReactServiceMealBreakTests.cs" />
     <Compile Include="AttendanceReactServiceApprovalNotificationTests.cs" />
     <Compile Include="AttendanceReactServiceLocationBatchTests.cs" />
+    <Compile Include="AttendanceReactServiceReviewRoundTests.cs" />
+    <Compile Include="PayrollCalculatorTests.cs" />
+    <Compile Include="AttendanceReactServicePayrollTests.cs" />
     <Compile Include="AttendanceApproverResolverTests.cs" />
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />
@@ -161,6 +166,7 @@
     <Compile Include="SeedDataServiceTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionContractTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionServiceTests.cs" />
+    <Compile Include="WarehouseManagerUserAccessTests.cs" />
     <Compile Include="NavigationServiceTests.cs" />
     <Compile Include="StoreProductInsightRulesTests.cs" />
     <Compile Include="StoreProductInsightQueryServiceTests.cs" />
@@ -268,6 +274,7 @@
     <Compile Include="ContainerAllocationSalesReportServiceTests.cs" />
     <Compile Include="ContainerAllocationSalesAuthorizationPipelineTests.cs" />
     <Compile Include="BrowserExtensionTests.cs" />
+    <Compile Include="HelpFaqTests.cs" />
     <Compile Include="LocalSupplierCategoryLogicTests.cs" />
     <Compile Include="LocalSupplierCategoryServiceTests.cs" />
     <Compile Include="LocalSupplierCategorySqlServerIntegrationTests.cs" />

@@ -305,6 +305,7 @@ namespace BlazorApp.Api.Controllers
                         RoleName = role.RoleName,
                         Description = role.Description,
                         IsActive = role.IsActive,
+                        Level = role.Level,
                         CreatedAt = role.CreatedAt,
                         UpdatedAt = role.UpdatedAt ?? role.CreatedAt,
                         UserCount = 0, // 这里不需要计算用户数

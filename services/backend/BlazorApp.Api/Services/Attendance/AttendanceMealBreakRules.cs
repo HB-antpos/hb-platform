@@ -57,9 +57,14 @@ public static class AttendanceMealBreakRules
     public static int RequiredCount(int effectiveCount, int workedMinutes) =>
         Math.Min(Math.Max(0, effectiveCount), Math.Max(0, workedMinutes) / WorkMinutesPerMeal);
 
-    /// <summary>计薪时从工时里扣除的用餐分钟数；是否休息过都按排班扣，未休息的差额靠审批加回。</summary>
-    public static int DeductionMinutes(int effectiveCount, int workedMinutes) =>
-        RequiredCount(effectiveCount, workedMinutes) * MealBreakMinutes;
+    /// <summary>
+    /// 计薪时从工时里扣除的用餐分钟数；是否休息过都按排班扣，未休息的差额靠审批加回。
+    /// 段间满 30 分钟的空档本身已不在实际工时里（员工打了下班卡），每个空档抵掉一次扣餐，避免同一顿饭扣两次：
+    /// 扣餐 = max(0, min(有效次数, ⌊实际工时 / 4h⌋) − 合格空档数) × 30。
+    /// </summary>
+    public static int DeductionMinutes(int effectiveCount, int workedMinutes, int qualifyingGapCount = 0) =>
+        Math.Max(0, RequiredCount(effectiveCount, workedMinutes) - Math.Max(0, qualifyingGapCount))
+        * MealBreakMinutes;
 
     /// <summary>相邻班段之间满 30 分钟的空档个数；每个空档算一次已用餐。</summary>
     public static int CountQualifyingGapBreaks(IReadOnlyList<AttendanceShiftSegmentDto> segments)

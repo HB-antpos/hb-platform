@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services.HelpFaq;
 using BlazorApp.Api.Services.Logging;
 using BlazorApp.Api.Services.Performance;
 using BlazorApp.Api.Services.React;
@@ -215,6 +216,22 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStorePosApiEntryAsync(CancellationToken cancellationToken);
 
+    Task ApplyHelpFaqAsync(CancellationToken cancellationToken);
+
+    Task VerifyHelpFaqAsync(CancellationToken cancellationToken);
+
+    Task ApplyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken);
+
+    Task ApplyAttendancePayrollLeaveAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendancePayrollLeaveAsync(CancellationToken cancellationToken);
+
+    Task ApplyRoleLevelAsync(CancellationToken cancellationToken);
+
+    Task VerifyRoleLevelAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -268,6 +285,8 @@ internal sealed class LinklyMultiTerminalSchemaMismatchException : Exception;
 internal sealed class MobileOtaRuntimeTargetsSchemaMismatchException : Exception;
 
 internal sealed class LocalSupplierCategorySchemaMismatchException : Exception;
+
+internal sealed class HelpFaqSchemaMismatchException : Exception;
 
 internal sealed class AttendanceLocationSampleBatchSchemaMismatchException : Exception;
 
@@ -1330,6 +1349,113 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StorePosApiEntrySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyRoleLevelAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            RoleLevelSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/可空性不符的列不会被误标为完成。
+        await VerifyRoleLevelAsync(cancellationToken);
+    }
+
+    public async Task VerifyRoleLevelAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            RoleLevelSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyHelpFaqAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            HelpFaqSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后先过精确签名，再灌种子；结构错误的同名表不会被灌入内容或误标为完成。
+        await VerifyHelpFaqAsync(cancellationToken);
+
+        // 首次内容来自嵌入资源 help-faq-seed.json：仅当 FAQ 两表都为空时单事务灌入，重复执行直接跳过。
+        var plan = HelpFaqSeedImporter.Parse(
+            HelpFaqSeedImporter.ReadEmbeddedSeedJson(),
+            DateTime.UtcNow
+        );
+        await HelpFaqSeedSqlWriter.SeedIfEmptyAsync(
+            _mainDatabase.ConnectionString,
+            plan,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task VerifyHelpFaqAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+                _mainDatabase.ConnectionString,
+                HelpFaqSchema.VerifySql,
+                _commandTimeoutSeconds,
+                cancellationToken
+            );
+        }
+        catch (SqlException exception) when (exception.Number is >= 54200 and <= 54209)
+        {
+            throw new HelpFaqSchemaMismatchException();
+        }
+    }
+
+    public async Task ApplyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceReviewAutoClockOutSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/可空性不符的列不会被误标为完成。
+        await VerifyAttendanceReviewAutoClockOutAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceReviewAutoClockOutAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceReviewAutoClockOutSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendancePayrollLeaveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayrollLeaveSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本。
+        await VerifyAttendancePayrollLeaveAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendancePayrollLeaveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayrollLeaveSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

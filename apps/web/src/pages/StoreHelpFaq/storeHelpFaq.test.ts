@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { STORE_HELP_FAQ_GROUPS, STORE_HELP_FAQ_PATH, type StoreHelpFaqLanguage, type StoreHelpFaqTab } from './faqContent'
+import {
+  STORE_HELP_FAQ_PATH,
+  type StoreHelpFaqGroup,
+  type StoreHelpFaqLanguage,
+  type StoreHelpFaqTab,
+} from './faqContent'
 import {
   buildStoreHelpFaqNumbering,
   filterStoreHelpFaqGroups,
@@ -16,6 +21,10 @@ import {
 
 const appSource = readFileSync('src/App.tsx', 'utf8')
 const publicPathSource = readFileSync('src/pages/MobilePrivacy/publicPath.ts', 'utf8')
+// 问答内容已落库，页面在接口失败时使用的兜底快照就是这里断言的数据（与后端种子逐字节一致，见 faqData.test.ts）
+const STORE_HELP_FAQ_GROUPS = (JSON.parse(readFileSync('src/pages/StoreHelpFaq/faqSnapshot.json', 'utf8')) as {
+  tabs: Record<StoreHelpFaqTab, StoreHelpFaqGroup[]>
+}).tabs
 
 // 路由：懒加载 + 免登录白名单
 assert.equal(STORE_HELP_FAQ_PATH, '/support/faq')
@@ -77,6 +86,7 @@ for (const tab of tabs) {
   }
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
+// 快照当前的题数（防止快照被误截断）；刷新快照后同步更新这两个数字
 assert.equal(countQuestions('pos'), 28)
 assert.equal(countQuestions('mobile'), 15)
 

@@ -112,6 +112,8 @@ import {
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
+import AttendancePayrollSettingsFields from './AttendancePayrollSettingsFields'
+import DeletedSchedulesDrawer from './DeletedSchedulesDrawer'
 import {
   buildAttendanceLocationTrajectory,
   normalizeAttendanceUtcText,
@@ -356,6 +358,7 @@ export default function ScheduleAttendancePage() {
   const [adjustmentPreviewLoading, setAdjustmentPreviewLoading] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [syncingHolidays, setSyncingHolidays] = useState(false)
+  const [deletedSchedulesOpen, setDeletedSchedulesOpen] = useState(false)
   const [scheduleForm] = Form.useForm<ScheduleFormValues>()
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
@@ -585,7 +588,9 @@ export default function ScheduleAttendancePage() {
 
     setAvailability((prev) => ({ ...prev, loading: true, page, pageSize }))
     try {
-      const result = await getAttendanceAvailability(queryParams(page, pageSize))
+      // 可上班时间按所选日期范围查（后端 FromDate / ToDate 过滤 AvailableDate）；
+      // 不带 weekStartDate，否则范围起点不是周一时会被「周起始日 = 起点」条件筛空。
+      const result = await getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })
       setAvailability({ loading: false, items: result.items, total: result.total, page: result.page, pageSize: result.pageSize })
     } catch (error) {
       console.error(error)
@@ -2110,6 +2115,8 @@ export default function ScheduleAttendancePage() {
               <Switch />
             </Form.Item>
           ) : null}
+          {/* 规格第 1 节新增参数（卡 B）：后端返回才显示，旧后端不受影响 */}
+          {settings?.defaultPeriodWeeks !== undefined ? <AttendancePayrollSettingsFields /> : null}
           <Space>
             <Button icon={<ReloadOutlined />} loading={settingsLoading} onClick={() => void loadSettings()}>{t('common.refresh')}</Button>
             {access.canEditAttendanceSettings ? (
@@ -2140,6 +2147,9 @@ export default function ScheduleAttendancePage() {
                   {t('posAdmin.scheduleAttendance.actions.publishWeek')}
                 </Button>
               </Tooltip>
+              <Button icon={<DeleteOutlined />} disabled={!storeCode} onClick={() => setDeletedSchedulesOpen(true)}>
+                {t('posAdmin.scheduleAttendance.deletedSchedules.button')}
+              </Button>
               <Button type="primary" icon={<PlusOutlined />} disabled={!canEditSelectedStore} onClick={() => openScheduleDrawer()}>{t('posAdmin.scheduleAttendance.actions.createSchedule')}</Button>
             </>
           ) : null}
@@ -2172,6 +2182,16 @@ export default function ScheduleAttendancePage() {
     >
       <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as TabKey)} items={tabItems} />
 
+      <DeletedSchedulesDrawer
+        open={deletedSchedulesOpen}
+        storeCode={storeCode}
+        fromDate={weekStart.format('YYYY-MM-DD')}
+        toDate={getIsoWeekEnd(weekStart).format('YYYY-MM-DD')}
+        canRestore={canEditSelectedStore}
+        onClose={() => setDeletedSchedulesOpen(false)}
+        onRestored={() => loadActiveTab(1)}
+      />
+
       <Drawer
         title={editingSchedule ? t('posAdmin.scheduleAttendance.drawer.editSchedule') : t('posAdmin.scheduleAttendance.drawer.createSchedule')}
         width={520}
@@ -2187,11 +2207,13 @@ export default function ScheduleAttendancePage() {
         )}
       >
         <Form form={scheduleForm} layout="vertical">
+          {/* 后端改排班不改员工和分店（打卡、审批都挂在原员工原分店上）；编辑时锁定，避免看似改了实际没生效。 */}
           <Form.Item name="storeCode" label={t('posAdmin.scheduleAttendance.fields.store')} rules={[{ required: true, message: t('form.pleaseSelectStore') }]}>
-            <Select showSearch optionFilterProp="label" options={editableStoreOptions} />
+            <Select showSearch optionFilterProp="label" options={editableStoreOptions} disabled={Boolean(editingSchedule)} />
           </Form.Item>
           <Form.Item name="userGuid" label={t('posAdmin.scheduleAttendance.fields.employeeGuid')} rules={[{ required: true, message: t('posAdmin.scheduleAttendance.validation.userGuidRequired') }]}>
             <Select
+              disabled={Boolean(editingSchedule)}
               showSearch
               optionFilterProp="label"
               options={storeUsers.map((user) => ({

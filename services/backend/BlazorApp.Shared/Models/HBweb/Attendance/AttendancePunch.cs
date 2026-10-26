@@ -76,5 +76,12 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = true, Length = 500)]
         public string? Remark { get; set; }
+
+        /// <summary>
+        /// 午夜自动下班卡：门店时区 00:00 仍未闭合的班段由系统补这张下班卡（时间 = 当天 24:00）。
+        /// 它闭合的班段不计薪、并视为漏下班；店长填实际下班时间（补卡覆盖本卡）后结案。列由迁移 20261026.001 添加。
+        /// </summary>
+        [SugarColumn(IsNullable = false)]
+        public bool IsSystemAutoClockOut { get; set; }
     }
 }
