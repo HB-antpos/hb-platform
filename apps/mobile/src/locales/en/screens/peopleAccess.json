@@ -78,6 +78,7 @@
     "copyFromColleague": "Copy from colleague",
     "copyToOthers": "Copy to others",
     "managerLimit": "Store managers can only grant permissions they have themselves.",
+    "warehouseLimit": "Warehouse managers can only grant permissions they hold themselves, excluding role-management and system-settings permissions.",
     "implicitNotice": "This account is an admin and has all permissions by default.",
     "source": {
       "inherited": "Inherited from {{roles}}",

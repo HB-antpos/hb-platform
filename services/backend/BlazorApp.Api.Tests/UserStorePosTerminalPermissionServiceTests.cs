@@ -315,10 +315,9 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("StoreManager")]
     [InlineData("WarehouseManager")]
     [InlineData("Admin")]
-    public async Task WarehouseManager_拒绝高权限和非员工目标(string targetRoleName)
+    public async Task WarehouseManager_拒绝管理员和仓库管理目标以及非员工目标(string targetRoleName)
     {
         await SeedWarehouseActorAndTargetAsync();
         await _db.Insertable(new Role
@@ -349,6 +348,37 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
         var nonEmployee = await CreateWarehouseService().GetAsync("target", "store-a");
         Assert.False(nonEmployee.Success);
         Assert.Equal("EMPLOYEE_TARGET_REQUIRED", nonEmployee.ErrorCode);
+    }
+
+    [Fact]
+    public async Task WarehouseManager_可维护店长账号的Pos业务权限()
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        // 目标从店员改为店长（线上店长角色自带 Users.* 店员管理码，完整高权限口径下它本身是受保护目标）。
+        await _db.Deleteable<UserRole>()
+            .Where(item => item.UserGUID == "target" && item.RoleGUID == "role-staff")
+            .ExecuteCommandAsync();
+        await _db.Insertable(new UserRole
+        {
+            UserRoleGUID = "target-store-manager",
+            UserGUID = "target",
+            RoleGUID = "role-manager",
+        }).ExecuteCommandAsync();
+        var service = CreateWarehouseService();
+
+        var state = await service.GetAsync("target", "store-a");
+        var updated = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes = [Permissions.PosTerminal.Sales.AddOpenItem],
+            }
+        );
+
+        Assert.True(state.Success, state.Message);
+        Assert.True(updated.Success, updated.Message);
+        Assert.Contains(Permissions.PosTerminal.Sales.AddOpenItem, updated.Data!.GrantedPermissionCodes);
     }
 
     [Fact]

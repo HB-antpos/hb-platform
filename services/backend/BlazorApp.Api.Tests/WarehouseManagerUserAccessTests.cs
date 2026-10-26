@@ -6,6 +6,7 @@ using BlazorApp.Api.Services;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlSugar;
@@ -274,6 +275,132 @@ public sealed class WarehouseManagerUserAccessTests : IDisposable
         Assert.True(actor.CanGrantManageableStores);
     }
 
+    [Fact]
+    public async Task 直接权限_仓库管理看店长目标时可分配权限为本人拥有且非提升类()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().GetUserAccessPermissionsAsync("warehouse", "store-manager");
+
+        Assert.True(result.Success, result.Message);
+        var codes = result.Data!.Categories.SelectMany(item => item.Permissions).Select(item => item.Name).ToList();
+        Assert.Contains(Permissions.Reports.View, codes);
+        Assert.Contains(Permissions.PosTerminal.Sales.View, codes);
+        // 仓库管理自己持有，但提升类 / POS 系统级权限不能转授。
+        Assert.DoesNotContain(Permissions.Roles.Edit, codes);
+        Assert.DoesNotContain(Permissions.PosTerminal.Settings.AppUpdate, codes);
+        // 本人没有的权限也不出现。
+        Assert.DoesNotContain(Permissions.Warehouse.StartPicking, codes);
+    }
+
+    [Fact]
+    public async Task 直接权限_仓库管理对员工目标仍只有POS业务权限()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().GetUserAccessPermissionsAsync("warehouse", "staff");
+
+        Assert.True(result.Success, result.Message);
+        var codes = result.Data!.Categories.SelectMany(item => item.Permissions).Select(item => item.Name).ToList();
+        Assert.Contains(Permissions.PosTerminal.Sales.View, codes);
+        Assert.DoesNotContain(Permissions.Reports.View, codes);
+    }
+
+    [Fact]
+    public async Task 直接权限_仓库管理可给店长授本人拥有的普通权限()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().AssignPermissionsToUserAsync(
+            "store-manager",
+            new UserPermissionAssignmentDto { Permissions = [Permissions.Reports.View] }
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(await _db.Queryable<SysUserPermission>().AnyAsync(item =>
+            item.UserGuid == "store-manager" && item.PermissionCode == Permissions.Reports.View));
+    }
+
+    [Theory]
+    [InlineData("Roles.Edit")]
+    [InlineData("Permissions.PosTerminal.Settings.AppUpdate")]
+    public async Task 直接权限_仓库管理不能给店长授提升类或POS系统级权限(string code)
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().AssignPermissionsToUserAsync(
+            "store-manager",
+            new UserPermissionAssignmentDto { Permissions = [code] }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("POS_PERMISSION_DELEGATION_DENIED", result.ErrorCode);
+        Assert.False(await _db.Queryable<SysUserPermission>().AnyAsync(item =>
+            item.UserGuid == "store-manager" && item.PermissionCode == code));
+    }
+
+    [Fact]
+    public async Task 直接权限_仓库管理不能授本人没有的权限()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().AssignPermissionsToUserAsync(
+            "store-manager",
+            new UserPermissionAssignmentDto { Permissions = [Permissions.Warehouse.StartPicking] }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("PERMISSION_ESCALATION_DENIED", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 直接权限_仓库管理对员工目标仍不能授普通权限()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService().AssignPermissionsToUserAsync(
+            "staff",
+            new UserPermissionAssignmentDto { Permissions = [Permissions.Reports.View] }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("POS_PERMISSION_DELEGATION_DENIED", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 直接权限_仓库管理不能维护订货员等非员工非店长目标()
+    {
+        await SeedAsync();
+        await _db.Insertable(User("order-user")).ExecuteCommandAsync();
+        await _db.Insertable(UserRoleRow("order-user", "role-order")).ExecuteCommandAsync();
+
+        var result = await CreateRoleService().AssignPermissionsToUserAsync(
+            "order-user",
+            new UserPermissionAssignmentDto { Permissions = [Permissions.PosTerminal.Sales.View] }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("EMPLOYEE_TARGET_REQUIRED", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 直接权限_店长操作者仍不能维护店长目标()
+    {
+        await SeedAsync();
+
+        var result = await CreateRoleService(
+            actorGuid: "plain-store-manager",
+            isAdmin: false,
+            storeGuids: ["store-a"]
+        ).AssignPermissionsToUserAsync(
+            "store-manager",
+            new UserPermissionAssignmentDto { Permissions = [Permissions.PosTerminal.Sales.View] }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("HIGH_PRIVILEGE_TARGET_DENIED", result.ErrorCode);
+    }
+
     private async Task<bool> HasRoleAsync(string userGuid, string roleGuid) =>
         await _db.Queryable<UserRole>().AnyAsync(item =>
             item.UserGUID == userGuid && item.RoleGUID == roleGuid && !item.IsDeleted);
@@ -323,6 +450,22 @@ public sealed class WarehouseManagerUserAccessTests : IDisposable
         }).ExecuteCommandAsync();
         await _db.Insertable(new[]
         {
+            RolePermission("wh-reports", "role-warehouse-manager", Permissions.Reports.View),
+            RolePermission("wh-pos-sales", "role-warehouse-manager", Permissions.PosTerminal.Sales.View),
+            // 仓库管理自己持有，但属于不可转授的类别。
+            RolePermission("wh-roles-edit", "role-warehouse-manager", Permissions.Roles.Edit),
+            RolePermission("wh-pos-appupdate", "role-warehouse-manager", Permissions.PosTerminal.Settings.AppUpdate),
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            Permission(Permissions.Reports.View, "查看报表", "报表"),
+            Permission(Permissions.PosTerminal.Sales.View, "POS 查看销售", "POS"),
+            Permission(Permissions.Roles.Edit, "编辑角色", "角色管理"),
+            Permission(Permissions.PosTerminal.Settings.AppUpdate, "POS 应用更新", "POS"),
+            Permission(Permissions.Warehouse.StartPicking, "开始配货", "仓库"),
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
             UserStoreRow("staff", "store-a", false),
             UserStoreRow("store-manager", "store-a", true),
             UserStoreRow("admin-target", "store-a", false),
@@ -350,6 +493,34 @@ public sealed class WarehouseManagerUserAccessTests : IDisposable
                 StoreGuids = storeGuids ?? Array.Empty<string>(),
             })
         );
+
+    private RoleService CreateRoleService(
+        string actorGuid = "warehouse",
+        bool isAdmin = true,
+        string[]? storeGuids = null
+    ) =>
+        new(
+            CreateContext(_db),
+            NullLogger<RoleService>.Instance,
+            new HttpContextAccessor(),
+            new FakeScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                IsAdmin = isAdmin,
+                IsStoreManager = !isAdmin,
+                UserGuid = actorGuid,
+                StoreGuids = storeGuids ?? Array.Empty<string>(),
+            })
+        );
+
+    private static SysPermission Permission(string code, string name, string category) => new()
+    {
+        Id = $"perm-{code}",
+        Code = code,
+        Name = name,
+        Category = category,
+    };
 
     private static Store Store(string guid) => new()
     {

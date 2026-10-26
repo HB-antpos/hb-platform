@@ -38,6 +38,8 @@ interface AccessPermissionsSectionProps {
   /** 目标是管理员：默认拥有全部权限，开关全部锁定，也不提供复制。 */
   implicitAll: boolean;
   isAdmin: boolean;
+  /** 仓库管理：提示文案不同（只能授予自己拥有的、非角色/系统管理类权限）。 */
+  isWarehouseManager?: boolean;
   inheritedSourceMap: Map<string, string[]>;
   editable: boolean;
   busy: boolean;
@@ -81,6 +83,7 @@ export function AccessPermissionsSection({
   counts,
   implicitAll,
   isAdmin,
+  isWarehouseManager = false,
   inheritedSourceMap,
   editable,
   busy,
@@ -208,7 +211,11 @@ export function AccessPermissionsSection({
         </View>
       </InfoCard>
 
-      {!isAdmin ? <NoticeBox tone="blue">{t("permissions.managerLimit")}</NoticeBox> : null}
+      {!isAdmin ? (
+        <NoticeBox tone="blue">
+          {t(isWarehouseManager ? "permissions.warehouseLimit" : "permissions.managerLimit")}
+        </NoticeBox>
+      ) : null}
       {implicitAll ? <NoticeBox tone="violet">{t("permissions.implicitNotice")}</NoticeBox> : null}
 
       <AccessSearchBox
