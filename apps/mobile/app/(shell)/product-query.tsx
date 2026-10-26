@@ -38,7 +38,7 @@ import { NumericInputModal } from "@/components/product-maintenance/NumericInput
 import { OfflineCatalogStatusRow } from "@/components/product-maintenance/OfflineCatalogStatusRow";
 import { OfflineModeBanner } from "@/components/product-maintenance/OfflineModeBanner";
 import { ProductHeroCard } from "@/components/product-maintenance/ProductHeroCard";
-import { ProductPromotionCard } from "@/components/product-maintenance/ProductPromotionCard";
+import { ProductPromotionSection } from "@/components/product-maintenance/ProductPromotionSection";
 import { SearchPanel } from "@/components/product-maintenance/SearchPanel";
 import { SetCodeCompactSection } from "@/components/product-maintenance/SetCodeCompactSection";
 import { buildPriceUpdatesRoute } from "@/modules/price-updates/navigation";
@@ -179,7 +179,11 @@ import {
   resolveProductEditorStoreScope,
 } from "@/modules/product-maintenance/invoice-editor-exit";
 import { createActivePromotionRequestCoordinator } from "@/modules/promotions/active-promotion-request";
-import { fetchValidPromotionsByProduct } from "@/modules/promotions/api";
+import { fetchStorePromotionsByProduct } from "@/modules/promotions/api";
+import {
+  countActiveProductPromotions,
+  resolveProductPromotionAccess,
+} from "@/modules/product-maintenance/product-promotion-section";
 import type { PromotionListItem } from "@/modules/promotions/types";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { IOS_REVIEW_SAMPLE_BARCODE } from "@/modules/ios-review/helpers";
@@ -573,6 +577,16 @@ function ProductQueryContent() {
     isAuthenticated &&
     !offlineMode &&
     access.hasPermission(PERMISSIONS.StoreProducts.EditName);
+  // 本商品促销：显示看 Promotions.View，操作看 Promotions.Edit；设备模式 / 离线只读。
+  const promotionAccessMode = resolveProductPromotionAccess({
+    canView: access.hasPermission(PERMISSIONS.Promotions.View),
+    canEdit: access.hasPermission(PERMISSIONS.Promotions.Edit),
+    interactive: !isDeviceMode && isAuthenticated && !offlineMode,
+  });
+  const promotionCanViewRef = useRef(promotionAccessMode !== "hidden");
+  promotionCanViewRef.current = promotionAccessMode !== "hidden";
+  // 促销弹层打开期间暂停页面扫码查询，避免扫码枪输入同时触发商品切换。
+  const [promotionSheetOpen, setPromotionSheetOpen] = useState(false);
   const printerAutoReconnectPaused = usePrinterStore(
     (state) => state.autoReconnectPaused,
   );
@@ -746,7 +760,11 @@ function ProductQueryContent() {
   if (!activePromotionCoordinatorRef.current) {
     activePromotionCoordinatorRef.current =
       createActivePromotionRequestCoordinator({
-        fetchPromotions: fetchValidPromotionsByProduct,
+        // 没有 Promotions.View 不请求，区块本来也不显示。
+        fetchPromotions: (productCode, storeCode) =>
+          promotionCanViewRef.current
+            ? fetchStorePromotionsByProduct(productCode, storeCode)
+            : Promise.resolve([]),
         applyPromotions: setActivePromotions,
         onFailure: (error) => {
           console.warn("[product-query] active promotions load failed", {
@@ -964,6 +982,13 @@ function ProductQueryContent() {
     },
     [],
   );
+  // 促销区块操作成功后，按当前商品与分店重新加载（仍走防串数据的协调器）。
+  const promotionProductCode = detail?.productCode;
+  const reloadActivePromotions = useCallback(() => {
+    if (promotionProductCode && selectedStoreCode) {
+      loadActivePromotions(promotionProductCode, selectedStoreCode);
+    }
+  }, [loadActivePromotions, promotionProductCode, selectedStoreCode]);
   const isProductQueryBusy = useCallback(
     () =>
       isProductQueryInteractionBlocked({
@@ -982,7 +1007,8 @@ function ProductQueryContent() {
       productTypeSaving ||
       nameSaving ||
       createProductBusy ||
-      hqSyncRetrying,
+      hqSyncRetrying ||
+      promotionSheetOpen,
     [
       autoPricingDialog,
       autoPricingDialogSaving,
@@ -991,6 +1017,7 @@ function ProductQueryContent() {
       createProductBusy,
       hqSyncRetrying,
       nameSaving,
+      promotionSheetOpen,
       productTypeSaving,
       saving,
       savingClearance,
@@ -4299,7 +4326,8 @@ function ProductQueryContent() {
     !isIosReviewSessionActive() && Boolean(detail?.productCode && selectedStoreCode);
   const posterAvailability = resolveScanPosterAvailability({
     discountRate: normalizedStoreDiscountRate,
-    activePromotionCount: activePromotions.length,
+    // 新接口还返回未开始 / 已停用的促销，海报只数此刻生效中的。
+    activePromotionCount: countActiveProductPromotions(activePromotions),
     clearancePrice: clearancePrice?.clearancePrice,
   });
   const discountedRetailPrice = getDiscountedRetailPrice(
@@ -4729,7 +4757,20 @@ function ProductQueryContent() {
 
             {editorTab === "price" || !hasCodeSection ? (
               <View style={styles.firstScreenSection}>
-              <ProductPromotionCard items={activePromotions} />
+              {detail?.productCode && selectedStoreCode ? (
+                <ProductPromotionSection
+                  items={activePromotions}
+                  accessMode={promotionAccessMode}
+                  productCode={detail.productCode}
+                  productName={detail.productName}
+                  retailPrice={storePrice?.retailPrice ?? null}
+                  storeCode={selectedStoreCode}
+                  storeName={storeDisplayName ?? selectedStoreCode}
+                  onChanged={reloadActivePromotions}
+                  onMessage={setSnackbarMessage}
+                  onSheetVisibleChange={setPromotionSheetOpen}
+                />
+              ) : null}
 
               {storePrice ? (
                 <StorePriceStrategyCard

@@ -3294,12 +3294,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             runtime.VerifyHelpFaqAsync(CancellationToken.None));
         Assert.NotNull(missing);
 
-        // 首次：建表 + 灌入 11 组 / 43 问（收银端 28 + 移动端 15），全部已发布。
+        // 首次：建表 + 灌入 11 组 / 45 问（收银端 28 + 移动端 17），全部已发布。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         await runtime.VerifyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString,
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Status = N'Published' AND Version = 1 AND PublishedAt IS NOT NULL AND DraftJson IS NULL AND IsDeleted = 0 AND CreatedBy = N'system-seed' AND UpdatedBy = N'system-seed'"));
         Assert.Equal(28, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion q JOIN dbo.HelpFaqGroup g ON g.GroupGUID = q.GroupGUID WHERE g.Tab = N'pos'"));
@@ -3307,13 +3307,13 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         // 重复执行：表非空直接跳过，行数不变（不重复灌入）。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 管理员删掉某题后再次执行迁移也不会补回（只要两表任一非空就跳过，绝不覆盖线上编辑）。
         await ExecuteNonQueryAsync(databases.MainConnectionString,
             "UPDATE dbo.HelpFaqQuestion SET IsDeleted = 1 WHERE Code = N'remove'");
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.Equal(1, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Code = N'remove' AND IsDeleted = 1"));
         await ExecuteNonQueryAsync(databases.MainConnectionString,
@@ -3329,7 +3329,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             NullLogger<HelpFaqPublicService>.Instance);
         var snapshot = await service.GetPublishedAsync();
         Assert.Equal(28, snapshot.Data.Tabs.Pos.Sum(g => g.Questions.Count));
-        Assert.Equal(15, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
+        Assert.Equal(17, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(snapshot.Data), StringComparison.Ordinal);
 
         // Code 全局唯一：重复锚点必须被数据库拒绝。
@@ -3375,12 +3375,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.HelpFaqMigrationId
         );
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.True((await coordinator.CheckAsync(CancellationToken.None)).Success);
 
         // 再次迁移：账本已登记，整步跳过，不重复灌入。
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
-        Assert.Equal(43, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 实体不在 tableTypes：全新库基线不会抢先用 CodeFirst 建出签名不符的 FAQ 表（迁移成功即证明）。
     }

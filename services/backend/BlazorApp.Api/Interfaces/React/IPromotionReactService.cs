@@ -13,6 +13,16 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<bool>> DeleteAsync(string id);
         Task<ApiResponse<bool>> EnableAsync(string id, bool enable);
         Task<GridResponseDto<PromotionListDto>> GetStoreGridAsync(StorePromotionGridRequestDto request);
+        Task<ApiResponse<PromotionStoreStatusCountsDto>> GetStoreStatusCountsAsync(
+            string storeCode,
+            string? keyword = null,
+            DateTime? asOf = null
+        );
+        Task<ApiResponse<List<PromotionListDto>>> GetStoreProductPromotionsAsync(
+            string productCode,
+            string storeCode,
+            DateTime? asOf = null
+        );
         Task<ApiResponse<PromotionDetailDto>> GetStoreByIdAsync(string id, string storeCode);
         Task<ApiResponse<PromotionDetailDto>> CreateStorePromotionAsync(
             string storeCode,

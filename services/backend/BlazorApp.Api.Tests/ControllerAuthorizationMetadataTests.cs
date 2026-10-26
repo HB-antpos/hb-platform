@@ -219,6 +219,14 @@ public class ControllerAuthorizationMetadataTests
             Permissions.Promotions.View
         );
         yield return Policy<ReactPromotionsController>(
+            nameof(ReactPromotionsController.StoreStatusCounts),
+            Permissions.Promotions.View
+        );
+        yield return Policy<ReactPromotionsController>(
+            nameof(ReactPromotionsController.StoreProductPromotions),
+            Permissions.Promotions.View
+        );
+        yield return Policy<ReactPromotionsController>(
             nameof(ReactPromotionsController.CreateStorePromotion),
             Permissions.Promotions.Edit
         );
