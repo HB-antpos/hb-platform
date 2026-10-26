@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Button, Icon, Text, TextInput } from "react-native-paper";
 import {
+  parsePublicHolidayPayHours,
   validateAttendanceMealBreakApproval,
   type OvertimeApprovalAction,
 } from "@/modules/attendance/attendance-approval";
@@ -22,6 +23,7 @@ const TYPE_TONES: Record<string, AttendanceStatusTone> = {
   MealBreak: "success",
   Leave: "accent",
   Punch: "neutral",
+  PublicHolidayPay: "warning",
 };
 
 const LEAVE_RANGE_PATTERN = /^\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})(?:\s*·\s*(.+))?$/;
@@ -76,6 +78,11 @@ export function ApprovalCard({
   const [remark, setRemark] = useState("");
   const [showRemark, setShowRemark] = useState(false);
   const [error, setError] = useState("");
+  // 带薪公假确认工时：默认填后端建议值，店长可改（0 < h ≤ 24）。
+  const suggestedHolidayHours = item.publicHolidayPay?.suggestedHours;
+  const [holidayHoursText, setHolidayHoursText] = useState(
+    suggestedHolidayHours !== undefined ? String(Number(suggestedHolidayHours.toFixed(2))) : "",
+  );
   const detailKind = resolveApprovalDetailKind(item);
   const leaveType = item.leave?.leaveType ?? (item.sourceType === "Leave" ? item.title : undefined);
   const selfReview = isSelf && canReviewSelf;
@@ -153,6 +160,37 @@ export function ApprovalCard({
         </>
       );
     }
+    if (item.sourceType === "PublicHolidayPay" && item.publicHolidayPay) {
+      const pay = item.publicHolidayPay;
+      return (
+        <>
+          <Text variant="bodyLarge" style={styles.bodyLine}>
+            {t("approvals.board.holidayPay.cardLine", {
+              holiday: pay.holidayName ?? t("approvals.board.tierRate.publicHoliday"),
+              month: pay.holidayDate.slice(5, 7),
+              day: pay.holidayDate.slice(8, 10),
+            })}
+          </Text>
+          <Text variant="bodyMedium" style={styles.bodySecondary}>
+            {processed && pay.hours !== undefined
+              ? t("approvals.board.holidayPay.confirmedLine", { hours: formatHours(pay.hours) })
+              : t("approvals.board.holidayPay.historyLine", { weeks: pay.lookbackWeeks, count: pay.ordinaryCount })}
+          </Text>
+          {!processed && canAct ? (
+            <TextInput
+              mode="outlined"
+              dense
+              style={styles.hoursInput}
+              label={t("approvals.board.holidayPay.hoursLabel")}
+              value={holidayHoursText}
+              onChangeText={(value) => { setHolidayHoursText(value); setError(""); }}
+              keyboardType="decimal-pad"
+              error={Boolean(error)}
+            />
+          ) : null}
+        </>
+      );
+    }
     if (item.sourceType === "Leave") {
       const parsed = item.detail ? LEAVE_RANGE_PATTERN.exec(item.detail) : null;
       const start = item.leave?.startDate ?? parsed?.[1];
@@ -193,6 +231,19 @@ export function ApprovalCard({
   };
 
   const quickSubmit = async (action: OvertimeApprovalAction) => {
+    if (item.sourceType === "PublicHolidayPay" && action === "approve") {
+      const hours = parsePublicHolidayPayHours(holidayHoursText);
+      if (hours === null) {
+        setError(t("approvals.board.holidayPay.invalidHours"));
+        return;
+      }
+      try {
+        await onApprove({ approvalGuid: item.approvalGuid, remark, approvedPaidHours: hours });
+      } catch {
+        // 列表页统一提示失败。
+      }
+      return;
+    }
     // 用餐加回：拒绝必须写原因，没写就先展开备注框。
     if (item.sourceType === "MealBreak" && validateAttendanceMealBreakApproval({ action, remark })) {
       setShowRemark(true);
@@ -247,7 +298,7 @@ export function ApprovalCard({
           disabled={isBusy || !canAct}
           onPress={() => void quickSubmit("reject")}
         >
-          {t("actions.reject")}
+          {item.sourceType === "PublicHolidayPay" ? t("approvals.board.holidayPay.notApplicable") : t("actions.reject")}
         </Button>
         <Button
           mode="contained"
@@ -258,7 +309,11 @@ export function ApprovalCard({
         >
           {selfReview
             ? t("approvals.board.selfReview.approve")
-            : item.sourceType === "MealBreak" ? t("actions.approveMealBreak") : t("approvals.board.approve")}
+            : item.sourceType === "MealBreak"
+              ? t("actions.approveMealBreak")
+              : item.sourceType === "PublicHolidayPay"
+                ? t("approvals.board.holidayPay.confirm", { hours: parsePublicHolidayPayHours(holidayHoursText) ?? "--" })
+                : t("approvals.board.approve")}
         </Button>
       </View>
     );
@@ -343,6 +398,7 @@ const styles = StyleSheet.create({
   },
   dangerText: { color: HB_COLORS.danger },
   header: { alignItems: "flex-start", flexDirection: "row", gap: HB_SPACING.sm },
+  hoursInput: { marginTop: HB_SPACING.xxs, width: 160 },
   headerBody: { flex: 1, gap: 2, minWidth: 0 },
   lockRow: { alignItems: "center", flexDirection: "row", gap: 6, paddingLeft: 52 },
   name: { color: HB_COLORS.textPrimary, flexShrink: 1, fontWeight: "600" },

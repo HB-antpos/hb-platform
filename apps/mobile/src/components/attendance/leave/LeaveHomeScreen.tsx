@@ -128,7 +128,7 @@ export function LeaveHomeContent({ storeCode, onBack, onOpenPaidLeave }: LeaveHo
   );
 }
 
-/** 头像取姓名首字母：跳过「[样例]」这类非字母开头的词；中文名取第一个字。 */
+/** 头像取姓名首字母：跳过「[临时]」这类非字母开头的词；中文名取第一个字。 */
 function initialsOf(name?: string) {
   const words = (name ?? "").split(/\s+/).filter((word) => /^[A-Za-zÀ-ɏ一-鿿]/.test(word));
   if (!words.length) return "?";

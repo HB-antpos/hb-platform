@@ -312,7 +312,8 @@
         "MissingClockOut": "Missing clock-out",
         "MealBreak": "Meal break",
         "Leave": "Leave",
-        "Punch": "Punch"
+        "Punch": "Punch",
+        "PublicHolidayPay": "Public holiday"
       },
       "weekdayDate": "{{weekday}} {{day}}/{{month}}",
       "weekdays": {
@@ -453,6 +454,15 @@
         "remarkPlaceholder": "Review note (required to reject), e.g. certificate is unreadable, please retake",
         "rejectReasonRequired": "Add a reason to reject, e.g. “Certificate is unreadable, please retake”.",
         "approve": "Approve {{hours}} paid sick leave"
+      },
+      "holidayPay": {
+        "cardLine": "Not rostered on {{holiday}} ({{day}}/{{month}})",
+        "historyLine": "Rostered on this weekday {{count}} times in the last {{weeks}} weeks. Pay for the public holiday?",
+        "confirmedLine": "Confirmed {{hours}}",
+        "hoursLabel": "Paid hours",
+        "notApplicable": "Not applicable",
+        "confirm": "Confirm {{hours}} h",
+        "invalidHours": "Hours must be more than 0 and no more than 24"
       }
     }
   },
@@ -775,7 +785,8 @@
     "PunchAdjustment": "Punch correction",
     "Overtime": "Overtime",
     "MissingClockOut": "Missing clock-out",
-    "MealBreak": "Meal break"
+    "MealBreak": "Meal break",
+    "PublicHolidayPay": "Public holiday pay"
   },
   "statuses": {
     "Normal": "Normal",

@@ -101,7 +101,7 @@ assert.equal(pendingLabelKey("Late"), "late");
 assert.equal(pendingLabelKey("Whatever"), "other");
 
 // ── 头像首字母 ──
-assert.equal(employeeInitials("[样例] Sarah Kim"), "SK");
+assert.equal(employeeInitials("[Temp] Sarah Kim"), "SK");
 assert.equal(employeeInitials("Test Person Name"), "TN");
 assert.equal(employeeInitials("测试员"), "测");
 assert.equal(employeeInitials("  "), "?");
@@ -178,5 +178,43 @@ assert.deepEqual(groupDaysByWeek(jack.days, fortnight.periodStart, 2).map((group
 const merged = buildPayrollHoursFixture({ storeCode: "SAMPLE", weeks: 1, mergeStores: true });
 assert.equal(merged.totals.paidHours, 174.35, "合并查看把其他分店工时并进来");
 assert.ok(!merged.alerts.some((alert) => alert.type === "OtherStores"));
+
+// ── 卡 B 后端实际形状（AttendancePayrollDtos.cs）：totals 对象、isManager、hasSchedule、字符串 pending、MultiStore / Birthday 提醒 ──
+const backend = normalizePayrollHoursReport({
+  storeCode: "S9",
+  periodStart: "2026-10-12T00:00:00",
+  periodEnd: "2026-10-18T00:00:00",
+  weeks: 1,
+  weekNumber: 42,
+  pendingCount: 3,
+  totals: { weekday: 30, saturday: 4, sunday: 2.5, publicHoliday: 0, leave: 8, total: 44.5 },
+  employees: [{
+    userGuid: "u1",
+    userName: "Test Person",
+    employmentType: "PartTime",
+    isManager: true,
+    pendingCount: 1,
+    totals: { weekday: 30, saturday: 4, sunday: 2.5, publicHoliday: 0, leave: 8, total: 44.5 },
+    days: [{ date: "2026-10-13T00:00:00", paidHours: 8, byTier: { weekday: 8 }, hasSchedule: true, pending: ["PunchAdjustment"], approvedMarks: [], otherStores: [], segments: [{ start: "13:02", end: "24:00", isAutoClockOut: true }] }],
+  }],
+  alerts: [
+    { type: "MultiStore", otherStoreItems: [{ userGuid: "u1", userName: "Test Person", storeCode: "X", hours: 2 }, { userGuid: "u1", userName: "Test Person", storeCode: "Y", hours: 1 }] },
+    { type: "Birthday", userGuid: "u1", userName: "Test Person", date: "2026-10-16T00:00:00", ageYears: 17, isMinor: true },
+    { type: "PublicHolidayPay", userGuid: "u1" },
+    { type: "PublicHolidayPay", userGuid: "u2" },
+  ],
+}, { storeCode: "S9", weeks: 1 });
+assert.deepEqual(backend.totals, { paidHours: 44.5, weekendHours: 6.5, publicHolidayHours: 0, leaveHours: 8, pendingCount: 3 });
+assert.equal(backend.employees[0].name, "Test Person");
+assert.equal(backend.employees[0].totalHours, 44.5);
+assert.equal(backend.employees[0].leaveHours, 8);
+assert.equal(backend.employees[0].byTier.sunday, 2.5);
+assert.equal(backend.employees[0].isStoreManager, true);
+assert.equal(backend.employees[0].days[0].isScheduled, true);
+assert.deepEqual(backend.employees[0].days[0].pending, [{ type: "PunchAdjustment" }]);
+assert.equal(backend.employees[0].days[0].segments?.[0].end, "00:00", "自动下班 24:00 显示为 00:00");
+assert.deepEqual(backend.alerts.map((alert) => alert.type), ["OtherStores", "MinorBirthday", "PublicHolidayPay"]);
+assert.equal(backend.alerts[0].employeeName, "Test Person");
+assert.equal(backend.alerts[2].count, 2);
 
 console.log("payroll-hours.test.ts: ok");

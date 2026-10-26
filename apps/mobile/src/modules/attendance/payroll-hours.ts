@@ -355,7 +355,7 @@ export function sumReportTotals(employees: PayrollHoursEmployee[]): PayrollHours
 
 // ───────────────────────── 头像 ─────────────────────────
 
-/** 头像首字母：去掉「[样例]」之类的方括号前缀，取前两个词的首字母；中文名取第一个字。 */
+/** 头像首字母：去掉「[临时]」之类的方括号前缀，取前两个词的首字母；中文名取第一个字。 */
 export function employeeInitials(name: string): string {
   const cleaned = name.replace(/^\s*\[[^\]]*\]\s*/, "").trim();
   if (!cleaned) return "?";
@@ -404,7 +404,8 @@ function normalizeSegments(raw: unknown): PayrollDaySegment[] | undefined {
   return asRecordArray(raw)
     .map((item) => ({
       start: asString(pick(item, "start", "Start")).slice(0, 5),
-      end: asOptionalString(pick(item, "end", "End"))?.slice(0, 5),
+      // 后端午夜自动下班写成 "24:00"，界面按设计图显示为 00:00。
+      end: asOptionalString(pick(item, "end", "End"))?.slice(0, 5).replace(/^24:00$/, "00:00"),
       isAutoClockOut: asBoolean(pick(item, "isAutoClockOut", "IsAutoClockOut", "isSystemAutoClockOut", "IsSystemAutoClockOut")),
     }))
     .filter((segment) => Boolean(segment.start));
@@ -415,7 +416,7 @@ function normalizeDay(raw: RawRecord): PayrollHoursDay | undefined {
   if (!isValidDate(date)) return undefined;
   const leaveRaw = pick(raw, "leave", "Leave");
   const holidayPayRaw = pick(raw, "publicHolidayPay", "PublicHolidayPay");
-  const isScheduledRaw = pick(raw, "isScheduled", "IsScheduled");
+  const isScheduledRaw = pick(raw, "isScheduled", "IsScheduled", "hasSchedule", "HasSchedule");
   const isPublicHolidayRaw = pick(raw, "isPublicHoliday", "IsPublicHoliday");
   return {
     date,
@@ -462,8 +463,13 @@ function normalizeEmployee(raw: RawRecord): PayrollHoursEmployee | undefined {
     .sort((a, b) => a.date.localeCompare(b.date));
   // 后端缺合计字段时由每天的数据兜底合计。
   const fallback = summarizeEmployeeDays(days);
-  const totalHours = asOptionalNumber(pick(raw, "totalHours", "TotalHours", "paidHours", "PaidHours"));
-  const leaveHours = asOptionalNumber(pick(raw, "leaveHours", "LeaveHours"));
+  // 后端（卡 B）把员工合计放在 totals{weekday,saturday,sunday,publicHoliday,leave,total}，total 已含带薪假。
+  const totalsRaw = pick(raw, "totals", "Totals");
+  const totals = isRecord(totalsRaw) ? totalsRaw : undefined;
+  const totalHours = asOptionalNumber(pick(raw, "totalHours", "TotalHours", "paidHours", "PaidHours"))
+    ?? (totals ? asOptionalNumber(pick(totals, "total", "Total")) : undefined);
+  const leaveHours = asOptionalNumber(pick(raw, "leaveHours", "LeaveHours"))
+    ?? (totals ? asOptionalNumber(pick(totals, "leave", "Leave")) : undefined);
   const pendingCount = asOptionalNumber(pick(raw, "pendingCount", "PendingCount"));
   return {
     userGuid,
@@ -473,9 +479,9 @@ function normalizeEmployee(raw: RawRecord): PayrollHoursEmployee | undefined {
     birthday: asOptionalString(pick(raw, "birthday", "Birthday"))?.slice(0, 10),
     segmentLimit: asOptionalNumber(pick(raw, "segmentLimit", "SegmentLimit")),
     hasOtherStores: asBoolean(pick(raw, "hasOtherStores", "HasOtherStores")),
-    isStoreManager: asBoolean(pick(raw, "isStoreManager", "IsStoreManager")),
+    isStoreManager: asBoolean(pick(raw, "isStoreManager", "IsStoreManager", "isManager", "IsManager")),
     totalHours: totalHours === undefined ? fallback.totalHours : roundHours(totalHours),
-    byTier: normalizeTier(pick(raw, "byTier", "ByTier")) ?? fallback.byTier,
+    byTier: normalizeTier(pick(raw, "byTier", "ByTier")) ?? normalizeTier(totals) ?? fallback.byTier,
     leaveHours: leaveHours === undefined ? fallback.leaveHours : roundHours(leaveHours),
     pendingCount: pendingCount === undefined ? fallback.pendingCount : Math.max(0, Math.round(pendingCount)),
     days,
@@ -483,17 +489,49 @@ function normalizeEmployee(raw: RawRecord): PayrollHoursEmployee | undefined {
 }
 
 function normalizeAlert(raw: RawRecord): PayrollHoursAlert | undefined {
-  const type = asOptionalString(pick(raw, "type", "Type"));
-  if (!type) return undefined;
+  const rawType = asOptionalString(pick(raw, "type", "Type"));
+  if (!rawType) return undefined;
+  // 后端只给 Birthday + isMinor；界面把未成年生日单独成句（提示核对时薪）。
+  const type = rawType === "Birthday" && asBoolean(pick(raw, "isMinor", "IsMinor")) ? "MinorBirthday" : rawType;
   return {
     type,
     message: asOptionalString(pick(raw, "message", "Message")),
     userGuid: asOptionalString(pick(raw, "userGuid", "UserGuid")),
-    employeeName: asOptionalString(pick(raw, "employeeName", "EmployeeName", "name", "Name")),
+    employeeName: asOptionalString(pick(raw, "employeeName", "EmployeeName", "userName", "UserName", "name", "Name")),
     date: asOptionalString(pick(raw, "date", "Date"))?.slice(0, 10),
     ageYears: asOptionalNumber(pick(raw, "ageYears", "AgeYears")),
     count: asOptionalNumber(pick(raw, "count", "Count")),
   };
+}
+
+/**
+ * 后端提醒 → 界面提醒：MultiStore 一条带 otherStoreItems，按人展开成 OtherStores；
+ * PublicHolidayPay 每人每天一条，合并成一条并计数。
+ */
+export function normalizePayrollHoursAlerts(raw: unknown): PayrollHoursAlert[] {
+  const result: PayrollHoursAlert[] = [];
+  let holidayPayCount = 0;
+  for (const item of asRecordArray(raw)) {
+    const type = asOptionalString(pick(item, "type", "Type"));
+    if (type === "MultiStore") {
+      const seen = new Set<string>();
+      for (const other of asRecordArray(pick(item, "otherStoreItems", "OtherStoreItems"))) {
+        const userGuid = asOptionalString(pick(other, "userGuid", "UserGuid"));
+        if (!userGuid || seen.has(userGuid)) continue;
+        seen.add(userGuid);
+        result.push({ type: "OtherStores", userGuid, employeeName: asOptionalString(pick(other, "userName", "UserName")) });
+      }
+      continue;
+    }
+    if (type === "PublicHolidayPay") {
+      holidayPayCount += Math.max(1, Math.round(asNumber(pick(item, "count", "Count"), 1)));
+      continue;
+    }
+    const alert = normalizeAlert(item);
+    if (alert) result.push(alert);
+  }
+  if (holidayPayCount > 0) result.push({ type: "PublicHolidayPay", count: holidayPayCount });
+  return result;
 }
 
 /** 接口归一化：字段缺省给安全值；totals 缺省时由员工合计；周数只认 1 / 2。 */
@@ -513,15 +551,20 @@ export function normalizePayrollHoursReport(raw: unknown, query: PayrollHoursQue
   const endRaw = asDateOnly(pick(record, "periodEnd", "PeriodEnd"));
   const totalsRaw = pick(record, "totals", "Totals");
   const fallbackTotals = sumReportTotals(employees);
+  // 后端合计形状：{weekday,saturday,sunday,publicHoliday,leave,total}（total 含带薪假），待审数在报表顶层 pendingCount。
+  const backendWeekend = isRecord(totalsRaw) && pick(totalsRaw, "saturday", "Saturday") !== undefined
+    ? asNumber(pick(totalsRaw, "saturday", "Saturday")) + asNumber(pick(totalsRaw, "sunday", "Sunday"))
+    : undefined;
+  const reportPending = asOptionalNumber(pick(record, "pendingCount", "PendingCount"));
   const totals: PayrollHoursTotals = isRecord(totalsRaw)
     ? {
-        paidHours: roundHours(asNumber(pick(totalsRaw, "paidHours", "PaidHours"), fallbackTotals.paidHours)),
-        weekendHours: roundHours(asNumber(pick(totalsRaw, "weekendHours", "WeekendHours"), fallbackTotals.weekendHours)),
-        publicHolidayHours: roundHours(asNumber(pick(totalsRaw, "publicHolidayHours", "PublicHolidayHours"), fallbackTotals.publicHolidayHours)),
-        leaveHours: roundHours(asNumber(pick(totalsRaw, "leaveHours", "LeaveHours"), fallbackTotals.leaveHours)),
-        pendingCount: Math.max(0, Math.round(asNumber(pick(totalsRaw, "pendingCount", "PendingCount"), fallbackTotals.pendingCount))),
+        paidHours: roundHours(asNumber(pick(totalsRaw, "paidHours", "PaidHours", "total", "Total"), fallbackTotals.paidHours)),
+        weekendHours: roundHours(asNumber(pick(totalsRaw, "weekendHours", "WeekendHours"), backendWeekend ?? fallbackTotals.weekendHours)),
+        publicHolidayHours: roundHours(asNumber(pick(totalsRaw, "publicHolidayHours", "PublicHolidayHours", "publicHoliday", "PublicHoliday"), fallbackTotals.publicHolidayHours)),
+        leaveHours: roundHours(asNumber(pick(totalsRaw, "leaveHours", "LeaveHours", "leave", "Leave"), fallbackTotals.leaveHours)),
+        pendingCount: Math.max(0, Math.round(asNumber(pick(totalsRaw, "pendingCount", "PendingCount"), reportPending ?? fallbackTotals.pendingCount))),
       }
-    : fallbackTotals;
+    : { ...fallbackTotals, pendingCount: reportPending ?? fallbackTotals.pendingCount };
   return {
     // 以请求的门店为准：页面用它判断缓存里的数据是不是当前门店的。
     storeCode: query.storeCode || asString(pick(record, "storeCode", "StoreCode")),
@@ -532,9 +575,7 @@ export function normalizePayrollHoursReport(raw: unknown, query: PayrollHoursQue
     weekNumber: asOptionalNumber(pick(record, "weekNumber", "WeekNumber")) ?? isoWeekNumber(periodStart),
     periodStatus: asOptionalString(pick(record, "periodStatus", "PeriodStatus", "status", "Status")),
     totals,
-    alerts: asRecordArray(pick(record, "alerts", "Alerts"))
-      .map(normalizeAlert)
-      .filter((alert): alert is PayrollHoursAlert => Boolean(alert)),
+    alerts: normalizePayrollHoursAlerts(pick(record, "alerts", "Alerts")),
     employees,
   };
 }

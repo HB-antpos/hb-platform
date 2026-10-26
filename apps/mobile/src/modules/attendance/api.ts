@@ -7,6 +7,7 @@ import {
 import type {
   AttendanceApproval,
   AttendanceApprovalLeaveDetail,
+  AttendanceApprovalPublicHolidayPay,
   AttendanceApprovalPayload,
   AttendanceApprovalReconcileSummary,
   AttendancePendingApprovalBoard,
@@ -442,6 +443,7 @@ function normalizeApproval(raw: ApiRecord): AttendanceApproval {
     pick(raw, "status", "Status", "reviewStatus", "ReviewStatus"),
     "Pending",
   );
+  const publicHolidayPay = normalizeApprovalPublicHolidayPay(pick(raw, "publicHolidayPay", "PublicHolidayPay"));
   return {
     approvalGuid: asString(pick(raw, "approvalGuid", "ApprovalGuid", "guid", "Guid")),
     sourceGuid: asString(pick(raw, "sourceGuid", "SourceGuid", "punchGuid", "PunchGuid", "leaveGuid", "LeaveGuid")),
@@ -467,12 +469,27 @@ function normalizeApproval(raw: ApiRecord): AttendanceApproval {
     scheduleStartTime: asOptionalString(pick(raw, "scheduleStartTime", "ScheduleStartTime")),
     scheduleEndTime: asOptionalString(pick(raw, "scheduleEndTime", "ScheduleEndTime")),
     clockInTime: asOptionalString(pick(raw, "clockInTime", "ClockInTime", "lastClockInTime", "LastClockInTime")),
-    holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
+    // 带薪公假确认没有顶层公假名，从 publicHolidayPay 里取，分组头才能显示「公假时薪」。
+    holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")) ?? publicHolidayPay?.holidayName,
     reviewedByName: asOptionalString(pick(raw, "reviewedByName", "ReviewedByName", "reviewerName", "ReviewerName")),
     reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt")),
     reviewRemark: asOptionalString(pick(raw, "reviewRemark", "ReviewRemark")),
     isSelfReview: asBoolean(pick(raw, "isSelfReview", "IsSelfReview")),
     leave: normalizeApprovalLeave(pick(raw, "leave", "Leave")),
+    publicHolidayPay,
+  };
+}
+
+function normalizeApprovalPublicHolidayPay(value: unknown): AttendanceApprovalPublicHolidayPay | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    holidayDate: asDateString(pick(value, "holidayDate", "HolidayDate")),
+    holidayName: asOptionalString(pick(value, "holidayName", "HolidayName")),
+    ordinaryCount: asNumber(pick(value, "ordinaryCount", "OrdinaryCount")),
+    lookbackWeeks: asNumber(pick(value, "lookbackWeeks", "LookbackWeeks")),
+    suggestedHours: asOptionalNumber(pick(value, "suggestedHours", "SuggestedHours")),
+    hours: asOptionalNumber(pick(value, "hours", "Hours")),
+    status: asOptionalString(pick(value, "status", "Status")),
   };
 }
 

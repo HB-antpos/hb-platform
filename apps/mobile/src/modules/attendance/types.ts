@@ -537,7 +537,7 @@ export interface AttendanceLeaveAttachmentUploadResult {
 export interface AttendanceApproval {
   approvalGuid: string;
   sourceGuid: string;
-  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | string;
+  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | "PublicHolidayPay" | string;
   employeeName?: string;
   storeCode?: string;
   storeName?: string;
@@ -573,6 +573,19 @@ export interface AttendanceApproval {
   isSelfReview?: boolean;
   /** sourceType 为 Leave 时的结构化请假信息（带薪病假审核一屏要用）。 */
   leave?: AttendanceApprovalLeaveDetail;
+  /** sourceType 为 PublicHolidayPay 时的带薪公假确认信息。 */
+  publicHolidayPay?: AttendanceApprovalPublicHolidayPay;
+}
+
+/** 全职 / 兼职公假当天没排班、但过去 N 周同一星期几排班够多次时生成的确认。 */
+export interface AttendanceApprovalPublicHolidayPay {
+  holidayDate: string;
+  holidayName?: string;
+  ordinaryCount: number;
+  lookbackWeeks: number;
+  suggestedHours?: number;
+  hours?: number;
+  status?: string;
 }
 
 /** 病假所选排班与当天打卡情况。 */
@@ -615,6 +628,8 @@ export interface AttendanceApprovalPayload {
   approvalGuid: string;
   remark?: string;
   approvedOvertimeMinutes?: number;
+  /** 带薪公假确认工时（0 < h ≤ 24）。 */
+  approvedPaidHours?: number;
 }
 
 export interface AttendanceScheduleWeekParams {

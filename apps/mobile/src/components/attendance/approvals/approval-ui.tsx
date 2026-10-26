@@ -22,7 +22,7 @@ const AVATAR_PALETTE = ["#E8590C", "#0E9384", "#6938EF", "#1570EF", "#DD2590", "
 
 const CJK_PATTERN = /[㐀-鿿豈-﫿]/;
 
-/** 头像首字母：去掉「[样例]」之类的方括号前缀；中文取前两个字，英文取首尾单词首字母。 */
+/** 头像首字母：去掉「[临时]」之类的方括号前缀；中文取前两个字，英文取首尾单词首字母。 */
 export function getAvatarInitials(name?: string) {
   const trimmed = name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim();
   if (!trimmed) return "?";

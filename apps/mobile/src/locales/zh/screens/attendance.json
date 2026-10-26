@@ -312,7 +312,8 @@
         "MissingClockOut": "漏下班",
         "MealBreak": "用餐",
         "Leave": "请假",
-        "Punch": "打卡"
+        "Punch": "打卡",
+        "PublicHolidayPay": "公假"
       },
       "weekdayDate": "{{weekday}} {{month}}-{{day}}",
       "weekdays": {
@@ -453,6 +454,15 @@
         "remarkPlaceholder": "审核备注（拒绝时必填），例如：医嘱看不清，请重拍",
         "rejectReasonRequired": "拒绝必须写原因，例如「医嘱看不清，请重拍」",
         "approve": "批准 {{hours}} 带薪病假"
+      },
+      "holidayPay": {
+        "cardLine": "{{holiday}} {{month}}-{{day}} 没排班",
+        "historyLine": "过去 {{weeks}} 周同一天排班 {{count}} 次，确认是否带薪",
+        "confirmedLine": "已确认 {{hours}}",
+        "hoursLabel": "带薪工时（小时）",
+        "notApplicable": "不适用",
+        "confirm": "确认 {{hours}} h",
+        "invalidHours": "工时要大于 0、不超过 24"
       }
     }
   },
@@ -775,7 +785,8 @@
     "PunchAdjustment": "补卡",
     "Overtime": "加班",
     "MissingClockOut": "漏下班",
-    "MealBreak": "用餐"
+    "MealBreak": "用餐",
+    "PublicHolidayPay": "带薪公假"
   },
   "statuses": {
     "Normal": "正常",

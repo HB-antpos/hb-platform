@@ -34,6 +34,7 @@ const FILTER_TYPES: KnownAttendanceApprovalSourceType[] = [
   "MissingClockOut",
   "MealBreak",
   "Leave",
+  "PublicHolidayPay",
   "Punch",
 ];
 
