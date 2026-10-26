@@ -20,6 +20,9 @@ public sealed class HeldOrderTodayCountServiceTests
     private static readonly TimeSpan StoreOffset = TimeSpan.FromHours(10);
     private static readonly TimeZoneInfo StoreTimeZone =
         TimeZoneInfo.CreateCustomTimeZone("StoreTime+10", StoreOffset, "StoreTime+10", "StoreTime+10");
+    // 默认是已登录收银员的会话：未登录时服务不会请求共享挂单（见 Signed_out_online_session_*）。
+    private static readonly Hbpos.Contracts.Cashiers.CashierSessionDto SignedInCashier =
+        new("C001", "U-1", "Alice", "S01", "POS-01", [], [], ["S01"], false, false, false);
     private static readonly PosSessionState Online = Session(isOnline: true);
     private static readonly PosSessionState Offline = Session(isOnline: false);
 
@@ -180,6 +183,47 @@ public sealed class HeldOrderTodayCountServiceTests
 
         Assert.Equal(1, await service.GetTodayCountAsync(Offline));
         Assert.Equal(0, api.ListCalls);
+    }
+
+    [Fact]
+    public async Task Signed_out_online_session_never_calls_remote_and_counts_local_only()
+    {
+        // 登录弹窗盖在首页上、没有收银员登录时：请求不带收银员票据，服务端必然 401，所以根本不发。
+        var suspended = new FakeSuspendedOrderService
+        {
+            PendingOrders = [LocalSummary(Guid.NewGuid(), Local(2026, 10, 15, 9, 0))]
+        };
+        var api = ApiReturning(RemoteItem(Guid.NewGuid(), Local(2026, 10, 15, 9, 0), deviceCode: "POS-02"));
+        var service = CreateService(suspended, new FakeSharedHeldOrderRepository(), api);
+        var signedOut = Online with { CashierSession = null };
+
+        Assert.Equal(1, await service.GetTodayCountAsync(signedOut));
+        Assert.Equal(1, await service.GetTodayCountAsync(signedOut, forceRemoteRefresh: true));
+        Assert.Equal(0, api.ListCalls);
+
+        // 登录之后立即恢复请求，共享挂单计入。
+        Assert.Equal(2, await service.GetTodayCountAsync(Online));
+        Assert.Equal(1, api.ListCalls);
+    }
+
+    [Fact]
+    public async Task Signed_in_check_ignores_the_login_snapshot_ticket_expiry()
+    {
+        // 后台刷新只更新 ICashierSessionContext 的票据，PosSessionState 里的是登录时的快照：
+        // 登录满 24 小时后快照票据的到期时间已过，但实际票据仍有效，不能因此停掉共享挂单。
+        var api = ApiReturning(RemoteItem(Guid.NewGuid(), Local(2026, 10, 15, 9, 0), deviceCode: "POS-02"));
+        var service = CreateService(new FakeSuspendedOrderService(), new FakeSharedHeldOrderRepository(), api);
+        var staleSnapshot = Online with
+        {
+            CashierSession = SignedInCashier with
+            {
+                AuthorizationToken = "old",
+                AuthorizationExpiresAtUtc = Local(2026, 10, 14, 9, 0)
+            }
+        };
+
+        Assert.Equal(1, await service.GetTodayCountAsync(staleSnapshot));
+        Assert.Equal(1, api.ListCalls);
     }
 
     // ───────────── 远端缓存 / 退避 ─────────────
@@ -385,7 +429,7 @@ public sealed class HeldOrderTodayCountServiceTests
         new(year, month, day, hour, minute, 0, StoreOffset);
 
     private static PosSessionState Session(bool isOnline) =>
-        new("HB POS", "S01", "Main Branch", "POS-01", "C001", "Alice", isOnline, 0);
+        new("HB POS", "S01", "Main Branch", "POS-01", "C001", "Alice", isOnline, 0, SignedInCashier);
 
     private static SuspendedOrderSummary LocalSummary(
         Guid guid,

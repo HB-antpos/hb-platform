@@ -360,15 +360,30 @@ public sealed class CashierSessionRefreshService(
 }
 
 public sealed class CashierSessionRefreshHostedService(
-    CashierSessionRefreshService refreshService) : BackgroundService
+    CashierSessionRefreshService refreshService,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    /// <summary>营业时间的刷新间隔；夜间静默窗口内由 <see cref="BackgroundPollingSchedule"/> 放慢到 5 分钟。</summary>
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(60);
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// 下一次刷新应等待多久（按设备本地时间）。
+    /// 夜间放慢是安全的：服务端 cashiers/session 只读，每次刷新都重新签发 24 小时的票据（滑动续期），
+    /// 间隔从 60 秒放到 5 分钟，票据剩余有效期始终 &gt; 23 小时 55 分；权限 / 角色 / 门店变更最多晚 5 分钟同步到本机，
+    /// 且服务端每次业务请求都会实时复核权限，不依赖本机快照。静默窗口结束时会立刻补一次刷新。
+    /// </summary>
+    internal static TimeSpan GetNextRefreshDelay(DateTimeOffset localNow) =>
+        BackgroundPollingSchedule.GetNextPollDelay(localNow, RefreshInterval);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(RefreshInterval);
+        using var timer = new PeriodicTimer(GetNextRefreshDelay(_timeProvider.GetLocalNow()), _timeProvider);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            // 每次 tick 先按当前本地时间重算下一次间隔（进入 / 离开夜间静默窗口时自动切换）。
+            timer.Period = GetNextRefreshDelay(_timeProvider.GetLocalNow());
             try
             {
                 await refreshService.RefreshOnceAsync(stoppingToken);
