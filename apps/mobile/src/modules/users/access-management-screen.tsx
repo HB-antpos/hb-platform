@@ -510,6 +510,7 @@ function AccessManagementPage({
             selectedRoleGuids={editor.selectedRoleGuids}
             hasManagedStoreAssignment={editor.hasManagedStoreAssignment}
             isAdmin={editor.isAdmin}
+            isWarehouseManager={editor.isWarehouseManager}
             rolesEditable={eligibility.rolesMode === "editable"}
             storesEditable={eligibility.storesMode === "editable"}
             canGrantStoreManagement={eligibility.canGrantStoreManagement}

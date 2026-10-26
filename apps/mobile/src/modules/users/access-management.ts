@@ -239,10 +239,18 @@ export function filterUserAccessRoles(
 export function limitUserAccessRolesForActor(
   roles: UserAccessRole[],
   isAdmin: boolean,
+  /** 仓库管理：可以设置店长（经「管理」分店派生），所以目录里多出「店长」这一行。 */
+  isWarehouseManager = false,
 ) {
   if (isAdmin) return roles;
   // 店长只能增删员工角色；其他既有角色由后端保留且不在可编辑目录中暴露。
-  return roles.filter((role) => isStoreStaffRoleName(role.roleName));
+  // 仓库管理在此基础上多看到「店长」派生行（不可直接勾选，点它引导去分店设为「管理」）；
+  // 管理员 / 仓库管理角色永远不出现在目录里。
+  return roles.filter(
+    (role) =>
+      isStoreStaffRoleName(role.roleName) ||
+      (isWarehouseManager && isStoreManagerRoleName(role.roleName)),
+  );
 }
 
 function deniedEligibility(
