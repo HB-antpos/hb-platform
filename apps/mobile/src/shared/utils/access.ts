@@ -137,6 +137,8 @@ export const PERMISSIONS = {
     PunchAdjustManagedStore: "Attendance.Punch.AdjustManagedStore",
     ApprovalViewManagedStore: "Attendance.Approval.ViewManagedStore",
     ApprovalReviewManagedStore: "Attendance.Approval.ReviewManagedStore",
+    // 店长审核本人申请；默认不授予任何角色，生产手动授权（规格 0.1-1）。
+    ApprovalReviewSelf: "Attendance.Approval.ReviewSelf",
     HolidayViewStore: "Attendance.Holiday.ViewStore",
     HolidayEditManagedStore: "Attendance.Holiday.EditManagedStore",
     LeaveApplySelf: "Attendance.Leave.ApplySelf",
@@ -194,12 +196,6 @@ const ATTENDANCE_MANAGEMENT_PERMISSIONS = [
   PERMISSIONS.Attendance.LeaveViewManagedStore,
   PERMISSIONS.Attendance.LeaveReviewManagedStore,
   PERMISSIONS.Attendance.SettingsEdit,
-  PERMISSIONS.Attendance.AdminView,
-];
-
-const ATTENDANCE_REVIEW_PERMISSIONS = [
-  PERMISSIONS.Attendance.ApprovalReviewManagedStore,
-  PERMISSIONS.Attendance.LeaveReviewManagedStore,
   PERMISSIONS.Attendance.AdminView,
 ];
 
@@ -266,6 +262,7 @@ function createEmptyAccess(): AccessControl {
     canViewAttendancePersonal: false,
     canViewAttendanceManagement: false,
     canReviewAttendance: false,
+    canReviewOwnAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
     canViewAttendancePunchRecords: false,
@@ -428,11 +425,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     ATTENDANCE_MANAGEMENT_PERMISSIONS.some((permission) =>
       hasPermission(permission)
     );
+  // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口），
+  // 只有「请假审核」或「查看全部考勤」的人看到按钮也会被 403。
   const canReviewAttendance =
-    isAdmin ||
-    ATTENDANCE_REVIEW_PERMISSIONS.some((permission) =>
-      hasPermission(permission)
-    );
+    isAdmin || hasPermission(PERMISSIONS.Attendance.ApprovalReviewManagedStore);
+  // 只认显式授权（不因管理员角色默认放开），没有时维持「申请人不能审自己」。
+  const canReviewOwnAttendance = hasPermission(PERMISSIONS.Attendance.ApprovalReviewSelf);
   const canEditAttendanceHoliday =
     isAdmin || hasPermission(PERMISSIONS.Attendance.HolidayEditManagedStore);
   const canEditAttendanceSettings =
@@ -508,6 +506,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewAttendancePersonal,
     canViewAttendanceManagement,
     canReviewAttendance,
+    canReviewOwnAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
     canViewAttendancePunchRecords,

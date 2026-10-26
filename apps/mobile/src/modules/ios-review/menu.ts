@@ -40,6 +40,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "notifications",
   // 客流统计依赖真实门店摄像机计数，审核模式没有离线演示数据，不展示。
   "traffic-stats",
+  // 工时统计依赖真实排班打卡汇总，审核模式没有离线演示数据，不展示。
+  "attendance-hours",
   "workbench",
 ] as const;
 

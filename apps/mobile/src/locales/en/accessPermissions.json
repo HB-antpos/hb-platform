@@ -57,6 +57,10 @@
       "name": "Approve attendance for managed stores",
       "description": "Review and approve attendance for the stores you manage, on the web admin and in the app."
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "Approve own attendance requests",
+      "description": "Approve or reject attendance requests you submitted yourself; such reviews are marked as self-approved."
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "View attendance approvals for managed stores",
       "description": "View attendance approval history for the stores you manage, on the web admin and in the app."
@@ -88,6 +92,18 @@
     "Attendance.Leave.ViewManagedStore": {
       "name": "View leave for managed stores",
       "description": "View leave requests for the stores you manage, on the web admin and in the app."
+    },
+    "Attendance.Payroll.Edit": {
+      "name": "Edit pay rates, payroll notes and submit periods",
+      "description": "Add new effective pay-rate records, write payroll notes and approved annual leave hours, and submit (lock) a pay period."
+    },
+    "Attendance.Payroll.Unlock": {
+      "name": "Unlock submitted pay periods",
+      "description": "Unlock a submitted pay period; a reason is required and the action is recorded."
+    },
+    "Attendance.Payroll.View": {
+      "name": "View payroll and pay rates",
+      "description": "View the payroll sheet and individual pay rates for the stores you can access."
     },
     "Attendance.Punch.AdjustManagedStore": {
       "name": "Adjust clock-ins for managed stores",

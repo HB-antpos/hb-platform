@@ -122,6 +122,9 @@ function normalizePunch(raw: ApiRecord, fallbackType?: AttendancePunchType): Att
     lateMinutes: asOptionalNumber(pick(raw, "lateMinutes", "LateMinutes")),
     earlyLeaveMinutes: asOptionalNumber(pick(raw, "earlyLeaveMinutes", "EarlyLeaveMinutes")),
     lateDepartureMinutes: asOptionalNumber(pick(raw, "lateDepartureMinutes", "LateDepartureMinutes")),
+    // 新字段 IsSystemAutoClockOut；兼容用打卡来源标记的写法。
+    isSystemAutoClockOut: asBoolean(pick(raw, "isSystemAutoClockOut", "IsSystemAutoClockOut"))
+      || /^system[-_ ]?auto/i.test(asString(pick(raw, "source", "Source"))),
   };
 }
 
