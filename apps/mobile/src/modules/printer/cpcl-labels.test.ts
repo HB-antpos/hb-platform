@@ -103,6 +103,73 @@ assert.throws(
   "员工二维码继续拒绝无效值和 CPCL 指令注入"
 );
 
+// 显式传 qr 与缺省完全一致，保证默认二维码行为不变。
+assert.equal(
+  buildEmployeeCashierBarcodeLabelCommand({
+    employeeName: "管理员",
+    username: "admin",
+    barcode: "2912345678906",
+    symbology: "qr",
+  }),
+  employeeBarcodeCommand,
+  "symbology=qr 必须与缺省输出逐字节一致"
+);
+
+const employeeEan13Command = buildEmployeeCashierBarcodeLabelCommand({
+  employeeName: "管理员",
+  username: "admin",
+  barcode: "2912345678906",
+  symbology: "barcode",
+});
+assert.ok(employeeEan13Command.startsWith("! 0 200 200 400 1\r\nPAGE-WIDTH 570\r\n"), "条码模式沿用标准标签尺寸");
+assert.ok(
+  employeeEan13Command.includes("BARCODE EAN13 3 2 70 36 104 2912345678906\r\n"),
+  "条码模式输出窄条 3 点的 EAN13，值为原始员工收银码"
+);
+assert.equal(employeeEan13Command.includes("BARCODE QR"), false, "条码模式不再输出二维码");
+assert.ok(
+  employeeEan13Command.indexOf("BARCODE-TEXT 7 0 5") < employeeEan13Command.indexOf("BARCODE EAN13")
+    && employeeEan13Command.indexOf("BARCODE EAN13") < employeeEan13Command.indexOf("BARCODE-TEXT OFF")
+    && employeeEan13Command.indexOf("BARCODE-TEXT OFF") < employeeEan13Command.indexOf("PRINT"),
+  "可读数字只对本条码开启，并在 PRINT 前关闭以免污染后续标签"
+);
+assert.ok(employeeEan13Command.endsWith("PRINT\r\n"), "条码模式必须发送 PRINT");
+assert.ok(employeeEan13Command.includes("TEXT 7 0 20 16 管理员"), "条码模式保留员工姓名");
+assert.ok(employeeEan13Command.includes("TEXT 4 0 20 60 @admin"), "条码模式保留用户名");
+const ean13Match = employeeEan13Command.match(/BARCODE EAN13 (\d+) \d+ (\d+) (\d+) (\d+) /);
+assert.ok(ean13Match, "条码模式必须包含 EAN13 指令");
+assert.ok(
+  Number(ean13Match[3]) + 95 * Number(ean13Match[1]) <= 570 - 20,
+  "EAN13 95 个模块加左侧静区后必须保留右边距"
+);
+assert.ok(
+  Number(ean13Match[4]) + Number(ean13Match[2]) <= 180,
+  "条码主体必须在价格标签单张安全高度内，下方留给可读数字"
+);
+assert.throws(
+  () => buildEmployeeCashierBarcodeLabelCommand({
+    employeeName: "管理员",
+    username: "admin",
+    barcode: "2912345678900",
+    symbology: "barcode",
+  }),
+  /valid EAN13/,
+  "条码模式同样拒绝校验位错误的值"
+);
+const injectedEan13Command = buildEmployeeCashierBarcodeLabelCommand({
+  employeeName: "Safe\r\nPRINT",
+  username: "admin\r\nBARCODE QR 0 0 M 2 U 8",
+  barcode: "2912345678906",
+  symbology: "barcode",
+});
+assert.equal(injectedEan13Command.includes("Safe\r\nPRINT"), false, "条码模式姓名换行不能注入 CPCL 指令");
+assert.equal(injectedEan13Command.includes("BARCODE QR"), true, "被压成单行的文本仍只是文字内容");
+assert.equal(
+  injectedEan13Command.split("\r\n").filter((row) => row.startsWith("BARCODE QR")).length,
+  0,
+  "条码模式用户名换行不能产生独立的 CPCL 指令行"
+);
+
 const productPayload = {
   productName: "Coconut Water 1L",
   itemNumber: "HB013-108",
