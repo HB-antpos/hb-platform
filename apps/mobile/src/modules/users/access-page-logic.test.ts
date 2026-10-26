@@ -324,6 +324,27 @@ assert.equal(
   true,
   "非管理员不能动高权限角色",
 );
+// 仓库管理：不是管理员，但能授「管理」分店关系 → 可以设置店长。点「店长」派生行是引导（不被「仅管理员」锁死），
+// 而管理员 / 仓库管理角色仍然不可动，也不会被引导。
+const warehouseRow = { ...baseRow, isAdmin: false, canGrantStoreManagement: true };
+const warehouseManagerRow = resolveAccessRoleRow({ role: manager, ...warehouseRow });
+assert.equal(warehouseManagerRow.derived, true);
+assert.equal(warehouseManagerRow.canGuideManagerGrant, true, "仓库管理点店长行是引导");
+assert.equal(warehouseManagerRow.disabled, false, "仓库管理的店长行不被锁死");
+assert.equal(
+  resolveAccessRoleRow({ role: manager, ...warehouseRow, storesEditable: false }).canGuideManagerGrant,
+  false,
+  "分店分段不可编辑时仓库管理也不引导",
+);
+assert.equal(resolveAccessRoleRow({ role: admin, ...warehouseRow }).disabled, true, "仓库管理不能动管理员角色");
+assert.equal(resolveAccessRoleRow({ role: admin, ...warehouseRow }).canGuideManagerGrant, false);
+assert.equal(
+  resolveAccessRoleRow({ role: role("WarehouseManager"), ...warehouseRow }).disabled,
+  true,
+  "仓库管理不能动仓库管理角色",
+);
+assert.equal(resolveAccessRoleRow({ role: staff, ...warehouseRow }).disabled, false, "员工角色仍可勾选");
+
 assert.equal(resolveAccessRoleRow({ role: staff, ...baseRow, busy: true }).disabled, true);
 assert.equal(resolveAccessRoleRow({ role: staff, ...baseRow, rolesEditable: false }).disabled, true);
 

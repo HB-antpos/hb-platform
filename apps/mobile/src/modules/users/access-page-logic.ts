@@ -438,7 +438,12 @@ export function resolveAccessRoleRow(input: {
     hasManagedStoreAssignment: input.hasManagedStoreAssignment,
   });
   const privileged = hasPrivilegedAccessRole([input.role.roleName]);
-  const adminOnly = !input.isAdmin && privileged;
+  // 仓库管理能授「管理」分店关系，所以「店长」派生行对它不是「仅管理员」：点它是引导；
+  // 店长（不能授管理关系）以及管理员 / 仓库管理等其他高权限角色仍然锁定。
+  const adminOnly =
+    !input.isAdmin &&
+    privileged &&
+    !(selection.derived && input.canGrantStoreManagement);
   const canGuideManagerGrant =
     selection.derived && input.canGrantStoreManagement && input.storesEditable;
   return {

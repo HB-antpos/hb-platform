@@ -629,7 +629,29 @@ assert.equal(delegatedStaffAccess.reason, "noPermission");
   assert.deepEqual(
     limitUserAccessRolesForActor(catalog, false).map((role) => role.roleName),
     ["StoreStaff"],
-    "仓库管理只能把角色改成店员；店长由分店管理关系派生，不在角色目录里",
+    "店长只看到「店员」一行",
+  );
+  // 仓库管理可以设置店长：目录里多一行派生的「店长」（不可勾选，点它引导去分店设为「管理」）；
+  // 管理员、仓库管理、订货员等永远不出现。
+  const catalogWithManager = [
+    ...catalog,
+    { roleGUID: "r-manager", roleName: "StoreManager" },
+    { roleGUID: "r-manager-cn", roleName: "店长" },
+  ] as UserAccessRole[];
+  assert.deepEqual(
+    limitUserAccessRolesForActor(catalogWithManager, false, true).map((role) => role.roleName),
+    ["StoreStaff", "StoreManager", "店长"],
+    "仓库管理：店员 + 派生的店长，不含管理员 / 仓库管理 / 订货员",
+  );
+  assert.deepEqual(
+    limitUserAccessRolesForActor(catalogWithManager, false).map((role) => role.roleName),
+    ["StoreStaff"],
+    "店长（非仓库管理）仍看不到店长行",
+  );
+  assert.equal(
+    limitUserAccessRolesForActor(catalogWithManager, true, true).length,
+    catalogWithManager.length,
+    "管理员看到全部",
   );
 }
 

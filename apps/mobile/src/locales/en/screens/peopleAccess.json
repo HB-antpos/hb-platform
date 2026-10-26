@@ -60,6 +60,7 @@
     "derivedHintOn": "Comes from a \"Manage\" store. To remove it, set that store to \"View\"",
     "highPrivilege": "High privilege",
     "managerLimit": "Store managers can only add or remove the Store staff role for staff at their stores.",
+    "warehouseLimit": "Warehouse managers can set the role to Store staff. To make someone a store manager, set a store to \"Manage\" under Stores. Admin and Warehouse manager cannot be assigned.",
     "grantManager": {
       "set": "{{store}} set to \"Manage\", pending save",
       "choose": "This staff member has more than one store. Choose which one to set to \"Manage\", then tap Save.",

@@ -418,8 +418,9 @@ export function useAccessEditor({
       limitUserAccessRolesForActor(
         mergeAccessRoleOptions(roleCatalogQuery.data, rolesQuery.data),
         access.isAdmin,
+        access.isWarehouseManager,
       ),
-    [access.isAdmin, roleCatalogQuery.data, rolesQuery.data],
+    [access.isAdmin, access.isWarehouseManager, roleCatalogQuery.data, rolesQuery.data],
   );
   const hasManagedStoreAssignment = storeAssignments.some((item) => item.isPrimary);
 
@@ -735,6 +736,7 @@ export function useAccessEditor({
     isDeviceMode,
     isAuthenticated,
     isAdmin: access.isAdmin,
+    isWarehouseManager: access.isWarehouseManager,
     actorUserGuid,
     managedStoreCodes,
     eligibility,
