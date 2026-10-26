@@ -69,6 +69,33 @@
         "restoreFailed": "恢复失败",
         "loadFailed": "加载已删除排班失败",
         "empty": "这周没有删除的排班"
+      },
+      "cellEditor": {
+        "searchPlaceholder": "搜索员工姓名",
+        "loadingStaff": "正在加载员工…",
+        "loadedStaff": "已加载 {{count}} 名在职员工",
+        "filteredStaff": "当前显示 {{count}} 人",
+        "editing": "编辑班次",
+        "creating": "新建班次",
+        "presets": "常用班次",
+        "presetNames": {
+          "morning": "早班",
+          "midday": "中班",
+          "evening": "晚班",
+          "fullDay": "全天"
+        },
+        "shiftTime": "班次时间",
+        "hours": "共 {{hours}} 小时",
+        "optional": "选填",
+        "remarkPlaceholder": "例如：补缺口、培训日",
+        "applyToOthers": "同时应用到本周其他日期",
+        "workdays": "工作日",
+        "allEmpty": "整周空白",
+        "occupied": "该日已有班次",
+        "hintDraft": "保存后为草稿，点右上角「发布本周」后才对员工生效。",
+        "hintActive": "该班次已发布，保存后直接生效。",
+        "shortcuts": "Enter 保存 · Esc 关闭",
+        "partialFailed": "已保存 {{ok}} 天，{{failed}} 天保存失败（{{dates}}）"
       }
     }
   }
