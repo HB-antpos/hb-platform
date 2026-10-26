@@ -745,11 +745,12 @@ export async function printProductLabelPayload(payload: ProductLabelPrintPayload
   return runLabelPrint(() => printNativeProductLabel(payload, printType));
 }
 
-export async function printDiscountLabel(detail: ProductDetail, printType?: string | null) {
+/** overrides 与 printProductLabel 一致：自动补打折扣标签时，多码 / 套码要带上扫到的条码与价格。 */
+export async function printDiscountLabel(detail: ProductDetail, printType?: string | null, overrides?: ProductLabelOverrides) {
   if (isIosReviewSessionActive()) {
     return true;
   }
-  return runLabelPrint(() => printNativeDiscountLabel(buildPayload(detail), printType));
+  return runLabelPrint(() => printNativeDiscountLabel(buildPayload(detail, overrides), printType));
 }
 
 export async function printDiscountLabelPayload(payload: ProductLabelPrintPayload, printType?: string | null) {

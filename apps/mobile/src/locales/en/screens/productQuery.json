@@ -133,6 +133,7 @@
     "hqSyncProduct": "Product {{productCode}} · Store {{storeCode}}",
     "hqSyncProductAllStores": "Product {{productCode}} · All stores",
     "hqSyncAttempt": "Attempts: {{count}}",
+    "discountAutoPrintFailed": "The regular label printed, but the discount label failed to print.",
     "discountPrintUnavailable": "This product has no discount data to print.",
     "clearancePrintUnavailable": "This product has no clearance data to print."
   },

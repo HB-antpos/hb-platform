@@ -19,7 +19,7 @@ import {
   resolveWarehousePriceConfirmationFeedback,
   shouldAutoPrintWarehousePrice,
 } from "./warehouse-price-sync";
-import { resolveScannedCodeLabel } from "./scan-label";
+import { resolveScannedCodeLabel, shouldAutoPrintDiscountLabel } from "./scan-label";
 
 // 执行页面真实详情后处理及扫码打印回调，只替换网络与打印机边界。
 const pageSource = readFileSync(resolve(__dirname, "../../../app/(shell)/product-query.tsx"), "utf8");
@@ -36,6 +36,7 @@ function callbackStatement(name: string): ts.VariableStatement {
 const processLoadedDetailStatement = callbackStatement("processLoadedDetail");
 const smartAutoPrintStatement = callbackStatement("smartAutoPrint");
 const sendCodeLabelStatement = callbackStatement("sendCodeLabel");
+const sendProductLabelStatement = callbackStatement("sendProductLabel");
 
 function compileCallback<T>(statement: ts.VariableStatement, name: string, deps: Record<string, unknown>): T {
   const source = `const { ${Object.keys(deps).join(", ")} } = deps;\n${statement.getText(pageAst)}\nreturn ${name};`;
@@ -522,7 +523,14 @@ const currentDetail = {
 };
 type Detail = typeof currentDetail;
 type FlowResult = { labelPrinted: boolean; autoPricingStatus: string };
-type PrintOptions = { barcode?: string; retailPrice?: number; discountRate?: number; action?: string; printType?: string | null };
+type PrintOptions = {
+  barcode?: string;
+  retailPrice?: number;
+  discountRate?: number;
+  action?: string;
+  printType?: string | null;
+  withDiscountLabel?: boolean;
+};
 
 function createPageFlow(options: {
   scanKeyword?: string;
@@ -543,7 +551,7 @@ function createPageFlow(options: {
     prints.push({ detail: value, options: printOptions });
     return options.print ? options.print() : true;
   };
-  const sendCodeLabel = compileCallback<(value: Detail, target: Record<string, unknown>, printType: string | null) => Promise<boolean>>(
+  const sendCodeLabel = compileCallback<(value: Detail, target: Record<string, unknown>, printType: string | null, withDiscountLabel?: boolean) => Promise<boolean>>(
     sendCodeLabelStatement, "sendCodeLabel", {
       useCallback: (callback: unknown) => callback,
       sendProductLabel,
@@ -595,14 +603,97 @@ function createPageFlow(options: {
   };
 }
 
+// 执行页面真实的 sendProductLabel：普通标签之后，自动打印链路有折扣才补打折扣标签；手动按钮不传 withDiscountLabel。
+function createSendProductLabel(options: { quantity?: number; failProduct?: boolean; failDiscount?: boolean } = {}) {
+  const calls: { kind: "product" | "discount"; printType?: string | null; overrides?: Record<string, unknown> }[] = [];
+  const messages: string[] = [];
+  const feedback: string[] = [];
+  const quantityResets: number[] = [];
+  const sendProductLabel = compileCallback<(value: Detail, printOptions?: PrintOptions) => Promise<boolean>>(
+    sendProductLabelStatement, "sendProductLabel", {
+      useCallback: (callback: unknown) => callback,
+      getSavedPrinter: async () => ({ address: "AA:BB" }),
+      setSnackbarMessage: (message: string) => messages.push(message),
+      t: (key: string) => key,
+      playQueryFeedback: (value: string) => feedback.push(value),
+      printerAutoReconnectPaused: false,
+      setPrintingAction: () => undefined,
+      printProductLabel: async (_value: Detail, overrides: Record<string, unknown>, printType?: string | null) => {
+        calls.push({ kind: "product", printType, overrides });
+        if (options.failProduct) throw new Error("product failed");
+        return true;
+      },
+      printDiscountLabel: async (_value: Detail, printType?: string | null, overrides?: Record<string, unknown>) => {
+        calls.push({ kind: "discount", printType, overrides });
+        if (options.failDiscount) throw new Error("discount failed");
+        return true;
+      },
+      shouldAutoPrintDiscountLabel,
+      printQuantity: options.quantity ?? 1,
+      quantitySingleUse: true,
+      setPrintQuantity: (value: number) => quantityResets.push(value),
+      getErrorMessage: (_error: unknown, fallback: string) => fallback,
+    },
+  );
+  return { sendProductLabel, calls, messages, feedback, quantityResets };
+}
+
+async function runAutoDiscountLabelRegression() {
+  const withDiscount = structuredClone(currentDetail); // 主档折扣 0.2
+  const noDiscount = { ...structuredClone(currentDetail), storePrice: { ...currentDetail.storePrice, discountRate: 0 } };
+
+  // 自动打印 + 有折扣：先普通标签、后折扣标签；折扣标签带同样的小标签类型与覆盖项（多码 / 套码不会打成主条码）。
+  const auto = createSendProductLabel();
+  assert.equal(await auto.sendProductLabel(withDiscount, { printType: "small", withDiscountLabel: true }), true);
+  assert.deepEqual(auto.calls.map((call) => call.kind), ["product", "discount"], "普通标签在前、折扣标签在后");
+  assert.equal(auto.calls[1].printType, "small");
+  assert.deepEqual(auto.messages, ["messages.printSuccess"]);
+
+  const multi = createSendProductLabel();
+  await multi.sendProductLabel(withDiscount, { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, action: "multi:multi-id", withDiscountLabel: true });
+  assert.deepEqual(multi.calls.map((call) => call.kind), ["product", "discount"]);
+  assert.deepEqual(multi.calls[1].overrides, { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2 }, "折扣标签沿用扫到的多码条码与价格");
+
+  // 份数：折扣标签与普通标签份数一致（与手动「折扣标签」按钮同口径）。
+  const twice = createSendProductLabel({ quantity: 2 });
+  await twice.sendProductLabel(withDiscount, { withDiscountLabel: true });
+  assert.deepEqual(twice.calls.map((call) => call.kind), ["product", "product", "discount", "discount"]);
+  assert.deepEqual(twice.quantityResets, [1], "单次份数用完后复位");
+
+  // 不补打：没有折扣、显式折扣 0（套装子项）、手动按钮（不传 withDiscountLabel）。
+  for (const [label, detail, printOptions] of [
+    ["门店价无折扣", noDiscount, { withDiscountLabel: true }],
+    ["套装子项显式折扣 0", withDiscount, { barcode: "SET-1", retailPrice: 10, discountRate: 0, withDiscountLabel: true }],
+    ["手动打印不补打折扣标签", withDiscount, {}],
+  ] as const) {
+    const flow = createSendProductLabel();
+    assert.equal(await flow.sendProductLabel(detail, printOptions), true, label);
+    assert.deepEqual(flow.calls.map((call) => call.kind), ["product"], label);
+  }
+
+  // 普通标签失败：不再尝试折扣标签。
+  const productFails = createSendProductLabel({ failProduct: true });
+  assert.equal(await productFails.sendProductLabel(withDiscount, { withDiscountLabel: true }), false);
+  assert.deepEqual(productFails.calls.map((call) => call.kind), ["product"], "普通标签失败不补打折扣标签");
+
+  // 折扣标签失败：普通标签已打出，仍返回 true（调用方不会重打），并单独提示折扣标签失败。
+  const discountFails = createSendProductLabel({ failDiscount: true, quantity: 2 });
+  assert.equal(await discountFails.sendProductLabel(withDiscount, { withDiscountLabel: true }), true, "普通标签已打出，不能报告整体失败");
+  assert.deepEqual(discountFails.messages, ["messages.discountAutoPrintFailed"]);
+  assert.deepEqual(discountFails.feedback, ["error"]);
+  assert.deepEqual(discountFails.quantityResets, [1], "折扣标签失败也要复位单次份数");
+  console.log("商品查询自动打印补打折扣标签回归通过");
+}
+
 async function runPageRegression() {
   for (const [scanKeyword, expectedOptions] of [
-    ["MAIN-1", { printType: null }],
-    ["PRODUCT-1", { printType: null }],
+    // 自动打印链路一律带 withDiscountLabel：普通标签之后有折扣再补打折扣标签（是否真有折扣由 sendProductLabel 判定）。
+    ["MAIN-1", { printType: null, withDiscountLabel: true }],
+    ["PRODUCT-1", { printType: null, withDiscountLabel: true }],
     // 套装子项：套装条码 + 套装价，不印折扣（显式 0，避免打印层回退到主档折扣）。
-    ["SET-1", { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null }],
+    ["SET-1", { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null, withDiscountLabel: true }],
     // 多码：多码条码 + 主档门店价 + 主档折扣。
-    ["MULTI-1", { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, action: "multi:multi-id", printType: null }],
+    ["MULTI-1", { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, action: "multi:multi-id", printType: null, withDiscountLabel: true }],
   ] as const) {
     const flow = createPageFlow({ scanKeyword });
     assert.equal((await flow.run()).labelPrinted, true, `${scanKeyword} 扫码打印本店价`);
@@ -669,7 +760,7 @@ async function runPageRegression() {
   assert.deepEqual(offlineMissing.messages, ["messages.codesLoadFailed"]);
   const offlineSet = createPageFlow({ offline: true, scanKeyword: "SET-1" });
   assert.equal((await offlineSet.run()).labelPrinted, true);
-  assert.deepEqual(offlineSet.prints[0].options, { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null });
+  assert.deepEqual(offlineSet.prints[0].options, { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null, withDiscountLabel: true });
   const staleStore = createPageFlow({ scopeCurrent: false });
   assert.equal((await staleStore.run()).labelPrinted, false, "切店后的旧详情不打印");
   for (const print of [async () => false, async () => { throw new Error("printer disconnected"); }]) {
@@ -677,6 +768,7 @@ async function runPageRegression() {
     assert.equal((await failedPrint.run()).labelPrinted, false, "打印失败不能报告成功");
     assert.equal(failedPrint.prints.length, 1);
   }
+  await runAutoDiscountLabelRegression();
   console.log("商品查询当前门店价扫码打印回归通过");
 }
 

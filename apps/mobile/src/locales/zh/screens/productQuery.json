@@ -133,6 +133,7 @@
     "hqSyncProduct": "商品 {{productCode}} · 分店 {{storeCode}}",
     "hqSyncProductAllStores": "商品 {{productCode}} · 全部分店",
     "hqSyncAttempt": "已尝试 {{count}} 次",
+    "discountAutoPrintFailed": "普通标签已打印，折扣标签打印失败",
     "discountPrintUnavailable": "当前商品没有折扣信息，无法打印折扣标签",
     "clearancePrintUnavailable": "当前商品没有清货信息，无法打印清货标签"
   },
