@@ -254,6 +254,9 @@ export const P = {
     LeaveViewManagedStore: 'Attendance.Leave.ViewManagedStore',
     LeaveReviewManagedStore: 'Attendance.Leave.ReviewManagedStore',
     SettingsEdit: 'Attendance.Settings.Edit',
+    PayrollView: 'Attendance.Payroll.View',
+    PayrollEdit: 'Attendance.Payroll.Edit',
+    PayrollUnlock: 'Attendance.Payroll.Unlock',
     AdminView: 'Attendance.Admin.View',
   },
 } as const

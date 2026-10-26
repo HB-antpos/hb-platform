@@ -93,6 +93,18 @@
       "name": "查看管理分店请假申请",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"
     },
+    "Attendance.Payroll.Edit": {
+      "name": "编辑时薪、工资备注与提交锁定",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 新增时薪生效记录、填写工资备注与年假核定工时、提交并锁定发薪周期"
+    },
+    "Attendance.Payroll.Unlock": {
+      "name": "解锁已提交的发薪周期",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 解锁已提交的发薪周期（需填写原因，留操作记录）"
+    },
+    "Attendance.Payroll.View": {
+      "name": "查看工资表与时薪表",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 查看工资表、个人时薪表"
+    },
     "Attendance.Punch.AdjustManagedStore": {
       "name": "补卡与修改管理分店打卡",
       "description": "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"

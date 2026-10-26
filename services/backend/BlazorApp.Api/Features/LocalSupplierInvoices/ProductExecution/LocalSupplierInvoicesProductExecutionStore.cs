@@ -407,6 +407,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         additionalBarcode,
                         activeStores,
                         calculatedRetailPrice,
+                        // 新建商品时各分店主价都等于本次算出的零售价，多码直接跟随它。
+                        _ => calculatedRetailPrice,
                         now,
                         userName,
                         productSetCodesToCreate,
@@ -742,6 +744,10 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 .Distinct()
                 .ToList();
 
+            // 一品多码（SetType=2）的价格跟随主条码：总部关系取本单分店主价，分店投影取各自分店主价，
+            // 分店主价缺失时回退商品主档价。进货单明细的零售价通常为空，不能作为多码价（否则收银出 $0.00）。
+            var productRetailPrices = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            var storeMainPrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             if (productCodesToUpdate.Count > 0)
             {
                 var products = await db.Queryable<Product>()
@@ -750,8 +756,23 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         && productCodesToUpdate.Contains(p.ProductCode)
                         && p.IsDeleted == false
                     )
-                    .Select(p => new { p.ProductCode, p.ProductType })
+                    .Select(p => new { p.ProductCode, p.ProductType, p.RetailPrice })
                     .ToListAsync();
+                foreach (var product in products)
+                    productRetailPrices.TryAdd(product.ProductCode!, product.RetailPrice);
+
+                var storePrices = await db.Queryable<StoreRetailPrice>()
+                    .Where(x =>
+                        x.ProductCode != null
+                        && productCodesToUpdate.Contains(x.ProductCode)
+                        && x.IsActive
+                        && x.IsDeleted == false
+                        && x.StoreRetailPriceValue != null
+                    )
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.StoreRetailPriceValue })
+                    .ToListAsync();
+                foreach (var price in storePrices.Where(x => x.StoreRetailPriceValue > 0m))
+                    storeMainPrices.TryAdd(BuildStorePriceKey(price.StoreCode, price.ProductCode), price.StoreRetailPriceValue!.Value);
 
                 var uuidsToUpdate = products
                     .Where(p => p.ProductType != 2)
@@ -835,12 +856,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         .Where(storeCode => !existingStoreMultiCodes.Contains(
                             BuildStoreMultiCodeKey(storeCode, detail.ProductCode, barcodeToAdd)))
                         .ToList();
+                    productRetailPrices.TryGetValue(detail.ProductCode!, out var productRetailPrice);
+                    var invoiceStoreCode = detail.StoreCode ?? header.StoreCode;
                     AppendMultiCodeEntities(
                         detail,
                         detail.ProductCode!,
                         barcodeToAdd,
                         missingStores,
-                        detail.RetailPrice,
+                        ResolveMainPrice(storeMainPrices, invoiceStoreCode, detail.ProductCode!, productRetailPrice),
+                        storeCode => ResolveMainPrice(storeMainPrices, storeCode, detail.ProductCode!, productRetailPrice),
                         now,
                         userName,
                         productSetCodesToCreate,
@@ -875,12 +899,26 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         private static string BuildStoreMultiCodeKey(string? storeCode, string? productCode, string? barcode) =>
             $"{storeCode?.Trim()}|{productCode?.Trim()}|{barcode?.Trim()}";
 
+        private static string BuildStorePriceKey(string? storeCode, string? productCode) =>
+            $"{storeCode?.Trim()}|{productCode?.Trim()}";
+
+        /// <summary>主条码价：分店主价（&gt;0）优先，缺失时回退商品主档价；都没有时为 null。</summary>
+        private static decimal? ResolveMainPrice(
+            IReadOnlyDictionary<string, decimal> storeMainPrices,
+            string? storeCode,
+            string productCode,
+            decimal? productRetailPrice) =>
+            storeMainPrices.TryGetValue(BuildStorePriceKey(storeCode, productCode), out var storePrice)
+                ? storePrice
+                : productRetailPrice is > 0m ? productRetailPrice : null;
+
         private static void AppendMultiCodeEntities(
             StoreLocalSupplierInvoiceDetails detail,
             string productCode,
             string barcodeToAdd,
             IEnumerable<string> activeStores,
             decimal? retailPrice,
+            Func<string, decimal?> storeRetailPrice,
             DateTime now,
             string userName,
             List<ProductSetCode> productSetCodesToCreate,
@@ -926,7 +964,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     MultiBarcode = barcodeToAdd,
                     // 与全局关系保持相同规则，门店投影等待同事务统一回算。
                     PurchasePrice = null,
-                    MultiCodeRetailPrice = retailPrice,
+                    MultiCodeRetailPrice = storeRetailPrice(storeCode),
                     DiscountRate = detail.DiscountRate,
                     IsAutoPricing = detail.AutoPricing ?? true,
                     IsSpecialProduct = detail.IsSpecialProduct ?? false,

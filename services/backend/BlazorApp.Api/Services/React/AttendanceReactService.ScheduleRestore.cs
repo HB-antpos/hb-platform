@@ -71,6 +71,10 @@ namespace BlazorApp.Api.Services.React
             {
                 return ApiResponse<AttendanceScheduleDto>.Error(storeAccess.Message, storeAccess.ErrorCode);
             }
+            if (await IsPayPeriodLockedAsync(model.StoreCode, model.WorkDate))
+            {
+                return PayPeriodLocked<AttendanceScheduleDto>();
+            }
 
             // 员工已离职或解绑本店时不能把班找回来，否则会出现无主班次。
             var boundUsers = await LoadStoreBoundUserGuidsAsync(model.StoreCode, new[] { model.UserGuid });
