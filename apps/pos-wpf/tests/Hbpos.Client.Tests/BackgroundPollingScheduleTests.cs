@@ -211,14 +211,45 @@ public sealed class BackgroundPollingScheduleTests
             context.SetCurrent(new CashierSessionDto(
                 "C001", "U-1", "Alice", "S001", "POS-01", [], [], ["S001"], false, false, false));
             var refresh = new CashierSessionRefreshService(api, context, new NoopCacheUpdater());
-            var service = new CashierSessionRefreshHostedService(refresh, clock);
+            var timers = new TimerCountingTimeProvider(clock);
+            var service = new CashierSessionRefreshHostedService(refresh, timers);
             await service.StartAsync(CancellationToken.None);
+            // Microsoft.Extensions.Hosting 10.x 的 BackgroundService.StartAsync 不再保证 ExecuteAsync 的同步部分
+            // 在返回前跑完（计时器可能稍后才在线程池上创建）。必须等到计时器真的建好再推进虚拟时间：
+            // 否则 Advance 发生在建计时器之前，之后建出来的计时器从「已推进后的现在」起算，首个 tick 永远等不到。
+            await WaitUntilAsync(() => timers.TimersCreated >= 1);
             return new RefreshHarness(clock, api, service);
         }
 
         public Task WaitForCallsAsync(int expected) => WaitUntilAsync(() => Api.CallCount >= expected);
 
         public async ValueTask DisposeAsync() => await _service.StopAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 包一层 TimeProvider，只多记录「创建过几个计时器」，其余（时间、时区、计时器本身）全部转给内部的 FakeTimeProvider。
+    /// 测试靠它确定性地知道后台服务的计时器已经建好，不用靠睡眠猜。
+    /// </summary>
+    private sealed class TimerCountingTimeProvider(TimeProvider inner) : TimeProvider
+    {
+        private int _timersCreated;
+
+        public int TimersCreated => Volatile.Read(ref _timersCreated);
+
+        public override DateTimeOffset GetUtcNow() => inner.GetUtcNow();
+
+        public override TimeZoneInfo LocalTimeZone => inner.LocalTimeZone;
+
+        public override long TimestampFrequency => inner.TimestampFrequency;
+
+        public override long GetTimestamp() => inner.GetTimestamp();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = inner.CreateTimer(callback, state, dueTime, period);
+            Interlocked.Increment(ref _timersCreated);
+            return timer;
+        }
     }
 
     private sealed class CountingRefreshApiClient : ICashierSessionRefreshApiClient
