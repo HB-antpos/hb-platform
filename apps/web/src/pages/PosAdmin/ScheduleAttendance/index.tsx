@@ -1,7 +1,6 @@
 import {
   CalendarOutlined,
   CheckOutlined,
-  CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -43,7 +42,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
-  approveAttendanceApproval,
   batchUpsertAttendanceHolidays,
   createAttendanceHoliday,
   createAttendanceSchedule,
@@ -56,9 +54,7 @@ import {
   getAttendanceScheduleWeek,
   getAttendanceRecords,
   getAttendanceSettings,
-  getPendingAttendanceApprovals,
   publishAttendanceScheduleWeek,
-  rejectAttendanceApproval,
   syncAttendanceHolidays,
   updateAttendanceHoliday,
   updateAttendanceSchedule,
@@ -71,13 +67,11 @@ import { getStoreUsersGrid } from '../../../services/storeUserService'
 import { useAuthStore } from '../../../store/auth'
 import type { StoreUserListDto } from '../../../services/storeUserService'
 import type {
-  AttendanceApprovalDto,
   AttendanceAvailabilityDto,
   AttendanceHolidayBusinessStatus,
   AttendanceLocationSampleDto,
   AttendancePunchDto,
   AttendancePunchStatus,
-  AttendanceReviewStatus,
   AttendanceScheduleDto,
   AttendanceScheduleStatus,
   AttendanceSettingsDto,
@@ -92,7 +86,6 @@ import type {
 import {
   buildAttendanceRecordSummary,
   buildLocalPunchAdjustmentPreview,
-  validateOvertimeApproval,
   resolveSegmentPunchTime,
   deriveOriginalPunchGuid,
   getPunchAdjustmentOptions,
@@ -102,12 +95,8 @@ import {
   resolvePunchAdjustmentOriginalGuid,
   canAdjustOwnAttendanceRecord,
   getProposedAdjustmentPunchStatus,
-  isKnownAttendanceApprovalSourceType,
-  getSupplementalAttendanceApprovalDetail,
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
-  insertAttendanceWeekdaysInText,
-  validateMealBreakApproval,
   buildAttendanceMealPaySummary,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
@@ -134,8 +123,7 @@ dayjs.extend(isoWeek)
 // 用餐未休息加工时等新增文案放页面级消息文件，随页面懒加载，不占首屏 i18n 包。
 registerPageMessages({ zh: scheduleAttendanceMessagesZh, en: scheduleAttendanceMessagesEn })
 
-type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'approvals' | 'holidays' | 'settings'
-type ReviewAction = 'approve' | 'reject'
+type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'holidays' | 'settings'
 
 interface AttendanceMapPreview {
   title: string
@@ -330,7 +318,6 @@ export default function ScheduleAttendancePage() {
   const [scheduleHolidaysLoading, setScheduleHolidaysLoading] = useState(false)
   const [availability, setAvailability] = useState<ListState<AttendanceAvailabilityDto>>(initialListState)
   const [punches, setPunches] = useState<ListState<AttendancePunchDto>>(initialListState)
-  const [approvals, setApprovals] = useState<ListState<AttendanceApprovalDto>>(initialListState)
   const [holidays, setHolidays] = useState<ListState<AttendanceStoreHolidayDto>>(initialListState)
   const [settings, setSettings] = useState<AttendanceSettingsDto | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -339,9 +326,6 @@ export default function ScheduleAttendancePage() {
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false)
   const [editingHoliday, setEditingHoliday] = useState<AttendanceStoreHolidayDto | null>(null)
   const [batchHolidayDrawerOpen, setBatchHolidayDrawerOpen] = useState(false)
-  const [reviewModalOpen, setReviewModalOpen] = useState(false)
-  const [reviewTarget, setReviewTarget] = useState<AttendanceApprovalDto | null>(null)
-  const [reviewAction, setReviewAction] = useState<ReviewAction>('approve')
   const [adjustmentTarget, setAdjustmentTarget] = useState<AttendanceScheduleDto | null>(null)
   const [adjustmentPreview, setAdjustmentPreview] = useState<LocalPunchAdjustmentPreview | null>(null)
   const [serverAdjustmentPreview, setServerAdjustmentPreview] = useState<AttendancePunchAdjustmentPreviewDto | null>(null)
@@ -362,7 +346,6 @@ export default function ScheduleAttendancePage() {
   const [scheduleForm] = Form.useForm<ScheduleFormValues>()
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
-  const [reviewForm] = Form.useForm<{ reviewRemark?: string; approvedOvertimeMinutes?: number }>()
   const [adjustmentForm] = Form.useForm<PunchAdjustmentFormValues>()
   const [settingsForm] = Form.useForm<SaveAttendanceSettingsPayload>()
   const previewRequestIdRef = useRef(0)
@@ -377,9 +360,6 @@ export default function ScheduleAttendancePage() {
   }, [t])
   const formatBusinessDisplayText = useCallback((displayText: string) => (
     insertAttendanceWeekday(displayText, getBusinessWeekdayLabel(displayText))
-  ), [getBusinessWeekdayLabel])
-  const formatBusinessDetailText = useCallback((detailText: string) => (
-    insertAttendanceWeekdaysInText(detailText, getBusinessWeekdayLabel)
   ), [getBusinessWeekdayLabel])
   const formatRecordMinutes = useCallback((minutes?: number) => (
     typeof minutes === 'number'
@@ -616,23 +596,6 @@ export default function ScheduleAttendancePage() {
     }
   }, [punches.page, punches.pageSize, queryParams, shouldSkipVisibleStoreQuery, t])
 
-  const loadApprovals = useCallback(async (page = approvals.page, pageSize = approvals.pageSize) => {
-    if (shouldSkipVisibleStoreQuery()) {
-      setApprovals({ ...initialListState, page, pageSize })
-      return
-    }
-
-    setApprovals((prev) => ({ ...prev, loading: true, page, pageSize }))
-    try {
-      const result = await getPendingAttendanceApprovals(queryParams(page, pageSize))
-      setApprovals({ loading: false, items: result.items, total: result.total, page: result.page, pageSize: result.pageSize })
-    } catch (error) {
-      console.error(error)
-      message.error(t('posAdmin.scheduleAttendance.messages.loadApprovalsFailed'))
-      setApprovals((prev) => ({ ...prev, loading: false }))
-    }
-  }, [approvals.page, approvals.pageSize, queryParams, shouldSkipVisibleStoreQuery, t])
-
   const loadHolidays = useCallback(async (page = holidays.page, pageSize = holidays.pageSize) => {
     if (shouldSkipVisibleStoreQuery()) {
       setHolidays({ ...initialListState, page, pageSize })
@@ -673,10 +636,9 @@ export default function ScheduleAttendancePage() {
     if (activeTab === 'records' && access.canViewAttendancePunches) void loadRecords(page)
     if (activeTab === 'availability') void loadAvailability(page)
     if (activeTab === 'punches') void loadPunches(page)
-    if (activeTab === 'approvals') void loadApprovals(page)
     if (activeTab === 'holidays') void loadHolidays(page)
     if (activeTab === 'settings') void loadSettings()
-  }, [access.canViewAttendancePunches, activeTab, loadApprovals, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers])
+  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers])
 
   useEffect(() => {
     if (visibleStoreCodes !== null) {
@@ -714,11 +676,6 @@ export default function ScheduleAttendancePage() {
   const punchStatusTag = (value: AttendancePunchStatus) => {
     const color = value === 'Normal' || value === 'Approved' ? 'green' : value === 'PendingApproval' ? 'orange' : 'red'
     return <Tag color={color}>{statusLabel('punch', value)}</Tag>
-  }
-
-  const reviewStatusTag = (value: AttendanceReviewStatus) => {
-    const color = value === 'Approved' ? 'green' : value === 'Pending' ? 'orange' : value === 'Rejected' ? 'red' : 'default'
-    return <Tag color={color}>{statusLabel('review', value)}</Tag>
   }
 
   const holidayStatusTag = (value: AttendanceHolidayBusinessStatus) => {
@@ -1015,78 +972,6 @@ export default function ScheduleAttendancePage() {
     })
   }
 
-  const openReviewModal = (record: AttendanceApprovalDto, action: ReviewAction) => {
-    if (!access.canReviewAttendance || !canEditStoreCode(record.storeCode)) {
-      message.error(t('message.noPermission', '无权操作该数据'))
-      return
-    }
-
-    setReviewTarget(record)
-    setReviewAction(action)
-    reviewForm.resetFields()
-    reviewForm.setFieldsValue({
-      approvedOvertimeMinutes: action === 'reject' ? 0 : record.candidateOvertimeMinutes,
-    })
-    setReviewModalOpen(true)
-  }
-
-  const submitReview = async () => {
-    if (!reviewTarget) return
-    if (!access.canReviewAttendance || !canEditStoreCode(reviewTarget.storeCode)) {
-      message.error(t('message.noPermission', '无权操作该数据'))
-      return
-    }
-
-    try {
-      const values = await reviewForm.validateFields()
-      const isOvertime = reviewTarget.sourceType === 'Overtime'
-      if (isOvertime) {
-        const validationError = validateOvertimeApproval({
-          candidateMinutes: reviewTarget.candidateOvertimeMinutes ?? 0,
-          approvedMinutes: reviewAction === 'reject' ? 0 : values.approvedOvertimeMinutes ?? 0,
-          action: reviewAction,
-          remark: values.reviewRemark,
-        })
-        if (validationError) {
-          const validationMessages = {
-            outOfRange: '批准加班必须在 0 到候选分钟之间',
-            invalidIncrement: '批准加班必须为 15 分钟倍数',
-            remarkRequired: '减少或拒绝候选加班时必须填写备注',
-          }
-          message.warning(t(`posAdmin.scheduleAttendance.validation.overtime.${validationError}`, validationMessages[validationError]))
-          return
-        }
-      }
-      if (reviewTarget.sourceType === 'MealBreak'
-        && validateMealBreakApproval({ action: reviewAction, remark: values.reviewRemark })) {
-        // 拒绝用餐加工时必须写明理由，员工能在申请记录里看到。
-        message.warning(t('posAdmin.scheduleAttendance.meal.remarkRequired'))
-        return
-      }
-      setSaving(true)
-      const payload = {
-        reviewRemark: values.reviewRemark?.trim() || undefined,
-        approvedOvertimeMinutes: isOvertime
-          ? reviewAction === 'reject' ? 0 : values.approvedOvertimeMinutes
-          : undefined,
-      }
-      if (reviewAction === 'approve') {
-        await approveAttendanceApproval(reviewTarget.approvalGuid, payload)
-      } else {
-        await rejectAttendanceApproval(reviewTarget.approvalGuid, payload)
-      }
-      message.success(t('posAdmin.scheduleAttendance.messages.reviewSuccess'))
-      setReviewModalOpen(false)
-      void loadApprovals()
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) return
-      console.error(error)
-      message.error(t('posAdmin.scheduleAttendance.messages.reviewFailed'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const openPunchAdjustmentModal = (record: AttendanceScheduleDto) => {
     if (!canAdjustOwnAttendanceRecord({
       isAdmin: access.isAdmin,
@@ -1200,7 +1085,6 @@ export default function ScheduleAttendancePage() {
       setPreviewPayloadSnapshot(null)
       void loadRecords()
       void loadPunches()
-      void loadApprovals()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return
       console.error(error)
@@ -1769,149 +1653,6 @@ export default function ScheduleAttendancePage() {
     { title: t('column.remarks'), dataIndex: 'remark', ellipsis: true },
   ]
 
-  const approvalDisplayTitle = (record: AttendanceApprovalDto) => (
-    isKnownAttendanceApprovalSourceType(record.sourceType)
-      ? t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.title`)
-      : record.title || record.sourceType
-  )
-
-  const approvalSystemDetails = (record: AttendanceApprovalDto) => {
-    if (!isKnownAttendanceApprovalSourceType(record.sourceType)) {
-      return record.detail ? <Typography.Text type="secondary">{formatBusinessDetailText(record.detail)}</Typography.Text> : null
-    }
-
-    if (record.sourceType === 'PunchAdjustment') {
-      return record.adjustment ? (
-        <>
-          {record.adjustment.originalPunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.originalPunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.originalPunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.requestedPunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.requestedPunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.requestedPunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.effectivePunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.effectivePunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.effectivePunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.reason ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.fields.reason')}: {record.adjustment.reason}</Typography.Text>
-          ) : null}
-          {record.adjustment.isDirectAdjustment ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.messages.directAdjustment')}</Typography.Text>
-          ) : null}
-        </>
-      ) : null
-    }
-
-    if (record.sourceType === 'MealBreak') {
-      // 店长判断依据：员工声明没休息几次、排班要求几次、系统记录到几次，以及员工给的原因。
-      const claim = record.mealClaim
-      if (!claim) {
-        return record.detail ? <Typography.Text type="secondary">{formatBusinessDetailText(record.detail)}</Typography.Text> : null
-      }
-      return (
-        <>
-          <Space size={4} wrap>
-            <Tag color="gold">
-              {t('posAdmin.scheduleAttendance.meal.claimSummary', { count: claim.notTakenCount, minutes: claim.claimedMinutes })}
-            </Tag>
-          </Space>
-          <Typography.Text type="secondary">
-            {t('posAdmin.scheduleAttendance.meal.claimCounts', { expected: claim.expectedCount, recorded: claim.recordedCount })}
-          </Typography.Text>
-          {claim.reason ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.meal.reason', { reason: claim.reason })}</Typography.Text>
-          ) : null}
-        </>
-      )
-    }
-
-    if (record.sourceType === 'Overtime') {
-      return (
-        <Space size={4} wrap>
-          <Tag color="gold">{t('posAdmin.scheduleAttendance.fields.candidateOvertime', { minutes: record.candidateOvertimeMinutes ?? 0 })}</Tag>
-          {record.approvedOvertimeMinutes !== undefined ? (
-            <Tag color="green">{t('posAdmin.scheduleAttendance.fields.approvedOvertime', { minutes: record.approvedOvertimeMinutes })}</Tag>
-          ) : null}
-        </Space>
-      )
-    }
-
-    if (record.sourceType === 'Punch' || record.sourceType === 'Leave') {
-      const supplementalDetail = getSupplementalAttendanceApprovalDetail({
-        sourceType: record.sourceType,
-        detail: record.detail,
-        displayedTitle: approvalDisplayTitle(record),
-      })
-      return (
-        <>
-          {record.workDate ? (
-            <Typography.Text type="secondary">
-              {t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.detail`, {
-                workDate: formatBusinessDisplayText(formatDate(record.workDate)),
-              })}
-            </Typography.Text>
-          ) : null}
-          {supplementalDetail ? <Typography.Text type="secondary">{formatBusinessDetailText(supplementalDetail)}</Typography.Text> : null}
-        </>
-      )
-    }
-
-    return record.workDate ? (
-      <Typography.Text type="secondary">
-        {t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.detail`, {
-          workDate: formatBusinessDisplayText(formatDate(record.workDate)),
-        })}
-      </Typography.Text>
-    ) : null
-  }
-
-  const approvalColumns: ColumnsType<AttendanceApprovalDto> = [
-    { title: t('posAdmin.scheduleAttendance.fields.store'), dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
-    { title: t('posAdmin.scheduleAttendance.fields.applicant'), key: 'applicant', width: 220, render: (_, record) => userCell(record) },
-    { title: t('posAdmin.scheduleAttendance.fields.sourceType'), dataIndex: 'sourceType', width: 120, render: (value: string) => t(`posAdmin.scheduleAttendance.status.sourceType.${value}`, value) },
-    {
-      title: t('posAdmin.scheduleAttendance.fields.workDate'),
-      dataIndex: 'workDate',
-      width: 130,
-      render: (value?: string) => renderBusinessDisplay(formatDate(value)),
-    },
-    { title: t('common.status'), dataIndex: 'reviewStatus', width: 130, render: reviewStatusTag },
-    {
-      title: t('posAdmin.scheduleAttendance.fields.approvalDetail'),
-      key: 'approvalDetail',
-      width: 330,
-      render: (_, record) => (
-        <Space direction="vertical" size={2} style={{ width: '100%' }}>
-          <Typography.Text strong>{approvalDisplayTitle(record)}</Typography.Text>
-          {approvalSystemDetails(record)}
-        </Space>
-      ),
-    },
-    { title: t('posAdmin.scheduleAttendance.fields.reviewedAt'), dataIndex: 'reviewedAt', width: 170, render: formatDateTime },
-    { title: t('column.remarks'), dataIndex: 'reviewRemark', ellipsis: true },
-    {
-      title: t('column.action'),
-      key: 'action',
-      width: 150,
-      render: (_, record) => access.canReviewAttendance && record.reviewStatus === 'Pending' && canEditStoreCode(record.storeCode) ? (
-        <Space>
-          <Button type="link" size="small" icon={<CheckOutlined />} onClick={() => openReviewModal(record, 'approve')}>
-            {record.sourceType === 'Overtime'
-              ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-              : record.sourceType === 'MealBreak'
-                ? t('posAdmin.scheduleAttendance.meal.approve')
-                : t('posAdmin.scheduleAttendance.actions.approve')}
-          </Button>
-          <Button type="link" danger size="small" icon={<CloseOutlined />} onClick={() => openReviewModal(record, 'reject')}>
-            {record.sourceType === 'Overtime'
-              ? t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-              : t('posAdmin.scheduleAttendance.actions.reject')}
-          </Button>
-        </Space>
-      ) : null,
-    },
-  ]
-
   const holidayColumns: ColumnsType<AttendanceStoreHolidayDto> = [
     { title: t('posAdmin.scheduleAttendance.fields.store'), dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
     { title: t('posAdmin.scheduleAttendance.fields.holidayDate'), dataIndex: 'holidayDate', width: 130, render: (value?: string) => renderBusinessDisplay(formatDate(value)) },
@@ -2042,20 +1783,6 @@ export default function ScheduleAttendancePage() {
           dataSource={punches.items}
           pagination={pagination(punches, loadPunches)}
           scroll={{ x: 1350 }}
-        />
-      ),
-    },
-    {
-      key: 'approvals',
-      label: t('posAdmin.scheduleAttendance.tabs.approvals'),
-      children: (
-        <MeasuredTable metricId="pos-admin.schedule-attendance.table-5"
-          rowKey="approvalGuid"
-          loading={approvals.loading}
-          columns={approvalColumns}
-          dataSource={approvals.items}
-          pagination={pagination(approvals, loadApprovals)}
-          scroll={{ x: 1000 }}
         />
       ),
     },
@@ -2721,60 +2448,6 @@ export default function ScheduleAttendancePage() {
             </Typography.Text>
           </Space>
         ) : null}
-      </Modal>
-
-      <Modal
-        title={reviewTarget?.sourceType === 'Overtime'
-          ? reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-            : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-          : reviewTarget?.sourceType === 'MealBreak'
-            ? reviewAction === 'approve'
-              ? t('posAdmin.scheduleAttendance.meal.approveTitle')
-              : t('posAdmin.scheduleAttendance.meal.rejectTitle')
-            : reviewAction === 'approve'
-              ? t('posAdmin.scheduleAttendance.drawer.approve')
-              : t('posAdmin.scheduleAttendance.drawer.reject')}
-        open={reviewModalOpen}
-        okText={reviewTarget?.sourceType === 'Overtime'
-          ? reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-            : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-          : reviewAction === 'approve'
-            ? reviewTarget?.sourceType === 'MealBreak'
-              ? t('posAdmin.scheduleAttendance.meal.approve')
-              : t('posAdmin.scheduleAttendance.actions.approve')
-            : t('posAdmin.scheduleAttendance.actions.reject')}
-        cancelText={t('common.cancel')}
-        okButtonProps={{ danger: reviewAction === 'reject', loading: saving }}
-        onOk={() => void submitReview()}
-        onCancel={() => setReviewModalOpen(false)}
-      >
-        {reviewTarget ? (
-          <Space direction="vertical" size={2} style={{ marginBottom: 16 }}>
-            <Typography.Text strong>{approvalDisplayTitle(reviewTarget)}</Typography.Text>
-            {approvalSystemDetails(reviewTarget)}
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.workDate')}: {formatBusinessDisplayText(formatDate(reviewTarget.workDate))}</Typography.Text>
-          </Space>
-        ) : null}
-        <Form form={reviewForm} layout="vertical">
-          {reviewTarget?.sourceType === 'Overtime' && reviewAction === 'approve' ? (
-            <Form.Item
-              name="approvedOvertimeMinutes"
-              label={t('posAdmin.scheduleAttendance.fields.approvedOvertimeMinutes', '批准加班分钟')}
-              rules={[{ required: true }]}
-              extra={t('posAdmin.scheduleAttendance.messages.overtimeApprovalRange', {
-                defaultValue: '只能选择 0 到 {{candidate}} 分钟，且必须为 15 分钟倍数',
-                candidate: reviewTarget.candidateOvertimeMinutes ?? 0,
-              })}
-            >
-              <InputNumber min={0} max={reviewTarget.candidateOvertimeMinutes ?? 0} step={15} style={{ width: '100%' }} />
-            </Form.Item>
-          ) : null}
-          <Form.Item name="reviewRemark" label={t('posAdmin.scheduleAttendance.fields.reviewRemark')}>
-            <Input.TextArea rows={4} />
-          </Form.Item>
-        </Form>
       </Modal>
     </Card>
   )
