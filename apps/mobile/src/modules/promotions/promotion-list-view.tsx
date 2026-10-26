@@ -77,6 +77,8 @@ export function PromotionListView({
   getErrorMessage,
 }: PromotionListViewProps) {
   const [status, setStatus] = useState<PromotionStatusFilter>("active");
+  // 仅「全部」分段用：默认隐藏已结束，关掉才能在全部里看到它们（「已结束」分段不受影响）。
+  const [hideEnded, setHideEnded] = useState(true);
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [productFilter, setProductFilter] = useState<ProductFilter | null>(null);
@@ -120,6 +122,7 @@ export function PromotionListView({
             storeCode,
             keyword,
             status,
+            hideEnded,
             page: nextPage,
             pageSize: PAGE_SIZE,
             sortModel: getListSortModel(status),
@@ -145,7 +148,7 @@ export function PromotionListView({
         }
       }
     },
-    [getErrorMessage, keyword, onMessage, status, storeCode],
+    [getErrorMessage, hideEnded, keyword, onMessage, status, storeCode],
   );
 
   const loadProductPromotions = useCallback(
@@ -369,6 +372,17 @@ export function PromotionListView({
           />
         </View>
       ) : null}
+      {status === "all" && !productFilter ? (
+        <View style={styles.hideEndedRow}>
+          <Text style={styles.caption}>{t("list.hideEnded")}</Text>
+          <Switch
+            value={hideEnded}
+            onValueChange={setHideEnded}
+            accessibilityLabel={t("list.hideEnded")}
+            style={styles.hideEndedSwitch}
+          />
+        </View>
+      ) : null}
       <Text style={styles.caption}>{caption}</Text>
     </View>
   );
@@ -524,6 +538,8 @@ const styles = StyleSheet.create({
   segmentTextSelected: { color: HB_COLORS.white },
   listHeader: { gap: HB_SPACING.xs, paddingBottom: HB_SPACING.xs },
   caption: { fontSize: 13, color: HB_COLORS.textSecondary },
+  hideEndedRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  hideEndedSwitch: { transform: [{ scale: 0.8 }] },
   productFilter: {
     flexDirection: "row",
     alignItems: "center",

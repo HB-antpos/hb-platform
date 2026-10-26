@@ -147,15 +147,16 @@ export function buildPromotionGridPayload(query: PromotionGridQuery) {
     startRow: (pageNumber - 1) * pageSize,
     pageSize,
     sortModel: query.sortModel?.length ? query.sortModel : undefined,
-    status: normalizeStatusFilter(query.status),
+    status: normalizeStatusFilter(query.status, query.hideEnded),
   };
 }
 
 const STATUS_FILTERS: readonly PromotionStatusFilter[] = ["active", "upcoming", "disabled", "ended", "all"];
 
-function normalizeStatusFilter(value?: PromotionStatusFilter) {
-  // 「全部」不传参数，旧后端也能正常返回。
-  return value && value !== "all" && STATUS_FILTERS.includes(value) ? value : undefined;
+function normalizeStatusFilter(value?: PromotionStatusFilter, hideEnded?: boolean) {
+  // 「全部」默认不传参数，旧后端也能正常返回；隐藏已结束时传 notended（旧后端不认识会按全部处理，只是仍显示已结束）。
+  if (!value || value === "all") return hideEnded ? "notended" : undefined;
+  return STATUS_FILTERS.includes(value) ? value : undefined;
 }
 
 export function normalizeStatusCounts(payload: unknown): PromotionStatusCounts {

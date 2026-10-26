@@ -33,6 +33,7 @@
     "sortEndDesc": "按结束时间倒序",
     "productFilter": "只看含「{{name}}」的促销",
     "clearProductFilter": "取消商品筛选",
+    "hideEnded": "隐藏已结束",
     "loadMore": "加载更多"
   },
   "card": {

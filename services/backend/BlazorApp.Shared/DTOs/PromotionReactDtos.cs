@@ -99,7 +99,7 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>
         /// 店级列表的状态分段：active（生效中）、upcoming（未开始）、disabled（已停用且未结束）、
-        /// ended（已结束）；为空或 all 表示全部。取值见 <see cref="PromotionStoreStatusFilters"/>。
+        /// ended（已结束）、notended（未结束，启停不限）；为空或 all 表示全部。取值见 <see cref="PromotionStoreStatusFilters"/>。
         /// </summary>
         public string? Status { get; set; }
     }
@@ -111,6 +111,9 @@ namespace BlazorApp.Shared.DTOs
         public const string Upcoming = "upcoming";
         public const string Disabled = "disabled";
         public const string Ended = "ended";
+
+        /// <summary>未结束（启停不限）：全部分段里「隐藏已结束」用，等于全部去掉已结束。</summary>
+        public const string NotEnded = "notended";
     }
 
     /// <summary>店级列表各状态分段的数量（与 Status 筛选口径一致）。</summary>
