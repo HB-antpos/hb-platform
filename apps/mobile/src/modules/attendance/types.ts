@@ -38,7 +38,15 @@ export type AttendancePunchStatus =
 
 export type AttendanceAvailabilityStatus = "Submitted" | "Cancelled" | string;
 
-export type AttendanceLeaveType = "AnnualLeave" | "SickLeave" | "PublicHoliday" | string;
+/** 原有无薪请假 AnnualLeave / SickLeave；带薪三种 PaidSick / PaidAnnual / AnnualCashOut（规格 0.2）。 */
+export type AttendanceLeaveType =
+  | "AnnualLeave"
+  | "SickLeave"
+  | "PublicHoliday"
+  | "PaidSick"
+  | "PaidAnnual"
+  | "AnnualCashOut"
+  | string;
 
 export type AttendanceApprovalStatus = "Pending" | "Approved" | "Rejected" | string;
 
@@ -140,6 +148,8 @@ export interface AttendancePunch {
   lateMinutes?: number;
   earlyLeaveMinutes?: number;
   lateDepartureMinutes?: number;
+  /** 午夜系统自动补的下班卡（门店时区 24:00）；该自动时段不计薪（规格 0.1-5）。 */
+  isSystemAutoClockOut?: boolean;
   minorCompliance?: MinorEmploymentComplianceEvaluation;
   /** 打卡响应里的用餐声明：最后一次下班带了声明才有；声明没休息时 status 为 Pending。 */
   mealClaim?: AttendanceMealClaim;
@@ -252,6 +262,8 @@ export interface AttendancePunchAdjustment {
   scheduleGuid?: string;
   originalPunchGuid?: string;
   originalPunchTimeLocal?: string;
+  /** 被修改的原打卡是午夜系统自动下班（卡片写「00:00 自动」）。 */
+  originalIsSystemAutoClockOut?: boolean;
   punchType: AttendancePunchType;
   requestedPunchTimeLocal: string;
   requestedPunchTimeUtc?: string;
@@ -475,6 +487,12 @@ export interface AttendanceLeaveRequest {
   endTime?: string;
   reason?: string;
   attachmentUrl?: string;
+  /** 医嘱等附件（多张）；兼容旧单字段 attachmentUrl。 */
+  attachmentUrls?: string[];
+  /** 带薪假申请工时（十进制小时）。 */
+  paidHours?: number;
+  /** 年假（休息 / 发放）财务核定工时；没有核定记录时为空，按申请工时。 */
+  approvedPaidHours?: number;
   status: AttendanceApprovalStatus;
   submittedAt?: string;
   reviewedAt?: string;
@@ -492,6 +510,10 @@ export interface AttendanceLeaveRequestPayload {
   endTime?: string;
   reason?: string;
   attachmentUrl?: string;
+  /** 医嘱照片对象地址（带薪病假必填，最多 3 张）。 */
+  attachmentUrls?: string[];
+  /** 带薪病假所选排班。 */
+  scheduleGuids?: string[];
 }
 
 export interface AttendanceDirectUploadRequest {
@@ -515,7 +537,7 @@ export interface AttendanceLeaveAttachmentUploadResult {
 export interface AttendanceApproval {
   approvalGuid: string;
   sourceGuid: string;
-  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | string;
+  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | "PublicHolidayPay" | string;
   employeeName?: string;
   storeCode?: string;
   storeName?: string;
@@ -529,12 +551,85 @@ export interface AttendanceApproval {
   adjustment?: AttendancePunchAdjustment;
   /** sourceType 为 MealBreak 时的用餐声明。 */
   mealClaim?: AttendanceMealClaim;
+  /** 申请人；与当前登录用户相同即「本人申请」。 */
+  applicantUserGuid?: string;
+  /** 后端直接标记的本人申请（优先于前端比对）。 */
+  isSelf?: boolean;
+  /** 申请人是否店长（卡片副行显示 Staff / Manager）。 */
+  isStoreManager?: boolean;
+  /** 申请人用工类型 FullTime / PartTime / Casual。 */
+  employmentType?: string;
+  /** 当天排班窗口（门店本地 HH:mm）。 */
+  scheduleStartTime?: string;
+  scheduleEndTime?: string;
+  /** 漏下班：最后一段的上班时间（门店本地 HH:mm），卡片写「上班 16:02，系统已在 00:00 自动下班」。 */
+  clockInTime?: string;
+  /** 当天是公共假期时的名称（分组头显示公假时薪）。 */
+  holidayName?: string;
+  /** 已处理记录：审核人、审核时间、备注，以及是否「本人审批」。 */
+  reviewedByName?: string;
+  reviewedAt?: string;
+  reviewRemark?: string;
+  isSelfReview?: boolean;
+  /** sourceType 为 Leave 时的结构化请假信息（带薪病假审核一屏要用）。 */
+  leave?: AttendanceApprovalLeaveDetail;
+  /** sourceType 为 PublicHolidayPay 时的带薪公假确认信息。 */
+  publicHolidayPay?: AttendanceApprovalPublicHolidayPay;
+}
+
+/** 全职 / 兼职公假当天没排班、但过去 N 周同一星期几排班够多次时生成的确认。 */
+export interface AttendanceApprovalPublicHolidayPay {
+  holidayDate: string;
+  holidayName?: string;
+  ordinaryCount: number;
+  lookbackWeeks: number;
+  suggestedHours?: number;
+  hours?: number;
+  status?: string;
+}
+
+/** 病假所选排班与当天打卡情况。 */
+export interface AttendanceApprovalLeaveSchedule {
+  scheduleGuid?: string;
+  workDate: string;
+  startTime?: string;
+  endTime?: string;
+  hasPunch: boolean;
+}
+
+export interface AttendanceApprovalLeaveDetail {
+  leaveType: AttendanceLeaveType;
+  startDate?: string;
+  endDate?: string;
+  paidHours?: number;
+  reason?: string;
+  attachmentUrls: string[];
+  /** 医嘱拍摄 / 上传时间（门店本地）。 */
+  attachmentTakenAt?: string;
+  schedules: AttendanceApprovalLeaveSchedule[];
+}
+
+/** 打开审核列表时的对账结果（规格 0.1-3）：失败不阻断列表。 */
+export interface AttendanceApprovalReconcileSummary {
+  createdMissingClockOutCount: number;
+  createdOvertimeCount: number;
+  /** 对账覆盖的天数（默认 14）。 */
+  lookbackDays: number;
+  reconciledAt?: string;
+  failed: boolean;
+}
+
+export interface AttendancePendingApprovalBoard {
+  items: AttendanceApproval[];
+  reconcile?: AttendanceApprovalReconcileSummary;
 }
 
 export interface AttendanceApprovalPayload {
   approvalGuid: string;
   remark?: string;
   approvedOvertimeMinutes?: number;
+  /** 带薪公假确认工时（0 < h ≤ 24）。 */
+  approvedPaidHours?: number;
 }
 
 export interface AttendanceScheduleWeekParams {

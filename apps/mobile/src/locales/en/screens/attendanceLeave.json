@@ -1,0 +1,185 @@
+{
+  "title": "Request leave",
+  "leaveTypes": {
+    "PaidSick": "Paid sick leave",
+    "PaidAnnual": "Annual leave (time off)",
+    "AnnualCashOut": "Annual leave cash-out"
+  },
+  "employmentType": {
+    "FullTime": "Full-time",
+    "PartTime": "Part-time",
+    "Casual": "Casual"
+  },
+  "units": {
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "weeks_one": "{{count}} week",
+    "weeks_other": "{{count}} weeks",
+    "hours": "{{hours}} h"
+  },
+  "weekday": {
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat",
+    "sun": "Sun"
+  },
+  "date": {
+    "monthDay": "{{d}} {{mon}}",
+    "dayWithWeekday": "{{weekday}} {{md}}",
+    "range": "{{start}} – {{end}}"
+  },
+  "calendar": {
+    "title": "{{month}} {{year}}",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "hoursTag": "{{hours}}h",
+    "notCounted": "not counted",
+    "header": {
+      "mon": "M",
+      "tue": "T",
+      "wed": "W",
+      "thu": "T",
+      "fri": "F",
+      "sat": "S",
+      "sun": "S"
+    },
+    "months": {
+      "1": "January",
+      "2": "February",
+      "3": "March",
+      "4": "April",
+      "5": "May",
+      "6": "June",
+      "7": "July",
+      "8": "August",
+      "9": "September",
+      "10": "October",
+      "11": "November",
+      "12": "December"
+    },
+    "monthsShort": {
+      "1": "Jan",
+      "2": "Feb",
+      "3": "Mar",
+      "4": "Apr",
+      "5": "May",
+      "6": "Jun",
+      "7": "Jul",
+      "8": "Aug",
+      "9": "Sep",
+      "10": "Oct",
+      "11": "Nov",
+      "12": "Dec"
+    }
+  },
+  "home": {
+    "paidSick": {
+      "title": "Paid sick leave",
+      "line1": "For rostered days you were too sick to work",
+      "line2": "Submit within {{days}} of falling ill · Medical certificate required"
+    },
+    "paidAnnual": {
+      "title": "Annual leave (time off)",
+      "line1": "Book at least {{lead}} ahead · Up to {{max}} at a time",
+      "line2": "{{hours}} h per workday; weekends and public holidays don't count"
+    },
+    "cashOut": {
+      "title": "Annual leave cash-out (keep working)",
+      "line1": "Book at least {{lead}} ahead · Up to {{max}}",
+      "line2": "Keep your roster and get annual leave pay on top"
+    },
+    "other": {
+      "title": "Other leave (unpaid)",
+      "line1": "Same as the existing leave request"
+    },
+    "casualHint": "Casual staff can only request other leave (unpaid).",
+    "optionsFailed": "Couldn't load the paid leave rules. For now you can only request other leave.",
+    "myRequests": "My requests",
+    "empty": "No leave requests yet"
+  },
+  "requests": {
+    "line": "{{range}} · {{amount}}",
+    "rejectedRemark": "Reason: {{remark}}",
+    "badge": {
+      "PaidSick": "Sick",
+      "PaidAnnual": "Annual",
+      "AnnualCashOut": "Cash-out",
+      "other": "Unpaid"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "approvedWithHours": "Approved · {{hours}} h set by finance",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    }
+  },
+  "sick": {
+    "title": "Paid sick leave",
+    "daysTitle": "Days you were sick",
+    "daysAside": "Rostered days from {{date}} only",
+    "shiftLine": "{{day}} · {{start}}–{{end}}",
+    "worked": "Worked",
+    "empty": "No rostered shifts you can claim in this period.",
+    "footnote": "Shifts on or before {{date}} are more than {{days}} ago and can't be claimed. Paid hours = rostered hours minus meal breaks.",
+    "photosTitle": "Medical certificate",
+    "photosAside": "Required, up to {{max}} photos",
+    "reasonPlaceholder": "Note (optional), e.g. fever, saw a GP",
+    "submit": "Submit",
+    "submitWithHours": "Submit · {{hours}} h paid",
+    "needDay": "Pick the day you were sick",
+    "needPhoto": "Add a photo of your medical certificate",
+    "photoFailed": "A photo didn't upload. Retry or remove it.",
+    "uploading": "Photos are still uploading…"
+  },
+  "photo": {
+    "camera": "Camera",
+    "library": "Photos",
+    "thumb": "Medical certificate photo {{index}}",
+    "remove": "Remove photo {{index}}",
+    "uploading": "Uploading",
+    "failed": "Upload failed, tap to retry",
+    "tooMany": "Up to {{max}} photos. The extra ones weren't added.",
+    "pickFailed": "Couldn't read the photo. Please try again.",
+    "cameraPermission": "Camera access is off, so you can't take a photo.",
+    "libraryPermission": "Photo access is off, so you can't pick a photo.",
+    "openSettings": "Open Settings"
+  },
+  "annual": {
+    "titlePaidAnnual": "Annual leave (time off)",
+    "titleCashOut": "Annual leave cash-out",
+    "dateTitle": "Dates",
+    "earliest": "Earliest {{date}}",
+    "to": "to",
+    "startPlaceholder": "Start date",
+    "endPlaceholder": "End date",
+    "checksTitle": "Rule check",
+    "pickHint": "Tap a start date, then an end date, on the calendar.",
+    "checkLead": "At least {{lead}} ahead ({{days}} from today)",
+    "checkMax": "No longer than {{max}} ({{days}} in total)",
+    "checkNoSchedule": "No published roster on these days yet",
+    "checkScheduleConflict": "Roster already published for {{dates}}",
+    "cashOutNotice": "You keep working your roster and get annual leave pay on top. Compliance to be confirmed by the accountant.",
+    "hoursTitle": "Paid hours requested",
+    "workdaysLine": "Workdays: {{days}} × {{hours}} h",
+    "weekendPart": "Weekends: {{days}}",
+    "holidayPart": "Public holidays: {{days}}",
+    "notCounted": "Not counted",
+    "financeNote": "Final pay is set by finance based on your accrued paid hours.",
+    "blockNote": "Once approved, {{range}} will be marked unavailable and can't be rostered.",
+    "cashOutNote": "These days stay on your roster as normal.",
+    "submit": "Submit · {{hours}} h",
+    "submitPlain": "Submit"
+  },
+  "messages": {
+    "loadFailed": "Couldn't load",
+    "retry": "Retry",
+    "submitFailed": "Couldn't submit. Please try again.",
+    "notAllowed": "You don't have access to leave requests, or you're not signed in.",
+    "notEligible": "Casual staff can't request paid leave. Go back to request other leave (unpaid).",
+    "unknownType": "Unknown leave type. Please go back and choose again."
+  }
+}

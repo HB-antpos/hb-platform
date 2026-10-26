@@ -113,6 +113,8 @@ export interface AccessControl {
   canViewAttendancePersonal: boolean;
   canViewAttendanceManagement: boolean;
   canReviewAttendance: boolean;
+  /** Attendance.Approval.ReviewSelf：可审核本人申请（需二次确认）。 */
+  canReviewOwnAttendance: boolean;
   canEditAttendanceHoliday: boolean;
   canEditAttendanceSettings: boolean;
   canViewAttendancePunchRecords: boolean;
