@@ -8,9 +8,17 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { useTranslation } from 'react-i18next'
 
 import { MeasuredTable } from '../../../components/MeasuredTable'
-import { POS_API_ENTRY_USAGE_MAX_RANGE_DAYS, getPosApiEntryUsage } from '../../../services/posApiEntryService'
+import {
+  MAIN_API_CLIENT_KINDS,
+  POS_API_ENTRY_USAGE_MAX_RANGE_DAYS,
+  getMainApiEntryUsage,
+  getPosApiEntryUsage,
+} from '../../../services/posApiEntryService'
 import type { StoreOption } from '../../../types/deviceRegistration'
 import type {
+  MainApiClientKind,
+  MainApiEntryUsageClientKindItem,
+  MainApiEntryUsageResult,
   PosApiEntryUsageBucket,
   PosApiEntryUsageCounts,
   PosApiEntryUsageEntry,
@@ -65,6 +73,28 @@ const RANGE_PROBLEM_KEY: Record<UsageRangeProblem, string> = {
   reversed: 'posAdmin.devices.apiUsage.rangeProblem.reversed',
   tooLarge: 'posAdmin.devices.apiUsage.rangeProblem.tooLarge',
 }
+// 用量来源：收银端 POS API（按分店拆分）/ 主 API（Web 后台 + 员工 App，按客户端类别拆分）
+type UsageSource = 'pos' | 'main'
+const SOURCE_LABEL_KEY: Record<UsageSource, string> = {
+  pos: 'posAdmin.devices.apiUsage.source.pos',
+  main: 'posAdmin.devices.apiUsage.source.main',
+}
+const CLIENT_KIND_LABEL_KEY: Record<MainApiClientKind, string> = {
+  web: 'posAdmin.devices.apiUsage.clientKinds.web',
+  app: 'posAdmin.devices.apiUsage.clientKinds.app',
+  other: 'posAdmin.devices.apiUsage.clientKinds.other',
+}
+const CLIENT_KIND_HINT_KEY: Record<MainApiClientKind, string> = {
+  web: 'posAdmin.devices.apiUsage.clientKindHints.web',
+  app: 'posAdmin.devices.apiUsage.clientKindHints.app',
+  other: 'posAdmin.devices.apiUsage.clientKindHints.other',
+}
+// 两个来源共用的结果字段（趋势图 / 汇总卡片 / 时间明细只依赖这些）
+type UsageView = Pick<
+  PosApiEntryUsageResult,
+  'startDate' | 'endDate' | 'granularity' | 'timeZone' | 'total' | 'entries' | 'buckets'
+>
+
 const UNKNOWN_LABEL_KEY = 'posAdmin.devices.apiUsage.entries.unknown'
 const UNKNOWN_HINT_KEY = 'posAdmin.devices.apiUsage.entryHints.unknown'
 
@@ -79,6 +109,11 @@ function renderRichText(text: string): ReactNode {
 
 function findEntry(entries: PosApiEntryUsageEntryItem[], entry: PosApiEntryUsageEntry): PosApiEntryUsageEntryItem {
   return entries.find((item) => item.entry === entry) ?? { entry, requests: 0, status4xx: 0, status5xx: 0, share: 0 }
+}
+
+/** 主 API 还没有数据时的占位类别（三张卡片先显示 0，加载完成后换成真实数据）。 */
+function emptyClientKind(clientKind: MainApiClientKind): MainApiEntryUsageClientKindItem {
+  return { clientKind, total: { requests: 0, status4xx: 0, status5xx: 0 }, share: 0, entries: [] }
 }
 
 function getEntryLabel(entry: PosApiEntryUsageEntry, t: TFunction): string {
@@ -170,8 +205,13 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
   const [range, setRange] = useState<UsageRange>(() => getDefaultUsageRange('day', today))
   // 用户手动选过日期后，切换粒度就不再覆盖他选的范围
   const rangeTouchedRef = useRef(false)
+  const [source, setSource] = useState<UsageSource>('pos')
   const [storeCode, setStoreCode] = useState<string>()
-  const [result, setResult] = useState<PosApiEntryUsageResult | null>(null)
+  const [clientKind, setClientKind] = useState<MainApiClientKind>()
+  const [posResult, setPosResult] = useState<PosApiEntryUsageResult | null>(null)
+  const [mainResult, setMainResult] = useState<MainApiEntryUsageResult | null>(null)
+  // 两个来源各存各的结果，按当前来源取用：切换来源时不会把另一边的旧数据错配到当前标签下
+  const result: UsageView | null = source === 'main' ? mainResult : posResult
   const [loading, setLoading] = useState(false)
   const requestGuardRef = useRef(createLatestRequestGuard())
 
@@ -183,16 +223,26 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
     if (problem) {
       return Promise.resolve()
     }
-    return runLatestGuardedRequest(
+    const requestSource = source
+    return runLatestGuardedRequest<PosApiEntryUsageResult | MainApiEntryUsageResult>(
       requestGuardRef.current,
-      () => getPosApiEntryUsage({ ...range, granularity, storeCode }),
+      () =>
+        requestSource === 'main'
+          ? getMainApiEntryUsage({ ...range, granularity, clientKind })
+          : getPosApiEntryUsage({ ...range, granularity, storeCode }),
       {
         onStart: () => {
           if (showLoading) {
             setLoading(true)
           }
         },
-        onSuccess: setResult,
+        onSuccess: (data) => {
+          if (requestSource === 'main') {
+            setMainResult(data as MainApiEntryUsageResult)
+          } else {
+            setPosResult(data as PosApiEntryUsageResult)
+          }
+        },
         onError: (error) => {
           console.error(t('posAdmin.devices.apiUsage.messages.loadFailed'), error)
           // 后台自动刷新失败不弹窗，避免网络抖动时每分钟刷一条错误
@@ -210,9 +260,15 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
     const intervalId = window.setInterval(() => void load(false), REFRESH_INTERVAL_MS)
     return () => window.clearInterval(intervalId)
     // 筛选条件变化重新取数；load 内部读取的就是这些条件
-  }, [granularity, range.startDate, range.endDate, storeCode])
+  }, [source, granularity, range.startDate, range.endDate, storeCode, clientKind])
 
   useEffect(() => () => requestGuardRef.current.invalidate(), [])
+
+  function changeSource(next: UsageSource) {
+    if (next !== source) {
+      setSource(next)
+    }
+  }
 
   function changeGranularity(next: PosApiEntryUsageGranularity) {
     setGranularity(next)
@@ -236,6 +292,11 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
   )
 
   const entryLabel = (entry: PosApiEntryUsageEntry) => getEntryLabel(entry, t)
+
+  const clientKindOptions = useMemo(
+    () => MAIN_API_CLIENT_KINDS.map((kind) => ({ value: kind, label: t(CLIENT_KIND_LABEL_KEY[kind]) })),
+    [t],
+  )
 
   const chart = useMemo(
     () => (result ? buildStackedChart(result.buckets, { width: CHART_WIDTH, height: CHART_HEIGHT }) : null),
@@ -300,6 +361,35 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
     [t],
   )
 
+  // 主 API：按客户端类别（Web / 员工 App / 其他）拆分的明细表
+  const clientColumns = useMemo<ColumnsType<MainApiEntryUsageClientKindItem>>(
+    () => [
+      {
+        title: t('posAdmin.devices.apiUsage.columns.clientKind'),
+        key: 'clientKind',
+        width: 220,
+        fixed: 'left',
+        render: (_value, item) => (
+          <div className="dev-mgmt-two">
+            <span className="dev-mgmt-strong">{t(CLIENT_KIND_LABEL_KEY[item.clientKind])}</span>
+            <span className="dev-mgmt-sub">{t(CLIENT_KIND_HINT_KEY[item.clientKind])}</span>
+          </div>
+        ),
+      },
+      {
+        title: t('posAdmin.devices.apiUsage.columns.kindShare'),
+        key: 'kindShare',
+        align: 'right',
+        width: 110,
+        sorter: (a, b) => a.share - b.share,
+        render: (_value, item) => <span className="dev-usage-num">{formatShare(item.share)}</span>,
+      },
+      ...ENTRY_ORDER.map((entry) => buildEntryColumn<MainApiEntryUsageClientKindItem>(entry, t)),
+      ...buildTotalColumns<MainApiEntryUsageClientKindItem>(t),
+    ],
+    [t],
+  )
+
   // 表格里最新的时间段排最前
   const bucketRows = useMemo(() => (result ? [...result.buckets].reverse() : []), [result])
 
@@ -311,10 +401,18 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
     <div className="dev-mgmt-card dev-entry-scope dev-usage">
       <div className="dev-entry-note" role="note">
         <InfoCircleFilled className="dev-entry-note-icon" aria-hidden="true" />
-        <div>{renderRichText(t('posAdmin.devices.apiUsage.intro'))}</div>
+        <div>
+          {renderRichText(t(source === 'main' ? 'posAdmin.devices.apiUsage.mainIntro' : 'posAdmin.devices.apiUsage.intro'))}
+        </div>
       </div>
 
       <div className="dev-mgmt-toolbar">
+        <Segmented<UsageSource>
+          aria-label={t('posAdmin.devices.apiUsage.source.aria')}
+          value={source}
+          onChange={changeSource}
+          options={(['pos', 'main'] as const).map((value) => ({ value, label: t(SOURCE_LABEL_KEY[value]) }))}
+        />
         <Segmented<PosApiEntryUsageGranularity>
           aria-label={t('posAdmin.devices.apiUsage.toolbar.granularityAria')}
           value={granularity}
@@ -335,17 +433,29 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
             }
           }}
         />
-        <Select<string>
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          placeholder={t('posAdmin.devices.apiUsage.toolbar.storePlaceholder')}
-          aria-label={t('posAdmin.devices.apiUsage.toolbar.storePlaceholder')}
-          style={{ width: 240 }}
-          value={storeCode}
-          onChange={(value) => setStoreCode(value)}
-          options={storeOptions}
-        />
+        {source === 'main' ? (
+          <Select<MainApiClientKind>
+            allowClear
+            placeholder={t('posAdmin.devices.apiUsage.toolbar.clientKindPlaceholder')}
+            aria-label={t('posAdmin.devices.apiUsage.toolbar.clientKindPlaceholder')}
+            style={{ width: 200 }}
+            value={clientKind}
+            onChange={(value) => setClientKind(value)}
+            options={clientKindOptions}
+          />
+        ) : (
+          <Select<string>
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t('posAdmin.devices.apiUsage.toolbar.storePlaceholder')}
+            aria-label={t('posAdmin.devices.apiUsage.toolbar.storePlaceholder')}
+            style={{ width: 240 }}
+            value={storeCode}
+            onChange={(value) => setStoreCode(value)}
+            options={storeOptions}
+          />
+        )}
         <span className="dev-mgmt-toolbar-spacer" />
         <Tooltip title={t('common.refresh')}>
           <Button icon={<ReloadOutlined spin={loading} />} aria-label={t('common.refresh')} onClick={() => void load()} />
@@ -400,6 +510,30 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
           </div>
         ))}
       </div>
+
+      {source === 'main' ? (
+        <div className="dev-usage-stats">
+          {(mainResult?.clientKinds ?? MAIN_API_CLIENT_KINDS.map((kind) => emptyClientKind(kind))).map((item) => (
+            <div className="dev-entry-stat" key={item.clientKind}>
+              <div className="dev-entry-stat-label">
+                <Tooltip title={t(CLIENT_KIND_HINT_KEY[item.clientKind])}>
+                  <span>{t(CLIENT_KIND_LABEL_KEY[item.clientKind])}</span>
+                </Tooltip>
+              </div>
+              <div className="dev-entry-stat-value">
+                {formatCount(item.total.requests)}
+                <small>{formatShare(item.share)}</small>
+              </div>
+              <div className="dev-entry-stat-hint">
+                {t('posAdmin.devices.apiUsage.summary.errors', {
+                  s4xx: formatCount(item.total.status4xx),
+                  s5xx: formatCount(item.total.status5xx),
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <section className="dev-usage-section" aria-busy={loading}>
         <h3 className="dev-usage-heading">{t('posAdmin.devices.apiUsage.chart.title')}</h3>
@@ -509,31 +643,56 @@ export default function PosApiEntryUsagePanel({ stores }: UsagePanelProps) {
         />
       </section>
 
-      <section className="dev-usage-section">
-        <h3 className="dev-usage-heading">{t('posAdmin.devices.apiUsage.sections.stores')}</h3>
-        <MeasuredTable<PosApiEntryUsageStore>
-          metricId="pos-admin.device-registration.api-usage.stores"
-          className="dev-mgmt-table"
-          rowKey={(store) => store.storeCode || '__unassigned__'}
-          size="middle"
-          loading={loading}
-          columns={storeColumns}
-          dataSource={result?.stores ?? []}
-          scroll={{ x: 1170 }}
-          locale={{ emptyText: <div className="dev-mgmt-sub dev-usage-empty">{t('posAdmin.devices.apiUsage.empty')}</div> }}
-          pagination={{ pageSize: STORE_PAGE_SIZE, hideOnSinglePage: true, showSizeChanger: false }}
-        />
-      </section>
+      {source === 'main' ? (
+        <section className="dev-usage-section">
+          <h3 className="dev-usage-heading">{t('posAdmin.devices.apiUsage.sections.clients')}</h3>
+          <MeasuredTable<MainApiEntryUsageClientKindItem>
+            metricId="pos-admin.device-registration.api-usage.clients"
+            className="dev-mgmt-table"
+            rowKey="clientKind"
+            size="middle"
+            loading={loading}
+            columns={clientColumns}
+            dataSource={mainResult?.clientKinds ?? []}
+            scroll={{ x: 1280 }}
+            locale={{ emptyText: <div className="dev-mgmt-sub dev-usage-empty">{t('posAdmin.devices.apiUsage.empty')}</div> }}
+            pagination={false}
+          />
+        </section>
+      ) : (
+        <section className="dev-usage-section">
+          <h3 className="dev-usage-heading">{t('posAdmin.devices.apiUsage.sections.stores')}</h3>
+          <MeasuredTable<PosApiEntryUsageStore>
+            metricId="pos-admin.device-registration.api-usage.stores"
+            className="dev-mgmt-table"
+            rowKey={(store) => store.storeCode || '__unassigned__'}
+            size="middle"
+            loading={loading}
+            columns={storeColumns}
+            dataSource={posResult?.stores ?? []}
+            scroll={{ x: 1170 }}
+            locale={{ emptyText: <div className="dev-mgmt-sub dev-usage-empty">{t('posAdmin.devices.apiUsage.empty')}</div> }}
+            pagination={{ pageSize: STORE_PAGE_SIZE, hideOnSinglePage: true, showSizeChanger: false }}
+          />
+        </section>
+      )}
 
       {result ? (
         <div className="dev-entry-footer">
-          {t('posAdmin.devices.apiUsage.footer', {
-            timeZone: result.timeZone,
-            start: result.startDate,
-            end: result.endDate,
-            buckets: result.buckets.length,
-            stores: result.stores.length,
-          })}
+          {source === 'main'
+            ? t('posAdmin.devices.apiUsage.mainFooter', {
+                timeZone: result.timeZone,
+                start: result.startDate,
+                end: result.endDate,
+                buckets: result.buckets.length,
+              })
+            : t('posAdmin.devices.apiUsage.footer', {
+                timeZone: result.timeZone,
+                start: result.startDate,
+                end: result.endDate,
+                buckets: result.buckets.length,
+                stores: posResult?.stores.length ?? 0,
+              })}
         </div>
       ) : null}
     </div>

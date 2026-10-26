@@ -96,6 +96,7 @@ internal sealed class SchemaMigrationCoordinator
         "20261026.002-attendance-payroll-leave";
     internal const string RoleLevelMigrationId = "20261026.003-role-level";
     internal const string PosApiEntryUsageMigrationId = "20261026.004-pos-api-entry-usage";
+    internal const string MainApiEntryUsageMigrationId = "20261027.001-main-api-entry-usage";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -367,6 +368,11 @@ internal sealed class SchemaMigrationCoordinator
             PosApiEntryUsageMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPosApiEntryUsageAsync(cancellationToken)
+        ),
+        new(
+            MainApiEntryUsageMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMainApiEntryUsageAsync(cancellationToken)
         ),
     ];
 

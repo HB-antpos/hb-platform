@@ -99,3 +99,40 @@ export interface PosApiEntryUsageQuery {
   /** 不传＝全部可见分店 */
   storeCode?: string
 }
+
+// ───────────────────────── 主 API（Web 后台 + 员工 App）线路用量 ─────────────────────────
+
+/** 主 API 请求的客户端类别（后端按 User-Agent 粗分）：web＝浏览器（Web 后台），app＝员工 App，other＝脚本 / 监控 / 其余。 */
+export type MainApiClientKind = 'web' | 'app' | 'other'
+
+/** 某一客户端类别在范围内的合计；share＝占范围内总请求数（0~1），entries 里的 share 以该类别自身请求数为分母。 */
+export interface MainApiEntryUsageClientKindItem {
+  clientKind: MainApiClientKind
+  total: PosApiEntryUsageCounts
+  share: number
+  entries: PosApiEntryUsageEntryItem[]
+}
+
+export interface MainApiEntryUsageResult {
+  startDate: string
+  endDate: string
+  granularity: PosApiEntryUsageGranularity
+  timeZone: string
+  /** 生效的客户端类别筛选；空串＝全部 */
+  clientKind: string
+  total: PosApiEntryUsageCounts
+  entries: PosApiEntryUsageEntryItem[]
+  buckets: PosApiEntryUsageBucket[]
+  /** 固定三项：web / app / other */
+  clientKinds: MainApiEntryUsageClientKindItem[]
+}
+
+export interface MainApiEntryUsageQuery {
+  /** yyyy-MM-dd（悉尼日期，含） */
+  startDate: string
+  /** yyyy-MM-dd（悉尼日期，含） */
+  endDate: string
+  granularity: PosApiEntryUsageGranularity
+  /** 不传＝全部类别 */
+  clientKind?: MainApiClientKind
+}

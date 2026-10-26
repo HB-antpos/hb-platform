@@ -217,7 +217,8 @@
         "toolbar": {
           "granularityAria": "统计粒度",
           "rangeAria": "统计日期范围",
-          "storePlaceholder": "全部分店"
+          "storePlaceholder": "全部分店",
+          "clientKindPlaceholder": "全部客户端"
         },
         "presets": {
           "last7": "近 7 天",
@@ -253,7 +254,8 @@
         },
         "sections": {
           "buckets": "时间明细",
-          "stores": "分店明细"
+          "stores": "分店明细",
+          "clients": "客户端明细"
         },
         "columns": {
           "period": "时间",
@@ -261,7 +263,9 @@
           "total": "合计",
           "status4xx": "4xx",
           "status5xx": "5xx",
-          "errorRate": "5xx 占比"
+          "errorRate": "5xx 占比",
+          "clientKind": "客户端",
+          "kindShare": "占总请求"
         },
         "partialTag": "不完整",
         "partialHint": "这一周 / 月只有部分日期在所选范围内，合计只含范围内的日期",
@@ -271,7 +275,24 @@
         "messages": {
           "loadFailed": "加载线路用量失败"
         },
-        "footer": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段、{{stores}} 家分店（含未归属）"
+        "footer": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段、{{stores}} 家分店（含未归属）",
+        "source": {
+          "aria": "统计来源",
+          "pos": "收银端 POS API",
+          "main": "主 API（Web 与员工 App）"
+        },
+        "mainIntro": "统计主 API（Web 后台与员工 App 访问的 /api 接口）的<b>请求数</b>，按线路（EdgeOne / AWS 悉尼 / 直连）和客户端类别（Web 后台 / 员工 App / 其他）区分。线路由源站服务器按请求来源识别；客户端类别由请求的浏览器标识粗分，只记数，不保存标识原文、IP 和用户。日期按悉尼时间，周从周一算起；数据约每分钟更新一次，统计从上线后开始累计，无法补录历史。源站未配置线路标记前，请求会全部显示为“未识别”。",
+        "clientKinds": {
+          "web": "Web 后台",
+          "app": "员工 App",
+          "other": "其他"
+        },
+        "clientKindHints": {
+          "web": "浏览器访问后台网页",
+          "app": "员工 App（iOS / Android）",
+          "other": "脚本、监控探活等无法识别的客户端"
+        },
+        "mainFooter": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段"
       }
     }
   }

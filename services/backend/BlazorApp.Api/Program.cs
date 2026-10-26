@@ -798,6 +798,11 @@ builder.Services.AddScoped<StoreSyncService>(); // 分店数据同步服务
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreReceiptProfiles.IStoreReceiptProfileService, BlazorApp.Api.Services.StoreReceiptProfiles.StoreReceiptProfileService>(); // 门店小票资料下发（快照 / 设备应用情况）
 builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryService>(); // 收银端 POS API 入口按分店设置（首选入口 + 设备实际入口统计）
 builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryUsageService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryUsageService>(); // 收银端 POS API 入口按日 / 周 / 月用量统计（只读，数据由 Hbpos.Api 写入 PosApiEntryUsageDaily）
+// 主 API（Web 后台 + 员工 App）入口用量统计：进程内计数器（单例）+ 每 60 秒批量落库的后台服务 + 只读查询（迁移 20261027.001 建表）。
+builder.Services.AddSingleton<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageCounter>();
+builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageWriter, BlazorApp.Api.Services.MainApiEntry.SqlSugarMainApiEntryUsageWriter>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageFlushService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageService, BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
@@ -1506,6 +1511,9 @@ if (app.Environment.IsDevelopment())
 // 🔒 HTTPS重定向中间件（当前已禁用）
 // 生产环境建议启用HTTPS重定向以提高安全性
 // app.UseHttpsRedirection();
+
+// 📊 入口用量统计：放在管线最外层，让限流 429 / 鉴权 401 也计入；只统计 /api/*，只记数，失败不影响响应。
+app.UseMiddleware<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageMiddleware>();
 
 // 🧾 全局请求管道异常日志，覆盖未进入 MVC Filter 的异常。
 app.UseMiddleware<ApplicationExceptionLoggingMiddleware>();
