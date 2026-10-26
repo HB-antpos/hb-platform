@@ -311,6 +311,24 @@ export function isNegativeAmount(value: number | null | undefined): boolean {
   return cents !== null && cents < 0
 }
 
+/** 日结差额（实点 − 应有）三态：负为短款、正为长款、0 为已平；没有金额为 none。按分比较，避免 0.004 之类的残差。 */
+export type VarianceKind = 'short' | 'over' | 'even' | 'none'
+
+export function classifyVariance(value: number | null | undefined): VarianceKind {
+  const cents = toCents(value)
+  if (cents === null) return 'none'
+  if (cents < 0) return 'short'
+  return cents > 0 ? 'over' : 'even'
+}
+
+/** 状态标识：与文字、正负号一起出现，色弱也能分清（颜色只是辅助）。 */
+export const VARIANCE_GLYPHS: Record<VarianceKind, string> = {
+  short: '▼',
+  over: '▲',
+  even: '✓',
+  none: '',
+}
+
 export function formatCount(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US') : EMPTY_CELL
 }

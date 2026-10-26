@@ -5,11 +5,14 @@ import type { ReactNode } from 'react'
 import type { CashStoreOption } from '../../../types/storeCash'
 import {
   formatAud,
+  classifyVariance,
   formatSignedAud,
   isDateDisabled,
   isNegativeAmount,
   MAX_RANGE_DAYS,
+  VARIANCE_GLYPHS,
   type CashRegisterFilter,
+  type VarianceKind,
 } from './logic'
 
 export type Tr = (key: string, params?: Record<string, string | number>) => string
@@ -39,6 +42,40 @@ export function Amount({ value, signed = false, strong = false, muted = false }:
       )}
     >
       {signed ? formatSignedAud(value) : formatAud(value)}
+    </span>
+  )
+}
+
+// 文案键必须以 tr('字面量') 调用的形式出现：契约测试按这个形式扫描键，才能发现孤立键与缺失键。
+function varianceLabel(kind: Exclude<VarianceKind, 'none'>, tr: Tr): string {
+  switch (kind) {
+    case 'short':
+      return tr('variance.short')
+    case 'over':
+      return tr('variance.over')
+    case 'even':
+      return tr('variance.even')
+  }
+}
+
+/**
+ * 日结差额（实点 − 应有）：短款红 ▼、长款橙 ▲、已平绿 ✓，金额带正负号。
+ * 图标 + 文字 + 正负号一起出现，不只靠颜色；showLabel=false 用于窄列 / 汇总行（文字放进 title 与读屏文本）。
+ * 不用 Amount：它只给负数上色，长款没有标识。
+ */
+export function VarianceAmount({ value, tr, showLabel = true }: {
+  value: number | null | undefined
+  tr: Tr
+  showLabel?: boolean
+}) {
+  const kind = classifyVariance(value)
+  if (kind === 'none') return <Amount value={value} />
+  const label = varianceLabel(kind, tr)
+  return (
+    <span className={`store-cash-variance is-${kind}`} title={label}>
+      <span className="store-cash-variance-glyph" aria-hidden="true">{VARIANCE_GLYPHS[kind]}</span>
+      <span className="store-cash-amount">{formatSignedAud(value)}</span>
+      {showLabel ? <span className="store-cash-variance-label">{label}</span> : <span className="store-cash-sr-only">{label}</span>}
     </span>
   )
 }

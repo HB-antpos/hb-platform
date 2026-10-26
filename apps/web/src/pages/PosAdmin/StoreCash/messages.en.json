@@ -50,6 +50,11 @@
         "expenses": "CashExpenses"
       }
     },
+    "variance": {
+      "short": "Short",
+      "over": "Over",
+      "even": "Balanced"
+    },
     "kpi": {
       "region": "Cash metrics",
       "pool": "Cash on hand",

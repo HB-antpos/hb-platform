@@ -50,6 +50,11 @@
         "expenses": "现金支出"
       }
     },
+    "variance": {
+      "short": "短款",
+      "over": "长款",
+      "even": "已平"
+    },
     "kpi": {
       "region": "现金指标",
       "pool": "现金池余额合计",
