@@ -32,7 +32,8 @@
     "payMode": {
       "Transfer": "全转账",
       "Cash": "全现金",
-      "Mixed": "转账+现金"
+      "Mixed": "转账+现金",
+      "none": "未设时薪"
     },
     "weekdayShort": {
       "0": "日",
@@ -163,7 +164,13 @@
       "leaveCashOut": "发 申请 {{hours}}",
       "approved": "核定",
       "rateMissing": "有工时的档缺时薪，这部分没算钱，请先补时薪表",
-      "footnote": "带薪假期按平日转账时薪；全现金员工所有工时（含带薪假）按现金时薪。工时先舍到 2 位小数再乘时薪，金额舍到分。"
+      "footnote": "带薪假期按平日转账时薪；全现金员工所有工时（含带薪假）按现金时薪。工时先舍到 2 位小数再乘时薪，金额舍到分。",
+      "warnings": {
+        "NO_RATE": "还没有时薪记录",
+        "MISSING_TRANSFER_RATE": "有工时的档缺转账时薪，这部分没算钱",
+        "MISSING_CASH_RATE": "缺现金时薪，现金部分没算钱",
+        "BELOW_MINIMUM_RATE": "有时薪低于自填的最低时薪"
+      }
     },
     "rates": {
       "columns": {

@@ -13,7 +13,7 @@ import {
   shiftPeriod,
   summarizeEmployeeHours,
 } from './payrollLogic'
-import { mockGetHours, mockGetPay, mockSaveLeaveApproval } from '../../../services/attendancePayrollMock'
+import { buildSampleHours, buildSamplePay, setSampleLeaveApproval } from './payrollSample.fixture'
 
 // 十进制小时：7:59 → 7.98，最多 2 位
 assert.equal(minutesToHours(479), 7.98)
@@ -83,8 +83,8 @@ assert.equal(periodEnd('2026-10-05', 2), '2026-10-18')
 assert.equal(isoWeekNumber('2026-10-05'), 41)
 assert.equal(isoWeekNumber('2026-10-18'), 42)
 
-// mock 样例数据与设计图 / 验收样例一致（两周 10-05 ~ 10-18）
-const hours = await mockGetHours({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
+// 样例夹具与设计图 / 验收样例一致（两周 10-05 ~ 10-18）；后端同口径由 PayrollCalculatorTests 锁定
+const hours = await buildSampleHours({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
 const totals = Object.fromEntries(hours.employees.map((employee) => [employee.userName, summarizeEmployeeHours(employee)]))
 assert.equal(totals['Sarah Kim'].total, 74.55)
 assert.equal(totals['Jack Nguyen'].total, 65.88)
@@ -99,7 +99,7 @@ assert.deepEqual(
   [182.41, 63.98, 35.38, 13.5, 63.6, 358.87],
 )
 
-const pay = await mockGetPay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
+const pay = await buildSamplePay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
 const gross = Object.fromEntries(pay.rows.map((row) => [row.userName, row.grossPay]))
 assert.equal(gross['Jack Nguyen'], 1964.5)
 assert.equal(gross['Emma Walsh'], 1702.96)
@@ -116,8 +116,8 @@ const payTotal = Math.round(pay.rows.reduce((acc, row) => acc + row.grossPay, 0)
 assert.equal(payTotal, 11221.49)
 
 // 财务改核定工时后，工资按核定工时重算
-await mockSaveLeaveApproval({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2, userGuid: 'mock-emma', leaveType: 'PaidAnnual', approvedHours: 24 })
-const repaid = await mockGetPay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
+setSampleLeaveApproval('mock-emma', 'PaidAnnual', 24)
+const repaid = await buildSamplePay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
 assert.equal(repaid.rows.find((row) => row.userName === 'Emma Walsh')!.hours.leave, 24)
 
 console.log('payrollLogic.test.ts: ok')

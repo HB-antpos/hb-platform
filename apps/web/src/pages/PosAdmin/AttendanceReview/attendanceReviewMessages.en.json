@@ -82,8 +82,8 @@
     "minutesUnit": "min",
     "empty": "Nothing to review",
     "summary": {
-      "missingClockOut": "Clocked in {{clockIn}} · auto clock-out at 00:00",
-      "missingClockOutSub": "Roster {{start}}–{{end}}; enter the actual clock-out time",
+      "missingClockOut": "No clock-out; system clocked out at 00:00",
+      "missingClockOutSub": "Enter the actual clock-out time; the auto clock-out period is unpaid",
       "overtime": "{{minutes}} min candidate overtime",
       "mealBreak": "{{expected}} breaks due, {{recorded}} taken; claims {{minutes}} min back",
       "leave": "{{type}} · {{days}} days",
@@ -129,25 +129,32 @@
       "hoursAfter": "Hours after approval",
       "reviewedOnly": "Reviewed only",
       "worked": "Worked",
-      "paid": "Paid",
-      "byTier": {
-        "weekday": "Weekday rate",
-        "saturday": "Saturday rate",
-        "sunday": "Sunday rate",
-        "publicHoliday": "Public holiday rate"
-      },
       "remark": "Review remark",
       "remarkHint": "Required to reject",
       "remarkPlaceholder": "Optional",
       "reviewResult": "Review result",
-      "scheduleRange": "Roster {{start}}–{{end}}"
+      "scheduleRange": "Roster {{start}}–{{end}}",
+      "missingClockOutReason": "Actual clock-out time entered by the manager in Attendance review",
+      "adjustPermissionRequired": "Entering the actual clock-out needs the Adjust staff punches permission (Attendance.Punch.AdjustManagedStore)",
+      "autoTime": "{{time}} (system auto)",
+      "sameDayMissingClockOut": "Missed clock-out that day",
+      "pendingState": "Pending",
+      "autoClosed": "Closed automatically",
+      "hoursNow": "Hours that day",
+      "paidNow": "Paid hours (now)",
+      "tierLabel": "Rate tier",
+      "paidAfterHint": "Paid hours are recalculated after approval (meal breaks and overtime per the rules)",
+      "hasPunch": "Punched that day",
+      "workedNow": "now {{value}} h"
     },
     "actions": {
       "previous": "Previous",
       "next": "Next",
       "reject": "Reject",
       "notApplicable": "Not applicable",
-      "approveNext": "Approve & next"
+      "approveNext": "Approve & next",
+      "excludeSegment": "Don't count it",
+      "closeMissingClockOut": "Add clock-out & next"
     },
     "validation": {
       "remarkRequired": "Enter a remark to reject",
@@ -165,7 +172,8 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "batchDone": "{{count}} items processed",
-      "batchPartial": "{{done}} processed, {{failed}} failed and kept in the list"
+      "batchPartial": "{{done}} processed, {{failed}} failed and kept in the list",
+      "missingClockOutClosed": "Clock-out added; missed clock-out closed"
     }
   }
 }

@@ -119,6 +119,7 @@ export interface AccessControl {
   canReviewOwnAttendance: boolean
   canViewAttendancePayroll: boolean
   canViewAttendanceHours: boolean
+  canAdjustAttendancePunches: boolean
   canEditAttendancePayroll: boolean
   canUnlockAttendancePayroll: boolean
   canViewEmployeeProfiles: boolean

@@ -32,7 +32,8 @@
     "payMode": {
       "Transfer": "Bank transfer",
       "Cash": "Cash",
-      "Mixed": "Transfer + cash"
+      "Mixed": "Transfer + cash",
+      "none": "No rate"
     },
     "weekdayShort": {
       "0": "Sun",
@@ -163,7 +164,13 @@
       "leaveCashOut": "Payout req. {{hours}}",
       "approved": "approved",
       "rateMissing": "A tier with hours has no rate, so it is not paid; update the pay rates first",
-      "footnote": "Paid leave uses the weekday transfer rate; cash-only staff are paid all hours (incl. leave) at the cash rate. Hours are rounded to 2 decimals before multiplying; amounts to the cent."
+      "footnote": "Paid leave uses the weekday transfer rate; cash-only staff are paid all hours (incl. leave) at the cash rate. Hours are rounded to 2 decimals before multiplying; amounts to the cent.",
+      "warnings": {
+        "NO_RATE": "No pay rate yet",
+        "MISSING_TRANSFER_RATE": "A tier with hours has no transfer rate; that part is not paid",
+        "MISSING_CASH_RATE": "No cash rate; the cash part is not paid",
+        "BELOW_MINIMUM_RATE": "A rate is below your minimum rate"
+      }
     },
     "rates": {
       "columns": {

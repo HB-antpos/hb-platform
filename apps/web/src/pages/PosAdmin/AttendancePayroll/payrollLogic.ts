@@ -40,11 +40,11 @@ export function sumBuckets(buckets: AttendancePayBuckets): number {
 }
 
 export interface PayRates {
-  transferWeekdayRate?: number
-  transferSaturdayRate?: number
-  transferSundayRate?: number
-  transferPublicHolidayRate?: number
-  cashRate?: number
+  transferWeekdayRate?: number | null
+  transferSaturdayRate?: number | null
+  transferSundayRate?: number | null
+  transferPublicHolidayRate?: number | null
+  cashRate?: number | null
 }
 
 export interface PayCalculationInput {
@@ -65,7 +65,7 @@ export interface PayCalculationResult {
   missingRates: string[]
 }
 
-function transferRateFor(key: PayBucketKey, rates: PayRates): number | undefined {
+function transferRateFor(key: PayBucketKey, rates: PayRates): number | null | undefined {
   switch (key) {
     case 'sunday':
       return rates.transferSundayRate
@@ -134,7 +134,7 @@ export function calculatePay(input: PayCalculationInput): PayCalculationResult {
 }
 
 /** 时薪记录里低于自填最低时薪的档（任一档低于即标红）。 */
-export function findRatesBelowMinimum(rate: Pick<AttendancePayRateDto, keyof PayRates | 'minimumRate' | 'payMode'>): (keyof PayRates)[] {
+export function findRatesBelowMinimum(rate: PayRates & Pick<AttendancePayRateDto, 'minimumRate' | 'payMode'>): (keyof PayRates)[] {
   const minimum = rate.minimumRate
   if (minimum === undefined || minimum === null || minimum <= 0) return []
   const keys: (keyof PayRates)[] = rate.payMode === 'Cash'

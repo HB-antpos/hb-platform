@@ -39,7 +39,7 @@ function LeaveApprovalInput(props: {
       size="small"
       min={0}
       max={props.approval.requestedHours}
-      step={0.5}
+      step={1}
       controls={false}
       value={value}
       disabled={props.disabled}
@@ -233,19 +233,25 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload }: PayT
                           <div className="atp-person-name">
                             {row.userName}{' '}
                             <span className="atp-muted atp-small">
-                              {t(`attendancePayroll.employmentType.${row.employmentType}`)}
-                              {row.ageYears !== undefined && row.ageYears < 18 ? ` · ${t('attendancePayroll.ageYears', { age: row.ageYears })}` : ''}
+                              {row.employmentType ? t(`attendancePayroll.employmentType.${row.employmentType}`) : ''}
+                              {row.ageYears != null && row.ageYears < 18 ? ` · ${t('attendancePayroll.ageYears', { age: row.ageYears })}` : ''}
                             </span>
                           </div>
                           <div>
-                            <Tag className="atp-tag" color={row.payMode === 'Cash' ? 'green' : row.payMode === 'Mixed' ? 'purple' : 'blue'}>
-                              {t(`attendancePayroll.payMode.${row.payMode}`)}
-                            </Tag>
+                            {row.payMode ? (
+                              <Tag className="atp-tag" color={row.payMode === 'Cash' ? 'green' : row.payMode === 'Mixed' ? 'purple' : 'blue'}>
+                                {t(`attendancePayroll.payMode.${row.payMode}`)}
+                              </Tag>
+                            ) : (
+                              <Tag className="atp-tag" color="red">{t('attendancePayroll.payMode.none')}</Tag>
+                            )}
                             {row.payMode === 'Mixed' && row.fixedTransferHoursPerWeek ? (
                               <span className="atp-muted atp-small">{t('attendancePayroll.pay.fixedPerWeek', { hours: formatHours(row.fixedTransferHoursPerWeek) })}</span>
                             ) : null}
-                            {row.warnings?.length ? (
-                              <Tooltip title={t('attendancePayroll.pay.rateMissing')}><Tag color="red" className="atp-tag">!</Tag></Tooltip>
+                            {row.warnings?.filter((code) => code !== 'NO_RATE').length ? (
+                              <Tooltip title={row.warnings.filter((code) => code !== 'NO_RATE').map((code) => t(`attendancePayroll.pay.warnings.${code}`, { defaultValue: code })).join('；')}>
+                                <Tag color="red" className="atp-tag">!</Tag>
+                              </Tooltip>
                             ) : null}
                           </div>
                         </div>
@@ -274,7 +280,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload }: PayT
                     <td className="atp-num atp-num-strong atp-week-divider">{formatMoney(row.grossPay)}</td>
                     <td className="atp-note-col">
                       <NoteInput
-                        value={row.note}
+                        value={row.note ?? undefined}
                         disabled={!canEdit}
                         placeholder={t('attendancePayroll.pay.notePlaceholder')}
                         onSave={(note) => saveNote(row, note)}

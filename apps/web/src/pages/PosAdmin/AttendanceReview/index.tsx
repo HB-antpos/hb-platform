@@ -28,7 +28,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
@@ -38,8 +38,18 @@ import {
   reviewAttendanceApproval,
   type AttendanceReviewView,
 } from '../../../services/attendancePayrollService'
+import {
+  createManagedAttendancePunchAdjustment,
+  getAttendanceRecords,
+  previewManagedAttendancePunchAdjustment,
+} from '../../../services/scheduleAttendanceService'
 import { useAuthStore } from '../../../store/auth'
-import type { AttendanceApprovalDto, ReviewAttendanceApprovalPayload } from '../../../types/scheduleAttendance'
+import type { AttendanceApprovalDayPreviewDto } from '../../../types/attendancePayroll'
+import type {
+  AttendanceApprovalDto,
+  AttendanceScheduleDto,
+  ReviewAttendanceApprovalPayload,
+} from '../../../types/scheduleAttendance'
 import { formatHours } from '../AttendancePayroll/payrollLogic'
 import { useAttendanceStores } from '../AttendancePayroll/useAttendanceStores'
 import { validateOvertimeApproval } from '../ScheduleAttendance/attendanceRecordLogic'
@@ -48,11 +58,13 @@ import messagesZh from './attendanceReviewMessages.zh.json'
 import {
   REVIEW_CATEGORIES,
   avatarColorOf,
+  buildDayPreviewFromRecord,
   buildTimelineModel,
   canReviewItem,
   canSelectForBatch,
   countByCategory,
   describeSubmittedTime,
+  findAutoClockOutPunchGuid,
   getReviewCategory,
   initialsOf,
   isSelfRequest,
@@ -81,6 +93,9 @@ const CATEGORY_COLORS: Record<ReviewCategory | 'Other', string> = {
 
 const timeOf = (value?: string) => (value ? dayjs(value).format('HH:mm') : '--')
 
+/** 需要看当天打卡的审批类型：详情里画时间线、推算批准后工时。 */
+const DAY_RECORD_SOURCES = new Set(['PunchAdjustment', 'MissingClockOut', 'Overtime', 'MealBreak', 'Punch'])
+
 export default function AttendanceReviewPage() {
   const { t } = useTranslation()
   const access = useAuthStore((state) => state.access)
@@ -107,6 +122,8 @@ export default function AttendanceReviewPage() {
   const [submitting, setSubmitting] = useState(false)
   const [batchRejectOpen, setBatchRejectOpen] = useState(false)
   const [batchRemark, setBatchRemark] = useState('')
+  const [dayRecord, setDayRecord] = useState<AttendanceScheduleDto | null>(null)
+  const dayRecordRequestRef = useRef(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -164,12 +181,47 @@ export default function AttendanceReviewPage() {
     setRemark('')
     setOvertimeMinutes(selected?.candidateOvertimeMinutes ?? null)
     setPaidHours(selected?.publicHolidayPay?.suggestedHours ?? null)
-    setClockOutTime(selected?.dayPreview?.scheduleEnd ? dayjs(`2000-01-01T${selected.dayPreview.scheduleEnd}`) : null)
+    setClockOutTime(null)
   }, [selected?.approvalGuid])
+
+  // 选中条目的当天考勤记录（排班、班段、工时）：后端审批不带当天详情，按员工 + 工作日取 records；
+  // 没有打卡查看权限或取不到时只是不画时间线，不影响审核。
+  useEffect(() => {
+    const requestId = ++dayRecordRequestRef.current
+    setDayRecord(null)
+    const workDate = selected?.workDate?.slice(0, 10)
+    if (!selected || !workDate || !DAY_RECORD_SOURCES.has(selected.sourceType) || !access.canViewAttendancePunches) return
+    void getAttendanceRecords({
+      storeCode: selected.storeCode,
+      userGuid: selected.applicantUserGuid,
+      fromDate: workDate,
+      toDate: workDate,
+      page: 1,
+      pageSize: 20,
+    })
+      .then((result) => {
+        if (dayRecordRequestRef.current !== requestId) return
+        // 漏下班的 sourceGuid 就是排班 GUID；其它类型取当天该员工的排班
+        const record = result.items.find((item) => item.scheduleGuid === selected.sourceGuid) ?? result.items[0] ?? null
+        setDayRecord(record)
+        if (record && selected.sourceType === 'MissingClockOut') {
+          // 实际下班时间默认 = 排班结束
+          const end = record.endTime?.slice(0, 5)
+          if (end) setClockOutTime(dayjs(`2000-01-01T${end}`))
+        }
+      })
+      .catch(() => undefined)
+  }, [access.canViewAttendancePunches, selected?.approvalGuid])
+
+  const dayPreview: AttendanceApprovalDayPreviewDto | undefined = useMemo(() => (
+    selected && dayRecord
+      ? buildDayPreviewFromRecord(dayRecord, selected, selected.sourceType === 'MissingClockOut' ? clockOutTime?.format('HH:mm') : undefined)
+      : undefined
+  ), [clockOutTime, dayRecord, selected])
 
   const categoryLabel = (value: ReviewCategory | 'Other') => t(`attendanceReview.category.${value}`)
   const tierLabel = (item: AttendanceApprovalDto) => {
-    const tier = tierOfWorkDate(item.workDate, item.dayPreview?.tier)
+    const tier = tierOfWorkDate(item.workDate)
     return tier && tier !== 'weekday' ? t(`attendanceReview.tier.${tier}`) : undefined
   }
   const workDateLabel = (item: AttendanceApprovalDto) => {
@@ -198,16 +250,12 @@ export default function AttendanceReviewPage() {
   /** 列表「内容」列：主句 + 灰色补充。 */
   const renderSummary = (item: AttendanceApprovalDto) => {
     const self = isSelfRequest(item, currentUserGuid)
-    const preview = item.dayPreview
     let main: ReactNode = item.detail ?? ''
     let sub: ReactNode = null
     const category = getReviewCategory(item)
     if (category === 'MissingClockOut') {
-      const firstIn = preview?.segments[0]?.start
-      main = t('attendanceReview.summary.missingClockOut', { clockIn: firstIn ?? '--' })
-      sub = preview?.scheduleStart
-        ? t('attendanceReview.summary.missingClockOutSub', { start: preview.scheduleStart, end: preview.scheduleEnd })
-        : null
+      main = t('attendanceReview.summary.missingClockOut')
+      sub = t('attendanceReview.summary.missingClockOutSub')
     } else if (category === 'PunchAdjustment' && item.adjustment) {
       const punchLabel = t(`attendanceReview.punchType.${item.adjustment.punchType ?? 'ClockIn'}`)
       main = (
@@ -266,7 +314,6 @@ export default function AttendanceReviewPage() {
             {item.applicantName}
             {self ? <span className="atr-muted">{t('attendanceReview.youSuffix')}</span> : null}
           </div>
-          {item.applicantRole ? <div className="atr-muted atr-small">{item.applicantRole}</div> : null}
         </div>
       </Space>
     )
@@ -373,19 +420,51 @@ export default function AttendanceReviewPage() {
       }
       payload.approvedPaidHours = paidHours
     }
-    if (category === 'MissingClockOut' && action === 'approve') {
-      if (!clockOutTime) {
-        message.warning(t('attendanceReview.validation.clockOutRequired'))
-        return null
-      }
-      // 店长填实际下班时间 = 补卡并结案（卡 A 口径 5）
-      payload.actualClockOutTime = clockOutTime.format('HH:mm')
-    }
     return payload
+  }
+
+  /**
+   * 漏下班「填实际下班时间」：店长代员工补一张下班卡（改掉系统午夜自动下班卡；旧数据没有自动卡就新增），
+   * 先 preview 拿 previewRevision 再原样提交；后端补卡成功后自动把这条漏下班以「已批准」结案，不再单独调 approve。
+   */
+  const closeMissingClockOut = async (item: AttendanceApprovalDto) => {
+    const workDate = item.workDate?.slice(0, 10)
+    if (!clockOutTime || !workDate) {
+      message.warning(t('attendanceReview.validation.clockOutRequired'))
+      return
+    }
+    const payload = {
+      storeCode: item.storeCode,
+      userGuid: item.applicantUserGuid,
+      scheduleGuid: item.sourceGuid,
+      originalPunchGuid: dayRecord ? findAutoClockOutPunchGuid(dayRecord) : undefined,
+      punchType: 'ClockOut' as const,
+      requestedPunchTimeLocal: `${workDate}T${clockOutTime.format('HH:mm')}:00`,
+      reason: remark.trim() || t('attendanceReview.detail.missingClockOutReason'),
+    }
+    setSubmitting(true)
+    try {
+      const preview = await previewManagedAttendancePunchAdjustment(payload)
+      if (!preview.isValid || !preview.previewRevision) {
+        message.error(preview.validationMessage || t('attendanceReview.messages.reviewFailed'))
+        return
+      }
+      await createManagedAttendancePunchAdjustment({ ...payload, previewRevision: preview.previewRevision })
+      message.success(t('attendanceReview.messages.missingClockOutClosed'))
+      finishHandled([item.approvalGuid])
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('attendanceReview.messages.reviewFailed'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleReview = async (action: 'approve' | 'reject') => {
     if (!selected) return
+    if (action === 'approve' && selected.sourceType === 'MissingClockOut') {
+      await closeMissingClockOut(selected)
+      return
+    }
     const payload = buildPayload(selected, action)
     if (!payload) return
     setSubmitting(true)
@@ -423,8 +502,7 @@ export default function AttendanceReviewPage() {
 
   // ===== 详情 =====
 
-  const renderTimeline = (item: AttendanceApprovalDto) => {
-    const preview = item.dayPreview
+  const renderTimeline = (preview: AttendanceApprovalDayPreviewDto | undefined) => {
     const model = preview ? buildTimelineModel(preview) : undefined
     if (!preview || !model) return null
     const changed = preview.proposedSegments?.[0]
@@ -433,7 +511,7 @@ export default function AttendanceReviewPage() {
         <div className="atr-section-head">
           <strong>{t('attendanceReview.detail.dayPunches')}</strong>
           {preview.segmentLimit ? (
-            <span className="atr-muted">{t('attendanceReview.detail.segments', { count: preview.segments.length, limit: preview.segmentLimit })}</span>
+            <span className="atr-muted">{t('attendanceReview.detail.segments', { count: preview.segments.length + (preview.proposedSegments?.length ?? 0), limit: preview.segmentLimit })}</span>
           ) : null}
         </div>
         <div className="atr-timeline">
@@ -467,17 +545,34 @@ export default function AttendanceReviewPage() {
     )
   }
 
-  const renderChanges = (item: AttendanceApprovalDto) => {
-    const rows = item.dayPreview?.sideEffects?.length
-      ? item.dayPreview.sideEffects
-      : item.adjustment
-        ? [{
-            label: t(`attendanceReview.punchType.${item.adjustment.punchType ?? 'ClockIn'}`),
-            before: item.adjustment.originalPunchTimeLocal ? timeOf(item.adjustment.originalPunchTimeLocal) : t('attendanceReview.detail.none'),
-            after: timeOf(item.adjustment.requestedPunchTimeLocal),
-          }]
-        : []
-    if (!rows.length) return null
+  const renderChanges = (item: AttendanceApprovalDto, preview: AttendanceApprovalDayPreviewDto | undefined) => {
+    const punchType = item.sourceType === 'MissingClockOut' ? 'ClockOut' : item.adjustment?.punchType ?? 'ClockIn'
+    const replaced = preview?.replaced
+    const after = item.sourceType === 'MissingClockOut'
+      ? clockOutTime?.format('HH:mm') ?? '--'
+      : timeOf(item.adjustment?.requestedPunchTimeLocal)
+    if (item.sourceType !== 'PunchAdjustment' && item.sourceType !== 'MissingClockOut') return null
+    if (item.sourceType === 'PunchAdjustment' && !item.adjustment) return null
+    const before = replaced?.originalTime
+      ? replaced.isSystemAutoClockOut
+        ? t('attendanceReview.detail.autoTime', { time: replaced.originalTime })
+        : replaced.originalTime
+      : item.adjustment?.originalPunchTimeLocal
+        ? timeOf(item.adjustment.originalPunchTimeLocal)
+        : t('attendanceReview.detail.none')
+    const rows = [{
+      label: `${t(`attendanceReview.punchType.${punchType}`)}${replaced ? ` #${replaced.segmentNumber}` : ''}`,
+      before,
+      after,
+    }]
+    // 改的是系统午夜自动下班卡：批准后同日漏下班自动结案
+    if (replaced?.isSystemAutoClockOut || item.sourceType === 'MissingClockOut') {
+      rows.push({
+        label: t('attendanceReview.detail.sameDayMissingClockOut'),
+        before: t('attendanceReview.detail.pendingState'),
+        after: t('attendanceReview.detail.autoClosed'),
+      })
+    }
     return (
       <section className="atr-section">
         <strong>{t('attendanceReview.detail.changes')}</strong>
@@ -491,7 +586,7 @@ export default function AttendanceReviewPage() {
             ))}
           </tbody>
         </table>
-        {item.adjustment?.reason && item.dayPreview?.sideEffects?.length ? (
+        {item.adjustment?.reason ? (
           <div className="atr-muted atr-small">{t('attendanceReview.detail.reason', { reason: item.adjustment.reason })}</div>
         ) : null}
       </section>
@@ -523,10 +618,19 @@ export default function AttendanceReviewPage() {
       return (
         <section className="atr-section">
           <strong>{t('attendanceReview.detail.actualClockOut')}</strong>
-          <Space>
-            <TimePicker format="HH:mm" minuteStep={1} value={clockOutTime} disabled={!editable} onChange={setClockOutTime} />
+          <Space wrap>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={1}
+              value={clockOutTime}
+              disabled={!editable || !access.canAdjustAttendancePunches}
+              onChange={setClockOutTime}
+            />
             <span className="atr-muted">{t('attendanceReview.detail.actualClockOutHint')}</span>
           </Space>
+          {!access.canAdjustAttendancePunches ? (
+            <Alert type="info" showIcon className="atr-inline-alert" message={t('attendanceReview.detail.adjustPermissionRequired')} />
+          ) : null}
         </section>
       )
     }
@@ -571,6 +675,18 @@ export default function AttendanceReviewPage() {
               days: leave.dayCount ?? dayjs(leave.endDate).diff(leave.startDate, 'day') + 1,
             })}
           </div>
+          {leave.reason ? <div className="atr-muted">{t('attendanceReview.detail.reason', { reason: leave.reason })}</div> : null}
+          {category === 'PaidSick' && leave.schedules?.length ? (
+            <ul className="atr-leave-days">
+              {leave.schedules.map((day) => (
+                <li key={day.scheduleGuid}>
+                  {dayjs(day.workDate).format('MM-DD')} {t(`attendanceReview.weekdayShort.${dayjs(day.workDate).day()}`)} · {day.startTime}–{day.endTime}
+                  {' · '}{t('attendanceReview.hoursValue', { value: formatHours(day.paidHours, '0') })}
+                  {day.hasPunch ? <Tag color="orange" className="atr-tag-inline">{t('attendanceReview.detail.hasPunch')}</Tag> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {leave.paidHours ? (
             <div>{t(`attendanceReview.detail.paidHours.${category === 'PaidSick' ? 'sick' : category === 'PaidAnnual' ? 'annual' : category === 'AnnualCashOut' ? 'cashOut' : 'other'}`, { hours: formatHours(leave.paidHours) })}</div>
           ) : null}
@@ -614,24 +730,36 @@ export default function AttendanceReviewPage() {
     return null
   }
 
-  const renderAfterHours = (item: AttendanceApprovalDto) => {
-    const preview = item.dayPreview
-    if (preview?.workedHoursAfter === undefined && preview?.paidHoursAfter === undefined) return null
+  const renderAfterHours = (item: AttendanceApprovalDto, preview: AttendanceApprovalDayPreviewDto | undefined) => {
+    if (!preview || preview.workedHours === undefined) return null
     const tier = tierOfWorkDate(item.workDate, preview.tier)
+    const hasAfter = preview.workedHoursAfter !== undefined && item.reviewStatus === 'Pending'
     return (
       <section className="atr-section">
         <div className="atr-section-head">
-          <strong>{t('attendanceReview.detail.hoursAfter')}</strong>
+          <strong>{hasAfter ? t('attendanceReview.detail.hoursAfter') : t('attendanceReview.detail.hoursNow')}</strong>
           <span className="atr-muted">{t('attendanceReview.detail.reviewedOnly')}</span>
         </div>
         <div className="atr-stats">
-          <div className="atr-stat"><span>{t('attendanceReview.detail.worked')}</span><strong>{t('attendanceReview.hoursValue', { value: formatHours(preview.workedHoursAfter, '0') })}</strong></div>
-          <div className="atr-stat"><span>{t('attendanceReview.detail.paid')}</span><strong>{t('attendanceReview.hoursValue', { value: formatHours(preview.paidHoursAfter, '0') })}</strong></div>
+          <div className="atr-stat">
+            <span>{t('attendanceReview.detail.worked')}</span>
+            <strong>
+              {t('attendanceReview.hoursValue', { value: formatHours(hasAfter ? preview.workedHoursAfter : preview.workedHours, '0') })}
+            </strong>
+            {hasAfter ? <span className="atr-stat-sub">{t('attendanceReview.detail.workedNow', { value: formatHours(preview.workedHours, '0') })}</span> : null}
+          </div>
+          <div className="atr-stat">
+            <span>{t('attendanceReview.detail.paidNow')}</span>
+            <strong>{preview.paidHours === undefined ? '--' : t('attendanceReview.hoursValue', { value: formatHours(preview.paidHours, '0') })}</strong>
+          </div>
           {tier ? (
-            <div className="atr-stat"><span>{t(`attendanceReview.detail.byTier.${tier}`)}</span><strong>{t('attendanceReview.hoursValue', { value: formatHours(preview.paidHoursAfter, '0') })}</strong></div>
+            <div className="atr-stat">
+              <span>{t('attendanceReview.detail.tierLabel')}</span>
+              <strong className="atr-stat-text">{t(`attendanceReview.tier.${tier}`)}</strong>
+            </div>
           ) : null}
         </div>
-        {preview.explanation ? <div className="atr-muted atr-small">{preview.explanation}</div> : null}
+        {hasAfter ? <div className="atr-muted atr-small">{t('attendanceReview.detail.paidAfterHint')}</div> : null}
       </section>
     )
   }
@@ -644,7 +772,7 @@ export default function AttendanceReviewPage() {
     const editable = canReviewItem(selected, currentUserGuid, canReviewOwn)
     const index = visibleItems.findIndex((item) => item.approvalGuid === selected.approvalGuid)
     const category = getReviewCategory(selected)
-    const preview = selected.dayPreview
+    const preview = dayPreview
     return (
       <div className="atr-detail">
         <div className="atr-detail-head">
@@ -668,10 +796,10 @@ export default function AttendanceReviewPage() {
           {self && !canReviewOwn && selected.reviewStatus === 'Pending' ? (
             <Alert type="info" showIcon icon={<LockOutlined />} message={t('attendanceReview.selfLockedDetail')} />
           ) : null}
-          {renderTimeline(selected)}
-          {renderChanges(selected)}
+          {renderTimeline(preview)}
+          {renderChanges(selected, preview)}
           {renderTypeSpecific(selected, editable)}
-          {renderAfterHours(selected)}
+          {renderAfterHours(selected, preview)}
           {selected.reviewStatus === 'Pending' ? (
             <section className="atr-section">
               <div className="atr-section-head">
@@ -703,10 +831,19 @@ export default function AttendanceReviewPage() {
           {selected.reviewStatus === 'Pending' ? (
             <Space>
               <Button danger disabled={!editable} loading={submitting} onClick={() => void handleReview('reject')}>
-                {category === 'PublicHolidayPay' ? t('attendanceReview.actions.notApplicable') : t('attendanceReview.actions.reject')}
+                {category === 'PublicHolidayPay'
+                  ? t('attendanceReview.actions.notApplicable')
+                  : category === 'MissingClockOut'
+                    ? t('attendanceReview.actions.excludeSegment')
+                    : t('attendanceReview.actions.reject')}
               </Button>
-              <Button type="primary" disabled={!editable} loading={submitting} onClick={() => void handleReview('approve')}>
-                {t('attendanceReview.actions.approveNext')}
+              <Button
+                type="primary"
+                disabled={!editable || (category === 'MissingClockOut' && !access.canAdjustAttendancePunches)}
+                loading={submitting}
+                onClick={() => void handleReview('approve')}
+              >
+                {category === 'MissingClockOut' ? t('attendanceReview.actions.closeMissingClockOut') : t('attendanceReview.actions.approveNext')}
               </Button>
             </Space>
           ) : (

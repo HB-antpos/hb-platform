@@ -1,5 +1,5 @@
 import { UndoOutlined } from '@ant-design/icons'
-import { Alert, Button, Drawer, Popconfirm, Tag, Typography, message } from 'antd'
+import { Alert, Button, Drawer, Popconfirm, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
@@ -59,7 +59,7 @@ export default function DeletedSchedulesDrawer(props: DeletedSchedulesDrawerProp
   }
 
   const columns: ColumnsType<AttendanceDeletedScheduleDto> = [
-    { title: t('posAdmin.scheduleAttendance.deletedSchedules.employee'), key: 'employee', width: 160, render: (_, item) => item.userName ?? item.userGuid },
+    { title: t('posAdmin.scheduleAttendance.deletedSchedules.employee'), key: 'employee', width: 180, render: (_, item) => item.userName || item.userGuid },
     {
       title: t('posAdmin.scheduleAttendance.deletedSchedules.workDate'),
       key: 'workDate',
@@ -67,12 +67,6 @@ export default function DeletedSchedulesDrawer(props: DeletedSchedulesDrawerProp
       render: (_, item) => `${dayjs(item.workDate).format('YYYY-MM-DD')} ${t(`posAdmin.scheduleAttendance.weekdays.${(dayjs(item.workDate).day() + 6) % 7}`)}`,
     },
     { title: t('posAdmin.scheduleAttendance.deletedSchedules.time'), key: 'time', width: 120, render: (_, item) => `${item.startTime.slice(0, 5)} - ${item.endTime.slice(0, 5)}` },
-    {
-      title: t('posAdmin.scheduleAttendance.deletedSchedules.punches'),
-      key: 'punches',
-      width: 110,
-      render: (_, item) => (item.punchCount ? <Tag color="orange">{t('posAdmin.scheduleAttendance.deletedSchedules.punchCount', { count: item.punchCount })}</Tag> : <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.deletedSchedules.noPunch')}</Typography.Text>),
-    },
     {
       title: t('posAdmin.scheduleAttendance.deletedSchedules.deleted'),
       key: 'deleted',
@@ -108,7 +102,7 @@ export default function DeletedSchedulesDrawer(props: DeletedSchedulesDrawerProp
         columns={columns}
         dataSource={storeCode ? items : []}
         pagination={false}
-        scroll={{ x: 800 }}
+        scroll={{ x: 700 }}
         locale={{ emptyText: storeCode ? t('posAdmin.scheduleAttendance.deletedSchedules.empty') : t('posAdmin.scheduleAttendance.selectStoreToSchedule') }}
       />
     </Drawer>

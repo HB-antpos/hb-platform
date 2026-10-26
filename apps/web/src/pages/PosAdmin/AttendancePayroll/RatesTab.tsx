@@ -30,19 +30,20 @@ interface RateDraft extends PayRates {
 
 const TRANSFER_KEYS = ['transferWeekdayRate', 'transferSaturdayRate', 'transferSundayRate', 'transferPublicHolidayRate'] as const
 
-const money = (value?: number) => (value === undefined || value === null ? '—' : value.toFixed(2))
+const money = (value?: number | null) => (value === undefined || value === null ? '—' : value.toFixed(2))
 
 function toDraft(rate: AttendancePayRateDto): RateDraft {
+  // 还没有时薪记录（payMode 为 null）的员工默认从「全转账」开始填
   return {
-    payMode: rate.payMode,
-    fixedTransferHoursPerWeek: rate.fixedTransferHoursPerWeek,
-    transferWeekdayRate: rate.transferWeekdayRate,
-    transferSaturdayRate: rate.transferSaturdayRate,
-    transferSundayRate: rate.transferSundayRate,
-    transferPublicHolidayRate: rate.transferPublicHolidayRate,
-    cashRate: rate.cashRate,
+    payMode: rate.payMode ?? 'Transfer',
+    fixedTransferHoursPerWeek: rate.fixedTransferHoursPerWeek || undefined,
+    transferWeekdayRate: rate.transferWeekdayRate ?? undefined,
+    transferSaturdayRate: rate.transferSaturdayRate ?? undefined,
+    transferSundayRate: rate.transferSundayRate ?? undefined,
+    transferPublicHolidayRate: rate.transferPublicHolidayRate ?? undefined,
+    cashRate: rate.cashRate ?? undefined,
     cashAllowancePerPeriod: rate.cashAllowancePerPeriod ?? 0,
-    minimumRate: rate.minimumRate,
+    minimumRate: rate.minimumRate ?? undefined,
     // 新生效记录默认从今天起；历史不改
     effectiveFrom: dayjs(),
     remark: rate.remark ?? '',
@@ -57,11 +58,11 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!editing) return
+    if (!editing || !storeCode) return
     setDraft(toDraft(editing))
     setHistory([])
     let cancelled = false
-    void getAttendancePayRateHistory(editing.userGuid)
+    void getAttendancePayRateHistory(editing.userGuid, storeCode)
       .then((items) => {
         if (!cancelled) setHistory(items)
       })
@@ -69,7 +70,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
     return () => {
       cancelled = true
     }
-  }, [editing])
+  }, [editing, storeCode])
 
   const update = (patch: Partial<RateDraft>) => setDraft((current) => (current ? { ...current, ...patch } : current))
   const belowMinimum = useMemo(
@@ -98,7 +99,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
   }, [draft, pay, payRow])
 
   const save = async () => {
-    if (!editing || !draft) return
+    if (!editing || !draft || !storeCode) return
     const needsTransfer = draft.payMode !== 'Cash'
     const needsCash = draft.payMode !== 'Transfer'
     if (needsTransfer && TRANSFER_KEYS.some((key) => draft[key] === undefined || draft[key] === null)) {
@@ -119,14 +120,14 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
         storeCode,
         userGuid: editing.userGuid,
         payMode: draft.payMode,
-        fixedTransferHoursPerWeek: draft.payMode === 'Mixed' ? draft.fixedTransferHoursPerWeek : undefined,
-        transferWeekdayRate: needsTransfer ? draft.transferWeekdayRate : undefined,
-        transferSaturdayRate: needsTransfer ? draft.transferSaturdayRate : undefined,
-        transferSundayRate: needsTransfer ? draft.transferSundayRate : undefined,
-        transferPublicHolidayRate: needsTransfer ? draft.transferPublicHolidayRate : undefined,
-        cashRate: needsCash ? draft.cashRate : undefined,
+        fixedTransferHoursPerWeek: draft.payMode === 'Mixed' ? draft.fixedTransferHoursPerWeek ?? 0 : 0,
+        transferWeekdayRate: needsTransfer ? draft.transferWeekdayRate ?? undefined : undefined,
+        transferSaturdayRate: needsTransfer ? draft.transferSaturdayRate ?? undefined : undefined,
+        transferSundayRate: needsTransfer ? draft.transferSundayRate ?? undefined : undefined,
+        transferPublicHolidayRate: needsTransfer ? draft.transferPublicHolidayRate ?? undefined : undefined,
+        cashRate: needsCash ? draft.cashRate ?? undefined : undefined,
         cashAllowancePerPeriod: draft.cashAllowancePerPeriod ?? 0,
-        minimumRate: draft.minimumRate,
+        minimumRate: draft.minimumRate ?? undefined,
         effectiveFrom: draft.effectiveFrom.format('YYYY-MM-DD'),
         remark: draft.remark.trim() || undefined,
       })
@@ -156,7 +157,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
             <div className="atp-muted atp-small">
               {rate.employmentType ? t(`attendancePayroll.employmentType.${rate.employmentType}`) : ''}
               {rate.isManager ? ` · ${t('attendancePayroll.manager')}` : ''}
-              {rate.birthday && rate.ageYears !== undefined && rate.ageYears < 18 ? (
+              {rate.birthday && rate.ageYears != null && rate.ageYears < 18 ? (
                 <>
                   {' '}<Tag className="atp-tag" color="magenta">🎂 {dayjs(rate.birthday).format('MM-DD')}</Tag>
                   <Tag className="atp-tag" color="gold">{t('attendancePayroll.ageYears', { age: rate.ageYears })}</Tag>
@@ -233,7 +234,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       align: 'right',
       render: (_, rate) => {
         if (rate.minimumRate === undefined || rate.minimumRate === null) {
-          return rate.ageYears !== undefined && rate.ageYears < 18
+          return rate.ageYears != null && rate.ageYears < 18
             ? <span className="atp-dashed-box atp-warn-box">{t('attendancePayroll.rates.minorMissing', { age: rate.ageYears })}</span>
             : <span className="atp-muted">{t('attendancePayroll.rates.notFilled')}</span>
         }

@@ -18,7 +18,6 @@ import {
   submitAttendancePayPeriod,
   unlockAttendancePayPeriod,
 } from '../../../services/attendancePayrollService'
-import { getAttendanceSettings } from '../../../services/scheduleAttendanceService'
 import { useAuthStore } from '../../../store/auth'
 import type {
   AttendanceHoursResultDto,
@@ -31,7 +30,7 @@ import HoursTab from './HoursTab'
 import PayTab from './PayTab'
 import RatesTab from './RatesTab'
 import { exportPayrollWorkbook } from './payrollExport'
-import { isoWeekNumber, periodEnd, resolvePeriodStart, shiftPeriod } from './payrollLogic'
+import { isoWeekNumber, periodEnd, shiftPeriod } from './payrollLogic'
 import { useAttendanceStores } from './useAttendanceStores'
 import './attendancePayroll.css'
 
@@ -48,9 +47,11 @@ export default function AttendancePayrollPage() {
   const canUnlock = access.canUnlockAttendancePayroll
   const { storeOptions, storeCode, setStoreCode } = useAttendanceStores(true)
   const [activeTab, setActiveTab] = useState<PayrollTabKey>(canViewHours ? 'hours' : 'pay')
-  const [weeks, setWeeks] = useState<1 | 2>(1)
-  const [anchorDate, setAnchorDate] = useState<string>()
-  const [periodStart, setPeriodStart] = useState(() => resolvePeriodStart(dayjs().format('YYYY-MM-DD'), 1))
+  // 期以后端为准：首次不传期起点 / 周数，后端返回今天所在期（周数取设置默认、两周按双周起始日对齐）；
+  // 翻期在返回的起点上 ± 周数 × 7 天，切周数时把当前起点连同新周数发过去由后端重新对齐。
+  // 写接口（提交、解锁、备注、核定）都用后端返回的 periodStart，避免 INVALID_PERIOD。
+  const [requested, setRequested] = useState<{ periodStart?: string; weeks?: 1 | 2 }>({})
+  const [resolvedPeriod, setResolvedPeriod] = useState<{ periodStart: string; weeks: 1 | 2 } | null>(null)
   const [includePending, setIncludePending] = useState(false)
   const [mergeStores, setMergeStores] = useState(false)
   const [hours, setHours] = useState<AttendanceHoursResultDto | null>(null)
@@ -62,28 +63,18 @@ export default function AttendancePayrollPage() {
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockReason, setUnlockReason] = useState('')
 
-  // 默认周期与双周起始日来自考勤设置；读不到（旧后端 / 无权限）就按 1 周
-  useEffect(() => {
-    void getAttendanceSettings()
-      .then((settings) => {
-        const defaultWeeks = settings.defaultPeriodWeeks === 2 ? 2 : 1
-        setAnchorDate(settings.fortnightAnchorDate)
-        setWeeks(defaultWeeks)
-        setPeriodStart(resolvePeriodStart(dayjs().format('YYYY-MM-DD'), defaultWeeks, settings.fortnightAnchorDate))
-      })
-      .catch(() => undefined)
-  }, [])
-
   const periodQuery = useMemo(
-    () => (storeCode ? { storeCode, periodStart, weeks, includePending, mergeStores } : null),
-    [includePending, mergeStores, periodStart, storeCode, weeks],
+    () => (storeCode ? { storeCode, ...requested, includePending, mergeStores } : null),
+    [includePending, mergeStores, requested, storeCode],
   )
 
   const loadHours = useCallback(async () => {
     if (!periodQuery || !canViewHours) return
     setLoading(true)
     try {
-      setHours(await getAttendancePayrollHours(periodQuery))
+      const result = await getAttendancePayrollHours(periodQuery)
+      setHours(result)
+      setResolvedPeriod({ periodStart: result.periodStart, weeks: result.weeks })
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.loadFailed'))
     } finally {
@@ -95,7 +86,9 @@ export default function AttendancePayrollPage() {
     if (!periodQuery || !canViewPay) return
     setLoading(true)
     try {
-      setPay(await getAttendancePayrollPay(periodQuery))
+      const result = await getAttendancePayrollPay(periodQuery)
+      setPay(result)
+      setResolvedPeriod({ periodStart: result.periodStart, weeks: result.weeks })
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.loadFailed'))
     } finally {
@@ -131,15 +124,18 @@ export default function AttendancePayrollPage() {
     if (activeTab === 'rates') void loadRates()
   }, [activeTab, loadHours, loadPay, loadRates])
 
-  const changeWeeks = (value: 1 | 2) => {
-    setWeeks(value)
-    setPeriodStart((current) => resolvePeriodStart(current, value, anchorDate))
+  const weeks = resolvedPeriod?.weeks ?? requested.weeks ?? 1
+  const periodStart = resolvedPeriod?.periodStart ?? requested.periodStart
+  const changeWeeks = (value: 1 | 2) => setRequested({ periodStart, weeks: value })
+  const shiftRequested = (direction: -1 | 1) => {
+    if (periodStart) setRequested({ periodStart: shiftPeriod(periodStart, weeks, direction), weeks })
   }
 
   const status = (activeTab === 'hours' ? hours : pay) ?? hours ?? pay
   const pendingCount = status?.pendingCount ?? 0
   const isSubmitted = status?.periodStatus === 'Submitted'
   const periodLabel = useMemo(() => {
+    if (!periodStart) return '…'
     const firstWeek = isoWeekNumber(periodStart)
     const weekText = weeks === 2
       ? t('attendancePayroll.period.weeksRange', { from: firstWeek, to: isoWeekNumber(shiftPeriod(periodStart, 1, 1)) })
@@ -148,7 +144,7 @@ export default function AttendancePayrollPage() {
   }, [periodStart, t, weeks])
 
   const handleSubmit = () => {
-    if (!storeCode) return
+    if (!storeCode || !periodStart) return
     Modal.confirm({
       title: t('attendancePayroll.submit.confirmTitle'),
       content: t('attendancePayroll.submit.confirmContent', { period: periodLabel }),
@@ -169,7 +165,7 @@ export default function AttendancePayrollPage() {
   }
 
   const handleUnlock = async () => {
-    if (!storeCode || !unlockReason.trim()) return
+    if (!storeCode || !periodStart || !unlockReason.trim()) return
     setSubmitting(true)
     try {
       await unlockAttendancePayPeriod({ storeCode, periodStart, weeks, reason: unlockReason.trim() })
@@ -186,11 +182,12 @@ export default function AttendancePayrollPage() {
 
   const handleExport = async () => {
     const storeName = storeOptions.find((option) => option.value === storeCode)?.label ?? storeCode ?? ''
+    if (!periodStart && activeTab !== 'rates') return
     try {
       await exportPayrollWorkbook({
         tab: activeTab,
         storeName,
-        periodStart,
+        periodStart: periodStart ?? '',
         weeks,
         hours,
         pay,
@@ -213,9 +210,9 @@ export default function AttendancePayrollPage() {
         onChange={(value) => changeWeeks(value as 1 | 2)}
       />
       <Space.Compact>
-        <Button icon={<LeftOutlined />} aria-label={t('attendancePayroll.period.previous')} onClick={() => setPeriodStart((current) => shiftPeriod(current, weeks, -1))} />
+        <Button icon={<LeftOutlined />} aria-label={t('attendancePayroll.period.previous')} disabled={!periodStart} onClick={() => shiftRequested(-1)} />
         <Button className="atp-period-label">{periodLabel}</Button>
-        <Button icon={<RightOutlined />} aria-label={t('attendancePayroll.period.next')} onClick={() => setPeriodStart((current) => shiftPeriod(current, weeks, 1))} />
+        <Button icon={<RightOutlined />} aria-label={t('attendancePayroll.period.next')} disabled={!periodStart} onClick={() => shiftRequested(1)} />
       </Space.Compact>
     </>
   ) : null

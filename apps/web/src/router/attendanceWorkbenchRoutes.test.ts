@@ -111,9 +111,10 @@ assertEqual(layoutSource.includes('useAttendancePendingCount(access.canReviewAtt
 assertEqual(badgeSource.includes("import('../services/attendancePayrollService')"), true, '角标服务必须动态加载')
 assertEqual(/^import[^\n]*services\//m.test(badgeSource), false, '角标文件不能静态引入服务层')
 
-// mock 只在开发开关下动态加载
+// 联调后服务层直连后端，样例夹具只给测试用
 const serviceSource = readFileSync(join(process.cwd(), 'src/services/attendancePayrollService.ts'), 'utf8')
-assertEqual(serviceSource.includes("import.meta.env.VITE_ATTENDANCE_MOCK === '1'"), true, 'mock 由开发开关控制')
-assertEqual(/^import[^\n]*attendancePayrollMock/m.test(serviceSource), false, 'mock 不能静态引入')
+assertEqual(/mock|fixture/i.test(serviceSource), false, '服务层不能再引用 mock / 测试夹具')
+assertEqual(serviceSource.includes('isSelfReview: true'), true, '本人审批记录按 isSelfReview=true 筛选')
+assertEqual(serviceSource.includes("reviewStatus: 'Pending'"), true, '菜单角标按状态查待审，不走会触发对账的 pending 接口')
 
 console.log('attendanceWorkbenchRoutes.test: ok')

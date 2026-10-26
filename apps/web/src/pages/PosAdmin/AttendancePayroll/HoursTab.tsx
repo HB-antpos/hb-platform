@@ -84,14 +84,15 @@ export default function HoursTab(props: HoursTabProps) {
     return groups
   }, [days, t])
 
-  const typeLabel = (employee: AttendanceHoursEmployeeDto) => t(`attendancePayroll.employmentType.${employee.employmentType}`)
+  // 员工资料没填类型时不显示类型标签
+  const typeLabel = (employee: AttendanceHoursEmployeeDto) => (employee.employmentType ? t(`attendancePayroll.employmentType.${employee.employmentType}`) : null)
 
   const confirmHolidayPay = async (alert: AttendanceHoursAlertDto, approve: boolean) => {
     if (!alert.approvalGuid) return
     setActing(alert.approvalGuid)
     try {
       await reviewAttendanceApproval(alert.approvalGuid, approve ? 'approve' : 'reject', approve
-        ? { approvedPaidHours: alert.hours }
+        ? { approvedPaidHours: alert.hours ?? undefined }
         // 「不适用」= 拒绝该待处理，备注写明原因
         : { reviewRemark: t('attendancePayroll.alerts.notApplicableRemark') })
       message.success(t('attendancePayroll.alerts.holidayDone'))
@@ -103,13 +104,13 @@ export default function HoursTab(props: HoursTabProps) {
     }
   }
 
-  const alertKey = (alert: AttendanceHoursAlertDto) => `${alert.kind}|${alert.userGuid ?? ''}|${alert.date ?? ''}`
+  const alertKey = (alert: AttendanceHoursAlertDto) => `${alert.type}|${alert.userGuid ?? ''}|${alert.date ?? ''}`
   const visibleAlerts = (data?.alerts ?? []).filter((alert) => !dismissed.includes(alertKey(alert)))
   const dismiss = (alert: AttendanceHoursAlertDto) => setDismissed((current) => [...current, alertKey(alert)])
 
   const renderAlert = (alert: AttendanceHoursAlertDto) => {
     const key = alertKey(alert)
-    if (alert.kind === 'MultiStore') {
+    if (alert.type === 'MultiStore') {
       const people = new Set((alert.otherStoreItems ?? []).map((item) => item.userGuid)).size
       const detail = (alert.otherStoreItems ?? [])
         .map((item) => t('attendancePayroll.alerts.multiStoreItem', {
@@ -132,14 +133,14 @@ export default function HoursTab(props: HoursTabProps) {
         </div>
       )
     }
-    if (alert.kind === 'PublicHolidayPay') {
+    if (alert.type === 'PublicHolidayPay') {
       return (
         <div key={key} className="atp-alert atp-alert-holiday">
           <div className="atp-alert-text">
             <strong>{t('attendancePayroll.alerts.holidayTitle', { date: dayjs(alert.date).format('MM-DD'), name: alert.holidayName ?? '' })}</strong>
             {t('attendancePayroll.alerts.holidayBody', {
               name: alert.userName,
-              type: t(`attendancePayroll.employmentType.${alert.employmentType ?? 'PartTime'}`),
+              type: alert.employmentType ? t(`attendancePayroll.employmentType.${alert.employmentType}`) : '',
               weeks: alert.lookbackWeeks,
               count: alert.ordinaryCount,
               weekday: t(`attendancePayroll.weekdayShort.${dayjs(alert.date).day()}`),
@@ -231,7 +232,7 @@ export default function HoursTab(props: HoursTabProps) {
   if (!data) return <Empty description={t('attendancePayroll.empty')} />
 
   const minorLabel = (employee: AttendanceHoursEmployeeDto) => (
-    employee.ageYears !== undefined && employee.ageYears < 18
+    employee.ageYears != null && employee.ageYears < 18
       ? <Tag color="gold" className="atp-tag">{t('attendancePayroll.ageYears', { age: employee.ageYears })}</Tag>
       : null
   )
@@ -348,7 +349,7 @@ export default function HoursTab(props: HoursTabProps) {
                           <div>
                             <div className="atp-person-name">{employee.userName}</div>
                             <Space size={4} wrap>
-                              <Tag className="atp-tag">{typeLabel(employee)}</Tag>
+                              {typeLabel(employee) ? <Tag className="atp-tag">{typeLabel(employee)}</Tag> : null}
                               {employee.isManager ? <Tag className="atp-tag">{t('attendancePayroll.manager')}</Tag> : null}
                               {minorLabel(employee)}
                               {employee.hasOtherStores ? <Tag color="cyan" className="atp-tag">{t('attendancePayroll.multiStore')}</Tag> : null}

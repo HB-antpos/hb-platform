@@ -1,6 +1,5 @@
 import type { PagedResult } from './api'
 import type {
-  AttendanceApprovalDayPreviewDto,
   AttendanceApprovalLeaveDetailDto,
   AttendanceApprovalPublicHolidayDto,
 } from './attendancePayroll'
@@ -155,6 +154,8 @@ export interface AttendancePunchDto {
   segmentStatus?: AttendanceSegmentStatus
   isBreakBoundary?: boolean
   supersedesPunchGuid?: string
+  /** 门店时区 00:00 系统补的自动下班卡（该时段不计薪）。 */
+  isSystemAutoClockOut?: boolean
   adjustmentGuid?: string
 }
 
@@ -196,25 +197,19 @@ export interface AttendanceApprovalDto {
   adjustment?: AttendanceAdjustmentDetailDto
   /** sourceType 为 MealBreak 时的用餐声明。 */
   mealClaim?: AttendanceMealClaimDto
-  /** 审核人与申请人是同一人（持 Attendance.Approval.ReviewSelf 审本人申请），审批记录可筛选。 */
+  /** 审核人与申请人是同一人（持 Attendance.Approval.ReviewSelf 审本人申请），审批记录可按 isSelfReview 筛选。 */
   isSelfReview?: boolean
-  /** 申请人是店长 / 员工，列表第二行显示。 */
-  applicantRole?: string
   /** 请假（含带薪病假、年假、年假发放）的类型、区间、带薪工时与医嘱。 */
   leave?: AttendanceApprovalLeaveDetailDto
   /** sourceType 为 PublicHolidayPay 时的公假与规则命中次数。 */
   publicHolidayPay?: AttendanceApprovalPublicHolidayDto
-  /** 批准后当天的时间线与工时预览（后端计算）。 */
-  dayPreview?: AttendanceApprovalDayPreviewDto
 }
 
 export interface ReviewAttendanceApprovalPayload {
   reviewRemark?: string
   approvedOvertimeMinutes?: number
-  /** 带薪公假批准时由店长确认的工时。 */
+  /** 带薪公假批准时由店长确认的工时（null 用建议工时）。 */
   approvedPaidHours?: number
-  /** 漏下班：店长填的实际下班时间（HH:mm），批准即补卡并结案。 */
-  actualClockOutTime?: string
 }
 
 export interface AttendanceAdjustmentDetailDto {

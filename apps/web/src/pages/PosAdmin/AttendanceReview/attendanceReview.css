@@ -280,3 +280,21 @@
     max-height: none;
   }
 }
+
+.atr-stat .atr-stat-text {
+  font-size: 15px;
+}
+
+.atr-leave-days {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.atr-tag-inline.ant-tag {
+  margin-left: 6px;
+}
+
+.atr-stat .atr-stat-sub {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}

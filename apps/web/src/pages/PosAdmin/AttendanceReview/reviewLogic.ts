@@ -1,6 +1,6 @@
 import dayjs from 'dayjs'
 import type { AttendanceApprovalDayPreviewDto, AttendanceTierHours } from '../../../types/attendancePayroll'
-import type { AttendanceApprovalDto } from '../../../types/scheduleAttendance'
+import type { AttendanceApprovalDto, AttendancePunchDto, AttendanceScheduleDto } from '../../../types/scheduleAttendance'
 
 /**
  * 审核分类（筛选标签与类型标签）：请假按假种细分，新增的带薪病假、年假、年假发放单独成类；
@@ -175,8 +175,131 @@ export function buildTimelineModel(preview: AttendanceApprovalDayPreviewDto): Ti
   }
 }
 
+// ===== 由当天考勤记录推算详情 =====
+
+/** 本地时间文本 → HH:mm（兼容 "2026-10-18T17:30:00" 与 "17:30:00"）。 */
+export function toClock(value?: string | null): string | undefined {
+  if (!value) return undefined
+  const text = value.includes('T') ? value.slice(11, 16) : value.slice(0, 5)
+  return /^\d{2}:\d{2}$/.test(text) ? text : undefined
+}
+
+const punchOf = (value: unknown) => (value && typeof value === 'object' ? value as AttendancePunchDto : undefined)
+const punchClock = (value: unknown) => {
+  const punch = punchOf(value)
+  return toClock(punch ? punch.punchTimeLocal : typeof value === 'string' ? value : undefined)
+}
+
+interface RecordSegment {
+  number: number
+  start: string
+  end: string
+  isSystemAutoClockOut: boolean
+  clockInGuid?: string
+  clockOutGuid?: string
+  durationMinutes: number
+}
+
+/** 当天班段：系统午夜自动下班画到 24:00；未闭合的段按开始时间画一个点。 */
+export function recordSegments(record: AttendanceScheduleDto): RecordSegment[] {
+  return [...(record.segments ?? [])]
+    .sort((left, right) => left.segmentIndex - right.segmentIndex)
+    .flatMap((segment, index) => {
+      const start = punchClock(segment.clockIn)
+      if (!start) return []
+      const clockOut = punchOf(segment.clockOut)
+      const isSystemAutoClockOut = Boolean(clockOut?.isSystemAutoClockOut)
+      const end = isSystemAutoClockOut ? '24:00' : punchClock(segment.clockOut) ?? start
+      return [{
+        number: index + 1,
+        start,
+        end,
+        isSystemAutoClockOut,
+        clockInGuid: punchOf(segment.clockIn)?.punchGuid,
+        clockOutGuid: clockOut?.punchGuid,
+        // 自动下班段后端按 0 分钟计（不计薪）
+        durationMinutes: segment.durationMinutes ?? (isSystemAutoClockOut ? 0 : Math.max(0, clockMinutes(end) - clockMinutes(start))),
+      }]
+    })
+}
+
+const clockMinutes = (clock: string) => {
+  const [hour, minute] = clock.split(':').map(Number)
+  return hour * 60 + (minute || 0)
+}
+
+/**
+ * 审核详情的当天时间线与工时：排班、现有班段、补卡批准后的班段与实际工时。
+ * 后端没有「批准后」预览接口，补卡按「去掉被改的段原工时 + 新段工时」推算实际工时；计薪工时显示当前值，批准后以后端为准。
+ * overrideClockOut：漏下班时店长填的实际下班时间（HH:mm），只改最后一段的结束。
+ */
+export function buildDayPreviewFromRecord(
+  record: AttendanceScheduleDto,
+  approval: Pick<AttendanceApprovalDto, 'sourceType' | 'adjustment' | 'workDate'>,
+  overrideClockOut?: string,
+): AttendanceApprovalDayPreviewDto {
+  const segments = recordSegments(record)
+  let replacedIndex = -1
+  let proposed: { start: string; end: string } | undefined
+  let originalTime: string | undefined
+  const adjustment = approval.adjustment
+  const requested = toClock(adjustment?.requestedPunchTimeLocal)
+  if (approval.sourceType === 'PunchAdjustment' && adjustment && requested) {
+    if (adjustment.originalPunchGuid) {
+      replacedIndex = segments.findIndex((segment) => (
+        adjustment.punchType === 'ClockIn'
+          ? segment.clockInGuid === adjustment.originalPunchGuid
+          : segment.clockOutGuid === adjustment.originalPunchGuid
+      ))
+    } else if (adjustment.punchType === 'ClockOut') {
+      // 新增下班卡：补在最后一段（自动下班或未闭合）上
+      replacedIndex = segments.length - 1
+    }
+    const target = segments[replacedIndex]
+    if (target) {
+      originalTime = adjustment.punchType === 'ClockIn' ? target.start : target.isSystemAutoClockOut ? '00:00' : target.end
+      proposed = adjustment.punchType === 'ClockIn'
+        ? { start: requested, end: target.end }
+        : { start: target.start, end: requested }
+    }
+  }
+  if (approval.sourceType === 'MissingClockOut' && overrideClockOut && segments.length) {
+    replacedIndex = segments.length - 1
+    proposed = { start: segments[replacedIndex].start, end: overrideClockOut }
+    originalTime = segments[replacedIndex].isSystemAutoClockOut ? '00:00' : segments[replacedIndex].end
+  }
+  const replaced = segments[replacedIndex]
+  const workedMinutes = record.workedMinutes ?? segments.reduce((sum, segment) => sum + segment.durationMinutes, 0)
+  const workedAfter = replaced && proposed
+    ? workedMinutes - replaced.durationMinutes + Math.max(0, clockMinutes(proposed.end) - clockMinutes(proposed.start))
+    : undefined
+  return {
+    scheduleStart: toClock(record.startTime),
+    scheduleEnd: toClock(record.endTime),
+    segments: segments
+      .filter((_, index) => index !== replacedIndex || !proposed)
+      .map(({ start, end, isSystemAutoClockOut }) => ({ start, end, isSystemAutoClockOut })),
+    proposedSegments: proposed ? [proposed] : undefined,
+    segmentLimit: record.segmentLimit,
+    workedHours: Math.round((workedMinutes / 60) * 100) / 100,
+    paidHours: record.paidMinutes === undefined ? undefined : Math.round((record.paidMinutes / 60) * 100) / 100,
+    workedHoursAfter: workedAfter === undefined ? undefined : Math.round((workedAfter / 60) * 100) / 100,
+    tier: tierOfWorkDate(approval.workDate ?? record.workDate),
+    replaced: replaced && proposed
+      ? { segmentNumber: replaced.number, originalTime, isSystemAutoClockOut: replaced.isSystemAutoClockOut }
+      : undefined,
+  }
+}
+
+/** 漏下班：最后一段的系统自动下班卡（店长填实际时间时改这张；旧数据没有自动卡时补一张新的下班卡）。 */
+export function findAutoClockOutPunchGuid(record: AttendanceScheduleDto): string | undefined {
+  const segments = recordSegments(record)
+  const last = segments[segments.length - 1]
+  return last?.isSystemAutoClockOut ? last.clockOutGuid : undefined
+}
+
 /** 头像缩写：取前两个词首字母（Jack Nguyen → JN）。 */
-export function initialsOf(name?: string): string {
+export function initialsOf(name?: string | null): string {
   const words = (name ?? '').trim().split(/\s+/).filter(Boolean)
   if (!words.length) return '?'
   return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join('')
@@ -185,7 +308,7 @@ export function initialsOf(name?: string): string {
 const AVATAR_COLORS = ['#6941C6', '#1570EF', '#0E9384', '#C11574', '#4E5BA6', '#DC6803', '#3538CD', '#099250']
 
 /** 按姓名稳定取色，同一个人在审核、工时、工资三处颜色一致。 */
-export function avatarColorOf(seed?: string): string {
+export function avatarColorOf(seed?: string | null): string {
   let hash = 0
   for (const char of seed ?? '') hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   return AVATAR_COLORS[hash % AVATAR_COLORS.length]
