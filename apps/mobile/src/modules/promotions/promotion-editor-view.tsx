@@ -9,6 +9,8 @@ import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleShee
 import { Button, Dialog, Icon, IconButton, Portal, Switch, Text, TextInput } from "react-native-paper";
 import { DateRangePickerModal } from "@/components/ui/DateRangePickerModal";
 import type { ProductLookupItem } from "@/modules/product-maintenance/types";
+import type { TextInput as RNTextInput } from "react-native";
+import { useScannerGuardedInput } from "@/modules/scanner/use-scanner-guarded-input";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { createPromotion, endPromotionNow, fetchPromotions, updatePromotion } from "./api";
 import {
@@ -51,10 +53,13 @@ import {
   type PromotionDraftIssue,
   type PromotionDraftProduct,
 } from "./promotion-screen-model";
+import { usePromotionScanner, useRegisterPromotionScanHandler } from "./promotion-scanner-bridge";
 import { Badge, PROMO_COLORS, ProductSearchSheet, PromotionScanSheet, SectionCard, StatusBadge, TABULAR, WarningBox } from "./promotion-ui";
 import type { PromotionDetail, PromotionListItem } from "./types";
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+// Paper TextInput 的 ref 类型要求同时满足 RN TextInput 与 Paper 句柄，用 RN TextInput 声明即可。
+type PaperInputHandle = RNTextInput;
 
 /** 一次最多显示的商品行数，超出后「显示更多」；名称 / 零售价只查已显示的行。 */
 const PRODUCT_PAGE = 30;
@@ -231,14 +236,18 @@ export function PromotionEditorView({
     [],
   );
 
-  /** 连续扫码添加：条码 → 本店商品（含零售价）；命中多个时转到候选列表让用户挑。 */
+  /**
+   * 连续扫码添加：条码 → 本店商品（含零售价）；命中多个时转到候选列表让用户挑。
+   * 相机扫码把结果写在扫码弹层里；硬件扫码（扫码枪 / PDA）没有弹层，结果走页面提示条。
+   */
   const handleBarcode = useCallback(
-    async (barcode: string) => {
-      setScanStatus(t("scan.looking", { barcode }));
+    async (barcode: string, fromHardware = false) => {
+      const report = (message: string) => (fromHardware ? onMessage(message) : setScanStatus(message));
+      if (!fromHardware) setScanStatus(t("scan.looking", { barcode }));
       try {
         const result = await resolveBarcodeToProduct(barcode, storeCode);
         if (result.kind === "notFound") {
-          setScanStatus(t("scan.notFound", { barcode }));
+          report(t("scan.notFound", { barcode }));
           return false;
         }
         if (result.kind === "multiple") {
@@ -249,14 +258,14 @@ export function PromotionEditorView({
         }
         const name = result.product.productName || result.product.productCode;
         const added = addProduct(result.product, true);
-        setScanStatus(added ? t("scan.added", { name }) : t("scan.duplicated", { name }));
+        report(added ? t("scan.added", { name }) : t("scan.duplicated", { name }));
         return true;
       } catch (error) {
-        setScanStatus(getErrorMessage(error, "scan.failed"));
+        report(getErrorMessage(error, "scan.failed"));
         return false;
       }
     },
-    [addProduct, getErrorMessage, storeCode, t],
+    [addProduct, getErrorMessage, onMessage, storeCode, t],
   );
 
   const handlePickSearchResult = useCallback(
@@ -297,6 +306,41 @@ export function PromotionEditorView({
     },
     [draft.effectiveEnd, draft.effectiveStart, patchDraft],
   );
+
+  // 硬件扫码（扫码枪 / PDA）：直接加入参与商品；本页任一弹层（相机、搜索、日期、件数）打开或保存中时不接。
+  const scanner = usePromotionScanner();
+  const handleHardwareScan = (barcode: string) => void handleBarcode(barcode, true);
+  useRegisterPromotionScanHandler(
+    "editor",
+    handleHardwareScan,
+    !scanVisible && !searchVisible && !dateVisible && !weightTarget && !saving,
+  );
+  // 输入框聚焦时扫码枪会把条码当键盘输入写进去（尤其价格 / 次数这类数字框）：恢复原值，条码改为加入商品。
+  const nameGuard = useScannerGuardedInput<PaperInputHandle>({
+    value: draft.name,
+    onChangeText: (name) => patchDraft({ name }),
+    onScan: handleHardwareScan,
+  });
+  const fixedPriceGuard = useScannerGuardedInput<PaperInputHandle>({
+    value: draft.fixedPriceText,
+    onChangeText: (text) => patchDraft({ fixedPriceText: text.replace(/[^\d.]/g, "") }),
+    onScan: handleHardwareScan,
+  });
+  const startTimeGuard = useScannerGuardedInput<PaperInputHandle>({
+    value: startTimeText,
+    onChangeText: setStartTimeText,
+    onScan: handleHardwareScan,
+  });
+  const endTimeGuard = useScannerGuardedInput<PaperInputHandle>({
+    value: endTimeText,
+    onChangeText: setEndTimeText,
+    onScan: handleHardwareScan,
+  });
+  const maxApplicationsGuard = useScannerGuardedInput<PaperInputHandle>({
+    value: draft.maxApplicationsText,
+    onChangeText: (text) => patchDraft({ maxApplicationsText: text.replace(/[^\d]/g, "") }),
+    onScan: handleHardwareScan,
+  });
 
   const applyDateRange = useCallback(
     (range: { from?: string; to?: string }) => {
@@ -496,9 +540,12 @@ export function PromotionEditorView({
             <Text style={styles.label}>{t("fields.name")}</Text>
             <TextInput
               mode="outlined"
+              ref={nameGuard.inputRef}
               value={draft.name}
               placeholder={t("editor.namePlaceholder")}
-              onChangeText={(name) => patchDraft({ name })}
+              onChangeText={nameGuard.onChangeText}
+              onFocus={scanner.onVisibleInputFocus}
+              onBlur={scanner.onVisibleInputBlur}
               error={hasIssue("nameRequired")}
               style={styles.input}
               outlineStyle={styles.outline}
@@ -528,10 +575,13 @@ export function PromotionEditorView({
                 <Text style={styles.label}>{t("fields.fixedPrice")}</Text>
                 <TextInput
                   mode="outlined"
+                  ref={fixedPriceGuard.inputRef}
                   value={draft.fixedPriceText}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
-                  onChangeText={(text) => patchDraft({ fixedPriceText: text.replace(/[^\d.]/g, "") })}
+                  onChangeText={fixedPriceGuard.onChangeText}
+                  onFocus={scanner.onVisibleInputFocus}
+                  onBlur={scanner.onVisibleInputBlur}
                   error={hasIssue("priceRequired")}
                   left={<TextInput.Affix text="$" />}
                   style={[styles.input, TABULAR]}
@@ -560,11 +610,16 @@ export function PromotionEditorView({
                 <TextInput
                   dense
                   mode="flat"
+                  ref={startTimeGuard.inputRef}
                   value={startTimeText}
                   keyboardType="numbers-and-punctuation"
-                  onChangeText={setStartTimeText}
-                  onBlur={() => applyTime("start", startTimeText)}
-                  onSubmitEditing={() => applyTime("start", startTimeText)}
+                  onChangeText={startTimeGuard.onChangeText}
+                  onFocus={scanner.onVisibleInputFocus}
+                  onBlur={() => {
+                    scanner.onVisibleInputBlur();
+                    startTimeGuard.guardBlur(() => applyTime("start", startTimeText))();
+                  }}
+                  onSubmitEditing={startTimeGuard.guardSubmit(() => applyTime("start", startTimeText))}
                   accessibilityLabel={t("editor.startTime")}
                   style={[styles.timeInput, TABULAR]}
                   underlineColor="transparent"
@@ -583,11 +638,16 @@ export function PromotionEditorView({
                 <TextInput
                   dense
                   mode="flat"
+                  ref={endTimeGuard.inputRef}
                   value={endTimeText}
                   keyboardType="numbers-and-punctuation"
-                  onChangeText={setEndTimeText}
-                  onBlur={() => applyTime("end", endTimeText)}
-                  onSubmitEditing={() => applyTime("end", endTimeText)}
+                  onChangeText={endTimeGuard.onChangeText}
+                  onFocus={scanner.onVisibleInputFocus}
+                  onBlur={() => {
+                    scanner.onVisibleInputBlur();
+                    endTimeGuard.guardBlur(() => applyTime("end", endTimeText))();
+                  }}
+                  onSubmitEditing={endTimeGuard.guardSubmit(() => applyTime("end", endTimeText))}
                   accessibilityLabel={t("editor.endTime")}
                   style={[styles.timeInput, TABULAR]}
                   underlineColor="transparent"
@@ -699,10 +759,13 @@ export function PromotionEditorView({
               <TextInput
                 dense
                 mode="outlined"
+                ref={maxApplicationsGuard.inputRef}
                 value={draft.maxApplicationsText}
                 keyboardType="number-pad"
                 placeholder={t("editor.unlimited")}
-                onChangeText={(text) => patchDraft({ maxApplicationsText: text.replace(/[^\d]/g, "") })}
+                onChangeText={maxApplicationsGuard.onChangeText}
+                onFocus={scanner.onVisibleInputFocus}
+                onBlur={scanner.onVisibleInputBlur}
                 error={hasIssue("maxApplicationsInvalid")}
                 style={[styles.maxInput, TABULAR]}
                 outlineStyle={styles.outline}

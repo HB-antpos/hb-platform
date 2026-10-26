@@ -4,11 +4,13 @@
  * - 分店只列当前账号能管理的店；后端店级接口对无权分店也会返回 STORE_FORBIDDEN。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, StyleSheet, View } from "react-native";
+import { useIsFocused } from "@react-navigation/native";
+import { BackHandler, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Snackbar } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
+import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner";
 import { getManageableStoresForSession } from "@/modules/shop/store-scope";
 import type { Store } from "@/modules/shop/types";
 import { useStores } from "@/modules/shop/use-stores";
@@ -22,6 +24,12 @@ import { PromotionDetailView } from "./promotion-detail-view";
 import { PromotionEditorView } from "./promotion-editor-view";
 import { PromotionListView } from "./promotion-list-view";
 import { canEditPromotionInStore } from "./promotion-logic";
+import {
+  PromotionScannerContext,
+  type PromotionScanHandler,
+  type PromotionScanOwner,
+  type PromotionScannerBridge,
+} from "./promotion-scanner-bridge";
 import { getPromotionErrorKind } from "./promotion-screen-model";
 import type { PromotionDetail, PromotionListItem } from "./types";
 
@@ -40,6 +48,10 @@ export function PromotionsScreen() {
   const [reloadToken, setReloadToken] = useState(0);
   const [snackbar, setSnackbar] = useState("");
   const editorBackHandler = useRef<(() => void) | null>(null);
+  const isFocused = useIsFocused();
+  const [scanHandlers, setScanHandlers] = useState<Partial<Record<PromotionScanOwner, PromotionScanHandler>>>({});
+  const visibleInputFocusedRef = useRef(false);
+  const resumeHiddenFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canEdit = access.hasPermission(PERMISSIONS.Promotions.Edit);
 
@@ -148,7 +160,53 @@ export function PromotionsScreen() {
     editorBackHandler.current = handler;
   }, []);
 
+  // 硬件扫码：整页只有这一个 HID 接收者，按当前屏分发给列表（筛选含该商品的促销）或编辑页（加入参与商品）。
+  // 详情页只读、分店选择 / 打开详情期间、子页面自己的弹层打开时（撤回登记）都不接收。
+  const registerScanHandler = useCallback((owner: PromotionScanOwner, handler: PromotionScanHandler | null) => {
+    setScanHandlers((current) => (current[owner] === (handler ?? undefined) ? current : { ...current, [owner]: handler ?? undefined }));
+  }, []);
+  const activeScanHandler =
+    view.kind === "list" || view.kind === "editor" ? scanHandlers[view.kind] : undefined;
+  const hidEnabled = isFocused && !storePickerVisible && !opening && Boolean(activeScanHandler);
+  const hidScanner = useHidBarcodeScanner({
+    enabled: hidEnabled,
+    onScan: (barcode) => activeScanHandler?.(barcode),
+  });
+
+  const { pauseHiddenInputFocus, resumeHiddenInputFocus } = hidScanner;
+  const scannerBridge = useMemo<PromotionScannerBridge>(
+    () => ({
+      registerScanHandler,
+      onVisibleInputFocus: () => {
+        visibleInputFocusedRef.current = true;
+        if (resumeHiddenFocusTimerRef.current) {
+          clearTimeout(resumeHiddenFocusTimerRef.current);
+          resumeHiddenFocusTimerRef.current = null;
+        }
+        pauseHiddenInputFocus();
+      },
+      onVisibleInputBlur: () => {
+        visibleInputFocusedRef.current = false;
+        if (resumeHiddenFocusTimerRef.current) clearTimeout(resumeHiddenFocusTimerRef.current);
+        // 延迟恢复，避免输入框之间切换焦点时隐藏扫码框插进来抢焦点。
+        resumeHiddenFocusTimerRef.current = setTimeout(() => {
+          resumeHiddenFocusTimerRef.current = null;
+          if (!visibleInputFocusedRef.current) resumeHiddenInputFocus();
+        }, 250);
+      },
+    }),
+    [pauseHiddenInputFocus, registerScanHandler, resumeHiddenInputFocus],
+  );
+
+  useEffect(
+    () => () => {
+      if (resumeHiddenFocusTimerRef.current) clearTimeout(resumeHiddenFocusTimerRef.current);
+    },
+    [],
+  );
+
   return (
+    <PromotionScannerContext.Provider value={scannerBridge}>
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       {/* 列表常驻（隐藏而不卸载），从编辑 / 详情返回时保留分段、搜索与滚动位置。 */}
       <View style={[styles.flex, view.kind !== "list" && styles.hidden]}>
@@ -224,7 +282,13 @@ export function PromotionsScreen() {
       <Snackbar visible={Boolean(snackbar)} onDismiss={() => setSnackbar("")} duration={4000}>
         {snackbar}
       </Snackbar>
+
+      {/* 扫码枪走文本模式时的隐藏接收框；不接收时卸载，避免禁用后残留焦点。 */}
+      {hidEnabled && hidScanner.mode === "textInput" && hidScanner.textInputProps ? (
+        <TextInput style={styles.hiddenInput} {...hidScanner.textInputProps} />
+      ) : null}
     </SafeAreaView>
+    </PromotionScannerContext.Provider>
   );
 }
 
@@ -232,6 +296,7 @@ const styles = StyleSheet.create({
   safeArea: BUSINESS_UI.screen,
   flex: { flex: 1 },
   hidden: { display: "none" },
+  hiddenInput: { position: "absolute", width: 1, height: 1, opacity: 0 },
   opening: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

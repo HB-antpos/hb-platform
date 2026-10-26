@@ -16,7 +16,10 @@ import {
   getPromotionStatus,
   isScopeVisible,
 } from "./promotion-logic";
+import type { TextInput as RNTextInput } from "react-native";
+import { useScannerGuardedInput } from "@/modules/scanner/use-scanner-guarded-input";
 import { resolveBarcodeToProduct } from "./promotion-product-lookup";
+import { usePromotionScanner, useRegisterPromotionScanHandler } from "./promotion-scanner-bridge";
 import {
   PROMOTION_STATUS_SEGMENTS,
   countPromotionsByStatus,
@@ -33,6 +36,8 @@ import type { PromotionListItem, PromotionStatusCounts, PromotionStatusFilter } 
 const PAGE_SIZE = 20;
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+// Paper TextInput 的 ref 类型要求同时满足 RN TextInput 与 Paper 句柄，用 RN TextInput 声明即可。
+type RNTextInputHandle = RNTextInput;
 
 interface ProductFilter {
   productCode: string;
@@ -222,15 +227,19 @@ export function PromotionListView({
     [getErrorMessage, onMessage, refresh, storeCode, t],
   );
 
-  /** 扫商品条码 → 解析成商品编码 → 只看含该商品的促销。 */
+  /**
+   * 扫商品条码 → 解析成商品编码 → 只看含该商品的促销。
+   * 相机扫码把进度写在扫码弹层里；硬件扫码（扫码枪 / PDA）没有弹层，失败原因走页面提示条。
+   */
   const handleBarcode = useCallback(
-    async (barcode: string) => {
+    async (barcode: string, fromHardware = false) => {
       if (!storeCode) return false;
-      setScanStatus(t("scan.looking", { barcode }));
+      const report = (message: string) => (fromHardware ? onMessage(message) : setScanStatus(message));
+      if (!fromHardware) setScanStatus(t("scan.looking", { barcode }));
       try {
         const result = await resolveBarcodeToProduct(barcode, storeCode);
         if (result.kind === "notFound") {
-          setScanStatus(t("scan.notFound", { barcode }));
+          report(t("scan.notFound", { barcode }));
           return false;
         }
         const product =
@@ -243,12 +252,27 @@ export function PromotionListView({
         setProductFilter(product);
         return true;
       } catch (error) {
-        setScanStatus(getErrorMessage(error, "scan.failed"));
+        report(getErrorMessage(error, "scan.failed"));
         return false;
       }
     },
     [getErrorMessage, onMessage, storeCode, t],
   );
+
+  const scanner = usePromotionScanner();
+  const handleHardwareScan = (barcode: string) => void handleBarcode(barcode, true);
+  // 相机扫码弹层打开时由弹层处理，硬件扫码先不接。
+  useRegisterPromotionScanHandler("list", handleHardwareScan, Boolean(storeCode) && !scanVisible);
+  // 搜索框聚焦时扫码枪会把条码打进框里：按扫码处理（筛选含该商品的促销），不当作名称关键字。
+  const searchGuard = useScannerGuardedInput<RNTextInputHandle>({
+    value: keywordInput,
+    onChangeText: (text) => {
+      setKeywordInput(text);
+      if (text && productFilter) setProductFilter(null);
+    },
+    onScan: handleHardwareScan,
+    enabled: Boolean(storeCode),
+  });
 
   const sortCaptionKind = getSortCaptionKind(status);
   const caption = [
@@ -364,14 +388,14 @@ export function PromotionListView({
           <TextInput
             mode="outlined"
             dense
+            ref={searchGuard.inputRef}
             value={keywordInput}
             placeholder={t("filters.keyword")}
-            onChangeText={(text) => {
-              setKeywordInput(text);
-              if (text && productFilter) setProductFilter(null);
-            }}
+            onChangeText={searchGuard.onChangeText}
+            onFocus={scanner.onVisibleInputFocus}
+            onBlur={scanner.onVisibleInputBlur}
             returnKeyType="search"
-            onSubmitEditing={() => setKeyword(keywordInput.trim())}
+            onSubmitEditing={searchGuard.guardSubmit(() => setKeyword(keywordInput.trim()))}
             style={styles.searchInput}
             outlineStyle={styles.searchOutline}
             left={<TextInput.Icon icon="magnify" />}

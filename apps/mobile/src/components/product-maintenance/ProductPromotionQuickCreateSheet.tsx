@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Button, Icon, Switch, Text } from "react-native-paper";
 import { MonthDatePicker } from "@/components/attendance/MonthDatePicker";
@@ -36,6 +36,8 @@ import {
   type QuickRangeKey,
 } from "@/modules/promotions/promotion-logic";
 import type { PromotionListItem } from "@/modules/promotions/types";
+import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner";
+import { useScannerGuardedInput } from "@/modules/scanner/use-scanner-guarded-input";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -108,6 +110,74 @@ export function ProductPromotionQuickCreateSheet({
     }
   }, [visible, initialDraft]);
 
+  // ---------------- 硬件扫码（扫码枪 / Zebra PDA） ----------------
+  // 弹层是独立窗口，商品查询页的扫码监听收不到按键；弹层打开期间由弹层自己接收，扫到即加入同组商品。
+  const scanBarcodeRef = useRef<(barcode: string) => void>(() => {});
+  const scanQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const hidEnabled = visible && view === "form" && !saving;
+  const hidScanner = useHidBarcodeScanner({
+    enabled: hidEnabled,
+    textInputOnly: true,
+    onScan: (barcode) => scanBarcodeRef.current(barcode),
+  });
+  const visibleInputFocusedRef = useRef(false);
+  const resumeHiddenFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { pauseHiddenInputFocus, resumeHiddenInputFocus } = hidScanner;
+  // 可见输入框聚焦时暂停隐藏扫码框抢焦点，失焦后延迟交还，避免输入框之间切换时互相抢。
+  const handleVisibleInputFocus = useCallback(() => {
+    visibleInputFocusedRef.current = true;
+    if (resumeHiddenFocusTimerRef.current) {
+      clearTimeout(resumeHiddenFocusTimerRef.current);
+      resumeHiddenFocusTimerRef.current = null;
+    }
+    pauseHiddenInputFocus();
+  }, [pauseHiddenInputFocus]);
+  const handleVisibleInputBlur = useCallback(() => {
+    visibleInputFocusedRef.current = false;
+    if (resumeHiddenFocusTimerRef.current) clearTimeout(resumeHiddenFocusTimerRef.current);
+    resumeHiddenFocusTimerRef.current = setTimeout(() => {
+      resumeHiddenFocusTimerRef.current = null;
+      if (!visibleInputFocusedRef.current) resumeHiddenInputFocus();
+    }, 250);
+  }, [resumeHiddenInputFocus]);
+  useEffect(
+    () => () => {
+      if (resumeHiddenFocusTimerRef.current) clearTimeout(resumeHiddenFocusTimerRef.current);
+    },
+    [],
+  );
+  // 新建时价格框自动聚焦会暂停隐藏扫码框；关闭弹层后复位，下次打开重新判断。
+  useEffect(() => {
+    if (!visible) visibleInputFocusedRef.current = false;
+  }, [visible]);
+
+  const patchDraftField = (next: Partial<QuickPromotionDraft>) => {
+    setDraft((current) => (current ? { ...current, ...next } : current));
+    setErrorText(null);
+  };
+  const routeScan = (barcode: string) => scanBarcodeRef.current(barcode);
+  // 输入框聚焦时扫码枪会把条码写进框里：恢复原值，条码改为加入同组商品。
+  const searchGuard = useScannerGuardedInput<TextInput>({
+    value: searchText,
+    onChangeText: setSearchText,
+    onScan: routeScan,
+  });
+  const nameGuard = useScannerGuardedInput<TextInput>({
+    value: draft?.name ?? "",
+    onChangeText: (name) => patchDraftField({ name: name.replace(/[\r\n]+/g, " ") }),
+    onScan: routeScan,
+  });
+  const priceGuard = useScannerGuardedInput<TextInput>({
+    value: draft?.fixedPriceText ?? "",
+    onChangeText: (text) => patchDraftField({ fixedPriceText: sanitizeMoneyInput(text) }),
+    onScan: routeScan,
+  });
+  const maxPerOrderGuard = useScannerGuardedInput<TextInput>({
+    value: draft?.maxPerOrderText ?? "",
+    onChangeText: (text) => patchDraftField({ maxPerOrderText: text.replace(/[^\d]/g, "") }),
+    onScan: routeScan,
+  });
+
   const evaluation = useMemo(
     () => (draft ? evaluateQuickPromotionDraft(draft, anchorProductCode) : null),
     [draft, anchorProductCode],
@@ -175,9 +245,9 @@ export function ProductPromotionQuickCreateSheet({
   };
 
   /** 加入同组商品：扫码枪扫入或手输后回车 / 点「添加」；唯一命中直接加入，多个命中让店员选。 */
-  const handleSearch = async () => {
-    const keyword = searchText.trim();
-    if (!keyword || searching) return;
+  const handleSearch = async (input: string = searchText, queued = false) => {
+    const keyword = input.trim();
+    if (!keyword || (searching && !queued)) return;
     const generation = ++searchGenerationRef.current;
     setSearching(true);
     setSearchMessage(null);
@@ -224,6 +294,12 @@ export function ProductPromotionQuickCreateSheet({
     setSearchText("");
     setSearchCandidates([]);
     setSearchMessage(null);
+  };
+
+  // 硬件扫码排队逐个查找加入，连续快扫不会因上一条还在查而被丢掉。
+  scanBarcodeRef.current = (barcode: string) => {
+    setProductsExpanded(true);
+    scanQueueRef.current = scanQueueRef.current.then(() => handleSearch(barcode, true)).catch(() => undefined);
   };
 
   const isCreate = mode === "create";
@@ -379,16 +455,19 @@ export function ProductPromotionQuickCreateSheet({
         <View style={styles.productsBox}>
           <View style={styles.searchRow}>
             <TextInput
+              ref={searchGuard.inputRef}
               style={[styles.input, styles.searchInput]}
               value={searchText}
-              onChangeText={setSearchText}
+              onChangeText={searchGuard.onChangeText}
+              onFocus={handleVisibleInputFocus}
+              onBlur={handleVisibleInputBlur}
               placeholder={t("promotion.form.productSearchPlaceholder")}
               placeholderTextColor="#98A2B3"
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
               // 扫码枪模拟键盘输入并回车，直接触发查找。
-              onSubmitEditing={() => void handleSearch()}
+              onSubmitEditing={searchGuard.guardSubmit(() => void handleSearch())}
               submitBehavior="submit"
               editable={!saving}
               accessibilityLabel={t("promotion.form.productSearchPlaceholder")}
@@ -454,9 +533,12 @@ export function ProductPromotionQuickCreateSheet({
       <View style={styles.field}>
         <Text style={styles.label}>{t("promotion.form.name")}</Text>
         <TextInput
+          ref={nameGuard.inputRef}
           style={styles.input}
           value={draft.name}
-          onChangeText={(name) => patch({ name: name.replace(/[\r\n]+/g, " ") })}
+          onChangeText={nameGuard.onChangeText}
+          onFocus={handleVisibleInputFocus}
+          onBlur={handleVisibleInputBlur}
           placeholder={defaultName}
           placeholderTextColor="#98A2B3"
           maxLength={100}
@@ -500,9 +582,12 @@ export function ProductPromotionQuickCreateSheet({
           <View style={[styles.priceInputWrap, notDiscount ? styles.inputError : styles.inputFocusTone]}>
             <Text style={styles.pricePrefix}>$</Text>
             <TextInput
+              ref={priceGuard.inputRef}
               style={styles.priceInput}
               value={draft.fixedPriceText}
-              onChangeText={(text) => patch({ fixedPriceText: sanitizeMoneyInput(text) })}
+              onChangeText={priceGuard.onChangeText}
+              onFocus={handleVisibleInputFocus}
+              onBlur={handleVisibleInputBlur}
               keyboardType="decimal-pad"
               placeholder="0.00"
               placeholderTextColor="#98A2B3"
@@ -654,8 +739,11 @@ export function ProductPromotionQuickCreateSheet({
               <Text style={styles.label}>{t("promotion.form.maxPerOrderLabel")}</Text>
               <TextInput
                 style={[styles.input, issues.includes("maxPerOrderInvalid") ? styles.inputError : null]}
+                ref={maxPerOrderGuard.inputRef}
                 value={draft.maxPerOrderText}
-                onChangeText={(text) => patch({ maxPerOrderText: text.replace(/[^\d]/g, "") })}
+                onChangeText={maxPerOrderGuard.onChangeText}
+                onFocus={handleVisibleInputFocus}
+                onBlur={handleVisibleInputBlur}
                 keyboardType="number-pad"
                 placeholder={t("promotion.form.maxPerOrderPlaceholder")}
                 placeholderTextColor="#98A2B3"
@@ -674,6 +762,11 @@ export function ProductPromotionQuickCreateSheet({
           </View>
         ) : null}
       </View>
+
+      {/* 弹层内的隐藏扫码接收框（必须渲染在 Modal 里才能拿到按键）；不接收时卸载。 */}
+      {hidEnabled && hidScanner.textInputProps ? (
+        <TextInput style={styles.hiddenScannerInput} {...hidScanner.textInputProps} />
+      ) : null}
     </BusinessSheet>
   );
 }
@@ -737,6 +830,7 @@ function DateField({
 const PROMO_OK_BG = "#ECFDF3";
 
 const styles = StyleSheet.create({
+  hiddenScannerInput: { position: "absolute", width: 1, height: 1, opacity: 0 },
   errorBanner: {
     flexDirection: "row",
     gap: 6,
