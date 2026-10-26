@@ -90,6 +90,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string SupplierPreorderRevisionMigrationId = "20261024.002-supplier-preorder-revision";
     internal const string StorePosApiEntryMigrationId = "20261024.003-store-pos-api-entry";
     internal const string HelpFaqMigrationId = "20261025.001-help-faq";
+    internal const string RoleLevelMigrationId = "20261026.001-role-level";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -341,6 +342,11 @@ internal sealed class SchemaMigrationCoordinator
             HelpFaqMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyHelpFaqAsync(cancellationToken)
+        ),
+        new(
+            RoleLevelMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyRoleLevelAsync(cancellationToken)
         ),
     ];
 

@@ -855,6 +855,8 @@ namespace BlazorApp.Api.Controllers
                 "SELF_ACCESS_MANAGEMENT_DENIED"
                 or "SELF_PROFILE_FIELDS_DENIED"
                 or "HIGH_PRIVILEGE_TARGET_DENIED"
+                or "TARGET_LEVEL_DENIED"
+                or "ROLE_LEVEL_DENIED"
                 or "USER_SCOPE_DENIED"
                 or "STORE_SCOPE_DENIED"
                 or "PERMISSION_ESCALATION_DENIED"

@@ -7,6 +7,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Pagination,
   Skeleton,
@@ -328,6 +329,7 @@ export default function SystemRolesPage() {
   const handleCreateOpen = () => {
     createForm.setFieldsValue({
       isActive: true,
+      level: 0,
     })
     setCreateOpen(true)
   }
@@ -341,6 +343,7 @@ export default function SystemRolesPage() {
         description: values.description?.trim() || undefined,
         roleName: values.roleName.trim(),
         isActive: values.isActive ?? true,
+        level: values.level ?? 0,
       })
       message.success(t('system.roles.createSuccess'))
       setCreateOpen(false)
@@ -366,6 +369,7 @@ export default function SystemRolesPage() {
       roleName: selectedRole.roleName,
       description: selectedRole.description,
       isActive: selectedRole.isActive,
+      level: selectedRole.level ?? 0,
     })
     setEditOpen(true)
   }
@@ -500,6 +504,7 @@ export default function SystemRolesPage() {
                 label={selectedRole.isActive ? t('common.active') : t('common.inactive')}
               />
             </Descriptions.Item>
+            <Descriptions.Item label={t('system.roles.level')}>{selectedRole.level ?? '--'}</Descriptions.Item>
             <Descriptions.Item label={t('column.description')} span="filled">{selectedRole.description || '--'}</Descriptions.Item>
             <Descriptions.Item label={t('system.roles.linkedUserCount')}>{selectedRole.userCount}</Descriptions.Item>
             <Descriptions.Item label={t('system.rolesWorkspace.effectivePermissions', '有效权限')}>
@@ -655,7 +660,7 @@ export default function SystemRolesPage() {
         width={620}
         destroyOnHidden
       >
-        <Form form={createForm} layout="vertical" initialValues={{ isActive: true }}>
+        <Form form={createForm} layout="vertical" initialValues={{ isActive: true, level: 0 }}>
           <Form.Item
             label={t('system.roles.roleName')}
             name="roleName"
@@ -673,6 +678,9 @@ export default function SystemRolesPage() {
             rules={[{ max: 200, message: t('system.roles.descriptionLength') }]}
           >
             <Input.TextArea rows={4} maxLength={200} showCount />
+          </Form.Item>
+          <Form.Item label={t('system.roles.level')} name="level" extra={t('system.roles.levelHint')}>
+            <InputNumber min={0} max={100} precision={0} style={{ width: 160 }} />
           </Form.Item>
           <Form.Item label={t('column.status')} name="isActive" valuePropName="checked">
             <Switch checkedChildren={t('common.active')} unCheckedChildren={t('common.inactive')} />
@@ -698,6 +706,9 @@ export default function SystemRolesPage() {
           </Form.Item>
           <Form.Item label={t('column.description')} name="description">
             <Input.TextArea rows={4} />
+          </Form.Item>
+          <Form.Item label={t('system.roles.level')} name="level" extra={t('system.roles.levelHint')}>
+            <InputNumber min={0} max={100} precision={0} style={{ width: 160 }} />
           </Form.Item>
           <Form.Item label={t('column.status')} name="isActive" valuePropName="checked">
             <Switch checkedChildren={t('common.active')} unCheckedChildren={t('common.inactive')} />

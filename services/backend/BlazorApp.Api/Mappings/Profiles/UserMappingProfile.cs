@@ -33,6 +33,7 @@ namespace BlazorApp.Api.Mappings.Profiles
                     RoleName = r.RoleName,
                     Description = r.Description,
                     IsActive = r.IsActive,
+                    Level = r.Level,
                     CreatedAt = r.CreatedAt,
                     UpdatedAt = r.UpdatedAt ?? r.CreatedAt
                 }).ToList() : new List<RoleDto>()))
