@@ -60,6 +60,19 @@ for (const language of ['zh', 'en']) {
   assertEqual(typeof locale.menu.attendancePayroll, 'string', `${language} 缺 menu.attendancePayroll`)
 }
 
+// 后端 Web 菜单树同样登记两个入口，权限与前端访问键一致（否则后端菜单缺叶子，前端整棵退回本地菜单）
+const navigationSource = readFileSync(join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/NavigationService.cs'), 'utf8')
+assertEqual(
+  /Path = "\/pos-admin\/attendance-review".*TitleKey = "menu\.attendanceReview".*Icon = "FileDoneOutlined".*Permission = Permissions\.Attendance\.Approval\.ReviewManagedStore/.test(navigationSource),
+  true,
+  '后端 FullMenu 应登记考勤审核，只认 Approval.ReviewManagedStore',
+)
+assertEqual(
+  /Path = "\/pos-admin\/attendance-payroll".*TitleKey = "menu\.attendancePayroll".*Icon = "AccountBookOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Punch\.ViewManagedStore, Permissions\.Attendance\.Payroll\.View \}/.test(navigationSource),
+  true,
+  '后端 FullMenu 应登记工时与工资，打卡查看或工资查看任一可见',
+)
+
 // 新权限码与规格一致
 assertEqual(P.Attendance.ApprovalReviewSelf, 'Attendance.Approval.ReviewSelf', '本人审核权限码')
 assertEqual(P.Attendance.PayrollView, 'Attendance.Payroll.View', '工资查看权限码')

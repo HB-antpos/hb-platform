@@ -173,6 +173,10 @@ namespace BlazorApp.Api.Services
                     // 节日贺卡分店填报统计：总部查看全部分店的剩余贺卡填报；独立权限码，店长的填报 / 本店查看权限不能打开。
                     new() { Path = "/pos-admin/seasonal-card-stats",  TitleKey = "menu.seasonalCardStats",      Icon = "GiftOutlined",               Permission = Permissions.SeasonalCards.Remaining.ViewAllStores },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
+                    // 考勤审核工作台：与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
+                    new() { Path = "/pos-admin/attendance-review",     TitleKey = "menu.attendanceReview",       Icon = "FileDoneOutlined",           Permission = Permissions.Attendance.Approval.ReviewManagedStore },
+                    // 工时与工资：工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View，任一即可见（页内再按各自权限显示页签）。
+                    new() { Path = "/pos-admin/attendance-payroll",    TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
