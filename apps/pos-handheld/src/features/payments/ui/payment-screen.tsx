@@ -30,6 +30,8 @@ import {
   canSwitchLinklyTerminal,
   canSelectPaymentMethod,
   canSubmitPaymentMethod,
+  isQuickCashSufficient,
+  nextQuickCashAmountText,
   type PaymentPresenterState,
   type PaymentPresenterTender,
   type PaymentScreenPresenter,
@@ -134,6 +136,8 @@ export function PaymentScreen({
   const [paymentEntryOpen, setPaymentEntryOpen] = useState(false);
   const latestState = useRef(state);
   latestState.current = state;
+  // 上一次快捷现金写入输入框的文本：输入框仍等于它时，再点快捷金额是累加而不是覆盖。
+  const lastQuickCashText = useRef<string | null>(null);
 
   const closePaymentEntry = (): void => {
     if (state.busy) return;
@@ -573,9 +577,20 @@ export function PaymentScreen({
                           <ActionButton
                             key={amount}
                             label={`$${amount}`}
-                            onPress={() =>
-                              presenter.setAmountText(amount.toFixed(2))
-                            }
+                            disabled={isQuickCashSufficient(
+                              state.amountText,
+                              lastQuickCashText.current,
+                              state.remaining,
+                            )}
+                            onPress={() => {
+                              const next = nextQuickCashAmountText(
+                                state.amountText,
+                                lastQuickCashText.current,
+                                amount,
+                              );
+                              lastQuickCashText.current = next;
+                              presenter.setAmountText(next);
+                            }}
                             sound="key"
                             style={[styles.quickCashButton, noteStyle]}
                             testID={`payment-cash-quick-${amount}`}
