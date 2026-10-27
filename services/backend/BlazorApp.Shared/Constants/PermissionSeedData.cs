@@ -208,6 +208,38 @@ namespace BlazorApp.Shared.Constants
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        /// <summary>
+        /// 收银端「设置 / 客显 / 特价商品 / 同步」这类不属于销售业务、但店长与仓库管理需要能按店转授给员工的权限。
+        /// 只用于「按店 POS 收银权限」页（<c>UserStorePosTerminalPermissionService</c>）；
+        /// 刻意不并入 <see cref="PosTerminalBusinessPermissionCodes"/>，因为后者还被账号直接权限委派、复制权限等路径共用，
+        /// 那些路径对 POS 系统级权限仍保持「只有管理员能授」。
+        /// 不含 Audit.View：员工操作日志是审计入口，不是收银机上的功能开关。
+        /// </summary>
+        public static IReadOnlyList<string> PosTerminalDelegableSystemPermissionCodes { get; } =
+            new[]
+            {
+                Permissions.PosTerminal.Settings.View,
+                Permissions.PosTerminal.Settings.PaymentTerminal,
+                Permissions.PosTerminal.Settings.ReceiptPrinter,
+                Permissions.PosTerminal.Settings.CatalogDownload,
+                Permissions.PosTerminal.Settings.CatalogReset,
+                Permissions.PosTerminal.Settings.TestDataReset,
+                Permissions.PosTerminal.Settings.DeviceRegistration,
+                Permissions.PosTerminal.Settings.AppUpdate,
+                Permissions.PosTerminal.CustomerDisplay.Manage,
+                Permissions.PosTerminal.SpecialProducts.View,
+                Permissions.PosTerminal.SpecialProducts.AddToCart,
+                Permissions.PosTerminal.SpecialProducts.Manage,
+                Permissions.PosTerminal.System.Sync,
+            };
+
+        /// <summary>「按店 POS 收银权限」页对店长 / 仓库管理开放的完整范围 = 业务白名单 + 可转授的系统级权限。</summary>
+        public static IReadOnlyList<string> PosTerminalStoreDelegablePermissionCodes { get; } =
+            PosTerminalBusinessPermissionCodes
+                .Concat(PosTerminalDelegableSystemPermissionCodes)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
         public static IReadOnlyList<string> OrderRolePermissionCodes { get; } =
             new[]
             {

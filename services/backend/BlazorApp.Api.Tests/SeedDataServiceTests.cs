@@ -207,6 +207,19 @@ namespace BlazorApp.Api.Tests
             Assert.DoesNotContain(Permissions.PosTerminal.SpecialProducts.Manage, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.DoesNotContain(Permissions.PosTerminal.System.Sync, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.DoesNotContain(Permissions.PosTerminal.Audit.View, PermissionSeedData.PosTerminalBusinessPermissionCodes);
+
+            // 按店 POS 收银权限页可转授的系统级权限：独立成表，不污染业务白名单（账号直接权限委派仍只给管理员授系统级）。
+            Assert.Contains(Permissions.PosTerminal.Settings.AppUpdate, PermissionSeedData.PosTerminalDelegableSystemPermissionCodes);
+            Assert.Contains(Permissions.PosTerminal.Settings.TestDataReset, PermissionSeedData.PosTerminalDelegableSystemPermissionCodes);
+            Assert.Contains(Permissions.PosTerminal.SpecialProducts.Manage, PermissionSeedData.PosTerminalDelegableSystemPermissionCodes);
+            Assert.Contains(Permissions.PosTerminal.System.Sync, PermissionSeedData.PosTerminalDelegableSystemPermissionCodes);
+            Assert.DoesNotContain(Permissions.PosTerminal.Audit.View, PermissionSeedData.PosTerminalDelegableSystemPermissionCodes);
+            Assert.Empty(PermissionSeedData.PosTerminalDelegableSystemPermissionCodes.Intersect(
+                PermissionSeedData.PosTerminalBusinessPermissionCodes,
+                StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(Permissions.PosTerminal.Settings.AppUpdate, PermissionSeedData.PosTerminalStoreDelegablePermissionCodes);
+            Assert.Contains(Permissions.PosTerminal.Payment.Confirm, PermissionSeedData.PosTerminalStoreDelegablePermissionCodes);
+            Assert.DoesNotContain(Permissions.PosTerminal.Audit.View, PermissionSeedData.PosTerminalStoreDelegablePermissionCodes);
         }
 
         [Fact]
