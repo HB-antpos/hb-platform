@@ -257,6 +257,10 @@
       "name": "Manage MYOB connections",
       "description": "Connect or disconnect MYOB company files and map stores to company files on the web admin."
     },
+    "Myob.Employee.Bind": {
+      "name": "Bind MYOB employees",
+      "description": "Match employees with MYOB employee cards, and unlink them, on the web admin."
+    },
     "OrderFront": {
       "name": "Access ordering portal",
       "description": "Open the web ordering portal and the app's order pages. Core permission for the Ordering staff role."

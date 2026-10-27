@@ -624,6 +624,12 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string Manage = "Myob.Connection.Manage";
             }
+
+            public static class Employee
+            {
+                /// <summary>员工绑定：把我方员工与 MYOB 员工卡配对、解除绑定、忽略名单。</summary>
+                public const string Bind = "Myob.Employee.Bind";
+            }
         }
 
         public static class SeasonalCards

@@ -1052,6 +1052,10 @@ namespace BlazorApp.Api.Services.React
                 return own.Where(item => item.EffectiveFrom.Date <= storeToday).OrderByDescending(item => item.EffectiveFrom).FirstOrDefault()
                     ?? own.OrderBy(item => item.EffectiveFrom).FirstOrDefault();
             });
+            if (query.PublicHolidayMismatchOnly)
+            {
+                result = result.Where(item => item.PublicHolidayRateMismatch).ToList();
+            }
             return ApiResponse<List<AttendancePayRateDto>>.OK(result
                 .OrderByDescending(item => item.IsManager)
                 .ThenBy(item => item.UserName, StringComparer.OrdinalIgnoreCase)
@@ -1094,6 +1098,10 @@ namespace BlazorApp.Api.Services.React
             {
                 return accessError;
             }
+            // 公司规定公假转账价 = 平日转账价：以后端为准强制相等，前端传什么公假价都忽略；全现金模式不用转账价。
+            request.TransferPublicHolidayRate = request.PayMode?.Trim() == PayrollCalculator.PayModeCash
+                ? null
+                : request.TransferWeekdayRate;
             var validation = ValidatePayRate(request);
             if (!validation.Success)
             {
@@ -1275,6 +1283,7 @@ namespace BlazorApp.Api.Services.React
             TransferSaturdayRate = item.TransferSaturdayRate,
             TransferSundayRate = item.TransferSundayRate,
             TransferPublicHolidayRate = item.TransferPublicHolidayRate,
+            PublicHolidayRateMismatch = HasPublicHolidayRateMismatch(item),
             CashRate = item.CashRate,
             CashAllowancePerPeriod = item.CashAllowancePerPeriod,
             MinimumRate = item.MinimumRate,
@@ -1283,6 +1292,14 @@ namespace BlazorApp.Api.Services.React
             CreatedAt = item.CreatedAt,
             CreatedBy = item.CreatedBy,
         };
+
+        /// <summary>
+        /// 公假转账价必须等于平日转账价（方案 docs/plans/2026-10-27-myob-payroll-integration.md 第 11.4 节）。
+        /// 全现金模式不用转账价，不算不一致；其余模式两个价（含一边为空）不相等即不一致。
+        /// </summary>
+        internal static bool HasPublicHolidayRateMismatch(EmployeePayRate item) =>
+            item.PayMode != PayrollCalculator.PayModeCash
+            && item.TransferPublicHolidayRate != item.TransferWeekdayRate;
 
         /// <summary>CreatedBy 存的是用户名；历史列表显示成姓名。</summary>
         private async Task<Dictionary<string, string>> ResolveUsernamesToDisplayAsync(IEnumerable<string?> usernames)

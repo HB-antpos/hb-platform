@@ -232,6 +232,11 @@ export interface AttendancePayRateDto {
   createdBy?: string | null
   /** 未成年过了生日、时薪还是生日前设的：提示核对。 */
   birthdayReviewHint?: boolean
+  /**
+   * 当前生效记录里公假转账价与平日转账价不一致（公假价按规定永远等于平日价，历史记录不改，
+   * 须新建一条时薪记录纠正）；全现金恒为 false。
+   */
+  publicHolidayRateMismatch?: boolean
 }
 
 /** POST payroll/rates：只新增一条生效记录，不改历史（重复生效日返回 RATE_EFFECTIVE_DATE_EXISTS）。 */

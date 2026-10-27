@@ -257,6 +257,10 @@
       "name": "管理 MYOB 连接",
       "description": "Web 页面 /pos-admin/myob - 连接 / 断开 MYOB 公司文件、维护分店与公司文件的映射"
     },
+    "Myob.Employee.Bind": {
+      "name": "绑定 MYOB 员工",
+      "description": "Web 页面 /pos-admin/myob「员工绑定」页签 - 把我方员工与 MYOB 员工卡配对、解除绑定"
+    },
     "OrderFront": {
       "name": "前台订货",
       "description": "Web 订货前台与移动端「订货单」- 进入前台订货入口（Order / 订货员角色核心权限）"

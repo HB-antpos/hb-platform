@@ -13,6 +13,28 @@ public sealed record MyobTokenResponse(string AccessToken, string? RefreshToken,
 /// <summary>GET /{cf_uri}/Company 的摘要：公司名与 ABN / TFN（只有 11 位数字才是 ABN，由调用方判断）。</summary>
 public sealed record MyobCompanyInfo(string CompanyName, string? AbnOrTfn);
 
+/// <summary>Contact/Employee 的一条（只取绑定需要的字段）。邮箱 / 手机来自所有 Addresses 的合集。</summary>
+public sealed record MyobEmployeeRecord(
+    string Uid,
+    string? DisplayId,
+    string FirstName,
+    string LastName,
+    string? CompanyName,
+    bool IsIndividual,
+    bool IsActive,
+    IReadOnlyList<string> Emails,
+    IReadOnlyList<string> Phones);
+
+/// <summary>EmployeePayrollDetails.Entitlements 的一项：假期累计类别（只要名字和是否已分配）。</summary>
+public sealed record MyobEntitlementRecord(string? CategoryName, bool IsAssigned);
+
+/// <summary>Contact/EmployeePayrollDetails 的一条（只取绑定与类型检查需要的字段）。</summary>
+public sealed record MyobEmployeePayrollRecord(
+    string EmployeeUid,
+    DateTime? DateOfBirth,
+    string? EmploymentStatus,
+    IReadOnlyList<MyobEntitlementRecord> Entitlements);
+
 /// <summary>
 /// 调用 MYOB 失败。Code 取自 <see cref="MyobErrorCodes"/>；IsAuthorizationRevoked＝refresh token 已失效（invalid_grant），
 /// 需要公司文件 Administrator 重新授权，调用方据此把连接标成 NeedsReauth。
@@ -37,6 +59,12 @@ public interface IMyobApiClient
     Task<MyobTokenResponse> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
 
     Task<MyobCompanyInfo> GetCompanyAsync(string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>GET /{cf_uri}/Contact/Employee，自动翻页拉全量（含已停用）。需要 scope sme-contacts-employee。</summary>
+    Task<IReadOnlyList<MyobEmployeeRecord>> GetEmployeesAsync(string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>GET /{cf_uri}/Contact/EmployeePayrollDetails，自动翻页拉全量。需要 scope sme-payroll。</summary>
+    Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -130,6 +158,117 @@ public sealed class MyobApiClient : IMyobApiClient
         }
 
         return new MyobCompanyInfo(payload.CompanyName.Trim(), payload.AbnOrTfn);
+    }
+
+    public async Task<IReadOnlyList<MyobEmployeeRecord>> GetEmployeesAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var items = await GetAllPagesAsync<EmployeePayload>(businessId, accessToken, "Contact/Employee", cancellationToken);
+        return items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Uid))
+            .Select(item => new MyobEmployeeRecord(
+                item.Uid!,
+                string.IsNullOrWhiteSpace(item.DisplayId) ? null : item.DisplayId.Trim(),
+                item.FirstName?.Trim() ?? string.Empty,
+                item.LastName?.Trim() ?? string.Empty,
+                string.IsNullOrWhiteSpace(item.CompanyName) ? null : item.CompanyName.Trim(),
+                item.IsIndividual ?? true,
+                item.IsActive ?? true,
+                (item.Addresses ?? [])
+                    .Select(address => address.Email?.Trim())
+                    .Where(email => !string.IsNullOrWhiteSpace(email))
+                    .Select(email => email!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                (item.Addresses ?? [])
+                    .SelectMany(address => new[] { address.Phone1, address.Phone2, address.Phone3 })
+                    .Where(phone => !string.IsNullOrWhiteSpace(phone))
+                    .Select(phone => phone!.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList()))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var items = await GetAllPagesAsync<EmployeePayrollPayload>(
+            businessId, accessToken, "Contact/EmployeePayrollDetails", cancellationToken);
+        return items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Employee?.Uid))
+            .Select(item => new MyobEmployeePayrollRecord(
+                item.Employee!.Uid!,
+                item.DateOfBirth,
+                string.IsNullOrWhiteSpace(item.EmploymentStatus) ? null : item.EmploymentStatus.Trim(),
+                (item.Entitlements ?? [])
+                    .Select(entitlement => new MyobEntitlementRecord(
+                        entitlement.EntitlementCategory?.Name?.Trim(),
+                        entitlement.IsAssigned ?? false))
+                    .ToList()))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 拉某个列表接口的全部页。MYOB 列表响应形如 { Items, NextPageLink, Count }：
+    /// 先请求 $top=1000，再沿 NextPageLink 翻页；只跟随与 ApiBaseUrl 同主机的链接（防止被带到别处），最多翻 50 页兜底。
+    /// 任何非 2xx 都按 ApiCallFailed 处理，消息只含状态码（401 多半是 scope 不够，403 是没有权限）。
+    /// </summary>
+    private async Task<List<T>> GetAllPagesAsync<T>(
+        string businessId,
+        string accessToken,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        const int maxPages = 50;
+        var baseUrl = _options.ApiBaseUrl.TrimEnd('/');
+        var baseHost = new Uri(baseUrl).Host;
+        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{path}?$top=1000";
+        var result = new List<T>();
+
+        for (var page = 0; page < maxPages && url is not null; page++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.TryAddWithoutValidation("x-myobapi-key", _options.ClientId);
+            request.Headers.TryAddWithoutValidation("x-myobapi-version", "v2");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new MyobApiException(
+                    MyobErrorCodes.ApiCallFailed,
+                    $"MYOB {path} 接口返回 {(int)response.StatusCode}",
+                    response.StatusCode);
+            }
+
+            ListPayload<T>? payload;
+            try
+            {
+                payload = JsonSerializer.Deserialize<ListPayload<T>>(body, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                throw new MyobApiException(MyobErrorCodes.ApiCallFailed, $"MYOB {path} 接口返回了无法解析的内容", response.StatusCode);
+            }
+
+            result.AddRange(payload?.Items ?? []);
+
+            url = null;
+            if (!string.IsNullOrWhiteSpace(payload?.NextPageLink)
+                && Uri.TryCreate(payload.NextPageLink, UriKind.Absolute, out var next)
+                && string.Equals(next.Host, baseHost, StringComparison.OrdinalIgnoreCase))
+            {
+                url = next.ToString();
+            }
+        }
+
+        return result;
     }
 
     private async Task<MyobTokenResponse> PostTokenAsync(
@@ -257,6 +396,56 @@ public sealed class MyobApiClient : IMyobApiClient
     {
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+    }
+
+    private sealed class ListPayload<T>
+    {
+        public List<T>? Items { get; set; }
+        public string? NextPageLink { get; set; }
+    }
+
+    private sealed class EmployeePayload
+    {
+        public string? Uid { get; set; }
+        public string? DisplayId { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? CompanyName { get; set; }
+        public bool? IsIndividual { get; set; }
+        public bool? IsActive { get; set; }
+        public List<AddressPayload>? Addresses { get; set; }
+    }
+
+    private sealed class AddressPayload
+    {
+        public string? Email { get; set; }
+        public string? Phone1 { get; set; }
+        public string? Phone2 { get; set; }
+        public string? Phone3 { get; set; }
+    }
+
+    private sealed class EmployeePayrollPayload
+    {
+        public EmployeeRefPayload? Employee { get; set; }
+        public DateTime? DateOfBirth { get; set; }
+        public string? EmploymentStatus { get; set; }
+        public List<EntitlementPayload>? Entitlements { get; set; }
+    }
+
+    private sealed class EmployeeRefPayload
+    {
+        public string? Uid { get; set; }
+    }
+
+    private sealed class EntitlementPayload
+    {
+        public CategoryPayload? EntitlementCategory { get; set; }
+        public bool? IsAssigned { get; set; }
+    }
+
+    private sealed class CategoryPayload
+    {
+        public string? Name { get; set; }
     }
 
     private sealed class CompanyPayload

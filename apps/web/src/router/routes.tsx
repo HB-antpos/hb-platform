@@ -302,9 +302,9 @@ const ATTENDANCE_PAYROLL_NAV_GROUP: NavGroupDefinition = {
   tabs: [
     // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
     { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours', keepAlive: true, element: <PosAdminAttendancePayrollPage /> },
-    // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
+    // MYOB 对接：连接与映射（Myob.Connection.Manage）/ 员工绑定（Myob.Employee.Bind）/ 发薪公司（Attendance.Payroll.Edit），三者任一可进入，页内按各自权限显示页签。
     // 不保活：授权完成后后端重定向回 /pos-admin/myob?myob=connected|error，页面必须按新进入重新加载并读取参数。
-    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canManageMyobConnections', keepAlive: false, element: <PosAdminMyobPage /> },
+    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob', keepAlive: false, element: <PosAdminMyobPage /> },
   ],
 }
 

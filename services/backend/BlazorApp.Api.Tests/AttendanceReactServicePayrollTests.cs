@@ -252,6 +252,76 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(31m, current.Data!.Single(item => item.UserGuid == "staff-user").TransferWeekdayRate);
         }
 
+        [Fact]
+        public async Task 时薪表_公假转账价强制等于平日价_请求里传什么公假价都忽略()
+        {
+            await SeedPayrollStoreAsync();
+
+            // TransferRateRequest 里公假价是 60、平日价 30：保存后以平日价为准。
+            var created = await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 10, 19)));
+            Assert.True(created.Success, created.Message);
+            Assert.Equal(30m, created.Data!.TransferPublicHolidayRate);
+            Assert.False(created.Data.PublicHolidayRateMismatch);
+            var stored = await _db.Queryable<EmployeePayRate>().FirstAsync(item => item.RateGuid == created.Data.RateGuid);
+            Assert.Equal(30m, stored.TransferPublicHolidayRate);
+
+            // 转账 + 现金同样强制；全现金模式不用转账价，公假价存空。
+            var mixed = await Manager().CreatePayRateAsync(new CreateEmployeePayRateDto
+            {
+                StoreCode = "BRI", UserGuid = "staff-user", PayMode = "Mixed", FixedTransferHoursPerWeek = 10m,
+                TransferWeekdayRate = 32.5m, TransferPublicHolidayRate = 99m, CashRate = 25m,
+                EffectiveFrom = new DateTime(2026, 11, 2),
+            });
+            Assert.True(mixed.Success, mixed.Message);
+            Assert.Equal(32.5m, mixed.Data!.TransferPublicHolidayRate);
+
+            var cash = await Manager().CreatePayRateAsync(new CreateEmployeePayRateDto
+            {
+                StoreCode = "BRI", UserGuid = "staff-user", PayMode = "Cash", TransferPublicHolidayRate = 99m, CashRate = 25m,
+                EffectiveFrom = new DateTime(2026, 11, 9),
+            });
+            Assert.True(cash.Success, cash.Message);
+            Assert.Null(cash.Data!.TransferPublicHolidayRate);
+            Assert.False(cash.Data.PublicHolidayRateMismatch);
+        }
+
+        [Fact]
+        public async Task 时薪表_历史记录公假价不一致_只标记不修改_列表可按不一致筛选()
+        {
+            await SeedPayrollStoreAsync();
+            // 历史记录：平日 30、公假 60（旧规则）。保存新规则前已存在，不得被改动。
+            await SeedTransferRateAsync(30m, 35m, 40m, 60m);
+
+            var all = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI" });
+            var row = all.Data!.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(60m, row.TransferPublicHolidayRate); // 历史值原样返回
+            Assert.True(row.PublicHolidayRateMismatch);
+            Assert.Equal(60m, (await _db.Queryable<EmployeePayRate>().FirstAsync(item => item.RateGuid == "rate-staff")).TransferPublicHolidayRate);
+
+            var mismatchOnly = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", PublicHolidayMismatchOnly = true });
+            Assert.Equal(["staff-user"], mismatchOnly.Data!.Select(item => item.UserGuid).ToArray());
+
+            // 财务新建一条从下一个未锁定周期起生效的记录后，当前记录仍是旧的（未到生效日），再往后才变一致。
+            var fixedRate = await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 10, 19)));
+            Assert.True(fixedRate.Success, fixedRate.Message);
+            var afterFix = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", PublicHolidayMismatchOnly = true });
+            Assert.Empty(afterFix.Data!); // 今天 10-20，10-19 的新记录已是当前记录且一致
+        }
+
+        [Fact]
+        public void 时薪表_不一致判定_全现金不算_一边为空算()
+        {
+            static EmployeePayRate Rate(string mode, decimal? weekday, decimal? holiday) => new()
+            {
+                PayMode = mode, TransferWeekdayRate = weekday, TransferPublicHolidayRate = holiday,
+            };
+
+            Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Cash", null, 60m)));
+            Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Transfer", 30m, 30m)));
+            Assert.True(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Transfer", 30m, 60m)));
+            Assert.True(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Mixed", 30m, null)));
+        }
+
         private static CreateEmployeePayRateDto TransferRateRequest(DateTime effectiveFrom, decimal weekday = 30m) => new()
         {
             StoreCode = "BRI",

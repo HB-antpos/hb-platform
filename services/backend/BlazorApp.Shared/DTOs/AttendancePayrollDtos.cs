@@ -267,6 +267,8 @@ namespace BlazorApp.Shared.DTOs
     {
         public string? StoreCode { get; set; }
         public string? Keyword { get; set; }
+        /// <summary>true 时只返回「公假转账价与平日转账价不一致」的员工（财务据此给他们新建时薪记录）。</summary>
+        public bool PublicHolidayMismatchOnly { get; set; }
     }
 
     public class AttendancePayRateDto
@@ -286,6 +288,11 @@ namespace BlazorApp.Shared.DTOs
         public decimal? TransferSaturdayRate { get; set; }
         public decimal? TransferSundayRate { get; set; }
         public decimal? TransferPublicHolidayRate { get; set; }
+        /// <summary>
+        /// 公假转账价与平日转账价不一致（全现金模式恒为 false）。公司规定公假转账价 = 平日转账价；
+        /// 历史记录不改（保证已锁定周期重算结果不变），不一致的由财务新建一条时薪记录纠正。
+        /// </summary>
+        public bool PublicHolidayRateMismatch { get; set; }
         public decimal? CashRate { get; set; }
         public decimal CashAllowancePerPeriod { get; set; }
         public decimal? MinimumRate { get; set; }

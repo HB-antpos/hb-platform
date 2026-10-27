@@ -3901,6 +3901,116 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB员工绑定_三张新表_过滤唯一索引允许解绑后重绑_权限码入库不授权_可重复执行且识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54340, missing.Number);
+
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(36) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NULL,
+                Category nvarchar(100) NULL, Description nvarchar(1000) NULL, CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL, IsDeleted bit NOT NULL);
+            INSERT dbo.HbwebSysPermissions (Id, Code, Name, Category, CreatedAt, IsDeleted)
+            VALUES (N'p-1', N'Orders.View', N'查看订单', N'分店订货', SYSUTCDATETIME(), 0);
+            """);
+
+        // 过滤索引要求 QUOTED_IDENTIFIER ON：迁移 SQL 自己设置，所以直接执行即可。
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Myob.Employee.Bind' AND Category = N'系统管理' AND IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Orders.View' AND Category = N'分店订货'"));
+
+        // 绑定：一个员工在一个公司文件里只有一张有效卡；一张卡只绑一个员工。
+        const string insertLink = """
+            SET QUOTED_IDENTIFIER ON;
+            INSERT dbo.EmployeeMyobLink (LinkGuid, UserGuid, ConnectionGuid, MyobEmployeeUid, MatchMethod, BoundAt, UnboundAt)
+            VALUES (N'{0}', N'{1}', N'c-1', N'{2}', N'Manual', SYSUTCDATETIME(), {3});
+            """;
+        string Link(string link, string user, string card, bool unbound = false) =>
+            string.Format(insertLink, link, user, card, unbound ? "SYSUTCDATETIME()" : "NULL");
+
+        await ExecuteNonQueryAsync(main, Link("l-1", "u-1", "card-1"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, Link("l-2", "u-1", "card-2")));  // 同员工第二张有效卡
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, Link("l-3", "u-2", "card-1")));  // 同一张卡给第二个人
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.EmployeeMyobLink SET UnboundAt = SYSUTCDATETIME() WHERE LinkGuid = N'l-1';");
+        // 软解绑后：历史行不再占用名额，原员工可以重新绑定，原卡也可以绑给别人；历史行可以有多条。
+        await ExecuteNonQueryAsync(main, Link("l-4", "u-1", "card-1"));
+        await ExecuteNonQueryAsync(main, Link("l-5", "u-9", "card-9", unbound: true));
+        await ExecuteNonQueryAsync(main, Link("l-6", "u-9", "card-9", unbound: true));
+        Assert.Equal(4, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.EmployeeMyobLink"));
+        // MatchMethod 白名单。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            SET QUOTED_IDENTIFIER ON;
+            INSERT dbo.EmployeeMyobLink (LinkGuid, UserGuid, ConnectionGuid, MyobEmployeeUid, MatchMethod, BoundAt)
+            VALUES (N'l-x', N'u-7', N'c-1', N'card-7', N'Guess', SYSUTCDATETIME());
+            """));
+
+        // 发薪公司：(员工, 分店, 生效日) 唯一；忽略名单：(连接, 员工卡) 主键。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.EmployeePayrollEmployer (EmployerGuid, UserGuid, StoreCode, ConnectionGuid, EffectiveFrom, CreatedAt)
+            VALUES (N'e-1', N'u-1', N'1013', N'c-1', '2026-10-26', SYSUTCDATETIME());
+            INSERT dbo.MyobEmployeeIgnore (ConnectionGuid, MyobEmployeeUid, IgnoredAt) VALUES (N'c-1', N'card-5', SYSUTCDATETIME());
+            """);
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.EmployeePayrollEmployer (EmployerGuid, UserGuid, StoreCode, ConnectionGuid, EffectiveFrom, CreatedAt)
+            VALUES (N'e-2', N'u-1', N'1013', NULL, '2026-10-26', SYSUTCDATETIME());
+            """));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobEmployeeIgnore (ConnectionGuid, MyobEmployeeUid, IgnoredAt) VALUES (N'c-1', N'card-5', SYSUTCDATETIME());
+            """));
+        // 重复执行迁移不影响已有数据。
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.EmployeePayrollEmployer"));
+
+        // 过滤唯一索引被换成无过滤的唯一索引 → 54343（否则解绑后无法重绑）。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_EmployeeMyobLink_Connection_Uid_Active ON dbo.EmployeeMyobLink;");
+        await ExecuteNonQueryAsync(main, "DELETE dbo.EmployeeMyobLink WHERE UnboundAt IS NOT NULL;");
+        await ExecuteNonQueryAsync(main, "CREATE UNIQUE NONCLUSTERED INDEX UX_EmployeeMyobLink_Connection_Uid_Active ON dbo.EmployeeMyobLink (ConnectionGuid, MyobEmployeeUid);");
+        var noFilter = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54343, noFilter.Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_EmployeeMyobLink_Connection_Uid_Active ON dbo.EmployeeMyobLink;");
+        await ExecuteNonQueryAsync(main, "SET QUOTED_IDENTIFIER ON; CREATE UNIQUE NONCLUSTERED INDEX UX_EmployeeMyobLink_Connection_Uid_Active ON dbo.EmployeeMyobLink (ConnectionGuid, MyobEmployeeUid) WHERE [UnboundAt] IS NULL;");
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql);
+
+        // 发薪公司唯一索引缺失 → 54344。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_EmployeePayrollEmployer_User_Store_From ON dbo.EmployeePayrollEmployer;");
+        var noEmployerIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54344, noEmployerIndex.Number);
+        await ExecuteNonQueryAsync(main, "CREATE UNIQUE NONCLUSTERED INDEX UX_EmployeePayrollEmployer_User_Store_From ON dbo.EmployeePayrollEmployer (UserGuid, StoreCode, EffectiveFrom);");
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql);
+
+        // CHECK 被禁用 → 54345。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.EmployeeMyobLink NOCHECK CONSTRAINT CK_EmployeeMyobLink_MatchMethod;");
+        var checkDisabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54345, checkDisabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.EmployeeMyobLink WITH CHECK CHECK CONSTRAINT CK_EmployeeMyobLink_MatchMethod;");
+
+        // 列宽漂移 → 54341；主键缺失 → 54342。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.EmployeeMyobLink ALTER COLUMN MyobName nvarchar(100) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54341, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.EmployeeMyobLink ALTER COLUMN MyobName nvarchar(200) NULL;");
+        await ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobEmployeeIgnore DROP CONSTRAINT PK_MyobEmployeeIgnore;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeBindingSchema.VerifySql));
+        Assert.Equal(54342, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

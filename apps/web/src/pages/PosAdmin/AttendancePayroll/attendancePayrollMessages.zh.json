@@ -210,6 +210,11 @@
       "noHistory": "还没有时薪记录",
       "readOnly": "只读：改时薪需要「工资编辑」权限",
       "cancel": "取消",
+      "mismatchTag": "公假价与平日价不一致",
+      "mismatchTip": "历史记录不会修改；请新建一条时薪记录，从下一个未锁定的工资周期起生效",
+      "mismatchBanner": "有 {{n}} 位员工公假价与平日价不一致，请新建时薪记录。",
+      "mismatchFilter": "只看公假价与平日价不一致",
+      "publicHolidayLocked": "公假按平日价发放（公司规定），不能单独设置",
       "saveNew": "保存为新生效记录",
       "saved": "已新增生效记录",
       "validation": {

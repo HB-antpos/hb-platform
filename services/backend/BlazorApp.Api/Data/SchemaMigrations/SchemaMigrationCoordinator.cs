@@ -98,6 +98,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string PosApiEntryUsageMigrationId = "20261026.004-pos-api-entry-usage";
     internal const string MainApiEntryUsageMigrationId = "20261027.001-main-api-entry-usage";
     internal const string MyobConnectionMigrationId = "20261027.002-myob-connection";
+    internal const string MyobEmployeeBindingMigrationId = "20261027.003-myob-employee-binding";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -379,6 +380,11 @@ internal sealed class SchemaMigrationCoordinator
             MyobConnectionMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyMyobConnectionAsync(cancellationToken)
+        ),
+        new(
+            MyobEmployeeBindingMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMyobEmployeeBindingAsync(cancellationToken)
         ),
     ];
 

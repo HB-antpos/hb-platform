@@ -210,6 +210,11 @@
       "noHistory": "No rate records yet",
       "readOnly": "Read only: editing rates needs the Payroll edit permission",
       "cancel": "Cancel",
+      "mismatchTag": "Public holiday rate differs from weekday",
+      "mismatchTip": "History is not changed. Create a new rate record; it takes effect from the next unlocked pay period.",
+      "mismatchBanner": "{{n}} staff have a public holiday rate that differs from the weekday rate. Please create new rate records.",
+      "mismatchFilter": "Only public holiday rate mismatches",
+      "publicHolidayLocked": "Public holidays are paid at the weekday rate (company policy); it can't be set separately.",
       "saveNew": "Save as new effective record",
       "saved": "New effective record added",
       "validation": {

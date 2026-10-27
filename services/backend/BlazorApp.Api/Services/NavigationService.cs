@@ -176,8 +176,8 @@ namespace BlazorApp.Api.Services
                     // 考勤审核与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
                     new() { Path = "/pos-admin/attendance",            TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           AnyPermissions = new List<string> { Permissions.Attendance.Schedule.ViewStore, Permissions.Attendance.Approval.ReviewManagedStore } },
                     // 工时与工资合并页：工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见（页内再按各自权限显示标签与页签）。
-                    // 工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View；MYOB 对接（连接公司文件、分店映射）用独立权限码，默认不授予任何角色。
-                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage } },
+                    // 工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View；MYOB 对接页签：连接 / 分店映射、员工绑定看独立权限码（默认不授予任何角色）；发薪公司页签看 Attendance.Payroll.Edit，但工资编辑不隐含查看，不单独打开本菜单。
+                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
@@ -897,7 +897,8 @@ namespace BlazorApp.Api.Services
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage,
                 // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
-                Permissions.Myob.Connection.Manage
+                Permissions.Myob.Connection.Manage,
+                Permissions.Myob.Employee.Bind
             );
         }
 

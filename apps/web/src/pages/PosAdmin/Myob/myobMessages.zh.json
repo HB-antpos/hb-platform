@@ -105,6 +105,294 @@
       "storeNotFound": "找不到对应的分店",
       "apiCallFailed": "调用 MYOB 接口失败，请稍后重试",
       "unknown": "未知错误，请稍后重试或联系管理员"
+    },
+    "tabs": {
+      "connections": "连接与映射",
+      "employees": "员工绑定",
+      "payroll": "发薪公司",
+      "push": "推送与对账",
+      "phase2": "阶段 2",
+      "pending": "{{count}} 待处理",
+      "noAccess": "你没有可用的 MYOB 页签权限",
+      "ariaLabel": "MYOB 对接功能页签"
+    },
+    "employees": {
+      "company": {
+        "title": "选择发薪公司文件",
+        "hint": "员工按「发薪公司」列出；在 A 店上班但由 B 公司发薪的员工，出现在 B 公司的名单里并带「跨公司」角标",
+        "refresh": "刷新 MYOB 员工",
+        "refreshedAt": "（上次 {{time}}）",
+        "abn": "ABN {{abn}}",
+        "noAbn": "未填写 ABN",
+        "employeeCount": "员工 {{count}} 人由这家发薪",
+        "connectOther": "连接其他公司文件",
+        "empty": "还没有已连接的公司文件。请先让有「连接与映射」权限的同事连接 MYOB 公司文件。",
+        "loadFailed": "加载公司文件失败",
+        "refreshFailed": "刷新 MYOB 员工失败",
+        "refreshed": "已刷新 MYOB 员工",
+        "select": "选择 {{name}}",
+        "retry": "重试",
+        "emptyCanConnect": "还没有已连接的公司文件，点击「连接其他公司文件」开始授权。"
+      },
+      "title": "员工绑定 · {{name}}",
+      "hint": "系统按 邮箱 → 生日 → 姓名 → 手机 打分给出建议，你确认后才生效；不会改动 MYOB 里的任何资料",
+      "loadFailed": "加载员工绑定失败",
+      "subtabs": {
+        "list": "绑定列表",
+        "missing": "对方没有",
+        "typeIssues": "用工类型检查",
+        "aria": "员工绑定视图"
+      },
+      "filters": {
+        "all": "全部",
+        "bound": "已绑定",
+        "suggested": "高分建议",
+        "review": "需人工确认",
+        "unmatched": "未匹配"
+      },
+      "search": "搜索姓名 / 邮箱 / 分店",
+      "batch": {
+        "title": "{{count}} 条「邮箱 + 生日都一致」的高分建议可以批量确认",
+        "hint": "中分、冲突和手机/姓名有差异的不会被批量带上，需要逐条核对",
+        "view": "先看看这 {{count}} 条",
+        "confirm": "确认这 {{count}} 条",
+        "confirmTitle": "确认这 {{count}} 条绑定？",
+        "confirmContent": "将把这 {{count}} 位员工绑定到各自建议的 MYOB 员工卡。服务端会重新核对得分，不是高分的会被拒绝；绑定后随时可以解除，不会修改 MYOB 里的资料。",
+        "confirmOk": "确认绑定"
+      },
+      "columns": {
+        "ours": "我方员工",
+        "myobCard": "MYOB 员工卡（{{name}}）",
+        "basis": "匹配依据",
+        "score": "得分",
+        "status": "状态",
+        "actions": "操作"
+      },
+      "cross": "跨公司",
+      "noCandidate": "没有找到相近的员工卡",
+      "empty": "没有符合条件的员工",
+      "total": "共 {{total}} 人 · 本页 {{page}} 条（已按「建议 → 需确认 → 未匹配 → 已绑定」排序）",
+      "type": {
+        "FullTime": "全职",
+        "PartTime": "兼职",
+        "Temporary": "临时工"
+      },
+      "status": {
+        "Suggested": "高分建议",
+        "NeedsReview": "需人工确认",
+        "Conflict": "冲突",
+        "Unmatched": "未匹配",
+        "Bound": "已绑定",
+        "conflictBoundTo": "该卡已绑定 {{name}}",
+        "boundBy": "{{who}} · {{time}}",
+        "cardMissing": "MYOB 里找不到这张卡了（已删除或停用）"
+      },
+      "basis": {
+        "email": "邮箱",
+        "birthday": "生日",
+        "name": "姓名",
+        "phone": "手机"
+      },
+      "signal": {
+        "match": "一致",
+        "mismatch": "不一致",
+        "unknown": "无法比对"
+      },
+      "scoreAria": "得分 {{score}}",
+      "actions": {
+        "confirm": "确认绑定",
+        "review": "核对并绑定",
+        "change": "换一个",
+        "searchOther": "搜索其他卡",
+        "searchMyob": "搜索 MYOB 员工卡",
+        "unbind": "解除绑定",
+        "confirmed": "已绑定 {{name}}",
+        "batchConfirmed": "已确认 {{count}} 条绑定",
+        "confirmFailed": "确认绑定失败",
+        "unbindTitle": "解除 {{name}} 的绑定？",
+        "unbindContent": "解除后该员工回到待处理列表，需要时可重新绑定；不会修改 MYOB 里的资料。",
+        "unbindOk": "确认解除",
+        "cancel": "取消",
+        "unbound": "已解除 {{name}} 的绑定",
+        "unbindFailed": "解除绑定失败"
+      },
+      "failures": {
+        "title": "{{ok}} 条已绑定，{{count}} 条失败",
+        "titleAllFailed": "{{count}} 条绑定失败",
+        "line": "{{name}}：{{reason}}",
+        "ok": "知道了",
+        "userNotFound": "找不到这位员工",
+        "cardNotFound": "MYOB 里找不到这张员工卡（请先刷新 MYOB 员工）",
+        "cardAlreadyBound": "这张卡已经被别的员工绑定",
+        "userAlreadyBound": "这位员工已经绑定了 MYOB 员工卡",
+        "notHighScore": "不再是高分建议，请改用「核对并绑定」逐条核对",
+        "linkNotFound": "找不到这条绑定记录（可能已被解除）"
+      },
+      "entitlement": {
+        "both": "年假 / 病假累计",
+        "annualOnly": "只挂了年假累计",
+        "sickOnly": "只挂了病假累计",
+        "none": "无年假 / 病假累计"
+      },
+      "missing": {
+        "hint": "帮财务找出两边对不上的人，以及用工类型和 MYOB 设置不相符的人",
+        "ours": {
+          "title": "我方有、MYOB 没有",
+          "hint": "请财务在 MYOB 新建员工卡；建好后点「刷新」，系统会自动给出建议",
+          "copy": "复制资料",
+          "copied": "已复制 {{name}} 的资料",
+          "joined": "入职 {{date}}",
+          "note": "「复制资料」只复制姓名、邮箱、生日、手机到剪贴板，方便你粘贴到 MYOB 新建员工卡；系统不会自动在 MYOB 建卡。",
+          "empty": "没有需要在 MYOB 新建的员工"
+        },
+        "theirs": {
+          "title": "MYOB 有、我方没有",
+          "hint": "可能是已离职未停用、别家公司的人，或我方还没建档",
+          "create": "我方建档",
+          "ignore": "忽略",
+          "ignored": "已忽略 {{name}}",
+          "ignoreFailed": "忽略失败",
+          "active": "在职",
+          "inactive": "MYOB 已停用",
+          "empty": "MYOB 里没有多出来的人"
+        }
+      },
+      "typeIssues": {
+        "title": "用工类型检查",
+        "hint": "只提示，不阻止；年假 / 病假余额只对全职、兼职显示（临时工不显示余额）",
+        "columns": {
+          "employee": "员工",
+          "ourType": "我方用工类型",
+          "myobStatus": "MYOB 现状",
+          "issue": "问题",
+          "advice": "建议"
+        },
+        "codes": {
+          "missingLeave": "假期余额拉不到",
+          "temporaryHasLeave": "临时工不应有假期累计",
+          "unknown": "用工类型与 MYOB 设置不一致"
+        },
+        "actions": {
+          "fix": {
+            "missingLeave": "告知财务在 MYOB 补设",
+            "temporaryHasLeave": "告知财务在 MYOB 修改",
+            "generic": "告知财务"
+          }
+        },
+        "notes": {
+          "missingLeave": "请在 MYOB 给 {{name}}（{{type}}，{{stores}}）的员工卡补设「年假 / 病假」累计，否则系统拉不到假期余额。",
+          "temporaryHasLeave": "{{name}}（{{type}}，{{stores}}）在系统里是临时工，但 MYOB 员工卡挂了年假 / 病假累计，请核对并修改。",
+          "generic": "{{name}}（{{type}}，{{stores}}）的用工类型与 MYOB 设置不一致，请核对。"
+        },
+        "noteCopied": "已复制给财务的说明，可直接粘贴发送",
+        "mystatus": "MYOB 用工状态：{{status}}",
+        "empty": "没有用工类型不一致的员工"
+      },
+      "birthdayLine": "生日 {{birthday}}"
+    },
+    "drawer": {
+      "title": "为 {{name}} 选择 MYOB 员工卡",
+      "subtitle": "只读取 MYOB 员工卡，确认后不会修改 MYOB 里的资料",
+      "close": "关闭",
+      "search": "在 {{company}} 的 MYOB 员工里搜索：姓名 / 邮箱 / 手机末 4 位",
+      "phone": "手机 {{value}}",
+      "birthday": "生日 {{value}}",
+      "notFilled": "未填写",
+      "unselectable": "不可选",
+      "boundTo": "已绑定给 {{name}}（我方）",
+      "candidatesTitle": "候选员工卡",
+      "empty": "没有找到匹配的员工卡，换个关键字试试",
+      "loadFailed": "加载候选员工卡失败",
+      "retry": "重试",
+      "scoreAria": "得分 {{score}}",
+      "compareTitle": "逐项对比",
+      "compare": {
+        "ours": "我方",
+        "theirs": "MYOB",
+        "result": "结果",
+        "same": "一致",
+        "diff": "不同",
+        "unknown": "无法比对",
+        "typeSame": "相符",
+        "typeDiff": "不符",
+        "fields": {
+          "name": "姓名",
+          "email": "邮箱",
+          "phone": "手机",
+          "birthday": "生日",
+          "type": "用工类型"
+        }
+      },
+      "warn": {
+        "both": "邮箱不同、生日无法比对，仅靠 姓名 + 手机 判断。请确认这确实是同一个人再绑定；绑定后随时可以解除。",
+        "email": "邮箱不同，请确认这确实是同一个人再绑定；绑定后随时可以解除。",
+        "birthday": "生日无法比对，请确认这确实是同一个人再绑定；绑定后随时可以解除。"
+      },
+      "cancel": "取消",
+      "confirm": "确认绑定到 {{name}}"
+    },
+    "payroll": {
+      "title": "发薪公司（按「员工 × 上班分店」）",
+      "hint": "默认：工时由上班分店所属的公司发薪。只有「在 A 店上班、由 B 公司发薪」这类例外才需要设置；同一个分店的工时不会拆给两家公司",
+      "search": "搜索员工",
+      "allStores": "全部分店",
+      "crossOnly": "只看跨公司",
+      "reload": "刷新",
+      "loadFailed": "加载发薪公司失败",
+      "retry": "重试",
+      "empty": "没有符合条件的员工",
+      "total": "共 {{total}} 行",
+      "columns": {
+        "employee": "员工",
+        "store": "上班分店",
+        "defaultCompany": "该分店所属公司（默认）",
+        "effectiveCompany": "本期实际发薪公司",
+        "effectiveFrom": "生效起",
+        "actions": "操作"
+      },
+      "cross": "跨公司",
+      "otherStores": "另有 {{stores}}",
+      "override": "例外",
+      "byStore": "按分店",
+      "unset": "未设置",
+      "set": "设置",
+      "edit": "编辑",
+      "editAria": "设置 {{name}} 在 {{store}} 的发薪公司"
+    },
+    "payrollDrawer": {
+      "title": "{{name}} 的发薪公司",
+      "subtitle": "需要「编辑工资」权限；每次修改都会记入审计",
+      "close": "关闭",
+      "loadFailed": "加载发薪公司详情失败",
+      "retry": "重试",
+      "columns": {
+        "store": "上班分店",
+        "defaultCompany": "默认公司",
+        "override": "改由其他公司发"
+      },
+      "byStoreOption": "按分店（{{company}}）",
+      "byStoreNoCompany": "按分店（分店还没映射公司）",
+      "noDefault": "未映射",
+      "effectiveFrom": "生效日期",
+      "effectiveHint": "只能选工资周期起始日，避免周期中途把同一分店的工时拆开",
+      "periodStart": "{{date}}（周期起始日）",
+      "currentPeriod": "{{date}}（当前期起始日）",
+      "noAllowedDates": "当前没有可选的生效日期，暂时无法保存",
+      "unbound": {
+        "title": "{{company}} 还没有绑定 {{name}}。",
+        "body": "保存后推送工时前，需要先在「员工绑定」里绑定。",
+        "go": "去绑定"
+      },
+      "history": "历史",
+      "historyEmpty": "还没有修改记录",
+      "historyOverride": "{{date}} 起 · {{store}} 由 {{company}} 发薪",
+      "historyDefault": "{{date}} 起 · {{store}} 改回按分店",
+      "historyBy": "设置人 {{who}} · {{time}}",
+      "cancel": "取消",
+      "save": "保存",
+      "saved": "已保存 {{name}} 的发薪公司",
+      "saveFailed": "保存发薪公司失败",
+      "noChanges": "没有改动"
     }
   }
 }

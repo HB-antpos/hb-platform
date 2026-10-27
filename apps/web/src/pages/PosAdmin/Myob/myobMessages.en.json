@@ -105,6 +105,294 @@
       "storeNotFound": "Store not found",
       "apiCallFailed": "MYOB API call failed. Please try again later",
       "unknown": "Unknown error. Try again later or contact an administrator"
+    },
+    "tabs": {
+      "connections": "Connections & mapping",
+      "employees": "Employee binding",
+      "payroll": "Paying company",
+      "push": "Push & reconcile",
+      "phase2": "Phase 2",
+      "pending": "{{count}} to review",
+      "noAccess": "You do not have access to any MYOB tab",
+      "ariaLabel": "MYOB integration sections"
+    },
+    "employees": {
+      "company": {
+        "title": "Choose the paying company file",
+        "hint": "Employees are listed by their paying company. Someone who works at a store of company A but is paid by company B appears in B's list with a \"Cross-company\" badge.",
+        "refresh": "Refresh MYOB employees",
+        "refreshedAt": " (last {{time}})",
+        "abn": "ABN {{abn}}",
+        "noAbn": "No ABN",
+        "employeeCount": "{{count}} employees paid by this company",
+        "connectOther": "Connect another company file",
+        "empty": "No company file is connected yet. Ask a colleague with the \"Connections & mapping\" permission to connect one.",
+        "loadFailed": "Failed to load company files",
+        "refreshFailed": "Failed to refresh MYOB employees",
+        "refreshed": "MYOB employees refreshed",
+        "select": "Select {{name}}",
+        "retry": "Retry",
+        "emptyCanConnect": "No company file is connected yet. Click \"Connect another company file\" to start authorising one."
+      },
+      "title": "Employee binding · {{name}}",
+      "hint": "Suggestions are scored by email, then birthday, name and phone. They only take effect after you confirm, and nothing in MYOB is changed.",
+      "loadFailed": "Failed to load employee binding",
+      "subtabs": {
+        "list": "Bindings",
+        "missing": "Missing on one side",
+        "typeIssues": "Employment type check",
+        "aria": "Employee binding views"
+      },
+      "filters": {
+        "all": "All",
+        "bound": "Bound",
+        "suggested": "Strong match",
+        "review": "Needs review",
+        "unmatched": "Unmatched"
+      },
+      "search": "Search name / email / store",
+      "batch": {
+        "title": "{{count}} strong matches (email and birthday both agree) can be confirmed in one go",
+        "hint": "Partial matches, conflicts and rows with a phone or name difference are never included; review those one by one.",
+        "view": "Show these {{count}}",
+        "confirm": "Confirm these {{count}}",
+        "confirmTitle": "Confirm these {{count}} bindings?",
+        "confirmContent": "These {{count}} employees will be bound to their suggested MYOB cards. The server re-scores each one and rejects any that is no longer a strong match. You can unbind at any time; nothing in MYOB is changed.",
+        "confirmOk": "Confirm"
+      },
+      "columns": {
+        "ours": "Our employee",
+        "myobCard": "MYOB card ({{name}})",
+        "basis": "Matched on",
+        "score": "Score",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "cross": "Cross-company",
+      "noCandidate": "No similar employee card found",
+      "empty": "No employees match",
+      "total": "{{total}} employees · {{page}} on this page (sorted: suggested, review, unmatched, bound)",
+      "type": {
+        "FullTime": "Full-time",
+        "PartTime": "Part-time",
+        "Temporary": "Casual"
+      },
+      "status": {
+        "Suggested": "Strong match",
+        "NeedsReview": "Needs review",
+        "Conflict": "Conflict",
+        "Unmatched": "Unmatched",
+        "Bound": "Bound",
+        "conflictBoundTo": "Card already bound to {{name}}",
+        "boundBy": "{{who}} · {{time}}",
+        "cardMissing": "This card no longer exists in MYOB (deleted or inactive)"
+      },
+      "basis": {
+        "email": "Email",
+        "birthday": "Birthday",
+        "name": "Name",
+        "phone": "Phone"
+      },
+      "signal": {
+        "match": "Match",
+        "mismatch": "Mismatch",
+        "unknown": "Cannot compare"
+      },
+      "scoreAria": "Score {{score}}",
+      "actions": {
+        "confirm": "Confirm binding",
+        "review": "Review and bind",
+        "change": "Pick another",
+        "searchOther": "Search other cards",
+        "searchMyob": "Search MYOB cards",
+        "unbind": "Unbind",
+        "confirmed": "Bound {{name}}",
+        "batchConfirmed": "Confirmed {{count}} bindings",
+        "confirmFailed": "Failed to confirm binding",
+        "unbindTitle": "Unbind {{name}}?",
+        "unbindContent": "The employee goes back to the to-do list and can be bound again. Nothing in MYOB is changed.",
+        "unbindOk": "Unbind",
+        "cancel": "Cancel",
+        "unbound": "Unbound {{name}}",
+        "unbindFailed": "Failed to unbind"
+      },
+      "failures": {
+        "title": "{{ok}} bound, {{count}} failed",
+        "titleAllFailed": "{{count}} bindings failed",
+        "line": "{{name}}: {{reason}}",
+        "ok": "Got it",
+        "userNotFound": "Employee not found",
+        "cardNotFound": "This card was not found in MYOB (refresh MYOB employees first)",
+        "cardAlreadyBound": "This card is already bound to another employee",
+        "userAlreadyBound": "This employee is already bound to a MYOB card",
+        "notHighScore": "No longer a strong match; use \"Review and bind\" instead",
+        "linkNotFound": "Binding not found (it may have been unbound already)"
+      },
+      "entitlement": {
+        "both": "Annual / sick leave entitlements",
+        "annualOnly": "Annual leave entitlement only",
+        "sickOnly": "Sick leave entitlement only",
+        "none": "No annual / sick leave entitlements"
+      },
+      "missing": {
+        "hint": "Find people who exist on only one side, and employment types that do not match MYOB.",
+        "ours": {
+          "title": "In our system, not in MYOB",
+          "hint": "Ask finance to create the employee card in MYOB, then click Refresh; suggestions appear automatically.",
+          "copy": "Copy details",
+          "copied": "Copied details for {{name}}",
+          "joined": "Joined {{date}}",
+          "note": "\"Copy details\" only copies name, email, birthday and phone to the clipboard so you can paste them into a new MYOB card. The system never creates cards in MYOB.",
+          "empty": "Nobody needs a new MYOB card"
+        },
+        "theirs": {
+          "title": "In MYOB, not in our system",
+          "hint": "Possibly left but not deactivated, belongs to another company, or not set up on our side yet.",
+          "create": "Set up on our side",
+          "ignore": "Ignore",
+          "ignored": "Ignored {{name}}",
+          "ignoreFailed": "Failed to ignore",
+          "active": "Active",
+          "inactive": "Inactive in MYOB",
+          "empty": "No extra people in MYOB"
+        }
+      },
+      "typeIssues": {
+        "title": "Employment type check",
+        "hint": "Advice only, nothing is blocked. Annual / sick leave balances show only for full-time and part-time staff (not casual).",
+        "columns": {
+          "employee": "Employee",
+          "ourType": "Our employment type",
+          "myobStatus": "MYOB today",
+          "issue": "Issue",
+          "advice": "Suggestion"
+        },
+        "codes": {
+          "missingLeave": "Leave balances unavailable",
+          "temporaryHasLeave": "Casual staff should not have leave entitlements",
+          "unknown": "Employment type does not match MYOB"
+        },
+        "actions": {
+          "fix": {
+            "missingLeave": "Tell finance to set up in MYOB",
+            "temporaryHasLeave": "Tell finance to fix in MYOB",
+            "generic": "Tell finance"
+          }
+        },
+        "notes": {
+          "missingLeave": "Please add annual / sick leave entitlements to the MYOB card of {{name}} ({{type}}, {{stores}}); otherwise leave balances cannot be fetched.",
+          "temporaryHasLeave": "{{name}} ({{type}}, {{stores}}) is casual in our system, but the MYOB card has annual / sick leave entitlements. Please check and fix.",
+          "generic": "The employment type of {{name}} ({{type}}, {{stores}}) does not match MYOB. Please check."
+        },
+        "noteCopied": "Note for finance copied; paste it to send",
+        "mystatus": "MYOB employment status: {{status}}",
+        "empty": "No employment type mismatches"
+      },
+      "birthdayLine": "Birthday {{birthday}}"
+    },
+    "drawer": {
+      "title": "Choose a MYOB card for {{name}}",
+      "subtitle": "MYOB cards are read only; confirming does not change anything in MYOB.",
+      "close": "Close",
+      "search": "Search {{company}} MYOB employees: name / email / last 4 phone digits",
+      "phone": "Phone {{value}}",
+      "birthday": "Birthday {{value}}",
+      "notFilled": "Not filled in",
+      "unselectable": "Unavailable",
+      "boundTo": "Already bound to {{name}} (ours)",
+      "candidatesTitle": "Candidate cards",
+      "empty": "No matching cards. Try another keyword.",
+      "loadFailed": "Failed to load candidate cards",
+      "retry": "Retry",
+      "scoreAria": "Score {{score}}",
+      "compareTitle": "Side by side",
+      "compare": {
+        "ours": "Ours",
+        "theirs": "MYOB",
+        "result": "Result",
+        "same": "Match",
+        "diff": "Different",
+        "unknown": "Cannot compare",
+        "typeSame": "Consistent",
+        "typeDiff": "Inconsistent",
+        "fields": {
+          "name": "Name",
+          "email": "Email",
+          "phone": "Phone",
+          "birthday": "Birthday",
+          "type": "Employment type"
+        }
+      },
+      "warn": {
+        "both": "The emails differ and the birthday cannot be compared, so only name and phone support this match. Make sure it is the same person before binding; you can unbind at any time.",
+        "email": "The emails differ. Make sure it is the same person before binding; you can unbind at any time.",
+        "birthday": "The birthday cannot be compared. Make sure it is the same person before binding; you can unbind at any time."
+      },
+      "cancel": "Cancel",
+      "confirm": "Bind to {{name}}"
+    },
+    "payroll": {
+      "title": "Paying company (by employee x store)",
+      "hint": "By default, hours are paid by the company that owns the store worked at. Only exceptions (works at a store of company A but is paid by company B) need to be set. Hours of one store are never split between two companies.",
+      "search": "Search employee",
+      "allStores": "All stores",
+      "crossOnly": "Cross-company only",
+      "reload": "Refresh",
+      "loadFailed": "Failed to load paying companies",
+      "retry": "Retry",
+      "empty": "No employees match",
+      "total": "{{total}} rows",
+      "columns": {
+        "employee": "Employee",
+        "store": "Store worked",
+        "defaultCompany": "Store's company (default)",
+        "effectiveCompany": "Paying company this period",
+        "effectiveFrom": "Effective from",
+        "actions": "Actions"
+      },
+      "cross": "Cross-company",
+      "otherStores": "Also {{stores}}",
+      "override": "Exception",
+      "byStore": "By store",
+      "unset": "Not set",
+      "set": "Set",
+      "edit": "Edit",
+      "editAria": "Set the paying company of {{name}} at {{store}}"
+    },
+    "payrollDrawer": {
+      "title": "Paying company of {{name}}",
+      "subtitle": "Requires the \"Edit payroll\" permission; every change is audited.",
+      "close": "Close",
+      "loadFailed": "Failed to load paying company details",
+      "retry": "Retry",
+      "columns": {
+        "store": "Store worked",
+        "defaultCompany": "Default company",
+        "override": "Pay from another company"
+      },
+      "byStoreOption": "By store ({{company}})",
+      "byStoreNoCompany": "By store (store not mapped to a company)",
+      "noDefault": "Not mapped",
+      "effectiveFrom": "Effective from",
+      "effectiveHint": "Only pay-period start dates can be chosen, so one store's hours are never split mid-period.",
+      "periodStart": "{{date}} (period start)",
+      "currentPeriod": "{{date}} (current period start)",
+      "noAllowedDates": "There is no selectable effective date right now, so this cannot be saved.",
+      "unbound": {
+        "title": "{{company}} has not bound {{name}} yet.",
+        "body": "Bind them under \"Employee binding\" before pushing hours.",
+        "go": "Go to binding"
+      },
+      "history": "History",
+      "historyEmpty": "No changes yet",
+      "historyOverride": "From {{date}} · {{store}} paid by {{company}}",
+      "historyDefault": "From {{date}} · {{store}} back to by-store",
+      "historyBy": "Set by {{who}} · {{time}}",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saved": "Saved the paying company of {{name}}",
+      "saveFailed": "Failed to save paying company",
+      "noChanges": "No changes"
     }
   }
 }
