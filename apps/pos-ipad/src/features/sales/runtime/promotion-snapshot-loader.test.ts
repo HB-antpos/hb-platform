@@ -4,6 +4,7 @@ import test from "node:test";
 import { ActivePricingCartSession } from "./active-pricing-cart-session";
 import {
   ActivePromotionSnapshotLoader,
+  hasNegativeFixedPrice,
   type ActivePromotionSnapshotPort,
   type StoredPromotionSnapshot,
 } from "./promotion-snapshot-loader";
@@ -55,6 +56,46 @@ test("没有活动快照或读取失败时保留当前促销与金额", async ()
   assert.deepEqual(malformed, { status: "fallback" });
   assert.equal(activeCart.read(), before);
   assert.equal(activeCart.getSnapshot().lines[0]?.discount.cents, 500);
+});
+
+test("负固定价规则整条忽略，其余规则照常生效，不让整份快照失效（对齐 WPF #742 D5）", async () => {
+  const activeCart = session(cartWithTwoTea());
+  const valid = snapshot();
+  const result = await new ActivePromotionSnapshotLoader(
+    activeCart,
+    new SnapshotPort({
+      ...valid,
+      promotions: [
+        ...valid.promotions,
+        {
+          promotionId: "PROMO-BAD",
+          definitionJson: JSON.stringify({
+            promotionId: "PROMO-BAD",
+            name: "bad negative price",
+            effectiveStart: "2026-06-12T00:00:00.000Z",
+            effectiveEnd: "2026-06-14T00:00:00.000Z",
+            isExclusive: true,
+            priority: 99,
+            applyQuantity: 1,
+            fixedPrice: -1,
+            maxApplicationsPerOrder: null,
+            products: [{ productCode: "TEA", unitWeight: 1 }],
+          }),
+        },
+      ],
+    }),
+  ).load({ storeCode: "S1", asOfIso });
+
+  // 坏规则不计入规则数；它是互斥规则也不能压住正常规则。
+  assert.deepEqual(result, { status: "loaded", snapshotId: "catalog-1", ruleCount: 1 });
+  assert.equal(activeCart.getSnapshot().lines[0]?.discount.cents, 500);
+
+  // 其它损坏（例如分币精度不合法）仍整份回退，不能顺手放过。
+  assert.equal(hasNegativeFixedPrice(valid.promotions[0]!), false);
+  assert.equal(
+    hasNegativeFixedPrice({ promotionId: "x", definitionJson: "not json" }),
+    false,
+  );
 });
 
 test("门店不匹配及仓储异常均 fail-closed，绝不清空已装载规则", async () => {
