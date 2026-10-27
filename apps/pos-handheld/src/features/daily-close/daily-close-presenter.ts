@@ -33,9 +33,11 @@ export type DailyCloseStatusCode =
   | "invalid-business-date"
   | "load-failed"
   | "permission-required"
+  | "reprint-cash-slip-failed"
   | "reprint-failed"
   | "reprint-printed"
   | "save-failed"
+  | "saved-cash-slip-failed"
   | "saved-print-failed"
   | "saved-printed"
   | "select-archive-required";
@@ -360,10 +362,16 @@ export class DailyClosePresenter {
       if (!this.destroyed) {
         this.patch({ busy: false, statusCode: "saved-printed" });
       }
-    } catch {
+    } catch (error) {
       // 中文注释：归档和审计已经提交；打印失败只改变安全状态码，绝不补偿删除。
+      // 日结单已打印、仅现金单失败时如实告知（对齐 WPF #478），避免店员以为整张都没出。
       if (!this.destroyed) {
-        this.patch({ busy: false, statusCode: "saved-print-failed" });
+        this.patch({
+          busy: false,
+          statusCode: isCashSlipFailure(error)
+            ? "saved-cash-slip-failed"
+            : "saved-print-failed",
+        });
       }
     }
   }
@@ -386,10 +394,15 @@ export class DailyClosePresenter {
       if (!this.destroyed) {
         this.patch({ busy: false, statusCode: "reprint-printed" });
       }
-    } catch {
+    } catch (error) {
       await this.appendReprintAudit(archive, "Failed");
       if (!this.destroyed) {
-        this.patch({ busy: false, statusCode: "reprint-failed" });
+        this.patch({
+          busy: false,
+          statusCode: isCashSlipFailure(error)
+            ? "reprint-cash-slip-failed"
+            : "reprint-failed",
+        });
       }
     }
   }
@@ -502,4 +515,16 @@ function normalizeHistoryLimit(value: number): number {
     throw new TypeError("Daily close history limit is invalid.");
   }
   return value;
+}
+
+/** 日结单已打印、随后的现金单没有确认打印成功（打印层以此错误码区分）。 */
+export const DAILY_CLOSE_CASH_SLIP_FAILED_CODE =
+  "DAILY_CLOSE_CASH_SLIP_NOT_CONFIRMED";
+
+function isCashSlipFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === DAILY_CLOSE_CASH_SLIP_FAILED_CODE
+  );
 }
