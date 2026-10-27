@@ -279,6 +279,81 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("x1", sparse.Suggestions.WeekdayUid);
     }
 
+    /// <summary>线上两家公司文件的真实类别名（2026-10-27 只读核对所得，仅名称与类型）；用 name 当 Uid 方便断言。</summary>
+    private static IReadOnlyList<MyobWageCategoryRecord> RealCategories(bool australian)
+    {
+        var common = new (string Name, string Type)[]
+        {
+            ("Advance", "Salary"), ("Annual Leave Loading", "Hourly"), ("Annual Leave Pay", "Hourly"),
+            ("Base Hourly", "Hourly"), ("Base Salary", "Salary"), ("Bonus", "Salary"), ("CDEP Payments", "Hourly"),
+            ("Commission", "Salary"), ("FP: AL Loading - ULT", "Hourly"), ("FP: Unused AL - ULT", "Hourly"),
+            ("FP: Unused LSL - ULT", "Hourly"), ("Long Service Leave", "Hourly"), ("Other Income", "Salary"),
+            ("Personal Leave Pay", "Hourly"), ("PUBLIC HOLIDAY (x2)", "Hourly"), ("PUBLIC HOLIDAY (x2.25)", "Hourly"),
+            ("SATURDAY (x1.25)", "Hourly"), ("SUNDAY (x1.4)", "Hourly"), ("SUNDAY (x1.5)", "Hourly"),
+            ("Unused Annual Leave", "Hourly"), ("Unused Long Service Leave", "Hourly"),
+        };
+        var specific = australian
+            ? new (string Name, string Type)[]
+            {
+                ("Back Pay", "Hourly"), ("Overtime (1.5x)", "Hourly"), ("Overtime (2x)", "Hourly"),
+                ("Pay in lieu of notice", "Hourly"), ("SATUDAY (x 1.2)", "Hourly"), // 线上确有这个拼错的类别
+            }
+            : new (string Name, string Type)[]
+            {
+                ("Back Pay", "Salary"), ("ETP TAX FREE", "Salary"), ("ETP Taxable", "Salary"),
+                ("Paid Parental Leave", "Salary"), ("SATURDAY (x1.2)", "Hourly"),
+            };
+        return common.Concat(specific).Select(item => new MyobWageCategoryRecord(item.Name, item.Name, item.Type)).ToList();
+    }
+
+    [Fact]
+    public async Task 类别映射_建议_用线上真实类别名_年假选Annual_Leave_Pay_倍率有多档并列时不猜()
+    {
+        await SeedConnectionsAsync();
+
+        // Australian：只有一个 SATURDAY（拼错的 SATUDAY 不算），周日有 x1.4 / x1.5 两档 → 周日不猜。
+        _api.Categories = RealCategories(australian: true);
+        var aus = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("Base Hourly", aus.Suggestions.WeekdayUid);
+        Assert.Equal("SATURDAY (x1.25)", aus.Suggestions.SaturdayUid);
+        Assert.Null(aus.Suggestions.SundayUid);
+        Assert.Equal("Personal Leave Pay", aus.Suggestions.PersonalLeaveUid);
+        // 线上曾被建议成 Annual Leave Loading（附加津贴）——年假必须是休假期间的工资，不是 Loading / Unused。
+        Assert.Equal("Annual Leave Pay", aus.Suggestions.HolidayLeaveUid);
+
+        // Investment：周六 x1.2 / x1.25、周日 x1.4 / x1.5 都并列 → 都不猜；Back Pay 是 Salary 型，不会被当成平日。
+        _api.Categories = RealCategories(australian: false);
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var invest = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("Base Hourly", invest.Suggestions.WeekdayUid);
+        Assert.Null(invest.Suggestions.SaturdayUid);
+        Assert.Null(invest.Suggestions.SundayUid);
+        Assert.Equal("Personal Leave Pay", invest.Suggestions.PersonalLeaveUid);
+        Assert.Equal("Annual Leave Pay", invest.Suggestions.HolidayLeaveUid);
+    }
+
+    [Fact]
+    public async Task 类别映射_建议_Salary型类别不入选_Annual与Holiday_Leave_Pay并列也不猜()
+    {
+        await SeedConnectionsAsync();
+        // 只有 Salary 型：不能记工时，平日 / 病假 / 年假都不建议。
+        _api.Categories = [new("s1", "Base Salary", "Salary"), new("s2", "Personal Leave Pay", "Salary"), new("s3", "Annual Leave Pay", "Salary")];
+        var salaryOnly = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Null(salaryOnly.Suggestions.WeekdayUid);
+        Assert.Null(salaryOnly.Suggestions.PersonalLeaveUid);
+        Assert.Null(salaryOnly.Suggestions.HolidayLeaveUid);
+
+        // 两个口径都叫得通 → 并列，不替财务选；读不到类型（null）的类别不排除。
+        _api.Categories = [new("a", "Annual Leave Pay", null), new("h", "Holiday Leave Pay", "Hourly")];
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var tie = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Null(tie.Suggestions.HolidayLeaveUid);
+
+        _api.Categories = [new("a", "Annual Leave Pay", null)];
+        _cache.Remove($"myob:wagecats:{Inv}");
+        Assert.Equal("a", (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!.Suggestions.HolidayLeaveUid);
+    }
+
     [Fact]
     public async Task 类别映射_保存后读回_五项齐全才算完整_已设置的项不再给建议()
     {

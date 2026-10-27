@@ -195,8 +195,13 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
 
     /// <summary>
     /// 按名称相近给未设置的项推荐类别（已设置的项不给建议）：
-    /// 周六 / 周日 看名称里的 Saturday / Sunday；病假 = Personal Leave（Pay）/ Sick；年假 = Holiday Leave（Pay）/ Annual；
+    /// 周六 / 周日 看名称里的 Saturday / Sunday；病假 = Personal Leave（Pay）/ Sick；年假 = Annual / Holiday Leave（Pay）；
     /// 平日 优先 Base Hourly，其次 Ordinary，再次其他不含周末 / 假期 / 加班字样的计时类别。同一个类别不会被推荐给两项。
+    /// 两条保守规则（线上真实账套暴露的问题）：
+    /// ① 只推荐计时（非 Salary）类别——Salary 型类别不能记工时；
+    /// ② 得分最高的类别不止一个时**不给建议**——例如同时有 SATURDAY (x1.2) 与 SATURDAY (x1.25)、
+    ///    Annual Leave Pay 与 Holiday Leave Pay，倍率 / 口径是财务的决定，不能按字母序替他们挑一个。
+    /// 年假另外排除附加津贴 / 未休折现类别（Annual Leave Loading、Unused Annual Leave 等），它们不是「休年假期间的工资」。
     /// </summary>
     internal static MyobPayCategoryMappingDto SuggestMapping(
         IReadOnlyList<MyobWageCategoryRecord> categories,
@@ -207,27 +212,39 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
             .Select(uid => uid!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var suggestion = new MyobPayCategoryMappingDto();
+        var hourlyOnly = categories
+            .Where(item => !string.Equals(item.WageType, "Salary", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         string? Pick(Func<MyobWageCategoryRecord, int> score)
         {
-            var best = categories
+            var scored = hourlyOnly
                 .Where(item => !used.Contains(item.Uid))
                 .Select(item => (Item: item, Score: score(item)))
                 .Where(item => item.Score > 0)
-                .OrderByDescending(item => item.Score)
-                .ThenBy(item => item.Item.Name, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
-            if (best.Item is null)
+                .ToList();
+            if (scored.Count == 0)
             {
                 return null;
             }
 
-            used.Add(best.Item.Uid);
-            return best.Item.Uid;
+            var top = scored.Max(item => item.Score);
+            var best = scored.Where(item => item.Score == top).ToList();
+            if (best.Count > 1)
+            {
+                return null; // 并列：不猜，留给财务在下拉里选
+            }
+
+            used.Add(best[0].Item.Uid);
+            return best[0].Item.Uid;
         }
 
         static bool Has(MyobWageCategoryRecord item, string text) =>
             item.Name.Contains(text, StringComparison.OrdinalIgnoreCase);
+
+        // 附加津贴 / 未休折现 / 代通知金 / 终止时结算类别：名字里常带 Leave，但不是正常休假期间的工资。
+        static bool IsLeaveSideCategory(MyobWageCategoryRecord item) =>
+            new[] { "loading", "unused", "in lieu", "cash", "payout", "termination", "fp:" }.Any(word => Has(item, word));
 
         // 先挑最没有歧义的几项，再挑平日（平日条件最宽，放最后避免抢走周末 / 假期类别）。
         if (current.SaturdayUid is null)
@@ -243,7 +260,8 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
         if (current.PersonalLeaveUid is null)
         {
             suggestion.PersonalLeaveUid = Pick(item =>
-                Has(item, "personal leave pay") ? 20
+                IsLeaveSideCategory(item) ? 0
+                : Has(item, "personal leave pay") ? 20
                 : Has(item, "personal leave") ? 15
                 : Has(item, "sick") ? 10
                 : 0);
@@ -251,8 +269,10 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
 
         if (current.HolidayLeaveUid is null)
         {
+            // MYOB 澳洲账套的休年假类别叫 Annual Leave Pay；新西兰 / 旧账套可能叫 Holiday Leave Pay。两者并列时同样不猜。
             suggestion.HolidayLeaveUid = Pick(item =>
-                Has(item, "holiday leave pay") ? 20
+                IsLeaveSideCategory(item) ? 0
+                : Has(item, "annual leave pay") || Has(item, "holiday leave pay") ? 20
                 : Has(item, "holiday leave") ? 15
                 : Has(item, "annual leave") ? 12
                 : Has(item, "holiday pay") ? 10
