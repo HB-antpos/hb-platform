@@ -42,6 +42,12 @@ services:
       - BrowserExtension__SafariStoreUrl=${BROWSER_EXTENSION_SAFARI_STORE_URL:-https://apps.apple.com/au/app/hb-supplier-order/id6803740010}
       # WPF 更新检查密钥只从服务器 .env 注入，禁止写入仓库。
       - WpfAppUpdate__CheckApiKey=${WPF_APP_UPDATE_CHECK_API_KEY:?required}
+      # MYOB 对接（阶段 0）：Client Id / Secret / 回调地址只从服务器 .env 注入，禁止写入仓库。
+      # 三项任一为空时 MyobOptions.IsConfigured=false，Web 页只提示「未配置」，不影响其他功能；
+      # RedirectUri 必须与 MYOB 开发者后台登记的完全一致（https://hotbargain.vip/api/myob/oauth/callback）。
+      - Myob__ClientId=${MYOB_CLIENT_ID:-}
+      - Myob__ClientSecret=${MYOB_CLIENT_SECRET:-}
+      - Myob__RedirectUri=${MYOB_REDIRECT_URI:-}
       # 远程维护仅在迁移、安装包校验与客户端验收准备好后启用；秘密只从服务器注入。
       - RemoteMaintenance__Enabled=${REMOTE_MAINTENANCE_ENABLED:-false}
       # 下发给已安装/新装 RustDesk 的服务器地址：这是 WPF 启动对账的唯一开关。
