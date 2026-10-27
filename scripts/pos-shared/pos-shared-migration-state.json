@@ -424,7 +424,7 @@
       "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券；新增主管结案相关稳定错误码 RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED / RETURN_RESOLUTION_EVIDENCE_REQUIRED / RETURN_SUPERVISOR_NOT_REFUNDED",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
       "canonicalRuntimeSha256": "7cfef7124e26edf8fc115f9e6cfb9da44418ef5b37359a0647f454c85b0fd7d7",
-      "canonicalTypeSha256": "1e2646b1154d71c8bf02cdcde2391b6d8d3583765e10f77ceff2e8e67fd9d0e8",
+      "canonicalTypeSha256": "2693985f703f0d12972097ecbef74ff515d893f85343cd47beec20ee2946e3e7",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -451,8 +451,8 @@
       "package": "pos-domain",
       "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮；state 暴露 requiredVoucherRefundCents，提示代金券买的部分至少须退代金券的金额；暴露 resolveBySupervisor 与 supervisorResolutionAvailable / supervisorWaitingRecorded，供 Unknown 页展示主管结案",
       "baselineCanonicalRuntimeSha256": "c31c130fc7b0d8ecf8d6ad9be3b1a32e7edbd9ecca17d831f22a1f1cdfa9ba8c",
-      "canonicalRuntimeSha256": "647c8821e4f1a61ec1a6462ddbe6e9c892d51322329a44dc99b9b6d157f15cf1",
-      "canonicalTypeSha256": "9c6fe180bc60610f4652c8877f19a0c162e39c5d5c2a4c1c4876953690979696",
+      "canonicalRuntimeSha256": "65a9f44bca443bdbeb52365676fbc27a7ce39f77d2c0e2ec7961845ab2ef1481",
+      "canonicalTypeSha256": "a41f0b1ea180c11128a7a986ef9f20427ebdd044bf46da4c5a4a0331b54f8a88",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -485,8 +485,8 @@
       "package": "pos-domain",
       "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划；新增 resolveUnknownBySupervisor：在 Unknown 状态下先取得强制另一名主管的授权，再调用执行端口 resolveUnknown，授权失败不改变 Unknown 锁定",
       "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
-      "canonicalRuntimeSha256": "f1cb550bc0837a51a1911e7c3d792723d79bee6955ee9d721cfbdea8849e7653",
-      "canonicalTypeSha256": "9f0857ff2bcde9b21bc3a0bd622d22cc9f818231a5ca8f9aa0bb5a583862af85",
+      "canonicalRuntimeSha256": "0f9182fad1e9c951b44320ca78f64ec356a9e2a3a804b8aca38723062baceb6a",
+      "canonicalTypeSha256": "d4caa552a9c62421300df54f3da553e8ae6b88bb5ccd0ebacb5e38aca411b6a8",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",

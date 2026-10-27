@@ -49,6 +49,39 @@ test("公开 Presenter JSON 不泄露原单、原明细、capacity、PaymentId�
   assertSanitized(presenter.getState());
 });
 
+test("退货页订单摘要：#单号末 8 位 + 售出时间 + 收银员，缺失时省略（对齐 WPF #701）", async () => {
+  const soldAtIso = new Date(2026, 9, 9, 17, 30).toISOString();
+  const withMeta = new ReturnPresenter(
+    new ReturnWorkflow({
+      lookup: {
+        lookupReceipt: async () =>
+          secretReceiptContext({ soldAtIso, cashierName: "Lucy" }),
+        lookupNoReceiptProduct: async () => noReceiptItem(),
+        createNoReceiptOpenItem: async () => noReceiptItem(),
+      },
+      connectivity: { isOnline: async () => true },
+      supervisorAuthorization: {
+        authorizeNoReceiptReturn: async () => ({ authorizationKey: "grant" }),
+      },
+      sessionGuard: new PresenterSessionGuard(),
+      execution: new PresenterExecution(),
+      createActionId: () => "action",
+    }),
+  );
+  assert.equal(await withMeta.loadReceipt("x"), true);
+  const state = withMeta.getState();
+  assert.equal(state.orderSummary, "#T-654321");
+  assert.equal(state.orderSoldAtIso, soldAtIso);
+  assert.equal(state.orderCashierName, "Lucy");
+
+  const plain = createPresenter(new PresenterExecution());
+  assert.equal(await plain.loadReceipt("x"), true);
+  assert.equal(plain.getState().orderSoldAtIso, null);
+  assert.equal(plain.getState().orderCashierName, null);
+  // 完整原单号不进入页面状态。
+  assert.equal(JSON.stringify(plain.getState()).includes("original-order-secret"), false);
+});
+
 test("Presenter 防重复点击，等待期间不会发起第二次退款", async () => {
   const pending = deferred<ReturnExecutionOutcome>();
   const execution = new PresenterExecution();
@@ -273,8 +306,11 @@ class PresenterSessionGuard {
   }
 }
 
-function secretReceiptContext(): ReceiptReturnContext {
+function secretReceiptContext(
+  extra: Partial<ReceiptReturnContext> = {},
+): ReceiptReturnContext {
   return {
+    ...extra,
     originalOrderGuid: "original-order-secret-123456",
     receiptLabel: "receipt-secret-654321",
     loadedFrom: "remote",

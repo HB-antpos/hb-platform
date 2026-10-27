@@ -46,6 +46,9 @@ export type ReturnPresenterState = Readonly<{
   mode: "receipt" | "no-receipt";
   busy: boolean;
   orderSummary: string | null;
+  /** 原单售出时间（ISO）与收银员，摘要第二行“时间 · 收银员”用；缺失为 null。 */
+  orderSoldAtIso?: string | null;
+  orderCashierName?: string | null;
   loadedFrom: "remote" | "local" | null;
   returnRecordsMayBeStale: boolean;
   lines: readonly ReturnPresenterLine[];
@@ -411,8 +414,10 @@ export class ReturnPresenter {
       mode: snapshot.caseKind,
       busy: this.state.busy,
       orderSummary: snapshot.receiptLabel
-        ? maskIdentifier(snapshot.receiptLabel)
+        ? shortOrderNumber(snapshot.receiptLabel)
         : null,
+      orderSoldAtIso: snapshot.receiptSoldAtIso ?? null,
+      orderCashierName: snapshot.receiptCashierName ?? null,
       loadedFrom: snapshot.loadedFrom,
       returnRecordsMayBeStale: snapshot.returnRecordsMayBeStale,
       lines,
@@ -497,6 +502,12 @@ function aggregateCapacities(
       remainingCents: totals.get(method) ?? 0,
       originalRefundAvailable: originalRefundable.has(method),
     }));
+}
+
+/** 单号摘要：“#”+ 末 8 位大写（与移动端历史页同口径），收银员据此与小票核对，完整单号不进入页面状态。 */
+function shortOrderNumber(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, "");
+  return normalized ? `#${normalized.slice(-8).toUpperCase()}` : "#--------";
 }
 
 function maskIdentifier(value: string): string {
