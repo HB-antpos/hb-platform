@@ -37,8 +37,11 @@ export function archiveFixture(
     { method: "card", salesCents: 435, refundCents: 0, netCents: 435 },
     { method: "voucher", salesCents: 0, refundCents: -115, netCents: -115 },
   ];
+  // 应有现金 = 现金净额 + 现金进位（默认 0，与未进位的旧口径一致）。
+  const cashRoundingCents = rest.cashRoundingCents ?? 0;
   const expectedCashCents =
-    tenders.find((entry) => entry.method === "cash")?.netCents ?? 0;
+    (tenders.find((entry) => entry.method === "cash")?.netCents ?? 0) +
+    cashRoundingCents;
   return {
     businessDate: "2026-10-07",
     periodFromIso: "2026-10-06T14:00:00.000Z",
@@ -47,6 +50,7 @@ export function archiveFixture(
     deviceCode: DAILY_CLOSE_FIXTURE_SCOPE.deviceCode,
     orderCount: 7,
     returnQuantity: "1.75",
+    cashRoundingCents,
     expectedCashCents,
     closeId: DAILY_CLOSE_FIXTURE_GUID,
     savedCashierId: "cashier-1",

@@ -313,6 +313,7 @@ function summary(scope: DailyCloseScope): DailyCloseSummary {
         netCents: 400,
       },
     ],
+    cashRoundingCents: 0,
     expectedCashCents: 1_000,
   };
 }

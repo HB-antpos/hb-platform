@@ -100,6 +100,8 @@ export function mapDailyCloseArchiveToSyncRequest(
     coinSubtotal: centsToAmount(archive.coinsSubtotalCents),
     countedCashAmount: centsToAmount(archive.countedCashCents),
     cashDifference: centsToAmount(archive.varianceCents),
+    // 现金进位（5 分进位）：服务端按 差额 = 实点 − (现金净额 + 进位) 校验，缺省按 0 处理（旧客户端）。
+    cashRoundingAmount: centsToAmount(archive.cashRoundingCents),
   };
 }
 
