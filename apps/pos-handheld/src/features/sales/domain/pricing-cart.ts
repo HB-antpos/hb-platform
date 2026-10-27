@@ -1853,16 +1853,11 @@ export class PricingCart {
           ),
         };
       })
-      .filter((candidate) => candidate.capacity > 0)
       .sort(
         (left, right) =>
           left.sortOrder - right.sortOrder ||
           left.firstSelectedIndex - right.firstSelectedIndex,
       );
-    if (candidates.length === 0) {
-      return;
-    }
-
     const groupTotal = sumSafe(
       candidates.map((candidate) => candidate.amount),
       "promotion group total",
@@ -1898,12 +1893,13 @@ export class PricingCart {
               remainingAmount,
               "promotion discount allocation",
             );
-      const lineDiscount = Math.min(
-        remainingDiscount,
-        candidate.capacity,
-        Math.max(0, proposed),
-      );
-      if (lineDiscount <= 0) {
+      // 叠加封顶（D3，对齐 WPF #753）：逐行份额始终按“未封顶”口径算出，已封顶的行仍占着份额和分母；
+      // 份额先从剩余折扣里扣掉，再与该行剩余容量取小入账，超出行原价的部分直接丢弃，
+      // 不转给其它还有容量的行（旧口径是转移）。这样多条规则叠加与 WPF 旧引擎“先累加再截断”一致。
+      const share = Math.min(remainingDiscount, Math.max(0, proposed));
+      remainingDiscount -= share;
+      const applied = Math.min(share, candidate.capacity);
+      if (applied <= 0) {
         continue;
       }
 
@@ -1912,14 +1908,13 @@ export class PricingCart {
         promotionIds: [],
       };
       allocation.cents = sumSafe(
-        [allocation.cents, lineDiscount],
+        [allocation.cents, applied],
         "promotion line discount",
       );
       if (!allocation.promotionIds.includes(promotion.id)) {
         allocation.promotionIds.push(promotion.id);
       }
       allocations.set(candidate.line, allocation);
-      remainingDiscount -= lineDiscount;
     }
   }
 }

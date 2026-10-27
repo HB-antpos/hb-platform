@@ -987,3 +987,87 @@ performanceTest("300 行不可合并百分比折扣的按钮预测保持近线�
     `300 行合并预测执行 20 次 CPU 耗时 ${elapsedMs.toFixed(1)}ms`,
   );
 });
+
+function stackedPromotion(
+  id: string,
+  priority: number,
+  applyQuantity: number,
+  fixedPriceCents: number,
+  productCodes: readonly string[],
+) {
+  return {
+    id,
+    name: id,
+    effectiveStartIso: "2026-06-12T00:00:00.000Z",
+    effectiveEndIso: "2026-06-14T00:00:00.000Z",
+    isExclusive: false,
+    priority,
+    applyQuantity,
+    fixedPrice: createAud(fixedPriceCents),
+    maxApplicationsPerOrder: null,
+    products: productCodes.map((productCode) => ({ productCode, unitWeight: 1 })),
+  };
+}
+
+function discountsByLine(cart: PricingCart): Record<string, number> {
+  return Object.fromEntries(
+    cart.snapshot().lines.map((line) => [line.lineId, line.discount.cents]),
+  );
+}
+
+test("叠加封顶 D3：被封顶行的份额丢弃，不转给同组其它行（对齐 WPF #753 EQ-D3）", () => {
+  // N1：A 1 件 0 元（A 被免到 0，累计折扣 = 行原价 2.00）；N2：A+B 凑 2 件 1.00（A、B 各 2.00 → 组折扣 3.00，各份额 1.50）。
+  const cart = new PricingCart({
+    asOfIso,
+    promotions: [
+      stackedPromotion("N1", 20, 1, 0, ["A"]),
+      stackedPromotion("N2", 10, 2, 100, ["A", "B"]),
+    ],
+  });
+  cart.addItem(item("line-a", { productCode: "A", unitPrice: createAud(200) }));
+  cart.addItem(item("line-b", { productCode: "B", unitPrice: createAud(200) }));
+
+  // A 已封顶 2.00，N2 分给 A 的 1.50 丢弃；B 只得自己的 1.50，而不是 2.00。
+  assert.deepEqual(discountsByLine(cart), { "line-a": 200, "line-b": 150 });
+});
+
+test("叠加封顶 D3d/D3e：部分容量只入账放得下的部分；排在后面的行被封顶时份额同样丢弃", () => {
+  // D3d：N1 先给 A 折 1.50（A 剩 0.50 容量），N2 分给 A 的 1.50 只入账 0.50，B 仍是自己的 1.50。
+  const partial = new PricingCart({
+    asOfIso,
+    promotions: [
+      stackedPromotion("N1", 20, 1, 50, ["A"]),
+      stackedPromotion("N2", 10, 2, 100, ["A", "B"]),
+    ],
+  });
+  partial.addItem(item("line-a", { productCode: "A", unitPrice: createAud(200) }));
+  partial.addItem(item("line-b", { productCode: "B", unitPrice: createAud(200) }));
+  assert.deepEqual(discountsByLine(partial), { "line-a": 200, "line-b": 150 });
+
+  // D3e：B 被 N1 折到 0，N2 的 B 份额丢弃，A 只得自己的 1.50。
+  const last = new PricingCart({
+    asOfIso,
+    promotions: [
+      stackedPromotion("N1", 20, 1, 0, ["B"]),
+      stackedPromotion("N2", 10, 2, 100, ["A", "B"]),
+    ],
+  });
+  last.addItem(item("line-a", { productCode: "A", unitPrice: createAud(200) }));
+  last.addItem(item("line-b", { productCode: "B", unitPrice: createAud(200) }));
+  assert.deepEqual(discountsByLine(last), { "line-a": 150, "line-b": 200 });
+});
+
+test("叠加封顶 D3c：被封顶的行仍占分母，其余行按各自比例分摊而不是吃掉它的份额", () => {
+  // N1：A 免费；N2：A+B+C 凑 3 件 3.00，三行各 2.00（总 6.00，组折扣 3.00，各份额 1.00）。
+  const cart = new PricingCart({
+    asOfIso,
+    promotions: [
+      stackedPromotion("N1", 20, 1, 0, ["A"]),
+      stackedPromotion("N2", 10, 3, 300, ["A", "B", "C"]),
+    ],
+  });
+  for (const code of ["A", "B", "C"]) {
+    cart.addItem(item(`line-${code}`, { productCode: code, unitPrice: createAud(200) }));
+  }
+  assert.deepEqual(discountsByLine(cart), { "line-A": 200, "line-B": 100, "line-C": 100 });
+});
