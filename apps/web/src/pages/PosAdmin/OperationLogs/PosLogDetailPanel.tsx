@@ -1,7 +1,6 @@
 import { AlertOutlined, ToolOutlined, WarningOutlined } from '@ant-design/icons'
 import { Alert, Button, Descriptions, Space, Spin, Tag, Timeline, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import dayjs from 'dayjs'
 import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -19,6 +18,7 @@ import type {
 import RiskReviewSection from '../LegacyEmployeeLogs/RiskReviewSection'
 
 import { buildSystemLogLink, formatMoney, formatSignedMoney, summarizeProducts } from './operationLogsLogic'
+import { formatStoreClock, formatStoreTime } from './operationLogsTime'
 import PosProductSummary from './PosProductSummary'
 
 interface PosLogDetailPanelProps {
@@ -148,7 +148,7 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
           ) : null}
         </div>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          {[record.cashierName || record.cashierId || '-', props.storeLabel, record.deviceCode || '-', dayjs(record.occurredAtUtc).format('HH:mm:ss')].join(' · ')}
+          {[record.cashierName || record.cashierId || '-', props.storeLabel, record.deviceCode || '-', formatStoreClock(record.occurredAtUtc)].join(' · ')}
         </Typography.Text>
       </div>
 
@@ -169,8 +169,8 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
 
       <Descriptions bordered size="small" column={1} labelStyle={{ width: 120 }}>
         <Descriptions.Item label={t('operationLogs.columns.time')}>
-          {dayjs(record.occurredAtUtc).format('YYYY-MM-DD HH:mm:ss')}
-          <Typography.Text type="secondary">{` · ${t('operationLogs.detail.receivedAt')} ${dayjs(record.receivedAtUtc).format('HH:mm:ss')}`}</Typography.Text>
+          {formatStoreTime(record.occurredAtUtc)}
+          <Typography.Text type="secondary">{` · ${t('operationLogs.detail.receivedAt')} ${formatStoreClock(record.receivedAtUtc)}`}</Typography.Text>
         </Descriptions.Item>
         <Descriptions.Item label={t('legacyEmployeeLogs.detail.storeDevice')}>
           {props.storeLabel} · <Typography.Text code>{record.deviceCode || '-'}</Typography.Text>
@@ -272,7 +272,7 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
                   children: (
                     <div style={{ fontWeight: isCurrent ? 500 : undefined, fontSize: 13 }}>
                       <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineEnd: 8, fontVariantNumeric: 'tabular-nums' }}>
-                        {dayjs(item.occurredAtUtc).format('HH:mm:ss')}
+                        {formatStoreClock(item.occurredAtUtc)}
                       </Typography.Text>
                       {props.operationLabel(item.operationType)}
                       {item.outcome !== 'Succeeded' ? <span style={{ marginInlineStart: 6 }}>{props.outcomeTag(item.outcome)}</span> : null}

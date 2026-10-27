@@ -281,7 +281,7 @@
       "pos": "新收银",
       "switchLabel": "数据来源",
       "legacySubtitle": "旧版收银系统上传的员工操作记录（门店本地时间）。",
-      "posSubtitle": "新收银（WPF / 手持 / iPad）的操作审计；时间按浏览器本地时区显示。"
+      "posSubtitle": "新收银（WPF / 手持 / iPad）的操作审计；时间按门店时区（悉尼）显示，与销售明细一致。"
     },
     "pos": {
       "allScope": "结果 · 成功 {{succeeded}} · 拒绝 {{denied}} · 失败 {{failed}}",
