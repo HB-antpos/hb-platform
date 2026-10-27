@@ -294,3 +294,185 @@ export interface MyobPayrollEmployerQuery {
   storeCode?: string
   crossCompanyOnly?: boolean
 }
+
+// ───────────────────────── 阶段 2：工资类别映射 + 只读推送预览 ─────────────────────────
+// 契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobTimesheetDtos.cs 为准。
+// 工资类别映射接口权限 Myob.Connection.Manage；推送预览接口权限 Attendance.Payroll.Edit；日期一律 yyyy-MM-dd 字符串。
+
+/** 我方转账工时对应的 MYOB 工资类别键（5 项）。 */
+export type MyobPayCategoryKey = 'weekday' | 'saturday' | 'sunday' | 'personalLeave' | 'holidayLeave'
+
+/** MYOB 里的一个工资类别（Payroll/PayrollCategory/Wage）。 */
+export interface MyobWageCategory {
+  uid: string
+  name: string
+  /** Hourly / Salary；读不到为 null。 */
+  wageType: string | null
+}
+
+/** 5 项映射：每项是 MYOB 工资类别的 UID，null = 未设置。同一结构用于「当前映射」「建议」与保存请求。 */
+export interface MyobPayCategoryMapping {
+  weekdayUid: string | null
+  saturdayUid: string | null
+  sundayUid: string | null
+  personalLeaveUid: string | null
+  holidayLeaveUid: string | null
+}
+
+export interface MyobPayCategories {
+  connectionGuid: string
+  connectionName: string
+  /** MYOB 工资类别最近一次读取时间（UTC，可能不带 Z）。 */
+  fetchedAt: string | null
+  /** MYOB 里可选的工资类别（后端已按名称排序）。 */
+  categories: MyobWageCategory[]
+  mapping: MyobPayCategoryMapping
+  /** 按名称相近给出的建议（只对尚未设置的项给出）。 */
+  suggestions: MyobPayCategoryMapping
+  /** 已设置的项数（0–5）。 */
+  mappedCount: number
+  /** 5 项都已设置，且都还在 MYOB 的类别里。 */
+  complete: boolean
+  /** 已保存的映射里 MYOB 现在已找不到的类别键，需要重新选择。 */
+  missingKeys: MyobPayCategoryKey[]
+  updatedAt: string | null
+}
+
+/** 预览行状态：Ready 可推送；NoTransfer 本公司没有转账工时；Blocked 有拦截项。 */
+export type MyobPreviewStatus = 'Ready' | 'NoTransfer' | 'Blocked'
+
+/** 员工发放方式：全转账 / 全现金 / 转账 + 现金。 */
+export type MyobPayMode = 'Transfer' | 'Cash' | 'Mixed'
+
+/** MYOB 对该员工该周期 Timesheet 的现状（只有 checkMyob=true 才会读）。 */
+export type MyobTimesheetState = 'Unknown' | 'Clear' | 'HasEntries' | 'Processed' | 'CheckFailed'
+
+export interface MyobPreviewPeriodOption {
+  /** 周期起始日 yyyy-MM-dd。 */
+  start: string
+  end: string
+}
+
+export interface MyobUnlockedStore {
+  storeCode: string
+  storeName: string
+  /** 本公司员工里在这家店有工时的人数。 */
+  employeeCount: number
+}
+
+export interface MyobPreviewReadiness {
+  /** 已提交锁定的分店（有本公司员工工时的分店）。 */
+  lockedStores: string[]
+  unlockedStores: MyobUnlockedStore[]
+  categoryMappedCount: number
+  categoryComplete: boolean
+  /** 是否读过 MYOB 的 Timesheet 状态（checkMyob=true）。 */
+  myobChecked: boolean
+  /** MYOB 里已发薪的员工数（仅 myobChecked 时有意义）。 */
+  myobProcessedCount: number
+  /** 读 MYOB 失败的员工数（仅 myobChecked 时有意义）。 */
+  myobCheckFailedCount: number
+}
+
+export interface MyobPreviewHint {
+  /** MyobHintCodes：BIRTHDAY_REVIEW / BELOW_MINIMUM_RATE / PUBLIC_HOLIDAY_RATE_MISMATCH / ANNUAL_CASH_OUT_NOT_PUSHED；未知码原样保留。 */
+  code: string
+  userGuid: string
+  userName: string
+  /** 给人看的中文说明（含日期 / 工时等细节）。 */
+  message: string
+}
+
+export interface MyobPreviewBlocker {
+  /** MyobBlockerCodes：NOT_BOUND / STORE_NOT_LOCKED / STORE_NOT_MAPPED / CATEGORY_NOT_MAPPED / NO_RATE / NO_STORE_ACCESS / MYOB_PROCESSED；未知码原样保留。 */
+  code: string
+  message: string
+  /** 相关分店或类别键；没有为 null。 */
+  ref: string | null
+}
+
+/** 要推送的转账工时，按 5 个 MYOB 类别汇总（小时）。 */
+export interface MyobPushHours {
+  weekday: number
+  saturday: number
+  sunday: number
+  personalLeave: number
+  holidayLeave: number
+}
+
+/** 日网格里的一行：key 是类别键或工时种类键；hours 与 days 一一对应。 */
+export interface MyobDayGridRow {
+  key: string
+  /** 后端可选给出的显示名（如 MYOB 类别名）；契约里目前没有，没给为 null。 */
+  label: string | null
+  hours: number[]
+  total: number
+}
+
+/** 跨公司时各公司分到的份额。 */
+export interface MyobCompanyShare {
+  connectionGuid: string
+  connectionName: string
+  actualHours: number
+  allocatedTransferHours: number
+}
+
+export interface MyobPreviewDetail {
+  /** 周期内每一天 yyyy-MM-dd（7 或 14 个）。 */
+  days: string[]
+  actual: MyobDayGridRow[]
+  pushed: MyobDayGridRow[]
+  cash: MyobDayGridRow[]
+  shares: MyobCompanyShare[]
+  /** 年假折现里占用了转账额度、但不推送的小时。 */
+  annualCashOutTransferHours: number
+  checkOk: boolean
+  checkMessage: string
+}
+
+export interface MyobPreviewRow {
+  userGuid: string
+  userName: string
+  payMode: MyobPayMode | null
+  fixedTransferHoursPerWeek: number
+  isCrossCompany: boolean
+  allocatedTransferHours: number
+  actualHours: number
+  /** 有工时的分店，如「1013 Orion」。 */
+  storeLabels: string[]
+  status: MyobPreviewStatus
+  pushed: MyobPushHours
+  pushedTotal: number
+  /** 本期年假折现工时（不推送，财务手工处理）。 */
+  cashOutHours: number
+  blockers: MyobPreviewBlocker[]
+  hintCodes: string[]
+  /** 已绑定的 MYOB 员工卡姓名；未绑定为 null。 */
+  myobName: string | null
+  myobState: MyobTimesheetState
+  detail: MyobPreviewDetail
+}
+
+export interface MyobPreviewTotals {
+  readyCount: number
+  readyHours: number
+  blockedCount: number
+  noTransferCount: number
+}
+
+export interface MyobTimesheetPreview {
+  connectionGuid: string
+  connectionName: string
+  periodStart: string
+  periodEnd: string
+  weeks: number
+  /** 可选的工资周期：最近 6 期，新的在前。 */
+  periods: MyobPreviewPeriodOption[]
+  readiness: MyobPreviewReadiness
+  hints: MyobPreviewHint[]
+  /** 后端已按「可推送 → 被拦截 → 不推送」排序，同档按姓名。 */
+  rows: MyobPreviewRow[]
+  totals: MyobPreviewTotals
+  /** 推送功能是否已开放；本批恒为 false。 */
+  pushEnabled: boolean
+}

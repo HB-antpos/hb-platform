@@ -147,7 +147,7 @@
   line-height: 18px;
 }
 
-.myob-tab-phase {
+.myob-tab-preview {
   margin-inline-start: 6px;
 }
 
@@ -685,6 +685,464 @@
   gap: 8px;
 }
 
+/* ───────────── 阶段 2：Timesheet 工资类别映射 ───────────── */
+
+.myob-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 公司名带「Pty Ltd」较长：公司卡片比员工绑定页的最小宽度更宽，避免名称被截断 */
+.myob-pc-companies,
+.myob-push-companies {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+}
+
+.myob-pc-body {
+  margin-top: 14px;
+}
+
+/* 窄屏：表格整体横向滚动，不撑破卡片 */
+.myob-pc-scroll {
+  overflow-x: auto;
+}
+
+.myob-pc-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.myob-pc-table thead th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ant-color-split, #f0f0f0);
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: start;
+}
+
+.myob-pc-table tbody th,
+.myob-pc-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ant-color-split, #f0f0f0);
+  font-weight: 400;
+  text-align: start;
+  vertical-align: middle;
+}
+
+.myob-pc-col-ours {
+  width: 210px;
+}
+
+.myob-pc-col-arrow {
+  width: 48px;
+}
+
+.myob-pc-col-note {
+  width: 340px;
+}
+
+.myob-pc-arrow {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  text-align: center !important;
+}
+
+.myob-pc-select {
+  width: 100%;
+}
+
+/* 未设置 / 失效的行整行高亮（状态列另有文字标签，不只靠颜色） */
+.myob-pc-row-unset > * {
+  background: var(--ant-color-warning-bg, #fffbe6);
+}
+
+.myob-pc-row-missing > * {
+  background: var(--ant-color-error-bg, #fff2f0);
+}
+
+.myob-pc-desc .ant-tag {
+  margin-inline-end: 6px;
+}
+
+.myob-pc-note {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 13px;
+}
+
+.myob-pc-note-warn {
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-pc-note-bad {
+  color: var(--ant-color-error-text, #cf1322);
+}
+
+.myob-pc-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.myob-pc-footer-hint {
+  margin-inline-end: auto;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 13px;
+}
+
+.myob-pc-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.myob-pc-category-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myob-pc-wage.ant-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+/* ───────────── 阶段 2：推送与对账（只读预览） ───────────── */
+
+.myob-push-period {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.myob-push-period-select {
+  min-width: 290px;
+  max-width: 100%;
+}
+
+.myob-push-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+
+.myob-push-toolbar-hint {
+  display: inline;
+}
+
+/* 四张就绪卡：符号 + 文字 + 颜色三重表达 */
+.myob-push-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.myob-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.myob-step-symbol {
+  flex: none;
+  min-width: 16px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+}
+
+.myob-step-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.myob-step-sub {
+  font-size: 12px;
+}
+
+.myob-step-action.ant-btn {
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+}
+
+.myob-step-ok {
+  border-color: var(--ant-color-success-border, #b7eb8f);
+  background: var(--ant-color-success-bg, #f6ffed);
+  color: var(--ant-color-success-text, #389e0d);
+}
+
+.myob-step-bad {
+  border-color: var(--ant-color-error-border, #ffccc7);
+  background: var(--ant-color-error-bg, #fff2f0);
+  color: var(--ant-color-error-text, #cf1322);
+}
+
+.myob-step-warn {
+  border-color: var(--ant-color-warning-border, #ffe58f);
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-step-muted {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+/* 提示块：不阻止推送，需逐条知晓 */
+.myob-push-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--ant-color-warning-border, #ffe58f);
+  border-radius: 10px;
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-push-hint-group-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.myob-push-hints ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+.myob-push-hints .ant-checkbox-wrapper {
+  margin-top: 6px;
+  color: inherit;
+}
+
+.myob-push-row-blocked > td {
+  background: var(--ant-color-error-bg, #fff2f0) !important;
+}
+
+.myob-push-row-muted > td {
+  background: var(--ant-color-fill-quaternary, #fafafa) !important;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.myob-push-hours {
+  font-variant-numeric: tabular-nums;
+}
+
+.myob-push-note-warn {
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-push-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+}
+
+.myob-push-status .ant-btn-link {
+  padding-inline: 2px;
+}
+
+.myob-push-extra {
+  display: inline;
+}
+
+.myob-push-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+
+.myob-push-summary {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.myob-push-summary b {
+  color: var(--ant-color-text, #1f1f1f);
+}
+
+.myob-push-summary .myob-push-bad {
+  color: var(--ant-color-error-text, #cf1322);
+}
+
+.myob-push-summary-sep {
+  margin: 0 10px;
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+}
+
+.myob-push-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.myob-push-disabled-note {
+  display: inline;
+}
+
+.myob-push-range {
+  margin-top: 10px;
+}
+
+/* ───────────── 阶段 2：按日明细抽屉 ───────────── */
+
+.myob-push-explain {
+  padding: 10px 14px;
+  border: 1px solid var(--ant-color-primary-border, #91caff);
+  border-radius: 10px;
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  line-height: 1.6;
+}
+
+.myob-push-api-tag.ant-tag {
+  margin-inline-start: 8px;
+  font-weight: 600;
+}
+
+.myob-push-grid-note {
+  margin-top: 6px;
+}
+
+.myob-push-grid-empty {
+  padding: 10px 12px;
+  border: 1px dashed var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+/* 日网格：列多（最多 14 天）时在自己的容器里横向滚动，不撑破抽屉 */
+.myob-daygrid-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--ant-color-split, #f0f0f0);
+  border-radius: 8px;
+}
+
+.myob-daygrid {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.myob-daygrid th,
+.myob-daygrid td {
+  padding: 7px 8px;
+  border-right: 1px solid var(--ant-color-split, #f0f0f0);
+  border-bottom: 1px solid var(--ant-color-split, #f0f0f0);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.myob-daygrid th:last-child,
+.myob-daygrid td:last-child {
+  border-right: 0;
+}
+
+.myob-daygrid tbody tr:last-child th,
+.myob-daygrid tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.myob-daygrid thead th {
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.myob-daygrid tbody th.myob-daygrid-name {
+  min-width: 112px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-weight: 400;
+}
+
+.myob-daygrid-zero {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+.myob-daygrid-total.myob-daygrid-hit {
+  font-weight: 700;
+}
+
+.myob-daygrid-pushed td.myob-daygrid-hit {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  color: var(--ant-color-primary-text-active, #0958d9);
+  font-weight: 600;
+}
+
+.myob-daygrid-cash td {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+.myob-push-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+}
+
+.myob-push-check .anticon {
+  margin-top: 4px;
+}
+
+.myob-push-check-ok {
+  border-color: var(--ant-color-success-border, #b7eb8f);
+  background: var(--ant-color-success-bg, #f6ffed);
+  color: var(--ant-color-success-text, #389e0d);
+}
+
+.myob-push-check-bad {
+  border-color: var(--ant-color-error-border, #ffccc7);
+  background: var(--ant-color-error-bg, #fff2f0);
+  color: var(--ant-color-error-text, #cf1322);
+}
+
+.myob-push-check-warn {
+  border-color: var(--ant-color-warning-border, #ffe58f);
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+@media (max-width: 1200px) {
+  .myob-push-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* 窄屏：表格由 scroll.x 横向滚动；卡片与按钮收紧 */
 @media (max-width: 768px) {
   .myob-card {
@@ -715,6 +1173,24 @@
   .myob-list-actions {
     flex-basis: 100%;
     justify-content: flex-start;
+  }
+
+  .myob-push-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .myob-push-period {
+    flex-wrap: wrap;
+  }
+
+  .myob-push-period-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .myob-push-footer {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

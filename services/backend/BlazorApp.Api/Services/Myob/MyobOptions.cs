@@ -18,6 +18,11 @@ public sealed class MyobOptions
     public string RedirectUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Timesheet 推送总闸，默认关闭。预览与类别映射不受它影响；推送接口上线后，只有服务器 .env 里显式打开（Myob__TimesheetPushEnabled=true）才允许写 MYOB。
+    /// </summary>
+    public bool TimesheetPushEnabled { get; set; }
+
+    /// <summary>
     /// 空格分隔。公司文件（/{cf_uri}/、/Info）、公司设置（只读，含 GET /Company，授权后校验公司名与 ABN 用它）、
     /// 员工资料、工资。注意：sme-company-file 不覆盖 /Company，缺 sme-company-settings 会 401（2026-10-27 上线实测）。
     /// </summary>

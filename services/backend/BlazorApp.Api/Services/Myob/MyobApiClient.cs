@@ -35,6 +35,12 @@ public sealed record MyobEmployeePayrollRecord(
     string? EmploymentStatus,
     IReadOnlyList<MyobEntitlementRecord> Entitlements);
 
+/// <summary>Payroll/PayrollCategory/Wage 的一条（只取映射需要的字段）。</summary>
+public sealed record MyobWageCategoryRecord(string Uid, string Name, string? WageType);
+
+/// <summary>某员工在某周期的 MYOB Timesheet 现状（只读判断用）。</summary>
+public sealed record MyobTimesheetStatus(bool HasEntries, bool HasProcessedEntries);
+
 /// <summary>
 /// 调用 MYOB 失败。Code 取自 <see cref="MyobErrorCodes"/>；IsAuthorizationRevoked＝refresh token 已失效（invalid_grant），
 /// 需要公司文件 Administrator 重新授权，调用方据此把连接标成 NeedsReauth。
@@ -65,6 +71,16 @@ public interface IMyobApiClient
 
     /// <summary>GET /{cf_uri}/Contact/EmployeePayrollDetails，自动翻页拉全量。需要 scope sme-payroll。</summary>
     Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>GET /{cf_uri}/Payroll/PayrollCategory/Wage：公司文件里的工资类别（用于 Timesheet 类别映射）。需要 scope sme-payroll。</summary>
+    Task<IReadOnlyList<MyobWageCategoryRecord>> GetWageCategoriesAsync(string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// GET /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：只读，判断该员工该周期在 MYOB 里是否已有记录 / 已发薪（Processed）。
+    /// MYOB 对没有记录的员工可能返回空体或 404，都按「没有记录」处理。
+    /// </summary>
+    Task<MyobTimesheetStatus> GetTimesheetStatusAsync(
+        string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -271,6 +287,113 @@ public sealed class MyobApiClient : IMyobApiClient
         return result;
     }
 
+    public async Task<IReadOnlyList<MyobWageCategoryRecord>> GetWageCategoriesAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var items = await GetAllPagesAsync<WageCategoryPayload>(
+            businessId, accessToken, "Payroll/PayrollCategory/Wage", cancellationToken);
+        return items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Uid) && !string.IsNullOrWhiteSpace(item.Name))
+            .Select(item => new MyobWageCategoryRecord(
+                item.Uid!, item.Name!.Trim(), string.IsNullOrWhiteSpace(item.WageType) ? null : item.WageType.Trim()))
+            .ToList();
+    }
+
+    public async Task<MyobTimesheetStatus> GetTimesheetStatusAsync(
+        string businessId,
+        string accessToken,
+        string employeeUid,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken)
+    {
+        var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/{Uri.EscapeDataString(businessId)}/Payroll/Timesheet/{Uri.EscapeDataString(employeeUid)}"
+            + $"?StartDate={startDate:yyyy-MM-dd}&EndDate={endDate:yyyy-MM-dd}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation("x-myobapi-key", _options.ClientId);
+        request.Headers.TryAddWithoutValidation("x-myobapi-version", "v2");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return new MyobTimesheetStatus(false, false);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new MyobApiException(
+                MyobErrorCodes.ApiCallFailed,
+                $"MYOB Timesheet 接口返回 {(int)response.StatusCode}",
+                response.StatusCode);
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return new MyobTimesheetStatus(false, false);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var hasEntries = false;
+            var processed = false;
+            // 响应可能是单个 Timesheet（根上有 Lines），也可能是 { Items: [...] } 列表：两种都兼容。
+            foreach (var timesheet in EnumerateTimesheets(document.RootElement))
+            {
+                if (!timesheet.TryGetProperty("Lines", out var lines) || lines.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var line in lines.EnumerateArray())
+                {
+                    if (!line.TryGetProperty("Entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    foreach (var entry in entries.EnumerateArray())
+                    {
+                        hasEntries = true;
+                        if (entry.TryGetProperty("Processed", out var flag) && flag.ValueKind == JsonValueKind.True)
+                        {
+                            processed = true;
+                        }
+                    }
+                }
+            }
+
+            return new MyobTimesheetStatus(hasEntries, processed);
+        }
+        catch (JsonException)
+        {
+            throw new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB Timesheet 接口返回了无法解析的内容", response.StatusCode);
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateTimesheets(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Items", out var items) && items.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in items.EnumerateArray())
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            yield return root;
+        }
+    }
+
     private async Task<MyobTokenResponse> PostTokenAsync(
         Dictionary<string, string> form,
         string failureCode,
@@ -396,6 +519,13 @@ public sealed class MyobApiClient : IMyobApiClient
     {
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+    }
+
+    private sealed class WageCategoryPayload
+    {
+        public string? Uid { get; set; }
+        public string? Name { get; set; }
+        public string? WageType { get; set; }
     }
 
     private sealed class ListPayload<T>

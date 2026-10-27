@@ -34,9 +34,11 @@ import './myob.css'
 
 registerPageMessages({ zh: messagesZh, en: messagesEn })
 
-// 员工绑定 / 发薪公司页签只在有权限时才渲染，且各自单独成块懒加载（页面级块之外不增加首屏体积）
+// 员工绑定 / 发薪公司 / 推送与对账页签、工资类别映射卡片只在有权限时才渲染，且各自单独成块懒加载（页面级块之外不增加首屏体积）
 const EmployeeBindingTab = lazy(() => import('./EmployeeBindingTab'))
 const PayrollEmployersTab = lazy(() => import('./PayrollEmployersTab'))
+const PayCategoryMappingCard = lazy(() => import('./PayCategoryMappingCard'))
+const PushPreviewTab = lazy(() => import('./PushPreviewTab'))
 
 function TabFallback() {
   return <Skeleton active paragraph={{ rows: 6 }} />
@@ -66,6 +68,8 @@ export default function MyobPage() {
   const activeTab = resolveActiveMyobTab(requestedTab, visibleTabs)
   const [bindingCounts, setBindingCounts] = useState<MyobBindingCounts | null>(null)
   const [focusRequest, setFocusRequest] = useState<{ connectionGuid: string; seq: number } | null>(null)
+  // 推送预览里「去映射」带来的预选公司（工资类别映射卡片用）
+  const [mappingFocus, setMappingFocus] = useState<{ connectionGuid: string; seq: number } | null>(null)
 
   const [connections, setConnections] = useState<MyobConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
@@ -74,12 +78,12 @@ export default function MyobPage() {
   const [mappingsLoading, setMappingsLoading] = useState(true)
   const [mappingsError, setMappingsError] = useState<string | null>(null)
   const [authorizing, setAuthorizing] = useState(false)
-  // 公司选项（只读、只含 Active）：员工绑定页签的公司选择条用它，任一页签权限即可读，不依赖连接管理权限
+  // 公司选项（只读、只含 Active）：员工绑定 / 推送与对账页签的公司选择条用它，任一页签权限即可读，不依赖连接管理权限
   const [companies, setCompanies] = useState<MyobCompanyOption[]>([])
   const [companiesLoading, setCompaniesLoading] = useState(true)
   const [companiesError, setCompaniesError] = useState<string | null>(null)
   const companiesSeq = useRef(0)
-  const needsCompanies = access.canBindMyobEmployees
+  const needsCompanies = access.canBindMyobEmployees || access.canEditAttendancePayroll
 
   // 只认最后一次发起的请求，避免快速连点刷新时旧响应覆盖新数据
   const connectionsSeq = useRef(0)
@@ -158,7 +162,7 @@ export default function MyobPage() {
     }
   }, [access.canManageMyobConnections, loadConnections, loadMappings])
 
-  // 公司选项：员工绑定页签需要（有任一页签权限即可读）
+  // 公司选项：员工绑定 / 推送与对账页签需要（有任一页签权限即可读）
   useEffect(() => {
     if (needsCompanies) {
       void loadCompanies()
@@ -212,6 +216,11 @@ export default function MyobPage() {
     setRequestedTab('employees')
   }, [])
 
+  const handleGoMapping = useCallback((connectionGuid: string) => {
+    setMappingFocus((current) => ({ connectionGuid, seq: (current?.seq ?? 0) + 1 }))
+    setRequestedTab('connections')
+  }, [])
+
   const pendingCount = getPendingBindingCount(bindingCounts)
 
   const connectionsPane = (
@@ -257,6 +266,10 @@ export default function MyobPage() {
           void loadConnections()
         }}
       />
+
+      <Suspense fallback={<TabFallback />}>
+        <PayCategoryMappingCard connections={connections} connectionsLoading={connectionsLoading} focusRequest={mappingFocus} />
+      </Suspense>
     </div>
   )
 
@@ -304,18 +317,35 @@ export default function MyobPage() {
           ),
         }
       : null,
-    // 阶段 2 才做：灰色禁用，仅占位说明路线
-    {
-      key: 'push',
-      label: (
-        <span>
-          {t('myob.tabs.push')}
-          <Tag className="myob-tab-phase">{t('myob.tabs.phase2')}</Tag>
-        </span>
-      ),
-      disabled: true,
-      children: null,
-    },
+    // 推送与对账：本批只读预览（推送按钮禁用）；权限 = 编辑工资（Attendance.Payroll.Edit）
+    visibleTabs.includes('push')
+      ? {
+          key: 'push',
+          label: (
+            <span>
+              {t('myob.tabs.push')}
+              <Tag className="myob-tab-preview" color="processing">
+                {t('myob.tabs.preview')}
+              </Tag>
+            </span>
+          ),
+          children: (
+            <Suspense fallback={<TabFallback />}>
+              <PushPreviewTab
+                companies={companies}
+                companiesLoading={companiesLoading}
+                companiesError={companiesError}
+                onReloadCompanies={() => void loadCompanies()}
+                active={activeTab === 'push'}
+                canGoBind={access.canBindMyobEmployees}
+                canGoMapping={access.canManageMyobConnections}
+                onGoBind={handleGoBind}
+                onGoMapping={handleGoMapping}
+              />
+            </Suspense>
+          ),
+        }
+      : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null)
 
   return (

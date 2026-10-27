@@ -18,6 +18,25 @@ import type {
   MyobMatchCandidate,
   MyobOnlyInMyob,
   MyobOnlyInOurs,
+  MyobCompanyShare,
+  MyobDayGridRow,
+  MyobPayCategories,
+  MyobPayCategoryKey,
+  MyobPayCategoryMapping,
+  MyobPayMode,
+  MyobPreviewBlocker,
+  MyobPreviewDetail,
+  MyobPreviewHint,
+  MyobPreviewPeriodOption,
+  MyobPreviewReadiness,
+  MyobPreviewRow,
+  MyobPreviewStatus,
+  MyobPreviewTotals,
+  MyobPushHours,
+  MyobTimesheetPreview,
+  MyobTimesheetState,
+  MyobUnlockedStore,
+  MyobWageCategory,
   MyobPayrollBindingState,
   MyobPayrollCompanyOption,
   MyobPayrollEmployerDetail,
@@ -34,7 +53,7 @@ import type {
 } from '../types/myob'
 import request, { unwrapApiData } from '../utils/request'
 
-// 路由与后端 MYOB 控制器一致；连接 / 映射接口需 Myob.Connection.Manage，员工绑定接口需 Myob.Employee.Bind，发薪公司接口需 Attendance.Payroll.Edit。
+// 路由与后端 MYOB 控制器一致；连接 / 映射 / 工资类别接口需 Myob.Connection.Manage，员工绑定接口需 Myob.Employee.Bind，发薪公司与推送预览接口需 Attendance.Payroll.Edit。
 const MYOB_BASE = '/api/react/v1/myob'
 
 function text(value: unknown) {
@@ -567,4 +586,284 @@ export function normalizeMyobCompanies(payload: unknown): MyobCompanyOption[] {
 export async function getMyobCompanies(): Promise<MyobCompanyOption[]> {
   const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/companies`)
   return normalizeMyobCompanies(unwrapApiData(response))
+}
+
+// ───────────────────────── 阶段 2：工资类别映射 ─────────────────────────
+
+/** 十进制小时：非有限数（缺字段 / 字符串 / NaN）一律按 0，页面不会因此出现 NaN。 */
+function num(value: unknown, fallback = 0) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+/** 5 个类别键与映射字段的对应；顺序即页面行的顺序。 */
+const PAY_CATEGORY_FIELDS: ReadonlyArray<readonly [MyobPayCategoryKey, keyof MyobPayCategoryMapping]> = [
+  ['weekday', 'weekdayUid'],
+  ['saturday', 'saturdayUid'],
+  ['sunday', 'sundayUid'],
+  ['personalLeave', 'personalLeaveUid'],
+  ['holidayLeave', 'holidayLeaveUid'],
+]
+
+export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMapping {
+  const item = record(raw)
+  return {
+    weekdayUid: nullableText(item.weekdayUid),
+    saturdayUid: nullableText(item.saturdayUid),
+    sundayUid: nullableText(item.sundayUid),
+    personalLeaveUid: nullableText(item.personalLeaveUid),
+    holidayLeaveUid: nullableText(item.holidayLeaveUid),
+  }
+}
+
+function normalizeWageCategory(raw: unknown): MyobWageCategory | null {
+  const item = record(raw)
+  const uid = text(item.uid)
+  // 没有 uid 的类别无法被选中保存，丢弃；名称为空时退回 uid，避免下拉里出现空白项
+  return uid ? { uid, name: text(item.name).trim() || uid, wageType: nullableText(item.wageType) } : null
+}
+
+export function normalizeMyobPayCategories(payload: unknown): MyobPayCategories {
+  const data = record(payload)
+  const mapping = normalizeMyobPayCategoryMapping(data.mapping)
+  const categories = list(data.categories, normalizeWageCategory)
+  const knownKeys = new Set<string>(PAY_CATEGORY_FIELDS.map(([key]) => key))
+  const mappedCount = typeof data.mappedCount === 'number' ? Math.min(5, Math.max(0, int(data.mappedCount))) : PAY_CATEGORY_FIELDS.filter(([, field]) => mapping[field] !== null).length
+  return {
+    connectionGuid: text(data.connectionGuid),
+    connectionName: text(data.connectionName),
+    fetchedAt: nullableText(data.fetchedAt),
+    categories,
+    mapping,
+    suggestions: normalizeMyobPayCategoryMapping(data.suggestions),
+    mappedCount,
+    complete: bool(data.complete),
+    missingKeys: textList(data.missingKeys).filter((key): key is MyobPayCategoryKey => knownKeys.has(key)),
+    updatedAt: nullableText(data.updatedAt),
+  }
+}
+
+/** 读取某公司文件的 MYOB 工资类别 + 已保存映射；refresh=true 时后端重新从 MYOB 拉取（否则用缓存）。权限 Myob.Connection.Manage。 */
+export async function getMyobPayCategories(connectionGuid: string, refresh = false): Promise<MyobPayCategories> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/pay-categories`, {
+    params: { connectionGuid, refresh: refresh ? true : undefined },
+  })
+  return normalizeMyobPayCategories(unwrapApiData(response))
+}
+
+/** 保存 5 项映射（调用方须保证 5 项都已选）；返回保存后的完整视图。 */
+export async function saveMyobPayCategoryMapping(
+  connectionGuid: string,
+  mapping: MyobPayCategoryMapping,
+): Promise<MyobPayCategories> {
+  const response = await request.put<ApiResponse<unknown>>(
+    `${MYOB_BASE}/pay-categories/${encodeURIComponent(connectionGuid)}`,
+    mapping,
+  )
+  return normalizeMyobPayCategories(unwrapApiData(response))
+}
+
+// ───────────────────────── 阶段 2：推送预览（只读） ─────────────────────────
+
+const PREVIEW_STATUSES: readonly MyobPreviewStatus[] = ['Ready', 'NoTransfer', 'Blocked']
+const PAY_MODES: readonly MyobPayMode[] = ['Transfer', 'Cash', 'Mixed']
+const TIMESHEET_STATES: readonly MyobTimesheetState[] = ['Unknown', 'Clear', 'HasEntries', 'Processed', 'CheckFailed']
+
+/** 未知的行状态按「被拦截」处理：宁可多拦一个，也不会把不认识的状态显示成「可推送」。 */
+export function normalizeMyobPreviewStatus(value: unknown): MyobPreviewStatus {
+  return PREVIEW_STATUSES.find((status) => status === value) ?? 'Blocked'
+}
+
+function normalizeMyobTimesheetState(value: unknown): MyobTimesheetState {
+  return TIMESHEET_STATES.find((state) => state === value) ?? 'Unknown'
+}
+
+function normalizePayMode(value: unknown): MyobPayMode | null {
+  return PAY_MODES.find((mode) => mode === value) ?? null
+}
+
+function normalizePeriod(raw: unknown): MyobPreviewPeriodOption | null {
+  const item = record(raw)
+  const start = text(item.start)
+  return start ? { start, end: text(item.end) } : null
+}
+
+function normalizeUnlockedStore(raw: unknown): MyobUnlockedStore | null {
+  const item = record(raw)
+  const storeCode = text(item.storeCode)
+  return storeCode ? { storeCode, storeName: text(item.storeName), employeeCount: int(item.employeeCount) } : null
+}
+
+function normalizeReadiness(raw: unknown): MyobPreviewReadiness {
+  const item = record(raw)
+  return {
+    lockedStores: textList(item.lockedStores),
+    unlockedStores: list(item.unlockedStores, normalizeUnlockedStore),
+    categoryMappedCount: Math.min(5, Math.max(0, int(item.categoryMappedCount))),
+    categoryComplete: bool(item.categoryComplete),
+    myobChecked: bool(item.myobChecked),
+    myobProcessedCount: int(item.myobProcessedCount),
+    myobCheckFailedCount: int(item.myobCheckFailedCount),
+  }
+}
+
+function normalizeHint(raw: unknown): MyobPreviewHint | null {
+  const item = record(raw)
+  const message = text(item.message).trim()
+  // 没有说明文字的提示没有信息量，丢弃
+  return message ? { code: text(item.code), userGuid: text(item.userGuid), userName: text(item.userName), message } : null
+}
+
+function normalizeBlocker(raw: unknown): MyobPreviewBlocker | null {
+  const item = record(raw)
+  const code = text(item.code)
+  const message = text(item.message)
+  return code || message ? { code, message, ref: nullableText(item.ref) } : null
+}
+
+function normalizePushHours(raw: unknown): MyobPushHours {
+  const item = record(raw)
+  return {
+    weekday: num(item.weekday),
+    saturday: num(item.saturday),
+    sunday: num(item.sunday),
+    personalLeave: num(item.personalLeave),
+    holidayLeave: num(item.holidayLeave),
+  }
+}
+
+/** 日网格行：hours 与 days 对齐（缺的补 0、多的截断），保证渲染时每个单元格都有数。 */
+function normalizeGridRow(raw: unknown, dayCount: number): MyobDayGridRow | null {
+  const item = record(raw)
+  const key = text(item.key)
+  if (!key) {
+    return null
+  }
+  const source = Array.isArray(item.hours) ? item.hours : []
+  const hours = Array.from({ length: dayCount }, (_, index) => num(source[index]))
+  return {
+    key,
+    label: nullableText(item.label),
+    hours,
+    total: typeof item.total === 'number' && Number.isFinite(item.total) ? item.total : hours.reduce((sum, value) => sum + value, 0),
+  }
+}
+
+function normalizeShare(raw: unknown): MyobCompanyShare | null {
+  const item = record(raw)
+  const connectionGuid = text(item.connectionGuid)
+  return connectionGuid
+    ? {
+        connectionGuid,
+        connectionName: text(item.connectionName),
+        actualHours: num(item.actualHours),
+        allocatedTransferHours: num(item.allocatedTransferHours),
+      }
+    : null
+}
+
+function normalizeDetail(raw: unknown): MyobPreviewDetail {
+  const item = record(raw)
+  const days = textList(item.days)
+  return {
+    days,
+    actual: list(item.actual, (row) => normalizeGridRow(row, days.length)),
+    pushed: list(item.pushed, (row) => normalizeGridRow(row, days.length)),
+    cash: list(item.cash, (row) => normalizeGridRow(row, days.length)),
+    shares: list(item.shares, normalizeShare),
+    annualCashOutTransferHours: num(item.annualCashOutTransferHours),
+    // 后端没给 checkOk 时按「未通过」处理：校验条不会在缺数据时显示成绿色通过
+    checkOk: bool(item.checkOk),
+    checkMessage: text(item.checkMessage),
+  }
+}
+
+export function normalizeMyobPreviewRow(raw: unknown): MyobPreviewRow | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  if (!userGuid) {
+    return null
+  }
+  const blockers = list(item.blockers, normalizeBlocker)
+  // 自洽兜底：有拦截项就一定是「被拦截」，不管 status 写了什么（推送时服务端也会拒绝）
+  const status = blockers.length > 0 ? 'Blocked' : normalizeMyobPreviewStatus(item.status)
+  return {
+    userGuid,
+    userName: text(item.userName),
+    payMode: normalizePayMode(item.payMode),
+    fixedTransferHoursPerWeek: num(item.fixedTransferHoursPerWeek),
+    isCrossCompany: bool(item.isCrossCompany),
+    allocatedTransferHours: num(item.allocatedTransferHours),
+    actualHours: num(item.actualHours),
+    storeLabels: textList(item.storeLabels),
+    status,
+    pushed: normalizePushHours(item.pushed),
+    pushedTotal: num(item.pushedTotal),
+    cashOutHours: num(item.cashOutHours),
+    blockers,
+    hintCodes: textList(item.hintCodes),
+    myobName: nullableText(item.myobName),
+    myobState: normalizeMyobTimesheetState(item.myobState),
+    detail: normalizeDetail(item.detail),
+  }
+}
+
+/** 后端没给 totals 时，由行数据推出（页面底部汇总不会空白）。 */
+function summarizePreviewRows(rows: MyobPreviewRow[]): MyobPreviewTotals {
+  const ready = rows.filter((row) => row.status === 'Ready')
+  return {
+    readyCount: ready.length,
+    readyHours: ready.reduce((sum, row) => sum + row.pushedTotal, 0),
+    blockedCount: rows.filter((row) => row.status === 'Blocked').length,
+    noTransferCount: rows.filter((row) => row.status === 'NoTransfer').length,
+  }
+}
+
+export function normalizeMyobTimesheetPreview(payload: unknown): MyobTimesheetPreview {
+  const data = record(payload)
+  const rows = list(data.rows, normalizeMyobPreviewRow)
+  const rawTotals = record(data.totals)
+  const totals: MyobPreviewTotals =
+    Object.keys(rawTotals).length > 0
+      ? {
+          readyCount: int(rawTotals.readyCount),
+          readyHours: num(rawTotals.readyHours),
+          blockedCount: int(rawTotals.blockedCount),
+          noTransferCount: int(rawTotals.noTransferCount),
+        }
+      : summarizePreviewRows(rows)
+  return {
+    connectionGuid: text(data.connectionGuid),
+    connectionName: text(data.connectionName),
+    periodStart: text(data.periodStart),
+    periodEnd: text(data.periodEnd),
+    weeks: Math.max(1, int(data.weeks, 1)),
+    periods: list(data.periods, normalizePeriod),
+    readiness: normalizeReadiness(data.readiness),
+    hints: list(data.hints, normalizeHint),
+    rows,
+    totals,
+    pushEnabled: bool(data.pushEnabled),
+  }
+}
+
+export interface MyobTimesheetPreviewQuery {
+  /** 周期起始日 yyyy-MM-dd；省略 = 后端取「上一个已结束的工资周期」。 */
+  periodStart?: string | null
+  /** true 才会逐个员工去 MYOB 读 Timesheet 状态（慢，会产生 MYOB 读请求）。 */
+  checkMyob?: boolean
+}
+
+/** 只读推送预览：不会往 MYOB 写任何东西。权限 Attendance.Payroll.Edit。 */
+export async function getMyobTimesheetPreview(
+  connectionGuid: string,
+  query: MyobTimesheetPreviewQuery = {},
+): Promise<MyobTimesheetPreview> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/timesheet/preview`, {
+    params: {
+      connectionGuid,
+      periodStart: query.periodStart || undefined,
+      checkMyob: query.checkMyob ? true : undefined,
+    },
+  })
+  return normalizeMyobTimesheetPreview(unwrapApiData(response))
 }

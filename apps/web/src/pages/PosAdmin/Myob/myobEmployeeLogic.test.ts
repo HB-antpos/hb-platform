@@ -141,14 +141,16 @@ const counts: MyobBindingCounts = {
 
 // ───────────── 页签权限 ─────────────
 
-assert.deepEqual(getVisibleMyobTabs({ canManageConnections: true, canBindEmployees: true, canEditPayroll: true }), ['connections', 'employees', 'payroll'])
+assert.deepEqual(getVisibleMyobTabs({ canManageConnections: true, canBindEmployees: true, canEditPayroll: true }), ['connections', 'employees', 'payroll', 'push'])
 assert.deepEqual(getVisibleMyobTabs({ canManageConnections: false, canBindEmployees: true, canEditPayroll: false }), ['employees'])
-assert.deepEqual(getVisibleMyobTabs({ canManageConnections: false, canBindEmployees: false, canEditPayroll: true }), ['payroll'])
+assert.deepEqual(getVisibleMyobTabs({ canManageConnections: false, canBindEmployees: false, canEditPayroll: true }), ['payroll', 'push'])
 assert.deepEqual(getVisibleMyobTabs({ canManageConnections: false, canBindEmployees: false, canEditPayroll: false }), [])
 assert.equal(resolveActiveMyobTab('payroll', ['connections', 'payroll']), 'payroll')
 assert.equal(resolveActiveMyobTab('employees', ['connections', 'payroll']), 'connections', '无权限页签回落到第一个可见页签')
 assert.equal(resolveActiveMyobTab(null, ['employees']), 'employees')
 assert.equal(resolveActiveMyobTab('payroll', []), null)
+assert.equal(resolveActiveMyobTab('push', ['connections', 'payroll', 'push']), 'push')
+assert.equal(resolveActiveMyobTab('push', ['connections']), 'connections', '没有编辑工资权限时推送页签回落')
 
 // ───────────── 筛选 / 搜索 / 计数 ─────────────
 

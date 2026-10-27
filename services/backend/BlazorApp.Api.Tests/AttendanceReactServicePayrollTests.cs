@@ -322,6 +322,60 @@ namespace BlazorApp.Api.Tests
             Assert.True(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Mixed", 30m, null)));
         }
 
+        [Fact]
+        public async Task MYOB推送供数_与工资表同源_转账工时与工资表一致_周期锁定状态随提交变化()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedWorkedScheduleAsync("pay-tue", new DateTime(2026, 10, 6), "09:00-17:30", "08:56-13:00", "13:31-17:30");
+            await SeedWorkedScheduleAsync("pay-sun", new DateTime(2026, 10, 11), "09:00-12:30", "09:00-12:30");
+            // 转账 + 现金：每周固定转账 4h × 2 周 = 8h；按 周日 → 平日 装入：周日 3.5h + 平日 4.5h
+            await _db.Insertable(new EmployeePayRate
+            {
+                RateGuid = "rate-mixed", UserGuid = "staff-user", PayMode = "Mixed", FixedTransferHoursPerWeek = 4m,
+                TransferWeekdayRate = 30m, TransferSaturdayRate = 35m, TransferSundayRate = 40m, TransferPublicHolidayRate = 30m,
+                CashRate = 25m, EffectiveFrom = new DateTime(2026, 7, 1), CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var source = (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)Manager();
+            var settings = await source.GetSettingsAsync();
+            Assert.True(settings.Weeks is 1 or 2);
+
+            var pairs = await source.FindDataPairsAsync(["staff-user", "nobody"], PayrollPeriodStart, 2);
+            Assert.Equal([("staff-user", "BRI")], pairs.ToArray());
+
+            var data = await source.GetStoreDataAsync("BRI", PayrollPeriodStart, 2, ["staff-user"]);
+            Assert.False(data.IsLocked);
+            var employee = Assert.Single(data.Employees);
+            Assert.Equal("staff-user", employee.UserGuid);
+            Assert.Equal(479, employee.WorkItems.Where(item => item.Bucket == BlazorApp.Api.Services.Attendance.PayrollBucket.Weekday).Sum(item => item.Minutes));
+            Assert.Equal(210, employee.WorkItems.Where(item => item.Bucket == BlazorApp.Api.Services.Attendance.PayrollBucket.Sunday).Sum(item => item.Minutes));
+            Assert.Single(employee.Rates);
+
+            // 与工资表同源：规划器算出的转账工时 = 工资表「转账」小时（同一批工时、同一个固定转账额度）
+            var items = employee.WorkItems
+                .Select(item => new BlazorApp.Api.Services.Myob.MyobWorkItem(
+                    "conn", "BRI", item.Date,
+                    item.Bucket switch
+                    {
+                        BlazorApp.Api.Services.Attendance.PayrollBucket.Sunday => BlazorApp.Api.Services.Myob.MyobWorkKind.Sunday,
+                        BlazorApp.Api.Services.Attendance.PayrollBucket.Saturday => BlazorApp.Api.Services.Myob.MyobWorkKind.Saturday,
+                        BlazorApp.Api.Services.Attendance.PayrollBucket.PublicHoliday => BlazorApp.Api.Services.Myob.MyobWorkKind.PublicHolidayWork,
+                        _ => BlazorApp.Api.Services.Myob.MyobWorkKind.Weekday,
+                    },
+                    item.Minutes))
+                .ToList();
+            var plan = BlazorApp.Api.Services.Myob.MyobTimesheetPlanner.Plan("Mixed", 4m, 2, items).Companies["conn"];
+            var pay = await Manager().GetPayrollPayAsync(PayrollQuery());
+            var row = Assert.Single(pay.Data!.Rows);
+            Assert.Equal(row.Transfer.Hours, BlazorApp.Api.Services.Attendance.PayrollCalculator.RoundHours(plan.PushedMinutes));
+            Assert.Equal(row.Transfer.Buckets.Sunday, BlazorApp.Api.Services.Attendance.PayrollCalculator.RoundHours(plan.Pushed.Where(line => line.CategoryKey == "sunday").Sum(line => line.Minutes)));
+
+            // 提交锁定后供数里的 IsLocked 变为 true
+            Assert.True((await Manager().SubmitPayPeriodAsync(PeriodKey())).Success);
+            var locked = await source.GetStoreDataAsync("BRI", PayrollPeriodStart, 2, ["staff-user"]);
+            Assert.True(locked.IsLocked);
+        }
+
         private static CreateEmployeePayRateDto TransferRateRequest(DateTime effectiveFrom, decimal weekday = 30m) => new()
         {
             StoreCode = "BRI",
