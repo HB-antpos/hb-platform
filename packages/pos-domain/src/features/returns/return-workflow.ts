@@ -151,6 +151,8 @@ export type ReturnWorkflowSnapshot = Readonly<{
   caseKind: ReturnCaseKind;
   originalOrderGuid: string | null;
   receiptLabel: string | null;
+  receiptSoldAtIso?: string | null;
+  receiptCashierName?: string | null;
   loadedFrom: "remote" | "local" | null;
   returnRecordsMayBeStale: boolean;
   lines: readonly ReturnDraftLine[];
@@ -280,6 +282,8 @@ export class ReturnWorkflow {
       caseKind: "receipt",
       originalOrderGuid: context.originalOrderGuid,
       receiptLabel: context.receiptLabel,
+      receiptSoldAtIso: context.soldAtIso ?? null,
+      receiptCashierName: context.cashierName ?? null,
       loadedFrom: context.loadedFrom,
       returnRecordsMayBeStale: context.returnRecordsMayBeStale,
       lines: createReceiptDraftLines(context),

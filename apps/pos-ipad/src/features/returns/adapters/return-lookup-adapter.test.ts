@@ -601,6 +601,31 @@ test("本地降级查单扣掉本机全部已退数量（含已同步的），�
   assert.equal(context?.lines[0]?.remainingAmountCents, 500);
 });
 
+test("退货摘要需要的售出时间与收银员：在线取原单 DTO，本地取本机订单，缺失为 null", async () => {
+  const remote = new FakeHistoryApi();
+  const base = remoteContext();
+  remote.contextResult = {
+    ...base,
+    order: { ...base.order!, soldAt: "2026-10-09T07:30:00Z", cashierName: " Lucy " },
+  };
+  const online = await createAdapter({ historyApi: remote }).lookupReceipt(orderGuid);
+  assert.equal(online?.soldAtIso, "2026-10-09T07:30:00Z");
+  assert.equal(online?.cashierName, "Lucy");
+
+  remote.contextResult = remoteContext();
+  const bare = await createAdapter({ historyApi: remote }).lookupReceipt(orderGuid);
+  assert.equal(bare?.soldAtIso, null);
+  assert.equal(bare?.cashierName, "Cashier"); // 夹具里原单自带收银员，无售出时间
+
+  const offline = new FakeHistoryApi();
+  offline.searchError = new HbposApiError("offline", { kind: "transport" });
+  const local = new FakeLocalOrders();
+  local.result = { ...localSnapshot(), soldAtIso: "2026-10-09T07:30:00Z", cashierName: "Bob" };
+  const fallback = await createAdapter({ historyApi: offline, localOrders: local }).lookupReceipt("receipt-local");
+  assert.equal(fallback?.soldAtIso, "2026-10-09T07:30:00Z");
+  assert.equal(fallback?.cashierName, "Bob");
+});
+
 function createAdapter(
   overrides: Partial<{
     historyApi: ReturnHistoryApiPort;

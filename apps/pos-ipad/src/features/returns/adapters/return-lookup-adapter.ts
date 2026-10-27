@@ -124,6 +124,9 @@ export type LocalReceiptReturnSnapshot = Readonly<{
   storeCode: string;
   originalOrderGuid: string;
   receiptLabel: string;
+  /** 原单售出时间与收银员，供退货页摘要显示（对齐 WPF #701）。 */
+  soldAtIso?: string | null;
+  cashierName?: string | null;
   lines: readonly ReceiptReturnLine[];
   capacities: readonly ProtectedTenderCapacityMaterial[];
   /** 原单全部支付（含代金券）的原始付款额口径；缺省视为无法取得，不额外约束。 */
@@ -408,6 +411,8 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
     return {
       originalOrderGuid,
       receiptLabel: originalOrderGuid,
+      soldAtIso: order.soldAt?.trim() || null,
+      cashierName: order.cashierName?.trim() || null,
       loadedFrom: "remote",
       // 读不到本机退货时无法保证数量准确，按过期处理（界面会提示）。
       returnRecordsMayBeStale: localRecords === null,
@@ -464,6 +469,8 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
     return {
       originalOrderGuid,
       receiptLabel: requiredText(snapshot.receiptLabel),
+      soldAtIso: snapshot.soldAtIso ?? null,
+      cashierName: snapshot.cashierName ?? null,
       loadedFrom: "local",
       returnRecordsMayBeStale: true,
       lines,
