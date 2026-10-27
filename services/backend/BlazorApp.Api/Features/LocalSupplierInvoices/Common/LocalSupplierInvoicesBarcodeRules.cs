@@ -25,6 +25,32 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             }
         }
 
+        /// <summary>
+        /// 「添加多码」实际要写入的条码集合，校验与写入共用，保证两边口径一致。
+        /// 有副码时通常只写副码；但主条码若还没归属该商品（主档条码是货号占位，或主条码本身是新条码），
+        /// 它也是这行要登记的新条码，必须一并写入，否则发票主条码永远落不进主档。
+        /// 无副码时沿用旧流程：只写明细主条码。
+        /// </summary>
+        public static List<string> ResolveMultiCodeBarcodes(
+            string? mainBarcode,
+            string? additionalBarcodesJson,
+            bool mainBarcodeOwned
+        )
+        {
+            var main = mainBarcode?.Trim();
+            var additional = DeserializeAdditionalBarcodes(additionalBarcodesJson);
+            if (additional.Count == 0)
+                return string.IsNullOrWhiteSpace(main)
+                    ? new List<string>()
+                    : NormalizeAdditionalBarcodeValues(null, new[] { main });
+
+            if (mainBarcodeOwned || string.IsNullOrWhiteSpace(main))
+                return additional;
+
+            // 主条码排在最前，NormalizeAdditionalBarcodeValues 会按大小写不敏感去重。
+            return NormalizeAdditionalBarcodeValues(null, new[] { main }.Concat(additional));
+        }
+
         public static void PopulateAdditionalBarcodes(IEnumerable<LocalSupplierInvoiceItemDto> items)
         {
             foreach (var item in items)
