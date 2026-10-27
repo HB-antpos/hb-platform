@@ -14,6 +14,9 @@ export type OperationAuditTableSortOrder = 'ascend' | 'descend'
 export interface OperationAuditQueryState {
   startUtc: string
   endUtc: string
+  /** 门店本地时间范围（YYYY-MM-DDTHH:mm:ss）；传了就让后端按每家分店各自的时区换算，startUtc / endUtc 仅作旧后端兜底。 */
+  startLocal?: string
+  endLocal?: string
   storeCode: string
   /** 分店多选；与 storeCode 合并后去重。 */
   storeCodes?: string[]
@@ -182,6 +185,9 @@ export function buildOperationAuditQuery(_state: OperationAuditQueryState): Oper
   return {
     fromUtc: _state.startUtc,
     toUtc: _state.endUtc,
+    ...(trim(_state.startLocal) && trim(_state.endLocal)
+      ? { fromLocal: trim(_state.startLocal), toLocal: trim(_state.endLocal) }
+      : {}),
     storeCode: trim(_state.storeCode),
     // 多选分店与操作类型按重复键展开；空数组不传，保持与旧后端兼容。
     ...(storeCodes.length ? { storeCodes } : {}),

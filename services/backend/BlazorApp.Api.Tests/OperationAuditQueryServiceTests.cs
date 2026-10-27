@@ -36,7 +36,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
             typeof(PosOperationAuditItem),
             typeof(PosOperationAuditFlag),
             typeof(PosOperationAuditReview),
-            typeof(BlazorApp.Shared.Models.Product));
+            typeof(BlazorApp.Shared.Models.Product),
+            typeof(BlazorApp.Shared.Models.Store));
     }
 
     [Fact]
@@ -640,6 +641,98 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
 
         Assert.Equal(OperationAuditDetailAccessStatus.Forbidden, result.Status);
         Assert.Null(result.Data);
+    }
+
+    [Fact]
+    public async Task QueryAsync_LocalRangeIsConvertedPerStoreTimeZone()
+    {
+        // 现场案例：同一个门店墙钟 16:24:52，昆士兰店（UTC+10）= 06:24:52Z，悉尼店（UTC+11）= 05:24:52Z。
+        await InsertStoreAsync("QLD1", "Australia/Brisbane");
+        await InsertStoreAsync("SYD1", "Australia/Sydney");
+        await InsertAuditAsync("qld-in-range", "QLD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd-in-range", "SYD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        // 墙钟 15:24:52 / 17:24:52，各自在范围之外。
+        await InsertAuditAsync("qld-early", "QLD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd-late", "SYD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        // 门店表里没有的编码按悉尼处理。
+        await InsertAuditAsync("unknown-in-range", "UNKNOWN", new DateTime(2026, 10, 27, 5, 25, 0, DateTimeKind.Utc));
+        var service = CreateService("Admin", withProductDb: true);
+
+        var result = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T16:20:00", ToLocal = "2026-10-27T16:29:00" },
+            new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(
+            ["qld-in-range", "syd-in-range", "unknown-in-range"],
+            result.Items.Select(item => item.ReceiptNumber).OrderBy(value => value, StringComparer.Ordinal).ToArray());
+        Assert.Equal("Australia/Brisbane", result.Items.Single(item => item.ReceiptNumber == "qld-in-range").StoreTimeZoneId);
+        Assert.Equal("Australia/Sydney", result.Items.Single(item => item.ReceiptNumber == "syd-in-range").StoreTimeZoneId);
+        Assert.Equal("Australia/Sydney", result.Items.Single(item => item.ReceiptNumber == "unknown-in-range").StoreTimeZoneId);
+    }
+
+    [Fact]
+    public async Task QueryAsync_LocalRangeStillRespectsStoreFilterAndManageableScope()
+    {
+        await InsertStoreAsync("QLD1", "Australia/Brisbane");
+        await InsertStoreAsync("SYD1", "Australia/Sydney");
+        await InsertAuditAsync("qld", "QLD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd", "SYD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var now = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+        var query = new OperationAuditQueryDto { FromLocal = "2026-10-27T16:00:00", ToLocal = "2026-10-27T17:00:00" };
+
+        var onlyQld = await CreateService("Admin", withProductDb: true)
+            .QueryAsync(new OperationAuditQueryDto { FromLocal = query.FromLocal, ToLocal = query.ToLocal, StoreCodes = ["QLD1"] }, now);
+        var manager = await CreateService("StoreManager", ["SYD1"], withProductDb: true).QueryAsync(query, now);
+
+        Assert.Equal(["qld"], onlyQld.Items.Select(item => item.ReceiptNumber).ToArray());
+        Assert.Equal(["syd"], manager.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task QueryAsync_LocalRangeFallsBackToSydneyWithoutStoreData()
+    {
+        // 没有主库连接（测试替身 / 查询失败）时所有门店按悉尼换算，不能因此查空或抛错。
+        await InsertAuditAsync("syd", "ANY", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var service = CreateService("Admin");
+
+        var result = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T16:20:00", ToLocal = "2026-10-27T16:29:00" },
+            new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(["syd"], result.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task QueryAsync_InvertedLocalRangeReturnsEmptyAndZonedValuesAreIgnored()
+    {
+        await InsertAuditAsync("syd", "ANY", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var service = CreateService("Admin");
+        var now = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+
+        var inverted = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T17:00:00", ToLocal = "2026-10-27T16:00:00" }, now);
+        // 带 Z 的 FromLocal 无效，整体回退到 FromUtc / ToUtc。
+        var zoned = await service.QueryAsync(
+            new OperationAuditQueryDto
+            {
+                FromLocal = "2026-10-27T16:20:00Z",
+                ToLocal = "2026-10-27T16:29:00Z",
+                FromUtc = new DateTimeOffset(2026, 10, 27, 5, 0, 0, TimeSpan.Zero),
+                ToUtc = new DateTimeOffset(2026, 10, 27, 6, 0, 0, TimeSpan.Zero),
+            }, now);
+
+        Assert.Empty(inverted.Items);
+        Assert.Equal(["syd"], zoned.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    private async Task InsertStoreAsync(string storeCode, string timeZoneId)
+    {
+        await _db.Insertable(new BlazorApp.Shared.Models.Store
+        {
+            StoreCode = storeCode,
+            StoreName = storeCode,
+            TimeZoneId = timeZoneId,
+        }).ExecuteCommandAsync();
     }
 
     private OperationAuditQueryService CreateService(

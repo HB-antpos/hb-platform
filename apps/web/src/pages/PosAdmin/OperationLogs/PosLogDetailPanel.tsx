@@ -148,7 +148,7 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
           ) : null}
         </div>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          {[record.cashierName || record.cashierId || '-', props.storeLabel, record.deviceCode || '-', formatStoreClock(record.occurredAtUtc)].join(' · ')}
+          {[record.cashierName || record.cashierId || '-', props.storeLabel, record.deviceCode || '-', formatStoreClock(record.occurredAtUtc, record.storeTimeZoneId)].join(' · ')}
         </Typography.Text>
       </div>
 
@@ -169,8 +169,8 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
 
       <Descriptions bordered size="small" column={1} labelStyle={{ width: 120 }}>
         <Descriptions.Item label={t('operationLogs.columns.time')}>
-          {formatStoreTime(record.occurredAtUtc)}
-          <Typography.Text type="secondary">{` · ${t('operationLogs.detail.receivedAt')} ${formatStoreClock(record.receivedAtUtc)}`}</Typography.Text>
+          {formatStoreTime(record.occurredAtUtc, record.storeTimeZoneId)}
+          <Typography.Text type="secondary">{` · ${t('operationLogs.detail.receivedAt')} ${formatStoreClock(record.receivedAtUtc, record.storeTimeZoneId)}`}</Typography.Text>
         </Descriptions.Item>
         <Descriptions.Item label={t('legacyEmployeeLogs.detail.storeDevice')}>
           {props.storeLabel} · <Typography.Text code>{record.deviceCode || '-'}</Typography.Text>
@@ -272,7 +272,7 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
                   children: (
                     <div style={{ fontWeight: isCurrent ? 500 : undefined, fontSize: 13 }}>
                       <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineEnd: 8, fontVariantNumeric: 'tabular-nums' }}>
-                        {formatStoreClock(item.occurredAtUtc)}
+                        {formatStoreClock(item.occurredAtUtc, item.storeTimeZoneId ?? record.storeTimeZoneId)}
                       </Typography.Text>
                       {props.operationLabel(item.operationType)}
                       {item.outcome !== 'Succeeded' ? <span style={{ marginInlineStart: 6 }}>{props.outcomeTag(item.outcome)}</span> : null}

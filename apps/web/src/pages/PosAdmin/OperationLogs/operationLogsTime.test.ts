@@ -6,6 +6,7 @@ import {
   formatStoreClock,
   formatStoreTime,
   getStoreNow,
+  storePickerValueToLocal,
   storePickerValueToUtcIso,
   storeWallClockToUtc,
   utcToStorePickerValue,
@@ -73,6 +74,30 @@ assertEqual(formatStoreTime(null), '—', '空值')
 assertEqual(formatStoreClock(undefined), '—', '空值时分秒')
 assertEqual(formatStoreClock('garbage'), '—', '非法值')
 
+// ───────── 分店时区：昆士兰店（Brisbane，UTC+10 不做夏令时）与悉尼店（UTC+11）同一时刻差 1 小时 ─────────
+
+// 现场实测：1014 店（昆士兰）订单墙钟 17:28:05 对应审计 UTC 07:28:05；1018 店（悉尼）16:53:30 对应 05:53:31
+assertEqual(formatStoreTime('2026-10-27T07:28:05.720Z', 'Australia/Brisbane'), '2026-10-27 17:28:05', '昆士兰店按 UTC+10 显示')
+assertEqual(formatStoreTime('2026-10-27T05:53:31.003Z', 'Australia/Sydney'), '2026-10-27 16:53:31', '悉尼店按 UTC+11 显示')
+assertEqual(formatStoreClock('2026-10-27T07:28:05.720Z', 'Australia/Brisbane'), '17:28:05', '昆士兰店时分秒')
+// 没配时区 / 旧后端没返回 / 无法识别：回退悉尼
+assertEqual(formatStoreTime('2026-10-27T05:24:53Z', null), '2026-10-27 16:24:53', '缺时区回退悉尼')
+assertEqual(formatStoreTime('2026-10-27T05:24:53Z', undefined), '2026-10-27 16:24:53', '未返回时区回退悉尼')
+assertEqual(formatStoreTime('2026-10-27T05:24:53Z', 'Not/AZone'), '2026-10-27 16:24:53', '无法识别回退悉尼')
+// 标准时间期间两地一致（7 月悉尼也是 UTC+10）
+assertEqual(formatStoreTime('2026-07-01T00:00:00Z', 'Australia/Brisbane'), formatStoreTime('2026-07-01T00:00:00Z', 'Australia/Sydney'), '冬令时两地相同')
+
+assertEqual(storeWallClockToUtc(wall(2026, 10, 27, 16, 24, 52), 'Australia/Brisbane').toISOString(), '2026-10-27T06:24:52.000Z', '昆士兰墙钟转 UTC')
+assertEqual(storePickerValueToUtcIso(dayjs('2026-10-27 16:24:52'), 'Australia/Brisbane'), '2026-10-27T06:24:52.000Z', '选择器值按昆士兰换算')
+// 「查看该员工当天」用这条日志所属分店的自然日：昆士兰店 07:28Z = 17:28 当地，当天 00:00 = 前一天 14:00Z
+const brisbaneDay = utcToStorePickerValue('2026-10-27T07:28:05Z', 'Australia/Brisbane')
+assertEqual(brisbaneDay.format('YYYY-MM-DD HH:mm:ss'), '2026-10-27 17:28:05', '回填昆士兰墙钟')
+assertEqual(storePickerValueToUtcIso(brisbaneDay.startOf('day'), 'Australia/Brisbane'), '2026-10-26T14:00:00.000Z', '昆士兰当天 00:00 的 UTC')
+
+// 交给后端的门店本地时间字符串：不带时区、不受浏览器时区影响
+assertEqual(storePickerValueToLocal(dayjs('2026-10-27 16:20:24')), '2026-10-27T16:20:24', '门店本地时间字符串')
+assertEqual(storePickerValueToLocal(utcToStorePickerValue('2026-10-27T05:24:52Z')), '2026-10-27T16:24:52', '悉尼墙钟回填后再取字符串')
+
 // ───────── 页面源码约束：不得再按浏览器时区取值 / 显示 ─────────
 
 const pageSource = readFileSync('src/pages/PosAdmin/OperationLogs/index.tsx', 'utf8')
@@ -81,4 +106,7 @@ for (const [name, source] of [['列表页', pageSource], ['详情面板', detail
   assertEqual(/\bdayjs\(/.test(source), false, `${name}不得用 dayjs() 按浏览器时区取时间`)
   assertEqual(source.includes('.toISOString()'), false, `${name}不得把选择器值直接 toISOString`)
 }
-assertEqual(pageSource.includes('storePickerValueToUtcIso(from)') && pageSource.includes('storePickerValueToUtcIso(to)'), true, '查询范围按门店时区换算')
+assertEqual(pageSource.includes('storePickerValueToUtcIso(from)') && pageSource.includes('storePickerValueToUtcIso(to)'), true, '旧后端兜底范围按悉尼换算')
+assertEqual(pageSource.includes('storePickerValueToLocal(from)') && pageSource.includes('storePickerValueToLocal(to)'), true, '查询范围以门店本地时间交给后端')
+assertEqual(pageSource.includes('formatStoreTime(value, record.storeTimeZoneId)'), true, '列表时间按分店时区显示')
+assertEqual(detailSource.includes('record.storeTimeZoneId'), true, '详情时间按分店时区显示')
