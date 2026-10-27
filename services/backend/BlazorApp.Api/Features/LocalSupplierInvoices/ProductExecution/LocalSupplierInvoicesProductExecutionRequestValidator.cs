@@ -185,17 +185,21 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 return;
             }
             if (string.IsNullOrWhiteSpace(detail.Barcode)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：主条码不能为空");
-            var barcodes = GetDetailBarcodes(detail);
-            if (barcodes.Count == 0) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：条码不能为空");
             var productExists = await _source.ProductExistsByCodeAsync(detail.ProductCode);
             if (!productExists) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：商品不存在");
+            var mainBarcodeOwned = true;
             if (LocalSupplierInvoicesBarcodeRules.DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson).Count > 0
-                && productExists && !string.IsNullOrWhiteSpace(detail.Barcode)
-                && !await _source.BarcodeBelongsToProductAsync(detail.Barcode, detail.ProductCode, LocalSupplierInvoicesRules.ResolveDetailStoreCode(detail.StoreCode, header.StoreCode)))
+                && productExists && !string.IsNullOrWhiteSpace(detail.Barcode))
             {
-                // 副条码只能挂在已确认归属的主条码商品上，避免条码交叉导致误写。
-                errors.Add($"明细 {detail.DetailGUID} 添加多码失败：主条码未匹配当前商品");
+                mainBarcodeOwned = await _source.BarcodeBelongsToProductAsync(detail.Barcode, detail.ProductCode, LocalSupplierInvoicesRules.ResolveDetailStoreCode(detail.StoreCode, header.StoreCode));
+                // 关键位置：副条码只能挂在不会交叉的主条码商品上。主条码不归当前商品时分两种：
+                // 已是别的商品的主条码 → 拒绝，避免条码交叉误写；没人占用（主档条码是货号占位、或主条码是新条码）→ 放行，
+                // 并把主条码一并登记为多码（写入端按同一规则处理）。被别的商品多码占用的情况由下面逐条码冲突检查拦截。
+                if (!mainBarcodeOwned && await _source.HasProductBarcodeAsync(NormalizeCaseInsensitive(detail.Barcode)!))
+                    errors.Add($"明细 {detail.DetailGUID} 添加多码失败：主条码未匹配当前商品");
             }
+            var barcodes = LocalSupplierInvoicesBarcodeRules.ResolveMultiCodeBarcodes(detail.Barcode, detail.AdditionalBarcodesJson, mainBarcodeOwned);
+            if (barcodes.Count == 0) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：条码不能为空");
             foreach (var barcode in barcodes)
             {
                 var normalized = NormalizeCaseInsensitive(barcode) ?? string.Empty;
@@ -275,14 +279,6 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 if (!seen.Add(selection.DetailGuid.Trim())) errors.Add($"明细 {selection.DetailGuid} 新商品副码类型选择失败：重复提交类型选择");
             }
             return errors;
-        }
-
-        private static List<string> GetDetailBarcodes(StoreLocalSupplierInvoiceDetails detail)
-        {
-            var additional = LocalSupplierInvoicesBarcodeRules.DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson);
-            return additional.Count > 0
-                ? additional
-                : string.IsNullOrWhiteSpace(detail.Barcode) ? new() : new() { detail.Barcode.Trim() };
         }
 
         private static string? NormalizeCaseInsensitive(string? value) =>
