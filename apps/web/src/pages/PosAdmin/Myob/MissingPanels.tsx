@@ -14,6 +14,7 @@ import {
   getTypeIssueKey,
   getTypeIssueNoteKey,
   joinSubtitle,
+  summarizeStoreLabels,
 } from './myobEmployeeLogic'
 
 // ───────────────────────── 对方没有 ─────────────────────────
@@ -55,7 +56,7 @@ export function MissingPanel({ onlyInOurs, onlyInMyob, canCreateOurSide, ignorin
                   <span className="myob-sub">
                     {joinSubtitle([
                       item.email,
-                      item.storeLabels.join(' / '),
+                      summarizeStoreLabels(item.storeLabels),
                       item.joinedAt ? t('myob.employees.missing.ours.joined', { date: formatShortDate(item.joinedAt) }) : null,
                     ])}
                   </span>
@@ -144,7 +145,7 @@ export function TypeIssuesPanel({ issues, onCopyNote }: TypeIssuesPanelProps) {
       render: (_, issue) => (
         <>
           <span className="myob-person-name">{issue.userName}</span>
-          <span className="myob-sub">{issue.storeLabels.join(' / ') || '—'}</span>
+          <span className="myob-sub">{summarizeStoreLabels(issue.storeLabels) || '—'}</span>
         </>
       ),
     },
@@ -184,7 +185,7 @@ export function TypeIssuesPanel({ issues, onCopyNote }: TypeIssuesPanelProps) {
               t(getTypeIssueNoteKey(issue.issueCode), {
                 name: issue.userName,
                 type: typeLabel(issue.ourType),
-                stores: issue.storeLabels.join(' / ') || '—',
+                stores: summarizeStoreLabels(issue.storeLabels) || '—',
               }),
             )
           }
