@@ -1,4 +1,8 @@
 import {
+  getAttendanceQrRefreshIntervalMs,
+  isBackgroundPollDue,
+} from "@hb/pos-domain/core/contracts/background-polling";
+import {
   AttendanceSecurityApiError,
   type AttendanceSecurityRemotePort,
   type RegisteredAttendanceSigningKey,
@@ -7,6 +11,7 @@ import {
 export const ATTENDANCE_QR_TOKEN_LIFETIME_MS = 15_000;
 export const ATTENDANCE_QR_REFRESH_LEAD_MS = 5_000;
 export const ATTENDANCE_QR_TICK_INTERVAL_MS = 1_000;
+/** 刷新基础节拍：每 15 秒唤醒一次，是否真正刷新由 isRefreshDue 按状态自适应决定（健康 5 分钟、异常 15 秒）。 */
 export const ATTENDANCE_QR_REFRESH_INTERVAL_MS = 15_000;
 
 export type AttendanceDeviceContext = Readonly<{
@@ -135,6 +140,7 @@ export class AttendanceQrController {
   private tokenExpiresAtTrustedEpochMs: number | null = null;
   private tokenGeneration = 0;
   private refreshInFlight: Promise<void> | null = null;
+  private lastRefreshStartedAtMs: number | null = null;
   private tickInFlight: Promise<void> | null = null;
   private cancelTick: (() => void) | null = null;
   private cancelRefresh: (() => void) | null = null;
@@ -165,7 +171,7 @@ export class AttendanceQrController {
     this.cancelRefresh = this.options.scheduler.every(
       ATTENDANCE_QR_REFRESH_INTERVAL_MS,
       () => {
-        void this.refresh();
+        if (this.isRefreshDue()) void this.refresh();
       },
     );
     void this.refresh();
@@ -191,6 +197,7 @@ export class AttendanceQrController {
     if (this.destroyed) return Promise.resolve();
     if (this.refreshInFlight) return this.refreshInFlight;
     let running!: Promise<void>;
+    this.lastRefreshStartedAtMs = this.safeClockNow();
     running = this.runRefresh().finally(() => {
       if (this.refreshInFlight === running) {
         this.refreshInFlight = null;
@@ -198,6 +205,34 @@ export class AttendanceQrController {
     });
     this.refreshInFlight = running;
     return running;
+  }
+
+  /**
+   * 后台刷新（在线登记 / 校时 / 连通性检查）是否到期（对齐 WPF #927）：
+   * 二维码在本机每秒签发，可信时间由「服务器时间锚点 + 本机流逝时间」推算，登记只是后台保活。
+   * 状态健康（在线、已启用、校时有效）时 5 分钟一次；离线、启用失败、需要重新校时等异常仍 15 秒重试，
+   * 保证提示在恢复后尽快消失。
+   */
+  private isRefreshDue(): boolean {
+    const nowMs = this.safeClockNow();
+    if (nowMs === null) return true;
+    const healthy =
+      this.state.kind === "ready" &&
+      this.state.online &&
+      !this.state.requiresOnlineResync;
+    return isBackgroundPollDue(
+      nowMs,
+      this.lastRefreshStartedAtMs,
+      getAttendanceQrRefreshIntervalMs(healthy),
+    );
+  }
+
+  private safeClockNow(): number | null {
+    try {
+      return validClockNow(this.options.clock.now());
+    } catch {
+      return null;
+    }
   }
 
   public tick(): Promise<void> {

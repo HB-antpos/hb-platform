@@ -125,7 +125,8 @@ function receiptProfileServices(
 }
 
 test("设备认证就绪后立即同步一次下发资料，之后前台在线每 60 秒一次，后台与卸载后不再轮询", async () => {
-  jest.useFakeTimers();
+  // 固定为白天：夜间窗口会把周期放慢到 5 分钟，测试不能依赖运行时刻。
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
   const { requestSync, services } = receiptProfileServices();
   mockRuntime = { services };
   const previous = AppState.currentState;
@@ -156,6 +157,27 @@ test("设备认证就绪后立即同步一次下发资料，之后前台在线�
     await screen.unmount();
     await act(async () => { jest.advanceTimersByTime(180_000); });
     expect(requestSync).toHaveBeenCalledTimes(2);
+  } finally {
+    AppState.currentState = previous;
+  }
+});
+
+test("夜间（22:00–06:00）小票资料周期检查放慢到 5 分钟（对齐 WPF #926）", async () => {
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 23, 0, 0) });
+  const { requestSync, services } = receiptProfileServices();
+  mockRuntime = { services };
+  const previous = AppState.currentState;
+  try {
+    AppState.currentState = "active";
+    const screen = await render(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    requestSync.mockClear();
+
+    await act(async () => { jest.advanceTimersByTime(4 * 60_000); });
+    expect(requestSync).not.toHaveBeenCalledWith("timer");
+    await act(async () => { jest.advanceTimersByTime(70_000); });
+    expect(requestSync).toHaveBeenCalledWith("timer");
+    await screen.unmount();
   } finally {
     AppState.currentState = previous;
   }
