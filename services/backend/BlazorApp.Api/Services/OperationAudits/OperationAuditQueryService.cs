@@ -967,7 +967,9 @@ public sealed class OperationAuditQueryService
             return OperationAuditStoreAccess.Denied;
         }
 
-        if (HasAnyRole(user, AdminRoleAliases))
+        // 仓库经理与超级管理员同口径：不限分店。与 CurrentUserManageableStoreScopeService、Web 的 managedStoreCodes() 一致；
+        // 否则仓库经理既不是管理员也不是店长，会被判为无权限，兼任店长时还会因“管理员范围的分店列表为空”被拒。
+        if (HasAnyRole(user, AdminRoleAliases) || HasAnyRole(user, Permissions.WarehouseManagerRoleNames))
         {
             return OperationAuditStoreAccess.Admin;
         }
