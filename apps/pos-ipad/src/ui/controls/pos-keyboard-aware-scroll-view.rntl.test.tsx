@@ -183,3 +183,61 @@ describe("PosKeyboardAwareScrollView", () => {
     expect(ref.current).not.toBeNull();
   });
 });
+
+describe("PosKeyboardAwareTextInput 扫码自动提交（对齐手持）", () => {
+  // 注意：自动提交的定时器触发后，react-test-renderer 的后续 render 会失效，
+  // 因此“触发提交”的场景必须放在本 describe 的最后。
+  it("未启用时不触发；手动输入节奏（字符间隔大）也不触发", async () => {
+    const plain = jest.fn();
+    const manual = jest.fn();
+    const screen = await render(
+      <>
+        <PosKeyboardAwareTextInput
+          onChangeText={() => undefined}
+          onSubmitEditing={plain}
+          testID="plain-input"
+        />
+        <PosKeyboardAwareTextInput
+          autoSubmitOnScanIdle
+          onChangeText={() => undefined}
+          onSubmitEditing={manual}
+          testID="manual-input"
+        />
+      </>,
+    );
+
+    const plainInput = screen.getByTestId("plain-input");
+    await fireEvent.changeText(plainInput, "1");
+    await fireEvent.changeText(plainInput, "12");
+    await fireEvent.changeText(plainInput, "123");
+    await fireEvent.changeText(plainInput, "1234");
+    const manualInput = screen.getByTestId("manual-input");
+    await fireEvent.changeText(manualInput, "9");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await fireEvent.changeText(manualInput, "98");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(plain).not.toHaveBeenCalled();
+    expect(manual).not.toHaveBeenCalled();
+  });
+
+  it("扫码枪快速连发且不带回车时，停顿后自动提交一次（等效回车）", async () => {
+    const onSubmitEditing = jest.fn();
+    const screen = await render(
+      <PosKeyboardAwareTextInput
+        autoSubmitOnScanIdle
+        onChangeText={() => undefined}
+        onSubmitEditing={onSubmitEditing}
+        testID="scan-input"
+      />,
+    );
+
+    const input = screen.getByTestId("scan-input");
+    for (const value of ["S", "ST", "STA", "STAF", "STAFF"]) {
+      await fireEvent.changeText(input, value);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(onSubmitEditing).toHaveBeenCalledTimes(1);
+  });
+});

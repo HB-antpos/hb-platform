@@ -121,13 +121,13 @@ test("二进制下载按 arraybuffer 请求并原样转交 Range 请求头，默
   assert.equal(requests[1]?.responseType, undefined);
 });
 
-function failingInstance(status: number, data: unknown) {
+function failingInstance(status: number, data: unknown, headers: Record<string, string> = {}) {
   return create({
     adapter: async (config) => {
       throw new AxiosError("request failed", "ERR_BAD_RESPONSE", config, undefined, {
         config,
         data,
-        headers: {},
+        headers,
         status,
         statusText: String(status),
       });
@@ -181,6 +181,37 @@ test("HTTP 错误记录正文是否为 ApiResult 信封：网关 HTML 403/404/40
   }
   // 非撤销码 403 与 404/405 都不得触发锁机或清票据。
   assert.deepEqual(unauthorized, []);
+});
+
+test("429 限流记录 Retry-After 整数秒；缺失、HTTP-date 或非法值为 undefined（设备激活页据此提示等待分钟数）", async () => {
+  const cases: ReadonlyArray<readonly [Record<string, string>, number | undefined]> = [
+    [{ "retry-after": "90" }, 90],
+    [{}, undefined],
+    [{ "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }, undefined],
+    [{ "retry-after": "0" }, undefined],
+    [{ "retry-after": "-5" }, undefined],
+  ];
+  for (const [headers, expected] of cases) {
+    const transport = createAxiosHbposTransport(
+      "https://hbpos.example",
+      { async getCredentials() { return {}; } },
+      failingInstance(429, "Too Many Requests", headers),
+      {
+        async onUnauthorized() {},
+        async onForbidden() {},
+      },
+      { cashierHeader: "override-explicit", responseHeaders: "omit" },
+    );
+    await assert.rejects(
+      () => transport.request({ method: "POST", url: "/api/v1/devices/activation-code/redeem" }),
+      (error: unknown) => {
+        assert.ok(error instanceof HbposApiError);
+        assert.equal(error.status, 429);
+        assert.equal(error.retryAfterSeconds, expected);
+        return true;
+      },
+    );
+  }
 });
 
 test("unwrap 遇到 2xx 非信封正文（HTML、null、空对象、数组）抛 envelope 错误并标记非 API 响应，不抛 TypeError", () => {

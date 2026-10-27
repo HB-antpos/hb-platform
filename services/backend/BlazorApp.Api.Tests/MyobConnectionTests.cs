@@ -392,7 +392,7 @@ public sealed class MyobConnectionTests : IDisposable
         Assert.Contains("client_id=client-key", url, StringComparison.Ordinal);
         Assert.Contains("redirect_uri=" + Uri.EscapeDataString("https://hotbargain.vip/api/myob/oauth/callback"), url, StringComparison.Ordinal);
         Assert.Contains("response_type=code", url, StringComparison.Ordinal);
-        Assert.Contains("scope=sme-company-file%20sme-contacts-employee%20sme-payroll", url, StringComparison.Ordinal);
+        Assert.Contains("scope=sme-company-file%20sme-company-settings%20sme-contacts-employee%20sme-payroll", url, StringComparison.Ordinal);
         Assert.Contains("prompt=consent", url, StringComparison.Ordinal);
         Assert.DoesNotContain("client-secret", url, StringComparison.Ordinal);
     }

@@ -26,6 +26,10 @@ import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import { parseDeviceActivationCode } from "@/core/security/device-activation-code";
 import type { DeviceSessionState } from "@/core/security/device-session";
 import { CameraScannerModal } from "@/features/scanner-camera/camera-scanner-modal";
+import {
+  describeDeviceRegistrationFailure,
+  type RegistrationTranslate,
+} from "./device-registration-failure";
 import { toggleAppLanguage } from "@/i18n";
 import {
   PosKeyboardAwareScrollView,
@@ -77,9 +81,9 @@ export function DeviceRegistrationScreen() {
       setRequestError(null);
       await reconcile(next);
     } catch (error: unknown) {
-      applyRequestFailure(error, runtime, setRequestError);
+      applyRequestFailure(error, runtime, setRequestError, t);
     }
-  }, [deviceSession, reconcile, runtime]);
+  }, [deviceSession, reconcile, runtime, t]);
 
   const previewActivation = useCallback(async (rawCode: string) => {
     if (!deviceSession) {
@@ -119,7 +123,7 @@ export function DeviceRegistrationScreen() {
         response: { ...response, storeCode, storeName, expiresAtUtc },
       });
     } catch (error: unknown) {
-      applyRequestFailure(error, runtime, setRequestError);
+      applyRequestFailure(error, runtime, setRequestError, t);
     } finally {
       setOperation(null);
     }
@@ -144,7 +148,7 @@ export function DeviceRegistrationScreen() {
       }
       await reconcile(next);
     } catch (error: unknown) {
-      applyRequestFailure(error, runtime, setRequestError);
+      applyRequestFailure(error, runtime, setRequestError, t);
     } finally {
       setOperation(null);
     }
@@ -161,7 +165,7 @@ export function DeviceRegistrationScreen() {
         if (!cancelled && restored) setActivationCode(restored);
       })
       .catch((error: unknown) => {
-        if (!cancelled) applyRequestFailure(error, runtime, setRequestError);
+        if (!cancelled) applyRequestFailure(error, runtime, setRequestError, t);
       });
     return () => {
       cancelled = true;
@@ -553,6 +557,7 @@ function applyRequestFailure(
   error: unknown,
   runtime: ReturnType<typeof usePosRuntime>,
   setRequestError: Dispatch<SetStateAction<string | null>>,
+  t: RegistrationTranslate,
 ) {
   if (error instanceof HbposApiError) {
     if (error.status === 403) {
@@ -566,14 +571,10 @@ function applyRequestFailure(
             : "registration-required",
       });
     }
-    setRequestError(error.message);
+    setRequestError(describeDeviceRegistrationFailure(error, t));
     return;
   }
-  setRequestError(
-    error instanceof Error
-      ? error.message
-      : "Device registration request failed.",
-  );
+  setRequestError(describeDeviceRegistrationFailure(error, t));
 }
 
 function FieldLabel({ children }: Readonly<{ children: string }>) {

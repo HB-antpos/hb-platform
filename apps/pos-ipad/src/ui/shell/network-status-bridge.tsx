@@ -1,4 +1,8 @@
 import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
+import {
+  getBackgroundPollingIntervalMs,
+  isBackgroundPollDue,
+} from "@hb/pos-domain/core/contracts/background-polling";
 import Constants from "expo-constants";
 import * as Network from "expo-network";
 import { useEffect } from "react";
@@ -24,8 +28,11 @@ import {
 
 /** 后端健康探测周期：后端停止后最多一个周期内收银页翻转为离线。 */
 const BACKEND_PROBE_INTERVAL_MS = 30_000;
-/** 单次后端健康探测超时。 */
-const BACKEND_PROBE_TIMEOUT_MS = 5_000;
+/**
+ * 单次后端健康探测超时。放宽到 8 秒（对齐 WPF）：探测按周期顺序执行，
+ * 弱网/跨入口时 5 秒偏紧会把慢但可用的后端误判为离线，放宽只会让真离线最多晚几秒判定。
+ */
+const BACKEND_PROBE_TIMEOUT_MS = 8_000;
 
 type HbposExtraConfig = Readonly<{
   hbpos?: Readonly<{
@@ -84,6 +91,8 @@ export function NetworkStatusBridge() {
     let probeTimer: ReturnType<typeof setInterval> | null = null;
     // 每次 probe 分配单调代次；多来源并发时只允许最新结果发布。
     let probeGeneration = 0;
+    // 最近一次发起后端探测的时间；夜间静默窗口内周期探测据此放慢（事件触发的探测不受限）。
+    let lastProbeAtMs: number | null = null;
 
     // 健康探测经入口感知的 fetch：边缘入口不通时改探直连，避免整台设备被误判离线进入仅现金模式。
     const probe = createSettingsApiHealthProbe(
@@ -100,6 +109,7 @@ export function NetworkStatusBridge() {
 
     // 探测后端 health：结果写入 backendReachable 并重新发布。
     const probeBackend = async () => {
+      lastProbeAtMs = Date.now();
       const generation = ++probeGeneration;
       try {
         const apiBaseUrl = await resolveCurrentApiBaseUrl();
@@ -156,6 +166,14 @@ export function NetworkStatusBridge() {
 
     // 周期探测后端：后端停止/恢复后最多一个周期内状态翻转。
     probeTimer = setInterval(() => {
+      // 夜间（22:00–06:00）且后端上次探测可达时放慢到 5 分钟（对齐 WPF #926）；
+      // 异常（不可达/尚未探测）仍按 30 秒重试，恢复后尽快翻回在线。网络变化、回前台的探测不受此限。
+      const intervalMs = getBackgroundPollingIntervalMs(
+        new Date(),
+        BACKEND_PROBE_INTERVAL_MS,
+        backendReachable === true,
+      );
+      if (!isBackgroundPollDue(Date.now(), lastProbeAtMs, intervalMs)) return;
       void probeBackend();
     }, BACKEND_PROBE_INTERVAL_MS);
 
