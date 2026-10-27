@@ -30,19 +30,26 @@ public sealed class MyobConnectionTests : IDisposable
     // 澳大利亚税务局公开的示例 ABN（51 824 753 556），通过 ABN 校验算法。
     private const string ValidAbn = "51824753556";
 
-    private static readonly DateTime Now = new(2026, 10, 27, 1, 0, 0, DateTimeKind.Utc);
+    // 假时钟必须取「测试开始时的真实时间」：OAuth state 由 Data Protection 的限时保护器签发，
+    // 它按系统时钟校验过期；若这里用固定日期，真实时间一过期限（CI 上就是几分钟后）所有回调用例都会误判 state 过期。
+    // 取整到秒是为了和 SQLite 往返后的 DateTime 精度一致。
+    private readonly DateTime Now = TruncateToSecond(DateTime.UtcNow);
+
+    private static DateTime TruncateToSecond(DateTime value) =>
+        new(value.Ticks - value.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);
 
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"hb-myob-{Guid.NewGuid():N}.db");
     private readonly SqlSugarClient _db;
     private readonly MyobSecretProtector _protector;
     private readonly FakeMyobApiClient _client = new();
-    private readonly FakeTimeProvider _time = new(Now);
+    private readonly FakeTimeProvider _time;
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly MyobTokenProvider _tokens;
     private readonly MyobConnectionService _service;
 
     public MyobConnectionTests()
     {
+        _time = new FakeTimeProvider(Now);
         _db = new SqlSugarClient(new ConnectionConfig
         {
             ConnectionString = $"Data Source={_dbPath}",
