@@ -709,10 +709,10 @@
     {
       "path": "features/receipts/daily-close-receipt.ts",
       "package": "pos-receipt-core",
-      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值",
+      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）",
       "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
-      "canonicalRuntimeSha256": "99d54c525a297762c08f72123929dc207194077a5d88715e90184c4304c0c954",
-      "canonicalTypeSha256": "c34c5cb1ac32140af1fa1f1a80298c4fff4df59a9da1934e2a1e8b22a9c91f75",
+      "canonicalRuntimeSha256": "af0d1518bad838c6ecc7d0ff38c92521d127fd45dd61eac37714c3cc78e920d9",
+      "canonicalTypeSha256": "6285e9af016526b6e0b686493b90ce0fa4c9a2f93485349dc4f204ba7c9fd942",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -725,6 +725,12 @@
           "script": "test:receipts",
           "path": "src/features/receipts/daily-close-receipt.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/daily-close-cash-slip.test.ts",
+          "pattern": "src/**/*.test.ts"
         }
       ]
     }
