@@ -20,6 +20,7 @@ import {
   joinSubtitle,
   type BindingFilter,
   type BindingRowAction,
+  summarizeStoreLabels,
 } from './myobEmployeeLogic'
 
 const PAGE_SIZE = 20
@@ -72,7 +73,7 @@ export default function BindingListView({
             <EmployeeTypeTag type={row.employeeType} />
             {row.isCrossCompany ? <Tag color="blue">{t('myob.employees.cross')}</Tag> : null}
           </span>
-          <span className="myob-sub">{joinSubtitle([row.email, row.storeLabels.join(' / ')])}</span>
+          <span className="myob-sub">{joinSubtitle([row.email, summarizeStoreLabels(row.storeLabels)])}</span>
         </>
       ),
     },

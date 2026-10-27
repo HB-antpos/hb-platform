@@ -559,3 +559,14 @@ export function getOtherStoresOfUser(
       companyName: row.effectiveConnectionName ?? row.defaultConnectionName ?? '',
     }))
 }
+
+/**
+ * 分店标签摘要：总部账号常挂在几十个分店上，一行全列会撑爆表格。
+ * 最多显示前 limit 个（后端已把由本公司发薪的分店排在前面），其余用「+N」表示（不依赖语言包）；没有分店返回空串。
+ */
+export function summarizeStoreLabels(labels: readonly string[], limit = 3): string {
+  if (labels.length === 0) return ''
+  const head = labels.slice(0, Math.max(1, limit)).join(' / ')
+  const rest = labels.length - Math.max(1, limit)
+  return rest > 0 ? `${head} +${rest}` : head
+}

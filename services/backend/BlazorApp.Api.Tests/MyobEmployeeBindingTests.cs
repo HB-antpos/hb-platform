@@ -487,9 +487,9 @@ public sealed class MyobEmployeeBindingTests : IDisposable
         Assert.Contains("Phone: 0400 999 888", liam.CopyText, StringComparison.Ordinal);
         Assert.DoesNotContain("Date of birth", liam.CopyText, StringComparison.Ordinal); // 没填生日就不写
 
-        // c-mei / c-tom / c-yuki 被建议给员工，c-sarah 已绑定 → 只剩 daniel 与已停用的 kevin；启用的排前面。
-        Assert.Equal(["c-daniel", "c-kevin"], snapshot.OnlyInMyob.Select(item => item.Card.Uid).ToArray());
-        Assert.False(snapshot.OnlyInMyob[1].Card.IsActive);
+        // c-mei / c-tom / c-yuki 被建议给员工，c-sarah 已绑定，c-kevin 已停用（离职历史卡不列出）→ 只剩 daniel。
+        Assert.Equal(["c-daniel"], snapshot.OnlyInMyob.Select(item => item.Card.Uid).ToArray());
+        Assert.DoesNotContain(snapshot.OnlyInMyob, item => item.Card.Uid == "c-kevin");
     }
 
     [Fact]
@@ -656,14 +656,14 @@ public sealed class MyobEmployeeBindingTests : IDisposable
         Assert.Equal(1, await _db.Queryable<MyobEmployeeIgnore>().CountAsync());
 
         var after = (await Binding().GetSnapshotAsync(Inv, false, CancellationToken.None)).Data!;
-        Assert.Equal(["c-kevin"], after.OnlyInMyob.Select(item => item.Card.Uid).ToArray());
-        Assert.Equal(1, after.Counts.OnlyInMyob);
+        Assert.Empty(after.OnlyInMyob); // daniel 被忽略，kevin 已停用不列出
+        Assert.Equal(0, after.Counts.OnlyInMyob);
 
         request.Ignored = false;
         await Binding().IgnoreAsync(request, "admin-1", CancellationToken.None);
         Assert.Equal(0, await _db.Queryable<MyobEmployeeIgnore>().CountAsync());
         var restored = (await Binding().GetSnapshotAsync(Inv, false, CancellationToken.None)).Data!;
-        Assert.Equal(2, restored.Counts.OnlyInMyob);
+        Assert.Equal(1, restored.Counts.OnlyInMyob);
     }
 
     // ───────────────────────── 候选 ─────────────────────────
@@ -850,6 +850,23 @@ public sealed class MyobEmployeeBindingTests : IDisposable
 
         _scope.Scope = new CurrentUserManageableStoreScope { IsAllowed = false, Message = "无权限" };
         Assert.Equal(MyobPayrollErrorCodes.Forbidden, (await Employers().ListAsync(null, null, false, CancellationToken.None)).ErrorCode);
+    }
+
+    [Fact]
+    public async Task 发薪公司_分店还没映射不算另一家公司_只有真正分属两家公司或有例外才算跨公司()
+    {
+        await SeedBaseAsync();
+        // 1014 → Investment；1042 没映射到任何公司。
+        await SeedEmployeeAsync("u-hq", "Head", "Office", null, null, null, EmployeeType.FullTime, "1014", "1042");
+        var list = (await Employers().ListAsync(null, null, false, CancellationToken.None)).Data!;
+        Assert.Equal(2, list.Rows.Count);
+        Assert.All(list.Rows, row => Assert.False(row.IsCrossCompany));
+        Assert.Null(list.Rows.Single(row => row.StoreCode == "1042").EffectiveConnectionGuid);
+
+        // 同一员工再加一个映射到另一家公司的分店 → 才是跨公司。
+        await _db.Insertable(new UserStore { UserStoreGUID = "us-extra", UserGUID = "u-hq", StoreGUID = "g-1013" }).ExecuteCommandAsync();
+        var cross = (await Employers().ListAsync(null, null, false, CancellationToken.None)).Data!;
+        Assert.All(cross.Rows, row => Assert.True(row.IsCrossCompany));
     }
 
     [Fact]

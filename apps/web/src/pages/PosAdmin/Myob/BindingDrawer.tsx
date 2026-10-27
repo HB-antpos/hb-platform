@@ -181,9 +181,10 @@ export default function BindingDrawer({
               <span className="myob-person-name">{ourName}</span>
               <span className="myob-person-tags">
                 <EmployeeTypeTag type={ourType} />
-                {ourStores.map((store) => (
+                {ourStores.slice(0, 6).map((store) => (
                   <Tag key={store}>{store}</Tag>
                 ))}
+                {ourStores.length > 6 ? <Tag>+{ourStores.length - 6}</Tag> : null}
               </span>
               <span className="myob-sub">
                 {joinSubtitle([

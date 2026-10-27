@@ -37,6 +37,7 @@ import {
   formatShortDateTime,
   formatStoreLabel,
   getBasisResult,
+  summarizeStoreLabels,
   getBindFailureKey,
   getBindingRowActions,
   getEmployeeTypeKey,
@@ -491,5 +492,13 @@ assert.deepEqual(payrollDetail.allowedEffectiveFrom, ['2026-10-26'])
 assert.equal(payrollDetail.history[0].connectionName, null, '改回按分店：connectionGuid 为 null')
 assert.equal(payrollDetail.bindingStates.length, 1)
 assert.deepEqual(normalizeMyobPayrollEmployerDetail(null).rows, [])
+
+// 分店标签摘要：总部账号挂几十个分店，只显示前几个，其余 +N
+assert.equal(summarizeStoreLabels([]), '')
+assert.equal(summarizeStoreLabels(['1003 A']), '1003 A')
+assert.equal(summarizeStoreLabels(['1 A', '2 B', '3 C']), '1 A / 2 B / 3 C')
+assert.equal(summarizeStoreLabels(['1 A', '2 B', '3 C', '4 D', '5 E']), '1 A / 2 B / 3 C +2')
+assert.equal(summarizeStoreLabels(['1 A', '2 B', '3 C'], 2), '1 A / 2 B +1')
+assert.equal(summarizeStoreLabels(['1 A', '2 B'], 0), '1 A +1', 'limit 至少为 1')
 
 console.log('myobEmployeeLogic.test: ok')

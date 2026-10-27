@@ -299,8 +299,10 @@ public sealed class MyobPayrollEmployerService : IMyobPayrollEmployerService
             .Where(item => item.UserGuid.Equals(pair.UserGuid, StringComparison.OrdinalIgnoreCase))
             .ToList();
         // 跨公司：同一员工的上班分店分属 ≥2 家发薪公司，或存在「改由其他公司发」的例外。
+        // 分店还没映射到公司文件（有效公司为空）不是「另一家公司」，不参与计数——线上实测一度把 441 行误标成跨公司。
         var cross = userPairs.Any(item => item.IsOverride)
-            || userPairs.Select(item => item.EffectiveConnectionGuid ?? string.Empty)
+            || userPairs.Select(item => item.EffectiveConnectionGuid)
+                .Where(guid => !string.IsNullOrWhiteSpace(guid))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
         string? NameOf(string? guid) => guid is not null && companyNames.TryGetValue(guid, out var name) ? name : null;
 
