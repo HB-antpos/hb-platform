@@ -159,6 +159,20 @@ export class HbposDeviceApi {
     return unwrapHbposEnvelope(response.data);
   }
 
+  /** 设备运行状态心跳（在线、应用版本等），后台设备管理页据此显示；服务端对缺失字段保留旧值。 */
+  public async reportRuntimeStatus(
+    input: components["schemas"]["DeviceRuntimeStatusRequest"],
+  ): Promise<void> {
+    const response = await this.transport.request<HbposEnvelope<unknown>>({
+      method: "POST",
+      url: "/api/v1/devices/runtime-status",
+      data: input,
+    });
+    if (response.data?.success !== true) {
+      unwrapHbposEnvelope(response.data);
+    }
+  }
+
   public async verify(
     input: Omit<DeviceVerifyRequest, "deviceSystem">
   ): Promise<DeviceVerifyResponse> {
