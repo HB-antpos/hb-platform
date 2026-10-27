@@ -508,3 +508,33 @@ test("业务 envelope 失败以非传输错误抛出，不能被离线回退吞�
       && error.code === "CASHIER_LOGIN_FAILED"
   );
 });
+
+test("运行状态心跳走认证 transport 的固定 POST 路径，业务拒绝抛出信封错误", async () => {
+  const calls: { method: string; url: string; data?: unknown }[] = [];
+  const respond = (body: unknown): HbposTransport => ({
+    async request<T>(config: HbposTransportRequest) {
+      calls.push({ method: config.method, url: config.url, data: config.data });
+      return { status: 200, data: body as T };
+    },
+  });
+
+  await new HbposDeviceApi(respond({ success: true, data: {} })).reportRuntimeStatus({
+    isOnline: true,
+    appVersion: "1.0.10",
+  });
+  assert.deepEqual(calls, [
+    {
+      method: "POST",
+      url: "/api/v1/devices/runtime-status",
+      data: { isOnline: true, appVersion: "1.0.10" },
+    },
+  ]);
+
+  await assert.rejects(
+    () =>
+      new HbposDeviceApi(
+        respond({ success: false, errorCode: "DEVICE_NOT_FOUND", message: "Device was not found." }),
+      ).reportRuntimeStatus({ isOnline: true }),
+    (error: unknown) => error instanceof HbposApiError && error.code === "DEVICE_NOT_FOUND",
+  );
+});

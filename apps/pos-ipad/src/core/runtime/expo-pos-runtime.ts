@@ -1,4 +1,8 @@
 import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
+import {
+  formatRuntimeAppVersion,
+  RuntimeStatusReporter,
+} from "@hb/pos-sync/core/sync/runtime-status-reporter";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -181,6 +185,8 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     scanner: Readonly<{ router: HidScannerRouter }>;
     applicationLog: ApplicationLogRuntime;
     updateIdentity: ExpoPosUpdateIdentity;
+    /** 设备运行状态心跳（在线、应用版本），由运行时工作桥按节奏触发；失败由调用方吞掉。 */
+    runtimeStatus: Pick<RuntimeStatusReporter, "report">;
     /** 原生壳版本号与 build 号，供登录页、收银页显示，路由层无需直接加载原生模块。 */
     nativeAppVersion: NativeAppVersion;
   }>;
@@ -1290,6 +1296,10 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       scanner: Object.freeze({ router: scannerRouter }),
       applicationLog: activeApplicationLog,
       updateIdentity,
+      runtimeStatus: new RuntimeStatusReporter({
+        api: deviceApi,
+        appVersion: formatRuntimeAppVersion(appVersion, updateIdentity),
+      }),
       nativeAppVersion: resolveNativeAppVersion({
         applicationVersion: Application.nativeApplicationVersion,
         constantsVersion: Constants.nativeAppVersion,

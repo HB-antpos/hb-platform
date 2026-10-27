@@ -1,4 +1,8 @@
 import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
+import {
+  formatRuntimeAppVersion,
+  RuntimeStatusReporter,
+} from "@hb/pos-sync/core/sync/runtime-status-reporter";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -232,6 +236,8 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     }>;
     applicationLog: ApplicationLogRuntime;
     updateIdentity: ExpoPosUpdateIdentity;
+    /** 设备运行状态心跳（在线、应用版本），由运行时工作桥按节奏触发；失败由调用方吞掉。 */
+    runtimeStatus: Pick<RuntimeStatusReporter, "report">;
   }>;
 
 type ExpoSettingsDevicePresentation = Readonly<{
@@ -1364,6 +1370,10 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       }),
       applicationLog: activeApplicationLog,
       updateIdentity,
+      runtimeStatus: new RuntimeStatusReporter({
+        api: deviceApi,
+        appVersion: formatRuntimeAppVersion(appVersion, updateIdentity),
+      }),
       shutdown: async () => {
         releaseClientMetricBinding?.();
         await clientMetricRuntime?.shutdown();
