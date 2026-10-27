@@ -1,3 +1,7 @@
+import {
+  getBackgroundPollingIntervalMs,
+  isBackgroundPollDue,
+} from "@hb/pos-domain/core/contracts/background-polling";
 import { useEffect, useMemo, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
@@ -66,8 +70,18 @@ export function RuntimeWorkBridge() {
     if (!controller || !receiptProfileEnabled || connectivity !== "online") {
       return undefined;
     }
+    // 夜间（22:00–06:00）放慢到 5 分钟（对齐 WPF #926）：基础定时器仍按 60 秒唤醒，
+    // 距上次执行不足当前目标间隔时跳过；回前台、网络恢复等事件触发的同步不受影响。
+    // 启动与网络恢复时本来就会立即同步一次，周期计时从挂载时刻起算。
+    let lastRunAtMs: number | null = Date.now();
     const timer = setInterval(() => {
       if (AppState.currentState !== "active") return;
+      const intervalMs = getBackgroundPollingIntervalMs(
+        new Date(),
+        RECEIPT_PROFILE_SYNC_INTERVAL_MS,
+      );
+      if (!isBackgroundPollDue(Date.now(), lastRunAtMs, intervalMs)) return;
+      lastRunAtMs = Date.now();
       controller.onReceiptProfileTimer();
     }, RECEIPT_PROFILE_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
