@@ -917,6 +917,13 @@ public sealed class MyobConnectionTests : IDisposable
             LastCompanyAccessToken = accessToken;
             return CompanyError is null ? Task.FromResult(NextCompany) : Task.FromException<MyobCompanyInfo>(CompanyError);
         }
+
+        // 阶段 1 的员工接口：阶段 0 的用例用不到，见 MyobEmployeeBindingTests。
+        public Task<IReadOnlyList<MyobEmployeeRecord>> GetEmployeesAsync(string businessId, string accessToken, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider

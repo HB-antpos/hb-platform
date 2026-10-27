@@ -880,14 +880,14 @@ export const appRoutes: AppRouteItem[] = [
         element: <PosAdminAttendancePayrollPage />,
       },
       {
-        // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
+        // MYOB 对接：连接与映射（Myob.Connection.Manage）/ 员工绑定（Myob.Employee.Bind）/ 发薪公司（Attendance.Payroll.Edit），三者任一可进入，页内按各自权限显示页签。
         // 不 keepAlive：授权完成后后端重定向回 ?myob=connected|error，页面必须按新进入重新加载并读取参数。
         path: '/pos-admin/myob',
         meta: {
           title: 'menu.myob',
           icon: 'LinkOutlined',
           keepAlive: false,
-          accessKey: 'canManageMyobConnections',
+          accessKey: 'canAccessMyob',
         },
         element: <PosAdminMyobPage />,
       },

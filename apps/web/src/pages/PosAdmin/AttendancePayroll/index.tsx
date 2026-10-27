@@ -6,7 +6,7 @@ import {
   SearchOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
-import { Button, Input, Modal, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Input, Modal, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -58,6 +58,8 @@ export default function AttendancePayrollPage() {
   const [pay, setPay] = useState<AttendancePayResultDto | null>(null)
   const [rates, setRates] = useState<AttendancePayRateDto[]>([])
   const [rateKeyword, setRateKeyword] = useState('')
+  // 只看公假价与平日价不一致的员工
+  const [mismatchOnly, setMismatchOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [unlockOpen, setUnlockOpen] = useState(false)
@@ -100,13 +102,13 @@ export default function AttendancePayrollPage() {
     if (!storeCode || !canViewPay) return
     setLoading(true)
     try {
-      setRates(await getAttendancePayRates({ storeCode, keyword: rateKeyword || undefined }))
+      setRates(await getAttendancePayRates({ storeCode, keyword: rateKeyword || undefined, publicHolidayMismatchOnly: mismatchOnly || undefined }))
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [canViewPay, rateKeyword, storeCode, t])
+  }, [canViewPay, mismatchOnly, rateKeyword, storeCode, t])
 
   useEffect(() => {
     if (activeTab === 'hours') void loadHours()
@@ -322,6 +324,12 @@ export default function AttendancePayrollPage() {
                 if (!event.target.value) setRateKeyword('')
               }}
             />
+          ) : null}
+          {activeTab === 'rates' ? (
+            <Space size={6}>
+              <Switch size="small" checked={mismatchOnly} onChange={setMismatchOnly} />
+              <span>{t('attendancePayroll.rates.mismatchFilter')}</span>
+            </Space>
           ) : null}
         </Space>
         <Space wrap>

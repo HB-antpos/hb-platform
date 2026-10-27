@@ -148,6 +148,24 @@ export function findRatesBelowMinimum(rate: PayRates & Pick<AttendancePayRateDto
   })
 }
 
+/**
+ * 公假转账时薪永远等于平日转账时薪（公司规定，后端保存时也会强制）：
+ * 保存前 / 平日价变动时，把公假价同步成平日价；平日价为空则公假价也为空。
+ */
+export function syncPublicHolidayRate<T extends PayRates>(rates: T): T {
+  return { ...rates, transferPublicHolidayRate: rates.transferWeekdayRate ?? undefined }
+}
+
+/** 当前生效记录里公假价与平日价不一致（以后端 publicHolidayRateMismatch 为准；全现金恒为 false）。 */
+export function hasPublicHolidayRateMismatch(rate: Pick<AttendancePayRateDto, 'publicHolidayRateMismatch'>): boolean {
+  return rate.publicHolidayRateMismatch === true
+}
+
+/** 列表里公假价与平日价不一致的员工数（只反映当前已加载的分店 / 筛选结果）。 */
+export function countPublicHolidayRateMismatch(rates: readonly Pick<AttendancePayRateDto, 'publicHolidayRateMismatch'>[]): number {
+  return rates.filter(hasPublicHolidayRateMismatch).length
+}
+
 // ===== 周期 =====
 
 /**

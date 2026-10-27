@@ -178,7 +178,7 @@ namespace BlazorApp.Api.Services
                     // 工时与工资：工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View，任一即可见（页内再按各自权限显示页签）。
                     new() { Path = "/pos-admin/attendance-payroll",    TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View } },
                     // MYOB 对接：连接 MYOB 公司文件、分店映射；独立权限码，默认不授予任何角色。
-                    new() { Path = "/pos-admin/myob",                  TitleKey = "menu.myob",                   Icon = "LinkOutlined",               Permission = Permissions.Myob.Connection.Manage },
+                    new() { Path = "/pos-admin/myob",                  TitleKey = "menu.myob",                   Icon = "LinkOutlined",               AnyPermissions = new List<string> { Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind, Permissions.Attendance.Payroll.Edit } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
@@ -898,7 +898,8 @@ namespace BlazorApp.Api.Services
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage,
                 // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
-                Permissions.Myob.Connection.Manage
+                Permissions.Myob.Connection.Manage,
+                Permissions.Myob.Employee.Bind
             );
         }
 

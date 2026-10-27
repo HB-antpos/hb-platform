@@ -84,6 +84,10 @@
   color: #93370d;
 }
 
+.atp-rate-mismatch {
+  margin-top: 4px;
+}
+
 .atp-alert-birthday {
   background: #fdf2fa;
   border-color: #fcceee;

@@ -125,6 +125,566 @@
   margin-top: 12px;
 }
 
+/* ───────────── 阶段 1：页签 ───────────── */
+
+.myob-tabs .ant-tabs-nav {
+  margin: 0 0 16px;
+  padding: 0 18px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.myob-tab-badge {
+  margin-inline-start: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--ant-color-warning-border, #ffe58f);
+  border-radius: 10px;
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.myob-tab-phase {
+  margin-inline-start: 6px;
+}
+
+.myob-tabpane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ───────────── 阶段 1：公司选择条 ───────────── */
+
+.myob-companies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.myob-company {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container, #fff);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.myob-company:hover {
+  border-color: var(--ant-color-primary, #1677ff);
+}
+
+.myob-company:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+}
+
+.myob-company-on {
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  box-shadow: 0 0 0 1px var(--ant-color-primary, #1677ff) inset;
+}
+
+.myob-company-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-tertiary, #f0f2f5);
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-weight: 700;
+}
+
+.myob-company-on .myob-company-icon {
+  background: var(--ant-color-primary-bg-hover, #bae0ff);
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.myob-company-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.myob-company-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myob-company-add {
+  justify-content: center;
+  border-style: dashed;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+/* ───────────── 阶段 1：筛选 / 批量条 ───────────── */
+
+.myob-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.myob-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 16px;
+  background: var(--ant-color-bg-container, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.myob-chip:hover {
+  border-color: var(--ant-color-primary, #1677ff);
+}
+
+.myob-chip:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+}
+
+.myob-chip-on {
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.myob-chip-count {
+  font-weight: 700;
+}
+
+.myob-chips-search {
+  width: 260px;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.myob-batch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--ant-color-success-border, #b7eb8f);
+  border-radius: 8px;
+  background: var(--ant-color-success-bg, #f6ffed);
+  color: var(--ant-color-success-text, #389e0d);
+}
+
+.myob-batch-icon {
+  font-size: 18px;
+}
+
+.myob-batch-text {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.myob-batch-title {
+  color: var(--ant-color-text, #1f1f1f);
+  font-weight: 600;
+}
+
+.myob-batch-hint {
+  display: block;
+  font-size: 12px;
+}
+
+.myob-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ───────────── 阶段 1：绑定列表 ───────────── */
+
+.myob-subtabs {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.myob-row-suggested > td {
+  background: var(--ant-color-success-bg, #f6ffed) !important;
+}
+
+.myob-row-review > td {
+  background: var(--ant-color-warning-bg, #fffbe6) !important;
+}
+
+.myob-person-name {
+  font-weight: 600;
+}
+
+.myob-person-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+}
+
+.myob-person-tags .ant-tag {
+  margin-inline-end: 0;
+}
+
+.myob-arrow {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  text-align: center;
+}
+
+/* 与我方不一致的 MYOB 值用琥珀色高亮（颜色之外，旁边还有「不同」文字徽章） */
+.myob-diff {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-basis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.myob-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 4px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.myob-signal-ok {
+  border-color: var(--ant-color-success-border, #b7eb8f);
+  background: var(--ant-color-success-bg, #f6ffed);
+  color: var(--ant-color-success-text, #389e0d);
+}
+
+.myob-signal-bad {
+  border-color: var(--ant-color-error-border, #ffccc7);
+  background: var(--ant-color-error-bg, #fff2f0);
+  color: var(--ant-color-error-text, #cf1322);
+}
+
+.myob-notes {
+  display: block;
+  margin-top: 3px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.myob-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 12px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-weight: 700;
+}
+
+.myob-score-high {
+  border-color: var(--ant-color-success-border, #b7eb8f);
+  background: var(--ant-color-success-bg, #f6ffed);
+  color: var(--ant-color-success-text, #389e0d);
+}
+
+.myob-score-mid {
+  border-color: var(--ant-color-warning-border, #ffe58f);
+  background: var(--ant-color-warning-bg, #fffbe6);
+  color: var(--ant-color-warning-text, #ad6800);
+}
+
+.myob-status-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.myob-status-alert {
+  display: block;
+  margin-top: 2px;
+  color: var(--ant-color-error-text, #cf1322);
+  font-size: 12px;
+}
+
+.myob-link-muted.ant-btn-link {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+/* ───────────── 阶段 1：对方没有 / 类型检查 ───────────── */
+
+.myob-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.myob-subcard {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 12px;
+}
+
+.myob-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ant-color-split, #f0f0f0);
+}
+
+.myob-list-item:first-child {
+  border-top: 0;
+}
+
+.myob-list-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.myob-list-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.myob-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--ant-color-fill-tertiary, #f0f2f5);
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.myob-note {
+  margin-top: 12px;
+}
+
+/* ───────────── 阶段 1：抽屉 ───────────── */
+
+.myob-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.myob-summary {
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-split, #f0f0f0);
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.myob-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.myob-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.myob-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container, #fff);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.myob-candidate:hover:not(:disabled) {
+  border-color: var(--ant-color-primary, #1677ff);
+}
+
+.myob-candidate:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+}
+
+.myob-candidate-on {
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  box-shadow: 0 0 0 1px var(--ant-color-primary, #1677ff) inset;
+}
+
+.myob-candidate:disabled {
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  cursor: not-allowed;
+}
+
+.myob-radio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 50%;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.myob-candidate-on .myob-radio {
+  border: 5px solid var(--ant-color-primary, #1677ff);
+}
+
+.myob-compare {
+  width: 100%;
+  border: 1px solid var(--ant-color-split, #f0f0f0);
+  border-collapse: separate;
+  border-radius: 8px;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+.myob-compare th,
+.myob-compare td {
+  padding: 8px 10px;
+  border-top: 1px solid var(--ant-color-split, #f0f0f0);
+  text-align: start;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.myob-compare thead th {
+  border-top: 0;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  font-weight: 600;
+}
+
+.myob-compare tbody th {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.myob-section-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.myob-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.myob-field-label {
+  flex: none;
+  min-width: 80px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.myob-timeline {
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-inline-start: 2px solid var(--ant-color-split, #f0f0f0);
+  list-style: none;
+}
+
+.myob-timeline-item {
+  position: relative;
+  padding: 0 0 12px 12px;
+}
+
+.myob-timeline-item::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: -21px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 50%;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.myob-timeline-item:first-child::before {
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary, #1677ff);
+}
+
+.myob-payroll-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.myob-payroll-filters .myob-search {
+  width: 240px;
+  max-width: 100%;
+}
+
+.myob-payroll-filters .myob-store-select {
+  width: 200px;
+  max-width: 100%;
+}
+
+.myob-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 窄屏：表格由 scroll.x 横向滚动；卡片与按钮收紧 */
 @media (max-width: 768px) {
   .myob-card {
@@ -134,4 +694,31 @@
   .myob-toolbar-spacer {
     display: none;
   }
+
+  .myob-tabs .ant-tabs-nav {
+    padding: 0 8px;
+  }
+
+  .myob-grid2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .myob-chips-search {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+
+  .myob-list-item {
+    flex-wrap: wrap;
+  }
+
+  .myob-list-actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* 抽屉：宽度由 Drawer 的 width 指定，窄屏最多占满视口 */
+.myob-drawer .ant-drawer-content-wrapper {
+  max-width: 100vw;
 }

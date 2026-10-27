@@ -138,6 +138,10 @@ export interface AccessControl {
   canManageFaceCameras: boolean
   /** MYOB 对接页（连接公司文件、分店映射）：独立权限 Myob.Connection.Manage。 */
   canManageMyobConnections: boolean
+  /** MYOB 对接页「员工绑定」页签：独立权限 Myob.Employee.Bind。 */
+  canBindMyobEmployees: boolean
+  /** MYOB 对接页入口：连接管理 / 员工绑定 / 编辑工资（发薪公司页签）三者任一；页内各页签再按各自权限显示。 */
+  canAccessMyob: boolean
   /** 人脸比对页：FaceMatch.* 五个权限码任一（页签再按各自权限显示）。 */
   canAccessFaceMatch: boolean
   canManageScheduledTasks: boolean

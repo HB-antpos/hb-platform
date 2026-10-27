@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import {
   calculatePay,
+  countPublicHolidayRateMismatch,
   findRatesBelowMinimum,
   formatHours,
   formatMoney,
   formatSignedMoney,
+  hasPublicHolidayRateMismatch,
   isoWeekNumber,
   minutesToHours,
   multiplyToCents,
@@ -12,6 +14,7 @@ import {
   resolvePeriodStart,
   shiftPeriod,
   summarizeEmployeeHours,
+  syncPublicHolidayRate,
 } from './payrollLogic'
 import { buildSampleHours, buildSamplePay, setSampleLeaveApproval } from './payrollSample.fixture'
 
@@ -119,5 +122,24 @@ assert.equal(payTotal, 11221.49)
 setSampleLeaveApproval('mock-emma', 'PaidAnnual', 24)
 const repaid = await buildSamplePay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
 assert.equal(repaid.rows.find((row) => row.userName === 'Emma Walsh')!.hours.leave, 24)
+
+// 公假价同步为平日价：覆盖原值、不改其它档；平日价为空则公假价清空
+assert.deepEqual(
+  syncPublicHolidayRate({ transferWeekdayRate: 28.5, transferSaturdayRate: 35.63, transferSundayRate: 42.75, transferPublicHolidayRate: 64.13, cashRate: 28.5 }),
+  { transferWeekdayRate: 28.5, transferSaturdayRate: 35.63, transferSundayRate: 42.75, transferPublicHolidayRate: 28.5, cashRate: 28.5 },
+)
+assert.equal(syncPublicHolidayRate({ transferWeekdayRate: null, transferPublicHolidayRate: 60 }).transferPublicHolidayRate, undefined)
+assert.equal(syncPublicHolidayRate({ transferWeekdayRate: 0, transferPublicHolidayRate: 60 }).transferPublicHolidayRate, 0)
+// 同步后公假档试算与平日档同价（PayrollCalculator 不改，仍按公假档取价）
+const synced = syncPublicHolidayRate({ transferWeekdayRate: 30, transferSaturdayRate: 37.5, transferSundayRate: 45, transferPublicHolidayRate: 67.5 })
+const holidayPay = calculatePay({ hours: { sunday: 0, saturday: 0, leave: 0, publicHoliday: 8, weekday: 0 }, payMode: 'Transfer', weeks: 1, rates: synced })
+assert.equal(holidayPay.grossPay, 240)
+
+// 不一致标记以后端字段为准；缺字段按一致处理；N 只数标记为 true 的行
+assert.equal(hasPublicHolidayRateMismatch({ publicHolidayRateMismatch: true }), true)
+assert.equal(hasPublicHolidayRateMismatch({ publicHolidayRateMismatch: false }), false)
+assert.equal(hasPublicHolidayRateMismatch({}), false)
+assert.equal(countPublicHolidayRateMismatch([{ publicHolidayRateMismatch: true }, {}, { publicHolidayRateMismatch: false }, { publicHolidayRateMismatch: true }]), 2)
+assert.equal(countPublicHolidayRateMismatch([]), 0)
 
 console.log('payrollLogic.test.ts: ok')

@@ -133,6 +133,8 @@ function createEmptyAccess(): AccessControl {
     canViewSeasonalCardStats: false,
     canManageFaceCameras: false,
     canManageMyobConnections: false,
+    canBindMyobEmployees: false,
+    canAccessMyob: false,
     canAccessFaceMatch: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
@@ -398,6 +400,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 人脸抓拍摄像机管理只认独立权限码（会签发摄像机推送令牌），不挂在系统设置权限下。
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
   const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
+  const canBindMyobEmployees = isAdmin || hasPermission(P.Myob.EmployeeBind)
+  // MYOB 对接页入口：三个页签各有独立权限（连接与映射 / 员工绑定 / 发薪公司 = 编辑工资），任一即可进入，页内只显示有权限的页签。
+  const canAccessMyob = canManageMyobConnections || canBindMyobEmployees || canEditAttendancePayroll
   // 人脸比对页任一 FaceMatch.* 权限即可进入；各页签（档案 / 统计 / 名单 / 复核）页内再按各自权限码显示。
   const canAccessFaceMatch =
     isAdmin ||
@@ -556,6 +561,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewSeasonalCardStats,
     canManageFaceCameras,
     canManageMyobConnections,
+    canBindMyobEmployees,
+    canAccessMyob,
     canAccessFaceMatch,
     canManageScheduledTasks,
     canManageSystemSettings,

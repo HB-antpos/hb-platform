@@ -1,5 +1,5 @@
-import { Alert, message } from 'antd'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Skeleton, Tabs, Tag, message } from 'antd'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -7,12 +7,20 @@ import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
   createMyobAuthorizeUrl,
+  getMyobCompanies,
   getMyobConnections,
   getMyobStoreMappings,
 } from '../../../services/myobService'
-import type { MyobConnection, MyobStoreMappings } from '../../../types/myob'
+import { useAuthStore } from '../../../store/auth'
+import type { MyobBindingCounts, MyobCompanyOption, MyobConnection, MyobStoreMappings } from '../../../types/myob'
 import ConnectionsPanel from './ConnectionsPanel'
 import StoreMappingsPanel from './StoreMappingsPanel'
+import {
+  getPendingBindingCount,
+  getVisibleMyobTabs,
+  resolveActiveMyobTab,
+  type MyobTabKey,
+} from './myobEmployeeLogic'
 import {
   extractMyobError,
   getMyobErrorMessageKey,
@@ -26,12 +34,38 @@ import './myob.css'
 
 registerPageMessages({ zh: messagesZh, en: messagesEn })
 
+// 员工绑定 / 发薪公司页签只在有权限时才渲染，且各自单独成块懒加载（页面级块之外不增加首屏体积）
+const EmployeeBindingTab = lazy(() => import('./EmployeeBindingTab'))
+const PayrollEmployersTab = lazy(() => import('./PayrollEmployersTab'))
+
+function TabFallback() {
+  return <Skeleton active paragraph={{ rows: 6 }} />
+}
+
 const EMPTY_MAPPINGS: MyobStoreMappings = { stores: [], connections: [] }
 
 export default function MyobPage() {
   const { t } = useTranslation()
   const location = useLocation()
   const navigate = useNavigate()
+  const access = useAuthStore((state) => state.access)
+  // 各页签按各自权限显示：连接与映射 = Myob.Connection.Manage，员工绑定 = Myob.Employee.Bind，发薪公司 = 编辑工资
+  const visibleTabs = useMemo(
+    () =>
+      getVisibleMyobTabs({
+        canManageConnections: access.canManageMyobConnections,
+        canBindEmployees: access.canBindMyobEmployees,
+        canEditPayroll: access.canEditAttendancePayroll,
+      }),
+    [access.canBindMyobEmployees, access.canEditAttendancePayroll, access.canManageMyobConnections],
+  )
+  // 授权回跳（?myob=）要落在「连接与映射」，其余按第一个可见页签
+  const [requestedTab, setRequestedTab] = useState<MyobTabKey | null>(() =>
+    parseMyobCallback(location.search) ? 'connections' : null,
+  )
+  const activeTab = resolveActiveMyobTab(requestedTab, visibleTabs)
+  const [bindingCounts, setBindingCounts] = useState<MyobBindingCounts | null>(null)
+  const [focusRequest, setFocusRequest] = useState<{ connectionGuid: string; seq: number } | null>(null)
 
   const [connections, setConnections] = useState<MyobConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
@@ -40,6 +74,12 @@ export default function MyobPage() {
   const [mappingsLoading, setMappingsLoading] = useState(true)
   const [mappingsError, setMappingsError] = useState<string | null>(null)
   const [authorizing, setAuthorizing] = useState(false)
+  // 公司选项（只读、只含 Active）：员工绑定页签的公司选择条用它，任一页签权限即可读，不依赖连接管理权限
+  const [companies, setCompanies] = useState<MyobCompanyOption[]>([])
+  const [companiesLoading, setCompaniesLoading] = useState(true)
+  const [companiesError, setCompaniesError] = useState<string | null>(null)
+  const companiesSeq = useRef(0)
+  const needsCompanies = access.canBindMyobEmployees
 
   // 只认最后一次发起的请求，避免快速连点刷新时旧响应覆盖新数据
   const connectionsSeq = useRef(0)
@@ -85,10 +125,48 @@ export default function MyobPage() {
     }
   }, [t])
 
+  const loadCompanies = useCallback(async () => {
+    const seq = ++companiesSeq.current
+    setCompaniesLoading(true)
+    try {
+      const data = await getMyobCompanies()
+      if (seq === companiesSeq.current) {
+        setCompanies(data)
+        setCompaniesError(null)
+      }
+    } catch (err) {
+      if (seq === companiesSeq.current) {
+        setCompaniesError(extractMyobError(err, t('myob.employees.company.loadFailed')).message)
+      }
+    } finally {
+      if (seq === companiesSeq.current) {
+        setCompaniesLoading(false)
+      }
+    }
+  }, [t])
+
+  // 连接 / 映射接口只认 Myob.Connection.Manage：没有该权限时完全不请求，避免无谓的 403 提示
   useEffect(() => {
-    void loadConnections()
-    void loadMappings()
-  }, [loadConnections, loadMappings])
+    if (access.canManageMyobConnections) {
+      void loadConnections()
+      void loadMappings()
+    } else {
+      connectionsSeq.current += 1
+      mappingsSeq.current += 1
+      setConnectionsLoading(false)
+      setMappingsLoading(false)
+    }
+  }, [access.canManageMyobConnections, loadConnections, loadMappings])
+
+  // 公司选项：员工绑定页签需要（有任一页签权限即可读）
+  useEffect(() => {
+    if (needsCompanies) {
+      void loadCompanies()
+    } else {
+      companiesSeq.current += 1
+      setCompaniesLoading(false)
+    }
+  }, [needsCompanies, loadCompanies])
 
   // 授权完成后后端会把浏览器重定向回本页并带上 ?myob=connected / error；
   // 读取一次、提示结果，然后用 replace 清掉参数，刷新或返回时不会重复提示。
@@ -129,46 +207,131 @@ export default function MyobPage() {
     }
   }, [authorizing, t])
 
+  const handleGoBind = useCallback((connectionGuid: string) => {
+    setFocusRequest((current) => ({ connectionGuid, seq: (current?.seq ?? 0) + 1 }))
+    setRequestedTab('employees')
+  }, [])
+
+  const pendingCount = getPendingBindingCount(bindingCounts)
+
+  const connectionsPane = (
+    <div className="myob-tabpane">
+      <Alert
+        type="info"
+        showIcon
+        message={t('myob.notice.title')}
+        description={
+          <ul className="myob-notice-list">
+            <li>{t('myob.notice.admin')}</li>
+            <li>{t('myob.notice.perAbn')}</li>
+          </ul>
+        }
+      />
+
+      <ConnectionsPanel
+        connections={connections}
+        loading={connectionsLoading}
+        error={connectionsError}
+        stores={mappings.stores}
+        authorizing={authorizing}
+        onAuthorize={() => void handleAuthorize()}
+        onReload={() => void loadConnections()}
+        onConnectionUpdated={(updated) => {
+          setConnections((current) => upsertConnection(current, updated))
+          // 验证 / 断开可能改变连接状态，公司选项（只含 Active）同步刷新
+          void loadCompanies()
+        }}
+        // 断开会移除该连接下的全部映射：重新拉映射表（可选连接列表也随之变化）
+        onDisconnected={() => void loadMappings()}
+      />
+
+      <StoreMappingsPanel
+        mappings={mappings}
+        allConnections={connections}
+        loading={mappingsLoading}
+        error={mappingsError}
+        onReload={() => void loadMappings()}
+        onSaved={(saved) => {
+          setMappings(saved)
+          // 映射数量显示在连接表里，保存后同步刷新
+          void loadConnections()
+        }}
+      />
+    </div>
+  )
+
+  const tabItems = [
+    visibleTabs.includes('connections')
+      ? { key: 'connections', label: t('myob.tabs.connections'), children: connectionsPane }
+      : null,
+    visibleTabs.includes('employees')
+      ? {
+          key: 'employees',
+          label: (
+            <span>
+              {t('myob.tabs.employees')}
+              {pendingCount > 0 ? <span className="myob-tab-badge">{t('myob.tabs.pending', { count: pendingCount })}</span> : null}
+            </span>
+          ),
+          // 始终渲染（即使不在当前页签）：这样待处理角标进入页面就能显示
+          forceRender: true,
+          children: (
+            <Suspense fallback={<TabFallback />}>
+              <EmployeeBindingTab
+                companies={companies}
+                companiesLoading={companiesLoading}
+                companiesError={companiesError}
+                canConnect={access.canManageMyobConnections}
+                authorizing={authorizing}
+                onAuthorize={() => void handleAuthorize()}
+                onReloadCompanies={() => void loadCompanies()}
+                focusRequest={focusRequest}
+                onCountsChange={setBindingCounts}
+                canCreateOurSide={access.canReadUserConsole}
+              />
+            </Suspense>
+          ),
+        }
+      : null,
+    visibleTabs.includes('payroll')
+      ? {
+          key: 'payroll',
+          label: t('myob.tabs.payroll'),
+          children: (
+            <Suspense fallback={<TabFallback />}>
+              <PayrollEmployersTab onGoBind={access.canBindMyobEmployees ? handleGoBind : undefined} />
+            </Suspense>
+          ),
+        }
+      : null,
+    // 阶段 2 才做：灰色禁用，仅占位说明路线
+    {
+      key: 'push',
+      label: (
+        <span>
+          {t('myob.tabs.push')}
+          <Tag className="myob-tab-phase">{t('myob.tabs.phase2')}</Tag>
+        </span>
+      ),
+      disabled: true,
+      children: null,
+    },
+  ].filter((item): item is NonNullable<typeof item> => item !== null)
+
   return (
     <PageContainer title={t('myob.title')} subtitle={t('myob.subtitle')}>
       <div className="myob-page">
-        <Alert
-          type="info"
-          showIcon
-          message={t('myob.notice.title')}
-          description={
-            <ul className="myob-notice-list">
-              <li>{t('myob.notice.admin')}</li>
-              <li>{t('myob.notice.perAbn')}</li>
-            </ul>
-          }
-        />
-
-        <ConnectionsPanel
-          connections={connections}
-          loading={connectionsLoading}
-          error={connectionsError}
-          stores={mappings.stores}
-          authorizing={authorizing}
-          onAuthorize={() => void handleAuthorize()}
-          onReload={() => void loadConnections()}
-          onConnectionUpdated={(updated) => setConnections((current) => upsertConnection(current, updated))}
-          // 断开会移除该连接下的全部映射：重新拉映射表（可选连接列表也随之变化）
-          onDisconnected={() => void loadMappings()}
-        />
-
-        <StoreMappingsPanel
-          mappings={mappings}
-          allConnections={connections}
-          loading={mappingsLoading}
-          error={mappingsError}
-          onReload={() => void loadMappings()}
-          onSaved={(saved) => {
-            setMappings(saved)
-            // 映射数量显示在连接表里，保存后同步刷新
-            void loadConnections()
-          }}
-        />
+        {activeTab === null ? (
+          <Alert type="warning" showIcon message={t('myob.tabs.noAccess')} />
+        ) : (
+          <Tabs
+            className="myob-tabs"
+            aria-label={t('myob.tabs.ariaLabel')}
+            activeKey={activeTab}
+            items={tabItems}
+            onChange={(key) => setRequestedTab(key as MyobTabKey)}
+          />
+        )}
       </div>
     </PageContainer>
   )

@@ -95,6 +95,8 @@ const rate = normalizePayRate({ userGuid: 'u1', payMode: 'Mixed', effectiveFrom:
 assert.equal(rate.effectiveFrom, '2026-10-05')
 assert.equal(rate.birthday, undefined)
 assert.equal(rate.cashAllowancePerPeriod, -20)
+assert.equal(rate.publicHolidayRateMismatch, false, '后端缺 publicHolidayRateMismatch 时按一致处理')
+assert.equal(normalizePayRate({ userGuid: 'u2', publicHolidayRateMismatch: true }).publicHolidayRateMismatch, true)
 
 // 审批：请假 / 带薪公假结构化字段（DateTime、TimeSpan 规整）
 const approval = normalizeAttendanceApproval({

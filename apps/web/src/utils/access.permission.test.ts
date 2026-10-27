@@ -374,6 +374,8 @@ const backendNavigationEntryCases: Array<[string, string]> = [
   [P.SeasonalCards.Remaining.ViewAllStores, '/pos-admin/seasonal-card-stats'],
   [P.FaceCapture.CamerasManage, '/system/face-cameras'],
   [P.Myob.ConnectionManage, '/pos-admin/myob'],
+  [P.Myob.EmployeeBind, '/pos-admin/myob'],
+  [P.Attendance.PayrollEdit, '/pos-admin/myob'],
   [P.FaceMatch.Manage, '/system/face-match'],
   [P.FaceMatch.Traffic.View, '/system/face-match'],
   [P.FaceMatch.Unwelcome.Manage, '/system/face-match'],

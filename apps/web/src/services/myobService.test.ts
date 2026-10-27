@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict'
-import { normalizeMyobConnection, normalizeMyobConnections, normalizeMyobStatus, normalizeMyobStoreMappings } from './myobService'
+import {
+  getMyobCompanies,
+  normalizeMyobCompanies,
+  normalizeMyobConnection,
+  normalizeMyobConnections,
+  normalizeMyobStatus,
+  normalizeMyobStoreMappings,
+} from './myobService'
 
 // 契约：MyobDtos.cs，camelCase；后端字段缺失 / 类型异常时前端不崩。
 
@@ -68,5 +75,57 @@ assert.equal(mappings.stores[2].isActive, true, '后端没给 isActive 时按启
 assert.equal(mappings.stores[2].storeAbn, null)
 assert.equal(mappings.connections.length, 1)
 assert.deepEqual(normalizeMyobStoreMappings(undefined), { stores: [], connections: [] })
+
+// 公司选项（GET /myob/companies，只读、只含 Active）：缺字段 / null / 类型异常给安全默认，没有 connectionGuid 的行丢弃
+assert.deepEqual(
+  normalizeMyobCompanies([
+    { connectionGuid: 'c1', name: 'Investment', abn: '00 000 000 000' },
+    { connectionGuid: 'c2', name: 'Australian', abn: null },
+    { connectionGuid: 'c3' },
+    { connectionGuid: 'c4', name: 5, abn: 123 },
+    { name: 'no guid' },
+    null,
+    'x',
+  ]),
+  [
+    { connectionGuid: 'c1', name: 'Investment', abn: '00000000000' },
+    { connectionGuid: 'c2', name: 'Australian', abn: null },
+    { connectionGuid: 'c3', name: '', abn: null },
+    { connectionGuid: 'c4', name: '', abn: null },
+  ],
+)
+assert.deepEqual(normalizeMyobCompanies(null), [])
+assert.deepEqual(normalizeMyobCompanies(undefined), [])
+assert.deepEqual(normalizeMyobCompanies({ not: 'an array' }), [])
+assert.deepEqual(normalizeMyobCompanies([]), [])
+
+// getMyobCompanies 走 GET /api/react/v1/myob/companies 并解包 ApiResponse
+const originalFetch = globalThis.fetch
+const fetchCalls: Array<{ url: string; method: string }> = []
+let fetchBody: unknown = null
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  fetchCalls.push({ url: String(input), method: init?.method ?? 'GET' })
+  return new Response(JSON.stringify(fetchBody), { status: 200, headers: { 'content-type': 'application/json' } })
+}) as typeof fetch
+try {
+  fetchBody = { success: true, data: [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000' }, {}] }
+  assert.deepEqual(await getMyobCompanies(), [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000' }])
+  assert.equal(fetchCalls.length, 1)
+  assert.equal(fetchCalls[0].method, 'GET')
+  assert.ok(fetchCalls[0].url.endsWith('/api/react/v1/myob/companies'), fetchCalls[0].url)
+  assert.ok(!fetchCalls[0].url.includes('/connections'), '公司选项不能再走需要连接管理权限的 /connections')
+
+  // data 为 null / 缺失时给空列表，不崩
+  fetchBody = { success: true, data: null }
+  assert.deepEqual(await getMyobCompanies(), [])
+  fetchBody = { success: true }
+  assert.deepEqual(await getMyobCompanies(), [])
+
+  // HTTP 200 + success=false：抛业务错误，由页面提示
+  fetchBody = { success: false, message: 'nope' }
+  await assert.rejects(getMyobCompanies(), /nope/)
+} finally {
+  globalThis.fetch = originalFetch
+}
 
 console.log('myobService.test: ok')

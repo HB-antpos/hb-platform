@@ -159,7 +159,7 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/AttendancePayroll/index.tsx',
   },
   {
-    // MYOB 对接：文案全部在页面级消息文件（菜单标题 menu.myob 在全局语言包）；错误码映射键写在 myobLogic.ts
+    // MYOB 对接：文案全部在页面级消息文件（菜单标题 menu.myob 在全局语言包）；错误码 / 状态映射键写在 myobLogic.ts 与 myobEmployeeLogic.ts
     name: 'MYOB 对接',
     keyPattern: /['"`](myob\.[A-Za-z0-9_.]+)['"`]/g,
     sources: [
@@ -168,6 +168,15 @@ const pages = [
       'src/pages/PosAdmin/Myob/StoreMappingsPanel.tsx',
       'src/pages/PosAdmin/Myob/AbnCell.tsx',
       'src/pages/PosAdmin/Myob/myobLogic.ts',
+      // 阶段 1：员工绑定 + 发薪公司
+      'src/pages/PosAdmin/Myob/myobEmployeeLogic.ts',
+      'src/pages/PosAdmin/Myob/EmployeeBindingTab.tsx',
+      'src/pages/PosAdmin/Myob/BindingListView.tsx',
+      'src/pages/PosAdmin/Myob/BindingDrawer.tsx',
+      'src/pages/PosAdmin/Myob/MissingPanels.tsx',
+      'src/pages/PosAdmin/Myob/MyobBadges.tsx',
+      'src/pages/PosAdmin/Myob/PayrollEmployersTab.tsx',
+      'src/pages/PosAdmin/Myob/PayrollEmployerDrawer.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',

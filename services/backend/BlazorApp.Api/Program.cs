@@ -812,6 +812,9 @@ builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobApiClient, Blazo
     client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTokenProvider, BlazorApp.Api.Services.Myob.MyobTokenProvider>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobConnectionService, BlazorApp.Api.Services.Myob.MyobConnectionService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeDirectory, BlazorApp.Api.Services.Myob.MyobEmployeeDirectory>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeBindingService, BlazorApp.Api.Services.Myob.MyobEmployeeBindingService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayrollEmployerService, BlazorApp.Api.Services.Myob.MyobPayrollEmployerService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
