@@ -1,4 +1,4 @@
-import { afterEach, expect, jest, test } from "@jest/globals";
+import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { act, cleanup, render, waitFor } from "@testing-library/react-native";
 import { AppState } from "react-native";
 
@@ -157,6 +157,70 @@ test("夜间（22:00–06:00）小票资料周期检查放慢到 5 分钟（对�
   } finally {
     AppState.currentState = previous;
   }
+});
+
+describe("设备运行状态心跳（对齐 WPF #613）", () => {
+  function heartbeatServices(
+    overrides: Readonly<Record<string, unknown>> = {},
+  ) {
+    const report = jest.fn(async () => undefined);
+    const { services } = receiptProfileServices();
+    return { report, services: { ...services, runtimeStatus: { report }, ...overrides } };
+  }
+
+  test("设备已认证且在线：立即上报一次，白天每 30 秒一次，卸载后停止", async () => {
+    jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
+    const { report, services } = heartbeatServices();
+    mockRuntime = { services };
+    const previous = AppState.currentState;
+    try {
+      AppState.currentState = "active";
+      const screen = await render(<RuntimeWorkBridge />);
+      await act(async () => { await Promise.resolve(); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(30_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      await screen.unmount();
+      await act(async () => { jest.advanceTimersByTime(120_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+    } finally {
+      AppState.currentState = previous;
+    }
+  });
+
+  test("夜间放慢到 5 分钟；后台不发；设备未认证或离线不发；上报失败被吞掉", async () => {
+    jest.useFakeTimers({ now: new Date(2026, 9, 27, 23, 0, 0) });
+    const { report, services } = heartbeatServices();
+    report.mockRejectedValue(new Error("offline"));
+    mockRuntime = { services };
+    const previous = AppState.currentState;
+    try {
+      AppState.currentState = "active";
+      const screen = await render(<RuntimeWorkBridge />);
+      await act(async () => { await Promise.resolve(); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(4 * 60_000); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(70_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      AppState.currentState = "background";
+      await act(async () => { jest.advanceTimersByTime(10 * 60_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      await screen.unmount();
+
+      for (const device of ["registration-required", "pending-approval", "locked"]) {
+        const locked = heartbeatServices({ device });
+        mockRuntime = { services: locked.services };
+        AppState.currentState = "active";
+        const view = await render(<RuntimeWorkBridge />);
+        await act(async () => { jest.advanceTimersByTime(10 * 60_000); });
+        expect(locked.report).not.toHaveBeenCalled();
+        await view.unmount();
+      }
+    } finally {
+      AppState.currentState = previous;
+    }
+  });
 });
 
 test("设备尚未认证（待注册、待审批、已锁定）时不暴露下发资料同步：启动与定时都不请求", async () => {

@@ -378,7 +378,7 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.Path == "/dashboard");
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/schedule-attendance");
+        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
     }
 
     [Fact]
@@ -537,62 +537,70 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.Path == "/dashboard");
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/schedule-attendance");
+        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
         Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/sales-orders");
     }
 
     [Fact]
-    public void BuildMenu_ShowsAttendanceReviewOnlyWithApprovalReviewPermission()
+    public void BuildMenu_ShowsAttendanceGroupForApprovalReviewPermissionOnly()
     {
+        // 考勤审核已并入「排班考勤」合并页：审核权限显示合并页入口（页内只剩审核标签），不显示工时与工资
         var reviewer = _service.BuildMenu(CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
             new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore)));
         var reviewerPosAdmin = Assert.Single(reviewer, item => item.Path == "/pos-admin");
-        var review = Assert.Single(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
-        Assert.Equal("menu.attendanceReview", review.TitleKey);
-        Assert.Equal("FileDoneOutlined", review.Icon);
-        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+        var attendance = Assert.Single(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance");
+        Assert.Equal("menu.scheduleAttendance", attendance.TitleKey);
+        Assert.Equal("CalendarOutlined", attendance.Icon);
+        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/payroll");
+        // 旧叶子不再单独出现在菜单里
+        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
 
-        // 只有查看审批、请假审核权限：与 Web 一致，不显示审核工作台
+        // 只有查看审批、请假审核权限：与 Web 一致，不显示审核工作台（合并页也不出现）
         var viewer = _service.BuildMenu(CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
             new Claim("permission", Permissions.Attendance.Approval.ViewManagedStore),
             new Claim("permission", Permissions.Attendance.Leave.ReviewManagedStore)));
         Assert.DoesNotContain(
             viewer.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
-            item => item.Path == "/pos-admin/attendance-review");
+            item => item.Path == "/pos-admin/attendance");
     }
 
     [Theory]
     [InlineData(Permissions.Attendance.Punch.ViewManagedStore)]
     [InlineData(Permissions.Attendance.Payroll.View)]
-    public void BuildMenu_ShowsAttendancePayrollWithPunchViewOrPayrollView(string permission)
+    [InlineData(Permissions.Myob.Connection.Manage)]
+    public void BuildMenu_ShowsPayrollGroupWithPunchViewPayrollViewOrMyobPermission(string permission)
     {
+        // 工时与工资合并页含工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见
         var menu = _service.BuildMenu(CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
             new Claim("permission", permission)));
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        var payroll = Assert.Single(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+        var payroll = Assert.Single(posAdmin.Children!, item => item.Path == "/pos-admin/payroll");
         Assert.Equal("menu.attendancePayroll", payroll.TitleKey);
         Assert.Equal("AccountBookOutlined", payroll.Icon);
-        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
+        // 旧叶子不再单独出现在菜单里
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/myob");
     }
 
     [Theory]
     [InlineData(Permissions.Attendance.Payroll.Edit)]
     [InlineData(Permissions.Attendance.Payroll.Unlock)]
     [InlineData(Permissions.Attendance.Admin.View)]
-    public void BuildMenu_HidesAttendancePayrollWithoutPunchViewOrPayrollView(string permission)
+    public void BuildMenu_HidesPayrollGroupWithoutPunchViewPayrollViewOrMyobPermission(string permission)
     {
-        // 工资编辑 / 解锁不隐含查看；Attendance.Admin.View 也不连带工资权限
+        // 工资编辑 / 解锁不隐含查看；Attendance.Admin.View 也不连带工资权限与 MYOB 对接
         var menu = _service.BuildMenu(CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
             new Claim("permission", permission)));
 
         Assert.DoesNotContain(
             menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
-            item => item.Path == "/pos-admin/attendance-payroll");
+            item => item.Path == "/pos-admin/payroll");
     }
 
     [Fact]

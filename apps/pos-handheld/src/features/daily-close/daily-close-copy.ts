@@ -56,9 +56,13 @@ export const dailyCloseEnglishCopy = {
   "status.load-failed":
     "Local daily-close summary could not be loaded. Try again.",
   "status.permission-required": "Permission required.",
+  "status.reprint-cash-slip-failed":
+    "Daily close report reprinted, but the cash slip failed. Reprint again from history.",
   "status.reprint-failed": "Reprint failed; the frozen archive is unchanged.",
   "status.reprint-printed": "Selected archive sent to print.",
   "status.save-failed": "Save failed; counts were preserved.",
+  "status.saved-cash-slip-failed":
+    "Saved safely and the daily close report printed, but the cash slip failed. Reprint from history.",
   "status.saved-print-failed":
     "Saved safely; printing failed and can be retried from history.",
   "status.saved-printed": "Saved and sent to print.",
@@ -120,9 +124,11 @@ const dailyCloseChineseCopy = {
   "status.invalid-business-date": "营业日或门店时区无效。",
   "status.load-failed": "本地日结汇总读取失败，请重试。",
   "status.permission-required": "当前收银员没有执行此操作的权限。",
+  "status.reprint-cash-slip-failed": "日结单已补打，但现金单失败，请从历史再补打一次。",
   "status.reprint-failed": "补打失败；冻结归档未改变。",
   "status.reprint-printed": "所选归档已发送打印。",
   "status.save-failed": "归档未保存，点钞数量已保留。",
+  "status.saved-cash-slip-failed": "归档与审计已保存，日结单已打印，但现金单失败，请从历史补打。",
   "status.saved-print-failed": "归档与审计已保存，但打印失败，可从历史补打。",
   "status.saved-printed": "归档与审计已保存并发送打印。",
   "status.select-archive-required": "请先选择一个归档。",

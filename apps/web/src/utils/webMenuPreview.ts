@@ -248,10 +248,22 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
         ],
       },
       { path: '/pos-admin/advertisements', title: 'menu.advertisements', accessKey: 'canManageAdvertisements' },
-      { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
-      { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
-      { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
-      { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob' },
+      {
+        path: '/pos-admin/attendance',
+        title: 'menu.scheduleAttendance',
+        children: [
+          { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
+          { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
+        ],
+      },
+      {
+        path: '/pos-admin/payroll',
+        title: 'menu.attendancePayroll',
+        children: [
+          { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
+          { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob' },
+        ],
+      },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },

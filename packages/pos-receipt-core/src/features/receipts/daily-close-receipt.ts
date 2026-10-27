@@ -21,6 +21,8 @@ export type DailyCloseReceiptDocument = Readonly<{
   lines: readonly string[];
   paper: ReceiptPaper;
   width: DailyCloseReceiptWidth;
+  /** 需要加粗打印的行下标（营业日期、核对提示等）；缺省表示全部正常字重。 */
+  emphasizedLines?: readonly number[];
 }>;
 
 export type DailyCloseReceiptInput = Readonly<{
@@ -53,6 +55,7 @@ export function buildDailyCloseReceipt(
   const zh = input.locale === "zh-CN";
   const width = receiptWidth(input.paper);
   const lines: string[] = [];
+  const emphasized: number[] = [];
   appendCentered(
     lines,
     receiptStoreHeading(
@@ -74,6 +77,7 @@ export function buildDailyCloseReceipt(
       width,
     );
   }
+  appendBusinessDateBlock(lines, emphasized, input.archive, zh, width);
   appendWrapped(
     lines,
     `${zh ? "门店/Store" : "Store"}: ${storeDisplay(
@@ -90,11 +94,6 @@ export function buildDailyCloseReceipt(
   appendWrapped(
     lines,
     `${zh ? "收银员/Cashier" : "Cashier"}: ${cleanText(input.archive.savedCashierName)}`,
-    width,
-  );
-  appendWrapped(
-    lines,
-    `${zh ? "营业日/Date" : "Business Date"}: ${input.archive.businessDate}`,
     width,
   );
   lines.push(separator(width));
@@ -191,27 +190,7 @@ export function buildDailyCloseReceipt(
   );
   lines.push(separator(width));
   lines.push(zh ? "面额明细 / DENOMINATIONS" : "DENOMINATIONS / 面额明细");
-  const denominationWidths = width === DAILY_CLOSE_RECEIPT_NARROW_WIDTH
-    ? [8, 8, 16]
-    : [12, 10, 20];
-  for (const denomination of input.archive.denominations) {
-    const label = DENOMINATION_LABELS.get(
-      denomination.denominationCents,
-    );
-    if (!label) {
-      throw new TypeError("Daily close receipt denomination is invalid.");
-    }
-    lines.push(
-      columns(
-        [
-          label,
-          `x${denomination.quantity}`,
-          money(denomination.subtotalCents),
-        ],
-        denominationWidths,
-      ),
-    );
-  }
+  appendDenominationLines(lines, input.archive, width);
   lines.push(separator(width));
   appendWrapped(
     lines,
@@ -231,6 +210,103 @@ export function buildDailyCloseReceipt(
     lines: Object.freeze(lines),
     paper: input.paper,
     width,
+    emphasizedLines: Object.freeze(emphasized),
+  });
+}
+
+/**
+ * 现金单（对齐 WPF #478）：只含点钞面额明细、纸币/硬币合计与实盘金额，单独出一张纸随现金封存交接；
+ * 不含销售汇总与长短款。日结单打完驱动会自动切纸，现金单作为第二个打印任务下发。
+ */
+export function buildDailyCloseCashSlip(
+  input: DailyCloseReceiptInput,
+): DailyCloseReceiptDocument {
+  const zh = input.locale === "zh-CN";
+  const width = receiptWidth(input.paper);
+  const lines: string[] = [];
+  const emphasized: number[] = [];
+  appendCentered(
+    lines,
+    receiptStoreHeading(
+      input.brandName ?? "",
+      input.storeName,
+      input.archive.storeCode,
+    ),
+    width,
+  );
+  appendCentered(
+    lines,
+    zh ? "日结现金单 / CASH SLIP" : "DAILY CLOSE CASH SLIP / 现金单",
+    width,
+  );
+  if (input.reprint) {
+    appendCentered(
+      lines,
+      zh ? "*** 补打 / REPRINT ***" : "*** REPRINT / 补打 ***",
+      width,
+    );
+  }
+  appendBusinessDateBlock(lines, emphasized, input.archive, zh, width);
+  appendWrapped(
+    lines,
+    `${zh ? "门店/Store" : "Store"}: ${storeDisplay(
+      input.storeName,
+      input.archive.storeCode,
+    )}`,
+    width,
+  );
+  appendWrapped(
+    lines,
+    `${zh ? "终端/Terminal" : "Terminal"}: ${cleanText(input.archive.deviceCode)}`,
+    width,
+  );
+  appendWrapped(
+    lines,
+    `${zh ? "归档/Archive" : "Archive"}: ${cleanText(input.archive.closeId)}`,
+    width,
+  );
+  lines.push(separator(width));
+  lines.push(zh ? "面额明细 / DENOMINATIONS" : "DENOMINATIONS / 面额明细");
+  appendDenominationLines(lines, input.archive, width);
+  lines.push(
+    twoColumns(
+      zh ? "纸币/Notes" : "Notes",
+      money(input.archive.notesSubtotalCents),
+      width,
+    ),
+  );
+  lines.push(
+    twoColumns(
+      zh ? "硬币/Coins" : "Coins",
+      money(input.archive.coinsSubtotalCents),
+      width,
+    ),
+  );
+  lines.push(separator(width));
+  emphasized.push(lines.length);
+  lines.push(
+    twoColumns(
+      zh ? "实点现金/Cash Counted" : "Cash Counted",
+      money(input.archive.countedCashCents),
+      width,
+    ),
+  );
+  lines.push(separator(width));
+  emphasized.push(lines.length);
+  appendCentered(lines, "KEEP THIS SLIP", width);
+  emphasized.push(lines.length);
+  appendCentered(lines, "WITH THE CASH", width);
+  if (zh) appendCentered(lines, "请随现金一同保存", width);
+  lines.push("");
+  lines.push(signatureLine(zh ? "点钞人/Counted by: " : "Counted by: ", width));
+  lines.push("");
+  lines.push(signatureLine(zh ? "复核人/Checked by: " : "Checked by: ", width));
+
+  return Object.freeze({
+    lines: Object.freeze(lines),
+    paper: input.paper,
+    width,
+    emphasizedLines: Object.freeze(emphasized),
   });
 }
 
@@ -248,7 +324,8 @@ export function dailyCloseReceiptToEscPosBytes(
   }
   const output: number[] = [];
   appendEscPosInitialize(output);
-  for (const line of document.lines) {
+  const emphasized = new Set(document.emphasizedLines ?? []);
+  for (const [index, line] of document.lines.entries()) {
     if (
       typeof line !== "string" ||
       /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(line) ||
@@ -256,9 +333,11 @@ export function dailyCloseReceiptToEscPosBytes(
     ) {
       throw new TypeError("Daily close receipt line is invalid.");
     }
+    // ESC E n：营业日期、核对提示、实盘金额等加粗行；其余行显式关闭加粗，避免状态串到下一行。
+    output.push(0x1b, 0x45, emphasized.has(index) ? 1 : 0);
     output.push(...encodeEscPosText(line), 0x0a);
   }
-  output.push(0x1b, 0x64, 0x03, 0x1d, 0x56, 0x00);
+  output.push(0x1b, 0x45, 0x00, 0x1b, 0x64, 0x03, 0x1d, 0x56, 0x00);
   if (output.length > 256 * 1_024) {
     throw new RangeError("Daily close receipt is too large.");
   }
@@ -270,6 +349,86 @@ export function dailyCloseReceiptDisplayWidth(value: string): number {
     (width, character) => width + (isWide(character) ? 2 : 1),
     0,
   );
+}
+
+/** 每种面额一行：面额、张数/枚数、小计。日结单与现金单共用。 */
+function appendDenominationLines(
+  lines: string[],
+  archive: DailyCloseArchive,
+  width: DailyCloseReceiptWidth,
+): void {
+  const denominationWidths = width === DAILY_CLOSE_RECEIPT_NARROW_WIDTH
+    ? [8, 8, 16]
+    : [12, 10, 20];
+  for (const denomination of archive.denominations) {
+    const label = DENOMINATION_LABELS.get(denomination.denominationCents);
+    if (!label) {
+      throw new TypeError("Daily close receipt denomination is invalid.");
+    }
+    lines.push(
+      columns(
+        [
+          label,
+          `x${denomination.quantity}`,
+          money(denomination.subtotalCents),
+        ],
+        denominationWidths,
+      ),
+    );
+  }
+}
+
+/**
+ * 营业日期单独成块并加粗（对齐 WPF #478）；保存当天（设备本地日期）与营业日期不一致时追加核对提示，
+ * 例如隔夜未重启按旧日期日结，店长一眼就能发现。
+ */
+function appendBusinessDateBlock(
+  lines: string[],
+  emphasized: number[],
+  archive: DailyCloseArchive,
+  zh: boolean,
+  width: DailyCloseReceiptWidth,
+): void {
+  lines.push(separator(width));
+  appendCentered(lines, zh ? "营业日期 / BUSINESS DATE" : "BUSINESS DATE", width);
+  emphasized.push(lines.length);
+  appendCentered(lines, formatBusinessDate(archive.businessDate), width);
+  const savedDate = localDateKey(archive.savedAtIso);
+  if (savedDate !== null && savedDate !== archive.businessDate) {
+    emphasized.push(lines.length);
+    appendCentered(lines, zh ? "** 请核对日期 / CHECK DATE **" : "** CHECK DATE **", width);
+    appendCentered(
+      lines,
+      zh
+        ? `保存于 ${savedDate}，不是营业日期`
+        : `Saved on ${savedDate}, not the business date`,
+      width,
+    );
+  }
+  lines.push(separator(width));
+}
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** yyyy-MM-dd + 星期缩写；日期不合法时原样返回，不抛错阻断打印。 */
+function formatBusinessDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return cleanText(value);
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return `${value} ${WEEKDAY_LABELS[date.getUTCDay()] ?? ""}`.trim();
+}
+
+/** 保存时间转设备本地日期（yyyy-MM-dd）；时间非法返回 null（不提示）。 */
+function localDateKey(iso: string): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** 签名栏：标签后用下划线补满当前纸宽（58mm 与 80mm 都不超宽）。 */
+function signatureLine(label: string, width: DailyCloseReceiptWidth): string {
+  return `${label}${"_".repeat(Math.max(4, width - dailyCloseReceiptDisplayWidth(label)))}`;
 }
 
 function appendCentered(

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "770c43a85aa93b5462f138bffccb003dd4010ecbe0bcec5d5b6c44d3eccb941d",
+  "reviewedModuleTopologySha256": "6a34accc6497baf4c66af490b0cd1d944f8ae3637f818336e68ae316dab088c0",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -517,10 +517,10 @@
     {
       "path": "features/receipts/receipt-reprint-service.ts",
       "package": "pos-receipt-core",
-      "reason": "退单（实收为负）没有找零结算，现金退单的历史重打与预览不再要求结算记录，按 WPF 打负数金额整单小票",
+      "reason": "退单（实收为负）没有找零结算，现金退单的历史重打与预览不再要求结算记录，按 WPF 打负数金额整单小票；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）",
       "baselineCanonicalRuntimeSha256": "684c7d190c53bc82ae8b0aec7c52e7eec4c5dc3e3fc2ea76a3d774c962c59b04",
-      "canonicalRuntimeSha256": "1c4d72537ee82059853a8307c8fbd7a0cc946a8624d70154bb9873fcc47d0a8d",
-      "canonicalTypeSha256": "842c0ae64278f105f5442bc4d3c32bbe0eb7bf778b4328cc88b8b85e4ac349c8",
+      "canonicalRuntimeSha256": "ce68be79337f2d1c42fc8e951c182d5a143908f54b6153c4a9f338a9030dc5ff",
+      "canonicalTypeSha256": "a775d2e8e23b6431eacf25ec02e6caacd54ac481800663edd0f9f04e19b6e6c6",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -607,10 +607,10 @@
     {
       "path": "features/receipts/receipt-document.ts",
       "package": "pos-receipt-core",
-      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配",
+      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）",
       "baselineCanonicalRuntimeSha256": "be588d9a3581e769fb819e30d22bc72e1f4873eaf98c2aa754416e1ccc9af8bc",
-      "canonicalRuntimeSha256": "7cce71c9dde2595bf2c9e8f207f2639d94aa74aab371627058e36814f134658d",
-      "canonicalTypeSha256": "8a6f5e200eac5d8f11321b96489a47aed653a47726e6a283f7d85bee3afb7ebd",
+      "canonicalRuntimeSha256": "beb5a90c1075854a64d14e0df9a0775ecebacbb1b20dbbdf55d0ce044d09a4d0",
+      "canonicalTypeSha256": "cf79572c2d71ca9e36a7b450c92a7fcc88eb255849dcb247b699facb2ffec35c",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",
@@ -709,10 +709,10 @@
     {
       "path": "features/receipts/daily-close-receipt.ts",
       "package": "pos-receipt-core",
-      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值",
+      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）",
       "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
-      "canonicalRuntimeSha256": "99d54c525a297762c08f72123929dc207194077a5d88715e90184c4304c0c954",
-      "canonicalTypeSha256": "c34c5cb1ac32140af1fa1f1a80298c4fff4df59a9da1934e2a1e8b22a9c91f75",
+      "canonicalRuntimeSha256": "af0d1518bad838c6ecc7d0ff38c92521d127fd45dd61eac37714c3cc78e920d9",
+      "canonicalTypeSha256": "6285e9af016526b6e0b686493b90ce0fa4c9a2f93485349dc4f204ba7c9fd942",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -724,6 +724,56 @@
           "workspace": "apps/pos-handheld",
           "script": "test:receipts",
           "path": "src/features/receipts/daily-close-receipt.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/daily-close-cash-slip.test.ts",
+          "pattern": "src/**/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/fulfilment/fulfilment-service.ts",
+      "package": "pos-domain",
+      "reason": "现金收款自动队列先开钱箱再打印小票，打印机缓慢或离线时不拖住钱箱（对齐 WPF #721）",
+      "baselineCanonicalRuntimeSha256": "def9a2b44a20f353bf24438c2140c1cbf430d19fe1129ec62078474fe758cc8a",
+      "canonicalRuntimeSha256": "08400f326d331e0d9e9d2246850ff56ec062536f87ec1c05f1afa511d4b37a83",
+      "canonicalTypeSha256": "e2cc3cc14409c851b0a36f08c7866bebc8b3ad4a0a6ec7e09e84bd6c187652e8",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:fulfilment",
+          "path": "src/features/fulfilment/fulfilment-service.test.ts",
+          "pattern": "src/features/fulfilment/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:fulfilment",
+          "path": "src/features/fulfilment/fulfilment-service.test.ts",
+          "pattern": "src/features/fulfilment/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/remote-history-receipt-reprint-service.ts",
+      "package": "pos-receipt-core",
+      "reason": "远程历史订单补打的小票状态行按净额判断：退款单（实收为负）打印 Refund，不再写死 Paid（对齐 WPF #885）",
+      "baselineCanonicalRuntimeSha256": "c86fef6188b45d8fc6d6043dd13bf46e83011213dfec136930205d0a45fdb9f2",
+      "canonicalRuntimeSha256": "d298ad1fadc768cb60cf18d19fd5f2ff26f89318a9717257aa4eb2f837c65456",
+      "canonicalTypeSha256": "d2d52af11d21d91aa355a302f902db043d1fc75fa240b3dbafc40833b71d5c76",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/remote-history-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/remote-history-receipt-reprint-service.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
         }
       ]

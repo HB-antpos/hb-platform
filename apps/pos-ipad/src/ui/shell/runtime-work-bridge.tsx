@@ -14,6 +14,12 @@ import {
 import type { ExpoPosRuntimeServices } from "@/core/runtime/expo-pos-runtime";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 
+/**
+ * 设备运行状态心跳周期：后台设备管理页以 45 秒为在线阈值（夜间窗口放宽到 12 分钟，见 WPF #926），
+ * 白天 30 秒一次，夜间由 background-polling 放慢到 5 分钟。
+ */
+const RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS = 30_000;
+
 /** 总部下发小票资料的定时检查周期。 */
 const RECEIPT_PROFILE_SYNC_INTERVAL_MS = 60_000;
 
@@ -86,6 +92,38 @@ export function RuntimeWorkBridge() {
     }, RECEIPT_PROFILE_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [connectivity, controller, receiptProfileEnabled]);
+
+  const runtimeStatus = runtime.services?.runtimeStatus ?? null;
+  const deviceAuthorized = isDeviceAuthorized(runtime.services);
+  useEffect(() => {
+    // 设备已认证且在线时上报运行状态心跳（在线、应用版本），后台设备管理页据此显示（对齐 WPF #613）。
+    // 心跳是看板信息：失败只吞掉，绝不影响收银；后台不发，回前台立即补发一次。
+    if (!runtimeStatus || !deviceAuthorized || connectivity !== "online") {
+      return undefined;
+    }
+    let lastRunAtMs = Date.now();
+    const send = () => {
+      lastRunAtMs = Date.now();
+      void runtimeStatus.report().catch(() => undefined);
+    };
+    if (AppState.currentState === "active") send();
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      const intervalMs = getBackgroundPollingIntervalMs(
+        new Date(),
+        RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS,
+      );
+      if (!isBackgroundPollDue(Date.now(), lastRunAtMs, intervalMs)) return;
+      send();
+    }, RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS);
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") send();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [connectivity, deviceAuthorized, runtimeStatus]);
 
   useEffect(() => {
     if (!controller || connectivity === "checking") return undefined;

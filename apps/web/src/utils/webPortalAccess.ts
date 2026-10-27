@@ -169,7 +169,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
   {
     // MYOB 对接：只有 Myob.Connection.Manage / Myob.Employee.Bind / 编辑工资 之一的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
     defaultPath: '/pos-admin/myob',
-    targetPrefixes: ['/pos-admin/myob'],
+    targetPrefixes: ['/pos-admin/myob', '/pos-admin/payroll'],
     canAccess: (access) =>
       access.hasPermission(P.Myob.ConnectionManage) ||
       access.hasPermission(P.Myob.EmployeeBind) ||

@@ -35,12 +35,16 @@ import {
   LINKLY_SAFE_OPERATOR_KEYS,
   canSelectPaymentMethod,
   canSubmitPaymentMethod,
+  isQuickCashSufficient,
+  nextQuickCashAmountText,
   type PaymentPresenterState,
   type PaymentPresenterTender,
   type PaymentScreenPresenter,
   type PaymentUiMethod,
   type PaymentUiPhase,
 } from "./payment-presenter";
+
+import { INSTALLMENT_MINIMUM_TOTAL_CENTS } from "@/features/installments/installment-presenter";
 
 import { receiptQrMatrix } from "@hb/pos-receipt-core/features/local-history/receipt-qr-matrix";
 import type {
@@ -133,8 +137,17 @@ export function PaymentScreen({
     setPreparedCashCancellationOpen,
   ] = useState(false);
   const [paymentEntryOpen, setPaymentEntryOpen] = useState(false);
+  // Lay-by 总额不足起订金额的页内提示（对齐 WPF #891）：按提示时的订单金额记住“已关闭”，金额变化后再次提示。
+  const [dismissedMinimumNoticeCents, setDismissedMinimumNoticeCents] =
+    useState<number | null>(null);
+  const installmentMinimumNoticeOpen =
+    state.fieldIssue === "installment-total-below-minimum" &&
+    state.checkout.flow === "installment-create" &&
+    dismissedMinimumNoticeCents !== state.total.cents;
   const latestState = useRef(state);
   latestState.current = state;
+  // 上一次快捷现金写入输入框的文本：输入框仍等于它时，再点快捷金额是累加而不是覆盖。
+  const lastQuickCashText = useRef<string | null>(null);
 
   const closePaymentEntry = (): void => {
     if (state.busy) return;
@@ -552,9 +565,20 @@ export function PaymentScreen({
                           <ActionButton
                             key={amount}
                             label={`$${amount}`}
-                            onPress={() =>
-                              presenter.setAmountText(amount.toFixed(2))
-                            }
+                            disabled={isQuickCashSufficient(
+                              state.amountText,
+                              lastQuickCashText.current,
+                              state.remaining,
+                            )}
+                            onPress={() => {
+                              const next = nextQuickCashAmountText(
+                                state.amountText,
+                                lastQuickCashText.current,
+                                amount,
+                              );
+                              lastQuickCashText.current = next;
+                              presenter.setAmountText(next);
+                            }}
                             sound="key"
                             style={[styles.quickCashButton, noteStyle]}
                             testID={`payment-cash-quick-${amount}`}
@@ -754,6 +778,62 @@ export function PaymentScreen({
                 sound="danger"
                 testID="payment-full-installment-confirm"
               />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setDismissedMinimumNoticeCents(state.total.cents)}
+        supportedOrientations={["landscape-left", "landscape-right"]}
+        testID="payment-installment-minimum-native-modal"
+        transparent
+        visible={installmentMinimumNoticeOpen}
+      >
+        <View
+          accessibilityViewIsModal
+          style={styles.confirmationBackdrop}
+          testID="payment-installment-minimum-notice"
+        >
+          <PosPressable
+            accessible={false}
+            onPress={() => setDismissedMinimumNoticeCents(state.total.cents)}
+            sound="navigate"
+            style={styles.backdropDismissArea}
+            testID="payment-installment-minimum-backdrop"
+          />
+          <View style={styles.confirmationCard}>
+            <Text style={styles.confirmationTitle}>
+              {t("installment.minimumNotice.title")}
+            </Text>
+            <Text style={styles.confirmationBody}>
+              {t("installment.minimumNotice.body", {
+                minimum: formatAud(INSTALLMENT_MINIMUM_TOTAL_CENTS, locale),
+                current: formatAud(state.total.cents, locale),
+              })}
+            </Text>
+            <View style={styles.confirmationActions}>
+              <ActionButton
+                label={t("installment.minimumNotice.dismiss")}
+                onPress={() => setDismissedMinimumNoticeCents(state.total.cents)}
+                style={styles.confirmationAction}
+                sound="navigate"
+                testID="payment-installment-minimum-dismiss"
+                tone="quiet"
+              />
+              {installmentModeControl && !installmentModeControl.locked ? (
+                <ActionButton
+                  label={t("installment.minimumNotice.regular")}
+                  onPress={() => {
+                    setDismissedMinimumNoticeCents(state.total.cents);
+                    installmentModeControl.onToggle(false);
+                  }}
+                  style={styles.confirmationAction}
+                  sound="navigate"
+                  testID="payment-installment-minimum-regular"
+                />
+              ) : null}
             </View>
           </View>
         </View>

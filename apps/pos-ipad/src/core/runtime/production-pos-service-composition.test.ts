@@ -3862,7 +3862,8 @@ test("下发资料后台同步：新版本落盘后，已创建的日结回单�
   assert.equal(presenter.setCount(100, 10), true);
   await presenter.saveAndPrint();
 
-  assert.equal(printed.length, 1);
+  // 日结单 + 单独的现金单；退货政策只出现在日结单上。
+  assert.equal(printed.length, 2);
   const text = new TextDecoder().decode(printed[0]);
   assert.match(text, /HQ refund within 7 days\./);
   assert.equal(text.includes("Manual policy"), false);
@@ -5364,12 +5365,14 @@ test("日结只使用可信收银员作用域，先耐久归档再通过同一�
   assert.equal(dailyClose.saved[0]?.archive.deviceCode, "IPAD-1");
   assert.equal(dailyClose.saved[0]?.archive.savedCashierId, "cashier-1");
   assert.equal(presenter.getState().statusCode, "saved-printed");
-  assert.equal(printed.length, 1);
+  // 日结单打完驱动自动切纸，现金单作为第二个任务单独出一张（对齐 WPF #478）。
+  assert.equal(printed.length, 2);
   assert.match(printed[0]?.jobId ?? "", /^daily-close:/);
-  assert.deepEqual(
-    [...(printed[0]?.bytes.slice(-3) ?? [])],
-    [0x1d, 0x56, 0x00],
-  );
+  assert.match(printed[1]?.jobId ?? "", /^daily-close-cash-slip:/);
+  for (const item of printed) {
+    assert.deepEqual([...item.bytes.slice(-3)], [0x1d, 0x56, 0x00]);
+  }
+  assert.match(new TextDecoder().decode(printed[1]?.bytes), /CASH SLIP/);
   presenter.destroy();
 });
 

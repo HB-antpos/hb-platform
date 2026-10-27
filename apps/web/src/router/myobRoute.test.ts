@@ -41,22 +41,20 @@ const MYOB_CODE = 'Myob.Connection.Manage'
 const MYOB_BIND_CODE = 'Myob.Employee.Bind'
 const PAYROLL_EDIT_CODE = 'Attendance.Payroll.Edit'
 
-// 路由登记：懒加载、不保活（授权回跳带 ?myob= 参数，必须按新进入加载）、全局菜单键与独立访问键、LinkOutlined 图标
+// 路由登记：作为「工时与工资」合并页的标签；懒加载、不保活（授权回跳带 ?myob= 参数，必须按新进入加载）、全局菜单键与独立访问键
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 const routeStart = routeSource.indexOf(`path: '${MYOB_PATH}'`)
 assertEqual(routeStart >= 0, true, '必须登记 MYOB 对接路由')
 const routeBlock = routeSource.slice(routeStart, routeSource.indexOf('element:', routeStart) + 40)
 assertEqual(routeSource.includes("const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))"), true, '页面必须懒加载，不进首屏包')
 assertEqual(routeBlock.includes("title: 'menu.myob'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes("icon: 'LinkOutlined'"), true, '菜单图标 LinkOutlined')
 assertEqual(routeBlock.includes('keepAlive: false'), true, '路由不能 keepAlive')
 assertEqual(routeBlock.includes("accessKey: 'canAccessMyob'"), true, '路由使用「三者任一」访问键')
 assertEqual(routeBlock.includes('element: <PosAdminMyobPage />'), true, '路由必须渲染 MYOB 对接页')
-assertEqual(/LinkOutlined:\s*<LinkOutlined\s*\/>/.test(routeSource), true, '图标表里必须有 LinkOutlined（后端菜单图标靠它渲染）')
 assertEqual(
-  routeSource.indexOf(MYOB_PATH) > routeSource.indexOf("path: '/pos-admin'"),
+  routeSource.indexOf(MYOB_PATH) > routeSource.indexOf('const ATTENDANCE_PAYROLL_NAV_GROUP'),
   true,
-  '登记在 /pos-admin 分组下',
+  '登记为工时与工资合并页的标签',
 )
 
 // 页面入口的请求边界：连接 / 映射接口只认 Myob.Connection.Manage，没有该权限不能请求（避免无谓的 403 提示）；
@@ -88,21 +86,17 @@ assertEqual(
   '菜单入口映射到三个权限任一',
 )
 
-// 后端 Web 菜单同一入口（路径、标题键、图标、独立权限）；后端缺叶子时前端整棵会退回本地菜单
+// 后端 Web 菜单：MYOB 对接并入「工时与工资」合并页入口，独立权限码任一可见；后端缺叶子时前端整棵会退回本地菜单
 const navigationSource = readFileSync(
   join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/NavigationService.cs'),
   'utf8',
 )
-const navigationLine = navigationSource.split('\n').find((line) => line.includes('Path = "/pos-admin/myob"')) ?? ''
 assertEqual(
-  /TitleKey = "menu\.myob".*Icon = "LinkOutlined"/.test(navigationLine) &&
-    navigationLine.includes('AnyPermissions') &&
-    navigationLine.includes('Permissions.Myob.Connection.Manage') &&
-    navigationLine.includes('Permissions.Myob.Employee.Bind') &&
-    navigationLine.includes('Permissions.Attendance.Payroll.Edit'),
+  /Path = "\/pos-admin\/payroll".*TitleKey = "menu\.attendancePayroll".*AnyPermissions = new List<string> \{[^}]*Permissions\.Myob\.Connection\.Manage[^}]*Permissions\.Myob\.Employee\.Bind[^}]*\}/.test(navigationSource),
   true,
-  '后端 FullMenu 应登记 MYOB 对接，三个权限任一可见（与前端 canAccessMyob 一致）',
+  '后端 FullMenu 的工时与工资合并页应包含 MYOB 连接 / 员工绑定权限任一；工资编辑不隐含查看，不单独打开菜单',
 )
+assertEqual(navigationSource.includes('Path = "/pos-admin/myob"'), false, '后端 FullMenu 不再单独登记 MYOB 对接')
 
 // 只有该权限：能进后台、登录落到该页、授权回跳的深链（带 ?myob=）被放行、菜单预览可见
 const only = buildAccess(createCurrentUser([MYOB_CODE]))
@@ -114,7 +108,13 @@ assertEqual(only.canAccessDashboard, false, '不连带工作台')
 assertEqual(hasBackendNavigationAccess(only), true, '只有该权限的账号也要能进入后台')
 assertEqual(only.canAccessAdminShell, true, '后台壳可进入')
 assertEqual(getDefaultWebPath(only), MYOB_PATH, '只有该权限时登录落到该页')
-for (const target of [MYOB_PATH, `${MYOB_PATH}?myob=connected&connection=abc`, `${MYOB_PATH}?myob=error&code=MYOB_AUTHORIZATION_DENIED`]) {
+for (const target of [
+  MYOB_PATH,
+  `${MYOB_PATH}?myob=connected&connection=abc`,
+  `${MYOB_PATH}?myob=error&code=MYOB_AUTHORIZATION_DENIED`,
+  // 合并页菜单地址：直接打开时会落到第一个有权限的标签
+  '/pos-admin/payroll',
+]) {
   assertEqual(resolveAuthorizedWebTarget(target, only), target, `${target} 被放行`)
 }
 assertEqual(resolveAuthorizedWebTarget('/pos-admin/daily-closes', only), undefined, '不能顺带放行其他后台页面')

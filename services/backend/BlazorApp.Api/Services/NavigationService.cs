@@ -172,13 +172,12 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     // 节日贺卡分店填报统计：总部查看全部分店的剩余贺卡填报；独立权限码，店长的填报 / 本店查看权限不能打开。
                     new() { Path = "/pos-admin/seasonal-card-stats",  TitleKey = "menu.seasonalCardStats",      Icon = "GiftOutlined",               Permission = Permissions.SeasonalCards.Remaining.ViewAllStores },
-                    new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
-                    // 考勤审核工作台：与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
-                    new() { Path = "/pos-admin/attendance-review",     TitleKey = "menu.attendanceReview",       Icon = "FileDoneOutlined",           Permission = Permissions.Attendance.Approval.ReviewManagedStore },
-                    // 工时与工资：工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View，任一即可见（页内再按各自权限显示页签）。
-                    new() { Path = "/pos-admin/attendance-payroll",    TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View } },
-                    // MYOB 对接：连接 MYOB 公司文件、分店映射；独立权限码，默认不授予任何角色。
-                    new() { Path = "/pos-admin/myob",                  TitleKey = "menu.myob",                   Icon = "LinkOutlined",               AnyPermissions = new List<string> { Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind, Permissions.Attendance.Payroll.Edit } },
+                    // 排班考勤合并页：排班考勤 / 考勤审核两个标签，任一权限即可见（标签再按各自权限显示）。
+                    // 考勤审核与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
+                    new() { Path = "/pos-admin/attendance",            TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           AnyPermissions = new List<string> { Permissions.Attendance.Schedule.ViewStore, Permissions.Attendance.Approval.ReviewManagedStore } },
+                    // 工时与工资合并页：工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见（页内再按各自权限显示标签与页签）。
+                    // 工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View；MYOB 对接页签：连接 / 分店映射、员工绑定看独立权限码（默认不授予任何角色）；发薪公司页签看 Attendance.Payroll.Edit，但工资编辑不隐含查看，不单独打开本菜单。
+                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },

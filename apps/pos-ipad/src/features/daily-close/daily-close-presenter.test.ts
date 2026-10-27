@@ -175,6 +175,22 @@ test("日结补打无论成功或失败都记录冻结员工身份", async () =>
   assert.equal(failed.audit.events[0]?.payload.outcome, "Failed");
 });
 
+test("日结单已打印、仅现金单失败时，保存与补打都如实报告现金单失败，归档与审计照常保留", async () => {
+  const saved = createHarness({ cashSlipFails: true });
+  await saved.presenter.load();
+  assert.equal(saved.presenter.setCount(10_000, 1), true);
+  await saved.presenter.saveAndPrint();
+  assert.equal(saved.presenter.getState().statusCode, "saved-cash-slip-failed");
+  assert.equal(saved.repository.commits.length, 1);
+
+  const reprint = createHarness({ cashSlipFails: true });
+  reprint.repository.archives.push(archive("cash-slip-reprint"));
+  await reprint.presenter.load();
+  await reprint.presenter.reprintSelected();
+  assert.equal(reprint.presenter.getState().statusCode, "reprint-cash-slip-failed");
+  assert.equal(reprint.audit.events[0]?.payload.status, "Failed");
+});
+
 test("日结补打的审计故障不覆盖已经确认的打印结果", async () => {
   const harness = createHarness({ auditFails: true });
   harness.repository.archives.push(archive("reprint-audit-failure"));
@@ -191,6 +207,8 @@ function createHarness(
     permissions: readonly string[];
     auditFails: boolean;
     printFails: boolean;
+    /** 日结单已确认打印，随后的现金单失败（对齐 WPF #478）。 */
+    cashSlipFails: boolean;
     saveFails: boolean;
   }> = {},
 ) {
@@ -210,6 +228,11 @@ function createHarness(
       this.jobs.push(job);
       events.push(`print:${job.archive.closeId}`);
       if (options.printFails) throw new Error("usb://secret-printer");
+      if (options.cashSlipFails) {
+        throw Object.assign(new Error("cash slip"), {
+          code: "DAILY_CLOSE_CASH_SLIP_NOT_CONFIRMED",
+        });
+      }
     },
   };
   const ids = ["close-1", "audit-1", "close-2", "audit-2"];
