@@ -75,6 +75,19 @@ public sealed class DailyCloseViewLayoutTests
     }
 
     [Fact]
+    public void Cash_difference_is_shown_with_the_same_signed_text_as_the_receipt_not_a_culture_dependent_currency_format()
+    {
+        var xaml = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Screens", "DailyCloseView.xaml"));
+
+        // 页面三处差额（历史列表、历史详情、现金工作区）都绑定与小票同格式的文本属性。
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(xaml, @"\{Binding CashDifferenceText, Mode=OneWay\}").Count);
+        // 不能再用 StringFormat 的货币格式：负数写法随绑定语言和系统区域设置变化，短款可能被读成正数。
+        Assert.DoesNotMatch(@"Binding CashDifference,\s*StringFormat", xaml);
+    }
+
+    [Fact]
     public void Daily_close_toolbar_removes_text_above_tabs_and_keeps_remaining_controls_on_one_row()
     {
         var view = LoadView();
