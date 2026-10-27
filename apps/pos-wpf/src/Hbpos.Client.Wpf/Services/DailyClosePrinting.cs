@@ -440,15 +440,12 @@ public static class DailyCloseTextFormatter
         return string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
     }
 
-    private static string Money(decimal amount)
-    {
-        return string.Create(CultureInfo.InvariantCulture, $"${amount:0.00}");
-    }
+    // 金额格式与日结页面共用 DailyCloseMoneyFormat，两处符号写法必须一致。
+    private static string Money(decimal amount) => DailyCloseMoneyFormat.Money(amount);
 
     private static string SignedMoney(decimal amount)
     {
-        var sign = amount >= 0m ? "+" : "-";
-        return sign + Money(Math.Abs(amount));
+        return DailyCloseMoneyFormat.SignedMoney(amount);
     }
 
     private static string TrimTo(string value, int maxChars)
