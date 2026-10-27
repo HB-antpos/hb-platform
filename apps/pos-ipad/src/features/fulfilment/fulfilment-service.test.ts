@@ -305,7 +305,7 @@ test("自动队列只认 Queued/Required；终态、Sending、Ambiguous、Reques
   const result = await service.drainAutomaticQueue();
 
   assert.deepEqual(printer.calls, ["print-Queued"]);
-  assert.deepEqual(printer.connectCalls, ["XP-PRINT", "XP-DRAWER"]);
+  assert.deepEqual(printer.connectCalls, ["XP-DRAWER", "XP-PRINT"]);
   assert.deepEqual(drawer.calls, ["drawer-Required"]);
   assert.deepEqual(result, { printed: 1, drawersOpened: 1 });
   assert.equal(store.printJobs.get("print-Queued")?.state, "Printed");
@@ -1408,13 +1408,14 @@ test("每个动作先连接其持久化 printerId；更换当前设置不会改�
 
   await service.drainAutomaticQueue();
 
+  // 对齐 WPF #721：钱箱先于小票打印。
   assert.deepEqual(hardwareTrace, [
-    "connect:XP-FROZEN-PRINT",
-    "print:print-old",
     "connect:XP-FROZEN-DRAWER",
     "drawer:drawer-old",
+    "connect:XP-FROZEN-PRINT",
+    "print:print-old",
   ]);
-  assert.deepEqual(printer.connectCalls, ["XP-FROZEN-PRINT", "XP-FROZEN-DRAWER"]);
+  assert.deepEqual(printer.connectCalls, ["XP-FROZEN-DRAWER", "XP-FROZEN-PRINT"]);
   assert.deepEqual(drawer.calls, ["drawer-old"]);
 });
 
@@ -1444,7 +1445,7 @@ test("连接失败安全落为 Failed，既不发送打印字节也不发钱箱�
   const result = await service.drainAutomaticQueue();
 
   assert.deepEqual(result, { printed: 0, drawersOpened: 0 });
-  assert.deepEqual(printer.connectCalls, ["XP-PRINT", "XP-DRAWER"]);
+  assert.deepEqual(printer.connectCalls, ["XP-DRAWER", "XP-PRINT"]);
   assert.deepEqual(printer.calls, []);
   assert.deepEqual(drawer.calls, []);
   assert.equal(store.printJobs.get("print-connect-failed")?.state, "Failed");
