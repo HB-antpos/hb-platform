@@ -214,11 +214,16 @@ export function createAxiosHbposTransport(
         // 记录正文是否为 ApiResult 信封：网关 HTML 403/404、认证页等非信封响应由上层按“服务不可用”分类，
         // 不能当作服务端业务拒绝（例如持久化锁机）。错误码读取口径保持不变。
         const apiEnvelope = isHbposApiEnvelope(error.response.data);
+        const retryAfterSeconds = parseRetryAfterSeconds(error.response.headers);
         const apiError = new HbposApiError(
           payload?.message ?? error.message ?? "Hbpos API request failed.",
-          code
-            ? { kind: "http", status: error.response.status, code, apiEnvelope }
-            : { kind: "http", status: error.response.status, apiEnvelope }
+          {
+            kind: "http",
+            status: error.response.status,
+            ...(code ? { code } : {}),
+            apiEnvelope,
+            ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+          },
         );
         if (
           (apiError.status === 401 || apiError.status === 403) &&
@@ -416,4 +421,17 @@ function toAxiosRequest(request: HbposTransportRequest): AxiosRequestConfig {
         }
       : {}),
   };
+}
+
+/** 只解析整数秒形式的 Retry-After（服务端限流使用此形式）；HTTP-date 等其它格式视为未提供。 */
+function parseRetryAfterSeconds(headers: unknown): number | undefined {
+  if (typeof headers !== "object" || headers === null) return undefined;
+  const raw = (headers as Readonly<Record<string, unknown>>)["retry-after"]
+    ?? (typeof (headers as { get?: unknown }).get === "function"
+      ? (headers as { get(name: string): unknown }).get("retry-after")
+      : undefined);
+  const text = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d{1,7}$/u.test(text)) return undefined;
+  const seconds = Number(text);
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
 }
