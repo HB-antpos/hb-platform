@@ -284,6 +284,30 @@ const SETTLEMENT_CASH_NAV_GROUP: NavGroupDefinition = {
   ],
 }
 
+const SCHEDULE_ATTENDANCE_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/attendance',
+  title: 'menu.scheduleAttendance',
+  icon: 'CalendarOutlined',
+  tabs: [
+    { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule', keepAlive: true, element: <PosAdminScheduleAttendancePage /> },
+    // 考勤审核工作台：侧栏「排班考勤」菜单带待审数角标（见 AdminLayout）。
+    { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance', keepAlive: true, element: <PosAdminAttendanceReviewPage /> },
+  ],
+}
+
+const ATTENDANCE_PAYROLL_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/payroll',
+  title: 'menu.attendancePayroll',
+  icon: 'AccountBookOutlined',
+  tabs: [
+    // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
+    { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours', keepAlive: true, element: <PosAdminAttendancePayrollPage /> },
+    // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
+    // 不保活：授权完成后后端重定向回 /pos-admin/myob?myob=connected|error，页面必须按新进入重新加载并读取参数。
+    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canManageMyobConnections', keepAlive: false, element: <PosAdminMyobPage /> },
+  ],
+}
+
 export const NAV_GROUPS: NavGroupDefinition[] = [
   DEVICES_NAV_GROUP,
   ACCOUNTS_NAV_GROUP,
@@ -292,6 +316,8 @@ export const NAV_GROUPS: NavGroupDefinition[] = [
   FACE_RECOGNITION_NAV_GROUP,
   PRODUCTS_PRICING_NAV_GROUP,
   SETTLEMENT_CASH_NAV_GROUP,
+  SCHEDULE_ATTENDANCE_NAV_GROUP,
+  ATTENDANCE_PAYROLL_NAV_GROUP,
 ]
 
 /** 合并页展开成路由：一个可见菜单项 + 每个标签一条隐藏路由（地址不变），全部渲染同一个合并页外壳。 */
@@ -847,50 +873,9 @@ export const appRoutes: AppRouteItem[] = [
         },
         element: <PosAdminAdvertisementsPage />,
       },
-      {
-        path: '/pos-admin/schedule-attendance',
-        meta: {
-          title: 'menu.scheduleAttendance',
-          icon: 'CalendarOutlined',
-          keepAlive: true,
-          accessKey: 'canViewAttendanceSchedule',
-        },
-        element: <PosAdminScheduleAttendancePage />,
-      },
-      {
-        // 考勤审核工作台：从排班考勤页的页签升级为独立菜单项，菜单带待审数角标（见 AdminLayout）。
-        path: '/pos-admin/attendance-review',
-        meta: {
-          title: 'menu.attendanceReview',
-          icon: 'FileDoneOutlined',
-          keepAlive: true,
-          accessKey: 'canReviewAttendance',
-        },
-        element: <PosAdminAttendanceReviewPage />,
-      },
-      {
-        // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
-        path: '/pos-admin/attendance-payroll',
-        meta: {
-          title: 'menu.attendancePayroll',
-          icon: 'AccountBookOutlined',
-          keepAlive: true,
-          accessKey: 'canViewAttendanceHours',
-        },
-        element: <PosAdminAttendancePayrollPage />,
-      },
-      {
-        // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
-        // 不 keepAlive：授权完成后后端重定向回 ?myob=connected|error，页面必须按新进入重新加载并读取参数。
-        path: '/pos-admin/myob',
-        meta: {
-          title: 'menu.myob',
-          icon: 'LinkOutlined',
-          keepAlive: false,
-          accessKey: 'canManageMyobConnections',
-        },
-        element: <PosAdminMyobPage />,
-      },
+      // 排班考勤（含考勤审核）、工时与工资（含 MYOB 对接）各合并为一个侧栏菜单项，标签沿用原地址。
+      ...navGroupRoutes(SCHEDULE_ATTENDANCE_NAV_GROUP),
+      ...navGroupRoutes(ATTENDANCE_PAYROLL_NAV_GROUP),
       {
         path: '/pos-admin/cash-register-users',
         meta: {
@@ -1197,7 +1182,9 @@ export function getBreadcrumbItems(pathname: string, access: AccessControl, curr
   if (navGroup) {
     const groupTitleKey = titleMap.get(navGroup)
     const groupTitles = groupTitleKey ? [i18n.t(groupTitleKey)] : []
-    const tabTitles = route.path === navGroup ? [] : [i18n.t(route.meta.title)]
+    // 标签与合并页同名时（排班考勤 / 工时与工资的首个标签）只保留一级，避免面包屑重复。
+    const tabTitle = i18n.t(route.meta.title)
+    const tabTitles = route.path === navGroup || groupTitles.includes(tabTitle) ? [] : [tabTitle]
     return [...titles, ...groupTitles, ...tabTitles].map((title) => ({ title }))
   }
 

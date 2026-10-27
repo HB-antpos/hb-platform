@@ -62,16 +62,20 @@ for (const language of ['zh', 'en']) {
 
 // 后端 Web 菜单树同样登记两个入口，权限与前端访问键一致（否则后端菜单缺叶子，前端整棵退回本地菜单）
 const navigationSource = readFileSync(join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/NavigationService.cs'), 'utf8')
+// 考勤审核并入「排班考勤」合并页、工时与工资并入同一合并页的 MYOB 标签：后端只登记两个合并页入口，旧叶子不再单独出现
 assertEqual(
-  /Path = "\/pos-admin\/attendance-review".*TitleKey = "menu\.attendanceReview".*Icon = "FileDoneOutlined".*Permission = Permissions\.Attendance\.Approval\.ReviewManagedStore/.test(navigationSource),
+  /Path = "\/pos-admin\/attendance",.*TitleKey = "menu\.scheduleAttendance".*Icon = "CalendarOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Schedule\.ViewStore, Permissions\.Attendance\.Approval\.ReviewManagedStore \}/.test(navigationSource),
   true,
-  '后端 FullMenu 应登记考勤审核，只认 Approval.ReviewManagedStore',
+  '后端 FullMenu 应登记排班考勤合并页，排班查看或审核任一可见（审核只认 Approval.ReviewManagedStore）',
 )
 assertEqual(
-  /Path = "\/pos-admin\/attendance-payroll".*TitleKey = "menu\.attendancePayroll".*Icon = "AccountBookOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Punch\.ViewManagedStore, Permissions\.Attendance\.Payroll\.View \}/.test(navigationSource),
+  /Path = "\/pos-admin\/payroll",.*TitleKey = "menu\.attendancePayroll".*Icon = "AccountBookOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Punch\.ViewManagedStore, Permissions\.Attendance\.Payroll\.View, Permissions\.Myob\.Connection\.Manage \}/.test(navigationSource),
   true,
-  '后端 FullMenu 应登记工时与工资，打卡查看或工资查看任一可见',
+  '后端 FullMenu 应登记工时与工资合并页，打卡查看、工资查看或 MYOB 对接任一可见',
 )
+for (const retired of ['/pos-admin/schedule-attendance', REVIEW_PATH, PAYROLL_PATH, '/pos-admin/myob']) {
+  assertEqual(navigationSource.includes(`Path = "${retired}"`), false, `后端 FullMenu 不应再单独登记 ${retired}`)
+}
 
 // 新权限码与规格一致
 assertEqual(P.Attendance.ApprovalReviewSelf, 'Attendance.Approval.ReviewSelf', '本人审核权限码')
