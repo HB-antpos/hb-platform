@@ -127,6 +127,7 @@ import {
 import {
   formatStoreTime,
   getStoreNow,
+  storePickerValueToLocal,
   storePickerValueToUtcIso,
   utcToStorePickerValue,
 } from './operationLogsTime'
@@ -346,8 +347,12 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
       const values = form.getFieldsValue()
       const [from, to] = values.timeRange ?? getDefaultTimeRange()
       return buildOperationAuditQuery({
+        // 范围是「各分店自己的本地时间」：startLocal / endLocal 交给后端按每家分店的时区换算；
+        // startUtc / endUtc（按悉尼）只给尚未升级的旧后端兜底。
         startUtc: storePickerValueToUtcIso(from),
         endUtc: storePickerValueToUtcIso(to),
+        startLocal: storePickerValueToLocal(from),
+        endLocal: storePickerValueToLocal(to),
         storeCode: '',
         storeCodes: values.storeCodes,
         cashierKeyword: values.cashierKeyword ?? '',
@@ -577,8 +582,8 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
 
   const showCashierDay = (record: OperationAuditListItem) => {
     if (!record.cashierId) return
-    // 「这一天」按门店（悉尼）自然日算，不是浏览器本地日。
-    const day = utcToStorePickerValue(record.occurredAtUtc)
+    // 「这一天」按这条日志所属分店的自然日算，不是浏览器本地日。
+    const day = utcToStorePickerValue(record.occurredAtUtc, record.storeTimeZoneId)
     form.setFieldsValue({
       timeRange: [day.startOf('day'), day.endOf('day')],
       deviceCode: undefined,
@@ -666,7 +671,7 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
         width: 175,
         sorter: true,
         sortOrder: sortBy === 'occurredAtUtc' ? sortOrder : null,
-        render: (value: string) => formatStoreTime(value),
+        render: (value: string, record) => formatStoreTime(value, record.storeTimeZoneId),
       },
       {
         title: t('operationLogs.columns.store'),

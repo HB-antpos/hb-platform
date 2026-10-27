@@ -1,7 +1,9 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using BlazorApp.Api.Features.LegacyEmployeeLogs;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services.OperationAudits.Risk;
+using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models.POSM;
@@ -115,7 +117,8 @@ public sealed class OperationAuditQueryService
         }
 
         var now = DateTime.SpecifyKind(utcNow ?? DateTime.UtcNow, DateTimeKind.Utc);
-        var query = BuildFilteredQuery(request, access, now, FilterScope.All);
+        var zones = await LoadStoreTimeZonesAsync();
+        var query = BuildFilteredQuery(request, access, now, FilterScope.All, zones);
         if (query == null)
         {
             return empty;
@@ -128,6 +131,7 @@ public sealed class OperationAuditQueryService
             .ToListAsync();
 
         var items = rows.Select(MapListItem).ToList();
+        ApplyStoreTimeZones(items, zones);
         await EnrichAsync(items);
         await FillPrimaryProductInfoAsync(items);
         return new PagedListReactDto<OperationAuditListItemDto>
@@ -156,9 +160,10 @@ public sealed class OperationAuditQueryService
         }
 
         var now = DateTime.SpecifyKind(utcNow ?? DateTime.UtcNow, DateTimeKind.Utc);
+        var zones = await LoadStoreTimeZonesAsync();
         // SqlSugar 的 Where 会就地修改查询对象，为避免各计数条件互相叠加，每次计数都重新构建基础查询。
         ISugarQueryable<PosOperationAudit>? Build() =>
-            BuildFilteredQuery(request, access, now, FilterScope.OperationType | FilterScope.Cashier);
+            BuildFilteredQuery(request, access, now, FilterScope.OperationType | FilterScope.Cashier, zones);
 
         var baseQuery = Build();
         if (baseQuery == null)
@@ -175,7 +180,7 @@ public sealed class OperationAuditQueryService
 
         // 风险入口计数与老收银同口径：再忽略操作类型，避免「已选某个操作类型」时入口基数跟着变小。
         ISugarQueryable<PosOperationAudit>? BuildRisk() =>
-            BuildFilteredQuery(request, access, now, FilterScope.Cashier);
+            BuildFilteredQuery(request, access, now, FilterScope.Cashier, zones);
         summary.DangerTotal = await ApplyDanger(BuildRisk()!).CountAsync();
         var abnormal = await LoadAbnormalAsync(BuildRisk()!);
         summary.AbnormalTotal = abnormal.Count;
@@ -184,7 +189,7 @@ public sealed class OperationAuditQueryService
         summary.AbnormalByRule = CountByRule(abnormal);
         // 设备下拉：与总数同一套过滤条件，但不带设备编码本身，选了某设备后仍能列出全部设备。
         summary.Devices = await LoadDeviceOptionsAsync(
-            BuildFilteredQuery(request, access, now, FilterScope.OperationType | FilterScope.Cashier, applyDeviceCode: false)!);
+            BuildFilteredQuery(request, access, now, FilterScope.OperationType | FilterScope.Cashier, zones, applyDeviceCode: false)!);
         return summary;
     }
 
@@ -289,7 +294,8 @@ public sealed class OperationAuditQueryService
         }
 
         var now = DateTime.SpecifyKind(utcNow ?? DateTime.UtcNow, DateTimeKind.Utc);
-        ISugarQueryable<PosOperationAudit>? Build() => BuildFilteredQuery(request, access, now, FilterScope.Base);
+        var zones = await LoadStoreTimeZonesAsync();
+        ISugarQueryable<PosOperationAudit>? Build() => BuildFilteredQuery(request, access, now, FilterScope.Base, zones);
         if (Build() == null)
         {
             return result;
@@ -375,7 +381,7 @@ public sealed class OperationAuditQueryService
         result.DangerTotal = employees.Sum(item => item.DangerCount);
         // 设备下拉：同分店、时间等基础条件，但不带设备编码本身。
         result.Devices = await LoadDeviceOptionsAsync(
-            BuildFilteredQuery(request, access, now, FilterScope.Base, applyDeviceCode: false)!);
+            BuildFilteredQuery(request, access, now, FilterScope.Base, zones, applyDeviceCode: false)!);
         return result;
     }
 
@@ -411,6 +417,7 @@ public sealed class OperationAuditQueryService
             items.Add(MapListItem(row));
             items = items.OrderBy(item => item.OccurredAtUtc).ThenBy(item => item.EventId).ToList();
         }
+        ApplyStoreTimeZones(items, await LoadStoreTimeZonesAsync());
         await EnrichAsync(items);
         await FillPrimaryProductInfoAsync(items);
         return OperationAuditDetailQueryResult<OperationAuditContextDto>.Found(new OperationAuditContextDto
@@ -638,6 +645,88 @@ public sealed class OperationAuditQueryService
         }
     }
 
+    private const string StoreTimeZonesCacheKey = "operation-audit:store-time-zones";
+
+    /// <summary>
+    /// 门店 → 时区快照（HBweb 门店表，规则同 InstallmentOrderStoreTimeZoneResolver），缓存 10 分钟。
+    /// 没有主库连接（测试替身）或查询失败时退回空快照，所有门店按悉尼处理，不影响日志查询本身。
+    /// </summary>
+    private async Task<OperationAuditStoreTimeZones> LoadStoreTimeZonesAsync()
+    {
+        if (_productDb == null)
+        {
+            return OperationAuditStoreTimeZones.Empty;
+        }
+
+        if (_cache != null && _cache.TryGetValue(StoreTimeZonesCacheKey, out OperationAuditStoreTimeZones? cached) && cached != null)
+        {
+            return cached;
+        }
+
+        try
+        {
+            var stores = await _productDb.Queryable<BlazorApp.Shared.Models.Store>()
+                .Where(store => !store.IsDeleted)
+                .ToListAsync();
+            var byStore = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var store in stores)
+            {
+                var code = store.StoreCode?.Trim();
+                if (!string.IsNullOrEmpty(code))
+                {
+                    byStore[code] = InstallmentOrderStoreTimeZoneResolver.Resolve(store);
+                }
+            }
+
+            var zones = new OperationAuditStoreTimeZones(byStore);
+            _cache?.Set(StoreTimeZonesCacheKey, zones, TimeSpan.FromMinutes(10));
+            return zones;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "加载门店时区失败，操作日志暂按悉尼时区处理");
+            return OperationAuditStoreTimeZones.Empty;
+        }
+    }
+
+    private static void ApplyStoreTimeZones(IEnumerable<OperationAuditListItemDto> items, OperationAuditStoreTimeZones zones)
+    {
+        foreach (var item in items)
+        {
+            item.StoreTimeZoneId = zones.Resolve(item.StoreCode);
+        }
+    }
+
+    /// <summary>
+    /// 「每家门店各自的本地时间范围」谓词：按时区分段，段内 门店 IN (...) 且 发生时间 在该时区换算后的 UTC 区间内，段之间取 OR。
+    /// 默认段（悉尼及未配置的门店）用 NOT IN 排除其他时区门店，保证门店表里没有的编码也被覆盖。
+    /// </summary>
+    private static Expression<Func<PosOperationAudit, bool>> BuildStoreLocalRangePredicate(
+        IReadOnlyList<OperationAuditStoreTimeZones.Segment> segments)
+    {
+        var predicate = Expressionable.Create<PosOperationAudit>();
+        foreach (var segment in segments)
+        {
+            var from = segment.FromUtc;
+            var to = segment.ToUtc;
+            var codes = segment.StoreCodes.ToList();
+            if (!segment.IsDefault)
+            {
+                predicate.Or(item => codes.Contains(item.StoreCode) && item.OccurredAtUtc >= from && item.OccurredAtUtc <= to);
+            }
+            else if (codes.Count == 0)
+            {
+                predicate.Or(item => item.OccurredAtUtc >= from && item.OccurredAtUtc <= to);
+            }
+            else
+            {
+                predicate.Or(item => !codes.Contains(item.StoreCode) && item.OccurredAtUtc >= from && item.OccurredAtUtc <= to);
+            }
+        }
+
+        return predicate.ToExpression();
+    }
+
     /// <summary>危险操作：类型在危险清单内，或不关联订单的手动开钱箱。</summary>
     private static ISugarQueryable<PosOperationAudit> ApplyDanger(ISugarQueryable<PosOperationAudit> query)
     {
@@ -657,18 +746,45 @@ public sealed class OperationAuditQueryService
         OperationAuditStoreAccess access,
         DateTime now,
         FilterScope scope,
+        OperationAuditStoreTimeZones zones,
         bool applyDeviceCode = true
     )
     {
         var fromUtc = request.FromUtc?.UtcDateTime ?? now.AddDays(-7);
         var toUtc = request.ToUtc?.UtcDateTime ?? now;
-        if (fromUtc > toUtc)
-        {
-            return null;
-        }
+        var hasFromLocal = OperationAuditStoreTimeZones.TryParseLocal(request.FromLocal, out var fromLocal);
+        var hasToLocal = OperationAuditStoreTimeZones.TryParseLocal(request.ToLocal, out var toLocal);
 
-        var query = _db.Queryable<PosOperationAudit>()
-            .Where(item => item.OccurredAtUtc >= fromUtc && item.OccurredAtUtc <= toUtc);
+        ISugarQueryable<PosOperationAudit> query;
+        if (hasFromLocal || hasToLocal)
+        {
+            // 门店本地时间范围：缺的一端按「UTC 参数 / 默认值」折成悉尼墙钟补齐，再逐时区换算。
+            var defaultZone = TimeZoneInfo.FindSystemTimeZoneById(OperationAuditStoreTimeZones.DefaultTimeZoneId);
+            if (!hasFromLocal)
+            {
+                fromLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc), defaultZone);
+            }
+            if (!hasToLocal)
+            {
+                toLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(toUtc, DateTimeKind.Utc), defaultZone);
+            }
+            if (fromLocal > toLocal)
+            {
+                return null;
+            }
+
+            query = _db.Queryable<PosOperationAudit>().Where(BuildStoreLocalRangePredicate(zones.BuildSegments(fromLocal, toLocal)));
+        }
+        else
+        {
+            if (fromUtc > toUtc)
+            {
+                return null;
+            }
+
+            query = _db.Queryable<PosOperationAudit>()
+                .Where(item => item.OccurredAtUtc >= fromUtc && item.OccurredAtUtc <= toUtc);
+        }
 
         if (!access.IsAdmin)
         {

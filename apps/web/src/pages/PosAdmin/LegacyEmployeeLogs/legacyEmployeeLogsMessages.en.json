@@ -281,7 +281,7 @@
       "pos": "New POS",
       "switchLabel": "Data source",
       "legacySubtitle": "Operations uploaded by the legacy POS (store local time).",
-      "posSubtitle": "Operation audits from the new POS (WPF / handheld / iPad), shown in store time (Sydney), matching Sales Details."
+      "posSubtitle": "Operation audits from the new POS (WPF / handheld / iPad), shown in each store's own time zone, matching Sales Details."
     },
     "pos": {
       "allScope": "Outcomes · succeeded {{succeeded}} · denied {{denied}} · failed {{failed}}",
