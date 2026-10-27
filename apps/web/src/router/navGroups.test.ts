@@ -45,7 +45,7 @@ function collectMenuKeys(items: unknown[] | undefined): string[] {
 }
 
 const groupPaths = NAV_GROUPS.map((group) => group.path)
-assert(groupPaths.length === 7, '七个合并页')
+assert(groupPaths.length === 9, '九个合并页')
 assert(new Set(groupPaths).size === groupPaths.length, '合并页地址不重复')
 
 // 每个标签的地址仍能解析，且挂在所属合并页上（菜单高亮、共用页签都靠 navGroup）
@@ -63,8 +63,8 @@ for (const group of NAV_GROUPS) {
   }
 }
 
-// 敏感页面不保活
-const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match']
+// 敏感页面不保活；MYOB 对接授权回跳带 ?myob= 参数，必须按新进入重新加载，同样不保活
+const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match', '/pos-admin/myob']
 for (const group of NAV_GROUPS) {
   for (const tab of group.tabs) {
     assert(tab.keepAlive === !sensitivePaths.includes(tab.path), `${tab.path} 保活设置与原路由一致`)
@@ -100,6 +100,43 @@ assert(usersTab?.keepAlive === true, '合并页外壳按组缓存')
 assert(getSelectedMenuKeys('/system/roles', admin).join(',') === '/system/accounts', '侧栏高亮合并页')
 const crumbs = getBreadcrumbItems('/system/roles', admin, '账号与权限').map((item) => item.title)
 assert(crumbs.length === 3, '面包屑：父菜单 / 合并页 / 当前标签')
+
+// 考勤两个合并页：考勤审核并入排班考勤，MYOB 对接并入工时与工资；原地址、访问键、保活设置不变
+const scheduleGroup = NAV_GROUPS.find((group) => group.path === '/pos-admin/attendance')!
+const payrollGroup = NAV_GROUPS.find((group) => group.path === '/pos-admin/payroll')!
+assert(
+  scheduleGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/schedule-attendance,/pos-admin/attendance-review',
+  '排班考勤合并页含排班考勤、考勤审核',
+)
+assert(
+  payrollGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/attendance-payroll,/pos-admin/myob',
+  '工时与工资合并页含工时与工资、MYOB 对接',
+)
+assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/myob')?.keepAlive === false, 'MYOB 授权回跳要按新进入加载，不保活')
+for (const path of ['/pos-admin/attendance-review', '/pos-admin/myob']) {
+  assert(!adminMenuKeys.includes(path), `${path} 不再单独出现在侧栏`)
+}
+// 只有审核权限：只显示「排班考勤」合并页，且只剩考勤审核一个标签
+const reviewerOnly = buildAccess(createUser([P.Attendance.ApprovalReviewManagedStore]))
+assert(collectMenuKeys(buildMenus(reviewerOnly)).includes('/pos-admin/attendance'), '审核权限显示排班考勤合并页')
+assert(
+  getVisibleNavGroupTabs(scheduleGroup, reviewerOnly).map((tab) => tab.path).join(',') === '/pos-admin/attendance-review',
+  '审核权限只看到考勤审核标签',
+)
+// 只有 MYOB 权限：只显示「工时与工资」合并页，且只剩 MYOB 对接一个标签
+const myobOnly = buildAccess(createUser([P.Myob.ConnectionManage]))
+assert(collectMenuKeys(buildMenus(myobOnly)).includes('/pos-admin/payroll'), 'MYOB 权限显示工时与工资合并页')
+assert(
+  getVisibleNavGroupTabs(payrollGroup, myobOnly).map((tab) => tab.path).join(',') === '/pos-admin/myob',
+  'MYOB 权限只看到 MYOB 对接标签',
+)
+// 面包屑：首个标签与合并页同名时只保留一级；其余标签仍是「父菜单 / 合并页 / 当前标签」
+assert(getBreadcrumbItems('/pos-admin/schedule-attendance', admin).length === 2, '同名标签不重复面包屑')
+assert(getBreadcrumbItems('/pos-admin/attendance-review', admin).length === 3, '考勤审核面包屑含合并页与标签')
+assert(getBreadcrumbItems('/pos-admin/myob', admin).length === 3, 'MYOB 对接面包屑含合并页与标签')
+// 老书签地址仍归到合并页：同组页签共用一个 key
+assert(toTabItem('/pos-admin/attendance-review', admin)?.key === '/pos-admin/attendance', '考勤审核页签归到排班考勤合并页')
+assert(getSelectedMenuKeys('/pos-admin/myob', admin).join(',') === '/pos-admin/payroll', 'MYOB 对接侧栏高亮工时与工资')
 
 // 本地存储里的旧页签归到合并页，同组只留一个
 const persisted: TabItem[] = [
