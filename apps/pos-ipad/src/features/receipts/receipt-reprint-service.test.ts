@@ -246,6 +246,9 @@ test("现金退单没有找零结算也能重打负数整单小票，且不读�
   // 与 WPF 一致：退单打负数金额的整单小票，付款行为负数现金。
   assert.match(bytes, /Total\(inc GST\)\s+\$-2\.50/);
   assert.match(bytes, /Cash\s+\$-2\.50/);
+  // 对齐 WPF #885：退单状态行打印 Refund，不再误印 Paid。
+  assert.match(bytes, /\*\*\* Refund \*\*\*/);
+  assert.doesNotMatch(bytes, /\*\*\* Paid \*\*\*/);
 });
 
 test("零金额订单只接受审计中的零找零", async () => {
