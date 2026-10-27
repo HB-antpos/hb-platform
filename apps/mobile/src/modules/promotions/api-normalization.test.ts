@@ -53,6 +53,32 @@ assertDeepEqual(
 );
 
 assertDeepEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "all", hideEnded: true }).status,
+  "notended",
+  "全部分段隐藏已结束时请求未结束过滤"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "all", hideEnded: false }).status,
+  undefined,
+  "全部分段不隐藏已结束时不传状态"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", hideEnded: true }).status,
+  "notended",
+  "未指定分段等同全部"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "ended", hideEnded: true }).status,
+  "ended",
+  "其他分段不受隐藏已结束影响"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "active", hideEnded: true }).status,
+  "active",
+  "生效中分段不受隐藏已结束影响"
+);
+
+assertDeepEqual(
   buildPromotionPayload({
     name: "  清仓促销 ",
     storeCode: " STO01 ",

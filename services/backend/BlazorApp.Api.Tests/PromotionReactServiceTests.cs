@@ -661,6 +661,13 @@ public sealed class PromotionReactServiceTests : IDisposable
         Assert.Equal(
             new[] { "active", "disabled", "ended", "ended-disabled", "upcoming" },
             await Ids(null));
+        // 未结束 = 全部去掉已结束（含已停用但未到期的），大小写不敏感。
+        Assert.Equal(
+            new[] { "active", "disabled", "upcoming" },
+            await Ids(PromotionStoreStatusFilters.NotEnded));
+        Assert.Equal(
+            new[] { "active", "disabled", "upcoming" },
+            await Ids("NotEnded"));
 
         var counts = await service.GetStoreStatusCountsAsync("S01");
         Assert.True(counts.Success);

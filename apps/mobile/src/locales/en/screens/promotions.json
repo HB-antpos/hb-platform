@@ -32,6 +32,7 @@
     "sortEndAsc": "Sorted by end date",
     "sortEndDesc": "Latest ended first",
     "productFilter": "Only promotions with \"{{name}}\"",
+    "hideEnded": "Hide ended",
     "clearProductFilter": "Clear product filter",
     "loadMore": "Load more"
   },

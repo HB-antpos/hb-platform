@@ -1191,7 +1191,8 @@ namespace BlazorApp.Api.Services.React
 
         /// <summary>
         /// 店级状态分段：生效中=启用且在有效期内；未开始=启用且未到开始时间；
-        /// 已停用=停用且未结束；已结束=结束时间已过（不论启停）。四段互斥，合计等于全部。
+        /// 已停用=停用且未结束；已结束=结束时间已过（不论启停）。四段互斥，合计等于全部；
+        /// notended 是「全部」去掉已结束的组合筛选，不是独立分段（不参与计数）。
         /// </summary>
         private static ISugarQueryable<Promotion> ApplyStoreStatusFilter(
             ISugarQueryable<Promotion> query,
@@ -1211,6 +1212,8 @@ namespace BlazorApp.Api.Services.React
                     !p.IsEnabled && p.EffectiveEnd >= now
                 ),
                 PromotionStoreStatusFilters.Ended => query.Where(p => p.EffectiveEnd < now),
+                // 未结束=全部去掉已结束（含已停用但未到期的），供移动端「全部」分段隐藏已结束。
+                PromotionStoreStatusFilters.NotEnded => query.Where(p => p.EffectiveEnd >= now),
                 _ => query,
             };
         }

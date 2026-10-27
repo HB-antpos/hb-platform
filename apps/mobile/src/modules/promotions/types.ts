@@ -52,6 +52,8 @@ export interface PromotionGridQuery {
   storeCode: string;
   keyword?: string;
   status?: PromotionStatusFilter;
+  /** 仅「全部」分段有效：隐藏已结束（请求时翻译成后端的 notended 过滤）。 */
+  hideEnded?: boolean;
   page?: number;
   pageSize?: number;
   sortModel?: Array<{ colId: string; sort: "asc" | "desc" }>;
