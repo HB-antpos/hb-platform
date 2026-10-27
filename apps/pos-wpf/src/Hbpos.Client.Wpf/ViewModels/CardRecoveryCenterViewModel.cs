@@ -83,7 +83,6 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
     private CardRecoveryQueueRowViewModel? _selectedRow;
     private bool _isBusy;
     private string _resolutionReason = string.Empty;
-    private string _resolutionEvidence = string.Empty;
     private string _resolutionReference = string.Empty;
     private string _statusMessage = string.Empty;
     private IReadOnlyList<PosCartLineSnapshot> _selectedProductLines = [];
@@ -210,10 +209,12 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             {
                 if (previousKey != value?.Key)
                 {
+                    // 弹窗属于上一笔交易；换了选择就收起，避免把旧弹窗的输入提交给另一笔金融交易。
+                    ResolutionDialogDecision = null;
                     IsManualExpanded = false;
                     ResolutionReason = string.Empty;
-                    ResolutionEvidence = string.Empty;
-                    ResolutionReference = string.Empty;
+                    // 中文注释：交易过程中抓到了批准小票时自动带出 RRN / 批准码，主管不必去找参考号；没有就留空（选填）。
+                    ResolutionReference = value?.ReceiptApprovalReference ?? string.Empty;
                 }
 
                 var matchingRow = value is null
@@ -269,13 +270,14 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
     public string ResolutionReason
     {
         get => _resolutionReason;
-        set => SetProperty(ref _resolutionReason, value);
-    }
-
-    public string ResolutionEvidence
-    {
-        get => _resolutionEvidence;
-        set => SetProperty(ref _resolutionEvidence, value);
+        set
+        {
+            if (SetProperty(ref _resolutionReason, value))
+            {
+                // 顾客已被扣款的记录要求备注必填，输入变化要即时刷新弹窗的确认按钮。
+                _submitResolutionDialogCommand?.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public string ResolutionReference
@@ -337,7 +339,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         : IsSquareRefundSelection
         ? T(
             "cardRecovery.refund.section.squareInstructions",
-            "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; confirm not refunded requires bank evidence; continue waiting requires a supervisor note.")
+            "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; continue waiting requires a supervisor note.")
         : IsRefundSelection
             ? T(
                 "cardRecovery.refund.section.instructions",
@@ -345,11 +347,11 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             : IsPaymentSelection && IsApprovedEvidenceSelection
                 ? T(
                     "cardRecovery.payment.section.approvedInstructions",
-                    "This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the evidence field, then close this record here. A supervisor note is optional.")
+                    "This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the supervisor note, then close this record here.")
             : IsPaymentSelection
                 ? T(
                     "cardRecovery.payment.section.instructions",
-                    "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.")
+                    "Check the bank result before unlocking this payment. Confirming paid or not paid only needs supervisor authorization. The payment reference and supervisor note are optional.")
                 : T(
                     "cardRecovery.center.resolution.instructions",
                     "Confirm the bank or terminal evidence for this selected transaction. Each manual decision requires one-time supervisor authorization.");
@@ -363,22 +365,13 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             ? T(
                 "cardRecovery.refund.field.note",
                 "Supervisor note (required when waiting; reference or note required when refunded)")
+            : IsPaymentSelection && IsApprovedEvidenceSelection
+                ? T(
+                    "cardRecovery.payment.field.approvedNote",
+                    "Supervisor note (required: how was the customer refunded or the payment handled?)")
             : IsPaymentSelection
                 ? T("cardRecovery.payment.field.note", "Supervisor note (optional)")
                 : T("cardRecovery.center.input.reason", "Supervisor reason or note");
-    public string ResolutionEvidenceLabelText => IsRefundSelection
-        ? T(
-            "cardRecovery.refund.field.evidence",
-            "Bank evidence (required when no refund was processed)")
-        : IsPaymentSelection && IsApprovedEvidenceSelection
-            ? T(
-                "cardRecovery.payment.field.approvedEvidence",
-                "Refund or handling evidence (required, for example the refund reference)")
-        : IsPaymentSelection
-            ? T(
-                "cardRecovery.payment.field.evidence",
-                "Bank evidence (required when confirming not paid)")
-            : T("cardRecovery.center.input.evidence", "Bank or terminal evidence");
     public string ResolutionReferenceLabelText => IsSquareRefundSelection
         ? T(
             "cardRecovery.refund.field.squareRefundReference",
@@ -386,7 +379,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         : IsRefundSelection
             ? T("cardRecovery.refund.field.refundReference", "Refund reference (when available)")
             : IsPaymentSelection
-                ? T("cardRecovery.payment.field.paymentReference", "Payment reference (when available)")
+                ? T("cardRecovery.payment.field.paymentReference", "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")
                 : T("cardRecovery.center.input.reference", "Payment or settlement reference");
     public string SelectedTypeText => MapOperationType(SelectedAttempt?.OperationKind);
     public string SelectedChannelText => MapChannel(SelectedAttempt?.Processor);
@@ -651,19 +644,20 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         string.Equals(attempt.OperationKind, "Refund", StringComparison.OrdinalIgnoreCase) &&
         (Normalize(attempt.PaymentId) is not null || Normalize(attempt.PaymentStatus) is not null);
 
-    private async Task ResolveSelectedAsync(
+    // 返回主管决定是否已经落库：弹窗据此决定关闭还是留着显示拒绝原因。
+    private async Task<bool> ResolveSelectedAsync(
         CardRecoverySupervisorDecision decision,
         string action)
     {
+        var persisted = false;
         var selected = SelectedAttempt;
         if (selected is null || !selected.IsOpen || IsBusy)
         {
-            return;
+            return false;
         }
 
         var selectedKey = selected.Key;
         var reason = Normalize(ResolutionReason) ?? string.Empty;
-        var evidence = Normalize(ResolutionEvidence);
         var reference = Normalize(ResolutionReference);
         IsBusy = true;
         try
@@ -684,7 +678,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                 SetStatusResource(
                     "cardRecovery.center.status.authorizationRequired",
                     "Authorization is required.");
-                return;
+                return false;
             }
 
             using var activation = authorization.Activate();
@@ -694,17 +688,20 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                 SetStatusResource(
                     "cardRecovery.center.status.selectionChanged",
                     "The selected transaction changed. Select it again before continuing.");
-                return;
+                return false;
             }
 
             var result = await _recoveryService.ResolveAsync(
                 selectedKey,
                 decision,
                 reason,
-                evidence,
+                // 证据输入框已取消：原因只写在主管备注里（服务层接口仍保留证据参数，供旧调用方使用）。
+                null,
                 decision == CardRecoverySupervisorDecision.ContinueWaiting ? null : reference,
                 _cart,
                 _session);
+            // 成功，或决定已落库但后续交接失败，都算“决定已保存”：弹窗关闭，后续问题由状态栏提示。
+            persisted = result.Succeeded || result.ResolutionPersisted;
             var actionMessage = string.IsNullOrWhiteSpace(result.Message)
                 ? T("cardRecovery.center.status.resolveNoResult", "The resolution returned no message.")
                 : result.Message;
@@ -743,6 +740,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         {
             IsBusy = false;
         }
+
+        return persisted;
     }
 
     private async Task TryRefreshListAfterOperationAsync(
@@ -879,6 +878,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         ConfirmPaidCommand.NotifyCanExecuteChanged();
         ConfirmNotPaidCommand.NotifyCanExecuteChanged();
         ContinueWaitingCommand.NotifyCanExecuteChanged();
+        NotifyResolutionDialogCommands();
     }
 
     private void UpdateSelectedProductLines(string? orderDraftJson)
@@ -921,13 +921,17 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(SelectedReferenceText));
         OnPropertyChanged(nameof(IsSquareRefundProcessing));
         OnPropertyChanged(nameof(CanShowSupervisorResolution));
+        // 刷新后这笔交易不再允许主管结案（例如已被别处处理）：弹窗随之收起。
+        if (ResolutionDialogDecision is not null && !CanShowSupervisorResolution)
+        {
+            ResolutionDialogDecision = null;
+        }
         OnPropertyChanged(nameof(CanShowRecoveryOnlyGuidance));
         OnPropertyChanged(nameof(RecoveryOnlyGuidanceMessage));
         OnPropertyChanged(nameof(SquareRefundProcessingMessage));
         OnPropertyChanged(nameof(ResolutionSectionTitleText));
         OnPropertyChanged(nameof(ResolutionInstructionsText));
         OnPropertyChanged(nameof(ResolutionReasonLabelText));
-        OnPropertyChanged(nameof(ResolutionEvidenceLabelText));
         OnPropertyChanged(nameof(ResolutionReferenceLabelText));
     }
 

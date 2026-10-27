@@ -133,6 +133,7 @@
     "hqSyncProduct": "商品 {{productCode}} · 分店 {{storeCode}}",
     "hqSyncProductAllStores": "商品 {{productCode}} · 全部分店",
     "hqSyncAttempt": "已尝试 {{count}} 次",
+    "discountAutoPrintFailed": "普通标签已打印，折扣标签打印失败",
     "discountPrintUnavailable": "当前商品没有折扣信息，无法打印折扣标签",
     "clearancePrintUnavailable": "当前商品没有清货信息，无法打印清货标签"
   },
@@ -161,12 +162,121 @@
     "unsaved": "有未保存修改"
   },
   "promotion": {
-    "title": "满减活动",
-    "unnamed": "未命名活动",
-    "rule": "满 {{count}} 件 ${{price}}",
-    "active": "促销中",
-    "until": "至 {{date}}",
-    "more": "等 {{count}} 个活动"
+    "title": "本商品促销",
+    "viewAll": "全部促销",
+    "unnamed": "未命名促销",
+    "status": {
+      "active": "生效中",
+      "upcoming": "未开始",
+      "disabled": "已停用",
+      "ended": "已结束"
+    },
+    "scope": {
+      "store": "本店独享",
+      "multi": "多店 · {{count}} 店"
+    },
+    "rule": "{{count}} 件 ${{price}}",
+    "unitPrice": "单件 ${{price}}",
+    "saving": "省 ${{amount}}",
+    "noSaving": "不比零售价便宜",
+    "dateRange": "{{start}} – {{end}}",
+    "daysLeft": "剩 {{count}} 天",
+    "startsIn": "{{count}} 天后开始",
+    "longTerm": "长期有效",
+    "products": "{{count}} 个商品",
+    "exclusive": "排他",
+    "stackable": "可叠加",
+    "toggleLabel": "启用「{{name}}」",
+    "lockedHint": "覆盖多家店的促销只能查看，可复制成本店独享促销后调整",
+    "readonlyHint": "仅查看",
+    "actions": {
+      "edit": "编辑",
+      "endNow": "提前结束",
+      "copy": "复制到本店",
+      "create": "为本商品新建促销"
+    },
+    "confirm": {
+      "endTitle": "提前结束促销",
+      "endMessage": "「{{name}}」的结束时间将改为现在，开关保持不变。确定提前结束吗？",
+      "endConfirm": "提前结束",
+      "copyTitle": "复制到本店",
+      "copyMessage": "将「{{name}}」复制为本店独享促销。复制后默认停用、优先级为 0，可编辑后再启用。",
+      "copyConfirm": "复制"
+    },
+    "messages": {
+      "enabled": "促销已启用",
+      "disabled": "促销已停用",
+      "ended": "促销已提前结束",
+      "copied": "已复制为本店独享促销（默认停用）",
+      "created": "促销已保存",
+      "updated": "促销修改已保存",
+      "loadDetailFailed": "读取促销详情失败",
+      "actionFailed": "促销操作失败",
+      "exclusiveConflict": "与其他排他促销时间冲突，请调整有效期，或先停用冲突的促销"
+    },
+    "form": {
+      "createTitle": "新建本店独享促销",
+      "editTitle": "编辑本店促销",
+      "addProducts": "加入同组商品（扫码 / 搜索）· 已选 {{count}} 个",
+      "productSearchPlaceholder": "扫码或输入条码 / 编码",
+      "productSearchAdd": "添加",
+      "productSearchEmpty": "没有找到商品",
+      "productSearchFailed": "查找商品失败",
+      "productSearchPick": "找到多个商品，请选择：",
+      "productRemove": "移除",
+      "productCurrent": "当前商品",
+      "name": "促销名称",
+      "defaultName": "{{name}} {{count}} 件价",
+      "applyQuantity": "买满数量",
+      "fixedPrice": "组合总价",
+      "decrease": "减少数量",
+      "increase": "增加数量",
+      "previewRule": "{{count}} 件 ${{price}} · 单件均价 ${{unit}}",
+      "previewSaving": "比零售价 ${{retail}} 便宜 {{percent}}（每组省 ${{amount}}）",
+      "previewNoRetail": "本店零售价未知，无法计算优惠",
+      "pricePending": "填写组合总价后显示单件均价与折扣",
+      "notDiscount": "组合价不低于零售价 × 数量（${{total}}），不能保存",
+      "nonDiscounted": "以下商品买满 {{count}} 件也没有优惠：{{names}}",
+      "quantityTooSmall": "买满数量至少 {{count}} 件",
+      "validity": "有效期",
+      "quick": {
+        "sevenDays": "今天起 7 天",
+        "monthEnd": "至本月底",
+        "thirtyDays": "30 天",
+        "custom": "自定义"
+      },
+      "startDate": "开始日期",
+      "endDate": "结束日期",
+      "rangeInvalid": "结束时间须晚于开始时间",
+      "rangeEnded": "结束时间已过；要结束促销请用「提前结束」",
+      "store": "适用分店",
+      "storeValue": "本店独享 · {{store}}",
+      "more": "更多设置",
+      "moreSummary": "{{exclusive}} · 优先级 {{priority}} · {{max}}",
+      "maxUnlimited": "每单不限",
+      "maxLimited": "每单最多 {{count}} 次",
+      "exclusiveLabel": "排他（与其他促销不叠加）",
+      "priorityLabel": "优先级",
+      "priorityHint": "本店促销优先级由后台统一管理，这里不能修改",
+      "maxPerOrderLabel": "每单最多次数",
+      "maxPerOrderPlaceholder": "留空表示不限",
+      "maxPerOrderInvalid": "请输入正整数，或留空表示不限",
+      "saveDisabled": "存为停用",
+      "saveEnabled": "保存并启用",
+      "save": "保存"
+    },
+    "conflict": {
+      "title": "与排他促销时间重叠",
+      "messageOther": "本商品在 {{range}} 已有{{scope}}排他促销「{{name}}」。重叠期间收银只会按优先级高的一条计价。",
+      "messageSelf": "本条是排他促销，与本商品在 {{range}} 的{{scope}}促销「{{name}}」时间重叠。重叠期间收银只会按优先级高的一条计价。",
+      "scopeStore": "本店",
+      "scopeMulti": "多店",
+      "current": "本次：{{name}} · 优先级 {{priority}} · {{range}}",
+      "other": "冲突：{{name}} · 优先级 {{priority}} · {{range}}",
+      "endBefore": "改到 {{date}} 结束",
+      "saveAnyway": "仍然保存",
+      "back": "返回修改"
+    }
   },
   "hero": {
     "unnamedProduct": "未命名商品",
@@ -544,5 +654,58 @@
       "clearAfter": "清空已打印",
       "resultQuestion": "打印好后可以清空这批海报，继续扫下一批。"
     }
+  },
+  "priceTask": {
+    "titlePriceUpdate": "本店有待处理的价格任务",
+    "titleLabelOnly": "本店有待换的价格标签",
+    "overdueTag": "超期 {{days}} 天",
+    "waitingTag": "已等待 {{days}} 天",
+    "storeNow": "本店现价",
+    "warehouseNew": "仓库新价",
+    "shelfLabel": "货架标签",
+    "deltaUp": "涨 {{amount}}",
+    "deltaDown": "降 {{amount}}",
+    "discountRow": "折扣：{{from}} → {{to}}",
+    "printerOffline": "标签机未连接，本次只会更新价格",
+    "connectPrinter": "去连接",
+    "dirtyBlocked": "页面上有未保存的价格修改，请先保存或放弃，再处理这条任务。",
+    "actions": {
+      "applyAndPrint": "更新并打印",
+      "applyOnly": "仅更新价格",
+      "printLabel": "打印标签",
+      "markReplaced": "标记已换",
+      "more": "更多",
+      "keepStorePrice": "保持本店价",
+      "viewTask": "查看任务详情",
+      "reprint": "再打一张",
+      "retry": "重试"
+    },
+    "steps": {
+      "apply": "更新价格",
+      "print": "打印标签",
+      "complete": "完成任务",
+      "skipped": "未执行"
+    },
+    "notice": {
+      "priceUpdatedLabelPending": "价格已更新，标签还没打印，已转为「待换标签」。",
+      "targetChanged": "价格已发生变化，已刷新为最新内容，请重新确认。",
+      "applyFailed": "更新价格失败，请重试。",
+      "printFailed": "价格已更新，但标签打印失败，任务保留在「待换标签」。",
+      "confirmFailed": "标签已打印，但回写任务状态失败，请点重试（不会重复打印）。",
+      "printerRequired": "请先连接标签机，再打印标签。",
+      "operationFailed": "操作失败，请重试"
+    },
+    "done": {
+      "completed": "任务已完成：价格已更新为 {{price}}，标签已打印",
+      "markedReplaced": "已标记为已换标签",
+      "keptStorePrice": "已保持本店价，任务已完成",
+      "reprinted": "已再打一张"
+    }
+  },
+  "autoPricingStore": {
+    "storeTag": "当前分店：{{store}}",
+    "taskHint": "本店还有 1 条仓库价格任务（{{kind}}），确认后在页面上处理。",
+    "kindPriceUpdate": "需改价",
+    "kindLabelOnly": "待换标签"
   }
 }

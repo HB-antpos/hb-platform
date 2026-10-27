@@ -7,6 +7,8 @@ import type {
   PromotionListItem,
   PromotionProductItem,
   PromotionScopeType,
+  PromotionStatusCounts,
+  PromotionStatusFilter,
   PromotionStoreItem,
 } from "@/modules/promotions/types";
 
@@ -145,6 +147,26 @@ export function buildPromotionGridPayload(query: PromotionGridQuery) {
     startRow: (pageNumber - 1) * pageSize,
     pageSize,
     sortModel: query.sortModel?.length ? query.sortModel : undefined,
+    status: normalizeStatusFilter(query.status, query.hideEnded),
+  };
+}
+
+const STATUS_FILTERS: readonly PromotionStatusFilter[] = ["active", "upcoming", "disabled", "ended", "all"];
+
+function normalizeStatusFilter(value?: PromotionStatusFilter, hideEnded?: boolean) {
+  // 「全部」默认不传参数，旧后端也能正常返回；隐藏已结束时传 notended（旧后端不认识会按全部处理，只是仍显示已结束）。
+  if (!value || value === "all") return hideEnded ? "notended" : undefined;
+  return STATUS_FILTERS.includes(value) ? value : undefined;
+}
+
+export function normalizeStatusCounts(payload: unknown): PromotionStatusCounts {
+  const record = asRecord(unwrapPayload(payload)) ?? {};
+  return {
+    active: Math.max(0, asInt(pick(record, "active", "Active"), 0)),
+    upcoming: Math.max(0, asInt(pick(record, "upcoming", "Upcoming"), 0)),
+    disabled: Math.max(0, asInt(pick(record, "disabled", "Disabled"), 0)),
+    ended: Math.max(0, asInt(pick(record, "ended", "Ended"), 0)),
+    total: Math.max(0, asInt(pick(record, "total", "Total"), 0)),
   };
 }
 
@@ -238,6 +260,26 @@ export async function fetchPromotions(query: PromotionGridQuery) {
   return normalizePromotionsResponse(response.data);
 }
 
+export async function fetchPromotionStatusCounts(storeCode: string, keyword?: string) {
+  const client = await getApiClient();
+  const response = await client.get(`${BASE_PATH}/store/status-counts`, {
+    params: { storeCode: storeCode.trim(), keyword: trimText(keyword) },
+  });
+  return normalizeStatusCounts(response.data);
+}
+
+/** 商品查询页「本商品促销」：当前分店相关、未结束（含未开始、已停用）的促销。 */
+export async function fetchStorePromotionsByProduct(productCode: string, storeCode: string) {
+  const client = await getApiClient();
+  const response = await client.get(`${BASE_PATH}/store/by-product`, {
+    params: {
+      productCode: productCode.trim(),
+      storeCode: storeCode.trim(),
+    },
+  });
+  return normalizeValidPromotionsResponse(response.data);
+}
+
 export async function fetchValidPromotionsByProduct(productCode: string, storeCode: string) {
   const client = await getApiClient();
   const response = await client.get(`${BASE_PATH}/valid/by-product`, {
@@ -277,6 +319,32 @@ export async function copyPromotionToStore(payload: PromotionCopyRequest) {
   const client = await getApiClient();
   const response = await client.post(`${BASE_PATH}/store/copy`, buildPromotionCopyPayload(payload));
   return normalizePromotionDetail(response.data);
+}
+
+/**
+ * 提前结束本店独享促销：只把结束时间改为现在，开关与其余字段保持原样（用户定：不同时停用）。
+ * 店级更新接口是整体替换，所以必须先取完整详情再回写，避免丢商品或改动排他 / 优先级。
+ */
+export async function endPromotionNow(id: string, storeCode: string, now: Date = new Date()) {
+  const detail = await fetchPromotionDetail(id, storeCode);
+  if (!detail) {
+    throw new Error("PROMOTION_NOT_FOUND");
+  }
+  return updatePromotion(id, {
+    id: detail.id,
+    name: detail.name,
+    description: detail.description,
+    storeCode,
+    effectiveStart: detail.effectiveStart,
+    effectiveEnd: now.toISOString(),
+    isEnabled: detail.isEnabled,
+    isExclusive: detail.isExclusive,
+    priority: detail.priority,
+    applyQuantity: detail.applyQuantity,
+    fixedPrice: detail.fixedPrice,
+    maxApplicationsPerOrder: detail.maxApplicationsPerOrder ?? null,
+    products: detail.products,
+  });
 }
 
 export async function setPromotionEnabled(id: string, storeCode: string, enable: boolean) {

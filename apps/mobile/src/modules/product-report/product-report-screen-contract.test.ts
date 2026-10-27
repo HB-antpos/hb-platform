@@ -57,11 +57,15 @@ function assertSourceOrder(scope: string, markers: string[], message: string) {
   });
 }
 
-const pickerStart = source.indexOf("function StorePickerModal(");
-const pickerEnd = source.indexOf("function BranchDrilldownModal(", pickerStart);
+// 分店选择必须使用全站共用的 StorePickerModal，不得再在页面里自写一份弹层。
+const sharedPickerSource = readFileSync(join(directory, "../../components/ui/StorePickerModal.tsx"), "utf8");
+const pickerStart = source.indexOf("<StorePickerModal");
+const pickerEnd = source.indexOf("/>", pickerStart);
 
 assert.ok(pickerStart >= 0, "商品报告必须保留分店选择弹层");
 assert.ok(pickerEnd > pickerStart, "必须能够隔离分店选择弹层源码");
+assert.doesNotMatch(source, /function StorePickerModal\(/, "商品报告不得自写分店选择弹层，必须复用共用组件");
+assert.match(source, /import \{ StorePickerModal \} from "@\/components\/ui\/StorePickerModal"/);
 
 assert.match(
   hubSource,
@@ -111,14 +115,16 @@ assert.match(
 
 const pickerSource = source.slice(pickerStart, pickerEnd);
 
-assert.match(pickerSource, /<ScrollView/);
-assert.match(pickerSource, /nestedScrollEnabled/);
-assert.match(pickerSource, /showsVerticalScrollIndicator/);
-assert.match(pickerSource, /keyboardShouldPersistTaps="handled"/);
-assert.match(pickerSource, /\{labelAll\}/);
-assert.match(pickerSource, /options\.map/);
-assert.match(pickerSource, /style=\{styles\.storeModalList\}/);
-assert.match(pickerSource, /contentContainerStyle=\{styles\.storeModalListContent\}/);
+assert.match(pickerSource, /presentation="sheet"/, "与其他页面一致，分店选择使用底部抽屉");
+assert.match(pickerSource, /includeAllOption/, "必须保留「全部分店」选项");
+assert.match(pickerSource, /allLabel=\{t\("productReport\.filters\.allStores"\)\}/);
+assert.match(pickerSource, /title=\{t\("labels\.selectStore"\)/, "弹层必须有「选择门店」标题");
+assert.match(pickerSource, /cancelLabel=\{t\("actions\.cancel"\)\}/, "弹层必须有取消按钮");
+assert.match(pickerSource, /stores=\{pickerStores\}/);
+assert.match(pickerSource, /onSelectStore=\{\(store\) => applyStore\(store\?\.storeCode\)\}/, "选中门店与「全部分店」都走 applyStore");
+// 排序、限高滚动由共用组件负责：分店按名字排序，列表限高可滚动。
+assert.match(sharedPickerSource, /sortStoresByName\(stores\)/, "分店选项必须按分店名字排序");
+assert.match(sharedPickerSource, /<ScrollView[\s\S]*?nestedScrollEnabled[\s\S]*?showsVerticalScrollIndicator/);
 
 assert.match(formatSource, /export function formatNullableMoney\(value: number \| null\)/);
 assert.match(formatSource, /export function formatGrossMarginRate\([\s\S]*?costStatus: ProductReportCostStatus[\s\S]*?costPendingLabel: string/);

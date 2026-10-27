@@ -4,6 +4,7 @@ import {
   buildPromotionPayload,
   normalizePromotionDetail,
   normalizePromotionsResponse,
+  normalizeStatusCounts,
   normalizeValidPromotionsResponse,
 } from "./api";
 
@@ -49,6 +50,32 @@ assertDeepEqual(
     sortModel: [{ colId: "priority", sort: "desc" }],
   },
   "促销列表查询会裁剪字段并规范分页"
+);
+
+assertDeepEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "all", hideEnded: true }).status,
+  "notended",
+  "全部分段隐藏已结束时请求未结束过滤"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "all", hideEnded: false }).status,
+  undefined,
+  "全部分段不隐藏已结束时不传状态"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", hideEnded: true }).status,
+  "notended",
+  "未指定分段等同全部"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "ended", hideEnded: true }).status,
+  "ended",
+  "其他分段不受隐藏已结束影响"
+);
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "S01", status: "active", hideEnded: true }).status,
+  "active",
+  "生效中分段不受隐藏已结束影响"
 );
 
 assertDeepEqual(
@@ -180,3 +207,19 @@ const directValidPromotions = normalizeValidPromotionsResponse([
 
 assertEqual(directValidPromotions.length, 1, "有效商品促销归一化支持已解包的直接数组");
 assertEqual(directValidPromotions[0]?.fixedPrice, 20, "直接数组组合价保持数值");
+
+// 状态分段：「全部」不传参数（旧后端兼容），其余原样透传；非法值丢弃。
+assertEqual(buildPromotionGridPayload({ storeCode: "1033", status: "active" }).status, "active", "状态分段透传");
+assertEqual(buildPromotionGridPayload({ storeCode: "1033", status: "all" }).status, undefined, "全部不传状态");
+assertEqual(
+  buildPromotionGridPayload({ storeCode: "1033", status: "bogus" as never }).status,
+  undefined,
+  "非法状态丢弃",
+);
+
+const counts = normalizeStatusCounts({ Active: 12, upcoming: "3", disabled: -1, ended: null, total: 20 });
+assertEqual(counts.active, 12, "数量兼容大写字段");
+assertEqual(counts.upcoming, 3, "数量兼容字符串");
+assertEqual(counts.disabled, 0, "负数归零");
+assertEqual(counts.ended, 0, "空值归零");
+assertEqual(counts.total, 20, "合计");

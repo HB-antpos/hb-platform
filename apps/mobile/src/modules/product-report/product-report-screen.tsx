@@ -125,6 +125,8 @@ import {
   type ProductReportDisplayContext,
 } from "@/modules/product-report/linked-selection";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import type { Store } from "@/modules/shop/types";
 import { useAuthStore } from "@/store/auth-store";
 
 // 页面上商品卡的「商品分店数据」下钻；供应商的商品明细 / 分店数据由 SupplierDetailSheet 负责。
@@ -373,6 +375,11 @@ export function ProductReportScreen({
   const cashierEnabledStoreCodes = useMemo(
     () => getCashierEnabledStoreCodes(storeOptionsQuery.data ?? []),
     [storeOptionsQuery.data],
+  );
+  const pickerStores = useMemo<Store[]>(
+    () => (storeOptionsQuery.isSuccess && !storeOptionsQuery.isFetching ? storeOptionsQuery.data ?? [] : [])
+      .map((option) => ({ storeCode: option.value, storeName: option.label })),
+    [storeOptionsQuery.data, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess],
   );
   const cashierStoreScopeVersion = storeOptionsQuery.dataUpdatedAt;
   const reportScopeValid = isReportScopeValid(accountIdentity, storeOptionsQuery, cashierEnabledStoreCodes);
@@ -2125,21 +2132,22 @@ export function ProductReportScreen({
         )}
       </ScrollView>
 
+      {/* 与其他页面统一：共用分店选择抽屉（标题 + 单选行 + 取消），列表限高可滚动，按分店名排序。 */}
       <StorePickerModal
+        presentation="sheet"
         visible={
           isStoreModalVisible
           && storeOptionsQuery.isSuccess
           && !storeOptionsQuery.isFetching
         }
-        labelAll={t("productReport.filters.allStores")}
-        options={
-          storeOptionsQuery.isSuccess && !storeOptionsQuery.isFetching
-            ? storeOptionsQuery.data ?? []
-            : []
-        }
+        stores={pickerStores}
         selectedStoreCode={selectedStoreCode}
-        onSelect={applyStore}
+        title={t("labels.selectStore")}
+        cancelLabel={t("actions.cancel")}
+        includeAllOption
+        allLabel={t("productReport.filters.allStores")}
         onDismiss={() => setStoreModalVisible(false)}
+        onSelectStore={(store) => applyStore(store?.storeCode)}
       />
       {sheetSupplier ? (
         <SupplierDetailSheet
@@ -2423,55 +2431,6 @@ function EmptyState({ label, actionLabel, onAction }: { label: string; actionLab
         </Button>
       ) : null}
     </View>
-  );
-}
-
-function StorePickerModal({
-  visible,
-  labelAll,
-  options,
-  selectedStoreCode,
-  onSelect,
-  onDismiss,
-}: {
-  visible: boolean;
-  labelAll: string;
-  options: { label: string; value: string }[];
-  selectedStoreCode?: string;
-  onSelect: (storeCode?: string) => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <Portal>
-      <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
-        <ScrollView
-          bounces={false}
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-          keyboardShouldPersistTaps="handled"
-          style={styles.storeModalList}
-          contentContainerStyle={styles.storeModalListContent}
-        >
-          <Button
-            mode={!selectedStoreCode ? "contained" : "outlined"}
-            onPress={() => onSelect(undefined)}
-            style={styles.modalOption}
-          >
-            {labelAll}
-          </Button>
-          {options.map((option) => (
-            <Button
-              key={option.value}
-              mode={selectedStoreCode === option.value ? "contained" : "outlined"}
-              onPress={() => onSelect(option.value)}
-              style={styles.modalOption}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </ScrollView>
-      </Modal>
-    </Portal>
   );
 }
 
@@ -2948,23 +2907,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: REPORT_UI.card,
     padding: 12,
-  },
-  modal: {
-    maxHeight: "82%",
-    margin: 18,
-    gap: 10,
-    borderRadius: 8,
-    backgroundColor: REPORT_UI.card,
-    padding: 16,
-  },
-  modalOption: {
-    alignSelf: "stretch",
-  },
-  storeModalList: {
-    flexShrink: 1,
-  },
-  storeModalListContent: {
-    gap: 10,
   },
   // 底部抽屉：Paper Modal 默认居中，这里改为贴底并去掉底部安全区外边距（由抽屉自己补内边距）。
   sheetWrapper: {

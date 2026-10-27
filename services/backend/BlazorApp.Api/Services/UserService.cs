@@ -298,6 +298,7 @@ namespace BlazorApp.Api.Services
                                 RoleName = r.RoleName,
                                 Description = r.Description,
                                 IsActive = r.IsActive,
+                                Level = r.Level,
                                 CreatedAt = r.CreatedAt,
                                 UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                             })
@@ -711,7 +712,7 @@ namespace BlazorApp.Api.Services
                 db,
                 _manageableStoreScopeService
             );
-            if (!actor.IsEnforced || actor.IsSuperAdmin)
+            if (!actor.IsEnforced || actor.HasUnrestrictedStoreScope)
             {
                 return UserStoreMutationScope.Unrestricted;
             }
@@ -915,6 +916,7 @@ namespace BlazorApp.Api.Services
                                 RoleName = r.RoleName,
                                 Description = r.Description,
                                 IsActive = r.IsActive,
+                                Level = r.Level,
                                 CreatedAt = r.CreatedAt,
                                 UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                             }
@@ -1973,13 +1975,34 @@ namespace BlazorApp.Api.Services
                 var scope = _manageableStoreScopeService == null
                     ? null
                     : await _manageableStoreScopeService.GetScopeAsync();
-                return scope?.IsStoreManager == true
-                    ? new UserAccessMutationDecision(
+                if (scope?.IsStoreManager == true)
+                {
+                    return new UserAccessMutationDecision(
                         false,
                         "当前店长权限已失效",
                         "ACCESS_DELEGATOR_DENIED"
-                    )
-                    : UserAccessMutationDecision.Allow;
+                    );
+                }
+
+                // 非 Admin、非店长但持有全局 Users.Edit/ResetPassword 的账号（如仓库经理、自定义角色）：
+                // 此前不做目标校验，现按角色等级收窄——只能修改等级严格低于自己的账号。
+                var actorGuid = string.IsNullOrWhiteSpace(actor.UserGuid)
+                    ? scope?.UserGuid
+                    : actor.UserGuid;
+                if (
+                    scope?.IsAuthenticated == true
+                    && !string.IsNullOrWhiteSpace(actorGuid)
+                    && !actorGuid.Equals(targetUserGuid, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    return await UserAccessMutationSecurity.ValidateTargetLevelAsync(
+                        db,
+                        actorGuid,
+                        targetUserGuid
+                    );
+                }
+
+                return UserAccessMutationDecision.Allow;
             }
 
             if (actor.UserGuid.Equals(targetUserGuid, StringComparison.OrdinalIgnoreCase))
@@ -2084,7 +2107,9 @@ namespace BlazorApp.Api.Services
                     if (newNonEmployeeRole != null)
                     {
                         return ApiResponse<bool>.Error(
-                            "店长只能授予员工角色",
+                            actor.IsWarehouseManager
+                                ? "仓库管理只能授予员工角色；店长角色请通过分店管理关系设置"
+                                : "店长只能授予员工角色",
                             "ROLE_DELEGATION_DENIED"
                         );
                     }
@@ -2153,8 +2178,32 @@ namespace BlazorApp.Api.Services
                         {
                             await db.Ado.RollbackTranAsync();
                             return ApiResponse<bool>.Error(
-                                "店长只能授予员工角色",
+                                transactionActor.IsWarehouseManager
+                                    ? "仓库管理只能授予员工角色；店长角色请通过分店管理关系设置"
+                                    : "店长只能授予员工角色",
                                 "ROLE_DELEGATION_DENIED"
+                            );
+                        }
+
+                        // 等级校验：新授予角色的有效等级必须严格低于操作者，已有角色不受影响。
+                        var newlyGrantedRoles = transactionRequestedRoles.Where(role =>
+                            !existingAssignedRoleGuids.Contains(
+                                role.RoleGUID,
+                                StringComparer.OrdinalIgnoreCase
+                            )
+                        );
+                        var grantLevelDecision =
+                            await UserAccessMutationSecurity.ValidateRoleGrantLevelAsync(
+                                db,
+                                transactionActor,
+                                newlyGrantedRoles
+                            );
+                        if (!grantLevelDecision.IsAllowed)
+                        {
+                            await db.Ado.RollbackTranAsync();
+                            return ApiResponse<bool>.Error(
+                                grantLevelDecision.Message,
+                                grantLevelDecision.ErrorCode
                             );
                         }
 
@@ -2388,7 +2437,7 @@ namespace BlazorApp.Api.Services
                         .ToList();
                 }
 
-                var isRestrictedActor = actor.IsEnforced && !actor.IsSuperAdmin;
+                var isRestrictedActor = actor.IsEnforced && !actor.CanGrantManageableStores;
                 if (isRestrictedActor)
                 {
                     var existingManageableStoreGuids = existingUserStores
@@ -2460,7 +2509,7 @@ namespace BlazorApp.Api.Services
                     var transactionExistingUserStores = await db.Queryable<UserStore>()
                         .Where(us => us.UserGUID == userGuid && !us.IsDeleted)
                         .ToListAsync();
-                    var transactionRestrictedActor = !transactionActor.IsSuperAdmin;
+                    var transactionRestrictedActor = !transactionActor.CanGrantManageableStores;
                     effectiveStoreAssignments = normalizedStoreAssignments;
 
                     if (transactionRestrictedActor)
@@ -2647,6 +2696,7 @@ namespace BlazorApp.Api.Services
                                 RoleName = r.RoleName,
                                 Description = r.Description,
                                 IsActive = r.IsActive,
+                                Level = r.Level,
                                 CreatedAt = r.CreatedAt,
                                 UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
                             }
@@ -2832,7 +2882,7 @@ namespace BlazorApp.Api.Services
                     db,
                     _manageableStoreScopeService
                 );
-                var targetDecision = await UserAccessMutationSecurity.ValidateAdminTargetAsync(
+                var targetDecision = await UserAccessMutationSecurity.ValidateStoreRelationTargetAsync(
                     db,
                     actor,
                     userGuid
@@ -3219,9 +3269,9 @@ namespace BlazorApp.Api.Services
                 db,
                 _manageableStoreScopeService
             );
-            if (asManageable && !actor.IsSuperAdmin)
+            if (asManageable && !actor.CanGrantManageableStores)
             {
-                return Fail("只有管理员可以授予分店管理关系", "MANAGEABLE_STORE_GRANT_DENIED");
+                return Fail("只有管理员或仓库管理可以授予分店管理关系", "MANAGEABLE_STORE_GRANT_DENIED");
             }
             if (actor.IsStoreManager)
             {
@@ -3347,7 +3397,7 @@ namespace BlazorApp.Api.Services
                         result.UnchangedCount++;
                         continue;
                     }
-                    if (hasManageable && !actor.IsSuperAdmin)
+                    if (hasManageable && !actor.CanGrantManageableStores)
                     {
                         // 店长不能撤销分店管理关系，与单人分配接口一致：原行保留。
                         result.ProtectedManageableCount++;

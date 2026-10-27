@@ -121,6 +121,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan ConnectivityNormalInterval = TimeSpan.FromSeconds(15);
 
     private readonly DispatcherTimer _connectivityTimer = new() { Interval = ConnectivityNormalInterval };
+    /// <summary>促销规则定时刷新：每 4 个探测拍（营业时间约 60 秒；夜间探测本身已降频，随之放慢）拉取一次。</summary>
+    internal const int PromotionRefreshTicksPerRound = 4;
+    /// <summary>单轮促销刷新的总预算：挂在连通性探测里，网络异常时不能长时间占住它。</summary>
+    private static readonly TimeSpan PromotionRefreshBudget = TimeSpan.FromSeconds(20);
+    private int _promotionRefreshTicks;
     private readonly DispatcherTimer _catalogDownloadHideTimer = new();
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly object _connectivityRefreshSync = new();
@@ -844,6 +849,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         _mainChildViewModelFactory.RestartCoordinatorProvider = coordinatorProvider;
         _mainChildViewModelFactory.SystemRestartSettingsStore = settingsStore;
+    }
+
+    /// <summary>配置设置页「扫码枪灵敏度」的存储（见 <see cref="MainChildViewModelFactory.ScannerSettingsStore"/>）。</summary>
+    internal void ConfigureScannerSettings(IScannerSettingsStore? settingsStore)
+    {
+        _mainChildViewModelFactory.ScannerSettingsStore = settingsStore;
     }
 
     private ScreenNavigator CreateScreenNavigator() =>
@@ -2556,6 +2567,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // 小票资料同步放在待传订单重试之前：它每 4 拍才真正请求一次、单轮有 20 秒预算，
                 // 而订单重试可能很久，不能让总部下发的资料被它拖慢生效。
                 await TrySyncReceiptProfileAsync(refreshCancellation);
+                // 促销同样放在订单重试之前：PDA / 后台新建的促销要尽快在收银端生效。
+                await TryRefreshPromotionsAsync(refreshCancellation);
                 await TryAutoRetryPendingOrdersAsync(refreshCancellation);
                 await TryCheckSquareRefundSettlementsAsync(refreshCancellation);
             }
@@ -2665,6 +2678,54 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             ConsoleLog.Write("ReceiptProfile", $"scheduled sync failed error={ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// 搭探测节拍定时刷新本店促销：PDA / 后台新增或修改促销后，收银端不必重启或手动同步。
+    /// 付款界面不刷新（避免付款中合计变化），到点状态保留，离开付款界面后的下一拍补刷；
+    /// 失败只记日志，沿用本地缓存，下一轮重试。
+    /// </summary>
+    private async Task TryRefreshPromotionsAsync(CancellationToken cancellationToken)
+    {
+        var storeCode = Session.StoreCode;
+        if (IsLifetimeEnding || string.IsNullOrWhiteSpace(storeCode))
+        {
+            return;
+        }
+
+        if (_promotionRefreshTicks < PromotionRefreshTicksPerRound)
+        {
+            _promotionRefreshTicks++;
+        }
+
+        if (_promotionRefreshTicks < PromotionRefreshTicksPerRound || CurrentScreen is PaymentViewModel)
+        {
+            return;
+        }
+
+        _promotionRefreshTicks = 0;
+        try
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(PromotionRefreshBudget);
+            var changed = await _shellCatalogService.RefreshPromotionsAsync(storeCode, budget.Token);
+            if (changed)
+            {
+                ConsoleLog.Write("Promotion", $"scheduled refresh applied new rules store={storeCode}");
+                PosTerminal?.RefreshCart();
+                CashPayment?.RefreshCart();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || IsLifetimeEnding)
+        {
+            // 关闭或外层取消：不是刷新失败，交给外层处理。
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 含单轮预算超时：保留本地旧缓存，下一轮再试。
+            ConsoleLog.Write("Promotion", $"scheduled refresh failed store={storeCode} error={ex.GetType().Name}");
         }
     }
 

@@ -4,7 +4,7 @@ import en from '../../../i18n/locales/en.json'
 import zh from '../../../i18n/locales/zh.json'
 import { createUser } from '../../../services/userService'
 import { AUTH_EXPIRED_EVENT, RequestError, unwrapApiData } from '../../../utils/request'
-import { getCreateUserErrorFeedback, getUpdateUserFieldError } from './createUserFeedback'
+import { getCreateUserErrorFeedback, getLevelDeniedMessage, getUpdateUserFieldError } from './createUserFeedback'
 
 const i18n = createInstance()
 await i18n.init({
@@ -166,3 +166,37 @@ try {
 }
 
 console.log('创建用户错误反馈测试通过：业务错误、字段定位、中英文、结果未确认和真实认证失效链路')
+
+// 角色等级：后端 TARGET_LEVEL_DENIED / ROLE_LEVEL_DENIED 映射为明确的中文原因，其他错误不接管。
+// 前面的用例会切换 i18n 语言，这里显式固定语言，不依赖前序状态。
+const tZh = i18n.getFixedT('zh')
+const tEn = i18n.getFixedT('en')
+assert.equal(
+  getLevelDeniedMessage(
+    businessError({ success: false, errorCode: 'TARGET_LEVEL_DENIED', message: 'x' }),
+    tZh,
+  ),
+  '该账号的角色等级不低于你，无权修改。',
+)
+assert.equal(
+  getLevelDeniedMessage(
+    businessError({ success: false, errorCode: 'role_level_denied', message: 'x' }),
+    tZh,
+  ),
+  '不能授予等级不低于你自己的角色。',
+)
+assert.equal(
+  getLevelDeniedMessage(
+    businessError({ success: false, errorCode: 'USER_SCOPE_DENIED', message: 'x' }),
+    tZh,
+  ),
+  null,
+)
+assert.equal(getLevelDeniedMessage(new Error('boom'), tZh), null)
+assert.equal(
+  getLevelDeniedMessage(
+    businessError({ success: false, errorCode: 'ROLE_LEVEL_DENIED', message: 'x' }),
+    tEn,
+  ),
+  'You cannot grant a role at or above your own level.',
+)

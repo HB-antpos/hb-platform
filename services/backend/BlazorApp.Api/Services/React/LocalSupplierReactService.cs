@@ -32,7 +32,9 @@ namespace BlazorApp.Api.Services.React
             string? keyword,
             int? status,
             string? sortBy,
-            string? sortOrder
+            string? sortOrder,
+            string? imageTemplate,
+            IReadOnlyCollection<string>? allowedStoreCodes
         )
         {
             var db = _context.Db;
@@ -46,28 +48,145 @@ namespace BlazorApp.Api.Services.React
             {
                 query = query.Where(x => x.Status == status.Value);
             }
+            // 图片模板：configured = 非空非空白；missing = 空或空白；其它值忽略。
+            switch (imageTemplate?.Trim().ToLowerInvariant())
+            {
+                case "configured":
+                    query = query.Where(x => x.ImageBaseUrl != null && x.ImageBaseUrl.Trim() != "");
+                    break;
+                case "missing":
+                    query = query.Where(x => x.ImageBaseUrl == null || x.ImageBaseUrl.Trim() == "");
+                    break;
+            }
+            // 分店范围统一成 null（不限）或去重后的代码列表。
+            var scopeCodes = allowedStoreCodes?
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct()
+                .ToList();
             var total = await query.CountAsync();
             var by = (sortBy ?? "name").ToLowerInvariant();
             var ord = (sortOrder ?? "ascend").ToLowerInvariant();
             var dir = ord == "descend" ? "desc" : "asc";
-            string orderExpr = by switch
+            List<LocalSupplierDto> items;
+            // 无可见分店时所有人的最近进货都为 null，按日期排序没有意义，落到默认的名称排序。
+            if (by == "lastpurchasedate" && !(scopeCodes is { Count: 0 }))
             {
-                "localsuppliercode" => $"LocalSupplierCode {dir}",
-                "name" => $"Name {dir}",
-                "status" => $"Status {dir}",
-                "contactperson" => $"ContactPerson {dir}",
-                "phone" => $"Phone {dir}",
-                "email" => $"Email {dir}",
-                "remark" => $"Remark {dir}",
-                "imagebaseurl" => $"ImageBaseUrl {dir}",
-                "createdat" => $"CreatedAt {dir}",
-                "updatedat" => $"UpdatedAt {dir}",
-                _ => $"Name asc",
+                items = await GetPageOrderedByLastPurchaseAsync(
+                    query,
+                    pageIndex,
+                    pageSize,
+                    dir == "desc",
+                    scopeCodes
+                );
+            }
+            else
+            {
+                string orderExpr = by switch
+                {
+                    "localsuppliercode" => $"LocalSupplierCode {dir}",
+                    "name" => $"Name {dir}",
+                    "status" => $"Status {dir}",
+                    "contactperson" => $"ContactPerson {dir}",
+                    "phone" => $"Phone {dir}",
+                    "email" => $"Email {dir}",
+                    "remark" => $"Remark {dir}",
+                    "imagebaseurl" => $"ImageBaseUrl {dir}",
+                    "createdat" => $"CreatedAt {dir}",
+                    "updatedat" => $"UpdatedAt {dir}",
+                    _ => $"Name asc",
+                };
+                items = await query
+                    .OrderBy(orderExpr)
+                    .Skip((pageIndex - 1) * pageSize)
+                    .Take(pageSize)
+                    .Select(x => new LocalSupplierDto
+                    {
+                        Guid = x.Guid,
+                        LocalSupplierCode = x.LocalSupplierCode,
+                        Name = x.Name,
+                        Status = x.Status,
+                        ContactPerson = x.ContactPerson,
+                        Phone = x.Phone,
+                        Email = x.Email,
+                        Remark = x.Remark,
+                        ImageBaseUrl = x.ImageBaseUrl,
+                        CreatedAt = x.CreatedAt,
+                        UpdatedAt = x.UpdatedAt,
+                    })
+                    .ToListAsync();
+            }
+            await FillLastPurchaseAsync(items, scopeCodes);
+            return new PagedResult<LocalSupplierDto>
+            {
+                Items = items,
+                Total = total,
+                Page = pageIndex,
+                PageSize = pageSize,
             };
-            var items = await query
-                .OrderBy(orderExpr)
+        }
+
+        /// <summary>
+        /// 按最近进货日期排序取一页：先用相关子查询算每个供应商在分店范围内的最大订单日期，
+        /// 无进货的（null）始终排最后，同日期再按名称、代码稳定排序；只取本页代码后再回表取完整字段。
+        /// </summary>
+        private async Task<List<LocalSupplierDto>> GetPageOrderedByLastPurchaseAsync(
+            ISugarQueryable<HBLocalSupplier> query,
+            int pageIndex,
+            int pageSize,
+            bool descending,
+            List<string>? scopeCodes
+        )
+        {
+            var db = _context.Db;
+            ISugarQueryable<LocalSupplierLastPurchaseSortRow> sortRows;
+            if (scopeCodes == null)
+            {
+                sortRows = query
+                    .Select(x => new LocalSupplierLastPurchaseSortRow
+                    {
+                        LocalSupplierCode = x.LocalSupplierCode,
+                        Name = x.Name,
+                        LastPurchaseDate = SqlFunc
+                            .Subqueryable<StoreLocalSupplierInvoice>()
+                            .Where(i => i.SupplierCode == x.LocalSupplierCode && i.IsDeleted == false)
+                            .Max(i => i.OrderDate),
+                    })
+                    .MergeTable();
+            }
+            else
+            {
+                sortRows = query
+                    .Select(x => new LocalSupplierLastPurchaseSortRow
+                    {
+                        LocalSupplierCode = x.LocalSupplierCode,
+                        Name = x.Name,
+                        LastPurchaseDate = SqlFunc
+                            .Subqueryable<StoreLocalSupplierInvoice>()
+                            .Where(i =>
+                                i.SupplierCode == x.LocalSupplierCode
+                                && i.IsDeleted == false
+                                && scopeCodes.Contains(i.StoreCode!)
+                            )
+                            .Max(i => i.OrderDate),
+                    })
+                    .MergeTable();
+            }
+
+            var pageCodes = await sortRows
+                .OrderBy(r => SqlFunc.IIF(r.LastPurchaseDate == null, 1, 0))
+                .OrderByIF(descending, r => r.LastPurchaseDate, OrderByType.Desc)
+                .OrderByIF(!descending, r => r.LastPurchaseDate, OrderByType.Asc)
+                .OrderBy(r => r.Name)
+                .OrderBy(r => r.LocalSupplierCode)
                 .Skip((pageIndex - 1) * pageSize)
                 .Take(pageSize)
+                .Select(r => r.LocalSupplierCode)
+                .ToListAsync();
+            if (pageCodes.Count == 0)
+                return new List<LocalSupplierDto>();
+
+            var rows = await db.Queryable<HBLocalSupplier>()
+                .Where(x => !x.IsDeleted && pageCodes.Contains(x.LocalSupplierCode))
                 .Select(x => new LocalSupplierDto
                 {
                     Guid = x.Guid,
@@ -83,13 +202,142 @@ namespace BlazorApp.Api.Services.React
                     UpdatedAt = x.UpdatedAt,
                 })
                 .ToListAsync();
-            return new PagedResult<LocalSupplierDto>
+            // 回表结果按排序后的代码顺序还原。
+            var byCode = rows
+                .GroupBy(x => x.LocalSupplierCode)
+                .ToDictionary(g => g.Key, g => g.First());
+            return pageCodes
+                .Where(byCode.ContainsKey)
+                .Select(code => byCode[code])
+                .ToList();
+        }
+
+        /// <summary>
+        /// 只为本页供应商批量补最近进货：未删除、有订单日期、在分店范围内的进货单里取订单日期最大的一张，
+        /// 同日再按创建时间取最新。分店名单独按代码查，避免 Store 重复行放大结果。
+        /// </summary>
+        private async Task FillLastPurchaseAsync(
+            List<LocalSupplierDto> items,
+            List<string>? scopeCodes
+        )
+        {
+            if (items.Count == 0 || (scopeCodes != null && scopeCodes.Count == 0))
+                return;
+            var supplierCodes = items
+                .Select(x => x.LocalSupplierCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct()
+                .ToList();
+            if (supplierCodes.Count == 0)
+                return;
+
+            var db = _context.Db;
+            var invoiceQuery = db.Queryable<StoreLocalSupplierInvoice>()
+                .Where(h =>
+                    h.IsDeleted == false
+                    && h.OrderDate != null
+                    && supplierCodes.Contains(h.SupplierCode!)
+                );
+            if (scopeCodes != null)
             {
-                Items = items,
-                Total = total,
-                Page = pageIndex,
-                PageSize = pageSize,
-            };
+                invoiceQuery = invoiceQuery.Where(h => scopeCodes.Contains(h.StoreCode!));
+                // 相关子查询只在范围内求最大日期，确保受限用户拿到的是自己分店里的最新一张。
+                invoiceQuery = invoiceQuery.Where(h =>
+                    h.OrderDate
+                    == SqlFunc
+                        .Subqueryable<StoreLocalSupplierInvoice>()
+                        .Where(x =>
+                            x.SupplierCode == h.SupplierCode
+                            && x.IsDeleted == false
+                            && scopeCodes.Contains(x.StoreCode!)
+                        )
+                        .Max(x => x.OrderDate)
+                );
+            }
+            else
+            {
+                invoiceQuery = invoiceQuery.Where(h =>
+                    h.OrderDate
+                    == SqlFunc
+                        .Subqueryable<StoreLocalSupplierInvoice>()
+                        .Where(x => x.SupplierCode == h.SupplierCode && x.IsDeleted == false)
+                        .Max(x => x.OrderDate)
+                );
+            }
+
+            // 只剩每个供应商「最大订单日期」那天的单，量很小，同日取舍放内存做。
+            var candidates = await invoiceQuery
+                .Select(h => new LocalSupplierLastPurchaseRow
+                {
+                    SupplierCode = h.SupplierCode,
+                    StoreCode = h.StoreCode,
+                    OrderDate = h.OrderDate,
+                    CreatedAt = h.CreatedAt,
+                    InvoiceGuid = h.InvoiceGUID,
+                })
+                .ToListAsync();
+            if (candidates.Count == 0)
+                return;
+
+            var latestBySupplier = candidates
+                .Where(x => !string.IsNullOrEmpty(x.SupplierCode))
+                .GroupBy(x => x.SupplierCode!)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(x => x.OrderDate)
+                        .ThenByDescending(x => x.CreatedAt)
+                        .ThenByDescending(x => x.InvoiceGuid, StringComparer.Ordinal)
+                        .First()
+                );
+
+            var storeCodes = latestBySupplier.Values
+                .Select(x => x.StoreCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .Distinct()
+                .ToList();
+            var storeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (storeCodes.Count > 0)
+            {
+                var stores = await db.Queryable<Store>()
+                    .Where(s => storeCodes.Contains(s.StoreCode))
+                    .Select(s => new { s.StoreCode, s.StoreName, s.IsDeleted })
+                    .ToListAsync();
+                // 同代码多行时优先未删除的那条。
+                foreach (var store in stores.OrderBy(s => s.IsDeleted ? 1 : 0))
+                {
+                    if (!string.IsNullOrEmpty(store.StoreCode) && !storeNames.ContainsKey(store.StoreCode))
+                        storeNames[store.StoreCode] = store.StoreName;
+                }
+            }
+
+            foreach (var item in items)
+            {
+                if (!latestBySupplier.TryGetValue(item.LocalSupplierCode, out var latest))
+                    continue;
+                item.LastPurchaseDate = latest.OrderDate;
+                item.LastPurchaseStoreCode = latest.StoreCode;
+                item.LastPurchaseStoreName =
+                    latest.StoreCode != null && storeNames.TryGetValue(latest.StoreCode, out var name)
+                        ? name
+                        : null;
+            }
+        }
+
+        private sealed class LocalSupplierLastPurchaseSortRow
+        {
+            public string LocalSupplierCode { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public DateTime? LastPurchaseDate { get; set; }
+        }
+
+        private sealed class LocalSupplierLastPurchaseRow
+        {
+            public string? SupplierCode { get; set; }
+            public string? StoreCode { get; set; }
+            public DateTime? OrderDate { get; set; }
+            public DateTime CreatedAt { get; set; }
+            public string InvoiceGuid { get; set; } = string.Empty;
         }
 
         public async Task<List<LocalSupplierDto>> GetActiveSuppliersAsync()

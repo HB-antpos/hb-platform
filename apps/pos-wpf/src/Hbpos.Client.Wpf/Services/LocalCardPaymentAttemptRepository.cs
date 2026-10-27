@@ -46,7 +46,9 @@ public sealed record LocalCardPaymentAttempt(
     string? SubmissionToken = null,
     string? RefundBusinessKey = null,
     string RecoveryPhase = CardRecoveryPhases.None,
-    string? RecoveryTargetStatus = null);
+    string? RecoveryTargetStatus = null,
+    // 本地 Linkly 交易过程中从小票抓到的批准证据（JSON，见 LinklyLocalReceiptApprovalEvidence）；只写一次。
+    string? ReceiptApprovalEvidence = null);
 
 public enum ActiveSessionSupervisorDecision
 {
@@ -100,6 +102,9 @@ public sealed record LinklyPaymentAttemptContext(
 {
     // 中文注释：仅在当前异步调用内固定 attempt 创建时的路由配置，不持久化也不记录敏感设置。
     internal CardTerminalSettings? SettingsSnapshot { get; init; }
+
+    // 中文注释：LocalIp 刷卡过程中收到批准小票时，由终端客户端回调把证据写入本 attempt（尽力而为）。
+    public Func<LinklyLocalReceiptApprovalEvidence, CancellationToken, Task>? RecordReceiptApprovalEvidenceAsync { get; init; }
 }
 
 public interface ILinklyPaymentAttemptContextAccessor
@@ -479,6 +484,13 @@ public interface ILocalCardPaymentAttemptRepository
         Task.FromResult<LocalCardPaymentAttempt?>(null);
 
     Task<LocalCardPaymentAttempt?> GetAttemptAsync(Guid attemptGuid, CancellationToken cancellationToken = default);
+
+    // 只补写小票批准证据：不改 Status/UpdatedAt，不影响恢复流程的乐观并发；已有证据时不覆盖。
+    Task<bool> TryRecordReceiptApprovalEvidenceAsync(
+        Guid attemptGuid,
+        string evidenceJson,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
 }
 
 public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : ILocalCardPaymentAttemptRepository
@@ -1296,7 +1308,8 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                     SubmissionToken,
                     RefundBusinessKey,
                     RecoveryPhase,
-                    RecoveryTargetStatus
+                    RecoveryTargetStatus,
+                    ReceiptApprovalEvidence
                 FROM LocalCardPaymentAttempts
                 WHERE OperationKind = 'Refund'
                   AND RefundBusinessKey = $RefundBusinessKey
@@ -1693,20 +1706,16 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 nameof(journal));
         }
 
-        if (resolution.Decision == ActiveSessionSupervisorDecision.ConfirmPaid &&
-            string.IsNullOrWhiteSpace(resolution.PaymentReference) &&
-            string.IsNullOrWhiteSpace(resolution.Evidence))
-        {
-            throw new ArgumentException(
-                "ConfirmPaid requires a payment reference or bank evidence.",
-                nameof(resolution));
-        }
-
+        // 中文注释：ConfirmPaid 的支付参考号/凭据为选填（与 CardPaymentSupervisorResolutionRules 一致）；
+        // 没填时建单沿用本笔 TxnRef 作为付款引用。
+        // 中文注释：普通“确认未付款”不再强制证据；顾客已被扣款的批准证据出口仍须留下备注或证据。
         if (resolution.Decision == ActiveSessionSupervisorDecision.ConfirmNotPaid &&
-            string.IsNullOrWhiteSpace(resolution.Evidence))
+            resolution.AllowApprovedEvidence &&
+            string.IsNullOrWhiteSpace(resolution.Evidence) &&
+            string.IsNullOrWhiteSpace(resolution.Reason))
         {
             throw new ArgumentException(
-                "ConfirmNotPaid requires bank evidence.",
+                "Approved-evidence closure requires a supervisor note or evidence.",
                 nameof(resolution));
         }
 
@@ -1913,7 +1922,8 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 SubmissionToken,
                 RefundBusinessKey,
                 RecoveryPhase,
-                RecoveryTargetStatus
+                RecoveryTargetStatus,
+                ReceiptApprovalEvidence
             FROM LocalCardPaymentAttempts
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -1954,6 +1964,30 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
             : null;
     }
 
+    public async Task<bool> TryRecordReceiptApprovalEvidenceAsync(
+        Guid attemptGuid,
+        string evidenceJson,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(evidenceJson))
+        {
+            return false;
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        // 中文注释：证据是追加信息，故意不动 UpdatedAt/Status：付款工作流随后还要按原 UpdatedAt 做 CAS 落结果。
+        command.CommandText = """
+            UPDATE LocalCardPaymentAttempts
+            SET ReceiptApprovalEvidence = $Evidence
+            WHERE AttemptGuid = $AttemptGuid
+              AND ReceiptApprovalEvidence IS NULL;
+            """;
+        command.Parameters.AddWithValue("$Evidence", evidenceJson);
+        command.Parameters.AddWithValue("$AttemptGuid", attemptGuid.ToString());
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async Task<LocalCardPaymentAttempt?> GetAttemptAsync(
         Guid attemptGuid,
         CancellationToken cancellationToken = default)
@@ -1987,7 +2021,8 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 SubmissionToken,
                 RefundBusinessKey,
                 RecoveryPhase,
-                RecoveryTargetStatus
+                RecoveryTargetStatus,
+                ReceiptApprovalEvidence
             FROM LocalCardPaymentAttempts
             WHERE AttemptGuid = $AttemptGuid;
             """;
@@ -2034,7 +2069,8 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 SubmissionToken,
                 RefundBusinessKey,
                 RecoveryPhase,
-                RecoveryTargetStatus
+                RecoveryTargetStatus,
+                ReceiptApprovalEvidence
             FROM LocalCardPaymentAttempts
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -2149,7 +2185,8 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 SubmissionToken,
                 RefundBusinessKey,
                 RecoveryPhase,
-                RecoveryTargetStatus
+                RecoveryTargetStatus,
+                ReceiptApprovalEvidence
             FROM LocalCardPaymentAttempts
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -2294,7 +2331,22 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
             ReadNullableString(reader, "SubmissionToken"),
             ReadNullableString(reader, "RefundBusinessKey"),
             ReadString(reader, "RecoveryPhase"),
-            ReadNullableString(reader, "RecoveryTargetStatus"));
+            ReadNullableString(reader, "RecoveryTargetStatus"),
+            ReadOptionalString(reader, "ReceiptApprovalEvidence"));
+    }
+
+    // 部分查询只选了固定列；列不在结果集里时按无证据处理。
+    private static string? ReadOptionalString(SqliteDataReader reader, string name)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return reader.IsDBNull(i) ? null : reader.GetString(i);
+            }
+        }
+
+        return null;
     }
 
     private static void AddTerminalStatusParameters(SqliteCommand command)

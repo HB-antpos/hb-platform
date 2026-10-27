@@ -184,22 +184,24 @@ public sealed partial class SettingsViewModelTests
         Assert.Equal("{Binding CanChangeEnvironment}", (string?)manual.Attribute("IsEnabled"));
         Assert.Equal("{Binding CanChangeEnvironment}", (string?)voucher.Attribute("IsEnabled"));
 
-        // 同一张「付款方式」卡片、同一个保存按钮；行顺序：手动刷卡 → 代金券 → 订单列表 → 保存按钮。
-        var card = manual.Ancestors(presentation + "StackPanel").First();
-        Assert.Same(card, voucher.Ancestors(presentation + "StackPanel").First());
-        Assert.Same(card, orderList.Ancestors(presentation + "StackPanel").First());
-        var rows = card.Elements().ToList();
+        // 首屏重设计后：三个开关各占一张独立的开关行卡片（Border，样式 PaymentMethodRowStyle），同属「付款方式」左列；
+        // 行顺序：手动刷卡 → 代金券 → 订单列表；「保存付款方式」按钮移到固定底栏（FOOTER: PaymentMethods）。
+        var card = manual.Ancestors(presentation + "StackPanel").Last(panel =>
+            panel.Elements(presentation + "Border").Any(row => (string?)row.Attribute("Style") == "{StaticResource PaymentMethodRowStyle}"));
+        var rows = card.Elements(presentation + "Border")
+            .Where(row => (string?)row.Attribute("Style") == "{StaticResource PaymentMethodRowStyle}").ToList();
+        Assert.Equal(3, rows.Count);
         var manualRow = rows.Single(row => row.Descendants().Contains(manual));
         var voucherRow = rows.Single(row => row.Descendants().Contains(voucher));
         var orderListRow = rows.Single(row => row.Descendants().Contains(orderList));
-        var saveButton = rows.Single(row => row.Name == presentation + "Button" &&
-            (string?)row.Attribute("Command") == "{Binding SavePaymentMethodsCommand}");
         Assert.True(rows.IndexOf(manualRow) < rows.IndexOf(voucherRow));
         Assert.True(rows.IndexOf(voucherRow) < rows.IndexOf(orderListRow));
-        Assert.True(rows.IndexOf(orderListRow) < rows.IndexOf(saveButton));
-        // 与上一行（代金券）之间同样有分隔线。
-        Assert.Equal(presentation + "Border", rows[rows.IndexOf(orderListRow) - 1].Name);
-        Assert.Equal("1", (string?)rows[rows.IndexOf(orderListRow) - 1].Attribute("Height"));
+        var saveButton = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
+            (string?)element.Attribute("Command") == "{Binding SavePaymentMethodsCommand}"));
+        Assert.DoesNotContain(card.Descendants(), element => element == saveButton);
+        Assert.Contains(saveButton.Ancestors(), ancestor => ancestor.Name.LocalName == "SettingsFooterBar");
+        Assert.Equal("{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}",
+            (string?)saveButton.Attribute("Visibility"));
 
         // 行内：图标块 + 标题 / 说明文案，样式与上一行一致。
         // PackIcon 来自 materialDesign 命名空间，这里按本地名匹配。
@@ -209,7 +211,7 @@ public sealed partial class SettingsViewModelTests
             .Select(text => (string?)text.Attribute("Text")).ToArray();
         Assert.Contains("{loc:Loc settings.payment.methods.orderList}", texts);
         Assert.Contains("{loc:Loc settings.payment.methods.orderList.help}", texts);
-        Assert.Equal((string?)voucherRow.Attribute("MinHeight"), (string?)orderListRow.Attribute("MinHeight"));
+        Assert.Equal((string?)voucherRow.Attribute("Style"), (string?)orderListRow.Attribute("Style"));
 
         // 颜色全部走色板 DynamicResource，行内不得出现硬编码十六进制颜色。
         var hardcoded = orderListRow.DescendantsAndSelf().SelectMany(element => element.Attributes())
@@ -343,13 +345,16 @@ public sealed partial class SettingsViewModelTests
             deviceRegistrationNavigationText.Attribute("Text")?.Value);
 
         var paymentSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsPaymentTerminalSelected", StringComparison.Ordinal) == true));
-        var contentScrollViewer = paymentSection.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
+        // 六个页面并列放在内容列的同一个 Grid 里（不再有外层 ScrollViewer），导航必须先于内容列声明。
+        var contentColumn = paymentSection.Parent!;
+        Assert.Equal("2", contentColumn.Attribute("Grid.Column")?.Value);
+        Assert.DoesNotContain(paymentSection.Ancestors(), element => element.Name.LocalName == "ScrollViewer");
         var settingsBodyChildren = navigationBorder.Parent!.Elements().ToArray();
         Assert.True(
-            Array.IndexOf(settingsBodyChildren, navigationBorder) < Array.IndexOf(settingsBodyChildren, contentScrollViewer),
-            "The category navigation must precede the content scroller so keyboard focus follows the visual order.");
+            Array.IndexOf(settingsBodyChildren, navigationBorder) < Array.IndexOf(settingsBodyChildren, contentColumn),
+            "The category navigation must precede the page column so keyboard focus follows the visual order.");
 
         var providerTabs = paymentSection.Descendants().Where(element => element.Name.LocalName == "TabItem").ToArray();
         Assert.Equal(2, providerTabs.Length);
@@ -371,28 +376,43 @@ public sealed partial class SettingsViewModelTests
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value.Contains("OpenLinklySetupInstructionsCommand", StringComparison.Ordinal) == true));
         Assert.Same(providerTabs[1], setupInstructionsButton.Ancestors().First(element => element.Name.LocalName == "TabItem"));
-        Assert.Equal(3, paymentSection.Descendants().Count(element =>
-            element.Name.LocalName == "Border" &&
-            element.Attribute("Style")?.Value.Contains("SettingsModeChoiceBorderStyle", StringComparison.Ordinal) == true));
+        // 首屏重设计：原「三选一单选」与「连接优先级」合并为一个 3 行模式列表（点行切换查看，⚙ 设为首选，▲▼ 调序）。
+        var modeList = Assert.Single(paymentSection.Descendants().Where(element =>
+            element.Name.LocalName == "ItemsControl" &&
+            (string?)element.Attribute("AutomationProperties.AutomationId") == "LinklyModePriorityList"));
+        Assert.Equal("{Binding LinklyModePriorityItems}", modeList.Attribute("ItemsSource")?.Value);
+        Assert.DoesNotContain(paymentSection.Descendants(), element =>
+            element.Name.LocalName == "RadioButton" &&
+            element.Attribute("GroupName")?.Value == "LinklySettingsMode");
+        foreach (var command in new[] { "SelectLinklyPriorityModeCommand", "MoveLinklyPriorityUpCommand", "MoveLinklyPriorityDownCommand" })
+        {
+            Assert.Contains(modeList.Descendants(), element =>
+                element.Name.LocalName == "Button" &&
+                element.Attribute("Command")?.Value.Contains(command, StringComparison.Ordinal) == true);
+        }
         Assert.True(paymentSection.Descendants().Count(element =>
             element.Name.LocalName == "TextBox" &&
             element.Attribute("Text")?.Value.Contains("TimeoutSecondsText", StringComparison.Ordinal) == true) >= 2);
 
-        var receiptSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+        var receiptHost = Assert.Single(elements.Where(element =>
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsReceiptPrinterSelected", StringComparison.Ordinal) == true));
+        // 小票页根是外层 Grid：左 = SettingsPageHost（页签 / 正文 / 底栏），右 = 独立的 80mm 小票预览栏（SettingsPageHost 之外），
+        // 所以预览里的绑定要在页面根下找，保存按钮在 SettingsPageHost 的底栏里。
+        var receiptSection = receiptHost.Parent!;
+        Assert.Contains("IsReceiptPrinterSelected", receiptSection.Attribute("Visibility")?.Value, StringComparison.Ordinal);
         Assert.Contains(receiptSection.Descendants(), element =>
             element.Name.LocalName == "TextBlock" &&
             element.Attribute("Text")?.Value == "{Binding ReceiptBrandNameText}");
         Assert.Contains(receiptSection.Descendants(), element =>
             element.Name.LocalName == "TextBlock" &&
             element.Attribute("Text")?.Value == "{Binding ReceiptReturnPolicyText}");
-        Assert.Contains(receiptSection.Descendants(), element =>
+        Assert.Contains(receiptHost.Descendants(), element =>
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value.Contains("SaveReceiptPrinterCommand", StringComparison.Ordinal) == true);
 
         var registrationSection = Assert.Single(elements.Where(element =>
-            element.Name.LocalName == "Grid" &&
+            element.Name.LocalName == "SettingsPageHost" &&
             element.Attribute("Visibility")?.Value.Contains("IsDeviceRegistrationSelected", StringComparison.Ordinal) == true));
         foreach (var binding in new[] { "Session.StoreName", "Session.StoreCode", "Session.DeviceCode" })
         {
@@ -480,13 +500,19 @@ public sealed partial class SettingsViewModelTests
         var paymentSection = document
             .Descendants()
             .Single(element =>
-                element.Name.LocalName == "Grid" &&
+                element.Name.LocalName == "SettingsPageHost" &&
                 element.Attribute("Visibility")?.Value.Contains(
                     "IsPaymentTerminalSelected",
                     StringComparison.Ordinal) == true);
-        var contentScrollViewer = paymentSection
-            .Ancestors()
-            .First(element => element.Name.LocalName == "ScrollViewer");
+        // 支付页由 SettingsPageHost 承载；正文外的兜底 ScrollViewer 在它的控件模板里（Themes/PosTheme.xaml）。
+        Assert.Equal("{StaticResource SettingsPageHostStyle}", paymentSection.Attribute("Style")?.Value);
+        var hostThemePath = Path.Combine(
+            Path.GetDirectoryName(xamlPath)!, "..", "..", "Themes", "PosTheme.xaml");
+        var contentScrollViewer = System.Xml.Linq.XDocument.Load(hostThemePath)
+            .Descendants()
+            .Single(element =>
+                element.Name.LocalName == "ScrollViewer" &&
+                element.Attribute(System.Xml.Linq.XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Name")?.Value == "PART_BodyScrollViewer");
         var xamlNamespace = System.Xml.Linq.XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
         var singleLineInputStyles = new[]
         {
@@ -543,17 +569,23 @@ public sealed partial class SettingsViewModelTests
             .Single(element =>
                 element.Name.LocalName == "Button" &&
                 element.Attribute("Command")?.Value.Contains("LogonLinklyCommand", StringComparison.Ordinal) == true);
+        // 首屏重设计：Linkly 的操作按钮在页面固定底栏（SettingsFooterBar）里；本地 IP 可见的三个按钮顺序仍是 测试 → 登录银行网络 → 启用。
+        Assert.Equal("SettingsFooterBar", logonButton.Parent!.Name.LocalName);
         var actionButtons = logonButton.Parent!
             .Elements()
             .Where(element => element.Name.LocalName == "Button")
             .ToArray();
+        int IndexOfCommand(string command) => Array.FindIndex(
+            actionButtons,
+            element => element.Attribute("Command")?.Value.Contains(command, StringComparison.Ordinal) == true);
 
-        Assert.Equal("WrapPanel", logonButton.Parent!.Name.LocalName);
-        Assert.Equal(3, actionButtons.Length);
-        Assert.Contains("TestLinklyCommand", actionButtons[0].Attribute("Command")?.Value, StringComparison.Ordinal);
-        Assert.Same(logonButton, actionButtons[1]);
-        Assert.Contains("SaveLinklyCommand", actionButtons[2].Attribute("Command")?.Value, StringComparison.Ordinal);
+        var test = IndexOfCommand("{Binding TestLinklyCommand}");
+        var logon = IndexOfCommand("{Binding LogonLinklyCommand}");
+        var save = IndexOfCommand("{Binding SaveLinklyCommand}");
+        Assert.True(test >= 0 && test < logon && logon < save, $"本地 IP 底栏按钮顺序应为 测试({test}) < 登录银行网络({logon}) < 启用({save})。");
         Assert.Contains("IsLinklyLocalIpMode", logonButton.Attribute("Visibility")?.Value, StringComparison.Ordinal);
+        // 测试 / 启用在本地 IP 与 Cloud 直连之间共用；后端异步模式下「测试 Linkly」隐藏（后端用「测试交易状态」）。
+        Assert.Contains("IsLinklyStandardActionMode", actionButtons[test].Attribute("Visibility")?.Value, StringComparison.Ordinal);
         Assert.Contains(
             logonButton.Descendants(),
             element =>
@@ -755,7 +787,7 @@ public sealed partial class SettingsViewModelTests
     }
 
     [Fact]
-    public void Data_download_card_merges_sync_status_into_single_panel_above_action()
+    public void Data_download_card_merges_sync_status_into_single_panel_and_puts_action_in_title_row()
     {
         var xamlPath = Path.Combine(
             FindRepoRoot(),
@@ -771,22 +803,34 @@ public sealed partial class SettingsViewModelTests
         var downloadButton = Assert.Single(document.Descendants().Where(element =>
             element.Name.LocalName == "Button" &&
             element.Attribute("Command")?.Value == "{Binding DownloadCatalogCommand}"));
-        var cardGrid = downloadButton.Parent!;
-        var statusPanel = Assert.Single(cardGrid.Elements().Where(element =>
+        // 首屏重设计：主按钮在卡片「标题行」右端（与图标、标题、状态胶囊同一行），同步块在说明下方。
+        var card = downloadButton.Ancestors().First(element =>
+            element.Name.LocalName == "Border" &&
+            element.Attribute("Style")?.Value == "{StaticResource DataMaintenanceCardStyle}");
+        var titleRow = downloadButton.Parent!;
+        Assert.Equal("Grid", titleRow.Name.LocalName);
+        Assert.Equal("4", downloadButton.Attribute("Grid.Column")?.Value);
+        Assert.Equal("48", downloadButton.Attribute("Height")?.Value);
+        var statusPanel = Assert.Single(card.Descendants().Where(element =>
             element.Attribute(xamlNamespace + "Name")?.Value == "CatalogSyncStatusPanel"));
+        // 同步块不在标题行里，按钮也不在同步块里。
+        Assert.DoesNotContain(titleRow.Descendants(), element => ReferenceEquals(element, statusPanel));
+        Assert.DoesNotContain(statusPanel.Descendants(), element => ReferenceEquals(element, downloadButton));
         var panelBindings = statusPanel.Descendants()
             .SelectMany(element => element.Attributes())
             .Select(attribute => attribute.Value)
             .ToArray();
+        var titleRowBindings = titleRow.Descendants()
+            .SelectMany(element => element.Attributes())
+            .Select(attribute => attribute.Value)
+            .ToArray();
 
-        Assert.Equal("1", statusPanel.Attribute("Grid.Row")?.Value);
-        Assert.Equal("2", downloadButton.Attribute("Grid.Row")?.Value);
+        // 同步块：上次同步标签 / 时间 + 固定状态区（同步中进度条、失败原因）。
         foreach (var binding in new[]
                  {
                      "{Binding CatalogSyncTimeLabelText}",
                      "{Binding CatalogSyncTimeText}",
                      "{Binding CatalogSyncFailureText}",
-                     "{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}",
                      "{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}",
                      "{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}"
                  })
@@ -794,8 +838,19 @@ public sealed partial class SettingsViewModelTests
             Assert.Contains(binding, panelBindings);
         }
 
+        // 已同步 / 同步中 / 同步失败 三个状态胶囊紧跟标题，在标题行里。
+        foreach (var binding in new[]
+                 {
+                     "{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}"
+                 })
+        {
+            Assert.Contains(binding, titleRowBindings);
+        }
+
         // 原卡片底部的通用状态框已并入同步信息块，页面级提示只保留在底部状态栏。
-        Assert.DoesNotContain(cardGrid.Descendants(), element =>
+        Assert.DoesNotContain(card.Descendants(), element =>
             element.Attribute("Text")?.Value == "{Binding StatusMessage}");
         Assert.Single(document.Descendants().Where(element =>
             element.Name.LocalName == "TextBlock" &&
@@ -4422,13 +4477,13 @@ public sealed partial class SettingsViewModelTests
         var button = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
             (string?)element.Attribute(x + "Name") == "RestartComputerTestButton"));
         Assert.Equal("{Binding RestartComputerCommand}", (string?)button.Attribute("Command"));
-        // 触屏最小高度，且和重启提醒开关在同一张卡片里。
+        // 触屏最小高度。首屏重设计后开关与「重启电脑」是数据维护页第三行并排的两张卡，
+        // 外层共用一个跟随 IsRestartPromptSettingVisible 的 Grid（原来在同一张卡里，显示条件不变）。
         Assert.True(double.Parse((string)button.Attribute("MinHeight")!) >= 44);
-        Assert.Same(
-            toggle.Ancestors(presentation + "Border").First(border =>
-                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"),
-            button.Ancestors(presentation + "Border").Last(border =>
-                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"));
+        var thirdRow = toggle.Ancestors(presentation + "Grid").First(grid =>
+            ((string?)grid.Attribute("Visibility") ?? string.Empty).Contains("IsRestartPromptSettingVisible", StringComparison.Ordinal));
+        Assert.Contains(button, thirdRow.Descendants());
+        Assert.Contains("IsRestartComputerTestVisible", (string?)button.Ancestors(presentation + "Border").First().Attribute("Visibility"));
 
         var keys = new[]
         {

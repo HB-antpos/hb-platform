@@ -13,6 +13,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     private readonly IApiServerSwitchCoordinator? _switchCoordinator;
     private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly ICashierSessionContext? _cashierSessionContext;
+    private readonly ApiTransportSelector? _transportSelector;
 
     [ObservableProperty]
     private string _serverAddressText = string.Empty;
@@ -26,6 +27,10 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _restartRequired;
 
+    // 只读展示：后台设置的首选入口 / 当前实际入口 / 是否回退中。当前地址不在别名组内（本机开发地址等）时为空。
+    [ObservableProperty]
+    private string _entryStatusText = string.Empty;
+
     // 最近一次加载或保存成功的地址：输入框与它不同即「改了还没保存」，设置页离开时据此提示。
     private string _addressBaseline = string.Empty;
 
@@ -36,8 +41,10 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         IOperationAuditLogger? operationAuditLogger = null,
         ICashierSessionContext? cashierSessionContext = null,
         INetworkDiagnosticsService? networkDiagnostics = null,
-        INetworkFixService? networkFixes = null)
+        INetworkFixService? networkFixes = null,
+        ApiTransportSelector? transportSelector = null)
     {
+        _transportSelector = transportSelector;
         _settingsService = settingsService;
         _localization = localization;
         _switchCoordinator = switchCoordinator;
@@ -61,6 +68,49 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     public NetworkDiagnosticsViewModel? Network { get; }
 
     public bool HasNetworkDiagnostics => Network is not null;
+
+    public bool HasEntryStatus => !string.IsNullOrEmpty(EntryStatusText);
+
+    partial void OnEntryStatusTextChanged(string value) => OnPropertyChanged(nameof(HasEntryStatus));
+
+    /// <summary>
+    /// 刷新入口状态（只读，不改变任何冷却状态）。入口会随线路故障转移变化，所以进入页面和每次测试连接后都刷新。
+    /// </summary>
+    public void RefreshEntryStatus()
+    {
+        EntryStatusText = BuildEntryStatusText();
+        // 同步刷新拆分后的首选 / 当前 / 回退三个字段（设置页两行展示用），数据来源与上面相同。
+        RefreshEntryParts();
+    }
+
+    private string BuildEntryStatusText()
+    {
+        if (_transportSelector is null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var status = _transportSelector.GetStatus(new Uri(_settingsService.GetCurrentAddress(), UriKind.Absolute));
+            if (status.ActiveMode is null)
+            {
+                return string.Empty;
+            }
+
+            return string.Format(
+                _localization.CurrentCulture,
+                _localization.T("settings.serverAddress.entry.line"),
+                _localization.T($"settings.serverAddress.entry.{status.PreferredMode}"),
+                _localization.T($"settings.serverAddress.entry.{status.ActiveMode}"),
+                status.UsingFallback ? _localization.T("settings.serverAddress.entry.fallback") : string.Empty);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UriFormatException)
+        {
+            // 展示用的附加信息，任何异常都不能影响设置页。
+            return string.Empty;
+        }
+    }
 
     public IAsyncRelayCommand TestConnectionCommand { get; }
 
@@ -94,6 +144,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         SetAddressBaseline(ServerAddressText);
         RestartRequired = false;
         SetStatus("settings.serverAddress.status.ready");
+        RefreshEntryStatus();
     }
 
     partial void OnServerAddressTextChanged(string value)
@@ -155,6 +206,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+            RefreshEntryStatus();
         }
     }
 

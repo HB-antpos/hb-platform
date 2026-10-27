@@ -1,3 +1,4 @@
+import { sortSuppliersByName } from "../../shared/utils/name-sort";
 import type { LocalSupplierOption } from "./types";
 
 export function searchCreateSuppliers(
@@ -6,20 +7,15 @@ export function searchCreateSuppliers(
   language: string,
 ) {
   const term = query.trim().toLocaleLowerCase();
-  return suppliers
-    .filter(
+  // 先过滤，再用统一的名字排序工具排序（返回新数组，不修改入参）。
+  return sortSuppliersByName(
+    suppliers.filter(
       (supplier) =>
         !term ||
         `${supplier.supplierName}\n${supplier.supplierCode}`
           .toLocaleLowerCase()
           .includes(term),
-    )
-    .sort(
-      (a, b) =>
-        (a.supplierName || a.supplierCode).localeCompare(
-          b.supplierName || b.supplierCode,
-          language === "zh" ? "zh-CN" : "en",
-          { numeric: true, sensitivity: "base" },
-        ) || a.supplierCode.localeCompare(b.supplierCode),
-    );
+    ),
+    language,
+  );
 }

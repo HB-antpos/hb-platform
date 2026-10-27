@@ -4,7 +4,11 @@ import { ProductImageBox } from "@/components/seasonal-product-insights/ProductI
 import { QrCodePanel } from "@/components/ui/QrCodePanel";
 import { InsightSheet } from "@/components/warehouse-product-insights/InsightSheet";
 import type { InvoiceAction } from "@/modules/sales-orders/invoice";
-import { summarizeSalesOrderLines } from "@/modules/sales-orders/logic";
+import {
+  SALES_ORDER_REFUND_TYPE,
+  resolveSalesOrderRefundTone,
+  summarizeSalesOrderLines,
+} from "@/modules/sales-orders/logic";
 import type {
   SalesOrderDetail,
   SalesOrderListItem,
@@ -13,7 +17,7 @@ import type {
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { productThumbnailUri } from "@/shared/utils/product-image";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { SalesOrderStatusTag } from "./SalesOrderStatusTag";
+import { REFUND_TONES, SalesOrderRefundTag, SalesOrderStatusTag } from "./SalesOrderStatusTag";
 import { formatSalesOrderMoney, formatSalesOrderTime } from "./format";
 
 /** 明细行缩略图边长（dp）。 */
@@ -47,6 +51,8 @@ export function SalesOrderDetailSheet({
 }: SalesOrderDetailSheetProps) {
   const { t } = useAppTranslation("salesOrders");
   const order = detail?.order ?? summary;
+  // 含退款商品：整单金额不为负是部分退款（橙），为负是整单退款（红）。
+  const refundTone = order ? resolveSalesOrderRefundTone(order) : null;
   const matchedCodes = new Set(
     (summary?.matchedProducts ?? []).map((product: SalesOrderMatchedProduct) => product.productCode),
   );
@@ -66,7 +72,10 @@ export function SalesOrderDetailSheet({
               <Text selectable style={styles.guid}>
                 {order.orderGuid}
               </Text>
-              <SalesOrderStatusTag status={order.status} />
+              <View style={styles.tags}>
+                {refundTone && order.status !== SALES_ORDER_REFUND_TYPE ? <SalesOrderRefundTag tone={refundTone} /> : null}
+                <SalesOrderStatusTag status={order.status} refundTone={refundTone} />
+              </View>
             </View>
             <Text style={styles.meta}>
               {t("detail.device", { value: order.deviceCode ?? "—" })}
@@ -74,7 +83,12 @@ export function SalesOrderDetailSheet({
             <View style={styles.amounts}>
               <Amount label={t("detail.totalAmount")} value={order.totalAmount} />
               <Amount label={t("detail.discount")} value={order.discountAmount} negative />
-              <Amount label={t("detail.actualPay")} value={order.actualAmount} strong />
+              <Amount
+                label={t("detail.actualPay")}
+                value={order.actualAmount}
+                strong
+                color={refundTone ? REFUND_TONES[refundTone].color : undefined}
+              />
             </View>
             <View style={styles.invoiceRow}>
               <Button
@@ -224,17 +238,20 @@ function Amount({
   value,
   negative = false,
   strong = false,
+  color,
 }: {
   label: string;
   value: number | null;
   negative?: boolean;
   strong?: boolean;
+  /** 含退款商品时整单金额按正负着色（橙 / 红）。 */
+  color?: string;
 }) {
   const shown = negative && value != null && value > 0 ? -value : value;
   return (
     <View style={styles.amount}>
       <Text style={styles.amountLabel}>{label}</Text>
-      <Text style={[styles.amountValue, strong ? styles.amountStrong : null]}>
+      <Text style={[styles.amountValue, strong ? styles.amountStrong : null, color ? { color } : null]}>
         {formatSalesOrderMoney(shown)}
       </Text>
     </View>
@@ -252,6 +269,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  tags: { flexDirection: "row", alignItems: "center", gap: 6 },
   guid: { flex: 1, fontSize: 12, fontWeight: "700", color: HB_COLORS.textPrimary },
   meta: { fontSize: 12, color: HB_COLORS.textSecondary },
   amounts: {

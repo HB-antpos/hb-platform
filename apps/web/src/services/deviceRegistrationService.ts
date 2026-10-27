@@ -16,6 +16,8 @@ import type {
 } from '../types/deviceRegistration'
 import request, { unwrapApiData } from '../utils/request'
 
+import { normalizePosApiEntryMode } from './posApiEntryService'
+
 const DEVICE_API_BASE = '/api'
 const REACT_API_BASE = '/api/react/v1/device-registration'
 const EMERGENCY_LOGIN_GRANT_API_BASE = '/api/react/v1/emergency-login-grants'
@@ -228,6 +230,9 @@ function normalizeItem(raw: Record<string, unknown>): DeviceRegistrationItem {
     systemUptimeSeconds: getNullableNumber(raw, 'systemUptimeSeconds', 'SystemUptimeSeconds', '系统开机秒数'),
     processWorkingSetMb: getNullableNumber(raw, 'processWorkingSetMb', 'ProcessWorkingSetMb', '客户端内存MB'),
     processHandleCount: getNullableNumber(raw, 'processHandleCount', 'ProcessHandleCount', '客户端句柄数'),
+    rustDeskClientVersion: getNullableString(raw, 'rustDeskClientVersion', 'RustDeskClientVersion'),
+    lastApiEntry: normalizePosApiEntryMode(getNullableString(raw, 'lastApiEntry', 'LastApiEntry')),
+    lastApiEntryAt: getNullableString(raw, 'lastApiEntryAt', 'LastApiEntryAt'),
   }
 }
 
@@ -419,6 +424,7 @@ export async function getDeviceRegistrations(params?: {
   const response = await request.get<
     ApiResponse<{
       devices?: Record<string, unknown>[]
+      rustDeskLatestVersion?: string | null
       pagination?: {
         page?: number
         pageSize?: number
@@ -441,6 +447,10 @@ export async function getDeviceRegistrations(params?: {
 
   return {
     devices: Array.isArray(data.devices) ? data.devices.map(normalizeItem) : [],
+    rustDeskLatestVersion:
+      typeof data.rustDeskLatestVersion === 'string' && data.rustDeskLatestVersion.trim()
+        ? data.rustDeskLatestVersion.trim()
+        : null,
     total: Number(pagination.total ?? 0),
     page: Number(pagination.page ?? params?.page ?? 1),
     pageSize: Number(pagination.pageSize ?? params?.pageSize ?? 50),

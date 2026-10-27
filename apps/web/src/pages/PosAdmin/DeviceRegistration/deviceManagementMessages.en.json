@@ -21,8 +21,18 @@
           "transactions": "Sales",
           "registeredAt": "Registered",
           "version": "Version",
+          "rustDeskVersion": "Remote",
           "update": "Update",
           "lastUser": "Last user"
+        },
+        "rustDeskVersionHint": "RustDesk client version reported by this device; orange when below the deployed {{latest}}",
+        "rustDeskNotInstalled": "Not installed",
+        "versionFilter": {
+          "appVersion": "App version",
+          "appVersionPlaceholder": "App version",
+          "rustDeskPlaceholder": "Remote version",
+          "notReported": "Not reported",
+          "outdated": "Older than {{latest}}"
         },
         "heartbeatNever": "Never reported",
         "cashier": "Cashier {{name}}",
@@ -96,6 +106,193 @@
           "lockSucceeded": "Locked {{count}} device(s)",
           "partialFailed": "{{succeeded}} succeeded, {{failed}} failed ({{devices}}). Failed devices stay selected so you can retry."
         }
+      },
+      "viewPosApiEntry": "Cashier entry",
+      "viewPosApiUsage": "Route usage",
+      "apiEntry": {
+        "intro": "Cashier devices (WPF / handheld / iPad) reach the POS API through three routes: <b>EdgeOne</b>, <b>AWS Sydney</b> and <b>Direct to Singapore</b>. All three lead to the same backend. Pick the <b>preferred</b> route for each store here; the other two act as fallbacks automatically: if the preferred route is unreachable the device switches to the next one at once, and switches back after recovery. Changes take effect within about 1 minute (slower at night), with no restart and no impact on payments in progress.",
+        "modes": {
+          "edge": "EdgeOne",
+          "aws": "AWS Sydney",
+          "direct": "Direct"
+        },
+        "modesShort": {
+          "edge": "EdgeOne",
+          "aws": "AWS",
+          "direct": "Direct"
+        },
+        "modeDescriptions": {
+          "edge": "Tencent multi-node acceleration; billed per request.",
+          "aws": "Self-hosted Sydney edge with warm connections and fast first requests; network independent of Tencent; single server.",
+          "direct": "Straight to the Singapore origin with no middle layer; unstable on a few ISPs."
+        },
+        "summary": {
+          "preferred": "Store preferred route",
+          "actualOn": "Actually on {{route}}",
+          "deviceUnit": "devices",
+          "fallbackHint": "{{count}} of them are falling back",
+          "unsupported": "Version too old, setting ignored",
+          "unsupportedHint": "Still use the old default, EdgeOne"
+        },
+        "toolbar": {
+          "searchPlaceholder": "Search store name / code",
+          "preferredPlaceholder": "All preferred routes",
+          "scopePlaceholder": "All stores",
+          "onlyFallback": "Stores with fallbacks only"
+        },
+        "columns": {
+          "store": "Store",
+          "preferred": "Preferred route",
+          "preferredHint": "Fallback order",
+          "actual": "Actual route (last 10 min)",
+          "attention": "Needs attention",
+          "updated": "Last changed"
+        },
+        "defaultTag": "Default",
+        "fallbackOrderPrefix": "Fallback",
+        "storeSub": "{{total}} devices · {{online}} online",
+        "legend": {
+          "preferred": "{{route}} {{count}}",
+          "fallback": "Fell back to {{route}} {{count}}",
+          "unsupported": "Unsupported (still EdgeOne) {{count}}",
+          "unknown": "Not reported {{count}}"
+        },
+        "attention": {
+          "fallback": "{{count}} falling back",
+          "unsupported": "{{count}} version too old",
+          "offline": "{{count}} offline",
+          "pending": "Just changed, taking effect"
+        },
+        "updatedToday": "Today {{time}}",
+        "batch": {
+          "setEdge": "Set EdgeOne as preferred",
+          "setAws": "Set AWS Sydney as preferred",
+          "setDirect": "Set Direct as preferred"
+        },
+        "radioGroupAria": "Preferred route of {{store}}",
+        "selectRowAria": "Select {{store}}",
+        "distributionAria": "Actual routes of {{store}} devices: {{summary}}",
+        "modal": {
+          "title": "Change preferred route for {{count}} stores",
+          "subtitle": "{{names}} · {{devices}} cashier devices in total",
+          "namesMore": " and {{count}} more",
+          "defaultSuffix": " (default)",
+          "fallbackOrderPrefix": "Fallback",
+          "choiceAria": "Choose the preferred route",
+          "effectTitle": "How it takes effect",
+          "effectSpeed": "Devices switch automatically within about 1 minute, no restart needed; payments in progress are not affected",
+          "effectIdentity": "Local data and activation stay unchanged (device identity does not depend on the route)",
+          "effectAllSupported": "All {{count}} devices support it",
+          "effectPartlyUnsupported": "{{supported}} devices support it; {{count}} have a version that is too old, so the setting is ignored (they still use the old default, EdgeOne)",
+          "confirm": "Confirm change"
+        },
+        "messages": {
+          "loadFailed": "Failed to load cashier entry settings",
+          "updateSuccess": "Updated the preferred route of {{updated}} stores",
+          "updateSkipped": "; {{skipped}} already used this route",
+          "updateFailed": "Failed to change the preferred route",
+          "tooMany": "You can change at most {{max}} stores at a time. Please do it in batches."
+        },
+        "footer": "{{count}} stores · Actual routes are identified by the server from each request, no reporting needed on the device · Fixed fallback order: AWS → EdgeOne → Direct (minus the preferred one)",
+        "readOnly": "Your account has view-only access and cannot change the preferred route.",
+        "emptyFiltered": "No stores match the filters",
+        "route": {
+          "column": "Route",
+          "columnHint": "The entry the device actually used for its latest request, identified by the server",
+          "fallingBack": "{{route}} · Falling back",
+          "preferredHint": "Preferred {{route}}",
+          "unsupported": "Version too old, still uses the old default EdgeOne",
+          "filterPlaceholder": "By route",
+          "filterFallback": "Falling back",
+          "filterLabel": "Route"
+        }
+      },
+      "apiUsage": {
+        "intro": "Counts <b>requests</b> from POS devices to the POS API, split by route (EdgeOne / AWS Sydney / Direct). The server identifies the route from where each request arrived; devices report nothing. Dates use Sydney time and weeks start on Monday. Data refreshes about once a minute and starts accumulating after release; history cannot be backfilled.",
+        "granularity": {
+          "day": "Daily",
+          "week": "Weekly",
+          "month": "Monthly"
+        },
+        "toolbar": {
+          "granularityAria": "Granularity",
+          "rangeAria": "Date range",
+          "storePlaceholder": "All stores",
+          "clientKindPlaceholder": "All clients"
+        },
+        "presets": {
+          "last7": "Last 7 days",
+          "last30": "Last 30 days",
+          "last90": "Last 90 days",
+          "thisMonth": "This month",
+          "lastMonth": "Last month",
+          "last12Months": "Last 12 months"
+        },
+        "rangeProblem": {
+          "invalid": "Invalid date format",
+          "reversed": "Start date cannot be after end date",
+          "tooLarge": "The range can be at most {{max}} days. Please shorten it."
+        },
+        "entries": {
+          "unknown": "Unidentified"
+        },
+        "entryHints": {
+          "unknown": "Requests without a route marker, e.g. reaching the origin server directly, bypassing the entry servers"
+        },
+        "summary": {
+          "total": "Total requests",
+          "requestUnit": "req",
+          "share": "{{share}} of total",
+          "errors": "4xx {{s4xx}} · 5xx {{s5xx}}"
+        },
+        "chart": {
+          "title": "Request trend",
+          "aria": "Stacked column chart of requests per route over {{count}} periods: {{summary}}",
+          "tooltipTotal": "Total {{count}}",
+          "tooltipPartial": "(partial: only days inside the selected range)",
+          "empty": "No usage data in the selected range"
+        },
+        "sections": {
+          "buckets": "By period",
+          "stores": "By store",
+          "clients": "By client"
+        },
+        "columns": {
+          "period": "Period",
+          "store": "Store",
+          "total": "Total",
+          "status4xx": "4xx",
+          "status5xx": "5xx",
+          "errorRate": "5xx rate",
+          "clientKind": "Client",
+          "kindShare": "Share of total"
+        },
+        "partialTag": "Partial",
+        "partialHint": "Only some days of this week / month fall inside the selected range; the totals cover those days only",
+        "unassignedStore": "Unassigned store",
+        "unassignedHint": "Unauthenticated requests (e.g. health checks, activation) that cannot be tied to a store",
+        "empty": "No usage data in the selected range.",
+        "messages": {
+          "loadFailed": "Failed to load route usage"
+        },
+        "footer": "Time zone: {{timeZone}} · Range {{start}} ~ {{end}} · 4xx / 5xx are subsets of requests · {{buckets}} periods, {{stores}} stores (incl. unassigned)",
+        "source": {
+          "aria": "Usage source",
+          "pos": "POS API (registers)",
+          "main": "Main API (Web & staff app)"
+        },
+        "mainIntro": "Counts <b>requests</b> to the main API (the /api endpoints used by the web back office and the staff app), split by route (EdgeOne / AWS Sydney / Direct) and by client type (Web back office / Staff app / Other). The origin server identifies the route; the client type is a rough split from the request's browser identifier, and only counts are stored - never the identifier text, IP or user. Dates use Sydney time and weeks start on Monday. Data refreshes about once a minute and starts accumulating after release; history cannot be backfilled. Until the origin server is configured to mark the route, all requests show as Unidentified.",
+        "clientKinds": {
+          "web": "Web back office",
+          "app": "Staff app",
+          "other": "Other"
+        },
+        "clientKindHints": {
+          "web": "Browsers using the web back office",
+          "app": "Staff app (iOS / Android)",
+          "other": "Scripts, uptime monitors and other unrecognised clients"
+        },
+        "mainFooter": "Time zone: {{timeZone}} · Range {{start}} ~ {{end}} · 4xx / 5xx are subsets of requests · {{buckets}} periods"
       }
     }
   }

@@ -22,6 +22,11 @@ export interface ContainerNewProductItem {
   basis: ContainerNewProductBasis;
   /** 新商品（仓库里没有或由本柜新建）；false 为补货的已有商品。旧版后端不返回时按新商品处理（旧接口只返回新商品） */
   isNewProduct: boolean;
+  /**
+   * 仓库是否已完成建档（商品主档已有该商品，商品查询页才能查到）。与 isNewProduct 不同：本柜新建的新品也是 true。
+   * 旧版后端不返回时为 null，按「未知」放行跳转，由商品查询页自己处理。
+   */
+  isCreated: boolean | null;
 }
 
 export interface ContainerNewProductsResponse {

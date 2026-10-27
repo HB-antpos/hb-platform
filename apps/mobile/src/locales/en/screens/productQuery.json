@@ -133,6 +133,7 @@
     "hqSyncProduct": "Product {{productCode}} · Store {{storeCode}}",
     "hqSyncProductAllStores": "Product {{productCode}} · All stores",
     "hqSyncAttempt": "Attempts: {{count}}",
+    "discountAutoPrintFailed": "The regular label printed, but the discount label failed to print.",
     "discountPrintUnavailable": "This product has no discount data to print.",
     "clearancePrintUnavailable": "This product has no clearance data to print."
   },
@@ -161,12 +162,121 @@
     "unsaved": "Unsaved changes"
   },
   "promotion": {
-    "title": "Multi-buy",
+    "title": "Promotions for this item",
+    "viewAll": "All promotions",
     "unnamed": "Unnamed promotion",
-    "rule": "{{count}} items for ${{price}}",
-    "active": "On promotion",
-    "until": "until {{date}}",
-    "more": "{{count}} promotions"
+    "status": {
+      "active": "Active",
+      "upcoming": "Upcoming",
+      "disabled": "Disabled",
+      "ended": "Ended"
+    },
+    "scope": {
+      "store": "This store only",
+      "multi": "Multi-store · {{count}}"
+    },
+    "rule": "{{count}} for ${{price}}",
+    "unitPrice": "${{price}} each",
+    "saving": "save ${{amount}}",
+    "noSaving": "No saving vs retail",
+    "dateRange": "{{start}} – {{end}}",
+    "daysLeft": "{{count}}d left",
+    "startsIn": "starts in {{count}}d",
+    "longTerm": "Ongoing",
+    "products": "Items: {{count}}",
+    "exclusive": "Exclusive",
+    "stackable": "Stackable",
+    "toggleLabel": "Enable \"{{name}}\"",
+    "lockedHint": "Multi-store promotions are view-only. Copy one to this store to adjust it.",
+    "readonlyHint": "View only",
+    "actions": {
+      "edit": "Edit",
+      "endNow": "End now",
+      "copy": "Copy to this store",
+      "create": "New promotion for this item"
+    },
+    "confirm": {
+      "endTitle": "End promotion now",
+      "endMessage": "The end time of \"{{name}}\" will be set to now. Its on/off switch stays the same. End it now?",
+      "endConfirm": "End now",
+      "copyTitle": "Copy to this store",
+      "copyMessage": "Copy \"{{name}}\" as a store-only promotion. The copy starts disabled with priority 0; edit it, then enable it.",
+      "copyConfirm": "Copy"
+    },
+    "messages": {
+      "enabled": "Promotion enabled",
+      "disabled": "Promotion disabled",
+      "ended": "Promotion ended",
+      "copied": "Copied as a store-only promotion (disabled)",
+      "created": "Promotion saved",
+      "updated": "Promotion changes saved",
+      "loadDetailFailed": "Couldn't load promotion details",
+      "actionFailed": "Promotion action failed",
+      "exclusiveConflict": "Overlaps another exclusive promotion. Change the dates or disable the other promotion first."
+    },
+    "form": {
+      "createTitle": "New store-only promotion",
+      "editTitle": "Edit store promotion",
+      "addProducts": "Add items to this deal (scan / search) · {{count}} selected",
+      "productSearchPlaceholder": "Scan or enter barcode / code",
+      "productSearchAdd": "Add",
+      "productSearchEmpty": "No item found",
+      "productSearchFailed": "Item search failed",
+      "productSearchPick": "Several items found. Pick one:",
+      "productRemove": "Remove",
+      "productCurrent": "This item",
+      "name": "Promotion name",
+      "defaultName": "{{name}} {{count}}-pack deal",
+      "applyQuantity": "Buy quantity",
+      "fixedPrice": "Bundle price",
+      "decrease": "Decrease quantity",
+      "increase": "Increase quantity",
+      "previewRule": "{{count}} for ${{price}} · ${{unit}} each",
+      "previewSaving": "{{percent}} off retail ${{retail}} (save ${{amount}} per bundle)",
+      "previewNoRetail": "Store retail price unknown; saving can't be calculated",
+      "pricePending": "Enter a bundle price to see the unit price and discount",
+      "notDiscount": "Bundle price isn't below retail × quantity (${{total}}). Can't save.",
+      "nonDiscounted": "No saving when buying {{count}} of: {{names}}",
+      "quantityTooSmall": "Buy quantity must be at least {{count}}",
+      "validity": "Valid period",
+      "quick": {
+        "sevenDays": "7 days from today",
+        "monthEnd": "To month end",
+        "thirtyDays": "30 days",
+        "custom": "Custom"
+      },
+      "startDate": "Start date",
+      "endDate": "End date",
+      "rangeInvalid": "End time must be after start time",
+      "rangeEnded": "End time has passed. Use \"End now\" to end a promotion.",
+      "store": "Store",
+      "storeValue": "This store only · {{store}}",
+      "more": "More settings",
+      "moreSummary": "{{exclusive}} · Priority {{priority}} · {{max}}",
+      "maxUnlimited": "No limit per order",
+      "maxLimited": "Max {{count}} per order",
+      "exclusiveLabel": "Exclusive (doesn't stack with other promotions)",
+      "priorityLabel": "Priority",
+      "priorityHint": "Store promotion priority is managed by head office and can't be changed here",
+      "maxPerOrderLabel": "Max per order",
+      "maxPerOrderPlaceholder": "Leave blank for no limit",
+      "maxPerOrderInvalid": "Enter a whole number above 0, or leave blank for no limit",
+      "saveDisabled": "Save as disabled",
+      "saveEnabled": "Save & enable",
+      "save": "Save"
+    },
+    "conflict": {
+      "title": "Overlaps an exclusive promotion",
+      "messageOther": "This item already has a {{scope}} exclusive promotion \"{{name}}\" during {{range}}. While they overlap, the POS only applies the one with higher priority.",
+      "messageSelf": "This promotion is exclusive and overlaps the {{scope}} promotion \"{{name}}\" during {{range}}. While they overlap, the POS only applies the one with higher priority.",
+      "scopeStore": "store",
+      "scopeMulti": "multi-store",
+      "current": "This one: {{name}} · Priority {{priority}} · {{range}}",
+      "other": "Conflict: {{name}} · Priority {{priority}} · {{range}}",
+      "endBefore": "End on {{date}}",
+      "saveAnyway": "Save anyway",
+      "back": "Back to edit"
+    }
   },
   "hero": {
     "unnamedProduct": "Unnamed product",
@@ -544,5 +654,58 @@
       "clearAfter": "Clear printed",
       "resultQuestion": "Once printed, clear this batch and scan the next one."
     }
+  },
+  "priceTask": {
+    "titlePriceUpdate": "This store has a pending price task",
+    "titleLabelOnly": "This store has a shelf label to replace",
+    "overdueTag": "Overdue {{days}}d",
+    "waitingTag": "Waiting {{days}}d",
+    "storeNow": "Store price",
+    "warehouseNew": "Warehouse price",
+    "shelfLabel": "Shelf label",
+    "deltaUp": "Up {{amount}}",
+    "deltaDown": "Down {{amount}}",
+    "discountRow": "Discount: {{from}} → {{to}}",
+    "printerOffline": "Label printer not connected — only the price will be updated",
+    "connectPrinter": "Connect",
+    "dirtyBlocked": "You have unsaved price changes on this page. Save or discard them before handling this task.",
+    "actions": {
+      "applyAndPrint": "Update & print",
+      "applyOnly": "Update price only",
+      "printLabel": "Print label",
+      "markReplaced": "Mark replaced",
+      "more": "More",
+      "keepStorePrice": "Keep store price",
+      "viewTask": "View task details",
+      "reprint": "Print another",
+      "retry": "Retry"
+    },
+    "steps": {
+      "apply": "Update price",
+      "print": "Print label",
+      "complete": "Complete task",
+      "skipped": "Skipped"
+    },
+    "notice": {
+      "priceUpdatedLabelPending": "Price updated. The label is not printed yet and the task is now \"Labels to replace\".",
+      "targetChanged": "The price has changed and was refreshed. Please review it again.",
+      "applyFailed": "Failed to update the price. Please try again.",
+      "printFailed": "Price updated, but printing failed. The task stays in \"Labels to replace\".",
+      "confirmFailed": "The label was printed, but saving the task status failed. Tap Retry (it will not print again).",
+      "printerRequired": "Connect a label printer before printing.",
+      "operationFailed": "Operation failed. Please try again."
+    },
+    "done": {
+      "completed": "Task complete: price updated to {{price}} and label printed",
+      "markedReplaced": "Marked as label replaced",
+      "keptStorePrice": "Store price kept, task complete",
+      "reprinted": "Printed another label"
+    }
+  },
+  "autoPricingStore": {
+    "storeTag": "Current store: {{store}}",
+    "taskHint": "This store also has 1 warehouse price task ({{kind}}). Handle it on the page after confirming.",
+    "kindPriceUpdate": "price update",
+    "kindLabelOnly": "label to replace"
   }
 }

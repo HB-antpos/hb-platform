@@ -40,6 +40,12 @@ public interface ISquarePaymentRecoveryService
         PosSessionState session,
         CancellationToken cancellationToken = default);
 
+    // 启动/收银员登录后自动补单：只处理“Square 已确认扣款但订单没落盘”的确定性记录。
+    Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(CardAutoRecoverySummary.None);
+
     Task<CardRecoveryResolutionResult> ResolveAttemptAsync(
         Guid attemptGuid,
         CardRecoverySupervisorDecision decision,
@@ -263,6 +269,114 @@ public sealed class SquarePaymentRecoveryService(
             attempt.PaymentId,
             attempt.OperationGuid,
             attempt.PaymentStatus);
+
+    /// <summary>
+    /// 刚更新的记录可能仍属于一笔正在进行的付款（页面还在落盘），自动补单只处理已“静置”超过该时长的记录，
+    /// 避免和付款页的正常完成并发写同一张订单。
+    /// </summary>
+    internal static readonly TimeSpan AutoRecoveryMinimumIdle = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// 自动补单：Square 已核实扣款（PaymentVerified，或已进入「待收尾→订单完成」）、本机持有订单草稿，
+    /// 却因程序卡住/被重启而没有生成订单的记录。1031 店 2026-10-24 多次出现：客人已付款，
+    /// 收银员重启后异常中心里躺着一条“Payment verified”，只能手动处理，处理不好就是白送商品。
+    /// 流程与异常中心点“恢复”完全一致（走 RecoverAttemptAsync），不会向 Square 发起任何新扣款，
+    /// 也不触碰当前购物车（使用一次性购物车）；主管已结案、结果未知、需要还原草稿的记录都不在此列。
+    /// </summary>
+    public async Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+        if (settings.Processor != CardProcessorKind.Square)
+        {
+            return CardAutoRecoverySummary.None;
+        }
+
+        var attempts = await RunLocalStoreAsync(
+            () => attemptRepository.GetOpenAttemptsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                settings.Environment.ToString(),
+                cancellationToken),
+            cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var candidates = attempts
+            .Where(attempt => IsDeterministicAutoRecoveryCandidate(attempt, now))
+            .OrderBy(attempt => attempt.CreatedAt)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return CardAutoRecoverySummary.None;
+        }
+
+        var scratchCart = new PosCartService();
+        var recoveredOrders = 0;
+        PosSessionState? updatedSession = null;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var result = await RecoverAttemptAsync(
+                    candidate.AttemptGuid,
+                    scratchCart,
+                    session,
+                    cancellationToken);
+                if (result.Outcome == CardPaymentRecoveryOutcome.OrderCompleted)
+                {
+                    recoveredOrders++;
+                    updatedSession = result.UpdatedSession ?? updatedSession;
+                }
+
+                // 不论成败都留日志：自动补单没成功时，现场只能看到异常中心里的 Pending，靠它定位原因。
+                ConsoleLog.WriteInformation(
+                    "SquareRecovery",
+                    $"auto recovery attemptGuid={candidate.AttemptGuid} status={candidate.Status} phase={candidate.RecoveryPhase} outcome={result.Outcome}",
+                    new ApplicationLogContext(TraceId: candidate.AttemptGuid.ToString("D")));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                // 单条失败不能影响其余记录；它仍留在异常中心队列，等待人工恢复。
+                ConsoleLog.WriteWarning(
+                    "SquareRecovery",
+                    $"auto recovery failed attemptGuid={candidate.AttemptGuid} error={ex.GetType().Name}",
+                    new ApplicationLogContext(TraceId: candidate.AttemptGuid.ToString("D")),
+                    ex);
+            }
+        }
+
+        return new CardAutoRecoverySummary(candidates.Length, recoveredOrders, updatedSession);
+    }
+
+    internal static bool IsDeterministicAutoRecoveryCandidate(LocalSquarePaymentAttempt attempt, DateTimeOffset now)
+    {
+        if (!string.Equals(attempt.OperationKind, "Sale", StringComparison.OrdinalIgnoreCase) ||
+            now - attempt.UpdatedAt < AutoRecoveryMinimumIdle)
+        {
+            return false;
+        }
+
+        // 任何主管金融结论（已付/未付/继续等待）都必须由异常中心界面处理，不自动执行。
+        if (IsPersistedSquareSupervisorResolution(attempt) || TryDeserializeDraft(attempt) is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal))
+        {
+            // 已核实扣款、订单收尾到一半；目标是失败/取消/未付款的记录要还原草稿，不在此列。
+            return attempt.RecoveryTargetStatus == LocalSquarePaymentAttemptStatus.OrderCompleted &&
+                !string.IsNullOrWhiteSpace(attempt.PaymentId);
+        }
+
+        return attempt.Status == LocalSquarePaymentAttemptStatus.PaymentVerified &&
+            !string.IsNullOrWhiteSpace(attempt.PaymentId) &&
+            string.Equals(attempt.PaymentStatus?.Trim(), "COMPLETED", StringComparison.OrdinalIgnoreCase);
+    }
 
     public async Task<CardPaymentRecoveryResult> RecoverAttemptAsync(
         Guid attemptGuid,
@@ -528,20 +642,12 @@ public sealed class SquarePaymentRecoveryService(
                 ResolutionPersisted: IsPersistedSquareSupervisorResolution(attempt));
         }
 
+        // 中文注释：确认已付款的参考号改为选填（与 Linkly 一致，门店反馈参考号太长、找不到）。
+        // 但 SupervisorFinancialReference 是“主管已确认付款”的持久化标记，收尾续跑与建单都靠它非空，
+        // 所以主管不填时用这笔的 Square CheckoutId（Square 后台可查）兜底，没有 CheckoutId 再用 attempt 号。
         if (decision == CardRecoverySupervisorDecision.ConfirmProcessed && normalizedReference is null)
         {
-            return new CardRecoveryResolutionResult(
-                false,
-                "Enter the real bank or terminal payment reference before confirming payment.",
-                LockRetained: true);
-        }
-
-        if (decision == CardRecoverySupervisorDecision.ConfirmNotProcessed && normalizedEvidence is null)
-        {
-            return new CardRecoveryResolutionResult(
-                false,
-                "Enter bank evidence confirming that no payment was processed.",
-                LockRetained: true);
+            normalizedReference = BuildSupervisorFallbackPaymentReference(attempt);
         }
 
         var resolvedAt = DateTimeOffset.UtcNow;
@@ -770,6 +876,11 @@ public sealed class SquarePaymentRecoveryService(
             string.Equals(attempt.ResponseCode, CardRefundSupervisorResolutionCodes.ConfirmedNotRefunded, StringComparison.Ordinal) ||
             string.Equals(attempt.ResponseCode, CardRefundSupervisorResolutionCodes.ContinueWaiting, StringComparison.Ordinal);
     }
+
+    internal static string BuildSupervisorFallbackPaymentReference(LocalSquarePaymentAttempt attempt) =>
+        string.IsNullOrWhiteSpace(attempt.CheckoutId)
+            ? $"SQ-ATTEMPT-{attempt.AttemptGuid:N}"
+            : attempt.CheckoutId.Trim();
 
     private static bool IsTerminalSquareStatus(LocalSquarePaymentAttemptStatus status) =>
         status is LocalSquarePaymentAttemptStatus.Canceled or

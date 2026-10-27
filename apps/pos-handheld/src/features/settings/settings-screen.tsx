@@ -14,6 +14,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import type { ApiEntrySettingsController } from "@hb/pos-api-client/api-entry-mode-coordinator";
+import {
+  API_ENTRY_HOSTS,
+  API_ENTRY_MODES,
+  DEFAULT_API_ENTRY_MODE,
+  isFailoverBaseUrl,
+  type ApiEntryMode,
+} from "@hb/pos-api-client/transport-failover";
+
+import { useApiEntrySettings } from "./api-entry-settings";
 import {
   resolveSettingsLocale,
   settingsText,
@@ -131,6 +141,8 @@ export type SettingsScreenPresenter = Pick<
   Readonly<{ getState(): SettingsState }>;
 
 type SettingsScreenProps = Readonly<{
+  /** 收银入口（线路）设置控制器；不传则不显示该设置（运行时未接线）。 */
+  apiEntry?: ApiEntrySettingsController;
   locale?: SettingsLocale;
   onBack?(): void;
   onOpenSyncHistory?(): void;
@@ -154,6 +166,7 @@ const NAV_ITEMS: readonly Readonly<{
  * 而在同一屏显示完整影响范围，确保自动化、键盘与触控都走同一确认路径。
  */
 export function SettingsScreen({
+  apiEntry,
   locale: localeOverride,
   onBack,
   onOpenSyncHistory,
@@ -298,6 +311,7 @@ export function SettingsScreen({
           ) : null}
           {state.kind === "ready" ? (
             <SettingsPaneContent
+              apiEntry={apiEntry}
               locale={locale}
               onBackToSales={onBack}
               onOpenSyncHistory={onOpenSyncHistory}
@@ -373,6 +387,7 @@ export function SettingsUnavailableScreen({
 }
 
 function SettingsPaneContent({
+  apiEntry,
   locale,
   onBackToSales,
   onOpenSyncHistory,
@@ -380,6 +395,7 @@ function SettingsPaneContent({
   scanner,
   state,
 }: Readonly<{
+  apiEntry: ApiEntrySettingsController | undefined;
   locale: SettingsLocale;
   onBackToSales: (() => void) | undefined;
   onOpenSyncHistory: (() => void) | undefined;
@@ -413,16 +429,23 @@ function SettingsPaneContent({
       );
     default:
       return (
-        <GeneralPane locale={locale} presenter={presenter} state={state} />
+        <GeneralPane
+          apiEntry={apiEntry}
+          locale={locale}
+          presenter={presenter}
+          state={state}
+        />
       );
   }
 }
 
 function GeneralPane({
+  apiEntry,
   locale,
   presenter,
   state,
 }: Readonly<{
+  apiEntry: ApiEntrySettingsController | undefined;
   locale: SettingsLocale;
   presenter: SettingsScreenPresenter;
   state: SettingsState;
@@ -568,6 +591,13 @@ function GeneralPane({
           />
         </View>
       </SectionCard>
+      <ApiEntryCard
+        apiBaseUrl={state.apiBaseUrl}
+        canChange={state.access.canReregisterDevice}
+        controller={apiEntry}
+        locale={locale}
+        locked={locked}
+      />
 
       <SectionCard eyebrow={t("eyebrow.catalog")} title={t("general.catalog")}>
         <View style={styles.metricRow}>
@@ -660,6 +690,114 @@ function GeneralPane({
       </SectionCard>
       </View>
     </HandheldStateSurface>
+  );
+}
+
+/**
+ * 收银入口（线路）：显示当前实际在用的线路与设置来源，并允许在本机手动指定首选线路。
+ * - 手动指定只改「首选」，故障转移照常生效；选「自动」= 清除本机覆盖、恢复跟随后台。
+ * - 自定义 API 地址（本地 / 局域网 / 其他服务器）不在三条线路之内，选择无意义，整张卡片的选项禁用。
+ */
+function ApiEntryCard({
+  apiBaseUrl,
+  canChange,
+  controller,
+  locale,
+  locked,
+}: Readonly<{
+  apiBaseUrl: string;
+  canChange: boolean;
+  controller: ApiEntrySettingsController | undefined;
+  locale: SettingsLocale;
+  locked: boolean;
+}>) {
+  const snapshot = useApiEntrySettings(controller);
+  if (!controller || !snapshot) return null;
+  const t = (
+    key: SettingsCopyKey,
+    values?: Readonly<Record<string, string | number>>,
+  ) => settingsText(locale, key, values);
+  const modeLabel = (mode: ApiEntryMode): string =>
+    t(`apiEntry.mode.${mode}`);
+  const applicable = isFailoverBaseUrl(apiBaseUrl);
+  const editable = applicable && canChange && !locked;
+  const sourceText =
+    snapshot.source === "manual"
+      ? t("apiEntry.source.manual")
+      : snapshot.source === "backend" && snapshot.backendMode
+        ? t("apiEntry.source.backend", {
+            route: modeLabel(snapshot.backendMode),
+          })
+        : t("apiEntry.source.default", {
+            route: modeLabel(DEFAULT_API_ENTRY_MODE),
+          });
+  return (
+    <SectionCard
+      eyebrow={t("eyebrow.network")}
+      title={t("apiEntry.title")}
+    >
+      <View testID="settings-api-entry">
+        <Text style={styles.sectionCopy}>{t("apiEntry.hint")}</Text>
+        {applicable ? (
+          <View style={styles.metricRow}>
+            <Metric
+              label={t("apiEntry.current")}
+              value={`${modeLabel(snapshot.activeMode)} · ${API_ENTRY_HOSTS[snapshot.activeMode]}`}
+            />
+            <Metric label={t("apiEntry.setting")} value={sourceText} />
+          </View>
+        ) : (
+          <Text style={styles.sectionCopy} testID="settings-api-entry-unsupported">
+            {t("apiEntry.unsupported")}
+          </Text>
+        )}
+        {applicable && snapshot.usingFallback ? (
+          <Text
+            style={styles.dangerDescription}
+            testID="settings-api-entry-fallback"
+          >
+            {t("apiEntry.fallback", {
+              preferred: modeLabel(snapshot.preferredMode),
+              active: modeLabel(snapshot.activeMode),
+            })}
+          </Text>
+        ) : null}
+        <View style={styles.actionRow} testID="settings-api-entry-options">
+          <ActionButton
+            disabled={!editable}
+            label={t("apiEntry.option.auto")}
+            onPress={() => controller.setManualMode(null)}
+            selected={snapshot.manualMode === null}
+            testID="settings-api-entry-auto"
+            tone="secondary"
+          />
+          {API_ENTRY_MODES.map((mode) => (
+            <ActionButton
+              disabled={!editable}
+              key={mode}
+              label={modeLabel(mode)}
+              onPress={() => controller.setManualMode(mode)}
+              selected={snapshot.manualMode === mode}
+              testID={`settings-api-entry-${mode}`}
+              tone="secondary"
+            />
+          ))}
+        </View>
+        {applicable && !canChange ? (
+          <Text style={styles.sectionCopy} testID="settings-api-entry-no-permission">
+            {t("apiEntry.noPermission")}
+          </Text>
+        ) : null}
+        {snapshot.manualSaveFailed ? (
+          <Text
+            style={styles.dangerDescription}
+            testID="settings-api-entry-save-failed"
+          >
+            {t("apiEntry.saveFailed")}
+          </Text>
+        ) : null}
+      </View>
+    </SectionCard>
   );
 }
 

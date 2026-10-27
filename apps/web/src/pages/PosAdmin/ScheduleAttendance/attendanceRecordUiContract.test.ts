@@ -16,25 +16,23 @@ const trajectoryMapSource = readFileSync(
   path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/AttendanceLocationTrajectoryMap.tsx'),
   'utf8',
 )
-const approvalColumnsStart = pageSource.indexOf('const approvalColumns:')
-const holidayColumnsStart = pageSource.indexOf('const holidayColumns:', approvalColumnsStart)
-assert(approvalColumnsStart >= 0 && holidayColumnsStart > approvalColumnsStart, '应能定位审核中心表格定义')
-const approvalColumnsSource = pageSource.slice(approvalColumnsStart, holidayColumnsStart)
 const recordColumnsStart = pageSource.indexOf('const recordColumns:')
 const availabilityColumnsStart = pageSource.indexOf('const availabilityColumns:', recordColumnsStart)
 assert(recordColumnsStart >= 0 && availabilityColumnsStart > recordColumnsStart, '应能定位考勤记录表格定义')
 const recordColumnsSource = pageSource.slice(recordColumnsStart, availabilityColumnsStart)
 const punchColumnsStart = pageSource.indexOf('const punchColumns:')
-assert(punchColumnsStart >= 0 && approvalColumnsStart > punchColumnsStart, '应能定位打卡记录表格定义')
-const punchColumnsSource = pageSource.slice(punchColumnsStart, approvalColumnsStart)
+const holidayColumnsStart = pageSource.indexOf('const holidayColumns:', punchColumnsStart)
+assert(punchColumnsStart >= 0 && holidayColumnsStart > punchColumnsStart, '应能定位打卡记录表格定义')
+const punchColumnsSource = pageSource.slice(punchColumnsStart, holidayColumnsStart)
 const adjustmentHandlersStart = pageSource.indexOf('const openPunchAdjustmentModal =')
 const saveSettingsStart = pageSource.indexOf('const saveSettings =', adjustmentHandlersStart)
 assert(adjustmentHandlersStart >= 0 && saveSettingsStart > adjustmentHandlersStart, '应能定位补卡业务处理逻辑')
 const adjustmentHandlersSource = pageSource.slice(adjustmentHandlersStart, saveSettingsStart)
 const adjustmentModalStart = pageSource.indexOf("title={t('posAdmin.scheduleAttendance.drawer.adjustPunch")
-const reviewModalStart = pageSource.indexOf("title={reviewTarget?.sourceType", adjustmentModalStart)
-assert(adjustmentModalStart >= 0 && reviewModalStart > adjustmentModalStart, '应能定位补卡修改弹窗')
-const adjustmentModalSource = pageSource.slice(adjustmentModalStart, reviewModalStart)
+// 审核弹窗已随审核页签迁到「考勤审核」页，补卡弹窗现在是页面最后一个弹窗。
+const adjustmentModalEnd = pageSource.lastIndexOf('</Card>')
+assert(adjustmentModalStart >= 0 && adjustmentModalEnd > adjustmentModalStart, '应能定位补卡修改弹窗')
+const adjustmentModalSource = pageSource.slice(adjustmentModalStart, adjustmentModalEnd)
 const filterBarStart = pageSource.indexOf('const filterBar =')
 const recordTabItemStart = pageSource.indexOf('const recordTabItem =', filterBarStart)
 assert(filterBarStart >= 0 && recordTabItemStart > filterBarStart, '应能定位排班筛选栏定义')
@@ -62,13 +60,9 @@ assert(recordColumnsSource.includes('renderBusinessDisplay(formatDate(record.wor
 assert((recordColumnsSource.match(/formatBusinessDisplayText\(/g) ?? []).length === 4, '考勤记录两端班段与首末打卡时间应显示星期')
 assert((punchColumnsSource.match(/renderBusinessDisplay\(/g) ?? []).length >= 2, '打卡记录工作日期与本地打卡时间应显示星期')
 assert(punchColumnsSource.includes('formatBusinessDisplayText(formatDateTime(record.punchTimeLocal))'), '打卡记录有效时间应显示星期')
-assert(approvalColumnsSource.includes('renderBusinessDisplay(formatDate(value))'), '审核中心工作日期应显示星期')
-assert(approvalColumnsSource.includes("dataIndex: 'reviewedAt', width: 170, render: formatDateTime"), '审核时间属于审计字段，不应附加星期')
 assert(pageSource.includes("{formatDateTime(settings.updatedAt)}"), '最后更新时间属于审计字段，不应附加星期')
 assert(pageSource.includes('formatBusinessDisplayText(formatDateTimeInTimeZone('), '门店时区时间应先转换再按展示日期附加星期')
 assert(pageSource.includes('formatBusinessDisplayText(formatStoredLocalDateTime('), '存储的门店本地时间应按本地日期附加星期')
-assert(pageSource.includes('formatBusinessDetailText(supplementalDetail)'), '审核补充明细中的日期范围应逐个显示星期')
-assert(pageSource.includes('formatBusinessDetailText(record.detail)'), '未知审核类型的原始业务明细也应保留内容并增强日期显示')
 assert(!recordColumnsSource.match(/[\u3400-\u9fff]/), '考勤记录表格不应残留用户可见的硬编码中文')
 assert(!adjustmentHandlersSource.match(/[\u3400-\u9fff]/), '补卡业务提示不应依赖硬编码中文回退')
 assert(!adjustmentModalSource.match(/[\u3400-\u9fff]/), '补卡修改弹窗不应残留用户可见的硬编码中文')
@@ -76,14 +70,10 @@ assert(!pageSource.includes("tabs.records', '考勤记录'"), '考勤记录页�
 assert(recordColumnsSource.includes("statusLabel('segment', segment.status)"), '班段状态应使用本地化状态文案')
 assert(recordColumnsSource.includes("statusLabel('scheduleState', record.scheduleState)"), '考勤排班状态应使用本地化状态文案')
 assert(recordColumnsSource.includes("statusLabel('overtimeApproval', record.overtimeApprovalStatus)"), '加班审批状态应使用本地化状态文案')
-assert(pageSource.includes('isKnownAttendanceApprovalSourceType'), '已知审批来源必须使用本地化展示文案')
-assert(pageSource.includes('getSupplementalAttendanceApprovalDetail'), 'Punch/Leave 必须保留 DTO 补充明细')
-assert(pageSource.includes('supplementalDetail ?'), 'DTO 补充明细仅在非空且不重复时渲染')
-assert(!pageSource.includes('<Typography.Text strong>{record.title}</Typography.Text>'), '已知审批不得直接展示后端标题')
-assert(pageSource.includes('record.adjustment.effectivePunchTimeLocal ?'), '补卡仅在实际生效时间存在时展示该字段')
-assert(pageSource.includes('validateOvertimeApproval'), '加班审批提交前应校验范围、15 分钟粒度与备注')
-assert(pageSource.includes('approveOvertime'), '加班审批应使用明确的批准按钮语义')
-assert(pageSource.includes('rejectOvertime'), '加班审批应使用明确的拒绝按钮语义')
+// 排班考勤页不再有审核页签：审批统一在「考勤审核」页处理，这里锁住不会回流。
+assert(!pageSource.includes("'approvals'"), '排班考勤页不应再有审核页签')
+assert(!pageSource.includes('getPendingAttendanceApprovals'), '排班考勤页不应再直接拉取待审核列表')
+assert(!pageSource.includes('approveAttendanceApproval') && !pageSource.includes('rejectAttendanceApproval'), '审批提交只能在考勤审核页')
 assert(pageSource.includes('buildLocalPunchAdjustmentPreview'), '补卡保存前应展示客户端预览')
 assert(pageSource.includes('if (!access.canViewAttendancePunches)'), '记录请求入口必须以 Punch.ViewManagedStore 做二次保护')
 assert(pageSource.includes('access.canViewAttendancePunches ? {'), '无 Punch 查看权限时不得渲染考勤记录 tab')
@@ -191,25 +181,20 @@ for (const pathValue of requiredLocalePaths) {
   assert(!/[\u3400-\u9fff]/.test(enValue), `英文 locale ${pathValue} 不应包含中文`)
 }
 
-// 用餐未休息加工时：文案在页面级消息文件；审批标题与来源类型是模板键，静态扫描扫不到，这里逐个核对。
-const zhPageLocale = JSON.parse(readFileSync(
-  path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json'),
-  'utf8',
-)).posAdmin.scheduleAttendance
-const enPageLocale = JSON.parse(readFileSync(
-  path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.en.json'),
-  'utf8',
-)).posAdmin.scheduleAttendance
-for (const pathValue of ['approvalPresentation.MealBreak.title', 'status.sourceType.MealBreak']) {
-  const zhValue = readLocalePath(zhPageLocale, pathValue)
-  const enValue = readLocalePath(enPageLocale, pathValue)
-  assert(typeof zhValue === 'string' && zhValue.trim().length > 0, `页面级中文文案缺少 ${pathValue}`)
-  assert(typeof enValue === 'string' && enValue.trim().length > 0, `页面级英文文案缺少 ${pathValue}`)
-  assert(!/[㐀-鿿]/.test(enValue), `页面级英文文案 ${pathValue} 不应包含中文`)
-}
 assert(recordColumnsSource.includes('buildAttendanceMealPaySummary(record)'), '考勤记录应展示用餐扣除、加回与计薪工时')
-assert(pageSource.includes("reviewTarget.sourceType === 'MealBreak'")
-  && pageSource.includes('validateMealBreakApproval'), '拒绝用餐加工时必须先校验审核备注')
-assert(pageSource.includes('record.mealClaim'), '用餐加工时审批必须展示员工声明的次数与原因')
 
 console.log('attendanceRecordUiContract.test.ts: ok')
+
+// 编辑排班时员工、分店锁定（后端 UpdateSchedule 不改这两项）；可上班时间按日期范围查询、列表显示后端回填的员工名。
+assert(
+  /name="storeCode"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
+  '编辑排班时分店应禁用',
+)
+assert(
+  /name="userGuid"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
+  '编辑排班时员工应禁用',
+)
+assert(
+  pageSource.includes('getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })'),
+  '可上班时间应按 fromDate / toDate 查询，不再带 weekStartDate',
+)

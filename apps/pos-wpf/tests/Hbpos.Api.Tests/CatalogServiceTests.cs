@@ -76,6 +76,43 @@ public sealed class CatalogServiceTests
         Assert.Equal("pos-device", storePrice.UpdatedBy);
     }
 
+    // 生产形态（SW0126）：SetType=2 的多码 SetRetailPrice 为 NULL，门店多码投影价为 NULL 或根本没有投影行，
+    // 扫多码必须按主条码的本店零售价返回，而不是 $0.00。
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LookupSellableItemAsync_set_code_without_own_price_follows_main_store_retail_price(bool hasNullPriceProjection)
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await fixture.SeedStoreAsync("S01");
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = "PRODUCT-UUID-SW",
+            ProductCode = "P-SW",
+            ProductName = "Wrapping Paper",
+            ItemNumber = "SW0126",
+            Barcode = "MAIN-BAR",
+            RetailPrice = 4m,
+            IsActive = true,
+            IsDeleted = false
+        });
+        await fixture.SeedStoreRetailPriceAsync("S01", "P-SW", 3.5m, "SRP-SW");
+        await fixture.SeedProductSetCodeAsync("P-SW", "MC-SW", "SET-BAR-SW", null, "SET-SW", setType: 2);
+        if (hasNullPriceProjection)
+        {
+            await fixture.SeedStoreMultiCodeProductAsync("S01", "P-SW", "MC-SW", "SET-BAR-SW", null, "PROJ-SW");
+        }
+
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var response = await service.LookupSellableItemAsync("S01", "SET-BAR-SW", null, CancellationToken.None);
+
+        Assert.NotNull(response);
+        Assert.True(response!.Found);
+        Assert.Equal("P-SW", response.Item!.ProductCode);
+        Assert.Equal(3.5m, response.Item.RetailPrice);
+    }
+
     [Fact]
     public async Task LookupSellableItemAsync_creates_zero_store_retail_price_when_product_base_price_is_null()
     {
@@ -1858,7 +1895,7 @@ public sealed class CatalogServiceTests
             string productCode,
             string multiCodeProductCode,
             string? multiBarcode,
-            decimal retailPrice,
+            decimal? retailPrice,
             string uuid,
             decimal? discountRate = null,
             bool isSpecialProduct = false)
@@ -1904,7 +1941,7 @@ public sealed class CatalogServiceTests
             string productCode,
             string setProductCode,
             string setBarcode,
-            decimal setRetailPrice,
+            decimal? setRetailPrice,
             string uuid,
             int setType = 1)
         {

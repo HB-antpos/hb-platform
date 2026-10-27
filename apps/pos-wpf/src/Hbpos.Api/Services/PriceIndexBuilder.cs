@@ -91,6 +91,28 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
         {
             products.TryGetValue(set.ProductCode, out var product);
             var hasStoreMultiPrice = multiBySetCode.TryGetValue(set.SetProductCode, out var storeMultiPrice);
+            // 多码自身没有有效价格（门店多码价缺失，且 SetRetailPrice 为 NULL 或 0）时，按主条码价格走，
+            // 否则会被 ?? 0m 兜成 $0.00（如 SW0126 的 9333527365828）。
+            var followsMainPrice = !hasStoreMultiPrice && set.SetRetailPrice is not > 0m && product is not null;
+            if (followsMainPrice)
+            {
+                var main = ResolveProductPrice(product!, storePrices);
+                items.Add(CreateItem(
+                    storeCode,
+                    product,
+                    set.ProductCode,
+                    set.SetBarcode!,
+                    main.Price,
+                    // 来源与引用码保持多码自身：目录决胜与冲突候选按 PriceSource 排序，不能因取价口径而改变顺序。
+                    PriceSourceKind.ProductSetCode,
+                    "set-follow-main",
+                    Latest(set.UpdatedAt, main.UpdatedAt),
+                    set.ReferenceCode,
+                    main.DiscountRate,
+                    isSpecialProduct: false));
+                continue;
+            }
+
             var price = hasStoreMultiPrice
                 ? storeMultiPrice!.MultiCodeRetailPrice!.Value
                 : set.SetRetailPrice ?? 0m;
@@ -121,24 +143,12 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
 
         foreach (var product in input.Products.Where(x => HasText(x.ProductCode)))
         {
-            storePrices.TryGetValue(product.ProductCode!, out var storePrice);
-            var price = storePrice?.StoreRetailPriceValue ?? product.RetailPrice ?? 0m;
-            var source = storePrice?.StoreRetailPriceValue is null
-                ? PriceSourceKind.ProductBase
-                : PriceSourceKind.StoreRetailPrice;
-            var updatedAt = Latest(product.UpdatedAt, storePrice?.UpdatedAt);
-            var referenceCode = source == PriceSourceKind.StoreRetailPrice
-                ? storePrice?.ReferenceCode
-                : product.ReferenceCode;
-            var discountRate = source == PriceSourceKind.StoreRetailPrice
-                ? storePrice?.DiscountRate
-                : null;
-            var isSpecialProduct = storePrice?.IsSpecialProduct ?? false;
+            var main = ResolveProductPrice(product, storePrices);
 
-            AddProductLookup(items, storeCode, product, product.Barcode, price, source, updatedAt, referenceCode, discountRate, isSpecialProduct);
+            AddProductLookup(items, storeCode, product, product.Barcode, main.Price, main.Source, main.UpdatedAt, main.ReferenceCode, main.DiscountRate, main.IsSpecialProduct);
             if (!StringComparer.OrdinalIgnoreCase.Equals(product.Barcode, product.ItemNumber))
             {
-                AddProductLookup(items, storeCode, product, product.ItemNumber, price, source, updatedAt, referenceCode, discountRate, isSpecialProduct);
+                AddProductLookup(items, storeCode, product, product.ItemNumber, main.Price, main.Source, main.UpdatedAt, main.ReferenceCode, main.DiscountRate, main.IsSpecialProduct);
             }
         }
 
@@ -193,6 +203,43 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
         codeConflicts.AddRange(OrderByPriority(group)
             .DistinctBy(item => item.ProductCode, StringComparer.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// 解析主条码的有效价格：门店零售价优先，缺失时回退商品基础价。
+    /// 主条码、货号以及"跟随主条码"的多码共用这一套口径。
+    /// </summary>
+    private static ResolvedProductPrice ResolveProductPrice(
+        ProductPriceRecord product,
+        IReadOnlyDictionary<string, StoreRetailPriceRecord> storePrices)
+    {
+        storePrices.TryGetValue(product.ProductCode!, out var storePrice);
+        var price = storePrice?.StoreRetailPriceValue ?? product.RetailPrice ?? 0m;
+        var source = storePrice?.StoreRetailPriceValue is null
+            ? PriceSourceKind.ProductBase
+            : PriceSourceKind.StoreRetailPrice;
+        var updatedAt = Latest(product.UpdatedAt, storePrice?.UpdatedAt);
+        var referenceCode = source == PriceSourceKind.StoreRetailPrice
+            ? storePrice?.ReferenceCode
+            : product.ReferenceCode;
+        var discountRate = source == PriceSourceKind.StoreRetailPrice
+            ? storePrice?.DiscountRate
+            : null;
+        return new ResolvedProductPrice(
+            price,
+            source,
+            updatedAt,
+            referenceCode,
+            discountRate,
+            storePrice?.IsSpecialProduct ?? false);
+    }
+
+    private readonly record struct ResolvedProductPrice(
+        decimal Price,
+        PriceSourceKind Source,
+        DateTimeOffset? UpdatedAt,
+        string? ReferenceCode,
+        decimal? DiscountRate,
+        bool IsSpecialProduct);
 
     private static void AddProductLookup(
         List<SellableItemDto> items,
@@ -276,6 +323,15 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
     private static decimal? NormalizeDiscountRate(decimal? value)
     {
         if (value is null || value < 0m || value > 100m)
+        {
+            return null;
+        }
+
+        // 中文注释：折扣保护。分店价里折扣率有两种写法：0~1 小数，或 >1 的百分数（50 = 50%）。
+        // 原来 1 当成「100%」、100 当成「100%」，结果该行 $0（1002 店 10-24/25：admin 写入的 1.0）。
+        // 目录折扣是自动给的，不能全免：值恰好为 1 本身有歧义（1% 还是 100%），连同 100 一律不下发，
+        // 客户端按原价卖；真要打折用 (0,1) 之间的小数或 (1,100) 之间的百分数。
+        if (value == 1m || value >= 100m)
         {
             return null;
         }

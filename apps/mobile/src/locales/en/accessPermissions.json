@@ -57,6 +57,10 @@
       "name": "Approve attendance for managed stores",
       "description": "Review and approve attendance for the stores you manage, on the web admin and in the app."
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "Approve own attendance requests",
+      "description": "Approve or reject attendance requests you submitted yourself; such reviews are marked as self-approved."
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "View attendance approvals for managed stores",
       "description": "View attendance approval history for the stores you manage, on the web admin and in the app."
@@ -88,6 +92,18 @@
     "Attendance.Leave.ViewManagedStore": {
       "name": "View leave for managed stores",
       "description": "View leave requests for the stores you manage, on the web admin and in the app."
+    },
+    "Attendance.Payroll.Edit": {
+      "name": "Edit pay rates, payroll notes and submit periods",
+      "description": "Add new effective pay-rate records, write payroll notes and approved annual leave hours, and submit (lock) a pay period."
+    },
+    "Attendance.Payroll.Unlock": {
+      "name": "Unlock submitted pay periods",
+      "description": "Unlock a submitted pay period; a reason is required and the action is recorded."
+    },
+    "Attendance.Payroll.View": {
+      "name": "View payroll and pay rates",
+      "description": "View the payroll sheet and individual pay rates for the stores you can access."
     },
     "Attendance.Punch.AdjustManagedStore": {
       "name": "Adjust clock-ins for managed stores",
@@ -236,6 +252,10 @@
     "LocalPurchase.View": {
       "name": "View local supplier invoices",
       "description": "View store supplier invoices on the web admin and in the app."
+    },
+    "Myob.Connection.Manage": {
+      "name": "Manage MYOB connections",
+      "description": "Connect or disconnect MYOB company files and map stores to company files on the web admin."
     },
     "OrderFront": {
       "name": "Access ordering portal",
@@ -856,6 +876,14 @@
     "Warehouse.CancelPriceUpdateTasks": {
       "name": "Cancel price update tasks",
       "description": "Web page /warehouse/products/price-update-tasks and the app's Prices & labels page - cancel pending store price update tasks (per product, across all stores; only removes the reminder, never changes any price, cannot be undone). Accounts with Manage warehouse products have it automatically."
+    },
+    "SupplierPreorder.Manage": {
+      "name": "Manage supplier seasonal preorders",
+      "description": "Web pages /supplier-preorders and /supplier-preorders/orderers - import KFC, Dats, Brazco and other seasonal order forms, choose participating stores, manage who may order for which store, lock at the deadline and export the summary (can still edit after the deadline). Nobody has it by default; granted manually."
+    },
+    "SupplierPreorder.Order": {
+      "name": "Order on supplier seasonal preorders",
+      "description": "Web page /supplier-preorder-ordering - entry to seasonal preorder ordering. Which stores a person may order for is set only on the Orderer authorization page, not by managed stores or store manager role. Nobody has it by default; granted manually."
     }
   },
   "roles": {

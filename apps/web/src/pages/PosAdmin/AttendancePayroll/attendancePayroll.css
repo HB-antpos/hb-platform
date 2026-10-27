@@ -1,0 +1,605 @@
+/* 工时与工资：工时统计网格、工资表、个人时薪表。类名统一 atp- 前缀。 */
+.atp-page {
+  padding: 4px 0 16px;
+}
+
+.atp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.atp-title.ant-typography {
+  margin: 0;
+}
+
+.atp-period-label {
+  min-width: 220px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.atp-loading {
+  padding: 64px 0;
+  text-align: center;
+}
+
+.atp-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.atp-muted {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.atp-small {
+  font-size: 12px;
+}
+
+.atp-center {
+  text-align: center;
+}
+
+.atp-tag.ant-tag {
+  margin-inline-end: 0;
+  padding-inline: 5px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* ===== 提醒条 ===== */
+.atp-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.atp-alert-text {
+  flex: 1;
+  min-width: 260px;
+}
+
+.atp-alert-text strong {
+  margin-right: 6px;
+}
+
+.atp-alert-store {
+  background: #ecfdf8;
+  border-color: #a7e8d6;
+  color: #0b6b55;
+}
+
+.atp-alert-holiday {
+  background: #fffaeb;
+  border-color: #fedf89;
+  color: #93370d;
+}
+
+.atp-alert-birthday {
+  background: #fdf2fa;
+  border-color: #fcceee;
+  color: #c11574;
+}
+
+/* ===== 指标卡 ===== */
+.atp-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.atp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.atp-stat-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.atp-stat-label {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.atp-stat-value {
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.atp-stat-value-small {
+  font-size: 15px;
+}
+
+.atp-stat-warn .atp-stat-value,
+.atp-stat-warn .atp-stat-sub {
+  color: #b54708;
+}
+
+.atp-stat-sub {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.atp-transfer-text {
+  color: #1d4ed8;
+}
+
+.atp-cash-text {
+  color: #067647;
+}
+
+.atp-gross-text {
+  color: #b54708;
+}
+
+/* ===== 网格（员工 × 日 / 工资表） ===== */
+.atp-grid-wrap {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.atp-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.atp-grid th,
+.atp-grid td {
+  padding: 5px 3px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  text-align: center;
+  background: #fff;
+}
+
+.atp-grid thead th {
+  background: #fafafa;
+  font-weight: 500;
+}
+
+.atp-grid tfoot td {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+.atp-grid .atp-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  text-align: left;
+}
+
+.atp-employee-col {
+  min-width: 176px;
+  padding-left: 10px !important;
+  box-shadow: inset -1px 0 0 #f0f0f0;
+}
+
+.atp-week-divider {
+  box-shadow: inset 2px 0 0 #e5e7eb;
+}
+
+.atp-grid .atp-col-holiday {
+  background: #fff8f1;
+}
+
+.atp-head-holiday {
+  color: #c4320a;
+}
+
+.atp-head-weekend {
+  color: #c4320a;
+}
+
+.atp-head-hint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+  font-weight: 400;
+}
+
+.atp-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atp-person-name {
+  font-weight: 500;
+}
+
+.atp-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 52px;
+  min-height: 50px;
+  padding: 4px;
+  border: 1px solid #eef2f6;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.atp-cell-value {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.atp-cell-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+}
+
+.atp-cell-rest {
+  background: #fff;
+  border-style: dashed;
+}
+
+.atp-cell-rest-text {
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  white-space: normal;
+}
+
+.atp-cell-unavailable {
+  background: repeating-linear-gradient(135deg, #f2f4f7 0 4px, #fff 4px 8px);
+}
+
+.atp-cell-holiday.atp-cell-rest {
+  background: #fff8f1;
+}
+
+.atp-cell-pending {
+  border: 1.5px dashed #f79009;
+  background: #fffaeb;
+}
+
+.atp-cell-sick {
+  background: #fff1f3;
+  border-color: #fecdd6;
+}
+
+.atp-cell-annual {
+  background: #f4f3ff;
+  border-color: #d9d6fe;
+}
+
+.atp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.atp-badge-holiday {
+  color: #c4320a;
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
+.atp-badge-sick {
+  color: #c01048;
+  border-color: #fda4af;
+  background: #fff1f3;
+}
+
+.atp-badge-annual {
+  color: #5925dc;
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+
+.atp-badge-cashout {
+  color: #067647;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.atp-badge-store {
+  color: #0e7490;
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+
+.atp-badge-birthday {
+  border-color: #fbcfe8;
+  background: #fdf2f8;
+}
+
+.atp-badge-pending {
+  color: #b54708;
+  border-color: #fdb022;
+  background: #fffaeb;
+}
+
+.atp-badge-ok {
+  color: #067647;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.atp-num {
+  text-align: right !important;
+}
+
+.atp-num-strong {
+  font-weight: 600;
+}
+
+.atp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 16px 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.atp-legend-note {
+  padding: 4px 16px 10px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: right;
+}
+
+.atp-legend-left {
+  text-align: left;
+}
+
+/* ===== 工资表 ===== */
+.atp-formula {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.atp-formula strong {
+  margin-right: 8px;
+}
+
+.atp-formula-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f5f5f5;
+}
+
+.atp-pay-grid th,
+.atp-pay-grid td {
+  padding: 8px 5px;
+}
+
+.atp-head-transfer,
+.atp-pay-grid .atp-col-transfer {
+  background: #f5f9ff !important;
+}
+
+.atp-head-transfer {
+  color: #1d4ed8;
+}
+
+.atp-head-cash,
+.atp-pay-grid .atp-col-cash {
+  background: #f3fbf6 !important;
+}
+
+.atp-head-cash {
+  color: #067647;
+}
+
+.atp-pay-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.atp-pay-sub {
+  max-width: 150px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: normal;
+  text-align: right;
+}
+
+.atp-negative {
+  color: #d92d20;
+}
+
+.atp-positive {
+  color: #067647;
+}
+
+.atp-approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.atp-dashed-box {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1.5px dashed #f79009;
+  border-radius: 4px;
+  color: #b54708;
+  font-weight: 600;
+}
+
+.atp-warn-box {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.atp-dashed-input.ant-input-number,
+.atp-dashed-input.ant-input {
+  border-style: dashed;
+}
+
+.atp-approval-input.ant-input-number {
+  width: 46px;
+  border-color: #f79009;
+}
+
+.atp-approval-input .ant-input-number-input {
+  padding: 0 4px;
+  height: 20px;
+  color: #b54708;
+  font-weight: 600;
+  text-align: center;
+}
+
+.atp-note-col {
+  min-width: 168px;
+  text-align: left !important;
+}
+
+.atp-note-input.ant-input {
+  font-size: 12px;
+}
+
+/* ===== 个人时薪表 ===== */
+.atp-rates-table .ant-table-row {
+  cursor: pointer;
+}
+
+.atp-rates-table .atp-row-active > td {
+  background: #f5f9ff !important;
+}
+
+.atp-rates-table .atp-row-active > td:first-child {
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.atp-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.atp-drawer-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.atp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.atp-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.atp-field-row .ant-input-number,
+.atp-field-row .ant-input-number-group-wrapper,
+.atp-field-row .ant-picker {
+  width: 100%;
+}
+
+.atp-field-label {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.atp-rate-grid {
+  display: grid;
+  grid-template-columns: 40px repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.atp-rate-cash {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.atp-rate-row-label {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.atp-rate-input.ant-input-number {
+  width: 100%;
+}
+
+.atp-rate-input .ant-input-number-input {
+  text-align: center;
+}
+
+.atp-trial {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  line-height: 1.6;
+}
+
+.atp-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.atp-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #eaecf0;
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .atp-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .atp-stats,
+  .atp-field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .atp-employee-col {
+    min-width: 150px;
+  }
+}

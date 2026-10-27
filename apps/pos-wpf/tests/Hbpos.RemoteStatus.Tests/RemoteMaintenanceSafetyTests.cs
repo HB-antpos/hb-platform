@@ -169,6 +169,8 @@ public sealed class RemoteMaintenanceSafetyTests
                 "--option \"approve-mode\"" => "password",
                 "--option \"verification-method\"" => "use-permanent-password",
                 "--option \"allow-only-conn-window-open\"" => "N",
+                // 配置前会读一次 api-server 以便写回；这里模拟设备从未设置过。
+                "--option \"api-server\"" => "",
                 // 与 RustDesk 1.4.9 一致：IPC 未就绪时打印连接错误而不是 Done!。
                 _ when arguments.StartsWith("--password ") =>
                     passwordAcknowledged && ++_passwordAttempts > passwordFailuresBeforeAck ? "Done!\r\n" : "Installation required!",

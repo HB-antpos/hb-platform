@@ -610,10 +610,13 @@ public sealed class CartLine : ObservableObject
     private decimal CalculateCatalogDiscountAmount()
     {
         // 先按已舍入到分的总价计算，再 AwayFromZero 舍入到分，和整数分语义一致。
-        return ClampDiscountAmount(decimal.Round(
+        var discount = decimal.Round(
             PositiveGrossAmount * CatalogDiscountBasisPoints / 10_000m,
             2,
-            MidpointRounding.AwayFromZero));
+            MidpointRounding.AwayFromZero);
+        // 折扣保护：自动目录折扣至少留 1 分，金额很小时舍入也不能把一行折成 $0。
+        var maxDiscount = Math.Max(0m, PositiveGrossAmount - 0.01m);
+        return ClampDiscountAmount(Math.Min(discount, maxDiscount));
     }
 
     private decimal ClampDiscountAmount(decimal discountAmount)
@@ -674,10 +677,21 @@ public sealed class CartLine : ObservableObject
 
     private bool HasCatalogDiscountBaseline => CatalogDiscountBasisPoints > 0;
 
+    /// <summary>目录折扣是系统自动给的，永远不能是「全免」：基点上限 9999（99.99%）。</summary>
+    internal const int MaxCatalogDiscountBasisPoints = 9_999;
+
     private static int CalculateCatalogDiscountBasisPoints(decimal? discountRate)
     {
-        var normalizedRate = Math.Clamp(discountRate ?? 0m, 0m, 1m);
-        return decimal.ToInt32(decimal.Round(normalizedRate * 10_000m, 0, MidpointRounding.AwayFromZero));
+        // 中文注释：折扣保护（1002 店 10-24/25：目录折扣率 = 1 被夹成 100%，整行变 $0）。
+        // 目录折扣率是 0~1 的小数，≥ 1（100% 及以上）一定是脏数据（旧版本把 1、100 这类值写进了分店价），
+        // 不能当成「全部折掉」，一律忽略、按原价卖；负数同样忽略。真正要打折的商品用 (0,1) 之间的小数。
+        if (discountRate is not { } rate || rate <= 0m || rate >= 1m)
+        {
+            return 0;
+        }
+
+        var basisPoints = decimal.ToInt32(decimal.Round(rate * 10_000m, 0, MidpointRounding.AwayFromZero));
+        return Math.Min(MaxCatalogDiscountBasisPoints, basisPoints);
     }
 
     private decimal PositiveGrossAmount => decimal.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);

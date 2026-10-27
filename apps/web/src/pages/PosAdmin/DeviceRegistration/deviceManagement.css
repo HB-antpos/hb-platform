@@ -599,7 +599,622 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 版本下拉里的特殊选项（未上报 / 未安装 / 低于最新版），与真实版本号区分开 */
+.dev-mgmt-option-special {
+  color: var(--ant-color-warning-text, #d46b08);
+}
+
 /* 选中后回显在输入框里时不显示台数 */
 .ant-select-selection-item .dev-mgmt-option-count {
   display: none;
+}
+
+/* ===== 收银入口（三条线路：EdgeOne / AWS 悉尼 / 直连） =====
+   颜色取自设计稿：edge 蓝 / aws 紫 / direct 绿 / 回退中琥珀。
+   文字色比圆点 / 色条更深一档，保证在浅色底上对比度 ≥ 4.5:1。 */
+.dev-entry-scope,
+.dev-entry-modal-root {
+  --dev-entry-edge: #2f6fde;
+  --dev-entry-edge-text: #1f5bc4;
+  --dev-entry-edge-soft: #e8f0fd;
+  --dev-entry-aws: #6b4fd8;
+  --dev-entry-aws-text: #5a3fc4;
+  --dev-entry-aws-soft: #f0ecfd;
+  --dev-entry-direct: #13a37f;
+  --dev-entry-direct-text: #0b6e55;
+  --dev-entry-direct-soft: #e3f6ef;
+  --dev-entry-amber: #faad14;
+  --dev-entry-amber-text: #ad6800;
+  --dev-entry-amber-soft: #fff3d6;
+  --dev-entry-gray: #cfd4db;
+  --dev-entry-gray-soft: #f1f3f6;
+  --dev-entry-gray-text: #5b6472;
+}
+
+.dev-entry-scope {
+  min-width: 0;
+}
+
+.dev-entry-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid #d6e4ff;
+  border-radius: 10px;
+  background: #f6f9ff;
+  color: #2b3a55;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dev-entry-note-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--ant-color-primary, #1677ff);
+}
+
+/* 概览条：首选分布 + 三条线路实际台数 + 版本过低台数 */
+.dev-entry-stats {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(4, minmax(0, 1fr));
+  margin-bottom: 14px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.dev-entry-stat {
+  min-width: 0;
+  padding: 12px 16px;
+  border-left: 1px solid var(--ant-color-border-secondary, #eef0f4);
+}
+
+.dev-entry-stat:first-child {
+  border-left: 0;
+}
+
+.dev-entry-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12.5px;
+}
+
+.dev-entry-stat-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 18px;
+  align-items: baseline;
+}
+
+.dev-entry-stat-value {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-entry-stat-preferred .dev-entry-stat-value {
+  font-size: 20px;
+}
+
+.dev-entry-stat-value small {
+  margin-left: 4px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.dev-entry-stat-hint {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12px;
+}
+
+.dev-entry-dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dev-entry-gray);
+}
+
+.dev-entry-dot-edge { background: var(--dev-entry-edge); }
+.dev-entry-dot-aws { background: var(--dev-entry-aws); }
+.dev-entry-dot-direct { background: var(--dev-entry-direct); }
+.dev-entry-dot-fallback { background: var(--dev-entry-amber); }
+
+.dev-entry-th-hint {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-weight: 400;
+}
+
+/* 行内首选线路三段切换（role=radiogroup） */
+.dev-entry-preferred {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.dev-entry-preferred-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-entry-switch {
+  display: inline-flex;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.dev-entry-switch-option {
+  padding: 3px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.dev-entry-switch-option + .dev-entry-switch-option {
+  border-left: 1px solid var(--ant-color-border, #d9d9d9);
+}
+
+.dev-entry-switch-option:hover:not(:disabled):not(.dev-entry-switch-option-on) {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+}
+
+.dev-entry-switch-option:focus-visible {
+  position: relative;
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: -2px;
+}
+
+.dev-entry-switch-option:disabled {
+  cursor: default;
+}
+
+.dev-entry-switch-option-on {
+  font-weight: 600;
+}
+
+.dev-entry-switch-option-edge.dev-entry-switch-option-on {
+  background: var(--dev-entry-edge-soft);
+  color: var(--dev-entry-edge-text);
+}
+
+.dev-entry-switch-option-aws.dev-entry-switch-option-on {
+  background: var(--dev-entry-aws-soft);
+  color: var(--dev-entry-aws-text);
+}
+
+.dev-entry-switch-option-direct.dev-entry-switch-option-on {
+  background: var(--dev-entry-direct-soft);
+  color: var(--dev-entry-direct-text);
+}
+
+.dev-entry-default-tag {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* 备用顺序小标签：「备用 AWS → 直连」 */
+.dev-entry-order {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.dev-entry-order-prefix,
+.dev-entry-order-arrow {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.dev-entry-order-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dev-entry-order-tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  line-height: 18px;
+}
+
+.dev-entry-order-tag-edge { background: var(--dev-entry-edge-soft); color: var(--dev-entry-edge-text); }
+.dev-entry-order-tag-aws { background: var(--dev-entry-aws-soft); color: var(--dev-entry-aws-text); }
+.dev-entry-order-tag-direct { background: var(--dev-entry-direct-soft); color: var(--dev-entry-direct-text); }
+
+/* 设备实际线路分布条 + 图例 */
+.dev-entry-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dev-entry-bar {
+  display: flex;
+  width: 200px;
+  max-width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--dev-entry-gray-soft);
+}
+
+.dev-entry-bar > i {
+  display: block;
+  height: 100%;
+}
+
+.dev-entry-bar-edge { background: var(--dev-entry-edge); }
+.dev-entry-bar-aws { background: var(--dev-entry-aws); }
+.dev-entry-bar-direct { background: var(--dev-entry-direct); }
+.dev-entry-bar-fallback { background: var(--dev-entry-amber); }
+.dev-entry-bar-neutral { background: var(--dev-entry-gray); }
+
+.dev-entry-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-entry-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* 线路徽标（设备列表 / 分店表共用） */
+.dev-entry-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.dev-entry-badge-edge { background: var(--dev-entry-edge-soft); color: var(--dev-entry-edge-text); }
+.dev-entry-badge-aws { background: var(--dev-entry-aws-soft); color: var(--dev-entry-aws-text); }
+.dev-entry-badge-direct { background: var(--dev-entry-direct-soft); color: var(--dev-entry-direct-text); }
+.dev-entry-badge-fallback { background: var(--dev-entry-amber-soft); color: var(--dev-entry-amber-text); }
+
+/* 「需要关注」胶囊 */
+.dev-entry-attention {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.dev-entry-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 10px;
+  border-radius: 10px;
+  background: var(--dev-entry-gray-soft);
+  color: var(--dev-entry-gray-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.dev-entry-chip-fallback {
+  background: var(--dev-entry-amber-soft);
+  color: var(--dev-entry-amber-text);
+}
+
+.dev-entry-footer {
+  padding: 4px 2px 12px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12.5px;
+}
+
+/* 确认弹窗：三个单选卡 + 生效方式 */
+.dev-entry-modal-subtitle {
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.dev-entry-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container, #fff);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+.dev-entry-choice:hover:not(.dev-entry-choice-on) {
+  border-color: var(--ant-color-text-quaternary, #bfbfbf);
+}
+
+.dev-entry-choice:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+}
+
+.dev-entry-choice-radio {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 50%;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.dev-entry-choice-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dev-entry-choice-title {
+  font-weight: 600;
+}
+
+.dev-entry-choice-host {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.dev-entry-choice-desc {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12.5px;
+}
+
+.dev-entry-choice-on.dev-entry-choice-edge {
+  border-color: var(--dev-entry-edge);
+  background: #f6f9ff;
+  box-shadow: 0 0 0 2px var(--dev-entry-edge-soft);
+}
+
+.dev-entry-choice-on.dev-entry-choice-aws {
+  border-color: var(--dev-entry-aws);
+  background: #faf8ff;
+  box-shadow: 0 0 0 2px var(--dev-entry-aws-soft);
+}
+
+.dev-entry-choice-on.dev-entry-choice-direct {
+  border-color: var(--dev-entry-direct);
+  background: #f6fcfa;
+  box-shadow: 0 0 0 2px var(--dev-entry-direct-soft);
+}
+
+.dev-entry-choice-on .dev-entry-choice-radio::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+}
+
+.dev-entry-choice-on.dev-entry-choice-edge .dev-entry-choice-radio { border-color: var(--dev-entry-edge); }
+.dev-entry-choice-on.dev-entry-choice-edge .dev-entry-choice-radio::after { background: var(--dev-entry-edge); }
+.dev-entry-choice-on.dev-entry-choice-aws .dev-entry-choice-radio { border-color: var(--dev-entry-aws); }
+.dev-entry-choice-on.dev-entry-choice-aws .dev-entry-choice-radio::after { background: var(--dev-entry-aws); }
+.dev-entry-choice-on.dev-entry-choice-direct .dev-entry-choice-radio { border-color: var(--dev-entry-direct); }
+.dev-entry-choice-on.dev-entry-choice-direct .dev-entry-choice-radio::after { background: var(--dev-entry-direct); }
+
+.dev-entry-impact {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 8px;
+  background: #fafbfc;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12.5px;
+}
+
+.dev-entry-impact-title {
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+  font-weight: 600;
+}
+
+.dev-entry-impact ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.dev-entry-impact li {
+  margin: 2px 0;
+}
+
+.dev-entry-impact-warn {
+  color: var(--dev-entry-amber-text);
+}
+
+.dev-entry-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 确认按钮颜色跟随所选线路（edge 蓝 / aws 紫 / direct 绿，白字对比度 ≥ 4.5:1） */
+.dev-entry-ok-edge.ant-btn-primary:not(:disabled) { background: var(--dev-entry-edge-text); border-color: var(--dev-entry-edge-text); }
+.dev-entry-ok-aws.ant-btn-primary:not(:disabled) { background: var(--dev-entry-aws-text); border-color: var(--dev-entry-aws-text); }
+.dev-entry-ok-direct.ant-btn-primary:not(:disabled) { background: var(--dev-entry-direct-text); border-color: var(--dev-entry-direct-text); }
+.dev-entry-ok.ant-btn-primary:not(:disabled):hover { filter: brightness(1.1); }
+
+/* ≤1024：概览条两列、工具栏已允许换行；表格自身横向滚动（scroll.x），页面不出现横向滚动条 */
+@media (max-width: 1024px) {
+  .dev-entry-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dev-entry-stat-preferred {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+
+  .dev-entry-stat:nth-child(2n) {
+    border-left: 0;
+  }
+
+  .dev-entry-stat:nth-child(n + 4) {
+    border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-entry-switch-option,
+  .dev-entry-choice {
+    transition: none;
+  }
+}
+
+/* ===== 收银入口 · 线路用量（日 / 周 / 月） =====
+   线路配色沿用上面的 --dev-entry-*（挂在 .dev-entry-scope 上）：edge 蓝 / aws 紫 / direct 绿 / 未识别灰。 */
+.dev-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+@media (max-width: 960px) {
+  .dev-usage-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(n + 4) {
+    border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(4) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .dev-usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(odd) {
+    border-left: 0;
+  }
+}
+
+.dev-usage-section {
+  margin-bottom: 18px;
+}
+
+.dev-usage-heading {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dev-usage-legend {
+  margin-bottom: 6px;
+}
+
+/* 桶很多或窄屏时图表保持可读宽度，由外层横向滚动，页面本身不出现横向滚动条 */
+.dev-usage-chart-wrap {
+  overflow-x: auto;
+}
+
+.dev-usage-chart {
+  display: block;
+  width: 100%;
+  min-width: 560px;
+  height: auto;
+}
+
+.dev-usage-grid {
+  stroke: var(--ant-color-border-secondary, #eef0f4);
+  stroke-width: 1;
+}
+
+.dev-usage-axis {
+  fill: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 11px;
+}
+
+.dev-usage-seg-edge { fill: var(--dev-entry-edge); }
+.dev-usage-seg-aws { fill: var(--dev-entry-aws); }
+.dev-usage-seg-direct { fill: var(--dev-entry-direct); }
+.dev-usage-seg-unknown { fill: var(--dev-entry-gray); }
+
+.dev-usage-empty {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.dev-usage-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dev-usage-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.35;
+}
+
+.dev-usage-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-usage-num-warn {
+  color: var(--dev-entry-amber-text);
+  font-weight: 600;
+}
+
+.dev-usage-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-usage-partial {
+  margin: 0;
+  background: var(--dev-entry-gray-soft);
+  color: var(--dev-entry-gray-text);
 }

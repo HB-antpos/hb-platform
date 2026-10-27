@@ -41,6 +41,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "product-insights", labelKey: "routes.productInsights", icon: "chart-timeline-variant" },
       { routeName: "seasonal-product-insights", labelKey: "routes.seasonalProductInsights", icon: "calendar-star" },
       { routeName: "price-updates", labelKey: "routes.priceUpdates", icon: "tag-arrow-up-outline" },
+      { routeName: "pricing-strategies", labelKey: "routes.pricingStrategies", icon: "chart-bell-curve-cumulative" },
       { routeName: "sales-orders", labelKey: "routes.salesOrders", icon: "receipt-text-outline" },
       { routeName: "installment-orders", labelKey: "routes.installmentOrders", icon: "cash-clock" },
       { routeName: "store-vouchers", labelKey: "routes.storeVouchers", icon: "ticket-confirmation-outline" },
@@ -66,6 +67,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "advertisements", labelKey: "routes.advertisements", icon: "bullhorn-outline" },
       { routeName: "promotions", labelKey: "routes.promotions", icon: "sale-outline" },
       { routeName: "reports", labelKey: "routes.reports", icon: "chart-line" },
+      { routeName: "traffic-stats", labelKey: "routes.trafficStats", icon: "account-multiple-outline" },
       { routeName: "legacy-employee-logs", labelKey: "routes.legacyEmployeeLogs", icon: "clipboard-text-clock-outline" },
       { routeName: "daily-closes", labelKey: "routes.dailyCloses", icon: "cash-register" },
       { routeName: "notifications", labelKey: "routes.notifications", icon: "bell-outline" },
@@ -77,6 +79,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
     items: [
       { routeName: "attendance-personal", labelKey: "routes.attendancePersonal", icon: "clock-check-outline" },
       { routeName: "attendance-management", labelKey: "routes.attendanceManagement", icon: "calendar-edit" },
+      { routeName: "attendance-hours", labelKey: "routes.attendanceHours", icon: "clock-outline" },
       // 「人员管理」合并入口（路由名 users）：原「员工列表 / 用户管理 / 角色管理 / 权限管理」四个入口合成一个，
       // 进去后是「人员 / 角色 / 权限」页签（角色、权限只有满足 Roles.View 门禁的账号才有，见 people/people-hub-tabs.ts）。
       // user-admin / roles / permissions 三个路由名保留为重定向壳（旧版 App、推送、书签仍可能指向它们），不再作为工作台入口。

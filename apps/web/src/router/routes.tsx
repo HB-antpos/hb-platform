@@ -16,6 +16,7 @@ import {
   InboxOutlined,
   IdcardOutlined,
   KeyOutlined,
+  LinkOutlined,
   MailOutlined,
   MoneyCollectOutlined,
   NumberOutlined,
@@ -42,12 +43,14 @@ import {
   ADMIN_PURCHASE_SALES_PATH,
   buildAdminPurchaseSalesTabPath,
 } from '../pages/ExecutiveSalesIntelligence/PurchaseSalesAnalysis/tabs'
+import NavGroupPage from '../components/NavGroupPage'
 import ForbiddenPage from '../pages/Forbidden'
 import NotFoundPage from '../pages/NotFound'
 import type { AccessControl } from '../types/auth'
 import type { NavigationMenuDto } from '../types/auth'
-import type { AppRouteItem, AppRouteMeta, TabItem } from '../types/router'
+import type { AppRouteItem, AppRouteMeta, NavGroupDefinition, TabItem } from '../types/router'
 import { chooseNavigationMenus } from './menuFallback'
+import { getNavGroupAccessKeys } from './navGroupLogic'
 import { shouldIncludeLocalMenuRoute } from './menuVisibility'
 
 const DashboardPage = lazy(() => import('../pages/Dashboard'))
@@ -67,10 +70,19 @@ const PurchaseSalesAnalysisPage = lazy(() => import('../pages/ExecutiveSalesInte
 const LocalProductSalesAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/LocalProductSalesAnalysis'))
 const PurchaseAmountDashboardPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/PurchaseAmountDashboard'))
 const PosmSalesOrdersPage = lazy(() => import('../pages/PosmSalesOrders'))
+const SupplierPreorderAdminPage = lazy(() => import('../pages/SupplierPreorders/Admin'))
+const SupplierPreorderImportPage = lazy(() => import('../pages/SupplierPreorders/Admin/Import'))
+const SupplierPreorderFormDetailPage = lazy(() => import('../pages/SupplierPreorders/Admin/FormDetail'))
+const SupplierPreorderOrderersPage = lazy(() => import('../pages/SupplierPreorders/Orderers'))
+const SupplierPreorderOrderingPage = lazy(() => import('../pages/SupplierPreorders/Ordering'))
+const SupplierPreorderOrderFormPage = lazy(() => import('../pages/SupplierPreorders/Ordering/OrderForm'))
 const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashRegisterUsers'))
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
+const PosAdminAttendanceReviewPage = lazy(() => import('../pages/PosAdmin/AttendanceReview'))
+const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
+const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
 const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/SupplierManagement'))
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
@@ -166,6 +178,7 @@ const iconMap = {
   GiftOutlined: <GiftOutlined />,
   InboxOutlined: <InboxOutlined />,
   IdcardOutlined: <IdcardOutlined />,
+  LinkOutlined: <LinkOutlined />,
   MailOutlined: <MailOutlined />,
   UserOutlined: <UserOutlined />,
   TeamOutlined: <TeamOutlined />,
@@ -184,6 +197,132 @@ const iconMap = {
   TrophyOutlined: <TrophyOutlined />,
   VideoCameraOutlined: <VideoCameraOutlined />,
   WalletOutlined: <WalletOutlined />,
+}
+
+// ===== 合并页（一个菜单 + 页内标签）=====
+// 每个标签仍是原来的页面和路由地址，权限沿用原 accessKey；直接打开菜单地址时落到第一个有权限的标签。
+// 同组路由共用一个顶部页签（见 toTabItem），后端 NavigationService 的菜单树须保持同样分组。
+
+const DEVICES_NAV_GROUP: NavGroupDefinition = {
+  path: '/system/devices',
+  title: 'menu.groupDevicesRemote',
+  icon: 'BuildOutlined',
+  tabs: [
+    { path: '/system/device-registration', title: 'menu.deviceRegistration', accessKey: 'canViewDeviceRegistration', keepAlive: true, element: <PosAdminDeviceRegistrationPage /> },
+    { path: '/system/emergency-login-keys', title: 'menu.emergencyLoginKeys', accessKey: 'canManageSystemSettings', keepAlive: true, element: <EmergencyLoginKeysPage /> },
+    // 离开含临时凭据的页面时卸载，及时清空内存密码与轮询。
+    { path: '/system/remote-maintenance', title: 'menu.remoteMaintenance', accessKey: 'isAdmin', keepAlive: false, element: <SystemRemoteMaintenancePage /> },
+  ],
+}
+
+const ACCOUNTS_NAV_GROUP: NavGroupDefinition = {
+  path: '/system/accounts',
+  title: 'menu.groupAccounts',
+  icon: 'TeamOutlined',
+  tabs: [
+    { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
+    { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole', keepAlive: true, element: <SystemUsersPage /> },
+    { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole', keepAlive: true, element: <SystemRolesPage /> },
+    { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole', keepAlive: true, element: <SystemPermissionsPage /> },
+  ],
+}
+
+const MONITORING_NAV_GROUP: NavGroupDefinition = {
+  path: '/system/monitoring',
+  title: 'menu.groupMonitoring',
+  icon: 'FileTextOutlined',
+  tabs: [
+    { path: '/system/center-logs', title: 'menu.systemCenterLogs', accessKey: 'canViewSystemLogs', keepAlive: true, element: <SystemCenterLogsPage /> },
+    { path: '/system/performance-baseline', title: 'menu.performanceBaseline', accessKey: 'canViewPerformanceBaseline', keepAlive: true, element: <SystemPerformanceBaselinePage /> },
+    { path: '/system/scheduled-statistics', title: 'menu.scheduledStatistics', accessKey: 'canManageScheduledTasks', keepAlive: true, element: <SystemScheduledStatisticsPage /> },
+  ],
+}
+
+const PAYMENTS_INVOICES_NAV_GROUP: NavGroupDefinition = {
+  path: '/system/payments-invoices',
+  title: 'menu.groupPaymentsInvoices',
+  icon: 'WalletOutlined',
+  tabs: [
+    { path: '/system/payment-terminal-settings', title: 'menu.paymentTerminalSettings', accessKey: 'canManageSystemSettings', keepAlive: true, element: <PaymentTerminalSettingsPage /> },
+    { path: '/system/invoice-email-settings', title: 'menu.invoiceEmailSettings', accessKey: 'canManageSystemSettings', keepAlive: true, element: <InvoiceEmailSettingsPage /> },
+  ],
+}
+
+const FACE_RECOGNITION_NAV_GROUP: NavGroupDefinition = {
+  path: '/system/face-recognition',
+  title: 'menu.groupFaceRecognition',
+  icon: 'VideoCameraOutlined',
+  tabs: [
+    // 新增 / 轮换后页面内存里会短暂持有一次性摄像机地址（含 token）：切走即卸载，保证不会留在缓存页里。
+    { path: '/system/face-cameras', title: 'menu.faceCameras', accessKey: 'canManageFaceCameras', keepAlive: false, element: <FaceCamerasPage /> },
+    // 页面内存里会短暂持有复核用的抓拍 / 参考照片 objectURL 与登记照预览：切走即卸载，保证 URL 已撤销。
+    { path: '/system/face-match', title: 'menu.faceMatch', accessKey: 'canAccessFaceMatch', keepAlive: false, element: <FaceMatchPage /> },
+  ],
+}
+
+const PRODUCTS_PRICING_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/products-pricing',
+  title: 'menu.groupProductsPricing',
+  icon: 'AppstoreOutlined',
+  tabs: [
+    { path: '/pos-admin/products', title: 'menu.productManagement', accessKey: 'canViewPosProducts', keepAlive: true, element: <PosAdminProductManagementPage /> },
+    { path: '/pos-admin/store-product-price', title: 'menu.storeProductPrice', accessKey: 'canManageStoreProducts', keepAlive: true, element: <PosAdminStoreProductPricePage /> },
+    { path: '/pos-admin/pricing-strategies', title: 'menu.pricingStrategies', accessKey: 'canManagePricing', keepAlive: true, element: <PosAdminPricingStrategiesPage /> },
+    { path: '/pos-admin/promotions', title: 'menu.promotions', accessKey: 'canManagePromotions', keepAlive: true, element: <PosAdminPromotionsPage /> },
+  ],
+}
+
+const SETTLEMENT_CASH_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/settlement-cash',
+  title: 'menu.groupSettlementCash',
+  icon: 'MoneyCollectOutlined',
+  tabs: [
+    // 日结记录：列表 + 右侧明细抽屉（抽屉用 ?id=<日结 GUID> 保持，可深链分享）；独立权限 DailyCloseRecords.View。
+    { path: '/pos-admin/daily-closes', title: 'menu.dailyCloses', accessKey: 'canViewDailyCloseRecords', keepAlive: true, element: <DailyClosesPage /> },
+    { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin', keepAlive: true, element: <LinklySettlementsPage /> },
+    { path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash', keepAlive: true, element: <PosAdminStoreCashPage /> },
+  ],
+}
+
+export const NAV_GROUPS: NavGroupDefinition[] = [
+  DEVICES_NAV_GROUP,
+  ACCOUNTS_NAV_GROUP,
+  MONITORING_NAV_GROUP,
+  PAYMENTS_INVOICES_NAV_GROUP,
+  FACE_RECOGNITION_NAV_GROUP,
+  PRODUCTS_PRICING_NAV_GROUP,
+  SETTLEMENT_CASH_NAV_GROUP,
+]
+
+/** 合并页展开成路由：一个可见菜单项 + 每个标签一条隐藏路由（地址不变），全部渲染同一个合并页外壳。 */
+function navGroupRoutes(group: NavGroupDefinition): AppRouteItem[] {
+  const element = <NavGroupPage group={group} />
+  return [
+    {
+      path: group.path,
+      meta: {
+        title: group.title,
+        icon: group.icon,
+        keepAlive: true,
+        anyAccessKeys: getNavGroupAccessKeys(group),
+        navGroup: group.path,
+      },
+      element,
+    },
+    ...group.tabs.map((tab): AppRouteItem => ({
+      path: tab.path,
+      meta: {
+        title: tab.title,
+        hidden: true,
+        // 按组缓存外壳；敏感标签由外壳在切走 / 离开时自行卸载（见 NavGroupPage）。
+        keepAlive: true,
+        accessKey: tab.accessKey,
+        activeMenu: group.path,
+        navGroup: group.path,
+      },
+      element,
+    })),
+  ]
 }
 
 export const appRoutes: AppRouteItem[] = [
@@ -216,138 +355,11 @@ export const appRoutes: AppRouteItem[] = [
         },
         element: <SystemStoresPage />,
       },
-      {
-        path: '/system/employee-profiles',
-        meta: {
-          title: 'menu.systemEmployeeProfiles',
-          icon: 'IdcardOutlined',
-          keepAlive: true,
-          accessKey: 'canViewEmployeeProfiles',
-        },
-        element: <SystemEmployeeProfilesPage />,
-      },
-      {
-        path: '/system/center-logs',
-        meta: {
-          title: 'menu.systemCenterLogs',
-          icon: 'FileTextOutlined',
-          keepAlive: true,
-          accessKey: 'canViewSystemLogs',
-        },
-        element: <SystemCenterLogsPage />,
-      },
-      {
-        path: '/system/performance-baseline',
-        meta: {
-          title: 'menu.performanceBaseline',
-          icon: 'DashboardOutlined',
-          keepAlive: true,
-          accessKey: 'canViewPerformanceBaseline',
-        },
-        element: <SystemPerformanceBaselinePage />,
-      },
-      {
-        path: '/system/scheduled-statistics',
-        meta: {
-          title: 'menu.scheduledStatistics',
-          icon: 'ScheduleOutlined',
-          keepAlive: true,
-          accessKey: 'canManageScheduledTasks',
-        },
-        element: <SystemScheduledStatisticsPage />,
-      },
-      {
-        path: '/system/invoice-email-settings',
-        meta: {
-          title: 'menu.invoiceEmailSettings',
-          icon: 'MailOutlined',
-          keepAlive: true,
-          accessKey: 'canManageSystemSettings',
-        },
-        element: <InvoiceEmailSettingsPage />,
-      },
-      {
-        path: '/system/payment-terminal-settings',
-        meta: {
-          title: 'menu.paymentTerminalSettings',
-          icon: 'WalletOutlined',
-          keepAlive: true,
-          accessKey: 'canManageSystemSettings',
-        },
-        element: <PaymentTerminalSettingsPage />,
-      },
-      {
-        path: '/system/emergency-login-keys',
-        meta: {
-          title: 'menu.emergencyLoginKeys',
-          icon: 'KeyOutlined',
-          keepAlive: true,
-          accessKey: 'canManageSystemSettings',
-        },
-        element: <EmergencyLoginKeysPage />,
-      },
-      {
-        path: '/system/face-cameras',
-        meta: {
-          title: 'menu.faceCameras',
-          icon: 'VideoCameraOutlined',
-          // 新增 / 轮换后页面内存里会短暂持有一次性摄像机地址（含 token）：离开页签即卸载，保证不会留在缓存页里。
-          keepAlive: false,
-          accessKey: 'canManageFaceCameras',
-        },
-        element: <FaceCamerasPage />,
-      },
-      {
-        path: '/system/face-match',
-        meta: {
-          title: 'menu.faceMatch',
-          icon: 'SafetyCertificateOutlined',
-          // 页面内存里会短暂持有复核用的抓拍 / 参考照片 objectURL 与登记照预览：离开页签即卸载，保证 URL 已撤销、不留在缓存页里。
-          keepAlive: false,
-          accessKey: 'canAccessFaceMatch',
-        },
-        element: <FaceMatchPage />,
-      },
-      {
-        path: '/system/users',
-        meta: {
-          title: 'menu.systemUsers',
-          icon: 'UserOutlined',
-          keepAlive: true,
-          accessKey: 'canReadUserConsole',
-        },
-        element: <SystemUsersPage />,
-      },
-      {
-        path: '/system/roles',
-        meta: {
-          title: 'menu.systemRoles',
-          icon: 'TeamOutlined',
-          keepAlive: true,
-          accessKey: 'canReadRole',
-        },
-        element: <SystemRolesPage />,
-      },
-      {
-        path: '/system/permissions',
-        meta: {
-          title: 'menu.systemPermissions',
-          icon: 'KeyOutlined',
-          keepAlive: true,
-          accessKey: 'canReadRole',
-        },
-        element: <SystemPermissionsPage />,
-      },
-      {
-        path: '/system/device-registration',
-        meta: {
-          title: 'menu.deviceRegistration',
-          icon: 'BuildOutlined',
-          keepAlive: true,
-          accessKey: 'canViewDeviceRegistration',
-        },
-        element: <PosAdminDeviceRegistrationPage />,
-      },
+      ...navGroupRoutes(DEVICES_NAV_GROUP),
+      ...navGroupRoutes(ACCOUNTS_NAV_GROUP),
+      ...navGroupRoutes(MONITORING_NAV_GROUP),
+      ...navGroupRoutes(PAYMENTS_INVOICES_NAV_GROUP),
+      ...navGroupRoutes(FACE_RECOGNITION_NAV_GROUP),
       {
         path: '/system/app-downloads',
         meta: {
@@ -357,17 +369,6 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewAppDownloads',
         },
         element: <SystemAppDownloadsPage />,
-      },
-      {
-        path: '/system/remote-maintenance',
-        meta: {
-          title: 'menu.remoteMaintenance',
-          icon: 'BuildOutlined',
-          // 离开含临时凭据的页面时卸载，及时清空内存密码与轮询。
-          keepAlive: false,
-          accessKey: 'isAdmin',
-        },
-        element: <SystemRemoteMaintenancePage />,
       },
       {
         // 旧地址兼容：WPF 版本已并入版本发布中心，书签与历史链接跳到 WPF 终端。
@@ -648,6 +649,46 @@ export const appRoutes: AppRouteItem[] = [
     ],
   },
   {
+    // 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
+    path: '/seasonal-preorders',
+    meta: {
+      title: 'menu.seasonalPreorders',
+      icon: 'GiftOutlined',
+    },
+    children: [
+      {
+        path: '/supplier-preorder-ordering',
+        meta: { title: 'menu.supplierPreorderOrdering', icon: 'ShoppingCartOutlined', accessKey: 'canOrderSupplierPreorders' },
+        element: <SupplierPreorderOrderingPage />,
+      },
+      {
+        path: '/supplier-preorder-ordering/:formGuid',
+        meta: { title: 'menu.supplierPreorderOrderForm', hidden: true, accessKey: 'canOrderSupplierPreorders', activeMenu: '/supplier-preorder-ordering' },
+        element: <SupplierPreorderOrderFormPage />,
+      },
+      {
+        path: '/supplier-preorders',
+        meta: { title: 'menu.supplierPreorders', icon: 'FileExcelOutlined', keepAlive: true, accessKey: 'canManageSupplierPreorders' },
+        element: <SupplierPreorderAdminPage />,
+      },
+      {
+        path: '/supplier-preorders/import',
+        meta: { title: 'menu.supplierPreorderImport', hidden: true, accessKey: 'canManageSupplierPreorders', activeMenu: '/supplier-preorders' },
+        element: <SupplierPreorderImportPage />,
+      },
+      {
+        path: '/supplier-preorders/forms/:formGuid',
+        meta: { title: 'menu.supplierPreorderFormDetail', hidden: true, accessKey: 'canManageSupplierPreorders', activeMenu: '/supplier-preorders' },
+        element: <SupplierPreorderFormDetailPage />,
+      },
+      {
+        path: '/supplier-preorders/orderers',
+        meta: { title: 'menu.supplierPreorderOrderers', icon: 'TeamOutlined', accessKey: 'canManageSupplierPreorders' },
+        element: <SupplierPreorderOrderersPage />,
+      },
+    ],
+  },
+  {
     path: '/executive-sales-intelligence',
     meta: {
       title: 'menu.executiveSalesIntelligence',
@@ -794,46 +835,8 @@ export const appRoutes: AppRouteItem[] = [
         },
         element: <PosAdminSupplierManagementPage />,
       },
-      {
-        path: '/pos-admin/products',
-        meta: {
-          title: 'menu.productManagement',
-          icon: 'AppstoreOutlined',
-          keepAlive: true,
-          accessKey: 'canViewPosProducts',
-        },
-        element: <PosAdminProductManagementPage />,
-      },
-      {
-        path: '/pos-admin/store-product-price',
-        meta: {
-          title: 'menu.storeProductPrice',
-          icon: 'DollarOutlined',
-          keepAlive: true,
-          accessKey: 'canManageStoreProducts',
-        },
-        element: <PosAdminStoreProductPricePage />,
-      },
-      {
-        path: '/pos-admin/pricing-strategies',
-        meta: {
-          title: 'menu.pricingStrategies',
-          icon: 'FileTextOutlined',
-          keepAlive: true,
-          accessKey: 'canManagePricing',
-        },
-        element: <PosAdminPricingStrategiesPage />,
-      },
-      {
-        path: '/pos-admin/promotions',
-        meta: {
-          title: 'menu.promotions',
-          icon: 'GiftOutlined',
-          keepAlive: true,
-          accessKey: 'canManagePromotions',
-        },
-        element: <PosAdminPromotionsPage />,
-      },
+      ...navGroupRoutes(PRODUCTS_PRICING_NAV_GROUP),
+      ...navGroupRoutes(SETTLEMENT_CASH_NAV_GROUP),
       {
         path: '/pos-admin/advertisements',
         meta: {
@@ -855,10 +858,46 @@ export const appRoutes: AppRouteItem[] = [
         element: <PosAdminScheduleAttendancePage />,
       },
       {
+        // 考勤审核工作台：从排班考勤页的页签升级为独立菜单项，菜单带待审数角标（见 AdminLayout）。
+        path: '/pos-admin/attendance-review',
+        meta: {
+          title: 'menu.attendanceReview',
+          icon: 'FileDoneOutlined',
+          keepAlive: true,
+          accessKey: 'canReviewAttendance',
+        },
+        element: <PosAdminAttendanceReviewPage />,
+      },
+      {
+        // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
+        path: '/pos-admin/attendance-payroll',
+        meta: {
+          title: 'menu.attendancePayroll',
+          icon: 'AccountBookOutlined',
+          keepAlive: true,
+          accessKey: 'canViewAttendanceHours',
+        },
+        element: <PosAdminAttendancePayrollPage />,
+      },
+      {
+        // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
+        // 不 keepAlive：授权完成后后端重定向回 ?myob=connected|error，页面必须按新进入重新加载并读取参数。
+        path: '/pos-admin/myob',
+        meta: {
+          title: 'menu.myob',
+          icon: 'LinkOutlined',
+          keepAlive: false,
+          accessKey: 'canManageMyobConnections',
+        },
+        element: <PosAdminMyobPage />,
+      },
+      {
         path: '/pos-admin/cash-register-users',
         meta: {
           title: 'menu.cashRegisterUsers',
           icon: 'UserOutlined',
+          // 不在 Web 侧栏显示；路由保留，旧链接与书签仍可直接打开。
+          hidden: true,
           keepAlive: true,
           accessKey: 'canManageStoreOps',
         },
@@ -886,46 +925,15 @@ export const appRoutes: AppRouteItem[] = [
         element: <Navigate to="/pos-admin/operation-logs?source=legacy" replace />,
       },
       {
-        path: '/pos-admin/linkly-settlements',
-        meta: {
-          title: 'menu.linklySettlements',
-          icon: 'ReconciliationOutlined',
-          keepAlive: true,
-          accessKey: 'isAdmin',
-        },
-        element: <LinklySettlementsPage />,
-      },
-      {
         path: '/pos-admin/linkly-settlements/:id',
         meta: {
           title: 'menu.linklySettlementDetail',
           hidden: true,
           accessKey: 'isAdmin',
-          activeMenu: '/pos-admin/linkly-settlements',
+          activeMenu: SETTLEMENT_CASH_NAV_GROUP.path,
           dynamicTitle: () => i18n.t('menu.linklySettlementDetail'),
         },
         element: <LinklySettlementDetailPage />,
-      },
-      {
-        // 日结记录：列表 + 右侧明细抽屉（抽屉用 ?id=<日结 GUID> 保持，可深链分享）；独立权限 DailyCloseRecords.View。
-        path: '/pos-admin/daily-closes',
-        meta: {
-          title: 'menu.dailyCloses',
-          icon: 'MoneyCollectOutlined',
-          keepAlive: true,
-          accessKey: 'canViewDailyCloseRecords',
-        },
-        element: <DailyClosesPage />,
-      },
-      {
-        path: '/pos-admin/store-cash',
-        meta: {
-          title: 'menu.storeCash',
-          icon: 'AccountBookOutlined',
-          keepAlive: true,
-          accessKey: 'canViewStoreCash',
-        },
-        element: <PosAdminStoreCashPage />,
       },
       {
         // 节日贺卡分店填报统计：表格 + 单店明细抽屉（抽屉用 ?store=<分店编码> 保持，可深链）；独立权限 SeasonalCards.Remaining.ViewAllStores。
@@ -1032,10 +1040,13 @@ const allRoutes = flattenAllRoutes(appRoutes)
 const titleMap = new Map(allRoutes.map((route) => [route.path, route.meta.title]))
 
 function canAccessRoute(meta: AppRouteMeta, access: AccessControl) {
-  if (!meta.accessKey) {
-    return true
+  if (meta.accessKey && access[meta.accessKey] !== true) {
+    return false
   }
-  return access[meta.accessKey] === true
+  if (meta.anyAccessKeys?.length) {
+    return meta.anyAccessKeys.some((key) => access[key] === true)
+  }
+  return true
 }
 
 export function resolveRoute(pathname: string) {
@@ -1181,6 +1192,15 @@ export function getBreadcrumbItems(pathname: string, access: AccessControl, curr
     .filter((item): item is string => Boolean(item))
     .map((key) => i18n.t(key))
 
+  // 合并页：面包屑为「父菜单 / 合并页 / 当前标签」；顶部页签标题是合并页名，这里不用它。
+  const navGroup = route.meta.navGroup
+  if (navGroup) {
+    const groupTitleKey = titleMap.get(navGroup)
+    const groupTitles = groupTitleKey ? [i18n.t(groupTitleKey)] : []
+    const tabTitles = route.path === navGroup ? [] : [i18n.t(route.meta.title)]
+    return [...titles, ...groupTitles, ...tabTitles].map((title) => ({ title }))
+  }
+
   const currentTitle = currentTabTitle || route.meta.dynamicTitle?.(route.params) || i18n.t(route.meta.title)
   return [...titles, currentTitle].map((title) => ({ title }))
 }
@@ -1193,6 +1213,19 @@ export function toTabItem(pathname: string, access: AccessControl): TabItem | nu
   // 旧地址兼容路由只做跳转：不生成页签，否则跳转后会留下一个与目标页同名的多余页签。
   if (isValidElement(route.element) && REDIRECT_ELEMENT_TYPES.has(route.element.type)) {
     return null
+  }
+
+  // 合并页：同组各标签共用一个顶部页签（key 为合并页菜单地址），path 跟随当前标签，点页签回到上次停留的标签。
+  const navGroup = route.meta.navGroup
+  if (navGroup) {
+    return {
+      key: navGroup,
+      path: pathname,
+      routePath: navGroup,
+      title: i18n.t(titleMap.get(navGroup) ?? route.meta.title),
+      closable: true,
+      keepAlive: true,
+    }
   }
 
   return {
@@ -1218,4 +1251,23 @@ export function getAffixTabs(): TabItem[] {
       closable: false,
       keepAlive: entry.route.meta.keepAlive,
     }))
+}
+
+/**
+ * 本地存储里的旧页签归一化：合并前按单页地址存的页签（如 /system/users）改成所属合并页的 key，
+ * 同 key 只留第一个，避免升级后出现两个指向同一合并页的顶部页签。
+ */
+export function normalizePersistedTabs(tabs: TabItem[]): TabItem[] {
+  const seen = new Set<string>()
+  const result: TabItem[] = []
+  for (const tab of tabs) {
+    const navGroup = resolveRoute(tab.path)?.meta.navGroup
+    const next = navGroup
+      ? { ...tab, key: navGroup, routePath: navGroup, title: i18n.t(titleMap.get(navGroup) ?? tab.title), keepAlive: true }
+      : tab
+    if (seen.has(next.key)) continue
+    seen.add(next.key)
+    result.push(next)
+  }
+  return result
 }

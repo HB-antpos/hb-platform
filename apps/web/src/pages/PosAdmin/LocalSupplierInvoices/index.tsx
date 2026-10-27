@@ -54,7 +54,7 @@ import {
   type HTMLAttributes,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { useAuthStore } from '../../../store/auth'
@@ -126,6 +126,7 @@ import {
   shouldRefreshInvoiceList,
   subscribeLocalSupplierInvoiceChanged,
 } from './invoiceListSync'
+import { buildUncreatedProductsFilter } from './uncreatedProductsFilter'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import invoiceMessagesEn from './invoiceMessages.en.json'
 import invoiceMessagesZh from './invoiceMessages.zh.json'
@@ -446,9 +447,22 @@ export default function LocalSupplierInvoicesPage() {
   // 筛选条件
   const [storeCode, setStoreCode] = useState<string | undefined>(undefined)
   const [supplierCode, setSupplierCode] = useState<string | undefined>(undefined)
+  // 从供应商管理「查看全部进货单」跳来时带 ?supplierCode=：预选该供应商并清空默认 90 天日期，
+  // 否则较早的进货单会被默认日期筛掉（页面保活，地址参数变化时也要同步）。
+  const location = useLocation()
+  useEffect(() => {
+    if (location.pathname !== '/pos-admin/local-supplier-invoices') return
+    const requestedSupplierCode = new URLSearchParams(location.search).get('supplierCode')?.trim()
+    if (!requestedSupplierCode) return
+    setSupplierCode(requestedSupplierCode)
+    setDateRange(null)
+    setPage(1)
+  }, [location.pathname, location.search])
   const [invoiceNo, setInvoiceNo] = useState('')
   const [keyword, setKeyword] = useState('')
   const [productChecked, setProductChecked] = useState<boolean | undefined>(undefined)
+  // 只看含「新品」（商品主档里还没有、尚未创建）明细的随货单；与分段、日期等条件叠加。
+  const [hasUncreatedProducts, setHasUncreatedProducts] = useState(false)
   // 日期区间：默认按创建日期看近 90 天；清空表示全部时间。
   const [dateField, setDateField] = useState<InvoiceListDateField>(DEFAULT_INVOICE_LIST_DATE_FIELD)
   const [dateRange, setDateRange] = useState<InvoiceListDateRange | null>(() => getDefaultInvoiceListDateRange())
@@ -587,6 +601,11 @@ export default function LocalSupplierInvoicesPage() {
     const dateFilter = buildInvoiceListDateFilter(dateField, dateRange)
     if (dateFilter) {
       baseFilterModel[dateFilter.key] = dateFilter.value
+    }
+    // 放进 baseFilterModel：全部/待检测分段计数、分店单数都要与列表同口径。
+    const uncreatedFilter = buildUncreatedProductsFilter(hasUncreatedProducts)
+    if (uncreatedFilter) {
+      baseFilterModel[uncreatedFilter.key] = uncreatedFilter.value
     }
     const filterModel: Record<string, unknown> = { ...baseFilterModel }
     if (productChecked !== undefined) {
@@ -926,6 +945,7 @@ export default function LocalSupplierInvoicesPage() {
     setInvoiceNo('')
     setKeyword('')
     setProductChecked(undefined)
+    setHasUncreatedProducts(false)
     setDateField(DEFAULT_INVOICE_LIST_DATE_FIELD)
     setDateRange(getDefaultInvoiceListDateRange())
     setSortBy('createdAt')
@@ -1543,7 +1563,7 @@ export default function LocalSupplierInvoicesPage() {
   const showStoreRail = !isMobile && storeOptions.length > 1
   // 默认的「创建日期 近 90 天」不算额外筛选，改过日期才显示「清空筛选」。
   const hasActiveFilters = Boolean(
-    storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined
+    storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined || hasUncreatedProducts
     || !isDefaultInvoiceListDateFilter(dateField, dateRange),
   )
   const storeCountTotal = storeCounts ? Object.values(storeCounts).reduce((sum, count) => sum + count, 0) : undefined
@@ -1710,6 +1730,18 @@ export default function LocalSupplierInvoicesPage() {
                   { value: 'checked', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentChecked'), checkedCount) },
                 ]}
               />
+              <Tooltip title={t('posAdmin.invoiceList.uncreatedFilterTip')}>
+                <Checkbox
+                  className="lsi-uncreated-filter"
+                  checked={hasUncreatedProducts}
+                  onChange={(e) => {
+                    setHasUncreatedProducts(e.target.checked)
+                    requestFirstPage(true)
+                  }}
+                >
+                  {t('posAdmin.invoiceList.uncreatedFilter')}
+                </Checkbox>
+              </Tooltip>
               <span className="lsi-list-toolbar-divider" />
               {/* 日期类型并排单选（默认创建日期），区间默认近 90 天；清空即全部时间。 */}
               <Space size={6}>

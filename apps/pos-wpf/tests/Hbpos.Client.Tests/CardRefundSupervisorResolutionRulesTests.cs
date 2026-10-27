@@ -68,8 +68,9 @@ public sealed class CardRefundSupervisorResolutionRulesTests
         Assert.Equal("Bank statement screenshot", normalized.Evidence);
     }
 
+    // 证据输入框已取消：确认未退款不再强制银行证据；仍带证据的旧调用方照常规范化。
     [Fact]
-    public void Confirm_not_refunded_requires_bank_evidence()
+    public void Confirm_not_refunded_does_not_require_bank_evidence()
     {
         var withoutEvidence = Create(
             CardRefundSupervisorDecision.ConfirmNotRefunded,
@@ -78,8 +79,9 @@ public sealed class CardRefundSupervisorResolutionRulesTests
             refundReference: null);
         var withEvidence = withoutEvidence with { Evidence = "  No refund entry for this reference  " };
 
-        Assert.False(CardRefundSupervisorResolutionRules.TryNormalize(withoutEvidence, out _, out var error));
-        Assert.Equal("Enter the bank evidence confirming that no refund was processed.", error);
+        Assert.True(CardRefundSupervisorResolutionRules.TryNormalize(withoutEvidence, out var bare, out var bareError));
+        Assert.Equal(string.Empty, bareError);
+        Assert.Null(bare.Evidence);
 
         Assert.True(CardRefundSupervisorResolutionRules.TryNormalize(withEvidence, out var normalized, out var noError));
         Assert.Equal(string.Empty, noError);
@@ -163,7 +165,7 @@ public sealed class CardRefundSupervisorResolutionRulesTests
     }
 
     [Fact]
-    public void Length_error_takes_precedence_over_missing_evidence()
+    public void Length_error_is_reported_for_an_overlong_note_even_without_evidence()
     {
         var resolution = Create(
             CardRefundSupervisorDecision.ConfirmNotRefunded,

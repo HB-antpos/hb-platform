@@ -137,15 +137,16 @@ public sealed class NoSaleCashDrawerRescanTests
             (string?)returnsToggle.Attribute("AutomationProperties.Name"));
 
         // 两个「再次扫码」开关同在「再次扫码确认」卡片里；银行收据开关在另一张「打印选项」卡片里。
-        // 两张卡片放在小票打印机页第 1 行的同一个 StackPanel 里上下排列，后面的卡片不用重新编号。
+        // 首屏重设计后「打印机与选项」分页是双栏 Grid：打印选项卡在左栏（StackPanel，第 0 列），再次扫码卡直接放在第 2 列。
         XElement Card(XElement toggle) => toggle.Ancestors(presentation + "Border").First(border =>
-            (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}");
+            (string?)border.Attribute("Style") == "{StaticResource ReceiptCardStyle}");
         var printCard = Card(Toggle("PrintBankReceiptTextToggle"));
         var rescanCard = Card(cashDrawerToggle);
         Assert.NotSame(printCard, rescanCard);
         Assert.Same(rescanCard, Card(returnsToggle));
-        Assert.Same(printCard.Parent, rescanCard.Parent);
-        Assert.Equal("1", (string?)printCard.Parent!.Attribute("Grid.Row"));
+        Assert.Equal("0", (string?)printCard.Parent!.Attribute("Grid.Column"));
+        Assert.Equal("2", (string?)rescanCard.Attribute("Grid.Column"));
+        Assert.Same(rescanCard.Parent, printCard.Parent.Parent);
 
         var rescanKeys = new[]
         {

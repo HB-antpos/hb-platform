@@ -922,6 +922,18 @@ button.lsi-wb-pricing:focus-visible {
   white-space: nowrap;
 }
 
+/* 本店自动定价状态标签：嵌在 12px 的副行里，压低高度避免把行撑高。 */
+.lsi-tag.lsi-wb-store-pricing {
+  height: 18px;
+  padding: 0 5px;
+}
+
+/* 本店还没有价格记录：虚线框弱化，和「自动 / 手动」两种实际状态区分开。 */
+.lsi-wb-store-pricing-none {
+  border: 1px dashed #d9dee7;
+  color: rgba(0, 0, 0, 0.45);
+}
+
 .lsi-wb-match-ok {
   color: #237804;
 }
@@ -1027,6 +1039,11 @@ button.lsi-wb-pricing:focus-visible {
 
 .lsi-entity .lsi-code {
   flex: 0 0 auto;
+}
+
+/* 「有商品未创建」复选项：文案不换行，工具栏空间不足时整项折到下一行而不是文字断行 */
+.lsi-uncreated-filter {
+  white-space: nowrap;
 }
 
 /* 查询类型单选按钮收窄内边距，给左侧分店栏腾出工具栏宽度 */

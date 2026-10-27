@@ -55,22 +55,30 @@ namespace BlazorApp.Api.Services.Pricing
         }
 
         private static decimal CalculateTheoreticalRetail(decimal purchasePrice, PricingStrategy? strategy)
+            => ResolveTheoreticalRetail(purchasePrice, strategy).Theoretical;
+
+        private static (decimal Theoretical, PricingStrategyDetail? Rule) ResolveTheoreticalRetail(
+            decimal purchasePrice, PricingStrategy? strategy)
         {
             if (purchasePrice < 0.1m)
                 throw new ArgumentException("进货价必须至少为 0.10，才能满足尾数及 1.5～5 成率限制");
+            // 交界归属：区间按下限排序后取第一个命中者，所以进货价恰好等于交界值时属于上一个区间（上限含、下限不含）。
             var rule = strategy?.Details?.OrderBy(d => d.MinPrice).FirstOrDefault(d =>
                 purchasePrice >= d.MinPrice && purchasePrice <= d.MaxPrice);
             if (rule == null)
             {
                 if (strategy != null) throw new ArgumentException("当前成本不在此定价策略范围内");
-                return purchasePrice * 2.5m;
+                return (purchasePrice * 2.5m, null);
             }
             if (PricingCurveMath.IsCurve(rule.Algorithm))
-                PricingCurveMath.Validate(strategy!.Details, allowLegacyZero: true);
-            return PricingCurveMath.TheoreticalRetail(purchasePrice, rule);
+                PricingCurveMath.Validate(strategy!.Details, allowLegacyZero: true, enforceIntervalLimit: false);
+            return (PricingCurveMath.TheoreticalRetail(purchasePrice, rule), rule);
         }
 
-        /// <summary>计算建议零售价，先按合法尾数及倍率限幅，再将 0.99/1.99 归整为 1/2。</summary>
+        /// <summary>
+        /// 计算建议零售价，先按合法尾数及倍率限幅，再将 0.99/1.99 归整为 1/2。
+        /// 所有区间（含固定成率）都走同一套尾数规则：小数进位到 .50 / .99，整数取到 .99（1、2 除外）。
+        /// </summary>
         public decimal CalculateRetailPrice(decimal purchasePrice, PricingStrategy? strategy)
         {
             return PricingCurveMath.AdjustTail(purchasePrice, CalculateTheoreticalRetail(purchasePrice, strategy));

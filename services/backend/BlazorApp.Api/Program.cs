@@ -796,6 +796,22 @@ builder.Services.AddScoped<IRoleService, RoleService>(); // 角色管理服务
 builder.Services.AddScoped<IStoreService, StoreService>(); // 分店管理服务
 builder.Services.AddScoped<StoreSyncService>(); // 分店数据同步服务
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreReceiptProfiles.IStoreReceiptProfileService, BlazorApp.Api.Services.StoreReceiptProfiles.StoreReceiptProfileService>(); // 门店小票资料下发（快照 / 设备应用情况）
+builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryService>(); // 收银端 POS API 入口按分店设置（首选入口 + 设备实际入口统计）
+builder.Services.AddScoped<BlazorApp.Api.Services.PosApiEntry.IPosApiEntryUsageService, BlazorApp.Api.Services.PosApiEntry.PosApiEntryUsageService>(); // 收银端 POS API 入口按日 / 周 / 月用量统计（只读，数据由 Hbpos.Api 写入 PosApiEntryUsageDaily）
+// 主 API（Web 后台 + 员工 App）入口用量统计：进程内计数器（单例）+ 每 60 秒批量落库的后台服务 + 只读查询（迁移 20261027.001 建表）。
+builder.Services.AddSingleton<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageCounter>();
+builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageWriter, BlazorApp.Api.Services.MainApiEntry.SqlSugarMainApiEntryUsageWriter>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageFlushService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageService, BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageService>();
+// MYOB 对接阶段 0（方案 docs/plans/2026-10-27-myob-payroll-integration.md）：OAuth 连接、token 加密与分店映射（迁移 20261027.002 建表）。
+builder.Services.Configure<BlazorApp.Api.Services.Myob.MyobOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Services.Myob.MyobOptions.SectionName));
+builder.Services.AddSingleton<BlazorApp.Api.Security.MyobSecretProtector>(sp =>
+    BlazorApp.Api.Security.MyobDataProtection.CreateProtector(sp.GetRequiredService<IDataProtectionProvider>()));
+builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobApiClient, BlazorApp.Api.Services.Myob.MyobApiClient>(
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTokenProvider, BlazorApp.Api.Services.Myob.MyobTokenProvider>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobConnectionService, BlazorApp.Api.Services.Myob.MyobConnectionService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
@@ -1324,6 +1340,11 @@ builder.Services.AddScoped<IBrowserExtensionAccessService, BrowserExtensionAcces
 builder.Services.AddScoped<IBrowserExtensionService, BrowserExtensionService>();
 builder.Services.AddScoped<ILocalSupplierCategoryCaptureService, LocalSupplierCategoryCaptureService>();
 builder.Services.AddScoped<ILocalSupplierCategoryReactService, LocalSupplierCategoryReactService>();
+// 使用帮助 FAQ 公开读服务（缓存在共享的 IMemoryCache 里，P2 写操作后调用 Invalidate）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Services.HelpFaq.IHelpFaqPublicService,
+    BlazorApp.Api.Services.HelpFaq.HelpFaqPublicService
+>();
 builder.Services.AddScoped<PreorderReactService>();
 builder.Services.AddScoped<IPreorderReactService>(provider =>
     provider.GetRequiredService<PreorderReactService>()
@@ -1331,6 +1352,13 @@ builder.Services.AddScoped<IPreorderReactService>(provider =>
 builder.Services.AddScoped<IPreorderGateService>(provider =>
     provider.GetRequiredService<PreorderReactService>()
 );
+// 供应商节日预订单（KFC / Dats / Brazco 圣诞、万圣节订单表）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderService, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderService>();
+// 去年历史快照：发布后排队计算、截止前每晚刷新（状态在快照表表头行）
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderHistoryWorker>();
+// 新品图片转存 COS 商品图片桶（状态在商品行的转存列）
+builder.Services.AddScoped<BlazorApp.Api.Services.React.SupplierPreorders.ISupplierPreorderImageStore, BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderCosImageStore>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.React.SupplierPreorders.SupplierPreorderImageWorker>();
 builder.Services.AddScoped<IStoreProductMaintenanceReactService, StoreProductMaintenanceReactService>();
 // 移动端离线商品目录：索引缓存为进程级单例（每店保留多版本供 delta），服务按请求作用域。
 builder.Services.AddSingleton<
@@ -1351,6 +1379,9 @@ builder.Services.AddScoped<BlazorApp.Api.Features.PromoPosters.IPromoPosterServi
 builder.Services.AddScoped<IAustralianPublicHolidayProvider, AustralianPublicHolidayProvider>();
 builder.Services.AddScoped<IAttendancePublicHolidaySyncService, AttendancePublicHolidaySyncService>();
 builder.Services.AddScoped<IAttendanceReactService, AttendanceReactService>();
+// 午夜自动下班：按门店时区 00:00 为未闭合班段补系统下班卡（AttendanceSettings.AutoClockOutAtMidnight 可关）。
+// 配置节 AttendanceAutoClockOut（Enabled / IntervalMinutes）。依赖迁移 20261026.001 的新列。
+builder.Services.AddHostedService<BlazorApp.Api.Services.Background.AttendanceAutoClockOutWorker>();
 // 考勤审批推送（N3-c）：审批人解析按审批接口的真实授权口径，通知器负责提交 / 结果 / 失效撤回；
 // 考勤服务以可选依赖持有通知器，只在业务事务提交后调用，推送失败不影响业务结果。
 builder.Services.AddScoped<IAttendanceApproverResolver, AttendanceApproverResolver>();
@@ -1489,6 +1520,9 @@ if (app.Environment.IsDevelopment())
 // 🔒 HTTPS重定向中间件（当前已禁用）
 // 生产环境建议启用HTTPS重定向以提高安全性
 // app.UseHttpsRedirection();
+
+// 📊 入口用量统计：放在管线最外层，让限流 429 / 鉴权 401 也计入；只统计 /api/*，只记数，失败不影响响应。
+app.UseMiddleware<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageMiddleware>();
 
 // 🧾 全局请求管道异常日志，覆盖未进入 MVC Filter 的异常。
 app.UseMiddleware<ApplicationExceptionLoggingMiddleware>();

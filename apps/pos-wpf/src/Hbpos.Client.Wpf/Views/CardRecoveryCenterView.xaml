@@ -806,52 +806,11 @@
                                                         </StackPanel>
                                                     </Border>
                                                 </StackPanel>
-                                                <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                    <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="squareDashboard" Content="{loc:Loc cardRecovery.v2.evidence.squareDashboard}" Style="{StaticResource RecoveryChipButton}"/>
-                                                    <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="terminalReceipt" Content="{loc:Loc cardRecovery.v2.evidence.terminalReceipt}" Style="{StaticResource RecoveryChipButton}"/>
-                                                    <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="bankStatement" Content="{loc:Loc cardRecovery.v2.evidence.bankStatement}" Style="{StaticResource RecoveryChipButton}"/>
-                                                </WrapPanel>
                                             </DockPanel>
 
-                                            <!-- 表单区：典型文案下不出现滚动条；英文长文案时在这里滚动，结果按钮始终固定在下方。 -->
+                                            <!-- 说明区：输入表单已搬进结案弹窗，这里只留说明，英文长文案时在此滚动，结果按钮始终固定在下方。 -->
                                             <ScrollViewer Grid.Row="1" x:Name="DetailScrollViewer" PanningMode="VerticalOnly" Style="{StaticResource PosVerticalTouchScrollViewerStyle}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                                                <StackPanel Margin="0,0,4,0">
-                                                    <TextBlock Text="{Binding ResolutionInstructionsText}" Style="{StaticResource RecoveryLabel}" FontSize="13" Margin="0,0,0,8"/>
-                                                    <!-- 三个输入同一行：付款参考号 / 证据 / 主管备注；被拒退款只剩备注，占满整行。 -->
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="0.9*"/>
-                                                            <ColumnDefinition Width="8"/>
-                                                            <ColumnDefinition Width="1.2*"/>
-                                                            <ColumnDefinition Width="8"/>
-                                                            <ColumnDefinition Width="1*"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel Grid.Column="0" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                            <TextBlock Text="{Binding ResolutionReferenceLabelText}" Style="{StaticResource RecoveryLabel}" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                                            <TextBox Text="{Binding ResolutionReference, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionReferenceLabelText}" MinHeight="48" FontSize="14.5" VerticalContentAlignment="Center" TextWrapping="Wrap" Style="{StaticResource PosSearchTextBoxStyle}"/>
-                                                        </StackPanel>
-                                                        <StackPanel Grid.Column="2" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                            <TextBlock Text="{Binding ResolutionEvidenceLabelText}" Style="{StaticResource RecoveryLabel}" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                                            <TextBox Text="{Binding ResolutionEvidence, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionEvidenceLabelText}" MinHeight="48" FontSize="14.5" VerticalContentAlignment="Center" TextWrapping="Wrap" Style="{StaticResource PosSearchTextBoxStyle}"/>
-                                                        </StackPanel>
-                                                        <StackPanel>
-                                                            <StackPanel.Style>
-                                                                <Style TargetType="StackPanel">
-                                                                    <Setter Property="Grid.Column" Value="4"/>
-                                                                    <Setter Property="Grid.ColumnSpan" Value="1"/>
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding ShowEvidenceInputs}" Value="False">
-                                                                            <Setter Property="Grid.Column" Value="0"/>
-                                                                            <Setter Property="Grid.ColumnSpan" Value="5"/>
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </StackPanel.Style>
-                                                            <TextBlock Text="{Binding ResolutionReasonLabelText}" Style="{StaticResource RecoveryLabel}" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                                            <TextBox Text="{Binding ResolutionReason, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionReasonLabelText}" MinHeight="48" FontSize="14.5" VerticalContentAlignment="Top" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True" Style="{StaticResource PosSearchTextBoxStyle}"/>
-                                                        </StackPanel>
-                                                    </Grid>
-                                                </StackPanel>
+                                                <TextBlock Text="{Binding ResolutionInstructionsText}" Style="{StaticResource RecoveryLabel}" FontSize="13" Margin="0,0,4,0"/>
                                             </ScrollViewer>
 
                                             <!-- 结果按钮：固定在卡片底部，永远在首屏内。每个结果仍需主管扫码授权。 -->
@@ -869,9 +828,9 @@
                                                         <ColumnDefinition Width="*"/>
                                                     </Grid.ColumnDefinitions>
                                                     <!-- 被 Square 拒绝的退款只有一个结果，占满整行 -->
-                                                    <Button Command="{Binding ConfirmPaidCommand}" Content="{Binding ConfirmProcessedText}" Tag="{Binding ProcessedOutcomeHintText}" Style="{StaticResource RecoveryPrimaryOutcomeTile}" MinHeight="76" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" Foreground="{DynamicResource PosSuccessTextBrush}"/>
-                                                    <Button Grid.Column="2" Command="{Binding ConfirmNotPaidCommand}" Content="{Binding ConfirmNotProcessedText}" Tag="{Binding NotProcessedOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="76" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                                    <Button Grid.Column="4" Command="{Binding ContinueWaitingCommand}" Content="{loc:Loc cardRecovery.center.action.continueWaiting}" Tag="{Binding WaitingOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="76" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                    <Button Command="{Binding OpenConfirmPaidDialogCommand}" Content="{Binding ConfirmProcessedText}" Tag="{Binding ProcessedOutcomeHintText}" Style="{StaticResource RecoveryPrimaryOutcomeTile}" MinHeight="76" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" Foreground="{DynamicResource PosSuccessTextBrush}"/>
+                                                    <Button Grid.Column="2" Command="{Binding OpenConfirmNotPaidDialogCommand}" Content="{Binding ConfirmNotProcessedText}" Tag="{Binding NotProcessedOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="76" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                    <Button Grid.Column="4" Command="{Binding OpenContinueWaitingDialogCommand}" Content="{loc:Loc cardRecovery.center.action.continueWaiting}" Tag="{Binding WaitingOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="76" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                                 </Grid>
                                                 <StackPanel Orientation="Horizontal" Margin="2,8,0,0">
                                                     <materialDesign:PackIcon Kind="ShieldCheckOutline" Width="16" Height="16" Margin="0,1,6,0" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}"/>
@@ -915,6 +874,106 @@
                     <TextBlock Text="{Binding LastRefreshText}" Style="{StaticResource RecoveryLabel}" FontSize="13" Margin="8,0,0,0"/>
                 </StackPanel>
             </Grid>
+        </Grid>
+
+        <!-- ===== 结案弹窗：付款参考号 / 银行证据 / 主管备注。点确认后才弹出主管扫码授权。 ===== -->
+        <Grid x:Name="ResolutionDialogOverlay" Visibility="{Binding IsResolutionDialogOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Border Background="{DynamicResource PosInverseSurfaceBrush}" Opacity="0.45"/>
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="680" MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" MaxHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=UserControl}}" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="16" Margin="12">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="40" ShadowDepth="0" Opacity="0.25"/>
+                </Border.Effect>
+                <Grid Margin="20,16,20,18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- 标题：当前选择的结果 + 需要主管授权的提示 -->
+                    <StackPanel>
+                        <DockPanel>
+                            <Border DockPanel.Dock="Right" Margin="12,0,0,0" CornerRadius="12" Padding="9,3" BorderThickness="1" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="LockOutline" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center" Foreground="{DynamicResource PosWarningTextBrush}"/>
+                                    <TextBlock Text="{loc:Loc cardRecovery.v2.sheet.supervisorRequired}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource PosWarningTextBrush}"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding ResolutionDialogTitleText}" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <TextBlock Text="{Binding ResolutionDialogHintText}" Style="{StaticResource RecoveryLabel}" FontSize="14" Margin="0,6,0,0"/>
+                        <!-- 交易摘要：确认自己正在结的是哪一笔（类型 / 金额 / 交易号 / 终端回复）。 -->
+                        <Border Margin="0,12,0,0" Padding="12,8" CornerRadius="12" BorderThickness="1" Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}">
+                            <WrapPanel>
+                                <StackPanel Margin="0,0,18,0">
+                                    <TextBlock Text="{loc:Loc cardRecovery.center.field.type}" Style="{StaticResource RecoveryCaps}"/>
+                                    <TextBlock Text="{Binding SelectedTitleText}" Style="{StaticResource RecoveryValue}" FontSize="15"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,18,0">
+                                    <TextBlock Text="{loc:Loc cardRecovery.center.field.amount}" Style="{StaticResource RecoveryCaps}"/>
+                                    <TextBlock Text="{Binding SelectedAmountText}" Style="{StaticResource RecoveryValue}" FontSize="15"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,18,0">
+                                    <TextBlock Text="{loc:Loc cardRecovery.center.field.txn}" Style="{StaticResource RecoveryCaps}"/>
+                                    <TextBlock Text="{Binding SelectedTxnText}" Style="{StaticResource RecoveryValue}" FontSize="15"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc cardRecovery.center.field.responseCode}" Style="{StaticResource RecoveryCaps}"/>
+                                    <TextBlock Text="{Binding SelectedResponseCodeText}" Style="{StaticResource RecoveryValue}" FontSize="15"/>
+                                </StackPanel>
+                            </WrapPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 表单：垂直排列，屏幕很矮时只在这一块滚动，标题与底部按钮固定。 -->
+                    <ScrollViewer Grid.Row="1" Margin="0,14,0,0" PanningMode="VerticalOnly" Style="{StaticResource PosVerticalTouchScrollViewerStyle}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="0,0,4,0">
+                            <StackPanel Visibility="{Binding ShowDialogReferenceInput, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="0,0,0,12">
+                                <TextBlock Text="{Binding ResolutionReferenceLabelText}" Style="{StaticResource RecoveryLabel}" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding ResolutionReference, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionReferenceLabelText}" MinHeight="52" FontSize="15" VerticalContentAlignment="Center" TextWrapping="Wrap" Style="{StaticResource PosSearchTextBoxStyle}"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="{Binding ResolutionReasonLabelText}" Style="{StaticResource RecoveryLabel}" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding ResolutionReason, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionReasonLabelText}" MinHeight="88" FontSize="15" VerticalContentAlignment="Top" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True" Style="{StaticResource PosSearchTextBoxStyle}"/>
+                                <!-- 备注预设：点一下把常用说法追加进备注（只有普通付款的“已付款 / 未付款”提供），主管可继续编辑。 -->
+                                <ItemsControl ItemsSource="{Binding ResolutionDialogPresets}" Margin="0,8,0,0" Visibility="{Binding HasResolutionDialogPresets, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding}" Command="{Binding DataContext.ApplyNotePresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource RecoveryChipButton}" Margin="0,0,8,8"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                            <!-- 提交被拒（实时核验失败、授权取消等）时的原因，弹窗不关、输入保留。 -->
+                            <Border Margin="0,12,0,0" Padding="12,10" CornerRadius="10" BorderThickness="1" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" Visibility="{Binding HasResolutionDialogMessage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{Binding ResolutionDialogMessage}" FontSize="14" TextWrapping="Wrap" Foreground="{DynamicResource PosWarningTextBrush}"/>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 底部按钮固定：取消 / 确认（确认后弹出主管扫码） -->
+                    <StackPanel Grid.Row="2" Margin="0,14,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="2*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Command="{Binding CancelResolutionDialogCommand}" Content="{loc:Loc common.cancel}" Tag="Close" Style="{StaticResource RecoverySecondaryIconButton}" MinHeight="60"/>
+                            <Button Grid.Column="2" Command="{Binding SubmitResolutionDialogCommand}" Content="{Binding ResolutionDialogSubmitText}" Tag="ShieldCheckOutline" Style="{StaticResource RecoveryPrimaryIconButton}" MinHeight="60"/>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="2,10,0,0">
+                            <materialDesign:PackIcon Kind="ShieldCheckOutline" Width="16" Height="16" Margin="0,1,6,0" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}"/>
+                            <TextBlock Text="{loc:Loc cardRecovery.v2.sheet.outcomeHint}" Style="{StaticResource RecoveryLabel}" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- ===== 次要信息弹层：商品 / 交易详情 / 状态记录（列表，可滚动） ===== -->

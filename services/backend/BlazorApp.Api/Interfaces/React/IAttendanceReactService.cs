@@ -13,6 +13,10 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<int>> PublishWeekAsync(PublishAttendanceWeekDto request);
         Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(CopyAttendanceScheduleWeekDto request);
         Task<ApiResponse<bool>> DeleteScheduleAsync(string scheduleGuid);
+        Task<ApiResponse<List<AttendanceScheduleDto>>> GetDeletedSchedulesAsync(AttendanceScheduleQueryDto query);
+        Task<ApiResponse<AttendanceScheduleDto>> RestoreScheduleAsync(string scheduleGuid);
+        /// <summary>午夜自动下班（后台任务调用）：为门店时区已过 00:00 仍未闭合的班段补系统下班卡，返回补卡张数。</summary>
+        Task<int> RunMidnightAutoClockOutAsync(CancellationToken cancellationToken = default);
         Task<ApiResponse<AttendanceTodayDto>> GetMyTodayAsync(DateTime? workDate = null, string? storeCode = null);
         Task<ApiResponse<List<AttendanceScheduleDto>>> GetMyWeekAsync(DateTime? weekStartDate, string? storeCode = null);
         Task<ApiResponse<List<AttendanceAvailabilityDto>>> GetMyAvailabilityAsync(DateTime? weekStartDate, string? storeCode = null);
@@ -50,5 +54,18 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<bool>> DeleteHolidayAsync(string holidayGuid);
         Task<ApiResponse<AttendanceSettingsDto>> GetSettingsAsync();
         Task<ApiResponse<AttendanceSettingsDto>> UpdateSettingsAsync(UpdateAttendanceSettingsDto request);
+
+        // 带薪假与工资（规格第 2 节）
+        Task<ApiResponse<AttendanceLeaveOptionsDto>> GetMyLeaveOptionsAsync(string? storeCode);
+        Task<ApiResponse<bool>> RevokeManagedLeaveRequestAsync(string leaveGuid, ReviewAttendanceApprovalDto request);
+        Task<ApiResponse<AttendancePayrollHoursDto>> GetPayrollHoursAsync(AttendancePayrollQueryDto query);
+        Task<ApiResponse<AttendancePayrollPayDto>> GetPayrollPayAsync(AttendancePayrollQueryDto query);
+        Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRatesAsync(AttendancePayRateQueryDto query);
+        Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRateHistoryAsync(string userGuid, string? storeCode);
+        Task<ApiResponse<AttendancePayRateDto>> CreatePayRateAsync(CreateEmployeePayRateDto request);
+        Task<ApiResponse<AttendancePayPeriodNoteDto>> UpsertPayPeriodNoteAsync(UpsertAttendancePayPeriodNoteDto request);
+        Task<ApiResponse<AttendancePayPeriodLeaveApprovalDto>> UpsertPayPeriodLeaveApprovalAsync(UpsertAttendancePayPeriodLeaveApprovalDto request);
+        Task<ApiResponse<AttendancePayPeriodDto>> SubmitPayPeriodAsync(AttendancePayPeriodKeyDto request);
+        Task<ApiResponse<AttendancePayPeriodDto>> UnlockPayPeriodAsync(UnlockAttendancePayPeriodDto request);
     }
 }

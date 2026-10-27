@@ -295,15 +295,17 @@ public class NavigationServiceTests
             _service.BuildMenu(authorized),
             item => item.Path == "/system"
         );
+        // 用户管理已并入「账号与权限」合并页：合并页只认 Users.ViewWebConsole，不认 Users.View。
         var usersMenu = Assert.Single(
             authorizedSystem.Children!,
-            item => item.Path == "/system/users"
+            item => item.Path == "/system/accounts"
         );
-        Assert.Equal(Permissions.Users.ViewWebConsole, usersMenu.Permission);
+        Assert.Contains(Permissions.Users.ViewWebConsole, usersMenu.AnyPermissions!);
+        Assert.DoesNotContain(Permissions.Users.View, usersMenu.AnyPermissions!);
 
         Assert.DoesNotContain(
             _service.BuildMenu(usersViewOnly).SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
-            item => item.Path == "/system/users"
+            item => item.Path == "/system/accounts"
         );
     }
 
@@ -321,12 +323,13 @@ public class NavigationServiceTests
             _service.BuildMenu(authorized),
             item => item.Path == "/system"
         );
+        // 紧急登录密钥已并入「设备与远程」合并页：菜单项是合并页，System.ManageSettings 即可见。
         var keyMenu = Assert.Single(
             authorizedSystem.Children!,
-            item => item.Path == "/system/emergency-login-keys"
+            item => item.Path == "/system/devices"
         );
-        Assert.Equal("menu.emergencyLoginKeys", keyMenu.TitleKey);
-        Assert.Equal(Permissions.System.ManageSettings, keyMenu.Permission);
+        Assert.Equal("menu.groupDevicesRemote", keyMenu.TitleKey);
+        Assert.Contains(Permissions.System.ManageSettings, keyMenu.AnyPermissions!);
 
         var unauthorizedSystem = Assert.Single(
             _service.BuildMenu(unauthorized),
@@ -334,7 +337,7 @@ public class NavigationServiceTests
         );
         Assert.DoesNotContain(
             unauthorizedSystem.Children!,
-            item => item.Path == "/system/emergency-login-keys"
+            item => item.Path == "/system/devices"
         );
     }
 
@@ -389,8 +392,9 @@ public class NavigationServiceTests
 
         var menu = service.BuildMenu(user);
 
-        Assert.Equal(6, menu.Count);
+        Assert.Equal(7, menu.Count);
         Assert.Contains(menu, item => item.Path == "/dashboard");
+        Assert.Contains(menu, item => item.Path == "/seasonal-preorders");
         Assert.Contains(menu, item => item.Path == "/system");
         Assert.Contains(menu, item => item.Path == "/warehouse");
         Assert.Contains(menu, item => item.Path == "/domestic-purchase");
@@ -405,8 +409,9 @@ public class NavigationServiceTests
 
         var menu = _service.BuildMenu(user);
 
-        Assert.Equal(6, menu.Count);
+        Assert.Equal(7, menu.Count);
         Assert.Contains(menu, item => item.Path == "/dashboard");
+        Assert.Contains(menu, item => item.Path == "/seasonal-preorders");
         Assert.Contains(menu, item => item.Path == "/system");
         Assert.Contains(menu, item => item.Path == "/warehouse");
         Assert.Contains(menu, item => item.Path == "/domestic-purchase");
@@ -414,11 +419,11 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.Path == "/pos-admin");
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
-        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/employee-profiles");
+        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/accounts");
         Assert.Contains(systemMenu.Children!, item => item.Path == "/system/app-downloads");
 
         var posAdminMenu = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/products");
+        Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/products-pricing");
         Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/local-supplier-invoices");
     }
 
@@ -427,21 +432,21 @@ public class NavigationServiceTests
     [InlineData("管理员")]
     [InlineData("SuperAdmin")]
     [InlineData("超级管理员")]
-    public void BuildMenu_四种系统管理员别名均显示Linkly结算(string roleName)
+    public void BuildMenu_四种系统管理员别名均显示结算与现金合并页(string roleName)
     {
         var user = CreateUser(new Claim(ClaimTypes.Role, roleName));
 
         var menu = _service.BuildMenu(user);
 
+        // Linkly 结算记录（仅管理员）已并入「结算与现金」合并页，页内标签仍按管理员身份显示。
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
         var item = Assert.Single(
             posAdmin.Children!,
-            child => child.Path == "/pos-admin/linkly-settlements"
+            child => child.Path == "/pos-admin/settlement-cash"
         );
-        Assert.Equal("menu.linklySettlements", item.TitleKey);
-        Assert.Equal("ReconciliationOutlined", item.Icon);
-        Assert.Null(item.Permission);
-        Assert.True(item.RequireAdmin);
+        Assert.Equal("menu.groupSettlementCash", item.TitleKey);
+        Assert.Equal("MoneyCollectOutlined", item.Icon);
+        Assert.DoesNotContain(posAdmin.Children!, child => child.Path == "/pos-admin/linkly-settlements");
     }
 
     [Theory]
@@ -537,6 +542,60 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_ShowsAttendanceReviewOnlyWithApprovalReviewPermission()
+    {
+        var reviewer = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore)));
+        var reviewerPosAdmin = Assert.Single(reviewer, item => item.Path == "/pos-admin");
+        var review = Assert.Single(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
+        Assert.Equal("menu.attendanceReview", review.TitleKey);
+        Assert.Equal("FileDoneOutlined", review.Icon);
+        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+
+        // 只有查看审批、请假审核权限：与 Web 一致，不显示审核工作台
+        var viewer = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Attendance.Approval.ViewManagedStore),
+            new Claim("permission", Permissions.Attendance.Leave.ReviewManagedStore)));
+        Assert.DoesNotContain(
+            viewer.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            item => item.Path == "/pos-admin/attendance-review");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Attendance.Punch.ViewManagedStore)]
+    [InlineData(Permissions.Attendance.Payroll.View)]
+    public void BuildMenu_ShowsAttendancePayrollWithPunchViewOrPayrollView(string permission)
+    {
+        var menu = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", permission)));
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        var payroll = Assert.Single(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+        Assert.Equal("menu.attendancePayroll", payroll.TitleKey);
+        Assert.Equal("AccountBookOutlined", payroll.Icon);
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Attendance.Payroll.Edit)]
+    [InlineData(Permissions.Attendance.Payroll.Unlock)]
+    [InlineData(Permissions.Attendance.Admin.View)]
+    public void BuildMenu_HidesAttendancePayrollWithoutPunchViewOrPayrollView(string permission)
+    {
+        // 工资编辑 / 解锁不隐含查看；Attendance.Admin.View 也不连带工资权限
+        var menu = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", permission)));
+
+        Assert.DoesNotContain(
+            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            item => item.Path == "/pos-admin/attendance-payroll");
+    }
+
+    [Fact]
     public void BuildMenu_ShowsLocalSupplierInvoicesWithLocalPurchasePermission()
     {
         var user = CreateUser(
@@ -607,11 +666,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        // 日结记录已并入「结算与现金」合并页，仅凭 DailyCloseRecords.View 即可见。
         var dailyCloses = Assert.Single(posAdmin.Children!);
-        Assert.Equal("/pos-admin/daily-closes", dailyCloses.Path);
-        Assert.Equal("menu.dailyCloses", dailyCloses.TitleKey);
+        Assert.Equal("/pos-admin/settlement-cash", dailyCloses.Path);
+        Assert.Equal("menu.groupSettlementCash", dailyCloses.TitleKey);
         Assert.Equal("MoneyCollectOutlined", dailyCloses.Icon);
-        Assert.Equal(Permissions.DailyCloseRecords.View, dailyCloses.Permission);
+        Assert.Contains(Permissions.DailyCloseRecords.View, dailyCloses.AnyPermissions!);
         Assert.False(dailyCloses.RequireAdmin);
     }
 
@@ -627,7 +687,7 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/daily-closes");
+        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/settlement-cash");
     }
 
     [Theory]
@@ -804,11 +864,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
+        // 设备管理已并入「设备与远程」合并页。
         var item = Assert.Single(
             systemMenu.Children!,
-            child => child.Path == "/system/device-registration"
+            child => child.Path == "/system/devices"
         );
-        Assert.Equal(Permissions.DeviceRegistration.View, item.Permission);
+        Assert.Contains(Permissions.DeviceRegistration.View, item.AnyPermissions!);
     }
 
     [Fact]
@@ -865,11 +926,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
+        // 员工个人信息已并入「账号与权限」合并页。
         Assert.Contains(
             systemMenu.Children!,
             item =>
-                item.Path == "/system/employee-profiles"
-                && item.Permission == Permissions.EmployeeProfiles.View
+                item.Path == "/system/accounts"
+                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
         );
     }
 
@@ -884,11 +946,12 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(user);
 
         var posAdminMenu = Assert.Single(menu, item => item.Path == "/pos-admin");
+        // 商品管理已并入「商品与价格」合并页。
         Assert.Contains(
             posAdminMenu.Children!,
             item =>
-                item.Path == "/pos-admin/products"
-                && item.Permission == Permissions.PosProducts.View
+                item.Path == "/pos-admin/products-pricing"
+                && item.AnyPermissions!.Contains(Permissions.PosProducts.View)
         );
     }
 
@@ -998,7 +1061,28 @@ public class NavigationServiceTests
         var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.Cash.OverviewView)));
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Equal(new[] { "/pos-admin/store-cash" }, posAdmin.Children!.Select(item => item.Path));
+        // 现金管理已并入「结算与现金」合并页；页内只显示有权限的标签。
+        Assert.Equal(new[] { "/pos-admin/settlement-cash" }, posAdmin.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void BuildMenu_只有预订单下单入口也能进后台且只看到下单页()
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.SupplierPreorder.Order)));
+
+        var group = Assert.Single(menu, item => item.Path == "/seasonal-preorders");
+        Assert.Equal(new[] { "/supplier-preorder-ordering" }, group.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void BuildMenu_预订单管理权限看到下单页订单表与下单人员授权()
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.SupplierPreorder.Manage)));
+
+        var group = Assert.Single(menu, item => item.Path == "/seasonal-preorders");
+        Assert.Equal(
+            new[] { "/supplier-preorder-ordering", "/supplier-preorders", "/supplier-preorders/orderers" },
+            group.Children!.Select(item => item.Path));
     }
 
     [Fact]
@@ -1009,8 +1093,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(43, menu.Count);
+        Assert.Equal(46, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
         Assert.Contains(menu, item => item.RouteName == "face-match-settings");
@@ -1035,8 +1120,10 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.RouteName == "employee-profile");
         Assert.Contains(menu, item => item.RouteName == "device-management");
         Assert.Contains(menu, item => item.RouteName == "reports");
+        Assert.Contains(menu, item => item.RouteName == "traffic-stats");
         Assert.Contains(menu, item => item.RouteName == "attendance-personal");
         Assert.Contains(menu, item => item.RouteName == "attendance-management");
+        Assert.Contains(menu, item => item.RouteName == "attendance-hours");
         Assert.Contains(menu, item => item.RouteName == "seasonal-cards");
         Assert.Contains(menu, item => item.RouteName == "advertisements");
         Assert.Contains(menu, item => item.RouteName == "promotions");
@@ -1350,6 +1437,29 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅凭客流统计查看权限可见客流统计入口()
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceMatch.Traffic.View)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "traffic-stats");
+        Assert.Equal("tabs.trafficStats", item.TitleKey);
+        Assert.Equal("chart-line", item.Icon);
+        Assert.Equal(Permissions.FaceMatch.Traffic.View, item.Permission);
+        // 独立入口：不顺带打开人脸比对合并入口；没有该权限则看不到客流统计。
+        Assert.DoesNotContain(menu, entry => entry.RouteName == "face-hub");
+        Assert.DoesNotContain(_service.BuildAppMenu(CreateUser()), entry => entry.RouteName == "traffic-stats");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含客流统计()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "traffic-stats");
+        }
+    }
+
+    [Fact]
     public void BuildAppMenu_ShowsAdvertisementsWithAdvertisementViewPermission()
     {
         var user = CreateUser(new Claim("permission", Permissions.Advertisements.View));
@@ -1396,6 +1506,30 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅凭查看管理分店打卡权限可见工时统计入口()
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Punch.ViewManagedStore)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "attendance-hours");
+        Assert.Equal("tabs.attendanceHours", item.TitleKey);
+        Assert.Equal("clock-outline", item.Icon);
+        Assert.Equal(Permissions.Attendance.Punch.ViewManagedStore, item.Permission);
+        // 只有审核权限、没有查看打卡权限的账号看不到工时统计。
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore))),
+            entry => entry.RouteName == "attendance-hours");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含工时统计()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "attendance-hours");
+        }
+    }
+
+    [Fact]
     public void BuildAppMenu_HidesAttendanceRoutesWithoutAttendancePermissions()
     {
         var user = CreateUser(new Claim("permission", Permissions.Orders.View));
@@ -1404,6 +1538,7 @@ public class NavigationServiceTests
 
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-personal");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-management");
+        Assert.DoesNotContain(menu, item => item.RouteName == "attendance-hours");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance");
     }
 
@@ -1673,6 +1808,29 @@ public class NavigationServiceTests
                 menu => menu.RouteName == "daily-closes"
             );
         }
+    }
+
+    [Fact]
+    public void BuildAppMenu_自动价格策略仅凭查看权限可见()
+    {
+        var viewer = CreateUser(new Claim("permission", Permissions.PricingStrategy.View));
+        var item = Assert.Single(_service.BuildAppMenu(viewer), menu => menu.RouteName == "pricing-strategies");
+        Assert.Equal("tabs.pricingStrategies", item.TitleKey);
+
+        // 只有编辑权限、改价任务权限、分店商品权限都不能单独打开入口（与 Web 菜单同口径：入口只认 View）。
+        foreach (var permission in new[]
+                 {
+                     Permissions.PricingStrategy.Edit,
+                     Permissions.StoreProducts.PriceUpdates,
+                     Permissions.StoreProducts.View,
+                 })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+                menu => menu.RouteName == "pricing-strategies"
+            );
+        }
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), menu => menu.RouteName == "pricing-strategies");
     }
 
     [Fact]

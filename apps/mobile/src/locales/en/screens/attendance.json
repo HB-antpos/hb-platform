@@ -293,6 +293,177 @@
     "mealBreakDetail": "Rostered meal breaks {{expected}}, recorded {{recorded}}",
     "mealBreakValidation": {
       "remarkRequired": "A review note is required to reject a missed meal break claim."
+    },
+    "board": {
+      "tabPending": "Pending",
+      "tabProcessed": "Done",
+      "reconcile": {
+        "created": "Rosters for the last {{days}} days were checked when you opened this: {{items}} added",
+        "none": "Rosters for the last {{days}} days were checked when you opened this. Nothing new.",
+        "failed": "Couldn't check rosters this time, so new missing clock-outs or overtime may not be listed yet. Pull down to retry.",
+        "missingClockOut_one": "{{count}} missing clock-out",
+        "missingClockOut_other": "{{count}} missing clock-outs",
+        "overtime_one": "{{count}} overtime",
+        "overtime_other": "{{count}} overtime"
+      },
+      "filters": {
+        "PunchAdjustment": "Corrections",
+        "Overtime": "Overtime",
+        "MissingClockOut": "Missing clock-out",
+        "MealBreak": "Meal break",
+        "Leave": "Leave",
+        "Punch": "Punch",
+        "PublicHolidayPay": "Public holiday"
+      },
+      "weekdayDate": "{{weekday}} {{day}}/{{month}}",
+      "weekdays": {
+        "0": "Mon",
+        "1": "Tue",
+        "2": "Wed",
+        "3": "Thu",
+        "4": "Fri",
+        "5": "Sat",
+        "6": "Sun"
+      },
+      "itemCount_one": "{{count}} item",
+      "itemCount_other": "{{count}} items",
+      "noDate": "No date",
+      "tierRate": {
+        "weekday": "Weekday rate",
+        "saturday": "Saturday rate",
+        "sunday": "Sunday rate",
+        "publicHoliday": "Public holiday rate"
+      },
+      "tierBy": {
+        "weekday": "weekday rate",
+        "saturday": "Saturday rate",
+        "sunday": "Sunday rate",
+        "publicHoliday": "public holiday rate"
+      },
+      "submitted": {
+        "justNow": "Just now",
+        "minutes_one": "{{count}} min ago",
+        "minutes_other": "{{count}} min ago",
+        "hours_one": "{{count}} hr ago",
+        "hours_other": "{{count}} hrs ago",
+        "yesterday": "Yesterday {{time}}",
+        "date": "{{day}}/{{month}} {{time}}"
+      },
+      "roleStaff": "Staff",
+      "roleManager": "Manager",
+      "employmentTypes": {
+        "FullTime": "Full-time",
+        "PartTime": "Part-time",
+        "Casual": "Casual"
+      },
+      "scheduleWindow": "Roster {{start}}–{{end}}",
+      "selfName": "{{name}} (you)",
+      "punchCard": {
+        "ClockIn": "Clock-in",
+        "ClockOut": "Clock-out"
+      },
+      "addPunchCard": "Add {{punch}} ",
+      "autoTime": "{{time}} auto",
+      "reasonLine": "Reason: {{reason}}",
+      "approve": "Approve",
+      "overtimeCardLine": "{{minutes}} min over the roster. Choose how much to approve.",
+      "overtimeApprovedLine": "{{candidate}} min claimed, {{approved}} min approved",
+      "openDetail": {
+        "overtime": "Review timeline",
+        "missingClockOut": "Enter actual finish time",
+        "sickLeave": "Review certificate"
+      },
+      "result": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "other": "Done"
+      },
+      "reviewedBy": "Reviewed by {{name}}",
+      "processedEmpty": "Nothing reviewed recently",
+      "selfReview": {
+        "tag": "Self-review",
+        "recorded": "Self-approved",
+        "locked": "Your own request. Another manager at this store needs to review it.",
+        "approve": "Approve my own",
+        "confirmTitle": "Approve your own request?",
+        "confirmMessage": "This will be recorded as a self-approval and can be filtered on the web.",
+        "confirmAction": "Approve"
+      },
+      "statusPending": "Pending",
+      "statusNeedsAction": "Action needed",
+      "systemGenerated": "Auto-created",
+      "overtimeTitle": "Overtime review",
+      "dayPunches": "Punches that day",
+      "segmentLimit": "{{count}} of {{limit}} segments",
+      "timelineSchedule": "Roster",
+      "timelineActual": "Actual",
+      "timelineUnavailable": "Couldn't find punches for this shift. It may have been deleted or moved.",
+      "gapCountsAsMeal": "{{minutes}} min gap, counted as 1 meal break",
+      "statSchedule": "Roster",
+      "statWorked": "Worked",
+      "statCandidate": "Possible overtime",
+      "minutesValue": "{{minutes}} min",
+      "approveMinutesTitle": "Minutes to approve",
+      "overtimeSplit": "Early {{early}} + late {{late}}, in 15-min steps",
+      "roundTo15": "In 15-min steps",
+      "remarkWhenReduced": "Note (required if less than {{minutes}} min)",
+      "approveMinutes": "Approve {{minutes}} min",
+      "storeTime": "Store time",
+      "missingClockOut": {
+        "title": "Missing clock-out",
+        "cardLine": "Clocked in {{time}}, auto clocked out at midnight",
+        "cardLineNoTime": "Auto clocked out at midnight",
+        "cardHint": "Enter the actual finish time to close this",
+        "alertTitle": "Auto clocked out at {{time}}",
+        "alertBody": "{{name}} clocked in at {{time}} on {{date}} but didn't scan out. Auto clock-out time isn't paid, so enter when they actually finished.",
+        "legend": "Blue: paid up to the time you enter. Red dashes: auto clock-out period (not paid).",
+        "actualTitle": "Actual finish time",
+        "reasonPlaceholder": "Reason (required), e.g. left after closing at 9:30 pm",
+        "reasonRequired": "Please add a reason first",
+        "previewReason": "Manager entered actual finish time",
+        "previewWorked": "Worked {{worked}} · meal break {{meal}} min",
+        "previewPaid": "Paid {{paid}}",
+        "previewPending": "Working out hours…",
+        "needsAdjustPermission": "You can't edit punches, so you can only choose “Don't pay this”.",
+        "exclude": "Don't pay this",
+        "resolve": "Clock out at {{time}} and close",
+        "resolved": "Clocked out at {{time}} and closed"
+      },
+      "sick": {
+        "title": "Sick leave review",
+        "submittedAt": "Submitted {{day}}/{{month}} {{time}}",
+        "dayAfter_one": "{{count}} day after falling sick",
+        "dayAfter_other": "{{count}} days after falling sick",
+        "datesTitle": "Sick days",
+        "noSchedule": "Not rostered",
+        "dayPunch": "Punches that day",
+        "none": "None",
+        "punched": "Clocked in",
+        "paidHours": "Paid hours",
+        "certificateTitle": "Medical certificate",
+        "tapToZoom": "Tap to enlarge",
+        "openPhoto": "Open certificate photo {{index}}",
+        "photoCount_one": "{{count}} certificate photo",
+        "photoCount_other": "{{count}} certificate photos",
+        "takenAt": "Taken {{day}}/{{month}} {{time}}",
+        "note": "Note: {{note}}",
+        "noCertificate": "No certificate photo",
+        "checkWithin_one": "Submitted within {{count}} day",
+        "checkWithin_other": "Submitted within {{count}} days",
+        "checkScheduled": "Rostered that day, no punches",
+        "remarkPlaceholder": "Review note (required to reject), e.g. certificate is unreadable, please retake",
+        "rejectReasonRequired": "Add a reason to reject, e.g. “Certificate is unreadable, please retake”.",
+        "approve": "Approve {{hours}} paid sick leave"
+      },
+      "holidayPay": {
+        "cardLine": "Not rostered on {{holiday}} ({{day}}/{{month}})",
+        "historyLine": "Rostered on this weekday {{count}} times in the last {{weeks}} weeks. Pay for the public holiday?",
+        "confirmedLine": "Confirmed {{hours}}",
+        "hoursLabel": "Paid hours",
+        "notApplicable": "Not applicable",
+        "confirm": "Confirm {{hours}} h",
+        "invalidHours": "Hours must be more than 0 and no more than 24"
+      }
     }
   },
   "holidayManagement": {
@@ -603,7 +774,10 @@
   "leaveTypes": {
     "AnnualLeave": "Annual leave",
     "SickLeave": "Sick leave",
-    "PublicHoliday": "Public holiday"
+    "PublicHoliday": "Public holiday",
+    "PaidSick": "Paid sick leave",
+    "PaidAnnual": "Annual leave",
+    "AnnualCashOut": "Annual leave cash-out"
   },
   "sourceTypes": {
     "Punch": "Punch",
@@ -611,7 +785,8 @@
     "PunchAdjustment": "Punch correction",
     "Overtime": "Overtime",
     "MissingClockOut": "Missing clock-out",
-    "MealBreak": "Meal break"
+    "MealBreak": "Meal break",
+    "PublicHolidayPay": "Public holiday pay"
   },
   "statuses": {
     "Normal": "Normal",
@@ -669,6 +844,9 @@
     "qrNetworkRequired": "Your phone must be online to submit a QR punch.",
     "qrCameraPermissionRequired": "Camera access is required to scan the attendance QR code.",
     "qrDayComplete": "Today's clock-in and clock-out are already complete.",
+    "punchTypeMismatch": "Your clock status has changed (you are already clocked in or out). Refresh and scan again.",
+    "punchTypeMismatchAlreadyIn": "You are already clocked in, so this scan would clock you out. Refresh and scan again.",
+    "punchTypeMismatchAlreadyOut": "You are already clocked out, so this scan would clock you in. Refresh and scan again.",
     "punchVerificationSentForReview": "Location or network check incomplete. The punch was submitted for manual review.",
     "locationRequiredForPunch": "Your current precise location is needed to clock in or out. Allow location access and try again.",
     "backgroundLocationRequiredForClockIn": "Location access is required during an active shift for attendance verification. Allow location access and try again.",

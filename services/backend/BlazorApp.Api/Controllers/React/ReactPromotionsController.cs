@@ -48,6 +48,29 @@ namespace BlazorApp.Api.Controllers.React
             return Ok(res);
         }
 
+        [HttpGet("store/status-counts")]
+        [Authorize(Policy = Permissions.Promotions.View)]
+        public async Task<ActionResult<ApiResponse<PromotionStoreStatusCountsDto>>> StoreStatusCounts(
+            [FromQuery] string storeCode,
+            [FromQuery] string? keyword
+        )
+        {
+            var res = await _service.GetStoreStatusCountsAsync(storeCode, keyword);
+            return Ok(res);
+        }
+
+        // 商品查询页「本商品促销」：当前分店相关、未结束（含未开始、已停用）的促销，带范围与可编辑标记。
+        [HttpGet("store/by-product")]
+        [Authorize(Policy = Permissions.Promotions.View)]
+        public async Task<ActionResult<ApiResponse<System.Collections.Generic.List<PromotionListDto>>>> StoreProductPromotions(
+            [FromQuery] string productCode,
+            [FromQuery] string storeCode
+        )
+        {
+            var res = await _service.GetStoreProductPromotionsAsync(productCode, storeCode);
+            return Ok(res);
+        }
+
         [HttpGet("store/{id}")]
         [Authorize(Policy = Permissions.Promotions.View)]
         public async Task<ActionResult<ApiResponse<PromotionDetailDto>>> GetStorePromotion(

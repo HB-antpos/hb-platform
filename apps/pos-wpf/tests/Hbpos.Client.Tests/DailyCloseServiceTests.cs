@@ -230,6 +230,112 @@ public sealed class DailyCloseServiceTests
     }
 
     [Fact]
+    public async Task SaveAsync_rejects_and_does_not_persist_when_sales_changed_after_the_snapshot()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var orderRepository = new LocalOrderRepository(store);
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+            var session = CreateSession();
+            var businessDate = new DateTime(2026, 5, 28);
+
+            await schema.InitializeAsync();
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 9, 0, 0), 20m,
+                [CreateLine("SKU-S1", "S1", 1m, 20m)],
+                [CreatePayment(PaymentMethodKind.Cash, 20m)]));
+
+            // 收银员点钞时看到的汇总快照。
+            var snapshot = await service.LoadReportAsync(session, businessDate);
+
+            // 点钞期间又入账一笔 7.99 的现金销售（现金进位 +0.01）。
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 9, 30, 0), 7.99m,
+                [CreateLine("SKU-S2", "S2", 1m, 7.99m)],
+                [CreatePayment(PaymentMethodKind.Cash, 7.99m)]));
+
+            var changed = await Assert.ThrowsAsync<DailyCloseReportChangedException>(() =>
+                service.SaveAsync(session, businessDate, [Count(20m, 1)], snapshot));
+
+            // 抛出的最新汇总包含新订单；没有任何存档落库。
+            Assert.Equal(2, changed.LatestReport.OrderCount);
+            Assert.Equal(27.99m, changed.LatestReport.SystemCashAmount);
+            Assert.Empty(await service.GetArchivesAsync(session, businessDate));
+
+            // 用最新汇总作为快照再次保存即可成功，存档里的应有现金就是收银员刚核对过的那个数。
+            var archive = await service.SaveAsync(session, businessDate, [Count(20m, 1)], changed.LatestReport);
+            Assert.Equal(changed.LatestReport.ExpectedCashAmount, archive.Report.ExpectedCashAmount);
+            Assert.Single(await service.GetArchivesAsync(session, businessDate));
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_without_an_expected_snapshot_skips_the_consistency_check()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+            var session = CreateSession();
+
+            await schema.InitializeAsync();
+
+            var archive = await service.SaveAsync(session, new DateTime(2026, 5, 28), [Count(20m, 1)]);
+
+            Assert.Equal(20m, archive.CountedCashAmount);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public void HasSameFiguresAs_compares_order_count_and_cash_but_ignores_card_amounts()
+    {
+        var baseline = CreateReportForComparison(orderCount: 5, cashNet: 100m, cardNet: 50m, rounding: 0.02m);
+
+        Assert.True(baseline.HasSameFiguresAs(CreateReportForComparison(5, 100m, 50m, 0.02m)));
+        // 订单数变化（哪怕只多了刷卡单）、现金变化、现金进位变化都视为不一致。
+        Assert.False(baseline.HasSameFiguresAs(CreateReportForComparison(6, 100m, 50m, 0.02m)));
+        Assert.False(baseline.HasSameFiguresAs(CreateReportForComparison(5, 107.99m, 50m, 0.02m)));
+        Assert.False(baseline.HasSameFiguresAs(CreateReportForComparison(5, 100m, 50m, 0.03m)));
+        // 订单数与现金都不变时，刷卡金额不参与比较。
+        Assert.True(baseline.HasSameFiguresAs(CreateReportForComparison(5, 100m, 60m, 0.02m)));
+    }
+
+    private static DailyCloseReport CreateReportForComparison(int orderCount, decimal cashNet, decimal cardNet, decimal rounding)
+    {
+        return new DailyCloseReport(
+            new DateTime(2026, 5, 28),
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            "S001",
+            "POS-01",
+            "C001",
+            "Alice",
+            orderCount,
+            [
+                new DailyClosePaymentSummary(PaymentMethodKind.Cash, cashNet, 0m, cashNet, 1),
+                new DailyClosePaymentSummary(PaymentMethodKind.Card, cardNet, 0m, cardNet, 1)
+            ],
+            0m,
+            0m,
+            rounding);
+    }
+
+    [Fact]
     public async Task SaveAsync_persists_multiple_archives_and_cash_counts()
     {
         var databasePath = CreateTempDatabasePath();
@@ -321,7 +427,7 @@ public sealed class DailyCloseServiceTests
                 session,
                 new DateTime(2026, 5, 28),
                 [],
-                callerCancellation.Token);
+                cancellationToken: callerCancellation.Token);
 
             Assert.NotEqual(Guid.Empty, archive.DailyCloseGuid);
             Assert.True(callerCancellation.IsCancellationRequested);

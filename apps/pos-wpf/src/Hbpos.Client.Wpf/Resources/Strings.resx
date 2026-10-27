@@ -1218,7 +1218,7 @@
   <data name="cardRecovery.linkly.activeSessionApprovedOrderPending" xml:space="preserve"><value>The previous Linkly transaction was approved, but its order has not been saved yet. Recover that transaction in Card Recovery before taking another payment.</value></data>
   <data name="cardRecovery.linkly.activeSessionApprovedOrphan" xml:space="preserve"><value>The previous Linkly transaction was approved (the customer was charged) but this POS has no order for it. Do not charge again. Ask a supervisor to review it in Card Recovery.</value></data>
   <data name="cardRecovery.center.action.closeApprovedHandled" xml:space="preserve"><value>Refunded or handled elsewhere, close</value></data>
-  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the evidence field, then close this record here. A supervisor note is optional.</value></data>
+  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the supervisor note, then close this record here.</value></data>
   <data name="cardRecovery.payment.field.approvedEvidence" xml:space="preserve"><value>Refund or handling evidence (required, for example the refund reference)</value></data>
   <data name="cardRecovery.linkly.notPaidPaymentReferenceNotAllowed" xml:space="preserve"><value>Do not enter a payment reference when confirming that no payment was processed.</value></data>
   <data name="cardRecovery.linkly.supervisorNotPaidRestored" xml:space="preserve"><value>The bank confirmed that no payment was processed. The original order has been restored and can be paid again.</value></data>
@@ -1326,7 +1326,7 @@
   <data name="cardRecovery.refund.field.refundReference" xml:space="preserve"><value>Refund reference (when available)</value></data>
   <data name="cardRecovery.refund.field.evidence" xml:space="preserve"><value>Bank evidence (required when no refund was processed)</value></data>
   <data name="cardRecovery.refund.field.note" xml:space="preserve"><value>Supervisor note (required when waiting; reference or note required when refunded)</value></data>
-  <data name="cardRecovery.refund.section.squareInstructions" xml:space="preserve"><value>Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; confirm not refunded requires bank evidence; continue waiting requires a supervisor note.</value></data>
+  <data name="cardRecovery.refund.section.squareInstructions" xml:space="preserve"><value>Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; continue waiting requires a supervisor note.</value></data>
   <data name="cardRecovery.refund.field.squareRefundReference" xml:space="preserve"><value>Square refund reference (required when confirming refunded)</value></data>
   <data name="cardRecovery.refund.field.squareNote" xml:space="preserve"><value>Supervisor note (required when continuing to wait)</value></data>
   <data name="cardRecovery.refund.action.confirmRefunded" xml:space="preserve"><value>Confirmed refunded</value></data>
@@ -1348,8 +1348,8 @@
   <data name="cardRecovery.refund.confirmedTenderRestored" xml:space="preserve"><value>The confirmed card refund was restored. Complete the remaining refund methods without refunding this card again.</value></data>
   <data name="cardRecovery.refund.confirmedCompleted" xml:space="preserve"><value>The confirmed card refund was recovered and the return was saved.</value></data>
   <data name="cardRecovery.payment.section.title" xml:space="preserve"><value>Supervisor payment reconciliation</value></data>
-  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.</value></data>
-  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>Payment reference (when available)</value></data>
+  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>Check the bank result before unlocking this payment. Confirming paid or not paid only needs supervisor authorization. The payment reference and supervisor note are optional.</value></data>
+  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)</value></data>
   <data name="cardRecovery.payment.field.evidence" xml:space="preserve"><value>Bank evidence (required when confirming not paid)</value></data>
   <data name="cardRecovery.payment.field.note" xml:space="preserve"><value>Supervisor note (optional)</value></data>
   <data name="cardRecovery.payment.action.confirmPaid" xml:space="preserve"><value>Confirm paid</value></data>
@@ -1460,6 +1460,8 @@
   <data name="dailyClose.status.draftPreparing" xml:space="preserve"><value>Preparing a new daily close...</value></data>
   <data name="dailyClose.status.draftReady" xml:space="preserve"><value>New daily close ready for cash counting.</value></data>
   <data name="dailyClose.status.draftResumed" xml:space="preserve"><value>Daily close draft resumed.</value></data>
+  <data name="dailyClose.status.draftResumedRefreshed" xml:space="preserve"><value>Daily close draft resumed. Sales changed since it was opened - figures were refreshed, please check them.</value></data>
+  <data name="dailyClose.status.reportChanged" xml:space="preserve"><value>Sales changed while counting. Figures were refreshed and nothing was saved - check Expected Cash and the difference, then save again.</value></data>
   <data name="dailyClose.status.draftPreserved" xml:space="preserve"><value>Daily close draft preserved. Select Continue Daily Close when you are ready.</value></data>
   <data name="dailyClose.status.draftDiscarded" xml:space="preserve"><value>Daily close draft discarded.</value></data>
   <data name="dailyClose.status.draftIdentityChanged" xml:space="preserve"><value>The daily close draft was discarded because the store, terminal, or cashier changed.</value></data>
@@ -1753,6 +1755,12 @@ Logged with reference {2}</value></data>
   <data name="settings.restartPrompt.description" xml:space="preserve"><value>After daily close, remind to restart this POS when it has been running for 7 days or more.</value></data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Remind to restart after daily close</value></data>
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>The POS only restarts after the cashier confirms and every safety check passes. Saved for this device only.</value></data>
+  <data name="settings.scanner.title" xml:space="preserve"><value>Scanner sensitivity</value></data>
+  <data name="settings.scanner.description" xml:space="preserve"><value>A second read of the same barcode within this time is ignored, so one scan never adds an item twice.</value></data>
+  <data name="settings.scanner.help" xml:space="preserve"><value>Raise it if one scan adds an item twice; lower it if scanning two identical items quickly only adds one. Saved for this device only.</value></data>
+  <data name="settings.scanner.valueFormat" xml:space="preserve"><value>{0} ms</value></data>
+  <data name="settings.scanner.decrease" xml:space="preserve"><value>Decrease scanner repeat window</value></data>
+  <data name="settings.scanner.increase" xml:space="preserve"><value>Increase scanner repeat window</value></data>
   <data name="settings.restartTest.title" xml:space="preserve"><value>Restart computer (test)</value></data>
   <data name="settings.restartTest.help" xml:space="preserve"><value>Runs the same flow as the reminder after daily close: safety checks, a 30-second countdown you can cancel, then a real restart of this computer.</value></data>
   <data name="settings.restartTest.button" xml:space="preserve"><value>Restart computer</value></data>
@@ -1788,4 +1796,12 @@ Logged with reference {2}</value></data>
   <data name="pendingChoice.prompt.confirm.recall" xml:space="preserve"><value>Discard {0} and recall</value></data>
   <data name="pendingChoice.prompt.confirm.exit" xml:space="preserve"><value>Discard {0} and exit</value></data>
   <data name="pendingChoice.prompt.confirm.all" xml:space="preserve"><value>Discard {0}</value></data>
+  <data name="payment.card.completionStalled.message" xml:space="preserve"><value>The card payment was approved, but POS is taking too long to save the order. Do NOT charge the card again. Open card transaction recovery to finish the order.</value></data>
+  <data name="cardRecovery.payment.field.approvedNote" xml:space="preserve"><value>Supervisor note (required: how was the customer refunded or the payment handled?)</value></data>
+  <data name="cardRecovery.linkly.approvedExitNoteRequired" xml:space="preserve"><value>Enter a supervisor note describing how the customer was refunded or the payment was handled before closing this record.</value></data>
+  <data name="cardRecovery.v2.preset.paid.terminalSuccess" xml:space="preserve"><value>Terminal shows payment successful</value></data>
+  <data name="cardRecovery.v2.preset.paid.customerRecord" xml:space="preserve"><value>Customer showed payment record</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalFailed" xml:space="preserve"><value>Terminal shows failed</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalOffline" xml:space="preserve"><value>Terminal offline</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalStuck" xml:space="preserve"><value>Terminal stuck</value></data>
 </root>

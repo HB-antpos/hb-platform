@@ -25,11 +25,14 @@ public sealed partial class SettingsMobileAppDownloadXamlTests
     [Fact]
     public void The_page_is_only_visible_when_its_category_is_selected()
     {
+        // 页面根是 SettingsPageHost（带 Visibility 绑定），原页面内容（一个 Grid）整体作为它的 Content。
         var panel = Assert.Single(
-            LoadSettingsView().Descendants(Presentation + "Grid"),
+            LoadSettingsView().Descendants().Where(element => element.Name.LocalName == "SettingsPageHost"),
             element => ((string?)element.Attribute("Visibility") ?? string.Empty).Contains("IsMobileAppDownloadSelected", StringComparison.Ordinal));
+        Assert.Equal("{StaticResource SettingsPageHostStyle}", (string?)panel.Attribute("Style"));
 
-        var inner = Assert.Single(panel.Elements(Presentation + "Grid"));
+        var pageRoot = Assert.Single(panel.Elements(Presentation + "Grid"));
+        var inner = Assert.Single(pageRoot.Elements(Presentation + "Grid"));
         Assert.Equal("{Binding MobileAppDownload}", (string?)inner.Attribute("DataContext"));
     }
 

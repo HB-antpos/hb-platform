@@ -57,6 +57,10 @@
       "name": "审核管理分店考勤",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"
     },
+    "Attendance.Approval.ReviewSelf": {
+      "name": "审核本人考勤申请",
+      "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 持有者可审核自己提交的考勤申请，审核记录标记「本人审批」"
+    },
     "Attendance.Approval.ViewManagedStore": {
       "name": "查看管理分店审核记录",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"
@@ -88,6 +92,18 @@
     "Attendance.Leave.ViewManagedStore": {
       "name": "查看管理分店请假申请",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"
+    },
+    "Attendance.Payroll.Edit": {
+      "name": "编辑时薪、工资备注与提交锁定",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 新增时薪生效记录、填写工资备注与年假核定工时、提交并锁定发薪周期"
+    },
+    "Attendance.Payroll.Unlock": {
+      "name": "解锁已提交的发薪周期",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 解锁已提交的发薪周期（需填写原因，留操作记录）"
+    },
+    "Attendance.Payroll.View": {
+      "name": "查看工资表与时薪表",
+      "description": "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 查看工资表、个人时薪表"
     },
     "Attendance.Punch.AdjustManagedStore": {
       "name": "补卡与修改管理分店打卡",
@@ -236,6 +252,10 @@
     "LocalPurchase.View": {
       "name": "查看本地进货",
       "description": "Web 页面 /pos-admin/local-supplier-invoices 与移动端「进货单」- 查看分店进货单"
+    },
+    "Myob.Connection.Manage": {
+      "name": "管理 MYOB 连接",
+      "description": "Web 页面 /pos-admin/myob - 连接 / 断开 MYOB 公司文件、维护分店与公司文件的映射"
     },
     "OrderFront": {
       "name": "前台订货",
@@ -856,6 +876,14 @@
     "Warehouse.CancelPriceUpdateTasks": {
       "name": "撤销价格变更任务",
       "description": "Web 页面 /warehouse/products/price-update-tasks 与移动端「价格和标签」- 撤销未完成的分店价格变更任务（按商品覆盖所有分店；只取消提醒，不修改任何价格，不可恢复）。持有「管理仓库商品」的账号自动具备"
+    },
+    "SupplierPreorder.Manage": {
+      "name": "管理供应商节日预订单",
+      "description": "Web 页面 /supplier-preorders 与 /supplier-preorders/orderers - 导入 KFC、Dats、Brazco 等节日订单表，开启参与分店，维护下单人员授权，截止锁定并导出汇总（截止后仍可修改）；默认无人具备，管理员手动授权"
+    },
+    "SupplierPreorder.Order": {
+      "name": "供应商节日预订单下单",
+      "description": "Web 页面 /supplier-preorder-ordering - 预订单下单入口；能替哪家店下单只认「下单人员授权」页，不看可管理分店或店长身份；默认无人具备，管理员手动授权"
     }
   },
   "roles": {

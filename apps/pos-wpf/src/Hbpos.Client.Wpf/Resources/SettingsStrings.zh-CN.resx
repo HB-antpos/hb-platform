@@ -9,7 +9,6 @@
   <data name="settings.subtitle.paymentTerminal" xml:space="preserve"><value>&#x5237;&#x5361;&#x7EC8;&#x7AEF;&#x8BBE;&#x7F6E;</value></data>
   <data name="settings.subtitle.receiptPrinter" xml:space="preserve"><value>&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;&#x8BBE;&#x7F6E;</value></data>
   <data name="settings.subtitle.deviceRegistration" xml:space="preserve"><value>更换分店重新注册</value></data>
-  <data name="settings.category.title" xml:space="preserve"><value>&#x5206;&#x7C7B;</value></data>
   <data name="settings.category.dataMaintenance" xml:space="preserve"><value>&#x6570;&#x636E;&#x7EF4;&#x62A4;</value></data>
   <data name="settings.category.paymentTerminal" xml:space="preserve"><value>&#x652F;&#x4ED8;&#x7EC8;&#x7AEF;</value></data>
   <data name="settings.category.receiptPrinter" xml:space="preserve"><value>&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
@@ -41,7 +40,8 @@
   <data name="settings.square.direct.description" xml:space="preserve"><value>开启后，如果总部也为本门店打开了直连，收银机会直接和 Square 通信，刷卡更快。任何一步失败都会自动回落到原来的中转路径，并且不会重复扣款。退款和付款恢复始终走服务端。</value></data>
   <data name="settings.square.direct.turnOn" xml:space="preserve"><value>开启直连</value></data>
   <data name="settings.square.direct.turnOff" xml:space="preserve"><value>关闭直连</value></data>
-  <data name="settings.square.direct.refresh" xml:space="preserve"><value>刷新状态</value></data>
+  <data name="settings.square.direct.group" xml:space="preserve"><value>直连 Square</value></data>
+  <data name="settings.square.direct.refresh" xml:space="preserve"><value>刷新直连状态</value></data>
   <data name="settings.square.direct.local.on" xml:space="preserve"><value>本机开关：已开启</value></data>
   <data name="settings.square.direct.local.off" xml:space="preserve"><value>本机开关：已关闭</value></data>
   <data name="settings.square.direct.server.on" xml:space="preserve"><value>门店开关（总部）：已开启</value></data>
@@ -90,6 +90,9 @@
   <data name="settings.linkly.mode.cloudDirectSync.help" xml:space="preserve"><value>直接配对 Linkly Cloud，但 POS 侧只返回交易状态结果。</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync" xml:space="preserve"><value>Cloud 后端异步</value></data>
   <data name="settings.linkly.mode.cloudBackendAsync.help" xml:space="preserve"><value>走后端异步流程，支持 display、receipt、sendkey 和签名授权。保存该模式后，下一笔付款使用 Linkly 云后端，不使用 Square token。</value></data>
+  <data name="settings.linkly.mode.localIp.short" xml:space="preserve"><value>连接本机或局域网的 EFT-Client 网关</value></data>
+  <data name="settings.linkly.mode.cloudDirectSync.short" xml:space="preserve"><value>直连 Linkly Cloud，仅返回交易状态</value></data>
+  <data name="settings.linkly.mode.cloudBackendAsync.short" xml:space="preserve"><value>走后端异步流程，含签名授权等能力</value></data>
   <data name="settings.linkly.priority.title" xml:space="preserve"><value>连接优先级</value></data>
   <data name="settings.linkly.priority.primary" xml:space="preserve"><value>首选</value></data>
   <data name="settings.linkly.priority.fallback" xml:space="preserve"><value>兜底</value></data>
@@ -194,13 +197,13 @@
   <data name="settings.receiptPrinter.installmentTerms" xml:space="preserve"><value>分期条款</value></data>
   <data name="settings.receiptPrinter.termsHelp" xml:space="preserve"><value>每行一条；留空＝使用默认文案。</value></data>
   <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>客人小票附带银行收据</value></data>
-  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>关闭后客人小票只保留卡类型、卡号后四位和金额，不再附带整段刷卡银行收据，小票更短。签名单、拒付单和结算单照常打印。</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>关闭后只保留卡类型、卡号后四位和金额，小票更短；签名单、拒付单、结算单照常打印。</value></data>
   <data name="settings.receiptPrinter.noSaleDrawerRescan" xml:space="preserve"><value>无交易开钱箱需要再次扫码</value></data>
-  <data name="settings.receiptPrinter.noSaleDrawerRescan.help" xml:space="preserve"><value>开启后，点击「开钱箱」（没有交易时）每次都要扫一次授权员工条码确认，即使当前收银员自己有开钱箱权限。收现金后自动弹开的钱箱不受影响。默认关闭。</value></data>
+  <data name="settings.receiptPrinter.noSaleDrawerRescan.help" xml:space="preserve"><value>没有交易时点「开钱箱」，每次都要扫授权员工条码；收现金后自动弹开的钱箱不受影响。默认关闭。</value></data>
   <data name="settings.receiptPrinter.rescan.title" xml:space="preserve"><value>再次扫码确认</value></data>
   <data name="settings.receiptPrinter.rescan.help" xml:space="preserve"><value>开启后，对应操作即使当前收银员自己有权限，也要再扫一次授权员工条码。各开关默认都关闭，点保存后生效。</value></data>
   <data name="settings.receiptPrinter.returnsRescan" xml:space="preserve"><value>退货操作需要再次扫码</value></data>
-  <data name="settings.receiptPrinter.returnsRescan.help" xml:space="preserve"><value>开启后，点击侧栏「退款」进入退货页时，要先扫一次授权员工条码，扫码的员工需要有退货权限；进入退货页后的加行、确认退货不再重复扫码。默认关闭。</value></data>
+  <data name="settings.receiptPrinter.returnsRescan.help" xml:space="preserve"><value>点侧栏「退款」进入退货页前先扫授权员工条码（该员工需有退货权限）；页内加行、确认退货不再重复扫码。默认关闭。</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>&#x4FDD;&#x5B58;&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>&#x6D4B;&#x8BD5;&#x6253;&#x5370;</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>&#x4ECE;&#x5206;&#x5E97;&#x8D44;&#x6599;&#x8F7D;&#x5165;</value></data>
@@ -294,6 +297,14 @@
   <data name="settings.serverAddress.blocked.deviceActivation" xml:space="preserve"><value>请先完成待恢复的设备开通，再切换服务器。</value></data>
   <data name="settings.serverAddress.blocked.sync" xml:space="preserve"><value>请先处理所有待上传、失败或同步中的订单，再切换服务器。</value></data>
   <data name="settings.serverAddress.blocked.audit" xml:space="preserve"><value>请等待操作审计记录上传完成，再切换服务器。</value></data>
+  <data name="settings.serverAddress.entry.line" xml:space="preserve"><value>总部设置的首选入口：{0} · 当前实际入口：{1}{2}</value></data>
+  <data name="settings.serverAddress.entry.preferred" xml:space="preserve"><value>总部设置的首选入口</value></data>
+  <data name="settings.serverAddress.entry.current" xml:space="preserve"><value>当前实际入口</value></data>
+  <data name="settings.serverAddress.entry.fallbackChip" xml:space="preserve"><value>回退中</value></data>
+  <data name="settings.serverAddress.entry.fallback" xml:space="preserve"><value> · 回退中</value></data>
+  <data name="settings.serverAddress.entry.edge" xml:space="preserve"><value>EdgeOne（pos.hotbargain.vip）</value></data>
+  <data name="settings.serverAddress.entry.aws" xml:space="preserve"><value>AWS 悉尼（pos-syd.hotbargain.vip）</value></data>
+  <data name="settings.serverAddress.entry.direct" xml:space="preserve"><value>直连（hotbargain.vip）</value></data>
   <data name="settings.linkly.cloudBackend.credentialsManagedByWeb" xml:space="preserve"><value>Cloud 用户名和密码由 Web 管理后台统一维护；当前 POS 只接收不含凭据的安全终端列表。</value></data>
   <data name="settings.linkly.cloudBackend.terminal" xml:space="preserve"><value>刷卡机</value></data>
   <data name="settings.linkly.cloudBackend.refresh" xml:space="preserve"><value>刷新</value></data>
@@ -311,6 +322,11 @@
   <data name="settings.remoteMaintenance.restore" xml:space="preserve"><value>检查并恢复</value></data>
   <data name="settings.remoteMaintenance.localStatus" xml:space="preserve"><value>本机服务状态</value></data>
   <data name="settings.remoteMaintenance.installHint" xml:space="preserve"><value>无需单独安装 RustDesk。① 点击“安装远程维护”。② 等待检查和下载完成。③ 在每次 Windows 授权窗口中选择“是”（如有提示，请输入管理员凭据）。请保持 POS 打开，直到提示配置完成。</value></data>
+  <data name="settings.remoteMaintenance.installHint.intro" xml:space="preserve"><value>无需单独安装 RustDesk。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step1" xml:space="preserve"><value>点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step2" xml:space="preserve"><value>等待检查和下载完成。</value></data>
+  <data name="settings.remoteMaintenance.installHint.step3" xml:space="preserve"><value>在每次 Windows 授权窗口中选择“是”（如有提示，请输入管理员凭据）。</value></data>
+  <data name="settings.remoteMaintenance.installHint.keepOpen" xml:space="preserve"><value>请保持 POS 打开，直到提示配置完成。</value></data>
   <data name="settings.remoteMaintenance.progress.preparing" xml:space="preserve"><value>正在获取远程维护安装信息，请稍候…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingRustDesk" xml:space="preserve"><value>正在后台下载并校验 RustDesk（1/2）…</value></data>
   <data name="settings.remoteMaintenance.progress.downloadingStatusAgent" xml:space="preserve"><value>正在后台下载并校验状态服务（2/2）…</value></data>
@@ -595,6 +611,7 @@
   <data name="settings.autosave.section.failed" xml:space="preserve"><value>未保存</value></data>
   <data name="settings.autosave.section.draft" xml:space="preserve"><value>已修改，尚未生效</value></data>
   <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>日结后提醒重启</value></data>
+  <data name="settings.autosave.section.scanner" xml:space="preserve"><value>扫码枪灵敏度</value></data>
   <data name="settings.autosave.section.paymentMethods" xml:space="preserve"><value>付款方式</value></data>
   <data name="settings.autosave.section.square" xml:space="preserve"><value>Square</value></data>
   <data name="settings.autosave.section.linkly" xml:space="preserve"><value>ANZ Linkly</value></data>

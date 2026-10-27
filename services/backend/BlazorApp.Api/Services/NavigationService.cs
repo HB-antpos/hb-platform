@@ -75,18 +75,18 @@ namespace BlazorApp.Api.Services
                 Children = new List<NavigationMenuDto>
                 {
                     new() { Path = "/system/stores",   TitleKey = "menu.systemStores",      Icon = "ShopOutlined",    Permission = Permissions.Stores.View },
-                    // Web 用户管理菜单只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
-                    new() { Path = "/system/users",    TitleKey = "menu.systemUsers",       Icon = "UserOutlined",     Permission = Permissions.Users.ViewWebConsole },
-                    new() { Path = "/system/employee-profiles", TitleKey = "menu.employeeProfiles", Icon = "IdcardOutlined", Permission = Permissions.EmployeeProfiles.View },
-                    new() { Path = "/system/roles",    TitleKey = "menu.systemRoles",       Icon = "TeamOutlined",     Permission = Permissions.Roles.View },
-                    new() { Path = "/system/permissions", TitleKey = "menu.systemPermissions", Icon = "KeyOutlined", Permission = Permissions.Roles.View },
-                    new() { Path = "/system/invoice-email-settings", TitleKey = "menu.invoiceEmailSettings", Icon = "SettingOutlined", Permission = Permissions.System.ManageSettings },
-                    new() { Path = "/system/payment-terminal-settings", TitleKey = "menu.paymentTerminalSettings", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
-                    new() { Path = "/system/emergency-login-keys", TitleKey = "menu.emergencyLoginKeys", Icon = "KeyOutlined", Permission = Permissions.System.ManageSettings },
-                    new() { Path = "/system/face-cameras", TitleKey = "menu.faceCameras", Icon = "VideoCameraOutlined", Permission = Permissions.FaceCapture.Cameras.Manage },
-                    // 人脸比对：五个独立权限，任一即可见入口，页内再按各自权限显示页签。
-                    new() { Path = "/system/face-match", TitleKey = "menu.faceMatch", Icon = "SafetyCertificateOutlined", AnyPermissions = new List<string> { Permissions.FaceMatch.Manage, Permissions.FaceMatch.Traffic.View, Permissions.FaceMatch.Unwelcome.Manage, Permissions.FaceMatch.Unwelcome.Approve, Permissions.FaceMatch.Unwelcome.Review } },
-                    new() { Path = "/system/device-registration", TitleKey = "menu.deviceRegistration", Icon = "BuildOutlined", Permission = Permissions.DeviceRegistration.View },
+                    // 合并页（一个菜单 + 页内标签）：菜单项为合并页地址，任一标签权限即可见；标签仍是原页面，地址与权限不变，
+                    // 页内按各标签原权限显示（与 Web routes.tsx 的 *_NAV_GROUP 保持一致）。仅管理员的标签（RustDesk 远程维护、Linkly 结算）不列权限码。
+                    // 设备与远程：设备管理 / 紧急登录密钥 / RustDesk 远程维护。
+                    new() { Path = "/system/devices", TitleKey = "menu.groupDevicesRemote", Icon = "BuildOutlined", AnyPermissions = new List<string> { Permissions.DeviceRegistration.View, Permissions.System.ManageSettings } },
+                    // 账号与权限：员工个人信息 / 用户 / 角色 / 权限。Web 用户管理只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
+                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.View, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
+                    // 系统监控：中心日志 / 性能质量基线 / 定时统计任务。
+                    new() { Path = "/system/monitoring", TitleKey = "menu.groupMonitoring", Icon = "FileTextOutlined", AnyPermissions = new List<string> { Permissions.System.ViewLogs, Permissions.System.ViewPerformanceBaseline, Permissions.System.ManageScheduledTasks } },
+                    // 支付与发票：支付终端配置 / 发票邮箱配置。
+                    new() { Path = "/system/payments-invoices", TitleKey = "menu.groupPaymentsInvoices", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
+                    // 人脸识别：人脸抓拍摄像机 / 人脸比对（比对五个独立权限，任一即可见，页内再按各自权限显示页签）。
+                    new() { Path = "/system/face-recognition", TitleKey = "menu.groupFaceRecognition", Icon = "VideoCameraOutlined", AnyPermissions = new List<string> { Permissions.FaceCapture.Cameras.Manage, Permissions.FaceMatch.Manage, Permissions.FaceMatch.Traffic.View, Permissions.FaceMatch.Unwelcome.Manage, Permissions.FaceMatch.Unwelcome.Approve, Permissions.FaceMatch.Unwelcome.Review } },
                     // 版本发布中心：App 原生 / OTA 与 WPF 安装包合并为一页，旧 /system/wpf-versions 由 Web 重定向到其 WPF 终端。
                     new() { Path = "/system/app-downloads", TitleKey = "menu.appDownloads", Icon = "QrcodeOutlined", Permission = Permissions.System.ViewAppDownloads },
                 },
@@ -124,6 +124,19 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 供应商节日预订单：下单入口给被授权的下单人员，管理两页只认 SupplierPreorder.Manage。
+                Path = "/seasonal-preorders",
+                TitleKey = "menu.seasonalPreorders",
+                Icon = "GiftOutlined",
+                Children = new List<NavigationMenuDto>
+                {
+                    new() { Path = "/supplier-preorder-ordering", TitleKey = "menu.supplierPreorderOrdering", Icon = "ShoppingCartOutlined", AnyPermissions = new List<string> { Permissions.SupplierPreorder.Order, Permissions.SupplierPreorder.Manage } },
+                    new() { Path = "/supplier-preorders", TitleKey = "menu.supplierPreorders", Icon = "FileExcelOutlined", Permission = Permissions.SupplierPreorder.Manage },
+                    new() { Path = "/supplier-preorders/orderers", TitleKey = "menu.supplierPreorderOrderers", Icon = "TeamOutlined", Permission = Permissions.SupplierPreorder.Manage },
+                },
+            },
+            new()
+            {
                 Path = "/executive-sales-intelligence",
                 TitleKey = "menu.executiveSalesIntelligence",
                 Icon = "BarChartOutlined",
@@ -149,22 +162,23 @@ namespace BlazorApp.Api.Services
                 Children = new List<NavigationMenuDto>
                 {
                     new() { Path = "/pos-admin/suppliers",              TitleKey = "menu.suppliers",              Icon = "ShopOutlined",               Permission = Permissions.AustralianSuppliers.View },
-                    new() { Path = "/pos-admin/products",              TitleKey = "menu.productManagement",      Icon = "AppstoreOutlined",           Permission = Permissions.PosProducts.View },
-                    new() { Path = "/pos-admin/store-product-price",   TitleKey = "menu.storeProductPrice",      Icon = "DollarOutlined",             Permission = Permissions.StoreProducts.View },
-                    new() { Path = "/pos-admin/pricing-strategies",    TitleKey = "menu.pricingStrategies",      Icon = "FileTextOutlined",           Permission = Permissions.PricingStrategy.View },
-                    new() { Path = "/pos-admin/promotions",            TitleKey = "menu.promotions",             Icon = "GiftOutlined",               Permission = Permissions.Promotions.View },
+                    // 商品与价格：商品管理 / 分店商品价格 / 自动价格策略 / 促销管理。
+                    new() { Path = "/pos-admin/products-pricing",      TitleKey = "menu.groupProductsPricing",   Icon = "AppstoreOutlined",           AnyPermissions = new List<string> { Permissions.PosProducts.View, Permissions.StoreProducts.View, Permissions.PricingStrategy.View, Permissions.Promotions.View } },
+                    // 结算与现金：日结记录（独立权限码，分店范围由查询接口收口）/ Linkly 结算记录（仅管理员）/ 现金管理（店长只见关联分店）。
+                    new() { Path = "/pos-admin/settlement-cash",       TitleKey = "menu.groupSettlementCash",    Icon = "MoneyCollectOutlined",       AnyPermissions = new List<string> { Permissions.DailyCloseRecords.View, Permissions.Cash.OverviewView } },
                     new() { Path = "/pos-admin/advertisements",        TitleKey = "menu.advertisements",         Icon = "PictureOutlined",            Permission = Permissions.Advertisements.View },
-                    new() { Path = "/pos-admin/cash-register-users",   TitleKey = "menu.cashRegisterUsers",      Icon = "UserOutlined",               Permission = Permissions.Store.ManageOperations },
+                    // 收银用户条码：Web 侧栏不再显示（路由保留，旧链接仍可打开）；移动端同名菜单不受影响。
                     // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
-                    new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
-                    // 日结记录：WPF / 手持 / iPad 上传的日结与现金盘点明细；独立权限码，分店范围由查询接口收口。
-                    new() { Path = "/pos-admin/daily-closes",          TitleKey = "menu.dailyCloses",            Icon = "MoneyCollectOutlined",       Permission = Permissions.DailyCloseRecords.View },
-                    // 分店现金管理：多店现金池总览、按日日结、存款与现金支出；店长只见关联分店，T2 受 14 天窗口限制。
-                    new() { Path = "/pos-admin/store-cash",           TitleKey = "menu.storeCash",              Icon = "AccountBookOutlined",        Permission = Permissions.Cash.OverviewView },
                     // 节日贺卡分店填报统计：总部查看全部分店的剩余贺卡填报；独立权限码，店长的填报 / 本店查看权限不能打开。
                     new() { Path = "/pos-admin/seasonal-card-stats",  TitleKey = "menu.seasonalCardStats",      Icon = "GiftOutlined",               Permission = Permissions.SeasonalCards.Remaining.ViewAllStores },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
+                    // 考勤审核工作台：与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
+                    new() { Path = "/pos-admin/attendance-review",     TitleKey = "menu.attendanceReview",       Icon = "FileDoneOutlined",           Permission = Permissions.Attendance.Approval.ReviewManagedStore },
+                    // 工时与工资：工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View，任一即可见（页内再按各自权限显示页签）。
+                    new() { Path = "/pos-admin/attendance-payroll",    TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View } },
+                    // MYOB 对接：连接 MYOB 公司文件、分店映射；独立权限码，默认不授予任何角色。
+                    new() { Path = "/pos-admin/myob",                  TitleKey = "menu.myob",                   Icon = "LinkOutlined",               Permission = Permissions.Myob.Connection.Manage },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
@@ -310,6 +324,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "pricing-strategies",
+                TitleKey = "tabs.pricingStrategies",
+                Icon = "chart-bell-curve-cumulative",
+                // 移动端「自动价格策略」：与 Web /pos-admin/pricing-strategies 同一对权限码；入口只认 View，
+                // 新建 / 修改 / 删除 / 启停由接口按 PricingStrategy.Edit 再校验。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.PricingStrategy.View,
+                Order = 50,
+            },
+            new()
+            {
                 RouteName = "product-insights",
                 TitleKey = "tabs.productInsights",
                 Icon = "chart-timeline-variant",
@@ -374,6 +398,16 @@ namespace BlazorApp.Api.Services
                 Icon = "calendar-clock",
                 Permission = Permissions.Attendance.Schedule.ViewStore,
                 AnyPermissions = AttendanceManagementPermissions,
+                Order = 56,
+            },
+            new()
+            {
+                RouteName = "attendance-hours",
+                TitleKey = "tabs.attendanceHours",
+                Icon = "clock-outline",
+                // 移动端店长「工时统计」：与 Web 工时页签同用 Punch.ViewManagedStore，接口再按管理分店校验；
+                // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.Attendance.Punch.ViewManagedStore,
                 Order = 56,
             },
             new()
@@ -564,6 +598,16 @@ namespace BlazorApp.Api.Services
                 Icon = "chart-box-outline",
                 // 移动端报告入口承载营业额和商品报告；ProductMovementView 兼容 Reports.View。
                 Permission = Permissions.Reports.ProductMovementView,
+                Order = 59,
+            },
+            new()
+            {
+                RouteName = "traffic-stats",
+                TitleKey = "tabs.trafficStats",
+                Icon = "chart-line",
+                // 移动端「客流统计」：只展示门店计数（进店人次 / 估算访客），不含任何生物信息；
+                // 与 Web 客流统计共用 FaceMatch.Traffic.View，接口再按门店归属校验。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.FaceMatch.Traffic.View,
                 Order = 59,
             },
             new()
@@ -848,8 +892,13 @@ namespace BlazorApp.Api.Services
                 Permissions.Cash.OverviewView,
                 // 节日贺卡分店填报统计：只有该权限的总部账号也要能拿到后台菜单。
                 Permissions.SeasonalCards.Remaining.ViewAllStores,
+                // 供应商节日预订单：只有下单入口或管理权限的店长 / 采购也要能拿到后台菜单。
+                Permissions.SupplierPreorder.Order,
+                Permissions.SupplierPreorder.Manage,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
-                Permissions.DeviceRegistration.MobileActivationCodes.Manage
+                Permissions.DeviceRegistration.MobileActivationCodes.Manage,
+                // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
+                Permissions.Myob.Connection.Manage
             );
         }
 

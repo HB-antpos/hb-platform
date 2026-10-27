@@ -20,6 +20,8 @@ type WebPortalAccess = Pick<
   | 'canViewPerformanceBaseline'
   | 'canViewOperationAudits'
   | 'canViewDeviceRegistration'
+  | 'canManageSupplierPreorders'
+  | 'canOrderSupplierPreorders'
   | 'hasPermission'
 >
 
@@ -111,6 +113,9 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
       '/system/invoice-email-settings',
       '/system/payment-terminal-settings',
       '/system/emergency-login-keys',
+      // 合并页菜单地址：打开后落到第一个有权限的标签。
+      '/system/payments-invoices',
+      '/system/devices',
     ],
     canAccess: (access) => access.canManageSystemSettings,
   },
@@ -121,7 +126,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
   },
   {
     defaultPath: '/system/device-registration',
-    targetPrefixes: ['/system/device-registration'],
+    targetPrefixes: ['/system/device-registration', '/system/devices'],
     canAccess: (access) => access.canViewDeviceRegistration,
   },
   {
@@ -133,14 +138,20 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
   {
     // 日结记录：独立权限码，只有它的账号也要能进入后台；放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/pos-admin/daily-closes',
-    targetPrefixes: ['/pos-admin/daily-closes'],
+    targetPrefixes: ['/pos-admin/daily-closes', '/pos-admin/settlement-cash'],
     canAccess: (access) => access.hasPermission(P.DailyCloseRecords.View),
+  },
+  {
+    // 供应商节日预订单：只有下单入口或管理权限的账号（店长、采购）也能进后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/supplier-preorder-ordering',
+    targetPrefixes: ['/supplier-preorder-ordering', '/supplier-preorders'],
+    canAccess: (access) => access.canOrderSupplierPreorders || access.canManageSupplierPreorders,
   },
   {
     // 分店现金管理：只有 Cash.Overview.View 的店长 / 财务登录后直接落到现金管理页。
     // 放在既有入口之后，已有其他后台权限的组合用户继续沿用原默认入口。
     defaultPath: '/pos-admin/store-cash',
-    targetPrefixes: ['/pos-admin/store-cash'],
+    targetPrefixes: ['/pos-admin/store-cash', '/pos-admin/settlement-cash'],
     canAccess: (access) => access.hasPermission(P.Cash.OverviewView),
   },
   {
@@ -152,13 +163,19 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
   {
     // 人脸抓拍摄像机管理：只有该独立权限的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
     defaultPath: '/system/face-cameras',
-    targetPrefixes: ['/system/face-cameras'],
+    targetPrefixes: ['/system/face-cameras', '/system/face-recognition'],
     canAccess: (access) => access.hasPermission(P.FaceCapture.CamerasManage),
+  },
+  {
+    // MYOB 对接：只有 Myob.Connection.Manage 的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/pos-admin/myob',
+    targetPrefixes: ['/pos-admin/myob'],
+    canAccess: (access) => access.hasPermission(P.Myob.ConnectionManage),
   },
   {
     // 人脸比对：只有五个 FaceMatch.* 权限之一的账号也要能进入后台；放在摄像机管理之后，组合权限用户沿用原默认入口。
     defaultPath: '/system/face-match',
-    targetPrefixes: ['/system/face-match'],
+    targetPrefixes: ['/system/face-match', '/system/face-recognition'],
     canAccess: (access) =>
       access.hasPermission(P.FaceMatch.Manage) ||
       access.hasPermission(P.FaceMatch.Traffic.View) ||
@@ -169,7 +186,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
   {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
-    targetPrefixes: ['/system/performance-baseline'],
+    targetPrefixes: ['/system/performance-baseline', '/system/monitoring'],
     canAccess: (access) => access.canViewPerformanceBaseline,
   },
 ]

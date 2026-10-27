@@ -381,7 +381,7 @@ function isBilingualTranslationPair(value) {
     .trim();
   const languageText = text
     .replace(
-      /\b(?:API|AUD|App Store|Development Build|ETag|HB|HID|ID|iPadOS|iPad|iOS|Linkly|OPENITEM|PAN|Permissions(?:\.[A-Za-z]+)+|POS|QR|SQLCipher|Square|token|UUID|UTC|WPF|YYYY-MM-DD)\b/gu,
+      /\b(?:API|AUD|App Store|AWS|Development Build|EdgeOne|ETag|HB|HID|ID|iPadOS|iPad|iOS|Linkly|OPENITEM|PAN|Permissions(?:\.[A-Za-z]+)+|POS|QR|SQLCipher|Square|token|UUID|UTC|WPF|YYYY-MM-DD)\b/gu,
       "",
     )
     .trim();

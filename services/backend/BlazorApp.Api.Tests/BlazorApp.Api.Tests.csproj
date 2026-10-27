@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="StoreDiscountRateTests.cs" />
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
     <Compile Include="ProductImageDescriptionTests.cs" />
     <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
@@ -67,6 +68,7 @@
     <Compile Include="FaceMatchMaintenanceTests.cs" />
     <Compile Include="FaceTrafficTests.cs" />
     <Compile Include="FaceTrafficHourlyTests.cs" />
+    <Compile Include="FaceTrafficOverviewTests.cs" />
     <Compile Include="FaceMatchControllerTests.cs" />
     <Compile Include="FaceMatchSqlServerTests.cs" />
     <Compile Include="NotificationHubTests.cs" />
@@ -92,6 +94,7 @@
     <Compile Include="ReactLocationControllerTests.cs" />
     <Compile Include="ReactProductWarehouseControllerTests.cs" />
     <Compile Include="DeviceRegistrationControllerTests.cs" />
+    <Compile Include="DeviceRegistrationRustDeskVersionTests.cs" />
     <Compile Include="DeviceRegistrationReactServiceTests.cs" />
     <Compile Include="DeviceActivationCodeManagementTests.cs" />
     <Compile Include="RemoteMaintenanceContractTests.cs" />
@@ -141,14 +144,19 @@
     <Compile Include="UserNamePartsTests.cs" />
     <Compile Include="StoreUserCashierBarcodeServiceTests.cs" />
     <Compile Include="UserStoreManagementRelationTests.cs" />
+    <Compile Include="RoleLevelAccessTests.cs" />
     <Compile Include="AttendanceReactServiceTests.cs" />
     <Compile Include="AttendanceReactServiceMealBreakTests.cs" />
     <Compile Include="AttendanceReactServiceApprovalNotificationTests.cs" />
     <Compile Include="AttendanceReactServiceLocationBatchTests.cs" />
+    <Compile Include="AttendanceReactServiceReviewRoundTests.cs" />
+    <Compile Include="PayrollCalculatorTests.cs" />
+    <Compile Include="AttendanceReactServicePayrollTests.cs" />
     <Compile Include="AttendanceApproverResolverTests.cs" />
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />
     <Compile Include="PricingCurveTests.cs" />
+    <Compile Include="PricingStrategySummaryTests.cs" />
     <Compile Include="AttendanceWorkSessionCalculatorTests.cs" />
     <Compile Include="AttendanceQrTokenCodecTests.cs" />
     <Compile Include="UserLoginDeviceAuditServiceTests.cs" />
@@ -158,6 +166,7 @@
     <Compile Include="SeedDataServiceTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionContractTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionServiceTests.cs" />
+    <Compile Include="WarehouseManagerUserAccessTests.cs" />
     <Compile Include="NavigationServiceTests.cs" />
     <Compile Include="StoreProductInsightRulesTests.cs" />
     <Compile Include="StoreProductInsightQueryServiceTests.cs" />
@@ -175,6 +184,8 @@
     <Compile Include="LocalSupplierInvoicesReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreateProductDetailBackfillTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreatedHereProductTests.cs" />
+    <Compile Include="LocalSupplierInvoiceStoreAutoPricingStatusTests.cs" />
+    <Compile Include="LocalSupplierInvoiceUncreatedProductFilterTests.cs" />
     <Compile Include="SqliteWarehouseProductChangeHistoryTable.cs" />
     <Compile Include="LocalSupplierInvoiceAuditTimestampContractTests.cs" />
     <Compile Include="ReactLocalSupplierInvoiceAuthorizationTests.cs" />
@@ -263,6 +274,7 @@
     <Compile Include="ContainerAllocationSalesReportServiceTests.cs" />
     <Compile Include="ContainerAllocationSalesAuthorizationPipelineTests.cs" />
     <Compile Include="BrowserExtensionTests.cs" />
+    <Compile Include="HelpFaqTests.cs" />
     <Compile Include="LocalSupplierCategoryLogicTests.cs" />
     <Compile Include="LocalSupplierCategoryServiceTests.cs" />
     <Compile Include="LocalSupplierCategorySqlServerIntegrationTests.cs" />
@@ -336,6 +348,7 @@
     <Compile Include="ProductMaintenanceHqProjectionWriterTests.cs" />
     <Compile Include="ProductSupplierImageBatchUpdateTests.cs" />
     <Compile Include="LocalSupplierHqSyncTests.cs" />
+    <Compile Include="LocalSupplierListLastPurchaseTests.cs" />
     <Compile Include="ProductIntegrityServiceTests.cs" />
     <Compile Include="ProductStoreSyncServiceTests.cs" />
     <Compile Include="ProductStoreSyncJobServiceTests.cs" />
@@ -463,6 +476,17 @@
     <Compile Include="WarehouseProductChangeHistoryServiceTests.cs" />
     <Compile Include="WarehouseProductChangeHistoryTestDouble.cs" />
     <Compile Include="SqliteTempFileCleanup.cs" />
+    <Compile Include="SupplierPreorderSheetParserTests.cs" />
+    <Compile Include="SupplierPreorderRulesTests.cs" />
+    <Compile Include="SupplierPreorderServiceSqliteTests.cs" />
+    <Compile Include="SupplierPreorderHistoryRulesTests.cs" />
+    <Compile Include="SupplierPreorderHistorySqliteTests.cs" />
+    <Compile Include="SupplierPreorderImageCopyTests.cs" />
+    <Compile Include="SupplierPreorderRevisionTests.cs" />
+    <Compile Include="PosApiEntryTests.cs" />
+    <Compile Include="PosApiEntryUsageTests.cs" />
+    <Compile Include="MainApiEntryUsageTests.cs" />
+    <Compile Include="MyobConnectionTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />

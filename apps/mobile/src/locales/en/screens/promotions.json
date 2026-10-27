@@ -1,80 +1,193 @@
 {
   "title": "Promotions",
-  "subtitle": "Current store: {{store}}",
   "actions": {
     "create": "New promotion",
-    "edit": "Edit",
-    "copyToStore": "Copy to this store",
-    "addProduct": "Add product"
+    "copyToStore": "Copy to this store"
   },
   "filters": {
     "keyword": "Search promotion name"
   },
+  "segments": {
+    "active": "Active",
+    "upcoming": "Upcoming",
+    "disabled": "Disabled",
+    "ended": "Ended",
+    "all": "All"
+  },
   "scope": {
-    "storeOnly": "This store",
+    "storeOnly": "This store only",
     "multiStore": "Multi-store",
-    "headquarters": "HQ",
-    "unknown": "Unknown"
+    "multiStoreCount": "Multi-store · {{count}}"
   },
   "status": {
-    "enabled": "Enabled",
+    "active": "Active",
+    "upcoming": "Upcoming",
     "disabled": "Disabled",
+    "ended": "Ended",
     "exclusive": "Exclusive",
     "stackable": "Stackable"
   },
+  "list": {
+    "today": "Today {{date}}",
+    "sortEndAsc": "Sorted by end date",
+    "sortEndDesc": "Latest ended first",
+    "productFilter": "Only promotions with \"{{name}}\"",
+    "hideEnded": "Hide ended",
+    "clearProductFilter": "Clear product filter",
+    "loadMore": "Load more"
+  },
+  "card": {
+    "ruleQuantity": "{{count}} for",
+    "productCount": "{{count}} items",
+    "longTerm": "Ongoing",
+    "daysLeft": "{{count}}d left",
+    "startsIn": "Starts in {{count}}d",
+    "toggleLabel": "Enable or disable \"{{name}}\"",
+    "lockedLabel": "Multi-store promotion, read only"
+  },
   "fields": {
-    "unnamed": "Unnamed promotion",
+    "unnamed": "Untitled promotion",
     "name": "Promotion name",
-    "description": "Description",
-    "effectiveStart": "Start time",
-    "effectiveEnd": "End time",
-    "applyQuantity": "Quantity",
+    "effectiveStart": "Start date",
+    "effectiveEnd": "End date",
+    "applyQuantity": "Buy quantity",
     "fixedPrice": "Bundle price",
     "priority": "Priority",
+    "priorityValue": "Priority {{value}}",
     "enabled": "Enabled",
     "exclusive": "Exclusive",
-    "productCode": "Product code",
-    "unitWeight": "Weighting",
-    "priorityValue": "Priority {{value}}",
-    "ruleValue": "{{count}} items for ${{price}}",
-    "productsAndStores": "{{products}} products · {{stores}} stores"
+    "maxApplications": "Max uses per order"
   },
-  "form": {
-    "createTitle": "New store promotion",
-    "editTitle": "Edit store promotion",
-    "storeReadonly": "Applies only to: {{store}}",
-    "priorityHint": "New and copied promotions start at priority 0. Raising it may cause conflicts when enabling exclusive promotions.",
-    "products": "Products"
+  "editor": {
+    "createTitle": "New promotion",
+    "editTitle": "Edit promotion",
+    "namePlaceholder": "e.g. Halloween costumes 2 for",
+    "decrease": "Decrease",
+    "increase": "Increase",
+    "unitPriceHint": "Average ${{price}} each",
+    "periodTitle": "Valid period",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "productsTitle": "Products · {{count}}",
+    "scanAdd": "Scan",
+    "searchAdd": "Search",
+    "productsEmpty": "No products yet. Tap Scan or Search to add.",
+    "productLoading": "Checking store price…",
+    "noRetailPrice": "No retail price in this store",
+    "productRetail": "Retail ${{retail}}",
+    "productPrice": "Retail ${{retail}} → avg ${{unit}}",
+    "productNotDiscount": "Retail ${{retail}} · {{count}} for ${{price}} costs more than retail",
+    "showMoreProducts": "Show {{count}} more",
+    "removeProduct": "Remove \"{{name}}\"",
+    "weightMenu": "Advanced settings for \"{{name}}\"",
+    "weightHint": "Long-press a product to set its weight (default 1)",
+    "weightTitle": "Product weight",
+    "weightDescription": "Weight is how many units this product counts toward the buy quantity. Usually keep 1.",
+    "weightBadge": "Weight ×{{value}}",
+    "singleNotDiscount": "\"{{name}}\" retails at ${{retail}}; {{count}} cost ${{original}}, which is not more than the bundle price ${{price}}, so customers get no discount. A single-product promotion cannot be saved this way; lower the bundle price.",
+    "mixedNotDiscountOne": "\"{{name}}\" retails at ${{retail}}; {{count}} cost ${{original}}, less than the bundle price ${{price}}, so customers get no discount. Consider removing it or creating a separate promotion.",
+    "mixedNotDiscountMany": "{{count}} products such as {{names}} cost more than retail when bundled, so customers get no discount. Consider removing them or creating a separate promotion.",
+    "advancedTitle": "Scope and advanced",
+    "appliesTo": "Applies to",
+    "storeOnlyValue": "This store only · {{store}}",
+    "exclusiveHint": "When on, it does not stack with other promotions in the same period",
+    "priorityNewHint": "Fixed at 0 for new promotions",
+    "priorityKeepHint": "Keeps the original priority",
+    "maxApplicationsHint": "Leave blank for no limit",
+    "unlimited": "No limit",
+    "discardTitle": "Discard changes?",
+    "discardMessage": "Your changes have not been saved.",
+    "keepEditing": "Keep editing",
+    "discard": "Discard",
+    "backToEdit": "Back to edit"
+  },
+  "quickRange": {
+    "sevenDays": "7 days",
+    "monthEnd": "To month end",
+    "thirtyDays": "30 days"
+  },
+  "validation": {
+    "nameRequired": "Enter a promotion name",
+    "quantityTooSmall": "Buy quantity must be at least 2",
+    "priceRequired": "Enter the bundle price",
+    "notDiscount": "With a single product, the bundle price must be lower than retail",
+    "productsRequired": "Add at least one product",
+    "rangeInvalid": "End time must be after start time",
+    "maxApplicationsInvalid": "Max uses per order must be a positive whole number"
+  },
+  "conflict": {
+    "title": "Possible exclusive conflict",
+    "message": "Overlaps with {{count}} promotion(s) such as {{names}}, and one side is exclusive, so only one may apply at checkout.",
+    "endBefore": "End at {{time}}",
+    "saveAnyway": "Save anyway"
+  },
+  "endNow": {
+    "button": "End now",
+    "title": "End this promotion now?",
+    "message": "The end time of \"{{name}}\" will be set to now. Checkout will stop applying it shortly.",
+    "confirm": "End now",
+    "done": "Promotion ended",
+    "failed": "Could not end the promotion"
+  },
+  "detail": {
+    "title": "Promotion details",
+    "productsAndStores": "{{products}} items · {{stores}} stores",
+    "productsPreview": "Products (first {{count}})",
+    "productsAll": "Products · {{count}}",
+    "viewAll": "View all {{count}}",
+    "multiStoreNote": "This promotion covers {{count}} stores. It is read only and cannot be edited or disabled here.",
+    "readOnlyNote": "You do not have permission to edit promotions, so this is read only."
   },
   "copy": {
     "title": "Copy to this store",
-    "description": "Copy “{{name}}” as a new promotion for this store only, then edit it."
+    "description": "Copy \"{{name}}\" as a new promotion for {{store}} only (disabled, priority 0), then edit it. The original multi-store promotion stays unchanged and still applies in this store.",
+    "nameLabel": "New promotion name",
+    "stackWarning": "If both are active they will stack. To use only this store's version, make it exclusive and raise its priority.",
+    "confirm": "Copy and edit"
+  },
+  "scan": {
+    "listButton": "Scan to find product promotions",
+    "listTitle": "Scan product promotions",
+    "listSubtitle": "Scan a product barcode to see only promotions that include it",
+    "editorTitle": "Scan to add products",
+    "editorSubtitle": "Keep scanning to add products to this promotion",
+    "looking": "Looking up {{barcode}}…",
+    "notFound": "No product in this store matches {{barcode}}",
+    "added": "Added: {{name}}",
+    "duplicated": "Already in the list: {{name}}",
+    "multipleUseFirst": "Barcode matched several products; filtered by \"{{name}}\"",
+    "failed": "Scan lookup failed",
+    "permissionTitle": "Camera permission needed",
+    "permissionDescription": "Allow camera access to scan product barcodes.",
+    "grantPermission": "Allow camera"
+  },
+  "search": {
+    "title": "Search products",
+    "candidatesTitle": "Barcode matched several products",
+    "placeholder": "Product name, barcode or code",
+    "searching": "Searching…",
+    "empty": "No products found"
   },
   "empty": {
-    "selectStoreTitle": "Select a store",
-    "selectStoreDescription": "Choose a store to view store, multi-store, and HQ promotions.",
+    "selectStoreTitle": "No manageable stores",
+    "selectStoreDescription": "This account has no stores it can manage, so promotions cannot be shown.",
     "noDataTitle": "No promotions",
-    "noDataDescription": "This store has no promotions yet."
-  },
-  "pagination": {
-    "previous": "Previous",
-    "next": "Next",
-    "page": "Page {{page}} / {{pageCount}}"
-  },
-  "store": {
-    "empty": "Not selected"
+    "noDataDescription": "There are no promotions in this tab.",
+    "noProductPromotion": "No current promotions in this store include this product."
   },
   "messages": {
-    "selectStoreFirst": "Please select a store first.",
-    "loadFailed": "Failed to load promotions.",
-    "detailFailed": "Failed to load promotion details.",
-    "detailMissing": "Promotion not found.",
-    "nameRequired": "Please enter a promotion name.",
-    "saveFailed": "Failed to save promotion.",
-    "saved": "Promotion saved.",
-    "copyFailed": "Failed to copy promotion.",
-    "copied": "Copied to this store.",
-    "copyBeforeEdit": "Copy multi-store or HQ promotions to this store before editing.",
-    "enableFailed": "Failed to update the status."
+    "loadFailed": "Could not load promotions",
+    "detailFailed": "Could not load promotion details",
+    "detailMissing": "Promotion not found",
+    "saveFailed": "Could not save the promotion",
+    "saved": "Promotion saved",
+    "saveConflict": "Conflicts with an exclusive promotion in the same period, so it was not saved. Adjust the dates or turn off Exclusive and try again.",
+    "copyFailed": "Could not copy the promotion",
+    "copied": "Copied to this store (disabled by default)",
+    "enabled": "Enabled \"{{name}}\"",
+    "disabled": "Disabled \"{{name}}\"",
+    "enableFailed": "Could not update the status",
+    "enableConflict": "Conflicts with an exclusive promotion in the same period, so it cannot be enabled. Adjust the dates or disable the other one first.",
+    "storeForbidden": "You cannot access promotions for this store"
   }
 }

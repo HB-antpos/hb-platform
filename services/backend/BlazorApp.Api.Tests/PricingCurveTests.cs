@@ -132,6 +132,115 @@ public class PricingCurveTests
         Assert.Equal(2m, _service.CalculateRetailPrice(.7m, Strategy(rule)));
     }
 
+    [Theory]
+    [InlineData("8.94", "22.50")]   // 22.35 → 进位到 .50（用户反馈的实例）
+    [InlineData("10.10", "25.50")]  // 25.25 → .50
+    [InlineData("10.30", "25.99")]  // 25.75 → .99
+    [InlineData("10.00", "24.99")]  // 整数 25.00 → 取到 24.99
+    [InlineData("3.33", "8.50")]    // 8.325 → .50
+    [InlineData("0.10", "0.50")]    // 0.25 → 最低 0.50
+    [InlineData("0.40", "1")]       // 1.00 是合法整数，保留
+    [InlineData("0.76", "2")]       // 1.90 → 1.99 → 归整为 2
+    public void 固定成率与其他区间一样按尾数规则调整(string cost, string expected)
+    {
+        var strategy = Strategy(Rule(0.1m, 99999m, 2.5m, 2.5m, "Fixed"));
+        PricingCurveMath.Validate(strategy.Details);
+
+        var price = _service.CalculateRetailPrice(decimal.Parse(cost), strategy);
+
+        Assert.Equal(decimal.Parse(expected), price);
+        // 展示用的上浮率是理论成率，保持精确的 2.5，不受尾数调整影响。
+        Assert.Equal(2.5m, _service.CalculateRate(decimal.Parse(cost), strategy));
+    }
+
+    [Fact]
+    public void 固定成率要求起止成率相同并保持在一点五到五之间且不带节点价和弧度()
+    {
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 2.5m, 3m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 1.4m, 1.4m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 5.1m, 5.1m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 50m, 2.5m, 2.5m, "Fixed", .1m) }));
+        var withNode = Rule(0.1m, 50m, 2.5m, 2.5m, "Fixed");
+        withNode.StartRetailPrice = .5m;
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { withNode }));
+    }
+
+    private static PricingStrategyDetail CurveRule(decimal a, decimal b, decimal pa, decimal pb) => new()
+    {
+        MinPrice = a, MaxPrice = b, Algorithm = "Linear", CurveBend = 0,
+        StartRetailPrice = pa, EndRetailPrice = pb,
+        StartRate = decimal.Round(pa / a, 4), EndRate = decimal.Round(pb / b, 4),
+    };
+
+    [Fact]
+    public void 固定与曲线可以按区间混合且曲线端点跟随固定交界价时不要求合法尾数()
+    {
+        // ≤10 固定 2.5×，10～50 曲线（起点 25.00 = 10×2.5，终点 100.00 = 50×2.0），>50 固定 2.0×。
+        var rules = new[] { Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"), CurveRule(10m, 50m, 25.00m, 100.00m), Rule(50m, 99999m, 2m, 2m, "Fixed") };
+        PricingCurveMath.Validate(rules);
+
+        var strategy = Strategy(rules);
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, strategy));      // 交界值属于上一个（固定）区间：25.00 → 24.99
+        Assert.Equal(25.50m, _service.CalculateRetailPrice(10.01m, Strategy(Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed"))));
+        // 50 属于曲线区间的上限：理论 100.00 → 99.99。
+        Assert.Equal(99.99m, _service.CalculateRetailPrice(50m, strategy));
+        Assert.Equal(100.50m, _service.CalculateRetailPrice(50.01m, strategy));   // 50.01 起按固定 2.0×：100.02 → 100.50
+    }
+
+    [Fact]
+    public void 曲线端点不跟随相邻固定区间时仍必须使用合法尾数()
+    {
+        // 25.00 不是合法尾数；左侧是曲线（非固定）时不能豁免。
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { CurveRule(1m, 10m, 2.5m, 24.99m), CurveRule(10m, 50m, 25.00m, 100.00m) }));
+        // 左侧是固定区间但价格对不上（固定算出 25.00，曲线起点取 26.00）也不能豁免。
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 10m, 2.5m, 2.5m, "Fixed"), CurveRule(10m, 50m, 26.00m, 100.00m) }));
+    }
+
+    [Fact]
+    public void 区间交界允许售价回落以支持阶梯定价但必须首尾相接()
+    {
+        // 3× 与 2.5× 相邻：10 处 29.99 → 25.50，成本变大售价反而降低，属于有意的阶梯。
+        var tiers = new[] { Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(10m, 50m, 2.5m, 2.5m, "Fixed") };
+        PricingCurveMath.Validate(tiers);
+        Assert.Equal(29.99m, _service.CalculateRetailPrice(10m, Strategy(tiers)));
+        Assert.Equal(25.50m, _service.CalculateRetailPrice(10.01m, Strategy(tiers)));
+
+        // 空隙与重叠都不允许。
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(11m, 50m, 2.5m, 2.5m, "Fixed") }));
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { Rule(0.1m, 10m, 3m, 3m, "Fixed"), Rule(9m, 50m, 2.5m, 2.5m, "Fixed") }));
+    }
+
+    [Fact]
+    public void 区间内部仍要求售价不降成率不升()
+    {
+        // 曲线区间内起点 100.00、终点 90.00：成本增加售价下降。
+        Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(new[] { CurveRule(10m, 50m, 24.99m, 24.50m) }));
+    }
+
+    [Fact]
+    public void 最多十个区间且运行时计价不受该限制()
+    {
+        PricingStrategyDetail[] Build(int count) => Enumerable.Range(0, count)
+            .Select(i => Rule(0.1m + i * 10m, 10.1m + i * 10m, 2.5m, 2.5m, "Fixed")).ToArray();
+        PricingCurveMath.Validate(Build(10));
+        var ex = Assert.Throws<ArgumentException>(() => PricingCurveMath.Validate(Build(11)));
+        Assert.Contains("10", ex.Message);
+        // 历史数据超过 10 个区间时，运行时校验（enforceIntervalLimit:false）不应抛出。
+        PricingCurveMath.Validate(Build(11), enforceIntervalLimit: false);
+    }
+
+    [Fact]
+    public void 固定成率区间外的进货价明确失败且其他算法仍走尾数调整()
+    {
+        var fixedStrategy = Strategy(Rule(0.1m, 100m, 2.5m, 2.5m, "Fixed"));
+        Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(100.01m, fixedStrategy));
+        Assert.Throws<ArgumentException>(() => _service.CalculateRetailPrice(.09m, fixedStrategy));
+
+        // 固定成率与旧的阶梯算法结果一致（都走尾数规则）：10.00 × 2.5 = 25.00 → 24.99。
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, Strategy(Rule(0.1m, 100m, 2.5m, 2.5m, "Step"))));
+        Assert.Equal(24.99m, _service.CalculateRetailPrice(10m, fixedStrategy));
+    }
+
     [Fact]
     public void 成率上下限只使用合法尾数且极低成本明确失败()
     {

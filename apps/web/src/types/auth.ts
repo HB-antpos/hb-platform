@@ -77,6 +77,10 @@ export interface AccessControl {
   canManageStoreOrderImportPriceVariance: boolean
   /** 分店订货单可录入退货（负数发货）；只认 Warehouse.StoreOrderReturn，无别名。 */
   canReturnStoreOrderGoods: boolean
+  /** 供应商节日预订单管理（导入、开启分店、下单人员授权、导出）；只认 SupplierPreorder.Manage。 */
+  canManageSupplierPreorders: boolean
+  /** 预订单下单入口；SupplierPreorder.Order 或 Manage。能改哪家店由后端按下单人员授权判定。 */
+  canOrderSupplierPreorders: boolean
   canManageWarehouseCategories: boolean
   canManageWarehouseLocations: boolean
   canViewContainers: boolean
@@ -112,6 +116,12 @@ export interface AccessControl {
   canReviewAttendance: boolean
   canEditAttendanceHoliday: boolean
   canEditAttendanceSettings: boolean
+  canReviewOwnAttendance: boolean
+  canViewAttendancePayroll: boolean
+  canViewAttendanceHours: boolean
+  canAdjustAttendancePunches: boolean
+  canEditAttendancePayroll: boolean
+  canUnlockAttendancePayroll: boolean
   canViewEmployeeProfiles: boolean
   canViewSystemLogs: boolean
   canViewPerformanceBaseline: boolean
@@ -126,6 +136,8 @@ export interface AccessControl {
   canViewSeasonalCardStats: boolean
   /** 人脸抓拍摄像机管理页：独立权限 FaceCapture.Cameras.Manage。 */
   canManageFaceCameras: boolean
+  /** MYOB 对接页（连接公司文件、分店映射）：独立权限 Myob.Connection.Manage。 */
+  canManageMyobConnections: boolean
   /** 人脸比对页：FaceMatch.* 五个权限码任一（页签再按各自权限显示）。 */
   canAccessFaceMatch: boolean
   canManageScheduledTasks: boolean

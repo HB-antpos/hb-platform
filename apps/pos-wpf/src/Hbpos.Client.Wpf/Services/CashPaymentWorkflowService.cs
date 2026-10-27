@@ -424,6 +424,7 @@ public sealed class CashPaymentWorkflowService(
         // 中文注释：在离开 UI 线程前固定付款明细，后台 SQLite 不得枚举可能继续变化的界面集合。
         var tenderSnapshot = tenders.ToArray();
         var cartSnapshot = cart.CreateSnapshot();
+        PaymentCompletionTrace.Mark("create-order");
         var result = checkout.CreatePaymentOrder(cart, session, tenderSnapshot, cashTenderedAmount);
         // 退款代金券先以待发券状态落本地，确保崩溃后仍能沿用原始幂等键恢复。
         var orderForPersistence = PrepareOrderForVoucherRefundPersistence(result.Order);
@@ -441,6 +442,7 @@ public sealed class CashPaymentWorkflowService(
         LocalOrder order;
         try
         {
+            PaymentCompletionTrace.Mark("persist-prepare");
             var preparedPersistence = await RunLocalStoreAsync(
                 () => PrepareOrderForRecoverableCardPersistenceAsync(
                     orderForPersistence,
@@ -454,7 +456,9 @@ public sealed class CashPaymentWorkflowService(
             if (!preparedPersistence.AlreadyPersisted)
             {
                 // 共享挂单取单完成：混合付款路径与 LocalOrder 同一事务写入来源/完成 claim/消费本地挂单。
+                PaymentCompletionTrace.Mark("held-order-resolve");
                 var heldOrder = await TryResolveHeldOrderAsync(session, cartSnapshot, persistenceCancellationToken);
+                PaymentCompletionTrace.Mark("save-pending-order");
                 await RunLocalStoreAsync(
                     () => heldOrder is null
                         ? orderRepository.SavePendingOrderAsync(order, persistenceCancellationToken)
@@ -488,6 +492,7 @@ public sealed class CashPaymentWorkflowService(
                 ex);
         }
         // 订单已落盘：后续收尾（退款券、代金券上传、标记完成、清购物车、计数）与重试路径共用同一实现。
+        PaymentCompletionTrace.Mark("order-persisted");
         return await FinalizePersistedOrderAsync(
             order,
             cart,
@@ -554,6 +559,7 @@ public sealed class CashPaymentWorkflowService(
     {
         try
         {
+            PaymentCompletionTrace.Mark("issue-refund-vouchers");
             order = await IssuePendingRefundVouchersAsync(order, session, cancellationToken);
         }
         catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
@@ -579,6 +585,7 @@ public sealed class CashPaymentWorkflowService(
 
             try
             {
+                PaymentCompletionTrace.Mark("upload-voucher-order");
                 await orderUploadService.UploadOrderAsync(order.OrderGuid, cancellationToken);
             }
             catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
@@ -604,6 +611,7 @@ public sealed class CashPaymentWorkflowService(
         var hasPostCommitWarning = false;
         try
         {
+            PaymentCompletionTrace.Mark("mark-card-attempt");
             await MarkCompletedCardAttemptsAsync(
                 cart,
                 completionTenders,
@@ -619,6 +627,7 @@ public sealed class CashPaymentWorkflowService(
 
         try
         {
+            PaymentCompletionTrace.Mark("mark-square-attempt");
             await MarkCompletedSquareAttemptsAsync(
                 cart,
                 completionTenders,
@@ -632,7 +641,9 @@ public sealed class CashPaymentWorkflowService(
             LogPostCommitWarning($"{logOperationPrefix}mark-square-attempt-completed", order.OrderGuid, ex);
         }
 
+        PaymentCompletionTrace.Mark("clear-cart");
         hasPostCommitWarning |= TryClearCartAfterCommit(cart, order.OrderGuid);
+        PaymentCompletionTrace.Mark("read-pending-sync");
         var pendingSyncResult = await ReadPendingSyncCountAfterCommitAsync(session, cancellationToken);
         hasPostCommitWarning |= pendingSyncResult.HasPostCommitWarning;
         var pendingSyncCount = pendingSyncResult.PendingSyncCount;
@@ -994,7 +1005,16 @@ public sealed class CashPaymentWorkflowService(
                         session,
                         cancellationToken))
             {
-                SettingsSnapshot = settingsSnapshot
+                SettingsSnapshot = settingsSnapshot,
+                // 中文注释：LocalIp 消费收到批准小票时补写证据，供 PF/断电后的恢复与主管结案使用；退款不走这条。
+                RecordReceiptApprovalEvidenceAsync = refundSubmissionToken is not null
+                    ? null
+                    : (evidence, _) => RunLocalStoreAsync(
+                        () => cardPaymentAttemptRepository!.TryRecordReceiptApprovalEvidenceAsync(
+                            attempt.AttemptGuid,
+                            evidence.Serialize(),
+                            CancellationToken.None),
+                        CancellationToken.None)
             });
         using var squareAttemptScope = squareAttempt is null || squarePaymentAttemptContextAccessor is null
             ? null
@@ -2698,7 +2718,11 @@ public sealed class CashPaymentWorkflowService(
 
     private static bool IsCancelResponseCode(string? responseCode)
     {
-        return string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
+        // 中文注释：TM = OPERATOR CANCELLED（收银员/顾客在刷卡机上取消），不是银行拒绝；
+        // 云端 API（LinklyCloudBackendAsyncService.IsCancelledResponseCode）早已按取消处理，这里对齐，
+        // 否则恢复中心会把被取消的交易标成 Declined（10-25 1033 店实测）。
+        return string.Equals(responseCode, "TM", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CA", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCEL", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) ||
@@ -2707,7 +2731,10 @@ public sealed class CashPaymentWorkflowService(
 
     private static bool IsTimeoutResponseCode(string? responseCode)
     {
-        return string.Equals(responseCode, "TO", StringComparison.OrdinalIgnoreCase) ||
+        // 中文注释：Linkly 文档 Appendix B：TI = Operator Timeout（Input timeout，未在时限内操作刷卡机，未扣款）。
+        // 恢复服务早已认 TI，这里对齐，否则实时失败的 TI 会被记成 Declined。
+        return string.Equals(responseCode, "TI", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "TO", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "TIMEOUT", StringComparison.OrdinalIgnoreCase);
     }
 

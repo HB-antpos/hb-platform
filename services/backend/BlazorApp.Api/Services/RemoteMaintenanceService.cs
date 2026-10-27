@@ -107,6 +107,72 @@ public sealed class RemoteMaintenanceService
         return RemoteMaintenanceResult<RemoteMaintenanceDeviceListResponseDto>.Ok(response);
     }
 
+    /// <summary>
+    /// 设备管理列表用：按设备注册 ID 批量取 RustDesk 客户端版本（只读，只带版本号，不碰 ID/密码/令牌）。
+    /// 先按 DeviceRegistrationId 精确对应；对不上的（设备重新登记换了注册 ID）再按硬件识别码取最近一次上报。
+    /// 表未迁移或查询失败时返回空字典，不影响设备列表本身。
+    /// </summary>
+    public async Task<Dictionary<int, string>> GetClientVersionsAsync(
+        IReadOnlyCollection<(int RegistrationId, string? HardwareId)> devices,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<int, string>();
+        if (devices.Count == 0) return result;
+        var registrationIds = devices.Select(x => x.RegistrationId).Distinct().ToList();
+        var hardwareIds = devices
+            .Select(x => Normalize(x.HardwareId, 100))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        List<RemoteMaintenanceDevice> rows;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            rows = await _dbContext.Db.Queryable<RemoteMaintenanceDevice>()
+                .Where(x => !x.IsDeleted && x.ClientVersion != null
+                    && (registrationIds.Contains(x.DeviceRegistrationId) || hardwareIds.Contains(x.HardwareId)))
+                .Select(x => new RemoteMaintenanceDevice
+                {
+                    Id = x.Id, DeviceRegistrationId = x.DeviceRegistrationId, HardwareId = x.HardwareId,
+                    ClientVersion = x.ClientVersion, LastSeenAtUtc = x.LastSeenAtUtc, RegisteredAtUtc = x.RegisteredAtUtc
+                })
+                .ToListAsync();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "读取 RustDesk 客户端版本失败，设备列表不显示远程版本");
+            return result;
+        }
+
+        var withVersion = rows.Where(x => !string.IsNullOrWhiteSpace(x.ClientVersion)).ToList();
+        // 同一注册 ID / 硬件号若有多条，取最近上报（LastSeen 优先，其次登记时间）的那条。
+        static IEnumerable<RemoteMaintenanceDevice> Latest(IEnumerable<RemoteMaintenanceDevice> source) =>
+            source.OrderByDescending(x => x.LastSeenAtUtc ?? DateTime.MinValue).ThenByDescending(x => x.RegisteredAtUtc);
+        var byRegistration = withVersion.GroupBy(x => x.DeviceRegistrationId)
+            .ToDictionary(g => g.Key, g => Latest(g).First().ClientVersion!.Trim());
+        var byHardware = withVersion.Where(x => !string.IsNullOrWhiteSpace(x.HardwareId))
+            .GroupBy(x => x.HardwareId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => Latest(g).First().ClientVersion!.Trim(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (registrationId, hardwareId) in devices)
+        {
+            if (byRegistration.TryGetValue(registrationId, out var version))
+                result[registrationId] = version;
+            else if (Normalize(hardwareId, 100) is { } hw && byHardware.TryGetValue(hw, out var hwVersion))
+                result[registrationId] = hwVersion;
+        }
+        return result;
+    }
+
+    /// <summary>远程维护下发的 RustDesk 安装包版本（配置项 RustdeskArtifact.Version）；功能未启用或未配置时为 null。</summary>
+    public string? GetConfiguredRustdeskVersion()
+    {
+        if (!IsFeatureEnabled()) return null;
+        var version = _options.Value.RustdeskArtifact?.Version?.Trim();
+        return string.IsNullOrWhiteSpace(version) ? null : version;
+    }
+
     public async Task<RemoteMaintenanceResult<RemoteMaintenanceCredentialResponseDto>> GetCredentialAsync(
         Guid id, string actor, CancellationToken cancellationToken = default)
     {

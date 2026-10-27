@@ -9,7 +9,11 @@ namespace Hbpos.Client.Wpf.ViewModels;
 // 这里只管 UI 状态与刷新时机；统计口径（本机 + 共享、去重、门店今天）全部在 IHeldOrderTodayCountService。
 public sealed partial class PosTerminalViewModel
 {
-    /// <summary>低频兜底刷新：别的收银机共享/取走挂单，本机只能靠轮询得知。</summary>
+    /// <summary>
+    /// 低频兜底刷新：别的收银机共享/取走挂单，本机只能靠轮询得知。
+    /// 这是营业时间的间隔；夜间静默窗口（22:00–06:00）内由 <see cref="BackgroundPollingSchedule"/> 放慢到 5 分钟。
+    /// 夜间放慢不影响本机业务：本机挂单 / 取单走 <see cref="RefreshHeldOrderTodayCountAsync"/> 立即重算，不依赖这个定时器。
+    /// </summary>
     private static readonly TimeSpan HeldOrderCountRefreshInterval = TimeSpan.FromSeconds(60);
 
     private const int HeldOrderBadgeMaxCount = 99;
@@ -27,8 +31,10 @@ public sealed partial class PosTerminalViewModel
     private ITimer? _heldOrderCountTimer;
     // 首页是否正在显示：只有显示时才定时刷新、才响应会话变化刷新（定时器回调在线程池线程读取，故 volatile）。
     private volatile bool _isScreenVisible;
-    // 上次已处理的会话范围（门店 / 设备 / 联机）：只有它变了才需要重算角标。
-    private (string StoreCode, string DeviceCode, bool IsOnline) _heldOrderCountScope;
+    // 上次已处理的会话范围（门店 / 设备 / 联机 / 是否已登录收银员）：只有它变了才需要重算角标。
+    // 「已登录收银员」也算范围：未登录时统计服务不会请求共享挂单（会 401），登录后要立刻补取，
+    // 否则夜间 5 分钟的轮询会让角标在登录后最多落后 5 分钟。
+    private (string StoreCode, string DeviceCode, bool IsOnline, bool IsCashierSignedIn) _heldOrderCountScope;
 
     /// <summary>今天仍可取的挂单张数（本机 + 本店共享，按挂单号去重）。</summary>
     [ObservableProperty]
@@ -71,7 +77,7 @@ public sealed partial class PosTerminalViewModel
     }
 
     /// <summary>
-    /// 首页变为可见时由导航层调用：立即刷新一次并启动 60 秒低频刷新。
+    /// 首页变为可见时由导航层调用：立即刷新一次并启动低频刷新（白天 60 秒，夜间静默窗口 5 分钟）。
     /// </summary>
     public void OnScreenShown()
     {
@@ -111,11 +117,39 @@ public sealed partial class PosTerminalViewModel
             return;
         }
 
+        var delay = GetNextHeldOrderCountDelay();
         _heldOrderCountTimer = _timeProvider.CreateTimer(
             OnHeldOrderCountTimerTick,
             null,
-            HeldOrderCountRefreshInterval,
-            HeldOrderCountRefreshInterval);
+            delay,
+            delay);
+    }
+
+    /// <summary>
+    /// 下一次兜底刷新的等待时间：白天 60 秒，夜间静默窗口 5 分钟（窗口结束时立即补一次）。
+    /// 用 <see cref="TimeProvider"/> 取本地时间，测试可控。
+    /// </summary>
+    private TimeSpan GetNextHeldOrderCountDelay() =>
+        BackgroundPollingSchedule.GetNextPollDelay(_timeProvider.GetLocalNow(), HeldOrderCountRefreshInterval);
+
+    /// <summary>每次 tick 后按当前本地时间重设间隔，进入 / 离开夜间静默窗口时自动切换。</summary>
+    private void RescheduleHeldOrderCountTimer()
+    {
+        var timer = _heldOrderCountTimer;
+        if (timer is null)
+        {
+            return;
+        }
+
+        var delay = GetNextHeldOrderCountDelay();
+        try
+        {
+            timer.Change(delay, delay);
+        }
+        catch (ObjectDisposedException)
+        {
+            // 回调线程与离开首页（停表）并发：定时器已释放，无需再调度。
+        }
     }
 
     private void StopHeldOrderCountTimer()
@@ -130,6 +164,8 @@ public sealed partial class PosTerminalViewModel
         {
             return;
         }
+
+        RescheduleHeldOrderCountTimer();
 
         // 生产环境 Timer 回调在线程池线程，回到 Dispatcher 再刷新（结果写绑定属性）；
         // 测试环境没有 Application，直接在当前线程执行。
@@ -148,11 +184,11 @@ public sealed partial class PosTerminalViewModel
     }
 
     /// <summary>
-    /// 会话的门店 / 设备 / 联机状态变化后重算角标；其余会话字段（待同步数等）变化与角标无关。
+    /// 会话的门店 / 设备 / 联机 / 是否已登录收银员变化后重算角标；其余会话字段（待同步数等）变化与角标无关。
     /// </summary>
     private void OnSessionChangedForHeldOrderCount(PosSessionState value)
     {
-        var scope = (value.StoreCode, value.DeviceCode, value.IsOnline);
+        var scope = (value.StoreCode, value.DeviceCode, value.IsOnline, IsCashierSignedIn: value.CashierSession is not null);
         var previous = _heldOrderCountScope;
         if (scope == previous)
         {

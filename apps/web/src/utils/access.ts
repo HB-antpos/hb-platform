@@ -81,6 +81,8 @@ function createEmptyAccess(): AccessControl {
     canManageWarehouseOrders: false,
     canManageStoreOrderImportPriceVariance: false,
     canReturnStoreOrderGoods: false,
+    canManageSupplierPreorders: false,
+    canOrderSupplierPreorders: false,
     canManageWarehouseCategories: false,
     canManageWarehouseLocations: false,
     canViewContainers: false,
@@ -114,6 +116,12 @@ function createEmptyAccess(): AccessControl {
     canReviewAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
+    canReviewOwnAttendance: false,
+    canViewAttendancePayroll: false,
+    canViewAttendanceHours: false,
+    canAdjustAttendancePunches: false,
+    canEditAttendancePayroll: false,
+    canUnlockAttendancePayroll: false,
     canViewEmployeeProfiles: false,
     canViewSystemLogs: false,
     canViewPerformanceBaseline: false,
@@ -124,6 +132,7 @@ function createEmptyAccess(): AccessControl {
     canViewDailyCloseRecords: false,
     canViewSeasonalCardStats: false,
     canManageFaceCameras: false,
+    canManageMyobConnections: false,
     canAccessFaceMatch: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
@@ -289,6 +298,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 退货（负数发货）单独授权：不继承 Warehouse.Manage / ManageOrders，管理员由 hasPermission 统一放行；
   // 页面里还要同时具备订货管理写权限才会真正放开负数输入。
   const canReturnStoreOrderGoods = hasPermission(P.Warehouse.StoreOrderReturn)
+  // 供应商节日预订单：不继承任何仓库权限（管理员由 hasPermission 统一放行）；下单入口持有 Manage 也可进入。
+  const canManageSupplierPreorders = hasPermission(P.SupplierPreorder.Manage)
+  const canOrderSupplierPreorders = canManageSupplierPreorders || hasPermission(P.SupplierPreorder.Order)
   const canManageWarehouseCategories =
     isAdmin || hasPermission(P.Warehouse.ManageCategories) || hasPermission(P.Warehouse.Manage)
   const canManageWarehouseLocations =
@@ -356,16 +368,22 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.PunchViewManagedStore)
-  const canReviewAttendance =
-    isAdmin ||
-    hasPermission(P.Attendance.AdminView) ||
-    hasPermission(P.Attendance.ApprovalReviewManagedStore) ||
-    hasPermission(P.Attendance.LeaveReviewManagedStore)
+  // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口）。
+  const canReviewAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewManagedStore)
   const canEditAttendanceHoliday =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.HolidayEditManagedStore)
   const canEditAttendanceSettings = isAdmin || hasPermission(P.Attendance.SettingsEdit)
+  // 本人审核、工资三项都是新权限，默认谁都没有；不随 Attendance.Admin.View 自动获得
+  const canReviewOwnAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewSelf)
+  const canEditAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollEdit)
+  const canUnlockAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollUnlock)
+  const canViewAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollView)
+  // 「工时与工资」页：工时统计只要打卡查看权限，工资表 / 时薪表另要 Payroll.View，任一即可进页
+  const canViewAttendanceHours = canViewAttendancePunches || canViewAttendancePayroll
+  // 店长代员工补卡（审核台填漏下班的实际下班时间）：后端 managed/punch-adjustments 只认这一个权限
+  const canAdjustAttendancePunches = isAdmin || hasPermission(P.Attendance.PunchAdjustManagedStore)
   const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.View)
   const canViewSystemLogs = isAdmin || hasPermission(P.System.ViewLogs)
   const canViewPerformanceBaseline =
@@ -379,6 +397,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSeasonalCardStats = isAdmin || hasPermission(P.SeasonalCards.Remaining.ViewAllStores)
   // 人脸抓拍摄像机管理只认独立权限码（会签发摄像机推送令牌），不挂在系统设置权限下。
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
+  const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
   // 人脸比对页任一 FaceMatch.* 权限即可进入；各页签（档案 / 统计 / 名单 / 复核）页内再按各自权限码显示。
   const canAccessFaceMatch =
     isAdmin ||
@@ -427,6 +446,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
       canViewPerformanceBaseline,
       canViewOperationAudits,
       canViewDeviceRegistration,
+      canManageSupplierPreorders,
+      canOrderSupplierPreorders,
       hasPermission,
     })
   const canAccessOrderFront =
@@ -483,6 +504,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageWarehouseOrders,
     canManageStoreOrderImportPriceVariance,
     canReturnStoreOrderGoods,
+    canManageSupplierPreorders,
+    canOrderSupplierPreorders,
     canManageWarehouseCategories,
     canManageWarehouseLocations,
     canViewContainers,
@@ -516,6 +539,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canReviewAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
+    canReviewOwnAttendance,
+    canViewAttendancePayroll,
+    canViewAttendanceHours,
+    canAdjustAttendancePunches,
+    canEditAttendancePayroll,
+    canUnlockAttendancePayroll,
     canViewEmployeeProfiles,
     canViewSystemLogs,
     canViewPerformanceBaseline,
@@ -526,6 +555,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewDailyCloseRecords,
     canViewSeasonalCardStats,
     canManageFaceCameras,
+    canManageMyobConnections,
     canAccessFaceMatch,
     canManageScheduledTasks,
     canManageSystemSettings,

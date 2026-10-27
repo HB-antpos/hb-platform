@@ -153,6 +153,13 @@ namespace BlazorApp.Api.Services.React
 
         public async Task<ApiResponse<PromotionDetailDto>> CreateAsync(CreatePromotionDto dto)
         {
+            // 分店必选：未绑定分店的促销收银端不计算，统一口径后不再允许创建。
+            dto.Stores = NormalizeStoreItems(dto.Stores);
+            if (dto.Stores.Count == 0)
+            {
+                return ApiResponse<PromotionDetailDto>.Error("请至少选择一家适用分店", PromotionStoreRequiredErrorCode);
+            }
+
             var id = UuidHelper.GenerateUuid7();
             var entity = new Promotion
             {
@@ -204,6 +211,13 @@ namespace BlazorApp.Api.Services.React
             UpdatePromotionDto dto
         )
         {
+            // 分店必选：先校验再落库，避免把已有促销改成未绑定分店（收银不计算）。
+            dto.Stores = NormalizeStoreItems(dto.Stores);
+            if (dto.Stores.Count == 0)
+            {
+                return ApiResponse<PromotionDetailDto>.Error("请至少选择一家适用分店", PromotionStoreRequiredErrorCode);
+            }
+
             var s = await _context.PromotionDb.AsQueryable().InSingleAsync(id);
             if (s == null)
             {
@@ -350,7 +364,8 @@ namespace BlazorApp.Api.Services.React
                 promotionsQuery = promotionsQuery.Where(s => s.Name.Contains(keyword));
             }
 
-            // 范围筛选下推到数据库：当前店关联 + 无门店关系的总部促销。
+            // 范围筛选下推到数据库：只看绑定了当前分店的促销。
+            // 未绑定任何分店的促销收银端不计算（PromotionRuleService），店级页面也不再把它当成全店促销展示。
             promotionsQuery = promotionsQuery.Where(promotion =>
                 SqlFunc
                     .Subqueryable<PromotionStore>()
@@ -358,11 +373,8 @@ namespace BlazorApp.Api.Services.React
                         store.PromotionId == promotion.Id && store.StoreCode == storeCode
                     )
                     .Any()
-                || !SqlFunc
-                    .Subqueryable<PromotionStore>()
-                    .Where(store => store.PromotionId == promotion.Id)
-                    .Any()
             );
+            promotionsQuery = ApplyStoreStatusFilter(promotionsQuery, request.Status, DateTime.UtcNow);
 
             promotionsQuery = ApplyStoreGridQuerySorting(promotionsQuery, request.SortModel);
             var total = await promotionsQuery.CountAsync();
@@ -407,6 +419,128 @@ namespace BlazorApp.Api.Services.React
                 )
                 .ToList();
             return GridResponseDto<PromotionListDto>.OK(items, total);
+        }
+
+        public async Task<ApiResponse<PromotionStoreStatusCountsDto>> GetStoreStatusCountsAsync(
+            string storeCode,
+            string? keyword = null,
+            DateTime? asOf = null
+        )
+        {
+            storeCode = NormalizeStoreCode(storeCode);
+            if (!await CanAccessStoreAsync(storeCode))
+            {
+                return ApiResponse<PromotionStoreStatusCountsDto>.Error("无权访问当前分店", "STORE_FORBIDDEN");
+            }
+
+            var now = asOf ?? DateTime.UtcNow;
+            ISugarQueryable<Promotion> BaseQuery()
+            {
+                var query = _context
+                    .PromotionDb.AsQueryable()
+                    .Where(promotion =>
+                        SqlFunc
+                            .Subqueryable<PromotionStore>()
+                            .Where(store =>
+                                store.PromotionId == promotion.Id && store.StoreCode == storeCode
+                            )
+                            .Any()
+                    );
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    var trimmed = keyword.Trim();
+                    query = query.Where(promotion => promotion.Name.Contains(trimmed));
+                }
+
+                return query;
+            }
+
+            // 各分段与列表 Status 筛选共用同一套判定，保证数字和点进去看到的条数一致。
+            var counts = new PromotionStoreStatusCountsDto
+            {
+                Active = await ApplyStoreStatusFilter(BaseQuery(), PromotionStoreStatusFilters.Active, now).CountAsync(),
+                Upcoming = await ApplyStoreStatusFilter(BaseQuery(), PromotionStoreStatusFilters.Upcoming, now).CountAsync(),
+                Disabled = await ApplyStoreStatusFilter(BaseQuery(), PromotionStoreStatusFilters.Disabled, now).CountAsync(),
+                Ended = await ApplyStoreStatusFilter(BaseQuery(), PromotionStoreStatusFilters.Ended, now).CountAsync(),
+                Total = await BaseQuery().CountAsync(),
+            };
+            return ApiResponse<PromotionStoreStatusCountsDto>.OK(counts);
+        }
+
+        public async Task<ApiResponse<List<PromotionListDto>>> GetStoreProductPromotionsAsync(
+            string productCode,
+            string storeCode,
+            DateTime? asOf = null
+        )
+        {
+            storeCode = NormalizeStoreCode(storeCode);
+            if (!await CanAccessStoreAsync(storeCode))
+            {
+                return ApiResponse<List<PromotionListDto>>.Error("无权访问当前分店", "STORE_FORBIDDEN");
+            }
+
+            productCode = productCode?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(productCode))
+            {
+                return ApiResponse<List<PromotionListDto>>.OK(new List<PromotionListDto>());
+            }
+
+            var now = asOf ?? DateTime.UtcNow;
+            // 商品查询页需要看到「还能管」的促销：未结束（含未开始、已停用），且绑定了当前分店、包含本商品。
+            var promotions = await _context
+                .PromotionDb.AsQueryable()
+                .Where(p => !p.IsDeleted && p.EffectiveEnd >= now)
+                .Where(p =>
+                    SqlFunc
+                        .Subqueryable<PromotionStore>()
+                        .Where(ps => ps.PromotionId == p.Id && !ps.IsDeleted && ps.StoreCode == storeCode)
+                        .Any()
+                )
+                .Where(p =>
+                    SqlFunc
+                        .Subqueryable<PromotionProduct>()
+                        .Where(pp => pp.PromotionId == p.Id && !pp.IsDeleted && pp.ProductCode == productCode)
+                        .Any()
+                )
+                .OrderBy(p => p.EffectiveStart, OrderByType.Asc)
+                .OrderBy(p => p.Priority, OrderByType.Desc)
+                .OrderBy(p => p.Id, OrderByType.Asc)
+                .ToListAsync();
+
+            var ids = promotions.Select(item => item.Id).ToList();
+            var stores =
+                ids.Count > 0
+                    ? await _context
+                        .PromotionStoreDb.AsQueryable()
+                        .Where(item => ids.Contains(item.PromotionId) && !item.IsDeleted)
+                        .ToListAsync()
+                    : new List<PromotionStore>();
+            var products =
+                ids.Count > 0
+                    ? await _context
+                        .PromotionProductDb.AsQueryable()
+                        .Where(item => ids.Contains(item.PromotionId) && !item.IsDeleted)
+                        .ToListAsync()
+                    : new List<PromotionProduct>();
+
+            var list = promotions
+                .Select(promotion =>
+                {
+                    var promotionStores = stores.Where(item => item.PromotionId == promotion.Id).ToList();
+                    var scopeType = ResolveScopeType(promotionStores, storeCode);
+                    return scopeType == null
+                        ? null
+                        : ToListDto(
+                            promotion,
+                            products.Count(item => item.PromotionId == promotion.Id),
+                            promotionStores.Count,
+                            scopeType
+                        );
+                })
+                .Where(item => item != null)
+                .Select(item => item!)
+                .ToList();
+            return ApiResponse<List<PromotionListDto>>.OK(list);
         }
 
         public async Task<ApiResponse<PromotionDetailDto>> GetStoreByIdAsync(
@@ -524,13 +658,10 @@ namespace BlazorApp.Api.Services.React
                 item.PromotionId == dto.SourcePromotionId
             );
             var scopeType = ResolveScopeType(sourceStores ?? new List<PromotionStore>(), storeCode);
-            if (
-                scopeType != PromotionStoreScopeTypes.MultiStore
-                && scopeType != PromotionStoreScopeTypes.Headquarters
-            )
+            if (scopeType != PromotionStoreScopeTypes.MultiStore)
             {
                 return ApiResponse<PromotionDetailDto>.Error(
-                    "只能复制总部或多店促销",
+                    "只能复制覆盖本店的多店促销",
                     "PROMOTION_NOT_COPYABLE"
                 );
             }
@@ -808,11 +939,7 @@ namespace BlazorApp.Api.Services.React
                             ps.PromotionId == p.Id && !ps.IsDeleted && ps.StoreCode == storeCode
                         )
                         .Any()
-                    // 没有任何有效门店绑定的活动属于总部活动，对所有门店可见。
-                    || !SqlFunc
-                        .Subqueryable<PromotionStore>()
-                        .Where(ps => ps.PromotionId == p.Id && !ps.IsDeleted)
-                        .Any()
+                // 未绑定任何分店的活动收银端不计算，这里也不再当成全店活动返回。
                 )
                 .Where(p =>
                     SqlFunc
@@ -948,6 +1075,25 @@ namespace BlazorApp.Api.Services.React
 
         private static string NormalizeStoreCode(string? storeCode) => storeCode?.Trim() ?? string.Empty;
 
+        public const string PromotionStoreRequiredErrorCode = "PROMOTION_STORE_REQUIRED";
+
+        /// <summary>去掉空白与重复的分店码（忽略大小写），保留首次出现的顺序。</summary>
+        private static List<PromotionStoreItemDto> NormalizeStoreItems(List<PromotionStoreItemDto>? stores)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<PromotionStoreItemDto>();
+            foreach (var store in stores ?? new List<PromotionStoreItemDto>())
+            {
+                var code = NormalizeStoreCode(store?.StoreCode);
+                if (code.Length > 0 && seen.Add(code))
+                {
+                    result.Add(new PromotionStoreItemDto { StoreCode = code });
+                }
+            }
+
+            return result;
+        }
+
         private static List<PromotionStoreItemDto> BuildSingleStoreItems(string storeCode) =>
             new() { new PromotionStoreItemDto { StoreCode = storeCode } };
 
@@ -956,10 +1102,11 @@ namespace BlazorApp.Api.Services.React
             string storeCode
         )
         {
-            // 范围判定是店级页面的权限边界：只有本店可编辑，多店/总部只能复制。
+            // 范围判定是店级页面的权限边界：只有本店独享可编辑，多店只能复制。
+            // 未绑定任何分店的促销收银端不计算，对任何分店都视为无关（不再当作总部/全店促销）。
             if (stores.Count == 0)
             {
-                return PromotionStoreScopeTypes.Headquarters;
+                return null;
             }
 
             var containsCurrentStore = stores.Any(item =>
@@ -997,9 +1144,7 @@ namespace BlazorApp.Api.Services.React
                 StoresCount = storesCount,
                 ScopeType = scopeType,
                 CanEditInStoreScope = scopeType == PromotionStoreScopeTypes.StoreOnly,
-                CanCopyToStore =
-                    scopeType == PromotionStoreScopeTypes.MultiStore
-                    || scopeType == PromotionStoreScopeTypes.Headquarters,
+                CanCopyToStore = scopeType == PromotionStoreScopeTypes.MultiStore,
             };
         }
 
@@ -1040,9 +1185,36 @@ namespace BlazorApp.Api.Services.React
                     .ToList(),
                 ScopeType = scopeType,
                 CanEditInStoreScope = scopeType == PromotionStoreScopeTypes.StoreOnly,
-                CanCopyToStore =
-                    scopeType == PromotionStoreScopeTypes.MultiStore
-                    || scopeType == PromotionStoreScopeTypes.Headquarters,
+                CanCopyToStore = scopeType == PromotionStoreScopeTypes.MultiStore,
+            };
+        }
+
+        /// <summary>
+        /// 店级状态分段：生效中=启用且在有效期内；未开始=启用且未到开始时间；
+        /// 已停用=停用且未结束；已结束=结束时间已过（不论启停）。四段互斥，合计等于全部；
+        /// notended 是「全部」去掉已结束的组合筛选，不是独立分段（不参与计数）。
+        /// </summary>
+        private static ISugarQueryable<Promotion> ApplyStoreStatusFilter(
+            ISugarQueryable<Promotion> query,
+            string? status,
+            DateTime now
+        )
+        {
+            return (status ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                PromotionStoreStatusFilters.Active => query.Where(p =>
+                    p.IsEnabled && p.EffectiveStart <= now && p.EffectiveEnd >= now
+                ),
+                PromotionStoreStatusFilters.Upcoming => query.Where(p =>
+                    p.IsEnabled && p.EffectiveStart > now && p.EffectiveEnd >= now
+                ),
+                PromotionStoreStatusFilters.Disabled => query.Where(p =>
+                    !p.IsEnabled && p.EffectiveEnd >= now
+                ),
+                PromotionStoreStatusFilters.Ended => query.Where(p => p.EffectiveEnd < now),
+                // 未结束=全部去掉已结束（含已停用但未到期的），供移动端「全部」分段隐藏已结束。
+                PromotionStoreStatusFilters.NotEnded => query.Where(p => p.EffectiveEnd >= now),
+                _ => query,
             };
         }
 

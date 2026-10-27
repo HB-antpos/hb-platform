@@ -107,6 +107,24 @@ public sealed class LocalCardPaymentApprovedEvidenceExitTests
                 paid,
                 CreateJournal(attempt, BaseTime.AddMinutes(1))));
 
+            // 备注与证据都为空：批准证据出口仍要求留下说明（备注或证据二选一）。
+            var noExplanation = new ActiveSessionResolution(
+                attempt.AttemptGuid,
+                "SESSION-EXIT-002",
+                ActiveSessionSupervisorDecision.ConfirmNotPaid,
+                attempt.Status,
+                attempt.UpdatedAt,
+                string.Empty,
+                null,
+                PaymentReference: null,
+                BaseTime.AddMinutes(1))
+            {
+                AllowApprovedEvidence = true
+            };
+            await Assert.ThrowsAsync<ArgumentException>(() => repository.ResolvePaymentWithJournalAsync(
+                noExplanation,
+                CreateJournal(attempt, BaseTime.AddMinutes(1))));
+
             var notPaid = new ActiveSessionResolution(
                 attempt.AttemptGuid,
                 "SESSION-EXIT-002",

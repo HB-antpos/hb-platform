@@ -385,6 +385,20 @@ namespace BlazorApp.Shared.Constants
             public const string CancelPriceUpdateTasks = "Warehouse.CancelPriceUpdateTasks";
         }
 
+        /// <summary>
+        /// 供应商节日预订单（KFC / Dats / Brazco 等圣诞、万圣节订单表）。两码都刻意不设别名，需显式授予。
+        /// </summary>
+        public static class SupplierPreorder
+        {
+            /// <summary>导入订单表、开启分店、维护下单人员授权、截止锁定、导出汇总；截止后仍可修改。</summary>
+            public const string Manage = "SupplierPreorder.Manage";
+            /// <summary>
+            /// 「预订单下单」入口。只决定能否看到菜单和进入页面；能替哪家店下单只认「下单人员授权」，
+            /// 不看可管理分店、不看是否店长。
+            /// </summary>
+            public const string Order = "SupplierPreorder.Order";
+        }
+
         public static class DomesticPurchase
         {
             public const string ManageSuppliers = "DomesticPurchase.ManageSuppliers";
@@ -566,6 +580,8 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string ViewManagedStore = "Attendance.Approval.ViewManagedStore";
                 public const string ReviewManagedStore = "Attendance.Approval.ReviewManagedStore";
+                // 审核本人提交的考勤申请；默认不授予任何角色，由管理员在生产手动授权（迁移 20261026.001 入库）。
+                public const string ReviewSelf = "Attendance.Approval.ReviewSelf";
             }
 
             public static class Holiday
@@ -586,9 +602,27 @@ namespace BlazorApp.Shared.Constants
                 public const string Edit = "Attendance.Settings.Edit";
             }
 
+            // 工资表 / 时薪表；默认不授予任何角色，由管理员在生产手动授权（迁移 20261026.002 入库）。
+            // Edit / Unlock 不隐含 View；Attendance.Admin.View 也不连带这三项。
+            public static class Payroll
+            {
+                public const string View = "Attendance.Payroll.View";
+                public const string Edit = "Attendance.Payroll.Edit";
+                public const string Unlock = "Attendance.Payroll.Unlock";
+            }
+
             public static class Admin
             {
                 public const string View = "Attendance.Admin.View";
+            }
+        }
+
+        // MYOB 对接（方案 docs/plans/2026-10-27-myob-payroll-integration.md）；默认不授予任何角色，由管理员手动授权。
+        public static class Myob
+        {
+            public static class Connection
+            {
+                public const string Manage = "Myob.Connection.Manage";
             }
         }
 
@@ -625,6 +659,42 @@ namespace BlazorApp.Shared.Constants
             public const string View = "OrderFront";
             /// <summary>订货前台「货号销量」页面：允许前台用户按导入货号查看全部分店的销量，与后台销售看板权限相互独立。</summary>
             public const string BatchProductSalesView = "OrderFront.BatchProductSales.View";
+        }
+
+        /// <summary>
+        /// 角色等级基准值（数值越大等级越高）。迁移回填与新环境种子共用，必须与
+        /// RoleLevelSchema.ApplySql 的回填保持一致；未登记的自定义角色默认为 0，由管理员在角色页设置。
+        /// </summary>
+        public static class RoleLevels
+        {
+            public const int SuperAdmin = 100;
+            public const int WarehouseManager = 80;
+            public const int StoreManager = 70;
+            public const int Manager = 60;
+            public const int Staff = 30;
+            public const int User = 10;
+            public const int Max = 100;
+
+            public static int ForRoleName(string? roleName)
+            {
+                if (string.IsNullOrWhiteSpace(roleName))
+                {
+                    return 0;
+                }
+
+                if (IsSuperAdminRole(roleName)) return SuperAdmin;
+                if (WarehouseManagerRoleNames.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+                    return WarehouseManager;
+                if (IsStoreManagerRole(roleName)) return StoreManager;
+                if (string.Equals(roleName, "Manager", StringComparison.OrdinalIgnoreCase))
+                    return Manager;
+                if (IsEmployeeRole(roleName)
+                    || string.Equals(roleName, "Order", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(roleName, "WarehouseStaff", StringComparison.OrdinalIgnoreCase))
+                    return Staff;
+                if (string.Equals(roleName, "User", StringComparison.OrdinalIgnoreCase)) return User;
+                return 0;
+            }
         }
 
         public static bool IsSuperAdminRole(string? roleName)

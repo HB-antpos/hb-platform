@@ -2357,6 +2357,51 @@ public sealed partial class CardPaymentRecoveryServiceTests
     }
 
     [Fact]
+    public async Task RecoverLatestAsync_local_ip_get_last_operator_cancelled_tm_restores_draft_as_cancelled()
+    {
+        // TM = OPERATOR CANCELLED：收银员/顾客在刷卡机上取消，不是银行拒绝，终态应为 Cancelled（10-25 1033 店实测曾被标成 Declined）。
+        var draft = CreateDraft(cardAmount: 8m, currentTenders: [new PaymentTender(PaymentMethodKind.Cash, 2m)]);
+        var attempt = CreateAttempt(
+            sessionId: null,
+            txnRef: "P000000000000009",
+            connectionMode: LinklyConnectionMode.LocalIp);
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var orders = new FakeLocalOrderRepository();
+        var backend = new FakeLinklyBackendTerminalClient();
+        var localTerminal = new FakeLinklyTerminalClient(new PaymentAuthorizationResult(
+            false,
+            "ANZ:P000000000000009",
+            "OPERATOR CANCELLED",
+            10m,
+            [CreateLocalCardTransaction("P000000000000009", "TM", "OPERATOR CANCELLED")],
+            "ANZ",
+            "Sandbox",
+            LinklyConnectionMode.LocalIp.ToString(),
+            "P",
+            null,
+            "P000000000000009",
+            "TM",
+            "OPERATOR CANCELLED"));
+        var cart = new PosCartService();
+        var service = CreateService(
+            attempts,
+            orders,
+            backend,
+            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
+            localTerminal);
+
+        var result = await service.RecoverLatestAsync(cart, Session);
+
+        Assert.Equal(CardPaymentRecoveryOutcome.DraftRestored, result.Outcome);
+        Assert.Equal(LocalCardPaymentAttemptStatus.Cancelled.ToString(), attempts.RecoveryTargetStatus);
+        Assert.Equal("TM", attempts.ResponseCode);
+        Assert.Equal(0, orders.SaveCount);
+
+        Assert.True(await service.CompleteDraftHandoffAsync(attempt.AttemptGuid, cart));
+        Assert.Equal(LocalCardPaymentAttemptStatus.Cancelled, attempts.Status);
+    }
+
+    [Fact]
     public async Task RecoverLatestAsync_local_ip_get_last_code_only_decline_restores_draft_as_declined()
     {
         var attempt = CreateAttempt(
@@ -4948,11 +4993,11 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.Equal(LocalSquarePaymentAttemptStatus.Unknown, attempts.Status);
     }
 
+    // 证据输入框已取消：确认未退款不再强制证据，只剩“已退款要退款号或备注”“继续等待要备注”两条必填。
     [Theory]
     [InlineData(CardRefundSupervisorDecision.ConfirmRefunded)]
-    [InlineData(CardRefundSupervisorDecision.ConfirmNotRefunded)]
     [InlineData(CardRefundSupervisorDecision.ContinueWaiting)]
-    public async Task ResolveRefundAsync_rejects_missing_required_supervisor_evidence(
+    public async Task ResolveRefundAsync_rejects_missing_required_supervisor_note_or_reference(
         CardRefundSupervisorDecision decision)
     {
         var attempt = CreateAttempt(
@@ -6297,15 +6342,14 @@ public sealed partial class CardPaymentRecoveryServiceTests
             audit.RootElement.GetProperty("reasonCode").GetString());
     }
 
-    [Theory]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
-    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
-    public async Task ResolvePaymentAsync_requires_financial_evidence_when_note_is_empty(
-        CardPaymentSupervisorDecision decision)
+    // 确认已付款的参考号/凭据已改为选填；证据输入框取消后，确认未付款也既不要证据也不要备注，
+    // 只靠主管扫码授权 + 实时核验（与终端结论矛盾仍会被拒）。
+    [Fact]
+    public async Task ResolvePaymentAsync_confirm_not_paid_needs_neither_note_nor_evidence()
     {
         var attempt = CreateAttempt(
-            "SESSION-SUPERVISOR-EVIDENCE",
-            "TXN-SUPERVISOR-EVIDENCE",
+            "SESSION-SUPERVISOR-NO-EVIDENCE",
+            "TXN-SUPERVISOR-NO-EVIDENCE",
             LocalCardPaymentAttemptStatus.Recovering);
         var attempts = new FakeCardPaymentAttemptRepository(attempt);
         var service = CreateService(
@@ -6317,15 +6361,16 @@ public sealed partial class CardPaymentRecoveryServiceTests
             new CardPaymentSupervisorResolution(
                 attempt.AttemptGuid,
                 CardProcessorKind.Linkly,
-                decision,
+                CardPaymentSupervisorDecision.ConfirmNotPaid,
                 string.Empty,
                 "MANAGER-01"),
             new PosCartService(),
             Session);
 
-        Assert.False(result.Succeeded);
-        Assert.True(result.LockRetained);
-        Assert.Null(attempts.LastPaymentJournal);
+        Assert.True(result.Succeeded);
+        var journal = Assert.IsType<LocalFinancialSupervisorResolution>(attempts.LastPaymentJournal);
+        Assert.Equal(string.Empty, journal.Reason);
+        Assert.Null(journal.Evidence);
     }
 
     [Fact]
@@ -6418,8 +6463,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
             attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.FinalizePending, attempts.RecoveryPhase);
         Assert.Null(attempts.AcknowledgedAt);
-        // 结案前的实时核验只是一次只读状态查询；除此之外没有任何后端副作用。
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，既没有状态查询也没有任何后端副作用。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(originalRevision, cart.Revision);
@@ -6471,7 +6516,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Equal(ActiveSessionSupervisorResolutionCodes.ContinueWaiting, attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.None, attempts.RecoveryPhase);
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，没有状态查询。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);
@@ -6513,7 +6559,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Null(result.RecoveryResult);
         Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(1, backend.StatusCallCount);
+        // 人工确认为准：结案不再做实时核验，没有状态查询。
+        Assert.Equal(0, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);

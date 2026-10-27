@@ -61,7 +61,8 @@ public static class ServiceRegistration
         var initialApiAddress = GetInitialApiBaseAddress(startupOptions);
         services.AddSingleton(new ApiRuntimeEndpointState(initialApiAddress.AbsoluteUri));
         // 进程内共享的主备入口选择器：所有 API 客户端的处理器必须共用同一份状态，才能一起切到备用入口。
-        services.AddSingleton<ApiTransportSelector>();
+        // 冷启动先套用本机记住的后台首选入口（见 ApiEntryPreferenceService），再被 receipt-profile/sync 下发的值覆盖。
+        services.AddSingleton(sp => ApiEntryPreferenceService.CreateSelector(sp.GetRequiredService<IApiEntryPreferenceStore>()));
         // 所有 HttpClient 的默认主处理器：只增加建连超时，其余保持与 HttpClientFactory 默认一致（不用 Cookie）。
         // 建连超时必须由我们自己实现（见 ApiHttpHandlerFactory），否则超时异常和请求超时无法区分。
         // 自行配置了主处理器的客户端（目录同步、远程维护）以各自配置为准。
@@ -86,6 +87,9 @@ public static class ServiceRegistration
             : Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Hbpos.Client");
+        services.AddSingleton<IApiEntryPreferenceStore>(
+            new FileApiEntryPreferenceStore(Path.Combine(localDataDirectory, "api-entry-mode.json")));
+        services.AddSingleton<IApiEntryPreferenceService, ApiEntryPreferenceService>();
         // 正式与调试 API 共用同一业务数据库，本地数据也固定落在同一个文件中。
         services.AddSingleton(new LocalSqliteStore(Path.Combine(localDataDirectory, "hbpos_client.db")));
         services.AddSingleton<ILocalSqliteCheckpointService>(sp => sp.GetRequiredService<LocalSqliteStore>());
@@ -499,7 +503,8 @@ public static class ServiceRegistration
         services.AddSingleton<IReceiptProfileSyncService>(sp => new ReceiptProfileSyncService(
             sp.GetRequiredService<IReceiptProfileLocalStore>(),
             sp.GetRequiredService<IStoreReceiptProfileApiClient>(),
-            sp.GetRequiredService<DeviceAuthorizationState>()));
+            sp.GetRequiredService<DeviceAuthorizationState>(),
+            entryPreference: sp.GetRequiredService<IApiEntryPreferenceService>()));
         services.AddSingleton<IReceiptTextFormatter, ReceiptTextFormatter>();
         services.AddSingleton<IReceiptPrinterDriver, XpReceiptPrinterDriver>();
         services.AddSingleton<IReceiptPrintService, ReceiptPrintService>();
@@ -518,7 +523,11 @@ public static class ServiceRegistration
         services.AddSingleton<ICardTerminalSettingsProvider>(sp => sp.GetRequiredService<ICardTerminalSettingsStore>());
         services.AddSingleton<ILinklyCloudSecretStore>(sp => sp.GetRequiredService<ICardTerminalSettingsStore>());
         services.AddSingleton<ILinklyEftClientFactory, LinklyEftClientFactory>();
-        services.AddSingleton<LinklyTerminalClient>();
+        // 本地 Linkly 客户端需要 attempt 上下文，才能在收到批准小票时把证据落到本笔 attempt。
+        services.AddSingleton(sp => new LinklyTerminalClient(
+            sp.GetRequiredService<ILinklyEftClientFactory>(),
+            sp.GetRequiredService<ILocalizationService>(),
+            sp.GetRequiredService<ILinklyPaymentAttemptContextAccessor>()));
         services.AddHttpClient<ILinklyCloudApiClient, LinklyCloudApiClient>(client =>
         {
             client.Timeout = LinklyTimeoutPolicy.HttpTimeout;
@@ -705,6 +714,7 @@ public static class ServiceRegistration
         services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
         services.AddSingleton<RawScannerInputProcessor>();
+        services.AddSingleton<IScannerSettingsStore, ScannerSettingsStore>();
         services.AddSingleton<IRawScannerService, RawScannerService>();
         services.AddSingleton<LocalSellableItemIndex>();
         services.AddSingleton<PosCartService>();
@@ -800,6 +810,7 @@ public static class ServiceRegistration
             viewModel.ConfigureRestartPrompt(
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
+            viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

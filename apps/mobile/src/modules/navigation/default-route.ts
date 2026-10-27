@@ -24,14 +24,17 @@ export type AppTabPath =
   | "/(shell)/advertisements"
   | "/(shell)/promotions"
   | "/(shell)/reports"
+  | "/(shell)/traffic-stats"
   | "/(shell)/store-vouchers"
   | "/(shell)/store-cash"
   | "/(shell)/seasonal-cards"
   | "/(shell)/attendance-personal"
   | "/(shell)/attendance-management"
+  | "/(shell)/attendance-hours"
   | "/(shell)/product-query"
   | "/(shell)/product-insights"
   | "/(shell)/price-updates"
+  | "/(shell)/pricing-strategies"
   | "/(shell)/warehouse-product-insights"
   | "/(shell)/seasonal-product-insights"
   | "/(shell)/container-new-products"
@@ -71,14 +74,17 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   advertisements: "/(shell)/advertisements",
   promotions: "/(shell)/promotions",
   reports: "/(shell)/reports",
+  "traffic-stats": "/(shell)/traffic-stats",
   "store-vouchers": "/(shell)/store-vouchers",
   "store-cash": "/(shell)/store-cash",
   "seasonal-cards": "/(shell)/seasonal-cards",
   "attendance-personal": "/(shell)/attendance-personal",
   "attendance-management": "/(shell)/attendance-management",
+  "attendance-hours": "/(shell)/attendance-hours",
   "product-query": "/(shell)/product-query",
   "product-insights": "/(shell)/product-insights",
   "price-updates": "/(shell)/price-updates",
+  "pricing-strategies": "/(shell)/pricing-strategies",
   "warehouse-product-insights": "/(shell)/warehouse-product-insights",
   "seasonal-product-insights": "/(shell)/seasonal-product-insights",
   "container-new-products": "/(shell)/container-new-products",
@@ -115,6 +121,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "wpf-versions",
   "attendance-personal",
   "attendance-management",
+  // 工时统计按账号的 Punch.ViewManagedStore 与管理分店授权，设备会话没有用户账号，设备模式不展示入口。
+  "attendance-hours",
   "employee-profile-review",
   // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示合并入口（及旧三个入口）。
   "face-hub",
@@ -127,6 +135,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "legacy-employee-logs",
   // 日结记录同样按账号权限与可查看分店授权，设备会话没有用户账号，设备模式不展示入口。
   "daily-closes",
+  // 自动价格策略按账号的 PricingStrategy.View / Edit 授权，设备会话没有用户账号，设备模式不展示入口。
+  "pricing-strategies",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
   // 设备会话没有用户账号，现金接口按账号权限与可操作分店授权，设备模式不展示入口。
@@ -135,6 +145,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "seasonal-product-insights",
   "device-management",
   "reports",
+  // 客流统计按账号的 FaceMatch.Traffic.View 与可查看门店授权，设备会话没有用户账号，设备模式不展示入口。
+  "traffic-stats",
   "user-admin",
   "roles",
   // 权限管理与角色管理同属全局管理，设备会话没有管理员身份，服务层会直接拒绝。

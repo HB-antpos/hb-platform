@@ -5,9 +5,9 @@ import {
   SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
-import { Alert, Button, Dropdown, Input, Modal, Segmented, Select, Tooltip, message } from 'antd'
+import { Alert, Button, Dropdown, Input, Modal, Segmented, Select, Spin, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar'
@@ -25,13 +25,16 @@ import {
   lockDevice,
 } from '../../../services/deviceRegistrationService'
 import { useAuthStore } from '../../../store/auth'
+import { getPosApiEntryStores } from '../../../services/posApiEntryService'
 import type { DeviceRegistrationItem, StoreOption } from '../../../types/deviceRegistration'
+import type { PosApiEntryStoreItem } from '../../../types/posApiEntry'
 import { P } from '../../../types/permissions'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 
 import AppUsagePanel from './AppUsagePanel'
 import DeviceActivationCodePanel from './DeviceActivationCodePanel'
 import EmergencyLoginModal from './EmergencyLoginModal'
+import PosApiEntryPanel from './PosApiEntryPanel'
 import { supportsTransactionGate } from './deviceSystemOptions'
 import {
   DeviceStatusPill,
@@ -48,7 +51,9 @@ import {
   DEVICE_STATUS_ACTIONS,
   DEVICE_STATUS_TABS,
   buildCountedOptions,
+  buildVersionFilterOptions,
   compareDateDesc,
+  compareDottedVersion,
   countDevicesByStatus,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
@@ -57,12 +62,24 @@ import {
   getDeviceStatusActions,
   getUptimeParts,
   isLongUptime,
+  isRustDeskVersionOutdated,
   runWithConcurrency,
   type CountedOption,
   type DeviceOnlineFilter,
   type DeviceStatusAction,
   type DeviceStatusTab,
+  VERSION_FILTER_NONE,
+  VERSION_FILTER_OUTDATED,
 } from './deviceManagementLogic'
+import { DeviceRouteCell, MODE_LABEL_KEY } from './posApiEntryCells'
+import {
+  POS_API_ENTRY_MODES,
+  buildPreferredModeMap,
+  getDeviceRouteState,
+  lookupPreferredMode,
+  matchesRouteFilter,
+  type DeviceRouteFilter,
+} from './posApiEntryLogic'
 import './deviceManagement.css'
 import deviceManagementMessagesEn from './deviceManagementMessages.en.json'
 import deviceManagementMessagesZh from './deviceManagementMessages.zh.json'
@@ -89,7 +106,10 @@ const STATUS_ACTION_REQUEST: Record<DeviceStatusAction, (id: number) => Promise<
   lock: lockDevice,
 }
 
-type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes'
+type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes' | 'posApiEntry' | 'posApiUsage'
+
+// 线路用量带图表与大表格，只有切到该视图时才加载，不进设备管理页的首屏代码
+const PosApiEntryUsagePanel = lazy(() => import('./PosApiEntryUsagePanel'))
 
 // 文案键写成字面量，页面文案契约测试才能扫描到并校验中英文都存在
 const BATCH_ACTION_LABEL_KEY: Record<DeviceStatusAction, string> = {
@@ -112,6 +132,20 @@ const BATCH_SUCCESS_KEY: Record<DeviceStatusAction, string> = {
   activate: 'posAdmin.devices.mgmt.batch.activateSucceeded',
   disable: 'posAdmin.devices.mgmt.batch.disableSucceeded',
   lock: 'posAdmin.devices.mgmt.batch.lockSucceeded',
+}
+
+/** 版本下拉里的特殊选项（未上报 / 未安装 / 低于最新版）：文字取文案，右侧同样显示台数。 */
+function renderSpecialVersionOption(value: string, text: string, count: number) {
+  return {
+    value,
+    title: text,
+    label: (
+      <span className="dev-mgmt-option">
+        <span className="dev-mgmt-option-special">{text}</span>
+        <span className="dev-mgmt-option-count">{count}</span>
+      </span>
+    ),
+  }
 }
 
 function renderCountedOption(option: CountedOption) {
@@ -152,12 +186,19 @@ export default function DeviceRegistrationPage() {
 
   const [items, setItems] = useState<DeviceRegistrationItem[]>([])
   const [serverTotal, setServerTotal] = useState(0)
+  // 远程维护下发的 RustDesk 版本：「远程版本」列低于它时标橙。
+  const [rustDeskLatestVersion, setRustDeskLatestVersion] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [statusTab, setStatusTab] = useState<DeviceStatusTab>('all')
   const [keyword, setKeyword] = useState('')
   const [deviceType, setDeviceType] = useState<string>()
   const [deviceSystem, setDeviceSystem] = useState<string>()
   const [onlineFilter, setOnlineFilter] = useState<DeviceOnlineFilter>()
+  const [appVersionFilter, setAppVersionFilter] = useState<string>()
+  const [rustDeskVersionFilter, setRustDeskVersionFilter] = useState<string>()
+  const [routeFilter, setRouteFilter] = useState<DeviceRouteFilter>()
+  // 各分店的收银入口首选：只用于「线路」列判断是否回退，加载失败静默降级为不做回退判断
+  const [entryStores, setEntryStores] = useState<PosApiEntryStoreItem[]>([])
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
 
   const [actionDeviceId, setActionDeviceId] = useState<number | null>(null)
@@ -199,6 +240,7 @@ export default function DeviceRegistrationPage() {
         onSuccess: (result) => {
           setItems(result.devices)
           setServerTotal(result.total)
+          setRustDeskLatestVersion(result.rustDeskLatestVersion ?? null)
         },
         onError: (error) => {
           console.error(t('posAdmin.devices.loadFailed'), error)
@@ -217,6 +259,30 @@ export default function DeviceRegistrationPage() {
       void loadStores()
     }
   }, [canViewLegacyDeviceRegistration])
+
+  // 每次回到设备列表视图时取一次（用户可能刚在「收银入口」里改过首选）；不跟随 15 秒轮询
+  useEffect(() => {
+    if (viewMode !== 'registered' || !canViewLegacyDeviceRegistration) {
+      return
+    }
+    let cancelled = false
+    getPosApiEntryStores()
+      .then((result) => {
+        if (!cancelled) {
+          setEntryStores(result)
+        }
+      })
+      .catch((error) => {
+        // 静默降级：拿不到首选时只显示实际线路，不判断回退
+        console.error('load pos api entry stores failed', error)
+        if (!cancelled) {
+          setEntryStores([])
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [viewMode, canViewLegacyDeviceRegistration])
 
   useEffect(() => {
     if (!canViewLegacyDeviceRegistration && viewMode !== 'activationCodes') {
@@ -244,7 +310,7 @@ export default function DeviceRegistrationPage() {
   useEffect(() => {
     setPagination((current) => (current.current === 1 ? current : { ...current, current: 1 }))
     setSelectedIds((current) => (current.length ? [] : current))
-  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter, viewMode])
+  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter, routeFilter, viewMode])
 
   // 轮询/操作后重新拉取时，剔除已不在列表里的勾选（设备被删除或换了分店）
   useEffect(() => {
@@ -270,16 +336,28 @@ export default function DeviceRegistrationPage() {
   const getStoreName = (storeCode?: string | null) =>
     storeCode ? storeNameMap[storeCode] : undefined
 
-  const baseFiltered = useMemo(
-    () =>
-      filterDevicesExceptStatus(
-        items,
-        { keyword, deviceType, deviceSystem, online: onlineFilter },
-        (item) => isDeviceRuntimeOnline(item),
-        getStoreName,
-      ),
-    [items, keyword, deviceType, deviceSystem, onlineFilter, storeNameMap]
-  )
+  const preferredModeMap = useMemo(() => buildPreferredModeMap(entryStores), [entryStores])
+  const getRouteState = (item: DeviceRegistrationItem) =>
+    getDeviceRouteState(item, lookupPreferredMode(preferredModeMap, item.storeCode), isDeviceRuntimeOnline(item))
+
+  const baseFiltered = useMemo(() => {
+    const filtered = filterDevicesExceptStatus(
+      items,
+      {
+        keyword,
+        deviceType,
+        deviceSystem,
+        online: onlineFilter,
+        appVersion: appVersionFilter,
+        rustDeskVersion: rustDeskVersionFilter,
+        rustDeskLatestVersion,
+      },
+      (item) => isDeviceRuntimeOnline(item),
+      getStoreName,
+    )
+    // 线路筛选单独叠加，不改动既有的 filterDevicesExceptStatus
+    return routeFilter ? filtered.filter((item) => matchesRouteFilter(getRouteState(item), routeFilter)) : filtered
+  }, [items, keyword, deviceType, deviceSystem, onlineFilter, appVersionFilter, rustDeskVersionFilter, rustDeskLatestVersion, routeFilter, preferredModeMap, storeNameMap])
   const statusCounts = useMemo(() => countDevicesByStatus(baseFiltered), [baseFiltered])
   const visibleItems = useMemo(() => filterDevicesByStatus(baseFiltered, statusTab), [baseFiltered, statusTab])
   const scopeCounts = useMemo(
@@ -300,6 +378,21 @@ export default function DeviceRegistrationPage() {
     () => buildCountedOptions(items.map((item) => item.deviceSystem), deviceSystem),
     [items, deviceSystem]
   )
+  // 版本下拉与类型 / 系统同口径：取当前分店范围已加载设备里真实出现的版本，按新到旧排序。
+  const appVersionOptions = useMemo(
+    () => buildVersionFilterOptions(items.map((item) => item.appVersion), appVersionFilter),
+    [items, appVersionFilter]
+  )
+  const rustDeskVersionOptions = useMemo(
+    () => buildVersionFilterOptions(items.map((item) => item.rustDeskClientVersion), rustDeskVersionFilter, rustDeskLatestVersion),
+    [items, rustDeskVersionFilter, rustDeskLatestVersion]
+  )
+  const describeVersionFilter = (value: string, noneLabel: string) =>
+    value === VERSION_FILTER_NONE
+      ? noneLabel
+      : value === VERSION_FILTER_OUTDATED
+        ? t('posAdmin.devices.mgmt.versionFilter.outdated', { latest: rustDeskLatestVersion ?? '-' })
+        : value
 
   async function executeStatusAction(item: DeviceRegistrationItem, action: DeviceStatusAction) {
     setActionDeviceId(item.id)
@@ -514,6 +607,34 @@ export default function DeviceRegistrationPage() {
         ),
       },
       {
+        // RustDesk 客户端版本：没装 RustDesk / 没有远程维护记录的显示「未安装」，低于下发版本标橙。
+        title: (
+          <Tooltip title={t('posAdmin.devices.mgmt.rustDeskVersionHint', { latest: rustDeskLatestVersion ?? '-' })}>
+            <span>{t('posAdmin.devices.mgmt.columns.rustDeskVersion')}</span>
+          </Tooltip>
+        ),
+        dataIndex: 'rustDeskClientVersion',
+        width: 110,
+        sorter: (left, right) => {
+          if (!left.rustDeskClientVersion || !right.rustDeskClientVersion) {
+            return Number(Boolean(left.rustDeskClientVersion)) - Number(Boolean(right.rustDeskClientVersion))
+          }
+          return compareDottedVersion(left.rustDeskClientVersion, right.rustDeskClientVersion)
+            ?? left.rustDeskClientVersion.localeCompare(right.rustDeskClientVersion)
+        },
+        render: (value: string | null | undefined) =>
+          value ? (
+            <span
+              className={`dev-mgmt-mono${isRustDeskVersionOutdated(value, rustDeskLatestVersion) ? ' dev-mgmt-warn' : ''}`}
+              title={value}
+            >
+              {value}
+            </span>
+          ) : (
+            <span className="dev-mgmt-faint">{t('posAdmin.devices.mgmt.rustDeskNotInstalled')}</span>
+          ),
+      },
+      {
         title: t('posAdmin.devices.mgmt.columns.runtime'),
         key: 'runtime',
         width: 180,
@@ -537,6 +658,17 @@ export default function DeviceRegistrationPage() {
             </div>
           )
         },
+      },
+      {
+        // 线路：设备最近一次请求实际走的入口；与所属分店首选不同 → 回退中；WPF 版本过低 → 不认设置
+        title: (
+          <Tooltip title={t('posAdmin.devices.apiEntry.route.columnHint')}>
+            <span>{t('posAdmin.devices.apiEntry.route.column')}</span>
+          </Tooltip>
+        ),
+        key: 'route',
+        width: 200,
+        render: (_value, record) => <DeviceRouteCell state={getRouteState(record)} t={t} />,
       },
       {
         title: t('column.status'),
@@ -631,7 +763,7 @@ export default function DeviceRegistrationPage() {
         },
       },
     ]
-  }, [canManage, actionDeviceId, storeNameMap, t])
+  }, [canManage, actionDeviceId, rustDeskLatestVersion, storeNameMap, preferredModeMap, t])
 
   const storeOptions = stores.map((store) => ({
     label: `${store.storeCode} / ${store.storeName}`,
@@ -675,6 +807,35 @@ export default function DeviceRegistrationPage() {
           onRemove: () => setDeviceSystem(undefined),
         }]
       : []),
+    ...(appVersionFilter
+      ? [{
+          key: 'appVersion',
+          label: t('posAdmin.devices.mgmt.versionFilter.appVersion'),
+          value: describeVersionFilter(appVersionFilter, t('posAdmin.devices.mgmt.versionFilter.notReported')),
+          source: 'toolbar' as const,
+          onRemove: () => setAppVersionFilter(undefined),
+        }]
+      : []),
+    ...(rustDeskVersionFilter
+      ? [{
+          key: 'rustDeskVersion',
+          label: t('posAdmin.devices.mgmt.columns.rustDeskVersion'),
+          value: describeVersionFilter(rustDeskVersionFilter, t('posAdmin.devices.mgmt.rustDeskNotInstalled')),
+          source: 'toolbar' as const,
+          onRemove: () => setRustDeskVersionFilter(undefined),
+        }]
+      : []),
+    ...(routeFilter
+      ? [{
+          key: 'route',
+          label: t('posAdmin.devices.apiEntry.route.filterLabel'),
+          value: routeFilter === 'fallback'
+            ? t('posAdmin.devices.apiEntry.route.filterFallback')
+            : t(MODE_LABEL_KEY[routeFilter]),
+          source: 'toolbar' as const,
+          onRemove: () => setRouteFilter(undefined),
+        }]
+      : []),
     ...(onlineFilter
       ? [{
           key: 'online',
@@ -692,6 +853,9 @@ export default function DeviceRegistrationPage() {
     setDeviceType(undefined)
     setDeviceSystem(undefined)
     setOnlineFilter(undefined)
+    setAppVersionFilter(undefined)
+    setRustDeskVersionFilter(undefined)
+    setRouteFilter(undefined)
     setStatusTab('all')
   }
 
@@ -704,6 +868,12 @@ export default function DeviceRegistrationPage() {
       : []),
     ...(canManageAnyActivationCodes
       ? [{ label: t('posAdmin.devices.activation.view'), value: 'activationCodes' as const }]
+      : []),
+    ...(canViewLegacyDeviceRegistration
+      ? [
+          { label: t('posAdmin.devices.viewPosApiEntry'), value: 'posApiEntry' as const },
+          { label: t('posAdmin.devices.viewPosApiUsage'), value: 'posApiUsage' as const },
+        ]
       : []),
   ]
 
@@ -733,6 +903,18 @@ export default function DeviceRegistrationPage() {
             canManageMobile={canManageMobileActivationCodes}
           />
         </div>
+      ) : viewMode === 'posApiEntry' ? (
+        <PosApiEntryPanel canManage={canManage} />
+      ) : viewMode === 'posApiUsage' ? (
+        <Suspense
+          fallback={
+            <div className="dev-mgmt-card" style={{ textAlign: 'center', padding: 48 }}>
+              <Spin />
+            </div>
+          }
+        >
+          <PosApiEntryUsagePanel stores={stores} />
+        </Suspense>
       ) : viewMode === 'appUsage' ? (
         <AppUsagePanel
           stores={stores}
@@ -777,6 +959,48 @@ export default function DeviceRegistrationPage() {
               onChange={(value) => setDeviceSystem(value)}
               options={deviceSystemOptions.map(renderCountedOption)}
             />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="title"
+              placeholder={t('posAdmin.devices.mgmt.versionFilter.appVersionPlaceholder')}
+              style={{ width: 150 }}
+              // 下拉面板放宽：「低于最新版 x.y.z」这类长选项右侧的台数不被截掉
+              popupMatchSelectWidth={220}
+              value={appVersionFilter}
+              onChange={(value) => setAppVersionFilter(value)}
+              options={[
+                ...appVersionOptions.versions.map(renderCountedOption),
+                ...(appVersionOptions.noneCount
+                  ? [renderSpecialVersionOption(VERSION_FILTER_NONE, t('posAdmin.devices.mgmt.versionFilter.notReported'), appVersionOptions.noneCount)]
+                  : []),
+              ]}
+            />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="title"
+              placeholder={t('posAdmin.devices.mgmt.versionFilter.rustDeskPlaceholder')}
+              style={{ width: 150 }}
+              // 下拉面板放宽：「低于最新版 x.y.z」这类长选项右侧的台数不被截掉
+              popupMatchSelectWidth={220}
+              value={rustDeskVersionFilter}
+              onChange={(value) => setRustDeskVersionFilter(value)}
+              options={[
+                // 「低于最新版」放最前：找出需要升级 RustDesk 的设备是最常见的用法
+                ...(rustDeskVersionOptions.outdatedCount
+                  ? [renderSpecialVersionOption(
+                      VERSION_FILTER_OUTDATED,
+                      t('posAdmin.devices.mgmt.versionFilter.outdated', { latest: rustDeskLatestVersion ?? '-' }),
+                      rustDeskVersionOptions.outdatedCount,
+                    )]
+                  : []),
+                ...rustDeskVersionOptions.versions.map(renderCountedOption),
+                ...(rustDeskVersionOptions.noneCount
+                  ? [renderSpecialVersionOption(VERSION_FILTER_NONE, t('posAdmin.devices.mgmt.rustDeskNotInstalled'), rustDeskVersionOptions.noneCount)]
+                  : []),
+              ]}
+            />
             <Select<DeviceOnlineFilter>
               allowClear
               placeholder={t('posAdmin.devices.filterByOnline')}
@@ -786,6 +1010,17 @@ export default function DeviceRegistrationPage() {
               options={[
                 { label: t('posAdmin.devices.online'), value: 'online' },
                 { label: t('posAdmin.devices.offline'), value: 'offline' },
+              ]}
+            />
+            <Select<DeviceRouteFilter>
+              allowClear
+              placeholder={t('posAdmin.devices.apiEntry.route.filterPlaceholder')}
+              style={{ width: 130 }}
+              value={routeFilter}
+              onChange={(value) => setRouteFilter(value)}
+              options={[
+                ...POS_API_ENTRY_MODES.map((mode) => ({ label: t(MODE_LABEL_KEY[mode]), value: mode })),
+                { label: t('posAdmin.devices.apiEntry.route.filterFallback'), value: 'fallback' as const },
               ]}
             />
             <span className="dev-mgmt-toolbar-spacer" />
@@ -901,7 +1136,7 @@ export default function DeviceRegistrationPage() {
               getCheckboxProps: () => ({ disabled: batchAction !== null }),
               onChange: (keys) => setSelectedIds(keys.map(Number)),
             } : undefined}
-            scroll={{ x: canManage ? 1394 : 1200 }}
+            scroll={{ x: canManage ? 1594 : 1400 }}
             rowClassName={() => 'dev-mgmt-row-clickable'}
             onRow={(record) => ({
               onClick: (event) => {

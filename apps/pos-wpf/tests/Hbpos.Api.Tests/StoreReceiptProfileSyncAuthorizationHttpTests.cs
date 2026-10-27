@@ -111,6 +111,37 @@ public sealed class StoreReceiptProfileSyncAuthorizationHttpTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Sync_records_only_a_whitelisted_entry_header_and_never_uses_it_for_authentication()
+    {
+        await using var factory = new ReceiptProfileApiFactory();
+
+        // 没有设备认证：带上合法的 X-HB-Entry 也是 401，且不记录。
+        using var anonymous = factory.CreateClient();
+        anonymous.DefaultRequestHeaders.Add(PosApiEntryModes.HeaderName, "aws");
+        using var denied = await anonymous.GetAsync(SyncUrl);
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        Assert.Empty(factory.Recorder.Calls);
+
+        // 已认证 + 合法入口头：记录归一化后的入口，身份取自认证声明。
+        using var valid = factory.CreateClient();
+        AddDeviceAuthentication(valid);
+        valid.DefaultRequestHeaders.Add(PosApiEntryModes.HeaderName, "Direct");
+        using var okResponse = await valid.GetAsync(SyncUrl);
+        Assert.Equal(HttpStatusCode.OK, okResponse.StatusCode);
+
+        // 已认证 + 乱码入口头：响应不受影响，recorder 收到 null（被忽略）。
+        using var invalid = factory.CreateClient();
+        AddDeviceAuthentication(invalid);
+        invalid.DefaultRequestHeaders.Add(PosApiEntryModes.HeaderName, "not-an-entry");
+        using var stillOk = await invalid.GetAsync(SyncUrl);
+        Assert.Equal(HttpStatusCode.OK, stillOk.StatusCode);
+
+        Assert.Equal(
+            [("POS-07", "S01", "HW-007", "direct"), ("POS-07", "S01", "HW-007", null)],
+            factory.Recorder.Calls.ToArray());
+    }
+
     private static void AddDeviceAuthentication(HttpClient client)
     {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
@@ -120,6 +151,8 @@ public sealed class StoreReceiptProfileSyncAuthorizationHttpTests
         : WebApplicationFactory<Program>
     {
         public RecordingReleaseService Release { get; } = new();
+
+        public PosApiEntryTests.RecordingRecorder Recorder { get; } = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -146,6 +179,8 @@ public sealed class StoreReceiptProfileSyncAuthorizationHttpTests
                 services.AddSingleton<IStoreReceiptProfileReleaseService>(Release);
                 services.RemoveAll<IStoreReceiptProfileService>();
                 services.AddSingleton<IStoreReceiptProfileService>(new FixedProfileService());
+                services.RemoveAll<IDeviceApiEntryRecorder>();
+                services.AddSingleton<IDeviceApiEntryRecorder>(Recorder);
 
                 services.RemoveAll<ICashierAuthorizationTicketService>();
                 services.AddSingleton<ICashierAuthorizationTicketService>(new FakeTicketService());

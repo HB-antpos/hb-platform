@@ -15,9 +15,28 @@ public sealed class KeyboardScannerFallbackBufferTests
         Assert.Null(buffer.Process(Key.D9, now));
         Assert.Null(buffer.Process(Key.D3, now.AddMilliseconds(10)));
         Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(20)));
-        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(30));
+        Assert.Null(buffer.Process(Key.D1, now.AddMilliseconds(30)));
+        Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(40)));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(50));
 
-        Assert.Equal("930", barcode);
+        Assert.Equal("93010", barcode);
+    }
+
+    [Fact]
+    public void Process_DropsInputShorterThanTheSharedMinimumLength()
+    {
+        // 与 Raw Input 路径共用 RawScannerInputProcessor.DefaultMinBarcodeLength（5）：4 位及以下视为误触。
+        Assert.Equal(5, RawScannerInputProcessor.DefaultMinBarcodeLength);
+        var buffer = new KeyboardScannerFallbackBuffer();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Null(buffer.Process(Key.D9, now));
+        Assert.Null(buffer.Process(Key.D3, now.AddMilliseconds(10)));
+        Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(20)));
+        Assert.Null(buffer.Process(Key.D1, now.AddMilliseconds(30)));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(40));
+
+        Assert.Null(barcode);
     }
 
     [Fact]
@@ -42,9 +61,11 @@ public sealed class KeyboardScannerFallbackBufferTests
         Assert.Null(buffer.Process(Key.ImeProcessed, now, Key.A));
         Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(10), Key.B));
         Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(20), Key.C));
-        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(30));
+        Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(30), Key.D));
+        Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(40), Key.E));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(50));
 
-        Assert.Equal("ABC", barcode);
+        Assert.Equal("ABCDE", barcode);
     }
 
     [Fact]
@@ -81,12 +102,12 @@ public sealed class KeyboardScannerFallbackBufferTests
         var guard = new ScannerInputDuplicateGuard();
         var now = DateTimeOffset.UtcNow;
 
-        // 连续快扫同一商品，键盘拷贝都落后 300ms：第二次 Raw 先于第一份拷贝到达。
+        // 连续快扫同一商品（间隔超过 600ms 的真实重扫），键盘拷贝都落后 ~300ms：第二次 Raw 先于第一份拷贝到达。
         Assert.True(guard.TryAccept("ABC123", "raw", now));
-        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(250)));
-        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(300)));
-        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(550)));
-        Assert.True(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(800)));
+        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(700)));
+        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(750)));
+        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(1000)));
+        Assert.True(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(1300)));
     }
 
     [Fact]
@@ -110,18 +131,85 @@ public sealed class KeyboardScannerFallbackBufferTests
 
         Assert.True(guard.TryAccept("ABC123", "raw", now));
         Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(100)));
-        // 拷贝被抵消后紧接着的下一次真实 Raw 扫码仍要接受。
-        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(150)));
+        // 拷贝被抵消后，超过 Raw 重复窗口（默认 600ms）的下一次真实 Raw 扫码仍要接受。
+        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(700)));
+    }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(250)]
+    [InlineData(600)]
+    public void DuplicateGuard_drops_same_barcode_raw_repeat_within_window(int repeatLagMs)
+    {
+        // 扫码枪对着条码多停一会儿会连读，生产日志里集中在 100～500ms：只放行第一次。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("ABC123", "raw", now));
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(repeatLagMs)));
     }
 
     [Fact]
-    public void DuplicateGuard_allows_repeated_scans_from_same_source_and_keyboard_only_scans()
+    public void DuplicateGuard_keeps_real_rescan_after_window_and_different_barcodes()
     {
         var guard = new ScannerInputDuplicateGuard();
         var now = DateTimeOffset.UtcNow;
 
         Assert.True(guard.TryAccept("ABC123", "raw", now));
-        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(10)));
+        // 不同条码紧接着扫不受影响。
+        Assert.True(guard.TryAccept("XYZ789", "raw", now.AddMilliseconds(100)));
+        // 同条码超过 600ms 是真实重扫（人工最快也要 500ms 以上）。
+        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(700)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_collapses_a_held_over_burst_into_one_scan()
+    {
+        // 持续对着条码连读：每次间隔 250ms 都在窗口内，整串只放行第一次；窗口随最近一次读码顺延。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("ABC123", "raw", now));
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(250)));
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(500)));
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(750)));
+        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(1400)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_follows_a_changing_window_provider()
+    {
+        // 设置页改了过滤窗口，下一次读码立即按新窗口判断。
+        var windowMs = 200;
+        var guard = new ScannerInputDuplicateGuard(() => TimeSpan.FromMilliseconds(windowMs));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("ABC123", "raw", now));
+        Assert.True(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(350)));
+
+        windowMs = 1000;
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(700)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_absorbs_keyboard_copy_of_a_dropped_raw_repeat()
+    {
+        // 连读的两次读码在键盘通道各有一份拷贝：两份都要被抵消，否则第二份会被当成真实键盘扫码加购第二次。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("ABC123", "raw", now));
+        Assert.False(guard.TryAccept("ABC123", "raw", now.AddMilliseconds(250)));
+        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(300)));
+        Assert.False(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(550)));
+        // 额度用完后的键盘提交才是新的真实扫码。
+        Assert.True(guard.TryAccept("ABC123", "keyboard-fallback", now.AddMilliseconds(1000)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_allows_repeated_keyboard_only_scans()
+    {
+        var now = DateTimeOffset.UtcNow;
 
         // 没有 Raw 通道的机器（如 POS_1013_0239）：键盘兜底连续扫同一商品必须逐次放行。
         var keyboardOnly = new ScannerInputDuplicateGuard();

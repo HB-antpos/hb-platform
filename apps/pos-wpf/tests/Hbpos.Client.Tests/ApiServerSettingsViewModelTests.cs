@@ -243,6 +243,54 @@ public sealed class ApiServerSettingsViewModelTests
         Assert.Equal("Could not save the server address. Check Windows permissions and try again.", viewModel.StatusMessage);
     }
 
+    [Fact]
+    public void Entry_status_shows_the_head_office_preference_the_current_entry_and_fallback()
+    {
+        var selector = new ApiTransportSelector();
+        selector.SetPreferredMode("aws");
+        var viewModel = CreateEntryViewModel("https://pos.hotbargain.vip/pos-api/", selector);
+
+        viewModel.Load();
+
+        Assert.True(viewModel.HasEntryStatus);
+        Assert.Equal(
+            "Entry set by head office: AWS Sydney (pos-syd.hotbargain.vip) · In use now: AWS Sydney (pos-syd.hotbargain.vip)",
+            viewModel.EntryStatusText);
+
+        // 首选入口连不上、已回退：实际入口变化并提示回退中。
+        selector.ReportConnectFailure(
+            new Uri("https://pos.hotbargain.vip/pos-api/"),
+            new Uri("https://pos-syd.hotbargain.vip/pos-api/"));
+        viewModel.RefreshEntryStatus();
+
+        Assert.Equal(
+            "Entry set by head office: AWS Sydney (pos-syd.hotbargain.vip) · In use now: EdgeOne (pos.hotbargain.vip) · falling back",
+            viewModel.EntryStatusText);
+    }
+
+    [Fact]
+    public void Entry_status_is_hidden_for_addresses_outside_the_entry_group_or_without_a_selector()
+    {
+        var local = CreateEntryViewModel("http://localhost:5159/", new ApiTransportSelector());
+        local.Load();
+        Assert.False(local.HasEntryStatus);
+
+        var noSelector = CreateEntryViewModel("https://pos.hotbargain.vip/pos-api/", selector: null);
+        noSelector.Load();
+        Assert.False(noSelector.HasEntryStatus);
+    }
+
+    private static ApiServerSettingsViewModel CreateEntryViewModel(string currentAddress, ApiTransportSelector? selector)
+    {
+        var service = new ApiServerSettingsService(
+            new HttpClient(new StubHttpMessageHandler(_ => OnlineResponse())),
+            () => currentAddress,
+            _ => { });
+        var localization = new LocalizationService();
+        localization.SetCulture("en-US");
+        return new ApiServerSettingsViewModel(service, localization, transportSelector: selector);
+    }
+
     private static ApiServerSettingsViewModel CreateViewModel(
         Func<HttpRequestMessage, HttpResponseMessage> responder,
         string currentAddress = "http://localhost:5159/",

@@ -13,7 +13,7 @@ public interface IHeldOrderTodayCountService
     /// <summary>
     /// 统计今天（<see cref="TimeProvider.LocalTimeZone"/> 的日历日）仍可取的挂单张数。
     /// 本机暂存挂单与本店共享挂单（远端 Pending 汇总）按挂单单号去重后合并计数。
-    /// 离线、远端失败或超时只降级为本机计数，不抛出；本机读取失败才会抛出（调用方保留旧值）。
+    /// 离线、未登录收银员、远端失败或超时只降级为本机计数，不抛出；本机读取失败才会抛出（调用方保留旧值）。
     /// </summary>
     /// <param name="session">当前会话：门店、设备与联机状态。</param>
     /// <param name="forceRemoteRefresh">true 时绕过远端短缓存与失败退避，立即向服务端要最新（挂单/取单成功后使用）。</param>
@@ -110,8 +110,13 @@ public sealed class HeldOrderTodayCountService : IHeldOrderTodayCountService
         var publications = await LoadPublicationsAsync(localToday.Keys, cancellationToken).ConfigureAwait(false);
         var claims = await LoadClaimsAsync(session, cancellationToken).ConfigureAwait(false);
 
-        // 2) 共享挂单：只有联机才请求；失败/超时/退避期内 remoteItems 为 null，退化为只算本机。
-        var remoteItems = session.IsOnline
+        // 2) 共享挂单：只有联机且已登录收银员才请求；失败/超时/退避期内 remoteItems 为 null，退化为只算本机。
+        // 未登录收银员时（登录弹窗盖在首页上，整夜无人登录很常见）请求不会带 X-HBPOS-Cashier-Authorization，
+        // GET held-orders 必然被服务端以 401 拒绝；每台空闲收银机每分钟白打一次（生产日志 10-25 仅此接口约 5700 次 401）。
+        // 这里只看「是否已登录」，不看 CashierSession 上的票据有效期：后台刷新只更新 ICashierSessionContext 里的票据，
+        // PosSessionState.CashierSession 仍是登录时的快照，登录满 24 小时后它的 AuthorizationExpiresAtUtc 会过期但实际票据仍有效。
+        // 收银员登录后范围变化会触发一次刷新（见 OnSessionChangedForHeldOrderCount），角标随即补上共享挂单。
+        var remoteItems = session.IsOnline && session.CashierSession is not null
             ? await TryGetRemoteItemsAsync(storeCode, forceRemoteRefresh, cancellationToken).ConfigureAwait(false)
             : null;
 

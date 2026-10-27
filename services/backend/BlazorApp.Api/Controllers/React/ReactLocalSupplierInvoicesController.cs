@@ -119,46 +119,15 @@ namespace BlazorApp.Api.Controllers.React
             ) == true;
         }
 
-        private bool IsFullStoreAccessUser()
-        {
-            var user = User;
-            if (user == null) return false;
-            return user.Claims.Any(c =>
-                c.Type == ClaimTypes.Role
-                // 超级管理员角色统一走共享权限常量，避免“管理员”通过授权元数据却被分店 gate 拦截。
-                && (Permissions.IsSuperAdminRole(c.Value)
-                    || c.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase))
-            );
-        }
+        // 分店范围口径抽到 LocalSupplierInvoiceStoreScope，澳洲供应商列表的「最近进货」复用同一判定。
+        private bool IsFullStoreAccessUser() =>
+            LocalSupplierInvoiceStoreScope.IsFullStoreAccessUser(User);
 
-        private string GetCurrentUserGuid()
-        {
-            return User?.FindFirst("userId")?.Value
-                ?? User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                ?? string.Empty;
-        }
+        private string GetCurrentUserGuid() =>
+            LocalSupplierInvoiceStoreScope.GetCurrentUserGuid(User);
 
-        private async Task<List<string>> GetCurrentUserStoreCodesAsync()
-        {
-            var userGuid = GetCurrentUserGuid();
-            if (string.IsNullOrEmpty(userGuid))
-                return new List<string>();
-
-            var storeGuids = await _dbContext.Db.Queryable<UserStore>()
-                .Where(us => us.UserGUID == userGuid)
-                .Select(us => us.StoreGUID)
-                .ToListAsync();
-
-            if (!storeGuids.Any())
-                return new List<string>();
-
-            var codes = await _dbContext.Db.Queryable<Store>()
-                .Where(s => storeGuids.Contains(s.StoreGUID))
-                .Select(s => s.StoreCode)
-                .ToListAsync();
-
-            return codes.Where(c => !string.IsNullOrEmpty(c)).ToList();
-        }
+        private Task<List<string>> GetCurrentUserStoreCodesAsync() =>
+            LocalSupplierInvoiceStoreScope.GetCurrentUserStoreCodesAsync(_dbContext.Db, User);
 
         private async Task<bool> CanAccessInvoiceAsync(string invoiceGuid)
         {

@@ -1573,7 +1573,8 @@ test("商品字段级脏数据归一化后仍可激活本地目录", async () =>
         lookupCode: "FRACTIONAL",
         retailPriceCents: 100,
         quantityFactor: 1,
-        discountRate: 1,
+        // 折扣保护：源数据 1.25（≥ 100%）是脏数据，入库时按没有折扣处理，不再夹成 1。
+        discountRate: null,
         updatedAtIso: "2026-07-28T00:00:00.000Z",
         displayName: "I-FRACTIONAL",
         priceSourceLabel: "catalog",

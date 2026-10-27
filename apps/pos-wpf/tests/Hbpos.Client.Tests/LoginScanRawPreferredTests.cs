@@ -313,9 +313,12 @@ public sealed class LoginScanRawPreferredTests
         var (service, delivered, _) = CreateLoginService(textInputFocused: false);
 
         service.DispatchResultForDiagnostics(EnterScan(FakeBarcode, T0));
+        // 默认 600ms 过滤窗口内的同条码第二次读码是扫码枪连读，按重复丢弃（只送达一次）。
         service.DispatchResultForDiagnostics(EnterScan(FakeBarcode, T0.AddMilliseconds(50)));
+        Assert.Equal([FakeBarcode], delivered);
 
-        // 同一来源的连续扫码必须保留，只消除跨来源的重复提交。
+        // 超过窗口的同一来源连续扫码是真实重扫，必须保留；只消除跨来源的重复提交与窗口内的连读。
+        service.DispatchResultForDiagnostics(EnterScan(FakeBarcode, T0.AddMilliseconds(50 + 700)));
         Assert.Equal([FakeBarcode, FakeBarcode], delivered);
     }
 

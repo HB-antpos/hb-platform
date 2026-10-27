@@ -56,6 +56,8 @@ namespace BlazorApp.Shared.DTOs
         public string RoleName { get; set; } = string.Empty;
         public string? Description { get; set; }
         public bool IsActive { get; set; }
+        /// <summary>角色等级，数值越大等级越高。</summary>
+        public int Level { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public int UserCount { get; set; }
@@ -70,6 +72,8 @@ namespace BlazorApp.Shared.DTOs
         public string RoleName { get; set; } = string.Empty;
         public string? Description { get; set; }
         public bool IsActive { get; set; }
+        /// <summary>角色等级，数值越大等级越高。</summary>
+        public int Level { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public int UserCount { get; set; }
@@ -92,6 +96,12 @@ namespace BlazorApp.Shared.DTOs
         public bool IsActive { get; set; } = true;
 
         /// <summary>
+        /// 角色等级；不得高于操作者自身等级减一（Admin 除外），默认 0。
+        /// </summary>
+        [Range(0, 100, ErrorMessage = "角色等级必须在0-100之间")]
+        public int Level { get; set; }
+
+        /// <summary>
         /// 权限列表
         /// </summary>
         public List<string> Permissions { get; set; } = new();
@@ -110,6 +120,12 @@ namespace BlazorApp.Shared.DTOs
         public string? Description { get; set; }
 
         public bool IsActive { get; set; } = true;
+
+        /// <summary>
+        /// 角色等级；为空表示保持原值（兼容不传该字段的旧客户端）。
+        /// </summary>
+        [Range(0, 100, ErrorMessage = "角色等级必须在0-100之间")]
+        public int? Level { get; set; }
     }
 
     /// <summary>

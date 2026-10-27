@@ -61,6 +61,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageDomesticPrefixCodes: [P.DomesticPurchase.ManagePrefixCodes],
   canManageDomesticProducts: [P.DomesticPurchase.ManageProducts],
   canManageWarehouseOrders: [P.Warehouse.ManageOrders, P.Warehouse.Manage],
+  canManageSupplierPreorders: [P.SupplierPreorder.Manage],
+  canOrderSupplierPreorders: [P.SupplierPreorder.Order, P.SupplierPreorder.Manage],
   canManageStoreOrderImportPriceVariance: [P.Warehouse.ManageOrders, P.Warehouse.Manage],
   canViewContainers: [P.Container.View],
   canManageWarehouseProducts: [P.Warehouse.ManageProducts, P.Warehouse.Manage],
@@ -88,6 +90,10 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManagePromotions: [P.Promotions.View],
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
+  // 与 access.ts 一致：审核入口只认 Approval.ReviewManagedStore（请假审核也走同一接口）
+  canReviewAttendance: [P.Attendance.ApprovalReviewManagedStore],
+  // 任一权限可见；从菜单授予时只补第一个（打卡查看＝工时统计），工资需另授 Payroll.View
+  canViewAttendanceHours: [P.Attendance.PunchViewManagedStore, P.Attendance.PayrollView],
   canManageStoreOps: [P.Store.ManageOperations],
   canViewStoreCash: [P.Cash.OverviewView],
   canViewOperationAudits: [P.PosTerminal.AuditView],
@@ -97,6 +103,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewDailyCloseRecords: [P.DailyCloseRecords.View],
   canViewSeasonalCardStats: [P.SeasonalCards.Remaining.ViewAllStores],
   canManageFaceCameras: [P.FaceCapture.CamerasManage],
+  canManageMyobConnections: [P.Myob.ConnectionManage],
   // 人脸比对页：任一权限可见；从菜单授予时只补第一个（管理），移除时五个权限码一并撤销。
   canAccessFaceMatch: [
     P.FaceMatch.Manage,
@@ -117,19 +124,50 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     title: 'menu.system',
     children: [
       { path: '/system/stores', title: 'menu.systemStores', accessKey: 'canReadStore' },
-      { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
-      { path: '/system/center-logs', title: 'menu.systemCenterLogs', accessKey: 'canViewSystemLogs' },
-      { path: '/system/performance-baseline', title: 'menu.performanceBaseline', accessKey: 'canViewPerformanceBaseline' },
-      { path: '/system/scheduled-statistics', title: 'menu.scheduledStatistics', accessKey: 'canManageScheduledTasks' },
-      { path: '/system/invoice-email-settings', title: 'menu.invoiceEmailSettings', accessKey: 'canManageSystemSettings' },
-      { path: '/system/payment-terminal-settings', title: 'menu.paymentTerminalSettings', accessKey: 'canManageSystemSettings' },
-      { path: '/system/emergency-login-keys', title: 'menu.emergencyLoginKeys', accessKey: 'canManageSystemSettings' },
-      { path: '/system/face-cameras', title: 'menu.faceCameras', accessKey: 'canManageFaceCameras' },
-      { path: '/system/face-match', title: 'menu.faceMatch', accessKey: 'canAccessFaceMatch' },
-      { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole' },
-      { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole' },
-      { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },
-      { path: '/system/device-registration', title: 'menu.deviceRegistration', accessKey: 'canViewDeviceRegistration' },
+      // 合并页：组节点本身不授权，按下面各标签（原页面）逐个授予 / 撤销；RustDesk 远程维护仅管理员，不在预览里。
+      {
+        path: '/system/devices',
+        title: 'menu.groupDevicesRemote',
+        children: [
+          { path: '/system/device-registration', title: 'menu.deviceRegistration', accessKey: 'canViewDeviceRegistration' },
+          { path: '/system/emergency-login-keys', title: 'menu.emergencyLoginKeys', accessKey: 'canManageSystemSettings' },
+        ],
+      },
+      {
+        path: '/system/accounts',
+        title: 'menu.groupAccounts',
+        children: [
+          { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
+          { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole' },
+          { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole' },
+          { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },
+        ],
+      },
+      {
+        path: '/system/monitoring',
+        title: 'menu.groupMonitoring',
+        children: [
+          { path: '/system/center-logs', title: 'menu.systemCenterLogs', accessKey: 'canViewSystemLogs' },
+          { path: '/system/performance-baseline', title: 'menu.performanceBaseline', accessKey: 'canViewPerformanceBaseline' },
+          { path: '/system/scheduled-statistics', title: 'menu.scheduledStatistics', accessKey: 'canManageScheduledTasks' },
+        ],
+      },
+      {
+        path: '/system/payments-invoices',
+        title: 'menu.groupPaymentsInvoices',
+        children: [
+          { path: '/system/payment-terminal-settings', title: 'menu.paymentTerminalSettings', accessKey: 'canManageSystemSettings' },
+          { path: '/system/invoice-email-settings', title: 'menu.invoiceEmailSettings', accessKey: 'canManageSystemSettings' },
+        ],
+      },
+      {
+        path: '/system/face-recognition',
+        title: 'menu.groupFaceRecognition',
+        children: [
+          { path: '/system/face-cameras', title: 'menu.faceCameras', accessKey: 'canManageFaceCameras' },
+          { path: '/system/face-match', title: 'menu.faceMatch', accessKey: 'canAccessFaceMatch' },
+        ],
+      },
       { path: '/system/app-downloads', title: 'menu.appDownloads', accessKey: 'canViewAppDownloads' },
     ],
   },
@@ -158,6 +196,15 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     ],
   },
   {
+    path: '/seasonal-preorders',
+    title: 'menu.seasonalPreorders',
+    children: [
+      { path: '/supplier-preorder-ordering', title: 'menu.supplierPreorderOrdering', accessKey: 'canOrderSupplierPreorders' },
+      { path: '/supplier-preorders', title: 'menu.supplierPreorders', accessKey: 'canManageSupplierPreorders' },
+      { path: '/supplier-preorders/orderers', title: 'menu.supplierPreorderOrderers', accessKey: 'canManageSupplierPreorders' },
+    ],
+  },
+  {
     path: '/executive-sales-intelligence',
     title: 'menu.executiveSalesIntelligence',
     accessKey: 'canViewSalesIntelligence',
@@ -178,17 +225,31 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     title: 'menu.posAdmin',
     children: [
       { path: '/pos-admin/suppliers', title: 'menu.suppliers', accessKey: 'canViewAustralianSuppliers' },
-      { path: '/pos-admin/products', title: 'menu.productManagement', accessKey: 'canViewPosProducts' },
-      { path: '/pos-admin/store-product-price', title: 'menu.storeProductPrice', accessKey: 'canManageStoreProducts' },
-      { path: '/pos-admin/pricing-strategies', title: 'menu.pricingStrategies', accessKey: 'canManagePricing' },
-      { path: '/pos-admin/promotions', title: 'menu.promotions', accessKey: 'canManagePromotions' },
+      {
+        path: '/pos-admin/products-pricing',
+        title: 'menu.groupProductsPricing',
+        children: [
+          { path: '/pos-admin/products', title: 'menu.productManagement', accessKey: 'canViewPosProducts' },
+          { path: '/pos-admin/store-product-price', title: 'menu.storeProductPrice', accessKey: 'canManageStoreProducts' },
+          { path: '/pos-admin/pricing-strategies', title: 'menu.pricingStrategies', accessKey: 'canManagePricing' },
+          { path: '/pos-admin/promotions', title: 'menu.promotions', accessKey: 'canManagePromotions' },
+        ],
+      },
+      {
+        path: '/pos-admin/settlement-cash',
+        title: 'menu.groupSettlementCash',
+        children: [
+          { path: '/pos-admin/daily-closes', title: 'menu.dailyCloses', accessKey: 'canViewDailyCloseRecords' },
+          { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin' },
+          { path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' },
+        ],
+      },
       { path: '/pos-admin/advertisements', title: 'menu.advertisements', accessKey: 'canManageAdvertisements' },
       { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
-      { path: '/pos-admin/cash-register-users', title: 'menu.cashRegisterUsers', accessKey: 'canManageStoreOps' },
+      { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
+      { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
+      { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canManageMyobConnections' },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
-      { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin' },
-      { path: '/pos-admin/daily-closes', title: 'menu.dailyCloses', accessKey: 'canViewDailyCloseRecords' },
-      { path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' },
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },

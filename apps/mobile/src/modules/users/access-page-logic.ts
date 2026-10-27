@@ -12,6 +12,7 @@
  */
 import { resolvePersonName, type ResolvedPersonName } from "@/modules/people/person-name";
 import type { RoleMenuDefinition } from "@/modules/identity-admin/role-logic";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import {
   splitMobileMenuItems,
   userMenuPermissionState,
@@ -259,13 +260,6 @@ export function classifyAccessTargetError(error: unknown): UserAccessErrorKind {
 
 // ───────────────────────── 分店 ─────────────────────────
 
-function compareByName(left: AccessStoreOption, right: AccessStoreOption) {
-  return (left.storeName || left.storeCode).localeCompare(
-    right.storeName || right.storeCode,
-    "en-AU",
-  );
-}
-
 /** 目录 + 已分配的分店按 GUID 去重（后者覆盖前者）并按名称排序。 */
 export function mergeAccessStoreOptions(
   catalog: AccessStoreOption[] = [],
@@ -275,7 +269,8 @@ export function mergeAccessStoreOptions(
   [...catalog, ...assigned].forEach((store) => {
     if (store.storeGUID.trim()) byGuid.set(store.storeGUID, store);
   });
-  return Array.from(byGuid.values()).sort(compareByName);
+  // 统一走「按名字排序」比较器（名字为空退回编号，数字按数值，同名按编号）。
+  return sortStoresByName(Array.from(byGuid.values()));
 }
 
 /**
@@ -309,6 +304,49 @@ export function filterAccessStores(stores: AccessStoreOption[], keyword: string)
       value.toLowerCase().includes(normalized),
     ),
   );
+}
+
+/** 分店授权筛选：全部，或按「管理 / 查看 / 未分配」。 */
+export type AccessStoreFilter = "all" | UserAccessStoreState;
+
+/** 各档分店数（按当前编辑中的分配计算，筛选芯片上的数字随改动实时变化）。 */
+export function countAccessStoresByState(
+  stores: AccessStoreOption[],
+  assignments: UserAccessStoreAssignment[],
+): Record<AccessStoreFilter, number> {
+  const counts: Record<AccessStoreFilter, number> = { all: stores.length, manage: 0, view: 0, unassigned: 0 };
+  for (const store of stores) {
+    counts[getUserAccessStoreState(assignments, store.storeGUID)] += 1;
+  }
+  return counts;
+}
+
+/**
+ * 选中某个筛选时，记下「此刻」属于该档的分店。
+ * 之后在筛选结果里把某家分店改成别的档，这一行不会立刻消失（否则一改就跳走，用户找不到刚改的那行）；
+ * 重新点筛选芯片才按最新分配重新取。选「全部」返回 null，表示不过滤。
+ */
+export function pinAccessStoresByState(
+  stores: AccessStoreOption[],
+  assignments: UserAccessStoreAssignment[],
+  filter: AccessStoreFilter,
+): ReadonlySet<string> | null {
+  if (filter === "all") return null;
+  return new Set(
+    stores
+      .filter((store) => getUserAccessStoreState(assignments, store.storeGUID) === filter)
+      .map((store) => store.storeGUID),
+  );
+}
+
+/** 先按关键字搜索，再按筛选时记下的分店集合过滤（null = 不过滤）。 */
+export function applyAccessStoreFilter(
+  stores: AccessStoreOption[],
+  keyword: string,
+  pinned: ReadonlySet<string> | null,
+): AccessStoreOption[] {
+  const matched = filterAccessStores(stores, keyword);
+  return pinned ? matched.filter((store) => pinned.has(store.storeGUID)) : matched;
 }
 
 export interface AccessStoreStateOption {
@@ -400,7 +438,12 @@ export function resolveAccessRoleRow(input: {
     hasManagedStoreAssignment: input.hasManagedStoreAssignment,
   });
   const privileged = hasPrivilegedAccessRole([input.role.roleName]);
-  const adminOnly = !input.isAdmin && privileged;
+  // 仓库管理能授「管理」分店关系，所以「店长」派生行对它不是「仅管理员」：点它是引导；
+  // 店长（不能授管理关系）以及管理员 / 仓库管理等其他高权限角色仍然锁定。
+  const adminOnly =
+    !input.isAdmin &&
+    privileged &&
+    !(selection.derived && input.canGrantStoreManagement);
   const canGuideManagerGrant =
     selection.derived && input.canGrantStoreManagement && input.storesEditable;
   return {

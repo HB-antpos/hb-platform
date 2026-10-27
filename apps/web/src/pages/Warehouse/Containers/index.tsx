@@ -158,6 +158,11 @@ function formatAmount(value?: number) {
   return value == null ? '--' : `¥${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// 运费以美元计价（与详情页 / 编辑表单一致），列表里和国内金额 ¥ 并排，所以单独带 $ 前缀。
+function formatUsd(value?: number) {
+  return value == null ? '--' : `$${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function formatNumber(value?: number, digits = 0) {
   return value == null ? '--' : value.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
 }
@@ -970,6 +975,14 @@ export default function ContainersPage() {
       render: (value?: number) => <span className="wh-containers-num">{formatAmount(value)}</span>,
     },
     {
+      title: t('warehouseUi.containers.columnFreight'),
+      dataIndex: '运费',
+      key: 'freight',
+      width: 116,
+      align: 'right',
+      render: (value?: number) => <span className="wh-containers-num">{formatUsd(value)}</span>,
+    },
+    {
       title: t('warehouseUi.containers.columnVolumeLoad'),
       dataIndex: '总体积',
       key: 'totalVolume',
@@ -1317,8 +1330,8 @@ export default function ContainersPage() {
             columns={columns}
             dataSource={containers}
             rowSelection={rowSelectionEnabled ? { selectedRowKeys, onChange: setSelectedRowKeys, columnWidth: 40 } : undefined}
-            // 默认列宽合计约 1068px（含勾选列），1440 宽屏且出现纵向滚动条时也不需要横向滚动。
-            scroll={{ x: 1068 }}
+            // 默认列宽合计约 1184px（含勾选列，新增运费列 116px）；1440 宽屏且出现纵向滚动条时也不需要横向滚动。
+            scroll={{ x: 1184 }}
             summary={() =>
               containers.length ? (
                 // 只有当前页数据，合计必须写明「本页合计」，不能当成筛选结果合计。
@@ -1334,10 +1347,14 @@ export default function ContainersPage() {
                   <MeasuredTable.Summary.Cell index={summaryOffset + 6} align="right">
                     <span className="wh-containers-summary-value">{formatAmount(pageTotals.amount)}</span>
                   </MeasuredTable.Summary.Cell>
-                  <MeasuredTable.Summary.Cell index={summaryOffset + 7}>
+                  {/* 运费列在国内金额之后；合计行的单元格索引必须与列顺序一一对应，否则体积合计会错位到运费列下。 */}
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 7} align="right">
+                    <span className="wh-containers-summary-value">{formatUsd(pageTotals.freight)}</span>
+                  </MeasuredTable.Summary.Cell>
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 8}>
                     <span className="wh-containers-summary-value">{formatNumber(pageTotals.volume, 2)} m³</span>
                   </MeasuredTable.Summary.Cell>
-                  <MeasuredTable.Summary.Cell index={summaryOffset + 8} />
+                  <MeasuredTable.Summary.Cell index={summaryOffset + 9} />
                 </MeasuredTable.Summary.Row>
               ) : null
             }

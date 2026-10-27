@@ -28,6 +28,37 @@ export interface DeviceListFilters {
   deviceType?: string
   deviceSystem?: string
   online?: DeviceOnlineFilter
+  /** 客户端版本：具体版本号，或 VERSION_FILTER_NONE（未上报） */
+  appVersion?: string
+  /** 远程版本：具体版本号，或 VERSION_FILTER_NONE（未安装）/ VERSION_FILTER_OUTDATED（低于下发版本） */
+  rustDeskVersion?: string
+  /** 远程维护下发的 RustDesk 版本，「低于最新版」按它比较 */
+  rustDeskLatestVersion?: string | null
+}
+
+/** 版本下拉的特殊选项值（不会与真实版本号冲突）。 */
+export const VERSION_FILTER_NONE = '__none__'
+export const VERSION_FILTER_OUTDATED = '__outdated__'
+
+/**
+ * 版本筛选：未选不过滤；「未上报 / 未安装」匹配空值；「低于最新版」按点分版本逐段比较；
+ * 其余按版本号不区分大小写精确匹配。
+ */
+export function matchesVersionFilter(
+  value: string | null | undefined,
+  filter: string | undefined,
+  latestVersion?: string | null,
+): boolean {
+  if (!filter) {
+    return true
+  }
+  if (filter === VERSION_FILTER_NONE) {
+    return !value?.trim()
+  }
+  if (filter === VERSION_FILTER_OUTDATED) {
+    return isRustDeskVersionOutdated(value, latestVersion)
+  }
+  return normalizeText(value) === normalizeText(filter)
 }
 
 export type DeviceStatusTone = 'pending' | 'enabled' | 'disabled' | 'locked' | 'unknown'
@@ -95,6 +126,12 @@ export function filterDevicesExceptStatus(
       return false
     }
     if (filters.online && (filters.online === 'online') !== isOnline(item)) {
+      return false
+    }
+    if (!matchesVersionFilter(item.appVersion, filters.appVersion)) {
+      return false
+    }
+    if (!matchesVersionFilter(item.rustDeskClientVersion, filters.rustDeskVersion, filters.rustDeskLatestVersion)) {
       return false
     }
     return matchesDeviceKeyword(item, filters.keyword, getStoreName(item.storeCode))
@@ -376,4 +413,68 @@ export function getUptimeParts(seconds: number | null | undefined): UptimeParts 
 export function isLongUptime(seconds: number | null | undefined): boolean {
   const parts = getUptimeParts(seconds)
   return parts !== null && parts.unit === 'days' && parts.count >= LONG_UPTIME_WARNING_DAYS
+}
+
+/** 点分版本号按数字逐段比较（1.4.10 > 1.4.9，缺的段按 0）；任一方不是「数字.数字…」格式时无法比较，返回 null。 */
+export function compareDottedVersion(left: string | null | undefined, right: string | null | undefined): number | null {
+  const parse = (value: string | null | undefined) => {
+    const match = value?.trim().match(/^v?(\d+(?:\.\d+)*)/i)
+    return match ? match[1].split('.').map(Number) : null
+  }
+  const leftParts = parse(left)
+  const rightParts = parse(right)
+  if (!leftParts || !rightParts) {
+    return null
+  }
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (delta !== 0) {
+      return delta
+    }
+  }
+  return 0
+}
+
+/** 远程版本低于远程维护下发的最新版本时标出来；没有最新版本或版本号无法比较时不标。 */
+export function isRustDeskVersionOutdated(version: string | null | undefined, latest: string | null | undefined): boolean {
+  const delta = compareDottedVersion(version, latest)
+  return delta !== null && delta < 0
+}
+
+export interface VersionFilterOptions {
+  /** 实际出现的版本号与台数，按版本从新到旧排序（无法解析的排最后） */
+  versions: CountedOption[]
+  /** 版本为空的台数（客户端「未上报」/ 远程「未安装」） */
+  noneCount: number
+  /** 低于最新版的台数；没有最新版本时为 0 */
+  outdatedCount: number
+}
+
+/**
+ * 版本下拉选项：取当前分店范围已加载设备里真实出现的版本（不受其他筛选影响，与类型/系统下拉同口径），
+ * 当前选中的版本即使已不存在也保留（计数 0）。
+ */
+export function buildVersionFilterOptions(
+  values: (string | null | undefined)[],
+  selected?: string,
+  latestVersion?: string | null,
+): VersionFilterOptions {
+  const special = selected === VERSION_FILTER_NONE || selected === VERSION_FILTER_OUTDATED
+  const counted = buildCountedOptions(values, special ? undefined : selected)
+  const versions = [...counted].sort((left, right) => {
+    const delta = compareDottedVersion(right.value, left.value)
+    if (delta !== null) return delta
+    // 一边能解析一边不能：能解析的在前；都不能就按字面
+    const leftOk = compareDottedVersion(left.value, left.value) !== null
+    const rightOk = compareDottedVersion(right.value, right.value) !== null
+    if (leftOk !== rightOk) return leftOk ? -1 : 1
+    return left.value.localeCompare(right.value)
+  })
+  return {
+    versions,
+    noneCount: values.filter((value) => !value?.trim()).length,
+    outdatedCount: latestVersion
+      ? values.filter((value) => isRustDeskVersionOutdated(value, latestVersion)).length
+      : 0,
+  }
 }

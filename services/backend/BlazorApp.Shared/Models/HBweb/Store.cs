@@ -58,6 +58,27 @@ namespace BlazorApp.Shared.Models
         public string? InstallmentTerms { get; set; }
 
         /// <summary>
+        /// 收银端访问 POS API 的首选入口：edge（EdgeOne）、aws（AWS 悉尼边缘）、direct（直连新加坡）；
+        /// NULL＝未设置，收银端按 edge 处理。只由后台「收银入口」页写入（迁移 20261024.003 带 CHECK 约束只允许这三个值），
+        /// 经 POS API 的 receipt-profile/sync 响应下发给收银端；与小票「下发」快照无关，改动约 1 分钟内生效。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 16)]
+        public string? PosApiEntryMode { get; set; }
+
+        /// <summary>
+        /// 首选入口最近一次修改时间（UTC）；独立于 BaseEntity.UpdatedAt，避免与其它分店资料修改混淆。
+        /// 显式 datetime2：与迁移 20261024.003 的列签名一致（CodeFirst 对 DateTime 默认建 datetime，会让迁移门禁判定不兼容）。
+        /// </summary>
+        [SugarColumn(IsNullable = true, ColumnDataType = "datetime2")]
+        public DateTime? PosApiEntryUpdatedAt { get; set; }
+
+        /// <summary>
+        /// 首选入口最近一次修改人（后台用户名）。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 64)]
+        public string? PosApiEntryUpdatedBy { get; set; }
+
+        /// <summary>
         /// 联系邮箱
         /// </summary>
         [SugarColumn(IsNullable = true, Length = 100)]

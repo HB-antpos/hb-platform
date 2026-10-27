@@ -143,6 +143,10 @@
   },
   "cashierBarcode": {
     "title": "个人码",
+    "symbology": {
+      "qr": "二维码",
+      "barcode": "条码"
+    },
     "loading": "正在加载个人码...",
     "empty": "暂未生成个人码，点击刷新即可创建。",
     "loadFailed": "加载个人码失败。",

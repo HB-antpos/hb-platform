@@ -21,8 +21,18 @@
           "transactions": "交易",
           "registeredAt": "注册时间",
           "version": "版本",
+          "rustDeskVersion": "远程版本",
           "update": "更新",
           "lastUser": "最近用户"
+        },
+        "rustDeskVersionHint": "该设备上报的 RustDesk 客户端版本；低于远程维护下发的 {{latest}} 时标橙",
+        "rustDeskNotInstalled": "未安装",
+        "versionFilter": {
+          "appVersion": "客户端版本",
+          "appVersionPlaceholder": "按客户端版本",
+          "rustDeskPlaceholder": "按远程版本",
+          "notReported": "未上报",
+          "outdated": "低于最新版 {{latest}}"
         },
         "heartbeatNever": "从未上报",
         "cashier": "收银员 {{name}}",
@@ -96,6 +106,193 @@
           "lockSucceeded": "已锁定 {{count}} 台设备",
           "partialFailed": "{{succeeded}} 台成功，{{failed}} 台失败（{{devices}}）。失败的设备仍保持勾选，可直接重试。"
         }
+      },
+      "viewPosApiEntry": "收银入口",
+      "viewPosApiUsage": "线路用量",
+      "apiEntry": {
+        "intro": "收银端（WPF / 手持 / iPad）访问 POS API 有三条线路：<b>EdgeOne</b>、<b>AWS 悉尼</b>、<b>直连新加坡</b>，三条都通向同一个后台。这里为每家分店选<b>首选</b>线路，另外两条自动当备用：首选连不上时立刻换下一条，恢复后自动切回。修改后约 1 分钟内生效（夜间更慢），不需要重启收银机，也不影响正在进行的收款。",
+        "modes": {
+          "edge": "EdgeOne",
+          "aws": "AWS 悉尼",
+          "direct": "直连"
+        },
+        "modesShort": {
+          "edge": "EdgeOne",
+          "aws": "AWS",
+          "direct": "直连"
+        },
+        "modeDescriptions": {
+          "edge": "腾讯多节点加速；按请求量计费。",
+          "aws": "自建悉尼边缘，连接常热、首个请求快；独立于腾讯的网络；单台服务器。",
+          "direct": "直连新加坡源站，无中间层；个别运营商线路不稳。"
+        },
+        "summary": {
+          "preferred": "分店首选",
+          "actualOn": "实际走 {{route}}",
+          "deviceUnit": "台",
+          "fallbackHint": "其中 {{count}} 台为回退",
+          "unsupported": "版本过低，设置不生效",
+          "unsupportedHint": "仍按旧默认走 EdgeOne"
+        },
+        "toolbar": {
+          "searchPlaceholder": "搜索分店名称 / 编号",
+          "preferredPlaceholder": "全部首选",
+          "scopePlaceholder": "全部分店",
+          "onlyFallback": "只看有回退的分店"
+        },
+        "columns": {
+          "store": "分店",
+          "preferred": "首选线路",
+          "preferredHint": "备用顺序",
+          "actual": "设备实际线路（最近 10 分钟）",
+          "attention": "需要关注",
+          "updated": "最近修改"
+        },
+        "defaultTag": "默认",
+        "fallbackOrderPrefix": "备用",
+        "storeSub": "{{total}} 台 · 在线 {{online}}",
+        "legend": {
+          "preferred": "{{route}} {{count}}",
+          "fallback": "回退到 {{route}} {{count}}",
+          "unsupported": "不支持（仍走 EdgeOne）{{count}}",
+          "unknown": "未上报 {{count}}"
+        },
+        "attention": {
+          "fallback": "{{count}} 台回退中",
+          "unsupported": "{{count}} 台版本过低",
+          "offline": "{{count}} 台离线",
+          "pending": "刚修改，等待生效"
+        },
+        "updatedToday": "今天 {{time}}",
+        "batch": {
+          "setEdge": "设为 EdgeOne 首选",
+          "setAws": "设为 AWS 悉尼首选",
+          "setDirect": "设为直连首选"
+        },
+        "radioGroupAria": "{{store}} 的首选线路",
+        "selectRowAria": "选择 {{store}}",
+        "distributionAria": "{{store}} 设备实际线路：{{summary}}",
+        "modal": {
+          "title": "修改 {{count}} 家分店的首选线路",
+          "subtitle": "{{names}} · 共 {{devices}} 台收银设备",
+          "namesMore": "等 {{count}} 家",
+          "defaultSuffix": "（默认）",
+          "fallbackOrderPrefix": "备用",
+          "choiceAria": "选择首选线路",
+          "effectTitle": "生效方式",
+          "effectSpeed": "约 1 分钟内各收银端自动切换，无需重启；进行中的收款不受影响",
+          "effectIdentity": "本地数据、激活状态不变（设备身份不随线路变化）",
+          "effectAllSupported": "{{count}} 台均已支持",
+          "effectPartlyUnsupported": "{{supported}} 台支持；另有 {{count}} 台版本过低，设置不生效（仍按旧默认走 EdgeOne）",
+          "confirm": "确认修改"
+        },
+        "messages": {
+          "loadFailed": "加载收银入口设置失败",
+          "updateSuccess": "已更新 {{updated}} 家分店的首选线路",
+          "updateSkipped": "，{{skipped}} 家本来就是该线路",
+          "updateFailed": "修改首选线路失败",
+          "tooMany": "一次最多修改 {{max}} 家分店，请分批操作"
+        },
+        "footer": "共 {{count}} 家分店 · 实际线路由服务器按请求来源识别，收银端无需上报 · 备用顺序固定：AWS → EdgeOne → 直连（去掉首选那条）",
+        "readOnly": "当前账号只有查看权限，不能修改首选线路。",
+        "emptyFiltered": "没有符合条件的分店",
+        "route": {
+          "column": "线路",
+          "columnHint": "设备最近一次请求实际走的入口，由服务器按请求来源识别",
+          "fallingBack": "{{route}} · 回退中",
+          "preferredHint": "首选 {{route}}",
+          "unsupported": "版本过低，仍按旧默认走 EdgeOne",
+          "filterPlaceholder": "按线路",
+          "filterFallback": "回退中",
+          "filterLabel": "线路"
+        }
+      },
+      "apiUsage": {
+        "intro": "统计收银端访问 POS API 的<b>请求数</b>，按线路（EdgeOne / AWS 悉尼 / 直连）区分，由服务器按请求来源识别，收银端无需上报。日期按悉尼时间，周从周一算起；数据约每分钟更新一次，统计从上线后开始累计，无法补录历史。",
+        "granularity": {
+          "day": "按日",
+          "week": "按周",
+          "month": "按月"
+        },
+        "toolbar": {
+          "granularityAria": "统计粒度",
+          "rangeAria": "统计日期范围",
+          "storePlaceholder": "全部分店",
+          "clientKindPlaceholder": "全部客户端"
+        },
+        "presets": {
+          "last7": "近 7 天",
+          "last30": "近 30 天",
+          "last90": "近 90 天",
+          "thisMonth": "本月",
+          "lastMonth": "上月",
+          "last12Months": "近 12 个月"
+        },
+        "rangeProblem": {
+          "invalid": "日期格式不正确",
+          "reversed": "开始日期不能晚于结束日期",
+          "tooLarge": "查询范围最多 {{max}} 天，请缩短范围"
+        },
+        "entries": {
+          "unknown": "未识别"
+        },
+        "entryHints": {
+          "unknown": "没带线路标记的请求，例如绕过入口服务器直接访问源站"
+        },
+        "summary": {
+          "total": "请求总数",
+          "requestUnit": "次",
+          "share": "占比 {{share}}",
+          "errors": "4xx {{s4xx}} · 5xx {{s5xx}}"
+        },
+        "chart": {
+          "title": "请求趋势",
+          "aria": "各线路请求数堆叠柱图，共 {{count}} 个时间段：{{summary}}",
+          "tooltipTotal": "合计 {{count}}",
+          "tooltipPartial": "（不完整：只含所选范围内的日期）",
+          "empty": "所选范围内暂无用量数据"
+        },
+        "sections": {
+          "buckets": "时间明细",
+          "stores": "分店明细",
+          "clients": "客户端明细"
+        },
+        "columns": {
+          "period": "时间",
+          "store": "分店",
+          "total": "合计",
+          "status4xx": "4xx",
+          "status5xx": "5xx",
+          "errorRate": "5xx 占比",
+          "clientKind": "客户端",
+          "kindShare": "占总请求"
+        },
+        "partialTag": "不完整",
+        "partialHint": "这一周 / 月只有部分日期在所选范围内，合计只含范围内的日期",
+        "unassignedStore": "未归属分店",
+        "unassignedHint": "未鉴权的请求（如健康检查、激活），无法确定分店",
+        "empty": "所选范围内暂无用量数据。",
+        "messages": {
+          "loadFailed": "加载线路用量失败"
+        },
+        "footer": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段、{{stores}} 家分店（含未归属）",
+        "source": {
+          "aria": "统计来源",
+          "pos": "收银端 POS API",
+          "main": "主 API（Web 与员工 App）"
+        },
+        "mainIntro": "统计主 API（Web 后台与员工 App 访问的 /api 接口）的<b>请求数</b>，按线路（EdgeOne / AWS 悉尼 / 直连）和客户端类别（Web 后台 / 员工 App / 其他）区分。线路由源站服务器按请求来源识别；客户端类别由请求的浏览器标识粗分，只记数，不保存标识原文、IP 和用户。日期按悉尼时间，周从周一算起；数据约每分钟更新一次，统计从上线后开始累计，无法补录历史。源站未配置线路标记前，请求会全部显示为“未识别”。",
+        "clientKinds": {
+          "web": "Web 后台",
+          "app": "员工 App",
+          "other": "其他"
+        },
+        "clientKindHints": {
+          "web": "浏览器访问后台网页",
+          "app": "员工 App（iOS / Android）",
+          "other": "脚本、监控探活等无法识别的客户端"
+        },
+        "mainFooter": "时区：{{timeZone}} · 范围 {{start}} ~ {{end}} · 4xx / 5xx 是请求数的子集 · 共 {{buckets}} 个时间段"
       }
     }
   }

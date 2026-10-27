@@ -1,14 +1,16 @@
 import {
   CalendarOutlined,
+  CheckCircleOutlined,
   CheckOutlined,
-  CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
+  LoadingOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import {
   Alert,
@@ -22,6 +24,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popover,
   Select,
   Space,
   Switch,
@@ -40,10 +43,10 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
-  approveAttendanceApproval,
   batchUpsertAttendanceHolidays,
   createAttendanceHoliday,
   createAttendanceSchedule,
@@ -56,9 +59,7 @@ import {
   getAttendanceScheduleWeek,
   getAttendanceRecords,
   getAttendanceSettings,
-  getPendingAttendanceApprovals,
   publishAttendanceScheduleWeek,
-  rejectAttendanceApproval,
   syncAttendanceHolidays,
   updateAttendanceHoliday,
   updateAttendanceSchedule,
@@ -71,13 +72,11 @@ import { getStoreUsersGrid } from '../../../services/storeUserService'
 import { useAuthStore } from '../../../store/auth'
 import type { StoreUserListDto } from '../../../services/storeUserService'
 import type {
-  AttendanceApprovalDto,
   AttendanceAvailabilityDto,
   AttendanceHolidayBusinessStatus,
   AttendanceLocationSampleDto,
   AttendancePunchDto,
   AttendancePunchStatus,
-  AttendanceReviewStatus,
   AttendanceScheduleDto,
   AttendanceScheduleStatus,
   AttendanceSettingsDto,
@@ -92,7 +91,6 @@ import type {
 import {
   buildAttendanceRecordSummary,
   buildLocalPunchAdjustmentPreview,
-  validateOvertimeApproval,
   resolveSegmentPunchTime,
   deriveOriginalPunchGuid,
   getPunchAdjustmentOptions,
@@ -102,16 +100,25 @@ import {
   resolvePunchAdjustmentOriginalGuid,
   canAdjustOwnAttendanceRecord,
   getProposedAdjustmentPunchStatus,
-  isKnownAttendanceApprovalSourceType,
-  getSupplementalAttendanceApprovalDetail,
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
-  insertAttendanceWeekdaysInText,
-  validateMealBreakApproval,
   buildAttendanceMealPaySummary,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
+import AttendancePayrollSettingsFields from './AttendancePayrollSettingsFields'
+import DeletedSchedulesDrawer from './DeletedSchedulesDrawer'
+import ScheduleCellEditor from './ScheduleCellEditor'
+import type { CellEditorValues } from './ScheduleCellEditor'
+import {
+  buildScheduleSavePayloads,
+  buildShiftPresets,
+  filterRowsByKeyword,
+  getNextEmptyDateKey,
+  getOccupiedDateKeys,
+  pickDefaultShift,
+} from './scheduleCellEditorLogic'
+import './scheduleCellEditor.css'
 import {
   buildAttendanceLocationTrajectory,
   normalizeAttendanceUtcText,
@@ -132,8 +139,7 @@ dayjs.extend(isoWeek)
 // 用餐未休息加工时等新增文案放页面级消息文件，随页面懒加载，不占首屏 i18n 包。
 registerPageMessages({ zh: scheduleAttendanceMessagesZh, en: scheduleAttendanceMessagesEn })
 
-type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'approvals' | 'holidays' | 'settings'
-type ReviewAction = 'approve' | 'reject'
+type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'holidays' | 'settings'
 
 interface AttendanceMapPreview {
   title: string
@@ -152,6 +158,15 @@ interface ScheduleRow {
   userName?: string
   schedulesByDate: Record<string, AttendanceScheduleDto[]>
 }
+
+/** 周排班表中正在就地编辑的单元格；scheduleGuid 为空表示在该日新建班次。 */
+interface EditingCell {
+  userGuid: string
+  dateKey: string
+  scheduleGuid?: string
+}
+
+const SCHEDULE_STATUS_ORDER: AttendanceScheduleStatus[] = ['Draft', 'Active', 'Cancelled']
 
 interface ScheduleFormValues {
   storeCode: string
@@ -318,6 +333,10 @@ export default function ScheduleAttendancePage() {
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [storeCode, setStoreCode] = useState<string | undefined>()
   const [userGuid, setUserGuid] = useState<string | undefined>()
+  // 周排班页的员工搜索：员工已一次性加载，姓名只在本地过滤，不再带进接口查询
+  const [staffKeyword, setStaffKeyword] = useState('')
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
+  const [cellSaving, setCellSaving] = useState(false)
   const [selectedWeek, setSelectedWeek] = useState<Dayjs>(dayjs())
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>([getIsoWeekStart(dayjs()), getIsoWeekEnd(dayjs())])
   const [schedules, setSchedules] = useState<ListState<AttendanceScheduleDto>>(initialListState)
@@ -328,7 +347,6 @@ export default function ScheduleAttendancePage() {
   const [scheduleHolidaysLoading, setScheduleHolidaysLoading] = useState(false)
   const [availability, setAvailability] = useState<ListState<AttendanceAvailabilityDto>>(initialListState)
   const [punches, setPunches] = useState<ListState<AttendancePunchDto>>(initialListState)
-  const [approvals, setApprovals] = useState<ListState<AttendanceApprovalDto>>(initialListState)
   const [holidays, setHolidays] = useState<ListState<AttendanceStoreHolidayDto>>(initialListState)
   const [settings, setSettings] = useState<AttendanceSettingsDto | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -337,9 +355,6 @@ export default function ScheduleAttendancePage() {
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false)
   const [editingHoliday, setEditingHoliday] = useState<AttendanceStoreHolidayDto | null>(null)
   const [batchHolidayDrawerOpen, setBatchHolidayDrawerOpen] = useState(false)
-  const [reviewModalOpen, setReviewModalOpen] = useState(false)
-  const [reviewTarget, setReviewTarget] = useState<AttendanceApprovalDto | null>(null)
-  const [reviewAction, setReviewAction] = useState<ReviewAction>('approve')
   const [adjustmentTarget, setAdjustmentTarget] = useState<AttendanceScheduleDto | null>(null)
   const [adjustmentPreview, setAdjustmentPreview] = useState<LocalPunchAdjustmentPreview | null>(null)
   const [serverAdjustmentPreview, setServerAdjustmentPreview] = useState<AttendancePunchAdjustmentPreviewDto | null>(null)
@@ -356,10 +371,10 @@ export default function ScheduleAttendancePage() {
   const [adjustmentPreviewLoading, setAdjustmentPreviewLoading] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [syncingHolidays, setSyncingHolidays] = useState(false)
+  const [deletedSchedulesOpen, setDeletedSchedulesOpen] = useState(false)
   const [scheduleForm] = Form.useForm<ScheduleFormValues>()
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
-  const [reviewForm] = Form.useForm<{ reviewRemark?: string; approvedOvertimeMinutes?: number }>()
   const [adjustmentForm] = Form.useForm<PunchAdjustmentFormValues>()
   const [settingsForm] = Form.useForm<SaveAttendanceSettingsPayload>()
   const previewRequestIdRef = useRef(0)
@@ -374,9 +389,6 @@ export default function ScheduleAttendancePage() {
   }, [t])
   const formatBusinessDisplayText = useCallback((displayText: string) => (
     insertAttendanceWeekday(displayText, getBusinessWeekdayLabel(displayText))
-  ), [getBusinessWeekdayLabel])
-  const formatBusinessDetailText = useCallback((detailText: string) => (
-    insertAttendanceWeekdaysInText(detailText, getBusinessWeekdayLabel)
   ), [getBusinessWeekdayLabel])
   const formatRecordMinutes = useCallback((minutes?: number) => (
     typeof minutes === 'number'
@@ -487,11 +499,10 @@ export default function ScheduleAttendancePage() {
     page,
     pageSize,
     storeCode,
-    userGuid: userGuid?.trim() || undefined,
     weekStartDate: weekStart.format('YYYY-MM-DD'),
     fromDate: weekStart.format('YYYY-MM-DD'),
     toDate: weekEnd.format('YYYY-MM-DD'),
-  }), [storeCode, userGuid, weekEnd, weekStart])
+  }), [storeCode, weekEnd, weekStart])
 
   const loadSchedules = useCallback(async (page = schedules.page, pageSize = schedules.pageSize) => {
     if (shouldSkipVisibleStoreQuery()) {
@@ -539,9 +550,9 @@ export default function ScheduleAttendancePage() {
 
     setStoreUsersLoading(true)
     try {
+      // 一次取回该分店全部在职员工，姓名搜索在本地过滤
       const result = await getStoreUsersGrid({
         storeCode,
-        keyword: userGuid?.trim() || undefined,
         status: 1,
       })
       setStoreUsers(result.items)
@@ -552,7 +563,7 @@ export default function ScheduleAttendancePage() {
     } finally {
       setStoreUsersLoading(false)
     }
-  }, [canViewStoreCode, storeCode, t, userGuid])
+  }, [canViewStoreCode, storeCode, t])
 
   const loadScheduleHolidays = useCallback(async () => {
     if (!storeCode || !canViewStoreCode(storeCode)) {
@@ -585,7 +596,9 @@ export default function ScheduleAttendancePage() {
 
     setAvailability((prev) => ({ ...prev, loading: true, page, pageSize }))
     try {
-      const result = await getAttendanceAvailability(queryParams(page, pageSize))
+      // 可上班时间按所选日期范围查（后端 FromDate / ToDate 过滤 AvailableDate）；
+      // 不带 weekStartDate，否则范围起点不是周一时会被「周起始日 = 起点」条件筛空。
+      const result = await getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })
       setAvailability({ loading: false, items: result.items, total: result.total, page: result.page, pageSize: result.pageSize })
     } catch (error) {
       console.error(error)
@@ -610,23 +623,6 @@ export default function ScheduleAttendancePage() {
       setPunches((prev) => ({ ...prev, loading: false }))
     }
   }, [punches.page, punches.pageSize, queryParams, shouldSkipVisibleStoreQuery, t])
-
-  const loadApprovals = useCallback(async (page = approvals.page, pageSize = approvals.pageSize) => {
-    if (shouldSkipVisibleStoreQuery()) {
-      setApprovals({ ...initialListState, page, pageSize })
-      return
-    }
-
-    setApprovals((prev) => ({ ...prev, loading: true, page, pageSize }))
-    try {
-      const result = await getPendingAttendanceApprovals(queryParams(page, pageSize))
-      setApprovals({ loading: false, items: result.items, total: result.total, page: result.page, pageSize: result.pageSize })
-    } catch (error) {
-      console.error(error)
-      message.error(t('posAdmin.scheduleAttendance.messages.loadApprovalsFailed'))
-      setApprovals((prev) => ({ ...prev, loading: false }))
-    }
-  }, [approvals.page, approvals.pageSize, queryParams, shouldSkipVisibleStoreQuery, t])
 
   const loadHolidays = useCallback(async (page = holidays.page, pageSize = holidays.pageSize) => {
     if (shouldSkipVisibleStoreQuery()) {
@@ -668,10 +664,9 @@ export default function ScheduleAttendancePage() {
     if (activeTab === 'records' && access.canViewAttendancePunches) void loadRecords(page)
     if (activeTab === 'availability') void loadAvailability(page)
     if (activeTab === 'punches') void loadPunches(page)
-    if (activeTab === 'approvals') void loadApprovals(page)
     if (activeTab === 'holidays') void loadHolidays(page)
     if (activeTab === 'settings') void loadSettings()
-  }, [access.canViewAttendancePunches, activeTab, loadApprovals, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers])
+  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers])
 
   useEffect(() => {
     if (visibleStoreCodes !== null) {
@@ -693,6 +688,11 @@ export default function ScheduleAttendancePage() {
     loadActiveTab(1)
   }, [activeTab, storeCode, dateRange, selectedWeek])
 
+  // 切页签 / 换分店 / 换周后，上一张表里的编辑浮层已经没有意义，直接收起
+  useEffect(() => {
+    setEditingCell(null)
+  }, [activeTab, storeCode, selectedWeek])
+
   useEffect(() => {
     if (activeTab === 'records' && !access.canViewAttendancePunches) setActiveTab('schedules')
   }, [access.canViewAttendancePunches, activeTab])
@@ -709,11 +709,6 @@ export default function ScheduleAttendancePage() {
   const punchStatusTag = (value: AttendancePunchStatus) => {
     const color = value === 'Normal' || value === 'Approved' ? 'green' : value === 'PendingApproval' ? 'orange' : 'red'
     return <Tag color={color}>{statusLabel('punch', value)}</Tag>
-  }
-
-  const reviewStatusTag = (value: AttendanceReviewStatus) => {
-    const color = value === 'Approved' ? 'green' : value === 'Pending' ? 'orange' : value === 'Rejected' ? 'red' : 'default'
-    return <Tag color={color}>{statusLabel('review', value)}</Tag>
   }
 
   const holidayStatusTag = (value: AttendanceHolidayBusinessStatus) => {
@@ -801,6 +796,7 @@ export default function ScheduleAttendancePage() {
         await deleteAttendanceSchedule(record.scheduleGuid)
         message.success(t('message.deleteSuccess'))
         setScheduleDrawerOpen(false)
+        setEditingCell(null)
         void loadSchedules()
       },
     })
@@ -1010,78 +1006,6 @@ export default function ScheduleAttendancePage() {
     })
   }
 
-  const openReviewModal = (record: AttendanceApprovalDto, action: ReviewAction) => {
-    if (!access.canReviewAttendance || !canEditStoreCode(record.storeCode)) {
-      message.error(t('message.noPermission', '无权操作该数据'))
-      return
-    }
-
-    setReviewTarget(record)
-    setReviewAction(action)
-    reviewForm.resetFields()
-    reviewForm.setFieldsValue({
-      approvedOvertimeMinutes: action === 'reject' ? 0 : record.candidateOvertimeMinutes,
-    })
-    setReviewModalOpen(true)
-  }
-
-  const submitReview = async () => {
-    if (!reviewTarget) return
-    if (!access.canReviewAttendance || !canEditStoreCode(reviewTarget.storeCode)) {
-      message.error(t('message.noPermission', '无权操作该数据'))
-      return
-    }
-
-    try {
-      const values = await reviewForm.validateFields()
-      const isOvertime = reviewTarget.sourceType === 'Overtime'
-      if (isOvertime) {
-        const validationError = validateOvertimeApproval({
-          candidateMinutes: reviewTarget.candidateOvertimeMinutes ?? 0,
-          approvedMinutes: reviewAction === 'reject' ? 0 : values.approvedOvertimeMinutes ?? 0,
-          action: reviewAction,
-          remark: values.reviewRemark,
-        })
-        if (validationError) {
-          const validationMessages = {
-            outOfRange: '批准加班必须在 0 到候选分钟之间',
-            invalidIncrement: '批准加班必须为 15 分钟倍数',
-            remarkRequired: '减少或拒绝候选加班时必须填写备注',
-          }
-          message.warning(t(`posAdmin.scheduleAttendance.validation.overtime.${validationError}`, validationMessages[validationError]))
-          return
-        }
-      }
-      if (reviewTarget.sourceType === 'MealBreak'
-        && validateMealBreakApproval({ action: reviewAction, remark: values.reviewRemark })) {
-        // 拒绝用餐加工时必须写明理由，员工能在申请记录里看到。
-        message.warning(t('posAdmin.scheduleAttendance.meal.remarkRequired'))
-        return
-      }
-      setSaving(true)
-      const payload = {
-        reviewRemark: values.reviewRemark?.trim() || undefined,
-        approvedOvertimeMinutes: isOvertime
-          ? reviewAction === 'reject' ? 0 : values.approvedOvertimeMinutes
-          : undefined,
-      }
-      if (reviewAction === 'approve') {
-        await approveAttendanceApproval(reviewTarget.approvalGuid, payload)
-      } else {
-        await rejectAttendanceApproval(reviewTarget.approvalGuid, payload)
-      }
-      message.success(t('posAdmin.scheduleAttendance.messages.reviewSuccess'))
-      setReviewModalOpen(false)
-      void loadApprovals()
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) return
-      console.error(error)
-      message.error(t('posAdmin.scheduleAttendance.messages.reviewFailed'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const openPunchAdjustmentModal = (record: AttendanceScheduleDto) => {
     if (!canAdjustOwnAttendanceRecord({
       isAdmin: access.isAdmin,
@@ -1195,7 +1119,6 @@ export default function ScheduleAttendancePage() {
       setPreviewPayloadSnapshot(null)
       void loadRecords()
       void loadPunches()
-      void loadApprovals()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return
       console.error(error)
@@ -1281,7 +1204,6 @@ export default function ScheduleAttendancePage() {
 
     schedules.items.forEach((schedule) => {
       if (storeCode && schedule.storeCode !== storeCode) return
-      if (userGuid?.trim() && !schedule.userGuid.toLowerCase().includes(userGuid.trim().toLowerCase()) && !schedule.userName?.toLowerCase().includes(userGuid.trim().toLowerCase())) return
 
       const existing = rows.get(schedule.userGuid) ?? {
         rowKey: `${schedule.storeCode}-${schedule.userGuid}`,
@@ -1296,74 +1218,198 @@ export default function ScheduleAttendancePage() {
       rows.set(schedule.userGuid, existing)
     })
 
-    return Array.from(rows.values())
-  }, [schedules.items, storeCode, storeNameMap, storeUsers, userGuid])
+    // 员工与班次都已整周加载完，姓名搜索只做本地过滤
+    return filterRowsByKeyword(Array.from(rows.values()), staffKeyword)
+  }, [schedules.items, staffKeyword, storeCode, storeNameMap, storeUsers])
 
-  const openCreateScheduleForCell = (row: ScheduleRow, date: Dayjs) => {
-    if (!access.canEditAttendanceSchedule || !canEditStoreCode(row.storeCode || storeCode)) return
-    openScheduleDrawer(undefined, {
-      storeCode: row.storeCode || storeCode,
-      userGuid: row.userGuid,
-      workDate: date,
-      status: 'Draft',
-    })
+  const weekDateKeys = useMemo(() => weekDays.map((day) => day.format('YYYY-MM-DD')), [weekDays])
+  // 常用班次与默认时段取自本店本周已排的班次，没有历史才回落到内置四档
+  const shiftPresets = useMemo(() => buildShiftPresets(schedules.items), [schedules.items])
+  const defaultShift = useMemo(() => pickDefaultShift(schedules.items), [schedules.items])
+
+  const isSameEditingCell = (left: EditingCell | null, right: EditingCell) => (
+    left?.userGuid === right.userGuid && left.dateKey === right.dateKey && left.scheduleGuid === right.scheduleGuid
+  )
+
+  // 保存单个单元格：已有班次走更新；空白格新建为草稿，可同时铺到本周其他空白日期
+  const saveCellSchedule = async (
+    row: ScheduleRow,
+    dateKey: string,
+    schedule: AttendanceScheduleDto | undefined,
+    values: CellEditorValues,
+    advance: boolean,
+  ) => {
+    const targetStoreCode = schedule?.storeCode ?? (row.storeCode || storeCode)
+    if (!targetStoreCode || !access.canEditAttendanceSchedule || !canEditStoreCode(targetStoreCode)) {
+      message.error(t('message.noPermission', '无权操作该数据'))
+      return
+    }
+
+    setCellSaving(true)
+    try {
+      let savedDateKeys = [dateKey]
+      if (schedule) {
+        const [payload] = buildScheduleSavePayloads({
+          storeCode: targetStoreCode,
+          userGuid: schedule.userGuid,
+          dateKeys: [dateKey],
+          start: values.start,
+          end: values.end,
+          remark: values.remark,
+          status: values.status,
+        })
+        await updateAttendanceSchedule(schedule.scheduleGuid, payload)
+        message.success(t('message.updateSuccess'))
+      } else {
+        const payloads = buildScheduleSavePayloads({
+          storeCode: targetStoreCode,
+          userGuid: row.userGuid,
+          dateKeys: [dateKey, ...values.extraDateKeys],
+          start: values.start,
+          end: values.end,
+          remark: values.remark,
+          status: 'Draft',
+        })
+        const results = await Promise.allSettled(payloads.map((payload) => createAttendanceSchedule(payload)))
+        const failedDates = payloads.filter((_, index) => results[index].status === 'rejected').map((payload) => payload.workDate)
+        // 全部失败：抛出让编辑浮层保持打开，输入不丢
+        if (failedDates.length === payloads.length) throw (results[0] as PromiseRejectedResult).reason
+        savedDateKeys = payloads.filter((_, index) => results[index].status === 'fulfilled').map((payload) => payload.workDate)
+        if (failedDates.length) {
+          message.warning(t('posAdmin.scheduleAttendance.cellEditor.partialFailed', {
+            ok: savedDateKeys.length,
+            failed: failedDates.length,
+            dates: failedDates.map((key) => key.slice(5)).join('、'),
+          }))
+        } else {
+          message.success(t('message.createSuccess'))
+        }
+      }
+
+      // Enter 保存时顺势打开右侧下一个空白格，连续排一整行；没有空白格就关闭
+      const nextDateKey = advance
+        ? getNextEmptyDateKey(dateKey, weekDateKeys, getOccupiedDateKeys(row.schedulesByDate), savedDateKeys)
+        : undefined
+      setEditingCell(nextDateKey ? { userGuid: row.userGuid, dateKey: nextDateKey } : null)
+      void loadSchedules()
+    } catch (error) {
+      console.error(error)
+      message.error(t('posAdmin.scheduleAttendance.messages.saveScheduleFailed'))
+    } finally {
+      setCellSaving(false)
+    }
+  }
+
+  // 把就地编辑浮层锚定在被点的单元格 / 班次块上；内容在打开时才渲染，关闭即销毁以重置表单
+  const withCellEditor = (
+    row: ScheduleRow,
+    date: Dayjs,
+    cell: EditingCell,
+    schedule: AttendanceScheduleDto | undefined,
+    trigger: ReactElement,
+  ) => {
+    const dateKey = date.format('YYYY-MM-DD')
+    const occupied = getOccupiedDateKeys(row.schedulesByDate)
+    return (
+      <Popover
+        open={isSameEditingCell(editingCell, cell)}
+        trigger="click"
+        placement="bottom"
+        destroyOnHidden
+        onOpenChange={(open) => {
+          // 点别处关闭时只清掉自己，避免把刚点开的另一个格子也一起关掉
+          setEditingCell((prev) => (open ? cell : isSameEditingCell(prev, cell) ? null : prev))
+        }}
+        content={(
+          <ScheduleCellEditor
+            employeeName={row.userName || '--'}
+            dateLabel={`${date.format('MM-DD')} ${t(`posAdmin.scheduleAttendance.weekdays.${date.isoWeekday() - 1}`)}`}
+            currentDateKey={dateKey}
+            schedule={schedule}
+            presets={shiftPresets}
+            defaultShift={defaultShift}
+            weekDays={weekDays.map((day, index) => {
+              const key = day.format('YYYY-MM-DD')
+              return {
+                dateKey: key,
+                weekdayLabel: t(`posAdmin.scheduleAttendance.weekdays.${index}`),
+                occupied: occupied.has(key),
+                isoIndex: index,
+              }
+            })}
+            saving={cellSaving}
+            onSave={(values, options) => void saveCellSchedule(row, dateKey, schedule, values, options.advance)}
+            onDelete={() => schedule && confirmDeleteSchedule(schedule)}
+            onClose={() => setEditingCell(null)}
+          />
+        )}
+      >
+        {trigger}
+      </Popover>
+    )
   }
 
   const renderScheduleCell = (row: ScheduleRow, date: Dayjs) => {
     const dateKey = date.format('YYYY-MM-DD')
     const daySchedules = [...(row.schedulesByDate[dateKey] ?? [])].sort((left, right) => left.startTime.localeCompare(right.startTime))
     const canEditRowStore = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
+    const newCell: EditingCell = { userGuid: row.userGuid, dateKey }
+    const newCellActive = isSameEditingCell(editingCell, newCell)
 
     if (!daySchedules.length) {
+      if (!canEditRowStore) {
+        // 无权限：整格只读，不响应点击
+        return <div className="sce-cell"><button type="button" disabled className="sce-empty sce-empty--readonly">{t('posAdmin.scheduleAttendance.emptyShift')}</button></div>
+      }
       return (
-        <button
-          type="button"
-          disabled={!canEditRowStore}
-          onClick={() => openCreateScheduleForCell(row, date)}
-          style={{
-            width: '100%',
-            minHeight: 58,
-            border: '1px dashed #d9d9d9',
-            borderRadius: 6,
-            background: '#fafafa',
-            color: '#8c8c8c',
-            cursor: canEditRowStore ? 'pointer' : 'default',
-          }}
-        >
-          {canEditRowStore ? t('posAdmin.scheduleAttendance.actions.addShift') : t('posAdmin.scheduleAttendance.emptyShift')}
-        </button>
+        <div className="sce-cell">
+          {withCellEditor(row, date, newCell, undefined, (
+            <button
+              type="button"
+              className={`sce-empty sce-empty--editable${newCellActive ? ' sce-empty--active' : ''}`}
+            >
+              <PlusOutlined /> {t('posAdmin.scheduleAttendance.actions.addShift')}
+            </button>
+          ))}
+        </div>
       )
     }
 
     return (
-      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      <div className="sce-cell">
         {daySchedules.map((schedule) => {
           const canEditSchedule = access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
-          return (
+          const chipCell: EditingCell = { userGuid: row.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
+          const chip = (
             <button
               key={schedule.scheduleGuid}
               type="button"
-              onClick={() => openScheduleDrawer(schedule)}
-              style={{
-                width: '100%',
-                border: '1px solid #91caff',
-                borderRadius: 6,
-                background: schedule.status === 'Draft' ? '#fffbe6' : schedule.status === 'Cancelled' ? '#fff1f0' : '#e6f4ff',
-                padding: '6px 8px',
-                textAlign: 'left',
-                cursor: canEditSchedule ? 'pointer' : 'default',
-              }}
               disabled={!canEditSchedule}
+              className={[
+                'sce-chip',
+                `sce-chip--${schedule.status}`,
+                canEditSchedule ? 'sce-chip--editable' : '',
+                isSameEditingCell(editingCell, chipCell) ? 'sce-chip--active' : '',
+              ].filter(Boolean).join(' ')}
             >
-              <Space direction="vertical" size={2}>
-                <Typography.Text strong style={{ fontSize: 12 }}>{formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}</Typography.Text>
-                {scheduleStatusTag(schedule.status)}
-                {schedule.remark ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{schedule.remark}</Typography.Text> : null}
-              </Space>
+              <span className="sce-chip-time">{formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}</span>
+              <span className="sce-chip-meta">
+                <span>{statusLabel('schedule', schedule.status)}</span>
+                {schedule.remark ? <span className="sce-chip-remark" title={schedule.remark}>{schedule.remark}</span> : null}
+              </span>
             </button>
           )
+          return canEditSchedule
+            ? <div key={schedule.scheduleGuid}>{withCellEditor(row, date, chipCell, schedule, chip)}</div>
+            : chip
         })}
-      </Space>
+        {/* 同一天再加一个班次：悬停该格才出现，不打扰已排满的日常视图 */}
+        {canEditRowStore ? withCellEditor(row, date, newCell, undefined, (
+          <button type="button" className={`sce-add-more${newCellActive ? ' sce-add-more--active' : ''}`}>
+            <PlusOutlined /> {t('posAdmin.scheduleAttendance.actions.addShift')}
+          </button>
+        )) : null}
+      </div>
     )
   }
 
@@ -1764,149 +1810,6 @@ export default function ScheduleAttendancePage() {
     { title: t('column.remarks'), dataIndex: 'remark', ellipsis: true },
   ]
 
-  const approvalDisplayTitle = (record: AttendanceApprovalDto) => (
-    isKnownAttendanceApprovalSourceType(record.sourceType)
-      ? t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.title`)
-      : record.title || record.sourceType
-  )
-
-  const approvalSystemDetails = (record: AttendanceApprovalDto) => {
-    if (!isKnownAttendanceApprovalSourceType(record.sourceType)) {
-      return record.detail ? <Typography.Text type="secondary">{formatBusinessDetailText(record.detail)}</Typography.Text> : null
-    }
-
-    if (record.sourceType === 'PunchAdjustment') {
-      return record.adjustment ? (
-        <>
-          {record.adjustment.originalPunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.originalPunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.originalPunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.requestedPunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.requestedPunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.requestedPunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.effectivePunchTimeLocal ? (
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.effectivePunchTime')}: {formatBusinessDisplayText(formatDateTime(record.adjustment.effectivePunchTimeLocal))}</Typography.Text>
-          ) : null}
-          {record.adjustment.reason ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.fields.reason')}: {record.adjustment.reason}</Typography.Text>
-          ) : null}
-          {record.adjustment.isDirectAdjustment ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.messages.directAdjustment')}</Typography.Text>
-          ) : null}
-        </>
-      ) : null
-    }
-
-    if (record.sourceType === 'MealBreak') {
-      // 店长判断依据：员工声明没休息几次、排班要求几次、系统记录到几次，以及员工给的原因。
-      const claim = record.mealClaim
-      if (!claim) {
-        return record.detail ? <Typography.Text type="secondary">{formatBusinessDetailText(record.detail)}</Typography.Text> : null
-      }
-      return (
-        <>
-          <Space size={4} wrap>
-            <Tag color="gold">
-              {t('posAdmin.scheduleAttendance.meal.claimSummary', { count: claim.notTakenCount, minutes: claim.claimedMinutes })}
-            </Tag>
-          </Space>
-          <Typography.Text type="secondary">
-            {t('posAdmin.scheduleAttendance.meal.claimCounts', { expected: claim.expectedCount, recorded: claim.recordedCount })}
-          </Typography.Text>
-          {claim.reason ? (
-            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.meal.reason', { reason: claim.reason })}</Typography.Text>
-          ) : null}
-        </>
-      )
-    }
-
-    if (record.sourceType === 'Overtime') {
-      return (
-        <Space size={4} wrap>
-          <Tag color="gold">{t('posAdmin.scheduleAttendance.fields.candidateOvertime', { minutes: record.candidateOvertimeMinutes ?? 0 })}</Tag>
-          {record.approvedOvertimeMinutes !== undefined ? (
-            <Tag color="green">{t('posAdmin.scheduleAttendance.fields.approvedOvertime', { minutes: record.approvedOvertimeMinutes })}</Tag>
-          ) : null}
-        </Space>
-      )
-    }
-
-    if (record.sourceType === 'Punch' || record.sourceType === 'Leave') {
-      const supplementalDetail = getSupplementalAttendanceApprovalDetail({
-        sourceType: record.sourceType,
-        detail: record.detail,
-        displayedTitle: approvalDisplayTitle(record),
-      })
-      return (
-        <>
-          {record.workDate ? (
-            <Typography.Text type="secondary">
-              {t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.detail`, {
-                workDate: formatBusinessDisplayText(formatDate(record.workDate)),
-              })}
-            </Typography.Text>
-          ) : null}
-          {supplementalDetail ? <Typography.Text type="secondary">{formatBusinessDetailText(supplementalDetail)}</Typography.Text> : null}
-        </>
-      )
-    }
-
-    return record.workDate ? (
-      <Typography.Text type="secondary">
-        {t(`posAdmin.scheduleAttendance.approvalPresentation.${record.sourceType}.detail`, {
-          workDate: formatBusinessDisplayText(formatDate(record.workDate)),
-        })}
-      </Typography.Text>
-    ) : null
-  }
-
-  const approvalColumns: ColumnsType<AttendanceApprovalDto> = [
-    { title: t('posAdmin.scheduleAttendance.fields.store'), dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
-    { title: t('posAdmin.scheduleAttendance.fields.applicant'), key: 'applicant', width: 220, render: (_, record) => userCell(record) },
-    { title: t('posAdmin.scheduleAttendance.fields.sourceType'), dataIndex: 'sourceType', width: 120, render: (value: string) => t(`posAdmin.scheduleAttendance.status.sourceType.${value}`, value) },
-    {
-      title: t('posAdmin.scheduleAttendance.fields.workDate'),
-      dataIndex: 'workDate',
-      width: 130,
-      render: (value?: string) => renderBusinessDisplay(formatDate(value)),
-    },
-    { title: t('common.status'), dataIndex: 'reviewStatus', width: 130, render: reviewStatusTag },
-    {
-      title: t('posAdmin.scheduleAttendance.fields.approvalDetail'),
-      key: 'approvalDetail',
-      width: 330,
-      render: (_, record) => (
-        <Space direction="vertical" size={2} style={{ width: '100%' }}>
-          <Typography.Text strong>{approvalDisplayTitle(record)}</Typography.Text>
-          {approvalSystemDetails(record)}
-        </Space>
-      ),
-    },
-    { title: t('posAdmin.scheduleAttendance.fields.reviewedAt'), dataIndex: 'reviewedAt', width: 170, render: formatDateTime },
-    { title: t('column.remarks'), dataIndex: 'reviewRemark', ellipsis: true },
-    {
-      title: t('column.action'),
-      key: 'action',
-      width: 150,
-      render: (_, record) => access.canReviewAttendance && record.reviewStatus === 'Pending' && canEditStoreCode(record.storeCode) ? (
-        <Space>
-          <Button type="link" size="small" icon={<CheckOutlined />} onClick={() => openReviewModal(record, 'approve')}>
-            {record.sourceType === 'Overtime'
-              ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-              : record.sourceType === 'MealBreak'
-                ? t('posAdmin.scheduleAttendance.meal.approve')
-                : t('posAdmin.scheduleAttendance.actions.approve')}
-          </Button>
-          <Button type="link" danger size="small" icon={<CloseOutlined />} onClick={() => openReviewModal(record, 'reject')}>
-            {record.sourceType === 'Overtime'
-              ? t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-              : t('posAdmin.scheduleAttendance.actions.reject')}
-          </Button>
-        </Space>
-      ) : null,
-    },
-  ]
-
   const holidayColumns: ColumnsType<AttendanceStoreHolidayDto> = [
     { title: t('posAdmin.scheduleAttendance.fields.store'), dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
     { title: t('posAdmin.scheduleAttendance.fields.holidayDate'), dataIndex: 'holidayDate', width: 130, render: (value?: string) => renderBusinessDisplay(formatDate(value)) },
@@ -1949,13 +1852,24 @@ export default function ScheduleAttendancePage() {
         options={storeOptions}
         onChange={setStoreCode}
       />
-      <Input
-        allowClear
-        placeholder={t('posAdmin.scheduleAttendance.filters.userGuid')}
-        style={{ width: 220 }}
-        value={userGuid}
-        onChange={(event) => setUserGuid(event.target.value)}
-      />
+      {activeTab === 'schedules' ? (
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder={t('posAdmin.scheduleAttendance.cellEditor.searchPlaceholder')}
+          style={{ width: 220 }}
+          value={staffKeyword}
+          onChange={(event) => setStaffKeyword(event.target.value)}
+        />
+      ) : (
+        <Input
+          allowClear
+          placeholder={t('posAdmin.scheduleAttendance.filters.userGuid')}
+          style={{ width: 220 }}
+          value={userGuid}
+          onChange={(event) => setUserGuid(event.target.value)}
+        />
+      )}
       {activeTab === 'schedules' ? (
         <>
           <DatePicker
@@ -2000,15 +1914,42 @@ export default function ScheduleAttendancePage() {
       key: 'schedules',
       label: t('posAdmin.scheduleAttendance.tabs.schedules'),
       children: (
-        <MeasuredTable metricId="pos-admin.schedule-attendance.table-2"
-          rowKey="rowKey"
-          loading={schedules.loading || storeUsersLoading || scheduleHolidaysLoading}
-          columns={scheduleColumns}
-          dataSource={storeCode ? scheduleRows : []}
-          pagination={false}
-          locale={{ emptyText: storeCode ? t('posAdmin.scheduleAttendance.emptyEmployees') : t('posAdmin.scheduleAttendance.selectStoreToSchedule') }}
-          scroll={{ x: 1430 }}
-        />
+        <>
+          {storeCode ? (
+            <div className="sce-strip">
+              {storeUsersLoading ? (
+                <Tag color="processing" icon={<LoadingOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t('posAdmin.scheduleAttendance.cellEditor.loadingStaff')}
+                </Tag>
+              ) : (
+                <Tag color="success" icon={<CheckCircleOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t('posAdmin.scheduleAttendance.cellEditor.loadedStaff', { count: storeUsers.length })}
+                </Tag>
+              )}
+              {staffKeyword.trim() ? (
+                <Typography.Text type="secondary">
+                  {t('posAdmin.scheduleAttendance.cellEditor.filteredStaff', { count: scheduleRows.length })}
+                </Typography.Text>
+              ) : null}
+              <span style={{ flex: 1 }} />
+              {SCHEDULE_STATUS_ORDER.map((status) => (
+                <span key={status} className="sce-legend">
+                  <i className={`is-${status}`} />
+                  {statusLabel('schedule', status)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <MeasuredTable metricId="pos-admin.schedule-attendance.table-2"
+            rowKey="rowKey"
+            loading={schedules.loading || storeUsersLoading || scheduleHolidaysLoading}
+            columns={scheduleColumns}
+            dataSource={storeCode ? scheduleRows : []}
+            pagination={false}
+            locale={{ emptyText: storeCode ? t('posAdmin.scheduleAttendance.emptyEmployees') : t('posAdmin.scheduleAttendance.selectStoreToSchedule') }}
+            scroll={{ x: 1430 }}
+          />
+        </>
       ),
     },
     ...(recordTabItem ? [recordTabItem] : []),
@@ -2037,20 +1978,6 @@ export default function ScheduleAttendancePage() {
           dataSource={punches.items}
           pagination={pagination(punches, loadPunches)}
           scroll={{ x: 1350 }}
-        />
-      ),
-    },
-    {
-      key: 'approvals',
-      label: t('posAdmin.scheduleAttendance.tabs.approvals'),
-      children: (
-        <MeasuredTable metricId="pos-admin.schedule-attendance.table-5"
-          rowKey="approvalGuid"
-          loading={approvals.loading}
-          columns={approvalColumns}
-          dataSource={approvals.items}
-          pagination={pagination(approvals, loadApprovals)}
-          scroll={{ x: 1000 }}
         />
       ),
     },
@@ -2110,6 +2037,8 @@ export default function ScheduleAttendancePage() {
               <Switch />
             </Form.Item>
           ) : null}
+          {/* 规格第 1 节新增参数（卡 B）：后端返回才显示，旧后端不受影响 */}
+          {settings?.defaultPeriodWeeks !== undefined ? <AttendancePayrollSettingsFields /> : null}
           <Space>
             <Button icon={<ReloadOutlined />} loading={settingsLoading} onClick={() => void loadSettings()}>{t('common.refresh')}</Button>
             {access.canEditAttendanceSettings ? (
@@ -2140,6 +2069,9 @@ export default function ScheduleAttendancePage() {
                   {t('posAdmin.scheduleAttendance.actions.publishWeek')}
                 </Button>
               </Tooltip>
+              <Button icon={<DeleteOutlined />} disabled={!storeCode} onClick={() => setDeletedSchedulesOpen(true)}>
+                {t('posAdmin.scheduleAttendance.deletedSchedules.button')}
+              </Button>
               <Button type="primary" icon={<PlusOutlined />} disabled={!canEditSelectedStore} onClick={() => openScheduleDrawer()}>{t('posAdmin.scheduleAttendance.actions.createSchedule')}</Button>
             </>
           ) : null}
@@ -2172,6 +2104,16 @@ export default function ScheduleAttendancePage() {
     >
       <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as TabKey)} items={tabItems} />
 
+      <DeletedSchedulesDrawer
+        open={deletedSchedulesOpen}
+        storeCode={storeCode}
+        fromDate={weekStart.format('YYYY-MM-DD')}
+        toDate={getIsoWeekEnd(weekStart).format('YYYY-MM-DD')}
+        canRestore={canEditSelectedStore}
+        onClose={() => setDeletedSchedulesOpen(false)}
+        onRestored={() => loadActiveTab(1)}
+      />
+
       <Drawer
         title={editingSchedule ? t('posAdmin.scheduleAttendance.drawer.editSchedule') : t('posAdmin.scheduleAttendance.drawer.createSchedule')}
         width={520}
@@ -2187,11 +2129,13 @@ export default function ScheduleAttendancePage() {
         )}
       >
         <Form form={scheduleForm} layout="vertical">
+          {/* 后端改排班不改员工和分店（打卡、审批都挂在原员工原分店上）；编辑时锁定，避免看似改了实际没生效。 */}
           <Form.Item name="storeCode" label={t('posAdmin.scheduleAttendance.fields.store')} rules={[{ required: true, message: t('form.pleaseSelectStore') }]}>
-            <Select showSearch optionFilterProp="label" options={editableStoreOptions} />
+            <Select showSearch optionFilterProp="label" options={editableStoreOptions} disabled={Boolean(editingSchedule)} />
           </Form.Item>
           <Form.Item name="userGuid" label={t('posAdmin.scheduleAttendance.fields.employeeGuid')} rules={[{ required: true, message: t('posAdmin.scheduleAttendance.validation.userGuidRequired') }]}>
             <Select
+              disabled={Boolean(editingSchedule)}
               showSearch
               optionFilterProp="label"
               options={storeUsers.map((user) => ({
@@ -2699,60 +2643,6 @@ export default function ScheduleAttendancePage() {
             </Typography.Text>
           </Space>
         ) : null}
-      </Modal>
-
-      <Modal
-        title={reviewTarget?.sourceType === 'Overtime'
-          ? reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-            : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-          : reviewTarget?.sourceType === 'MealBreak'
-            ? reviewAction === 'approve'
-              ? t('posAdmin.scheduleAttendance.meal.approveTitle')
-              : t('posAdmin.scheduleAttendance.meal.rejectTitle')
-            : reviewAction === 'approve'
-              ? t('posAdmin.scheduleAttendance.drawer.approve')
-              : t('posAdmin.scheduleAttendance.drawer.reject')}
-        open={reviewModalOpen}
-        okText={reviewTarget?.sourceType === 'Overtime'
-          ? reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-            : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-          : reviewAction === 'approve'
-            ? reviewTarget?.sourceType === 'MealBreak'
-              ? t('posAdmin.scheduleAttendance.meal.approve')
-              : t('posAdmin.scheduleAttendance.actions.approve')
-            : t('posAdmin.scheduleAttendance.actions.reject')}
-        cancelText={t('common.cancel')}
-        okButtonProps={{ danger: reviewAction === 'reject', loading: saving }}
-        onOk={() => void submitReview()}
-        onCancel={() => setReviewModalOpen(false)}
-      >
-        {reviewTarget ? (
-          <Space direction="vertical" size={2} style={{ marginBottom: 16 }}>
-            <Typography.Text strong>{approvalDisplayTitle(reviewTarget)}</Typography.Text>
-            {approvalSystemDetails(reviewTarget)}
-            <Typography.Text>{t('posAdmin.scheduleAttendance.fields.workDate')}: {formatBusinessDisplayText(formatDate(reviewTarget.workDate))}</Typography.Text>
-          </Space>
-        ) : null}
-        <Form form={reviewForm} layout="vertical">
-          {reviewTarget?.sourceType === 'Overtime' && reviewAction === 'approve' ? (
-            <Form.Item
-              name="approvedOvertimeMinutes"
-              label={t('posAdmin.scheduleAttendance.fields.approvedOvertimeMinutes', '批准加班分钟')}
-              rules={[{ required: true }]}
-              extra={t('posAdmin.scheduleAttendance.messages.overtimeApprovalRange', {
-                defaultValue: '只能选择 0 到 {{candidate}} 分钟，且必须为 15 分钟倍数',
-                candidate: reviewTarget.candidateOvertimeMinutes ?? 0,
-              })}
-            >
-              <InputNumber min={0} max={reviewTarget.candidateOvertimeMinutes ?? 0} step={15} style={{ width: '100%' }} />
-            </Form.Item>
-          ) : null}
-          <Form.Item name="reviewRemark" label={t('posAdmin.scheduleAttendance.fields.reviewRemark')}>
-            <Input.TextArea rows={4} />
-          </Form.Item>
-        </Form>
       </Modal>
     </Card>
   )

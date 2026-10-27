@@ -3306,7 +3306,7 @@
   <data name="cardRecovery.linkly.activeSessionApprovedOrderPending" xml:space="preserve"><value>上一笔 Linkly 交易已批准，但对应订单尚未保存。请先在卡交易异常中心恢复该笔交易，再收取新的付款。</value></data>
   <data name="cardRecovery.linkly.activeSessionApprovedOrphan" xml:space="preserve"><value>上一笔 Linkly 交易已批准（顾客已被扣款），但本机没有对应订单。请勿再次刷卡，请主管在卡交易异常中心核对处理。</value></data>
   <data name="cardRecovery.center.action.closeApprovedHandled" xml:space="preserve"><value>已退款或已另行处理，关闭</value></data>
-  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>这笔刷卡已获批准（顾客已被扣款），但 POS 无法重建订单。请先尝试“恢复”；仍然失败时，请先给顾客退款或另行处理这笔付款（例如手工录入刷卡），在证据栏写明处理情况（如退款参考号），再在此关闭该记录。主管备注可不填。</value></data>
+  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>这笔刷卡已获批准（顾客已被扣款），但 POS 无法重建订单。请先尝试“恢复”；仍然失败时，请先给顾客退款或另行处理这笔付款（例如手工录入刷卡），在主管备注里写明处理情况（如退款参考号），再在此关闭该记录。</value></data>
   <data name="cardRecovery.payment.field.approvedEvidence" xml:space="preserve"><value>退款或处理证据（必填，例如退款参考号）</value></data>
   <data name="cardRecovery.linkly.notPaidPaymentReferenceNotAllowed" xml:space="preserve"><value>确认未付款时，请勿填写付款参考号。</value></data>
   <data name="cardRecovery.linkly.supervisorNotPaidRestored" xml:space="preserve"><value>银行确认未发生付款，原订单已恢复，可以再次付款。</value></data>
@@ -3414,7 +3414,7 @@
   <data name="cardRecovery.refund.field.refundReference" xml:space="preserve"><value>退款参考号（如有）</value></data>
   <data name="cardRecovery.refund.field.evidence" xml:space="preserve"><value>银行证据（确认未退款时必填）</value></data>
   <data name="cardRecovery.refund.field.note" xml:space="preserve"><value>主管备注（继续等待时必填；确认已退款需参考号或备注）</value></data>
-  <data name="cardRecovery.refund.section.squareInstructions" xml:space="preserve"><value>选择结果前，请先核对 Square 退款记录。确认已退款必须填写真实的 Square 退款参考号；确认未退款必须填写银行证据；继续等待必须填写主管备注。</value></data>
+  <data name="cardRecovery.refund.section.squareInstructions" xml:space="preserve"><value>选择结果前，请先核对 Square 退款记录。确认已退款必须填写真实的 Square 退款参考号；继续等待必须填写主管备注。</value></data>
   <data name="cardRecovery.refund.field.squareRefundReference" xml:space="preserve"><value>Square 退款参考号（确认已退款时必填）</value></data>
   <data name="cardRecovery.refund.field.squareNote" xml:space="preserve"><value>主管备注（继续等待时必填）</value></data>
   <data name="cardRecovery.refund.action.confirmRefunded" xml:space="preserve"><value>确认已退款</value></data>
@@ -3436,8 +3436,8 @@
   <data name="cardRecovery.refund.confirmedTenderRestored" xml:space="preserve"><value>已恢复确认的银行卡退款。请完成其余退款方式，不要再次退这笔银行卡款。</value></data>
   <data name="cardRecovery.refund.confirmedCompleted" xml:space="preserve"><value>已恢复确认的银行卡退款并保存退货单。</value></data>
   <data name="cardRecovery.payment.section.title" xml:space="preserve"><value>主管付款核对</value></data>
-  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>解锁前请先核对银行结果。确认已付款需参考号或证据，确认未付款需银行证据；主管备注可选。</value></data>
-  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>付款参考号（如有）</value></data>
+  <data name="cardRecovery.payment.section.instructions" xml:space="preserve"><value>解锁前请先核对银行结果。确认已付款或未付款都只需主管授权；付款参考号与主管备注都可不填。</value></data>
+  <data name="cardRecovery.payment.field.paymentReference" xml:space="preserve"><value>付款参考号（选填，可填刷卡机小票上的 RRN 或 APPROVAL CODE）</value></data>
   <data name="cardRecovery.payment.field.evidence" xml:space="preserve"><value>银行证据（确认未付款时必填）</value></data>
   <data name="cardRecovery.payment.field.note" xml:space="preserve"><value>主管备注（选填）</value></data>
   <data name="cardRecovery.payment.action.confirmPaid" xml:space="preserve"><value>确认已付款</value></data>
@@ -3548,6 +3548,8 @@
   <data name="dailyClose.status.draftPreparing" xml:space="preserve"><value>正在准备新日结……</value></data>
   <data name="dailyClose.status.draftReady" xml:space="preserve"><value>新日结已准备好，可以开始现金统计。</value></data>
   <data name="dailyClose.status.draftResumed" xml:space="preserve"><value>已继续未完成的日结草稿。</value></data>
+  <data name="dailyClose.status.draftResumedRefreshed" xml:space="preserve"><value>已继续未完成的日结草稿。开单后销售有变化，数据已刷新，请核对。</value></data>
+  <data name="dailyClose.status.reportChanged" xml:space="preserve"><value>点钞期间销售有变化，数据已刷新，本次未保存。请核对应有现金和差额后再次保存。</value></data>
   <data name="dailyClose.status.draftPreserved" xml:space="preserve"><value>日结草稿已保留，准备好后请选择“继续日结”。</value></data>
   <data name="dailyClose.status.draftDiscarded" xml:space="preserve"><value>日结草稿已放弃。</value></data>
   <data name="dailyClose.status.draftIdentityChanged" xml:space="preserve"><value>门店、终端或收银员已变化，原日结草稿已清除。</value></data>
@@ -4065,6 +4067,24 @@
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
     <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
   </data>
+  <data name="settings.scanner.title" xml:space="preserve">
+    <value>扫码枪灵敏度</value>
+  </data>
+  <data name="settings.scanner.description" xml:space="preserve">
+    <value>同一个条码在这段时间内被读到第二次会忽略，避免扫一次加购两次。</value>
+  </data>
+  <data name="settings.scanner.help" xml:space="preserve">
+    <value>同一商品总是加购两次就调大；快速连扫相同商品却只进一个就调小。仅保存在本机。</value>
+  </data>
+  <data name="settings.scanner.valueFormat" xml:space="preserve">
+    <value>{0} 毫秒</value>
+  </data>
+  <data name="settings.scanner.decrease" xml:space="preserve">
+    <value>调小重复读码忽略时间</value>
+  </data>
+  <data name="settings.scanner.increase" xml:space="preserve">
+    <value>调大重复读码忽略时间</value>
+  </data>
   <data name="settings.restartTest.title" xml:space="preserve">
     <value>重启电脑（测试）</value>
   </data>
@@ -4170,4 +4190,14 @@
   <data name="pendingChoice.prompt.confirm.all" xml:space="preserve">
     <value>放弃 {0} 项</value>
   </data>
+  <data name="payment.card.completionStalled.message" xml:space="preserve">
+    <value>刷卡已批准，但 POS 保存订单耗时过长。请勿再次刷卡，点击「打开卡交易异常中心」完成订单。</value>
+  </data>
+  <data name="cardRecovery.payment.field.approvedNote" xml:space="preserve"><value>主管备注（必填：如何给顾客退款，或这笔付款是怎么处理的）</value></data>
+  <data name="cardRecovery.linkly.approvedExitNoteRequired" xml:space="preserve"><value>关闭该记录前，请先在主管备注里写明如何给顾客退款，或这笔付款是怎么处理的。</value></data>
+  <data name="cardRecovery.v2.preset.paid.terminalSuccess" xml:space="preserve"><value>刷卡机显示支付成功</value></data>
+  <data name="cardRecovery.v2.preset.paid.customerRecord" xml:space="preserve"><value>顾客提供支付记录</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalFailed" xml:space="preserve"><value>刷卡机显示失败</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalOffline" xml:space="preserve"><value>刷卡机离线</value></data>
+  <data name="cardRecovery.v2.preset.notPaid.terminalStuck" xml:space="preserve"><value>刷卡机卡住了</value></data>
 </root>

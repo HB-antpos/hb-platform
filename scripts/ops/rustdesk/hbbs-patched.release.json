@@ -1,0 +1,14 @@
+{
+  "image": "hb-rustdesk-server:1.1.16-wss-registration-20260908",
+  "image_id": "sha256:4ebec0e8c474cccfa7250408c213d62aed955bdba19d1566743a83b759e4df70",
+  "source_commit": "47a923f6e2e1e303c45da406b55729ea12ff804c",
+  "base_revision": "c3a3e0d1070e29cb28b468cf6ef5b184e65e4051",
+  "compat_label": "wss-registration-v1",
+  "files": {
+    "image.tar": "c39da0cd8cfb54c8f85d9b455eae8feb5d65f911f9854dc8c6b818332ea97669",
+    "compose.registration.yml": "fb8e7472045da7ed5aa778234d5be0b59d8b83b2623e2d911374141a339e2691",
+    "smoke-server.py": "444beba049275433ba0556b2f2f92b5209a3c928da95cdaa214d2cae9765baec",
+    "source.bundle": "5777c846bbe719631229d440d887e1330f53d92bbf55968b2df3893c6cf7e97a"
+  },
+  "note": "来源：新加坡生产 /home/ubuntu/rustdesk-wss-registration-20260908（image.tar 与 source.bundle 不入库）。本目录的 compose.registration.yml 带中文注释，哈希与上面 files 里的不同。"
+}

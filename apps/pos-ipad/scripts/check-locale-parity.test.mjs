@@ -19,6 +19,7 @@ const registeredPageCopySurfaces = {
   "app/installments.tsx": "src/features/installments/installment-copy.ts",
   "app/local-history.tsx": "src/features/local-history/local-history-copy.ts",
   "app/login.tsx": "src/features/cashier-login/cashier-login-screen.tsx",
+  "app/network-check.tsx": "src/features/network-check/network-check-copy.ts",
   "app/payment-recovery.tsx": "../../packages/pos-domain/src/features/payment-recovery/payment-recovery-copy.ts",
   "app/payment.tsx": "src/features/payments/ui/payment-copy.ts",
   "app/registration.tsx": "src/features/device-registration/device-registration-screen.tsx",
@@ -224,6 +225,9 @@ test("双语同屏识别覆盖常见分隔形式，并允许品牌与协议缩�
     "此设备或 Development Build 未提供相机能力",
     "门店 / 设备",
     "支付方式：Square",
+    // 收银端入口线路名：EdgeOne / AWS 是供应商品牌名，与 Square、WPF 同属允许的品牌缩写
+    "EdgeOne 加速入口",
+    "AWS 悉尼入口",
   ]) {
     assert.equal(isBilingualTranslationPair(value), false, value);
   }
@@ -390,7 +394,7 @@ function isBilingualTranslationPair(value) {
     .trim();
   const languageText = text
     .replace(
-      /\b(?:API|AUD|App Store|Development Build|ETag|HB|HID|ID|iPadOS|iPad|iOS|Linkly|OPENITEM|PAN|Permissions(?:\.[A-Za-z]+)+|POS|QR|SQLCipher|Square|token|UUID|UTC|WPF|YYYY-MM-DD)\b/gu,
+      /\b(?:API|AUD|App Store|AWS|Development Build|EdgeOne|ETag|HB|HID|ID|iPadOS|iPad|iOS|Linkly|OPENITEM|PAN|Permissions(?:\.[A-Za-z]+)+|POS|QR|SQLCipher|Square|token|UUID|UTC|WPF|YYYY-MM-DD)\b/gu,
       "",
     )
     .trim();

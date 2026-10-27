@@ -62,12 +62,12 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.Equal(first.Key, Assert.Single(vm.OpenAttemptRows).Key);
         Assert.Equal("ORDER-ALPHA", vm.SelectedOrderText);
         vm.IsManualExpanded = true;
-        vm.ResolutionEvidence = "old evidence";
+        vm.ResolutionReason = "old note";
         vm.SearchText = "";
         vm.OperationIndex = 2;
         Assert.Equal(second.Key, Assert.Single(vm.OpenAttemptRows).Key);
         Assert.False(vm.IsManualExpanded);
-        Assert.Empty(vm.ResolutionEvidence);
+        Assert.Empty(vm.ResolutionReason);
         Assert.Equal(2, vm.SelectedHistory.Count);
     }
 
@@ -736,7 +736,6 @@ public sealed class CardRecoveryCenterViewModelTests
         authorization.Requests.Clear();
         authorization.IssuedScopes.Clear();
         viewModel.ResolutionReason = "  settlement checked  ";
-        viewModel.ResolutionEvidence = "  bank portal evidence  ";
         viewModel.ResolutionReference = "  BANK-REF-1  ";
         recovery.OpenItems = [];
 
@@ -755,7 +754,8 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.Equal(selected.Key, recovery.ResolvedKey);
         Assert.Equal(decision, recovery.ResolvedDecision);
         Assert.Equal("settlement checked", recovery.ResolvedReason);
-        Assert.Equal("bank portal evidence", recovery.ResolvedEvidence);
+        // 证据输入框已取消：结案不再带证据，原因只写在备注里。
+        Assert.Null(recovery.ResolvedEvidence);
         Assert.Equal(
             decision == CardRecoverySupervisorDecision.ContinueWaiting ? null : "BANK-REF-1",
             recovery.ResolvedReference);
@@ -852,9 +852,10 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.True(viewModel.ConfirmNotPaidCommand.CanExecute(null));
         Assert.Equal("Refunded or handled elsewhere, close", viewModel.ConfirmNotProcessedText);
         Assert.Contains("approved", GetStringProperty(viewModel, "ResolutionInstructionsText"), StringComparison.OrdinalIgnoreCase);
+        // 证据输入框取消后，备注就是唯一的说明：标签写明必填。
         Assert.Equal(
-            "Refund or handling evidence (required, for example the refund reference)",
-            GetStringProperty(viewModel, "ResolutionEvidenceLabelText"));
+            "Supervisor note (required: how was the customer refunded or the payment handled?)",
+            GetStringProperty(viewModel, "ResolutionReasonLabelText"));
     }
 
     [Fact]
@@ -1141,8 +1142,185 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.Equal(rejected.Key, recovery.ResolvedKey);
     }
 
+    private static CardRecoveryQueueItem CreateOpenPaymentWithoutApprovalEvidence(Guid? attemptGuid = null, int minutesAgo = 0) =>
+        CreateQueueItem(
+            CardProcessorKind.Linkly,
+            attemptGuid ?? Guid.NewGuid(),
+            updatedAt: Now.AddMinutes(-minutesAgo)) with
+        {
+            Status = "Pending",
+            ResponseCode = null
+        };
+
+    // 三个结果按钮只负责打开弹窗；每次打开都是空白表单，参考号只属于“已付款”，预设按结果提供。
     [Fact]
-    public void Evidence_presets_fill_and_append_without_duplicates()
+    public async Task Resolution_dialog_opens_blank_per_outcome_and_offers_payment_presets()
+    {
+        var recovery = new RecordingRecoveryService { OpenItems = [CreateOpenPaymentWithoutApprovalEvidence()] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.IsResolutionDialogOpen);
+        viewModel.ResolutionReason = "stale text from an earlier outcome";
+
+        viewModel.OpenConfirmPaidDialogCommand.Execute(null);
+
+        Assert.True(viewModel.IsResolutionDialogOpen);
+        Assert.Equal(CardRecoverySupervisorDecision.ConfirmProcessed, viewModel.ResolutionDialogDecision);
+        Assert.Empty(viewModel.ResolutionReason);
+        Assert.True(viewModel.ShowDialogReferenceInput);
+        Assert.Equal(
+            ["Terminal shows payment successful", "Customer showed payment record"],
+            viewModel.ResolutionDialogPresets);
+        Assert.True(viewModel.IsManualExpanded);
+        // 打开弹窗不会触发结案，也不会弹主管授权。
+        Assert.Equal(0, recovery.ResolveCallCount);
+
+        viewModel.CancelResolutionDialogCommand.Execute(null);
+
+        Assert.False(viewModel.IsResolutionDialogOpen);
+        Assert.False(viewModel.IsManualExpanded);
+
+        viewModel.OpenConfirmNotPaidDialogCommand.Execute(null);
+
+        Assert.Equal(CardRecoverySupervisorDecision.ConfirmNotProcessed, viewModel.ResolutionDialogDecision);
+        Assert.False(viewModel.ShowDialogReferenceInput);
+        Assert.Equal(
+            ["Terminal shows failed", "Terminal offline", "Terminal stuck"],
+            viewModel.ResolutionDialogPresets);
+        // 备注与预设都是选填：一打开确认键就可用。
+        Assert.True(viewModel.SubmitResolutionDialogCommand.CanExecute(null));
+
+        viewModel.OpenContinueWaitingDialogCommand.Execute(null);
+
+        Assert.Equal(CardRecoverySupervisorDecision.ContinueWaiting, viewModel.ResolutionDialogDecision);
+        Assert.Empty(viewModel.ResolutionDialogPresets);
+    }
+
+    [Fact]
+    public async Task Resolution_dialog_submit_saves_note_without_evidence_and_closes()
+    {
+        var authorization = new RecordingAuthorizationService(CreateCashier("SUPERVISOR"));
+        var recovery = new RecordingRecoveryService
+        {
+            OpenItems = [CreateOpenPaymentWithoutApprovalEvidence()],
+            ResolveResult = new CardRecoveryResolutionResult(true, "Resolution saved")
+        };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            authorization,
+            CreateLocalization());
+        await viewModel.LoadAsync();
+        authorization.Requests.Clear();
+
+        viewModel.OpenConfirmNotPaidDialogCommand.Execute(null);
+        viewModel.ApplyNotePresetCommand.Execute("Terminal offline");
+        recovery.OpenItems = [];
+        await viewModel.SubmitResolutionDialogCommand.ExecuteAsync(null);
+
+        Assert.Equal(CardRecoverySupervisorDecision.ConfirmNotProcessed, recovery.ResolvedDecision);
+        Assert.Equal("Terminal offline", recovery.ResolvedReason);
+        // 证据输入框已取消：结案不再带证据，备注是唯一的说明。
+        Assert.Null(recovery.ResolvedEvidence);
+        Assert.Equal("resolve/confirm-not-paid", Assert.Single(authorization.Requests).Action);
+        Assert.False(viewModel.IsResolutionDialogOpen);
+        Assert.False(viewModel.IsManualExpanded);
+    }
+
+    // 没保存（授权取消、实时核验拒绝、保存失败）时弹窗不关、输入保留，原因直接显示在弹窗里；重新打开会清掉旧提示。
+    [Fact]
+    public async Task Resolution_dialog_stays_open_and_shows_why_when_the_decision_is_not_saved()
+    {
+        var recovery = new RecordingRecoveryService
+        {
+            OpenItems = [CreateOpenPaymentWithoutApprovalEvidence()],
+            ResolveResult = new CardRecoveryResolutionResult(
+                false,
+                "POS could not check the final result with Linkly or the card terminal.",
+                LockRetained: true)
+        };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        viewModel.OpenConfirmPaidDialogCommand.Execute(null);
+        viewModel.ResolutionReason = "Customer showed the receipt";
+        await viewModel.SubmitResolutionDialogCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsResolutionDialogOpen);
+        Assert.True(viewModel.HasResolutionDialogMessage);
+        Assert.Contains("could not check the final result", viewModel.ResolutionDialogMessage, StringComparison.Ordinal);
+        Assert.Equal("Customer showed the receipt", viewModel.ResolutionReason);
+        Assert.False(viewModel.IsBusy);
+
+        viewModel.CancelResolutionDialogCommand.Execute(null);
+        viewModel.OpenConfirmPaidDialogCommand.Execute(null);
+
+        Assert.False(viewModel.HasResolutionDialogMessage);
+    }
+
+    // 顾客已被扣款的记录只剩“已退款或另行处理，关闭”：证据输入框取消后，备注必填，且不提供预设。
+    [Fact]
+    public async Task Resolution_dialog_requires_a_note_when_closing_a_charged_payment()
+    {
+        var approved = CreateQueueItem(CardProcessorKind.Linkly, Guid.NewGuid(), Now);
+        var recovery = new RecordingRecoveryService { OpenItems = [approved] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        viewModel.OpenConfirmNotPaidDialogCommand.Execute(null);
+
+        Assert.True(viewModel.IsResolutionDialogNoteRequired);
+        Assert.Empty(viewModel.ResolutionDialogPresets);
+        Assert.False(viewModel.SubmitResolutionDialogCommand.CanExecute(null));
+
+        viewModel.ResolutionReason = "Refunded in cash, receipt R-1";
+
+        Assert.True(viewModel.SubmitResolutionDialogCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Resolution_dialog_closes_when_the_selected_transaction_changes()
+    {
+        var first = CreateOpenPaymentWithoutApprovalEvidence(Guid.Parse("47000000-0000-0000-0000-000000000001"));
+        var second = CreateOpenPaymentWithoutApprovalEvidence(Guid.Parse("47000000-0000-0000-0000-000000000002"), 5);
+        var recovery = new RecordingRecoveryService { OpenItems = [first, second] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+        viewModel.SelectedAttempt = first;
+        viewModel.OpenConfirmPaidDialogCommand.Execute(null);
+        Assert.True(viewModel.IsResolutionDialogOpen);
+
+        viewModel.SelectedAttempt = second;
+
+        // 弹窗属于上一笔交易：换了选择就收起，避免把旧输入提交给另一笔金融交易。
+        Assert.False(viewModel.IsResolutionDialogOpen);
+        Assert.Equal(second.Key, viewModel.SelectedAttempt?.Key);
+    }
+
+    [Fact]
+    public void Note_presets_fill_and_append_without_duplicates()
     {
         using var viewModel = new CardRecoveryCenterViewModel(
             new RecordingRecoveryService(),
@@ -1151,12 +1329,12 @@ public sealed class CardRecoveryCenterViewModelTests
             new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
             CreateLocalization());
 
-        viewModel.ApplyEvidencePresetCommand.Execute("squareDashboard");
-        viewModel.ApplyEvidencePresetCommand.Execute("squareDashboard");
-        viewModel.ApplyEvidencePresetCommand.Execute("bankStatement");
-        viewModel.ApplyEvidencePresetCommand.Execute("unknown");
+        viewModel.ApplyNotePresetCommand.Execute("Terminal offline");
+        viewModel.ApplyNotePresetCommand.Execute("Terminal offline");
+        viewModel.ApplyNotePresetCommand.Execute("Terminal stuck");
+        viewModel.ApplyNotePresetCommand.Execute("   ");
 
-        Assert.Equal("Square Dashboard; Bank statement", viewModel.ResolutionEvidence);
+        Assert.Equal("Terminal offline; Terminal stuck", viewModel.ResolutionReason);
     }
 
     private static async Task TickAutoCheckIntervalAsync(CardRecoveryCenterViewModel viewModel)
@@ -1243,7 +1421,6 @@ public sealed class CardRecoveryCenterViewModelTests
         await viewModel.LoadAsync();
         viewModel.SelectedAttempt = selected;
         viewModel.ResolutionReason = "Keep waiting";
-        viewModel.ResolutionEvidence = "Bank portal checked";
         viewModel.ResolutionReference = "REF-KEEP";
         var refreshedSelected = selected with
         {
@@ -1256,13 +1433,42 @@ public sealed class CardRecoveryCenterViewModelTests
 
         Assert.Same(refreshedSelected, viewModel.SelectedAttempt);
         Assert.Equal("Keep waiting", viewModel.ResolutionReason);
-        Assert.Equal("Bank portal checked", viewModel.ResolutionEvidence);
         Assert.Equal("REF-KEEP", viewModel.ResolutionReference);
 
         viewModel.SelectedAttempt = first;
 
         Assert.Equal(string.Empty, viewModel.ResolutionReason);
-        Assert.Equal(string.Empty, viewModel.ResolutionEvidence);
+        Assert.Equal(string.Empty, viewModel.ResolutionReference);
+    }
+
+    [Fact]
+    public async Task Selecting_payment_with_receipt_evidence_prefills_rrn_and_approval_code()
+    {
+        // 交易过程中抓到了批准小票：确认已付款的参考号自动带出 RRN / 批准码，主管不用去找。
+        var withEvidence = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("44000000-0000-0000-0000-000000000020"),
+            updatedAt: Now) with
+        {
+            ReceiptApprovalReference = "RRN P29R5YNFN4XM / APPROVAL CODE 267836"
+        };
+        var withoutEvidence = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("44000000-0000-0000-0000-000000000021"),
+            updatedAt: Now.AddMinutes(-1));
+        var recovery = new RecordingRecoveryService { OpenItems = [withEvidence, withoutEvidence] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        viewModel.SelectedAttempt = withEvidence;
+        Assert.Equal("RRN P29R5YNFN4XM / APPROVAL CODE 267836", viewModel.ResolutionReference);
+
+        viewModel.SelectedAttempt = withoutEvidence;
         Assert.Equal(string.Empty, viewModel.ResolutionReference);
     }
 
@@ -1309,33 +1515,29 @@ public sealed class CardRecoveryCenterViewModelTests
         CardProcessorKind.Linkly,
         "Sale",
         "Supervisor payment reconciliation",
-        "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
+        "Check the bank result before unlocking this payment. Confirming paid or not paid only needs supervisor authorization. The payment reference and supervisor note are optional.",
         "Supervisor note (optional)",
-        "Bank evidence (required when confirming not paid)",
-        "Payment reference (when available)")]
+        "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")]
     [InlineData(
         CardProcessorKind.Linkly,
         "ActiveSession",
         "Supervisor payment reconciliation",
-        "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
+        "Check the bank result before unlocking this payment. Confirming paid or not paid only needs supervisor authorization. The payment reference and supervisor note are optional.",
         "Supervisor note (optional)",
-        "Bank evidence (required when confirming not paid)",
-        "Payment reference (when available)")]
+        "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)")]
     [InlineData(
         CardProcessorKind.Linkly,
         "Refund",
         "Supervisor refund reconciliation",
         "Check the bank or terminal record before choosing one outcome. The refund remains locked until a supervisor decision is saved.",
         "Supervisor note (required when waiting; reference or note required when refunded)",
-        "Bank evidence (required when no refund was processed)",
         "Refund reference (when available)")]
     [InlineData(
         CardProcessorKind.Square,
         "Refund",
         "Supervisor refund reconciliation",
-        "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; confirm not refunded requires bank evidence; continue waiting requires a supervisor note.",
+        "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; continue waiting requires a supervisor note.",
         "Supervisor note (required when continuing to wait)",
-        "Bank evidence (required when no refund was processed)",
         "Square refund reference (required when confirming refunded)")]
     [InlineData(
         CardProcessorKind.Linkly,
@@ -1343,7 +1545,6 @@ public sealed class CardRecoveryCenterViewModelTests
         "Supervisor resolution",
         "Confirm the bank or terminal evidence for this selected transaction. Each manual decision requires one-time supervisor authorization.",
         "Supervisor reason or note",
-        "Bank or terminal evidence",
         "Payment or settlement reference")]
     public async Task Resolution_guidance_matches_selected_operation(
         CardProcessorKind processor,
@@ -1351,7 +1552,6 @@ public sealed class CardRecoveryCenterViewModelTests
         string expectedTitle,
         string expectedInstructions,
         string expectedReasonLabel,
-        string expectedEvidenceLabel,
         string expectedReferenceLabel)
     {
         var selected = CreateQueueItem(
@@ -1375,7 +1575,6 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.Equal(expectedTitle, GetStringProperty(viewModel, "ResolutionSectionTitleText"));
         Assert.Equal(expectedInstructions, GetStringProperty(viewModel, "ResolutionInstructionsText"));
         Assert.Equal(expectedReasonLabel, GetStringProperty(viewModel, "ResolutionReasonLabelText"));
-        Assert.Equal(expectedEvidenceLabel, GetStringProperty(viewModel, "ResolutionEvidenceLabelText"));
         Assert.Equal(expectedReferenceLabel, GetStringProperty(viewModel, "ResolutionReferenceLabelText"));
     }
 
@@ -1415,9 +1614,6 @@ public sealed class CardRecoveryCenterViewModelTests
             "主管备注（继续等待时必填）",
             GetStringProperty(viewModel, "ResolutionReasonLabelText"));
         Assert.Equal(
-            "银行证据（确认未退款时必填）",
-            GetStringProperty(viewModel, "ResolutionEvidenceLabelText"));
-        Assert.Equal(
             "Square 退款参考号（确认已退款时必填）",
             GetStringProperty(viewModel, "ResolutionReferenceLabelText"));
         Assert.All(
@@ -1426,7 +1622,6 @@ public sealed class CardRecoveryCenterViewModelTests
                 "ResolutionSectionTitleText",
                 "ResolutionInstructionsText",
                 "ResolutionReasonLabelText",
-                "ResolutionEvidenceLabelText",
                 "ResolutionReferenceLabelText"
             },
             propertyName => Assert.Contains(propertyName, changedProperties));
@@ -1642,9 +1837,12 @@ public sealed class CardRecoveryCenterViewModelTests
                      "BackCommand",
                      "RefreshCommand",
                      "RecoverCommand",
-                     "ConfirmPaidCommand",
-                     "ConfirmNotPaidCommand",
-                     "ContinueWaitingCommand"
+                     // 三个结果按钮只负责打开结案弹窗；真正的结案命令由弹窗里的确认按钮触发。
+                     "OpenConfirmPaidDialogCommand",
+                     "OpenConfirmNotPaidDialogCommand",
+                     "OpenContinueWaitingDialogCommand",
+                     "CancelResolutionDialogCommand",
+                     "SubmitResolutionDialogCommand"
                  })
         {
             var button = Assert.Single(document.Descendants(presentation + "Button")
@@ -1655,7 +1853,7 @@ public sealed class CardRecoveryCenterViewModelTests
                 $"{command} must have a touch target of at least 48.");
             var label = button.Attribute("Content")?.Value;
             Assert.True(label?.StartsWith("{loc:Loc ", StringComparison.Ordinal) == true ||
-                label is "{Binding ConfirmProcessedText}" or "{Binding ConfirmNotProcessedText}",
+                label is "{Binding ConfirmProcessedText}" or "{Binding ConfirmNotProcessedText}" or "{Binding ResolutionDialogSubmitText}",
                 $"{command} must use a localized label.");
         }
     }
@@ -1677,7 +1875,6 @@ public sealed class CardRecoveryCenterViewModelTests
         foreach (var (inputProperty, labelProperty) in new[]
                  {
                      ("ResolutionReason", "ResolutionReasonLabelText"),
-                     ("ResolutionEvidence", "ResolutionEvidenceLabelText"),
                      ("ResolutionReference", "ResolutionReferenceLabelText")
                  })
         {
@@ -2314,8 +2511,8 @@ public sealed class CardRecoveryCenterViewModelTests
             ["cardRecovery.center.input.evidence"] = "Bank or terminal evidence",
             ["cardRecovery.center.input.reference"] = "Payment or settlement reference",
             ["cardRecovery.payment.section.title"] = "Supervisor payment reconciliation",
-            ["cardRecovery.payment.section.instructions"] = "Check the bank result before unlocking this payment. Confirming paid requires a reference or evidence; confirming not paid requires evidence. A supervisor note is optional.",
-            ["cardRecovery.payment.field.paymentReference"] = "Payment reference (when available)",
+            ["cardRecovery.payment.section.instructions"] = "Check the bank result before unlocking this payment. Confirming paid or not paid only needs supervisor authorization. The payment reference and supervisor note are optional.",
+            ["cardRecovery.payment.field.paymentReference"] = "Payment reference (optional, e.g. RRN or APPROVAL CODE on the terminal receipt)",
             ["cardRecovery.payment.field.evidence"] = "Bank evidence (required when confirming not paid)",
             ["cardRecovery.payment.field.note"] = "Supervisor note (optional)",
             ["cardRecovery.refund.section.title"] = "Supervisor refund reconciliation",
@@ -2323,7 +2520,7 @@ public sealed class CardRecoveryCenterViewModelTests
             ["cardRecovery.refund.field.refundReference"] = "Refund reference (when available)",
             ["cardRecovery.refund.field.evidence"] = "Bank evidence (required when no refund was processed)",
             ["cardRecovery.refund.field.note"] = "Supervisor note (required when waiting; reference or note required when refunded)",
-            ["cardRecovery.refund.section.squareInstructions"] = "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; confirm not refunded requires bank evidence; continue waiting requires a supervisor note.",
+            ["cardRecovery.refund.section.squareInstructions"] = "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; continue waiting requires a supervisor note.",
             ["cardRecovery.refund.field.squareRefundReference"] = "Square refund reference (required when confirming refunded)",
             ["cardRecovery.refund.field.squareNote"] = "Supervisor note (required when continuing to wait)",
             ["cardRecovery.center.openCount"] = "{0} card transactions need attention",
@@ -2346,8 +2543,8 @@ public sealed class CardRecoveryCenterViewModelTests
             ["cardRecovery.center.input.evidence"] = "银行或终端证据",
             ["cardRecovery.center.input.reference"] = "付款或结算参考号",
             ["cardRecovery.payment.section.title"] = "主管付款核对",
-            ["cardRecovery.payment.section.instructions"] = "解锁前请先核对银行结果。确认已付款需参考号或证据，确认未付款需银行证据；主管备注可选。",
-            ["cardRecovery.payment.field.paymentReference"] = "付款参考号（如有）",
+            ["cardRecovery.payment.section.instructions"] = "解锁前请先核对银行结果。确认已付款只需主管授权；确认未付款需银行证据；付款参考号与主管备注都可不填。",
+            ["cardRecovery.payment.field.paymentReference"] = "付款参考号（选填，可填刷卡机小票上的 RRN 或 APPROVAL CODE）",
             ["cardRecovery.payment.field.evidence"] = "银行证据（确认未付款时必填）",
             ["cardRecovery.payment.field.note"] = "主管备注（选填）",
             ["cardRecovery.refund.section.title"] = "主管退款核对",

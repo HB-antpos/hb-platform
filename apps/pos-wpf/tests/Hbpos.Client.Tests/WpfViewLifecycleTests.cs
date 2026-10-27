@@ -79,6 +79,8 @@ public sealed class WpfViewLifecycleTests
                 _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask, managementItem, supportsManagement: true));
             model.LinklyCloudLines.Add(rows[^1]);
         }
+        // 首屏重设计后后端异步是 master-detail：先聚焦第 2 条线路，再展开它的配对（切换聚焦会先清掉配对面板，顺序不能反）。
+        model.FocusedLinklyCloudLine = rows[1];
         rows[1].IsExpanded = true;
         rows[1].IsEnteringCode = true;
         rows[1].PairCode = "386214";
@@ -92,45 +94,50 @@ public sealed class WpfViewLifecycleTests
             foreach (var culture in new[] { "en-US", "zh-CN" })
             {
                 localization.SetCulture(culture);
-                foreach (var width in new[] { 1366d, 1024d })
-                {
-                    view.Measure(new Size(width, 5000));
-                    view.Arrange(new Rect(0, 0, width, 5000));
-                    view.UpdateLayout();
-                    var cards = Assert.Single(FindVisualDescendants<ItemsControl>(view).Where(item =>
-                        AutomationProperties.GetAutomationId(item) == "LinklyCloudLineCards"));
-                    Assert.Empty(FindVisualDescendants<ItemsControl>(view).Where(item =>
-                        AutomationProperties.GetAutomationId(item) == "LinklyCloudTerminalLineList"));
-                    var toggles = FindVisualDescendants<Button>(cards).Where(button =>
-                        AutomationProperties.GetAutomationId(button) == "LinklyLineTogglePairing").ToArray();
-                    Assert.Equal(3, toggles.Length);
-                    Assert.Equal(3, FindVisualDescendants<Button>(cards).Count(button =>
-                        AutomationProperties.GetAutomationId(button) == "LinklyLineUseForPayments"));
-                    Assert.All(toggles, button => Assert.True(button.ActualHeight >= 44));
-                    Assert.All(toggles, button => Assert.NotNull(button.Command));
-                    Assert.Equal(localization.T("settings.linkly.lines.repair"), Assert.IsType<TextBlock>(toggles[0].Content).Text);
-                    Assert.Equal(localization.T("settings.linkly.lines.collapsePairing"), Assert.IsType<TextBlock>(toggles[1].Content).Text);
-                    var input = Assert.Single(FindVisualDescendants<TextBox>(cards).Where(box => box.ActualHeight > 0));
-                    Assert.Equal("386214", input.Text);
-                    Assert.Equal(6, input.MaxLength);
-                    AssertHorizontallyContained(input, cards, width, 5000);
-                    foreach (var button in FindVisualDescendants<Button>(cards).Where(button => button.ActualWidth > 0))
-                        AssertHorizontallyContained(button, cards, width, 5000);
-                    foreach (var target in FindVisualDescendants<ComboBox>(cards).Where(combo => combo.ActualWidth > 0))
-                        AssertHorizontallyContained(target, cards, width, 5000);
-                    Assert.All(FindVisualDescendants<TextBlock>(cards), text => Assert.DoesNotContain("[[settings.", text.Text));
-                    SaveLinklyLayoutEvidence(cards, $"linkly-lines-{culture}-{width:0}-entry.png");
-                }
+                // 设置页的设计画布是 1366 宽（首屏重设计后的 400 + * 两列布局不再支持 1024 宽的并排）。
+                const double width = 1366d;
+                view.Measure(new Size(width, 5000));
+                view.Arrange(new Rect(0, 0, width, 5000));
+                view.UpdateLayout();
+                var cards = Assert.Single(FindVisualDescendants<ItemsControl>(view).Where(item =>
+                    AutomationProperties.GetAutomationId(item) == "LinklyCloudLineCards"));
+                Assert.Empty(FindVisualDescendants<ItemsControl>(view).Where(item =>
+                    AutomationProperties.GetAutomationId(item) == "LinklyCloudTerminalLineList"));
+                Assert.Equal(3, cards.Items.Count);
+                // 线路动作按钮只有底栏一份，作用于聚焦线路（第 2 条，已展开配对 → 文案是「收起」）。
+                var toggle = Assert.Single(FindVisualDescendants<Button>(view).Where(button =>
+                    AutomationProperties.GetAutomationId(button) == "LinklyLineTogglePairing"));
+                Assert.Same(rows[1].TogglePairingCommand, toggle.Command);
+                Assert.True(toggle.ActualHeight >= 44);
+                Assert.Equal(
+                    localization.T("settings.linkly.lines.collapsePairing"),
+                    Assert.Single(FindVisualDescendants<TextBlock>(toggle)).Text);
+                var useLine = Assert.Single(FindVisualDescendants<Button>(view).Where(button =>
+                    AutomationProperties.GetAutomationId(button) == "LinklyLineUseForPayments"));
+                Assert.Same(rows[1].SelectCommand, useLine.Command);
+                Assert.True(useLine.ActualHeight >= 44);
+                // 配对码输入在详情区，只显示聚焦线路自己的那一个。
+                var input = Assert.Single(FindVisualDescendants<TextBox>(view).Where(box =>
+                    AutomationProperties.GetAutomationId(box) == "LinklyLinePairCode" && box.ActualHeight > 0));
+                Assert.Equal("386214", input.Text);
+                Assert.Equal(6, input.MaxLength);
+                AssertHorizontallyContained(input, view, width, 5000);
+                foreach (var button in FindVisualDescendants<Button>(view).Where(button => button.ActualWidth > 0))
+                    AssertHorizontallyContained(button, view, width, 5000);
+                foreach (var target in FindVisualDescendants<ComboBox>(view).Where(combo => combo.ActualWidth > 0))
+                    AssertHorizontallyContained(target, view, width, 5000);
+                Assert.All(
+                    FindVisualDescendants<TextBlock>(view).Where(text => text.Text.Contains("[[settings.linkly", StringComparison.Ordinal)),
+                    text => Assert.Fail($"缺少 Linkly 文案键：{text.Text}"));
+                SaveLinklyLayoutEvidence(cards, $"linkly-lines-{culture}-{width:0}-entry.png");
             }
             rows[1].IsEnteringCode = false;
             rows[1].IsConfirming = true;
             view.UpdateLayout();
-            var confirmedCards = Assert.Single(FindVisualDescendants<ItemsControl>(view).Where(item =>
-                AutomationProperties.GetAutomationId(item) == "LinklyCloudLineCards"));
-            var confirmation = Assert.Single(FindVisualDescendants<Button>(confirmedCards).Where(button =>
+            var confirmation = Assert.Single(FindVisualDescendants<Button>(view).Where(button =>
                 AutomationProperties.GetAutomationId(button) == "LinklyLineConfirmPairing" && button.ActualHeight > 0));
             Assert.Same(rows[1].ConfirmCommand, confirmation.Command);
-            SaveLinklyLayoutEvidence(confirmedCards, "linkly-lines-zh-CN-confirm.png");
+            SaveLinklyLayoutEvidence(Assert.Single(FindVisualDescendants<ItemsControl>(view).Where(item => AutomationProperties.GetAutomationId(item) == "LinklyCloudLineCards")), "linkly-lines-zh-CN-confirm.png");
             RaiseLoaded(view);
             RaiseUnloaded(view);
             Assert.All(rows, row => { Assert.False(row.IsExpanded); Assert.Empty(row.PairCode); });
@@ -1080,6 +1087,7 @@ public sealed class WpfViewLifecycleTests
             PosSessionState session,
             DateTime businessDate,
             IReadOnlyList<CashDenominationCount> cashCounts,
+            DailyCloseReport? expectedReport = null,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException("运行时弹窗测试不应保存日结。");

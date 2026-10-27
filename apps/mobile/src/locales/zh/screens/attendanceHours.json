@@ -1,0 +1,127 @@
+{
+  "title": "工时统计",
+  "messages": {
+    "notAllowed": "你没有查看工时统计的权限。",
+    "reviewUnavailable": "审核演示模式不提供工时统计。",
+    "noStore": "没有可管理的分店。",
+    "loadFailed": "工时加载失败",
+    "retry": "重试",
+    "empty": "本期没有员工工时。",
+    "employeeMissing": "本期没有这位员工的工时。",
+    "submitted": "本期已提交锁定，工时不能再改。",
+    "merged": "已合并其他分店的工时（只影响查看）。"
+  },
+  "store": {
+    "pickerTitle": "选择分店",
+    "cancel": "取消",
+    "loading": "加载分店…"
+  },
+  "period": {
+    "oneWeek": "1 周",
+    "twoWeeks": "2 周",
+    "week": "第 {{week}} 周",
+    "weeks": "第 {{first}}–{{last}} 周",
+    "range": "{{from}} ~ {{to}}",
+    "previous": "上一期",
+    "next": "下一期",
+    "weeksSwitch": "统计周数"
+  },
+  "summary": {
+    "paid": "计薪",
+    "weekendOf": "其中周末",
+    "paidLeave": "带薪假",
+    "weekendPublic": "周末 / 公",
+    "pending": "待审",
+    "hours": "{{value}} h"
+  },
+  "tier": {
+    "weekday": "平",
+    "saturday": "六",
+    "sunday": "日",
+    "publicHoliday": "公",
+    "leave": "假"
+  },
+  "employment": {
+    "FullTime": "全职",
+    "PartTime": "兼职",
+    "Casual": "临时",
+    "age": "{{age}} 岁",
+    "multiStore": "多店"
+  },
+  "weekday": {
+    "short1": "一",
+    "short2": "二",
+    "short3": "三",
+    "short4": "四",
+    "short5": "五",
+    "short6": "六",
+    "short7": "日"
+  },
+  "cell": {
+    "sick": "病 {{hours}}",
+    "annual": "年 {{hours}}",
+    "publicHoliday": "公 {{hours}}",
+    "publicHolidayPending": "公 ?",
+    "unavailable": "不可",
+    "cashOutBadge": "发",
+    "a11yRest": "休息",
+    "a11yHours": "{{hours}} 小时",
+    "a11yPending": "有待审",
+    "a11yCashOut": "年假发放",
+    "a11yBirthday": "生日"
+  },
+  "alerts": {
+    "minorBirthday": "{{name}} {{date}} 满 {{age}} 岁，核对时薪",
+    "birthday": "{{name}} {{date}} 生日",
+    "pending": "{{count}} 项待审，没算进去",
+    "publicHolidayPay": "{{count}} 项带薪公假待确认",
+    "otherStores": "{{name}} 在其他分店也有打卡",
+    "otherStoresAnonymous": "有员工在其他分店也有打卡",
+    "review": "去审核",
+    "merge": "合并查看",
+    "unmerge": "只看本店"
+  },
+  "detail": {
+    "rest": "休息",
+    "unavailable": "不能上班",
+    "noPunch": "没有打卡",
+    "paidSick": "带薪病假",
+    "sickLeave": "病假（无薪）",
+    "certificate": "医嘱",
+    "paidAnnual": "带薪年假",
+    "annualLeave": "年假（无薪）",
+    "cashOut": "年假发放 {{hours}} h",
+    "publicHolidayBadge": "公",
+    "sickBadge": "病",
+    "annualBadge": "年",
+    "publicHolidayPay": "带薪公假",
+    "publicHolidayPayPending": "带薪公假待确认",
+    "publicHoliday": "公共假期",
+    "auto": "自动",
+    "otherStore": "另在 {{store}} {{hours}} h",
+    "birthday": "生日",
+    "weekTitle": "第 {{week}} 周 · {{from}} ~ {{to}}"
+  },
+  "pending": {
+    "late": "迟到待审",
+    "punch": "打卡待审",
+    "punchAdjustment": "补卡待审",
+    "overtime": "加班待审",
+    "missingClockOut": "漏下班待审",
+    "mealBreak": "扣餐待审",
+    "leave": "请假待审",
+    "publicHolidayPay": "公假待确认",
+    "other": "待审"
+  },
+  "legend": {
+    "title": "图例",
+    "weekend": "周末",
+    "pending": "待审",
+    "annual": "年假",
+    "sick": "病假",
+    "unavailable": "不能上班",
+    "rest": "没排班",
+    "cashOut": "年假发放",
+    "birthday": "生日"
+  }
+}

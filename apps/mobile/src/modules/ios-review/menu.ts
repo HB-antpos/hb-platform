@@ -28,6 +28,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "store-cash",
   // 日结记录是真实门店现金对账数据，审核模式没有离线演示数据。
   "daily-closes",
+  // 自动价格策略直接影响真实门店售价，审核模式没有离线演示数据。
+  "pricing-strategies",
   // 「人脸比对」合并入口（含其下的名单、设置、抓拍）涉及真实的生物识别照片与门店合规档案，审核模式没有离线演示数据，不展示。
   "face-hub",
   // 旧三个入口（不受欢迎人员名单、人脸比对设置、抓拍与比对）同理，路由保留为重定向壳，审核模式同样不展示。
@@ -36,6 +38,10 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   // 抓拍与比对含真实的生物识别照片，通知收件箱是真实账号的服务端消息，审核模式都没有离线演示数据，不展示。
   "face-capture-results",
   "notifications",
+  // 客流统计依赖真实门店摄像机计数，审核模式没有离线演示数据，不展示。
+  "traffic-stats",
+  // 工时统计依赖真实排班打卡汇总，审核模式没有离线演示数据，不展示。
+  "attendance-hours",
   "workbench",
 ] as const;
 

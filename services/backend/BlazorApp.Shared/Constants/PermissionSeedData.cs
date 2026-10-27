@@ -28,12 +28,18 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Punch.AdjustManagedStore, "补卡与修改管理分店打卡", "排班考勤", "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"),
                 new(Permissions.Attendance.Approval.ViewManagedStore, "查看管理分店审核记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"),
                 new(Permissions.Attendance.Approval.ReviewManagedStore, "审核管理分店考勤", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"),
+                // 仅注册，不写入任何角色模板：审批类权限在生产手动授权；入库由版本号迁移 20261026.001 幂等完成。
+                new(Permissions.Attendance.Approval.ReviewSelf, "审核本人考勤申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 持有者可审核自己提交的考勤申请，审核记录标记「本人审批」"),
                 new(Permissions.Attendance.Holiday.ViewStore, "查看分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看分店公共假期"),
                 new(Permissions.Attendance.Holiday.EditManagedStore, "编辑管理分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 编辑管理分店公共假期"),
                 new(Permissions.Attendance.Leave.ApplySelf, "本人提交请假申请", "排班考勤", "移动端「个人考勤」- 本人提交请假申请"),
                 new(Permissions.Attendance.Leave.ViewManagedStore, "查看管理分店请假申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"),
                 new(Permissions.Attendance.Leave.ReviewManagedStore, "审核管理分店请假申请", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店请假申请"),
                 new(Permissions.Attendance.Settings.Edit, "编辑考勤设置", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 编辑考勤设置"),
+                // 工资三项仅注册，不写入任何角色模板：默认谁都没有、生产手动授权；入库由版本号迁移 20261026.002 幂等完成。
+                new(Permissions.Attendance.Payroll.View, "查看工资表与时薪表", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 查看工资表、个人时薪表"),
+                new(Permissions.Attendance.Payroll.Edit, "编辑时薪、工资备注与提交锁定", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 新增时薪生效记录、填写工资备注与年假核定工时、提交并锁定发薪周期"),
+                new(Permissions.Attendance.Payroll.Unlock, "解锁已提交的发薪周期", "排班考勤", "Web 页面 /pos-admin/attendance-payroll 与移动端「考勤管理」- 解锁已提交的发薪周期（需填写原因，留操作记录）"),
                 new(Permissions.Attendance.Admin.View, "查看全部考勤管理", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看全部分店考勤管理"),
             };
 
@@ -202,6 +208,38 @@ namespace BlazorApp.Shared.Constants
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        /// <summary>
+        /// 收银端「设置 / 客显 / 特价商品 / 同步」这类不属于销售业务、但店长与仓库管理需要能按店转授给员工的权限。
+        /// 只用于「按店 POS 收银权限」页（<c>UserStorePosTerminalPermissionService</c>）；
+        /// 刻意不并入 <see cref="PosTerminalBusinessPermissionCodes"/>，因为后者还被账号直接权限委派、复制权限等路径共用，
+        /// 那些路径对 POS 系统级权限仍保持「只有管理员能授」。
+        /// 不含 Audit.View：员工操作日志是审计入口，不是收银机上的功能开关。
+        /// </summary>
+        public static IReadOnlyList<string> PosTerminalDelegableSystemPermissionCodes { get; } =
+            new[]
+            {
+                Permissions.PosTerminal.Settings.View,
+                Permissions.PosTerminal.Settings.PaymentTerminal,
+                Permissions.PosTerminal.Settings.ReceiptPrinter,
+                Permissions.PosTerminal.Settings.CatalogDownload,
+                Permissions.PosTerminal.Settings.CatalogReset,
+                Permissions.PosTerminal.Settings.TestDataReset,
+                Permissions.PosTerminal.Settings.DeviceRegistration,
+                Permissions.PosTerminal.Settings.AppUpdate,
+                Permissions.PosTerminal.CustomerDisplay.Manage,
+                Permissions.PosTerminal.SpecialProducts.View,
+                Permissions.PosTerminal.SpecialProducts.AddToCart,
+                Permissions.PosTerminal.SpecialProducts.Manage,
+                Permissions.PosTerminal.System.Sync,
+            };
+
+        /// <summary>「按店 POS 收银权限」页对店长 / 仓库管理开放的完整范围 = 业务白名单 + 可转授的系统级权限。</summary>
+        public static IReadOnlyList<string> PosTerminalStoreDelegablePermissionCodes { get; } =
+            PosTerminalBusinessPermissionCodes
+                .Concat(PosTerminalDelegableSystemPermissionCodes)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
         public static IReadOnlyList<string> OrderRolePermissionCodes { get; } =
             new[]
             {
@@ -306,6 +344,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Warehouse.Picking, "仓库订单拣货", "仓库管理", "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"),
                 new(Permissions.Warehouse.StartPicking, "打印配货单开始配货", "仓库管理", "Web 页面 /warehouse/store-order/picking/:id - 仓库员工打印或下载配货单时自动把订单从「已提交」推进到「配货中」；与订单编辑权限分开授权，不会随管理仓库权限自动具备"),
                 new(Permissions.Warehouse.StoreOrderReturn, "分店订单退货", "仓库管理", "Web 页面 /warehouse/store-orders 订货单明细 - 用负数发货数量录入退货（退货冲减金额，订单净额为负时开退款单）；默认无人具备，管理员手动授权，不会随管理仓库权限自动具备"),
+                new(Permissions.SupplierPreorder.Manage, "管理供应商节日预订单", "仓库管理", "Web 页面 /supplier-preorders 与 /supplier-preorders/orderers - 导入 KFC、Dats、Brazco 等节日订单表，开启参与分店，维护下单人员授权，截止锁定并导出汇总（截止后仍可修改）；默认无人具备，管理员手动授权"),
+                new(Permissions.SupplierPreorder.Order, "供应商节日预订单下单", "仓库管理", "Web 页面 /supplier-preorder-ordering - 预订单下单入口；能替哪家店下单只认「下单人员授权」页，不看可管理分店或店长身份；默认无人具备，管理员手动授权"),
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),
@@ -424,6 +464,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.System.ManageSettings, "管理设置", "系统管理", "Web 页面 /system/invoice-email-settings、/system/payment-terminal-settings、/system/emergency-login-keys - 管理发票邮箱、支付终端与紧急登录密钥"),
                 // 仅注册权限，不写入角色模板，避免默认扩大 App 下载入口访问面。
                 new(Permissions.System.ViewAppDownloads, "查看 App 下载", "系统管理", "Web 页面 /system/app-downloads、/system/wpf-versions（移动端同名入口另需管理员）- 查看 App 下载与 WPF 版本"),
+                // MYOB 对接：默认不授予任何角色；入库由版本号迁移 20261027.002 幂等完成。
+                new(Permissions.Myob.Connection.Manage, "管理 MYOB 连接", "系统管理", "Web 页面 /pos-admin/myob - 连接 / 断开 MYOB 公司文件、维护分店与公司文件的映射"),
                 new(Permissions.System.ManageAppDownloads, "管理 App 下载", "系统管理", "系统管理 - 登记 OTA 更新和生成回撤命令"),
                 // 仅注册权限，不写入角色模板；由管理员按需授予，只读展示最新正式版安装链接。
                 new(Permissions.System.ViewMobileAppInstallLinks, "移动端查看 App 安装二维码", "系统管理", "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"),
@@ -477,6 +519,8 @@ namespace BlazorApp.Shared.Constants
                         Permissions.AustralianSuppliers.View,
                         Permissions.AustralianSuppliers.Edit,
                         Permissions.Dashboard.View,
+                        // 仓库管理可维护任意分店员工的 POS 业务权限；服务层仍限定员工目标和业务白名单。
+                        Permissions.Users.ManagePosTerminalPermissions,
                     }
                 ),
                 new(
