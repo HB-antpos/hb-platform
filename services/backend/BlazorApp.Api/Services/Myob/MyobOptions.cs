@@ -17,8 +17,11 @@ public sealed class MyobOptions
     /// <summary>如 https://hotbargain.vip/api/myob/oauth/callback。</summary>
     public string RedirectUri { get; set; } = string.Empty;
 
-    /// <summary>空格分隔。阶段 0 只需这三个：公司文件、员工资料、工资。</summary>
-    public string Scopes { get; set; } = "sme-company-file sme-contacts-employee sme-payroll";
+    /// <summary>
+    /// 空格分隔。公司文件（/{cf_uri}/、/Info）、公司设置（只读，含 GET /Company，授权后校验公司名与 ABN 用它）、
+    /// 员工资料、工资。注意：sme-company-file 不覆盖 /Company，缺 sme-company-settings 会 401（2026-10-27 上线实测）。
+    /// </summary>
+    public string Scopes { get; set; } = "sme-company-file sme-company-settings sme-contacts-employee sme-payroll";
 
     public string AuthorizeUrl { get; set; } = "https://secure.myob.com/oauth2/account/authorize";
 

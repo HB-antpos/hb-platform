@@ -68,7 +68,7 @@ token 加密沿用 `Security/LinklyCloudTerminalCredentialDataProtection.cs` 的
 
 - 开发者应用已注册。Redirect Uri 填 `https://hotbargain.vip/api/myob/oauth/callback`，必须与代码逐字一致。
 - Secret 曾在截图中露出明文，**上线前在 MYOB 后台重新生成**，只放服务器 `.env`。
-- OAuth2 授权码模式，scope：`sme-company-file sme-contacts-employee sme-payroll`；回调参数 `businessId` 即 `cf_uri`；授权码 2~5 分钟过期，回调里立即换 token。
+- OAuth2 授权码模式，scope：`sme-company-file sme-company-settings sme-contacts-employee sme-payroll`；回调参数 `businessId` 即 `cf_uri`；授权码 2~5 分钟过期，回调里立即换 token。
 - 每个 ABN 的公司文件由该文件 **Administrator** 授权一次。
 - 连接后读公司信息的 ABN，与 `Store.ABN` 比对，自动建议分店映射，人工确认。
 - refresh 失败 → 连接标「需重新授权」，Web 提示。客户端限流 8 次 / 秒并重试。
