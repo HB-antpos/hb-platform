@@ -20,6 +20,7 @@ import {
   shouldAutoPrintWarehousePrice,
 } from "./warehouse-price-sync";
 import { resolveScannedCodeLabel, shouldAutoPrintDiscountLabel } from "./scan-label";
+import { resolveScanHighlight } from "../scanner/scan-highlight";
 
 // 执行页面真实详情后处理及扫码打印回调，只替换网络与打印机边界。
 const pageSource = readFileSync(resolve(__dirname, "../../../app/(shell)/product-query.tsx"), "utf8");
@@ -37,6 +38,7 @@ const processLoadedDetailStatement = callbackStatement("processLoadedDetail");
 const smartAutoPrintStatement = callbackStatement("smartAutoPrint");
 const sendCodeLabelStatement = callbackStatement("sendCodeLabel");
 const sendProductLabelStatement = callbackStatement("sendProductLabel");
+const playFoundFeedbackStatement = callbackStatement("playFoundFeedback");
 
 function compileCallback<T>(statement: ts.VariableStatement, name: string, deps: Record<string, unknown>): T {
   const source = `const { ${Object.keys(deps).join(", ")} } = deps;\n${statement.getText(pageAst)}\nreturn ${name};`;
@@ -579,7 +581,8 @@ function createPageFlow(options: {
       useCallback: (callback: unknown) => callback,
       ensureCurrentDetailStoreScope: () => options.scopeCurrent !== false,
       offlineModeRef: { current: options.offline === true },
-      playQueryFeedback: (value: string) => feedback.push(value),
+      // 「找到」反馈已拆到 playFoundFeedback（折扣 / 促销 / 多码换铃音），这里只关心它被调用。
+      playFoundFeedback: () => { feedback.push("found"); },
       smartAutoPrint,
       maybeHandleAutoPricing: async () => {
         autoPricingCalls += 1;
@@ -685,6 +688,55 @@ async function runAutoDiscountLabelRegression() {
   console.log("商品查询自动打印补打折扣标签回归通过");
 }
 
+// 执行页面真实的 playFoundFeedback：折扣 / 促销 / 多码换铃音，其余仍是普通「找到」；促销请求慢或属于别的商品时不能误报。
+async function runFoundFeedbackRegression() {
+  type Promotions = unknown[] | null;
+  const plain = { ...structuredClone(currentDetail), productCode: "P-1", multiCodeCount: 0, storePrice: { ...currentDetail.storePrice, discountRate: 0 } };
+  const run = async (
+    targetDetail: Record<string, unknown>,
+    options: { pending?: { productCode: string; result: Promise<Promotions> } | null; offline?: boolean } = {},
+  ) => {
+    const played: string[] = [];
+    const playFoundFeedback = compileCallback<(value: unknown) => Promise<void>>(
+      playFoundFeedbackStatement, "playFoundFeedback", {
+        useCallback: (callback: unknown) => callback,
+        activePromotionLoadRef: { current: options.pending ?? null },
+        offlineModeRef: { current: options.offline === true },
+        PROMOTION_WAIT_MS: 30,
+        countActiveProductPromotions: (items: unknown[]) => items.length,
+        resolveScanHighlight,
+        playScanHighlight: (kind: string) => played.push(kind),
+        playQueryFeedback: (value: string) => played.push(`query:${value}`),
+      },
+    );
+    await playFoundFeedback(targetDetail);
+    return played;
+  };
+  const resolved = (productCode: string, items: Promotions) => ({ productCode, result: Promise.resolve(items) });
+
+  assert.deepEqual(await run(plain), ["query:found"], "无折扣 / 促销 / 多码：普通找到");
+  assert.deepEqual(await run({ ...plain, storePrice: { ...plain.storePrice, discountRate: 0.2 } }), ["discount"]);
+  assert.deepEqual(await run({ ...plain, multiCodeCount: 2 }), ["multi_code"]);
+  assert.deepEqual(await run(plain, { pending: resolved("P-1", [{}]) }), ["promotion"], "有生效促销");
+  assert.deepEqual(
+    await run({ ...plain, multiCodeCount: 2, storePrice: { ...plain.storePrice, discountRate: 0.2 } }, { pending: resolved("P-1", [{}]) }),
+    ["promotion"], "同时命中：促销优先",
+  );
+  assert.deepEqual(await run(plain, { pending: resolved("P-1", []) }), ["query:found"], "促销为空");
+
+  // 促销请求被取代 / 失败（null）、属于别的商品、离线：都不能报促销。
+  assert.deepEqual(await run(plain, { pending: resolved("P-1", null) }), ["query:found"]);
+  assert.deepEqual(await run(plain, { pending: resolved("OTHER", [{}]) }), ["query:found"], "别的商品的促销请求不能算到这个商品头上");
+  assert.deepEqual(await run(plain, { pending: resolved("P-1", [{}]), offline: true }), ["query:found"], "离线不报促销");
+
+  // 促销请求太慢：不拖慢扫码，按折扣 / 多码继续判定。
+  const never = { productCode: "P-1", result: new Promise<Promotions>(() => undefined) };
+  const started = Date.now();
+  assert.deepEqual(await run({ ...plain, multiCodeCount: 1 }, { pending: never }), ["multi_code"], "促销超时后按多码判定");
+  assert.ok(Date.now() - started < 500, "等待促销不能超过上限太多");
+  console.log("商品查询找到提示音（折扣 / 促销 / 多码）回归通过");
+}
+
 async function runPageRegression() {
   for (const [scanKeyword, expectedOptions] of [
     // 自动打印链路一律带 withDiscountLabel：普通标签之后有折扣再补打折扣标签（是否真有折扣由 sendProductLabel 判定）。
@@ -769,6 +821,7 @@ async function runPageRegression() {
     assert.equal(failedPrint.prints.length, 1);
   }
   await runAutoDiscountLabelRegression();
+  await runFoundFeedbackRegression();
   console.log("商品查询当前门店价扫码打印回归通过");
 }
 

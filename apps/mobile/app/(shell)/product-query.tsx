@@ -163,6 +163,8 @@ import {
   playScanFeedbackSound,
   preloadScanFeedbackSounds,
 } from "@/modules/scanner/scan-sound";
+import { playScanHighlight } from "@/modules/scanner/scan-highlight-feedback";
+import { resolveScanHighlight } from "@/modules/scanner/scan-highlight";
 import type { ScanSource } from "@/modules/scanner/types";
 import { getManageableStoresForSession, isStoreManageable } from "@/modules/shop/store-scope";
 import { useStores } from "@/modules/shop/use-stores";
@@ -431,6 +433,8 @@ class OfflineCatalogUnavailableError extends Error {
 }
 
 const CODE_PAGE_SIZE = 50;
+/** 扫码「找到」提示音最多等促销请求这么久；超时就当没有促销，避免拖慢扫码反馈。 */
+const PROMOTION_WAIT_MS = 350;
 const EMPTY_CREATE_PRODUCT_DRAFT: CreateProductDraft = {
   localSupplierCode: "",
   itemNumber: "",
@@ -757,6 +761,11 @@ function ProductQueryContent() {
   const activePromotionCoordinatorRef = useRef<ReturnType<
     typeof createActivePromotionRequestCoordinator
   > | null>(null);
+  // 最近一次促销请求：扫码「找到」提示音要看该商品有没有生效促销，需要等这次请求的结果。
+  const activePromotionLoadRef = useRef<{
+    productCode: string;
+    result: Promise<PromotionListItem[] | null>;
+  } | null>(null);
   if (!activePromotionCoordinatorRef.current) {
     activePromotionCoordinatorRef.current =
       createActivePromotionRequestCoordinator({
@@ -978,7 +987,8 @@ function ProductQueryContent() {
   }, []);
   const loadActivePromotions = useCallback(
     (productCode: string, storeCode: string) => {
-      void activePromotionCoordinatorRef.current?.load(productCode, storeCode);
+      const result = activePromotionCoordinatorRef.current?.load(productCode, storeCode);
+      activePromotionLoadRef.current = result ? { productCode, result } : null;
     },
     [],
   );
@@ -1135,6 +1145,47 @@ function ProductQueryContent() {
       playScanFeedbackSound(status);
     },
     [],
+  );
+
+  /**
+   * 扫到商品后的「找到」反馈：有促销 / 折扣 / 多码时换成对应铃音 + 震动，否则仍是普通「找到」提示音。
+   * 促销来自并行的独立请求，通常在这里已经返回；最多再等 PROMOTION_WAIT_MS，慢了就当没有促销，不拖慢扫码。
+   */
+  const playFoundFeedback = useCallback(
+    async (targetDetail: ProductDetail) => {
+      try {
+        let activePromotionCount = 0;
+        const pending = activePromotionLoadRef.current;
+        if (
+          !offlineModeRef.current &&
+          pending &&
+          pending.productCode === targetDetail.productCode
+        ) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const items = await Promise.race([
+            pending.result,
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), PROMOTION_WAIT_MS);
+            }),
+          ]);
+          clearTimeout(timer);
+          activePromotionCount = items ? countActiveProductPromotions(items) : 0;
+        }
+        const highlight = resolveScanHighlight({
+          discountRate: targetDetail.storePrice?.discountRate,
+          activePromotionCount,
+          multiCodeCount: targetDetail.multiCodeCount,
+        });
+        if (highlight) {
+          playScanHighlight(highlight);
+          return;
+        }
+      } catch {
+        // 提示音判定失败不能影响扫码流程，退回普通「找到」。
+      }
+      playQueryFeedback("found");
+    },
+    [playQueryFeedback],
   );
 
   const loadProductCodes = useCallback(
@@ -2248,7 +2299,7 @@ function ProductQueryContent() {
       }
       if (offlineModeRef.current) {
         // 离线态不做自动价评估，只反馈命中并按需自动打印。
-        playQueryFeedback("found");
+        void playFoundFeedback(targetDetail);
         if (options.autoPrintEnabled) {
           const labelPrinted = await smartAutoPrint(
             options.scanKeyword ?? "",
@@ -2267,7 +2318,7 @@ function ProductQueryContent() {
           autoPrintEnabled: options.autoPrintEnabled,
         });
         if (autoPricingResult.autoPricingStatus === "no_action") {
-          playQueryFeedback("found");
+          void playFoundFeedback(targetDetail);
           if (options.autoPrintEnabled && !autoPricingResult.labelPrinted) {
             const labelPrinted = await smartAutoPrint(
               options.scanKeyword ?? "",
@@ -2282,7 +2333,7 @@ function ProductQueryContent() {
 
       // 供应商 200 跳过自动定价评估，直接使用刚从服务器取得的当前门店价。
       const currentStorePrice = targetDetail.storePrice;
-      playQueryFeedback("found");
+      void playFoundFeedback(targetDetail);
       if (!options.autoPrintEnabled) {
         return DEFAULT_LOOKUP_FLOW_RESULT;
       }
@@ -2326,7 +2377,7 @@ function ProductQueryContent() {
       ensureCurrentDetailStoreScope,
       getErrorMessage,
       maybeHandleAutoPricing,
-      playQueryFeedback,
+      playFoundFeedback,
       smartAutoPrint,
       t,
     ],
