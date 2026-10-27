@@ -86,6 +86,90 @@ async function rowOf(
   return row;
 }
 
+/**
+ * 模拟“M54 之前的旧版 App”保存的历史日结：旧结构没有 cash_rounding_cents 列，
+ * 所以不能走现行仓储（它会写这一列）。写入流程与旧仓储一致：审计 → Preparing 存档 → 三类 tender → 11 档面额 → Archived，
+ * 触发器仍然全程把关。这些用例关心的是上传 outbox 迁移，而不是日结保存。
+ */
+async function savePreM54Archive(
+  connection: SqliteConnectionPort,
+  commit: DailyCloseArchiveCommit,
+): Promise<void> {
+  const { archive, audit } = commit;
+  await connection.run(
+    `INSERT INTO audit_events (
+      event_id, event_type, occurred_at_iso, order_guid, correlation_id,
+      payload_json, uploaded_at_iso, delivery_state, attempt_count,
+      next_attempt_at_iso, last_error_code, scope_store_code, scope_device_code
+    ) VALUES (?, ?, ?, NULL, ?, ?, NULL, 'pending', 0, ?, NULL, ?, ?)`,
+    [
+      audit.eventId,
+      audit.eventType,
+      audit.occurredAtIso,
+      audit.correlationId,
+      JSON.stringify(audit.payload),
+      audit.occurredAtIso,
+      archive.storeCode,
+      archive.deviceCode,
+    ],
+  );
+  await connection.run(
+    `INSERT INTO local_daily_closes (
+      close_id, business_date, period_from_iso, period_to_iso,
+      store_code, device_code, saved_cashier_id, saved_cashier_name,
+      order_count, return_quantity, expected_cash_cents,
+      counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
+      variance_cents, terminal_audit_event_id, saved_at_iso,
+      source_kind, state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'native', 'Preparing')`,
+    [
+      archive.closeId,
+      archive.businessDate,
+      archive.periodFromIso,
+      archive.periodToIso,
+      archive.storeCode,
+      archive.deviceCode,
+      archive.savedCashierId,
+      archive.savedCashierName,
+      archive.orderCount,
+      archive.returnQuantity,
+      archive.expectedCashCents,
+      archive.countedCashCents,
+      archive.notesSubtotalCents,
+      archive.coinsSubtotalCents,
+      archive.varianceCents,
+      audit.eventId,
+      archive.savedAtIso,
+    ],
+  );
+  for (const tender of archive.tenders) {
+    await connection.run(
+      `INSERT INTO daily_close_totals (
+        close_id, tender_method, sales_cents, refund_cents, net_cents
+      ) VALUES (?, ?, ?, ?, ?)`,
+      [
+        archive.closeId,
+        tender.method,
+        tender.salesCents,
+        tender.refundCents,
+        tender.netCents,
+      ],
+    );
+  }
+  for (const count of archive.denominations) {
+    await connection.run(
+      `INSERT INTO cash_denominations (
+        close_id, denomination_cents, quantity, subtotal_cents
+      ) VALUES (?, ?, ?, ?)`,
+      [archive.closeId, count.denominationCents, count.quantity, count.subtotalCents],
+    );
+  }
+  await connection.run(
+    "UPDATE local_daily_closes SET state = 'Archived' WHERE close_id = ?",
+    [archive.closeId],
+  );
+}
+
 async function upgradeToLatest(connection: SqliteConnectionPort): Promise<void> {
   await applyMigrations(connection, () => NOW);
 }
@@ -113,9 +197,9 @@ test("旧库升级：历史日结自动 pending 且立即到期，legacy 非 GUI
     }
     // 2. 升到“上传迁移之前”的最新版，并保存 3 条原生日结（升级前的历史日结）。
     await applyMigrations(connection, () => NOW, BEFORE_UPLOAD);
-    const repository = new SqliteDailyCloseRepository(connection);
     for (const index of [1, 2, 3]) {
-      await repository.saveArchive(
+      await savePreM54Archive(
+        connection,
         commitFor(guid(index), { savedAtIso: `2026-10-0${index}T13:30:00.000Z` }),
       );
     }
@@ -173,9 +257,8 @@ test("旧库升级：历史日结自动 pending 且立即到期，legacy 非 GUI
 test("迁移幂等：再次 applyMigrations 不会把已 synced / rejected 的行重置成 pending", async () => {
   await withDatabase(async (connection) => {
     await applyMigrations(connection, () => NOW, BEFORE_UPLOAD);
-    const repository = new SqliteDailyCloseRepository(connection);
-    await repository.saveArchive(commitFor(guid(1)));
-    await repository.saveArchive(commitFor(guid(2)));
+    await savePreM54Archive(connection, commitFor(guid(1)));
+    await savePreM54Archive(connection, commitFor(guid(2)));
     await upgradeToLatest(connection);
     await connection.run("UPDATE local_daily_closes SET upload_state = 'synced' WHERE close_id = ?", [guid(1)]);
     await connection.run("UPDATE local_daily_closes SET upload_state = 'rejected' WHERE close_id = ?", [guid(2)]);
@@ -451,9 +534,9 @@ test("历史补传：升级后全部历史日结（含 legacy GUID 形态）补�
       [NOW, NOW],
     );
     await applyMigrations(connection, () => NOW, BEFORE_UPLOAD);
-    const saves = new SqliteDailyCloseRepository(connection);
     for (let index = 1; index <= 25; index += 1) {
-      await saves.saveArchive(
+      await savePreM54Archive(
+        connection,
         commitFor(guid(index), {
           savedAtIso: new Date(Date.UTC(2026, 8, 1, 0, index)).toISOString(),
           businessDate: "2026-09-01",

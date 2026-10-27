@@ -6061,6 +6061,7 @@ class MemoryDailyCloseRepository implements DailyCloseRepositoryPort {
           netCents: 0,
         },
       ],
+      cashRoundingCents: 0,
       expectedCashCents: 1_000,
     };
   }

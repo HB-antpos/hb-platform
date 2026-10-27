@@ -145,6 +145,7 @@ function createSummary(): DailyCloseSummary {
         netCents: 200,
       },
     ],
+    cashRoundingCents: 0,
     expectedCashCents: 800,
   };
 }

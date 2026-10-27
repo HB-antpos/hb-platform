@@ -125,6 +125,17 @@ function check(
   for (const field of ["noteSubtotal", "coinSubtotal", "countedCashAmount", "cashDifference"]) {
     withinLimit(decimalOf(wire[field]), "AMOUNT_OUT_OF_RANGE");
   }
+  // cashRoundingAmount 是可选字段（旧客户端不发，按 0 处理）。
+  const roundingDecimal =
+    wire.cashRoundingAmount === undefined || wire.cashRoundingAmount === null
+      ? { unscaled: 0n, scale: 0 }
+      : decimalOf(wire.cashRoundingAmount);
+  withinLimit(roundingDecimal, "AMOUNT_OUT_OF_RANGE");
+  const cashRounding = roundMoneyCents(roundingDecimal);
+  // 每张订单的现金进位最多 ±2 分（5 分进位），合计不可能超过 订单数 × 2 分；容差 1 分。
+  if (abs(cashRounding) > BigInt(wire.orderCount as number) * 2n + 1n) {
+    throw new RuleViolation("INVALID_CASH_ROUNDING");
+  }
   const noteSubtotal = roundMoneyCents(decimalOf(wire.noteSubtotal));
   const coinSubtotal = roundMoneyCents(decimalOf(wire.coinSubtotal));
   const counted = roundMoneyCents(decimalOf(wire.countedCashAmount));
@@ -135,8 +146,8 @@ function check(
   if (counted !== noteCents + coinCents) {
     throw new RuleViolation("INVALID_COUNTED_CASH_AMOUNT");
   }
-  // 差额 = 实点 − 现金净额，容差 0.01（1 分）。
-  if (abs(difference - (counted - cashNetCents)) > 1n) {
+  // 差额 = 实点 − 应有现金（现金净额 + 现金进位），容差 0.01（1 分）。
+  if (abs(difference - (counted - (cashNetCents + cashRounding))) > 1n) {
     throw new RuleViolation("INVALID_CASH_DIFFERENCE");
   }
 }

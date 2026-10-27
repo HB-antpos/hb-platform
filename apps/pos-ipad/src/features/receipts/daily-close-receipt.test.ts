@@ -171,6 +171,63 @@ test("中文日结文本使用 GB18030 且不输出 UTF-8 字节", () => {
   assert.equal(containsBytes(bytes, [...new TextEncoder().encode("商品")]), false);
 });
 
+test("日结小票在应有现金前单独列出现金进位（中英文、两种纸宽、正负号），应有现金含进位", () => {
+  const base = createArchive();
+  // 现金净额 $10.00，进位 +$0.02 → 应有现金 $10.02；实点 $107.00，差额 +$96.98。
+  const positive = {
+    ...base,
+    cashRoundingCents: 2,
+    expectedCashCents: base.expectedCashCents + 2,
+    varianceCents: base.countedCashCents - (base.expectedCashCents + 2),
+  };
+  for (const paper of ["58mm", "80mm"] as const) {
+    const receipt = buildDailyCloseReceipt({
+      archive: positive,
+      locale: "en",
+      paper,
+      reprint: false,
+      storeName: "Sunnybank Plaza",
+    });
+    const text = receipt.lines.join("\n");
+    assert.match(text, /Cash Rounding.*\+\$0\.02/);
+    assert.match(text, /Expected Cash.*\$10\.02/);
+    assert.match(text, /Variance.*\+\$96\.98/);
+    // 进位行必须排在应有现金之前。
+    assert.ok(text.indexOf("Cash Rounding") < text.indexOf("Expected Cash"));
+    assert.ok(
+      receipt.lines.every(
+        (line) => dailyCloseReceiptDisplayWidth(line) <= receipt.width,
+      ),
+    );
+  }
+
+  const zh = buildDailyCloseReceipt({
+    archive: {
+      ...positive,
+      cashRoundingCents: -3,
+      expectedCashCents: base.expectedCashCents - 3,
+      varianceCents: base.countedCashCents - (base.expectedCashCents - 3),
+    },
+    locale: "zh-CN",
+    paper: "58mm",
+    reprint: false,
+    storeName: "Sunnybank Plaza",
+  });
+  const zhText = zh.lines.join("\n");
+  assert.match(zhText, /现金进位\/Rounding.*-\$0\.03/);
+  assert.match(zhText, /应有现金\/Expected.*\$9\.97/);
+
+  // 没有进位（旧存档）也照常打印这一行，金额为 0。
+  const plain = buildDailyCloseReceipt({
+    archive: base,
+    locale: "en",
+    paper: "58mm",
+    reprint: true,
+    storeName: "Sunnybank Plaza",
+  });
+  assert.match(plain.lines.join("\n"), /Cash Rounding.*\$0\.00/);
+});
+
 function createArchive(): DailyCloseArchive {
   const denominationValues = [
     10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20, 10, 5,
@@ -216,6 +273,7 @@ function createArchive(): DailyCloseArchive {
         netCents: 400,
       },
     ],
+    cashRoundingCents: 0,
     expectedCashCents: 1_000,
     closeId: "close-1",
     savedCashierId: "C1",
