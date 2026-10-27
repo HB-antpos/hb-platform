@@ -136,6 +136,8 @@ export interface AccessControl {
   canViewSeasonalCardStats: boolean
   /** 人脸抓拍摄像机管理页：独立权限 FaceCapture.Cameras.Manage。 */
   canManageFaceCameras: boolean
+  /** MYOB 对接页（连接公司文件、分店映射）：独立权限 Myob.Connection.Manage。 */
+  canManageMyobConnections: boolean
   /** 人脸比对页：FaceMatch.* 五个权限码任一（页签再按各自权限显示）。 */
   canAccessFaceMatch: boolean
   canManageScheduledTasks: boolean

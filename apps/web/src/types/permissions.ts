@@ -210,6 +210,10 @@ export const P = {
       ViewAllStores: 'SeasonalCards.Remaining.ViewAllStores',
     },
   },
+  // MYOB 对接（后台菜单「MYOB 对接」）：连接公司文件与分店映射，与后端 Permissions.Myob.Connection.Manage 一致（新权限默认不授予，Admin 靠角色放行）。
+  Myob: {
+    ConnectionManage: 'Myob.Connection.Manage',
+  },
   // 门店人脸抓拍摄像机管理（系统菜单「人脸抓拍摄像机」）：独立顶层权限码，与后端 Permissions.FaceCapture.Cameras.Manage 一致。
   FaceCapture: {
     CamerasManage: 'FaceCapture.Cameras.Manage',

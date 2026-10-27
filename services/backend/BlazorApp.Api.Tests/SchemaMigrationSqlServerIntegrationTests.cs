@@ -3812,6 +3812,95 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB连接与分店映射_两张新表_权限码入库不授权_可重复执行且识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表不存在：校验报 54330。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql));
+        Assert.Equal(54330, missing.Number);
+
+        // 迁移前形态：权限表存在，且已有一条别的权限码与一个角色授权（迁移不得动它们）。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(36) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NULL,
+                Category nvarchar(100) NULL, Description nvarchar(1000) NULL, CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL, IsDeleted bit NOT NULL);
+            INSERT dbo.HbwebSysPermissions (Id, Code, Name, Category, CreatedAt, IsDeleted)
+            VALUES (N'p-1', N'Orders.View', N'查看订单', N'分店订货', SYSUTCDATETIME(), 0);
+            """);
+
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+        // 权限码幂等入库，类别用既有的「系统管理」；重复执行不产生第二行，已有权限码不变。
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Myob.Connection.Manage' AND Category = N'系统管理' AND IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Orders.View' AND Category = N'分店订货'"));
+
+        // 重复执行不影响已写入的连接。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobConnection (ConnectionGuid, BusinessId, BusinessName, Abn, Status, AuthorizedAt, CreatedAt)
+            VALUES (N'c-1', N'biz-1', N'Hot Bargain Pty Ltd', N'51824753556', N'Active', SYSUTCDATETIME(), SYSUTCDATETIME());
+            INSERT dbo.MyobStoreMapping (StoreCode, ConnectionGuid, MappedAt) VALUES (N'1001', N'c-1', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobConnection WHERE ConnectionGuid = N'c-1' AND BusinessName = N'Hot Bargain Pty Ltd'"));
+
+        // 同一个公司文件只能有一条连接（BusinessId 唯一）；一个分店只能映射一个连接（StoreCode 主键）。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobConnection (ConnectionGuid, BusinessId, BusinessName, Status, AuthorizedAt, CreatedAt)
+            VALUES (N'c-2', N'biz-1', N'Duplicate', N'Active', SYSUTCDATETIME(), SYSUTCDATETIME());
+            """));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobStoreMapping (StoreCode, ConnectionGuid, MappedAt) VALUES (N'1001', N'c-1', SYSUTCDATETIME());
+            """));
+        // Status 白名单。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobConnection (ConnectionGuid, BusinessId, BusinessName, Status, AuthorizedAt, CreatedAt)
+            VALUES (N'c-3', N'biz-3', N'Bad status', N'Revoked', SYSUTCDATETIME(), SYSUTCDATETIME());
+            """));
+
+        // 约束被禁用 → 54334；修复后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobConnection NOCHECK CONSTRAINT CK_MyobConnection_Status;");
+        var checkDisabled = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql));
+        Assert.Equal(54334, checkDisabled.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobConnection WITH CHECK CHECK CONSTRAINT CK_MyobConnection_Status;");
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+
+        // 唯一索引被换成非唯一 → 54333。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobConnection_BusinessId ON dbo.MyobConnection;");
+        await ExecuteNonQueryAsync(main, "CREATE NONCLUSTERED INDEX UX_MyobConnection_BusinessId ON dbo.MyobConnection (BusinessId);");
+        var notUnique = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql));
+        Assert.Equal(54333, notUnique.Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobConnection_BusinessId ON dbo.MyobConnection;");
+        await ExecuteNonQueryAsync(main, "CREATE UNIQUE NONCLUSTERED INDEX UX_MyobConnection_BusinessId ON dbo.MyobConnection (BusinessId);");
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+
+        // 列类型 / 宽度漂移 → 54331。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobConnection ALTER COLUMN LastError nvarchar(100) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql));
+        Assert.Equal(54331, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobConnection ALTER COLUMN LastError nvarchar(500) NULL;");
+        await ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql);
+
+        // 主键缺失 → 54332。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobStoreMapping DROP CONSTRAINT PK_MyobStoreMapping;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobConnectionSchema.VerifySql));
+        Assert.Equal(54332, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

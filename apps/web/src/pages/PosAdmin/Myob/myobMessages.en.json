@@ -1,0 +1,110 @@
+{
+  "myob": {
+    "title": "MYOB Integration",
+    "subtitle": "Connect each company file's MYOB account and map stores to their paying company",
+    "reload": "Refresh",
+    "notice": {
+      "title": "Before you authorise",
+      "admin": "Authorisation must be completed by the Administrator of the MYOB company file, signed in to MYOB. Other roles will fail or lack permission.",
+      "perAbn": "Each ABN maps to one company file, and each company file is authorised once. After connecting, choose the company file for each store below."
+    },
+    "callback": {
+      "connected": "MYOB company file connected",
+      "error": "MYOB authorisation failed: {{reason}}"
+    },
+    "connections": {
+      "title": "Connected company files",
+      "connect": "Connect MYOB company file",
+      "empty": "No MYOB company file is connected yet. Click \"Connect MYOB company file\" at the top right to start.",
+      "loadFailed": "Failed to load connections",
+      "retry": "Retry",
+      "authorizeFailed": "Failed to get the MYOB authorisation URL",
+      "disconnectedTitle": "Disconnected ({{count}})",
+      "columns": {
+        "company": "Company",
+        "businessId": "BusinessId",
+        "abn": "ABN",
+        "status": "Status",
+        "authorized": "Authorised by / at",
+        "lastRefreshed": "Last verified",
+        "stores": "Mapped stores",
+        "actions": "Actions"
+      },
+      "status": {
+        "Active": "Connected",
+        "NeedsReauth": "Needs reauthorisation",
+        "Disconnected": "Disconnected"
+      },
+      "copyBusinessId": "Copy BusinessId",
+      "copyDone": "Copied",
+      "copyFailed": "Copy failed, please copy manually",
+      "storeCount": "{{count}} stores",
+      "noStores": "None",
+      "unknownCompany": "(unnamed)"
+    },
+    "abn": {
+      "empty": "Not set",
+      "edit": "Edit ABN",
+      "save": "Save",
+      "cancel": "Cancel",
+      "placeholder": "11 digits, spaces allowed",
+      "invalid": "ABN must be 11 digits",
+      "saved": "ABN updated",
+      "cleared": "ABN cleared",
+      "saveFailed": "Failed to save ABN"
+    },
+    "actions": {
+      "verify": "Verify",
+      "verified": "Verified. Company details refreshed",
+      "verifyFailed": "Verification failed",
+      "reauthorize": "Reauthorise",
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect {{name}}?",
+      "disconnectContent": "This clears the authorisation token for this company file and removes the mappings of all stores under it ({{count}} now). You will need to reauthorise and map the stores again to use it.",
+      "disconnectOk": "Disconnect",
+      "disconnectCancel": "Cancel",
+      "disconnected": "Disconnected {{name}}",
+      "disconnectFailed": "Failed to disconnect"
+    },
+    "mappings": {
+      "title": "Store → company file mapping",
+      "hint": "A store's company file is its default paying company. Only connected company files can be chosen.",
+      "empty": "No stores",
+      "loadFailed": "Failed to load store mappings",
+      "noConnections": "No connected company file to choose from. Connect one above first.",
+      "showInactive": "Show inactive stores",
+      "inactive": "Inactive",
+      "adoptAll": "Adopt all suggestions ({{count}})",
+      "adopt": "Adopt",
+      "suggestion": "Suggested: {{name}}",
+      "unsaved": "{{count}} unsaved",
+      "save": "Save",
+      "saved": "Saved {{count}} mapping changes",
+      "saveFailed": "Failed to save mappings",
+      "discard": "Discard changes",
+      "columns": {
+        "store": "Store",
+        "abn": "Store ABN",
+        "mapping": "Current mapping",
+        "suggestion": "Suggestion"
+      },
+      "select": "Choose company file",
+      "needsReauthOption": "{{name}} (needs reauthorisation)",
+      "noAbn": "Not set"
+    },
+    "errors": {
+      "notConfigured": "MYOB app credentials are not configured on the server. Contact an administrator",
+      "invalidState": "The authorisation state is invalid or expired. Please start again",
+      "authorizationDenied": "Authorisation was denied or cancelled",
+      "tokenExchangeFailed": "Failed to exchange the MYOB token. The code may have expired. Please authorise again",
+      "businessIdMissing": "MYOB did not return a company file ID. Make sure a company file is selected and try again",
+      "connectionNotFound": "MYOB connection not found",
+      "connectionNotActive": "The connection is not in Connected state",
+      "needsReauthorization": "The authorisation has expired. Please reauthorise",
+      "invalidAbn": "Invalid ABN format",
+      "storeNotFound": "Store not found",
+      "apiCallFailed": "MYOB API call failed. Please try again later",
+      "unknown": "Unknown error. Try again later or contact an administrator"
+    }
+  }
+}

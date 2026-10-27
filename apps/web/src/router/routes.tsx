@@ -16,6 +16,7 @@ import {
   InboxOutlined,
   IdcardOutlined,
   KeyOutlined,
+  LinkOutlined,
   MailOutlined,
   MoneyCollectOutlined,
   NumberOutlined,
@@ -81,6 +82,7 @@ const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions')
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
 const PosAdminAttendanceReviewPage = lazy(() => import('../pages/PosAdmin/AttendanceReview'))
 const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
+const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
 const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/SupplierManagement'))
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
@@ -176,6 +178,7 @@ const iconMap = {
   GiftOutlined: <GiftOutlined />,
   InboxOutlined: <InboxOutlined />,
   IdcardOutlined: <IdcardOutlined />,
+  LinkOutlined: <LinkOutlined />,
   MailOutlined: <MailOutlined />,
   UserOutlined: <UserOutlined />,
   TeamOutlined: <TeamOutlined />,
@@ -875,6 +878,18 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewAttendanceHours',
         },
         element: <PosAdminAttendancePayrollPage />,
+      },
+      {
+        // MYOB 对接：连接 MYOB 公司文件（OAuth 整页跳转往返）+ 分店 → 公司文件映射；独立权限 Myob.Connection.Manage。
+        // 不 keepAlive：授权完成后后端重定向回 ?myob=connected|error，页面必须按新进入重新加载并读取参数。
+        path: '/pos-admin/myob',
+        meta: {
+          title: 'menu.myob',
+          icon: 'LinkOutlined',
+          keepAlive: false,
+          accessKey: 'canManageMyobConnections',
+        },
+        element: <PosAdminMyobPage />,
       },
       {
         path: '/pos-admin/cash-register-users',

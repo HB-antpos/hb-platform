@@ -158,6 +158,24 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/AttendancePayroll/index.tsx',
   },
   {
+    // MYOB 对接：文案全部在页面级消息文件（菜单标题 menu.myob 在全局语言包）；错误码映射键写在 myobLogic.ts
+    name: 'MYOB 对接',
+    keyPattern: /['"`](myob\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/Myob/index.tsx',
+      'src/pages/PosAdmin/Myob/ConnectionsPanel.tsx',
+      'src/pages/PosAdmin/Myob/StoreMappingsPanel.tsx',
+      'src/pages/PosAdmin/Myob/AbnCell.tsx',
+      'src/pages/PosAdmin/Myob/myobLogic.ts',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',
+      en: 'src/pages/PosAdmin/Myob/myobMessages.en.json',
+    },
+    registerImport: "from './myobMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/Myob/index.tsx',
+  },
+  {
     name: '支付终端配置',
     keyPattern: /['"`](paymentTerminalSettings\.[A-Za-z0-9_.]+)['"`]/g,
     sources: ['src/pages/System/PaymentTerminalSettings/index.tsx'],

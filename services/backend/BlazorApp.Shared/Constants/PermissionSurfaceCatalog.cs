@@ -50,6 +50,7 @@ namespace BlazorApp.Shared.Constants
             "LegacyEmployeeLogs.View",
             "LocalPurchase.Edit",
             "LocalPurchase.PushToHq",
+            "Myob.Connection.Manage",
             "OrderFront.BatchProductSales.View",
             "Orders.Delete",
             "Orders.Edit",

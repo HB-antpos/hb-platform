@@ -1,0 +1,110 @@
+{
+  "myob": {
+    "title": "MYOB 对接",
+    "subtitle": "连接各公司文件的 MYOB 账号，并把分店对应到发薪公司",
+    "reload": "刷新",
+    "notice": {
+      "title": "授权须知",
+      "admin": "授权必须由该 MYOB 公司文件的 Administrator 登录 MYOB 后完成，其他角色授权会失败或权限不足。",
+      "perAbn": "每个 ABN 对应一个公司文件，每个公司文件各授权一次；授权后在下方为分店选择对应的公司文件。"
+    },
+    "callback": {
+      "connected": "MYOB 公司文件已连接",
+      "error": "MYOB 授权失败：{{reason}}"
+    },
+    "connections": {
+      "title": "已连接的公司文件",
+      "connect": "连接 MYOB 公司文件",
+      "empty": "还没有连接任何 MYOB 公司文件，点击右上角「连接 MYOB 公司文件」开始授权",
+      "loadFailed": "加载连接失败",
+      "retry": "重试",
+      "authorizeFailed": "获取 MYOB 授权地址失败",
+      "disconnectedTitle": "已断开（{{count}}）",
+      "columns": {
+        "company": "公司名",
+        "businessId": "BusinessId",
+        "abn": "ABN",
+        "status": "状态",
+        "authorized": "授权人 / 时间",
+        "lastRefreshed": "最近验证",
+        "stores": "已映射分店",
+        "actions": "操作"
+      },
+      "status": {
+        "Active": "已连接",
+        "NeedsReauth": "需重新授权",
+        "Disconnected": "已断开"
+      },
+      "copyBusinessId": "复制 BusinessId",
+      "copyDone": "已复制",
+      "copyFailed": "复制失败，请手动复制",
+      "storeCount": "{{count}} 家",
+      "noStores": "无",
+      "unknownCompany": "（未命名）"
+    },
+    "abn": {
+      "empty": "未填写",
+      "edit": "编辑 ABN",
+      "save": "保存",
+      "cancel": "取消",
+      "placeholder": "11 位数字，可含空格",
+      "invalid": "ABN 必须是 11 位数字",
+      "saved": "ABN 已更新",
+      "cleared": "ABN 已清除",
+      "saveFailed": "保存 ABN 失败"
+    },
+    "actions": {
+      "verify": "验证",
+      "verified": "验证通过，已刷新公司信息",
+      "verifyFailed": "验证失败",
+      "reauthorize": "重新授权",
+      "disconnect": "断开",
+      "disconnectTitle": "断开 {{name}}？",
+      "disconnectContent": "断开后会清除该公司文件的授权令牌，并移除它下面所有分店的映射（当前 {{count}} 家）。之后需重新授权并重新映射才能继续使用。",
+      "disconnectOk": "确认断开",
+      "disconnectCancel": "取消",
+      "disconnected": "已断开 {{name}}",
+      "disconnectFailed": "断开失败"
+    },
+    "mappings": {
+      "title": "分店 → 公司文件映射",
+      "hint": "分店所属的公司文件即默认发薪公司；仅可选择状态为「已连接」的公司文件。",
+      "empty": "没有分店数据",
+      "loadFailed": "加载分店映射失败",
+      "noConnections": "还没有可选的已连接公司文件，请先在上方连接。",
+      "showInactive": "显示未启用分店",
+      "inactive": "未启用",
+      "adoptAll": "一键采用全部建议（{{count}}）",
+      "adopt": "采用",
+      "suggestion": "建议：{{name}}",
+      "unsaved": "{{count}} 项未保存",
+      "save": "保存",
+      "saved": "已保存 {{count}} 项映射",
+      "saveFailed": "保存映射失败",
+      "discard": "放弃修改",
+      "columns": {
+        "store": "分店",
+        "abn": "分店 ABN",
+        "mapping": "当前映射",
+        "suggestion": "建议"
+      },
+      "select": "选择公司文件",
+      "needsReauthOption": "{{name}}（需重新授权）",
+      "noAbn": "未填写"
+    },
+    "errors": {
+      "notConfigured": "服务器尚未配置 MYOB 应用凭据，请联系管理员",
+      "invalidState": "授权状态已失效或不匹配，请重新发起授权",
+      "authorizationDenied": "授权被拒绝或已取消",
+      "tokenExchangeFailed": "换取 MYOB 令牌失败，授权码可能已过期，请重新授权",
+      "businessIdMissing": "MYOB 没有返回公司文件 ID，请确认选择了公司文件并重试",
+      "connectionNotFound": "找不到该 MYOB 连接",
+      "connectionNotActive": "该连接不是「已连接」状态",
+      "needsReauthorization": "该连接的授权已失效，请重新授权",
+      "invalidAbn": "ABN 格式不正确",
+      "storeNotFound": "找不到对应的分店",
+      "apiCallFailed": "调用 MYOB 接口失败，请稍后重试",
+      "unknown": "未知错误，请稍后重试或联系管理员"
+    }
+  }
+}

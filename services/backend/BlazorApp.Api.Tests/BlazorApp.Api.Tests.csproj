@@ -486,6 +486,7 @@
     <Compile Include="PosApiEntryTests.cs" />
     <Compile Include="PosApiEntryUsageTests.cs" />
     <Compile Include="MainApiEntryUsageTests.cs" />
+    <Compile Include="MyobConnectionTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
