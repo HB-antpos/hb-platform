@@ -388,6 +388,7 @@
     <Compile Include="ApplicationLogServiceTests.cs" />
     <Compile Include="OperationAuditQueryServiceTests.cs" />
     <Compile Include="OperationAuditRiskQueryTests.cs" />
+    <Compile Include="OperationAuditStoreTimeZonesTests.cs" />
     <Compile Include="DailyCloseRecordsTests.cs" />
     <Compile Include="InstallmentAmendLinesPermissionTests.cs" />
     <Compile Include="PosOperationAuditRiskEvaluatorTests.cs" />
