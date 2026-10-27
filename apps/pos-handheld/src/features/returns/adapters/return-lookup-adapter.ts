@@ -20,6 +20,10 @@ import {
   type LineSyncProvenance,
 } from "@hb/pos-domain/core/contracts/line-sync-provenance";
 import type { components } from "@hb/pos-api-client/openapi";
+import type {
+  LocalReturnRecord,
+  LocalReturnRecordReader,
+} from "@hb/pos-db/core/db/sqlite-local-return-records";
 
 type OrderHistoryQueryResponse =
   components["schemas"]["OrderHistoryQueryResponse"];
@@ -162,6 +166,11 @@ export type ReturnLookupAdapterOptions = Readonly<{
   localOrders: LocalReturnOrderLookupPort;
   localCatalog: LocalReturnCatalogPort;
   capacityVault: ReturnCapacityVaultPort;
+  /**
+   * 本机已提交的退货明细读取器（对齐 WPF #683）：在线查单合并尚未同步成功的退货，
+   * 本地降级时扣掉本机全部已退数量；缺省时保持旧行为（仅由退货账本在执行时兜底）。
+   */
+  localReturnRecords?: LocalReturnRecordReader | undefined;
   createOpaqueId(kind: "selection" | "source"): string;
 }>;
 
@@ -278,6 +287,26 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
     return summary?.orderGuid?.trim() ?? null;
   }
 
+  /**
+   * 读取本机针对原单已提交的退货。读取失败返回 null，由调用方按「记录可能过期」处理，
+   * 不让查单整体失败（退货账本在执行时仍会按本机容量表兜底）。
+   */
+  private async readLocalReturnRecords(
+    originalOrderGuid: string,
+    unsyncedOnly: boolean,
+  ): Promise<readonly LocalReturnRecord[] | null> {
+    const reader = this.options.localReturnRecords;
+    if (!reader) return [];
+    try {
+      return await reader.listForOriginalOrder({
+        originalOrderGuid,
+        unsyncedOnly,
+      });
+    } catch {
+      return null;
+    }
+  }
+
   private async mapRemoteContext(
     context: OrderReturnContextDto,
   ): Promise<ReceiptReturnContext> {
@@ -317,6 +346,39 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       );
     }
 
+    // 服务端的退货记录只覆盖已同步的退货单；本机尚未上传成功的退货要补进来，
+    // 否则同一件商品在同步窗口内会显示可退而被重复选中（WPF #683）。
+    // 服务端已有记录的退货单（上传成功但本机状态还没回写）以服务端为准，避免重复计数。
+    const localRecords = await this.readLocalReturnRecords(
+      originalOrderGuid,
+      true,
+    );
+    if (localRecords) {
+      const knownReturnOrders = new Set(
+        (context.returnRecords ?? [])
+          .map((record) => record.returnOrderGuid?.trim().toLowerCase())
+          .filter((guid): guid is string => Boolean(guid)),
+      );
+      for (const record of localRecords) {
+        if (knownReturnOrders.has(record.returnOrderGuid.toLowerCase())) continue;
+        if (record.originalOrderDetailGuid === null) continue;
+        returnedByDetail.set(
+          record.originalOrderDetailGuid,
+          safeAdd(
+            returnedByDetail.get(record.originalOrderDetailGuid) ?? 0,
+            record.returnQuantity,
+          ),
+        );
+        const remainingCents = remainingByDetail.get(record.originalOrderDetailGuid);
+        if (remainingCents !== undefined) {
+          remainingByDetail.set(
+            record.originalOrderDetailGuid,
+            Math.max(0, remainingCents - record.returnAmountCents),
+          );
+        }
+      }
+    }
+
     const lines = (order.lines ?? [])
       .filter((line) => line.kind === undefined || line.kind === 1)
       .map((line) =>
@@ -347,7 +409,8 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       originalOrderGuid,
       receiptLabel: originalOrderGuid,
       loadedFrom: "remote",
-      returnRecordsMayBeStale: false,
+      // 读不到本机退货时无法保证数量准确，按过期处理（界面会提示）。
+      returnRecordsMayBeStale: localRecords === null,
       lines,
       tenderCapacities,
       voucherFundedBasis,
@@ -361,12 +424,33 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       throw new ReturnFeatureError("RETURN_SOURCE_MISMATCH");
     }
     const originalOrderGuid = requiredText(snapshot.originalOrderGuid);
-    const lines = snapshot.lines.map((line) => ({
-      ...line,
-      syncProvenance: normalizeReturnLineSyncProvenance(
-        line.syncProvenance,
-      ),
-    }));
+    // 本地降级拿不到服务端的任何退货记录：把本机保存的全部退货（含已同步的）都扣掉；
+    // 其它设备的退货仍然看不到，所以保持 returnRecordsMayBeStale=true。
+    const localRecords =
+      (await this.readLocalReturnRecords(originalOrderGuid, false)) ?? [];
+    const returnedByDetail = new Map<string, { quantity: number; amountCents: number }>();
+    for (const record of localRecords) {
+      if (record.originalOrderDetailGuid === null) continue;
+      const prior = returnedByDetail.get(record.originalOrderDetailGuid);
+      returnedByDetail.set(record.originalOrderDetailGuid, {
+        quantity: safeAdd(prior?.quantity ?? 0, record.returnQuantity),
+        amountCents: safeAdd(prior?.amountCents ?? 0, record.returnAmountCents),
+      });
+    }
+    const lines = snapshot.lines
+      .map((line) => {
+        const returned = returnedByDetail.get(line.originalOrderDetailGuid);
+        return {
+          ...line,
+          availableQuantity: line.availableQuantity - (returned?.quantity ?? 0),
+          remainingAmountCents:
+            line.remainingAmountCents - (returned?.amountCents ?? 0),
+          syncProvenance: normalizeReturnLineSyncProvenance(
+            line.syncProvenance,
+          ),
+        };
+      })
+      .filter((line) => line.availableQuantity > 0 && line.remainingAmountCents > 0);
     for (const line of lines) {
       if (line.originalOrderGuid !== originalOrderGuid) {
         throw new ReturnFeatureError("RETURN_SOURCE_MISMATCH");
