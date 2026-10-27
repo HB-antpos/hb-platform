@@ -141,6 +141,42 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         Assert.Equal(0, result.Total);
     }
 
+    // 仓库经理（含中文/历史别名）不限分店：即使名下没有任何 UserStore 关联也能看全部分店，详情同样可读。
+    [Theory]
+    [InlineData("WarehouseManager")]
+    [InlineData("仓库经理")]
+    [InlineData("仓库管理员")]
+    public async Task QueryAsync_WarehouseManagerSeesAllStoresWithoutAssignedStores(string role)
+    {
+        var now = DateTime.UtcNow;
+        await InsertAuditAsync("bri", "BRI", now.AddMinutes(-3));
+        var otherId = await InsertAuditAsync("syd", "SYD", now.AddMinutes(-2));
+        await InsertAuditAsync("other", "OTHER", now.AddMinutes(-1));
+        var service = CreateService(role, [], assignedStoreCodes: []);
+
+        var all = await service.QueryAsync(new OperationAuditQueryDto(), now);
+        var one = await service.QueryAsync(new OperationAuditQueryDto { StoreCode = "SYD" }, now);
+        var detail = await service.GetDetailAsync(otherId);
+
+        Assert.Equal(["BRI", "OTHER", "SYD"], all.Items.Select(item => item.StoreCode).Order(StringComparer.Ordinal));
+        Assert.Single(one.Items);
+        Assert.Equal(OperationAuditDetailAccessStatus.Found, detail.Status);
+    }
+
+    // 同时兼任店长时，仓库经理的不限分店口径优先，不能被店长的“关联分店为空”拒绝。
+    [Fact]
+    public async Task QueryAsync_WarehouseManagerWhoIsAlsoStoreManagerStaysUnrestricted()
+    {
+        var now = DateTime.UtcNow;
+        await InsertAuditAsync("bri", "BRI", now.AddMinutes(-2));
+        await InsertAuditAsync("syd", "SYD", now.AddMinutes(-1));
+        var service = CreateService(["WarehouseManager", "StoreManager"], [], assignedStoreCodes: []);
+
+        var result = await service.QueryAsync(new OperationAuditQueryDto(), now);
+
+        Assert.Equal(2, result.Total);
+    }
+
     [Fact]
     public async Task QueryAsync_ProductKeywordSearchesChildTableAndReturnsParent()
     {
@@ -648,10 +684,18 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         bool scopeAllowed = true,
         bool withProductDb = false,
         IReadOnlyList<string>? assignedStoreCodes = null
+    ) => CreateService([role], storeCodes, scopeAllowed, withProductDb, assignedStoreCodes);
+
+    private OperationAuditQueryService CreateService(
+        IReadOnlyList<string> roles,
+        IReadOnlyList<string>? storeCodes = null,
+        bool scopeAllowed = true,
+        bool withProductDb = false,
+        IReadOnlyList<string>? assignedStoreCodes = null
     )
     {
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, "test-user"), new Claim(ClaimTypes.Role, role)],
+            roles.Select(role => new Claim(ClaimTypes.Role, role)).Prepend(new Claim(ClaimTypes.NameIdentifier, "test-user")),
             "Test"
         );
         var accessor = new HttpContextAccessor
