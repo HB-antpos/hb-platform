@@ -1206,6 +1206,7 @@ public sealed class LinklyBackendTerminalClientTests
     [Fact]
     public async Task SettlementAsync_returns_unknown_immediately_when_server_closed_the_session_as_result_unknown()
     {
+        var clock = CreateBusinessDayClock();
         var statusPolls = 0;
         var handler = new StubHttpMessageHandler(request =>
         {
@@ -1216,10 +1217,10 @@ public sealed class LinklyBackendTerminalClientTests
             }
 
             return path.EndsWith("/settlements/resumable", StringComparison.Ordinal)
-                ? JsonResponse(SettlementSessionJson("settlement-timeout", "Pending", recoveryAction: "ResultUnknown", createdAt: DateTimeOffset.Now))
+                ? JsonResponse(SettlementSessionJson("settlement-timeout", "Pending", recoveryAction: "ResultUnknown", createdAt: clock.GetLocalNow()))
                 : throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
         });
-        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+        var client = CreateClientWithClock(handler, clock);
 
         var result = await client.SettlementAsync(CreateSession(), CreateSettings());
 
@@ -1233,6 +1234,7 @@ public sealed class LinklyBackendTerminalClientTests
     {
         // 回归 H14：D 日结算 ack 失败/结果未知，D+1 日结算时 resumable 返回 D 日的会话。
         // 旧行为是直接接管它：今天的批次没发给银行，界面却显示成功并打印旧回单。
+        var clock = CreateBusinessDayClock();
         var requests = new List<HttpRequestMessage>();
         var handler = new StubHttpMessageHandler(request =>
         {
@@ -1246,7 +1248,7 @@ public sealed class LinklyBackendTerminalClientTests
                     responseCode: "00",
                     responseText: "YESTERDAY",
                     receipts: ["YESTERDAY RECEIPT"],
-                    createdAt: DateTimeOffset.Now.AddDays(-1))),
+                    createdAt: clock.GetLocalNow().AddDays(-1))),
                 "/api/v1/linkly/cloud-backend/settlements" => JsonResponse(SettlementSessionJson(
                     "settlement-today",
                     "Completed",
@@ -1254,11 +1256,11 @@ public sealed class LinklyBackendTerminalClientTests
                     responseCode: "00",
                     responseText: "TODAY",
                     receipts: ["TODAY RECEIPT"],
-                    createdAt: DateTimeOffset.Now)),
+                    createdAt: clock.GetLocalNow())),
                 _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
             };
         });
-        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+        var client = CreateClientWithClock(handler, clock);
 
         var result = await client.SettlementAsync(CreateSession(), CreateSettings());
 
@@ -1273,6 +1275,9 @@ public sealed class LinklyBackendTerminalClientTests
     [Fact]
     public async Task SettlementAsync_still_resumes_a_session_created_earlier_the_same_business_day()
     {
+        // 时钟固定在营业日中午：「10 分钟前」恒属同一天。原先用墙钟 DateTimeOffset.Now，
+        // 在 CI（UTC）每天 00:00–00:10 之间会算到前一天，被当成跨日会话而偶发失败。
+        var clock = CreateBusinessDayClock();
         var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath switch
         {
             "/api/v1/linkly/cloud-backend/settlements/resumable" => JsonResponse(SettlementSessionJson(
@@ -1282,10 +1287,10 @@ public sealed class LinklyBackendTerminalClientTests
                 responseCode: "00",
                 responseText: "SETTLED",
                 receipts: ["SAME DAY RECEIPT"],
-                createdAt: DateTimeOffset.Now.AddMinutes(-10))),
+                createdAt: clock.GetLocalNow().AddMinutes(-10))),
             _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
         });
-        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+        var client = CreateClientWithClock(handler, clock);
 
         var result = await client.SettlementAsync(CreateSession(), CreateSettings());
 
@@ -6533,6 +6538,30 @@ public sealed class LinklyBackendTerminalClientTests
         using var document = JsonDocument.Parse(body!);
         Assert.Equal("Sandbox", document.RootElement.GetProperty("environment").GetString());
         Assert.Equal(supervisorResolved, document.RootElement.GetProperty("supervisorResolved").GetBoolean());
+    }
+
+    /// <summary>
+    /// 营业日相关用例用的固定时钟：本地时区固定为 UTC，时间固定在当天中午，
+    /// 不依赖运行时刻与时区，避免午夜前后「N 分钟前」跨到前一天。
+    /// </summary>
+    private static FakeTimeProvider CreateBusinessDayClock()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
+        clock.SetLocalTimeZone(TimeZoneInfo.Utc);
+        return clock;
+    }
+
+    private static LinklyBackendTerminalClient CreateClientWithClock(
+        StubHttpMessageHandler handler,
+        TimeProvider timeProvider)
+    {
+        return CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.Zero,
+            null,
+            null,
+            timeProvider: timeProvider);
     }
 
     private static LinklyBackendTerminalClient CreateClient(
