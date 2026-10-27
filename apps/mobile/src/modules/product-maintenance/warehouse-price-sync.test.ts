@@ -39,6 +39,9 @@ const smartAutoPrintStatement = callbackStatement("smartAutoPrint");
 const sendCodeLabelStatement = callbackStatement("sendCodeLabel");
 const sendProductLabelStatement = callbackStatement("sendProductLabel");
 const playFoundFeedbackStatement = callbackStatement("playFoundFeedback");
+const handlePrintStatement = callbackStatement("handlePrint");
+const handlePrintMultiCodeProductStatement = callbackStatement("handlePrintMultiCodeProduct");
+const handlePrintSetCodeProductStatement = callbackStatement("handlePrintSetCodeProduct");
 
 function compileCallback<T>(statement: ts.VariableStatement, name: string, deps: Record<string, unknown>): T {
   const source = `const { ${Object.keys(deps).join(", ")} } = deps;\n${statement.getText(pageAst)}\nreturn ${name};`;
@@ -606,7 +609,7 @@ function createPageFlow(options: {
   };
 }
 
-// 执行页面真实的 sendProductLabel：普通标签之后，自动打印链路有折扣才补打折扣标签；手动按钮不传 withDiscountLabel。
+// 执行页面真实的 sendProductLabel：普通标签之后，带 withDiscountLabel 的链路（自动打印、手动「普通」标签）有折扣才补打折扣标签。
 function createSendProductLabel(options: { quantity?: number; failProduct?: boolean; failDiscount?: boolean } = {}) {
   const calls: { kind: "product" | "discount"; printType?: string | null; overrides?: Record<string, unknown> }[] = [];
   const messages: string[] = [];
@@ -663,11 +666,11 @@ async function runAutoDiscountLabelRegression() {
   assert.deepEqual(twice.calls.map((call) => call.kind), ["product", "product", "discount", "discount"]);
   assert.deepEqual(twice.quantityResets, [1], "单次份数用完后复位");
 
-  // 不补打：没有折扣、显式折扣 0（套装子项）、手动按钮（不传 withDiscountLabel）。
+  // 不补打：没有折扣、显式折扣 0（套装子项）、调用方没带 withDiscountLabel（如「小标签」按钮）。
   for (const [label, detail, printOptions] of [
     ["门店价无折扣", noDiscount, { withDiscountLabel: true }],
     ["套装子项显式折扣 0", withDiscount, { barcode: "SET-1", retailPrice: 10, discountRate: 0, withDiscountLabel: true }],
-    ["手动打印不补打折扣标签", withDiscount, {}],
+    ["调用方不带 withDiscountLabel", withDiscount, {}],
   ] as const) {
     const flow = createSendProductLabel();
     assert.equal(await flow.sendProductLabel(detail, printOptions), true, label);
@@ -735,6 +738,89 @@ async function runFoundFeedbackRegression() {
   assert.deepEqual(await run({ ...plain, multiCodeCount: 1 }, { pending: never }), ["multi_code"], "促销超时后按多码判定");
   assert.ok(Date.now() - started < 500, "等待促销不能超过上限太多");
   console.log("商品查询找到提示音（折扣 / 促销 / 多码）回归通过");
+}
+
+// 执行页面真实的手动打印回调：「普通」按钮与多码子项补打折扣标签，「小标签」「折扣」与套码子项保持原样。
+async function runManualPrintRegression() {
+  const withDiscount = structuredClone(currentDetail); // 主档折扣 0.2
+  const sendOptions: { options?: PrintOptions }[] = [];
+  const sendProductLabel = async (_detail: Detail, options?: PrintOptions) => {
+    sendOptions.push({ options });
+    return true;
+  };
+  const codeCalls: unknown[][] = [];
+  const sendCodeLabel = async (...args: unknown[]) => {
+    codeCalls.push(args);
+    return true;
+  };
+  const discountCalls: unknown[][] = [];
+  const messages: string[] = [];
+  const common = {
+    useCallback: (callback: unknown) => callback,
+    detail: { ...withDiscount, multiCodes: [{ barcode: "MULTI-1", id: "multi-id" }] },
+    setSnackbarMessage: (message: string) => messages.push(message),
+    t: (key: string) => key,
+    setPrintingAction: () => undefined,
+    smallLabel: false,
+    sendProductLabel,
+    sendCodeLabel,
+    printDiscountLabel: async (...args: unknown[]) => { discountCalls.push(args); return true; },
+    printBigDiscountLabel: async () => true,
+    printClearanceLabel: async () => true,
+    printQuantity: 1,
+    quantitySingleUse: true,
+    setPrintQuantity: () => undefined,
+    getErrorMessage: (_error: unknown, fallback: string) => fallback,
+    getMultiCodeItemId: (item: { id: string }) => item.id,
+    resolveMultiCodeLabelPrice: () => ({ retailPrice: 5, discountRate: 0.2 }),
+  };
+  const handlePrint = compileCallback<(kind: string) => Promise<void>>(handlePrintStatement, "handlePrint", common);
+
+  // 手动「普通」标签：带 withDiscountLabel，是否真有折扣交给 sendProductLabel 判定。
+  await handlePrint("product");
+  assert.deepEqual(sendOptions[0].options, { action: "product", printType: null, withDiscountLabel: true });
+
+  // 手动「小标签」：固定小标签尺寸，不补打折扣标签（保持原行为）。
+  await handlePrint("small");
+  assert.deepEqual(sendOptions[1].options, { action: "small", printType: "small" });
+
+  // 手动「折扣」按钮本身只打一次折扣标签，不能被「普通」标签的补打逻辑重复触发。
+  await handlePrint("discount");
+  assert.equal(discountCalls.length, 1);
+  assert.equal(sendOptions.length, 2);
+
+  // 多码子项手动打印：与主条码同一商品，补打折扣标签。
+  const handleMulti = compileCallback<(id: string) => Promise<void>>(
+    handlePrintMultiCodeProductStatement, "handlePrintMultiCodeProduct", common);
+  await handleMulti("multi-id");
+  assert.equal(codeCalls.length, 1);
+  assert.equal(codeCalls[0][3], true, "多码子项手动打印带 withDiscountLabel");
+
+  // 套码子项手动打印：套装价不印折扣，不带 withDiscountLabel。
+  const handleSet = compileCallback<(id: string) => Promise<void>>(
+    handlePrintSetCodeProductStatement, "handlePrintSetCodeProduct", {
+      ...common,
+      detail: { ...withDiscount, setCodes: [{ setCodeId: "set-id", setBarcode: "SET-1", setRetailPrice: 10 }] },
+    });
+  await handleSet("set-id");
+  assert.equal(sendOptions[2].options?.withDiscountLabel, undefined, "套码子项手动打印不补打折扣标签");
+  assert.equal(sendOptions[2].options?.discountRate, 0);
+
+  // 真实 sendProductLabel 串联：手动「普通」标签 + 有折扣 -> 普通、折扣各一张；无折扣只打普通。
+  for (const [label, detail, expected] of [
+    ["有折扣", withDiscount, ["product", "discount"]],
+    ["无折扣", { ...structuredClone(currentDetail), storePrice: { ...currentDetail.storePrice, discountRate: 0 } }, ["product"]],
+  ] as const) {
+    const real = createSendProductLabel();
+    const run = compileCallback<(kind: string) => Promise<void>>(handlePrintStatement, "handlePrint", {
+      ...common,
+      detail,
+      sendProductLabel: real.sendProductLabel,
+    });
+    await run("product");
+    assert.deepEqual(real.calls.map((call) => call.kind), expected, `手动普通标签：${label}`);
+  }
+  console.log("商品查询手动打印补打折扣标签回归通过");
 }
 
 async function runPageRegression() {
@@ -822,6 +908,7 @@ async function runPageRegression() {
   }
   await runAutoDiscountLabelRegression();
   await runFoundFeedbackRegression();
+  await runManualPrintRegression();
   console.log("商品查询当前门店价扫码打印回归通过");
 }
 

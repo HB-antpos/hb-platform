@@ -1,9 +1,9 @@
 import type { MenuProps } from 'antd'
 import { useEffect, useState } from 'react'
 
-// 侧栏「考勤审核」菜单的待审数角标。
+// 侧栏「排班考勤」菜单（合并页，含「考勤审核」标签）的待审数角标。
 // 服务层按需动态加载，不进首屏包；路由切换时最多每分钟刷新一次，审核页批准 / 拒绝后发事件立即刷新。
-export const ATTENDANCE_REVIEW_MENU_KEY = '/pos-admin/attendance-review'
+export const ATTENDANCE_REVIEW_MENU_KEY = '/pos-admin/attendance'
 export const ATTENDANCE_REVIEW_CHANGED_EVENT = 'hb:attendance-review-changed'
 const REFRESH_INTERVAL_MS = 60_000
 
