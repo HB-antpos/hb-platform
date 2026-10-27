@@ -1,5 +1,6 @@
 import {
   buildSaleReceiptDocument,
+  defaultSaleStatusText,
   documentToEscPosBytes,
   type EscPosDocument,
   type ReceiptLocale,
@@ -198,7 +199,7 @@ export function renderLocalOrderReceiptDocument(
         reference: tender.reference,
       })),
       cashChangeCents,
-      statusText: "*** Paid ***",
+      statusText: defaultSaleStatusText(order.actualAmount.cents),
       isReprint: context.isReprint,
       includeMachineCodes: true,
       // 中文注释：WPF 的普通打印和补打都使用成交时间；实际任务时间仍由履约审计记录。

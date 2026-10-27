@@ -1,5 +1,6 @@
 import {
   buildSaleReceiptDocument,
+  defaultSaleStatusText,
   documentToEscPosBytes,
 } from "./receipt-document";
 import type {
@@ -139,7 +140,7 @@ export class RemoteHistoryReceiptReprintPreparationService {
           reference: payment.displayReference,
         })),
         cashChangeCents: null,
-        statusText: "*** Paid ***",
+        statusText: defaultSaleStatusText(details.actualAmountCents),
         isReprint: true,
         includeMachineCodes: true,
         printedAtIso: details.soldAtIso,

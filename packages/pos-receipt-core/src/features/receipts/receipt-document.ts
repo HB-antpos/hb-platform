@@ -81,6 +81,15 @@ export type SaleInput = Readonly<{
 type DailyInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; storeName: string; businessDate: string; deviceCode: string; cashierName: string; paymentTotals: readonly Readonly<{ method: string; salesCents: number; refundCents: number; netCents: number }>[]; orderCount: number; salesCents: number; refundCents: number; netCents: number; expectedCashCents: number; countedCashCents: number; differenceCents: number }>;
 type BankInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; status: string; cardType?: string; maskedCardNumber?: string; reference?: string; rawText?: string }>;
 
+/**
+ * 小票状态行默认值（对齐 WPF #885）：净额为负的退款单打印 Refund，其余才是 Paid。
+ * 首次打印、历史补打、远程订单补打都经此判断，避免退款单被印成 Paid。
+ */
+export function defaultSaleStatusText(totalCents: number, zh = false): string {
+  if (totalCents < 0) return zh ? "*** 退款 ***" : "*** Refund ***";
+  return zh ? "*** 已支付 ***" : "*** Paid ***";
+}
+
 export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
   assertSafeSaleText(input);
   const width = lineWidth(input.paper);
@@ -96,7 +105,7 @@ export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
   const phone = nonBlank(input.store.phone);
   const abn = nonBlank(input.store.abn);
   const title = nonBlank(input.title) ?? (zh ? "===== 税务发票 =====" : "===== TAX INVOICE =====");
-  const statusText = nonBlank(input.statusText) ?? (zh ? "*** 已支付 ***" : "*** Paid ***");
+  const statusText = nonBlank(input.statusText) ?? defaultSaleStatusText(input.totalCents, zh);
   const displayOrder = nonBlank(input.orderDisplay) ?? nonBlank(input.orderNumber) ?? "-";
   const printedAtIso = nonBlank(input.printedAtIso) ?? input.soldAtIso;
   const [itemWidth, quantityWidth, priceWidth] = saleColumnWidths(width);
