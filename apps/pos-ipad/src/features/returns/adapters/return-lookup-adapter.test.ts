@@ -18,6 +18,10 @@ import {
   type ReturnHistorySearchInput,
 } from "./return-lookup-adapter";
 
+import type {
+  LocalReturnRecord,
+  LocalReturnRecordReader,
+} from "@hb/pos-db/core/db/sqlite-local-return-records";
 import { HbposApiError } from "@/core/api/hbpos-api";
 import type { components } from "@hb/pos-api-client/openapi";
 
@@ -481,12 +485,129 @@ test("Vault 未原子提交或返回敏感值作为 capacityId 时不产出公�
   );
 });
 
+test("在线查单合并本机尚未同步的退货：数量与剩余金额都扣掉，服务端已有的退货单不重复计", async () => {
+  const remote = new FakeHistoryApi();
+  const base = remoteContext();
+  const knownReturnOrder = "33333333-3333-4333-8333-333333333333";
+  remote.contextResult = {
+    ...base,
+    returnRecords: [
+      {
+        returnOrderGuid: knownReturnOrder,
+        originalOrderGuid: orderGuid,
+        originalOrderDetailGuid: lineGuid,
+        returnQuantity: 1,
+        returnAmount: 3.34,
+      },
+    ],
+  };
+  const records = new FakeLocalReturnRecords([
+    // 服务端已记录（上传成功但本机状态还没回写）：以服务端为准，不重复扣。
+    localReturnRecord({ returnOrderGuid: knownReturnOrder }),
+    localReturnRecord({
+      returnOrderGuid: "44444444-4444-4444-8444-444444444444",
+      returnQuantity: 1,
+      returnAmountCents: 334,
+    }),
+  ]);
+  const adapter = createAdapter({
+    historyApi: remote,
+    localReturnRecords: records,
+  });
+
+  const context = await adapter.lookupReceipt(orderGuid);
+
+  assert.deepEqual(records.calls, [
+    { originalOrderGuid: orderGuid, unsyncedOnly: true },
+  ]);
+  // 原单 3 件：服务端已退 1，本机未同步再退 1 → 只剩 1 件，金额 6.67-3.34。
+  assert.equal(context?.lines[0]?.availableQuantity, 1);
+  assert.equal(context?.lines[0]?.remainingAmountCents, 333);
+  assert.equal(context?.returnRecordsMayBeStale, false);
+});
+
+test("在线查单：本机未同步退货把整行退完时，该行不再出现在可退列表", async () => {
+  const remote = new FakeHistoryApi();
+  remote.contextResult = remoteContext();
+  const adapter = createAdapter({
+    historyApi: remote,
+    localReturnRecords: new FakeLocalReturnRecords([
+      localReturnRecord({
+        returnOrderGuid: "55555555-5555-4555-8555-555555555555",
+        returnQuantity: 2,
+        returnAmountCents: 667,
+      }),
+    ]),
+  });
+
+  const context = await adapter.lookupReceipt(orderGuid);
+
+  assert.deepEqual(context?.lines, []);
+});
+
+test("在线查单：读不到本机退货时标记记录可能过期，但不让查单失败", async () => {
+  const remote = new FakeHistoryApi();
+  remote.contextResult = remoteContext();
+  const records = new FakeLocalReturnRecords([]);
+  records.error = new Error("db busy");
+  const adapter = createAdapter({
+    historyApi: remote,
+    localReturnRecords: records,
+  });
+
+  const context = await adapter.lookupReceipt(orderGuid);
+
+  assert.equal(context?.returnRecordsMayBeStale, true);
+  assert.equal(context?.lines[0]?.availableQuantity, 2);
+});
+
+test("本地降级查单扣掉本机全部已退数量（含已同步的），不再取原单全量", async () => {
+  const remote = new FakeHistoryApi();
+  remote.searchError = new HbposApiError("offline", { kind: "transport" });
+  const local = new FakeLocalOrders();
+  const snapshot = localSnapshot();
+  local.result = {
+    ...snapshot,
+    lines: [
+      { ...snapshot.lines[0]!, availableQuantity: 3, unitRefundCents: 500, remainingAmountCents: 1_500 },
+    ],
+  };
+  const records = new FakeLocalReturnRecords([
+    localReturnRecord({
+      returnOrderGuid: "66666666-6666-4666-8666-666666666666",
+      returnQuantity: 1,
+      returnAmountCents: 500,
+      synced: true,
+    }),
+    localReturnRecord({
+      returnOrderGuid: "77777777-7777-4777-8777-777777777777",
+      returnQuantity: 1,
+      returnAmountCents: 500,
+    }),
+  ]);
+  const adapter = createAdapter({
+    historyApi: remote,
+    localOrders: local,
+    localReturnRecords: records,
+  });
+
+  const context = await adapter.lookupReceipt("receipt-local");
+
+  assert.deepEqual(records.calls, [
+    { originalOrderGuid: orderGuid, unsyncedOnly: false },
+  ]);
+  assert.equal(context?.returnRecordsMayBeStale, true);
+  assert.equal(context?.lines[0]?.availableQuantity, 1);
+  assert.equal(context?.lines[0]?.remainingAmountCents, 500);
+});
+
 function createAdapter(
   overrides: Partial<{
     historyApi: ReturnHistoryApiPort;
     localOrders: LocalReturnOrderLookupPort;
     localCatalog: LocalReturnCatalogPort;
     capacityVault: ReturnCapacityVaultPort;
+    localReturnRecords: LocalReturnRecordReader;
     createOpaqueId(kind: "selection" | "source"): string;
   }> = {},
 ): ReturnLookupAdapter {
@@ -496,6 +617,7 @@ function createAdapter(
     localOrders: overrides.localOrders ?? new FakeLocalOrders(),
     localCatalog: overrides.localCatalog ?? new FakeCatalog(),
     capacityVault: overrides.capacityVault ?? new RecordingVault(),
+    localReturnRecords: overrides.localReturnRecords,
     createOpaqueId:
       overrides.createOpaqueId ?? ((kind) => `${kind}-opaque-default`),
   });
@@ -523,6 +645,41 @@ class FakeHistoryApi implements ReturnHistoryApiPort {
     if (this.searchError) throw this.searchError;
     return this.contextResult;
   }
+}
+
+class FakeLocalReturnRecords implements LocalReturnRecordReader {
+  public error: unknown = null;
+  public readonly calls: Readonly<{
+    originalOrderGuid: string;
+    unsyncedOnly: boolean;
+  }>[] = [];
+
+  public constructor(private readonly records: readonly LocalReturnRecord[]) {}
+
+  public async listForOriginalOrder(input: Readonly<{
+    originalOrderGuid: string;
+    unsyncedOnly: boolean;
+  }>): Promise<readonly LocalReturnRecord[]> {
+    this.calls.push(input);
+    if (this.error) throw this.error;
+    return input.unsyncedOnly
+      ? this.records.filter((record) => !record.synced)
+      : this.records;
+  }
+}
+
+function localReturnRecord(
+  overrides: Partial<LocalReturnRecord> = {},
+): LocalReturnRecord {
+  return {
+    returnOrderGuid: "88888888-8888-4888-8888-888888888888",
+    originalOrderGuid: orderGuid,
+    originalOrderDetailGuid: lineGuid,
+    returnQuantity: 1,
+    returnAmountCents: 334,
+    synced: false,
+    ...overrides,
+  };
 }
 
 class FakeLocalOrders implements LocalReturnOrderLookupPort {

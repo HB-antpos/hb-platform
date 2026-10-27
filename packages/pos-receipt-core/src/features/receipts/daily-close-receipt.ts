@@ -146,6 +146,14 @@ export function buildDailyCloseReceipt(
       width,
     ),
   );
+  // 现金进位（5 分进位）单独一行：Cash 行是订单精确金额，Expected = Cash 净额 + 进位（对齐 WPF #914）。
+  lines.push(
+    twoColumns(
+      zh ? "现金进位/Rounding" : "Cash Rounding",
+      signedMoney(input.archive.cashRoundingCents),
+      width,
+    ),
+  );
   lines.push(
     twoColumns(
       zh ? "应有现金/Expected" : "Expected Cash",

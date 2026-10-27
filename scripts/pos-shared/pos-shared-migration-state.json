@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "97f2a35d7be6ef32d2285a6ffdf7a4c7f27ec4ea8eb183b6298078ddfcb5b724",
+  "reviewedModuleTopologySha256": "770c43a85aa93b5462f138bffccb003dd4010ecbe0bcec5d5b6c44d3eccb941d",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -640,6 +640,90 @@
           "workspace": "apps/pos-handheld",
           "script": "test:receipts",
           "path": "src/features/receipts/installment-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "core/contracts/daily-close.ts",
+      "package": "pos-domain",
+      "reason": "日结对齐 WPF #914：汇总与存档新增现金进位 cashRoundingCents（应有现金 = 现金净额 + 逐单 5 分进位），新增 sumCashRoundingCents 按订单合并现金 tender 后进位，并引入 money 的 roundAudCash",
+      "baselineCanonicalRuntimeSha256": "011edd57ad1d3a3605bb4710efd7ae6a3ad16967b1db2608cc3d9b0436586c22",
+      "canonicalRuntimeSha256": "56aa64de28ea0e8fd957514c0191f3d125082ed13d39e97b1cb38f76982bf68c",
+      "canonicalTypeSha256": "a750b4d430e5faf4181b01cab3739995350252ad09b99a13e111f93f05dc0e0d",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/core/contracts/daily-close.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "core/db/sqlite-daily-close-repository.ts",
+      "package": "pos-db",
+      "reason": "日结对齐 WPF #914：汇总按订单合并现金 tender 计算进位，应有现金含进位；存档校验 应有现金 = 现金净额 + 进位（进位不得超过订单数×2 分）并持久化 cash_rounding_cents，列不存在时按 0 读取",
+      "baselineCanonicalRuntimeSha256": "bf0e2926c5fc979d72ade18eef8da2e100e85a0f66600f497ae73145f7e36c7c",
+      "canonicalRuntimeSha256": "7e0acfe49308f93fb56d6d801485a87242ca7debab1ee007654440e130b46e2e",
+      "canonicalTypeSha256": "7f0db0799f5fa8f528c4f17b5bcefa767a980440e78e0761f75d671d2d32ea8a",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/daily-close-receipt.ts",
+      "package": "pos-receipt-core",
+      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值",
+      "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
+      "canonicalRuntimeSha256": "99d54c525a297762c08f72123929dc207194077a5d88715e90184c4304c0c954",
+      "canonicalTypeSha256": "c34c5cb1ac32140af1fa1f1a80298c4fff4df59a9da1934e2a1e8b22a9c91f75",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/daily-close-receipt.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/daily-close-receipt.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
         }
       ]

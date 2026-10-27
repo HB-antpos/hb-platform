@@ -281,6 +281,9 @@ describe("DailyCloseScreen", () => {
 
     expect(screen.getByText("Cash")).toBeTruthy();
     expect(screen.getByText(/\$12\.00.*-\$2\.00.*\$10\.00/)).toBeTruthy();
+    // 汇总里单独显示现金进位，应有现金在其后。
+    expect(screen.getByText("Cash rounding")).toBeTruthy();
+    expect(screen.getByText("Expected cash")).toBeTruthy();
     expect(screen.queryByTestId("daily-close-save")).toBeNull();
     await fireEvent.press(screen.getByTestId("daily-close-show-history"));
     expect(screen.getByTestId("daily-close-history-close-old")).toBeTruthy();
@@ -427,6 +430,7 @@ function closeSummary(): DailyCloseSummary {
         netCents: 400,
       },
     ],
+    cashRoundingCents: 0,
     expectedCashCents: 1_000,
   };
 }
