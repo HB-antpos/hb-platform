@@ -4084,6 +4084,8 @@ function ProductQueryContent() {
           ...resolveMultiCodeLabelPrice(detail),
         },
         smallLabel ? "small" : null,
+        // 多码是主档同一商品的普通标签，折扣口径与主条码一致：有折扣就补打折扣标签。
+        true,
       );
     },
     [detail, sendCodeLabel, smallLabel, t],
@@ -4117,7 +4119,8 @@ function ProductQueryContent() {
       try {
         const printType = smallLabel ? "small" : null;
         if (kind === "product") {
-          await sendProductLabel(source, { action: "product", printType });
+          // 手动「普通」标签：有折扣时和自动打印一样，普通标签后接着补打折扣标签（折扣率是否 > 0 由 sendProductLabel 判定）。
+          await sendProductLabel(source, { action: "product", printType, withDiscountLabel: true });
           return;
         } else if (kind === "small") {
           // 「小标签」按钮固定打 60mm 小标签，不看打印设置里的小标签开关；其余口径（价格、折扣、数量）与普通标签一致。
