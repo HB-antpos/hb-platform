@@ -427,6 +427,47 @@ test("日期与订单或商品关键字按 presenter 业务时区边界提交", 
   expect(screen.getByTestId("local-history-date-invalid")).toBeTruthy();
 });
 
+test("快捷日期范围按分店营业时区取今天 / 昨天 / 近 7 天并立即查询（对齐 WPF #608）", async () => {
+  // 只伪造 Date：2026-07-27T05:00Z = 布里斯班 07-27 15:00。
+  jest.useFakeTimers({
+    now: new Date("2026-07-27T05:00:00.000Z"),
+    doNotFake: [
+      "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+      "setImmediate", "clearImmediate", "queueMicrotask", "nextTick",
+      "requestAnimationFrame", "cancelAnimationFrame", "performance",
+    ],
+  });
+  try {
+    const presenter = createPresenter();
+    const screen = await render(<LocalHistoryScreen presenter={presenter} />);
+
+    await fireEvent.press(screen.getByTestId("local-history-quick-today"));
+    expect(presenter.setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        soldFromIso: "2026-07-26T14:00:00.000Z",
+        soldToIso: "2026-07-27T13:59:59.999Z",
+      }),
+    );
+    await fireEvent.press(screen.getByTestId("local-history-quick-yesterday"));
+    expect(presenter.setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        soldFromIso: "2026-07-25T14:00:00.000Z",
+        soldToIso: "2026-07-26T13:59:59.999Z",
+      }),
+    );
+    await fireEvent.press(screen.getByTestId("local-history-quick-last7days"));
+    expect(presenter.setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        soldFromIso: "2026-07-20T14:00:00.000Z",
+        soldToIso: "2026-07-27T13:59:59.999Z",
+      }),
+    );
+    expect(presenter.refresh).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test("关键词限制为查询边界长度，筛选同步拒绝时页面受控提示", async () => {
   const presenter = createPresenter();
   presenter.setFilters.mockImplementation(() => {
