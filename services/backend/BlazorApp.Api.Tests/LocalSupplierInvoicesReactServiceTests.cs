@@ -3504,6 +3504,129 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_主档条码是货号占位且主条码无人占用时主条码与副码一并写入()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-multi-placeholder", "INV-MULTI-PLACEHOLDER", new DateTime(2026, 1, 12));
+            // 复现 89986：主档条码是货号占位值，发票上 4 个真实条码（1 主 + 3 副）库里都没人占用。
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-placeholder",
+                ProductCode = "P-MULTI-PLACEHOLDER",
+                ItemNumber = "89986",
+                Barcode = "89986",
+                ProductType = 0,
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 1.35m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-placeholder",
+                InvoiceGUID = "invoice-multi-placeholder",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-PLACEHOLDER",
+                ItemNumber = "89986",
+                Barcode = "191554897779",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[]
+                {
+                    "191554897809",
+                    "191554897793",
+                    "191554897786",
+                }),
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                PurchasePrice = 1.35m,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-placeholder",
+                new List<string> { "detail-multi-placeholder" },
+                "tester"
+            );
+
+            var expectedBarcodes = new[] { "191554897779", "191554897786", "191554897793", "191554897809" };
+            var productSetCodes = await _db.Queryable<ProductSetCode>()
+                .Where(x => x.ProductCode == "P-MULTI-PLACEHOLDER")
+                .OrderBy(x => x.SetBarcode)
+                .ToListAsync();
+            var storeMultiCodes = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P-MULTI-PLACEHOLDER")
+                .OrderBy(x => x.MultiBarcode)
+                .ToListAsync();
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "P-MULTI-PLACEHOLDER");
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(4, result.Data?.AddedMultiCodes);
+            Assert.Equal(expectedBarcodes, productSetCodes.Select(x => x.SetBarcode).ToArray());
+            Assert.Equal(expectedBarcodes, storeMultiCodes.Select(x => x.MultiBarcode).ToArray());
+            Assert.Equal(2, product.ProductType);
+            // 主档原条码（占位值）不动，新条码都只作为多码挂上去。
+            Assert.Equal("89986", product.Barcode);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_主条码已是其他商品分店多码时校验失败并回滚()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-multi-main-other-multi", "INV-MULTI-MAIN-OTHER-MULTI", new DateTime(2026, 1, 12));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-main-other-multi",
+                ProductCode = "P-MULTI-MAIN-OTHER-MULTI",
+                ItemNumber = "89986",
+                Barcode = "89986",
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                LocalSupplierCode = "SUP01",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreMultiCodeProduct
+            {
+                UUID = "multi-main-other-owner",
+                StoreCode = "S01",
+                ProductCode = "P-MULTI-MAIN-OTHER-OWNER",
+                MultiCodeProductCode = "MULTI-MAIN-OTHER-001",
+                StoreMultiCodeProductCode = "S01MULTI-MAIN-OTHER-001",
+                MultiBarcode = "191554897779",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-main-other-multi",
+                InvoiceGUID = "invoice-multi-main-other-multi",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-MAIN-OTHER-MULTI",
+                ItemNumber = "89986",
+                Barcode = "191554897779",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "191554897809" }),
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                PurchasePrice = 1.35m,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-main-other-multi",
+                new List<string> { "detail-multi-main-other-multi" },
+                "tester"
+            );
+
+            var multiCodeCount = await _db.Queryable<StoreMultiCodeProduct>().CountAsync();
+            var productSetCodeCount = await _db.Queryable<ProductSetCode>().CountAsync();
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.Code);
+            var validationDetails = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Contains(validationDetails.Errors, error => error.Contains("191554897779", StringComparison.Ordinal));
+            Assert.Equal(1, multiCodeCount);
+            Assert.Equal(0, productSetCodeCount);
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_CreateProductWithAdditionalBarcodes_选择多码时写入两张多码表()
         {
             await SeedStoreAndSupplierAsync();

@@ -177,18 +177,6 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             }
         }
 
-        private static List<string> GetDetailBarcodesForMultiCode(StoreLocalSupplierInvoiceDetails detail)
-        {
-            var additionalBarcodes = DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson);
-            if (additionalBarcodes.Count > 0)
-                return additionalBarcodes;
-
-            // 关键位置：旧流程没有副条码字段，仍然使用明细 Barcode 新增一条多码，保持历史行为。
-            return string.IsNullOrWhiteSpace(detail.Barcode)
-                ? new List<string>()
-                : NormalizeAdditionalBarcodeValues(null, new[] { detail.Barcode });
-        }
-
         private static string? NormalizePastedTextField(string? value, int maxLength)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -748,6 +736,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             // 分店主价缺失时回退商品主档价。进货单明细的零售价通常为空，不能作为多码价（否则收银出 $0.00）。
             var productRetailPrices = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
             var storeMainPrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            // 商品主档当前的主条码，用来判断发票主条码是否已归属该商品。
+            var productMainBarcodes = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             if (productCodesToUpdate.Count > 0)
             {
                 var products = await db.Queryable<Product>()
@@ -756,10 +746,13 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         && productCodesToUpdate.Contains(p.ProductCode)
                         && p.IsDeleted == false
                     )
-                    .Select(p => new { p.ProductCode, p.ProductType, p.RetailPrice })
+                    .Select(p => new { p.ProductCode, p.ProductType, p.RetailPrice, p.Barcode })
                     .ToListAsync();
                 foreach (var product in products)
+                {
                     productRetailPrices.TryAdd(product.ProductCode!, product.RetailPrice);
+                    productMainBarcodes.TryAdd(product.ProductCode!, product.Barcode);
+                }
 
                 var storePrices = await db.Queryable<StoreRetailPrice>()
                     .Where(x =>
@@ -798,8 +791,10 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             // 关键位置：多码可能早已挂在同一商品上（之前执行过或其它入口加过），已有的关系与分店记录跳过，
             // 只补缺失的分店，并沿用已有关系的多码商品编码，保证总部与分店仍指向同一个多码商品。
             // 按大写比较，与校验口径（SqlFunc.ToUpper）一致，不依赖数据库排序规则是否区分大小写。
+            // 这里按「主条码未归属」取最大集合（主条码 + 副码）做已有关系的预查；逐行是否真写主条码见下方 mainBarcodeOwned。
             var requestedBarcodes = details
-                .SelectMany(GetDetailBarcodesForMultiCode)
+                .SelectMany(detail => LocalSupplierInvoicesBarcodeRules.ResolveMultiCodeBarcodes(
+                    detail.Barcode, detail.AdditionalBarcodesJson, mainBarcodeOwned: false))
                 .Select(x => x.Trim().ToUpperInvariant())
                 .Where(x => x.Length > 0)
                 .Distinct()
@@ -838,7 +833,17 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     result.FailedCount++;
                     continue;
                 }
-                var barcodesToAdd = GetDetailBarcodesForMultiCode(detail);
+                // 关键位置：主条码已是商品主档条码、或已挂为本店多码时视为已归属，只写副码；
+                // 否则主条码是这行要登记的新条码，与副码一并写入（校验端已排除被其他商品占用的情况）。
+                productMainBarcodes.TryGetValue(detail.ProductCode, out var productMainBarcode);
+                var mainBarcode = detail.Barcode.Trim();
+                var mainBarcodeOwned = string.Equals(productMainBarcode?.Trim(), mainBarcode, StringComparison.OrdinalIgnoreCase)
+                    || existingStoreMultiCodes.Contains(BuildStoreMultiCodeKey(
+                        LocalSupplierInvoicesRules.ResolveDetailStoreCode(detail.StoreCode, header.StoreCode),
+                        detail.ProductCode,
+                        mainBarcode));
+                var barcodesToAdd = LocalSupplierInvoicesBarcodeRules.ResolveMultiCodeBarcodes(
+                    detail.Barcode, detail.AdditionalBarcodesJson, mainBarcodeOwned);
                 if (barcodesToAdd.Count == 0)
                 {
                     result.Errors.Add($"添加多码失败：条码不能为空");

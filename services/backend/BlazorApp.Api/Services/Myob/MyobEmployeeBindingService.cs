@@ -174,10 +174,10 @@ public sealed class MyobEmployeeBindingService : IMyobEmployeeBindingService
             .ToList();
 
         var claimedCards = assignment.Values.Select(item => item.Card.Dto.Uid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 只列启用的卡：MYOB 里已停用的多半是离职人员的历史卡，没有需要处理的事（线上实测 63 张卡里 48 张已停用），列出来只会淹没真正缺档的人。
         var onlyInMyob = freeCards
-            .Where(card => !claimedCards.Contains(card.Dto.Uid) && !ignoredCardUids.Contains(card.Dto.Uid))
-            .OrderByDescending(card => card.Dto.IsActive)
-            .ThenBy(card => card.Dto.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(card => card.Dto.IsActive && !claimedCards.Contains(card.Dto.Uid) && !ignoredCardUids.Contains(card.Dto.Uid))
+            .OrderBy(card => card.Dto.Name, StringComparer.OrdinalIgnoreCase)
             .Select(card => new MyobOnlyInMyobDto { Card = card.Dto })
             .ToList();
 
