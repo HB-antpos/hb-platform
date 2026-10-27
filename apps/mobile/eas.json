@@ -10,7 +10,7 @@
       "env": {
         "EXPO_PUBLIC_APP_BUILD_PROFILE": "development",
         "EXPO_PUBLIC_NATIVE_APK_INSTALLER_ENABLED": "false",
-        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.10"
+        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.9"
       },
       "android": {
         "env": {
@@ -25,7 +25,7 @@
       "env": {
         "EXPO_PUBLIC_APP_BUILD_PROFILE": "preview",
         "EXPO_PUBLIC_NATIVE_APK_INSTALLER_ENABLED": "true",
-        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.10"
+        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.9"
       },
       "android": {
         "buildType": "apk",
@@ -43,7 +43,7 @@
         "EXPO_PUBLIC_IOS_REVIEW_MODE_ENABLED": "true",
         "EXPO_PUBLIC_IOS_REVIEW_PASSWORD_SHA256": "9eb044ae7bf67e2f67b05dd9981524a1bebc80f92baa776b5d6e244cbde80a2c",
         "EXPO_PUBLIC_NATIVE_APK_INSTALLER_ENABLED": "true",
-        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.10"
+        "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.9"
       },
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.0"
