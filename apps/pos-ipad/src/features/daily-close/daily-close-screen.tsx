@@ -249,6 +249,10 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
                       value={state.summary.returnQuantity}
                     />
                     <Metric
+                      label={dailyCloseText(locale, "metric.cashRounding")}
+                      value={signedMoney(state.summary.cashRoundingCents)}
+                    />
+                    <Metric
                       label={dailyCloseText(locale, "metric.expectedCash")}
                       value={money(state.summary.expectedCashCents)}
                     />
@@ -592,6 +596,11 @@ function ArchiveDetails({
         {dailyCloseText(locale, "archive.ordersReturns", {
           orders: archive.orderCount,
           returns: archive.returnQuantity,
+        })}
+      </Text>
+      <Text style={styles.detailLine}>
+        {dailyCloseText(locale, "archive.rounding", {
+          amount: signedMoney(archive.cashRoundingCents),
         })}
       </Text>
       <Text style={styles.detailLine}>

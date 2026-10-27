@@ -1,6 +1,7 @@
 import {
   AUD_CASH_DENOMINATIONS_CENTS,
   normalizeDailyCloseCounts,
+  sumCashRoundingCents,
   type AudCashDenominationCents,
   type DailyCloseArchive,
   type DailyCloseArchiveCommit,
@@ -36,6 +37,7 @@ type TenderSummaryRow = Readonly<{
   sales_cents: unknown;
   refund_cents: unknown;
 }>;
+type OrderCashRow = Readonly<{ cash_cents: unknown }>;
 type DailyCloseRow = Readonly<{
   close_id: unknown;
   business_date: unknown;
@@ -48,6 +50,7 @@ type DailyCloseRow = Readonly<{
   order_count: unknown;
   return_quantity: unknown;
   expected_cash_cents: unknown;
+  cash_rounding_cents: unknown;
   counted_cash_cents: unknown;
   notes_subtotal_cents: unknown;
   coins_subtotal_cents: unknown;
@@ -129,9 +132,9 @@ export class SqliteDailyCloseRepository
           order_count, return_quantity, expected_cash_cents,
           counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
           variance_cents, terminal_audit_event_id, saved_at_iso,
-          source_kind, state
+          cash_rounding_cents, source_kind, state
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           'native', 'Preparing'
         )`,
         [
@@ -152,6 +155,7 @@ export class SqliteDailyCloseRepository
           archive.varianceCents,
           audit.eventId,
           archive.savedAtIso,
+          archive.cashRoundingCents,
         ],
       );
       for (const tender of archive.tenders) {
@@ -390,14 +394,36 @@ async function summarizeSnapshot(
   const returnQuantity = sumDecimalStrings(
     quantityRows.map((row) => requiredText(row.quantity, "return quantity")),
   );
-  const expectedCashCents =
+  // 每张订单的现金 tender 合计（销售为正、退款为负）；同一订单混合支付时多笔现金先合并再进位，
+  // 与收银时“最后一笔现金按 5 分取整”的实际收付一致。
+  const orderCashRows = await connection.getAll<OrderCashRow>(
+    `SELECT SUM(tenders.amount_cents) AS cash_cents
+     FROM order_tenders tenders
+     INNER JOIN local_orders orders
+       ON orders.order_guid = tenders.order_guid
+     WHERE ${orderFilter}
+       AND tenders.method = 'cash'
+     GROUP BY tenders.order_guid`,
+    orderParameters,
+  );
+  const cashRoundingCents = sumCashRoundingCents(
+    orderCashRows.map((row) => safeInteger(row.cash_cents, "daily close order cash")),
+  );
+  const cashNetCents =
     tenders.find((item) => item.method === "cash")?.netCents ?? 0;
+  // 应有现金 = 现金净额（订单精确金额）+ 现金进位：钱箱实点必然是 5 分整数倍。
+  const expectedCashCents = safeSum(
+    cashNetCents,
+    cashRoundingCents,
+    "daily close expected cash",
+  );
 
   return Object.freeze({
     ...normalizedScope,
     orderCount,
     returnQuantity,
     tenders,
+    cashRoundingCents,
     expectedCashCents,
   });
 }
@@ -447,6 +473,12 @@ async function readArchive(
     orderCount: safeInteger(row.order_count, "daily close order count"),
     returnQuantity: requiredText(row.return_quantity, "return quantity"),
     tenders,
+    // 迁移给旧存档补 0：旧存档的应有现金本来就等于现金净额，口径不变。
+    // 列不存在（M54 之前的库结构）等同于没有进位。
+    cashRoundingCents: safeInteger(
+      row.cash_rounding_cents ?? 0,
+      "cash rounding",
+    ),
     expectedCashCents: safeInteger(
       row.expected_cash_cents,
       "expected cash",
@@ -505,6 +537,10 @@ function validateLegacyArchive(input: DailyCloseArchive): DailyCloseArchive {
       "daily close return quantity",
     ),
     tenders,
+    cashRoundingCents: safeInteger(
+      input.cashRoundingCents,
+      "cash rounding",
+    ),
     expectedCashCents: safeInteger(
       input.expectedCashCents,
       "expected cash",
@@ -553,9 +589,23 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     input.expectedCashCents,
     "expected cash",
   );
+  const cashRoundingCents = safeInteger(
+    input.cashRoundingCents,
+    "cash rounding",
+  );
   const cash = tenders.find((item) => item.method === "cash");
-  if (!cash || cash.netCents !== expectedCashCents) {
-    throw new TypeError("Daily close expected cash does not match cash net.");
+  // 每张订单现金进位最多 ±2 分，合计不可能超过 订单数 × 2 分（与服务端 INVALID_CASH_ROUNDING 同口径）。
+  if (Math.abs(cashRoundingCents) > orderCount * 2) {
+    throw new TypeError("Daily close cash rounding exceeds the order count limit.");
+  }
+  if (
+    !cash ||
+    safeSum(cash.netCents, cashRoundingCents, "expected cash") !==
+      expectedCashCents
+  ) {
+    throw new TypeError(
+      "Daily close expected cash does not match cash net plus rounding.",
+    );
   }
   const denominations = normalizeDailyCloseCounts(input.denominations);
   if (input.denominations.length !== AUD_CASH_DENOMINATIONS_CENTS.length) {
@@ -616,6 +666,7 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     orderCount,
     returnQuantity,
     tenders,
+    cashRoundingCents,
     expectedCashCents,
     denominations,
     notesSubtotalCents,

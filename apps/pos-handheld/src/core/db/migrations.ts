@@ -7054,6 +7054,104 @@ BEFORE DELETE ON square_refund_settlements
 BEGIN SELECT RAISE(ABORT, 'SQUARE_REFUND_SETTLEMENT_IMMUTABLE'); END;
 `;
 
+/**
+ * M54 日结现金进位（对齐 WPF #914）：澳洲现金按 5 分进位，钱箱实点必然是 5 分整数倍，
+ * 而 order_tenders 里的现金是订单精确金额，每天会差几分钱，造成长短款里的“假差异”。
+ * 1. local_daily_closes 新增 cash_rounding_cents（带符号分）；ADD COLUMN 的 DEFAULT 0 让升级前的存档口径不变
+ *    （旧存档的应有现金本来就等于现金净额）。该列同样纳入不可变触发器。
+ * 2. 应有现金 = 现金净额 + 现金进位：归档转换触发器原先强制 expected_cash_cents = 现金净额，必须改成净额 + 进位，
+ *    否则带进位的新日结在归档时会被 DAILY_CLOSE_ARCHIVE_INCOMPLETE 拒绝。其余校验条件原样保留。
+ * 3. 触发器只能 DROP 后重建；整个迁移在 applyMigrations 的独占事务内执行，要么全成功要么全回滚。
+ */
+const M54 = `
+ALTER TABLE local_daily_closes ADD COLUMN cash_rounding_cents INTEGER NOT NULL DEFAULT 0
+  CHECK (typeof(cash_rounding_cents) = 'integer');
+
+DROP TRIGGER trg_daily_close_archive_immutable;
+DROP TRIGGER trg_daily_close_archive_transition;
+
+CREATE TRIGGER trg_daily_close_archive_immutable
+BEFORE UPDATE OF
+  close_id, business_date, period_from_iso, period_to_iso,
+  store_code, device_code, saved_cashier_id, saved_cashier_name,
+  order_count, return_quantity, expected_cash_cents, counted_cash_cents,
+  notes_subtotal_cents, coins_subtotal_cents, variance_cents,
+  terminal_audit_event_id, saved_at_iso, source_kind, cash_rounding_cents
+ON local_daily_closes
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'DAILY_CLOSE_ARCHIVE_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_daily_close_archive_transition
+BEFORE UPDATE OF state ON local_daily_closes
+FOR EACH ROW
+WHEN NOT (
+  OLD.state = 'Preparing'
+  AND NEW.state = 'Archived'
+  AND NEW.source_kind = 'native'
+  AND (
+    SELECT COUNT(*)
+    FROM daily_close_totals totals
+    WHERE totals.close_id = NEW.close_id
+  ) = 3
+  AND NOT EXISTS (
+    SELECT 1
+    FROM (
+      SELECT 'cash' AS tender_method
+      UNION ALL SELECT 'card'
+      UNION ALL SELECT 'voucher'
+    ) required
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM daily_close_totals totals
+      WHERE totals.close_id = NEW.close_id
+        AND totals.tender_method = required.tender_method
+    )
+  )
+  AND (
+    SELECT COUNT(*)
+    FROM cash_denominations counts
+    WHERE counts.close_id = NEW.close_id
+  ) = 11
+  AND (
+    SELECT COALESCE(SUM(subtotal_cents), 0)
+    FROM cash_denominations counts
+    WHERE counts.close_id = NEW.close_id
+      AND counts.denomination_cents >= 500
+  ) = NEW.notes_subtotal_cents
+  AND (
+    SELECT COALESCE(SUM(subtotal_cents), 0)
+    FROM cash_denominations counts
+    WHERE counts.close_id = NEW.close_id
+      AND counts.denomination_cents < 500
+  ) = NEW.coins_subtotal_cents
+  AND NEW.counted_cash_cents
+    = NEW.notes_subtotal_cents + NEW.coins_subtotal_cents
+  AND NEW.variance_cents
+    = NEW.counted_cash_cents - NEW.expected_cash_cents
+  AND NEW.expected_cash_cents = (
+    SELECT net_cents
+    FROM daily_close_totals totals
+    WHERE totals.close_id = NEW.close_id
+      AND totals.tender_method = 'cash'
+  ) + NEW.cash_rounding_cents
+  AND EXISTS (
+    SELECT 1
+    FROM audit_events audit
+    WHERE audit.event_id = NEW.terminal_audit_event_id
+      AND audit.event_type = 'DAILY_CLOSE_SAVE'
+      AND audit.order_guid IS NULL
+      AND audit.correlation_id = NEW.close_id
+      AND audit.occurred_at_iso = NEW.saved_at_iso
+      AND json_valid(audit.payload_json) = 1
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'DAILY_CLOSE_ARCHIVE_INCOMPLETE');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7108,6 +7206,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 51, name: "M51_payment_recovery_center", sql: M51 },
   { version: 52, name: "M52_unblock_next_payment_after_parked_recovery", sql: M52 },
   { version: 53, name: "M53_square_refund_settlements", sql: M53 },
+  { version: 54, name: "M54_daily_close_cash_rounding", sql: M54 },
 ];
 
 export async function applyMigrations(
