@@ -352,19 +352,21 @@ public sealed class UserStorePosTerminalPermissionService(
         }
 
         // 仓库管理自己不使用收银端，角色模板里没有任何 POS 业务码；若仍按「本人持有」收口，
-        // 可分配范围永远为空，入口形同虚设。因此仓库管理可分配完整的 POS 业务白名单（仍不含系统级权限）。
-        // 店长维持原规则：POS 业务白名单 ∩ 本人有效权限，防止越权授予自己没有的能力。
+        // 可分配范围永远为空，入口形同虚设。因此仓库管理可分配完整的转授范围：POS 业务白名单 + 设置/客显/特价/同步等系统级权限
+        // （Audit.View 与其他非 POS 权限仍不可转授）。
+        // 店长维持原规则：转授范围 ∩ 本人有效权限，防止越权授予自己没有的能力
+        // （店长角色模板默认不含系统级权限，需管理员先授给店长本人，店长才能转授）。
         if (isWarehouseManager)
         {
             return AccessResult.Allowed(
                 false,
-                PermissionSeedData.PosTerminalBusinessPermissionCodes.ToArray()
+                PermissionSeedData.PosTerminalStoreDelegablePermissionCodes.ToArray()
             );
         }
 
         var actorEffectivePermissionCodes = await UserAccessMutationSecurity
             .GetEffectivePermissionCodesAsync(db, scope.UserGuid);
-        var assignablePermissionCodes = PermissionSeedData.PosTerminalBusinessPermissionCodes
+        var assignablePermissionCodes = PermissionSeedData.PosTerminalStoreDelegablePermissionCodes
             .Where(actorEffectivePermissionCodes.Contains)
             .ToArray();
 

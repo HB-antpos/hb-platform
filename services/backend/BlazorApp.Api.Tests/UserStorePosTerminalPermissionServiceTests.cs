@@ -267,9 +267,9 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
         );
 
         Assert.True(state.Success);
-        // 可分配范围 = 完整业务白名单，而不是「本人持有」的空集合。
+        // 可分配范围 = 完整转授范围（业务白名单 + 可转授系统级权限），而不是「本人持有」的空集合。
         Assert.Equal(
-            PermissionSeedData.PosTerminalBusinessPermissionCodes.OrderBy(item => item),
+            PermissionSeedData.PosTerminalStoreDelegablePermissionCodes.OrderBy(item => item),
             state.Data!.AssignablePermissions.Select(item => item.Code).OrderBy(item => item)
         );
         Assert.True(updated.Success);
@@ -280,20 +280,92 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task WarehouseManager_不能分配系统级Pos权限并保留既有系统级覆盖()
+    public async Task WarehouseManager_可分配设置等系统级Pos权限_但不能分配审计权限()
+    {
+        await SeedWarehouseActorAndTargetAsync();
+        var service = CreateWarehouseService();
+
+        var state = await service.GetAsync("target", "store-a");
+        var codes = state.Data!.AssignablePermissions.Select(item => item.Code).ToList();
+        // 设置 / 客显 / 特价 / 同步都在可分配范围里。
+        foreach (var code in PermissionSeedData.PosTerminalDelegableSystemPermissionCodes)
+        {
+            Assert.Contains(code, codes);
+        }
+        Assert.DoesNotContain(Permissions.PosTerminal.Audit.View, codes);
+
+        var granted = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes =
+                [
+                    Permissions.PosTerminal.Settings.AppUpdate,
+                    Permissions.PosTerminal.CustomerDisplay.Manage,
+                ],
+            }
+        );
+        Assert.True(granted.Success);
+        Assert.Contains(Permissions.PosTerminal.Settings.AppUpdate, granted.Data!.GrantedPermissionCodes);
+        Assert.Contains(Permissions.PosTerminal.CustomerDisplay.Manage, granted.Data.GrantedPermissionCodes);
+
+        // 审计权限不是收银机功能开关，仍然只能管理员授。
+        var denied = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes = [Permissions.PosTerminal.Audit.View],
+            }
+        );
+        Assert.False(denied.Success);
+        Assert.Equal("POS_PERMISSION_INVALID_CODES", denied.ErrorCode);
+    }
+
+    [Fact]
+    public async Task WarehouseManager_保存时保留管理员授的审计覆盖()
     {
         await SeedWarehouseActorAndTargetAsync();
         await _db.Insertable(new SysUserStorePosPermission
         {
-            Id = "admin-system-override",
+            Id = "admin-audit-override",
             UserGuid = "target",
             StoreGuid = "store-a",
-            PermissionCode = Permissions.PosTerminal.Settings.AppUpdate,
+            PermissionCode = Permissions.PosTerminal.Audit.View,
             IsGranted = true,
         }).ExecuteCommandAsync();
-        var service = CreateWarehouseService();
 
-        var denied = await service.UpdateAsync(
+        var saved = await CreateWarehouseService().UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest()
+        );
+
+        Assert.True(saved.Success);
+        Assert.True(await _db.Queryable<SysUserStorePosPermission>().AnyAsync(item =>
+            item.Id == "admin-audit-override" && item.IsGranted));
+    }
+
+    [Fact]
+    public async Task StoreManager_本人持有的系统级Pos权限可转授_未持有的不可转授()
+    {
+        await SeedActorAndTargetAsync();
+        // 店长本人被管理员授予「应用更新设置」，但没有「重置测试数据」。
+        await _db.Insertable(new SysRolePermission
+        {
+            Id = "actor-app-update",
+            RoleGuid = "role-manager",
+            PermissionCode = Permissions.PosTerminal.Settings.AppUpdate,
+        }).ExecuteCommandAsync();
+        var service = CreateService("store-a");
+
+        var state = await service.GetAsync("target", "store-a");
+        var codes = state.Data!.AssignablePermissions.Select(item => item.Code).ToList();
+        Assert.Contains(Permissions.PosTerminal.Settings.AppUpdate, codes);
+        Assert.DoesNotContain(Permissions.PosTerminal.Settings.TestDataReset, codes);
+
+        var granted = await service.UpdateAsync(
             "target",
             "store-a",
             new UpdateUserStorePosTerminalPermissionsRequest
@@ -301,17 +373,19 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
                 GrantedPermissionCodes = [Permissions.PosTerminal.Settings.AppUpdate],
             }
         );
-        var saved = await service.UpdateAsync(
+        var denied = await service.UpdateAsync(
             "target",
             "store-a",
-            new UpdateUserStorePosTerminalPermissionsRequest()
+            new UpdateUserStorePosTerminalPermissionsRequest
+            {
+                GrantedPermissionCodes = [Permissions.PosTerminal.Settings.TestDataReset],
+            }
         );
 
+        Assert.True(granted.Success);
+        Assert.Contains(Permissions.PosTerminal.Settings.AppUpdate, granted.Data!.GrantedPermissionCodes);
         Assert.False(denied.Success);
         Assert.Equal("POS_PERMISSION_INVALID_CODES", denied.ErrorCode);
-        Assert.True(saved.Success);
-        Assert.True(await _db.Queryable<SysUserStorePosPermission>().AnyAsync(item =>
-            item.Id == "admin-system-override" && item.IsGranted));
     }
 
     [Theory]
