@@ -803,6 +803,15 @@ builder.Services.AddSingleton<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUs
 builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageWriter, BlazorApp.Api.Services.MainApiEntry.SqlSugarMainApiEntryUsageWriter>();
 builder.Services.AddHostedService<BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageFlushService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.MainApiEntry.IMainApiEntryUsageService, BlazorApp.Api.Services.MainApiEntry.MainApiEntryUsageService>();
+// MYOB 对接阶段 0（方案 docs/plans/2026-10-27-myob-payroll-integration.md）：OAuth 连接、token 加密与分店映射（迁移 20261027.002 建表）。
+builder.Services.Configure<BlazorApp.Api.Services.Myob.MyobOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Services.Myob.MyobOptions.SectionName));
+builder.Services.AddSingleton<BlazorApp.Api.Security.MyobSecretProtector>(sp =>
+    BlazorApp.Api.Security.MyobDataProtection.CreateProtector(sp.GetRequiredService<IDataProtectionProvider>()));
+builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobApiClient, BlazorApp.Api.Services.Myob.MyobApiClient>(
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTokenProvider, BlazorApp.Api.Services.Myob.MyobTokenProvider>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobConnectionService, BlazorApp.Api.Services.Myob.MyobConnectionService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));

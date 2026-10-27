@@ -57,6 +57,8 @@ const WEB_MENU: MenuSource[] = ([
   // 与后端 FullMenu 一致：节日贺卡分店填报统计只认 SeasonalCards.Remaining.ViewAllStores（店长的填报权限不能打开）。
   ["/pos-admin/seasonal-card-stats", "Seasonal card stats", "节日贺卡填报统计", ["SeasonalCards.Remaining.ViewAllStores"]],
   ["/pos-admin/schedule-attendance", "Rosters and attendance", "排班考勤", ["Attendance.Schedule.ViewStore"]],
+  // 与后端 FullMenu 一致：MYOB 对接（连接公司文件、分店映射）只认 Myob.Connection.Manage。
+  ["/pos-admin/myob", "MYOB integration", "MYOB 对接", ["Myob.Connection.Manage"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
 ] as MenuRow[]).map(toSource("web"));

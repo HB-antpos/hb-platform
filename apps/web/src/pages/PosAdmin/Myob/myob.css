@@ -1,0 +1,137 @@
+/* MYOB 对接页（普通 CSS + 全局前缀类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+.myob-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.myob-card {
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.myob-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.myob-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.myob-card-hint {
+  margin-top: 2px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 13px;
+}
+
+.myob-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.myob-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.myob-notice-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* BusinessId / ABN 等标识用等宽字体，便于核对 */
+.myob-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+}
+
+.myob-businessid {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+}
+
+.myob-businessid-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myob-muted {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+.myob-sub {
+  display: block;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.myob-last-error {
+  display: block;
+  max-width: 260px;
+  margin-top: 4px;
+  color: var(--ant-color-warning-text, #ad6800);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.myob-abn-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.myob-abn-error {
+  display: block;
+  margin-top: 2px;
+  color: var(--ant-color-error, #ff4d4f);
+  font-size: 12px;
+}
+
+.myob-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+}
+
+/* 有未保存改动的映射行高亮，避免改完忘了点保存 */
+.myob-row-dirty > td {
+  background: var(--ant-color-warning-bg, #fffbe6) !important;
+}
+
+.myob-suggestion {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.myob-collapse {
+  margin-top: 12px;
+}
+
+/* 窄屏：表格由 scroll.x 横向滚动；卡片与按钮收紧 */
+@media (max-width: 768px) {
+  .myob-card {
+    padding: 12px;
+  }
+
+  .myob-toolbar-spacer {
+    display: none;
+  }
+}

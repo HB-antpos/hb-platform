@@ -103,6 +103,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewDailyCloseRecords: [P.DailyCloseRecords.View],
   canViewSeasonalCardStats: [P.SeasonalCards.Remaining.ViewAllStores],
   canManageFaceCameras: [P.FaceCapture.CamerasManage],
+  canManageMyobConnections: [P.Myob.ConnectionManage],
   // 人脸比对页：任一权限可见；从菜单授予时只补第一个（管理），移除时五个权限码一并撤销。
   canAccessFaceMatch: [
     P.FaceMatch.Manage,
@@ -247,6 +248,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
       { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
       { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
+      { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canManageMyobConnections' },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },

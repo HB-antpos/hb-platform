@@ -136,6 +136,7 @@
     "scheduleAttendance": "排班考勤",
     "attendanceReview": "考勤审核",
     "attendancePayroll": "工时与工资",
+    "myob": "MYOB 对接",
     "deviceRegistration": "设备管理",
     "appDownloads": "版本发布中心",
     "remoteMaintenance": "RustDesk 远程维护",

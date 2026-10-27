@@ -132,6 +132,7 @@ function createEmptyAccess(): AccessControl {
     canViewDailyCloseRecords: false,
     canViewSeasonalCardStats: false,
     canManageFaceCameras: false,
+    canManageMyobConnections: false,
     canAccessFaceMatch: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
@@ -396,6 +397,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSeasonalCardStats = isAdmin || hasPermission(P.SeasonalCards.Remaining.ViewAllStores)
   // 人脸抓拍摄像机管理只认独立权限码（会签发摄像机推送令牌），不挂在系统设置权限下。
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
+  const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
   // 人脸比对页任一 FaceMatch.* 权限即可进入；各页签（档案 / 统计 / 名单 / 复核）页内再按各自权限码显示。
   const canAccessFaceMatch =
     isAdmin ||
@@ -553,6 +555,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewDailyCloseRecords,
     canViewSeasonalCardStats,
     canManageFaceCameras,
+    canManageMyobConnections,
     canAccessFaceMatch,
     canManageScheduledTasks,
     canManageSystemSettings,

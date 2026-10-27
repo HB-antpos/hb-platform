@@ -617,6 +617,15 @@ namespace BlazorApp.Shared.Constants
             }
         }
 
+        // MYOB 对接（方案 docs/plans/2026-10-27-myob-payroll-integration.md）；默认不授予任何角色，由管理员手动授权。
+        public static class Myob
+        {
+            public static class Connection
+            {
+                public const string Manage = "Myob.Connection.Manage";
+            }
+        }
+
         public static class SeasonalCards
         {
             public static class Remaining

@@ -253,6 +253,10 @@
       "name": "查看本地进货",
       "description": "Web 页面 /pos-admin/local-supplier-invoices 与移动端「进货单」- 查看分店进货单"
     },
+    "Myob.Connection.Manage": {
+      "name": "管理 MYOB 连接",
+      "description": "Web 页面 /pos-admin/myob - 连接 / 断开 MYOB 公司文件、维护分店与公司文件的映射"
+    },
     "OrderFront": {
       "name": "前台订货",
       "description": "Web 订货前台与移动端「订货单」- 进入前台订货入口（Order / 订货员角色核心权限）"
