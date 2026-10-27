@@ -4011,6 +4011,42 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资类别映射_新表_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategorySchema.VerifySql));
+        Assert.Equal(54350, missing.Number);
+
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayCategoryMapping (ConnectionGuid, WeekdayUid, UpdatedAt)
+            VALUES (N'c-1', N'cat-weekday', SYSUTCDATETIME());
+            """);
+        // 重复执行不影响已写入的映射；一个公司文件只能有一行。
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE WeekdayUid = N'cat-weekday'"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayCategoryMapping (ConnectionGuid, UpdatedAt) VALUES (N'c-1', SYSUTCDATETIME());
+            """));
+
+        // 列宽漂移 → 54351；主键缺失 → 54352。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping ALTER COLUMN SundayUid nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategorySchema.VerifySql));
+        Assert.Equal(54351, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping ALTER COLUMN SundayUid nvarchar(50) NULL;");
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping DROP CONSTRAINT PK_MyobPayCategoryMapping;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategorySchema.VerifySql));
+        Assert.Equal(54352, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

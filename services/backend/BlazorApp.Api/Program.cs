@@ -815,6 +815,11 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobConnectionService, B
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeDirectory, BlazorApp.Api.Services.Myob.MyobEmployeeDirectory>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeBindingService, BlazorApp.Api.Services.Myob.MyobEmployeeBindingService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayrollEmployerService, BlazorApp.Api.Services.Myob.MyobPayrollEmployerService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, BlazorApp.Api.Services.Myob.MyobPayCategoryService>();
+// 工资供数：与工资表同一个考勤服务实例（同一请求内共用同一个 DbContext / 缓存）。
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
+    (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService, BlazorApp.Api.Services.Myob.MyobTimesheetPreviewService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));

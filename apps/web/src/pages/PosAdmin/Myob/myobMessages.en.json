@@ -111,7 +111,7 @@
       "employees": "Employee binding",
       "payroll": "Paying company",
       "push": "Push & reconcile",
-      "phase2": "Phase 2",
+      "preview": "Preview",
       "pending": "{{count}} to review",
       "noAccess": "You do not have access to any MYOB tab",
       "ariaLabel": "MYOB integration sections"
@@ -393,6 +393,292 @@
       "saved": "Saved the paying company of {{name}}",
       "saveFailed": "Failed to save paying company",
       "noChanges": "No changes"
+    },
+    "payCategories": {
+      "title": "Timesheet pay category mapping",
+      "hint": "Before pushing hours, tell the system which MYOB pay category each tier of our hours maps to. Set once per company file.",
+      "refresh": "Re-read MYOB pay categories",
+      "refreshedAt": " (last {{time}})",
+      "refreshed": "MYOB pay categories re-read",
+      "refreshFailed": "Failed to re-read MYOB pay categories",
+      "loadFailed": "Failed to read MYOB pay categories",
+      "loadFailedShort": "Read failed",
+      "loadingShort": "Reading…",
+      "retry": "Retry",
+      "noCompanies": "No company file is connected yet. Connect and verify one above first.",
+      "noCategories": "No pay categories were read from {{name}}. Check that pay categories are set up in MYOB, then click \"Re-read\" at the top right.",
+      "companyAria": "Choose the company file to map pay categories for",
+      "mappedCount": "{{mapped}} / {{total}} mapped",
+      "complete": "Complete",
+      "incomplete": "Incomplete",
+      "columns": {
+        "ours": "Our hours",
+        "arrow": "Maps to",
+        "myob": "MYOB pay category (read from {{name}})",
+        "note": "Notes"
+      },
+      "rows": {
+        "weekday": {
+          "label": "Weekday",
+          "sub": "Includes public-holiday work and paid public holiday",
+          "note": "Public-holiday work and paid public holiday also use this category (the public-holiday transfer rate must equal the weekday rate)"
+        },
+        "saturday": {
+          "label": "Saturday",
+          "note": "The pay multiplier comes from the MYOB category; it must match our Saturday transfer rate"
+        },
+        "sunday": {
+          "label": "Sunday",
+          "note": "The pay multiplier comes from the MYOB category; it must match our Sunday transfer rate"
+        },
+        "personalLeave": {
+          "label": "Sick leave",
+          "sub": "Pushed as Personal Leave Pay",
+          "note": "MYOB deducts the sick-leave balance by this category"
+        },
+        "holidayLeave": {
+          "label": "Annual leave",
+          "sub": "Pushed as Holiday Leave Pay",
+          "note": "MYOB deducts the annual-leave balance by this category"
+        }
+      },
+      "placeholder": "Choose a MYOB pay category…",
+      "selectAria": "Choose the MYOB pay category for \"{{label}}\"",
+      "noMatch": "No matching pay category",
+      "state": {
+        "suggested": "Suggested by name",
+        "suggestedHint": "Pre-filled, editable; takes effect only after saving",
+        "unset": "Not set",
+        "unsetHint": "No similarly named category found; choose one manually. These hours cannot be pushed until it is set",
+        "missing": "Category gone",
+        "missingHint": "This category no longer exists in MYOB; choose it again",
+        "edited": "Edited"
+      },
+      "note": {
+        "notPushedLabel": "Not pushed: ",
+        "notPushed": "annual-leave cash-out (paid as cash) is handled manually in MYOB by finance. ",
+        "prereqLabel": "MYOB-side prerequisites",
+        "prereq": " (confirmed by finance): turn on \"Use Timesheets to record payroll\" in payroll settings, align the week start day with ours, and attach the categories above to each employee's pay details."
+      },
+      "remaining": "{{count}} still to choose; all 5 must be chosen before saving",
+      "unsaved": "You have unsaved changes",
+      "suggestionsUnsaved": "Suggested categories are not saved yet; click \"Save mapping\" once you have checked them",
+      "cancel": "Cancel",
+      "save": "Save mapping",
+      "saved": "Pay category mapping saved for {{name}}",
+      "saveFailed": "Failed to save the pay category mapping",
+      "leave": {
+        "title": "Discard the unsaved pay category mapping?",
+        "content": "You changed the pay category mapping but have not saved it. Leaving now will lose these changes.",
+        "ok": "Discard and leave",
+        "cancel": "Stay on this page"
+      },
+      "switch": {
+        "title": "Discard unsaved changes?",
+        "content": "The pay category mapping of the current company has unsaved changes. Switching company will lose them.",
+        "ok": "Discard and switch",
+        "cancel": "Keep editing"
+      }
+    },
+    "push": {
+      "title": "Push hours to MYOB · Preview",
+      "hint": "Only the transfer part of hours is pushed; the cash part never goes into MYOB. The preview writes nothing to MYOB.",
+      "period": "Pay period",
+      "periodPlaceholder": "Choose a pay period",
+      "weeksSuffix": " ({{count}} wk)",
+      "loadFailed": "Failed to load the push preview",
+      "retry": "Retry",
+      "reload": "Refresh preview",
+      "check": "Check MYOB status",
+      "recheck": "Re-check MYOB status",
+      "checkHint": "Reads MYOB employee by employee, so it is slow; it confirms whether MYOB already has records or a processed pay for this period.",
+      "cross": "Cross-company",
+      "goBind": "Bind",
+      "goBindAria": "Bind {{name}} to a MYOB employee card",
+      "detail": "Daily detail",
+      "detailAria": "View the daily push detail of {{name}}",
+      "moreBlockers": "+{{count}} more",
+      "total": "{{total}} employees",
+      "empty": "No hours to push in this period (this company has no employee hours, or hours are not submitted and locked yet)",
+      "range": "{{name}} · Pay period {{range}}",
+      "pushButton": "Push to MYOB ({{count}})",
+      "pushDisabledTip": "Pushing opens up later",
+      "pushDisabledNote": "Pushing opens up later",
+      "export": "Export preview CSV",
+      "company": {
+        "aria": "Choose the paying company to preview",
+        "count": "{{count}} paid by this company this period",
+        "empty": "No company file is connected yet. Ask a colleague with the \"Connections & mapping\" permission to connect and verify one."
+      },
+      "columns": {
+        "employee": "Employee",
+        "stores": "Store",
+        "weekday": "Weekday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "personalLeave": "Sick",
+        "holidayLeave": "Annual",
+        "pushedTotal": "Pushed total",
+        "status": "Status"
+      },
+      "payMode": {
+        "Transfer": "All transfer",
+        "Cash": "All cash",
+        "Mixed": "Transfer + cash {{hours}}h/wk"
+      },
+      "status": {
+        "ready": "Ready",
+        "readyCashOut": "Ready · cash-out not pushed",
+        "noTransfer": "No transfer hours · not pushed"
+      },
+      "blocker": {
+        "NOT_BOUND": "Not bound",
+        "STORE_NOT_LOCKED": "Store not locked",
+        "STORE_NOT_MAPPED": "Store not mapped",
+        "CATEGORY_NOT_MAPPED": "Category not mapped",
+        "NO_RATE": "No pay rate",
+        "NO_STORE_ACCESS": "No access",
+        "MYOB_PROCESSED": "Paid in MYOB",
+        "unknown": "Blocked"
+      },
+      "notes": {
+        "crossShare": "This company gets {{allocated}} h of transfer allowance (of {{total}} h, split by hours {{ratio}})",
+        "crossShareNoRatio": "This company gets {{allocated}} h of transfer allowance (of {{total}} h)",
+        "bound": "Bound · {{name}}",
+        "leaveFirst": "Sick / annual leave is loaded into transfer before weekday",
+        "myobHasEntries": "MYOB already has unprocessed entries",
+        "myobCheckFailed": "Could not read MYOB; status unknown"
+      },
+      "readiness": {
+        "aria": "Pre-push checks",
+        "locked": {
+          "title": "Stores submitted and locked",
+          "none": "No locked stores this period"
+        },
+        "unlocked": {
+          "title": "Unlocked stores: {{count}}",
+          "item": "{{label}} · {{count}} affected",
+          "noneTitle": "No unlocked stores",
+          "noneSub": "All stores involved are submitted and locked"
+        },
+        "category": {
+          "title": "Pay categories mapped {{mapped}} / {{total}}",
+          "incomplete": "Hours of unmapped categories cannot be pushed",
+          "go": "Go to mapping"
+        },
+        "processed": {
+          "title": "Processed pays in MYOB are not overwritten",
+          "unchecked": "Not checked: click \"Check MYOB status\" above to see",
+          "some": "{{count}} already paid in MYOB; they will not be overwritten",
+          "failed": "Could not read MYOB for {{count}}; please check again later",
+          "none": "No processed pay in MYOB for this period"
+        },
+        "state": {
+          "ok": "OK",
+          "bad": "Needs action",
+          "warn": "Attention",
+          "muted": "Not checked"
+        }
+      },
+      "hints": {
+        "title": "{{count}} notes that do not block pushing; please acknowledge each:",
+        "ack": "I have read the notes above",
+        "codes": {
+          "BIRTHDAY_REVIEW": "Turning 18: pay rate to change",
+          "BELOW_MINIMUM_RATE": "Below minimum rate",
+          "PUBLIC_HOLIDAY_RATE_MISMATCH": "Public-holiday rate differs from weekday rate",
+          "ANNUAL_CASH_OUT_NOT_PUSHED": "Annual-leave cash-out not pushed",
+          "unknown": "Other notes"
+        },
+        "nameSep": ": "
+      },
+      "summary": {
+        "ready": "Ready: {{count}} · total ",
+        "hours": "{{hours}} h",
+        "blockedPrefix": "Blocked: ",
+        "people": "{{count}}",
+        "blockedSuffix": " (never skipped silently; they are listed in the result)",
+        "noTransfer": "Not pushed: {{count}}"
+      },
+      "weekdays": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "drawer": {
+        "title": "{{name}} · Daily push detail",
+        "close": "Close",
+        "closeButton": "Close",
+        "noDays": "No daily data for this period",
+        "explain": {
+          "label": "How hours are split: ",
+          "crossIntro": "First the fixed transfer hours are split between the companies by hours worked ({{pairs}}{{ratio}} → {{allocated}}); then, within this company's share, hours are loaded in the order ",
+          "crossOutro": ".",
+          "singleIntro": "Fixed transfer hours are loaded in the order ",
+          "singleOutro": "; whatever does not fit is paid as cash.",
+          "orderChain": "Sunday → Saturday → Paid leave → Public holiday → Weekday",
+          "allTransfer": "All-transfer employee: all of this company's actual hours are pushed by day; no transfer allowance is split.",
+          "allCash": "All-cash employee: no transfer hours, nothing is pushed."
+        },
+        "subtitle": {
+          "mixed": "Transfer + cash (fixed transfer {{fixed}}h/wk, this company gets {{allocated}} h)",
+          "transfer": "All transfer",
+          "cash": "All cash"
+        },
+        "actualTitle": "Actual hours at this company ({{stores}})",
+        "actualEmpty": "No hours at this company this period",
+        "pushedTitle": "Transfer hours to push to MYOB",
+        "pushedApi": "PUT Payroll/Timesheet",
+        "pushedNote": "Loaded into the transfer allowance in the order shown under \"How hours are split\"; when a category does not fill, days are filled from earliest to latest, so the last day may be partly filled.",
+        "pushedEmpty": "No transfer hours to push",
+        "cashTitle": "Not pushed (paid as cash)",
+        "cashEmpty": "No cash hours",
+        "cashRow": "{{name}} (cash)",
+        "categoryHead": "Category",
+        "total": "Total",
+        "check": {
+          "ok": "Check passed",
+          "bad": "Check failed",
+          "sep": ": "
+        },
+        "annualCashOut": "A further {{hours}} h of annual-leave cash-out uses up transfer allowance but is not pushed; finance handles it manually in MYOB.",
+        "kinds": {
+          "weekday": "Weekday",
+          "saturday": "Saturday",
+          "sunday": "Sunday",
+          "publicHolidayWork": "Public-holiday work",
+          "publicHolidayPay": "Paid public holiday",
+          "sick": "Sick leave",
+          "annual": "Annual leave",
+          "annualCashOut": "Annual-leave cash-out"
+        },
+        "pushedRows": {
+          "weekday": "Weekday",
+          "saturday": "Saturday",
+          "sunday": "Sunday",
+          "personalLeave": "Sick (Personal Leave Pay)",
+          "holidayLeave": "Annual (Holiday Leave Pay)"
+        }
+      },
+      "csv": {
+        "employee": "Employee",
+        "stores": "Stores",
+        "payMode": "Pay mode",
+        "weekday": "Weekday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "personalLeave": "Sick",
+        "holidayLeave": "Annual",
+        "pushedTotal": "Pushed total",
+        "cashOut": "Annual-leave cash-out (not pushed)",
+        "status": "Status",
+        "reason": "Blocked reason",
+        "myobCard": "MYOB employee card"
+      }
     }
   }
 }

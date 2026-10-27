@@ -177,6 +177,11 @@ const pages = [
       'src/pages/PosAdmin/Myob/MyobBadges.tsx',
       'src/pages/PosAdmin/Myob/PayrollEmployersTab.tsx',
       'src/pages/PosAdmin/Myob/PayrollEmployerDrawer.tsx',
+      // 阶段 2：工资类别映射 + 只读推送预览
+      'src/pages/PosAdmin/Myob/myobTimesheetLogic.ts',
+      'src/pages/PosAdmin/Myob/PayCategoryMappingCard.tsx',
+      'src/pages/PosAdmin/Myob/PushPreviewTab.tsx',
+      'src/pages/PosAdmin/Myob/PushDetailDrawer.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',

@@ -20,7 +20,7 @@ import { formatMyobTime } from './myobLogic'
 
 // ───────────────────────── 页签 / 权限 ─────────────────────────
 
-export type MyobTabKey = 'connections' | 'employees' | 'payroll'
+export type MyobTabKey = 'connections' | 'employees' | 'payroll' | 'push'
 
 export interface MyobTabAccess {
   canManageConnections: boolean
@@ -34,6 +34,8 @@ export function getVisibleMyobTabs(access: MyobTabAccess): MyobTabKey[] {
   if (access.canManageConnections) tabs.push('connections')
   if (access.canBindEmployees) tabs.push('employees')
   if (access.canEditPayroll) tabs.push('payroll')
+  // 推送与对账（只读预览）和发薪公司同用「编辑工资」权限（Attendance.Payroll.Edit）
+  if (access.canEditPayroll) tabs.push('push')
   return tabs
 }
 

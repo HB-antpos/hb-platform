@@ -111,7 +111,7 @@
       "employees": "员工绑定",
       "payroll": "发薪公司",
       "push": "推送与对账",
-      "phase2": "阶段 2",
+      "preview": "预览",
       "pending": "{{count}} 待处理",
       "noAccess": "你没有可用的 MYOB 页签权限",
       "ariaLabel": "MYOB 对接功能页签"
@@ -393,6 +393,292 @@
       "saved": "已保存 {{name}} 的发薪公司",
       "saveFailed": "保存发薪公司失败",
       "noChanges": "没有改动"
+    },
+    "payCategories": {
+      "title": "Timesheet 工资类别映射",
+      "hint": "推送工时前，要告诉系统「我方的哪一档工时，对应 MYOB 里的哪个工资类别」。每个公司文件单独设置一次。",
+      "refresh": "重新读取 MYOB 工资类别",
+      "refreshedAt": "（上次 {{time}}）",
+      "refreshed": "已重新读取 MYOB 工资类别",
+      "refreshFailed": "重新读取 MYOB 工资类别失败",
+      "loadFailed": "读取 MYOB 工资类别失败",
+      "loadFailedShort": "读取失败",
+      "loadingShort": "读取中…",
+      "retry": "重试",
+      "noCompanies": "还没有已连接的公司文件，请先在上方连接并验证。",
+      "noCategories": "没有从 {{name}} 读到任何工资类别。请确认该公司文件在 MYOB 里已设置工资类别，然后点右上角「重新读取」。",
+      "companyAria": "选择要设置工资类别映射的公司文件",
+      "mappedCount": "已映射 {{mapped}} / {{total}} 项",
+      "complete": "已完整",
+      "incomplete": "未完整",
+      "columns": {
+        "ours": "我方工时",
+        "arrow": "对应",
+        "myob": "MYOB 工资类别（读取自 {{name}}）",
+        "note": "说明"
+      },
+      "rows": {
+        "weekday": {
+          "label": "平日",
+          "sub": "含公假上班、带薪公假",
+          "note": "公假上班、带薪公假也走这个类别（公假转账价须等于平日价）"
+        },
+        "saturday": {
+          "label": "周六",
+          "note": "时薪倍数由 MYOB 类别决定，需与我方周六转账价一致"
+        },
+        "sunday": {
+          "label": "周日",
+          "note": "时薪倍数由 MYOB 类别决定，需与我方周日转账价一致"
+        },
+        "personalLeave": {
+          "label": "病假",
+          "sub": "推送为 Personal Leave Pay",
+          "note": "MYOB 按此类别扣病假余额"
+        },
+        "holidayLeave": {
+          "label": "年假",
+          "sub": "推送为 Holiday Leave Pay",
+          "note": "MYOB 按此类别扣年假余额"
+        }
+      },
+      "placeholder": "请选择 MYOB 工资类别…",
+      "selectAria": "为「{{label}}」选择 MYOB 工资类别",
+      "noMatch": "没有匹配的工资类别",
+      "state": {
+        "suggested": "按名称相近推荐",
+        "suggestedHint": "已预填，可改；保存后才生效",
+        "unset": "未设置",
+        "unsetHint": "没找到名称相近的类别，请手动选择；未设置前这类工时不能推送",
+        "missing": "类别已失效",
+        "missingHint": "MYOB 里找不到这个类别，请重新选择",
+        "edited": "已修改"
+      },
+      "note": {
+        "notPushedLabel": "不推送的：",
+        "notPushed": "年假折现（现金发放）由财务在 MYOB 手工处理。",
+        "prereqLabel": "MYOB 端前置配置",
+        "prereq": "（由财务确认）：工资设置里开启「使用 Timesheet 记录工资」、周起始日与我方一致、员工工资明细里挂上上面这些类别。"
+      },
+      "remaining": "还差 {{count}} 项未选择，5 项都选好才能保存",
+      "unsaved": "有未保存的改动",
+      "suggestionsUnsaved": "名称相近的推荐还没保存，确认无误后点「保存映射」",
+      "cancel": "取消",
+      "save": "保存映射",
+      "saved": "已保存 {{name}} 的工资类别映射",
+      "saveFailed": "保存工资类别映射失败",
+      "leave": {
+        "title": "放弃未保存的工资类别映射？",
+        "content": "你改过工资类别映射但还没保存，现在离开会丢失这些改动。",
+        "ok": "放弃并离开",
+        "cancel": "留在本页"
+      },
+      "switch": {
+        "title": "放弃未保存的改动？",
+        "content": "当前公司的工资类别映射有未保存的改动，切换公司会丢失它们。",
+        "ok": "放弃并切换",
+        "cancel": "继续编辑"
+      }
+    },
+    "push": {
+      "title": "推送工时到 MYOB · 预览",
+      "hint": "只推送转账部分的工时；现金部分不进 MYOB。预览不会往 MYOB 写任何东西。",
+      "period": "工资周期",
+      "periodPlaceholder": "选择工资周期",
+      "weeksSuffix": "（{{count}} 周）",
+      "loadFailed": "加载推送预览失败",
+      "retry": "重试",
+      "reload": "刷新预览",
+      "check": "检查 MYOB 状态",
+      "recheck": "重新检查 MYOB 状态",
+      "checkHint": "会逐个员工读取 MYOB，较慢；用来确认本周期在 MYOB 里是否已有记录或已发薪。",
+      "cross": "跨公司",
+      "goBind": "去绑定",
+      "goBindAria": "去绑定 {{name}} 的 MYOB 员工卡",
+      "detail": "按日明细",
+      "detailAria": "查看 {{name}} 的按日推送明细",
+      "moreBlockers": "另有 {{count}} 项",
+      "total": "共 {{total}} 人",
+      "empty": "这个周期没有可推送的工时数据（该公司本期没有员工工时，或工时还没提交锁定）",
+      "range": "{{name}} · 工资周期 {{range}}",
+      "pushButton": "推送到 MYOB（{{count}} 人）",
+      "pushDisabledTip": "推送功能稍后开放",
+      "pushDisabledNote": "推送功能稍后开放",
+      "export": "导出预览 CSV",
+      "company": {
+        "aria": "选择要预览的发薪公司",
+        "count": "本期 {{count}} 人由这家发薪",
+        "empty": "还没有已连接的公司文件，请先让有「连接与映射」权限的同事连接并验证。"
+      },
+      "columns": {
+        "employee": "员工",
+        "stores": "分店",
+        "weekday": "平日",
+        "saturday": "周六",
+        "sunday": "周日",
+        "personalLeave": "病假",
+        "holidayLeave": "年假",
+        "pushedTotal": "推送合计",
+        "status": "状态"
+      },
+      "payMode": {
+        "Transfer": "全转账",
+        "Cash": "全现金",
+        "Mixed": "转账+现金 {{hours}}h/周"
+      },
+      "status": {
+        "ready": "可推送",
+        "readyCashOut": "可推送 · 折现不推",
+        "noTransfer": "无转账工时 · 不推送"
+      },
+      "blocker": {
+        "NOT_BOUND": "未绑定",
+        "STORE_NOT_LOCKED": "分店未锁定",
+        "STORE_NOT_MAPPED": "分店未映射",
+        "CATEGORY_NOT_MAPPED": "类别未映射",
+        "NO_RATE": "无时薪",
+        "NO_STORE_ACCESS": "无权限",
+        "MYOB_PROCESSED": "MYOB 已发薪",
+        "unknown": "被拦截"
+      },
+      "notes": {
+        "crossShare": "本公司分到转账额度 {{allocated}} h（共 {{total}} h，按工时比例 {{ratio}}）",
+        "crossShareNoRatio": "本公司分到转账额度 {{allocated}} h（共 {{total}} h）",
+        "bound": "已绑定 · {{name}}",
+        "leaveFirst": "病假 / 年假先于平日装入转账",
+        "myobHasEntries": "MYOB 里已有未发薪的记录",
+        "myobCheckFailed": "读取 MYOB 失败，状态未知"
+      },
+      "readiness": {
+        "aria": "推送前检查",
+        "locked": {
+          "title": "分店已提交锁定",
+          "none": "本期没有已锁定的分店"
+        },
+        "unlocked": {
+          "title": "{{count}} 家分店未锁定",
+          "item": "{{label}} · 涉及 {{count}} 人",
+          "noneTitle": "没有未锁定的分店",
+          "noneSub": "涉及的分店本期都已提交锁定"
+        },
+        "category": {
+          "title": "工资类别已映射 {{mapped}} / {{total}}",
+          "incomplete": "没映射完整的类别，相关工时不能推送",
+          "go": "去映射"
+        },
+        "processed": {
+          "title": "MYOB 已发薪的周期不覆盖",
+          "unchecked": "未检查：点上方「检查 MYOB 状态」后显示",
+          "some": "{{count}} 人在 MYOB 里已发薪，不会覆盖",
+          "failed": "{{count}} 人读取 MYOB 失败，请稍后重新检查",
+          "none": "本期 MYOB 里尚无已发薪记录"
+        },
+        "state": {
+          "ok": "正常",
+          "bad": "需要处理",
+          "warn": "请注意",
+          "muted": "未检查"
+        }
+      },
+      "hints": {
+        "title": "{{count}} 条提示，不阻止推送，请逐条知晓：",
+        "ack": "我已知晓以上提示",
+        "codes": {
+          "BIRTHDAY_REVIEW": "满 18 岁需调时薪",
+          "BELOW_MINIMUM_RATE": "低于最低时薪",
+          "PUBLIC_HOLIDAY_RATE_MISMATCH": "公假价与平日价不一致",
+          "ANNUAL_CASH_OUT_NOT_PUSHED": "年假折现不推送",
+          "unknown": "其他提示"
+        },
+        "nameSep": "："
+      },
+      "summary": {
+        "ready": "可推送 {{count}} 人 · 合计 ",
+        "hours": "{{hours}} h",
+        "blockedPrefix": "被拦截 ",
+        "people": "{{count}} 人",
+        "blockedSuffix": "（不会被悄悄跳过，会列在结果里）",
+        "noTransfer": "不推送 {{count}} 人"
+      },
+      "weekdays": {
+        "sun": "周日",
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六"
+      },
+      "drawer": {
+        "title": "{{name}} · 按日推送明细",
+        "close": "关闭",
+        "closeButton": "关闭",
+        "noDays": "这个周期没有按日数据",
+        "explain": {
+          "label": "怎么分的：",
+          "crossIntro": "先按各公司的工时比例分摊固定转账工时（{{pairs}}{{ratio}} → {{allocated}}）；再在本公司分到的额度里按 ",
+          "crossOutro": " 装入。",
+          "singleIntro": "固定转账工时按 ",
+          "singleOutro": " 装入，装不下的部分按现金发放。",
+          "orderChain": "周日 → 周六 → 带薪假 → 公假 → 平日",
+          "allTransfer": "全转账员工：本公司的实际工时全部按日推送，不涉及转账额度的分摊。",
+          "allCash": "全现金员工：没有转账工时，不会推送。"
+        },
+        "subtitle": {
+          "mixed": "转账 + 现金（固定转账 {{fixed}}h/周，本公司分到 {{allocated}} h）",
+          "transfer": "全转账",
+          "cash": "全现金"
+        },
+        "actualTitle": "本公司实际工时（{{stores}}）",
+        "actualEmpty": "本公司本期没有工时",
+        "pushedTitle": "将推送到 MYOB 的转账工时",
+        "pushedApi": "PUT Payroll/Timesheet",
+        "pushedNote": "按上方「怎么分的」的顺序装入转账额度；同一类别装不满时，按日期从早到晚填满，最后一天可能只填一部分。",
+        "pushedEmpty": "没有要推送的转账工时",
+        "cashTitle": "不推送（现金发放）",
+        "cashEmpty": "没有现金发放的工时",
+        "cashRow": "{{name}}（现金）",
+        "categoryHead": "类别",
+        "total": "合计",
+        "check": {
+          "ok": "校验通过",
+          "bad": "校验未通过",
+          "sep": "："
+        },
+        "annualCashOut": "另有 {{hours}} h 年假折现占用了转账额度，不会推送，请财务在 MYOB 手工处理。",
+        "kinds": {
+          "weekday": "平日",
+          "saturday": "周六",
+          "sunday": "周日",
+          "publicHolidayWork": "公假上班",
+          "publicHolidayPay": "带薪公假",
+          "sick": "病假",
+          "annual": "年假",
+          "annualCashOut": "年假折现"
+        },
+        "pushedRows": {
+          "weekday": "平日",
+          "saturday": "周六",
+          "sunday": "周日",
+          "personalLeave": "病假（Personal Leave Pay）",
+          "holidayLeave": "年假（Holiday Leave Pay）"
+        }
+      },
+      "csv": {
+        "employee": "员工",
+        "stores": "分店",
+        "payMode": "发放方式",
+        "weekday": "平日",
+        "saturday": "周六",
+        "sunday": "周日",
+        "personalLeave": "病假",
+        "holidayLeave": "年假",
+        "pushedTotal": "推送合计",
+        "cashOut": "年假折现（不推送）",
+        "status": "状态",
+        "reason": "被拦截原因",
+        "myobCard": "MYOB 员工卡"
+      }
     }
   }
 }
