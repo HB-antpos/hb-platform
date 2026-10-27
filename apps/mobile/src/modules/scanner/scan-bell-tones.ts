@@ -16,7 +16,7 @@ export interface BellNote {
 export const BELL_SAMPLE_RATE = 8000;
 
 // [相对基频倍数, 相对振幅]；铃声的金属感来自略偏离整数倍的 3.01。
-const BELL_PARTIALS: ReadonlyArray<readonly [number, number]> = [
+const BELL_PARTIALS: readonly (readonly [number, number])[] = [
   [1, 1],
   [2, 0.45],
   [3.01, 0.2],
