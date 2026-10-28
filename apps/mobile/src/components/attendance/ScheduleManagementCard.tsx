@@ -57,7 +57,7 @@ import {
   DEFAULT_SHIFT,
   SHIFT_PRESETS,
   getAvailabilityConflict,
-  getMealBadge,
+  getCellMealBadge,
   getPlacementVerdict,
   isScheduleLocked,
   type PlacementKind,
@@ -1266,10 +1266,8 @@ export function ScheduleManagementCard({
       const hasAvailabilityConflict = cell.schedules.some(
         (item) => !item.leaveType && getAvailabilityConflict(item, cell.availability),
       );
-      // 用餐小标记：只有手动指定了次数（含 0）才显示，自动的不加噪音
-      const manualMeal = cell.schedules
-        .map((item) => getMealBadge(item.mealBreakCount))
-        .find((badge) => badge !== undefined);
+      // 用餐小标记：手动指定的（含 0）醒目，按时长自动扣的（>4.5h 1 次、>9h 2 次）弱化显示，合计为 0 的自动班次不显示
+      const mealBadge = getCellMealBadge(cell.schedules);
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
           <Text
@@ -1283,8 +1281,10 @@ export function ScheduleManagementCard({
           {cell.schedules.length > 1 ? (
             <Text style={styles.moreText}>+{cell.schedules.length - 1}</Text>
           ) : null}
-          {manualMeal ? (
-            <Text style={styles.mealBadge}>{t("scheduleManagement.cell.mealBadge", { count: manualMeal.count })}</Text>
+          {mealBadge ? (
+            <Text style={[styles.mealBadge, mealBadge.manual ? null : styles.mealBadgeAuto]}>
+              {t("scheduleManagement.cell.mealBadge", { count: mealBadge.count })}
+            </Text>
           ) : null}
           {/* 与员工上报的不能上班 / 可上班时间冲突：只提醒不拦截，小三角标记 */}
           {hasAvailabilityConflict ? (
@@ -2376,6 +2376,8 @@ const styles = StyleSheet.create({
   conflictMark: { color: "#D46B08", fontSize: 11, fontWeight: "700", marginLeft: 1 },
   conflictNotice: { color: "#B54708" },
   mealBadge: { bottom: 0, color: "#667085", fontSize: 9, fontWeight: "700", position: "absolute", right: 2 },
+  // 自动扣餐：比手动指定的更浅更细，一眼能分辨
+  mealBadgeAuto: { color: "#98A2B3", fontWeight: "500" },
   placementActions: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
   placementBar: {
     alignItems: "center",

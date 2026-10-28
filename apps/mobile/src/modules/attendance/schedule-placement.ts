@@ -1,3 +1,4 @@
+import { effectiveMealBreakCount, scheduleDurationMinutes } from "./attendance-my-week";
 import { normalizeClockTime } from "./schedule-grid";
 import type {
   AttendanceAvailability,
@@ -224,7 +225,21 @@ export function buildPresetPayload(
   return { storeCode, userGuid, workDate, startTime: preset.startTime, endTime: preset.endTime, status: "Draft" };
 }
 
-/** 班次上的用餐标记：只有手动指定（含 0）才有；自动（含 null）没有。 */
-export function getMealBadge(mealBreakCount?: number | null): { count: number } | undefined {
-  return typeof mealBreakCount === "number" ? { count: mealBreakCount } : undefined;
+/**
+ * 排班格里的用餐小标记：一格可能有多个班次，按每个班次的「有效用餐次数」合计。
+ * 有效次数 = 店长手动指定的（含 0）优先，否则按时长自动算（超过 4.5 小时 1 次、超过 9 小时 2 次，每次 30 分钟）。
+ * manual 表示其中有班次是手动指定的（界面上更醒目）；纯自动且合计为 0 的不显示，避免短班次满格噪音。
+ * 已取消的班次和请假占位不参与。
+ */
+export function getCellMealBadge(
+  schedules: Pick<AttendanceSchedule, "startTime" | "endTime" | "mealBreakCount" | "status" | "leaveType">[],
+): { count: number; manual: boolean } | undefined {
+  const worked = schedules.filter((item) => item.status.toLowerCase() !== "cancelled" && !item.leaveType);
+  if (!worked.length) return undefined;
+  const count = worked.reduce(
+    (sum, item) => sum + effectiveMealBreakCount(item.mealBreakCount, scheduleDurationMinutes(item)),
+    0,
+  );
+  const manual = worked.some((item) => typeof item.mealBreakCount === "number");
+  return count > 0 || manual ? { count, manual } : undefined;
 }

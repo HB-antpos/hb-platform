@@ -8,7 +8,7 @@ import {
   buildTransferCreatePayload,
   collectPunchScheduleGuids,
   getAvailabilityConflict,
-  getMealBadge,
+  getCellMealBadge,
   getPlacementVerdict,
   isScheduleLocked,
   rangesOverlap,
@@ -175,10 +175,19 @@ assert.deepEqual(buildPresetPayload("1013", "u-staff", "2026-10-28", { startTime
   storeCode: "1013", userGuid: "u-staff", workDate: "2026-10-28", startTime: "16:00", endTime: "17:30", status: "Draft",
 });
 
-// 用餐标记：只有手动指定（含 0）才有
-assert.deepEqual(getMealBadge(0), { count: 0 });
-assert.deepEqual(getMealBadge(2), { count: 2 });
-assert.equal(getMealBadge(undefined), undefined);
-assert.equal(getMealBadge(null), undefined);
+// 格内用餐标记：手动指定（含 0）优先，否则按时长自动（>4.5h 1 次、>9h 2 次）；一格多个班次合计
+const meal = (startTime: string, endTime: string, mealBreakCount?: number | null, extra: Partial<AttendanceSchedule> = {}) =>
+  ({ startTime, endTime, mealBreakCount, status: "Draft", ...extra });
+assert.equal(getCellMealBadge([meal("09:00:00", "13:00:00")]), undefined, "4 小时自动 0 次：不显示");
+assert.equal(getCellMealBadge([meal("09:00:00", "13:30:00")]), undefined, "正好 4.5 小时不超过：不显示");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "17:30:00")]), { count: 1, manual: false }, "8.5 小时自动 1 次");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "21:00:00")]), { count: 2, manual: false }, "12 小时自动 2 次");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "17:30:00", 0)]), { count: 0, manual: true }, "手动 0 次也显示，且标为手动");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "17:30:00", 2)]), { count: 2, manual: true }, "手动次数覆盖自动");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "13:00:00"), meal("16:00:00", "23:00:00")]), { count: 1, manual: false }, "一格两班按各自有效次数合计");
+assert.deepEqual(getCellMealBadge([meal("09:00:00", "17:30:00"), meal("18:00:00", "20:00:00", 1)]), { count: 2, manual: true }, "任一班次手动即标手动");
+assert.equal(getCellMealBadge([meal("09:00:00", "17:30:00", null, { status: "Cancelled" })]), undefined, "已取消的班次不算");
+assert.equal(getCellMealBadge([meal("09:00:00", "17:30:00", null, { leaveType: "AnnualLeave" as AttendanceSchedule["leaveType"] })]), undefined, "请假占位不算");
+assert.equal(getCellMealBadge([]), undefined);
 
 console.log("schedule-placement tests passed");
