@@ -21,7 +21,7 @@ assert.ok(card.includes("startTime: DEFAULT_SHIFT.startTime") && card.includes("
 // 格内标记：与员工上报冲突、手动指定的用餐次数
 assert.ok(card.includes("getAvailabilityConflict(item, cell.availability)"), "格内要判断与员工上报的冲突");
 assert.ok(card.includes("styles.conflictMark") && card.includes("styles.mealBadge"), "格内显示冲突与用餐小标记");
-assert.ok(card.includes("getMealBadge(item.mealBreakCount)"), "用餐标记只在手动指定时出现");
+assert.ok(card.includes("getCellMealBadge(cell.schedules)") && card.includes("styles.mealBadgeAuto"), "格内用餐标记含自动扣餐，自动的弱化显示");
 
 // 班次块「×」：每个班次块可删除（先确认），确认文案告知会取消待审批考勤并可找回
 assert.ok(card.includes("onClose={() => confirmDelete(item)}"), "编辑器里每个班次块要有「×」");
