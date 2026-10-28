@@ -1726,11 +1726,12 @@ function ProductQueryContent() {
       );
     } catch (error) {
       hqSyncMutationCoordinatorRef.current?.fail(mutation);
-      // 能明确指向某个输入框的服务端冲突（如货号已存在）标红该框；其余失败显示通用文案。
+      // 能明确指向某个输入框的服务端冲突（货号已存在、条码已有商品）标红该框；其余失败显示通用文案。
+      // 条码已有商品时文案会点名已有商品（conflict.params），提示选用而不是重复新建。
       const conflict = resolveCreateProductServerError(error);
       showCreateProductError(
         conflict
-          ? t(conflict.messageKey)
+          ? t(conflict.messageKey, conflict.params)
           : getErrorMessage(error, "createProduct.messages.createFailed"),
         conflict?.field ?? null,
       );

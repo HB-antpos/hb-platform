@@ -30,7 +30,11 @@ function collectKeys(value: unknown, prefix = ''): string[] {
 const zh = JSON.parse(read(`${pageDir}/messages.zh.json`)) as { posAdmin: { products: { supplierCategory: Record<string, string> } } }
 const en = JSON.parse(read(`${pageDir}/messages.en.json`)) as { posAdmin: { products: { supplierCategory: Record<string, string> } } }
 assert.deepEqual(Object.keys(zh), ['posAdmin'], '页面文案只放 posAdmin 命名空间')
-assert.deepEqual(Object.keys(zh.posAdmin.products), ['supplierCategory', 'imageNames'], '页面文案只新增 posAdmin.products.supplierCategory 与 imageNames（看图生成英文名）')
+assert.deepEqual(
+  Object.keys(zh.posAdmin.products),
+  ['duplicateBarcode', 'supplierCategory', 'imageNames'],
+  '页面文案只新增 posAdmin.products.duplicateBarcode（条码已有商品提示）、supplierCategory 与 imageNames（看图生成英文名）',
+)
 
 // 看图生成英文名：页面与预览弹窗引用的 imageNames 键必须中英文都存在
 const imageNameSources = [pageSource, read(`${pageDir}/ImageEnglishNamePreviewModal.tsx`)]

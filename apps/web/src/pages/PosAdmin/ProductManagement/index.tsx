@@ -198,14 +198,17 @@ import {
   type BatchSupplierCategoryScopeStatus,
 } from './supplierCategoryOptions'
 import { useSupplierCategoryTrees } from './useSupplierCategoryTrees'
+import {
+  BARCODE_EXISTS_ERROR_CODE,
+  ITEM_NUMBER_EXISTS_ERROR_CODE,
+  formatExistingProductLine,
+  readProductCreateConflict,
+} from './duplicateProductConflict'
 import messagesEn from './messages.en.json'
 import messagesZh from './messages.zh.json'
 
 // 供应商分类等本页新增文案随页面代码块懒注册，不进入首屏 i18n 包。
 registerPageMessages({ zh: messagesZh, en: messagesEn })
-
-// 后端创建商品遇到货号已存在时返回的错误码（ReactProductsController.CreateWithPrices）。
-const ITEM_NUMBER_EXISTS_ERROR_CODE = 'ITEM_NUMBER_EXISTS'
 
 type ProductRow = (PosProductDto & {
   warehouseCategoryGuid?: string
@@ -2256,6 +2259,45 @@ export default function ProductManagementPage() {
       createForm.resetFields()
       void loadData()
     } catch (error) {
+      const conflict = readProductCreateConflict(error)
+      if (conflict?.errorCode === BARCODE_EXISTS_ERROR_CODE) {
+        // 条码已被任何供应商的存活商品占用：列出已有商品，让用户选用已有商品；不提供强行新建的入口，创建弹窗保持打开以便改条码。
+        const shown = conflict.existingProducts.slice(0, 5)
+        const hiddenCount = conflict.existingProducts.length - shown.length
+        const barcode = String(createForm.getFieldValue('barcode') ?? '').trim()
+        Modal.warning({
+          title: t('posAdmin.products.duplicateBarcode.title', '该条码已有商品，请选用已有商品'),
+          width: 560,
+          okText: t('posAdmin.products.duplicateBarcode.ok', '知道了'),
+          content: (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <span>
+                {shown.length > 0
+                  ? t('posAdmin.products.duplicateBarcode.intro', '条码 {{barcode}} 已属于下面的商品（任何供应商的存活商品都算占用），不能重复新建：', { barcode })
+                  : (conflict.message || t('posAdmin.products.duplicateBarcode.title', '该条码已有商品，请选用已有商品'))}
+              </span>
+              {shown.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {shown.map((product) => (
+                    <li key={product.productCode}>
+                      {formatExistingProductLine(product, {
+                        supplier: t('posAdmin.products.duplicateBarcode.supplier', '供应商'),
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {hiddenCount > 0 ? (
+                <span>{t('posAdmin.products.duplicateBarcode.more', '另有 {{count}} 个商品未列出', { count: hiddenCount })}</span>
+              ) : null}
+              <span style={{ color: 'rgba(0, 0, 0, 0.55)' }}>
+                {t('posAdmin.products.duplicateBarcode.hint', '请在商品列表里搜索该条码，选用已有商品；如果这确实是另一件商品，请先更换条码。')}
+              </span>
+            </Space>
+          ),
+        })
+        return
+      }
       // 货号重复是用户能自己修正的错误，要明确告诉他，而不是笼统的「创建商品失败」。
       message.error(readRequestErrorCode(error) === ITEM_NUMBER_EXISTS_ERROR_CODE
         ? t('posAdmin.products.itemNumberExists', '该供应商下货号已存在，请更换货号')

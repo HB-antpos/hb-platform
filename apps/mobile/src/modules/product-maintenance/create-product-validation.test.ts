@@ -147,3 +147,83 @@ assertEqual(resolveCreateProductServerError({ code: "ERR_NETWORK" }), null, "net
 assertEqual(resolveCreateProductServerError({ response: { status: 500, data: { message: "创建失败" } } }), null, "5xx stays generic");
 assertEqual(resolveCreateProductServerError(null), null, "null is not an error object");
 assertEqual(resolveCreateProductServerError("ITEM_NUMBER_EXISTS"), null, "a bare string is not an error object");
+
+// —— 条码已被已有商品占用（BARCODE_EXISTS）→ 标红条码并点名已有商品 ——
+const barcodeConflictError = (existingProducts: unknown[]) => ({
+  code: "ERR_BAD_REQUEST",
+  response: {
+    status: 409,
+    data: {
+      success: false,
+      message: "条码 9310000000017 已属于商品 货号 62800 · Soft toy（供应商 250），请选用已有商品，不能重复新建",
+      errorCode: "BARCODE_EXISTS",
+      existingProducts,
+    },
+  },
+});
+
+assertDeepEqual(
+  resolveCreateProductServerError(
+    barcodeConflictError([
+      { productCode: "p1", itemNumber: "62800", productName: "Soft toy", localSupplierCode: "250", source: "MainBarcode" },
+    ])
+  ),
+  {
+    messageKey: "createProduct.messages.barcodeExists",
+    field: "barcode",
+    params: { product: "62800 · Soft toy", supplier: "250", count: 1 },
+  },
+  "single existing product is named in the barcode conflict"
+);
+assertDeepEqual(
+  resolveCreateProductServerError(
+    barcodeConflictError([
+      { productCode: "p1", itemNumber: "62800", productName: "Soft toy", localSupplierCode: "250" },
+      { productCode: "p2", itemNumber: "62801", productName: "Soft toy B", localSupplierCode: "248" },
+    ])
+  ),
+  {
+    messageKey: "createProduct.messages.barcodeExistsMore",
+    field: "barcode",
+    params: { product: "62800 · Soft toy", supplier: "250", count: 2 },
+  },
+  "several existing products use the plural message and carry the total"
+);
+// 名称/货号缺失时退回商品编码，供应商缺失显示 --，不能出现 undefined。
+assertDeepEqual(
+  resolveCreateProductServerError(barcodeConflictError([{ productCode: "p9" }])),
+  {
+    messageKey: "createProduct.messages.barcodeExists",
+    field: "barcode",
+    params: { product: "p9", supplier: "--", count: 1 },
+  },
+  "missing item number and name fall back to the product code"
+);
+// 清单缺失（旧后端 / 异常响应）也要识别为条码冲突，只是不点名。
+assertDeepEqual(
+  resolveCreateProductServerError(barcodeConflictError([])),
+  { messageKey: "createProduct.messages.barcodeExistsUnknown", field: "barcode" },
+  "an empty list still reports the barcode conflict"
+);
+assertDeepEqual(
+  resolveCreateProductServerError({ response: { status: 409, data: { errorCode: "BARCODE_EXISTS" } } }),
+  { messageKey: "createProduct.messages.barcodeExistsUnknown", field: "barcode" },
+  "a missing list still reports the barcode conflict"
+);
+assertDeepEqual(
+  resolveCreateProductServerError({
+    response: { data: { ErrorCode: " BARCODE_EXISTS ", ExistingProducts: [{ itemNumber: "1", productName: "N", localSupplierCode: "S" }] } },
+  }),
+  {
+    messageKey: "createProduct.messages.barcodeExists",
+    field: "barcode",
+    params: { product: "1 · N", supplier: "S", count: 1 },
+  },
+  "PascalCase error code and list are accepted"
+);
+// 货号冲突不受影响：仍然不带 params。
+assertDeepEqual(
+  resolveCreateProductServerError({ response: { data: { errorCode: "ITEM_NUMBER_EXISTS", existingProducts: [{ productCode: "p1" }] } } }),
+  itemConflict,
+  "item number conflict keeps its own message and field"
+);
