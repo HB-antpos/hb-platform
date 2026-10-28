@@ -17,7 +17,7 @@ import { isValidEAN13 } from '../../../utils/barcode'
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import type { ProductImportItem, DuplicateGroup } from './types'
 import { buildAssignContainerItems, buildHbwebProductNameSyncNotificationDecision, buildHbwebProductNameUpdates, calculateStatistics, createEmptyProduct, detectDuplicates, findInvalidAssignContainerItems, generateImageUrl, getHbwebProductNameSyncConfirmationKeys, mergeDuplicateProducts, parseProductImportPasteText, stripAssignContainerItemsForRequest, summarizeAssignProductsResult, summarizeHbwebProductNameSyncResponse, updateCalculatedFields } from './utils'
-import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportRowClassName, getImportRowErrors, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeEnglishNamesById, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
+import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportRowClassName, getImportRowErrors, IMPORT_FILLER_MIN_WIDTH, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeEnglishNamesById, resolveImportColumnWidths, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
 import type { ConflictSelection, ContainerConflictRow, ImportDiffField, ImportStatusFilter } from './importGridLogic'
 import { applyImportPaste, clearImportColumn, findRowIndexById, toEditableColumn } from './importPasteLogic'
 import type { ImportEditableColumn } from './importPasteLogic'
@@ -34,10 +34,12 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 // 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
 registerPageMessages({ zh: productImportMessagesZh, en: productImportMessagesEn })
 
-// 表格最小宽度：固定列宽合计 808（检测后：勾选 52 + 件数 48 + 图 36 + 货号 104 + 条码 126 + 国内价 78 + 零售价 64 + 中包 52 + 装箱 52 + 体积 68 + 状态 126）+ 商品名称 / 英文名称两个自适应列各至少约 80。
+// 表格最小宽度：固定列宽合计 806（检测后：勾选 52 + 件数 48 + 图 36 + 货号 104 + 条码 126 + 国内价 78 + 零售价 64 + 中包 52 + 装箱 52 + 体积 68 + 状态 126）+ 商品名称 70 / 英文名称 92（最小宽度下的列宽见 importGridLogic 的 resolveImportColumnWidths）。
 // 货号、条码、国内价、状态这几列必须完整显示（导入审核要逐个核对标识符与新旧值；宽度按实测溢出量加出来的），
 // 名称类自由文本列在窄屏用省略号。1280 视口 + 展开侧栏（248）时内容区约 983px，Windows 经典滚动条再占约 15px → 968，
-// 所以最小宽度取 968，不会出现横向滚动条；更宽的屏幕由两个自适应列吃掉余量。
+// 所以最小宽度取 968，不会出现横向滚动条。
+// 更宽的屏幕：多出的空间先补足后面的窄列，再放宽名称列（有上限），仍有剩余由一个空白填充列吸收。
+// 不能再让名称列不写宽度去吃余量：那样宽屏下它俩会吃掉全部空间，装箱 / 体积 / 状态反而显示不全。
 const PRODUCT_IMPORT_TABLE_SCROLL_X = 968
 const BLANK_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 
@@ -121,6 +123,8 @@ export default function ProductImportPage() {
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
   const [selectedColumnKey, setSelectedColumnKey] = useState<string | null>(null)
   const [tableScrollY, setTableScrollY] = useState(500)
+  // 表格容器宽度：用来把宽屏多出的空间分给后面的列和名称列（0 = 还没量到，按最小宽度算）
+  const [tableWrapWidth, setTableWrapWidth] = useState(0)
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null)
   // 同步标记：state 更新是异步的，连点两次时第二次点击读到的 busyAction 仍是 null，必须用 ref 才挡得住
   const busyRef = useRef(false)
@@ -199,6 +203,8 @@ export default function ProductImportPage() {
       const minTableBodyHeight = 260
       const nextScrollY = Math.max(Math.floor(window.innerHeight - tableTop - headerHeight - bottomPadding), minTableBodyHeight)
       setTableScrollY(nextScrollY)
+      // 侧栏展开 / 收起不会触发 window resize，下面会单独观察容器尺寸；宽度没变时 setState 会被 React 忽略
+      if (container) setTableWrapWidth(Math.floor(container.clientWidth))
     }
 
     // 表格高度跟随视口剩余空间，避免导入多行时撑高整个页面，只让表格内部滚动。
@@ -211,6 +217,11 @@ export default function ProductImportPage() {
       observer.observe(headRef.current)
       // 底部栏的错误汇总可能换行，高度变化同样要重算
       if (footerRef.current) observer.observe(footerRef.current)
+    }
+    // 容器自身宽度变化（侧栏展开 / 收起、分栏）同样要重算列宽
+    if (productImportTableRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = observer ?? new ResizeObserver(updateTableScrollY)
+      observer.observe(productImportTableRef.current)
     }
     return () => {
       window.removeEventListener('resize', updateTableScrollY)
@@ -986,6 +997,13 @@ export default function ProductImportPage() {
 
   /* ------------------------------ 表格列 ------------------------------ */
 
+  // 按容器宽度分配多出来的列宽；量不到容器（未挂载 / 不在前台）时按最小宽度算，等同窄屏
+  const colWidths = useMemo(
+    () => resolveImportColumnWidths(tableWrapWidth, PRODUCT_IMPORT_TABLE_SCROLL_X, showStatistics),
+    [tableWrapWidth, showStatistics],
+  )
+  const showFillerColumn = colWidths.leftover >= IMPORT_FILLER_MIN_WIDTH
+
   const columns: ColumnsType<ProductImportItem> = useMemo(() => {
     const editableHeader = (field: ImportEditableColumn) => ({
       onHeaderCell: () => ({
@@ -1085,6 +1103,7 @@ export default function ProductImportPage() {
         title: t('domesticProducts.productName', '商品名称'),
         dataIndex: ['newProduct', 'productName'],
         key: 'productName',
+        width: colWidths.widths.productName,
         ...editableHeader('productName'),
         render: (_, record) => renderEditable('productName', 'text', record),
       },
@@ -1092,6 +1111,7 @@ export default function ProductImportPage() {
         title: t('domesticProducts.englishName', '英文名称'),
         dataIndex: ['newProduct', 'englishName'],
         key: 'englishName',
+        width: colWidths.widths.englishName,
         ...editableHeader('englishName'),
         render: (_, record) => renderEditable('englishName', 'text', record),
       },
@@ -1107,7 +1127,7 @@ export default function ProductImportPage() {
         title: t('productImport.oemPriceCol', '零售价'),
         dataIndex: ['newProduct', 'oemPrice'],
         key: 'oemPrice',
-        width: 64,
+        width: colWidths.widths.oemPrice,
         ...editableHeader('oemPrice'),
         render: (_, record) => renderEditable('oemPrice', 'number', record, { precision: 2 }),
       },
@@ -1115,7 +1135,7 @@ export default function ProductImportPage() {
         title: <span title={t('productImport.middlePackCol', '中包数')}>{t('productImport.colMidPack', '中包')}</span>,
         dataIndex: ['newProduct', 'midPackQuantity'],
         key: 'midPackQuantity',
-        width: 52,
+        width: colWidths.widths.midPackQuantity,
         ...editableHeader('midPackQuantity'),
         render: (_, record) => renderEditable('midPackQuantity', 'number', record),
       },
@@ -1123,7 +1143,7 @@ export default function ProductImportPage() {
         title: <span title={t('productImport.packingQtyCol', '单件装箱数')}>{t('productImport.colCasePack', '装箱')}</span>,
         dataIndex: ['newProduct', 'casePackQuantity'],
         key: 'casePackQuantity',
-        width: 52,
+        width: colWidths.widths.casePackQuantity,
         ...editableHeader('casePackQuantity'),
         render: (_, record) => renderEditable('casePackQuantity', 'number', record),
       },
@@ -1131,7 +1151,7 @@ export default function ProductImportPage() {
         title: <span title={t('productImport.unitVolumeCol', '单件体积')}>{t('productImport.colVolume', '体积')}</span>,
         dataIndex: ['newProduct', 'volume'],
         key: 'volume',
-        width: 68,
+        width: colWidths.widths.volume,
         ...editableHeader('volume'),
         render: (_, record) => renderEditable('volume', 'number', record, { step: '0.001', precision: 3 }),
       },
@@ -1152,7 +1172,7 @@ export default function ProductImportPage() {
       base.push({
         title: t('productImport.colStatus', '状态'),
         key: 'status',
-        width: 126,
+        width: colWidths.widths.status,
         onCell: colCell('status'),
         render: (_, record) => {
           const kind = resolveImportRowKind(record, detectedRowIds)
@@ -1214,8 +1234,18 @@ export default function ProductImportPage() {
         render: (_, record) => <div className="pi-status pi-status-actions">{renderDeleteButton(record)}</div>,
       })
     }
+    if (showFillerColumn) {
+      // 空白填充列：不写宽度，只吸收两档都涨满后剩下的空间（fixed 布局下没写宽度的列独占剩余宽度），
+      // 这样超宽屏上名称列停在上限，不会被剩余空间再按比例撑大。
+      base.push({
+        title: '',
+        key: 'filler',
+        className: 'pi-col-filler',
+        render: () => null,
+      })
+    }
     return base
-  }, [t, showStatistics, detectedRowIds, duplicateIndex, rowNumberById, selectedColumnKey, tableLocked, handleHeaderClick, updateProduct, removeRows])
+  }, [t, showStatistics, showFillerColumn, colWidths, detectedRowIds, duplicateIndex, rowNumberById, selectedColumnKey, tableLocked, handleHeaderClick, updateProduct, removeRows])
 
   const getRowClassName = (row: ProductImportItem) => getImportRowClassName(resolveImportRowKind(row, detectedRowIds), row.sentToContainer === true)
 
