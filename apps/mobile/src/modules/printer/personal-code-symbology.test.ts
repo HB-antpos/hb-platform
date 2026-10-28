@@ -77,6 +77,14 @@ async function main() {
   assert.equal(await pending, "barcode");
   assert.equal(slow.getSnapshot(), "barcode");
 
+  // 回归：hydrate 完成后用户再切换，后续 hydrate（打印前调用）必须返回最新选择，而不是首次读到的旧值。
+  const afterHydrate = createPersonalCodeSymbologyController(memoryStorage());
+  assert.equal(await afterHydrate.hydrate(), "qr");
+  await afterHydrate.set("barcode");
+  assert.equal(await afterHydrate.hydrate(), "barcode", "切到一维码后打印必须取到 barcode");
+  await afterHydrate.set("qr");
+  assert.equal(await afterHydrate.hydrate(), "qr", "切回二维码后同样取最新值");
+
   // hydrate 幂等：重复调用只读一次存储。
   let reads = 0;
   const counted = createPersonalCodeSymbologyController({
