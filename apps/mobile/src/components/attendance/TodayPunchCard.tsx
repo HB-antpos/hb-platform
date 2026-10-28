@@ -18,7 +18,6 @@ import {
 } from "@/modules/attendance/attendance-device-time";
 import {
   findActiveMealSession,
-  formatMealElapsed,
   resolveAttendanceMealPanelState,
 } from "@/modules/attendance/attendance-meal-break";
 import { MEAL_BREAK_MINUTES } from "@/modules/attendance/attendance-my-week";
@@ -227,7 +226,7 @@ export function TodayPunchCard({
                 {mealPanel.kind === "onBreak" ? (
                   <>
                     <Text variant="labelLarge" style={styles.tabularText}>
-                      {t("today.meal.onBreak", { elapsed: formatMealElapsed(mealPanel.elapsedSeconds) })}
+                      {t("today.meal.onBreak")}
                     </Text>
                     {mealSession.meal.openBreakStartedAtUtc ? (
                       <Text variant="bodySmall" style={styles.muted}>

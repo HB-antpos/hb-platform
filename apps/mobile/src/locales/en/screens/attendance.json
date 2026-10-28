@@ -144,7 +144,7 @@
       "upcoming": "Meal breaks {{handled}}/{{total}}",
       "upcomingAt": "Meal breaks {{handled}}/{{total}} · reminder at {{time}}",
       "done": "Meal breaks recorded {{handled}}/{{total}}",
-      "onBreak": "On break {{elapsed}}",
+      "onBreak": "On break",
       "onBreakSince": "Since {{time}}; ends automatically when you clock out",
       "start": "Start break",
       "end": "End break",
