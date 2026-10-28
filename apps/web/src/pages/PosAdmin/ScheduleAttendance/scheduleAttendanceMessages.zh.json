@@ -1,6 +1,16 @@
 {
   "posAdmin": {
     "scheduleAttendance": {
+      "weekAvailability": {
+        "available": "可",
+        "unavailable": "不可",
+        "allDay": "全天",
+        "legendAvailable": "可上班",
+        "legendUnavailable": "不能上班",
+        "legendTip": "员工自己上报的时间；未上报的格子不显示",
+        "conflictUnavailable": "该班次与员工上报的「不能上班」时间重叠",
+        "conflictOutside": "该班次超出员工上报的「可上班」时间"
+      },
       "approvalPresentation": {
         "MealBreak": {
           "title": "用餐未休息加工时"

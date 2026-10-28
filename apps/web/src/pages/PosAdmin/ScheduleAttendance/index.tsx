@@ -11,9 +11,11 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import {
   Alert,
+  Badge,
   Button,
   Card,
   DatePicker,
@@ -27,6 +29,7 @@ import {
   Popover,
   Select,
   Space,
+  Spin,
   Switch,
   Tabs,
   Tag,
@@ -42,9 +45,11 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useLocation, useSearchParams } from 'react-router-dom'
+import { useAttendancePendingCount } from '../../../layout/attendancePendingBadge'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
   batchUpsertAttendanceHolidays,
@@ -120,6 +125,12 @@ import {
 } from './scheduleCellEditorLogic'
 import './scheduleCellEditor.css'
 import {
+  buildAvailabilityIndex,
+  getDayAvailability,
+  getScheduleAvailabilityConflict,
+} from './availabilityLogic'
+import type { AvailabilitySegment, DayAvailability } from './availabilityLogic'
+import {
   buildAttendanceLocationTrajectory,
   normalizeAttendanceUtcText,
   splitAttendanceSampleDateRange,
@@ -139,7 +150,12 @@ dayjs.extend(isoWeek)
 // 用餐未休息加工时等新增文案放页面级消息文件，随页面懒加载，不占首屏 i18n 包。
 registerPageMessages({ zh: scheduleAttendanceMessagesZh, en: scheduleAttendanceMessagesEn })
 
-type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'holidays' | 'settings'
+type TabKey = 'schedules' | 'records' | 'review' | 'availability' | 'punches' | 'holidays' | 'settings'
+
+// 考勤审核整页作为「考勤记录」后面的子标签：首次切到该标签才加载代码，不进排班页首屏包。
+const AttendanceReviewPanel = lazy(() => import('../AttendanceReview'))
+const REVIEW_TAB_QUERY = 'review'
+const SCHEDULE_ATTENDANCE_PATH = '/pos-admin/schedule-attendance'
 
 interface AttendanceMapPreview {
   title: string
@@ -329,7 +345,17 @@ export default function ScheduleAttendancePage() {
   const managedStoreCodeKey = managedStoreCodes?.join(',') ?? 'all'
   const visibleStoreCodes = access.visibleStoreCodes?.()
   const visibleStoreCodeKey = visibleStoreCodes?.join(',') ?? 'all'
-  const [activeTab, setActiveTab] = useState<TabKey>('schedules')
+  // 页内子标签：排班类标签按 canViewAttendanceSchedule 显示，「考勤审核」按 canReviewAttendance 显示，
+  // 两者互相独立（只有审核权限的账号也能进入本页，只看到「考勤审核」）。
+  const canViewSchedulePart = access.canViewAttendanceSchedule
+  const canReviewTab = access.canReviewAttendance
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  // 本页被保活缓存时 useSearchParams 读到的是「当前地址」的参数，必须确认当前地址就是本页才认 ?tab=review。
+  const wantsReviewTab = location.pathname === SCHEDULE_ATTENDANCE_PATH && searchParams.get('tab') === REVIEW_TAB_QUERY
+  const [activeTab, setActiveTab] = useState<TabKey>(() => (
+    canReviewTab && (wantsReviewTab || !canViewSchedulePart) ? 'review' : 'schedules'
+  ))
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [storeCode, setStoreCode] = useState<string | undefined>()
   const [userGuid, setUserGuid] = useState<string | undefined>()
@@ -346,6 +372,9 @@ export default function ScheduleAttendancePage() {
   const [scheduleHolidays, setScheduleHolidays] = useState<AttendanceStoreHolidayDto[]>([])
   const [scheduleHolidaysLoading, setScheduleHolidaysLoading] = useState(false)
   const [availability, setAvailability] = useState<ListState<AttendanceAvailabilityDto>>(initialListState)
+  // 周排班格内展示用：本店本周全部员工上报的可上班 / 不能上班时间（与「员工可用时间」标签的分页列表互不影响）
+  const [weekAvailability, setWeekAvailability] = useState<AttendanceAvailabilityDto[]>([])
+  const weekAvailabilityRequestRef = useRef(0)
   const [punches, setPunches] = useState<ListState<AttendancePunchDto>>(initialListState)
   const [holidays, setHolidays] = useState<ListState<AttendanceStoreHolidayDto>>(initialListState)
   const [settings, setSettings] = useState<AttendanceSettingsDto | null>(null)
@@ -588,6 +617,29 @@ export default function ScheduleAttendancePage() {
     }
   }, [canViewStoreCode, storeCode, t, weekEnd, weekStart])
 
+  // 周排班格内的可上班 / 不能上班：整周一次拉全（后端不分页）。失败只静默清空，不打断排班；
+  // 没有「员工可用时间」查看权限就不请求。请求编号防止快速切周时旧响应覆盖新周。
+  const loadWeekAvailability = useCallback(async () => {
+    const requestId = ++weekAvailabilityRequestRef.current
+    if (!access.canViewAttendanceAvailability || !storeCode || shouldSkipVisibleStoreQuery()) {
+      setWeekAvailability([])
+      return
+    }
+    try {
+      const result = await getAttendanceAvailability({
+        storeCode,
+        fromDate: weekStart.format('YYYY-MM-DD'),
+        toDate: weekEnd.format('YYYY-MM-DD'),
+      })
+      if (requestId === weekAvailabilityRequestRef.current) setWeekAvailability(result.items)
+    } catch (error) {
+      console.error(error)
+      if (requestId === weekAvailabilityRequestRef.current) setWeekAvailability([])
+    }
+  }, [access.canViewAttendanceAvailability, shouldSkipVisibleStoreQuery, storeCode, weekEnd, weekStart])
+
+  const availabilityIndex = useMemo(() => buildAvailabilityIndex(weekAvailability), [weekAvailability])
+
   const loadAvailability = useCallback(async (page = availability.page, pageSize = availability.pageSize) => {
     if (shouldSkipVisibleStoreQuery()) {
       setAvailability({ ...initialListState, page, pageSize })
@@ -660,13 +712,14 @@ export default function ScheduleAttendancePage() {
       void loadSchedules(page)
       void loadStoreUsers()
       void loadScheduleHolidays()
+      void loadWeekAvailability()
     }
     if (activeTab === 'records' && access.canViewAttendancePunches) void loadRecords(page)
     if (activeTab === 'availability') void loadAvailability(page)
     if (activeTab === 'punches') void loadPunches(page)
     if (activeTab === 'holidays') void loadHolidays(page)
     if (activeTab === 'settings') void loadSettings()
-  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers])
+  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers, loadWeekAvailability])
 
   useEffect(() => {
     if (visibleStoreCodes !== null) {
@@ -696,6 +749,34 @@ export default function ScheduleAttendancePage() {
   useEffect(() => {
     if (activeTab === 'records' && !access.canViewAttendancePunches) setActiveTab('schedules')
   }, [access.canViewAttendancePunches, activeTab])
+
+  // 旧地址 /pos-admin/attendance-review 重定向到 ?tab=review：本页已挂载（保活）时也要切过去。
+  useEffect(() => {
+    if (wantsReviewTab && canReviewTab) setActiveTab('review')
+  }, [canReviewTab, wantsReviewTab])
+
+  // 权限与当前标签对不上时回落：没有审核权限不停在审核；只有审核权限没有排班查看权限时不停在排班类标签。
+  useEffect(() => {
+    if (activeTab === 'review' && !canReviewTab) setActiveTab('schedules')
+    else if (activeTab !== 'review' && !canViewSchedulePart && canReviewTab) setActiveTab('review')
+  }, [activeTab, canReviewTab, canViewSchedulePart])
+
+  // 切标签同时把「考勤审核」写进地址（刷新、复制链接能回到同一标签）；切走时清掉，避免 ?tab=review 残留把之后的访问又拉回审核。
+  const handleTabChange = (key: string) => {
+    setActiveTab(key as TabKey)
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (key === 'review') next.set('tab', REVIEW_TAB_QUERY)
+      else next.delete('tab')
+      return next
+    }, { replace: true })
+  }
+
+  // 子标签上的待审数（侧栏「排班考勤」角标同源）；只在本页处于前台时拉取，避免保活缓存期间重复请求。
+  const pendingReviewCount = useAttendancePendingCount(
+    canReviewTab && location.pathname === SCHEDULE_ATTENDANCE_PATH,
+    location.pathname,
+  )
 
   const statusLabel = useCallback((type: 'schedule' | 'punch' | 'review' | 'scheduleState' | 'segment' | 'overtimeApproval', value?: string) => {
     if (!value) return '--'
@@ -1349,8 +1430,37 @@ export default function ScheduleAttendancePage() {
     )
   }
 
+  // 格内状态行：绿=员工可上班、红=不能上班，同类多段用「·」连在一行；没上报则整块不渲染。
+  const renderAvailabilityLines = (day?: DayAvailability) => {
+    if (!day) return null
+    const segmentText = (segment: AvailabilitySegment) => (
+      segment.allDay
+        ? t('posAdmin.scheduleAttendance.weekAvailability.allDay')
+        : `${segment.startLabel}-${segment.endLabel}`
+    )
+    const renderLine = (kind: 'available' | 'unavailable', segments: AvailabilitySegment[]) => {
+      if (!segments.length) return null
+      const remarks = segments.map((segment) => segment.remark).filter(Boolean).join(' / ')
+      return (
+        <div key={kind} className={`sce-avail sce-avail--${kind}`} title={remarks || undefined}>
+          <i aria-hidden />
+          <span>
+            {t(`posAdmin.scheduleAttendance.weekAvailability.${kind}`)} {segments.map(segmentText).join(' · ')}
+          </span>
+        </div>
+      )
+    }
+    return (
+      <div className="sce-avail-list">
+        {renderLine('available', day.available)}
+        {renderLine('unavailable', day.unavailable)}
+      </div>
+    )
+  }
+
   const renderScheduleCell = (row: ScheduleRow, date: Dayjs) => {
     const dateKey = date.format('YYYY-MM-DD')
+    const dayAvailability = getDayAvailability(availabilityIndex, row.userGuid, dateKey)
     const daySchedules = [...(row.schedulesByDate[dateKey] ?? [])].sort((left, right) => left.startTime.localeCompare(right.startTime))
     const canEditRowStore = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
     const newCell: EditingCell = { userGuid: row.userGuid, dateKey }
@@ -1359,7 +1469,12 @@ export default function ScheduleAttendancePage() {
     if (!daySchedules.length) {
       if (!canEditRowStore) {
         // 无权限：整格只读，不响应点击
-        return <div className="sce-cell"><button type="button" disabled className="sce-empty sce-empty--readonly">{t('posAdmin.scheduleAttendance.emptyShift')}</button></div>
+        return (
+          <div className="sce-cell">
+            <button type="button" disabled className="sce-empty sce-empty--readonly">{t('posAdmin.scheduleAttendance.emptyShift')}</button>
+            {renderAvailabilityLines(dayAvailability)}
+          </div>
+        )
       }
       return (
         <div className="sce-cell">
@@ -1371,6 +1486,7 @@ export default function ScheduleAttendancePage() {
               <PlusOutlined /> {t('posAdmin.scheduleAttendance.actions.addShift')}
             </button>
           ))}
+          {renderAvailabilityLines(dayAvailability)}
         </div>
       )
     }
@@ -1380,6 +1496,8 @@ export default function ScheduleAttendancePage() {
         {daySchedules.map((schedule) => {
           const canEditSchedule = access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
           const chipCell: EditingCell = { userGuid: row.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
+          // 班次与员工上报的时间冲突：块上加橙色角标，悬停说明原因（不阻止保存，仅提醒排班的人）
+          const conflict = getScheduleAvailabilityConflict(schedule, dayAvailability)
           const chip = (
             <button
               key={schedule.scheduleGuid}
@@ -1390,9 +1508,17 @@ export default function ScheduleAttendancePage() {
                 `sce-chip--${schedule.status}`,
                 canEditSchedule ? 'sce-chip--editable' : '',
                 isSameEditingCell(editingCell, chipCell) ? 'sce-chip--active' : '',
+                conflict ? 'sce-chip--conflict' : '',
               ].filter(Boolean).join(' ')}
             >
-              <span className="sce-chip-time">{formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}</span>
+              <span className="sce-chip-time">
+                {formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}
+                {conflict ? (
+                  <Tooltip title={t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`)}>
+                    <WarningOutlined className="sce-chip-warn" />
+                  </Tooltip>
+                ) : null}
+              </span>
               <span className="sce-chip-meta">
                 <span>{statusLabel('schedule', schedule.status)}</span>
                 {schedule.remark ? <span className="sce-chip-remark" title={schedule.remark}>{schedule.remark}</span> : null}
@@ -1403,6 +1529,7 @@ export default function ScheduleAttendancePage() {
             ? <div key={schedule.scheduleGuid}>{withCellEditor(row, date, chipCell, schedule, chip)}</div>
             : chip
         })}
+        {renderAvailabilityLines(dayAvailability)}
         {/* 同一天再加一个班次：悬停该格才出现，不打扰已排满的日常视图 */}
         {canEditRowStore ? withCellEditor(row, date, newCell, undefined, (
           <button type="button" className={`sce-add-more${newCellActive ? ' sce-add-more--active' : ''}`}>
@@ -1909,7 +2036,7 @@ export default function ScheduleAttendancePage() {
     ),
   } : null
 
-  const tabItems = [
+  const scheduleTabItems = [
     {
       key: 'schedules',
       label: t('posAdmin.scheduleAttendance.tabs.schedules'),
@@ -1932,6 +2059,14 @@ export default function ScheduleAttendancePage() {
                 </Typography.Text>
               ) : null}
               <span style={{ flex: 1 }} />
+              {access.canViewAttendanceAvailability ? (
+                <Tooltip title={t('posAdmin.scheduleAttendance.weekAvailability.legendTip')}>
+                  <span style={{ display: 'inline-flex', gap: 12 }}>
+                    <span className="sce-legend"><i className="is-available" />{t('posAdmin.scheduleAttendance.weekAvailability.legendAvailable')}</span>
+                    <span className="sce-legend"><i className="is-unavailable" />{t('posAdmin.scheduleAttendance.weekAvailability.legendUnavailable')}</span>
+                  </span>
+                </Tooltip>
+              ) : null}
               {SCHEDULE_STATUS_ORDER.map((status) => (
                 <span key={status} className="sce-legend">
                   <i className={`is-${status}`} />
@@ -2051,10 +2186,33 @@ export default function ScheduleAttendancePage() {
     },
   ]
 
+  // 「考勤审核」放在「考勤记录」后面：整页复用审核工作台，外层只提供标签与待审数。
+  const reviewTabItem = canReviewTab ? {
+    key: 'review',
+    label: (
+      <span>
+        {t('menu.attendanceReview')}
+        {pendingReviewCount > 0 ? <Badge count={pendingReviewCount} overflowCount={99} size="small" style={{ marginInlineStart: 6 }} /> : null}
+      </span>
+    ),
+    children: (
+      <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>}>
+        <AttendanceReviewPanel embedded />
+      </Suspense>
+    ),
+  } : null
+  const afterRecordsKeys = new Set<string>(['schedules', 'records'])
+  const tabItems = [
+    ...(canViewSchedulePart ? scheduleTabItems.filter((item) => afterRecordsKeys.has(item.key)) : []),
+    ...(reviewTabItem ? [reviewTabItem] : []),
+    ...(canViewSchedulePart ? scheduleTabItems.filter((item) => !afterRecordsKeys.has(item.key)) : []),
+  ]
+
   return (
     <Card
       title={<Space><CalendarOutlined />{t('posAdmin.scheduleAttendance.title')}</Space>}
-      extra={
+      // 考勤审核标签自带门店 / 日期 / 搜索筛选，这里的周排班筛选与操作按钮不适用，整块隐藏。
+      extra={activeTab === 'review' ? undefined : (
         <Space wrap>
           {filterBar}
           {activeTab === 'schedules' && access.canEditAttendanceSchedule ? (
@@ -2100,9 +2258,9 @@ export default function ScheduleAttendancePage() {
             </>
           ) : null}
         </Space>
-      }
+      )}
     >
-      <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as TabKey)} items={tabItems} />
+      <Tabs activeKey={activeTab} onChange={handleTabChange} items={tabItems} />
 
       <DeletedSchedulesDrawer
         open={deletedSchedulesOpen}

@@ -96,7 +96,12 @@ const timeOf = (value?: string) => (value ? dayjs(value).format('HH:mm') : '--')
 /** 需要看当天打卡的审批类型：详情里画时间线、推算批准后工时。 */
 const DAY_RECORD_SOURCES = new Set(['PunchAdjustment', 'MissingClockOut', 'Overtime', 'MealBreak', 'Punch'])
 
-export default function AttendanceReviewPage() {
+interface AttendanceReviewPageProps {
+  /** 嵌在排班考勤页的子标签里时为 true：外层已有页面标题，这里不再重复渲染大标题。 */
+  embedded?: boolean
+}
+
+export default function AttendanceReviewPage({ embedded = false }: AttendanceReviewPageProps = {}) {
   const { t } = useTranslation()
   const access = useAuthStore((state) => state.access)
   const currentUser = useAuthStore((state) => state.currentUser)
@@ -868,7 +873,7 @@ export default function AttendanceReviewPage() {
     <div className="atr-page">
       <div className="atr-header">
         <div>
-          <Typography.Title level={4} className="atr-title">{t('attendanceReview.title')}</Typography.Title>
+          {embedded ? null : <Typography.Title level={4} className="atr-title">{t('attendanceReview.title')}</Typography.Title>}
           {loadedAt && view === 'pending' ? (
             <div className="atr-muted"><SyncOutlined /> {t('attendanceReview.reconciledHint', { time: loadedAt.format('HH:mm') })}</div>
           ) : null}

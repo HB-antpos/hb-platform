@@ -80,7 +80,6 @@ const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashR
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
-const PosAdminAttendanceReviewPage = lazy(() => import('../pages/PosAdmin/AttendanceReview'))
 const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
 const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
@@ -289,9 +288,17 @@ const SCHEDULE_ATTENDANCE_NAV_GROUP: NavGroupDefinition = {
   title: 'menu.scheduleAttendance',
   icon: 'CalendarOutlined',
   tabs: [
-    { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule', keepAlive: true, element: <PosAdminScheduleAttendancePage /> },
-    // 考勤审核工作台：侧栏「排班考勤」菜单带待审数角标（见 AdminLayout）。
-    { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance', keepAlive: true, element: <PosAdminAttendanceReviewPage /> },
+    // 考勤审核已并入页内「考勤记录」后面的子标签（?tab=review，由页面按 canReviewAttendance 显示）；
+    // 只有审核权限的账号也要能进入本页，所以入口权限是「排班查看或审核任一」。
+    // 侧栏「排班考勤」菜单仍带待审数角标（见 AdminLayout）。旧地址 /pos-admin/attendance-review 见下方重定向路由。
+    {
+      path: '/pos-admin/schedule-attendance',
+      title: 'menu.scheduleAttendance',
+      accessKey: 'canViewAttendanceSchedule',
+      anyAccessKeys: ['canViewAttendanceSchedule', 'canReviewAttendance'],
+      keepAlive: true,
+      element: <PosAdminScheduleAttendancePage />,
+    },
   ],
 }
 
@@ -342,7 +349,8 @@ function navGroupRoutes(group: NavGroupDefinition): AppRouteItem[] {
         hidden: true,
         // 按组缓存外壳；敏感标签由外壳在切走 / 离开时自行卸载（见 NavGroupPage）。
         keepAlive: true,
-        accessKey: tab.accessKey,
+        // 声明了 anyAccessKeys 的标签以它为准（路由守卫里 accessKey 与 anyAccessKeys 要同时满足，不能两个都写）。
+        ...(tab.anyAccessKeys?.length ? { anyAccessKeys: tab.anyAccessKeys } : { accessKey: tab.accessKey }),
         activeMenu: group.path,
         navGroup: group.path,
       },
@@ -897,6 +905,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewEmployeeOperationLogs',
         },
         element: <PosAdminEmployeeLogsPage />,
+      },
+      {
+        // 旧「考勤审核」地址（书签、分享链接、工时页「去审核」）转到排班考勤页内的「考勤审核」子标签。
+        path: '/pos-admin/attendance-review',
+        meta: {
+          title: 'menu.attendanceReview',
+          hidden: true,
+          accessKey: 'canReviewAttendance',
+          activeMenu: '/pos-admin/attendance',
+        },
+        element: <Navigate to="/pos-admin/schedule-attendance?tab=review" replace />,
       },
       {
         // 旧「老系统操作日志」地址（书签、分享链接）转到合并页的老收银来源。

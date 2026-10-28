@@ -23,6 +23,11 @@ export interface NavGroupTab {
   title: string
   accessKey: keyof AccessControl
   /**
+   * 标签内部还承载了其他页面（如排班考勤页内嵌考勤审核）时，任一权限为真即可进入该标签；
+   * 设置后以它为准，accessKey 仅作为主权限的说明保留。页内各子标签再按各自权限显示。
+   */
+  anyAccessKeys?: (keyof AccessControl)[]
+  /**
    * false：切走或离开合并页即卸载（页面内存里会短暂持有凭据、摄像机地址、照片等敏感数据）；
    * true：切走后保留状态（筛选、分页等）。
    */
