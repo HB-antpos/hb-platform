@@ -189,7 +189,7 @@ function paidMinutes(day: SampleDay): number {
   const worked = segments.reduce((sum, [start, end]) => sum + (end - start), 0)
   const inSchedule = segments.reduce((sum, [start, end]) => sum + Math.max(0, Math.min(end, scheduleEnd) - Math.max(start, scheduleStart)), 0)
   const duration = scheduleEnd - scheduleStart
-  const effectiveMeals = duration > 540 ? 2 : duration > 270 ? 1 : 0
+  const effectiveMeals = duration > 540 ? 2 : duration >= 270 ? 1 : 0
   const required = Math.min(effectiveMeals, Math.floor(worked / 240))
   let gaps = 0
   for (let index = 1; index < segments.length; index++) {

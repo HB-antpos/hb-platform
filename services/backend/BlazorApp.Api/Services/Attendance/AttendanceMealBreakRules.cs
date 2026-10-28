@@ -5,7 +5,7 @@ namespace BlazorApp.Api.Services.Attendance;
 
 /// <summary>
 /// 排班用餐规则（后端口径）。默认次数规则与移动端 attendance-my-week.ts 保持一致：
-/// 班次超过 9 小时 2 次、超过 4.5 小时 1 次，每次 30 分钟；排班上指定过次数（含 0）就用指定值。
+/// 班次超过 9 小时 2 次、达到 4.5 小时（含）1 次，每次 30 分钟；排班上指定过次数（含 0）就用指定值。
 /// 此前只有移动端会算，后端不知道有效次数，所以下班检查、工时扣除都要在这里再算一遍。
 /// </summary>
 public static class AttendanceMealBreakRules
@@ -38,11 +38,11 @@ public static class AttendanceMealBreakRules
         return endTime > startTime ? minutes : minutes + 1440;
     }
 
-    /// <summary>按班次时长推算的默认用餐次数；门槛均为「超过」，正好 4.5 / 9 小时按低一档。</summary>
+    /// <summary>按班次时长推算的默认用餐次数：达到 4.5 小时（含）1 次；超过 9 小时 2 次，正好 9 小时仍按 1 次。</summary>
     public static int DefaultCount(int durationMinutes)
     {
         if (durationMinutes > 9 * 60) return 2;
-        if (durationMinutes > 270) return 1;
+        if (durationMinutes >= 270) return 1;
         return 0;
     }
 

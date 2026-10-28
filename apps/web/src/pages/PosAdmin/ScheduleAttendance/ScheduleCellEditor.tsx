@@ -172,7 +172,7 @@ export default function ScheduleCellEditor({
         ) : null}
       </div>
 
-      {/* 用餐扣除：自动按时长算（超过 4.5 小时 1 次、超过 9 小时 2 次），也可手动指定 0–3 次；下面一行实时算出计薪时长 */}
+      {/* 用餐扣除：自动按时长算（满 4.5 小时 1 次、超过 9 小时 2 次），也可手动指定 0–3 次；下面一行实时算出计薪时长 */}
       <div className="sce-label">
         <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.title')}</span>
         <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.perMeal', { minutes: 30 })}</span>

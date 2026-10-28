@@ -38,10 +38,11 @@ assert.deepEqual(DEFAULT_SHIFT, { start: '09:00', end: '17:30' })
 
 // 默认用餐次数：门槛都是「超过」，与后端 AttendanceMealBreakRules 一致
 assert.equal(defaultMealBreakCount(240), 0) // 4 小时
-assert.equal(defaultMealBreakCount(270), 0) // 正好 4.5 小时按低一档
+assert.equal(defaultMealBreakCount(269), 0)
+assert.equal(defaultMealBreakCount(270), 1) // 正好 4.5 小时起扣 1 次
 assert.equal(defaultMealBreakCount(271), 1)
 assert.equal(defaultMealBreakCount(480), 1) // 8 小时
-assert.equal(defaultMealBreakCount(540), 1) // 正好 9 小时按低一档
+assert.equal(defaultMealBreakCount(540), 1) // 正好 9 小时仍按 1 次
 assert.equal(defaultMealBreakCount(541), 2)
 assert.equal(defaultMealBreakCount(720), 2) // 12 小时
 
