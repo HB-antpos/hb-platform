@@ -59,7 +59,12 @@ for (const group of NAV_GROUPS) {
     assert(route?.meta.hidden === true, `${tab.path} 不再单独出现在侧栏`)
     assert(route?.meta.navGroup === group.path, `${tab.path} 必须挂在 ${group.path}`)
     assert(route?.meta.activeMenu === group.path, `${tab.path} 侧栏高亮合并页`)
-    assert(route?.meta.accessKey === tab.accessKey, `${tab.path} 沿用原访问键`)
+    if (tab.anyAccessKeys?.length) {
+      assert(route?.meta.accessKey === undefined, `${tab.path} 声明了任一访问键就不再要求单个 accessKey`)
+      assert(route?.meta.anyAccessKeys?.join(',') === tab.anyAccessKeys.join(','), `${tab.path} 沿用任一访问键`)
+    } else {
+      assert(route?.meta.accessKey === tab.accessKey, `${tab.path} 沿用原访问键`)
+    }
   }
 }
 
@@ -101,12 +106,16 @@ assert(getSelectedMenuKeys('/system/roles', admin).join(',') === '/system/accoun
 const crumbs = getBreadcrumbItems('/system/roles', admin, '账号与权限').map((item) => item.title)
 assert(crumbs.length === 3, '面包屑：父菜单 / 合并页 / 当前标签')
 
-// 考勤两个合并页：考勤审核并入排班考勤，MYOB 对接并入工时与工资；原地址、访问键、保活设置不变
+// 考勤两个合并页：考勤审核成为排班考勤页内「考勤记录」后的子标签（外层只剩一个标签），MYOB 对接并入工时与工资
 const scheduleGroup = NAV_GROUPS.find((group) => group.path === '/pos-admin/attendance')!
 const payrollGroup = NAV_GROUPS.find((group) => group.path === '/pos-admin/payroll')!
 assert(
-  scheduleGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/schedule-attendance,/pos-admin/attendance-review',
-  '排班考勤合并页含排班考勤、考勤审核',
+  scheduleGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/schedule-attendance',
+  '排班考勤合并页只剩一个标签，考勤审核已并入页内子标签',
+)
+assert(
+  scheduleGroup.tabs[0].anyAccessKeys?.join(',') === 'canViewAttendanceSchedule,canReviewAttendance',
+  '排班考勤标签：排班查看或审核任一即可进入',
 )
 assert(
   payrollGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/attendance-payroll,/pos-admin/myob',
@@ -116,13 +125,26 @@ assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/myob')?.keepAliv
 for (const path of ['/pos-admin/attendance-review', '/pos-admin/myob']) {
   assert(!adminMenuKeys.includes(path), `${path} 不再单独出现在侧栏`)
 }
-// 只有审核权限：只显示「排班考勤」合并页，且只剩考勤审核一个标签
+// 只有审核权限：仍显示「排班考勤」合并页并能进入唯一的标签（页内只会显示「考勤审核」子标签），不能因合并丢入口
 const reviewerOnly = buildAccess(createUser([P.Attendance.ApprovalReviewManagedStore]))
 assert(collectMenuKeys(buildMenus(reviewerOnly)).includes('/pos-admin/attendance'), '审核权限显示排班考勤合并页')
 assert(
-  getVisibleNavGroupTabs(scheduleGroup, reviewerOnly).map((tab) => tab.path).join(',') === '/pos-admin/attendance-review',
-  '审核权限只看到考勤审核标签',
+  getVisibleNavGroupTabs(scheduleGroup, reviewerOnly).map((tab) => tab.path).join(',') === '/pos-admin/schedule-attendance',
+  '审核权限能进入排班考勤标签',
 )
+assert(reviewerOnly.canViewAttendanceSchedule === false && reviewerOnly.canReviewAttendance === true, '审核权限不连带排班查看')
+assert(Boolean(resolveRoute('/pos-admin/schedule-attendance')), '排班考勤路由登记')
+// 只有排班查看权限：能进入，页内看不到审核（页面按 canReviewAttendance 控制）
+const scheduleOnly = buildAccess(createUser([P.Attendance.ScheduleViewStore]))
+assert(
+  getVisibleNavGroupTabs(scheduleGroup, scheduleOnly).map((tab) => tab.path).join(',') === '/pos-admin/schedule-attendance',
+  '排班查看权限能进入排班考勤标签',
+)
+assert(scheduleOnly.canReviewAttendance === false, '排班查看权限不连带审核')
+// 两种权限都没有：看不到该合并页
+const noAttendance = buildAccess(createUser([P.Cash.OverviewView]))
+assert(getVisibleNavGroupTabs(scheduleGroup, noAttendance).length === 0, '无考勤相关权限不显示排班考勤标签')
+assert(!collectMenuKeys(buildMenus(noAttendance)).includes('/pos-admin/attendance'), '无考勤相关权限不显示排班考勤菜单')
 // 只有 MYOB 权限：只显示「工时与工资」合并页，且只剩 MYOB 对接一个标签
 const myobOnly = buildAccess(createUser([P.Myob.ConnectionManage]))
 assert(collectMenuKeys(buildMenus(myobOnly)).includes('/pos-admin/payroll'), 'MYOB 权限显示工时与工资合并页')
@@ -132,10 +154,12 @@ assert(
 )
 // 面包屑：首个标签与合并页同名时只保留一级；其余标签仍是「父菜单 / 合并页 / 当前标签」
 assert(getBreadcrumbItems('/pos-admin/schedule-attendance', admin).length === 2, '同名标签不重复面包屑')
-assert(getBreadcrumbItems('/pos-admin/attendance-review', admin).length === 3, '考勤审核面包屑含合并页与标签')
 assert(getBreadcrumbItems('/pos-admin/myob', admin).length === 3, 'MYOB 对接面包屑含合并页与标签')
-// 老书签地址仍归到合并页：同组页签共用一个 key
-assert(toTabItem('/pos-admin/attendance-review', admin)?.key === '/pos-admin/attendance', '考勤审核页签归到排班考勤合并页')
+// 旧「考勤审核」地址只做跳转（转到页内 ?tab=review），不生成页签，需要审核权限才放行，侧栏仍高亮排班考勤
+const reviewRedirect = resolveRoute('/pos-admin/attendance-review')
+assert(reviewRedirect?.meta.hidden === true && reviewRedirect.meta.accessKey === 'canReviewAttendance', '旧考勤审核地址保留为隐藏跳转路由')
+assert(reviewRedirect?.meta.activeMenu === '/pos-admin/attendance', '旧考勤审核地址侧栏高亮排班考勤')
+assert(toTabItem('/pos-admin/attendance-review', admin) === null, '旧考勤审核地址只跳转，不生成页签')
 assert(getSelectedMenuKeys('/pos-admin/myob', admin).join(',') === '/pos-admin/payroll', 'MYOB 对接侧栏高亮工时与工资')
 
 // 本地存储里的旧页签归到合并页，同组只留一个

@@ -286,7 +286,7 @@ export default function HoursTab(props: HoursTabProps) {
             <strong className="atp-stat-value">
               {t('attendancePayroll.hours.pendingCount', { count: data.pendingCount })}
               {data.pendingCount > 0 ? (
-                <Button type="link" size="small" onClick={() => navigate('/pos-admin/attendance-review')}>{t('attendancePayroll.hours.goReview')}</Button>
+                <Button type="link" size="small" onClick={() => navigate('/pos-admin/schedule-attendance?tab=review')}>{t('attendancePayroll.hours.goReview')}</Button>
               ) : null}
             </strong>
             <span className="atp-stat-sub">

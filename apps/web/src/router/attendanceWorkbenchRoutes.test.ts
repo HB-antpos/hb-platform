@@ -39,8 +39,37 @@ const REVIEW_PATH = '/pos-admin/attendance-review'
 const PAYROLL_PATH = '/pos-admin/attendance-payroll'
 
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
+// 考勤审核已并入排班考勤页内的子标签：路由层只保留旧地址的隐藏跳转，不再有独立页面组件
+{
+  const start = routeSource.indexOf(`path: '${REVIEW_PATH}'`)
+  assertEqual(start >= 0, true, `必须保留旧地址 ${REVIEW_PATH}`)
+  const block = routeSource.slice(start, routeSource.indexOf('element:', start) + 90)
+  assertEqual(block.includes("title: 'menu.attendanceReview'"), true, '旧审核地址使用全局菜单键')
+  assertEqual(block.includes("accessKey: 'canReviewAttendance'"), true, '旧审核地址仍需审核权限')
+  assertEqual(block.includes('hidden: true'), true, '旧审核地址不进侧栏')
+  assertEqual(block.includes('<Navigate to="/pos-admin/schedule-attendance?tab=review" replace />'), true, '旧审核地址跳到页内审核子标签')
+  assertEqual(routeSource.includes('PosAdminAttendanceReviewPage'), false, '路由层不再单独加载审核页')
+}
+
+// 排班考勤页：「考勤审核」子标签紧跟在「考勤记录」后面，按审核权限显示，首次切到才懒加载
+{
+  const pageSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/index.tsx'), 'utf8')
+  assertEqual(pageSource.includes("lazy(() => import('../AttendanceReview'))"), true, '审核页在子标签内懒加载')
+  assertEqual(pageSource.includes('const reviewTabItem = canReviewTab ? {'), true, '审核子标签按 canReviewAttendance 显示')
+  const compose = pageSource.slice(pageSource.indexOf('const tabItems = ['))
+  const recordsIdx = compose.indexOf('afterRecordsKeys.has(item.key))')
+  const reviewIdx = compose.indexOf('reviewTabItem ? [reviewTabItem]')
+  const restIdx = compose.indexOf('!afterRecordsKeys.has(item.key))')
+  assertEqual(recordsIdx >= 0 && reviewIdx > recordsIdx && restIdx > reviewIdx, true, '标签顺序：周排班、考勤记录、考勤审核、其余')
+  assertEqual(pageSource.includes("set('tab', REVIEW_TAB_QUERY)"), true, '切到审核标签要写入地址 ?tab=review')
+  assertEqual(
+    pageSource.includes("location.pathname === SCHEDULE_ATTENDANCE_PATH && searchParams.get('tab')"),
+    true,
+    '保活期间只认本页地址上的 ?tab=review',
+  )
+}
+
 for (const [path, title, accessKey, component] of [
-  [REVIEW_PATH, 'menu.attendanceReview', 'canReviewAttendance', 'PosAdminAttendanceReviewPage'],
   [PAYROLL_PATH, 'menu.attendancePayroll', 'canViewAttendanceHours', 'PosAdminAttendancePayrollPage'],
 ] as const) {
   const start = routeSource.indexOf(`path: '${path}'`)

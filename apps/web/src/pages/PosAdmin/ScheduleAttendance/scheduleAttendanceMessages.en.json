@@ -1,6 +1,16 @@
 {
   "posAdmin": {
     "scheduleAttendance": {
+      "weekAvailability": {
+        "available": "Avail",
+        "unavailable": "Off",
+        "allDay": "All day",
+        "legendAvailable": "Available",
+        "legendUnavailable": "Unavailable",
+        "legendTip": "Times reported by staff; cells without a report show nothing",
+        "conflictUnavailable": "This shift overlaps a time the employee marked unavailable",
+        "conflictOutside": "This shift is outside the times the employee marked available"
+      },
       "approvalPresentation": {
         "MealBreak": {
           "title": "Missed meal break"
