@@ -51,6 +51,18 @@ import {
   type ScheduleGridCell,
   type SchedulePublishState,
 } from "@/modules/attendance/schedule-grid";
+import {
+  DEFAULT_SHIFT,
+  SHIFT_PRESETS,
+  getAvailabilityConflict,
+  getMealBadge,
+  getPlacementVerdict,
+  isScheduleLocked,
+  type PlacementKind,
+  type PlacementSource,
+  type PlacementVerdict,
+} from "@/modules/attendance/schedule-placement";
+import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
 import type {
   AttendanceAvailability,
   AttendanceSchedule,
@@ -71,15 +83,9 @@ const SIDE_PANEL_WIDTH = 380;
 const ACCENT = ATTENDANCE_STATUS_TONES.accent;
 const LEAVE = ATTENDANCE_STATUS_TONES.warning;
 const UNAVAILABLE = ATTENDANCE_STATUS_TONES.danger;
-const QUICK_SHIFTS = [
-  { key: "nineToFiveThirty", startTime: "09:00", endTime: "17:30" },
-  { key: "tenToFour", startTime: "10:00", endTime: "16:00" },
-  { key: "nineToSeven", startTime: "09:00", endTime: "19:00" },
-  { key: "nineToNine", startTime: "09:00", endTime: "21:00" },
-];
 const EMPTY_FORM = {
-  startTime: "09:00",
-  endTime: "17:30",
+  startTime: DEFAULT_SHIFT.startTime,
+  endTime: DEFAULT_SHIFT.endTime,
   status: "Draft" as AttendanceScheduleStatus,
   remark: "",
   /** 店长指定的用餐次数；null 表示按班次时长默认。 */
@@ -338,6 +344,9 @@ export function ScheduleManagementCard({
   onDelete,
   onPublishWeek,
   onCopyPreviousWeek,
+  punchScheduleGuids,
+  punchesKnown,
+  onPlaceShift,
 }: {
   weekStartDate: string;
   storeCode?: string;
@@ -361,6 +370,12 @@ export function ScheduleManagementCard({
   onDelete: (scheduleGuid: string) => void;
   onPublishWeek: () => void;
   onCopyPreviousWeek: () => void;
+  /** 本周有打卡记录的排班 GUID：这些班次不能移动 / 复制（仍可删除）。 */
+  punchScheduleGuids: ReadonlySet<string>;
+  /** 是否成功拿到了本周打卡；拿不到（无权限 / 失败）时保守地锁今天及以前的班次。 */
+  punchesKnown: boolean;
+  /** 「点选目标格」放下：移动 / 复制 / 常用班次添加，由屏幕层落地并提示（含撤销）。 */
+  onPlaceShift: (source: PlacementSource, target: PlacementTargetCell) => void;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const insets = useSafeAreaInsets();
@@ -373,6 +388,8 @@ export function ScheduleManagementCard({
   const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  // 「点选目标格」：拿起一个班次（移动 / 复制）或常用班次（添加）后，点格子放下
+  const [placement, setPlacement] = useState<PlacementSource | null>(null);
   // 网格容器宽度：宽屏（横屏全屏）时把 7 天均分铺满，窄屏保持最小列宽并横向滚动。
   const [gridWidths, setGridWidths] = useState<Record<GridVariant, number>>({
     card: 0,
@@ -589,6 +606,81 @@ export function ScheduleManagementCard({
     setForm(EMPTY_FORM);
   };
 
+  const isLocked = (schedule: AttendanceSchedule) =>
+    isScheduleLocked({
+      scheduleGuid: schedule.scheduleGuid,
+      workDate: schedule.workDate,
+      today,
+      punchScheduleGuids,
+      punchesKnown,
+    });
+
+  // 编辑器里点「移到… / 复制到…」：关掉编辑器，进入点选目标格模式
+  const startPlacement = (kind: Extract<PlacementKind, "move" | "copy">, schedule: AttendanceSchedule) => {
+    setEditingTarget(null);
+    setBatchTarget(null);
+    setForm(EMPTY_FORM);
+    setPlacement({
+      kind,
+      schedule,
+      startTime: normalizeClockTime(schedule.startTime),
+      endTime: normalizeClockTime(schedule.endTime),
+    });
+  };
+
+  const startPresetPlacement = (preset: (typeof SHIFT_PRESETS)[number]) => {
+    setEditingTarget(null);
+    setPlacement({ kind: "preset", startTime: preset.startTime, endTime: preset.endTime });
+  };
+
+  const placementVerdictOf = (row: ScheduleRow, day: string): PlacementVerdict | undefined =>
+    placement
+      ? getPlacementVerdict(placement, {
+          userGuid: row.userGuid,
+          workDate: day,
+          schedules: row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
+          availability: availabilityMap.get(availabilityKey(row.userGuid, day)),
+        })
+      : undefined;
+
+  // 点格子放下：不能放（重叠）直接提示；提醒（员工当天不能上班等）手机上没有悬停，必须二次确认
+  const handlePlacementPress = (row: ScheduleRow, day: string) => {
+    if (!placement || !storeCode) {
+      return;
+    }
+    const verdict = placementVerdictOf(row, day);
+    if (!verdict || verdict.state === "noop") {
+      setPlacement(null);
+      return;
+    }
+    if (verdict.state === "bad") {
+      Alert.alert(t("scheduleManagement.placement.badOverlap"));
+      return;
+    }
+    const place = () => {
+      onPlaceShift(placement, { storeCode, userGuid: row.userGuid, workDate: day });
+      setPlacement(null);
+    };
+    if (verdict.state === "warn") {
+      const name = row.employeeName || row.userGuid;
+      Alert.alert(
+        t("scheduleManagement.placement.warnTitle"),
+        t(
+          verdict.reason === "unavailable"
+            ? "scheduleManagement.placement.warnUnavailable"
+            : "scheduleManagement.placement.warnOutside",
+          { name },
+        ),
+        [
+          { text: t("common:actions.cancel"), style: "cancel" },
+          { text: t("scheduleManagement.placement.warnConfirm"), onPress: place },
+        ],
+      );
+      return;
+    }
+    place();
+  };
+
   const openBatch = (target: BatchTarget) => {
     if (!storeCode) {
       return;
@@ -696,8 +788,8 @@ export function ScheduleManagementCard({
     closeEditor();
   };
 
-  const confirmDelete = () => {
-    const scheduleGuid = editingTarget?.schedule?.scheduleGuid;
+  const confirmDelete = (target?: AttendanceSchedule) => {
+    const scheduleGuid = (target ?? editingTarget?.schedule)?.scheduleGuid;
     if (!scheduleGuid) {
       return;
     }
@@ -879,6 +971,13 @@ export function ScheduleManagementCard({
       const hasMinorFindings = cell.schedules.some(
         (item) => item.minorCompliance?.hasFindings,
       );
+      const hasAvailabilityConflict = cell.schedules.some(
+        (item) => !item.leaveType && getAvailabilityConflict(item, cell.availability),
+      );
+      // 用餐小标记：只有手动指定了次数（含 0）才显示，自动的不加噪音
+      const manualMeal = cell.schedules
+        .map((item) => getMealBadge(item.mealBreakCount))
+        .find((badge) => badge !== undefined);
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
           <Text
@@ -891,6 +990,13 @@ export function ScheduleManagementCard({
           </Text>
           {cell.schedules.length > 1 ? (
             <Text style={styles.moreText}>+{cell.schedules.length - 1}</Text>
+          ) : null}
+          {manualMeal ? (
+            <Text style={styles.mealBadge}>{t("scheduleManagement.cell.mealBadge", { count: manualMeal.count })}</Text>
+          ) : null}
+          {/* 与员工上报的不能上班 / 可上班时间冲突：只提醒不拦截，小三角标记 */}
+          {hasAvailabilityConflict ? (
+            <Text style={styles.conflictMark} accessibilityLabel={t("scheduleManagement.cell.conflictA11y")}>⚠︎</Text>
           ) : null}
           {/* 未成年用工合规只提醒不拦截：格子里用小标记提示店长，详情在提醒待办里看。 */}
           {hasMinorFindings ? (
@@ -920,7 +1026,57 @@ export function ScheduleManagementCard({
     return null;
   };
 
-  const renderGrid = (variant: GridVariant) => {
+  // 放置模式的提示条与常用班次托盘：拿起后点格子放下；没拿起时显示「添加班次」托盘
+  const renderPlacementBar = () => {
+    if (!storeCode || !rows.length) {
+      return null;
+    }
+    if (placement) {
+      const shift = `${normalizeClockTime(placement.startTime)}–${normalizeClockTime(placement.endTime)}`;
+      const key = placement.kind === "move" ? "bannerMove" : placement.kind === "copy" ? "bannerCopy" : "bannerAdd";
+      return (
+        <View style={styles.placementBar}>
+          <Text variant="labelLarge" style={styles.placementBarText}>
+            {t(`scheduleManagement.placement.${key}`, { shift })}
+          </Text>
+          <Button compact mode="text" onPress={() => setPlacement(null)}>
+            {t("scheduleManagement.placement.cancel")}
+          </Button>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.trayBar}>
+        <Text variant="labelMedium" style={styles.muted}>
+          {t("scheduleManagement.placement.trayTitle")}
+        </Text>
+        <View style={styles.chipRow}>
+          {SHIFT_PRESETS.map((preset) => (
+            <Chip
+              key={`${preset.startTime}-${preset.endTime}`}
+              compact
+              disabled={isBusy}
+              onPress={() => startPresetPlacement(preset)}
+            >
+              {`${preset.startTime}–${preset.endTime}`}
+            </Chip>
+          ))}
+        </View>
+        <Text variant="labelSmall" style={styles.muted}>
+          {t("scheduleManagement.placement.trayHint")}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderGrid = (variant: GridVariant) => (
+    <>
+      {renderPlacementBar()}
+      {renderGridBody(variant)}
+    </>
+  );
+
+  const renderGridBody = (variant: GridVariant) => {
     const width = gridWidths[variant];
     const cellWidth = Math.max(
       MIN_CELL_WIDTH,
@@ -951,7 +1107,7 @@ export function ScheduleManagementCard({
                 accessibilityLabel={t("scheduleManagement.batch.employeeA11y", {
                   name: row.employeeName || row.userGuid,
                 })}
-                disabled={!storeCode || isBusy}
+                disabled={!storeCode || isBusy || Boolean(placement)}
                 onPress={() =>
                   openBatch({ mode: "employee", userGuid: row.userGuid, employeeName: row.employeeName })
                 }
@@ -992,7 +1148,7 @@ export function ScheduleManagementCard({
                       accessibilityLabel={t("scheduleManagement.batch.dateA11y", {
                         date: `${t(`weekdays.${index}`)} ${shortDate(day)}`,
                       })}
-                      disabled={!storeCode || isBusy || !rows.length}
+                      disabled={!storeCode || isBusy || !rows.length || Boolean(placement)}
                       onPress={() => openBatch({ mode: "date", workDate: day, weekdayIndex: index })}
                       style={({ pressed }) => [
                         styles.headerCell,
@@ -1026,18 +1182,25 @@ export function ScheduleManagementCard({
                       row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
                       availabilityMap.get(availabilityKey(row.userGuid, day)),
                     );
+                    const verdict = placementVerdictOf(row, day);
                     return (
                       <Pressable
                         key={`${row.userGuid}-${day}`}
                         accessibilityRole="button"
                         accessibilityLabel={`${row.employeeName || row.userGuid} ${t(`weekdays.${index}`)} ${shortDate(day)}`}
                         disabled={!storeCode || isBusy}
-                        onPress={() => openCell(row, day, index, cell)}
+                        onPress={() =>
+                          placement ? handlePlacementPress(row, day) : openCell(row, day, index, cell)
+                        }
                         style={({ pressed }) => [
                           styles.bodyCell,
                           styles.dayCell,
                           { width: cellWidth },
                           day === today ? styles.todayColumn : null,
+                          // 放置模式：可放蓝 / 提醒琥珀 / 不能放红，与 Web 拖拽的落点提示一致
+                          verdict?.state === "ok" ? styles.placementOk : null,
+                          verdict?.state === "warn" ? styles.placementWarn : null,
+                          verdict?.state === "bad" ? styles.placementBad : null,
                           pressed ? styles.cellPressed : null,
                         ]}
                       >
@@ -1119,9 +1282,9 @@ export function ScheduleManagementCard({
             {t("scheduleManagement.quickShiftTitle")}
           </Text>
           <View style={styles.chipRow}>
-            {QUICK_SHIFTS.map((shift) => (
+            {SHIFT_PRESETS.map((shift) => (
               <Chip
-                key={shift.key}
+                key={`${shift.startTime}-${shift.endTime}`}
                 compact
                 selected={
                   form.startTime === shift.startTime &&
@@ -1135,7 +1298,7 @@ export function ScheduleManagementCard({
                   }))
                 }
               >
-                {t(`scheduleManagement.quickShifts.${shift.key}`)}
+                {`${shift.startTime}–${shift.endTime}`}
               </Chip>
             ))}
           </View>
@@ -1266,6 +1429,12 @@ export function ScheduleManagementCard({
     );
     const currentGuid = editingTarget.schedule?.scheduleGuid;
     const row = rows.find((item) => item.userGuid === editingTarget.userGuid);
+    // 正在编辑的时间与员工上报的冲突：只提醒，不拦截保存
+    const editorConflict = getAvailabilityConflict(
+      { startTime: form.startTime, endTime: form.endTime },
+      dayAvailability,
+    );
+    const editingLocked = editingTarget.schedule ? isLocked(editingTarget.schedule) : false;
 
     return (
       <>
@@ -1285,6 +1454,13 @@ export function ScheduleManagementCard({
               {describeAvailability(dayAvailability)}
             </Text>
           </View>
+          {editorConflict ? (
+            <Text variant="labelMedium" style={styles.conflictNotice}>
+              {t(editorConflict === "unavailable"
+                ? "scheduleManagement.editor.conflictUnavailable"
+                : "scheduleManagement.editor.conflictOutside")}
+            </Text>
+          ) : null}
           <View style={styles.infoRow}>
             <Text variant="bodySmall" style={styles.muted}>
               {t("scheduleManagement.editor.weekHoursLabel")}
@@ -1298,22 +1474,24 @@ export function ScheduleManagementCard({
         </View>
 
         {editingTarget.daySchedules.length && row ? (
-          // 同一天多个班次时在这里切换；也可以给同一员工再加一班。
+          // 同一天的班次都列在这里切换；每个班次块右侧的「×」直接删除（先确认）；也可以给同一员工再加一班。
           <View style={styles.chipRow}>
-            {editingTarget.daySchedules.length > 1
-              ? editingTarget.daySchedules.map((item) => (
-                  <Chip
-                    key={item.scheduleGuid}
-                    compact
-                    selected={item.scheduleGuid === currentGuid}
-                    onPress={() =>
-                      openEdit(item, row, editingTarget.weekdayIndex, editingTarget.daySchedules)
-                    }
-                  >
-                    {formatShiftShort(item.startTime, item.endTime)}
-                  </Chip>
-                ))
-              : null}
+            {editingTarget.daySchedules.map((item) => (
+              <Chip
+                key={item.scheduleGuid}
+                compact
+                selected={item.scheduleGuid === currentGuid}
+                onPress={() =>
+                  openEdit(item, row, editingTarget.weekdayIndex, editingTarget.daySchedules)
+                }
+                onClose={() => confirmDelete(item)}
+                closeIconAccessibilityLabel={t("scheduleManagement.placement.closeA11y", {
+                  shift: formatShiftShort(item.startTime, item.endTime),
+                })}
+              >
+                {formatShiftShort(item.startTime, item.endTime)}
+              </Chip>
+            ))}
             <Chip
               compact
               icon="plus"
@@ -1325,6 +1503,37 @@ export function ScheduleManagementCard({
               {t("scheduleManagement.editor.addShift")}
             </Chip>
           </View>
+        ) : null}
+
+        {editingTarget.schedule ? (
+          // 移动 / 复制：不在手机上拖动（要新增原生手势库），改成点选目标格；已有打卡的班次不能移动或复制
+          <View style={styles.placementActions}>
+            <Button
+              mode="outlined"
+              icon="arrow-right-bold-outline"
+              compact
+              disabled={editingLocked || isBusy}
+              onPress={() => startPlacement("move", editingTarget.schedule!)}
+            >
+              {t("scheduleManagement.placement.moveAction")}
+            </Button>
+            <Button
+              mode="outlined"
+              icon="content-copy"
+              compact
+              disabled={editingLocked || isBusy}
+              onPress={() => startPlacement("copy", editingTarget.schedule!)}
+            >
+              {t("scheduleManagement.placement.copyAction")}
+            </Button>
+          </View>
+        ) : null}
+        {editingLocked ? (
+          <Text variant="labelMedium" style={styles.muted}>
+            {t(punchesKnown
+              ? "scheduleManagement.placement.lockedNotice"
+              : "scheduleManagement.placement.lockedUnknownNotice")}
+          </Text>
         ) : null}
 
         {renderShiftFields()}
@@ -1357,7 +1566,7 @@ export function ScheduleManagementCard({
         <Button
           mode="outlined"
           textColor={HB_COLORS.danger}
-          onPress={confirmDelete}
+          onPress={() => confirmDelete()}
           disabled={isBusy}
         >
           {t("scheduleManagement.editor.setRest")}
@@ -1813,6 +2022,27 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   minorWarning: { color: "#B54708", fontSize: 11, fontWeight: "700", marginLeft: 2 },
+  conflictMark: { color: "#D46B08", fontSize: 11, fontWeight: "700", marginLeft: 1 },
+  conflictNotice: { color: "#B54708" },
+  mealBadge: { bottom: 0, color: "#667085", fontSize: 9, fontWeight: "700", position: "absolute", right: 2 },
+  placementActions: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
+  placementBar: {
+    alignItems: "center",
+    backgroundColor: "#EFF8FF",
+    borderColor: "#B2DDFF",
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    justifyContent: "space-between",
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: 2,
+  },
+  placementBarText: { color: "#175CD3", flexShrink: 1 },
+  placementOk: { backgroundColor: "#F0F7FF" },
+  placementWarn: { backgroundColor: "#FFFBE6" },
+  placementBad: { backgroundColor: "#FFF1F0", opacity: 0.6 },
+  trayBar: { gap: HB_SPACING.xs },
   // 草稿班次：同样浅蓝底，用虚线描边区分未发布。
   shiftChipDraft: {
     borderColor: "#53B1FD",

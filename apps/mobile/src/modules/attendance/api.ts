@@ -997,6 +997,28 @@ export async function deleteAttendanceSchedule(scheduleGuid: string): Promise<vo
   await apiClient.delete(`${ATTENDANCE_BASE}/schedules/${encodeURIComponent(scheduleGuid)}`);
 }
 
+/** 恢复已删除排班（后端恢复成草稿；有打卡的才恢复成有效）。 */
+export async function restoreAttendanceSchedule(scheduleGuid: string): Promise<void> {
+  await apiClient.post(`${ATTENDANCE_BASE}/schedules/${encodeURIComponent(scheduleGuid)}/restore`);
+}
+
+/**
+ * 本周打卡里出现过的排班 GUID：周排班接口不带打卡汇总，店长要靠它判断「哪些班次已有打卡、不能移动」。
+ * 需要打卡查看权限，没有权限 / 失败由调用方按「无法确认」处理。
+ */
+export async function getAttendancePunchScheduleGuids(params: {
+  storeCode: string;
+  fromDate: string;
+  toDate: string;
+}): Promise<string[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/punches`, {
+    params: { storeCode: params.storeCode, fromDate: params.fromDate, toDate: params.toDate },
+  });
+  return getArray(response.data)
+    .map((item) => asString(pick(item, "scheduleGuid", "ScheduleGuid")))
+    .filter(Boolean);
+}
+
 export async function publishAttendanceSchedulesWeek(payload: AttendancePublishWeekPayload): Promise<void> {
   await apiClient.post(`${ATTENDANCE_BASE}/schedules/publish-week`, sanitizePayload({ ...payload }));
 }

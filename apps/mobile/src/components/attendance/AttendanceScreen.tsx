@@ -31,6 +31,9 @@ import { TodayPunchCard } from "@/components/attendance/TodayPunchCard";
 import { MyRequestsPanel } from "@/components/attendance/MyRequestsPanel";
 import { MySchedulePanel } from "@/components/attendance/MySchedulePanel";
 import { shiftDate } from "@/modules/attendance/attendance-my-week";
+import { executePlacement } from "@/modules/attendance/schedule-placement-actions";
+import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
+import type { PlacementSource } from "@/modules/attendance/schedule-placement";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import {
@@ -53,6 +56,7 @@ import {
   getMyAttendanceWeek,
   getMyAvailability,
   getAttendanceEmployees,
+  getAttendancePunchScheduleGuids,
   getPendingApprovalBoard,
   getProcessedApprovals,
   punchAttendance,
@@ -60,6 +64,7 @@ import {
   previewMyAttendancePunchAdjustment,
   rejectAttendanceApproval,
   resolveAttendanceQr,
+  restoreAttendanceSchedule,
   startMyMealBreak,
   syncAttendanceHolidays,
   updateAttendanceHoliday,
@@ -259,6 +264,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     useState(getWeekStartDate);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarVisible, setSnackbarVisible] = useState(false);
+  // 带「撤销」按钮的提示（排班点选目标格放下后）：普通提示会清掉它
+  const [snackbarUndo, setSnackbarUndo] = useState<(() => void) | null>(null);
   const [attendanceScannerVisible, setAttendanceScannerVisible] = useState(false);
   const [attendanceScannerError, setAttendanceScannerError] = useState("");
   const [attendanceScannerPaused, setAttendanceScannerPaused] = useState(false);
@@ -364,6 +371,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   }, [activeMainTab, canViewAttendanceManagement, mode]);
 
   const showMessage = useCallback((message: string) => {
+    setSnackbarUndo(null);
     setSnackbarMessage(message);
     setSnackbarVisible(true);
   }, []);
@@ -450,6 +458,25 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       isAuthenticated && user && isScheduleManagementTab && selectedStoreCode,
     ),
   });
+  // 本周有打卡的排班：周排班接口不带打卡汇总，店长要靠它判断哪些班次不能移动 / 复制。
+  // 需要打卡查看权限；没有权限 / 失败只是「无法确认」，网格按保守规则锁今天及以前的班次。
+  const managedPunchScheduleGuidsQuery = useQuery({
+    queryKey: ["attendance", "punches", "week-schedule-guids", selectedStoreCode ?? "", managerWeekStartDate],
+    queryFn: () =>
+      getAttendancePunchScheduleGuids({
+        storeCode: selectedStoreCode!,
+        fromDate: managerWeekStartDate,
+        toDate: shiftDate(managerWeekStartDate, 6),
+      }),
+    enabled: Boolean(
+      isAuthenticated && user && isScheduleManagementTab && selectedStoreCode && canViewManagedPunches,
+    ),
+    retry: false,
+  });
+  const managedPunchScheduleGuids = useMemo(
+    () => new Set(managedPunchScheduleGuidsQuery.data ?? []),
+    [managedPunchScheduleGuidsQuery.data],
+  );
   const holidaysQuery = useQuery({
     queryKey: attendanceKeys.holidays(selectedStoreCode),
     queryFn: () => getAttendanceHolidays({ storeCode: selectedStoreCode }),
@@ -664,6 +691,58 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       ),
   });
 
+  // 点选目标格放下：移动 / 复制 / 常用班次添加（换员工 = 新建 + 删除，见 executePlacement）。成功后给 8 秒「撤销」。
+  const placeShiftMutation = useMutation({
+    mutationFn: ({ source, target }: { source: PlacementSource; target: PlacementTargetCell }) =>
+      executePlacement(
+        {
+          createSchedule: createAttendanceSchedule,
+          updateSchedule: updateAttendanceSchedule,
+          deleteSchedule: deleteAttendanceSchedule,
+          restoreSchedule: restoreAttendanceSchedule,
+        },
+        source,
+        target,
+      ).then((result) => ({ result, target })),
+    onSuccess: async ({ result, target }) => {
+      await invalidateScheduleManagementData();
+      const name = storeUsersQuery.data?.find((item) => item.userGUID === target.userGuid);
+      const params = {
+        name: name ? (name.fullName || name.username || target.userGuid) : target.userGuid,
+        date: target.workDate.slice(5),
+      };
+      if (result.outcome === "transferDeleteFailed") {
+        showMessage(t("scheduleManagement.placement.transferDeleteFailed"));
+        return;
+      }
+      const text = `${t(`scheduleManagement.placement.${result.outcome}`, params)}${
+        result.downgraded ? t("scheduleManagement.placement.downgradedSuffix") : ""
+      }`;
+      showMessage(text);
+      const { undo } = result;
+      if (undo) {
+        setSnackbarUndo(() => async () => {
+          try {
+            await undo();
+            await invalidateScheduleManagementData();
+            showMessage(t("scheduleManagement.placement.undone"));
+          } catch {
+            await invalidateScheduleManagementData();
+            showMessage(t("scheduleManagement.placement.undoFailed"));
+          }
+        });
+      }
+    },
+    onError: async (error) => {
+      await invalidateScheduleManagementData();
+      showMessage(
+        t("scheduleManagement.placement.failed", {
+          reason: getErrorMessage(error, "messages.saveFailed"),
+        }),
+      );
+    },
+  });
+
   const publishWeekMutation = useMutation({
     mutationFn: publishAttendanceSchedulesWeek,
     onSuccess: async () => {
@@ -792,6 +871,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     createScheduleBatchMutation.isPending ||
     updateScheduleMutation.isPending ||
     deleteScheduleMutation.isPending ||
+    placeShiftMutation.isPending ||
     publishWeekMutation.isPending;
   const isHolidayBusy =
     createHolidayMutation.isPending ||
@@ -1827,6 +1907,11 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   deleteScheduleMutation.mutate(scheduleGuid)
                 }
                 onPublishWeek={handlePublishWeek}
+                punchScheduleGuids={managedPunchScheduleGuids}
+                punchesKnown={managedPunchScheduleGuidsQuery.isSuccess}
+                onPlaceShift={(source, target) =>
+                  placeShiftMutation.mutate({ source, target })
+                }
                 onCopyPreviousWeek={() => {
                   if (!selectedStoreCode) {
                     showMessage(t("messages.selectStoreFirst"));
@@ -2003,6 +2088,20 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       <Snackbar
         visible={snackbarVisible}
         onDismiss={() => setSnackbarVisible(false)}
+        duration={snackbarUndo ? 8000 : undefined}
+        action={
+          snackbarUndo
+            ? {
+                label: t("scheduleManagement.placement.undo"),
+                onPress: () => {
+                  const undo = snackbarUndo;
+                  setSnackbarVisible(false);
+                  setSnackbarUndo(null);
+                  undo();
+                },
+              }
+            : undefined
+        }
       >
         {snackbarMessage}
       </Snackbar>
