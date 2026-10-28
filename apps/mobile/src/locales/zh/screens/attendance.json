@@ -669,7 +669,7 @@
     "ageBadge": "{{age}}岁",
     "placement": {
       "trayTitle": "添加班次",
-      "trayHint": "点常用班次，再点要放的格子",
+      "trayHint": "长按常用班次拖到格子里；也可点一下再点要放的格子。长按已排的班次可拖去别的格子",
       "bannerMove": "移动 {{shift}}：点要放的格子",
       "bannerCopy": "复制 {{shift}}：点要放的格子",
       "bannerAdd": "添加 {{shift}}：点要放的格子",

@@ -260,6 +260,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     string | undefined
   >(undefined);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
+  // 排班网格长按拖动期间锁住整页纵向滚动，避免拖动时页面跟着动
+  const [isScheduleDragging, setIsScheduleDragging] = useState(false);
   const [managerWeekStartDate, setManagerWeekStartDate] =
     useState(getWeekStartDate);
   const [snackbarMessage, setSnackbarMessage] = useState("");
@@ -1569,6 +1571,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView
         contentContainerStyle={styles.content}
+        scrollEnabled={!isScheduleDragging}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -1912,6 +1915,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 onPlaceShift={(source, target) =>
                   placeShiftMutation.mutate({ source, target })
                 }
+                onDragActiveChange={setIsScheduleDragging}
                 onCopyPreviousWeek={() => {
                   if (!selectedStoreCode) {
                     showMessage(t("messages.selectStoreFirst"));
