@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 
@@ -66,6 +67,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             var createItemNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var createBarcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var multiCodeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // 关键位置：新建商品的主条码必须全局唯一（不限供应商）。此前只按本单供应商查重，别的供应商已占用的条码会被放行，
+            // 建出同货号同条码的第二条商品（2026-10-28 全库 90 组重复全是跨供应商）。锁内一次性批量查占用，不逐行查询。
+            var createBarcodeOwners = await _source.FindBarcodeOwnersAsync(
+                data.Details
+                    .Where(detail => detail.ActivityType == (int)DetailAction.CreateProduct
+                        && alreadyCreatedDetailGuids?.Contains(detail.DetailGUID) != true)
+                    .Select(detail => detail.Barcode)
+            );
             foreach (var detail in data.Details)
             {
                 if (!detail.ActivityType.HasValue)
@@ -89,7 +98,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     case DetailAction.CreateProduct:
                         // 商品已建好的行视为已执行（写入时跳过），不再按「新建」校验货号条码是否已存在。
                         if (alreadyCreatedDetailGuids?.Contains(detail.DetailGUID) == true) break;
-                        await ValidateCreateProductAsync(detail, data.Header!, productTypes, createItemNumbers, createBarcodes, errors);
+                        await ValidateCreateProductAsync(detail, data.Header!, productTypes, createItemNumbers, createBarcodes, createBarcodeOwners, errors);
                         break;
                     case DetailAction.UpdatePurchasePrice:
                         await ValidatePurchasePriceUpdateAsync(detail, errors);
@@ -111,6 +120,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             IReadOnlyDictionary<string, int> productTypes,
             HashSet<string> itemNumbers,
             HashSet<string> barcodes,
+            IReadOnlyDictionary<string, List<ProductBarcodeOwner>> barcodeOwners,
             List<string> errors
         )
         {
@@ -139,14 +149,28 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 }
             }
 
+            var sameSupplierIdentityExists = false;
             if (!string.IsNullOrWhiteSpace(detail.ItemNumber) || !string.IsNullOrWhiteSpace(detail.Barcode))
             {
                 if (await _source.HasSupplierProductIdentityAsync(
                     header.SupplierCode,
                     NormalizeCaseInsensitive(detail.ItemNumber),
                     NormalizeCaseInsensitive(detail.Barcode)
-                )) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：货号或条码已存在");
+                ))
+                {
+                    errors.Add($"明细 {detail.DetailGUID} 新建商品失败：货号或条码已存在");
+                    sameSupplierIdentityExists = true;
+                }
             }
+
+            // 跨供应商的条码占用：提示已有商品，让用户改为「选用」，不允许重复新建。
+            // 本供应商内已命中的行上面已经报错，不再重复提示。
+            var mainBarcode = ProductDuplicateGuard.NormalizeBarcode(detail.Barcode);
+            if (!sameSupplierIdentityExists
+                && mainBarcode != null
+                && barcodeOwners.TryGetValue(mainBarcode, out var owners)
+                && owners.Count > 0)
+                errors.Add($"明细 {detail.DetailGUID} 新建商品失败：{ProductDuplicateGuard.BuildBarcodeConflictMessage(mainBarcode, owners)}");
         }
 
         private async Task ValidatePurchasePriceUpdateAsync(StoreLocalSupplierInvoiceDetails detail, List<string> errors)

@@ -172,6 +172,9 @@
     <Compile Include="StoreProductInsightQueryServiceTests.cs" />
     <Compile Include="SeasonalProductInsightQueryServiceTests.cs" />
     <Compile Include="StoreProductInsightsControllerTests.cs" />
+    <Compile Include="ProductDuplicateGuardTests.cs" />
+    <Compile Include="ProductDuplicateInvoiceFlowTests.cs" />
+    <Compile Include="ProductDuplicateCreateEntryPointTests.cs" />
     <Compile Include="StaticReportAccessControllerTests.cs" />
     <Compile Include="ProductBranchSalesServiceTests.cs" />
     <Compile Include="ProductBranchSalesControllerTests.cs" />

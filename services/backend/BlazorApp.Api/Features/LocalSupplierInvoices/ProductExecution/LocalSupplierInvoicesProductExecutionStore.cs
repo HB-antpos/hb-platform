@@ -5,6 +5,7 @@ using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -255,6 +256,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             var detailsToBackfill = new List<StoreLocalSupplierInvoiceDetails>();
             var pricingStrategyCache = new Dictionary<decimal, PricingStrategy?>();
 
+            // 防御性复核：锁内校验器已经拦过一次，这里在写入前最后一刻再查一遍，保证没有任何入口能绕过，
+            // 把别的供应商已占用（主条码/分店多码/一品多码）的条码再建成第二条商品。冲突行计失败，调用方整单回滚。
+            var barcodeOwners = await ProductDuplicateGuard.FindBarcodeOwnersAsync(
+                db,
+                details.Select(detail => detail.Barcode)
+            );
+            var createdBarcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var detail in details)
             {
                 // 验证必填字段
@@ -275,6 +284,23 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 if (detail.PurchasePrice == null || detail.PurchasePrice <= 0)
                 {
                     result.Errors.Add($"创建商品失败：进货价必须大于0");
+                    result.FailedCount++;
+                    continue;
+                }
+
+                var mainBarcode = ProductDuplicateGuard.NormalizeBarcode(detail.Barcode)!;
+                if (barcodeOwners.TryGetValue(mainBarcode, out var owners) && owners.Count > 0)
+                {
+                    result.Errors.Add(
+                        $"创建商品失败：{ProductDuplicateGuard.BuildBarcodeConflictMessage(mainBarcode, owners)}"
+                    );
+                    result.FailedCount++;
+                    continue;
+                }
+
+                if (!createdBarcodes.Add(mainBarcode))
+                {
+                    result.Errors.Add($"创建商品失败：本次执行内条码重复 {mainBarcode}");
                     result.FailedCount++;
                     continue;
                 }

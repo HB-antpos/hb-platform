@@ -9,6 +9,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.LocalSupplierCategories;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -1400,6 +1401,42 @@ namespace BlazorApp.Api.Services.React
                         _db,
                         new[] { product.ProductCode }
                     );
+
+                    // 查重必须在锁内、插入前：条码已被存活商品占用（主条码/分店多码/一品多码，不限供应商）
+                    // 或同供应商下货号已存在时拒绝新建，返回已有商品清单让调用方提示用户选用。
+                    await ProductDuplicateGuard.AcquireBarcodeCreateLocksAsync(_db, new[] { product.Barcode });
+                    await ProductDuplicateGuard.AcquireSupplierItemNumberCreateLockAsync(
+                        _db,
+                        product.LocalSupplierCode,
+                        product.ItemNumber
+                    );
+                    var barcodeOwners = await ProductDuplicateGuard.FindBarcodeOwnersAsync(
+                        _db,
+                        new[] { product.Barcode }
+                    );
+                    var normalizedBarcode = ProductDuplicateGuard.NormalizeBarcode(product.Barcode);
+                    if (normalizedBarcode != null
+                        && barcodeOwners.TryGetValue(normalizedBarcode, out var owners)
+                        && owners.Count > 0)
+                    {
+                        throw new ProductDuplicateException(
+                            ProductDuplicateGuard.BarcodeExistsErrorCode,
+                            ProductDuplicateGuard.BuildBarcodeConflictMessage(normalizedBarcode, owners),
+                            ProductDuplicateGuard.ToResponsePayload(owners)
+                        );
+                    }
+                    if (await ProductDuplicateGuard.HasSupplierItemNumberAsync(
+                        _db,
+                        product.LocalSupplierCode,
+                        product.ItemNumber
+                    ))
+                    {
+                        throw new ProductDuplicateException(
+                            ProductDuplicateGuard.ItemNumberExistsErrorCode,
+                            "该供应商下货号已存在，请更换货号"
+                        );
+                    }
+
                     var beforeSnapshots = await CaptureProductSnapshotsAsync(
                         new[] { product.ProductCode ?? string.Empty }
                     );
@@ -1483,6 +1520,12 @@ namespace BlazorApp.Api.Services.React
 
                 var resultDto = await GetByIdAsync(product.ProductCode);
                 return resultDto;
+            }
+            catch (ProductDuplicateException ex)
+            {
+                // 业务拦截不是系统错误：不记 Error 日志，带错误码和已有商品清单返回。
+                _logger.LogInformation("创建商品被查重拦截 {ErrorCode}: {Message}", ex.ErrorCode, ex.Message);
+                return ApiResponse<ProductDto>.Error(ex.Message, ex.ErrorCode, ex.Details);
             }
             catch (Exception ex)
             {

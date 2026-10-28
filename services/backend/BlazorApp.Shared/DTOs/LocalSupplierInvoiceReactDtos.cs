@@ -849,6 +849,28 @@ namespace BlazorApp.Shared.DTOs
         /// 默认操作类型
         /// </summary>
         public int DefaultAction { get; set; }
+
+        /// <summary>
+        /// 建议选用的已有商品：本供应商下货号不存在（ProductStatus=2），但该条码已是其他存活商品的主条码时，
+        /// 列出这些商品（最多 3 个，同货号的排前面），提示用户改为「选用」而不是新建，避免跨供应商建出同条码的重复商品。
+        /// 只是提示：不改变状态和默认操作，也不自动关联。
+        /// </summary>
+        public List<ProductCheckSuggestedProductDto> SuggestedExistingProducts { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 检测时建议选用的已有商品（条码已被占用）
+    /// </summary>
+    public class ProductCheckSuggestedProductDto
+    {
+        public string? ProductCode { get; set; }
+        public string? ItemNumber { get; set; }
+        public string? ProductName { get; set; }
+        public string? LocalSupplierCode { get; set; }
+        public string? ProductImage { get; set; }
+
+        /// <summary>与本行货号相同（忽略大小写）：通常就是同一个商品挂在别的供应商名下。</summary>
+        public bool SameItemNumber { get; set; }
     }
 
     /// <summary>

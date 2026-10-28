@@ -443,12 +443,23 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
 
         var barcodeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var productCodesByBarcode = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var barcodeOwnerProducts = new Dictionary<string, List<Product>>(StringComparer.OrdinalIgnoreCase);
         if (barcodes.Count > 0)
         {
             var barcodeProducts = await QueryInChunksParallelAsync<Product, string>(barcodes, 200, (queryDb, chunk) =>
                 queryDb.Queryable<Product>().Where(p => p.IsDeleted == false && p.Barcode != null && chunk.Contains(p.Barcode)).ToListAsync());
             foreach (var product in barcodeProducts)
+            {
                 AddBarcodeMatch(barcodeCounts, productCodesByBarcode, product.Barcode, product.ProductCode);
+                // 保留主条码占用者的完整商品信息，供「货号不存在但条码已被占用」时提示用户选用已有商品。
+                if (!string.IsNullOrWhiteSpace(product.Barcode) && !string.IsNullOrWhiteSpace(product.ProductCode))
+                {
+                    var key = product.Barcode.Trim();
+                    if (!barcodeOwnerProducts.TryGetValue(key, out var owners))
+                        barcodeOwnerProducts[key] = owners = new List<Product>();
+                    owners.Add(product);
+                }
+            }
 
             var multiCodes = await QueryInChunksParallelAsync<StoreMultiCodeProduct, string>(barcodes, 200, (queryDb, chunk) =>
                 queryDb.Queryable<StoreMultiCodeProduct>().Where(x => x.StoreCode == header.StoreCode
@@ -482,7 +493,8 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             storePrices,
             barcodeCounts,
             productCodesByBarcode,
-            additionalBarcodeOwners
+            additionalBarcodeOwners,
+            barcodeOwnerProducts
         );
     }
 
@@ -538,7 +550,8 @@ internal sealed record LocalSupplierInvoicesProductReviewData(
     Dictionary<string, StoreRetailPrice> StorePricesByProductCode,
     Dictionary<string, int> BarcodeMatchCounts,
     Dictionary<string, HashSet<string>> ProductCodesByBarcode,
-    Dictionary<string, HashSet<string>> AdditionalBarcodeOwners);
+    Dictionary<string, HashSet<string>> AdditionalBarcodeOwners,
+    Dictionary<string, List<Product>> BarcodeOwnerProducts);
 
 internal sealed class BarcodeProductProjection
 {
