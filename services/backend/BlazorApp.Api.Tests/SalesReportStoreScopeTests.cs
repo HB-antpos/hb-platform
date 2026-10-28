@@ -183,6 +183,52 @@ public sealed class SalesReportStoreScopeTests
         service.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task 营业额快照按授权范围返回门店时区且跳过未维护时区的门店()
+    {
+        var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
+        SetupReportService(service, "revenue-snapshot", (_, _) => { });
+        var userService = CreateUserService(new[] { "S1", "S2" });
+        var storeOptions = new Mock<IProductMovementReportService>(MockBehavior.Strict);
+        IReadOnlyList<string>? capturedScope = null;
+        storeOptions.Setup(x => x.GetStoreOptionsAsync(It.IsAny<IReadOnlyList<string>?>()))
+            .Callback<IReadOnlyList<string>?>(scope => capturedScope = scope)
+            .ReturnsAsync(new List<ProductMovementReportStoreOptionDto>
+            {
+                new() { Value = "S1", Label = "悉尼店", TimeZoneId = " Australia/Sydney " },
+                new() { Value = "S2", Label = "未维护时区", TimeZoneId = null },
+            });
+
+        var response = await CreateRevenueController(service.Object, userService.Object, storeOptions: storeOptions.Object)
+            .GetRevenueReportSnapshot(StartDate, StartDate);
+
+        var ok = Assert.IsType<OkObjectResult>(response);
+        var timeZones = Assert.IsType<Dictionary<string, string>>(
+            ok.Value!.GetType().GetProperty("branchTimeZones")!.GetValue(ok.Value));
+        Assert.Equal(new[] { "S1", "S2" }, capturedScope);
+        Assert.Equal("Australia/Sydney", Assert.Single(timeZones).Value);
+        Assert.Equal("S1", Assert.Single(timeZones).Key);
+    }
+
+    [Fact]
+    public async Task 门店时区读取失败时营业额快照仍成功且时区为空()
+    {
+        var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
+        SetupReportService(service, "revenue-snapshot", (_, _) => { });
+        var userService = CreateUserService(new[] { "S1" });
+        var storeOptions = new Mock<IProductMovementReportService>(MockBehavior.Strict);
+        storeOptions.Setup(x => x.GetStoreOptionsAsync(It.IsAny<IReadOnlyList<string>?>()))
+            .ThrowsAsync(new InvalidOperationException("db down"));
+
+        var response = await CreateRevenueController(service.Object, userService.Object, storeOptions: storeOptions.Object)
+            .GetRevenueReportSnapshot(StartDate, StartDate);
+
+        var ok = Assert.IsType<OkObjectResult>(response);
+        var timeZones = Assert.IsType<Dictionary<string, string>>(
+            ok.Value!.GetType().GetProperty("branchTimeZones")!.GetValue(ok.Value));
+        Assert.Empty(timeZones);
+    }
+
     [Theory]
     [InlineData("Admin")]
     [InlineData("WarehouseManager")]
@@ -482,12 +528,14 @@ public sealed class SalesReportStoreScopeTests
         ISalesDashboardReactService service,
         IUserService userService,
         string? role = "StoreManager",
-        bool includeIdentity = true
+        bool includeIdentity = true,
+        IProductMovementReportService? storeOptions = null
     )
     {
         var controller = new RevenueReportSnapshotController(
             service,
             userService,
+            storeOptions ?? new Mock<IProductMovementReportService>().Object,
             NullLogger<RevenueReportSnapshotController>.Instance);
         controller.ControllerContext = new ControllerContext
         {
