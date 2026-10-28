@@ -35,6 +35,19 @@ assert.ok(/verdict\.state === "bad"[\s\S]{0,200}badOverlap/.test(card), "时间�
 assert.ok(/verdict\.state === "warn"[\s\S]{0,600}warnConfirm/.test(card), "员工上报冲突要二次确认");
 assert.ok(card.includes("disabled={editingLocked || isBusy}"), "已有打卡的班次不能移动 / 复制");
 
+// 长按拖动：长按班次 / 常用班次拿起，拖到目标格松手；落点处理与点选共用 commitPlacement，不另起一套规则
+assert.ok(card.includes("onLongPress={() => handleCellLongPress(variant, cell)}"), "有班次的格子长按拿起班次");
+assert.ok(card.includes("onLongPress={() => handlePresetLongPress(variant, preset)}"), "常用班次托盘长按拿起");
+assert.ok(card.includes("getDragStartVerdict(cell, isLocked)"), "拿起前要走锁定判断（已有打卡不能拖）");
+assert.ok(/handlePlacementPress[\s\S]{0,200}commitPlacement\(placement, row, day\)/.test(card), "点选放下走 commitPlacement");
+assert.ok(/finishDrag[\s\S]{0,900}commitPlacement\(runtime\.source, row, day\)/.test(card), "拖动松手也走 commitPlacement（重叠拒绝、冲突二次确认）");
+assert.ok(card.includes("PanResponder.create") && card.includes("{...dragPanResponder.panHandlers}"), "拖动用 RN 自带 PanResponder（不引入原生依赖，可 OTA）");
+assert.ok(card.includes("scrollEnabled={!drag}"), "拖动中锁住日期区横向滚动");
+assert.ok(/onPanResponderRelease[\s\S]{0,300}dragApiRef\.current\.release\(/.test(card), "松手用抬起点重算落点（兜住被合并 / 丢掉的 move）");
+assert.ok(card.includes("DRAG_AUTO_SCROLL_DWELL_MS") && card.includes("runtime.edgeSince"), "靠边自动滚动要先停留一会儿，避免列在手底下漂移");
+assert.ok(card.includes("onDragActiveChange?.(true)") && card.includes("onDragActiveChange?.(false)"), "拖动开始 / 结束通知屏幕层");
+assert.ok(screen.includes("scrollEnabled={!isScheduleDragging}") && screen.includes("onDragActiveChange={setIsScheduleDragging}"), "拖动期间屏幕层锁住整页纵向滚动");
+
 // 屏幕层：本周打卡只在有打卡查看权限时拉取；放下走 executePlacement，成功后给撤销
 assert.ok(/managedPunchScheduleGuidsQuery[\s\S]{0,700}canViewManagedPunches/.test(screen), "本周打卡只在有打卡查看权限时拉取");
 assert.ok(screen.includes("punchesKnown={managedPunchScheduleGuidsQuery.isSuccess}"), "拿不到打卡时要告诉网格走保守锁定");

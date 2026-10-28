@@ -669,7 +669,7 @@
     "ageBadge": "{{age}}y",
     "placement": {
       "trayTitle": "Add shift",
-      "trayHint": "Tap a preset, then tap the cell to place it",
+      "trayHint": "Press and hold a preset to drag it onto a cell, or tap it then tap a cell. Press and hold a shift to drag it elsewhere",
       "bannerMove": "Move {{shift}}: tap the target cell",
       "bannerCopy": "Copy {{shift}}: tap the target cell",
       "bannerAdd": "Add {{shift}}: tap the target cell",
