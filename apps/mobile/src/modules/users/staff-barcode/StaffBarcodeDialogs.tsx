@@ -3,8 +3,10 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import * as Crypto from "expo-crypto";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "react-native-qrcode-svg";
-import { ActivityIndicator, Button, Icon, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Icon, SegmentedButtons, Text } from "react-native-paper";
 import { LabelPrinterSetupSheet } from "@/components/printer/LabelPrinterSetupSheet";
+import { Ean13Barcode } from "@/modules/employee-profile/Ean13Barcode";
+import { isValidEan13 } from "@/modules/employee-profile/ean13-modules";
 import { InfoCard, NoticeBox, resolvePersonalCodeLabelName, resolvePersonName } from "@/modules/people";
 import { PeopleSheet, SHEET_BUTTON_STYLE, SheetActions } from "@/modules/people/detail/people-sheet";
 import {
@@ -32,7 +34,8 @@ import {
 import { staffBarcodeQueueSecureStorage } from "@/modules/users/staff-barcode/storage";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { hydrateSavedPrinter, printEmployeeCashierBarcodeLabel } from "@/modules/printer/api";
-import { personalCodeSymbology } from "@/modules/printer/use-personal-code-symbology";
+import type { PersonalCodeSymbology } from "@/modules/printer/personal-code-symbology";
+import { personalCodeSymbology, usePersonalCodeSymbology } from "@/modules/printer/use-personal-code-symbology";
 import { runPersonalCodePrintExclusive } from "@/modules/printer/personal-code-print-lock";
 import { usePrinterStore } from "@/modules/printer/state";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -116,6 +119,8 @@ export function StaffBarcodeDialog({
   const printerHydrated = usePrinterStore((state) => state.hydrated);
   // 更换打印机就在弹层内完成（LabelPrinterSetupSheet），不再关掉弹层跳去设置页丢失上下文。
   const [printerSheetVisible, setPrinterSheetVisible] = useState(false);
+  // 与本人码卡片、批量打印共用设备偏好：屏幕显示什么，打印就出什么。
+  const [symbology, setSymbology] = usePersonalCodeSymbology();
   const [operation, setOperation] = useState<StaffBarcodeBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -258,6 +263,8 @@ export function StaffBarcodeDialog({
   const stackActions = fontScale > 1.2 || width < 380;
   const data = barcodeQuery.isError ? undefined : barcodeQuery.data;
   const canOperate = Boolean(user && user.status === 1);
+  // 偏好为条码但值不是合法 EAN13 时，屏幕回退到二维码（此时打印也会因校验失败而中止）。
+  const showLinearBarcode = symbology === "barcode" && isValidEan13(data?.barcode?.trim() ?? "");
 
   if (!visible) return null;
 
@@ -296,8 +303,13 @@ export function StaffBarcodeDialog({
       ) : null}
       {data?.exists && data.barcode ? (
         <View style={styles.codePanel}>
-          <View style={styles.qrFrame}>
-            <QRCode value={data.barcode} size={176} />
+          <SymbologySwitch value={symbology} onChange={setSymbology} disabled={busy} />
+          <View style={[styles.qrFrame, showLinearBarcode ? styles.barcodeFrame : null]}>
+            {showLinearBarcode ? (
+              <Ean13Barcode value={data.barcode.trim()} width={250} />
+            ) : (
+              <QRCode value={data.barcode} size={176} />
+            )}
           </View>
           <Text style={styles.codeText} selectable>{data.barcode}</Text>
           <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.printCount", { count: data.printCount })}</Text>
@@ -344,6 +356,7 @@ export function StaffBarcodeBatchDialog({
   const printerStatus = usePrinterStore((state) => state.status);
   const printerHydrated = usePrinterStore((state) => state.hydrated);
   const [printerSheetVisible, setPrinterSheetVisible] = useState(false);
+  const [symbology, setSymbology] = usePersonalCodeSymbology();
   const [batch, setBatch] = useState<StaffBarcodeBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingLoaded, setPendingLoaded] = useState(false);
@@ -473,6 +486,8 @@ export function StaffBarcodeBatchDialog({
         </SheetActions>
       )}
     >
+      {/* 批量打印每张标签都读这份偏好，必须让用户在开始前看得见、改得了。 */}
+      <SymbologySwitch value={symbology} onChange={setSymbology} disabled={busy} />
       <PrinterRow
         name={printer?.name || ""}
         status={printerStatus}
@@ -498,6 +513,31 @@ export function StaffBarcodeBatchDialog({
       ) : null}
       <LabelPrinterSetupSheet visible={printerSheetVisible} onDismiss={() => setPrinterSheetVisible(false)} />
     </PeopleSheet>
+  );
+}
+
+/** 二维码 / 一维码切换：写入设备级偏好，显示与打印共用。 */
+function SymbologySwitch({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: PersonalCodeSymbology;
+  onChange: (next: PersonalCodeSymbology) => Promise<void>;
+  disabled: boolean;
+}) {
+  const { t } = useAppTranslation(["userManagement"]);
+  return (
+    <SegmentedButtons
+      density="small"
+      value={value}
+      onValueChange={(next) => void onChange(next as PersonalCodeSymbology)}
+      buttons={[
+        { value: "qr", label: t("staffBarcode.symbology.qr"), disabled, testID: "staff-barcode-symbology-qr" },
+        { value: "barcode", label: t("staffBarcode.symbology.barcode"), disabled, testID: "staff-barcode-symbology-barcode" },
+      ]}
+      style={styles.symbologySwitch}
+    />
   );
 }
 
@@ -546,7 +586,10 @@ const styles = StyleSheet.create({
   printerRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 56, paddingHorizontal: 14, paddingVertical: 10 },
   printerSub: { color: HB_COLORS.textSecondary, fontSize: 12.5, marginTop: 1 },
   printerTitle: { color: HB_COLORS.textPrimary, fontSize: 14.5, fontWeight: "700" },
+  // 与二维码框等高（176 + 内边距 + 边框），切换时弹窗高度不跳动。
+  barcodeFrame: { alignItems: "center", justifyContent: "center", minHeight: 198, minWidth: 198 },
   qrFrame: { backgroundColor: HB_COLORS.white, borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.surface, borderWidth: 1, padding: 10 },
+  symbologySwitch: { alignSelf: "stretch" },
   queueIdentity: { flex: 1, minWidth: 0 },
   queueRow: { alignItems: "center", borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.control, borderWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: HB_SPACING.sm, padding: HB_SPACING.sm },
 });

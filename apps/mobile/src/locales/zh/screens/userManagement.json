@@ -376,6 +376,10 @@
   },
   "staffBarcode": {
     "title": "员工个人码",
+    "symbology": {
+      "qr": "二维码",
+      "barcode": "条码"
+    },
     "emptyDescription": "该员工还没有个人码。创建后可显示二维码，或创建并打印一张标签。",
     "printCount": "已确认打印 {{count}} 次",
     "printer": "标签打印机：{{printer}} · {{status}}",

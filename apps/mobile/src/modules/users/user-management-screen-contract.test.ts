@@ -264,6 +264,16 @@ assert.match(barcodeDialogSource, /<PeopleSheet[^>]*testID="staff-barcode-dialog
 assert.match(barcodeDialogSource, /<PeopleSheet[^>]*testID="staff-barcode-batch-dialog"/, "批量个人码弹层必须是底部弹层");
 assert.match(barcodeDialogSource, /pendingConfirmation\?\.phase === "printed"/, "已出纸待确认必须显示独立恢复状态");
 assert.match(barcodeDialogSource, /fontScale > 1\.2 \|\| width < 380/, "窄屏或大字号时弹层操作必须改为纵向布局");
+// 一维条码：单个与批量弹层都要能切换二维码 / 条码，屏幕显示与打印共用同一份设备偏好。
+assert.equal(barcodeDialogSource.match(/<SymbologySwitch\b/g)?.length, 2, "单个与批量个人码弹层都必须提供二维码/条码切换");
+assert.equal(barcodeDialogSource.match(/usePersonalCodeSymbology\(\)/g)?.length, 2, "两个弹层都读同一份共享码制偏好");
+assert.match(barcodeDialogSource, /symbology: await personalCodeSymbology\.hydrate\(\)/, "打印必须读取共享码制偏好");
+assert.match(
+  barcodeDialogSource,
+  /symbology === "barcode" && isValidEan13\(data\?\.barcode\?\.trim\(\) \?\? ""\)/,
+  "条码模式只在值是合法 EAN13 时显示一维码，否则回退二维码"
+);
+assert.match(barcodeDialogSource, /<Ean13Barcode value=\{data\.barcode\.trim\(\)\}/, "条码模式必须显示 EAN13 一维码");
 
 
 // 创建员工页「账号归属」里的分店标签：新员工与这家店的关系是「仅查看」（后端 IsPrimary=false），
