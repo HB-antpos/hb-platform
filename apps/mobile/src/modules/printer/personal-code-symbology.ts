@@ -32,7 +32,11 @@ export function createPersonalCodeSymbologyController(storage: PersonalCodeSymbo
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    /** 幂等：只读一次存储；读取期间用户已手动切换时，以用户操作为准。 */
+    /**
+     * 幂等：只读一次存储；读取期间用户已手动切换时，以用户操作为准。
+     * 返回值必须在每次调用时取最新的 current：缓存的 Promise 只代表「读取已完成」，
+     * 若直接返回它，首次读到的旧值会被永久复用，用户之后切到一维码，打印仍会读到二维码。
+     */
     hydrate(): Promise<PersonalCodeSymbology> {
       hydratePromise ??= storage
         .getString(PERSONAL_CODE_SYMBOLOGY_STORAGE_KEY)
@@ -47,7 +51,7 @@ export function createPersonalCodeSymbologyController(storage: PersonalCodeSymbo
           return current;
         })
         .catch(() => current);
-      return hydratePromise;
+      return hydratePromise.then(() => current);
     },
     async set(next: PersonalCodeSymbology) {
       userChanged = true;
