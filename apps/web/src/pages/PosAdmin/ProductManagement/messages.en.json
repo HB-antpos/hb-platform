@@ -1,6 +1,14 @@
 {
   "posAdmin": {
     "products": {
+      "duplicateBarcode": {
+        "title": "This barcode already has a product. Use the existing product",
+        "intro": "Barcode {{barcode}} already belongs to the product(s) below (an active product from any supplier counts), so it cannot be created again:",
+        "supplier": "Supplier",
+        "more": "{{count}} more product(s) not listed",
+        "hint": "Search this barcode in the product list and use the existing product. If this really is a different product, change the barcode first.",
+        "ok": "Got it"
+      },
       "supplierCategory": {
         "column": "Supplier Category",
         "columnHint": "The product's category on the supplier's website. For Hot Bargain (200) it equals the warehouse category; product category is used by POS, warehouse category comes from HQ.",

@@ -41,19 +41,70 @@ export interface CreateProductDialogError {
   field: CreateProductErrorField | null;
 }
 
+/** 服务端 409 里的 existingProducts 单项（后端 ProductDuplicateGuard.ToResponsePayload）。 */
+interface ExistingProductHit {
+  productCode?: unknown;
+  itemNumber?: unknown;
+  productName?: unknown;
+  localSupplierCode?: unknown;
+}
+
+/** 服务端冲突在弹层里的展示：文案 key + 插值参数 + 要标红的输入框。 */
+export interface CreateProductServerConflict {
+  messageKey: string;
+  field: CreateProductErrorField;
+  /** 文案插值参数；只有需要点名已有商品的冲突（条码已存在）才带。 */
+  params?: Record<string, string | number>;
+}
+
+function readText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * 条码被已有商品占用时的文案参数：点名第一个已有商品（货号 · 名称）和它的供应商，
+ * 多个时再带上总数，让手持上的用户一眼知道该去选用哪件商品。
+ */
+function buildBarcodeExistsConflict(existingProducts: unknown): CreateProductServerConflict {
+  const hits = (Array.isArray(existingProducts) ? existingProducts : []).filter(
+    (item): item is ExistingProductHit => typeof item === "object" && item !== null
+  );
+  if (hits.length === 0) {
+    // 旧后端或响应里没带清单：仍然明确告诉用户「条码已有商品」，只是不点名。
+    return { messageKey: "createProduct.messages.barcodeExistsUnknown", field: "barcode" };
+  }
+  const first = hits[0];
+  const itemNumber = readText(first.itemNumber);
+  const productName = readText(first.productName);
+  const params = {
+    product: [itemNumber, productName].filter(Boolean).join(" · ") || readText(first.productCode) || "--",
+    supplier: readText(first.localSupplierCode) || "--",
+    count: hits.length,
+  };
+  return {
+    messageKey: hits.length > 1
+      ? "createProduct.messages.barcodeExistsMore"
+      : "createProduct.messages.barcodeExists",
+    field: "barcode",
+    params,
+  };
+}
+
 /**
  * 服务端对创建请求给出的、能明确指向某个输入框的业务冲突。
- * 其余失败（网络、5xx、条码被占用等没有错误码的 409）仍走通用文案，不去猜测归属哪个输入框。
+ * 其余失败（网络、5xx、没有错误码的 409 等）仍走通用文案，不去猜测归属哪个输入框。
+ * - ITEM_NUMBER_EXISTS：同供应商下货号已存在 → 标红货号。
+ * - BARCODE_EXISTS：条码已被任何供应商的存活商品占用 → 标红条码，提示选用已有商品（不提供「仍然创建」）。
  */
 export function resolveCreateProductServerError(
   error: unknown
-): { messageKey: string; field: CreateProductErrorField } | null {
+): CreateProductServerConflict | null {
   if (typeof error !== "object" || error === null) {
     return null;
   }
   const record = error as {
     code?: unknown;
-    response?: { data?: { errorCode?: unknown; ErrorCode?: unknown } };
+    response?: { data?: { errorCode?: unknown; ErrorCode?: unknown; existingProducts?: unknown; ExistingProducts?: unknown } };
   };
   // HTTP 4xx 的响应体里带 errorCode（axios 错误）；success:false 信封解包后的错误则把它放在 error.code。
   const body = record.response?.data;
@@ -62,6 +113,9 @@ export function resolveCreateProductServerError(
 
   if (code === "ITEM_NUMBER_EXISTS") {
     return { messageKey: "createProduct.messages.itemNumberExists", field: "itemNumber" };
+  }
+  if (code === "BARCODE_EXISTS") {
+    return buildBarcodeExistsConflict(body?.existingProducts ?? body?.ExistingProducts);
   }
   return null;
 }

@@ -193,6 +193,12 @@ import {
   isProductLinkConfirmed,
   mergeProductCheckResult,
 } from './matchedProductLink'
+import {
+  describeSuggestedProduct,
+  getRowSuggestedProducts,
+  mergeSuggestedExistingProducts,
+  type SuggestedExistingByDetail,
+} from './suggestedExistingProducts'
 import { resolveInvoiceEditGuid } from './invoiceEditRoute'
 import {
   BATCH_LINK_QUERY_CONCURRENCY,
@@ -623,6 +629,8 @@ export default function InvoiceEditPage() {
 
   /* ---- 行内操作类型 (本地临时存储) ---- */
   const [rowActions, setRowActions] = useState<Record<string, number>>({})
+  // 商品检测给出的「建议选用的已有商品」（条码已被其他存活商品占用）：后端不落库，只存在于检测响应里，按行记在页面上。
+  const [suggestedExistingByDetail, setSuggestedExistingByDetail] = useState<SuggestedExistingByDetail>({})
 
   /* ---- 搜索 ---- */
   const [searchText, setSearchText] = useState('')
@@ -2078,6 +2086,8 @@ export default function InvoiceEditPage() {
       }
     })
     setRowActions((prev) => ({ ...prev, ...newActions }))
+    // 以本次检测结果刷新「建议选用」提示：选用后重新检测，建议为空即自动撤掉。
+    setSuggestedExistingByDetail((prev) => mergeSuggestedExistingProducts(prev, result.results))
   }
 
   const handleUpdateLastPurchasePrices = () => {
@@ -3572,6 +3582,23 @@ export default function InvoiceEditPage() {
                 </span>
               )
               : <span className="lsi-wb-match-new">{t('posAdmin.invoiceWorkbench.matchNotExists')}</span>
+          // 条码已被其他商品占用时，直接在行里提示「建议选用」；点开就是现有的匹配商品弹窗（里面有「选用」），不自动关联。
+          const suggestedProducts = canLinkMatchedProduct(record) && record.barcode
+            ? getRowSuggestedProducts(record, suggestedExistingByDetail)
+            : []
+          const suggestedHint = suggestedProducts.length > 0 ? (() => {
+            const first = describeSuggestedProduct(suggestedProducts[0])
+            const text = suggestedProducts.length > 1
+              ? t('posAdmin.invoiceWorkbench.suggestedExistingMore', { ...first, count: suggestedProducts.length })
+              : t('posAdmin.invoiceWorkbench.suggestedExisting', first)
+            return (
+              <Tooltip title={`${text}。${t('posAdmin.invoiceWorkbench.suggestedExistingTip')}`}>
+                <Button type="link" size="small" className="lsi-wb-match-link lsi-wb-suggested" onClick={openMatchedProducts}>
+                  {text}
+                </Button>
+              </Tooltip>
+            )
+          })() : null
           const barcodeLabel = barcodeStatus === 'normal'
             ? <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.barcodeNormal')}</span>
             : barcodeStatus === 'noMatch'
@@ -3580,6 +3607,7 @@ export default function InvoiceEditPage() {
           return (
             <div className="lsi-wb-cell">
               {productLine}
+              {suggestedHint}
               {barcodeStatus === 'notDetected' ? (
                 <span className="lsi-wb-sub">{t('posAdmin.invoiceWorkbench.barcodeUnchecked')}</span>
               ) : (
