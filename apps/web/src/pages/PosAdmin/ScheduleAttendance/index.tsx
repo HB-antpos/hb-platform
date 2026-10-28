@@ -112,6 +112,7 @@ import {
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
   buildAttendanceMealPaySummary,
+  splitExceptionDuration,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
@@ -450,6 +451,13 @@ export default function ScheduleAttendancePage() {
       ? t('posAdmin.scheduleAttendance.recordLabels.minutes', { minutes })
       : '--'
   ), [t])
+  // 迟到 / 早退 / 早到 / 晚退：不足 60 分钟显示分钟，满 60 分钟起显示「X 小时 Y 分」（整小时不带分钟）。
+  const formatExceptionDuration = useCallback((totalMinutes: number) => {
+    const { hours, minutes } = splitExceptionDuration(totalMinutes)
+    if (hours === 0) return t('posAdmin.scheduleAttendance.recordLabels.duration.minutes', { minutes })
+    if (minutes === 0) return t('posAdmin.scheduleAttendance.recordLabels.duration.hours', { hours })
+    return t('posAdmin.scheduleAttendance.recordLabels.duration.hoursMinutes', { hours, minutes })
+  }, [t])
   const renderBusinessDisplay = useCallback((displayText: string) => {
     const weekdayLabel = getBusinessWeekdayLabel(displayText)
     return (
@@ -2051,10 +2059,10 @@ export default function ScheduleAttendancePage() {
         return (
           <Space size={4} wrap>
             <Tag color={summary.lateMinutes ? 'red' : 'default'}>
-              {t('posAdmin.scheduleAttendance.recordLabels.late', { minutes: summary.lateMinutes })}
+              {t('posAdmin.scheduleAttendance.recordLabels.late', { duration: formatExceptionDuration(summary.lateMinutes) })}
             </Tag>
             <Tag color={summary.earlyLeaveMinutes ? 'red' : 'default'}>
-              {t('posAdmin.scheduleAttendance.recordLabels.earlyLeave', { minutes: summary.earlyLeaveMinutes })}
+              {t('posAdmin.scheduleAttendance.recordLabels.earlyLeave', { duration: formatExceptionDuration(summary.earlyLeaveMinutes) })}
             </Tag>
           </Space>
         )
@@ -2068,8 +2076,8 @@ export default function ScheduleAttendancePage() {
         const summary = buildAttendanceRecordSummary(record)
         return (
           <Space size={[4, 3]} wrap>
-            <Tag>{t('posAdmin.scheduleAttendance.recordLabels.earlyArrival', { minutes: summary.earlyOvertimeMinutes })}</Tag>
-            <Tag>{t('posAdmin.scheduleAttendance.recordLabels.lateDeparture', { minutes: summary.lateOvertimeMinutes })}</Tag>
+            <Tag>{t('posAdmin.scheduleAttendance.recordLabels.earlyArrival', { duration: formatExceptionDuration(summary.earlyOvertimeMinutes) })}</Tag>
+            <Tag>{t('posAdmin.scheduleAttendance.recordLabels.lateDeparture', { duration: formatExceptionDuration(summary.lateOvertimeMinutes) })}</Tag>
             <Tag color={summary.candidateOvertimeMinutes ? 'gold' : 'default'}>
               {t('posAdmin.scheduleAttendance.recordLabels.candidateOvertime', { minutes: summary.candidateOvertimeMinutes })}
             </Tag>

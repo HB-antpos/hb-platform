@@ -513,6 +513,15 @@ export function resolveAttendancePunchExceptionMinutes(
   }
 }
 
+/**
+ * 迟到 / 早退等异常分钟数拆成「小时 + 分钟」：不足 60 分钟 hours 为 0，界面只显示分钟；
+ * 满 60 分钟起按小时显示（如 65 分钟 → 1 小时 5 分钟，120 分钟 → 2 小时，界面不再补「0 分钟」）。
+ */
+export function splitExceptionDuration(minutes: number) {
+  const total = Math.max(0, Math.round(minutes));
+  return { hours: Math.floor(total / 60), minutes: total % 60 };
+}
+
 export function buildAttendanceTodayDisplay(today?: AttendanceToday) {
   const stores = (today?.storePunchStates ?? [])
     .filter((store) => store.scheduleSessions.length > 0)

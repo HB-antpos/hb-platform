@@ -3138,12 +3138,17 @@
       },
       "recordLabels": {
         "minutes": "{{minutes}} min",
-        "late": "Late: {{minutes}} min",
-        "earlyLeave": "Early leave: {{minutes}} min",
-        "earlyArrival": "Early arrival: {{minutes}} min",
-        "lateDeparture": "Late departure: {{minutes}} min",
+        "late": "Late: {{duration}}",
+        "earlyLeave": "Early leave: {{duration}}",
+        "earlyArrival": "Early arrival: {{duration}}",
+        "lateDeparture": "Late departure: {{duration}}",
         "candidateOvertime": "Candidate overtime: {{minutes}} min",
         "approvedOvertime": "Approved overtime: {{minutes}} min",
+        "duration": {
+          "minutes": "{{minutes}} min",
+          "hours": "{{hours}} h",
+          "hoursMinutes": "{{hours}} h {{minutes}} min"
+        },
         "crossStore": "Cross-store missing clock-out: {{storeCode}}",
         "original": "Original: {{time}}",
         "effective": "Effective: {{time}}",

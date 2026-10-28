@@ -33,6 +33,15 @@ export function insertAttendanceWeekday(displayText: string, weekdayLabel?: stri
   return `${match[1]} ${weekdayLabel}${match[2]}`
 }
 
+/**
+ * 迟到 / 早退等异常分钟数拆成「小时 + 分钟」：不足 60 分钟 hours 为 0，界面只显示分钟；
+ * 满 60 分钟起按小时显示（65 分钟 → 1 小时 5 分，120 分钟 → 2 小时，界面不再补「0 分」）。
+ */
+export function splitExceptionDuration(totalMinutes: number): { hours: number; minutes: number } {
+  const total = Math.max(0, Math.round(totalMinutes))
+  return { hours: Math.floor(total / 60), minutes: total % 60 }
+}
+
 export interface AttendanceRecordSummary {
   firstClockIn?: string
   finalClockOut?: string

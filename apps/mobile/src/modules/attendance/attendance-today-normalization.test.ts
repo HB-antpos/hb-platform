@@ -3,7 +3,19 @@ import {
   buildAttendanceTodayDisplay,
   normalizeAttendanceToday,
   resolveAttendancePunchExceptionMinutes,
+  splitExceptionDuration,
 } from "./attendance-today-normalization";
+
+// 异常时长：不足 60 分钟只有分钟；满 60 分钟起拆成小时 + 分钟（整小时分钟为 0，界面不再补「0 分钟」）
+assert.deepEqual(splitExceptionDuration(0), { hours: 0, minutes: 0 });
+assert.deepEqual(splitExceptionDuration(45), { hours: 0, minutes: 45 });
+assert.deepEqual(splitExceptionDuration(59), { hours: 0, minutes: 59 });
+assert.deepEqual(splitExceptionDuration(60), { hours: 1, minutes: 0 }, "正好 60 分钟 = 1 小时");
+assert.deepEqual(splitExceptionDuration(65), { hours: 1, minutes: 5 });
+assert.deepEqual(splitExceptionDuration(120), { hours: 2, minutes: 0 });
+assert.deepEqual(splitExceptionDuration(135), { hours: 2, minutes: 15 });
+assert.deepEqual(splitExceptionDuration(59.6), { hours: 1, minutes: 0 }, "小数分钟先四舍五入再拆分");
+assert.deepEqual(splitExceptionDuration(-5), { hours: 0, minutes: 0 }, "负数按 0 处理");
 
 assert.equal(
   resolveAttendancePunchExceptionMinutes({

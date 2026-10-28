@@ -107,7 +107,12 @@
       "onBreak": "On break",
       "overtimeTitle": "Overtime",
       "overtimeSummary": "Recorded {{raw}} min · potential {{candidate}} min · approved {{approved}} min",
-      "statusWithMinutes": "{{status}} {{minutes}} min"
+      "statusWithDuration": "{{status}} {{duration}}",
+      "duration": {
+        "minutes": "{{minutes}} min",
+        "hours": "{{hours}} h",
+        "hoursMinutes": "{{hours}} h {{minutes}} min"
+      }
     },
     "qrResult": {
       "title": "Latest QR punch",

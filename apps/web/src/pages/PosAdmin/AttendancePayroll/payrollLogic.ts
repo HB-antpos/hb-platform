@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import type {
+  AttendanceEmploymentType,
   AttendanceHoursEmployeeDto,
   AttendanceHoursTotalsDto,
   AttendancePayBuckets,
@@ -13,6 +14,17 @@ import type {
 // - 先把各档工时舍到 2 位小数再乘时薪，金额舍到分，逐档相加；再 ± 每期现金补贴。
 export const TRANSFER_FILL_ORDER = ['sunday', 'saturday', 'leave', 'publicHoliday', 'weekday'] as const
 export type PayBucketKey = (typeof TRANSFER_FILL_ORDER)[number]
+
+/**
+ * 工时页员工姓名下的类型标签颜色：全职蓝、兼职绿、临时紫、店长洋红，一眼分得清。
+ * 避开已有语义色：未成年（金）、多店（青）、公共假期（橙）、异常（红）。
+ */
+export const EMPLOYMENT_TYPE_TAG_COLORS: Record<AttendanceEmploymentType, string> = {
+  FullTime: 'blue',
+  PartTime: 'green',
+  Casual: 'purple',
+}
+export const MANAGER_TAG_COLOR = 'magenta'
 
 /** 舍到 2 位小数（先放大成整数分再四舍五入，避免 0.005 这类浮点误差）。 */
 export function round2(value: number): number {
