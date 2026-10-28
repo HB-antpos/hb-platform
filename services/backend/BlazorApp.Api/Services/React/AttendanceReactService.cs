@@ -1077,12 +1077,16 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => item.StoreCode.Equals(storeCode, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             string punchType;
-            var segmentLimit = schedule == null ? 1 : scheduleSegmentLimit;
+            // 无排班和有排班一样受每天班段数上限约束（员工 / 店长各自的上限，可在考勤设置里调），不再只认「一对」。
+            var segmentLimit = scheduleSegmentLimit;
             var isFirstClockIn = false;
             var isFinalClockOut = false;
             if (schedule == null)
             {
-                if (todayPunches.Any(item => item.ScheduleGuid != null)
+                // 无排班：按「最后一张有效卡」判断上班 / 下班——最后一张是上班卡（还没下班）这次就是下班，否则是新的一段上班。
+                // 上限只拦「新开一段」；还没下班的那一段任何时候都允许下班，不会被上限卡住下不了班。
+                punchType = ResolveUnscheduledNextPunchType(todayPunches);
+                if (punchType == "ClockIn"
                     && CountEffectiveStoreSegments(todayPunches) >= scheduleSegmentLimit)
                 {
                     await _db.Ado.RollbackTranAsync();
@@ -1090,14 +1094,6 @@ namespace BlazorApp.Api.Services.React
                         "该员工在本店今日班段数量已达到上限",
                         "SEGMENT_LIMIT_REACHED");
                 }
-                var hasClockIn = todayPunches.Any(item => item.PunchType == "ClockIn");
-                var hasClockOut = todayPunches.Any(item => item.PunchType == "ClockOut");
-                if (hasClockIn && hasClockOut)
-                {
-                    await _db.Ado.RollbackTranAsync();
-                    return ApiResponse<AttendancePunchDto>.Error("今日打卡已完成", "DAY_COMPLETE");
-                }
-                punchType = hasClockIn ? "ClockOut" : "ClockIn";
                 isFirstClockIn = punchType == "ClockIn";
                 isFinalClockOut = punchType == "ClockOut";
             }
@@ -4030,6 +4026,27 @@ namespace BlazorApp.Api.Services.React
                     "SEGMENT_LIMIT_REACHED");
             }
             return ValidationResult.OK();
+        }
+
+        /// <summary>
+        /// 无排班时这次打卡的类型：最后一张有效卡（排除已被补卡替换的原卡，按真实 UTC 先后）是上班卡＝这段还没下班，
+        /// 这次就是下班；否则是新的一段上班。同一时刻的卡用 Id 兜底排序，与有效卡序校验一致。
+        /// </summary>
+        internal static string ResolveUnscheduledNextPunchType(IEnumerable<AttendancePunch> punches)
+        {
+            var rows = punches.ToList();
+            var superseded = rows
+                .Where(item => !string.IsNullOrWhiteSpace(item.SupersedesPunchGuid))
+                .Select(item => item.SupersedesPunchGuid!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var last = rows
+                .Where(item => !superseded.Contains(item.PunchGuid))
+                .OrderBy(item => item.PunchTimeUtc)
+                .ThenBy(item => item.Id)
+                .LastOrDefault();
+            return last != null && last.PunchType.Equals("ClockIn", StringComparison.OrdinalIgnoreCase)
+                ? "ClockOut"
+                : "ClockIn";
         }
 
         private static int CountEffectiveStoreSegments(IEnumerable<AttendancePunch> punches)

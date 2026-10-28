@@ -370,7 +370,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task PunchAsync_WithValidQrToken_AutomaticallyClocksInThenOutAndCompletesDay()
+        public async Task PunchAsync_WithValidQrToken_AutomaticallyClocksInThenOutThenStartsNextSegment()
         {
             await SeedStoreScopeAsync();
             var now = DateTime.UtcNow;
@@ -392,7 +392,8 @@ namespace BlazorApp.Api.Tests
             _timeProvider.SetUtcNow(now.AddSeconds(31));
             var forged = await service.PunchAsync(forgedRequest);
             var clockOut = await service.PunchAsync(CreateQrPunchRequest(now, Guid.NewGuid()));
-            var complete = await service.PunchAsync(CreateQrPunchRequest(now, Guid.NewGuid()));
+            // 无排班不再只认一对：下班之后再扫就是新的一段上班（直到班段数上限）
+            var secondSegmentClockIn = await service.PunchAsync(CreateQrPunchRequest(now, Guid.NewGuid()));
 
             Assert.True(clockIn.Success);
             Assert.Equal("ClockIn", clockIn.Data!.PunchType);
@@ -407,8 +408,68 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("ATTENDANCE_QR_AUTH_INVALID", forged.ErrorCode);
             Assert.True(clockOut.Success);
             Assert.Equal("ClockOut", clockOut.Data!.PunchType);
-            Assert.False(complete.Success);
-            Assert.Equal("DAY_COMPLETE", complete.ErrorCode);
+            Assert.True(secondSegmentClockIn.Success, $"{secondSegmentClockIn.ErrorCode}: {secondSegmentClockIn.Message}");
+            Assert.Equal("ClockIn", secondSegmentClockIn.Data!.PunchType);
+            Assert.Equal("NoSchedule", secondSegmentClockIn.Data.Status);
+        }
+
+        [Fact]
+        public async Task PunchAsync_WhenNoSchedule_AllowsMultipleSegmentsUpToLimitAndAlwaysAllowsClockOut()
+        {
+            await SeedStoreScopeAsync();
+            var now = DateTime.UtcNow;
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            // 员工默认每天 4 段：8 次扫码依次是 上班 / 下班 × 4，第 4 段还没下班时下班不能被上限拦住
+            var types = new List<string>();
+            for (var scan = 0; scan < 8; scan++)
+            {
+                var result = await service.PunchAsync(CreateQrPunchRequest(now, Guid.NewGuid()));
+                Assert.True(result.Success, $"第 {scan + 1} 次扫码失败：{result.ErrorCode}: {result.Message}");
+                Assert.Equal("NoSchedule", result.Data!.Status);
+                Assert.Null(result.Data.ScheduleGuid);
+                types.Add(result.Data.PunchType);
+            }
+            Assert.Equal(
+                new[] { "ClockIn", "ClockOut", "ClockIn", "ClockOut", "ClockIn", "ClockOut", "ClockIn", "ClockOut" },
+                types);
+
+            // 第 5 段上班：超过上限，拒绝；已有的 8 张卡不变
+            var overLimit = await service.PunchAsync(CreateQrPunchRequest(now, Guid.NewGuid()));
+            Assert.False(overLimit.Success);
+            Assert.Equal("SEGMENT_LIMIT_REACHED", overLimit.ErrorCode);
+            Assert.Equal(8, await _db.Queryable<AttendancePunch>().CountAsync(item => item.UserGuid == "staff-user"));
+        }
+
+        [Fact]
+        public void ResolveUnscheduledNextPunchType_UsesLastEffectivePunch()
+        {
+            var t0 = new DateTime(2026, 5, 18, 0, 0, 0, DateTimeKind.Utc);
+            AttendancePunch Punch(string guid, string type, int minutes, string? supersedes = null) => new()
+            {
+                PunchGuid = guid,
+                PunchType = type,
+                PunchTimeUtc = t0.AddMinutes(minutes),
+                SupersedesPunchGuid = supersedes,
+            };
+
+            // 没有卡 / 最后一张是下班：新的一段上班
+            Assert.Equal("ClockIn", AttendanceReactService.ResolveUnscheduledNextPunchType(Array.Empty<AttendancePunch>()));
+            Assert.Equal("ClockIn", AttendanceReactService.ResolveUnscheduledNextPunchType(new[]
+            {
+                Punch("in-1", "ClockIn", 0), Punch("out-1", "ClockOut", 60),
+            }));
+            // 最后一张是上班：这次是下班（与传入顺序无关，按 UTC 时间排）
+            Assert.Equal("ClockOut", AttendanceReactService.ResolveUnscheduledNextPunchType(new[]
+            {
+                Punch("in-2", "ClockIn", 120), Punch("out-1", "ClockOut", 60), Punch("in-1", "ClockIn", 0),
+            }));
+            // 最后一张上班卡已被补卡（下班卡）替换：原卡不算，最后有效的是替换它的下班卡 → 新的一段上班
+            Assert.Equal("ClockIn", AttendanceReactService.ResolveUnscheduledNextPunchType(new[]
+            {
+                Punch("in-1", "ClockIn", 0), Punch("out-1", "ClockOut", 60),
+                Punch("in-2", "ClockIn", 120), Punch("out-2", "ClockOut", 120, supersedes: "in-2"),
+            }));
         }
 
         [Fact]
