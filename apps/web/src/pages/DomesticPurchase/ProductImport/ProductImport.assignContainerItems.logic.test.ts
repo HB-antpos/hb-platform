@@ -80,6 +80,22 @@ if (!tableScrollXMatch || Number(tableScrollXMatch[1]) > 1000) {
   throw new Error('商品导入表格最小宽度应不超过 1000px，才能在 1280 视口下不横向滚动')
 }
 
+// 商品名称 / 英文名称以及后面的窄列必须写明宽度（来自 resolveImportColumnWidths）：
+// 有一列没写宽度时，宽屏多出的空间会被它独吞，后面的固定列（装箱、体积、状态）就显示不全
+assertDeepEqual(
+  [
+    /key: 'productName',\s*width: colWidths\.widths\.productName,/.test(pageSource),
+    /key: 'englishName',\s*width: colWidths\.widths\.englishName,/.test(pageSource),
+    /key: 'casePackQuantity',\s*width: colWidths\.widths\.casePackQuantity,/.test(pageSource),
+    /key: 'volume',\s*width: colWidths\.widths\.volume,/.test(pageSource),
+    /key: 'status',\s*width: colWidths\.widths\.status,/.test(pageSource),
+    // 剩余空间由没写宽度的空白填充列吸收
+    /key: 'filler',\s*className: 'pi-col-filler',/.test(pageSource),
+  ],
+  [true, true, true, true, true, true],
+  '商品导入的名称列与后面的窄列应按容器宽度写明宽度，剩余空间交给空白填充列',
+)
+
 assertDeepEqual(
   [
     pageSource.includes('searchText: [s.supplierCode, s.supplierName, s.shopNumber]'),

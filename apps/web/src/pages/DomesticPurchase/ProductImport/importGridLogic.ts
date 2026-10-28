@@ -484,3 +484,82 @@ export function splitProductsByResolution(
   }
   return { override, increase }
 }
+
+/* ------------------------------------------------------------------ */
+/* 列宽分配                                                            */
+/* ------------------------------------------------------------------ */
+
+/** 会随屏幕变宽的列；其余列（勾选、件数、图、货号、条码、国内价）宽度固定，不参与分配。 */
+export type ImportGrowColumnKey = 'oemPrice' | 'midPackQuantity' | 'casePackQuantity' | 'volume' | 'status' | 'productName' | 'englishName'
+
+interface ImportGrowColumnSpec {
+  key: ImportGrowColumnKey
+  /** 窄屏（表格最小宽度）下的宽度 */
+  base: number
+  /** 再宽也不超过这个宽度 */
+  max: number
+}
+
+/**
+ * 第一档：后面这几列在最小宽度下放不下「数字 + 旧值 / 变化字段」，屏幕一宽先补足它们。
+ * 状态列只在检测后才有。
+ */
+const IMPORT_TRAILING_COLUMNS: readonly ImportGrowColumnSpec[] = [
+  { key: 'oemPrice', base: 64, max: 72 },
+  { key: 'midPackQuantity', base: 52, max: 60 },
+  { key: 'casePackQuantity', base: 52, max: 68 },
+  { key: 'volume', base: 68, max: 84 },
+  { key: 'status', base: 126, max: 162 },
+]
+
+/** 第二档：名称两列。英文名通常比中文名长，所以上限更高；有上限，超宽屏也不会再被撑得过宽。 */
+const IMPORT_NAME_COLUMNS: readonly ImportGrowColumnSpec[] = [
+  { key: 'productName', base: 70, max: 280 },
+  { key: 'englishName', base: 92, max: 360 },
+]
+
+/** 固定不变的列宽合计：勾选 52 + 件数 48 + 图 36 + 货号 104 + 条码 126 + 国内价 78；须与 index.tsx 里这些列的 width 保持一致。 */
+const IMPORT_FIXED_COLUMNS_WIDTH = 444
+/** 检测前没有状态列，只有一个窄的删除列 */
+const IMPORT_ACTIONS_COLUMN_WIDTH = 44
+
+/** 剩余空间不到这个值就不加空白填充列，直接让浏览器分摊（几个像素的差别看不出来）。 */
+export const IMPORT_FILLER_MIN_WIDTH = 40
+
+export interface ImportColumnWidths {
+  widths: Record<ImportGrowColumnKey, number>
+  /** 两档都涨满后还剩多少空间；够大时页面加一个空白填充列吸收，避免剩余空间又被名称列等按比例吃掉。 */
+  leftover: number
+  /** 最小宽度下的列宽合计（用来校验与 scroll.x 一致） */
+  baseTotal: number
+}
+
+/**
+ * 按表格容器宽度分配多出来的空间：先补足后面的列，再放宽名称列，都有上限，剩下的交给空白填充列。
+ * 原先名称列不写宽度，宽屏下多出的空间全被它俩吃掉，后面的固定窄列反而显示不全。
+ */
+export function resolveImportColumnWidths(containerWidth: number, minTableWidth: number, showStatus: boolean): ImportColumnWidths {
+  const tiers = [
+    IMPORT_TRAILING_COLUMNS.filter((spec) => showStatus || spec.key !== 'status'),
+    IMPORT_NAME_COLUMNS,
+  ]
+  const specs = tiers.flat()
+  const widths = Object.fromEntries(specs.map((spec) => [spec.key, spec.base])) as Record<ImportGrowColumnKey, number>
+  const baseTotal = IMPORT_FIXED_COLUMNS_WIDTH + (showStatus ? 0 : IMPORT_ACTIONS_COLUMN_WIDTH) + specs.reduce((sum, spec) => sum + spec.base, 0)
+
+  // 表格实际宽度 = max(容器宽度, 最小宽度)，窄屏走横向滚动而不是压缩
+  let slack = Math.max(0, Math.floor(containerWidth), minTableWidth) - baseTotal
+  for (const tier of tiers) {
+    const room = tier.reduce((sum, spec) => sum + (spec.max - spec.base), 0)
+    const give = Math.min(Math.max(slack, 0), room)
+    if (give <= 0) continue
+    let given = 0
+    for (const spec of tier) {
+      const grow = Math.floor((give * (spec.max - spec.base)) / room)
+      widths[spec.key] += grow
+      given += grow
+    }
+    slack -= given
+  }
+  return { widths, leftover: Math.max(slack, 0), baseTotal }
+}
