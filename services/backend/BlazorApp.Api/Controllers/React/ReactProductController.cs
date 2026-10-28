@@ -2,6 +2,7 @@ using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -222,6 +223,20 @@ namespace BlazorApp.Api.Controllers.React
                             success = true,
                             data = result.Data,
                             message = "创建成功",
+                        }
+                    );
+                }
+                // 条码/货号被已有商品占用：409 + 错误码 + 已有商品清单，客户端据此提示用户选用已有商品。
+                if (result.ErrorCode is ProductDuplicateGuard.BarcodeExistsErrorCode
+                    or ProductDuplicateGuard.ItemNumberExistsErrorCode)
+                {
+                    return Conflict(
+                        new
+                        {
+                            success = false,
+                            message = result.Message,
+                            errorCode = result.ErrorCode,
+                            existingProducts = result.Details,
                         }
                     );
                 }

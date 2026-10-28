@@ -57,6 +57,7 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
             }
 
             ApplyBarcodeStatus(result, barcode, data.BarcodeMatchCounts, summary);
+            ApplySuggestedExistingProducts(result, itemNumber, barcode, data.BarcodeOwnerProducts);
             if (result.ProductStatus != 1)
                 result.AutoPricing = detail.AutoPricing ?? true;
 
@@ -159,6 +160,39 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
             summary.BarcodeNormal++;
         else
             summary.BarcodeAbnormal++;
+    }
+
+    /// <summary>
+    /// 本供应商下货号不存在、但条码已是其他存活商品的主条码时，给出「建议选用的已有商品」。
+    /// 货号匹配按供应商限定是对的（不同供应商可以用相同货号表示不同商品），但条码在全局应该唯一；
+    /// 条码已被占用时若仍新建，就会建出同货号同条码的重复商品。这里只提示，不改状态和默认操作，也不自动关联。
+    /// </summary>
+    private static void ApplySuggestedExistingProducts(
+        ProductCheckResultDto result,
+        string? itemNumber,
+        string? barcode,
+        Dictionary<string, List<Product>> ownersByBarcode)
+    {
+        if (result.ProductStatus != 2
+            || string.IsNullOrWhiteSpace(barcode)
+            || !ownersByBarcode.TryGetValue(barcode.Trim(), out var owners))
+            return;
+
+        result.SuggestedExistingProducts = owners
+            .Select(product => new ProductCheckSuggestedProductDto
+            {
+                ProductCode = product.ProductCode,
+                ItemNumber = product.ItemNumber,
+                ProductName = product.ProductName,
+                LocalSupplierCode = product.LocalSupplierCode,
+                ProductImage = product.ProductImage,
+                SameItemNumber = !string.IsNullOrWhiteSpace(itemNumber)
+                    && string.Equals(product.ItemNumber?.Trim(), itemNumber.Trim(), StringComparison.OrdinalIgnoreCase),
+            })
+            .OrderByDescending(item => item.SameItemNumber)
+            .ThenBy(item => item.ItemNumber, StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
     }
 
     private void ApplyAutoPricingPreview(
