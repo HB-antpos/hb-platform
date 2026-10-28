@@ -2,11 +2,13 @@ import {
   CalendarOutlined,
   CheckCircleOutlined,
   CheckOutlined,
+  CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
   LoadingOutlined,
+  LockOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -26,6 +28,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Popover,
   Select,
   Space,
@@ -46,11 +49,12 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactElement } from 'react'
+import type { DragEvent, ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAttendancePendingCount } from '../../../layout/attendancePendingBadge'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import { restoreAttendanceSchedule } from '../../../services/attendancePayrollService'
 import {
   batchUpsertAttendanceHolidays,
   createAttendanceHoliday,
@@ -116,13 +120,27 @@ import DeletedSchedulesDrawer from './DeletedSchedulesDrawer'
 import ScheduleCellEditor from './ScheduleCellEditor'
 import type { CellEditorValues } from './ScheduleCellEditor'
 import {
+  SHIFT_PRESETS,
   buildScheduleSavePayloads,
-  buildShiftPresets,
   filterRowsByKeyword,
+  getMealSummary,
   getNextEmptyDateKey,
   getOccupiedDateKeys,
-  pickDefaultShift,
+  normalizeHm,
+  toMealChoice,
 } from './scheduleCellEditorLogic'
+import type { ShiftPreset } from './scheduleCellEditorLogic'
+import {
+  buildCopyPayload,
+  buildMoveUpdatePayload,
+  buildPresetPayload,
+  buildTransferCreatePayload,
+  collectPunchScheduleGuids,
+  getDropVerdict,
+  getMealBadge,
+  isScheduleLocked,
+} from './scheduleDragLogic'
+import type { DragSource } from './scheduleDragLogic'
 import './scheduleCellEditor.css'
 import {
   buildAvailabilityIndex,
@@ -375,6 +393,14 @@ export default function ScheduleAttendancePage() {
   // 周排班格内展示用：本店本周全部员工上报的可上班 / 不能上班时间（与「员工可用时间」标签的分页列表互不影响）
   const [weekAvailability, setWeekAvailability] = useState<AttendanceAvailabilityDto[]>([])
   const weekAvailabilityRequestRef = useRef(0)
+  // 本周已有打卡记录的排班：有打卡的班次锁定、不能拖动。known＝成功拉到了打卡（需要打卡查看权限）；没拉到时按保守规则锁今天及以前的班次。
+  const [weekPunches, setWeekPunches] = useState<{ guids: ReadonlySet<string>; known: boolean }>(() => ({ guids: new Set<string>(), known: false }))
+  const weekPunchesRequestRef = useRef(0)
+  // 拖拽：正在拖的内容、是否按住 ⌥（复制）、当前悬停的格子
+  const [dragSource, setDragSource] = useState<DragSource | null>(null)
+  const [altCopy, setAltCopy] = useState(false)
+  const [hoverDropKey, setHoverDropKey] = useState<string | null>(null)
+  const dropBusyRef = useRef(false)
   const [punches, setPunches] = useState<ListState<AttendancePunchDto>>(initialListState)
   const [holidays, setHolidays] = useState<ListState<AttendanceStoreHolidayDto>>(initialListState)
   const [settings, setSettings] = useState<AttendanceSettingsDto | null>(null)
@@ -640,6 +666,27 @@ export default function ScheduleAttendancePage() {
 
   const availabilityIndex = useMemo(() => buildAvailabilityIndex(weekAvailability), [weekAvailability])
 
+  // 本周打卡：只为判断「哪些班次已有打卡、不能拖动」。失败 / 无权限时 known=false，走保守规则。
+  const loadWeekPunches = useCallback(async () => {
+    const requestId = ++weekPunchesRequestRef.current
+    const unknown = { guids: new Set<string>(), known: false }
+    if (!access.canViewAttendancePunches || !storeCode || shouldSkipVisibleStoreQuery()) {
+      setWeekPunches(unknown)
+      return
+    }
+    try {
+      const result = await getAttendancePunches({
+        storeCode,
+        fromDate: weekStart.format('YYYY-MM-DD'),
+        toDate: weekEnd.format('YYYY-MM-DD'),
+      })
+      if (requestId === weekPunchesRequestRef.current) setWeekPunches({ guids: collectPunchScheduleGuids(result.items), known: true })
+    } catch (error) {
+      console.error(error)
+      if (requestId === weekPunchesRequestRef.current) setWeekPunches(unknown)
+    }
+  }, [access.canViewAttendancePunches, shouldSkipVisibleStoreQuery, storeCode, weekEnd, weekStart])
+
   const loadAvailability = useCallback(async (page = availability.page, pageSize = availability.pageSize) => {
     if (shouldSkipVisibleStoreQuery()) {
       setAvailability({ ...initialListState, page, pageSize })
@@ -713,13 +760,14 @@ export default function ScheduleAttendancePage() {
       void loadStoreUsers()
       void loadScheduleHolidays()
       void loadWeekAvailability()
+      void loadWeekPunches()
     }
     if (activeTab === 'records' && access.canViewAttendancePunches) void loadRecords(page)
     if (activeTab === 'availability') void loadAvailability(page)
     if (activeTab === 'punches') void loadPunches(page)
     if (activeTab === 'holidays') void loadHolidays(page)
     if (activeTab === 'settings') void loadSettings()
-  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers, loadWeekAvailability])
+  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers, loadWeekAvailability, loadWeekPunches])
 
   useEffect(() => {
     if (visibleStoreCodes !== null) {
@@ -1304,9 +1352,6 @@ export default function ScheduleAttendancePage() {
   }, [schedules.items, staffKeyword, storeCode, storeNameMap, storeUsers])
 
   const weekDateKeys = useMemo(() => weekDays.map((day) => day.format('YYYY-MM-DD')), [weekDays])
-  // 常用班次与默认时段取自本店本周已排的班次，没有历史才回落到内置四档
-  const shiftPresets = useMemo(() => buildShiftPresets(schedules.items), [schedules.items])
-  const defaultShift = useMemo(() => pickDefaultShift(schedules.items), [schedules.items])
 
   const isSameEditingCell = (left: EditingCell | null, right: EditingCell) => (
     left?.userGuid === right.userGuid && left.dateKey === right.dateKey && left.scheduleGuid === right.scheduleGuid
@@ -1338,6 +1383,9 @@ export default function ScheduleAttendancePage() {
           end: values.end,
           remark: values.remark,
           status: values.status,
+          mealChoice: values.mealChoice,
+          // 选「自动」要显式带恢复标记，后端才会清掉原来手动指定的次数
+          resetAutoMeal: true,
         })
         await updateAttendanceSchedule(schedule.scheduleGuid, payload)
         message.success(t('message.updateSuccess'))
@@ -1350,6 +1398,7 @@ export default function ScheduleAttendancePage() {
           end: values.end,
           remark: values.remark,
           status: 'Draft',
+          mealChoice: values.mealChoice,
         })
         const results = await Promise.allSettled(payloads.map((payload) => createAttendanceSchedule(payload)))
         const failedDates = payloads.filter((_, index) => results[index].status === 'rejected').map((payload) => payload.workDate)
@@ -1381,6 +1430,244 @@ export default function ScheduleAttendancePage() {
     }
   }
 
+  // ===== 拖拽：移动 / ⌥ 复制 / 托盘添加，以及班次右上角「×」删除 =====
+  // 撤销回调里要拿到「最新的」loadSchedules：用户可能在 5 秒内已经切了周，用旧闭包会把旧周数据刷回来
+  const loadSchedulesRef = useRef(loadSchedules)
+  loadSchedulesRef.current = loadSchedules
+  const todayKey = dayjs().format('YYYY-MM-DD')
+
+  const endDrag = () => {
+    setDragSource(null)
+    setAltCopy(false)
+    setHoverDropKey(null)
+  }
+
+  // 拖动开始时不能立刻改界面：同步 setState 会让浏览器在首帧取消这次拖动，推迟到下一个宏任务
+  const handleChipDragStart = (event: DragEvent<HTMLElement>, schedule: AttendanceScheduleDto) => {
+    event.dataTransfer.effectAllowed = 'copyMove'
+    event.dataTransfer.setData('text/plain', schedule.scheduleGuid)
+    const alt = event.altKey
+    const source: DragSource = {
+      kind: alt ? 'copy' : 'move',
+      schedule,
+      start: normalizeHm(schedule.startTime),
+      end: normalizeHm(schedule.endTime),
+    }
+    setEditingCell(null)
+    window.setTimeout(() => {
+      setAltCopy(alt)
+      setDragSource(source)
+    }, 0)
+  }
+
+  const handlePresetDragStart = (event: DragEvent<HTMLElement>, preset: ShiftPreset) => {
+    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.setData('text/plain', `${preset.start}-${preset.end}`)
+    setEditingCell(null)
+    window.setTimeout(() => setDragSource({ kind: 'preset', start: preset.start, end: preset.end }), 0)
+  }
+
+  const dragErrorMessage = (error: unknown) => (
+    error instanceof Error && error.message ? error.message : t('posAdmin.scheduleAttendance.messages.saveScheduleFailed')
+  )
+
+  // 带「撤销」的提示：5 秒内可撤销，撤销失败要如实告诉用户
+  const showUndoToast = (text: string, undo: () => Promise<void>, kind: 'success' | 'warning' = 'success') => {
+    const key = `sce-undo-${Date.now()}`
+    message[kind]({
+      key,
+      duration: 5,
+      content: (
+        <span>
+          {text}
+          <a
+            role="button"
+            style={{ marginInlineStart: 12 }}
+            onClick={async () => {
+              message.destroy(key)
+              try {
+                await undo()
+                message.success(t('posAdmin.scheduleAttendance.drag.undone'))
+              } catch (error) {
+                console.error(error)
+                message.error(t('posAdmin.scheduleAttendance.drag.undoFailed'))
+              }
+              void loadSchedulesRef.current()
+            }}
+          >
+            {t('posAdmin.scheduleAttendance.drag.undo')}
+          </a>
+        </span>
+      ),
+    })
+  }
+
+  // 松手后的落地：
+  // - 托盘 / ⌥ 复制：新建草稿；
+  // - 同员工换日期：调用「更新排班」（保持原状态）；
+  // - 换员工：后端更新接口不改员工，所以「新建 + 删除原班次」。新建接口一律建成草稿，有效班次要再补一次更新把状态改回去。
+  const runDrop = async (source: DragSource, row: ScheduleRow, dateKey: string) => {
+    if (dropBusyRef.current) return
+    const targetStoreCode = row.storeCode || storeCode
+    if (!targetStoreCode || !access.canEditAttendanceSchedule || !canEditStoreCode(targetStoreCode)) {
+      message.error(t('message.noPermission', '无权操作该数据'))
+      return
+    }
+
+    dropBusyRef.current = true
+    const params = { name: row.userName || '--', date: dateKey.slice(5) }
+    const origin = source.schedule
+    const originDateKey = origin ? dayjs(origin.workDate).format('YYYY-MM-DD') : undefined
+    const isMove = source.kind === 'move'
+    try {
+      if (source.kind === 'preset') {
+        const created = await createAttendanceSchedule(buildPresetPayload(targetStoreCode, row.userGuid, dateKey, source.start, source.end))
+        showUndoToast(t('posAdmin.scheduleAttendance.drag.added', params), async () => {
+          await deleteAttendanceSchedule(created.scheduleGuid)
+        })
+      } else if (origin && source.kind === 'copy') {
+        const created = await createAttendanceSchedule(buildCopyPayload(origin, row.userGuid, dateKey))
+        showUndoToast(t('posAdmin.scheduleAttendance.drag.copied', params), async () => {
+          await deleteAttendanceSchedule(created.scheduleGuid)
+        })
+      } else if (origin && originDateKey && isMove && origin.userGuid === row.userGuid) {
+        await updateAttendanceSchedule(origin.scheduleGuid, buildMoveUpdatePayload(origin, dateKey))
+        showUndoToast(
+          t(origin.status === 'Active' ? 'posAdmin.scheduleAttendance.drag.movedPublished' : 'posAdmin.scheduleAttendance.drag.moved', params),
+          async () => {
+            await updateAttendanceSchedule(origin.scheduleGuid, buildMoveUpdatePayload(origin, originDateKey))
+          },
+          origin.status === 'Active' ? 'warning' : 'success',
+        )
+      } else if (origin && originDateKey && isMove) {
+        const created = await createAttendanceSchedule(buildTransferCreatePayload(origin, row.userGuid, dateKey))
+        let downgraded = false
+        if (origin.status === 'Active') {
+          try {
+            await updateAttendanceSchedule(created.scheduleGuid, buildTransferCreatePayload(origin, row.userGuid, dateKey))
+          } catch (error) {
+            console.error(error)
+            downgraded = true
+          }
+        }
+        try {
+          await deleteAttendanceSchedule(origin.scheduleGuid)
+        } catch (error) {
+          console.error(error)
+          message.warning(t('posAdmin.scheduleAttendance.drag.transferDeleteFailed'))
+          return
+        }
+        showUndoToast(
+          t(origin.status === 'Active' && !downgraded ? 'posAdmin.scheduleAttendance.drag.movedPublished' : 'posAdmin.scheduleAttendance.drag.moved', params),
+          async () => {
+            // 恢复已删除排班会变成草稿（后端不留原状态），有效班次要再改回有效
+            await deleteAttendanceSchedule(created.scheduleGuid)
+            await restoreAttendanceSchedule(origin.scheduleGuid)
+            if (origin.status === 'Active') {
+              await updateAttendanceSchedule(origin.scheduleGuid, buildMoveUpdatePayload(origin, originDateKey))
+            }
+          },
+          origin.status === 'Active' ? 'warning' : 'success',
+        )
+      }
+    } catch (error) {
+      console.error(error)
+      message.error(t(source.kind === 'preset' || source.kind === 'copy' ? 'posAdmin.scheduleAttendance.drag.addFailed' : 'posAdmin.scheduleAttendance.drag.moveFailed', { reason: dragErrorMessage(error) }))
+    } finally {
+      dropBusyRef.current = false
+      void loadSchedulesRef.current()
+    }
+  }
+
+  // 班次右上角「×」：现有删除接口（软删除，可在「已删除排班」找回）
+  const deleteScheduleViaX = async (schedule: AttendanceScheduleDto) => {
+    try {
+      await deleteAttendanceSchedule(schedule.scheduleGuid)
+      message.success(t('message.deleteSuccess'))
+      setEditingCell(null)
+    } catch (error) {
+      console.error(error)
+      message.error(dragErrorMessage(error))
+    } finally {
+      void loadSchedulesRef.current()
+    }
+  }
+
+  // 某个格子对当前拖拽内容的落点：类名（可放 / 提醒 / 不能放 / 当前悬停）、事件、角标与「放到这里」提示
+  const effectiveDragSource: DragSource | null = dragSource && dragSource.kind !== 'preset'
+    ? { ...dragSource, kind: altCopy ? 'copy' : 'move' }
+    : dragSource
+
+  const getCellDrop = (row: ScheduleRow, dateKey: string, availability: DayAvailability | undefined) => {
+    const cellKey = `${row.userGuid}|${dateKey}`
+    const editable = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
+    const source = effectiveDragSource
+    const sourceCell = source?.schedule
+      ? { userGuid: source.schedule.userGuid, dateKey: dayjs(source.schedule.workDate).format('YYYY-MM-DD') }
+      : undefined
+    const verdict = source && editable
+      ? getDropVerdict(source, { userGuid: row.userGuid, dateKey, schedules: row.schedulesByDate[dateKey] ?? [], availability }, sourceCell)
+      : undefined
+    const droppable = verdict?.state === 'ok' || verdict?.state === 'warn'
+    const hovered = droppable && hoverDropKey === cellKey
+
+    const className = [
+      'sce-cell',
+      verdict && verdict.state !== 'noop' ? `sce-cell--drop-${verdict.state}` : '',
+      hovered ? 'sce-cell--drop-target' : '',
+    ].filter(Boolean).join(' ')
+
+    const props = {
+      className,
+      onDragOver: (event: DragEvent<HTMLDivElement>) => {
+        if (!source) return
+        if (source.kind !== 'preset' && event.altKey !== altCopy) setAltCopy(event.altKey)
+        if (!droppable) {
+          event.dataTransfer.dropEffect = 'none'
+          return
+        }
+        // 必须 preventDefault 浏览器才允许在这里放下
+        event.preventDefault()
+        event.dataTransfer.dropEffect = source.kind === 'move' ? 'move' : 'copy'
+        if (hoverDropKey !== cellKey) setHoverDropKey(cellKey)
+      },
+      onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setHoverDropKey((prev) => (prev === cellKey ? null : prev))
+        }
+      },
+      onDrop: (event: DragEvent<HTMLDivElement>) => {
+        if (!source || !droppable) return
+        event.preventDefault()
+        endDrag()
+        void runDrop(source, row, dateKey)
+      },
+    }
+
+    let flag: ReactElement | null = null
+    if (verdict && verdict.state !== 'noop') {
+      const flagKind = verdict.state === 'ok' ? (hovered ? 'ok' : null) : verdict.state
+      const flagText = verdict.state === 'ok'
+        ? t('posAdmin.scheduleAttendance.drag.flagOk')
+        : verdict.state === 'bad'
+          ? t('posAdmin.scheduleAttendance.drag.flagOverlap')
+          : t(verdict.reason === 'unavailable' ? 'posAdmin.scheduleAttendance.drag.flagUnavailable' : 'posAdmin.scheduleAttendance.drag.flagOutside')
+      if (flagKind) flag = <span className={`sce-drop-flag sce-drop-flag--${flagKind}`}>{flagText}</span>
+    }
+    const noteKey = source?.kind === 'preset' ? 'dropAdd' : source?.kind === 'copy' ? 'dropCopy' : 'dropMove'
+    const decor = (
+      <>
+        {flag}
+        {hovered ? (
+          <div className="sce-drop-note">
+            {t(`posAdmin.scheduleAttendance.drag.${noteKey}`, { name: row.userName || '--', date: dateKey.slice(5) })}
+          </div>
+        ) : null}
+      </>
+    )
+    return { props, decor }
+  }
+
   // 把就地编辑浮层锚定在被点的单元格 / 班次块上；内容在打开时才渲染，关闭即销毁以重置表单
   const withCellEditor = (
     row: ScheduleRow,
@@ -1407,8 +1694,6 @@ export default function ScheduleAttendancePage() {
             dateLabel={`${date.format('MM-DD')} ${t(`posAdmin.scheduleAttendance.weekdays.${date.isoWeekday() - 1}`)}`}
             currentDateKey={dateKey}
             schedule={schedule}
-            presets={shiftPresets}
-            defaultShift={defaultShift}
             weekDays={weekDays.map((day, index) => {
               const key = day.format('YYYY-MM-DD')
               return {
@@ -1465,6 +1750,7 @@ export default function ScheduleAttendancePage() {
     const canEditRowStore = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
     const newCell: EditingCell = { userGuid: row.userGuid, dateKey }
     const newCellActive = isSameEditingCell(editingCell, newCell)
+    const cellDrop = getCellDrop(row, dateKey, dayAvailability)
 
     if (!daySchedules.length) {
       if (!canEditRowStore) {
@@ -1477,7 +1763,8 @@ export default function ScheduleAttendancePage() {
         )
       }
       return (
-        <div className="sce-cell">
+        <div {...cellDrop.props}>
+          {cellDrop.decor}
           {withCellEditor(row, date, newCell, undefined, (
             <button
               type="button"
@@ -1492,25 +1779,58 @@ export default function ScheduleAttendancePage() {
     }
 
     return (
-      <div className="sce-cell">
+      <div {...cellDrop.props}>
+        {cellDrop.decor}
         {daySchedules.map((schedule) => {
           const canEditSchedule = access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
           const chipCell: EditingCell = { userGuid: row.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
           // 班次与员工上报的时间冲突：块上加橙色角标，悬停说明原因（不阻止保存，仅提醒排班的人）
           const conflict = getScheduleAvailabilityConflict(schedule, dayAvailability)
+          // 已有打卡记录（或无法确认且已到班）的班次锁定：不能拖动，「×」仍可用
+          const locked = canEditSchedule && schedule.status !== 'Cancelled' && isScheduleLocked({
+            scheduleGuid: schedule.scheduleGuid,
+            workDateKey: dateKey,
+            todayKey,
+            punchScheduleGuids: weekPunches.guids,
+            canViewPunches: weekPunches.known,
+          })
+          const canDrag = canEditSchedule && schedule.status !== 'Cancelled' && !locked
+          const dragging = dragSource?.schedule?.scheduleGuid === schedule.scheduleGuid && !altCopy
+          const mealBadge = getMealBadge(schedule.mealBreakCount)
+          const mealPaid = mealBadge
+            ? getMealSummary(normalizeHm(schedule.startTime), normalizeHm(schedule.endTime), toMealChoice(schedule.mealBreakCount))?.paidHours
+            : undefined
+          const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
+          // 用 div 而不是 button：部分浏览器（Firefox）里 button 不能被拖动
           const chip = (
-            <button
+            <div
               key={schedule.scheduleGuid}
-              type="button"
-              disabled={!canEditSchedule}
+              role="button"
+              tabIndex={canEditSchedule ? 0 : -1}
+              aria-disabled={!canEditSchedule}
+              draggable={canDrag}
+              title={locked ? t(weekPunches.known ? 'posAdmin.scheduleAttendance.drag.locked' : 'posAdmin.scheduleAttendance.drag.lockedUnknown') : undefined}
+              onDragStart={(event) => handleChipDragStart(event, schedule)}
+              onDragEnd={endDrag}
+              onKeyDown={(event) => {
+                // 键盘 Enter / 空格等同点击（div 没有 button 的原生行为）
+                if (canEditSchedule && (event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                  event.preventDefault()
+                  event.currentTarget.click()
+                }
+              }}
               className={[
                 'sce-chip',
                 `sce-chip--${schedule.status}`,
                 canEditSchedule ? 'sce-chip--editable' : '',
+                canDrag ? 'sce-chip--draggable' : '',
+                locked ? 'sce-chip--locked' : '',
+                dragging ? 'sce-chip--drag-src' : '',
                 isSameEditingCell(editingCell, chipCell) ? 'sce-chip--active' : '',
                 conflict ? 'sce-chip--conflict' : '',
               ].filter(Boolean).join(' ')}
             >
+              {canDrag ? <span className="sce-chip-grip" aria-hidden>⋮⋮</span> : null}
               <span className="sce-chip-time">
                 {formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}
                 {conflict ? (
@@ -1518,12 +1838,52 @@ export default function ScheduleAttendancePage() {
                     <WarningOutlined className="sce-chip-warn" />
                   </Tooltip>
                 ) : null}
+                {locked ? <LockOutlined className="sce-chip-lock" /> : null}
               </span>
               <span className="sce-chip-meta">
                 <span>{statusLabel('schedule', schedule.status)}</span>
+                {mealBadge ? (
+                  <span
+                    className="sce-chip-meal"
+                    title={mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : undefined}
+                  >
+                    {mealBadge.count === 0
+                      ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeNone')
+                      : t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTimes', { count: mealBadge.count })}
+                  </span>
+                ) : null}
                 {schedule.remark ? <span className="sce-chip-remark" title={schedule.remark}>{schedule.remark}</span> : null}
               </span>
-            </button>
+              {canEditSchedule ? (
+                // 点「×」只弹删除确认，不能触发外层「点班次打开编辑浮层」
+                <span className="sce-chip-x-wrap" onClick={(event) => event.stopPropagation()}>
+                  <Popconfirm
+                    title={t('posAdmin.scheduleAttendance.drag.deleteTitle', { time: timeText })}
+                    description={t('posAdmin.scheduleAttendance.drag.deleteDesc')}
+                    okText={t('common.delete')}
+                    cancelText={t('common.cancel')}
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => deleteScheduleViaX(schedule)}
+                  >
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="sce-chip-x"
+                      aria-label={t('posAdmin.scheduleAttendance.drag.deleteAria')}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          event.currentTarget.click()
+                        }
+                      }}
+                    >
+                      <CloseOutlined />
+                    </span>
+                  </Popconfirm>
+                </span>
+              ) : null}
+            </div>
           )
           return canEditSchedule
             ? <div key={schedule.scheduleGuid}>{withCellEditor(row, date, chipCell, schedule, chip)}</div>
@@ -2073,6 +2433,25 @@ export default function ScheduleAttendancePage() {
                   {statusLabel('schedule', status)}
                 </span>
               ))}
+            </div>
+          ) : null}
+          {/* 拖拽托盘：5 个固定常用班次，拖到任意格新建草稿班次 */}
+          {storeCode && access.canEditAttendanceSchedule && canEditSelectedStore ? (
+            <div className="sce-tray">
+              <span className="sce-tray-label">{t('posAdmin.scheduleAttendance.drag.trayLabel')}</span>
+              {SHIFT_PRESETS.map((preset) => (
+                <span
+                  key={`${preset.start}-${preset.end}`}
+                  className="sce-tray-chip"
+                  draggable
+                  onDragStart={(event) => handlePresetDragStart(event, preset)}
+                  onDragEnd={endDrag}
+                >
+                  <span className="sce-tray-grip" aria-hidden>⋮⋮</span>
+                  {preset.start}–{preset.end}
+                </span>
+              ))}
+              <span className="sce-tray-hint">{t('posAdmin.scheduleAttendance.drag.trayHint')}</span>
             </div>
           ) : null}
           <MeasuredTable metricId="pos-admin.schedule-attendance.table-2"

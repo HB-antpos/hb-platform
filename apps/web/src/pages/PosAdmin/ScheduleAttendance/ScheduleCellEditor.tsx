@@ -8,8 +8,15 @@ import { useTranslation } from 'react-i18next'
 
 import type { AttendanceScheduleDto, AttendanceScheduleStatus } from '../../../types/scheduleAttendance'
 
-import { getShiftHours, normalizeHm } from './scheduleCellEditorLogic'
-import type { ShiftPreset } from './scheduleCellEditorLogic'
+import {
+  DEFAULT_SHIFT,
+  SHIFT_PRESETS,
+  getMealSummary,
+  getShiftHours,
+  normalizeHm,
+  toMealChoice,
+} from './scheduleCellEditorLogic'
+import type { MealChoice } from './scheduleCellEditorLogic'
 import './scheduleCellEditor.css'
 
 export interface CellEditorValues {
@@ -17,6 +24,8 @@ export interface CellEditorValues {
   end: string
   remark?: string
   status: AttendanceScheduleStatus
+  /** 用餐扣除：auto＝按班次时长自动，数字＝手动指定次数（0＝不扣）。 */
+  mealChoice: MealChoice
   /** 仅新建时可选：同一时段一并铺到本周其他日期。 */
   extraDateKeys: string[]
 }
@@ -36,8 +45,6 @@ interface ScheduleCellEditorProps {
   currentDateKey: string
   /** 有值 = 编辑已有班次；无值 = 在空白格新建。 */
   schedule?: AttendanceScheduleDto
-  presets: ShiftPreset[]
-  defaultShift: { start: string; end: string }
   weekDays: CellEditorWeekDay[]
   saving: boolean
   onSave: (values: CellEditorValues, options: { advance: boolean }) => void
@@ -47,15 +54,14 @@ interface ScheduleCellEditorProps {
 
 const SCHEDULE_STATUSES: AttendanceScheduleStatus[] = ['Draft', 'Active', 'Cancelled']
 const toTime = (value: string) => dayjs(value, 'HH:mm')
+const MEAL_CHOICES: MealChoice[] = ['auto', 0, 1, 2, 3]
 
-/** 周排班单元格就地编辑浮层：快捷班次 + 时间 + 备注，新建时可同时应用到本周其他日期。 */
+/** 周排班单元格就地编辑浮层：固定常用班次 + 时间 + 用餐扣除 + 备注，新建时可同时应用到本周其他日期。 */
 export default function ScheduleCellEditor({
   employeeName,
   dateLabel,
   currentDateKey,
   schedule,
-  presets,
-  defaultShift,
   weekDays,
   saving,
   onSave,
@@ -65,9 +71,10 @@ export default function ScheduleCellEditor({
   const { t } = useTranslation()
   const rootRef = useRef<HTMLDivElement>(null)
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => [
-    toTime(schedule ? normalizeHm(schedule.startTime) : defaultShift.start),
-    toTime(schedule ? normalizeHm(schedule.endTime) : defaultShift.end),
+    toTime(schedule ? normalizeHm(schedule.startTime) : DEFAULT_SHIFT.start),
+    toTime(schedule ? normalizeHm(schedule.endTime) : DEFAULT_SHIFT.end),
   ])
+  const [mealChoice, setMealChoice] = useState<MealChoice>(() => toMealChoice(schedule?.mealBreakCount))
   const [remark, setRemark] = useState(schedule?.remark ?? '')
   const [status, setStatus] = useState<AttendanceScheduleStatus>(schedule?.status ?? 'Draft')
   const [extraDateKeys, setExtraDateKeys] = useState<string[]>([])
@@ -87,6 +94,7 @@ export default function ScheduleCellEditor({
   const start = range[0].format('HH:mm')
   const end = range[1].format('HH:mm')
   const hours = getShiftHours(start, end)
+  const mealSummary = getMealSummary(start, end, mealChoice)
   const selectableDays = useMemo(
     () => weekDays.filter((day) => day.dateKey !== currentDateKey && !day.occupied),
     [currentDateKey, weekDays],
@@ -94,7 +102,7 @@ export default function ScheduleCellEditor({
 
   const submit = (advance: boolean) => {
     if (saving) return
-    onSave({ start, end, remark: remark.trim() || undefined, status, extraDateKeys }, { advance })
+    onSave({ start, end, remark: remark.trim() || undefined, status, mealChoice, extraDateKeys }, { advance })
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -118,10 +126,6 @@ export default function ScheduleCellEditor({
     setExtraDateKeys((prev) => (prev.includes(dateKey) ? prev.filter((key) => key !== dateKey) : [...prev, dateKey]))
   }
 
-  const presetLabel = (preset: ShiftPreset) => (
-    preset.nameKey ? t(`posAdmin.scheduleAttendance.cellEditor.presetNames.${preset.nameKey}`) : undefined
-  )
-
   return (
     <div ref={rootRef} className="sce-editor" tabIndex={-1} onKeyDown={handleKeyDown}>
       <div className="sce-editor-head">
@@ -132,10 +136,8 @@ export default function ScheduleCellEditor({
       </div>
 
       <div className="sce-label"><span>{t('posAdmin.scheduleAttendance.cellEditor.presets')}</span></div>
-      <div className="sce-presets">
-        {presets.map((preset) => {
-          const label = presetLabel(preset)
-          const timeText = `${preset.start}–${preset.end}`
+      <div className="sce-presets sce-presets--three">
+        {SHIFT_PRESETS.map((preset) => {
           const on = preset.start === start && preset.end === end
           return (
             <button
@@ -144,14 +146,18 @@ export default function ScheduleCellEditor({
               className={`sce-preset${on ? ' sce-preset--on' : ''}`}
               onClick={() => setRange([toTime(preset.start), toTime(preset.end)])}
             >
-              <span className="sce-preset-name">{label ?? timeText}</span>
-              {label ? <span className="sce-preset-time">{timeText}</span> : null}
+              <span className="sce-preset-name">{`${preset.start}–${preset.end}`}</span>
             </button>
           )
         })}
       </div>
 
-      <div className="sce-label"><span>{t('posAdmin.scheduleAttendance.cellEditor.shiftTime')}</span></div>
+      <div className="sce-label">
+        <span>{t('posAdmin.scheduleAttendance.cellEditor.shiftTime')}</span>
+        {schedule ? null : (
+          <span>{t('posAdmin.scheduleAttendance.cellEditor.defaultShift', { start: DEFAULT_SHIFT.start, end: DEFAULT_SHIFT.end })}</span>
+        )}
+      </div>
       <div className="sce-time-row">
         <TimePicker.RangePicker
           format="HH:mm"
@@ -165,6 +171,55 @@ export default function ScheduleCellEditor({
           <span className="sce-duration">{t('posAdmin.scheduleAttendance.cellEditor.hours', { hours })}</span>
         ) : null}
       </div>
+
+      {/* 用餐扣除：自动按时长算（超过 4.5 小时 1 次、超过 9 小时 2 次），也可手动指定 0–3 次；下面一行实时算出计薪时长 */}
+      <div className="sce-label">
+        <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.title')}</span>
+        <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.perMeal', { minutes: 30 })}</span>
+      </div>
+      <Segmented
+        block
+        value={mealChoice}
+        onChange={(value) => setMealChoice(value as MealChoice)}
+        options={MEAL_CHOICES.map((value) => ({
+          value,
+          label: value === 'auto'
+            ? t('posAdmin.scheduleAttendance.cellEditor.meal.auto')
+            : value === 0
+              ? t('posAdmin.scheduleAttendance.cellEditor.meal.none')
+              : t('posAdmin.scheduleAttendance.cellEditor.meal.times', { count: value }),
+        }))}
+      />
+      {mealSummary ? (
+        <div className="sce-meal-sum">
+          <div className="sce-meal-eq">
+            {mealSummary.deductMinutes === 0 ? (
+              <>
+                <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.hours', { hours: mealSummary.hours })}</span>
+                <span className="sce-meal-op">·</span>
+                <b className="sce-meal-same">{t('posAdmin.scheduleAttendance.cellEditor.meal.noDeduct', { hours: mealSummary.paidHours })}</b>
+              </>
+            ) : (
+              <>
+                <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.hours', { hours: mealSummary.hours })}</span>
+                <span className="sce-meal-op">−</span>
+                <span>{t('posAdmin.scheduleAttendance.cellEditor.meal.deduct', { minutes: mealSummary.deductMinutes })}</span>
+                <span className="sce-meal-op">=</span>
+                <b>{t('posAdmin.scheduleAttendance.cellEditor.meal.paid', { hours: mealSummary.paidHours })}</b>
+              </>
+            )}
+          </div>
+          <div className="sce-meal-sub">
+            {mealSummary.isAuto
+              ? mealSummary.count === 0
+                ? t('posAdmin.scheduleAttendance.cellEditor.meal.autoNone')
+                : t('posAdmin.scheduleAttendance.cellEditor.meal.autoCount', { count: mealSummary.count })
+              : mealSummary.count === 0
+                ? t('posAdmin.scheduleAttendance.cellEditor.meal.manualNone')
+                : t('posAdmin.scheduleAttendance.cellEditor.meal.manual')}
+          </div>
+        </div>
+      ) : null}
 
       {schedule ? (
         <>

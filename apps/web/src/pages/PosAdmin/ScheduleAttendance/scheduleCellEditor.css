@@ -430,3 +430,278 @@
     transition: none;
   }
 }
+
+/* ===== 常用班次：固定 5 个，3 列排，只显示时间 ===== */
+.sce-presets--three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.sce-presets--three .sce-preset {
+  justify-content: center;
+  min-width: 0;
+  padding: 6px 4px;
+}
+
+.sce-presets--three .sce-preset-name {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== 用餐扣除：分段选择下面一行算式 ===== */
+.sce-meal-sum {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sce-meal-eq {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-meal-op {
+  color: #bfbfbf;
+}
+
+.sce-meal-eq b {
+  color: #0958d9;
+  font-weight: 650;
+}
+
+.sce-meal-eq b.sce-meal-same {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.sce-meal-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* 班次块上的用餐标记：只有手动指定了用餐次数才显示，自动的不加噪音 */
+.sce-chip-meal {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0.8;
+}
+
+/* ===== 拖拽：班次块的抓手、锁、「×」 ===== */
+.sce-chip--draggable {
+  cursor: grab;
+}
+
+.sce-chip--draggable:active {
+  cursor: grabbing;
+}
+
+.sce-chip--locked {
+  cursor: pointer;
+}
+
+/* 左侧抓手：悬停才出现，提示可拖 */
+.sce-chip-grip {
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.sce-chip:hover .sce-chip-grip,
+.sce-chip:focus-visible .sce-chip-grip {
+  opacity: 1;
+}
+
+.sce-chip-lock {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* 拖动中：原位置留一个淡影 */
+.sce-chip--drag-src {
+  opacity: 0.42;
+  outline: 1.5px dashed #8c8c8c;
+  outline-offset: -2px;
+}
+
+/* 右上角「×」：放在班次块内（块本身 overflow:hidden），悬停 / 键盘聚焦才出现；触屏没有悬停，始终显示 */
+.sce-chip-x-wrap {
+  display: contents;
+}
+
+.sce-chip-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid #d9d9d9;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #8c8c8c;
+  font-size: 9px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.sce-chip:hover .sce-chip-x,
+.sce-chip:focus-within .sce-chip-x,
+.sce-chip-x:focus-visible {
+  opacity: 1;
+}
+
+.sce-chip-x:hover {
+  border-color: #ff7875;
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+
+@media (hover: none) {
+  .sce-chip-x {
+    opacity: 1;
+  }
+}
+
+/* ===== 拖拽：落点状态（可放 / 提醒 / 不能放 / 当前悬停） ===== */
+.sce-cell {
+  position: relative;
+  border-radius: 8px;
+}
+
+.sce-cell--drop-ok {
+  background: #f0f7ff;
+  outline: 1px dashed #91caff;
+  outline-offset: 2px;
+}
+
+.sce-cell--drop-warn {
+  background: #fffbe6;
+  outline: 1px dashed #ffc069;
+  outline-offset: 2px;
+}
+
+.sce-cell--drop-bad {
+  background: repeating-linear-gradient(135deg, #fff1f0 0 6px, #fff 6px 12px);
+  outline: 1px dashed #ff7875;
+  outline-offset: 2px;
+  cursor: not-allowed;
+}
+
+.sce-cell--drop-target {
+  background: #e6f4ff;
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.sce-drop-flag {
+  position: absolute;
+  top: -9px;
+  left: 6px;
+  z-index: 3;
+  padding: 0 7px;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.sce-drop-flag--ok {
+  background: #1677ff;
+}
+
+.sce-drop-flag--warn {
+  background: #fa8c16;
+}
+
+.sce-drop-flag--bad {
+  background: #ff4d4f;
+}
+
+.sce-drop-note {
+  padding: 0 3px;
+  color: #0958d9;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ===== 拖拽托盘：5 个固定常用班次 ===== */
+.sce-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.sce-tray-label {
+  margin-right: 4px;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.sce-tray-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 6px;
+  border: 1px solid #d9d9d9;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.15s;
+}
+
+.sce-tray-chip:hover {
+  border-color: #69b1ff;
+}
+
+.sce-tray-chip:active {
+  cursor: grabbing;
+}
+
+.sce-tray-grip {
+  color: #bfbfbf;
+  font-size: 11px;
+  letter-spacing: -2px;
+}
+
+.sce-tray-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}

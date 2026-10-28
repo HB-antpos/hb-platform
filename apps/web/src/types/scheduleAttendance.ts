@@ -68,6 +68,8 @@ export interface AttendanceScheduleDto {
   earlyLeaveMinutes?: number
   crossStoreMissingClockOutStoreCode?: string
   segments?: AttendanceScheduleSegmentDto[]
+  /** 店长手动指定的用餐次数（0–3）；缺省 / null＝按班次时长自动。 */
+  mealBreakCount?: number | null
   /** 排班有效用餐次数（指定值优先，否则按时长默认）；旧后端不返回。 */
   effectiveMealBreakCount?: number
   /** 计薪时扣除的用餐分钟（是否休息过都按排班扣）。 */
@@ -109,6 +111,10 @@ export interface SaveAttendanceSchedulePayload {
   endTime: string
   status?: AttendanceScheduleStatus
   remark?: string
+  /** 用餐次数（0–3）；新建不传＝自动，更新不传＝后端保持原值。 */
+  mealBreakCount?: number
+  /** 仅更新用：true＝恢复按时长自动（后端把次数写回 null）。 */
+  resetMealBreakCount?: boolean
 }
 
 export interface AttendanceAvailabilityDto {
