@@ -555,7 +555,7 @@
     "editTitle": "Edit shift",
     "deleteAction": "Delete",
     "deleteTitle": "Delete shift",
-    "deleteMessage": "Delete this shift?",
+    "deleteMessage": "Related pending attendance approvals will be cancelled. You can restore it from Deleted rosters.",
     "deleteConfirm": "Delete",
     "noStore": "Select a store first",
     "noEmployees": "No staff in this store",
@@ -580,12 +580,6 @@
       "scheduledPeople": "Rostered"
     },
     "quickShiftTitle": "Common shifts",
-    "quickShifts": {
-      "nineToFiveThirty": "09:00 - 17:30",
-      "tenToFour": "10:00 - 16:00",
-      "nineToSeven": "09:00 - 19:00",
-      "nineToNine": "09:00 - 21:00"
-    },
     "timePicker": {
       "hour": "HH",
       "minute": "MM"
@@ -615,7 +609,9 @@
     "cell": {
       "leave": "Leave",
       "available": "Avail",
-      "unavailable": "No"
+      "unavailable": "No",
+      "mealBadge": "M{{count}}",
+      "conflictA11y": "Conflicts with the times the employee reported"
     },
     "legend": {
       "shift": "Shift",
@@ -658,7 +654,9 @@
       "mealBreakMinus": "One fewer meal break",
       "mealBreakPlus": "One more meal break",
       "save": "Save ({{hours}} h)",
-      "addShift": "Add another shift"
+      "addShift": "Add another shift",
+      "conflictUnavailable": "Overlaps a time the employee marked unavailable",
+      "conflictOutside": "Outside the times the employee marked available"
     },
     "copyPreviousWeek": "Copy last week",
     "copyConfirmTitle": "Copy last week's roster",
@@ -668,7 +666,35 @@
     "copyWeekFailed": "Couldn't copy last week's roster",
     "showOtherManagers": "Other store managers ({{count}})",
     "managerBadge": "Mgr",
-    "ageBadge": "{{age}}y"
+    "ageBadge": "{{age}}y",
+    "placement": {
+      "trayTitle": "Add shift",
+      "trayHint": "Tap a preset, then tap the cell to place it",
+      "bannerMove": "Move {{shift}}: tap the target cell",
+      "bannerCopy": "Copy {{shift}}: tap the target cell",
+      "bannerAdd": "Add {{shift}}: tap the target cell",
+      "cancel": "Cancel",
+      "moveAction": "Move to…",
+      "copyAction": "Copy to…",
+      "lockedNotice": "Has punch records, cannot be moved or copied; you can still delete it",
+      "lockedUnknownNotice": "Punch records unknown; shifts today or earlier cannot be moved or copied; you can still delete it",
+      "badOverlap": "Overlaps an existing shift in that cell",
+      "warnTitle": "Place here?",
+      "warnUnavailable": "{{name}} marked this day as unavailable. Place it anyway?",
+      "warnOutside": "This shift is outside the times {{name}} marked available. Place it anyway?",
+      "warnConfirm": "Place anyway",
+      "added": "Added to {{name}} · {{date}} (draft)",
+      "copied": "Copied to {{name}} · {{date}} (draft)",
+      "moved": "Moved to {{name}} · {{date}}",
+      "movedPublished": "Moved to {{name}} · {{date}} (active shift, effective immediately)",
+      "downgradedSuffix": "; the new shift is a draft, please publish the week",
+      "transferDeleteFailed": "Created at the new place, but deleting the original failed. Please delete it manually",
+      "undo": "Undo",
+      "undone": "Undone",
+      "undoFailed": "Undo failed, please fix manually",
+      "failed": "Not placed: {{reason}}",
+      "closeA11y": "Delete shift {{shift}}"
+    }
   },
   "adjustment": {
     "title": "Punch correction",

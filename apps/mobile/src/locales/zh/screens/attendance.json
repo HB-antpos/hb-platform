@@ -555,7 +555,7 @@
     "editTitle": "编辑班次",
     "deleteAction": "删除",
     "deleteTitle": "删除班次",
-    "deleteMessage": "确定删除这个班次吗？",
+    "deleteMessage": "关联的待审批考勤会一并取消。删除后可在「已删除排班」里找回。",
     "deleteConfirm": "删除",
     "noStore": "请先选择分店",
     "noEmployees": "当前分店暂无员工",
@@ -580,12 +580,6 @@
       "scheduledPeople": "排班人数"
     },
     "quickShiftTitle": "常用班次",
-    "quickShifts": {
-      "nineToFiveThirty": "09:00 - 17:30",
-      "tenToFour": "10:00 - 16:00",
-      "nineToSeven": "09:00 - 19:00",
-      "nineToNine": "09:00 - 21:00"
-    },
     "timePicker": {
       "hour": "小时",
       "minute": "分钟"
@@ -615,7 +609,9 @@
     "cell": {
       "leave": "假",
       "available": "可",
-      "unavailable": "不可"
+      "unavailable": "不可",
+      "mealBadge": "餐{{count}}",
+      "conflictA11y": "与员工上报的时间冲突"
     },
     "legend": {
       "shift": "班次",
@@ -658,7 +654,9 @@
       "mealBreakMinus": "减少一次用餐",
       "mealBreakPlus": "增加一次用餐",
       "save": "保存（{{hours}} 小时）",
-      "addShift": "再加一班"
+      "addShift": "再加一班",
+      "conflictUnavailable": "与员工上报的「不能上班」时间重叠",
+      "conflictOutside": "超出员工上报的「可上班」时间"
     },
     "copyPreviousWeek": "复制上周",
     "copyConfirmTitle": "复制上周排班",
@@ -668,7 +666,35 @@
     "copyWeekFailed": "复制上周排班失败",
     "showOtherManagers": "其他店长（{{count}}）",
     "managerBadge": "经理",
-    "ageBadge": "{{age}}岁"
+    "ageBadge": "{{age}}岁",
+    "placement": {
+      "trayTitle": "添加班次",
+      "trayHint": "点常用班次，再点要放的格子",
+      "bannerMove": "移动 {{shift}}：点要放的格子",
+      "bannerCopy": "复制 {{shift}}：点要放的格子",
+      "bannerAdd": "添加 {{shift}}：点要放的格子",
+      "cancel": "取消",
+      "moveAction": "移到…",
+      "copyAction": "复制到…",
+      "lockedNotice": "已有打卡记录，不能移动或复制；可以删除",
+      "lockedUnknownNotice": "无法确认打卡记录，今天及以前的班次不能移动或复制；可以删除",
+      "badOverlap": "与该格已有班次时间重叠，不能放在这里",
+      "warnTitle": "确认放下？",
+      "warnUnavailable": "{{name}}在这天上报了「不能上班」，仍要放下吗？",
+      "warnOutside": "这个班次超出{{name}}上报的可上班时间，仍要放下吗？",
+      "warnConfirm": "仍然放下",
+      "added": "已添加到 {{name}} · {{date}}（草稿）",
+      "copied": "已复制到 {{name}} · {{date}}（草稿）",
+      "moved": "已移到 {{name}} · {{date}}",
+      "movedPublished": "已移到 {{name}} · {{date}}（有效班次，直接生效）",
+      "downgradedSuffix": "；新班次是草稿，请发布本周",
+      "transferDeleteFailed": "已在新位置创建，但原班次删除失败，请手动删除原班次",
+      "undo": "撤销",
+      "undone": "已撤销",
+      "undoFailed": "撤销失败，请手动处理",
+      "failed": "未放下：{{reason}}",
+      "closeA11y": "删除班次 {{shift}}"
+    }
   },
   "adjustment": {
     "title": "补卡与修改",
