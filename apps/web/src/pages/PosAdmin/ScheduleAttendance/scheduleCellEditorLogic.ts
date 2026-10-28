@@ -35,10 +35,10 @@ const toMinutes = (value: string) => {
   return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : undefined
 }
 
-/** 按班次时长推算的默认用餐次数；门槛均为「超过」，正好 4.5 / 9 小时按低一档（与后端、手机端同一规则）。 */
+/** 按班次时长推算的默认用餐次数：达到 4.5 小时（含）1 次；超过 9 小时 2 次，正好 9 小时仍按 1 次（与后端、手机端同一规则）。 */
 export function defaultMealBreakCount(durationMinutes: number): number {
   if (durationMinutes > 9 * 60) return 2
-  if (durationMinutes > 270) return 1
+  if (durationMinutes >= 270) return 1
   return 0
 }
 

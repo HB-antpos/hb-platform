@@ -48,10 +48,11 @@ assert.equal(shiftWeekStart("2026-09-28", 1), "2026-10-05");
 assert.equal(shiftWeekStart("2026-09-28", -1), "2026-09-21");
 assert.equal(scheduleDurationMinutes({ startTime: "09:00:00", endTime: "17:30:00" }), 510);
 assert.equal(scheduleDurationMinutes({ startTime: "22:00", endTime: "02:00" }), 240, "跨午夜按次日结束");
-// 计薪工时：默认超过 4.5 小时 1 次、超过 9 小时 2 次用餐，每次 30 分钟；正好到门槛按低一档。
+// 计薪工时：默认满 4.5 小时 1 次、超过 9 小时 2 次用餐，每次 30 分钟；正好 9 小时仍按 1 次。
 assert.equal(schedulePaidMinutes({ startTime: "09:00:00", endTime: "17:30:00" }), 480, "8.5 小时班默认扣 1 次用餐，记 8 小时");
-assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "13:30" }), 270, "正好 4.5 小时不扣用餐");
-assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "13:31" }), 241, "超过 4.5 小时即扣 1 次用餐");
+assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "13:29" }), 269, "不足 4.5 小时不扣用餐");
+assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "13:30" }), 240, "正好 4.5 小时起扣 1 次用餐");
+assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "13:31" }), 241, "超过 4.5 小时同样扣 1 次用餐");
 assert.equal(schedulePaidMinutes({ startTime: "22:00", endTime: "04:00" }), 330, "跨午夜班次按总时长判断");
 assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "18:00" }), 510, "正好 9 小时仍只扣 1 次");
 assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "18:01" }), 481, "超过 9 小时扣 2 次");
@@ -61,7 +62,9 @@ assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "17:30", mealBre
 assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "17:30", mealBreakCount: 2 }), 450, "指定 2 次扣 60 分钟");
 assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "10:00", mealBreakCount: 3 }), 0, "扣除不超过班次时长");
 assert.equal(schedulePaidMinutes({ startTime: "09:00", endTime: "17:30", mealBreakCount: null }), 480, "null 按默认");
-assert.equal(defaultMealBreakCount(270), 0);
+assert.equal(defaultMealBreakCount(269), 0);
+assert.equal(defaultMealBreakCount(270), 1);
+assert.equal(defaultMealBreakCount(540), 1);
 assert.equal(defaultMealBreakCount(271), 1);
 assert.equal(defaultMealBreakCount(541), 2);
 
@@ -124,7 +127,7 @@ assert.equal(leaveDayCount("2026-10-12", "2026-10-14"), 3);
 assert.equal(leaveDayCount("2026-10-14", "2026-10-12"), 0);
 assert.equal(shiftDate("2026-09-30", 1), "2026-10-01");
 
-// 工时统计：周一至五计入工作日、周六日计入周末；已取消与请假班次不计入；超过 4.5 小时的班次扣 1 次用餐，指定次数优先。
+// 工时统计：周一至五计入工作日、周六日计入周末；已取消与请假班次不计入；满 4.5 小时的班次扣 1 次用餐（10-02 的 09:00–13:30 正好 4.5 小时，扣后 240），指定次数优先。
 const stats = computeScheduleHourStats([
   schedule("2026-09-28", "09:00:00", "17:00:00"),
   schedule("2026-10-02", "09:00:00", "13:30:00"),
@@ -136,15 +139,15 @@ const stats = computeScheduleHourStats([
 ]);
 // 等效工时：工作日 ×1、周六 ×1.25、周日 ×1.5，按扣用餐后的计薪工时加权。
 assert.deepEqual(stats, {
-  totalMinutes: 450 + 270 + 330 + 480 + 240,
-  weekdayMinutes: 450 + 270 + 480,
+  totalMinutes: 450 + 240 + 330 + 480 + 240,
+  weekdayMinutes: 450 + 240 + 480,
   weekendMinutes: 330 + 240,
   saturdayMinutes: 330,
   sundayMinutes: 240,
-  equivalentMinutes: 450 + 270 + 480 + 330 * 1.25 + 240 * 1.5,
+  equivalentMinutes: 450 + 240 + 480 + 330 * 1.25 + 240 * 1.5,
 });
-assert.equal(formatScheduleHours(stats.totalMinutes), "29.5");
-assert.equal(formatScheduleHours(stats.equivalentMinutes), "32.9", "1972.5 分钟 ≈ 32.9 小时");
+assert.equal(formatScheduleHours(stats.totalMinutes), "29");
+assert.equal(formatScheduleHours(stats.equivalentMinutes), "32.4", "1942.5 分钟 ≈ 32.4 小时");
 assert.equal(formatScheduleHours(6 * 60), "6");
 
 console.log("attendance-my-week.test.ts: ok");

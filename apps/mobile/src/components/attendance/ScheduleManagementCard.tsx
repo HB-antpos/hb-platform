@@ -288,7 +288,7 @@ function TimeStepField({
 }
 
 /**
- * 用餐次数步进：默认按班次时长推算（超过 4.5 小时 1 次、超过 9 小时 2 次），店长可增减（0 次＝不扣用餐）。
+ * 用餐次数步进：默认按班次时长推算（满 4.5 小时 1 次、超过 9 小时 2 次），店长可增减（0 次＝不扣用餐）。
  * 改过后显示「恢复默认」，回到按时长自动计算。
  */
 function MealBreakStepField({
@@ -1266,7 +1266,7 @@ export function ScheduleManagementCard({
       const hasAvailabilityConflict = cell.schedules.some(
         (item) => !item.leaveType && getAvailabilityConflict(item, cell.availability),
       );
-      // 用餐小标记：手动指定的（含 0）醒目，按时长自动扣的（>4.5h 1 次、>9h 2 次）弱化显示，合计为 0 的自动班次不显示
+      // 用餐小标记：手动指定的（含 0）醒目，按时长自动扣的（≥4.5h 1 次、>9h 2 次）弱化显示，合计为 0 的自动班次不显示
       const mealBadge = getCellMealBadge(cell.schedules);
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
