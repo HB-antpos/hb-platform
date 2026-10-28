@@ -13,7 +13,7 @@ import type {
   AttendanceHoursResultDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { formatHours, isoWeekNumber, round2, summarizeEmployeeHours } from './payrollLogic'
+import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, formatHours, isoWeekNumber, round2, summarizeEmployeeHours } from './payrollLogic'
 
 interface HoursTabProps {
   data: AttendanceHoursResultDto | null
@@ -349,8 +349,8 @@ export default function HoursTab(props: HoursTabProps) {
                           <div>
                             <div className="atp-person-name">{employee.userName}</div>
                             <Space size={4} wrap>
-                              {typeLabel(employee) ? <Tag className="atp-tag">{typeLabel(employee)}</Tag> : null}
-                              {employee.isManager ? <Tag className="atp-tag">{t('attendancePayroll.manager')}</Tag> : null}
+                              {typeLabel(employee) ? <Tag color={employee.employmentType ? EMPLOYMENT_TYPE_TAG_COLORS[employee.employmentType] : undefined} className="atp-tag">{typeLabel(employee)}</Tag> : null}
+                              {employee.isManager ? <Tag color={MANAGER_TAG_COLOR} className="atp-tag">{t('attendancePayroll.manager')}</Tag> : null}
                               {minorLabel(employee)}
                               {employee.hasOtherStores ? <Tag color="cyan" className="atp-tag">{t('attendancePayroll.multiStore')}</Tag> : null}
                             </Space>

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import {
+  EMPLOYMENT_TYPE_TAG_COLORS,
+  MANAGER_TAG_COLOR,
   calculatePay,
   countPublicHolidayRateMismatch,
   findRatesBelowMinimum,
@@ -141,5 +143,11 @@ assert.equal(hasPublicHolidayRateMismatch({ publicHolidayRateMismatch: false }),
 assert.equal(hasPublicHolidayRateMismatch({}), false)
 assert.equal(countPublicHolidayRateMismatch([{ publicHolidayRateMismatch: true }, {}, { publicHolidayRateMismatch: false }, { publicHolidayRateMismatch: true }]), 2)
 assert.equal(countPublicHolidayRateMismatch([]), 0)
+
+// 工时页员工类型标签：三种类型与店长颜色两两不同，且避开已有语义色（未成年金、多店青、公假橙、异常红）
+const typeColors = [...Object.values(EMPLOYMENT_TYPE_TAG_COLORS), MANAGER_TAG_COLOR]
+assert.equal(new Set(typeColors).size, typeColors.length, '员工类型与店长的标签颜色不得重复')
+for (const reserved of ['gold', 'cyan', 'orange', 'red']) assert.ok(!typeColors.includes(reserved), `类型颜色不得占用语义色 ${reserved}`)
+assert.deepEqual(Object.keys(EMPLOYMENT_TYPE_TAG_COLORS).sort(), ['Casual', 'FullTime', 'PartTime'])
 
 console.log('payrollLogic.test.ts: ok')

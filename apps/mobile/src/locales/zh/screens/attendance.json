@@ -107,7 +107,12 @@
       "onBreak": "休息中",
       "overtimeTitle": "加班",
       "overtimeSummary": "原始 {{raw}} 分钟 · 候选 {{candidate}} 分钟 · 已批准 {{approved}} 分钟",
-      "statusWithMinutes": "{{status}} {{minutes}} 分钟"
+      "statusWithDuration": "{{status}} {{duration}}",
+      "duration": {
+        "minutes": "{{minutes}} 分钟",
+        "hours": "{{hours}} 小时",
+        "hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟"
+      }
     },
     "qrResult": {
       "title": "最近一次扫码打卡",

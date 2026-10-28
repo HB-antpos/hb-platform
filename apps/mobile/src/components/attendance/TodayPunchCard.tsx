@@ -10,6 +10,7 @@ import { canOpenAttendanceQrScanner } from "@/modules/attendance/attendance-qr";
 import {
   buildAttendanceTodayDisplay,
   resolveAttendancePunchExceptionMinutes,
+  splitExceptionDuration,
 } from "@/modules/attendance/attendance-today-normalization";
 import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
 import {
@@ -101,6 +102,13 @@ export function TodayPunchCard({
   onEndMealBreak?: (storeCode: string) => void;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
+  // 迟到 / 早退等异常时长：不足 60 分钟显示分钟，满 60 分钟起显示「X 小时 Y 分钟」（整小时不带分钟）。
+  const formatExceptionDuration = (totalMinutes: number) => {
+    const { hours, minutes } = splitExceptionDuration(totalMinutes);
+    if (hours === 0) return t("today.timeline.duration.minutes", { minutes });
+    if (minutes === 0) return t("today.timeline.duration.hours", { hours });
+    return t("today.timeline.duration.hoursMinutes", { hours, minutes });
+  };
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
   useEffect(() => {
@@ -424,7 +432,7 @@ export function TodayPunchCard({
                             <StatusPill
                               tone={punchTone(segment.clockIn.status)}
                               label={clockInMinutes !== undefined
-                                ? t("today.timeline.statusWithMinutes", { status: clockInStatus, minutes: clockInMinutes })
+                                ? t("today.timeline.statusWithDuration", { status: clockInStatus, duration: formatExceptionDuration(clockInMinutes) })
                                 : clockInStatus}
                             />
                           ) : null}
@@ -444,7 +452,7 @@ export function TodayPunchCard({
                             <StatusPill
                               tone={punchTone(segment.clockOut.status)}
                               label={clockOutMinutes !== undefined
-                                ? t("today.timeline.statusWithMinutes", { status: clockOutStatus, minutes: clockOutMinutes })
+                                ? t("today.timeline.statusWithDuration", { status: clockOutStatus, duration: formatExceptionDuration(clockOutMinutes) })
                                 : clockOutStatus}
                             />
                           ) : null}

@@ -3138,12 +3138,17 @@
       },
       "recordLabels": {
         "minutes": "{{minutes}} 分",
-        "late": "迟到 {{minutes}} 分",
-        "earlyLeave": "早退 {{minutes}} 分",
-        "earlyArrival": "早到 {{minutes}} 分",
-        "lateDeparture": "晚退 {{minutes}} 分",
+        "late": "迟到 {{duration}}",
+        "earlyLeave": "早退 {{duration}}",
+        "earlyArrival": "早到 {{duration}}",
+        "lateDeparture": "晚退 {{duration}}",
         "candidateOvertime": "候选 {{minutes}} 分",
         "approvedOvertime": "批准 {{minutes}} 分",
+        "duration": {
+          "minutes": "{{minutes}} 分",
+          "hours": "{{hours}} 小时",
+          "hoursMinutes": "{{hours}} 小时 {{minutes}} 分"
+        },
         "crossStore": "跨店漏下班：{{storeCode}}",
         "original": "原始：{{time}}",
         "effective": "有效：{{time}}",
