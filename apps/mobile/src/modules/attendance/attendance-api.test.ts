@@ -23,3 +23,10 @@ assert.match(source, /return normalizeAttendancePunchMutationResult\(\s*response
   "punch mutation 成功响应必须经过严格 normalizer，不能直接返回历史宽松结果");
 
 console.log("attendance-api.test.ts: ok");
+
+// 排班「点选目标格」用到的两个接口：恢复已删除排班、本周打卡的排班 GUID（判断哪些班次已有打卡）
+assert.match(source, /export async function restoreAttendanceSchedule\(scheduleGuid: string\)[\s\S]{0,200}apiClient\.post\(`\$\{ATTENDANCE_BASE\}\/schedules\/\$\{encodeURIComponent\(scheduleGuid\)\}\/restore`\)/,
+  "恢复排班应 POST /schedules/{guid}/restore");
+assert.match(source, /export async function getAttendancePunchScheduleGuids[\s\S]{0,400}apiClient\.get\(`\$\{ATTENDANCE_BASE\}\/punches`[\s\S]{0,200}fromDate: params\.fromDate/,
+  "本周打卡应 GET /punches 并按起止日期过滤");
+console.log("attendance-api.test.ts (schedule placement): ok");
