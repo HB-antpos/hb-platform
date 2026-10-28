@@ -20,16 +20,19 @@ public sealed class RevenueReportSnapshotController : ControllerBase
 {
     private readonly ISalesDashboardReactService _service;
     private readonly IUserService _userService;
+    private readonly IProductMovementReportService _storeOptionsService;
     private readonly ILogger<RevenueReportSnapshotController> _logger;
 
     public RevenueReportSnapshotController(
         ISalesDashboardReactService service,
         IUserService userService,
+        IProductMovementReportService storeOptionsService,
         ILogger<RevenueReportSnapshotController> logger
     )
     {
         _service = service;
         _userService = userService;
+        _storeOptionsService = storeOptionsService;
         _logger = logger;
     }
 
@@ -79,6 +82,7 @@ public sealed class RevenueReportSnapshotController : ControllerBase
                 cancellationToken
             );
             var statisticsLastSuccessfulAtUtc = await ReadLastSuccessfulAtForTodayAsync(endDate);
+            var branchTimeZones = await ReadBranchTimeZonesAsync(scope.BranchCodes);
 
             return Ok(new
             {
@@ -88,6 +92,7 @@ public sealed class RevenueReportSnapshotController : ControllerBase
                 statisticMessage = result.StatisticMessage,
                 statisticUpdatedAt = result.StatisticUpdatedAt,
                 statisticsLastSuccessfulAtUtc,
+                branchTimeZones,
                 cacheVersion = result.CacheVersion,
                 statisticsPending = result.StatisticsPending,
                 statisticsExpectedBranchCount = result.StatisticsExpectedBranchCount,
@@ -128,6 +133,34 @@ public sealed class RevenueReportSnapshotController : ControllerBase
             _logger.LogWarning(ex, "营业额快照读取统计发布时间失败，累计对齐将回退为不对齐");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 范围内各门店的 IANA 时区（分店代码 → 时区）。Web 据此按门店本地时间计算同期对比的截止整点，
+    /// 与移动端 mobile-reports/store-options 同源，两端截止整点一致；只有销售数据权限的账号也能拿到。
+    /// 没维护时区的门店不返回，前端回退为固定 UTC+10；读取失败只影响时区换算，不能让整页快照失败。
+    /// </summary>
+    private async Task<Dictionary<string, string>> ReadBranchTimeZonesAsync(
+        IReadOnlyList<string>? branchCodes
+    )
+    {
+        var timeZones = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var options = await _storeOptionsService.GetStoreOptionsAsync(branchCodes);
+            foreach (var option in options)
+            {
+                var code = option.Value?.Trim();
+                var timeZoneId = option.TimeZoneId?.Trim();
+                if (!string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(timeZoneId))
+                    timeZones[code] = timeZoneId;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "营业额快照读取门店时区失败，截止整点将回退为固定 UTC+10");
+        }
+        return timeZones;
     }
 
     private async Task<(bool HasAccess, List<string>? BranchCodes)> ResolveBranchScopeAsync(

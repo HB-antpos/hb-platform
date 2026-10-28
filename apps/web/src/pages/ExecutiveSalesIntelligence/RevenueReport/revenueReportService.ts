@@ -12,6 +12,7 @@ interface RevenueEnvelope<T> {
   statisticMessage?: string | null
   statisticUpdatedAt?: string | null
   statisticsLastSuccessfulAtUtc?: string | null
+  branchTimeZones?: Record<string, string> | null
   cacheVersion?: string | null
 }
 
@@ -28,6 +29,8 @@ export interface RevenueReportSnapshot {
   weeklyComparePending?: boolean
   /** 查询含今天时，今天最近一次营业额发布时间（UTC）；决定可与去年同一时刻比较的完整整点。 */
   statisticsLastSuccessfulAtUtc?: string | null
+  /** 范围内各门店的 IANA 时区（分店代码 → 时区），用于按门店本地时间算截止整点；旧后端没有该字段，按固定 UTC+10 回退。 */
+  branchTimeZones?: Record<string, string>
 }
 
 function unwrapRevenueSnapshot(payload: RevenueEnvelope<RevenueReportSnapshot>): ReportSnapshot<RevenueReportSnapshot> {
@@ -37,7 +40,11 @@ function unwrapRevenueSnapshot(payload: RevenueEnvelope<RevenueReportSnapshot>):
     throw new Error('营业额快照响应不完整')
   }
   return {
-    data: { ...data, statisticsLastSuccessfulAtUtc: payload.statisticsLastSuccessfulAtUtc ?? null },
+    data: {
+      ...data,
+      statisticsLastSuccessfulAtUtc: payload.statisticsLastSuccessfulAtUtc ?? null,
+      branchTimeZones: payload.branchTimeZones ?? undefined,
+    },
     statisticStatus: payload.statisticStatus || (payload.statisticsPending ? 'Pending' : 'Fresh'),
     statisticMessage: payload.statisticMessage ?? payload.message,
     statisticUpdatedAt: payload.statisticUpdatedAt,
