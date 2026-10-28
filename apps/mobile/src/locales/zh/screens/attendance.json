@@ -144,7 +144,7 @@
       "upcoming": "用餐 {{handled}}/{{total}} 次",
       "upcomingAt": "用餐 {{handled}}/{{total}} 次 · {{time}} 提醒",
       "done": "今日用餐已记录 {{handled}}/{{total}} 次",
-      "onBreak": "休息中 {{elapsed}}",
+      "onBreak": "休息中",
       "onBreakSince": "{{time}} 开始，下班时会自动结束",
       "start": "开始休息",
       "end": "结束休息",
