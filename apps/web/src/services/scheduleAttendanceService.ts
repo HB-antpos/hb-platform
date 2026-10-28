@@ -68,6 +68,11 @@ function normalizeAttendanceSegment(value: unknown) {
   }
 }
 
+/** 手动指定的用餐次数：只认 0–3 的整数，null / 缺失 / 其他一律当作自动（undefined）。 */
+function normalizeMealBreakCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 3 ? value : undefined
+}
+
 export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleDto {
   const source = asRecord(value)
   const segments = readCompat<unknown[]>(source, 'segments', 'Segments')
@@ -102,6 +107,8 @@ export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleD
     crossStoreMissingClockOutStoreCode: readCompat<string>(source, 'crossStoreMissingClockOutStoreCode', 'CrossStoreMissingClockOutStoreCode'),
     segments: Array.isArray(segments) ? segments.map(normalizeAttendanceSegment) : undefined,
     // 用餐扣除与计薪工时：旧后端不返回时都是 undefined，记录表不显示用餐列内容。
+    // mealBreakCount：null＝自动，统一收成 undefined；只认 0–3 的整数。
+    mealBreakCount: normalizeMealBreakCount(readCompat<unknown>(source, 'mealBreakCount', 'MealBreakCount')),
     effectiveMealBreakCount: readCompat<number>(source, 'effectiveMealBreakCount', 'EffectiveMealBreakCount'),
     mealDeductionMinutes: readCompat<number>(source, 'mealDeductionMinutes', 'MealDeductionMinutes'),
     approvedMealAddBackMinutes: readCompat<number>(source, 'approvedMealAddBackMinutes', 'ApprovedMealAddBackMinutes'),

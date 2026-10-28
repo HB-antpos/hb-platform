@@ -198,3 +198,31 @@ assert(
   pageSource.includes('getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })'),
   '可上班时间应按 fromDate / toDate 查询，不再带 weekStartDate',
 )
+
+// 周排班拖拽 / 复制 / 托盘添加 / 右上角「×」：源码接线契约（交互本身靠目测与逻辑单测）
+{
+  const dragStart = pageSource.indexOf('const runDrop = async')
+  const dragEnd = pageSource.indexOf('const deleteScheduleViaX', dragStart)
+  assert(dragStart >= 0 && dragEnd > dragStart, '应能定位拖拽落地逻辑')
+  const runDropSource = pageSource.slice(dragStart, dragEnd)
+  // 换员工 = 新建 + 删除原班次；新建接口一律建成草稿，有效班次要补一次更新改回有效，且删除在新建之后
+  const transferCreate = runDropSource.indexOf('createAttendanceSchedule(buildTransferCreatePayload(')
+  const statusRepair = runDropSource.indexOf("origin.status === 'Active'", transferCreate)
+  const originDelete = runDropSource.indexOf('deleteAttendanceSchedule(origin.scheduleGuid)', transferCreate)
+  assert(transferCreate >= 0 && statusRepair > transferCreate && originDelete > statusRepair, '换员工应先新建、补状态、再删除原班次')
+  // 同员工换日期走更新接口；复制与托盘添加走新建；撤销都有对应的回退
+  assert(runDropSource.includes('updateAttendanceSchedule(origin.scheduleGuid, buildMoveUpdatePayload(origin, dateKey))'), '同员工换日期应调用更新接口')
+  assert(runDropSource.includes('buildCopyPayload(origin, row.userGuid, dateKey)'), '⌥ 复制应新建草稿')
+  assert(runDropSource.includes('buildPresetPayload(targetStoreCode, row.userGuid, dateKey'), '托盘添加应新建草稿')
+  assert(runDropSource.includes('restoreAttendanceSchedule(origin.scheduleGuid)'), '换员工的撤销要把原班次恢复回来')
+}
+assert(pageSource.includes('draggable={canDrag}'), '班次块只有 canDrag 时才可拖')
+assert(pageSource.includes('isScheduleLocked({'), '已有打卡记录的班次要锁定')
+assert(pageSource.includes('schedule.status !== \'Cancelled\' && !locked'), '已取消 / 已锁定的班次不可拖')
+assert(pageSource.includes('className="sce-chip-x"'), '班次块右上角要有「×」')
+assert(/<Popconfirm[\s\S]{0,400}onConfirm=\{\(\) => deleteScheduleViaX\(schedule\)\}/.test(pageSource), '「×」要先弹删除确认')
+assert(pageSource.includes('onClick={(event) => event.stopPropagation()}'), '点「×」不能触发外层的编辑浮层')
+assert(pageSource.includes('SHIFT_PRESETS.map((preset) => ('), '拖拽托盘使用固定的 5 个常用班次')
+assert(pageSource.includes('getDropVerdict(source,'), '格子要按落点判定显示可放 / 提醒 / 不能放')
+assert(pageSource.includes("window.setTimeout(() => {\n      setAltCopy(alt)"), '拖动开始要异步改界面，避免浏览器取消拖动')
+assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDefaultShift'), '常用班次不再按本周班次推导')

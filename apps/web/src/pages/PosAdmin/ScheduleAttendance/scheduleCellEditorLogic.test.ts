@@ -1,51 +1,33 @@
 import assert from 'node:assert/strict'
 
 import {
-  DEFAULT_SHIFT_PRESETS,
-  FALLBACK_SHIFT,
+  DEFAULT_SHIFT,
+  SHIFT_PRESETS,
   buildScheduleSavePayloads,
-  buildShiftPresets,
+  defaultMealBreakCount,
   filterRowsByKeyword,
+  getMealSummary,
   getNextEmptyDateKey,
   getOccupiedDateKeys,
   getShiftHours,
   normalizeHm,
-  pickDefaultShift,
+  toMealChoice,
 } from './scheduleCellEditorLogic'
-
-const shift = (startTime: string, endTime: string, status: 'Draft' | 'Active' | 'Cancelled' = 'Active') => ({ startTime, endTime, status })
 
 // 时间统一收敛成 HH:mm（接口可能返回 HH:mm:ss）
 assert.equal(normalizeHm('09:00:00'), '09:00')
 assert.equal(normalizeHm('09:00'), '09:00')
 assert.equal(normalizeHm(undefined), '')
 
-// 没有历史班次：用内置四档，默认时段沿用抽屉原来的 09:00-17:00
-assert.deepEqual(buildShiftPresets([]), DEFAULT_SHIFT_PRESETS)
-assert.deepEqual(pickDefaultShift([]), FALLBACK_SHIFT)
+// 固定常用班次：5 个，顺序即界面顺序；默认时段 09:00–17:30，不再按本周班次推导
+assert.deepEqual(
+  SHIFT_PRESETS.map((preset) => `${preset.start}-${preset.end}`),
+  ['09:00-13:00', '16:00-17:30', '09:00-17:00', '09:00-21:00', '09:00-19:00'],
+)
+assert.deepEqual(DEFAULT_SHIFT, { start: '09:00', end: '17:30' })
 
-// 本周最常用的时段排最前，且恰好等于内置档位时带名称，自定义时段不带名称
+// 已取消的班次不占用日期
 {
-  const week = [
-    shift('12:00:00', '20:00:00'), shift('12:00', '20:00'), shift('12:00', '20:00', 'Draft'),
-    shift('07:00', '15:00'), shift('07:00', '15:00'),
-    shift('08:30', '16:30'),
-  ]
-  const presets = buildShiftPresets(week)
-  assert.equal(presets.length, 4)
-  assert.deepEqual(presets[0], { start: '12:00', end: '20:00' })
-  assert.deepEqual(presets[1], { start: '07:00', end: '15:00', nameKey: 'morning' })
-  assert.deepEqual(presets[2], { start: '08:30', end: '16:30' })
-  // 已出现过的内置档位不会再被补一遍
-  assert.equal(presets.filter((preset) => preset.start === '07:00' && preset.end === '15:00').length, 1)
-  assert.deepEqual(pickDefaultShift(week), { start: '12:00', end: '20:00' })
-}
-
-// 已取消的班次不参与常用统计，也不占用日期
-{
-  const week = [shift('06:00', '14:00', 'Cancelled'), shift('06:00', '14:00', 'Cancelled'), shift('10:00', '18:00')]
-  assert.deepEqual(pickDefaultShift(week), { start: '10:00', end: '18:00' })
-  assert.ok(!buildShiftPresets(week).some((preset) => preset.start === '06:00'))
   const occupied = getOccupiedDateKeys({
     '2026-10-26': [{ status: 'Cancelled' }],
     '2026-10-27': [{ status: 'Draft' }],
@@ -54,11 +36,34 @@ assert.deepEqual(pickDefaultShift([]), FALLBACK_SHIFT)
   assert.deepEqual(Array.from(occupied).sort(), ['2026-10-27', '2026-10-28'])
 }
 
-// 次数相同按开始时间升序，结果稳定
-assert.deepEqual(
-  buildShiftPresets([shift('15:00', '23:00'), shift('07:00', '15:00')]).slice(0, 2).map((preset) => preset.start),
-  ['07:00', '15:00'],
-)
+// 默认用餐次数：门槛都是「超过」，与后端 AttendanceMealBreakRules 一致
+assert.equal(defaultMealBreakCount(240), 0) // 4 小时
+assert.equal(defaultMealBreakCount(270), 0) // 正好 4.5 小时按低一档
+assert.equal(defaultMealBreakCount(271), 1)
+assert.equal(defaultMealBreakCount(480), 1) // 8 小时
+assert.equal(defaultMealBreakCount(540), 1) // 正好 9 小时按低一档
+assert.equal(defaultMealBreakCount(541), 2)
+assert.equal(defaultMealBreakCount(720), 2) // 12 小时
+
+// 用餐算式（设计稿里的数字）：自动 / 手动 / 不扣
+assert.deepEqual(getMealSummary('09:00', '17:30', 'auto'), { hours: 8.5, count: 1, isAuto: true, deductMinutes: 30, paidHours: 8 })
+assert.deepEqual(getMealSummary('09:00', '17:00', 'auto'), { hours: 8, count: 1, isAuto: true, deductMinutes: 30, paidHours: 7.5 })
+assert.deepEqual(getMealSummary('09:00', '13:00', 'auto'), { hours: 4, count: 0, isAuto: true, deductMinutes: 0, paidHours: 4 })
+assert.deepEqual(getMealSummary('16:00', '17:30', 'auto'), { hours: 1.5, count: 0, isAuto: true, deductMinutes: 0, paidHours: 1.5 })
+assert.deepEqual(getMealSummary('09:00', '21:00', 'auto'), { hours: 12, count: 2, isAuto: true, deductMinutes: 60, paidHours: 11 })
+assert.deepEqual(getMealSummary('09:00', '19:00', 'auto'), { hours: 10, count: 2, isAuto: true, deductMinutes: 60, paidHours: 9 })
+assert.deepEqual(getMealSummary('09:00', '17:30', 0), { hours: 8.5, count: 0, isAuto: false, deductMinutes: 0, paidHours: 8.5 })
+assert.deepEqual(getMealSummary('09:00', '17:00', 2), { hours: 8, count: 2, isAuto: false, deductMinutes: 60, paidHours: 7 })
+assert.equal(getMealSummary('17:00', '09:00', 'auto'), undefined) // 结束不晚于开始不下结论
+assert.equal(getMealSummary('', '09:00', 1), undefined)
+
+// 记录里的 mealBreakCount → 界面选择：只认 0–3，其余（含 null / undefined）都是自动
+assert.equal(toMealChoice(undefined), 'auto')
+assert.equal(toMealChoice(null), 'auto')
+assert.equal(toMealChoice(0), 0)
+assert.equal(toMealChoice(3), 3)
+assert.equal(toMealChoice(4), 'auto')
+assert.equal(toMealChoice(-1), 'auto')
 
 // 保存后跳到右侧下一个空白格：跳过有班次的日期和本次刚一并写入的日期
 {
@@ -84,6 +89,25 @@ assert.deepEqual(
   assert.deepEqual(payloads.map((payload) => payload.workDate), ['2026-10-28', '2026-10-29'])
   assert.ok(payloads.every((payload) => payload.userGuid === 'u-1' && payload.status === 'Draft' && payload.remark === '补缺口'))
   assert.equal(buildScheduleSavePayloads({ storeCode: '1013', userGuid: 'u', dateKeys: ['2026-10-28'], start: '09:00', end: '17:00', remark: '   ', status: 'Active' })[0].remark, undefined)
+}
+
+// 用餐字段：新建选数字带 mealBreakCount；选自动新建时不带；更新时选自动要显式带恢复标记
+{
+  const base = { storeCode: '1013', userGuid: 'u', dateKeys: ['2026-10-28'], start: '09:00', end: '17:30', status: 'Draft' as const }
+  const manual = buildScheduleSavePayloads({ ...base, mealChoice: 2 })[0]
+  assert.equal(manual.mealBreakCount, 2)
+  assert.equal('resetMealBreakCount' in manual, false)
+  const zero = buildScheduleSavePayloads({ ...base, mealChoice: 0 })[0]
+  assert.equal(zero.mealBreakCount, 0)
+  const autoCreate = buildScheduleSavePayloads({ ...base, mealChoice: 'auto' })[0]
+  assert.equal('mealBreakCount' in autoCreate, false)
+  assert.equal('resetMealBreakCount' in autoCreate, false)
+  const autoUpdate = buildScheduleSavePayloads({ ...base, mealChoice: 'auto', resetAutoMeal: true })[0]
+  assert.equal(autoUpdate.resetMealBreakCount, true)
+  assert.equal('mealBreakCount' in autoUpdate, false)
+  // 不传 mealChoice：什么用餐字段都不带（后端保持原值）
+  const none = buildScheduleSavePayloads(base)[0]
+  assert.equal('mealBreakCount' in none || 'resetMealBreakCount' in none, false)
 }
 
 // 姓名本地搜索：按姓名或 GUID 子串，忽略大小写；空关键字不过滤

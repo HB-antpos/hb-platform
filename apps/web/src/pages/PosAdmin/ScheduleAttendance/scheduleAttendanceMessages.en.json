@@ -88,12 +88,6 @@
         "editing": "Edit shift",
         "creating": "New shift",
         "presets": "Common shifts",
-        "presetNames": {
-          "morning": "Early",
-          "midday": "Mid",
-          "evening": "Late",
-          "fullDay": "Full day"
-        },
         "shiftTime": "Shift time",
         "hours": "{{hours}} h total",
         "optional": "Optional",
@@ -105,7 +99,53 @@
         "hintDraft": "Saved as a draft. It only takes effect for staff after you click \"Publish week\".",
         "hintActive": "This shift is published. Changes take effect on save.",
         "shortcuts": "Enter saves · Esc closes",
-        "partialFailed": "Saved {{ok}} day(s); {{failed}} failed ({{dates}})"
+        "partialFailed": "Saved {{ok}} day(s); {{failed}} failed ({{dates}})",
+        "defaultShift": "Default {{start}}–{{end}}",
+        "meal": {
+          "title": "Meal deduction",
+          "perMeal": "{{minutes}} min each",
+          "auto": "Auto",
+          "none": "None",
+          "times": "{{count}}×",
+          "hours": "{{hours}} h",
+          "deduct": "meal {{minutes}} min",
+          "paid": "paid {{hours}} h",
+          "noDeduct": "no meal deduction, paid {{hours}} h",
+          "autoNone": "Auto by shift length: 4.5 h or less, no meal deducted",
+          "autoCount": "Auto by shift length: {{count}} meal(s) (over 4.5 h = 1, over 9 h = 2)",
+          "manualNone": "Set to no meal deduction",
+          "manual": "Set manually; no longer follows shift length",
+          "badgeNone": "No meal",
+          "badgeTimes": "Meal ×{{count}}",
+          "badgeTip": "Meal count set manually, paid {{hours}} h"
+        }
+      },
+      "drag": {
+        "trayLabel": "Drag to add",
+        "trayHint": "Drop on any cell to create a draft shift · click a shift to edit",
+        "deleteTitle": "Delete the {{time}} shift?",
+        "deleteDesc": "Related pending attendance approvals will be cancelled. You can restore it from Deleted rosters.",
+        "deleteAria": "Delete shift",
+        "undo": "Undo",
+        "undone": "Undone",
+        "undoFailed": "Undo failed, please fix manually",
+        "moved": "Moved to {{name}} · {{date}}",
+        "movedPublished": "Moved to {{name}} · {{date}} (active shift, effective immediately)",
+        "copied": "Copied to {{name}} · {{date}} (draft)",
+        "added": "Added to {{name}} · {{date}} (draft)",
+        "dropMove": "Move to {{name}} · {{date}}",
+        "dropCopy": "Copy to {{name}} · {{date}}",
+        "dropAdd": "New · {{name}} · {{date}} · draft",
+        "flagOk": "Drop here",
+        "flagOverlap": "Overlaps",
+        "flagUnavailable": "Unavailable that day",
+        "flagOutside": "Outside available time",
+        "locked": "Has punch records, cannot be dragged (use × to delete)",
+        "lockedUnknown": "Punch records unknown; shifts today or earlier cannot be dragged (use × to delete)",
+        "moveFailed": "Not moved: {{reason}}",
+        "addFailed": "Not added: {{reason}}",
+        "transferDeleteFailed": "Created at the new place, but deleting the original failed. Please delete it manually",
+        "overlap": "Overlaps an existing shift in that cell"
       }
     }
   }

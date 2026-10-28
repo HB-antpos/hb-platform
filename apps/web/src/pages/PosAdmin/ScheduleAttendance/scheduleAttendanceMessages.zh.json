@@ -88,12 +88,6 @@
         "editing": "编辑班次",
         "creating": "新建班次",
         "presets": "常用班次",
-        "presetNames": {
-          "morning": "早班",
-          "midday": "中班",
-          "evening": "晚班",
-          "fullDay": "全天"
-        },
         "shiftTime": "班次时间",
         "hours": "共 {{hours}} 小时",
         "optional": "选填",
@@ -105,7 +99,53 @@
         "hintDraft": "保存后为草稿，点右上角「发布本周」后才对员工生效。",
         "hintActive": "该班次已发布，保存后直接生效。",
         "shortcuts": "Enter 保存 · Esc 关闭",
-        "partialFailed": "已保存 {{ok}} 天，{{failed}} 天保存失败（{{dates}}）"
+        "partialFailed": "已保存 {{ok}} 天，{{failed}} 天保存失败（{{dates}}）",
+        "defaultShift": "默认 {{start}}–{{end}}",
+        "meal": {
+          "title": "用餐扣除",
+          "perMeal": "每次 {{minutes}} 分钟",
+          "auto": "自动",
+          "none": "不扣",
+          "times": "{{count}} 次",
+          "hours": "{{hours}} 小时",
+          "deduct": "用餐 {{minutes}} 分钟",
+          "paid": "计薪 {{hours}} 小时",
+          "noDeduct": "无用餐扣除，计薪 {{hours}} 小时",
+          "autoNone": "按班次时长自动：不超过 4.5 小时，不扣用餐",
+          "autoCount": "按班次时长自动 {{count}} 次（超过 4.5 小时 1 次，超过 9 小时 2 次）",
+          "manualNone": "已指定不扣用餐时间",
+          "manual": "已手动指定次数，不再按时长自动计算",
+          "badgeNone": "不扣餐",
+          "badgeTimes": "用餐 {{count}} 次",
+          "badgeTip": "已手动指定用餐次数，计薪 {{hours}} 小时"
+        }
+      },
+      "drag": {
+        "trayLabel": "拖拽添加",
+        "trayHint": "拖到任意格新建草稿班次 · 点班次可编辑",
+        "deleteTitle": "删除 {{time}} 这个班次？",
+        "deleteDesc": "关联的待审批考勤会一并取消。删除后可在「已删除排班」里找回。",
+        "deleteAria": "删除班次",
+        "undo": "撤销",
+        "undone": "已撤销",
+        "undoFailed": "撤销失败，请手动处理",
+        "moved": "已移到 {{name}} · {{date}}",
+        "movedPublished": "已移到 {{name}} · {{date}}（有效班次，直接生效）",
+        "copied": "已复制到 {{name}} · {{date}}（草稿）",
+        "added": "已添加到 {{name}} · {{date}}（草稿）",
+        "dropMove": "移到 {{name}} · {{date}}",
+        "dropCopy": "复制到 {{name}} · {{date}}",
+        "dropAdd": "新建 · {{name}} · {{date}} · 草稿",
+        "flagOk": "可放下",
+        "flagOverlap": "时间重叠",
+        "flagUnavailable": "当天不能上班",
+        "flagOutside": "超出可上班时间",
+        "locked": "已有打卡记录，不能拖动（可点「×」删除）",
+        "lockedUnknown": "无法确认打卡记录，今天及以前的班次不能拖动（可点「×」删除）",
+        "moveFailed": "未移动：{{reason}}",
+        "addFailed": "未添加：{{reason}}",
+        "transferDeleteFailed": "已在新位置创建，但原班次删除失败，请手动删除原班次",
+        "overlap": "与目标格已有班次时间重叠，不能放在这里"
       }
     }
   }
