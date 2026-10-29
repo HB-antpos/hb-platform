@@ -1,8 +1,9 @@
-import { Alert, Button, Modal, Table, Tag, message } from 'antd'
+import { Alert, Button, Modal, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import { getMyobSyncBatches, undoMyobSyncBatch } from '../../../services/myobService'
 import type { MyobSyncBatch } from '../../../types/myob'
 
@@ -157,7 +158,8 @@ export default function MyobSyncBatchesModal({ open, connectionGuid, onClose, on
           }
         />
       ) : null}
-      <Table<MyobSyncBatch>
+      <MeasuredTable<MyobSyncBatch>
+        metricId="pos-admin.myob.sync-batches"
         size="small"
         rowKey="batchGuid"
         columns={columns}

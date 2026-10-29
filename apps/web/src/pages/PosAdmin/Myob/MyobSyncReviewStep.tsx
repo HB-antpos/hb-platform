@@ -1,9 +1,10 @@
 import { LockOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, Empty, Segmented, Table, Tag } from 'antd'
+import { Alert, Button, Checkbox, Empty, Segmented, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import type { MyobSyncPreview } from '../../../types/myob'
 
 import { summarizeStoreLabels } from './myobEmployeeLogic'
@@ -211,7 +212,8 @@ export default function MyobSyncReviewStep({
       </div>
 
       <div className="myob-sync-table-wrap" ref={wrapRef}>
-        <Table<SyncPreviewRow>
+        <MeasuredTable<SyncPreviewRow>
+          metricId="pos-admin.myob.sync-review"
           size="small"
           rowKey="key"
           columns={columns}

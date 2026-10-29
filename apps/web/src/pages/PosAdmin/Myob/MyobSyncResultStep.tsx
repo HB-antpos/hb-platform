@@ -1,9 +1,10 @@
 import { CheckCircleFilled, LockOutlined, RollbackOutlined } from '@ant-design/icons'
-import { Button, Table, Tag } from 'antd'
+import { Button, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import type { MyobSyncApplyResult, MyobSyncFailure, MyobSyncField, MyobSyncUndoResult, MyobSyncWritten } from '../../../types/myob'
 
 import {
@@ -101,7 +102,7 @@ export default function MyobSyncResultStep({ result, skippedNoDiff, undone, undo
       {result.written.length > 0 ? (
         <>
           <h3 className="myob-section-title">{t('myob.sync.step3.writtenSection')}</h3>
-          <Table<MyobSyncWritten> size="small" rowKey="userGuid" columns={columns} dataSource={shown} pagination={false} />
+          <MeasuredTable<MyobSyncWritten> metricId="pos-admin.myob.sync-result" size="small" rowKey="userGuid" columns={columns} dataSource={shown} pagination={false} />
           {split.rest.length > 0 ? (
             <div className="myob-sync-more">
               {expanded ? null : t('myob.sync.step3.rest', { people: split.rest.length, changes: split.restChangeCount })}{' '}
