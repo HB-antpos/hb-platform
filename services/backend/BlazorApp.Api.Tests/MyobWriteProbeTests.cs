@@ -216,6 +216,8 @@ public sealed class MyobWriteProbeTests : IDisposable
         Assert.True(_api.Puts > 0);
         Assert.All(_api.PutEmployees, uid => Assert.Equal(Card, uid));
         Assert.All(_api.GetEmployees, uid => Assert.Equal(Card, uid));
+        Assert.True(_api.Deletes > 0);
+        Assert.All(_api.DeleteEmployees, uid => Assert.Equal(Card, uid));
     }
 
     // ───────────────────────── 结论与清理 ─────────────────────────
@@ -232,8 +234,11 @@ public sealed class MyobWriteProbeTests : IDisposable
         Assert.Equal(7.333m, v.HoursReadBack);
         Assert.True(v.PutReplacesAll);
         Assert.False(v.OutOfRangeEntryStored);
+        Assert.True(v.ClearWithDelete);
+        Assert.Equal(200, v.DeleteHttpStatus);
         Assert.True(v.ClearWithEmptyLines);
-        Assert.Null(v.ClearWithEmptyEntries); // 第一种办法就有效，不再往下试
+        Assert.True(v.ClearWithEmptyEntries); // 四种清空办法各自独立测，不是第一个有效就停
+        Assert.True(v.ClearWithZeroHours);
         Assert.True(v.FinalEmpty);
         Assert.True(v.FinalClean);
         Assert.Empty(_api.Store);
@@ -250,6 +255,7 @@ public sealed class MyobWriteProbeTests : IDisposable
         Assert.False(v.PutReplacesAll);
         Assert.False(v.ClearWithEmptyLines);
         Assert.True(v.ClearWithEmptyEntries);
+        Assert.True(v.ClearWithDelete);
         Assert.True(v.FinalEmpty);
         Assert.Empty(_api.Store);
     }
@@ -259,10 +265,14 @@ public sealed class MyobWriteProbeTests : IDisposable
     {
         _api.Merge = true;
         _api.EmptyEntriesClears = false;
+        _api.DeleteWorks = false;
 
         var result = await Service().RunAsync(Request(), CancellationToken.None);
 
         var v = result.Data!.Verdicts;
+        Assert.False(v.ClearWithDelete);
+        Assert.Equal(405, v.DeleteHttpStatus);
+        Assert.Equal("99", result.Data.Steps.First(step => step.Key == "clear-delete").ErrorCode);
         Assert.False(v.ClearWithEmptyLines);
         Assert.False(v.ClearWithEmptyEntries);
         Assert.True(v.ClearWithZeroHours);
@@ -309,8 +319,22 @@ public sealed class MyobWriteProbeTests : IDisposable
         var v = result.Data!.Verdicts;
         Assert.Null(v.DateFormatAccepted);
         Assert.False(v.MinimalBodyAccepted);
-        Assert.Equal(2, _api.Puts);
+        Assert.Equal(3, _api.Puts); // 三种日期写法各试一次，之后不再写
         Assert.True(v.FinalEmpty);
+    }
+
+    [Fact]
+    public async Task 日期只收_空格分隔_的格式_第三种写法被接受_后续步骤沿用()
+    {
+        _api.RequireSpaceDate = true;
+
+        var result = await Service().RunAsync(Request(), CancellationToken.None);
+
+        var v = result.Data!.Verdicts;
+        Assert.Equal("datetime-space", v.DateFormatAccepted);
+        Assert.True(v.PutReplacesAll);
+        Assert.All(_api.PutDates.Skip(4), date => Assert.Matches(@"^\d{4}-\d{2}-\d{2} 00:00:00$", date));
+        Assert.Empty(_api.Store);
     }
 
     [Fact]
@@ -421,6 +445,41 @@ public sealed class MyobWriteProbeTests : IDisposable
     }
 
     [Fact]
+    public async Task 客户端DELETE_方法_地址_头_没有请求体()
+    {
+        var client = ClientFor(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK), out var handler);
+
+        var result = await client.DeleteTimesheetAsync("biz", "token", "emp-1", new DateTime(2026, 11, 9), new DateTime(2026, 11, 29), CancellationToken.None);
+
+        Assert.True(result.Success);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Delete, request.Method);
+        Assert.Contains("/biz/Payroll/Timesheet/emp-1?StartDate=2026-11-09&EndDate=2026-11-29", request.Url, StringComparison.Ordinal);
+        Assert.Equal("Bearer token", request.Authorization);
+        Assert.Null(request.Body);
+    }
+
+    [Theory]
+    [InlineData("""{"Errors":[{"ErrorCode":34001,"Name":"EmployeePayrollCategoryNotAssigned","Message":"secret-message"}]}""", "34001")]
+    [InlineData("""{"Errors":[{"ErrorCode":"220","Name":"EntryDateOutOfRange"}]}""", "220")]
+    [InlineData("""{"Errors":[{"Name":"OnlyName"}]}""", null)]
+    public async Task 客户端写请求_错误码数字或字符串都取_DELETE同样不回显响应体(string body, string? expectedCode)
+    {
+        var client = ClientFor(_ => Json(body, System.Net.HttpStatusCode.BadRequest), out _);
+
+        var put = await client.PutTimesheetAsync("biz", "t", "e", Start, Start.AddDays(6), [], CancellationToken.None);
+        var delete = await client.DeleteTimesheetAsync("biz", "t", "e", Start, Start.AddDays(6), CancellationToken.None);
+
+        foreach (var result in new[] { put, delete })
+        {
+            Assert.Equal(400, result.StatusCode);
+            Assert.Equal(expectedCode, result.ErrorCode);
+            Assert.NotNull(result.ErrorName);
+            Assert.DoesNotContain("secret-message", result.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task 客户端PUT_错误体不是JSON_只给状态码()
     {
         var client = ClientFor(_ => Json("<html>gateway</html>", System.Net.HttpStatusCode.BadGateway), out _);
@@ -513,6 +572,11 @@ public sealed class MyobWriteProbeTests : IDisposable
         public bool EmptyEntriesClears { get; set; } = true;
         public bool StoreOutOfRange { get; set; }
         public bool RejectPlainDate { get; set; }
+        public bool RequireSpaceDate { get; set; }
+        public bool DeleteWorks { get; set; } = true;
+        public int DeleteStatusWhenBroken { get; set; } = 405;
+        public int Deletes { get; private set; }
+        public List<string> DeleteEmployees { get; } = [];
         public bool RejectAllPuts { get; set; }
         public string? RejectCategory { get; set; }
         public MyobApiException? GetError { get; set; }
@@ -569,6 +633,7 @@ public sealed class MyobWriteProbeTests : IDisposable
 
             if (RejectAllPuts
                 || (RejectPlainDate && lines.Any(line => line.Entries.Any(entry => !entry.Date.Contains('T', StringComparison.Ordinal))))
+                || (RequireSpaceDate && lines.Any(line => line.Entries.Any(entry => !entry.Date.Contains(' ', StringComparison.Ordinal))))
                 || (RejectCategory is not null && lines.Any(line => line.CategoryUid == RejectCategory)))
             {
                 return Task.FromResult(new MyobTimesheetPutResult(400, "InvalidRequest"));
@@ -600,7 +665,22 @@ public sealed class MyobWriteProbeTests : IDisposable
             return Task.FromResult(new MyobTimesheetPutResult(200, null));
         }
 
-        private static string Normalize(string date) => date.Contains('T', StringComparison.Ordinal) ? date : date + "T00:00:00";
+        public Task<MyobTimesheetPutResult> DeleteTimesheetAsync(
+            string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken)
+        {
+            Deletes++;
+            DeleteEmployees.Add(employeeUid);
+            if (!DeleteWorks)
+            {
+                return Task.FromResult(new MyobTimesheetPutResult(DeleteStatusWhenBroken, "MethodNotAllowed", "99"));
+            }
+
+            Store.RemoveAll(entry => InRange(entry.Date, startDate, endDate));
+            return Task.FromResult(new MyobTimesheetPutResult(200, null));
+        }
+
+        private static string Normalize(string date) =>
+            date.Contains('T', StringComparison.Ordinal) || date.Contains(' ', StringComparison.Ordinal) ? date : date + "T00:00:00";
 
         private static bool InRange(string date, DateTime start, DateTime end)
         {

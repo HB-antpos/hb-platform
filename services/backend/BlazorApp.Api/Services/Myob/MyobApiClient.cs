@@ -68,8 +68,11 @@ public sealed record MyobTimesheetPutEntry(string Date, decimal Hours);
 
 public sealed record MyobTimesheetPutLine(string CategoryUid, IReadOnlyList<MyobTimesheetPutEntry> Entries);
 
-/// <summary>PUT Timesheet 的结果：HTTP 状态码与 MYOB 错误类型名（只取 Errors[0].Name，不回显响应体）。非 2xx 不抛异常，由调用方判断。</summary>
-public sealed record MyobTimesheetPutResult(int StatusCode, string? ErrorName)
+/// <summary>
+/// PUT / DELETE Timesheet 的结果：HTTP 状态码与 MYOB 错误类型名 / 错误码（只取 Errors[0].Name 与 Errors[0].ErrorCode，不回显响应体）。
+/// 非 2xx 不抛异常，由调用方判断。
+/// </summary>
+public sealed record MyobTimesheetPutResult(int StatusCode, string? ErrorName, string? ErrorCode = null)
 {
     public bool Success => StatusCode is >= 200 and < 300;
 }
@@ -150,6 +153,14 @@ public interface IMyobApiClient
         DateTime endDate,
         IReadOnlyList<MyobTimesheetPutLine> lines,
         CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    /// <summary>
+    /// DELETE /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：**写 MYOB**。官方文档只列了 DELETE，没说删什么、已发薪记录能不能删，
+    /// 所以目前只有临时的写入探针调用，实测后才决定正式推送 / 撤销用不用它。默认实现抛 NotSupportedException。
+    /// </summary>
+    Task<MyobTimesheetPutResult> DeleteTimesheetAsync(
+        string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 }
 
@@ -698,13 +709,32 @@ public sealed class MyobApiClient : IMyobApiClient
         request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
 
         using var response = await SendAsync(request, cancellationToken);
+        return await ReadWriteResultAsync(response, cancellationToken);
+    }
+
+    public async Task<MyobTimesheetPutResult> DeleteTimesheetAsync(
+        string businessId,
+        string accessToken,
+        string employeeUid,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateTimesheetRequest(HttpMethod.Delete, businessId, accessToken, employeeUid, startDate, endDate);
+        using var response = await SendAsync(request, cancellationToken);
+        return await ReadWriteResultAsync(response, cancellationToken);
+    }
+
+    /// <summary>写请求的结果：2xx 只给状态码；非 2xx 只取 Errors[0].Name 与 Errors[0].ErrorCode，不回显响应体；解析失败就只给状态码。</summary>
+    private static async Task<MyobTimesheetPutResult> ReadWriteResultAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
         if (response.IsSuccessStatusCode)
         {
             return new MyobTimesheetPutResult((int)response.StatusCode, null);
         }
 
-        // 只取错误类型名（Errors[0].Name），不回显响应体；解析失败就只给状态码。
         string? errorName = null;
+        string? errorCode = null;
         try
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -713,18 +743,25 @@ public sealed class MyobApiClient : IMyobApiClient
                 && document.RootElement.TryGetProperty("Errors", out var errors)
                 && errors.ValueKind == JsonValueKind.Array
                 && errors.GetArrayLength() > 0
-                && errors[0].ValueKind == JsonValueKind.Object
-                && errors[0].TryGetProperty("Name", out var name)
-                && name.ValueKind == JsonValueKind.String)
+                && errors[0].ValueKind == JsonValueKind.Object)
             {
-                errorName = Truncate(name.GetString() ?? string.Empty);
+                if (errors[0].TryGetProperty("Name", out var name) && name.ValueKind == JsonValueKind.String)
+                {
+                    errorName = Truncate(name.GetString() ?? string.Empty);
+                }
+
+                if (errors[0].TryGetProperty("ErrorCode", out var code)
+                    && code.ValueKind is JsonValueKind.String or JsonValueKind.Number)
+                {
+                    errorCode = Truncate(code.ValueKind == JsonValueKind.String ? code.GetString() ?? string.Empty : code.GetRawText());
+                }
             }
         }
         catch (JsonException)
         {
         }
 
-        return new MyobTimesheetPutResult((int)response.StatusCode, errorName);
+        return new MyobTimesheetPutResult((int)response.StatusCode, errorName, errorCode);
     }
 
     private HttpRequestMessage CreateTimesheetRequest(

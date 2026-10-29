@@ -1,7 +1,7 @@
 # MYOB Timesheet 推送（PUT）· 方案
 
 > 状态：**方案已确认（2026-10-29），未开始实现**。第 10 节：实测环境**改为用一个生产公司文件（B）**（用户 2026-10-29 改选，不再新建测试文件）；其余按推荐项：新增权限码 `Myob.Timesheet.Push`；MYOB 已有未发薪记录时允许覆盖但须单独勾选；可挑人推。第 3 节的「实测」未做之前，任何写 MYOB 的正式推送代码都不合入、不开总闸。
-> 进度：已选 Robinson Road；测试卡 `test test`（Employee ID `0086`）已在该生产文件里建好，连接已授权。探针代码已写好（本 PR），待在测试卡上补全 Payroll Details、合并并部署主 API 后运行（第 3.3 节）。
+> 进度：已选 Robinson Road；测试卡 `test test`（Employee ID `0086`）已在该生产文件里建好，连接已授权。探针 #1080 已合并；2026-10-30 读官方文档后补测 DELETE、三种日期写法与 MYOB 错误码（本 PR）。待在测试卡上补全 Payroll Details、部署主 API 后运行（第 3.3 节）。
 > 范围：把「工资周期锁定后的转账工时」写进发薪公司的 MYOB Timesheet，并能**按批次撤销**。不跑 Pay Run、不报 STP、不写员工卡、不碰现金部分。
 > 与总方案关系：落实 `2026-10-27-myob-payroll-integration.md` 第 8 节「阶段 2：推送 Timesheet」。已有的预览、类别映射、员工绑定、发薪公司规则全部沿用，本方案只新增「写」与「撤销」。
 
@@ -10,7 +10,7 @@
 | 问题 | 结论 |
 |---|---|
 | 要做什么 | 在预览页「推送到 MYOB」按钮背后，实现 `PUT /{cf_uri}/Payroll/Timesheet/{EmployeeUID}`，按员工逐个写；每次写入前后各读一次 MYOB 校验。 |
-| 能不能撤销 | **发薪前能，发薪后不能**（Processed 的记录 API 不能改）。撤销 = 用推送前留下的快照再 PUT 回去（原来没有就清空）。**撤销的具体做法取决于第 3 节实测**。 |
+| 能不能撤销 | **发薪前能，发薪后不能**（Processed 的记录 API 不能改）。撤销 = 用推送前留下的快照再 PUT 回去（原来没有就清空；清空可能用 DELETE，文档只列了它、没说细节，以实测为准）。**撤销的具体做法取决于第 3 节实测**。 |
 | 最大风险 | PUT 的语义（覆盖 / 合并 / 能否清空）官方文档没写透，我无法保证。所以**先做实测，再写代码**。 |
 | 安全阀 | ① 总闸 `Myob__TimesheetPushEnabled` 默认关（已存在）；② 新增灰度白名单（按公司文件）；③ 新权限码 `Myob.Timesheet.Push`，默认不授予任何角色；④ 每次推送重新服务端校验，不信任预览结果。 |
 | 要建表吗 | 要：`MyobTimesheetPush`（总方案第 4 节已规划），迁移 `20261029.005-myob-timesheet-push`（当前最大是 `.004`）。 |
@@ -53,13 +53,23 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 
 ## 3. 第 0 步：实测（写代码之前，必做）
 
+### 3.0 官方文档核对（2026-10-30，读 [Timesheet 文档页](https://developer.myob.com/api/myob-business-api/v2/payroll/timesheet/) 原文）
+
+| 文档写了 | 文档**没写** |
+|---|---|
+| 支持 `GET \| PUT \| POST \| DELETE`；`Employee.UID` 在 PUT 创建时必填、`PayrollCategory.UID` 在 PUT 时必填；`Entries[].Processed` 表示「已被发薪使用」；字段 `StartDate` / `EndDate` / `Lines[]`（含 `Notes` ≤255、`Job` 等）/ `Entries[].UID / Date / Hours / Processed`；分页默认 400、最多 1000 | PUT 是覆盖还是合并；**DELETE 删什么**（整个区间 / 一行 / 一条）、已发薪的记录能不能删；Processed 记录能不能改；Hours 的精度（类型写 Integer，示例却是 `7.6`）；日期格式（文字写 `YYYY-MM-DD HH:MM:SS`，示例是 `yyyy-MM-ddT00:00:00`）；区间外的 Entries 怎么处理 |
+
+另据 MYOB 错误码页（较旧，以实测为准）：条目日期落在 StartDate~EndDate 之外 = 220；StartDate 晚于 EndDate = 221；类别没挂到员工 = 34001；公司文件的 Timesheet 设置未开 = 34003。
+
+**更正**：此前方案与对话里说「MYOB 没有 DELETE Timesheet」是错的——文档列了 DELETE。它可能是比「PUT 空数组」更干净的清空 / 撤销办法，探针已加测（见 3.2），结论出来前撤销的做法（4.5）仍以实测为准。
+
 以下几点官方文档没有明确写，凭记忆不可靠，**每一条都要用真实请求确认**，结果写回本节：
 
 | # | 要确认的 | 为什么重要 | 怎么测 |
 |---|---|---|---|
 | 1 | PUT 是**整体覆盖**该员工该日期区间，还是按 Line 合并？ | 决定重推是否安全、撤销能否恢复 | 先 PUT A（类别 X，2 天），再 PUT B（类别 Y，1 天），GET 看结果里有没有 X |
-| 2 | Lines 里传空 `Entries`，或整个 `Lines: []`，能否**清空**？ | 撤销「原来没有」的唯一办法 | PUT 清空后 GET |
-| 3 | `Entries[].Date` 的接受格式（`yyyy-MM-dd` 还是带时间）、`Hours` 精度（几位小数） | 请求体能否被接受；分钟 → 小时取整误差 | 分别发 `2026-10-23`、`2026-10-23T00:00:00`；Hours 发 7.5、7.33、7.333 |
+| 2 | **DELETE**（带 StartDate / EndDate）、`Lines: []`、每行空 `Entries`、全部改 0 小时，四种办法各自能否**清空**？ | 撤销「原来没有」的办法；选最干净的 | 每种办法各自在刚写好的记录上测一遍，再读回 |
+| 3 | `Entries[].Date` 的接受格式（`yyyy-MM-dd` / `yyyy-MM-ddT00:00:00` / `yyyy-MM-dd 00:00:00`）、`Hours` 精度（几位小数） | 请求体能否被接受；分钟 → 小时取整误差 | 三种写法依次试；Hours 发 7.5、7.333 看读回 |
 | 4 | 请求体 `StartDate` / `EndDate` 与查询串的关系；区间外的 Entries 会怎样 | 防止写出周期之外 | 发区间外的一天，看 400 还是被忽略 |
 | 5 | 对含 `Processed=true` 的区间 PUT 返回什么（状态码 / 错误体）；是否会改动已处理那几天 | 我们的「不覆盖」依赖它，不能只靠自己的前置检查 | 需要一个已发薪的历史周期（只对 1 个测试员工，且**只做会被拒绝的那种 PUT**，见下） |
 | 6 | 同一员工同周期不同 Line 的 `Notes` / `Job` 是否必填 | 请求体最小集 | 省略后看返回 |
@@ -88,7 +98,7 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 - 写请求只发在测试文件的测试员工上，且每一组测完就清空（或恢复），最后再 GET 确认测试员工回到初始状态。
 - 探针代码单独一个 PR（标题注明「临时探针，实测后删除」），部署到主 API；`WriteProbeBusinessId` 只配 Robinson Road 这一个公司文件。结果记入本节，探针在第 1 批后端实现提交里一并移除。
 - 与总闸 `TimesheetPushEnabled` 无关：探针不走推送服务，也不会让正式推送接口开放。
-- 实际执行顺序（代码里的步骤键）：`precheck`（整个 21 天区间必须为空，否则中止、一次不写）→ `put-date-format`（日期写法与最小请求体，被拒则回退带时间的写法）→ `put-hours-scale`（7.333 小时）→ `put-other-category`（覆盖还是合并）→ `put-out-of-range`（越界一天）→ `clear-empty-lines` / `clear-empty-entries` / `clear-zero-hours`（逐个降级，找到有效的清空办法就停）→ 可选 `put-unassigned-category` → 无论成败都执行清理并 `final-check`。
+- 实际执行顺序（代码里的步骤键）：`precheck`（整个 21 天区间必须为空，否则中止、一次不写）→ `put-date-format`（日期写法与最小请求体，被拒则回退带时间的写法）→ `put-hours-scale`（7.333 小时）→ `put-other-category`（覆盖还是合并）→ `put-out-of-range`（越界一天）→ `clear-delete` / `clear-empty-lines` / `clear-empty-entries` / `clear-zero-hours`（**四种清空办法各自在刚写好的记录上独立测一遍**，不是第一个有效就停）→ 可选 `put-unassigned-category` → 无论成败都执行清理并 `final-check`。
 - 探针没有覆盖第 3 节的第 5 条（生产不测）和第 8 条里的限流 / 重试部分；耗时在每步 `ElapsedMs` 里。
 
 ### 3.3 运行步骤（探针合并并部署主 API 之后）
