@@ -150,6 +150,24 @@ public sealed class AppUpdateCoordinatorTests
 #endif
     }
 
+    [Fact]
+    public void Client_services_resolve_update_coordinator_and_both_schedulers_from_the_real_container()
+    {
+        var services = new ServiceCollection();
+        // 中文注释：正式程序里 IConfiguration 由 Host.CreateDefaultBuilder 提供，裸容器需要自己补上。
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddHbposClientServices(new AppStartupOptions([], true, null, null));
+
+        using var provider = services.BuildServiceProvider();
+
+        // 中文注释：MainWindow 在启动时从容器取这些对象，任何一个构造失败都会让收银端启动即崩，所以要真正解析一遍而不是只看注册。
+        Assert.NotNull(provider.GetRequiredService<IAppUpdateCoordinator>());
+        Assert.NotNull(provider.GetRequiredService<AppUpdateBackgroundCheckScheduler>());
+        Assert.IsType<WindowsAppUpdateElevationProbe>(provider.GetRequiredService<IAppUpdateElevationProbe>());
+        Assert.NotNull(provider.GetRequiredService<AppUpdateUnattendedInstallScheduler>());
+        Assert.IsType<AppUpdateCoordinator>(provider.GetRequiredService<IAppUpdateCoordinator>());
+    }
+
     [Theory]
     [InlineData("1.0.0", false, false, false)]
     [InlineData("1.1.0", true, false, true)]
@@ -1373,7 +1391,7 @@ public sealed class AppUpdateCoordinatorTests
         // 中文注释：白天被收银员拒绝过的版本，夜间照样安装。
         state.MarkOptionalUpdateDeclined("1.1.0");
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.Installed, result.Status);
         Assert.Equal(1, download.CallCount);
@@ -1382,6 +1400,66 @@ public sealed class AppUpdateCoordinatorTests
         Assert.False(prompt.OptionalPromptShown);
         Assert.False(state.IsForceUpdateBlocking);
         Assert.False(installer.CancellationToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_with_agent_ignores_release_arguments_but_never_allows_direct_install()
+    {
+        var installer = new ModeCapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false) with { InstallerArguments = "/SP-" },
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: true, directInstallAvailable: true);
+
+        // 中文注释：安装参数不是静默参数时不能直接运行安装器（会弹安装向导），但代理用固定的静默参数，照常安装。
+        Assert.Equal(AppUpdateCoordinatorStatus.Installed, result.Status);
+        Assert.Same(UnattendedInstallMode.AgentOnly, installer.Mode);
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    public async Task InstallUpdateUnattendedAsync_allows_direct_install_only_when_prompt_free_and_silent(
+        bool agentAvailable,
+        bool directInstallAvailable,
+        bool expectedAllowDirect)
+    {
+        var installer = new ModeCapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateSilentRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        await coordinator.InstallUpdateUnattendedAsync(agentAvailable, directInstallAvailable);
+
+        Assert.Equal(expectedAllowDirect, installer.Mode!.AllowDirectInstall);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_skips_without_any_prompt_free_install_path()
+    {
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var apiClient = new StaticUpdateApiClient(CreateSilentRelease(force: true));
+        var coordinator = CreateCoordinator(
+            apiClient,
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: false);
+
+        Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
+        Assert.Equal(AppUpdateCoordinator.UnattendedNoInstallPathErrorCode, result.ErrorCode);
+        Assert.Equal(0, apiClient.CallCount);
+        Assert.Equal(0, download.CallCount);
     }
 
     [Fact]
@@ -1396,7 +1474,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             new AppUpdateState());
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         // 中文注释：非静默参数会弹安装向导等人点，夜间不能拉起。
         Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
@@ -1418,7 +1496,7 @@ public sealed class AppUpdateCoordinatorTests
             new AppUpdateState(),
             guard: guard);
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
         Assert.Equal(AppUpdateCoordinator.UnattendedActiveTransactionErrorCode, result.ErrorCode);
@@ -1436,7 +1514,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             state);
 
-        var failed = await failing.InstallUpdateUnattendedAsync();
+        var failed = await failing.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.InstallFailed, failed.Status);
         Assert.Equal("launch failed", Assert.Single(failed.StatusArgs));
@@ -1451,7 +1529,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             new AppUpdateState());
 
-        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await latest.InstallUpdateUnattendedAsync()).Status);
+        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await latest.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true)).Status);
         Assert.Equal(0, download.CallCount);
     }
 
@@ -1472,7 +1550,7 @@ public sealed class AppUpdateCoordinatorTests
 
         Assert.Equal(
             AppUpdateCoordinatorStatus.AlreadyRunning,
-            (await coordinator.InstallUpdateUnattendedAsync()).Status);
+            (await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true)).Status);
 
         download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
         await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
@@ -1682,6 +1760,27 @@ public sealed class AppUpdateCoordinatorTests
             Update = update;
             CancellationToken = cancellationToken;
             LaunchCallCount++;
+            return Task.FromResult(ProcessLaunchResult.Succeeded());
+        }
+    }
+
+    private sealed class ModeCapturingInstallerLauncher : IAppUpdateInstallerLauncher
+    {
+        public UnattendedInstallMode? Mode { get; private set; }
+
+        public Task<ProcessLaunchResult> LaunchAsync(
+            string installerPath,
+            AppUpdateCheckResponse update,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProcessLaunchResult.Succeeded());
+
+        public Task<ProcessLaunchResult> LaunchUnattendedAsync(
+            string installerPath,
+            AppUpdateCheckResponse update,
+            UnattendedInstallMode mode,
+            CancellationToken cancellationToken = default)
+        {
+            Mode = mode;
             return Task.FromResult(ProcessLaunchResult.Succeeded());
         }
     }

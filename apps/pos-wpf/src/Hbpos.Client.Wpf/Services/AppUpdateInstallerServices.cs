@@ -100,12 +100,30 @@ public sealed class ShellAppUpdateInstallSafetyGuard(
     }
 }
 
+/// <summary>
+/// 夜间无人值守安装的方式：更新窗口失败时直接重新打开旧版收银端；AllowDirectInstall 为 false 时（本机只能靠管理员更新代理免 UAC）
+/// 绝不直接运行安装器，因为那会弹出没人点的 UAC 确认框，把收银机卡到早上。
+/// </summary>
+public sealed record UnattendedInstallMode(bool AllowDirectInstall)
+{
+    public static UnattendedInstallMode AgentOnly { get; } = new(false);
+
+    public static UnattendedInstallMode AnyInstaller { get; } = new(true);
+}
+
 public interface IAppUpdateInstallerLauncher
 {
     Task<ProcessLaunchResult> LaunchAsync(
         string installerPath,
         AppUpdateCheckResponse update,
         CancellationToken cancellationToken = default);
+
+    Task<ProcessLaunchResult> LaunchUnattendedAsync(
+        string installerPath,
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode mode,
+        CancellationToken cancellationToken = default) =>
+        LaunchAsync(installerPath, update, cancellationToken);
 }
 
 public sealed class AppUpdateInstallerLauncher(
@@ -114,10 +132,24 @@ public sealed class AppUpdateInstallerLauncher(
     IAppUpdateInstallSafetyGuard safetyGuard,
     IAppUpdateProgressWindowLauncher? progressWindowLauncher = null) : IAppUpdateInstallerLauncher
 {
-    public async Task<ProcessLaunchResult> LaunchAsync(
+    public Task<ProcessLaunchResult> LaunchAsync(
         string installerPath,
         AppUpdateCheckResponse update,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        LaunchCoreAsync(installerPath, update, unattended: null, cancellationToken);
+
+    public Task<ProcessLaunchResult> LaunchUnattendedAsync(
+        string installerPath,
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode mode,
+        CancellationToken cancellationToken = default) =>
+        LaunchCoreAsync(installerPath, update, mode, cancellationToken);
+
+    private async Task<ProcessLaunchResult> LaunchCoreAsync(
+        string installerPath,
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode? unattended,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -139,9 +171,20 @@ public sealed class AppUpdateInstallerLauncher(
 
         var configuredArguments = update.InstallerArguments?.Trim() ?? string.Empty;
 
+        // 中文注释：无人值守且只能靠管理员更新代理时，任何“直接运行安装器”的路径都会弹 UAC，一律不走。
+        var directInstallAllowed = unattended?.AllowDirectInstall ?? true;
+
         ProcessLaunchResult launchResult;
         if (installerType.Equals("msi", StringComparison.OrdinalIgnoreCase))
         {
+            if (!directInstallAllowed)
+            {
+                return ProcessLaunchResult.Fail(
+                    "MSI packages cannot be installed unattended without user confirmation.",
+                    "appUpdate.install.failed",
+                    "MSI packages cannot be installed unattended without user confirmation.");
+            }
+
             var arguments = string.IsNullOrWhiteSpace(configuredArguments)
                 ? $"/i \"{installerPath}\""
                 : $"/i \"{installerPath}\" {configuredArguments}";
@@ -150,8 +193,16 @@ public sealed class AppUpdateInstallerLauncher(
         else
         {
             // 中文注释：exe 安装包优先交给独立更新窗口接管并显示进度；窗口不可用时退回直接启动安装器，更新不能因此卡住。
-            launchResult = await TryLaunchProgressWindowAsync(installerPath, configuredArguments, update)
-                ?? await processLauncher.StartAsync(installerPath, configuredArguments);
+            var windowResult = await TryLaunchProgressWindowAsync(installerPath, configuredArguments, update, unattended);
+            if (windowResult is null && !directInstallAllowed)
+            {
+                return ProcessLaunchResult.Fail(
+                    "The update window is unavailable and installing without it would show an elevation prompt.",
+                    "appUpdate.install.failed",
+                    "The update window is unavailable and installing without it would show an elevation prompt.");
+            }
+
+            launchResult = windowResult ?? await processLauncher.StartAsync(installerPath, configuredArguments);
         }
 
         if (!launchResult.Success)
@@ -167,7 +218,8 @@ public sealed class AppUpdateInstallerLauncher(
     private async Task<ProcessLaunchResult?> TryLaunchProgressWindowAsync(
         string installerPath,
         string installerArguments,
-        AppUpdateCheckResponse update)
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode? unattended)
     {
         if (progressWindowLauncher is null)
         {
@@ -176,7 +228,7 @@ public sealed class AppUpdateInstallerLauncher(
 
         try
         {
-            return await progressWindowLauncher.TryLaunchAsync(installerPath, installerArguments, update);
+            return await progressWindowLauncher.TryLaunchAsync(installerPath, installerArguments, update, unattended);
         }
         catch (Exception ex)
         {

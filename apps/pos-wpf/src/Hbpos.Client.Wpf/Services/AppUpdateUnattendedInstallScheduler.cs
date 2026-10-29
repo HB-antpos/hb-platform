@@ -84,15 +84,21 @@ public sealed record AppUpdateUnattendedInstallOptions(
 
 public interface IAppUpdateElevationProbe
 {
-    // 中文注释：安装包需要管理员权限；返回无人值守时能否提权而不弹 UAC 确认框。
+    // 中文注释：安装包需要管理员权限；返回本机直接运行安装器时能否提权而不弹 UAC 确认框（已提权、关闭 UAC 或“不提示直接提升”）。
     bool CanElevateWithoutPrompt(out string reason);
+
+    // 中文注释：安装包是否已为这份安装目录注册管理员更新代理（SYSTEM 计划任务），更新窗口可请它免 UAC 安装。
+    bool IsUpdateAgentRegistered();
 }
 
-public sealed class WindowsAppUpdateElevationProbe : IAppUpdateElevationProbe
+public sealed class WindowsAppUpdateElevationProbe(Func<bool>? isUpdateAgentRegistered = null) : IAppUpdateElevationProbe
 {
     private const int TokenElevationTypeInformationClass = 18;
     private const int TokenElevationTypeLimited = 3;
     private const string UacPolicyKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    private readonly Func<bool> _isUpdateAgentRegistered = isUpdateAgentRegistered ?? WindowsUpdateAgentRegistration.IsRegisteredForThisInstall;
+
+    public bool IsUpdateAgentRegistered() => _isUpdateAgentRegistered();
 
     public bool CanElevateWithoutPrompt(out string reason)
     {
@@ -155,6 +161,48 @@ public sealed class WindowsAppUpdateElevationProbe : IAppUpdateElevationProbe
         out int tokenInformation,
         int tokenInformationLength,
         out int returnLength);
+}
+
+// 中文注释：查询“HB POS Update Agent”计划任务是否已为当前安装目录注册。任务名与动作路径必须与更新程序里的
+// WindowsUpdateAgentTaskScheduler 和安装脚本保持一致；只读查询，不需要管理员权限。
+public static class WindowsUpdateAgentRegistration
+{
+    public const string TaskName = "HB POS Update Agent";
+
+    public static bool IsRegisteredForThisInstall()
+    {
+        try
+        {
+            var expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "updater", "Hbpos.Updater.exe"));
+            if (!File.Exists(expectedPath))
+            {
+                return false;
+            }
+
+            var serviceType = Type.GetTypeFromProgID("Schedule.Service");
+            if (serviceType is null)
+            {
+                return false;
+            }
+
+            dynamic service = Activator.CreateInstance(serviceType)!;
+            service.Connect();
+            dynamic task = service.GetFolder("\\").GetTask(TaskName);
+            if (!(bool)task.Enabled || (int)task.Definition.Actions.Count < 1)
+            {
+                return false;
+            }
+
+            var registeredPath = (string)task.Definition.Actions.Item(1).Path;
+            return string.Equals(Path.GetFullPath(registeredPath), expectedPath, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is COMException or UnauthorizedAccessException or FileNotFoundException
+            or DirectoryNotFoundException or InvalidCastException or ArgumentException or NotSupportedException
+            or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            return false;
+        }
+    }
 }
 
 // 中文注释：夜间无人值守安装：窗口内（默认本机 18:00-次日 08:00，周四 20:00-次日 08:00）只要有更新且收银机空闲，就直接拉起静默安装器，
@@ -248,15 +296,18 @@ public sealed class AppUpdateUnattendedInstallScheduler(
                 return;
             }
 
-            if (!elevationProbe.CanElevateWithoutPrompt(out var reason))
+            // 中文注释：安装包需要管理员权限。有管理员更新代理就请它免 UAC 安装；本机直接运行安装器也不弹 UAC 时才允许直接运行。
+            // 两者都没有时，弹 UAC 确认框无人点击会让 POS 卡在拉起安装器这一步，当晚跳过、留给白天手动安装。
+            var agentAvailable = elevationProbe.IsUpdateAgentRegistered();
+            var directInstallAvailable = elevationProbe.CanElevateWithoutPrompt(out var reason);
+            if (!agentAvailable && !directInstallAvailable)
             {
-                // 中文注释：安装包需要管理员权限，会弹 UAC 时无人确认会让 POS 卡在拉起安装器这一步，当晚跳过、留给白天手动安装。
                 _windowBlocked = true;
                 ConsoleLog.WriteError("AppUpdate", $"unattended app update install skipped: elevation would prompt reason={reason}");
                 return;
             }
 
-            var result = await coordinator.InstallUpdateUnattendedAsync(cancellationToken);
+            var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable, directInstallAvailable, cancellationToken);
             HandleResult(result, utcNow);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -290,6 +341,7 @@ public sealed class AppUpdateUnattendedInstallScheduler(
                 _idleTicks = 0;
                 return;
             case AppUpdateCoordinatorStatus.UnattendedInstallSkipped:
+                // 中文注释：安装参数不是静默参数等“当晚都不会变”的原因，本晚不再重试。
                 _windowBlocked = true;
                 ConsoleLog.WriteError(
                     "AppUpdate",

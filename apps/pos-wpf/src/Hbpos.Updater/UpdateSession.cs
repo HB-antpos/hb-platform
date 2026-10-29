@@ -21,6 +21,16 @@ internal sealed class UpdateSession
     private readonly UpdaterViewModel _viewModel;
     private readonly string _progressFilePath;
     private bool _installing;
+    private string _activeProgressFilePath;
+    private string? _activeLogPath;
+
+    private enum AgentInstallOutcome
+    {
+        NotUsed,
+        NotResponding,
+        Failed,
+        Succeeded
+    }
 
     public UpdateSession(
         UpdaterOptions options,
@@ -34,6 +44,8 @@ internal sealed class UpdateSession
         _timeProvider = timeProvider;
         _viewModel = viewModel;
         _progressFilePath = progressFilePath;
+        _activeProgressFilePath = progressFilePath;
+        _activeLogPath = options.LogPath;
         _viewModel.RetryRequested += (_, _) => _ = RunGuardedAsync(() => InstallAsync());
         _viewModel.OpenCurrentVersionRequested += (_, _) => OpenCurrentVersion();
         _viewModel.ViewLogRequested += (_, _) => ViewLog();
@@ -52,7 +64,7 @@ internal sealed class UpdateSession
 
     public void ReportUnexpectedFailure(Exception exception)
     {
-        _viewModel.ShowFailed(UpdaterFailureKind.Unexpected, exception.Message, CanViewLog());
+        ShowFailed(UpdaterFailureKind.Unexpected, exception.Message);
     }
 
     internal async Task InstallAsync(CancellationToken cancellationToken = default)
@@ -124,6 +136,27 @@ internal sealed class UpdateSession
             return;
         }
 
+        var agentStartedAt = _timeProvider.GetTimestamp();
+        var agentOutcome = await TryInstallViaAgentAsync(agentStartedAt, cancellationToken);
+        switch (agentOutcome)
+        {
+            case AgentInstallOutcome.Succeeded:
+                await CompleteAsync(_timeProvider.GetElapsedTime(agentStartedAt), openAppImmediately: true, cancellationToken);
+                return;
+            case AgentInstallOutcome.Failed:
+                return;
+            case AgentInstallOutcome.NotUsed or AgentInstallOutcome.NotResponding when _options.AgentOnly:
+                // 中文注释：夜间只能靠代理时，代理不可用、请求被拒（例如下载地址不在公司发布目录）或没响应，
+                // 都不能退回直接运行安装器：那条路会弹 UAC 确认框，没人点就一直挂到早上。
+                ShowFailed(
+                    UpdaterFailureKind.InstallerFailed,
+                    agentOutcome == AgentInstallOutcome.NotUsed ? "update-agent-unavailable" : "update-agent-not-responding");
+                return;
+        }
+
+        // 中文注释：本机没有可用的管理员更新代理（或白天代理没响应）时，沿用原来的直接运行安装器，需要时由 Windows 弹 UAC 确认。
+        _activeProgressFilePath = _progressFilePath;
+        _activeLogPath = _options.LogPath;
         _system.TryDeleteFile(_progressFilePath);
         var includeLog = _options.LogPath is not null && _system.TryEnsureParentDirectory(_options.LogPath);
         var startedAt = _timeProvider.GetTimestamp();
@@ -160,12 +193,67 @@ internal sealed class UpdateSession
             return;
         }
 
-        await CompleteAsync(_timeProvider.GetElapsedTime(startedAt), cancellationToken);
+        await CompleteAsync(_timeProvider.GetElapsedTime(startedAt), openAppImmediately: false, cancellationToken);
+    }
+
+    private async Task<AgentInstallOutcome> TryInstallViaAgentAsync(long startedAt, CancellationToken cancellationToken)
+    {
+        if (_options.AppExePath is not { } appExePath ||
+            !UpdateAgentRequest.TryCreate(
+                Guid.NewGuid().ToString("N"),
+                _options.DownloadUrl,
+                _options.Sha256,
+                _options.FileSize,
+                out var request,
+                out _) ||
+            request is null)
+        {
+            return AgentInstallOutcome.NotUsed;
+        }
+
+        var layout = UpdateAgentLayout.ForAppExecutable(appExePath);
+        var agentInstall = _system.TryStartAgentInstall(request, layout);
+        if (agentInstall is null)
+        {
+            return AgentInstallOutcome.NotUsed;
+        }
+
+        // 中文注释：代理以 SYSTEM 安装，进度和日志写在 {app}\UpdateAgent 下（普通用户可读），窗口改读那里。
+        _activeProgressFilePath = layout.ProgressFile(request.RequestId);
+        _activeLogPath = layout.LogFile(request.RequestId);
+        int exitCode;
+        string? failureDetail;
+        using (agentInstall)
+        {
+            var exitTask = agentInstall.WaitForExitAsync(cancellationToken);
+            while (!exitTask.IsCompleted)
+            {
+                ApplyInstallerProgress(startedAt);
+                await Task.WhenAny(exitTask, Task.Delay(PollInterval, _timeProvider, cancellationToken));
+            }
+
+            await exitTask;
+            exitCode = agentInstall.ExitCode;
+            failureDetail = agentInstall.FailureDetail;
+        }
+
+        if (exitCode == AgentInstallProcess.AgentNotRespondingExitCode)
+        {
+            return AgentInstallOutcome.NotResponding;
+        }
+
+        if (exitCode != 0)
+        {
+            ShowFailed(MapExitCode(exitCode), failureDetail ?? exitCode.ToString(CultureInfo.InvariantCulture));
+            return AgentInstallOutcome.Failed;
+        }
+
+        return AgentInstallOutcome.Succeeded;
     }
 
     private void ApplyInstallerProgress(long startedAt)
     {
-        if (InstallerProgressSnapshot.TryParse(_system.TryReadAllText(_progressFilePath), out var progress))
+        if (InstallerProgressSnapshot.TryParse(_system.TryReadAllText(_activeProgressFilePath), out var progress))
         {
             _viewModel.ReportInstallerProgress(progress);
         }
@@ -173,11 +261,19 @@ internal sealed class UpdateSession
         _viewModel.UpdateElapsed(_timeProvider.GetElapsedTime(startedAt));
     }
 
-    private async Task CompleteAsync(TimeSpan installDuration, CancellationToken cancellationToken)
+    private async Task CompleteAsync(TimeSpan installDuration, bool openAppImmediately, CancellationToken cancellationToken)
     {
         _viewModel.ShowCompleted(installDuration);
         var startedAt = _timeProvider.GetTimestamp();
         var processName = ResolveAppProcessName();
+        if (openAppImmediately &&
+            _options.AppExePath is { } newAppExePath &&
+            !_system.IsProcessRunning(processName, _options.WaitProcessId))
+        {
+            // 中文注释：代理以 SYSTEM 安装时安装脚本不会打开收银端（否则会开到看不见的服务会话），由更新窗口在当前登录会话里立即打开新版。
+            _system.TryStartApp(newAppExePath);
+        }
+
         // 安装脚本 [Run] 会以原登录用户打开新版；等不到时由更新窗口兜底打开，避免收银机停在桌面。
         while (!_system.IsProcessRunning(processName, _options.WaitProcessId))
         {
@@ -224,7 +320,7 @@ internal sealed class UpdateSession
 
     private void ViewLog()
     {
-        if (_options.LogPath is { } logPath)
+        if (_activeLogPath is { } logPath)
         {
             _system.TryOpenFile(logPath);
         }
@@ -233,11 +329,16 @@ internal sealed class UpdateSession
     private void ShowFailed(UpdaterFailureKind kind, string? detail)
     {
         _viewModel.ShowFailed(kind, detail, CanViewLog());
+        if (_options.Unattended)
+        {
+            // 中文注释：夜间无人值守时没人能点“重试/打开当前版本”，直接打开旧版收银端，门店早上照常营业。
+            OpenCurrentVersion();
+        }
     }
 
     private bool CanViewLog()
     {
-        return _options.LogPath is { } logPath && _system.FileExists(logPath);
+        return _activeLogPath is { } logPath && _system.FileExists(logPath);
     }
 
     private string ResolveAppProcessName()

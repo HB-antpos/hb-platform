@@ -197,6 +197,8 @@ public sealed class AppUpdateBackgroundCheckSchedulerTests
         }
 
         public Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+            bool agentAvailable,
+            bool directInstallAvailable,
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Background scheduler must not install unattended.");

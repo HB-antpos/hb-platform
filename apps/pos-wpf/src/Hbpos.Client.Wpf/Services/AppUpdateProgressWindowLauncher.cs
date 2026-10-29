@@ -14,7 +14,20 @@ public sealed record AppUpdaterLaunchRequest(
     string FromVersion,
     string ToVersion,
     string Culture,
-    string? LogPath);
+    string? LogPath)
+{
+    // 中文注释：发布合同里的下载地址、SHA256 和大小，更新窗口转交给管理员更新代理自己重新下载核对。
+    public string? DownloadUrl { get; init; }
+
+    public string? Sha256 { get; init; }
+
+    public long? FileSize { get; init; }
+
+    public bool Unattended { get; init; }
+
+    // 中文注释：无人值守且只能靠管理员更新代理时为 true：更新窗口永远不直接运行安装器（会弹没人点的 UAC）。
+    public bool AgentOnly { get; init; }
+}
 
 /// <summary>
 /// 生成更新窗口（Hbpos.Updater）的命令行；参数名必须与更新窗口的 UpdaterOptions 保持一致。
@@ -37,6 +50,30 @@ public static class AppUpdaterCommandLine
         {
             arguments.Add("--log");
             arguments.Add(request.LogPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.DownloadUrl) &&
+            !string.IsNullOrWhiteSpace(request.Sha256) &&
+            request.FileSize is > 0)
+        {
+            arguments.Add("--download-url");
+            arguments.Add(request.DownloadUrl);
+            arguments.Add("--sha256");
+            arguments.Add(request.Sha256);
+            arguments.Add("--file-size");
+            arguments.Add(request.FileSize.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (request.Unattended)
+        {
+            arguments.Add("--unattended");
+            arguments.Add("1");
+        }
+
+        if (request.AgentOnly)
+        {
+            arguments.Add("--agent-only");
+            arguments.Add("1");
         }
 
         return string.Join(' ', arguments.Select(QuoteArgument));
@@ -113,6 +150,17 @@ public interface IAppUpdateProgressWindowLauncher
         string installerPath,
         string installerArguments,
         AppUpdateCheckResponse update);
+
+    /// <summary>
+    /// 与上面相同；unattended 不为 null 表示夜间无人值守：更新窗口失败时直接打开旧版，
+    /// 且 AllowDirectInstall 为 false 时永远不退回会弹 UAC 的直接安装。
+    /// </summary>
+    Task<ProcessLaunchResult?> TryLaunchAsync(
+        string installerPath,
+        string installerArguments,
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode? unattended) =>
+        TryLaunchAsync(installerPath, installerArguments, update);
 }
 
 public sealed class AppUpdateProgressWindowLauncher(
@@ -128,10 +176,17 @@ public sealed class AppUpdateProgressWindowLauncher(
     private readonly Func<string> _cultureNameProvider = cultureNameProvider ??
         (() => LocalizationResourceProvider.Instance.CurrentCulture.Name);
 
+    public Task<ProcessLaunchResult?> TryLaunchAsync(
+        string installerPath,
+        string installerArguments,
+        AppUpdateCheckResponse update) =>
+        TryLaunchAsync(installerPath, installerArguments, update, unattended: null);
+
     public async Task<ProcessLaunchResult?> TryLaunchAsync(
         string installerPath,
         string installerArguments,
-        AppUpdateCheckResponse update)
+        AppUpdateCheckResponse update,
+        UnattendedInstallMode? unattended)
     {
         var updaterPath = TryStageUpdater();
         if (updaterPath is null)
@@ -148,7 +203,14 @@ public sealed class AppUpdateProgressWindowLauncher(
             versionProvider.CurrentVersion,
             targetVersion,
             _cultureNameProvider(),
-            TryPrepareLogPath(targetVersion));
+            TryPrepareLogPath(targetVersion))
+        {
+            DownloadUrl = update.DownloadUrl,
+            Sha256 = update.Sha256,
+            FileSize = update.FileSize,
+            Unattended = unattended is not null,
+            AgentOnly = unattended is { AllowDirectInstall: false }
+        };
         var result = await processLauncher.StartAsync(updaterPath, AppUpdaterCommandLine.Build(request));
         if (!result.Success)
         {
