@@ -15,7 +15,17 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
 {
     private static readonly XNamespace Presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly string[] PaletteNames = ["Default", "Paper", "Graphite", "Celadon", "Blue", "Elder"];
+    private static readonly string[] PaletteNames = ["Blue", "Graphite", "Celadon", "Elder", "Candy", "Sunny", "Ocean", "Rainbow"];
+
+    // 功能键每键一种底色的彩色主题；其余主题的逐键底色都等于功能键底色。
+    private static readonly string[] MulticolorSidebarPalettes = ["Ocean", "Rainbow"];
+
+    private static readonly string[] SidebarTileKeys =
+    [
+        "PosSidebarTileSpecialBrush", "PosSidebarTileRefundBrush", "PosSidebarTileHoldBrush", "PosSidebarTileRecallBrush",
+        "PosSidebarTileDrawerBrush", "PosSidebarTileReceiptBrush", "PosSidebarTileLockBrush", "PosSidebarTileDailyCloseBrush",
+        "PosSidebarTileCardRecoveryBrush", "PosSidebarTileAttendanceBrush", "PosSidebarTileSettingsBrush"
+    ];
 
     // 跟随主题的收银界面文件；客显与启动页保持独立配色，不在其中。
     private static readonly string[] ThemedXamlFiles =
@@ -42,12 +52,18 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     [Theory]
     [InlineData(null, PosColorTheme.Blue)]
     [InlineData("", PosColorTheme.Blue)]
-    [InlineData("Default", PosColorTheme.Default)]
     [InlineData("blue", PosColorTheme.Blue)]
-    [InlineData("Paper", PosColorTheme.Paper)]
     [InlineData("graphite", PosColorTheme.Graphite)]
     [InlineData("CELADON", PosColorTheme.Celadon)]
     [InlineData("elder", PosColorTheme.Elder)]
+    [InlineData("Candy", PosColorTheme.Candy)]
+    [InlineData("sunny", PosColorTheme.Sunny)]
+    [InlineData("Ocean", PosColorTheme.Ocean)]
+    [InlineData("RAINBOW", PosColorTheme.Rainbow)]
+    // 已删除的旧主题：经典由糖果紫接替，暖纸回到默认蓝色。
+    [InlineData("Default", PosColorTheme.Candy)]
+    [InlineData("default", PosColorTheme.Candy)]
+    [InlineData("Paper", PosColorTheme.Blue)]
     [InlineData("Neon", PosColorTheme.Blue)]
     [InlineData("99", PosColorTheme.Blue)]
     public void Stored_theme_value_falls_back_to_blue_when_missing_or_unknown(string? stored, PosColorTheme expected)
@@ -102,35 +118,32 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     public void Palettes_define_the_same_colors_and_matching_metadata()
     {
         var palettes = PaletteNames.ToDictionary(name => name, LoadPalette);
-        var defaultKeys = BrushKeys(palettes["Default"]);
+        var defaultKeys = BrushKeys(palettes["Blue"]);
         Assert.True(defaultKeys.Count >= 40, "默认色板应覆盖全部主题颜色。");
+        // 色板目录里只能有登记过的主题（删除的经典 / 暖纸不能残留）。
+        Assert.Equal(
+            PaletteNames.Order(StringComparer.Ordinal),
+            Directory.GetFiles(Path.Combine(WpfRoot(), "Themes", "Palettes"), "*.xaml").Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal));
+        Assert.Equal(PaletteNames.Order(StringComparer.Ordinal), Enum.GetNames<PosColorTheme>().Order(StringComparer.Ordinal));
 
         foreach (var (name, palette) in palettes)
         {
             Assert.Equal(defaultKeys, BrushKeys(palette));
             Assert.Equal(name, ReadValue(palette, "PosPaletteId"));
             Assert.Equal(name == "Graphite" ? "True" : "False", ReadValue(palette, "PosPaletteIsDark"));
-            // 默认主题不覆盖 MaterialDesign 主色，保证与改造前一致。
-            Assert.Equal(name != "Default", ReadValue(palette, "PosPaletteMaterialPrimaryColor") is not null);
+            Assert.NotNull(ReadValue(palette, "PosPaletteMaterialPrimaryColor"));
         }
     }
 
     [Theory]
-    [InlineData("Default")]
-    [InlineData("Paper")]
-    [InlineData("Graphite")]
-    [InlineData("Celadon")]
-    [InlineData("Blue")]
-    [InlineData("Elder")]
+    [MemberData(nameof(AllPalettes))]
     public void Palette_text_and_filled_buttons_stay_readable(string name)
     {
         var colors = SolidColors(LoadPalette(name));
         var surface = colors["PosSurfaceBrush"];
 
         Assert.True(Contrast(colors["PosTextBrush"], surface) >= 7, "正文对比度应达到 AAA。");
-        // 默认主题保持改造前的次要文字色（4.47:1），三套新主题都达到 AA。
-        var mutedMinimum = name == "Default" ? 4.4 : 4.5;
-        Assert.True(Contrast(colors["PosMutedForegroundBrush"], surface) >= mutedMinimum, "次要文字对比度不足。");
+        Assert.True(Contrast(colors["PosMutedForegroundBrush"], surface) >= 4.5, "次要文字对比度不足。");
         Assert.True(Contrast(colors["PosPrimaryTextBrush"], surface) >= 4.5, "主色文字对比度应达到 AA。");
         // 各页面在主色、危险色填充上都用白字。
         Assert.True(Contrast(Colors.White, colors["PosPrimaryBrush"]) >= 4.5, "主色填充上的白字应达到 AA。");
@@ -140,7 +153,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     [Fact]
     public void Themed_views_reference_palette_colors_dynamically_and_do_not_hard_code_colors()
     {
-        var paletteKeys = BrushKeys(LoadPalette("Default"));
+        var paletteKeys = BrushKeys(LoadPalette("Blue"));
         var violations = new List<string>();
         var brushAttribute = new Regex(
             @"\b(Background|Foreground|BorderBrush|Fill|Stroke)=""(#(?:FF)?[0-9A-Fa-f]{6}|White|Black)""");
@@ -219,10 +232,10 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             finally
             {
                 // 共享测试 Application 的其他用例依赖默认色板。
-                applier.Apply(PosColorTheme.Default);
+                applier.Apply(PosColorTheme.Blue);
             }
 
-            Assert.Equal("Default", application.Resources["PosPaletteId"]);
+            Assert.Equal("Blue", application.Resources["PosPaletteId"]);
             Assert.Equal(Colors.White, Assert.IsType<SolidColorBrush>(border.Background).Color);
             window.Close();
             return Task.CompletedTask;
@@ -230,7 +243,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
-    public async Task Switcher_lists_six_themes_with_blue_first_marks_the_current_one_and_closes_after_selection()
+    public async Task Switcher_lists_eight_themes_with_blue_first_marks_the_current_one_and_closes_after_selection()
     {
         var localization = new LocalizationService();
         localization.SetCulture("zh-CN");
@@ -238,7 +251,8 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         var switcher = new ColorThemeSwitcherViewModel(service, localization);
 
         Assert.Equal("界面配色", switcher.MenuTitle);
-        Assert.Equal(["蓝色", "经典", "暖纸", "石墨夜", "青瓷", "长者模式"], switcher.Options.Select(option => option.Name));
+        Assert.Equal(["蓝色", "糖果紫", "阳光橙", "海洋青", "彩虹分区", "石墨夜", "青瓷", "长者模式"], switcher.Options.Select(option => option.Name));
+        Assert.All(switcher.Options, option => Assert.False(string.IsNullOrWhiteSpace(option.Hint)));
         Assert.All(switcher.Options, option => Assert.Equal(3, option.Swatches.Count));
         // 没有保存过偏好的收银机默认是蓝色。
         Assert.True(switcher.Options.Single(option => option.Theme == PosColorTheme.Blue).IsSelected);
@@ -252,43 +266,93 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
 
         localization.SetCulture("en-US");
         Assert.Equal("Color theme", switcher.MenuTitle);
-        Assert.Equal(["Blue", "Classic", "Paper", "Graphite", "Celadon", "Easy View"], switcher.Options.Select(option => option.Name));
+        Assert.Equal(["Blue", "Candy", "Sunny", "Ocean", "Rainbow", "Graphite", "Celadon", "Easy View"], switcher.Options.Select(option => option.Name));
     }
 
+    public static TheoryData<string> AllPalettes() => new(PaletteNames);
+
     [Theory]
-    [InlineData("Default")]
-    [InlineData("Paper")]
-    [InlineData("Graphite")]
-    [InlineData("Celadon")]
-    [InlineData("Blue")]
-    [InlineData("Elder")]
-    public void Sidebar_icons_keep_function_colors_in_default_and_share_one_ink_color_in_new_themes(string name)
+    [MemberData(nameof(AllPalettes))]
+    public void Sidebar_icons_are_readable_on_their_key_backgrounds(string name)
     {
         var colors = SolidColors(LoadPalette(name));
         var icon = colors["PosSidebarIconBrush"];
         var refund = colors["PosSidebarRefundIconBrush"];
         var hold = colors["PosSidebarHoldIconBrush"];
 
-        if (name == "Default")
+        if (name is "Candy" or "Sunny")
         {
-            // 默认主题与改造前一致：功能图标主色、退款红色、挂单橙色。
-            Assert.Equal(colors["PosPrimaryTextBrush"], icon);
-            Assert.Equal(colors["PosDangerTextBrush"], refund);
-            Assert.Equal(colors["PosAccentBrush"], hold);
+            // 糖果紫 / 阳光橙：功能键白底，三种图标各用一种功能色（图形元素按 WCAG 非文字 3:1）。
+            Assert.Equal(3, new[] { icon, refund, hold }.Distinct().Count());
+            Assert.All(new[] { icon, refund, hold }, ink => Assert.True(Contrast(ink, colors["PosSidebarButtonBrush"]) >= 3, "侧栏彩色图标对比度不足。"));
         }
         else
         {
             Assert.Equal(icon, refund);
             Assert.Equal(icon, hold);
-            // 长者主题的功能按钮是深蓝实心底配白图标，图标坐在按钮底色上而不是白卡片上。
-            var iconBackground = name == "Elder" ? colors["PosSidebarButtonBrush"] : colors["PosSurfaceBrush"];
-            Assert.True(Contrast(icon, iconBackground) >= 4.5, "侧栏图标对比度应达到 AA。");
+            // 长者 / 海洋青 / 彩虹分区的功能键是实心底配白图标，图标坐在按钮底色上而不是白卡片上。
+            var iconBackgrounds = MulticolorSidebarPalettes.Contains(name)
+                ? SidebarTileKeys.Select(key => colors[key]).ToArray()
+                : [name == "Elder" ? colors["PosSidebarButtonBrush"] : colors["PosSurfaceBrush"]];
+            Assert.All(iconBackgrounds, background => Assert.True(Contrast(icon, background) >= 4.5, "侧栏图标对比度应达到 AA。"));
         }
     }
 
     [Theory]
-    [InlineData("Default")]
-    [InlineData("Paper")]
+    [MemberData(nameof(AllPalettes))]
+    public void Sidebar_tiles_get_one_color_per_key_only_in_the_multicolor_themes(string name)
+    {
+        var colors = SolidColors(LoadPalette(name));
+        var tiles = SidebarTileKeys.Select(key => colors[key]).ToArray();
+
+        if (!MulticolorSidebarPalettes.Contains(name))
+        {
+            // 其余主题的逐键底色都等于功能键底色，外观与改动前一致。
+            Assert.All(tiles, tile => Assert.Equal(colors["PosSidebarButtonBrush"], tile));
+            Assert.Equal(255, colors["PosSidebarButtonHoverBrush"].A);
+            Assert.Equal(255, colors["PosSidebarButtonPressedBrush"].A);
+            return;
+        }
+
+        // 每个功能键一种颜色，白字可读；悬停 / 按下是叠在键自身颜色上的半透明深色，而不是换成另一种颜色。
+        Assert.Equal(tiles.Length, tiles.Distinct().Count());
+        Assert.All(tiles, tile => Assert.True(Contrast(colors["PosSidebarButtonForegroundBrush"], tile) >= 4.5, $"{name}: 功能键白字对比度不足。"));
+        Assert.True(Contrast(colors["PosSidebarExitForegroundBrush"], colors["PosSidebarExitButtonBrush"]) >= 4.5, "退出键文字对比度不足。");
+        Assert.InRange(colors["PosSidebarButtonHoverBrush"].A, 1, 128);
+        Assert.InRange(colors["PosSidebarButtonPressedBrush"].A, 1, 128);
+        Assert.Equal(Colors.Black with { A = 0 }, colors["PosSidebarButtonHoverBrush"] with { A = 0 });
+    }
+
+    [Fact]
+    public void Sidebar_buttons_paint_their_own_tile_color_and_the_template_keeps_it_under_hover()
+    {
+        var view = XDocument.Load(Path.Combine(WpfRoot(), "Views", "Screens", "PosTerminalView.xaml"));
+        var sidebarButtons = view.Descendants(Presentation + "Button")
+            .Where(button => ((string?)button.Attribute("Style"))?.Contains("PosSidebar", StringComparison.Ordinal) == true)
+            .ToArray();
+        var backgrounds = sidebarButtons
+            .Select(button => (string?)button.Attribute("Background"))
+            .Where(background => background is not null)
+            .ToArray();
+
+        // 10 个按钮本地写逐键底色；Card Recovery 走样式（要让警示触发器能覆盖），退出键保留自己的红色键。
+        Assert.Equal(10, backgrounds.Length);
+        var cardRecoveryStyle = view.Descendants(Presentation + "Style")
+            .Single(style => (string?)style.Attribute(Xaml + "Key") == "PosSidebarCardRecoveryButtonStyle");
+        var cardRecoveryBackground = cardRecoveryStyle.Elements(Presentation + "Setter")
+            .Single(setter => (string?)setter.Attribute("Property") == "Background");
+        Assert.Equal(
+            SidebarTileKeys.Select(key => $"{{DynamicResource {key}}}").Order(StringComparer.Ordinal),
+            backgrounds.Append((string)cardRecoveryBackground.Attribute("Value")!).Order(StringComparer.Ordinal));
+        Assert.Null(sidebarButtons.Single(button => (string?)button.Attribute("Command") == "{Binding OpenCardRecoveryCenterCommand}").Attribute("Background"));
+
+        var template = view.Descendants(Presentation + "ControlTemplate")
+            .Single(element => (string?)element.Attribute(Xaml + "Key") == "PosSidebarActionButtonTemplate");
+        var layers = template.Element(Presentation + "Grid")!.Elements(Presentation + "Border").Select(border => (string?)border.Attribute(Xaml + "Name")).ToArray();
+        Assert.Equal(["KeyShadow", "TileBase", "Root"], layers);
+    }
+
+    [Theory]
     [InlineData("Graphite")]
     [InlineData("Celadon")]
     [InlineData("Blue")]
@@ -356,12 +420,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Theory]
-    [InlineData("Default")]
-    [InlineData("Paper")]
-    [InlineData("Graphite")]
-    [InlineData("Celadon")]
-    [InlineData("Blue")]
-    [InlineData("Elder")]
+    [MemberData(nameof(AllPalettes))]
     public void Payment_method_and_note_colors_are_readable_in_every_palette(string name)
     {
         var colors = SolidColors(LoadPalette(name));
@@ -397,14 +456,10 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Theory]
-    [InlineData("Default", 1.3)]
-    [InlineData("Blue", 1.5)]
-    [InlineData("Celadon", 1.5)]
-    [InlineData("Paper", 1.5)]
-    [InlineData("Graphite", 1.5)]
-    [InlineData("Elder", 1.5)]
-    public void Cart_selected_row_stands_out_from_neighbours_in_every_palette(string name, double minimumNeighbourContrast)
+    [MemberData(nameof(AllPalettes))]
+    public void Cart_selected_row_stands_out_from_neighbours_in_every_palette(string name)
     {
+        const double minimumNeighbourContrast = 1.5;
         // 选中行与上下相邻的普通行 / 斑马纹行必须拉开对比，收银员才能一眼找到当前行；
         // 同时正文仍要读得清、左侧色条要压得住选中底、选中的退货行里红字也要可读。
         var colors = SolidColors(LoadPalette(name));
@@ -422,6 +477,124 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         Require("色条 / 选中底", Contrast(colors["PosCartSelectedBarBrush"], selected), 3);
         Require("选中退货行红字", Contrast(colors["PosDangerTextBrush"], colors["PosCartSelectedDangerRowBrush"]), 4.5);
         Assert.True(failures.Count == 0, $"{name}: " + string.Join("; ", failures));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllPalettes))]
+    public void Title_bar_text_icons_and_button_states_are_readable_on_the_header_color(string name)
+    {
+        var colors = SolidColors(LoadPalette(name));
+        var header = colors["PosHeaderBackgroundBrush"];
+        var failures = new List<string>();
+
+        void Require(string label, double actual, double minimum)
+        {
+            if (actual < minimum) failures.Add($"{label} {actual:F2} < {minimum}");
+        }
+
+        Require("标题栏文字", Contrast(colors["PosHeaderForegroundBrush"], header), 4.5);
+        Require("标题栏次要文字", Contrast(colors["PosHeaderMutedForegroundBrush"], header), 4.5);
+        Require("标题栏图标", Contrast(colors["PosHeaderIconBrush"], header), 4.5);
+        Require("标题栏门店图标", Contrast(colors["PosHeaderAccentBrush"], header), 3);
+        // 悬停 / 按下可能是半透明叠层（彩色主题）或不透明色（旧主题），都按叠在标题栏底色上的结果核对文字。
+        Require("悬停态文字", Contrast(colors["PosHeaderForegroundBrush"], Over(colors["PosHeaderHoverBrush"], header)), 4.5);
+        Require("按下态文字", Contrast(colors["PosHeaderForegroundBrush"], Over(colors["PosHeaderPressedBrush"], header)), 4.5);
+        Assert.True(failures.Count == 0, $"{name}: " + string.Join("; ", failures));
+    }
+
+    [Theory]
+    [InlineData("Blue")]
+    [InlineData("Graphite")]
+    [InlineData("Celadon")]
+    [InlineData("Elder")]
+    public void Classic_title_bars_keep_the_pre_redesign_colors(string name)
+    {
+        // 标题栏改用 PosHeader* 键之前直接取页面通用色；旧主题的取值必须等于当时实际显示的颜色，外观不变。
+        var colors = SolidColors(LoadPalette(name));
+        var equivalents = new (string Key, string Legacy)[]
+        {
+            ("PosHeaderBackgroundBrush", "PosSurfaceBrush"),
+            ("PosHeaderForegroundBrush", "PosTextBrush"),
+            ("PosHeaderMutedForegroundBrush", "PosTextSecondaryBrush"),
+            ("PosHeaderBorderBrush", "PosDividerBrush"),
+            ("PosHeaderDividerBrush", "PosSurfaceStrongBrush"),
+            ("PosHeaderHoverBrush", "PosSurfaceMutedBrush"),
+            ("PosHeaderPressedBrush", "PosSurfaceStrongBrush"),
+            ("PosHeaderIconBrush", "PosMutedForegroundBrush"),
+            ("PosHeaderAccentBrush", "PosPrimaryTextBrush")
+        };
+
+        foreach (var (key, legacy) in equivalents)
+        {
+            Assert.True(colors[key] == colors[legacy], $"{name}: {key} 应等于改版前的 {legacy}");
+        }
+    }
+
+    [Theory]
+    [InlineData("Candy")]
+    [InlineData("Sunny")]
+    [InlineData("Ocean")]
+    [InlineData("Rainbow")]
+    public void Vivid_themes_have_a_colored_title_bar_with_white_text(string name)
+    {
+        var colors = SolidColors(LoadPalette(name));
+
+        Assert.NotEqual(colors["PosSurfaceBrush"], colors["PosHeaderBackgroundBrush"]);
+        Assert.Equal(Colors.White, colors["PosHeaderForegroundBrush"]);
+        // 悬停 / 按下是叠在标题栏底色上的半透明深色，不会换成别的颜色。
+        Assert.InRange(colors["PosHeaderHoverBrush"].A, 1, 128);
+        Assert.InRange(colors["PosHeaderPressedBrush"].A, 1, 128);
+        // 关闭按钮悬停用浅红底红字小块，在彩色标题栏上也要可读。
+        Assert.True(Contrast(colors["PosDangerTextBrush"], colors["PosDangerSoftBrush"]) >= 4.5, "关闭按钮悬停的红字对比度不足。");
+    }
+
+    [Fact]
+    public void Title_bar_uses_header_palette_keys_and_leaves_the_shared_button_styles_alone()
+    {
+        var window = XDocument.Load(Path.Combine(WpfRoot(), "MainWindow.xaml"));
+        var titleBar = Assert.Single(window.Descendants(Presentation + "Border").Where(border =>
+            (string?)border.Attribute("MouseLeftButtonDown") == "TitleBar_MouseLeftButtonDown"));
+        Assert.Equal("{DynamicResource PosHeaderBackgroundBrush}", (string?)titleBar.Attribute("Background"));
+        Assert.Equal("{DynamicResource PosHeaderBorderBrush}", (string?)titleBar.Attribute("BorderBrush"));
+
+        var styleOf = (XElement button) => ((string?)button.Attribute("Style"))?.Replace("{StaticResource ", string.Empty).TrimEnd('}');
+        var buttons = titleBar.Descendants(Presentation + "Button").ToArray();
+        string?[] titleBarButtonStyles = buttons.Select(styleOf).ToArray();
+        // 语言、扫码枪用标题栏专用工具按钮；最小化 / 最大化 / 关闭用标题栏专用窗口按钮。
+        Assert.Equal(2, titleBarButtonStyles.Count(style => style == "HeaderBarUtilityButtonStyle"));
+        Assert.Equal(2, titleBarButtonStyles.Count(style => style == "HeaderWindowButtonStyle"));
+        Assert.Equal(1, titleBarButtonStyles.Count(style => style == "HeaderCloseButtonStyle"));
+        // 页脚同步中心、各弹窗关闭按钮仍用页面通用样式；标题栏里不能再出现它们（深色标题栏上悬停色会糊）。
+        Assert.DoesNotContain("HeaderUtilityButtonStyle", titleBarButtonStyles);
+        Assert.DoesNotContain("TitleBarButtonStyle", titleBarButtonStyles);
+        Assert.DoesNotContain("TitleBarCloseButtonStyle", titleBarButtonStyles);
+
+        // 全局隐式 TextBlock 样式会把文字色固定成 PosTextBrush，盖掉按钮继承的前景色；
+        // 标题栏工具按钮必须自己声明让文字跟随按钮前景色（否则彩色标题栏上「中 / EN」「扫码枪」是深色字）。
+        const string followButtonForeground = "{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}";
+        var utilityStyle = window.Descendants(Presentation + "Style")
+            .Single(style => (string?)style.Attribute(Xaml + "Key") == "HeaderBarUtilityButtonStyle");
+        var styleResourcesTextBlock = utilityStyle.Element(Presentation + "Style.Resources")!.Elements(Presentation + "Style").Single();
+        var presenterTextBlock = utilityStyle.Descendants(Presentation + "ContentPresenter.Resources").Single().Elements(Presentation + "Style").Single();
+        Assert.All(new[] { styleResourcesTextBlock, presenterTextBlock }, textStyle =>
+        {
+            Assert.Equal("TextBlock", (string?)textStyle.Attribute("TargetType"));
+            Assert.Equal(followButtonForeground, (string?)textStyle.Elements(Presentation + "Setter").Single(setter => (string?)setter.Attribute("Property") == "Foreground").Attribute("Value"));
+        });
+
+        // 标题栏自己的文字（品牌名、页面标题）取标题栏前景色，不再取页面正文色。
+        var directTexts = titleBar.Descendants(Presentation + "TextBlock")
+            .Where(text => text.Ancestors(Presentation + "Popup").Any() == false)
+            .Select(text => (string?)text.Attribute("Foreground"))
+            .Where(foreground => foreground is not null);
+        Assert.All(directTexts, foreground => Assert.Equal("{DynamicResource PosHeaderForegroundBrush}", foreground));
+    }
+
+    private static Color Over(Color top, Color bottom)
+    {
+        var alpha = top.A / 255d;
+        byte Mix(byte over, byte under) => (byte)Math.Round((over * alpha) + (under * (1 - alpha)));
+        return Color.FromRgb(Mix(top.R, bottom.R), Mix(top.G, bottom.G), Mix(top.B, bottom.B));
     }
 
     [Fact]
@@ -578,7 +751,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             }
             finally
             {
-                applier.Apply(PosColorTheme.Default);
+                applier.Apply(PosColorTheme.Blue);
             }
 
             return Task.CompletedTask;

@@ -93,7 +93,19 @@
     <!-- 标题栏文字 -->
     <SolidColorBrush x:Key="PosHeaderForegroundBrush" Color="#FF1D2923" />
     <!-- 标题栏次要文字 -->
-    <SolidColorBrush x:Key="PosHeaderMutedForegroundBrush" Color="#FF56655D" />
+    <SolidColorBrush x:Key="PosHeaderMutedForegroundBrush" Color="#FF34433B" />
+    <!-- 标题栏下沿线 -->
+    <SolidColorBrush x:Key="PosHeaderBorderBrush" Color="#FFD6DED8" />
+    <!-- 标题栏内的竖分隔线 -->
+    <SolidColorBrush x:Key="PosHeaderDividerBrush" Color="#FFD6DED8" />
+    <!-- 标题栏按钮悬停底色 -->
+    <SolidColorBrush x:Key="PosHeaderHoverBrush" Color="#FFE4EAE6" />
+    <!-- 标题栏按钮按下底色 -->
+    <SolidColorBrush x:Key="PosHeaderPressedBrush" Color="#FFD6DED8" />
+    <!-- 标题栏功能图标（配色切换、客显按钮） -->
+    <SolidColorBrush x:Key="PosHeaderIconBrush" Color="#FF56655D" />
+    <!-- 标题栏门店图标 -->
+    <SolidColorBrush x:Key="PosHeaderAccentBrush" Color="#FF245A74" />
     <!-- 状态栏背景 -->
     <SolidColorBrush x:Key="PosFooterBackgroundBrush" Color="#FFEAEFEB" />
 
@@ -219,6 +231,19 @@
     <SolidColorBrush x:Key="PosNote10TextBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="PosNote5FillBrush" Color="#FF82507C" />
     <SolidColorBrush x:Key="PosNote5TextBrush" Color="#FFFFFFFF" />
+
+    <!-- 功能区逐键底色（彩色主题每个功能键一种颜色；其它主题取值＝功能键底色 PosSidebarButtonBrush，外观不变） -->
+    <SolidColorBrush x:Key="PosSidebarTileSpecialBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileRefundBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileHoldBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileRecallBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileDrawerBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileReceiptBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileLockBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileDailyCloseBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileCardRecoveryBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileAttendanceBrush" Color="#FFF2F5F2" />
+    <SolidColorBrush x:Key="PosSidebarTileSettingsBrush" Color="#FFF2F5F2" />
 
     <LinearGradientBrush x:Key="PosPrimaryGradientBrush" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Color="#FF2E6C8A" Offset="0" />

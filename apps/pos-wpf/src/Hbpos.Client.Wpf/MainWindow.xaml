@@ -38,7 +38,7 @@
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="34" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosHeaderIconBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="IsTabStop" Value="False" />
@@ -55,7 +55,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosHeaderHoverBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
@@ -104,7 +104,7 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosHeaderIconBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="IsTabStop" Value="False" />
@@ -132,7 +132,7 @@
                             <DataTrigger Binding="{Binding CustomerDisplayWindowMode}" Value="{x:Static services:CustomerDisplayWindowMode.Closed}">
                                 <Setter TargetName="Root" Property="Background" Value="Transparent" />
                                 <Setter TargetName="Root" Property="BorderBrush" Value="Transparent" />
-                                <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosHeaderMutedForegroundBrush}" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding CustomerDisplayWindowMode}" Value="{x:Static services:CustomerDisplayWindowMode.Normal}">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
@@ -194,9 +194,108 @@
             </Setter>
         </Style>
 
+        <!-- 标题栏专用按钮样式：颜色全部取 PosHeader* 键，标题栏在彩色主题里是深色底（白字），
+             不能沿用页面通用的 HeaderUtilityButtonStyle / TitleBarButtonStyle（它们还被页脚同步中心、弹窗关闭按钮使用，
+             悬停 / 按下取页面浅灰色，放在深色标题栏上白字会糊）。旧主题的 PosHeader* 取值＝改动前标题栏显示的颜色。 -->
+        <Style x:Key="HeaderBarUtilityButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderUtilityButtonStyle}">
+            <!-- PosTheme 的全局隐式 TextBlock 样式把文字色固定成 PosTextBrush（深色），会盖掉按钮继承来的前景色：
+                 彩色标题栏上「中 / EN」「扫码枪」会变成深色字。这里在按钮样式（显式 TextBlock 子元素，如扫码枪按钮）和
+                 模板 ContentPresenter（字符串内容，如语言按钮）里各声明一个隐式 TextBlock 样式，让文字跟随所在按钮的前景色。
+                 只改文字色，字号仍沿用全局 14，与改动前一致。 -->
+            <Style.Resources>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}" />
+                </Style>
+            </Style.Resources>
+            <Setter Property="Foreground" Value="{DynamicResource PosHeaderForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              TextBlock.Foreground="{TemplateBinding Foreground}">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}" />
+                                    </Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosHeaderHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosHeaderPressedBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HeaderWindowButtonStyle" TargetType="Button" BasedOn="{StaticResource TitleBarButtonStyle}">
+            <Setter Property="Foreground" Value="{DynamicResource PosHeaderForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosHeaderHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosHeaderPressedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 关闭按钮悬停：浅红底 + 红字（浅色小块在彩色标题栏上同样醒目、可读）。
+             底色必须写在模板触发器里（Root 上）：模板内的触发器会盖过样式触发器设给按钮的 Background。 -->
+        <Style x:Key="HeaderCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderWindowButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosDangerBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="HeaderMetadataTextStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosHeaderForegroundBrush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
@@ -205,7 +304,7 @@
             <Setter Property="Width" Value="1" />
             <Setter Property="Height" Value="18" />
             <Setter Property="Margin" Value="10,0" />
-            <Setter Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosHeaderDividerBrush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
@@ -293,9 +392,10 @@
             <RowDefinition Height="42" />
         </Grid.RowDefinitions>
 
+        <!-- 标题栏颜色全部取 PosHeader* 键：旧主题等于原来的白底 / 卡片色，彩色主题是深色底配白字。 -->
         <Border Grid.Row="0"
-                Background="{DynamicResource PosSurfaceBrush}"
-                BorderBrush="{DynamicResource PosDividerBrush}"
+                Background="{DynamicResource PosHeaderBackgroundBrush}"
+                BorderBrush="{DynamicResource PosHeaderBorderBrush}"
                 BorderThickness="0,0,0,1"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
             <controls:TitleBarLayoutPanel Margin="16,0,8,0">
@@ -314,14 +414,14 @@
                     <TextBlock Text="{loc:Loc AppName}"
                                FontWeight="Black"
                                FontSize="17"
-                               Foreground="{DynamicResource PosTextBrush}"
+                               Foreground="{DynamicResource PosHeaderForegroundBrush}"
                                VerticalAlignment="Center" />
                 </StackPanel>
 
                 <TextBlock Text="{Binding ActivePageTitleText}"
                            FontSize="21"
                            FontWeight="Black"
-                           Foreground="{DynamicResource PosTextBrush}"
+                           Foreground="{DynamicResource PosHeaderForegroundBrush}"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"
@@ -437,7 +537,7 @@
                     </Grid>
                     <Border Style="{StaticResource HeaderDividerStyle}" />
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <materialDesign:PackIcon Kind="StorefrontOutline" Width="17" Height="17" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,6,0" />
+                        <materialDesign:PackIcon Kind="StorefrontOutline" Width="17" Height="17" Foreground="{DynamicResource PosHeaderAccentBrush}" Margin="0,0,6,0" />
                         <TextBlock Text="{Binding StoreInfo}"
                                    AutomationProperties.AutomationId="CurrentStoreInfo"
                                    Style="{StaticResource HeaderMetadataTextStyle}"
@@ -452,12 +552,12 @@
                     <Button Content="{loc:Loc shell.languageToggle}"
                             Command="{Binding ToggleCultureCommand}"
                             Width="64"
-                            Style="{StaticResource HeaderUtilityButtonStyle}"
+                            Style="{StaticResource HeaderBarUtilityButtonStyle}"
                             ToolTip="{loc:Loc Language}" />
                     <Border Style="{StaticResource HeaderDividerStyle}" Margin="5,0" />
                     <Button Command="{Binding ResetScannerBindingCommand}"
                             Width="84"
-                            Style="{StaticResource HeaderUtilityButtonStyle}"
+                            Style="{StaticResource HeaderBarUtilityButtonStyle}"
                             ToolTip="{loc:Loc shell.scannerBinding.resetTooltip}">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                             <materialDesign:PackIcon Kind="BarcodeScan" Width="17" Height="17" Margin="0,0,6,0" />
@@ -465,18 +565,18 @@
                         </StackPanel>
                     </Button>
                     <Button Click="MinimizeButton_Click"
-                            Style="{StaticResource TitleBarButtonStyle}"
+                            Style="{StaticResource HeaderWindowButtonStyle}"
                             ToolTip="{loc:Loc shell.window.minimize}">
                         <materialDesign:PackIcon Kind="WindowMinimize" Width="18" Height="18" />
                     </Button>
                     <Button Click="MaximizeButton_Click"
-                            Style="{StaticResource TitleBarButtonStyle}"
+                            Style="{StaticResource HeaderWindowButtonStyle}"
                             ToolTip="{loc:Loc shell.window.maximize}"
                             Margin="0">
                         <materialDesign:PackIcon Kind="WindowMaximize" Width="16" Height="16" />
                     </Button>
                     <Button Command="{Binding ExitApplicationCommand}"
-                            Style="{StaticResource TitleBarCloseButtonStyle}"
+                            Style="{StaticResource HeaderCloseButtonStyle}"
                             ToolTip="{loc:Loc shell.window.close}"
                             Margin="0">
                         <materialDesign:PackIcon Kind="Close" Width="18" Height="18" />
