@@ -37,7 +37,10 @@ public sealed record MyobPayrollAdviceRecord(
     string? SuperFundName,
     IReadOnlyList<MyobPayrollAdviceLine> Lines);
 
-/// <summary>工资单查询条件。支付日期区间为 [PaymentFrom, PaymentToExclusive)；全部为空 = 不加筛选。</summary>
+/// <summary>
+/// 工资单查询条件。支付日期区间为 [PaymentFrom, PaymentToExclusive)；<see cref="IMyobApiClient.GetPayrollAdvicesAsync"/> 要求两端都有
+/// （按 ≤90 天窗口取数）；EmployeeUid 可选，用于只取某一名员工。
+/// </summary>
 public sealed record MyobPayrollAdviceQuery(
     DateTime? PaymentFrom = null,
     DateTime? PaymentToExclusive = null,
@@ -52,10 +55,14 @@ internal static class MyobAdviceQueries
 {
     internal const string ReportPath = "Report/Payroll/EmployeePayrollAdvice";
 
-    /// <summary>完整分页查询串（含 $top=1000）。</summary>
-    internal static string Build(MyobPayrollAdviceQuery query) => Compose(1000, null, Filter(query), null);
+    /// <summary>一页查询串（$top=1000，skip 为 0 时不带 $skip）。</summary>
+    internal static string Build(MyobPayrollAdviceQuery query, int skip = 0) =>
+        Compose(PageSize, skip > 0 ? skip : null, Filter(query), null);
 
-    /// <summary>探针用：自定义 $top / $skip / $orderby / 筛选的组合（全部由我方固定模板生成）。</summary>
+    /// <summary>服务端单页上限；返回满一页意味着这个窗口里可能还有更多。</summary>
+    internal const int PageSize = 1000;
+
+    /// <summary>组合 $top / $skip / $orderby / $filter（全部由我方强类型输入生成，不接受外部原样字符串）。</summary>
     internal static string Compose(int top, int? skip, string? filter, string? orderBy)
     {
         var parts = new List<string> { $"$top={top.ToString(CultureInfo.InvariantCulture)}" };
@@ -197,270 +204,37 @@ internal sealed class PayrollAdvicePayload
     }
 }
 
-// ───────────────────────── 探针（只读，只产出结构与计数） ─────────────────────────
-
-/// <summary>响应里出现过的一个字段路径与取值种类（String / Number / Boolean / Null / Object / Array），不含任何取值。</summary>
-public sealed record MyobProbeField(string Path, IReadOnlyList<string> Kinds);
-
 /// <summary>
-/// 一次探针请求（可能翻多页）的结构摘要。没有姓名、金额、UID 的取值：只有字段路径、取值种类、计数、日期范围和类别名称。
-/// FirstEmployeeUid 仅供后续「按员工筛选」一步使用，不会出现在对外 DTO 里。
+/// 把 [from, toExclusive) 切成若干个最长 maxDays 天的窗口。
+/// 为什么要切：服务端单页最多 1000 条，满页时 NextPageLink 为空（不能靠它翻页）；窗口取小后绝大多数一次就取完，
+/// 万一某窗口仍然满页，再在窗口内用 $skip 继续翻。
 /// </summary>
-public sealed record MyobAdviceProbeResult(
-    int? StatusCode,
-    long ElapsedMs,
-    int Pages,
-    bool Truncated,
-    string RootShape,
-    IReadOnlyList<string> RootFields,
-    int ItemCount,
-    int DistinctEmployees,
-    string? MinPaymentDate,
-    string? MaxPaymentDate,
-    string? FirstItemPaymentDate,
-    string? LastItemPaymentDate,
-    IReadOnlyList<MyobProbeField> Fields,
-    IReadOnlyList<string> LineTypes,
-    IReadOnlyList<string> CategoryNames,
-    IReadOnlyList<string> ErrorNames,
-    bool BodyUnparseable)
+internal static class MyobAdviceWindows
 {
-    internal string? FirstEmployeeUid { get; init; }
-}
+    internal const int DefaultMaxDays = 90;
 
-/// <summary>把若干页响应体累计成 <see cref="MyobAdviceProbeResult"/>；纯逻辑，不访问网络，便于单测。</summary>
-internal sealed class MyobAdviceProbeAccumulator
-{
-    private const int MaxPaths = 300;
-    private const int MaxCategoryNames = 60;
-    private const int MaxErrorNames = 10;
-    private const int MaxErrorNameLength = 100;
-
-    private readonly Dictionary<string, SortedSet<string>> _fields = new(StringComparer.Ordinal);
-    private readonly SortedSet<string> _rootFields = new(StringComparer.Ordinal);
-    private readonly SortedSet<string> _lineTypes = new(StringComparer.Ordinal);
-    private readonly SortedSet<string> _categoryNames = new(StringComparer.Ordinal);
-    private readonly SortedSet<string> _errorNames = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _employees = new(StringComparer.OrdinalIgnoreCase);
-    private string _rootShape = "None";
-    private int _items;
-    private DateTime? _minDate;
-    private DateTime? _maxDate;
-    private DateTime? _firstDate;
-    private DateTime? _lastDate;
-    private string? _firstEmployeeUid;
-    private bool _unparseable;
-
-    /// <summary>累计一页响应，返回下一页链接（没有则 null）。</summary>
-    internal string? AddPage(string body)
+    internal static IReadOnlyList<(DateTime From, DateTime ToExclusive)> Split(DateTime from, DateTime toExclusive, int maxDays = DefaultMaxDays)
     {
-        if (string.IsNullOrWhiteSpace(body))
+        if (maxDays <= 0)
         {
-            return null;
+            throw new ArgumentOutOfRangeException(nameof(maxDays));
         }
 
-        try
+        var windows = new List<(DateTime, DateTime)>();
+        var cursor = from.Date;
+        var end = toExclusive.Date;
+        while (cursor < end)
         {
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            string? next = null;
-            IEnumerable<JsonElement> items;
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Items", out var list) && list.ValueKind == JsonValueKind.Array)
+            var next = cursor.AddDays(maxDays);
+            if (next > end)
             {
-                _rootShape = "Object{Items}";
-                foreach (var property in root.EnumerateObject())
-                {
-                    _rootFields.Add(property.Name);
-                }
-
-                if (root.TryGetProperty("NextPageLink", out var link) && link.ValueKind == JsonValueKind.String)
-                {
-                    next = link.GetString();
-                }
-
-                items = list.EnumerateArray();
-            }
-            else if (root.ValueKind == JsonValueKind.Array)
-            {
-                _rootShape = "Array";
-                items = root.EnumerateArray();
-            }
-            else
-            {
-                // 单个对象，或错误体：错误体里只取 Errors[].Name。
-                _rootShape = root.ValueKind == JsonValueKind.Object ? "Object" : root.ValueKind.ToString();
-                if (root.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var property in root.EnumerateObject())
-                    {
-                        _rootFields.Add(property.Name);
-                    }
-                }
-
-                items = root.ValueKind == JsonValueKind.Object && !root.TryGetProperty("Errors", out _)
-                    ? [root]
-                    : [];
+                next = end;
             }
 
-            foreach (var item in items)
-            {
-                AddItem(item);
-            }
-
-            return next;
+            windows.Add((cursor, next));
+            cursor = next;
         }
-        catch (JsonException)
-        {
-            _unparseable = true;
-            return null;
-        }
+
+        return windows;
     }
-
-    /// <summary>非 2xx 响应：只取 MYOB 错误体里的 Errors[].Name（错误类型名），不记 Message（可能回显筛选表达式）。</summary>
-    internal void AddError(string body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("Errors", out var errors)
-                && errors.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var error in errors.EnumerateArray())
-                {
-                    if (_errorNames.Count < MaxErrorNames
-                        && error.ValueKind == JsonValueKind.Object
-                        && error.TryGetProperty("Name", out var name)
-                        && name.ValueKind == JsonValueKind.String)
-                    {
-                        var text = name.GetString() ?? string.Empty;
-                        _errorNames.Add(text.Length <= MaxErrorNameLength ? text : text[..MaxErrorNameLength]);
-                    }
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            // 非 JSON 错误体（网关错误页等）：只按状态码处理。
-        }
-    }
-
-    internal MyobAdviceProbeResult Build(int? statusCode, long elapsedMs, int pages, bool truncated) =>
-        new(
-            statusCode, elapsedMs, pages, truncated, _rootShape, _rootFields.ToList(), _items, _employees.Count,
-            Format(_minDate), Format(_maxDate), Format(_firstDate), Format(_lastDate),
-            _fields.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .Select(pair => new MyobProbeField(pair.Key, pair.Value.ToList()))
-                .ToList(),
-            _lineTypes.ToList(), _categoryNames.ToList(), _errorNames.ToList(), _unparseable)
-        {
-            FirstEmployeeUid = _firstEmployeeUid,
-        };
-
-    private void AddItem(JsonElement item)
-    {
-        _items++;
-        Walk(item, string.Empty);
-        if (item.ValueKind != JsonValueKind.Object)
-        {
-            return;
-        }
-
-        if (item.TryGetProperty("Employee", out var employee) && employee.ValueKind == JsonValueKind.Object
-            && employee.TryGetProperty("UID", out var uid) && uid.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(uid.GetString()))
-        {
-            _employees.Add(uid.GetString()!);
-            _firstEmployeeUid ??= uid.GetString();
-        }
-
-        if (item.TryGetProperty("PaymentDate", out var paymentDate) && paymentDate.ValueKind == JsonValueKind.String
-            && DateTime.TryParse(paymentDate.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-        {
-            _minDate = _minDate is null || date < _minDate ? date : _minDate;
-            _maxDate = _maxDate is null || date > _maxDate ? date : _maxDate;
-            _firstDate ??= date;
-            _lastDate = date;
-        }
-
-        if (item.TryGetProperty("Lines", out var lines) && lines.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var line in lines.EnumerateArray())
-            {
-                if (line.ValueKind == JsonValueKind.Object
-                    && line.TryGetProperty("PayrollCategory", out var category) && category.ValueKind == JsonValueKind.Object)
-                {
-                    if (category.TryGetProperty("Type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() is { Length: > 0 } typeText)
-                    {
-                        _lineTypes.Add(typeText);
-                    }
-
-                    if (_categoryNames.Count < MaxCategoryNames
-                        && category.TryGetProperty("Name", out var name) && name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } nameText)
-                    {
-                        _categoryNames.Add(nameText);
-                    }
-                }
-            }
-        }
-    }
-
-    // 记录字段路径（数组元素用 [] 表示）与取值种类，不记录任何取值。
-    private void Walk(JsonElement element, string path)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                Note(path, "Object");
-                foreach (var property in element.EnumerateObject())
-                {
-                    Walk(property.Value, path.Length == 0 ? property.Name : $"{path}.{property.Name}");
-                }
-
-                break;
-            case JsonValueKind.Array:
-                Note(path, "Array");
-                foreach (var child in element.EnumerateArray())
-                {
-                    Walk(child, $"{path}[]");
-                }
-
-                break;
-            case JsonValueKind.True:
-            case JsonValueKind.False:
-                Note(path, "Boolean");
-                break;
-            default:
-                Note(path, element.ValueKind.ToString());
-                break;
-        }
-    }
-
-    private void Note(string path, string kind)
-    {
-        if (path.Length == 0)
-        {
-            return;
-        }
-
-        if (!_fields.TryGetValue(path, out var kinds))
-        {
-            if (_fields.Count >= MaxPaths)
-            {
-                return;
-            }
-
-            kinds = new SortedSet<string>(StringComparer.Ordinal);
-            _fields[path] = kinds;
-        }
-
-        kinds.Add(kind);
-    }
-
-    private static string? Format(DateTime? date) => date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 }

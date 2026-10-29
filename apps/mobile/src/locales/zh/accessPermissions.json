@@ -269,6 +269,14 @@
       "name": "绑定 MYOB 员工",
       "description": "Web 页面 /pos-admin/myob「员工绑定」页签 - 把我方员工与 MYOB 员工卡配对、解除绑定"
     },
+    "Myob.Payslip.ViewManagedStore": {
+      "name": "查看管辖分店员工工资单",
+      "description": "Web 页面 /pos-admin/myob「工资单」页签 - 查看管辖分店员工在 MYOB 里的历史工资单（只读）"
+    },
+    "Myob.Payslip.ViewAllStores": {
+      "name": "查看全部分店员工工资单",
+      "description": "Web 页面 /pos-admin/myob「工资单」页签 - 查看全部分店与公司文件的历史工资单，含未绑定员工（只读）"
+    },
     "OrderFront": {
       "name": "前台订货",
       "description": "Web 订货前台与移动端「订货单」- 进入前台订货入口（Order / 订货员角色核心权限）"
