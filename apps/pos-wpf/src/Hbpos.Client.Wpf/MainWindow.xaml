@@ -1999,6 +1999,12 @@
             </Border>
         </Grid>
 
+        <!-- 收银员首次登录的配色选择窗：DataContext 在 MainWindow 构造时设为 ColorThemeOnboardingViewModel；
+             层级低于登录遮罩与刷卡恢复结果等业务弹窗，换人登录时由新会话撤回。 -->
+        <controls:ColorThemeOnboardingOverlay x:Name="ColorThemeOnboardingOverlay"
+                                              Grid.RowSpan="3"
+                                              Panel.ZIndex="89" />
+
         <Grid Grid.RowSpan="3"
               Visibility="{Binding IsCardRecoveryResultDialogOpen, Converter={StaticResource BoolToVis}}"
               Background="#99000000"
