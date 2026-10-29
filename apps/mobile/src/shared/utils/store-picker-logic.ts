@@ -1,4 +1,4 @@
-// 人员筛选「选择分店」二级页的纯逻辑：搜索、按首字母分组、「我的主分店」。不依赖 React Native，可在 Node 下测试。
+// 分店选择页（人员筛选、日结筛选、操作日志筛选共用）的纯逻辑：搜索、按首字母分组、「我的主分店」。不依赖 React Native，可在 Node 下测试。
 
 export interface StoreOption {
   value: string;

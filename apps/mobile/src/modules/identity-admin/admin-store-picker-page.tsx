@@ -10,7 +10,7 @@ import {
   pickMyStoreOptions,
   splitStoreLabel,
   type StoreOption,
-} from "./admin-store-picker-logic";
+} from "@/shared/utils/store-picker-logic";
 
 /**
  * 筛选弹层里的「选择分店」二级页：搜索（名称 / 编号）+「我的主分店」快捷项 + 按首字母分组的单选列表。

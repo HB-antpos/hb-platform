@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Icon, Text, TextInput } from "react-native-paper";
 import { MonthDatePicker } from "@/components/attendance/MonthDatePicker";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { StoreFilterRow } from "@/components/ui/StoreFilterRow";
+import { StoreMultiPickPage } from "@/components/ui/StoreMultiPickPage";
 import {
   buildDailyCloseListParams,
   canPickDailyCloseDevice,
@@ -41,13 +43,16 @@ export interface DailyCloseFilterSheetProps {
 /**
  * 筛选面板（底部抽屉）：本地草稿，点「查看 N 条」才回写。沿用员工操作日志筛选抽屉的交互：
  * 分店多选、营业日预设、来源、终端（仅选中单个分店后可选）、收银员；N 是草稿条件的实时命中数。
+ * 分店有几十家，主表单里只放一行摘要选择器，点开进「选择分店」第二步（可搜索的多选列表），
+ * 这样来源、终端、收银员等其它筛选不会被分店挤到折叠线以下。
  * 自定义日期用同一个弹层里的「选日期」第二步（内嵌月历，选完自动返回）：BusinessSheet 是原生 Modal，
  * Paper 的 Portal 弹层会被压在它下面，所以不能用弹窗式日期选择；月历放在主表单下面又会落在折叠线以下看不见。
  */
 export function DailyCloseFilterSheet({ visible, filters, stores, appliedTotal, onClose, onApply }: DailyCloseFilterSheetProps) {
   const { t } = useAppTranslation("dailyCloses");
   const [draft, setDraft] = useState(filters);
-  const [storeQuery, setStoreQuery] = useState("");
+  // 是否在「选择分店」第二步（与选日期互斥）
+  const [pickingStores, setPickingStores] = useState(false);
   // 正在选哪一端日期：非空时弹层内容换成月历（第二步），选完或点「返回」回到主表单
   const [pickingDate, setPickingDate] = useState<"from" | "to" | null>(null);
   const today = todayInSydney();
@@ -55,16 +60,20 @@ export function DailyCloseFilterSheet({ visible, filters, stores, appliedTotal, 
   useEffect(() => {
     if (visible) {
       setDraft(filters);
-      setStoreQuery("");
+      setPickingStores(false);
       setPickingDate(null);
     }
   }, [filters, visible]);
 
   const patch = (partial: Partial<DailyCloseFilters>) => setDraft((current) => ({ ...current, ...partial }));
-  const visibleStores = useMemo(() => {
-    const query = storeQuery.trim().toLowerCase();
-    return query ? stores.filter((store) => store.storeCode.toLowerCase().includes(query) || store.storeName?.toLowerCase().includes(query)) : stores;
-  }, [storeQuery, stores]);
+  // 分店摘要：没选 = 全部分店；选 1 家显示名称 + 编号；多家显示「已选 N 家」
+  const selectedStore = draft.storeCodes.length === 1 ? stores.find((store) => store.storeCode === draft.storeCodes[0]) : undefined;
+  const storeSummary =
+    draft.storeCodes.length === 0
+      ? { label: t("filters.storesAll"), caption: t("filters.storesTotal", { count: stores.length }) }
+      : draft.storeCodes.length === 1
+        ? { label: selectedStore?.storeName || draft.storeCodes[0], caption: selectedStore?.storeName ? draft.storeCodes[0] : "" }
+        : { label: t("filters.storesSelected", { count: draft.storeCodes.length }), caption: "" };
 
   const rangeIssue = validateDailyCloseFilters(draft, today);
   const singleStore = canPickDailyCloseDevice(draft) ? draft.storeCodes[0].trim() : null;
@@ -84,11 +93,22 @@ export function DailyCloseFilterSheet({ visible, filters, stores, appliedTotal, 
   return (
     <BusinessSheet
       visible={visible}
-      title={pickingDate ? t(pickingDate === "from" ? "filters.rangeFrom" : "filters.rangeTo") : t("filters.title")}
-      // 选日期这一步里点关闭 / 背景只退回主表单，不丢掉草稿
-      onDismiss={() => (pickingDate ? setPickingDate(null) : onClose())}
+      title={
+        pickingStores
+          ? t("filters.storePageTitle")
+          : pickingDate
+            ? t(pickingDate === "from" ? "filters.rangeFrom" : "filters.rangeTo")
+            : t("filters.title")
+      }
+      // 选日期 / 选分店这一步里点关闭 / 背景只退回主表单，不丢掉草稿
+      onDismiss={() => (pickingStores ? setPickingStores(false) : pickingDate ? setPickingDate(null) : onClose())}
+      onBack={pickingStores ? () => setPickingStores(false) : undefined}
       footer={
-        pickingDate ? (
+        pickingStores ? (
+          <Button mode="contained" onPress={() => setPickingStores(false)}>
+            {t("filters.storesDone")}
+          </Button>
+        ) : pickingDate ? (
           <Button mode="outlined" onPress={() => setPickingDate(null)}>
             {t("filters.backToFilters")}
           </Button>
@@ -107,7 +127,21 @@ export function DailyCloseFilterSheet({ visible, filters, stores, appliedTotal, 
         )
       }
     >
-      {pickingDate === "from" ? (
+      {pickingStores ? (
+        <StoreMultiPickPage
+          stores={stores}
+          selected={draft.storeCodes}
+          onToggle={(code) => setDraft(toggleDailyCloseStore(draft, code))}
+          onClear={() => setDraft(clearDailyCloseStores(draft))}
+          labels={{
+            searchPlaceholder: t("filters.searchStore"),
+            emptyText: t("filters.storeEmpty"),
+            selectedText: t("filters.storesSelected", { count: draft.storeCodes.length }),
+            allRowLabel: t("filters.storesAll"),
+            allRowCaption: t("filters.storesTotal", { count: stores.length }),
+          }}
+        />
+      ) : pickingDate === "from" ? (
         // 起始日不晚于结束日，且与结束日相距不超过 93 天：选不出不合法的区间
         <MonthDatePicker
           value={from}
@@ -134,29 +168,15 @@ export function DailyCloseFilterSheet({ visible, filters, stores, appliedTotal, 
             <Text style={DAILY_UI.sectionLabel}>{t("filters.stores")}</Text>
             <Text style={styles.hint}>{t("filters.storesHint")}</Text>
           </View>
-          {stores.length > 6 ? (
-            <TextInput
-              mode="outlined"
-              dense
-              value={storeQuery}
-              onChangeText={setStoreQuery}
-              placeholder={t("filters.searchStore")}
-              accessibilityLabel={t("filters.searchStore")}
-              left={<TextInput.Icon icon="magnify" />}
-            />
-          ) : null}
-          <View style={styles.wrap}>
-            <Option label={t("filters.storesAll")} selected={draft.storeCodes.length === 0} onPress={() => setDraft(clearDailyCloseStores(draft))} />
-            {visibleStores.map((store) => (
-              <Option
-                key={store.storeCode}
-                label={store.storeName || store.storeCode}
-                count={store.storeName ? store.storeCode : undefined}
-                selected={draft.storeCodes.includes(store.storeCode)}
-                onPress={() => setDraft(toggleDailyCloseStore(draft, store.storeCode))}
-              />
-            ))}
-          </View>
+          <StoreFilterRow
+            label={storeSummary.label}
+            caption={storeSummary.caption}
+            active={draft.storeCodes.length > 0}
+            accessibilityLabel={t("filters.storePageTitle")}
+            clearLabel={t("filters.storesAll")}
+            onPress={() => setPickingStores(true)}
+            onClear={() => setDraft(clearDailyCloseStores(draft))}
+          />
 
           <View style={styles.headRow}>
             <Text style={DAILY_UI.sectionLabel}>{t("filters.range")}</Text>

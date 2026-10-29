@@ -138,7 +138,12 @@
     "reset": "Reset",
     "backToFilters": "Back to filters",
     "viewResults": "View results",
-    "viewCount": "Show {{count}} results"
+    "viewCount": "Show {{count}} results",
+    "storePageTitle": "Choose stores",
+    "storesDone": "Done",
+    "storesTotal": "{{count}} stores",
+    "storesSelected": "{{count}} selected",
+    "storeEmpty": "No matching stores"
   },
   "detail": {
     "title": "Daily close",

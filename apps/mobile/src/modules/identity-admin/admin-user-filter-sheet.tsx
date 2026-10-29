@@ -1,14 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Icon, Text } from "react-native-paper";
+import { Button, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { StoreFilterRow } from "@/components/ui/StoreFilterRow";
 import { OptionChipWrap } from "@/modules/people/people-frame";
 import { NoticeBox, SegmentTabs } from "@/modules/people/ui";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { AdminStorePickerPage } from "./admin-store-picker-page";
-import { splitStoreLabel } from "./admin-store-picker-logic";
+import { splitStoreLabel } from "@/shared/utils/store-picker-logic";
 import {
   ADMIN_SORT_ORDER,
   buildAdminFilterKey,
@@ -152,33 +153,15 @@ export function AdminUserFilterSheet({
 
       {showStoreSection ? (
         <Section title={t("people:sheet.store")}>
-          <Pressable
-            accessibilityRole="button"
+          <StoreFilterRow
+            label={selectedStore ? splitStoreLabel(selectedStore.label).name : t("people:sheet.all")}
+            caption={selectedStore ? splitStoreLabel(selectedStore.label).code : t("people:sheet.storeCount", { count: storeOptions.length })}
+            active={Boolean(selectedStore)}
             accessibilityLabel={t("people:sheet.storePageTitle")}
+            clearLabel={t("people:sheet.clearStore")}
             onPress={() => setPage("store")}
-            style={[styles.picker, selectedStore && styles.pickerSelected]}
-          >
-            {selectedStore ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t("people:sheet.clearStore")}
-                onPress={() => setDraft((current) => ({ ...current, storeGuid: "" }))}
-                hitSlop={8}
-                style={styles.pickerClear}
-              >
-                <Icon source="close" size={14} color={HB_COLORS.white} />
-              </Pressable>
-            ) : null}
-            <Text style={[styles.pickerValue, selectedStore && styles.pickerValueSelected]} numberOfLines={1}>
-              {selectedStore ? splitStoreLabel(selectedStore.label).name : t("people:sheet.all")}
-            </Text>
-            {selectedStore ? (
-              <Text style={styles.pickerCaption}>{splitStoreLabel(selectedStore.label).code}</Text>
-            ) : (
-              <Text style={styles.pickerCaption}>{t("people:sheet.storeCount", { count: storeOptions.length })}</Text>
-            )}
-            <Icon source="chevron-right" size={20} color={HB_COLORS.textSecondary} />
-          </Pressable>
+            onClear={() => setDraft((current) => ({ ...current, storeGuid: "" }))}
+          />
         </Section>
       ) : null}
 
@@ -232,10 +215,4 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
   sectionTitle: { color: HB_COLORS.textSecondary, fontSize: 12.5, fontWeight: "700" },
   sectionHint: { flexShrink: 1, color: HB_COLORS.textSecondary, fontSize: 11.5 },
-  picker: { minHeight: 50, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: HB_COLORS.outline, backgroundColor: HB_COLORS.white },
-  pickerSelected: { borderColor: HB_COLORS.brand, backgroundColor: "#EFF6FF" },
-  pickerClear: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "#98B4E8" },
-  pickerValue: { flex: 1, color: HB_COLORS.textPrimary, fontSize: 15 },
-  pickerValueSelected: { color: HB_COLORS.action, fontWeight: "700" },
-  pickerCaption: { color: HB_COLORS.textSecondary, fontSize: 12.5 },
 });

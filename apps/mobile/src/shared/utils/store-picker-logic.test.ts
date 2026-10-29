@@ -5,7 +5,7 @@ import {
   pickMyStoreOptions,
   splitStoreLabel,
   type StoreOption,
-} from "./admin-store-picker-logic";
+} from "./store-picker-logic";
 
 const OPTIONS: StoreOption[] = [
   { value: "g-star", label: "Star Value Taree · 1038" },
