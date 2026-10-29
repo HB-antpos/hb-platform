@@ -98,7 +98,7 @@ assertEqual(
   '后端 FullMenu 应登记排班考勤合并页，排班查看或审核任一可见（审核只认 Approval.ReviewManagedStore）',
 )
 assertEqual(
-  /Path = "\/pos-admin\/payroll",.*TitleKey = "menu\.attendancePayroll".*Icon = "AccountBookOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Punch\.ViewManagedStore, Permissions\.Attendance\.Payroll\.View, Permissions\.Myob\.Connection\.Manage, Permissions\.Myob\.Employee\.Bind \}/.test(navigationSource),
+  /Path = "\/pos-admin\/payroll",.*TitleKey = "menu\.attendancePayroll".*Icon = "AccountBookOutlined".*AnyPermissions = new List<string> \{ Permissions\.Attendance\.Punch\.ViewManagedStore, Permissions\.Attendance\.Payroll\.View, Permissions\.Myob\.Connection\.Manage, Permissions\.Myob\.Employee\.Bind, Permissions\.Myob\.Payslip\.ViewManagedStore, Permissions\.Myob\.Payslip\.ViewAllStores \}/.test(navigationSource),
   true,
   '后端 FullMenu 应登记工时与工资合并页，打卡查看、工资查看或 MYOB 对接（连接 / 员工绑定）任一可见；工资编辑不隐含查看',
 )
