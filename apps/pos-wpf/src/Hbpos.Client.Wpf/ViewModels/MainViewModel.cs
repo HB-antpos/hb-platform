@@ -110,6 +110,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly ScreenNavigator _screenNavigator;
     private readonly IWindowOwnerProvider? _windowOwnerProvider;
     private readonly Func<CancellationToken, Task<AppUpdateCoordinatorResult>>? _checkForAppUpdateAsync;
+    private Func<CashierSessionDto, Task>? _onCashierLoggedInForColorTheme;
     private readonly IAppUpdateChannelProvider? _appUpdateChannelProvider;
     private readonly ApiServerSettingsViewModel? _apiServerSettings;
     private readonly AttendanceQrPanelViewModel? _attendanceQrPanel;
@@ -863,6 +864,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     internal void ConfigureScannerSettings(IScannerSettingsStore? settingsStore)
     {
         _mainChildViewModelFactory.ScannerSettingsStore = settingsStore;
+    }
+
+    /// <summary>收银员登录成功后切换到其个人配色（没有偏好时由回调弹首次选择窗）；未配置时保持本机配色。</summary>
+    internal void ConfigureCashierColorTheme(Func<CashierSessionDto, Task>? onCashierLoggedIn)
+    {
+        _onCashierLoggedInForColorTheme = onCashierLoggedIn;
     }
 
     private ScreenNavigator CreateScreenNavigator() =>
@@ -1643,6 +1650,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ConsoleLog.Write(
             "CashierLoginTiming",
             $"sessionApplyMs={sessionApplyStopwatch.ElapsedMilliseconds} offlineCached={result.Session.IsOfflineCached}");
+        // 配色查询走网络，不等待：登录流程照常继续，配色到了再切换。
+        StartCashierColorTheme(result.Session);
         OperationAuditEvents.RecordAction(
             _operationAuditLogger,
             OperationAuditTypes.CashierLogin,
@@ -1656,6 +1665,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await RecoverPendingStartupCardPaymentAttemptAfterLoginAsync();
         await RecoverSharedHeldClaimsSafelyAsync();
         return true;
+    }
+
+    private void StartCashierColorTheme(CashierSessionDto cashierSession)
+    {
+        if (_onCashierLoggedInForColorTheme is not { } onCashierLoggedIn)
+        {
+            return;
+        }
+
+        _ = RunCashierColorThemeSafeAsync(onCashierLoggedIn, cashierSession);
+    }
+
+    private static async Task RunCashierColorThemeSafeAsync(
+        Func<CashierSessionDto, Task> onCashierLoggedIn,
+        CashierSessionDto cashierSession)
+    {
+        try
+        {
+            await onCashierLoggedIn(cashierSession);
+        }
+        catch (Exception ex)
+        {
+            // 配色只是体验项，任何异常都不能影响收银。
+            ConsoleLog.WriteError("ColorTheme", $"cashier theme apply failed error={ex.GetType().Name}", exception: ex);
+        }
     }
 
     private string ResolveCashierLoginStatusMessage(string? errorCode)

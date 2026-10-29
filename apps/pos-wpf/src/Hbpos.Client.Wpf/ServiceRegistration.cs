@@ -341,6 +341,13 @@ public static class ServiceRegistration
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        services.AddHttpClient<ICashierPreferenceApiClient, CashierPreferenceApiClient>(client =>
+        {
+            client.BaseAddress = initialApiAddress;
+            client.Timeout = CashierPreferenceApiClient.RequestTimeout;
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
         services.AddHttpClient<IAdvertisementApiClient, AdvertisementApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
@@ -709,7 +716,9 @@ public static class ServiceRegistration
                 () => sp.GetRequiredService<IShellCatalogService>().IsCatalogSyncActive));
         services.AddSingleton<IDisplayTopologyService, DisplayTopologyService>();
         services.AddSingleton<IColorThemeService, ColorThemeService>();
+        services.AddSingleton<CashierColorThemePreferenceService>();
         services.AddSingleton<ColorThemeSwitcherViewModel>();
+        services.AddSingleton<ColorThemeOnboardingViewModel>();
         services.AddSingleton<IWindowOwnerProvider, WpfWindowOwnerProvider>();
         services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
@@ -811,6 +820,7 @@ public static class ServiceRegistration
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
+            viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

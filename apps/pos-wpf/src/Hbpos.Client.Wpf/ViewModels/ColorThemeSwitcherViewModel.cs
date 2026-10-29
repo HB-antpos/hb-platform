@@ -7,19 +7,27 @@ using Hbpos.Client.Wpf.Services;
 
 namespace Hbpos.Client.Wpf.ViewModels;
 
-/// <summary>标题栏的配色切换菜单：只负责展示选项与转发选择，切换与保存由 IColorThemeService 完成。</summary>
+/// <summary>
+/// 标题栏的配色切换菜单：只负责展示选项与转发选择，切换与保存由 IColorThemeService 完成；
+/// 有收银员登录时经 CashierColorThemePreferenceService 同时记为该员工的偏好。
+/// </summary>
 public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
 {
     private readonly IColorThemeService _colorThemeService;
     private readonly ILocalizationService _localization;
+    private readonly CashierColorThemePreferenceService? _cashierPreferences;
 
     [ObservableProperty]
     private bool _isMenuOpen;
 
-    public ColorThemeSwitcherViewModel(IColorThemeService colorThemeService, ILocalizationService localization)
+    public ColorThemeSwitcherViewModel(
+        IColorThemeService colorThemeService,
+        ILocalizationService localization,
+        CashierColorThemePreferenceService? cashierPreferences = null)
     {
         _colorThemeService = colorThemeService;
         _localization = localization;
+        _cashierPreferences = cashierPreferences;
         Options = new ObservableCollection<ColorThemeOption>(
             Definitions.Select(definition => new ColorThemeOption(definition.Theme, definition.Swatches)));
         SelectCommand = new AsyncRelayCommand<PosColorTheme>(SelectAsync);
@@ -56,7 +64,13 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
     private async Task SelectAsync(PosColorTheme theme)
     {
         IsMenuOpen = false;
-        await _colorThemeService.SelectAsync(theme);
+        if (_cashierPreferences is null)
+        {
+            await _colorThemeService.SelectAsync(theme);
+            return;
+        }
+
+        await _cashierPreferences.SelectForCurrentCashierAsync(theme);
     }
 
     private void RefreshSelection()
