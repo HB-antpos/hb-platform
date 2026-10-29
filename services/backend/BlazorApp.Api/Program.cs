@@ -824,7 +824,9 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, 
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService, BlazorApp.Api.Services.Myob.MyobTimesheetPreviewService>();
-builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobWriteProbeService, BlazorApp.Api.Services.Myob.MyobWriteProbeService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource>(sp =>
+    (BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource)sp.GetRequiredService<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService>()); // 推送与预览共用同一段规划代码
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPushService, BlazorApp.Api.Services.Myob.MyobTimesheetPushService>(); // Timesheet 推送 / 撤销（总闸默认关）
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipPermissionChecker, BlazorApp.Api.Services.Myob.RoleServicePayslipPermissionChecker>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipEmailSender, BlazorApp.Api.Services.Myob.MyobPayslipEmailSender>(); // 工资单 PDF 邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipService, BlazorApp.Api.Services.Myob.MyobPayslipService>();
