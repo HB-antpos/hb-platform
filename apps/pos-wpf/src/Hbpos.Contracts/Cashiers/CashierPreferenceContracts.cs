@@ -9,7 +9,7 @@ public static class CashierPreferenceKeys
 /// <summary>WPF 收银端可选的界面配色；名称与客户端 PosColorTheme 枚举一致，服务端只接受这些值。</summary>
 public static class CashierColorThemes
 {
-    public static IReadOnlyList<string> All { get; } = ["Default", "Paper", "Graphite", "Celadon", "Blue", "Elder"];
+    public static IReadOnlyList<string> All { get; } = ["Graphite", "Celadon", "Blue", "Elder", "Candy", "Sunny", "Ocean", "Rainbow"];
 
     /// <summary>忽略大小写匹配到规范名称；不认识的值返回 null。</summary>
     public static string? Normalize(string? value)

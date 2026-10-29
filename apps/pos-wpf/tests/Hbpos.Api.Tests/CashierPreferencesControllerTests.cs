@@ -15,7 +15,7 @@ namespace Hbpos.Api.Tests;
 
 /// <summary>
 /// 收银员配色偏好接口：员工只取自收银员票据并核对设备范围；保存时请求里的员工必须与票据一致，
-/// 配色只接受固定的六个值；存储异常一律映射为 503 暂不可用，让收银端沿用本机主题。
+/// 配色只接受固定的八个值；存储异常一律映射为 503 暂不可用，让收银端沿用本机主题。
 /// </summary>
 public sealed class CashierPreferencesControllerTests
 {
@@ -40,7 +40,7 @@ public sealed class CashierPreferencesControllerTests
     [Fact]
     public void Color_theme_list_matches_the_wpf_palettes_and_normalizes_case()
     {
-        Assert.Equal(["Default", "Paper", "Graphite", "Celadon", "Blue", "Elder"], CashierColorThemes.All);
+        Assert.Equal(["Graphite", "Celadon", "Blue", "Elder", "Candy", "Sunny", "Ocean", "Rainbow"], CashierColorThemes.All);
         Assert.Equal("Graphite", CashierColorThemes.Normalize(" graphite "));
         Assert.Null(CashierColorThemes.Normalize("Neon"));
         Assert.Null(CashierColorThemes.Normalize(null));
@@ -84,7 +84,7 @@ public sealed class CashierPreferencesControllerTests
 
         var get = await controller.GetColorTheme(CancellationToken.None);
         var save = await controller.SaveColorTheme(
-            new CashierColorThemePreferenceUpdateRequest("user-guid-1", "Paper"),
+            new CashierColorThemePreferenceUpdateRequest("user-guid-1", "Candy"),
             CancellationToken.None);
 
         AssertError(get, StatusCodes.Status403Forbidden, "DEVICE_SCOPE_FORBIDDEN");
@@ -101,7 +101,7 @@ public sealed class CashierPreferencesControllerTests
 
         var get = await controller.GetColorTheme(CancellationToken.None);
         var save = await controller.SaveColorTheme(
-            new CashierColorThemePreferenceUpdateRequest("user-guid-1", "Paper"),
+            new CashierColorThemePreferenceUpdateRequest("user-guid-1", "Candy"),
             CancellationToken.None);
 
         AssertError(get, StatusCodes.Status503ServiceUnavailable, "CASHIER_PREFERENCES_UNAVAILABLE");
@@ -132,7 +132,7 @@ public sealed class CashierPreferencesControllerTests
         var controller = CreateController(store, Ticket("S01", "POS-01"), AuthenticatedDevice("S01", "POS-01"));
 
         var action = await controller.SaveColorTheme(
-            new CashierColorThemePreferenceUpdateRequest("user-guid-previous", "Paper"),
+            new CashierColorThemePreferenceUpdateRequest("user-guid-previous", "Candy"),
             CancellationToken.None);
 
         AssertError(action, StatusCodes.Status409Conflict, "CASHIER_PREFERENCE_USER_MISMATCH");

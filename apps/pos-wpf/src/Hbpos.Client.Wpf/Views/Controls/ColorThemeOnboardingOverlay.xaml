@@ -63,7 +63,7 @@
           AutomationProperties.AutomationId="ColorThemeOnboardingOverlay"
           Background="#99000000"
           Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
-        <Border Width="640"
+        <Border Width="760"
                 Padding="22,20"
                 Background="{DynamicResource PosSurfaceBrush}"
                 BorderBrush="{DynamicResource PosDividerBrush}"
@@ -104,7 +104,7 @@
                 <ItemsControl x:Name="ThemeCards" ItemsSource="{Binding Options}" Margin="-5,14,-5,10">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <UniformGrid Columns="3" />
+                            <UniformGrid Columns="4" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>

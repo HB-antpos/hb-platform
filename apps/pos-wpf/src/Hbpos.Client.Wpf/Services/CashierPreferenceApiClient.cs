@@ -63,7 +63,7 @@ public sealed class CashierPreferenceApiClient(HttpClient httpClient) : ICashier
                 return CashierColorThemeFetchResult.Unavailable;
             }
 
-            // 服务端只会返回固定的六个值或 null；客户端仍按枚举再校验一次，认不出的值等同未设置。
+            // 服务端只会返回固定白名单里的值或 null；客户端仍按枚举再校验一次，认不出的值等同未设置。
             return ColorThemeService.TryParse(preference.ColorTheme, out var theme)
                 ? new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.Found, theme)
                 : new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.NotSet);

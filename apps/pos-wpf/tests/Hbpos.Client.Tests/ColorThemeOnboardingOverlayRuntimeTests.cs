@@ -9,7 +9,7 @@ using Hbpos.Client.Wpf.Views.Controls;
 namespace Hbpos.Client.Tests;
 
 /// <summary>
-/// 首次登录配色选择窗按真实色板渲染：六张卡片、只有当前预选项带勾、确认按钮写明所选配色；
+/// 首次登录配色选择窗按真实色板渲染：八张卡片、只有当前预选项带勾、确认按钮写明所选配色；
 /// 点卡片预览后整屏色板跟着换，勾也跟着移动。设置 HBPOS_THEME_SCREENSHOTS 时输出截图供目测。
 /// </summary>
 [Collection(WpfViewLifecycleTestCollection.Name)]
@@ -37,7 +37,7 @@ public sealed class ColorThemeOnboardingOverlayRuntimeTests(PaymentViewRuntimeSt
 
             Assert.True(onboarding.IsOpen);
             var cards = Descendants<Button>(overlay).Where(button => button.CommandParameter is PosColorTheme).ToList();
-            Assert.Equal(6, cards.Count);
+            Assert.Equal(8, cards.Count);
             Assert.Equal([PosColorTheme.Blue], CheckedThemes(cards));
             // 主色按钮上的文字必须是白字（隐式 TextBlock 样式曾把它盖成正文深色）。
             var confirmText = Descendants<TextBlock>(overlay).Single(text => text.Text == "使用「蓝色」开始收银");
@@ -55,7 +55,7 @@ public sealed class ColorThemeOnboardingOverlayRuntimeTests(PaymentViewRuntimeSt
         finally
         {
             // 共享测试 Application 的其他用例依赖默认色板。
-            new WpfColorThemeApplier().Apply(PosColorTheme.Default);
+            new WpfColorThemeApplier().Apply(PosColorTheme.Blue);
             window.Close();
         }
     });
@@ -64,7 +64,7 @@ public sealed class ColorThemeOnboardingOverlayRuntimeTests(PaymentViewRuntimeSt
     public Task Overlay_stays_hidden_until_a_cashier_needs_to_choose() => host.RunAsync(async _ =>
     {
         var fixture = new CashierColorThemeFixture();
-        fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.Found, PosColorTheme.Paper);
+        fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.Found, PosColorTheme.Candy);
         var onboarding = fixture.Onboarding();
         var overlay = new ColorThemeOnboardingOverlay { DataContext = onboarding };
         var window = new Window { Content = overlay };

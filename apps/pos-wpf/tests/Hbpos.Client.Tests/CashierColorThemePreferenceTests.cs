@@ -20,7 +20,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Online_login_with_a_saved_preference_switches_to_it_and_caches_it_locally()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.Found, PosColorTheme.Graphite);
         var session = fixture.Login();
 
@@ -64,14 +64,14 @@ public sealed class CashierColorThemePreferenceTests
     }
 
     [Theory]
-    [InlineData(null, CashierColorThemeOutcome.KeptCurrent, PosColorTheme.Paper)]
+    [InlineData(null, CashierColorThemeOutcome.KeptCurrent, PosColorTheme.Candy)]
     [InlineData("Graphite", CashierColorThemeOutcome.Applied, PosColorTheme.Graphite)]
     public async Task Unavailable_server_falls_back_to_the_local_cache_then_the_terminal_theme_without_asking(
         string? cached,
         CashierColorThemeOutcome expectedOutcome,
         PosColorTheme expectedTheme)
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         if (cached is not null)
         {
             fixture.Settings[CashierColorThemePreferenceService.UserSettingKey(UserGuid)] = cached;
@@ -110,7 +110,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Emergency_login_keeps_the_terminal_theme_and_touches_no_preference()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         var session = fixture.Login(Session() with { IsEmergencyOverride = true });
 
         var outcome = await fixture.Service.ApplyForCashierAsync(session);
@@ -127,7 +127,7 @@ public sealed class CashierColorThemePreferenceTests
     {
         var fixture = new CashierColorThemeFixture();
         var offline = fixture.Login(Session() with { IsOfflineCached = true });
-        await fixture.Service.SaveChoiceAsync(offline, PosColorTheme.Paper);
+        await fixture.Service.SaveChoiceAsync(offline, PosColorTheme.Candy);
         Assert.Equal("1", fixture.Settings[CashierColorThemePreferenceService.PendingUploadKey(UserGuid)]);
         Assert.Empty(fixture.Api.Saves);
 
@@ -135,8 +135,8 @@ public sealed class CashierColorThemePreferenceTests
         var outcome = await fixture.Service.ApplyForCashierAsync(fixture.Login());
 
         Assert.Equal(CashierColorThemeOutcome.Applied, outcome);
-        Assert.Equal(PosColorTheme.Paper, fixture.Themes.Current);
-        Assert.Equal([(UserGuid, PosColorTheme.Paper)], fixture.Api.Saves);
+        Assert.Equal(PosColorTheme.Candy, fixture.Themes.Current);
+        Assert.Equal([(UserGuid, PosColorTheme.Candy)], fixture.Api.Saves);
         Assert.Empty(fixture.Api.Fetches);
         Assert.Equal("0", fixture.Settings[CashierColorThemePreferenceService.PendingUploadKey(UserGuid)]);
     }
@@ -157,7 +157,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Preference_that_arrives_after_the_cashier_changed_is_not_applied()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         var first = fixture.Login();
         fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.Found, PosColorTheme.Graphite);
         fixture.Api.BeforeFetchReturns = () => fixture.Login(Session() with { UserGuid = "someone-else" });
@@ -165,7 +165,7 @@ public sealed class CashierColorThemePreferenceTests
         var outcome = await fixture.Service.ApplyForCashierAsync(first);
 
         Assert.Equal(CashierColorThemeOutcome.KeptCurrent, outcome);
-        Assert.Equal(PosColorTheme.Paper, fixture.Themes.Current);
+        Assert.Equal(PosColorTheme.Candy, fixture.Themes.Current);
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Onboarding_opens_on_the_terminal_theme_previews_without_saving_and_saves_on_confirm()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.NotSet);
         var onboarding = fixture.Onboarding();
 
@@ -198,12 +198,12 @@ public sealed class CashierColorThemePreferenceTests
         Assert.True(onboarding.IsOpen);
         Assert.Equal("欢迎，Alice", onboarding.Title);
         Assert.Equal("A", onboarding.AvatarText);
-        Assert.Equal([PosColorTheme.Paper], onboarding.Options.Where(option => option.IsSelected).Select(option => option.Theme));
-        Assert.Equal("使用「暖纸」开始收银", onboarding.ConfirmText);
+        Assert.Equal([PosColorTheme.Candy], onboarding.Options.Where(option => option.IsSelected).Select(option => option.Theme));
+        Assert.Equal("使用「糖果紫」开始收银", onboarding.ConfirmText);
 
         onboarding.PreviewCommand.Execute(PosColorTheme.Graphite);
         Assert.Equal(PosColorTheme.Graphite, fixture.Themes.Current);
-        Assert.Equal("Paper", fixture.Settings[ColorThemeService.SettingKey]);
+        Assert.Equal("Candy", fixture.Settings[ColorThemeService.SettingKey]);
         Assert.Empty(fixture.Api.Saves);
         Assert.Equal("使用「石墨夜」开始收银", onboarding.ConfirmText);
 
@@ -217,7 +217,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Next_cashier_login_withdraws_an_unconfirmed_choice_and_restores_the_theme()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.NotSet);
         var onboarding = fixture.Onboarding();
         await onboarding.HandleCashierLoginAsync(fixture.Login());
@@ -234,7 +234,7 @@ public sealed class CashierColorThemePreferenceTests
     [Fact]
     public async Task Confirm_after_the_cashier_changed_saves_nothing_and_restores_the_theme()
     {
-        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Paper);
+        var fixture = new CashierColorThemeFixture(terminalTheme: PosColorTheme.Candy);
         fixture.Api.FetchResult = new CashierColorThemeFetchResult(CashierColorThemeFetchStatus.NotSet);
         var onboarding = fixture.Onboarding();
         await onboarding.HandleCashierLoginAsync(fixture.Login());
@@ -244,9 +244,9 @@ public sealed class CashierColorThemePreferenceTests
         await onboarding.ConfirmCommand.ExecuteAsync(null);
 
         Assert.False(onboarding.IsOpen);
-        Assert.Equal(PosColorTheme.Paper, fixture.Themes.Current);
+        Assert.Equal(PosColorTheme.Candy, fixture.Themes.Current);
         Assert.Empty(fixture.Api.Saves);
-        Assert.Equal("Paper", fixture.Settings[ColorThemeService.SettingKey]);
+        Assert.Equal("Candy", fixture.Settings[ColorThemeService.SettingKey]);
     }
 
     [Theory]
