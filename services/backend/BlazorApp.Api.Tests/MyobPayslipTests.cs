@@ -3,6 +3,7 @@ using System.Text.Json;
 using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Models.Myob;
+using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Api.Services.Myob;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -753,6 +754,111 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Null(response.Data);
     }
 
+    // ───────────────────────── 我方考勤工时（按需加载） ─────────────────────────
+
+    [Fact]
+    public async Task 工时_按分店汇总计薪工时和带薪假_周期取自工资单_只取这一名员工_不写查看记录()
+    {
+        _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
+        _source.Hours[("1005", "u-tom")] = (WorkMinutes: 38 * 60 + 30, Sick: 2m, Annual: 4m, Holiday: 1.5m);
+        _source.Hours[("1002", "u-tom")] = (WorkMinutes: 24 * 60, Sick: 0m, Annual: 0m, Holiday: 0m);
+        AsAdmin();
+
+        var response = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+
+        Assert.True(response.Success);
+        var hours = response.Data!;
+        Assert.Equal(["1002", "1005"], hours.Stores.Select(s => s.StoreCode).ToArray());
+        var newcastle = hours.Stores.Single(s => s.StoreCode == "1005");
+        Assert.Equal(38.5m, newcastle.WorkHours);
+        Assert.Equal(7.5m, newcastle.LeaveHours); // 病假 2 + 年假 4 + 公假 1.5
+        Assert.Equal("1005 Newcastle", newcastle.StoreLabel);
+        Assert.Equal(24m, hours.Stores.Single(s => s.StoreCode == "1002").WorkHours);
+        Assert.Equal(62.5m, hours.TotalWorkHours);
+        Assert.Equal(7.5m, hours.TotalLeaveHours);
+
+        // 周期取自 MYOB 工资单（10-10 ~ 10-19 共 10 天 → 2 周），不是客户端传的；只查这一名员工。
+        Assert.All(_source.StoreCalls, call => Assert.Equal(["u-tom"], call.Users));
+        Assert.All(_source.StoreCalls, call => Assert.Equal(new DateTime(2026, 10, 10), call.Start));
+        Assert.All(_source.StoreCalls, call => Assert.Equal(2, call.Weeks));
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync()); // 与明细同一次查看，不重复记
+    }
+
+    [Fact]
+    public async Task 工时_单个分店读取失败_只标这一行_其它分店照常_不回显异常内容()
+    {
+        _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
+        _source.Hours[("1005", "u-tom")] = (600, 0m, 0m, 0m);
+        _source.FailStores.Add("1002");
+        AsAdmin();
+
+        var response = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.Stores.Single(s => s.StoreCode == "1002").Failed);
+        Assert.False(response.Data.Stores.Single(s => s.StoreCode == "1005").Failed);
+        Assert.Equal(10m, response.Data.TotalWorkHours);
+        var json = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain("secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("1812", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task 工时_未绑定或无法确定分店_返回空列表_不是错误_不调用考勤()
+    {
+        GivenSlips();
+        AsAdmin();
+        var unbound = await Service().GetHoursAsync(D(Inv, CardStranger), CancellationToken.None);
+        Assert.True(unbound.Success);
+        Assert.Empty(unbound.Data!.Stores);
+        Assert.Empty(_source.StoreCalls);
+    }
+
+    [Fact]
+    public async Task 工时_权限与明细一致_无权限403_店长看管辖外员工404_管辖内可看()
+    {
+        GivenSlips();
+        _source.Hours[("1005", "u-tom")] = (480, 0m, 0m, 0m);
+
+        var denied = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, denied.ErrorCode);
+
+        AsManager("1002"); // 只管 Wallsend：Tom 在 Newcastle，不在管辖内
+        var outOfScope = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, outOfScope.ErrorCode);
+        Assert.Empty(_source.StoreCalls); // 越权时一次考勤都不查
+
+        _permissions.Granted.Clear();
+        AsManager("1005");
+        var own = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+        Assert.True(own.Success);
+        Assert.Equal(8m, own.Data!.TotalWorkHours);
+    }
+
+    [Theory]
+    [InlineData("not-a-guid", "2026-10-23")]
+    [InlineData("aaaaaaaa-0000-0000-0000-000000000002", "bad-date")]
+    public async Task 工时_参数不合法_找不到_不请求MYOB(string card, string date)
+    {
+        GivenSlips();
+        AsAdmin();
+        var response = await Service().GetHoursAsync(D(Inv, card, date), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, response.ErrorCode);
+        Assert.Equal(0, _api.Calls);
+    }
+
+    [Fact]
+    public async Task 工时_MYOB读取失败_返回MYOB错误码()
+    {
+        GivenSlips();
+        AsAdmin();
+        _api.Errors[Inv] = new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回 503");
+        var response = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
+        Assert.Equal(MyobErrorCodes.ApiCallFailed, response.ErrorCode);
+    }
+
     [Fact]
     public async Task 展示对象_序列化后不含年薪时薪生日支票号银行等字段()
     {
@@ -780,12 +886,12 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal("api/react/v1/myob/payslips", type.GetCustomAttribute<RouteAttribute>()!.Template);
 
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).ToList();
-        Assert.Equal(3, actions.Count);
+        Assert.Equal(4, actions.Count);
         Assert.All(actions, method => Assert.NotNull(method.GetCustomAttribute<HttpGetAttribute>()));
         Assert.DoesNotContain(actions, method => method.GetCustomAttributes().Any(a =>
             a is HttpPostAttribute or HttpPutAttribute or HttpDeleteAttribute or HttpPatchAttribute));
         Assert.Equal(
-            ["", "companies", "detail"],
+            ["", "companies", "detail", "hours"],
             actions.Select(method => method.GetCustomAttribute<HttpGetAttribute>()!.Template ?? string.Empty).OrderBy(t => t, StringComparer.Ordinal).ToArray());
     }
 
@@ -823,6 +929,7 @@ public sealed class MyobPayslipTests : IDisposable
         public Task<ApiResponse<List<MyobPayslipCompanyDto>>> GetCompaniesAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipListDto>> ListAsync(MyobPayslipQuery query, CancellationToken cancellationToken) => Task.FromResult(list);
         public Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private sealed class FakeApi : IMyobApiClient
@@ -888,8 +995,35 @@ public sealed class MyobPayslipTests : IDisposable
             Task.FromResult<IReadOnlyList<(string, string)>>(
                 Pairs.Where(pair => userGuids.Contains(pair.UserGuid, StringComparer.OrdinalIgnoreCase)).ToList());
 
-        public Task<PayrollPushStoreData> GetStoreDataAsync(string storeCode, DateTime periodStart, int weeks, IReadOnlyCollection<string> onlyUsers) =>
-            throw new NotSupportedException();
+        // 每个 (店, 员工) 的工时分钟与带薪假小时；Fail 里的店模拟读取失败。
+        public Dictionary<(string Store, string User), (int WorkMinutes, decimal Sick, decimal Annual, decimal Holiday)> Hours { get; } = new();
+        public HashSet<string> FailStores { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<(string Store, DateTime Start, int Weeks, string[] Users)> StoreCalls { get; } = [];
+
+        public Task<PayrollPushStoreData> GetStoreDataAsync(string storeCode, DateTime periodStart, int weeks, IReadOnlyCollection<string> onlyUsers)
+        {
+            StoreCalls.Add((storeCode, periodStart, weeks, onlyUsers.ToArray()));
+            if (FailStores.Contains(storeCode))
+            {
+                throw new InvalidOperationException("secret failure detail 1812.40");
+            }
+
+            var employees = onlyUsers
+                .Where(user => Hours.ContainsKey((storeCode, user)))
+                .Select(user =>
+                {
+                    var h = Hours[(storeCode, user)];
+                    return new PayrollPushEmployee(
+                        user, user, null, null, [],
+                        [new PayrollWorkItem(periodStart, PayrollBucket.Weekday, h.WorkMinutes)],
+                        [new PayrollLeaveItem(periodStart, h.Sick)],
+                        [new PayrollLeaveItem(periodStart, h.Holiday)],
+                        [new PayrollLeaveItem(periodStart, h.Annual)],
+                        []);
+                })
+                .ToList();
+            return Task.FromResult(new PayrollPushStoreData(storeCode, storeCode, false, employees));
+        }
     }
 
     private sealed class FakeScope : ICurrentUserManageableStoreScopeService

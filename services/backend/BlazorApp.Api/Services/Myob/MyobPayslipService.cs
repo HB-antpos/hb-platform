@@ -20,6 +20,12 @@ public interface IMyobPayslipService
 
     /// <summary>单张工资单明细；每次成功打开写一条查看记录（只记谁看了谁哪一期，不含金额）。</summary>
     Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 这张工资单对应周期里「我方考勤」按分店的计薪工时（仅供参考，按需加载）。权限与归类和明细完全一致（重新取这张工资单再判断），
+    /// 但不写查看记录：它和打开明细属于同一次查看。
+    /// </summary>
+    Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>查「某用户是否有某权限码」的最小抽象：生产用 IRoleService（含管理员角色与权限别名），测试用假实现。</summary>
@@ -550,19 +556,32 @@ internal sealed class MyobPayslipService : IMyobPayslipService
 
     // ───────────────────────── 明细 ─────────────────────────
 
-    public async Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    /// <summary>已通过权限与归类校验的一张工资单（明细与工时共用）。</summary>
+    private sealed record ResolvedSlip(
+        AccessResult Access, MyobConnection Connection, MyobPayrollAdviceRecord Slip, int SameDayCount, PlacedAdvice Placed);
+
+    private sealed record ResolveOutcome(ResolvedSlip? Slip, string? ErrorCode, string? Message);
+
+    private static ResolveOutcome NotFoundOutcome() => new(null, MyobPayslipErrorCodes.NotFound, "找不到这张工资单");
+
+    /// <summary>
+    /// 取出并校验单张工资单：权限 → 参数格式 → 公司文件可见 → 从 MYOB 只取这名员工这一天 → 归类 → 可见性。
+    /// 越权与不存在返回同样的 NotFound，不暴露这张工资单是否存在。工时接口也走这里重新取工资单，
+    /// 不信任客户端传来的周期，避免用伪造的周期绕过「分店归属」判断。
+    /// </summary>
+    private async Task<ResolveOutcome> ResolveSlipAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
     {
         var access = await ResolveAccessAsync();
         if (access.Access is null)
         {
-            return ApiResponse<MyobPayslipDetailDto>.Error(access.Message, MyobPayslipErrorCodes.Forbidden);
+            return new ResolveOutcome(null, MyobPayslipErrorCodes.Forbidden, access.Message);
         }
 
         // 员工卡 UID 必须是合法 Guid（也是后面拼进 OData 表达式的前提）；日期必须是 yyyy-MM-dd。
         if (!Guid.TryParse(request.EmployeeUid, out _)
             || !TryParseDate(request.PaymentDate ?? string.Empty, out var paymentDate))
         {
-            return ApiResponse<MyobPayslipDetailDto>.Error("找不到这张工资单", MyobPayslipErrorCodes.NotFound);
+            return NotFoundOutcome();
         }
 
         DateTime? periodStart = null;
@@ -570,18 +589,17 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         {
             if (!TryParseDate(request.PeriodStart, out var parsed))
             {
-                return ApiResponse<MyobPayslipDetailDto>.Error("找不到这张工资单", MyobPayslipErrorCodes.NotFound);
+                return NotFoundOutcome();
             }
 
             periodStart = parsed;
         }
 
-        var connections = await LoadVisibleConnectionsAsync(access.Access, request.ConnectionGuid);
-        var connection = connections.FirstOrDefault();
+        var connection = (await LoadVisibleConnectionsAsync(access.Access, request.ConnectionGuid)).FirstOrDefault();
         if (connection is null)
         {
             // 公司文件不存在、未启用或对该账号不可见：统一当作找不到，不暴露区别。
-            return ApiResponse<MyobPayslipDetailDto>.Error("找不到这张工资单", MyobPayslipErrorCodes.NotFound);
+            return NotFoundOutcome();
         }
 
         IReadOnlyList<MyobPayrollAdviceRecord> records;
@@ -596,7 +614,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         }
         catch (MyobApiException ex)
         {
-            return ApiResponse<MyobPayslipDetailDto>.Error(ex.Message, ex.Code);
+            return new ResolveOutcome(null, ex.Code, ex.Message);
         }
 
         var sameDay = records
@@ -608,15 +626,27 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             : sameDay.FirstOrDefault(record => record.PeriodStart?.Date == periodStart);
         if (chosen is null)
         {
-            return ApiResponse<MyobPayslipDetailDto>.Error("找不到这张工资单", MyobPayslipErrorCodes.NotFound);
+            return NotFoundOutcome();
         }
 
         var placed = (await PlaceAsync([new AdviceItem(connection.ConnectionGuid, connection.BusinessName, chosen)], cancellationToken)).FirstOrDefault();
         if (placed is null || !MyobPayslipMatcher.IsVisible(access.Access, placed.Link is not null, placed.Placement))
         {
-            // 越权与不存在返回同样的结果，不暴露这张工资单是否存在。
-            return ApiResponse<MyobPayslipDetailDto>.Error("找不到这张工资单", MyobPayslipErrorCodes.NotFound);
+            return NotFoundOutcome();
         }
+
+        return new ResolveOutcome(new ResolvedSlip(access, connection, chosen, sameDay.Count, placed), null, null);
+    }
+
+    public async Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    {
+        var outcome = await ResolveSlipAsync(request, cancellationToken);
+        if (outcome.Slip is null)
+        {
+            return ApiResponse<MyobPayslipDetailDto>.Error(outcome.Message ?? "找不到这张工资单", outcome.ErrorCode);
+        }
+
+        var (access, connection, chosen, sameDayCount, placed) = outcome.Slip;
 
         // 先记查看，再返回内容：记不下来就拒绝（宁可不给看，也不能无痕地看）。只记谁、哪一期，不记金额。
         try
@@ -627,7 +657,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
                 ConnectionGuid = connection.ConnectionGuid,
                 TargetUserGuid = placed.Link?.UserGuid,
                 MyobEmployeeUid = chosen.EmployeeUid,
-                PaymentDate = paymentDate,
+                PaymentDate = chosen.PaymentDate?.Date ?? DateTime.MinValue,
                 ViewedAt = _time.GetUtcNow().UtcDateTime,
             }).ExecuteCommandAsync();
         }
@@ -654,7 +684,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             SuperFundName = chosen.SuperFundName,
             Placement = placed.Placement.Kind,
             Stores = ToStoreDtos(placed.Placement, labels),
-            SamePaymentDateCount = sameDay.Count,
+            SamePaymentDateCount = sameDayCount,
         };
         foreach (var line in chosen.Lines)
         {
@@ -670,6 +700,63 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         }
 
         return ApiResponse<MyobPayslipDetailDto>.OK(detail);
+    }
+
+    public async Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    {
+        var outcome = await ResolveSlipAsync(request, cancellationToken);
+        if (outcome.Slip is null)
+        {
+            return ApiResponse<MyobPayslipHoursDto>.Error(outcome.Message ?? "找不到这张工资单", outcome.ErrorCode);
+        }
+
+        var (_, _, chosen, _, placed) = outcome.Slip;
+        var dto = new MyobPayslipHoursDto
+        {
+            PeriodStart = FormatDate(chosen.PeriodStart),
+            PeriodEnd = FormatDate(chosen.PeriodEnd),
+        };
+
+        // 没绑定我方员工、没有分店、或工资单没有周期：没有可算的考勤工时，返回空列表（不是错误）。
+        if (placed.Link is null || placed.Placement.StoreCodes.Count == 0 || chosen.PeriodStart is not { } start)
+        {
+            return ApiResponse<MyobPayslipHoursDto>.OK(dto);
+        }
+
+        var end = (chosen.PeriodEnd ?? start).Date;
+        var weeks = Math.Max(1, (int)Math.Ceiling(((end - start.Date).TotalDays + 1) / 7d));
+        var labels = await LoadStoreLabelsAsync();
+        foreach (var storeCode in placed.Placement.StoreCodes)
+        {
+            var row = new MyobPayslipStoreHoursDto
+            {
+                StoreCode = storeCode,
+                StoreLabel = labels.GetValueOrDefault(storeCode) ?? storeCode,
+            };
+            try
+            {
+                // 与工资表 / Timesheet 推送同一个快照构建器，口径一致；只取这一名员工。
+                var data = await _source.GetStoreDataAsync(storeCode, start.Date, weeks, [placed.Link.UserGuid]);
+                var employee = data.Employees.FirstOrDefault(item => item.UserGuid.Equals(placed.Link.UserGuid, StringComparison.OrdinalIgnoreCase));
+                if (employee is not null)
+                {
+                    row.WorkHours = Math.Round(employee.WorkItems.Sum(item => item.Minutes) / 60m, 2);
+                    row.LeaveHours = Math.Round(
+                        employee.Sick.Sum(item => item.Hours) + employee.Annual.Sum(item => item.Hours) + employee.PublicHolidayPay.Sum(item => item.Hours), 2);
+                }
+            }
+            catch (Exception)
+            {
+                // 单个分店读取失败只标这一行，不拖垮其它分店；不回显异常内容。
+                row.Failed = true;
+            }
+
+            dto.Stores.Add(row);
+        }
+
+        dto.TotalWorkHours = dto.Stores.Sum(item => item.WorkHours);
+        dto.TotalLeaveHours = dto.Stores.Sum(item => item.LeaveHours);
+        return ApiResponse<MyobPayslipHoursDto>.OK(dto);
     }
 
     private static List<MyobPayslipLineDto> LinesFor(MyobPayslipDetailDto detail, string? type) =>

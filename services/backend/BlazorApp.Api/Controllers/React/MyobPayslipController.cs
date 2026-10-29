@@ -49,6 +49,14 @@ namespace BlazorApp.Api.Controllers.React
             return ToResult(await _service.GetDetailAsync(request ?? new MyobPayslipDetailRequest(), cancellationToken));
         }
 
+        /// <summary>这张工资单对应周期里「我方考勤」按分店的计薪工时（仅供参考，抽屉里点击后才请求；不写查看记录）。</summary>
+        [HttpGet("hours")]
+        public async Task<IActionResult> GetHours([FromQuery] MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+        {
+            NoStore();
+            return ToResult(await _service.GetHoursAsync(request ?? new MyobPayslipDetailRequest(), cancellationToken));
+        }
+
         private void NoStore() => Response.Headers.CacheControl = "no-store";
 
         // 无权限 403；找不到 404（越权与不存在不区分）；其余业务失败 400。

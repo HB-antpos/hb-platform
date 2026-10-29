@@ -1,7 +1,7 @@
 # MYOB 历史工资单查看（Web「工资单」页签）· 方案
 
 > 状态：**方案已确认（2026-10-29）**。第 10 节问题 1 选 A（先上探针）；其余按第 10 节推荐项执行：新增两个权限码；店长看整张工资单；历史默认 3 个月、最长 24 个月；不做导出；留查看记录；未绑定 / 无法确定分店仅财务可见；抽屉显示我方考勤工时（仅参考）；页签叫「工资单」放第五位。
-> 进度：第一批（#1067）已于 2026-10-29 部署主 API，并在 Investment、Australian 两个公司文件上跑过探针（结果见第 1.3 节）。第二批（后端）已写完：翻页改为窗口 + `$skip`、匹配规则、列表 / 明细接口、两个权限码、查看记录表、移除探针；Web 页签（第 8 节第 4 步）与「抽屉里显示我方考勤工时」尚未做。
+> 进度：第一批（#1067）已于 2026-10-29 部署主 API，并在 Investment、Australian 两个公司文件上跑过探针（结果见第 1.3 节）。第二批（后端）已写完：翻页改为窗口 + `$skip`、匹配规则、列表 / 明细接口、两个权限码、查看记录表、移除探针；第三批（Web + 我方考勤工时接口）已写完：「工时与工资」页面里新增「工资单」页签（与「工时与工资」「MYOB 对接」并列）、明细抽屉、未归属视图、各种状态，以及点击后才加载的 `GET payslips/hours`；**迁移 20261029.003 与第二、三批都还没部署**。
 > 范围：只读。读 MYOB 里已发薪的工资单，按我方分店过滤后在 Web 展示；不写 MYOB。
 > 与总方案关系：落实 `2026-10-27-myob-payroll-integration.md` 第 9 / 10 节里「拉取并展示工资单」的 Web 部分；本方案**不含**员工本人在手机端看自己的工资单、不含对账、不含余额。
 
@@ -192,8 +192,11 @@
 
 ### 6.1 入口
 
-- `/pos-admin/myob` 新增第五个页签「**工资单**」（key `payslips`），排在「推送与对账」后；`getVisibleMyobTabs` 里按新权限码显示。理由：与员工绑定、发薪公司同一页面，「未绑定」行可直接跳到「员工绑定」；比新开独立页面少一个菜单入口。
-- 新文件：`PayslipsTab.tsx`（列表 + 筛选）、`PayslipDrawer.tsx`（明细）、`myobPayslipLogic.ts`（区间预设、财年、过滤、分组纯函数，配 `.test.ts`）、`myobService.ts` 加 `normalizeMyobPayslip*` 与请求函数、`myobMessages.zh/en.json` 加 `payslips` 节、`myob.css` 加 `myob-payslip-*`。
+- **位置（2026-10-29 按用户要求调整）**：放在「工时与工资」页面里，作为页面组顶部页签 `工时与工资 | 工资单 | MYOB 对接` 的第二个，路由 `/pos-admin/payslips`、访问键 `canViewMyobPayslips`（`Myob.Payslip.ViewManagedStore` / `ViewAllStores` 任一）。不再是 MYOB 对接页的第五个页签，所以 MYOB 页的页签逻辑不用改；工资单权限不连带 MYOB 对接页，MYOB 权限也不连带工资单。
+- 只有工资单权限的账号登录后落到工资单页；同时有 MYOB 权限的沿用原落点（MYOB 页）。不保活（离开页签即丢掉内存里的工资数据）。
+- 新文件（`pages/PosAdmin/Payslips/`）：`index.tsx`（列表 + 筛选 + 状态）、`PayslipDrawer.tsx`（明细 + 我方工时按需加载）、`payslipLogic.ts`（日期预设 / 澳洲财年、金额与周期格式化、错误归类、分店下拉；配 `.test.ts`）、`payslipMessages.zh/en.json`、`payslips.css`；`services/myobPayslipService.ts`、`types/myobPayslip.ts`；全局语言包只加菜单标题 `menu.payslips`。
+- 「最近一个周期」预设改为「最近两周」：MYOB 有周薪也有双周薪，无法统一成一个周期。
+- 「去绑定」「查看发薪公司」目前只跳到 `/pos-admin/myob`（落到该账号第一个可见页签），不带预选公司。
 - 手机端：本期不做。
 
 ### 6.2 列表页
@@ -233,7 +236,7 @@
 | 1 | `GetPayrollAdvicesAsync` + 探针接口（#1067） | **已完成并部署主 API（2026-10-29，无迁移）** |
 | 2 | 跑探针，核对第 1.3 节；修订本方案第 1、3 节 | **已完成（Investment、Australian）** |
 | 3 | 第二批（后端）：`GetPayrollAdvicesAsync` 改窗口 + `$skip` + 5xx 重试 + 去重；匹配规则；列表 / 明细接口；迁移 `20261029.003-myob-payslip`（两个权限码入库、`MyobPayslipViewLog` 表）；去掉探针 + 测试 | **已写完，待部署**：迁移 → 主 API |
-| 4 | Web 页签 + 抽屉 + 状态 | Web |
+| 4 | Web 页签 + 抽屉 + 状态 + 我方考勤工时接口（第三批） | **已写完，待部署**：迁移 → 主 API → Web |
 | 5 | 管理员授权角色；上线前对其余 4 个公司文件各跑一次结构核对；抽查核对 | — |
 
 ## 9. 范围外

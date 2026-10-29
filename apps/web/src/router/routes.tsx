@@ -82,6 +82,7 @@ const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions')
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
 const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
 const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
+const PosAdminPayslipsPage = lazy(() => import('../pages/PosAdmin/Payslips'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
 const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/SupplierManagement'))
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
@@ -309,6 +310,8 @@ const ATTENDANCE_PAYROLL_NAV_GROUP: NavGroupDefinition = {
   tabs: [
     // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
     { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours', keepAlive: true, element: <PosAdminAttendancePayrollPage /> },
+    // 工资单（MYOB 历史工资单，只读）：Myob.Payslip.ViewManagedStore / ViewAllStores 任一；含薪资等敏感信息，不保活（离开页签即丢掉内存里的工资数据）。
+    { path: '/pos-admin/payslips', title: 'menu.payslips', accessKey: 'canViewMyobPayslips', keepAlive: false, element: <PosAdminPayslipsPage /> },
     // MYOB 对接：连接与映射（Myob.Connection.Manage）/ 员工绑定（Myob.Employee.Bind）/ 发薪公司（Attendance.Payroll.Edit），三者任一可进入，页内按各自权限显示页签。
     // 不保活：授权完成后后端重定向回 /pos-admin/myob?myob=connected|error，页面必须按新进入重新加载并读取参数。
     { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob', keepAlive: false, element: <PosAdminMyobPage /> },
