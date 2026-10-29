@@ -230,6 +230,36 @@ namespace BlazorApp.Api.Tests
             ));
         }
 
+        [Theory]
+        // 店长(70)：只见更低的 HrOps(50) / Clerk(40) / StoreStaff(30)；同级 StoreManager、更高的 Auditor(90) / 仓库经理 / 管理员、停用的 OldBoss 都不可见
+        [InlineData("sm-1", new[] { "Clerk", "HrOps", "StoreStaff" })]
+        // 仓库经理(80)：多看到店长(70)；同级仓库经理与 Auditor(90) 不可见
+        [InlineData("whm-1", new[] { "Clerk", "HrOps", "StoreManager", "StoreStaff" })]
+        // 员工(30)、无任何有效角色（等级 0）、只有停用角色的账号：没有更低的角色可选
+        [InlineData("staff-1", new string[0])]
+        [InlineData("norole-1", new string[0])]
+        [InlineData("ghost-1", new string[0])]
+        public async Task GetActiveRolesBelowUserLevelAsync_ListsOnlyActiveRolesStrictlyBelowActor(
+            string actorGuid,
+            string[] expectedRoleNames
+        )
+        {
+            await SeedAsync();
+            var service = new RoleService(
+                CreateSqlSugarContext(_db),
+                NullLogger<RoleService>.Instance,
+                new Microsoft.AspNetCore.Http.HttpContextAccessor()
+            );
+
+            var result = await service.GetActiveRolesBelowUserLevelAsync(actorGuid);
+
+            Assert.True(result.Success);
+            Assert.Equal(
+                expectedRoleNames,
+                result.Data!.Select(role => role.RoleName).OrderBy(name => name, StringComparer.Ordinal).ToArray()
+            );
+        }
+
         private Task<UserAccessMutationDecision> Validate(string actor, string target) =>
             UserAccessMutationSecurity.ValidateTargetLevelAsync(_db, actor, target);
 

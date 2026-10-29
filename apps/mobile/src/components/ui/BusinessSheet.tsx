@@ -25,6 +25,8 @@ interface BusinessSheetProps {
   children: ReactNode;
   footer?: ReactNode;
   dismissable?: boolean;
+  /** 传入后标题左侧显示返回键（弹层内的二级页用）；不传则与原来完全一致。 */
+  onBack?: () => void;
 }
 
 /** 仅由新业务界面显式使用；不改变已有公共弹窗和设置页的默认行为。 */
@@ -36,6 +38,7 @@ export function BusinessSheet({
   children,
   footer,
   dismissable = true,
+  onBack,
 }: BusinessSheetProps) {
   const { t } = useAppTranslation("common");
   const insets = useSafeAreaInsets();
@@ -77,6 +80,15 @@ export function BusinessSheet({
         >
           <View style={styles.handle} />
           <View style={styles.header}>
+            {onBack ? (
+              <IconButton
+                icon="chevron-left"
+                accessibilityLabel={t("actions.back")}
+                onPress={onBack}
+                iconColor={HB_COLORS.action}
+                style={styles.back}
+              />
+            ) : null}
             <View style={styles.heading}>
               <NativeText ref={titleRef} accessibilityRole="header" style={styles.title}>{title}</NativeText>
               {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -117,6 +129,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, lineHeight: 28, fontWeight: "700", color: HB_COLORS.textPrimary },
   subtitle: { fontSize: 12, lineHeight: 18, color: HB_COLORS.textSecondary, marginTop: 4 },
   close: { margin: 0 },
+  back: { margin: 0, marginLeft: -HB_SPACING.xs },
   scroll: { flexGrow: 0, flexShrink: 1 },
   content: { padding: HB_SPACING.md, gap: HB_SPACING.sm },
   footer: { paddingHorizontal: HB_SPACING.md, paddingTop: HB_SPACING.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted, gap: HB_SPACING.xs },

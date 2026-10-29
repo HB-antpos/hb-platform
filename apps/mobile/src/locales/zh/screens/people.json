@@ -105,7 +105,14 @@
     "all": "全部",
     "apply": "查看 {{count}} 人",
     "applyUnknown": "查看结果",
-    "optionsFailed": "筛选选项加载失败，请重试。"
+    "optionsFailed": "筛选选项加载失败，请重试。",
+    "storePageTitle": "选择分店",
+    "storeCount": "共 {{count}} 家",
+    "storeSearch": "搜索分店名称或编号",
+    "myStores": "我的主分店",
+    "storeEmpty": "没有匹配的分店",
+    "clearStore": "清除分店",
+    "roleHint": "仅显示等级低于你的角色"
   },
   "rolesList": {
     "noAccess": "当前会话无权访问角色列表",

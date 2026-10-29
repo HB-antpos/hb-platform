@@ -22,6 +22,8 @@ export interface UserAccessRole {
   roleName: string;
   description?: string;
   isActive?: boolean;
+  /** 角色等级（数值越大越高）；后端 Level 为 0 表示未单独设置。 */
+  level?: number;
 }
 
 export interface AccessPermission {

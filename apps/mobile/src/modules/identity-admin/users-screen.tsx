@@ -31,11 +31,11 @@ import {
   type AdminStatusFilter,
   type AdminUserFilters,
 } from "./admin-user-list-logic";
-import { fetchAccessRoleCatalog, fetchAccessStoreCatalog, fetchIdentityUsers } from "./api";
+import { fetchAccessStoreCatalog, fetchIdentityUsers, fetchRoleFilterCatalog } from "./api";
 import { AdminUserFilterSheet } from "./admin-user-filter-sheet";
 import { AdminEmpty, AdminError } from "./ui";
 import type { IdentityUser } from "./types";
-import { managedIdentityStores, selectableIdentityRoles } from "./user-logic";
+import { managedIdentityStores, sortRolesByLevel } from "./user-logic";
 import { useIdentitySearch, useIdentitySession } from "./user-hooks";
 
 interface AdminUserEntry {
@@ -68,7 +68,8 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
   const filters = useMemo<AdminUserFilters>(() => ({ search, ...applied }), [applied, search]);
   const scoped = access.isStoreLevelManager;
 
-  // 分店 / 角色选项：与原列表同一组接口与权限门禁（门店级管理者只能选自己管理的分店与「店员」角色）。
+  // 分店 / 角色选项：与原列表同一组权限门禁。分店：门店级管理者只能选自己管理的分店；
+  // 角色：服务端按「等级严格低于当前登录人」返回（管理员为全部），不再只剩「店员」。
   const storesQuery = useQuery({
     queryKey: ["identity-admin", actorKey, "store-options"],
     queryFn: ({ signal }) => fetchAccessStoreCatalog(actorKey, signal),
@@ -77,8 +78,8 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
   });
   const canReadRoleOptions = access.canReadRole || access.hasPermission("Users.ManageRoles");
   const rolesQuery = useQuery({
-    queryKey: ["identity-admin", actorKey, "role-options"],
-    queryFn: ({ signal }) => fetchAccessRoleCatalog(actorKey, signal),
+    queryKey: ["identity-admin", actorKey, "role-filter-options"],
+    queryFn: ({ signal }) => fetchRoleFilterCatalog(actorKey, signal),
     enabled: allowed && canReadRoleOptions,
     retry: false,
   });
@@ -91,13 +92,15 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
       })),
     [language, scoped, storesQuery.data, user]
   );
+  // 「选择分店」页顶部的「我的主分店」快捷项。
+  const myStoreGuids = useMemo(() => managedIdentityStores(user).map((store) => store.storeGUID), [user]);
   const roleOptions = useMemo(
     () =>
-      selectableIdentityRoles(rolesQuery.data ?? [], scoped).map((role) => ({
+      sortRolesByLevel(rolesQuery.data ?? []).map((role) => ({
         value: role.roleGUID,
         label: localizeAccessRoleName(role.roleName, language),
       })),
-    [language, rolesQuery.data, scoped]
+    [language, rolesQuery.data]
   );
 
   // 服务端分页：翻页参数沿用原来的 page / pageSize，下拉到底再取下一页并累加。筛选变化即换 key，从第一页重新开始。
@@ -356,6 +359,7 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
         allowed={allowed}
         storeOptions={storeOptions}
         roleOptions={roleOptions}
+        myStoreGuids={myStoreGuids}
         showStoreSection={showStoreSection}
         showRoleSection={showRoleSection}
         storesError={storesQuery.isError}
