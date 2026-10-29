@@ -57,6 +57,23 @@ public sealed record MyobWageCategoryRecord(string Uid, string Name, string? Wag
 /// <summary>某员工在某周期的 MYOB Timesheet 现状（只读判断用）。</summary>
 public sealed record MyobTimesheetStatus(bool HasEntries, bool HasProcessedEntries);
 
+/// <summary>Timesheet 里的一天：Date 保留 MYOB 返回的原文（用来核对日期格式），Hours 保留原有小数位。</summary>
+public sealed record MyobTimesheetEntryRecord(string? Date, decimal? Hours, bool Processed);
+
+/// <summary>Timesheet 的一行（一个工资类别）：只取类别 UID 与每天的工时，不取 Job / Notes。</summary>
+public sealed record MyobTimesheetLineRecord(string? CategoryUid, IReadOnlyList<MyobTimesheetEntryRecord> Entries);
+
+/// <summary>PUT Timesheet 的一天。Date 原样写进请求体，由调用方决定格式（yyyy-MM-dd 或带时间）。</summary>
+public sealed record MyobTimesheetPutEntry(string Date, decimal Hours);
+
+public sealed record MyobTimesheetPutLine(string CategoryUid, IReadOnlyList<MyobTimesheetPutEntry> Entries);
+
+/// <summary>PUT Timesheet 的结果：HTTP 状态码与 MYOB 错误类型名（只取 Errors[0].Name，不回显响应体）。非 2xx 不抛异常，由调用方判断。</summary>
+public sealed record MyobTimesheetPutResult(int StatusCode, string? ErrorName)
+{
+    public bool Success => StatusCode is >= 200 and < 300;
+}
+
 /// <summary>
 /// 调用 MYOB 失败。Code 取自 <see cref="MyobErrorCodes"/>；IsAuthorizationRevoked＝refresh token 已失效（invalid_grant），
 /// 需要公司文件 Administrator 重新授权，调用方据此把连接标成 NeedsReauth。
@@ -110,6 +127,29 @@ public interface IMyobApiClient
     /// </summary>
     Task<IReadOnlyList<MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
         string businessId, string accessToken, MyobPayrollAdviceQuery query, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    /// <summary>
+    /// GET /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：返回每行的类别 UID 与每天的工时 / Processed。
+    /// 404 或空体 = 没有记录（空列表）；其他非 2xx 抛 <see cref="MyobApiException"/>（只含状态码）。默认实现抛 NotSupportedException。
+    /// </summary>
+    Task<IReadOnlyList<MyobTimesheetLineRecord>> GetTimesheetLinesAsync(
+        string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    /// <summary>
+    /// PUT /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：**写 MYOB**。
+    /// 目前只有临时的写入探针（Myob__WriteProbe*，只对一个连接、一张测试员工卡）调用；正式推送在探针实测、方案定稿之后另批实现。
+    /// 默认实现抛 NotSupportedException。
+    /// </summary>
+    Task<MyobTimesheetPutResult> PutTimesheetAsync(
+        string businessId,
+        string accessToken,
+        string employeeUid,
+        DateTime startDate,
+        DateTime endDate,
+        IReadOnlyList<MyobTimesheetPutLine> lines,
+        CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 }
 
@@ -550,6 +590,154 @@ public sealed class MyobApiClient : IMyobApiClient
         {
             throw new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB Timesheet 接口返回了无法解析的内容", response.StatusCode);
         }
+    }
+
+    public async Task<IReadOnlyList<MyobTimesheetLineRecord>> GetTimesheetLinesAsync(
+        string businessId,
+        string accessToken,
+        string employeeUid,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateTimesheetRequest(HttpMethod.Get, businessId, accessToken, employeeUid, startDate, endDate);
+        using var response = await SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return [];
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new MyobApiException(
+                MyobErrorCodes.ApiCallFailed,
+                $"MYOB Timesheet 接口返回 {(int)response.StatusCode}",
+                response.StatusCode);
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var result = new List<MyobTimesheetLineRecord>();
+            foreach (var timesheet in EnumerateTimesheets(document.RootElement))
+            {
+                if (!timesheet.TryGetProperty("Lines", out var lines) || lines.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var line in lines.EnumerateArray())
+                {
+                    string? categoryUid = null;
+                    if (line.TryGetProperty("PayrollCategory", out var category)
+                        && category.ValueKind == JsonValueKind.Object
+                        && category.TryGetProperty("UID", out var uid)
+                        && uid.ValueKind == JsonValueKind.String)
+                    {
+                        categoryUid = uid.GetString();
+                    }
+
+                    var entries = new List<MyobTimesheetEntryRecord>();
+                    if (line.TryGetProperty("Entries", out var rawEntries) && rawEntries.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var entry in rawEntries.EnumerateArray())
+                        {
+                            string? date = entry.TryGetProperty("Date", out var dateElement) && dateElement.ValueKind == JsonValueKind.String
+                                ? dateElement.GetString()
+                                : null;
+                            decimal? hours = entry.TryGetProperty("Hours", out var hoursElement)
+                                && hoursElement.ValueKind == JsonValueKind.Number
+                                && hoursElement.TryGetDecimal(out var value)
+                                    ? value
+                                    : null;
+                            var processed = entry.TryGetProperty("Processed", out var flag) && flag.ValueKind == JsonValueKind.True;
+                            entries.Add(new MyobTimesheetEntryRecord(date, hours, processed));
+                        }
+                    }
+
+                    result.Add(new MyobTimesheetLineRecord(categoryUid, entries));
+                }
+            }
+
+            return result;
+        }
+        catch (JsonException)
+        {
+            throw new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB Timesheet 接口返回了无法解析的内容", response.StatusCode);
+        }
+    }
+
+    public async Task<MyobTimesheetPutResult> PutTimesheetAsync(
+        string businessId,
+        string accessToken,
+        string employeeUid,
+        DateTime startDate,
+        DateTime endDate,
+        IReadOnlyList<MyobTimesheetPutLine> lines,
+        CancellationToken cancellationToken)
+    {
+        // 属性名按 MYOB 的 PascalCase 原样写（不套 Web 默认的 camelCase）。
+        var payload = new
+        {
+            Employee = new { UID = employeeUid },
+            StartDate = startDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            EndDate = endDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            Lines = lines.Select(line => new
+            {
+                PayrollCategory = new { UID = line.CategoryUid },
+                Entries = line.Entries.Select(entry => new { entry.Date, entry.Hours }).ToList(),
+            }).ToList(),
+        };
+        using var request = CreateTimesheetRequest(HttpMethod.Put, businessId, accessToken, employeeUid, startDate, endDate);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await SendAsync(request, cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return new MyobTimesheetPutResult((int)response.StatusCode, null);
+        }
+
+        // 只取错误类型名（Errors[0].Name），不回显响应体；解析失败就只给状态码。
+        string? errorName = null;
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("Errors", out var errors)
+                && errors.ValueKind == JsonValueKind.Array
+                && errors.GetArrayLength() > 0
+                && errors[0].ValueKind == JsonValueKind.Object
+                && errors[0].TryGetProperty("Name", out var name)
+                && name.ValueKind == JsonValueKind.String)
+            {
+                errorName = Truncate(name.GetString() ?? string.Empty);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return new MyobTimesheetPutResult((int)response.StatusCode, errorName);
+    }
+
+    private HttpRequestMessage CreateTimesheetRequest(
+        HttpMethod method, string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate)
+    {
+        var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/{Uri.EscapeDataString(businessId)}/Payroll/Timesheet/{Uri.EscapeDataString(employeeUid)}"
+            + $"?StartDate={startDate:yyyy-MM-dd}&EndDate={endDate:yyyy-MM-dd}";
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation("x-myobapi-key", _options.ClientId);
+        request.Headers.TryAddWithoutValidation("x-myobapi-version", "v2");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return request;
     }
 
     private static IEnumerable<JsonElement> EnumerateTimesheets(JsonElement root)
