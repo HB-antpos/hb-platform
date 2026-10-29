@@ -168,7 +168,7 @@ public interface IMyobApiClient
 /// MYOB Business API v2 的最小客户端（阶段 0 只需 OAuth 与 Company）。
 /// 所有请求经同一个最小间隔限流（MYOB 每个 API Key 每秒 8 次）。
 /// </summary>
-public sealed class MyobApiClient : IMyobApiClient
+public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
 {
     private const int MaxErrorTextLength = 200;
 
@@ -295,6 +295,13 @@ public sealed class MyobApiClient : IMyobApiClient
                     .ToList()))
             .ToList();
     }
+
+    // 临时探针专用：原样返回 EmployeePayrollDetails 的 JSON，供核对 Wage 节真实字段名（见 MyobWageProbeService）。
+    public async Task<IReadOnlyList<JsonElement>> GetEmployeePayrollDetailsRawAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        await GetAllPagesAsync<JsonElement>(businessId, accessToken, "Contact/EmployeePayrollDetails", cancellationToken);
 
     public async Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(
         string businessId,
