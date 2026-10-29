@@ -57,6 +57,12 @@ namespace BlazorApp.Shared.Constants
             public const string EditPositionType = "EmployeeProfiles.EditPositionType";
             public const string ReviewSensitiveManagedStore =
                 "EmployeeProfiles.ReviewSensitiveManagedStore";
+
+            // 员工个人信息维护（Web 页面、用户管理抽屉「个人信息」页签、移动端「人员管理 > 资料」与人员详情共用）。
+            // 与上面 View / Edit 独立：View / Edit 只保留给员工本人资料与 Web 管理员改敏感资料。
+            // 数据范围随身份走：管理员全部分店，店长只限自己管理的分店；不含本人，不含管理员 / 店长 / 仓库经理。
+            public const string ViewManagedStore = "EmployeeProfiles.ViewManagedStore";
+            public const string EditManagedStore = "EmployeeProfiles.EditManagedStore";
         }
 
         public static class Roles

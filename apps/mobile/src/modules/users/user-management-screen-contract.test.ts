@@ -148,7 +148,11 @@ assert.match(
   "员工列表可见性必须是 ViewStoreStaff 或 View"
 );
 const roleMenuCatalogSource = readFileSync(resolve(currentDirectory, "../identity-admin/role-menu-catalog.ts"), "utf8");
-assert.match(roleMenuCatalogSource, /\["users", "Staff management", "人员管理", \["Users\.ViewStoreStaff"\]\]/, "users 路由（人员管理）必须认 Users.ViewStoreStaff");
+assert.match(
+  roleMenuCatalogSource,
+  /\["users", "Staff management", "人员管理", \["Users\.ViewStoreStaff", "EmployeeProfiles\.ViewManagedStore"\]\]/,
+  "users 路由（人员管理）认 Users.ViewStoreStaff 或 EmployeeProfiles.ViewManagedStore（与后端 FullAppMenu 的 AnyPermissions 一致）",
+);
 assert.match(roleMenuCatalogSource, /\["user-admin", "User management", "用户管理", \["Users\.View"\]\]/, "user-admin 仍然是 Users.View");
 const iosReviewMenuSource = readFileSync(resolve(currentDirectory, "../ios-review/menu.ts"), "utf8");
 assert.match(iosReviewMenuSource, /routeName: "users"[^}]*permission: "Users\.ViewStoreStaff"/, "审核模式菜单的 users 必须同步新权限码");
@@ -179,6 +183,9 @@ assert.match(hubSource, /useIdentitySession\("Users\.View"\)/, "管理员版人�
 assert.match(hubSource, /canViewRolesAndPermissions: rolesGate\.allowed/, "只有通过门禁的账号才显示角色 / 权限页签");
 assert.match(hubSource, /router\.setParams\(\{ tab: next \}\)/, "页签状态必须写进 URL，详情页返回时保持页签");
 assert.match(hubSource, /normalizeHubTab\(tab, tabs\)/, "非法或无权限的 tab 必须回落");
+assert.match(hubSource, /useIdentitySession\(PERMISSIONS\.EmployeeProfiles\.ViewManagedStore\)/, "「资料」页签必须使用 ViewManagedStore + account 会话门禁");
+assert.match(hubSource, /canViewProfiles: profilesGate\.allowed/, "只有通过门禁的账号才显示「资料」页签");
+assert.match(hubSource, /renders\("profiles"\)[\s\S]{0,200}<ManagedProfileList/, "「资料」面板只在页签可见且访问过时才挂载");
 assert.match(hubSource, /access\.hasPermission\(PERMISSIONS\.Users\.ViewStoreStaff\)/, "人员页签仍认 Users.ViewStoreStaff（与 Users.View 并列，不收敛成单个码）");
 assert.match(hubSource, /listMode === "admin" \?[\s\S]{0,120}<AdminUserList[\s\S]{0,120}<StoreStaffList/, "管理员走全局用户列表，其余走本店店员列表");
 assert.match(hubSource, /renders\("roles"\)[\s\S]{0,200}<RolesList[\s\S]{0,200}renders\("permissions"\)[\s\S]{0,200}<PermissionsList/, "角色 / 权限面板只在页签可见且访问过时才挂载（审核模式不会挂载，也就不发管理员请求）");

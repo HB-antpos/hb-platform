@@ -219,8 +219,8 @@ const ACCOUNTS_NAV_GROUP: NavGroupDefinition = {
   title: 'menu.groupAccounts',
   icon: 'TeamOutlined',
   tabs: [
-    { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
     { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole', keepAlive: true, element: <SystemUsersPage /> },
+    { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
     { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole', keepAlive: true, element: <SystemRolesPage /> },
     { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole', keepAlive: true, element: <SystemPermissionsPage /> },
   ],

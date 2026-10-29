@@ -14,10 +14,22 @@ namespace BlazorApp.Shared.DTOs
         public string? EmployeeType { get; set; }
 
         public bool? HasProfile { get; set; }
+
+        /// <summary>按分店过滤（仅 /managed 列表使用；超出调用者管理范围时返回空页）。</summary>
+        public string? StoreGuid { get; set; }
+
+        /// <summary>按角色过滤（仅 /managed 列表使用）。</summary>
+        public string? RoleGuid { get; set; }
     }
 
     public class EmployeeProfileListItemDto
     {
+        /// <summary>所属分店名称（仅 /managed 列表填充；非管理员只含其管理范围内的分店）。</summary>
+        public List<string> StoreNames { get; set; } = new();
+
+        /// <summary>角色名称（仅 /managed 列表填充）。</summary>
+        public List<string> RoleNames { get; set; } = new();
+
         public int? EmployeeInfoId { get; set; }
         public string UserGUID { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;

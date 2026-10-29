@@ -229,6 +229,14 @@
       "name": "Review sensitive employee changes",
       "description": "In the app, review sensitive profile changes submitted by staff at the stores you manage."
     },
+    "EmployeeProfiles.ViewManagedStore": {
+      "name": "View staff profiles (managed stores)",
+      "description": "View profile details for staff in your scope on the web profile maintenance page and under Staff > Profiles in the app. Bank, super and ID numbers are masked. Admins see all stores; store managers see the stores they manage."
+    },
+    "EmployeeProfiles.EditManagedStore": {
+      "name": "Edit staff profiles (managed stores)",
+      "description": "Edit phone, gender and address for staff in your scope on the web and in the app. Changing employment type also needs Edit employment type. Bank, super, ID and birthday changes still go through staff submission and review."
+    },
     "EmployeeProfiles.View": {
       "name": "View employee profiles",
       "description": "View the employee profile list and details on the web admin and in the app."

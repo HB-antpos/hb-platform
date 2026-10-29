@@ -142,6 +142,9 @@ export const P = {
     View: 'EmployeeProfiles.View',
     Edit: 'EmployeeProfiles.Edit',
     EditPositionType: 'EmployeeProfiles.EditPositionType',
+    // 员工个人信息维护（Web 页面 / 用户管理「个人信息」页签 / 移动端共用）：管理员全部分店，店长限管理分店。
+    ViewManagedStore: 'EmployeeProfiles.ViewManagedStore',
+    EditManagedStore: 'EmployeeProfiles.EditManagedStore',
   },
   StoreProducts: {
     View: 'StoreProducts.View',

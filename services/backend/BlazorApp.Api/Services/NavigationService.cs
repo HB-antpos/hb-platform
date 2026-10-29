@@ -80,7 +80,7 @@ namespace BlazorApp.Api.Services
                     // 设备与远程：设备管理 / 紧急登录密钥 / RustDesk 远程维护。
                     new() { Path = "/system/devices", TitleKey = "menu.groupDevicesRemote", Icon = "BuildOutlined", AnyPermissions = new List<string> { Permissions.DeviceRegistration.View, Permissions.System.ManageSettings } },
                     // 账号与权限：员工个人信息 / 用户 / 角色 / 权限。Web 用户管理只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
-                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.View, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
+                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.ViewManagedStore, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
                     // 系统监控：中心日志 / 性能质量基线 / 定时统计任务。
                     new() { Path = "/system/monitoring", TitleKey = "menu.groupMonitoring", Icon = "FileTextOutlined", AnyPermissions = new List<string> { Permissions.System.ViewLogs, Permissions.System.ViewPerformanceBaseline, Permissions.System.ManageScheduledTasks } },
                     // 支付与发票：支付终端配置 / 发票邮箱配置。
@@ -428,7 +428,12 @@ namespace BlazorApp.Api.Services
                 TitleKey = "tabs.users",
                 Icon = "account-group-outline",
                 // 「员工管理」只认 ViewStoreStaff（Users.View 通过别名满足）；「用户管理」user-admin 仍用 Users.View。
-                Permission = Permissions.Users.ViewStoreStaff,
+                // 「人员管理」合并入口新增「资料」页签（员工个人信息维护），只持有 EmployeeProfiles.ViewManagedStore 的账号也要能进入。
+                AnyPermissions = new[]
+                {
+                    Permissions.Users.ViewStoreStaff,
+                    Permissions.EmployeeProfiles.ViewManagedStore,
+                },
                 Order = 57,
             },
             new()

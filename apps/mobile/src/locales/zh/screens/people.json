@@ -3,6 +3,7 @@
     "title": "人员管理",
     "tabs": {
       "people": "人员",
+      "profiles": "资料",
       "roles": "角色",
       "permissions": "权限"
     },

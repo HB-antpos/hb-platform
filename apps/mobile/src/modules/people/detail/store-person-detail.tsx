@@ -50,6 +50,7 @@ import { DetailAppBar, DetailStateScreen, detailStyles } from "./detail-ui";
 import { MoreActionsSheet, type MoreRowModel } from "./more-actions-sheet";
 import { ConfirmDialog } from "./people-sheet";
 import { PersonHeader } from "./person-header";
+import { ManagedProfileEntry } from "../profiles/managed-profile-entry";
 import { buildPrefillTitle, personFromStoreProfile, type DetailRouteParams } from "./person-view";
 import { ScheduleRecordsView } from "./schedule-records-view";
 import {
@@ -602,6 +603,9 @@ export function StorePersonDetail({
           />
         ) : null}
       </InfoCard>
+
+      {/* 个人信息（员工个人信息维护）入口：四个条件由 resolveDetailPermissions 统一判断，不满足整行隐藏。 */}
+      {permissions.canOpenProfile ? <ManagedProfileEntry userGuid={userGuid} /> : null}
 
       {scheduleEntries.length ? (
         <>

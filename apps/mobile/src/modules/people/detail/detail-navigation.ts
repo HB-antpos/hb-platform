@@ -43,6 +43,11 @@ export function buildEditRoute(target: DetailRouteTarget): RoutePush {
   };
 }
 
+/** 个人信息（员工个人信息维护）：只需 userGuid，数据由页面自己按 userGuid 从 /employee-profiles/managed 拉取，服务端再次强制范围。 */
+export function buildProfileRoute(target: Pick<DetailRouteTarget, "userGuid">): RoutePush {
+  return { pathname: "/users/[userGuid]/profile", params: { userGuid: target.userGuid } };
+}
+
 export function buildAccessRoute(target: DetailRouteTarget, options: { section?: AccessSection; copy?: boolean } = {}): RoutePush {
   return {
     pathname: "/users/[userGuid]/access",

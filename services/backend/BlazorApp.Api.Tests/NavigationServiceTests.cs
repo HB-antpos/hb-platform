@@ -924,11 +924,11 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildMenu_ShowsEmployeeProfilesWithEmployeeProfileViewPermission()
+    public void BuildMenu_ShowsEmployeeProfilesWithEmployeeProfileViewManagedStorePermission()
     {
         var user = CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
-            new Claim("permission", Permissions.EmployeeProfiles.View)
+            new Claim("permission", Permissions.EmployeeProfiles.ViewManagedStore)
         );
 
         var menu = _service.BuildMenu(user);
@@ -939,7 +939,8 @@ public class NavigationServiceTests
             systemMenu.Children!,
             item =>
                 item.Path == "/system/accounts"
-                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
+                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.ViewManagedStore)
+                && !item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
         );
     }
 
@@ -1698,6 +1699,17 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅有ViewManagedStore时可进入人员管理资料页签_不显示用户管理()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.EmployeeProfiles.ViewManagedStore));
+
+        var menu = _service.BuildAppMenu(user);
+
+        Assert.Contains(menu, item => item.RouteName == "users");
+        Assert.DoesNotContain(menu, item => item.RouteName == "user-admin");
+    }
+
+    [Fact]
     public void BuildAppMenu_持有UsersView时经别名同时显示员工管理与用户管理()
     {
         var user = CreateUser(new Claim("permission", Permissions.Users.View));
@@ -1706,7 +1718,9 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.RouteName == "users");
         Assert.Contains(menu, item => item.RouteName == "user-admin");
-        Assert.Equal(Permissions.Users.ViewStoreStaff, Assert.Single(menu, item => item.RouteName == "users").Permission);
+        // 「人员管理」合并入口改为多权限任一可见（ViewStoreStaff 或「资料」页签的 ViewManagedStore）；
+        // 移动端菜单 DTO 只带单个 Permission，多权限入口由服务端过滤后下发，Permission 为空。
+        Assert.Null(Assert.Single(menu, item => item.RouteName == "users").Permission);
         Assert.Equal(Permissions.Users.View, Assert.Single(menu, item => item.RouteName == "user-admin").Permission);
     }
 

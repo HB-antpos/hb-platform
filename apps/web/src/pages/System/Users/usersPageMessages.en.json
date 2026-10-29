@@ -44,6 +44,7 @@
         "generic": "Could not change sign-in access. Please try again later."
       },
       "tabProfile": "Profile",
+      "tabEmployeeProfile": "Personal details",
       "tabAssignments": "Roles & stores",
       "lastLogin": "Last sign-in",
       "createdAt": "Created",

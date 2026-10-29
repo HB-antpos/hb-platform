@@ -229,6 +229,14 @@
       "name": "审核管理分店员工敏感资料",
       "description": "移动端员工敏感资料审核 - 审核管理分店内普通员工提交的敏感资料变更"
     },
+    "EmployeeProfiles.ViewManagedStore": {
+      "name": "查看员工个人信息（管理分店）",
+      "description": "Web「员工个人信息维护」页面与用户管理「个人信息」页签、移动端「人员管理 > 资料」与人员详情 - 查看管理范围内员工的个人信息（银行 / 公积金 / 证件号脱敏）；管理员全部分店，店长限管理分店"
+    },
+    "EmployeeProfiles.EditManagedStore": {
+      "name": "维护员工个人信息（管理分店）",
+      "description": "Web 与移动端 - 修改管理范围内员工的手机、性别、地址等非敏感资料（改职位类型另需修改职位类型权限；银行 / 公积金 / 证件 / 生日仍走员工提交审核）"
+    },
     "EmployeeProfiles.View": {
       "name": "查看员工个人信息",
       "description": "Web 页面 /system/employee-profiles 与移动端「员工资料」- 查看员工个人信息列表与详情"

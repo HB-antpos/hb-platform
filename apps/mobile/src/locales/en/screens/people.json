@@ -3,6 +3,7 @@
     "title": "Staff management",
     "tabs": {
       "people": "Staff",
+      "profiles": "Profiles",
       "roles": "Roles",
       "permissions": "Permissions"
     },

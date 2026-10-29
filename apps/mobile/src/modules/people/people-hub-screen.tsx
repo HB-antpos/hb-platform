@@ -1,8 +1,10 @@
 // 「人员管理」Hub（路由 /users）：原「员工管理」（店长）与「用户管理 / 角色管理 / 权限管理」（管理员）合并成一个入口。
-// 页签 = 人员 | 角色 | 权限；页签状态由 URL 参数 ?tab= 驱动，从详情页返回时仍停在原页签。
+// 页签 = 人员 | 资料 | 角色 | 权限；页签状态由 URL 参数 ?tab= 驱动，从详情页返回时仍停在原页签。
 //
 // 谁能看到什么：
 // - 「人员」页签：管理员（全局用户查看 + account 会话）看全局用户列表（AdminUserList），其余人看本店店员列表（StoreStaffList）；
+// - 「资料」页签（员工个人信息维护）：持有 EmployeeProfiles.ViewManagedStore 且满足 account 会话 / 非设备 / 非 iOS 审核才显示；
+//   只持有该权限、没有任何 Users.* 的账号也能进入 Hub，此时只有「资料」页签（不画页签条）；
 // - 「角色」「权限」页签：只有满足原 roles / permissions 入口门禁（identity-admin-access 的 Roles.View 判断：
 //   account 会话、非设备模式、非 iOS 审核、持有 Roles.View）才显示；其余人只有人员列表，不画页签条。
 //   iOS 审核模式下这两个页签不存在，也不会挂载任何管理员列表，因此不会发出管理员接口请求。
@@ -17,6 +19,7 @@ import { PermissionsList } from "@/modules/identity-admin/permissions-screen";
 import { RolesList } from "@/modules/identity-admin/roles-screen";
 import { useIdentitySession } from "@/modules/identity-admin/user-hooks";
 import { StoreStaffList } from "@/modules/users/store-staff-list";
+import { ManagedProfileList } from "./profiles/managed-profile-list";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
@@ -43,6 +46,8 @@ function PeopleHubContent() {
   // 两个入口门禁：Users.View（管理员版人员列表）与 Roles.View（角色 / 权限页签），都要求 account 会话、非设备、非审核。
   const usersGate = useIdentitySession("Users.View");
   const rolesGate = useIdentitySession("Roles.View");
+  // 「资料」页签门禁：与角色 / 权限页签一样要求 account 会话、非设备、非审核，再加 ViewManagedStore。
+  const profilesGate = useIdentitySession(PERMISSIONS.EmployeeProfiles.ViewManagedStore);
   const { tab } = useLocalSearchParams<{ tab?: string | string[] }>();
 
   // 员工管理入口认 Users.ViewStoreStaff；Users.View（全局用户查看）持有者同样放行。
@@ -52,8 +57,8 @@ function PeopleHubContent() {
     || access.canReadUser
     || access.hasPermission(PERMISSIONS.Users.ViewStoreStaff);
   const tabs = useMemo(
-    () => resolveHubTabs({ canViewPeople, canViewRolesAndPermissions: rolesGate.allowed }),
-    [canViewPeople, rolesGate.allowed]
+    () => resolveHubTabs({ canViewPeople, canViewProfiles: profilesGate.allowed, canViewRolesAndPermissions: rolesGate.allowed }),
+    [canViewPeople, profilesGate.allowed, rolesGate.allowed]
   );
   const listMode = resolvePeopleListMode({
     identityUsersAllowed: usersGate.allowed,
@@ -114,6 +119,11 @@ function PeopleHubContent() {
           ) : (
             <StoreStaffList chrome={chrome} />
           )}
+        </View>
+      ) : null}
+      {renders("profiles") ? (
+        <View style={panelStyle("profiles")}>
+          <ManagedProfileList chrome={chrome} />
         </View>
       ) : null}
       {renders("roles") ? (
