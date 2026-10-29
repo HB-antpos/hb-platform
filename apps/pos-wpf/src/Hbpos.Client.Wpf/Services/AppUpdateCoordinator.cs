@@ -104,8 +104,11 @@ public interface IAppUpdateCoordinator
     Task<AppUpdateCoordinatorResult> CheckForUpdatesInBackgroundAsync(
         CancellationToken cancellationToken = default);
 
-    // 中文注释：夜间无人值守安装：有更新（可选或强制、是否被拒绝过都一样）就下载并直接拉起静默安装器，不弹任何提示。
+    // 中文注释：夜间无人值守安装：有更新（可选或强制、是否被拒绝过都一样）就下载并拉起安装，不弹任何提示。
+    // agentAvailable：本机注册了管理员更新代理，可免 UAC 安装；directInstallAvailable：本机直接运行静默安装器也不会弹 UAC。
     Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+        bool agentAvailable,
+        bool directInstallAvailable,
         CancellationToken cancellationToken = default);
 }
 
@@ -123,6 +126,7 @@ public sealed class AppUpdateCoordinator(
 {
     public const string UnattendedInstallerNotSilentErrorCode = "UNATTENDED_INSTALLER_NOT_SILENT";
     public const string UnattendedActiveTransactionErrorCode = "UNATTENDED_ACTIVE_TRANSACTION";
+    public const string UnattendedNoInstallPathErrorCode = "UNATTENDED_NO_INSTALL_PATH";
     private const string ActiveTransactionStatusKey = "appUpdate.install.activeTransaction";
     private const string BackgroundForcePendingStatusKey = "appUpdate.force.backgroundReady";
     private const int RequiredSafeObservations = 2;
@@ -232,8 +236,17 @@ public sealed class AppUpdateCoordinator(
     }
 
     public async Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+        bool agentAvailable,
+        bool directInstallAvailable,
         CancellationToken cancellationToken = default)
     {
+        if (!agentAvailable && !directInstallAvailable)
+        {
+            return UnattendedInstallSkipped(
+                UnattendedNoInstallPathErrorCode,
+                "Neither the update agent nor a prompt-free direct install is available.");
+        }
+
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
             return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.AlreadyRunning);
@@ -248,9 +261,11 @@ public sealed class AppUpdateCoordinator(
                 return terminalResult;
             }
 
-            if (!IsSilentInstallerArguments(update!))
+            // 中文注释：直接运行安装器时用发布合同里的参数，非静默参数会弹安装向导等人点击，POS 已退出却装不完；
+            // 走管理员更新代理时参数由代理固定为静默参数，与发布合同无关。
+            var directInstallAllowed = directInstallAvailable && IsSilentInstallerArguments(update!);
+            if (!agentAvailable && !directInstallAllowed)
             {
-                // 中文注释：非静默参数会弹安装向导等人点击，夜间拉起后 POS 已退出却装不完，宁可跳过留给白天。
                 return UnattendedInstallSkipped(
                     UnattendedInstallerNotSilentErrorCode,
                     "Installer arguments are not silent; unattended install would wait for user input.");
@@ -265,7 +280,11 @@ public sealed class AppUpdateCoordinator(
             }
 
             // 中文注释：启动器内部会再过一次安全守卫；拉起成功后退出 POS，安装包装完会以原登录用户重新启动 POS。
-            var launchResult = await installerLauncher.LaunchAsync(download.FilePath, update!, CancellationToken.None);
+            var launchResult = await installerLauncher.LaunchUnattendedAsync(
+                download.FilePath,
+                update!,
+                directInstallAllowed ? UnattendedInstallMode.AnyInstaller : UnattendedInstallMode.AgentOnly,
+                CancellationToken.None);
             if (launchResult.Success)
             {
                 return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.Installed);

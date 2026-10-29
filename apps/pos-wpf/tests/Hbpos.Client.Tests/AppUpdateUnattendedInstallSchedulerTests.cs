@@ -96,6 +96,68 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
         Assert.Equal(canElevate, reason is "administrator-token" or "administrator-elevates-without-prompt");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Elevation_probe_reports_agent_registration_separately_from_prompt_free_direct_install(bool registered)
+    {
+        var probe = new WindowsAppUpdateElevationProbe(isUpdateAgentRegistered: () => registered);
+
+        Assert.Equal(registered, probe.IsUpdateAgentRegistered());
+
+        // 中文注释：代理已注册不代表直接运行安装器不会弹 UAC；两件事分开判断，夜间才能在“只能走代理”时禁止直接运行安装器。
+        var canElevate = probe.CanElevateWithoutPrompt(out var reason);
+        Assert.NotEqual("update-agent-registered", reason);
+        Assert.Equal(canElevate, reason is "administrator-token" or "administrator-elevates-without-prompt");
+    }
+
+    [Fact]
+    public async Task Prompt_free_direct_install_and_agent_are_passed_to_the_coordinator_independently()
+    {
+        var harness = new Harness(localTime: new TimeOnly(1, 0));
+        harness.Probe.AgentRegistered = true;
+        harness.Probe.CanElevate = false;
+
+        await harness.TickAsync();
+        await harness.AdvanceAndTickAsync();
+
+        Assert.Equal((true, false), Assert.Single(harness.Coordinator.Calls));
+    }
+
+    [Fact]
+    public async Task Direct_install_without_agent_is_still_allowed_when_elevation_is_prompt_free()
+    {
+        var harness = new Harness(localTime: new TimeOnly(1, 0));
+        harness.Probe.AgentRegistered = false;
+        harness.Probe.CanElevate = true;
+
+        await harness.TickAsync();
+        await harness.AdvanceAndTickAsync();
+
+        Assert.Equal((false, true), Assert.Single(harness.Coordinator.Calls));
+    }
+
+    [Fact]
+    public async Task Skips_night_when_neither_agent_nor_prompt_free_direct_install_is_available()
+    {
+        var harness = new Harness(localTime: new TimeOnly(1, 0));
+        harness.Probe.AgentRegistered = false;
+        harness.Probe.CanElevate = false;
+
+        await harness.TickAsync();
+        await harness.AdvanceAndTickAsync();
+        await harness.AdvanceAndTickAsync();
+
+        Assert.Empty(harness.Coordinator.Calls);
+    }
+
+    [Fact]
+    public void Update_agent_registration_probe_is_false_for_the_test_host_install()
+    {
+        // 中文注释：测试进程不在已注册代理的安装目录里，探测必须安全返回 false，不抛异常。
+        Assert.False(WindowsUpdateAgentRegistration.IsRegisteredForThisInstall());
+    }
+
     [Fact]
     public async Task Installs_after_two_idle_ticks_inside_window_regardless_of_update_prompts()
     {
@@ -337,12 +399,17 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
 
         public int CallCount { get; private set; }
 
+        public List<(bool AgentAvailable, bool DirectInstallAvailable)> Calls { get; } = [];
+
         public void Enqueue(AppUpdateCoordinatorResult result) => _results.Enqueue(result);
 
         public Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+            bool agentAvailable,
+            bool directInstallAvailable,
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            Calls.Add((agentAvailable, directInstallAvailable));
             return Task.FromResult(_results.Count > 0
                 ? _results.Dequeue()
                 : AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.AlreadyRunning));
@@ -378,7 +445,11 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
     {
         public bool CanElevate { get; set; } = true;
 
+        public bool AgentRegistered { get; set; }
+
         public int CallCount { get; private set; }
+
+        public bool IsUpdateAgentRegistered() => AgentRegistered;
 
         public bool CanElevateWithoutPrompt(out string reason)
         {
