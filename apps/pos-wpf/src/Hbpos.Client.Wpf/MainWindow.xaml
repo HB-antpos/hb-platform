@@ -35,8 +35,15 @@
 
         <!-- 标题栏配色按钮：打开时不参与命中测试，再点一次即视为点击外部，由 Popup 自行关闭。 -->
         <Style x:Key="ColorThemeToggleButtonStyle" TargetType="ToggleButton">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="34" />
+            <!-- 全局隐式 TextBlock 样式把文字固定成深色正文色：当前主题名要跟随按钮前景色，彩色标题栏上才是浅色字。 -->
+            <Style.Resources>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}" />
+                </Style>
+            </Style.Resources>
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="8,0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource PosHeaderIconBrush}" />
             <Setter Property="Cursor" Value="Hand" />
@@ -47,6 +54,7 @@
                     <ControlTemplate TargetType="{x:Type ToggleButton}">
                         <Border x:Name="Root"
                                 Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
                                 CornerRadius="4"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center"
@@ -99,9 +107,15 @@
         </Style>
 
         <Style x:Key="CustomerDisplayModeIconButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="34" />
-            <Setter Property="Padding" Value="0" />
+            <!-- 同上：副屏状态文字跟随按钮前景色（随关闭 / 普通 / 全屏三态变色）。 -->
+            <Style.Resources>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}" />
+                </Style>
+            </Style.Resources>
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="8,0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource PosHeaderIconBrush}" />
@@ -115,6 +129,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
+                                Padding="{TemplateBinding Padding}"
                                 CornerRadius="4"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center"
@@ -430,8 +445,10 @@
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center" Panel.ZIndex="2">
                     <Button Command="{Binding ToggleCustomerDisplayWindowCommand}"
                             Style="{StaticResource CustomerDisplayModeIconButtonStyle}"
-                            ToolTip="{loc:Loc shell.customerDisplayWindow}">
-                        <materialDesign:PackIcon Width="17" Height="17">
+                            ToolTip="{loc:Loc shell.customerDisplayWindow}"
+                            AutomationProperties.AutomationId="CustomerDisplayToggle">
+                        <StackPanel Orientation="Horizontal">
+                        <materialDesign:PackIcon Width="17" Height="17" VerticalAlignment="Center">
                             <materialDesign:PackIcon.Style>
                                 <Style TargetType="materialDesign:PackIcon">
                                     <Setter Property="Kind" Value="MonitorOff" />
@@ -447,6 +464,13 @@
                                 </Style>
                             </materialDesign:PackIcon.Style>
                         </materialDesign:PackIcon>
+                        <TextBlock Text="{Binding CustomerDisplayStateText}"
+                                   Margin="6,0,0,0"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   AutomationProperties.AutomationId="CustomerDisplayStateText" />
+                        </StackPanel>
                     </Button>
                     <!-- 配色切换：DataContext 在 MainWindow 构造时设为 ColorThemeSwitcherViewModel。 -->
                     <Grid x:Name="ColorThemeSwitcher" Margin="2,0,0,0" VerticalAlignment="Center">
@@ -456,10 +480,19 @@
                                       ToolTip="{loc:Loc shell.colorTheme}"
                                       AutomationProperties.AutomationId="ColorThemeToggle"
                                       AutomationProperties.Name="{loc:Loc shell.colorTheme}">
-                            <materialDesign:PackIcon Kind="PaletteOutline"
-                                                     Width="18"
-                                                     Height="18"
-                                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="PaletteOutline"
+                                                         Width="18"
+                                                         Height="18"
+                                                         VerticalAlignment="Center"
+                                                         Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                                <TextBlock Text="{Binding CurrentThemeName}"
+                                           Margin="6,0,0,0"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           AutomationProperties.AutomationId="ColorThemeName" />
+                            </StackPanel>
                         </ToggleButton>
                         <Popup IsOpen="{Binding IsMenuOpen, Mode=TwoWay}"
                                PlacementTarget="{Binding ElementName=ColorThemeToggle}"
@@ -535,14 +568,6 @@
                             </Border>
                         </Popup>
                     </Grid>
-                    <Border Style="{StaticResource HeaderDividerStyle}" />
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <materialDesign:PackIcon Kind="StorefrontOutline" Width="17" Height="17" Foreground="{DynamicResource PosHeaderAccentBrush}" Margin="0,0,6,0" />
-                        <TextBlock Text="{Binding StoreInfo}"
-                                   AutomationProperties.AutomationId="CurrentStoreInfo"
-                                   Style="{StaticResource HeaderMetadataTextStyle}"
-                                   MaxWidth="132" />
-                    </StackPanel>
                     <Border Style="{StaticResource HeaderDividerStyle}" />
                     <TextBlock Text="{Binding CashierInfo}"
                                AutomationProperties.AutomationId="CurrentCashierInfo"
@@ -940,6 +965,13 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Style="{StaticResource FooterDividerStyle}" />
+                    <materialDesign:PackIcon Kind="StorefrontOutline" Width="14" Height="14" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,6,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StoreInfo}"
+                               AutomationProperties.AutomationId="CurrentStoreInfo"
+                               Style="{StaticResource FooterTextStyle}"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="220" />
                     <Border Style="{StaticResource FooterDividerStyle}" />
                     <TextBlock Text="{Binding TerminalInfo}" Style="{StaticResource FooterTextStyle}" />
                 </StackPanel>

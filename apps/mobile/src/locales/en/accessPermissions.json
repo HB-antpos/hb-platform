@@ -269,6 +269,14 @@
       "name": "Bind MYOB employees",
       "description": "Match employees with MYOB employee cards, and unlink them, on the web admin."
     },
+    "Myob.Payslip.ViewManagedStore": {
+      "name": "View payslips for managed stores",
+      "description": "View historical MYOB payslips of employees at the stores you manage on the web admin (read-only)."
+    },
+    "Myob.Payslip.ViewAllStores": {
+      "name": "View payslips for all stores",
+      "description": "View historical MYOB payslips for all stores and company files, including unmatched employees, on the web admin (read-only)."
+    },
     "OrderFront": {
       "name": "Access ordering portal",
       "description": "Open the web ordering portal and the app's order pages. Core permission for the Ordering staff role."

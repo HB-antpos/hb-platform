@@ -1,0 +1,188 @@
+{
+  "payslips": {
+    "title": "Payslips",
+    "subtitle": "View employees' historical paid payslips from MYOB (read-only)",
+    "cardTitle": "Historical payslips",
+    "cardHint": "Read live from MYOB, read-only; filtered by payment date. A payslip has no store of its own: stores are derived from employee matching, the paying company and attendance in the pay period.",
+    "fetchedAt": "MYOB data read at {{time}}",
+    "reload": "Refresh",
+    "retry": "Retry",
+    "total": "{{total}} payslips",
+    "filters": {
+      "company": "Paying company",
+      "allCompanies": "All companies",
+      "store": "Store",
+      "allStores": "All stores",
+      "dateRange": "Payment date",
+      "dateFrom": "Start date",
+      "dateTo": "End date",
+      "search": "Search employee name / MYOB ID",
+      "presetAria": "Quick payment date ranges",
+      "presets": {
+        "last2Weeks": "Last 2 weeks",
+        "last3Months": "Last 3 months",
+        "thisFinancialYear": "This financial year",
+        "lastFinancialYear": "Last financial year"
+      },
+      "rangeError": {
+        "incomplete": "Choose a complete payment date range",
+        "reversed": "The start date cannot be after the end date",
+        "tooLong": "The payment date range is limited to 24 months"
+      }
+    },
+    "view": {
+      "all": "All {{count}}",
+      "unassigned": "Unassigned {{count}}",
+      "aria": "Payslip view",
+      "back": "Back to all payslips"
+    },
+    "notice": {
+      "title": "About store filtering: ",
+      "body": "When an employee works at several stores paid by the same company there is one payslip, shown under each of those stores without splitting the amount. A dashed store tag means there was no attendance in the pay period, so the employee's current store is used."
+    },
+    "summary": {
+      "count": "Payslips",
+      "employees": "Employees",
+      "gross": "Gross total",
+      "net": "Net total",
+      "scope": "Totals cover the current filter only",
+      "unitCount": "{{count}}",
+      "unitPeople": "{{count}}"
+    },
+    "columns": {
+      "employee": "Employee",
+      "employeeMyob": "Employee (MYOB)",
+      "stores": "Stores",
+      "company": "Paying company",
+      "paymentDate": "Payment date",
+      "period": "Pay period",
+      "gross": "Gross",
+      "tax": "PAYG tax",
+      "net": "Net",
+      "reason": "Why unassigned",
+      "actions": "Actions"
+    },
+    "placement": {
+      "inferredTip": "No attendance in this pay period; the employee's current store is used",
+      "Unbound": "Not matched",
+      "Unknown": "Store unknown",
+      "UnboundHint": "This MYOB employee card is not matched to an employee here",
+      "UnknownHint": "Matched, but no attendance in the period and the current store is not paid by this company"
+    },
+    "actions": {
+      "detail": "Details",
+      "detailAria": "View the payslip details of {{name}} paid on {{date}}",
+      "goBind": "Match",
+      "goBindAria": "Match the MYOB employee card of {{name}}",
+      "goPayroll": "Paying company"
+    },
+    "unassignedBar": {
+      "message": "{{count}} more payslips cannot be assigned to a store",
+      "detail": " (the employee is not matched to a MYOB card, or has no store data in the pay period). Visible with the all-stores permission only.",
+      "link": "View unassigned payslips"
+    },
+    "unassignedPage": {
+      "title": "Historical payslips · Unassigned",
+      "hint": "These payslips cannot be assigned to a store: the employee is not matched to a MYOB card, or is matched but has no attendance in the pay period and the current store does not match. Visible with the all-stores permission only.",
+      "howToTitle": "What to do: ",
+      "howTo": "For unmatched employees, match the MYOB card on MYOB integration → Employee matching. For \"store unknown\", check the employee's store assignment, the paying company (MYOB integration → Paying company) and whether there was a roster in the period."
+    },
+    "companies": {
+      "failedTitle": "{{name}}: could not read MYOB",
+      "ok": "Read OK",
+      "failed": "Read failed",
+      "count": "{{count}}",
+      "incomplete": "The results above do not include employees paid by {{names}}; do not treat them as a complete list.",
+      "goConnect": "Re-authorise in MYOB integration",
+      "kinds": {
+        "reauth": "The MYOB authorisation has expired or lacks scope. An administrator of the company file must re-authorise.",
+        "forbidden": "This company file does not allow reading payroll data. Contact the company file administrator.",
+        "unavailable": "MYOB is temporarily unavailable or rate-limited. Please try again shortly.",
+        "other": "Could not read MYOB payslips. Please try again shortly."
+      }
+    },
+    "states": {
+      "empty": {
+        "title": "No paid payslips for this filter",
+        "description": "The store's employees may not have been paid yet, may not be matched to a MYOB card, or MYOB has no records in the range. Widen the dates, or check matching in Employee matching.",
+        "clear": "Clear filters",
+        "goBind": "Go to employee matching"
+      },
+      "noPermission": {
+        "title": "You do not have permission to view payslips",
+        "description": "Payslips contain sensitive pay information. An administrator must grant \"View payslips for managed stores\" or \"View payslips for all stores\".",
+        "back": "Go back"
+      },
+      "failed": {
+        "title": "Cannot read MYOB payslips right now",
+        "retry": "Retry",
+        "goConnect": "View connections",
+        "reauth": "The MYOB authorisation has expired or lacks scope (401). An administrator of the company file must re-authorise in MYOB integration.",
+        "forbidden": "This company file does not allow reading payroll data (403). Contact the company file administrator.",
+        "unavailable": "The MYOB service is temporarily unavailable or rate-limited. Payslips are not cached here; please try again shortly.",
+        "other": "Could not read MYOB payslips. Please try again shortly."
+      },
+      "loadFailed": "Failed to load payslips"
+    },
+    "drawer": {
+      "title": "Payslip of {{name}}",
+      "close": "Close",
+      "loadFailed": "Failed to load payslip details",
+      "notFound": "This payslip cannot be found (you may no longer have access, or MYOB has corrected it).",
+      "paid": "Paid",
+      "period": "Pay period {{range}}",
+      "paymentDate": "Payment date {{date}}",
+      "gross": "Gross Pay",
+      "net": "Net Pay",
+      "samePaymentDate": "This employee has {{count}} more payslips for other pay periods paid on the same date in this company file. Open them separately from the list.",
+      "noLines": "This payslip has no detail lines.",
+      "fund": "Fund: {{name}}",
+      "sections": {
+        "wages": {
+          "title": "Wages",
+          "sub": "Wages"
+        },
+        "deductions": {
+          "title": "Deductions & Taxes",
+          "sub": "Deductions and tax"
+        },
+        "superannuation": {
+          "title": "Superannuation",
+          "sub": "Superannuation"
+        },
+        "entitlements": {
+          "title": "Leave accrual",
+          "sub": "Leave accrual (hours)"
+        },
+        "others": {
+          "title": "Other",
+          "sub": "Other"
+        }
+      },
+      "columns": {
+        "description": "Description",
+        "hours": "Hours",
+        "rate": "Rate",
+        "thisPay": "This pay",
+        "ytd": "YTD"
+      },
+      "disclaimerZh": "本工资单仅供查看，以 MYOB 发出的工资单为准。",
+      "disclaimerEn": "For reference only. The official payslip is the one issued from MYOB.",
+      "logged": "This view has been recorded (only who viewed which period; no amounts)"
+    },
+    "hours": {
+      "title": "Store assignment and our attendance hours",
+      "sub": "The payslip is issued by company, not by store",
+      "noStores": "This payslip has no assignable store, so there are no attendance hours.",
+      "load": "Show our hours",
+      "loading": "Reading attendance…",
+      "loadFailed": "Could not read our hours. Retry",
+      "retry": "Retry",
+      "work": "Paid hours here",
+      "leave": "Paid leave",
+      "storeFailed": "Read failed",
+      "total": "Total (reference only)",
+      "note": "From our attendance (same basis as the payroll sheet). It can differ from the hours on the MYOB payslip above; MYOB is authoritative."
+    }
+  }
+}

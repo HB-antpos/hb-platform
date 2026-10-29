@@ -410,6 +410,9 @@
   <data name="customerDisplay.window.swapRequiresOpen" xml:space="preserve"><value>Open the customer display before swapping screens.</value></data>
   <data name="customerDisplay.window.swapUnavailable" xml:space="preserve"><value>Could not detect the screens of the main window and customer display. Screens were not swapped.</value></data>
   <data name="shell.customerDisplayWindow" xml:space="preserve"><value>Customer display window</value></data>
+  <data name="shell.customerDisplayState.closed" xml:space="preserve"><value>Off</value></data>
+  <data name="shell.customerDisplayState.normal" xml:space="preserve"><value>Window</value></data>
+  <data name="shell.customerDisplayState.fullscreen" xml:space="preserve"><value>Fullscreen</value></data>
   <data name="shell.swapCustomerDisplayScreens" xml:space="preserve"><value>Swap screens with the customer display</value></data>
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
   <data name="shell.colorTheme.blue" xml:space="preserve"><value>Blue</value></data>

@@ -107,6 +107,10 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canBindMyobEmployees: [P.Myob.EmployeeBind],
   // 任一权限可见：连接与映射 / 员工绑定 / 发薪公司（编辑工资）
   canAccessMyob: [P.Myob.ConnectionManage, P.Myob.EmployeeBind, P.Attendance.PayrollEdit],
+  // 工资单页签：任一权限可见；从菜单授予时只补第一个（管辖分店），移除时两个权限码一并撤销。
+  canViewMyobPayslips: [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores],
+  // 全部分店口径单独映射到 ViewAllStores（页内入口开关，不是菜单叶子）。
+  canViewAllMyobPayslips: [P.Myob.PayslipViewAllStores],
   // 人脸比对页：任一权限可见；从菜单授予时只补第一个（管理），移除时五个权限码一并撤销。
   canAccessFaceMatch: [
     P.FaceMatch.Manage,
@@ -261,6 +265,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
         title: 'menu.attendancePayroll',
         children: [
           { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
+          { path: '/pos-admin/payslips', title: 'menu.payslips', accessKey: 'canViewMyobPayslips' },
           { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob' },
         ],
       },

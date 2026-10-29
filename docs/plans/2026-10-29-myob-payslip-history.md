@@ -1,7 +1,7 @@
 # MYOB 历史工资单查看（Web「工资单」页签）· 方案
 
 > 状态：**方案已确认（2026-10-29）**。第 10 节问题 1 选 A（先上探针）；其余按第 10 节推荐项执行：新增两个权限码；店长看整张工资单；历史默认 3 个月、最长 24 个月；不做导出；留查看记录；未绑定 / 无法确定分店仅财务可见；抽屉显示我方考勤工时（仅参考）；页签叫「工资单」放第五位。
-> 进度：第一批（#1067：`GetPayrollAdvicesAsync` + 只读探针接口）已于 2026-10-29 部署主 API，并已在 Investment、Australian 两个公司文件上跑过探针（结果见第 1.3 节）；第 1、3 节已按真实结果修订。**下一步要改 `GetPayrollAdvicesAsync` 的翻页方式（见第 3.2 节：服务端到 1000 条后不再给下一页链接）**，再写匹配规则与页面。
+> 进度：第一批（#1067）已于 2026-10-29 部署主 API，并在 Investment、Australian 两个公司文件上跑过探针（结果见第 1.3 节）。第二批（后端）已写完：翻页改为窗口 + `$skip`、匹配规则、列表 / 明细接口、两个权限码、查看记录表、移除探针；第三批（Web + 我方考勤工时接口）已写完：「工时与工资」页面里新增「工资单」页签（与「工时与工资」「MYOB 对接」并列）、明细抽屉、未归属视图、各种状态，以及点击后才加载的 `GET payslips/hours`；**迁移 20261029.003 与第二、三批都还没部署**。
 > 范围：只读。读 MYOB 里已发薪的工资单，按我方分店过滤后在 Web 展示；不写 MYOB。
 > 与总方案关系：落实 `2026-10-27-myob-payroll-integration.md` 第 9 / 10 节里「拉取并展示工资单」的 Web 部分；本方案**不含**员工本人在手机端看自己的工资单、不含对账、不含余额。
 
@@ -118,8 +118,9 @@
 |---|---|---|
 | GET | `companies` | 当前账号可见的公司文件下拉（只列状态 Active 的连接；店长只列自己管辖分店涉及的公司） |
 | GET | `?connectionGuid=&storeCode=&from=&to=&keyword=&page=&pageSize=` | 列表；`from/to` 按 **PaymentDate**；`connectionGuid` 为空 = 所有可见公司；返回每家公司各自的读取状态（部分失败时不拖垮其它公司） |
-| GET | `{connectionGuid}/{employeeUid}/{paymentDate}` | 单张工资单明细（抽屉）。写一条查看记录 |
-| GET | `api/react/v1/myob/payslip-probe?connectionGuid=`（临时，核对完删除；路径不在 `payslips` 下） | 第 1.3 节的结构探针，仅 `Myob.Connection.Manage` |
+| GET | `detail?connectionGuid=&employeeUid=&paymentDate=&periodStart=` | 单张工资单明细（抽屉）。参数走查询串而不是路径（日期与 UID 都做了格式校验）；`periodStart` 可空，同一支付日有多张时用它区分。先写一条查看记录再返回内容，记不下就拒绝 |
+
+> 探针接口与服务已随第二批移除。实现中的差异：列表参数里的 `onlyUnassigned=true` 用来只看「未绑定 / 无法确定分店」的工资单（仅全部分店权限）；越权与不存在统一返回 404，不暴露这张工资单是否存在。
 
 - `keyword`：员工姓名 / MYOB DisplayID（后端内存过滤，不透传给 MYOB）。
 - 列表默认：最近 3 个月、所有可见公司；单次区间上限 24 个月。财年快捷项按澳洲财年（7 月 1 日–次年 6 月 30 日）。
@@ -145,15 +146,15 @@
 
 ### 3.3 缓存与限流
 
-- 缓存：`IMemoryCache`，键 `myob:advice:{connectionGuid}:{窗口起}:{窗口止}`（按窗口缓存，不同区间的查询可复用相同窗口），TTL 10 分钟（与 `MyobEmployeeDirectory.CacheLifetime` 同口径）；只放进程内存，不落盘不落库；「刷新」按钮 `refresh=true` 绕过缓存。完全早于 60 天前的窗口可以放宽到 60 分钟（历史工资单基本不变，仅撤销 / 重发会改）。
-- 同一连接同一窗口的并发请求串行（同 `MyobEmployeeDirectory` 的 `Locks`），只打一轮 MYOB。
+- 缓存：`IMemoryCache`，键 `myob:advice:{connectionGuid}:{区间起}:{区间止}`（**实现按「整个查询区间」缓存，窗口切分在客户端内部做**；分店、关键字等过滤不影响缓存键），TTL 10 分钟（与 `MyobEmployeeDirectory.CacheLifetime` 同口径）；只放进程内存，不落盘不落库；「刷新」按钮 `refresh=true` 绕过缓存。按窗口缓存、历史窗口放宽到 60 分钟留作以后的优化。
+- 同一公司文件的并发请求串行（锁按公司文件，不按查询键，避免键里带日期导致字典无限增长），同键的后到请求直接用先到请求的结果，只打一轮 MYOB。明细接口不走缓存。
 - 缓存只存**展示用精简对象**（已丢弃 DOB / 年薪 / 时薪 / 支票号），避免敏感字段长期驻留内存。
 - 估算量（按真实数据）：近 45 天 Investment 66 张、Australian 81 张，即每个公司每周约 10~13 张；3 个月窗口约 100~190 张，1 次请求约 2~3 秒；24 个月约 1,000~1,400 张，8 个窗口并发约 5~8 秒（单窗口耗时 + 130ms 间隔）。双公司并发。内存：每张工资单约十几行明细，24 个月一个公司几 MB，可接受。
 - 不做后台定时拉取（本阶段是「查看」，不是对账）；日后做对账再引入快照表。
 
 ### 3.4 查看记录
 
-- 新表 `MyobPayslipViewLog(LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, PaymentDate, ViewedAt)`，**只记谁看了谁的哪一期**，不记金额与姓名文本。仅抽屉打开时写；列表不写。
+- 新表 `MyobPayslipViewLog(LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, MyobEmployeeUid, PaymentDate, ViewedAt)`（迁移 `20261029.003-myob-payslip`，同一迁移里幂等写入两个权限码、不授予任何角色），**只记谁看了谁的哪一期**，不记金额与姓名文本。`TargetUserGuid` 在员工卡未绑定时为空，所以多记一列 `MyobEmployeeUid`（员工卡 UID，不是姓名），保证未绑定员工的查看也能追溯。仅抽屉打开时写；列表不写；**写不进去就拒绝显示工资单**。
 - 用途：员工问「谁看过我的工资单」时可查；Web 不提供查询页面（先不做），需要时由管理员查库。
 
 ## 4. 权限
@@ -191,8 +192,11 @@
 
 ### 6.1 入口
 
-- `/pos-admin/myob` 新增第五个页签「**工资单**」（key `payslips`），排在「推送与对账」后；`getVisibleMyobTabs` 里按新权限码显示。理由：与员工绑定、发薪公司同一页面，「未绑定」行可直接跳到「员工绑定」；比新开独立页面少一个菜单入口。
-- 新文件：`PayslipsTab.tsx`（列表 + 筛选）、`PayslipDrawer.tsx`（明细）、`myobPayslipLogic.ts`（区间预设、财年、过滤、分组纯函数，配 `.test.ts`）、`myobService.ts` 加 `normalizeMyobPayslip*` 与请求函数、`myobMessages.zh/en.json` 加 `payslips` 节、`myob.css` 加 `myob-payslip-*`。
+- **位置（2026-10-29 按用户要求调整）**：放在「工时与工资」页面里，作为页面组顶部页签 `工时与工资 | 工资单 | MYOB 对接` 的第二个，路由 `/pos-admin/payslips`、访问键 `canViewMyobPayslips`（`Myob.Payslip.ViewManagedStore` / `ViewAllStores` 任一）。不再是 MYOB 对接页的第五个页签，所以 MYOB 页的页签逻辑不用改；工资单权限不连带 MYOB 对接页，MYOB 权限也不连带工资单。
+- 只有工资单权限的账号登录后落到工资单页；同时有 MYOB 权限的沿用原落点（MYOB 页）。不保活（离开页签即丢掉内存里的工资数据）。
+- 新文件（`pages/PosAdmin/Payslips/`）：`index.tsx`（列表 + 筛选 + 状态）、`PayslipDrawer.tsx`（明细 + 我方工时按需加载）、`payslipLogic.ts`（日期预设 / 澳洲财年、金额与周期格式化、错误归类、分店下拉；配 `.test.ts`）、`payslipMessages.zh/en.json`、`payslips.css`；`services/myobPayslipService.ts`、`types/myobPayslip.ts`；全局语言包只加菜单标题 `menu.payslips`。
+- 「最近一个周期」预设改为「最近两周」：MYOB 有周薪也有双周薪，无法统一成一个周期。
+- 「去绑定」「查看发薪公司」目前只跳到 `/pos-admin/myob`（落到该账号第一个可见页签），不带预选公司。
 - 手机端：本期不做。
 
 ### 6.2 列表页
@@ -231,8 +235,8 @@
 |---|---|---|
 | 1 | `GetPayrollAdvicesAsync` + 探针接口（#1067） | **已完成并部署主 API（2026-10-29，无迁移）** |
 | 2 | 跑探针，核对第 1.3 节；修订本方案第 1、3 节 | **已完成（Investment、Australian）** |
-| 3 | 第二批：改 `GetPayrollAdvicesAsync` 翻页（窗口 + `$skip` + 5xx 重试 + 去重）；匹配规则；列表 / 抽屉接口；迁移（两个权限码入库、`MyobPayslipViewLog` 表）；去掉探针 + 测试 | 迁移 → 主 API |
-| 4 | Web 页签 + 抽屉 + 状态 | Web |
+| 3 | 第二批（后端）：`GetPayrollAdvicesAsync` 改窗口 + `$skip` + 5xx 重试 + 去重；匹配规则；列表 / 明细接口；迁移 `20261029.003-myob-payslip`（两个权限码入库、`MyobPayslipViewLog` 表）；去掉探针 + 测试 | **已写完，待部署**：迁移 → 主 API |
+| 4 | Web 页签 + 抽屉 + 状态 + 我方考勤工时接口（第三批） | **已写完，待部署**：迁移 → 主 API → Web |
 | 5 | 管理员授权角色；上线前对其余 4 个公司文件各跑一次结构核对；抽查核对 | — |
 
 ## 9. 范围外

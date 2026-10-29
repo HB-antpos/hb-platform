@@ -109,4 +109,62 @@ export interface LocalSupplierInvoiceItem {
   retailPrice: number | null;
   amount: number | null;
   productImage: string;
+  // ---- 以下为与 Web 明细页对齐新增的字段（后端 details 接口本来就返回，之前被归一化丢掉）----
+  /** 副码（除主条码外的其他条码）。 */
+  additionalBarcodes: string[];
+  /** 商品主档类型：0 单品 / 1 套装 / 2 多码；未匹配主档为 null。 */
+  productType: number | null;
+  /** 本单新品：关联商品由本进货单新建。 */
+  isCreatedByThisInvoice: boolean;
+  /** 主档命中数：0 不存在、>0 已存在；null = 还没做过商品检测（「未检测」，不能当成 0）。 */
+  existingProductCount: number | null;
+  /** 0 未检测 / 1 正常 / 其他按 barcodeMatchCount 区分无匹配、多匹配。 */
+  barcodeStatus: number;
+  barcodeMatchCount: number;
+  /** 行操作类型 DetailAction：0 无 / 1 新建商品 / 2 更新进货价 / 3 等待操作 / 4 更新货号 / 5 添加多码 / 99 已执行。 */
+  activityType: number;
+  /** 折扣率，小数口径（0.1 = 10%）。 */
+  discountRate: number | null;
+  autoPricing: boolean | null;
+  pricingFloatRate: number | null;
+  newAutoRetailPrice: number | null;
+  isSpecialProduct: boolean;
+  /** 本店分店价格表里的自动定价状态，仅展示；与本行要写入的 autoPricing 不同。 */
+  storeIsAutoPricing: boolean | null;
+}
+
+/** 表头可编辑字段（对应 Web UpdateInvoiceRequest 中本页实际发送的 5 项）。 */
+export interface UpdateInvoiceHeaderRequest {
+  storeCode?: string;
+  supplierCode?: string;
+  orderDate?: string;
+  inboundDate?: string;
+  remarks?: string;
+}
+
+/** 条码已被其他商品占用时，后端给出的匹配商品。 */
+export interface BarcodeMatchedProduct {
+  productCode: string;
+  productName: string;
+  supplierCode: string;
+  supplierName: string;
+  itemNumber: string;
+  barcode: string;
+  productImage: string;
+  isMultiCode: boolean;
+  isBundle: boolean;
+  productType: number | null;
+}
+
+/** 商品检测单行结果（只取手机端复核「选用匹配商品」要用的字段，其余由后端落库、刷新明细即可见）。 */
+export interface ProductCheckRowResult {
+  detailGuid: string;
+  /** 0 未知 / 1 已存在 / 2 不存在 */
+  productStatus: number;
+  /** 0 未检测 / 1 正常 / 2 异常 */
+  barcodeStatus: number;
+  existingProductCount: number;
+  barcodeMatchCount: number;
+  /** 检测命中的主档商品编码（productInfo.productCode）。 */
+  productCode: string;
 }

@@ -52,6 +52,8 @@ namespace BlazorApp.Shared.Constants
             "LocalPurchase.PushToHq",
             "Myob.Connection.Manage",
             "Myob.Employee.Bind",
+            "Myob.Payslip.ViewAllStores",
+            "Myob.Payslip.ViewManagedStore",
             "OrderFront.BatchProductSales.View",
             "Orders.Delete",
             "Orders.Edit",

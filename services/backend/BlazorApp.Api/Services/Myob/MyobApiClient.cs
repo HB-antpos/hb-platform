@@ -102,20 +102,14 @@ public interface IMyobApiClient
         string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken);
 
     /// <summary>
-    /// GET /{cf_uri}/Report/Payroll/EmployeePayrollAdvice：已发薪工资单（只读），自动翻页拉全量。需要 scope sme-payroll。
-    /// 只返回展示用精简对象（不含年薪 / 时薪 / 生日 / 支票号）。筛选写法官方文档没有说明，须先用探针核对再依赖服务端筛选。
+    /// GET /{cf_uri}/Report/Payroll/EmployeePayrollAdvice：已发薪工资单（只读）。需要 scope sme-payroll。
+    /// query 的支付日期区间 [PaymentFrom, PaymentToExclusive) 必须两端都有：按 ≤90 天窗口并发取数，窗口满页（1000 条）时在窗口内用 $skip 继续翻页，
+    /// 不跟 NextPageLink（服务端到顶后它是空的，会静默漏数据）；单次请求遇 5xx 重试 1 次；结果按「员工 + 支付日期 + 周期 + 金额」去重，
+    /// 支付日期倒序返回。只返回展示用精简对象（不含年薪 / 时薪 / 生日 / 支票号）。
     /// 默认实现抛 NotSupportedException：既有测试替身无需改动，真实客户端覆盖。
     /// </summary>
     Task<IReadOnlyList<MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
         string businessId, string accessToken, MyobPayrollAdviceQuery query, CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
-
-    /// <summary>
-    /// 探针：用固定查询串（$top / $skip / $orderby / $filter 的组合，由调用方的固定模板生成，不接受用户输入）读工资单报表，
-    /// 沿 NextPageLink 最多翻 maxPages 页，只返回字段结构与计数，响应体（含姓名、金额）不出此方法。非 2xx 不抛异常，状态码写进结果。
-    /// </summary>
-    Task<MyobAdviceProbeResult> ProbePayrollAdviceAsync(
-        string businessId, string accessToken, string query, int maxPages, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 }
 
@@ -308,14 +302,12 @@ public sealed class MyobApiClient : IMyobApiClient
         string businessId,
         string accessToken,
         string path,
-        CancellationToken cancellationToken,
-        string? query = null)
+        CancellationToken cancellationToken)
     {
         const int maxPages = 50;
         var baseUrl = _options.ApiBaseUrl.TrimEnd('/');
         var baseHost = new Uri(baseUrl).Host;
-        // query 由调用方的强类型构造器生成（见 MyobAdviceQueries），自带 $top；为空时沿用默认 $top=1000。
-        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{path}?{(string.IsNullOrEmpty(query) ? "$top=1000" : query)}";
+        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{path}?$top=1000";
         var result = new List<T>();
 
         for (var page = 0; page < maxPages && url is not null; page++)
@@ -374,36 +366,83 @@ public sealed class MyobApiClient : IMyobApiClient
             .ToList();
     }
 
+    // 窗口并发数：RateGate 只约束相邻请求的发起间隔，不串行化整个请求；这里再限并发，避免一次查询占满 MYOB 配额。
+    private const int AdviceWindowConcurrency = 4;
+
+    // 单个窗口最多翻的页数：满页后继续 $skip；超过说明窗口里的数据量异常，宁可报错也不静默截断。
+    private const int AdviceMaxPagesPerWindow = 20;
+
     public async Task<IReadOnlyList<MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
         string businessId,
         string accessToken,
         MyobPayrollAdviceQuery query,
         CancellationToken cancellationToken)
     {
-        var items = await GetAllPagesAsync<PayrollAdvicePayload>(
-            businessId, accessToken, MyobAdviceQueries.ReportPath, cancellationToken, MyobAdviceQueries.Build(query));
-        return items
-            .Select(PayrollAdvicePayload.ToRecord)
-            .OfType<MyobPayrollAdviceRecord>()
+        if (query.PaymentFrom is null || query.PaymentToExclusive is null)
+        {
+            throw new ArgumentException("工资单查询必须指定支付日期区间", nameof(query));
+        }
+
+        var windows = MyobAdviceWindows.Split(query.PaymentFrom.Value, query.PaymentToExclusive.Value);
+        using var gate = new SemaphoreSlim(AdviceWindowConcurrency);
+        var tasks = windows.Select(async window =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await GetAdviceWindowAsync(
+                    businessId, accessToken, query with { PaymentFrom = window.From, PaymentToExclusive = window.ToExclusive }, cancellationToken);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+        var pages = await Task.WhenAll(tasks);
+
+        // 窗口边界与 $skip 翻页期间有新工资单插入时可能出现重复；金额也进键，避免把「同一周期同一天的更正单」误当重复吞掉。
+        return pages
+            .SelectMany(items => items)
+            .GroupBy(item => (item.EmployeeUid.ToLowerInvariant(), item.PaymentDate, item.PeriodStart, item.PeriodEnd, item.GrossPay, item.NetPay))
+            .Select(group => group.First())
+            .OrderByDescending(item => item.PaymentDate)
+            .ThenBy(item => item.EmployeeName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    public async Task<MyobAdviceProbeResult> ProbePayrollAdviceAsync(
+    /// <summary>取一个窗口：满页就继续 $skip，直到某页不足一页。</summary>
+    private async Task<List<MyobPayrollAdviceRecord>> GetAdviceWindowAsync(
+        string businessId,
+        string accessToken,
+        MyobPayrollAdviceQuery windowQuery,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<MyobPayrollAdviceRecord>();
+        for (var page = 0; page < AdviceMaxPagesPerWindow; page++)
+        {
+            var items = await GetAdvicePageAsync(
+                businessId, accessToken, MyobAdviceQueries.Build(windowQuery, page * MyobAdviceQueries.PageSize), cancellationToken);
+            records.AddRange(items.Select(PayrollAdvicePayload.ToRecord).OfType<MyobPayrollAdviceRecord>());
+            if (items.Count < MyobAdviceQueries.PageSize)
+            {
+                return records;
+            }
+        }
+
+        throw new MyobApiException(
+            MyobErrorCodes.ApiCallFailed,
+            $"MYOB 工资单报表在一个查询窗口内超过 {AdviceMaxPagesPerWindow * MyobAdviceQueries.PageSize} 条，请缩小日期范围");
+    }
+
+    /// <summary>取一页（原始条数用于判断是否满页）；5xx 重试 1 次，4xx 与再次失败只报状态码，不回显响应体（含薪资）。</summary>
+    private async Task<List<PayrollAdvicePayload>> GetAdvicePageAsync(
         string businessId,
         string accessToken,
         string query,
-        int maxPages,
         CancellationToken cancellationToken)
     {
-        var baseUrl = _options.ApiBaseUrl.TrimEnd('/');
-        var baseHost = new Uri(baseUrl).Host;
-        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{MyobAdviceQueries.ReportPath}?{query}";
-        var accumulator = new MyobAdviceProbeAccumulator();
-        var stopwatch = Stopwatch.StartNew();
-        int? status = null;
-        var pages = 0;
-
-        while (url is not null && pages < maxPages)
+        var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/{Uri.EscapeDataString(businessId)}/{MyobAdviceQueries.ReportPath}?{query}";
+        for (var attempt = 0; ; attempt++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -412,26 +451,30 @@ public sealed class MyobApiClient : IMyobApiClient
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var response = await SendAsync(request, cancellationToken);
-            status = (int)response.StatusCode;
-            pages++;
+            if ((int)response.StatusCode >= 500 && attempt == 0)
+            {
+                // 探针里见过 MYOB 偶发 500（重跑正常）。
+                continue;
+            }
+
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                accumulator.AddError(body);
-                url = null;
-                break;
+                throw new MyobApiException(
+                    MyobErrorCodes.ApiCallFailed,
+                    $"MYOB 工资单报表接口返回 {(int)response.StatusCode}",
+                    response.StatusCode);
             }
 
-            var next = accumulator.AddPage(body);
-            url = !string.IsNullOrWhiteSpace(next)
-                && Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
-                && string.Equals(nextUri.Host, baseHost, StringComparison.OrdinalIgnoreCase)
-                    ? nextUri.ToString()
-                    : null;
+            try
+            {
+                return JsonSerializer.Deserialize<ListPayload<PayrollAdvicePayload>>(body, JsonOptions)?.Items ?? [];
+            }
+            catch (JsonException)
+            {
+                throw new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回了无法解析的内容", response.StatusCode);
+            }
         }
-
-        // 还有下一页但已达上限 = 被截断，计数只是下限。
-        return accumulator.Build(status, stopwatch.ElapsedMilliseconds, pages, truncated: url is not null);
     }
 
     public async Task<MyobTimesheetStatus> GetTimesheetStatusAsync(

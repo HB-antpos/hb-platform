@@ -1152,6 +1152,15 @@
   <data name="shell.customerDisplayWindow" xml:space="preserve">
     <value>客显窗口</value>
   </data>
+  <data name="shell.customerDisplayState.closed" xml:space="preserve">
+    <value>已关闭</value>
+  </data>
+  <data name="shell.customerDisplayState.normal" xml:space="preserve">
+    <value>窗口</value>
+  </data>
+  <data name="shell.customerDisplayState.fullscreen" xml:space="preserve">
+    <value>全屏</value>
+  </data>
   <data name="shell.swapCustomerDisplayScreens" xml:space="preserve">
     <value>主窗口与客显互换屏幕</value>
   </data>

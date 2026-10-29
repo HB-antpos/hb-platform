@@ -1,4 +1,5 @@
 import type {
+  BarcodeMatchedProduct,
   GridFilterModel,
   GridRequest,
   GridResult,
@@ -9,7 +10,10 @@ import type {
   LocalSupplierOption,
   LocalSupplierInvoice,
   LocalSupplierInvoiceItem,
+  ProductCheckRowResult,
+  UpdateInvoiceHeaderRequest,
 } from "@/modules/local-supplier-invoices/types";
+import type { InvoiceDetailUpsertItem } from "@/modules/local-supplier-invoices/detail/inline-edit";
 
 const BASE_PATH = "/react/v1/local-supplier-invoices";
 const ACTIVE_LOCAL_SUPPLIERS_PATH = "/react/v1/local-suppliers/active";
@@ -71,6 +75,24 @@ function asNumber(value: unknown, fallback = 0): number {
 function asNullableInt(value: unknown): number | null {
   const parsed = asNullableNumber(value);
   return parsed == null ? null : Math.trunc(parsed);
+}
+
+function asBool(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true" || value === "True") return true;
+  if (value === 0 || value === "0" || value === "false" || value === "False") return false;
+  return fallback;
+}
+
+function asNullableBool(value: unknown): boolean | null {
+  if (value === null || value === undefined || value === "") return null;
+  return asBool(value, false);
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+    : [];
 }
 
 function normalizePage(page?: number) {
@@ -246,6 +268,21 @@ export function normalizeInvoiceItem(raw: unknown): LocalSupplierInvoiceItem {
     retailPrice: asNullableNumber(pick(item, "retailPrice", "RetailPrice")),
     amount: asNullableNumber(pick(item, "amount", "Amount")),
     productImage: asString(pick(item, "productImage", "ProductImage")),
+    additionalBarcodes: asStringArray(pick(item, "additionalBarcodes", "AdditionalBarcodes")),
+    productType: asNullableInt(pick(item, "productType", "ProductType")),
+    isCreatedByThisInvoice: asBool(
+      pick(item, "isCreatedByThisInvoice", "IsCreatedByThisInvoice")
+    ),
+    existingProductCount: asNullableNumber(pick(item, "existingProductCount", "ExistingProductCount")),
+    barcodeStatus: asNumber(pick(item, "barcodeStatus", "BarcodeStatus"), 0),
+    barcodeMatchCount: asNumber(pick(item, "barcodeMatchCount", "BarcodeMatchCount"), 0),
+    activityType: asNumber(pick(item, "activityType", "ActivityType"), 0),
+    discountRate: asNullableNumber(pick(item, "discountRate", "DiscountRate")),
+    autoPricing: asNullableBool(pick(item, "autoPricing", "AutoPricing")),
+    pricingFloatRate: asNullableNumber(pick(item, "pricingFloatRate", "PricingFloatRate")),
+    newAutoRetailPrice: asNullableNumber(pick(item, "newAutoRetailPrice", "NewAutoRetailPrice")),
+    isSpecialProduct: asBool(pick(item, "isSpecialProduct", "IsSpecialProduct")),
+    storeIsAutoPricing: asNullableBool(pick(item, "storeIsAutoPricing", "StoreIsAutoPricing")),
   };
 }
 
@@ -316,4 +353,120 @@ export async function fetchActiveLocalSuppliers() {
   const client = await getApiClient();
   const response = await client.get(ACTIVE_LOCAL_SUPPLIERS_PATH);
   return normalizeActiveLocalSuppliersResponse(response.data);
+}
+
+// ---------------------------------------------------------------------------
+// 一期新增：全量明细读取 + 写接口（与 Web localSupplierInvoiceService 同路径、同口径）
+// 写接口需要 LocalPurchase.Edit；success=false 的业务失败由 apiClient 拦截器解包时直接抛错。
+// ---------------------------------------------------------------------------
+
+/**
+ * batch-upsert 请求体的一项：以 detailGUID 定位行，其余为本次要写入的字段。
+ * 常规保存用 InvoiceDetailUpsertItem（口径见 detail/inline-edit）；「选用匹配商品」只写 productCode。
+ */
+export type InvoiceDetailUpsertPayload =
+  | InvoiceDetailUpsertItem
+  | { detailGUID: string; productCode: string };
+
+/** GET {guid}/details 返回的是整张单的全部明细（Web 一次性加载、前端筛选），不是分页。 */
+export function normalizeInvoiceDetailsResponse(payload: unknown): LocalSupplierInvoiceItem[] {
+  const rows = Array.isArray(payload) ? payload : getEnvelopeData(payload);
+  return Array.isArray(rows) ? rows.map(normalizeInvoiceItem) : [];
+}
+
+export function normalizeBarcodeMatchedProduct(raw: unknown): BarcodeMatchedProduct {
+  const item = asRecord(raw) ?? {};
+  return {
+    productCode: asString(pick(item, "productCode", "ProductCode")),
+    productName: asString(pick(item, "productName", "ProductName")),
+    supplierCode: asString(pick(item, "supplierCode", "SupplierCode")),
+    supplierName: asString(pick(item, "supplierName", "SupplierName")),
+    itemNumber: asString(pick(item, "itemNumber", "ItemNumber")),
+    barcode: asString(pick(item, "barcode", "Barcode")),
+    productImage: asString(pick(item, "productImage", "ProductImage")),
+    isMultiCode: asBool(pick(item, "isMultiCode", "IsMultiCode")),
+    isBundle: asBool(pick(item, "isBundle", "IsBundle")),
+    productType: asNullableInt(pick(item, "productType", "ProductType")),
+  };
+}
+
+export function normalizeProductsByBarcodeResponse(payload: unknown): BarcodeMatchedProduct[] {
+  const root = asRecord(payload) ?? {};
+  const list = pick(root, "matchedProducts", "MatchedProducts");
+  return Array.isArray(list) ? list.map(normalizeBarcodeMatchedProduct) : [];
+}
+
+export function normalizeCheckProductsResponse(payload: unknown): ProductCheckRowResult[] {
+  const root = asRecord(payload) ?? {};
+  const results = pick(root, "results", "Results");
+  if (!Array.isArray(results)) return [];
+  return results.map((raw) => {
+    const row = asRecord(raw) ?? {};
+    const info = asRecord(pick(row, "productInfo", "ProductInfo")) ?? {};
+    return {
+      detailGuid: asString(pick(row, "detailGuid", "DetailGUID", "detailGUID")),
+      productStatus: asNumber(pick(row, "productStatus", "ProductStatus"), 0),
+      barcodeStatus: asNumber(pick(row, "barcodeStatus", "BarcodeStatus"), 0),
+      existingProductCount: asNumber(pick(row, "existingProductCount", "ExistingProductCount"), 0),
+      barcodeMatchCount: asNumber(pick(row, "barcodeMatchCount", "BarcodeMatchCount"), 0),
+      productCode: asString(pick(info, "productCode", "ProductCode")),
+    };
+  });
+}
+
+export async function fetchInvoiceDetailsAll(invoiceGuid: string) {
+  const client = await getApiClient();
+  const response = await client.get(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details`);
+  return normalizeInvoiceDetailsResponse(response.data);
+}
+
+/** 保存表头；返回最新表头（响应里没有的名称字段由调用方保留旧值）。 */
+export async function updateInvoiceHeader(invoiceGuid: string, request: UpdateInvoiceHeaderRequest) {
+  const client = await getApiClient();
+  const response = await client.put(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}`, request);
+  return normalizeInvoice(response.data);
+}
+
+export async function batchUpsertInvoiceDetails(
+  invoiceGuid: string,
+  items: InvoiceDetailUpsertPayload[]
+) {
+  const client = await getApiClient();
+  await client.post(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details/batch-upsert`, items);
+}
+
+/** 改行操作类型：立即落库，不计入「未保存修改」（与 Web 一致）。 */
+export async function updateInvoiceDetailAction(
+  invoiceGuid: string,
+  detailGuid: string,
+  action: number
+) {
+  const client = await getApiClient();
+  await client.put(
+    `${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details/${encodeURIComponent(detailGuid)}/action`,
+    { action }
+  );
+}
+
+export async function deleteInvoiceDetails(invoiceGuid: string, detailGuids: string[]) {
+  const client = await getApiClient();
+  await client.delete(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details`, {
+    data: detailGuids,
+  });
+}
+
+export async function fetchProductsByBarcode(invoiceGuid: string, barcode: string) {
+  const client = await getApiClient();
+  const response = await client.get(
+    `${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/products-by-barcode`,
+    { params: { barcode } }
+  );
+  return normalizeProductsByBarcodeResponse(response.data);
+}
+
+/** 同步商品检测（只检传入的行）；后端会把结果写回明细，调用方随后刷新明细即可。 */
+export async function checkInvoiceProducts(invoiceGuid: string, detailGuids: string[]) {
+  const client = await getApiClient();
+  const response = await client.post(`${BASE_PATH}/check-products`, { invoiceGuid, detailGuids });
+  return normalizeCheckProductsResponse(response.data);
 }

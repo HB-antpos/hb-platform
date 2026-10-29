@@ -804,6 +804,34 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
+    public void Title_bar_buttons_show_the_current_theme_and_customer_display_state()
+    {
+        var window = XDocument.Load(Path.Combine(WpfRoot(), "MainWindow.xaml"));
+        var texts = window.Descendants(Presentation + "TextBlock")
+            .Select(text => (string?)text.Attribute("Text"))
+            .ToList();
+
+        Assert.Contains("{Binding CurrentThemeName}", texts);
+        Assert.Contains("{Binding CustomerDisplayStateText}", texts);
+    }
+
+    [Fact]
+    public void Footer_shows_store_info_right_before_the_terminal_code()
+    {
+        var window = XDocument.Load(Path.Combine(WpfRoot(), "MainWindow.xaml"));
+        var store = Assert.Single(window.Descendants(Presentation + "TextBlock"), text =>
+            (string?)text.Attribute("AutomationProperties.AutomationId") == "CurrentStoreInfo");
+        Assert.Equal("{Binding StoreInfo}", (string?)store.Attribute("Text"));
+
+        // 底栏：分店名称和代码紧挨在终端代码之前，同一个容器内；标题栏不再显示分店。
+        var terminal = store.ElementsAfterSelf(Presentation + "TextBlock").First();
+        Assert.Equal("{Binding TerminalInfo}", (string?)terminal.Attribute("Text"));
+        var footer = store.Ancestors(Presentation + "Border")
+            .First(border => (string?)border.Attribute("Grid.Row") == "2");
+        Assert.NotNull(footer);
+    }
+
+    [Fact]
     public void Window_foreground_and_plain_text_inputs_follow_the_palette_text_color()
     {
         // 真机巡检：石墨夜下未着色图标、系统模板输入框都落回黑色，压在深色底上看不见。
