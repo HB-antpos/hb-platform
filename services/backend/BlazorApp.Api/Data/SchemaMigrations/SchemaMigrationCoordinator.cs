@@ -106,6 +106,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string UserPreferenceMigrationId = "20261029.004-user-preference";
     internal const string MyobPayslipExportMigrationId = "20261029.005-myob-payslip-export";
     internal const string MyobTimesheetPushMigrationId = "20261030.001-myob-timesheet-push";
+    internal const string MyobPayCategoryPublicHolidayMigrationId = "20261030.002-myob-pay-category-public-holiday";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -427,6 +428,11 @@ internal sealed class SchemaMigrationCoordinator
             MyobTimesheetPushMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyMyobTimesheetPushAsync(cancellationToken)
+        ),
+        new(
+            MyobPayCategoryPublicHolidayMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMyobPayCategoryPublicHolidayAsync(cancellationToken)
         ),
     ];
 

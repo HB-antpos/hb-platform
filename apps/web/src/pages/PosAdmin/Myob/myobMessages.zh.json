@@ -420,8 +420,8 @@
       "rows": {
         "weekday": {
           "label": "平日",
-          "sub": "含公假上班、带薪公假",
-          "note": "公假上班、带薪公假也走这个类别（公假转账价须等于平日价）"
+          "sub": "不含公假",
+          "note": "只推送平日工时；公假上班、带薪公假走下面的「公共假期」类别"
         },
         "saturday": {
           "label": "周六",
@@ -442,6 +442,16 @@
           "label": "周日（临时工）",
           "sub": "Casual",
           "note": "临时工的周日用单独的 MYOB 类别；公司里没有临时工周日工时可以不设，有了没设则该员工不能推送"
+        },
+        "publicHoliday": {
+          "label": "公共假期",
+          "sub": "全职、兼职（含公假上班、带薪公假）",
+          "note": "公假上班与带薪公假都推送到这个类别，时薪倍数由 MYOB 类别决定；公司里没有公假工时可以不设，有了没设则该员工不能推送"
+        },
+        "publicHolidayCasual": {
+          "label": "公共假期（临时工）",
+          "sub": "Casual",
+          "note": "临时工的公假用单独的 MYOB 类别；公司里没有临时工公假工时可以不设，有了没设则该员工不能推送"
         },
         "personalLeave": {
           "label": "病假",
@@ -529,6 +539,7 @@
         "weekday": "平日",
         "saturday": "周六",
         "sunday": "周日",
+        "publicHoliday": "公共假期",
         "personalLeave": "病假",
         "holidayLeave": "年假",
         "pushedTotal": "推送合计",
@@ -676,6 +687,8 @@
           "sunday": "周日",
           "saturdayCasual": "周六（临时工）",
           "sundayCasual": "周日（临时工）",
+          "publicHoliday": "公共假期",
+          "publicHolidayCasual": "公共假期（临时工）",
           "personalLeave": "病假（Personal Leave Pay）",
           "holidayLeave": "年假（Holiday Leave Pay）"
         }
@@ -687,6 +700,7 @@
         "weekday": "平日",
         "saturday": "周六",
         "sunday": "周日",
+        "publicHoliday": "公共假期",
         "personalLeave": "病假",
         "holidayLeave": "年假",
         "pushedTotal": "推送合计",

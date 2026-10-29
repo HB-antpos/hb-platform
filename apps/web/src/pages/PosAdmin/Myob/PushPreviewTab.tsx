@@ -40,11 +40,12 @@ const READINESS_STATE_KEYS: Record<ReadinessCard['tone'], string> = {
   muted: 'myob.push.readiness.state.muted',
 }
 
-// 5 个类别的工时列（键写成字面量，供页面文案契约测试扫描）
+// 6 个口径的工时列（键写成字面量，供页面文案契约测试扫描）
 const HOUR_COLUMNS = [
   { key: 'weekday', titleKey: 'myob.push.columns.weekday' },
   { key: 'saturday', titleKey: 'myob.push.columns.saturday' },
   { key: 'sunday', titleKey: 'myob.push.columns.sunday' },
+  { key: 'publicHoliday', titleKey: 'myob.push.columns.publicHoliday' },
   { key: 'personalLeave', titleKey: 'myob.push.columns.personalLeave' },
   { key: 'holidayLeave', titleKey: 'myob.push.columns.holidayLeave' },
 ] as const

@@ -74,7 +74,7 @@ public sealed class MyobTimesheetTests : IDisposable
         plan.Pushed.Where(line => line.CategoryKey == category).Sum(line => line.Minutes);
 
     [Fact]
-    public void 规划_全转账_全部推送_类别映射正确_公假和带薪公假归平日_折现不推送()
+    public void 规划_全转账_全部推送_类别映射正确_公假和带薪公假归公共假期_折现不推送()
     {
         var items = new[]
         {
@@ -90,7 +90,9 @@ public sealed class MyobTimesheetTests : IDisposable
         var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeTransfer, 0m, 1, items).Companies[Inv];
 
         Assert.Equal(items.Sum(item => item.Minutes), plan.CapacityMinutes);
-        Assert.Equal((int)Math.Round((8 + 8 + 7.6) * 60), Minutes(plan, MyobPayCategoryKeys.Weekday));
+        Assert.Equal(480, Minutes(plan, MyobPayCategoryKeys.Weekday)); // 平日只剩平日自己的 8h
+        Assert.Equal((int)Math.Round((8 + 7.6) * 60), Minutes(plan, MyobPayCategoryKeys.PublicHoliday)); // 公假上班 + 带薪公假
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.PublicHolidayCasual));
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Saturday));
         Assert.Equal(300, Minutes(plan, MyobPayCategoryKeys.Sunday));
         Assert.Equal(360, Minutes(plan, MyobPayCategoryKeys.PersonalLeave));
@@ -101,7 +103,7 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
-    public void 规划_临时工_周六周日走临时工专用类别_平日和假期类别不变_全职兼职不受影响()
+    public void 规划_临时工_周六周日和公共假期走临时工专用类别_平日和病假年假类别不变_全职兼职不受影响()
     {
         var items = new[]
         {
@@ -116,7 +118,9 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(300, Minutes(casual, MyobPayCategoryKeys.SundayCasual));
         Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Saturday));
         Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Sunday));
-        Assert.Equal(720, Minutes(casual, MyobPayCategoryKeys.Weekday)); // 平日 8h + 公假上班 4h 仍是平日类别
+        Assert.Equal(480, Minutes(casual, MyobPayCategoryKeys.Weekday)); // 平日 8h 仍是平日类别
+        Assert.Equal(240, Minutes(casual, MyobPayCategoryKeys.PublicHolidayCasual)); // 公假上班 4h 走临时工公共假期
+        Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.PublicHoliday));
         Assert.Equal(casual.CapacityMinutes, casual.PushedMinutes);
 
         // 全职 / 兼职（默认）：周末仍走原来的类别，没有任何临时工类别的行。
@@ -130,6 +134,8 @@ public sealed class MyobTimesheetTests : IDisposable
             Assert.Equal(300, Minutes(regular, MyobPayCategoryKeys.Sunday));
             Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SaturdayCasual));
             Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SundayCasual));
+            Assert.Equal(240, Minutes(regular, MyobPayCategoryKeys.PublicHoliday));
+            Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.PublicHolidayCasual));
         }
     }
 
@@ -242,7 +248,8 @@ public sealed class MyobTimesheetTests : IDisposable
         };
         // 额度 14h：带薪公假 4 → 病假 4 → 年假 4 → 折现 2（只进一半，占用额度不推送）
         var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 14m, 1, items).Companies[Inv];
-        Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Weekday));       // 只有带薪公假 4h；平日 / 公假上班一点都没进
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.Weekday));         // 平日一点都没进
+        Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.PublicHoliday)); // 只有带薪公假 4h；公假上班一点都没进
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.PersonalLeave));
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.HolidayLeave));
         Assert.Equal(120, plan.CashOutTransferMinutes);
@@ -369,6 +376,9 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("Personal Leave Pay", aus.Suggestions.PersonalLeaveUid);
         // 线上曾被建议成 Annual Leave Loading（附加津贴）——年假必须是休假期间的工资，不是 Loading / Unused。
         Assert.Equal("Annual Leave Pay", aus.Suggestions.HolidayLeaveUid);
+        // PUBLIC HOLIDAY (x2) / (x2.25) 两档并列：公共假期不猜，也不会被「年假」认走。
+        Assert.Null(aus.Suggestions.PublicHolidayUid);
+        Assert.Null(aus.Suggestions.PublicHolidayCasualUid);
 
         // Investment：周六 x1.2 / x1.25、周日 x1.4 / x1.5 都并列 → 都不猜；Back Pay 是 Salary 型，不会被当成平日。
         _api.Categories = RealCategories(australian: false);
@@ -458,6 +468,63 @@ public sealed class MyobTimesheetTests : IDisposable
         _api.Categories = StandardCategories().ToList();
         var missing = (await Categories().GetAsync(Inv, true, CancellationToken.None)).Data!;
         Assert.Equal([MyobPayCategoryKeys.SaturdayCasual, MyobPayCategoryKeys.SundayCasual], missing.MissingKeys);
+        Assert.True(missing.Complete);
+    }
+
+    [Fact]
+    public async Task 类别映射_公共假期两项可选_建议只认Public_Holiday且临时工另含Casual_年假不被认走_保存读回_不影响完整度()
+    {
+        await SeedConnectionsAsync();
+        await SaveCompleteMappingAsync();
+        // 名字是 Public Holiday Pay：不能被「年假」的 holiday pay 规则认走，年假仍是 Holiday Leave Pay。
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-ph", "Public Holiday Pay", "Hourly"),
+            new MyobWageCategoryRecord("cat-ph-c", "Public Holiday Pay Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var basic = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.True(basic.Complete);
+        Assert.Equal(5, basic.MappedCount); // 公共假期两项不计入必填
+        Assert.Null(basic.Mapping.PublicHolidayUid);
+        Assert.Equal("cat-ph", basic.Suggestions.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", basic.Suggestions.PublicHolidayCasualUid);
+
+        // 全新账套：没有设过年假时，年假也只会建议 Holiday Leave Pay，不会选到 Public Holiday Pay。
+        await _db.Deleteable<MyobPayCategoryMapping>().Where(item => item.ConnectionGuid == Inv).ExecuteCommandAsync();
+        var fresh = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("cat-holiday", fresh.Suggestions.HolidayLeaveUid);
+        Assert.Equal("cat-ph", fresh.Suggestions.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", fresh.Suggestions.PublicHolidayCasualUid);
+
+        // 设上公共假期两项：存取一致，必填计数仍是 5，已设置的项不再给建议。
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            PublicHolidayUid = "cat-ph", PublicHolidayCasualUid = "cat-ph-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var full = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("cat-ph", full.Mapping.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", full.Mapping.PublicHolidayCasualUid);
+        Assert.Equal(5, full.MappedCount);
+        Assert.True(full.Complete);
+        Assert.Null(full.Suggestions.PublicHolidayUid);
+
+        // 公共假期与平日选同一个类别：拒绝；不存在的类别：拒绝。
+        var duplicate = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", PublicHolidayUid = "cat-base",
+        }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryDuplicate, duplicate.ErrorCode);
+        var ghost = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto { PublicHolidayCasualUid = "cat-ghost" }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryNotFound, ghost.ErrorCode);
+
+        // 公共假期类别在 MYOB 里被删：标出缺失项，但必填项仍完整。
+        _api.Categories = StandardCategories().ToList();
+        var missing = (await Categories().GetAsync(Inv, true, CancellationToken.None)).Data!;
+        Assert.Equal([MyobPayCategoryKeys.PublicHoliday, MyobPayCategoryKeys.PublicHolidayCasual], missing.MissingKeys);
         Assert.True(missing.Complete);
     }
 
@@ -832,6 +899,73 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
+    public async Task 预览_公共假期按员工类型走各自类别_汇总列合计_没映射时拦截_平日不再含公假()
+    {
+        await SeedConnectionsAsync();
+        // 只映射必填 5 项（公共假期两项没设）
+        await SaveCompleteMappingAsync();
+        await SeedStoreAsync("1014", "Kawana", Inv, locked: true,
+            // 公假上班 8h + 带薪公假 7.6h + 平日 8h
+            Emp("u-cas", "Cas", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-27", PayrollBucket.PublicHoliday, 8)],
+                holidayPay: [Leave("2026-10-28", 7.6)], employmentType: "Casual"),
+            Emp("u-ft", "Fran", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-27", PayrollBucket.PublicHoliday, 8)],
+                holidayPay: [Leave("2026-10-28", 7.6)], employmentType: "FullTime"),
+            // 没有任何公假工时：不受公共假期两项没设的影响
+            Emp("u-plain", "Plain", Rate("Transfer"), [Work("2026-10-26", PayrollBucket.Weekday, 8)], employmentType: "PartTime"));
+        foreach (var user in new[] { "u-cas", "u-ft", "u-plain" })
+        {
+            await SeedUserAsync(user, user, "1014");
+            await BindAsync(user);
+            _source.Pairs.Add((user, "1014"));
+        }
+
+        var dto = await PreviewInvAsync();
+        var cas = RowOf(dto, "u-cas");
+        Assert.Equal(MyobPreviewStatuses.Blocked, cas.Status);
+        Assert.Contains(cas.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.PublicHolidayCasual);
+        Assert.DoesNotContain(cas.Blockers, item => item.Ref == MyobPayCategoryKeys.PublicHoliday);
+        var ft = RowOf(dto, "u-ft");
+        Assert.Equal(MyobPreviewStatuses.Blocked, ft.Status);
+        Assert.Contains(ft.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.PublicHoliday);
+        Assert.DoesNotContain(ft.Blockers, item => item.Ref == MyobPayCategoryKeys.PublicHolidayCasual);
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(dto, "u-plain").Status);
+
+        // 汇总：平日只剩 8h，公共假期 = 公假上班 + 带薪公假。
+        Assert.Equal(8m, ft.Pushed.Weekday);
+        Assert.Equal(15.6m, ft.Pushed.PublicHoliday);
+        Assert.Equal(15.6m, cas.Pushed.PublicHoliday);
+        Assert.Equal(["publicHoliday", "weekday"], ft.Detail.Pushed.Select(item => item.Key).Order().ToArray());
+        Assert.Equal(["publicHolidayCasual", "weekday"], cas.Detail.Pushed.Select(item => item.Key).Order().ToArray());
+        Assert.Equal(23.6m, ft.PushedTotal);
+
+        // 必填项齐全 = 就绪卡完整，不因为公共假期两项没设而变成「不完整」。
+        Assert.Equal(5, dto.Readiness.CategoryMappedCount);
+        Assert.True(dto.Readiness.CategoryComplete);
+
+        // 补上公共假期两项映射：拦截消失，网格行带 MYOB 类别名。
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-ph", "Public Holiday", "Hourly"),
+            new MyobWageCategoryRecord("cat-ph-c", "Public Holiday Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            PublicHolidayUid = "cat-ph", PublicHolidayCasualUid = "cat-ph-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var ready = await PreviewInvAsync();
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(ready, "u-cas").Status);
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(ready, "u-ft").Status);
+        Assert.Equal("Public Holiday Casual", RowOf(ready, "u-cas").Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.PublicHolidayCasual).Label);
+        Assert.Equal("Public Holiday", RowOf(ready, "u-ft").Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.PublicHoliday).Label);
+    }
+
+    [Fact]
     public async Task 预览_将推送网格带MYOB类别名_缓存里有才有_没有为空()
     {
         await SeedMainScenarioAsync();
@@ -990,14 +1124,14 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
-    public async Task 预览_提示项_年假折现_公假价不一致_生日换档_低于最低时薪()
+    public async Task 预览_提示项_年假折现_生日换档_低于最低时薪_公假价不再提示()
     {
         await SeedMainScenarioAsync();
         await SeedStoreAsync("1030", "Hints", Inv, locked: true,
             // 年假 7.6h + 折现 8h；全转账所以折现也「转账」但不推送
             Emp("u-yuki", "Yuki", Rate("Transfer"),
                 [Work("2026-10-26", PayrollBucket.Weekday, 8)], annual: [Leave("2026-10-27", 7.6)], cashOut: [Leave("2026-10-28", 8)]),
-            // 公假上班 + 公假价（60）与平日价（30）不一致
+            // 公假上班 + 公假价（60）与平日价（30）不一致：公假现在有自己的 MYOB 类别，不再提示「公假价与平日价不一致」
             Emp("u-hol", "Hol", Rate("Transfer", weekday: 30m, holiday: 60m),
                 [Work("2026-10-27", PayrollBucket.PublicHoliday, 8)]),
             // 未成年：生日 2026-10-20 满 17 岁，时薪记录 2026-07-01 生效（早于生日）→ 提示改时薪
@@ -1022,7 +1156,7 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(8m, RowOf(dto, "u-yuki").Pushed.Weekday);
         Assert.Equal(8m, RowOf(dto, "u-yuki").Detail.AnnualCashOutTransferHours); // 全转账：折现占用 8h 额度但不推送
         Assert.True(RowOf(dto, "u-yuki").Detail.CheckOk, RowOf(dto, "u-yuki").Detail.CheckMessage);
-        Assert.Equal([MyobHintCodes.PublicHolidayRateMismatch], CodesOf("u-hol"));
+        Assert.Empty(CodesOf("u-hol"));
         Assert.Contains(MyobHintCodes.BirthdayReview, CodesOf("u-teen"));
         Assert.Contains("2026-10-20", dto.Hints.Single(hint => hint.Code == MyobHintCodes.BirthdayReview).Message, StringComparison.Ordinal);
         Assert.Contains(MyobHintCodes.BelowMinimumRate, CodesOf("u-low"));

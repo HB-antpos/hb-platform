@@ -159,7 +159,7 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         var mapping = await _categories.GetSavedMappingAsync(connectionGuid);
         var mappingByKey = MyobPayCategoryService.ToDictionary(mapping);
         var categoryNames = _categories.GetCachedCategoryNames(connectionGuid);
-        // 完整度只看必填 5 项；临时工周末两项可选（真有临时工周末工时又没设，会在员工行上拦截）。
+        // 完整度只看必填 5 项；临时工周末与公共假期四项可选（真有对应工时又没设，会在员工行上拦截）。
         dto.Readiness.CategoryMappedCount = mappingByKey.Count(
             pair => pair.Value is not null && MyobPayCategoryKeys.Required.Contains(pair.Key));
         dto.Readiness.CategoryComplete = dto.Readiness.CategoryMappedCount == MyobPayCategoryKeys.Required.Length;
@@ -537,6 +537,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
                 SumMinutes(mine, MyobPayCategoryKeys.Saturday) + SumMinutes(mine, MyobPayCategoryKeys.SaturdayCasual));
             row.Pushed.Sunday = MyobTimesheetPlanner.Hours(
                 SumMinutes(mine, MyobPayCategoryKeys.Sunday) + SumMinutes(mine, MyobPayCategoryKeys.SundayCasual));
+            row.Pushed.PublicHoliday = MyobTimesheetPlanner.Hours(
+                SumMinutes(mine, MyobPayCategoryKeys.PublicHoliday) + SumMinutes(mine, MyobPayCategoryKeys.PublicHolidayCasual));
             row.Pushed.PersonalLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.PersonalLeave));
             row.Pushed.HolidayLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.HolidayLeave));
             row.PushedTotal = MyobTimesheetPlanner.Hours(pushedMinutes);
@@ -657,13 +659,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             }
         }
 
-        var hasHolidayHours = mineItems.Any(item => item.Kind is MyobWorkKind.PublicHolidayWork or MyobWorkKind.PublicHolidayPay);
-        if (hasHolidayHours && rate is not null && rate.PayMode != PayrollCalculator.PayModeCash
-            && rate.TransferPublicHolidayRate != rate.TransferWeekdayRate)
-        {
-            Add(MyobHintCodes.PublicHolidayRateMismatch,
-                $"{name} 本期有公假工时，但我方公假价与平日价不一致：公假按平日类别推送，请新建时薪记录对齐。");
-        }
+        // 公假工时现在有自己的 MYOB 类别（公共假期），公假价在 MYOB 里按该类别计，
+        // 不再「按平日类别推送」，所以「公假价与平日价不一致」的提示（PUBLIC_HOLIDAY_RATE_MISMATCH）不再产生；代码保留，旧数据与前端文案不受影响。
 
         if (row.CashOutHours > 0)
         {
@@ -854,6 +851,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         MyobPayCategoryKeys.Sunday => "周日",
         MyobPayCategoryKeys.SaturdayCasual => "周六（临时工）",
         MyobPayCategoryKeys.SundayCasual => "周日（临时工）",
+        MyobPayCategoryKeys.PublicHoliday => "公共假期",
+        MyobPayCategoryKeys.PublicHolidayCasual => "公共假期（临时工）",
         MyobPayCategoryKeys.PersonalLeave => "病假",
         _ => "年假",
     };

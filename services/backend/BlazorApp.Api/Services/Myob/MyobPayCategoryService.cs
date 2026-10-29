@@ -22,7 +22,7 @@ public interface IMyobPayCategoryService
 
 /// <summary>
 /// Timesheet 工资类别映射（方案第 8 节）：我方 5 档转账工时 → MYOB 工资类别；
-/// 另有 2 项可选：临时工（Casual）的周六 / 周日，与全职 / 兼职的周末是不同的类别。
+/// 另有 4 项可选：临时工（Casual）的周六 / 周日，以及全职 / 兼职与临时工各自的公共假期，它们与平日、全职 / 兼职的周末是不同的类别。
 /// 类别列表实时从 MYOB 读（缓存 10 分钟，「重新读取」绕过缓存）；库里只存 UID，名称不落库。
 /// 名称相近的类别会作为「建议」预填，但必须人工保存才生效。
 /// </summary>
@@ -133,6 +133,8 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
         row.SundayUid = normalized.SundayUid;
         row.SaturdayCasualUid = normalized.SaturdayCasualUid;
         row.SundayCasualUid = normalized.SundayCasualUid;
+        row.PublicHolidayUid = normalized.PublicHolidayUid;
+        row.PublicHolidayCasualUid = normalized.PublicHolidayCasualUid;
         row.PersonalLeaveUid = normalized.PersonalLeaveUid;
         row.HolidayLeaveUid = normalized.HolidayLeaveUid;
         row.UpdatedAt = now;
@@ -173,7 +175,7 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
             .Where(pair => pair.Value is not null && !known.Contains(pair.Value))
             .Select(pair => pair.Key)
             .ToList();
-        // 已设置但 MYOB 里找不到的项不算「已映射」；完整度只看必填 5 项（临时工周末两项可选）。
+        // 已设置但 MYOB 里找不到的项不算「已映射」；完整度只看必填 5 项（临时工周末、公共假期四项可选）。
         var effective = ToDictionary(mapping)
             .Where(pair => MyobPayCategoryKeys.Required.Contains(pair.Key)
                 && pair.Value is not null && known.Contains(pair.Value))
@@ -199,7 +201,7 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
 
     /// <summary>
     /// 按名称相近给未设置的项推荐类别（已设置的项不给建议）：
-    /// 周六 / 周日 看名称里的 Saturday / Sunday（不含 Casual 字样）；临时工周六 / 周日 要求名称同时含 Saturday / Sunday 与 Casual；病假 = Personal Leave（Pay）/ Sick；年假 = Annual / Holiday Leave（Pay）；
+    /// 周六 / 周日 看名称里的 Saturday / Sunday（不含 Casual 字样）；临时工周六 / 周日 要求名称同时含 Saturday / Sunday 与 Casual；公共假期 看名称里的 Public Holiday（临时工项另含 Casual）；病假 = Personal Leave（Pay）/ Sick；年假 = Annual / Holiday Leave（Pay）；
     /// 平日 优先 Base Hourly，其次 Ordinary，再次其他不含周末 / 假期 / 加班字样的计时类别。同一个类别不会被推荐给两项。
     /// 两条保守规则（线上真实账套暴露的问题）：
     /// ① 只推荐计时（非 Salary）类别——Salary 型类别不能记工时；
@@ -272,6 +274,20 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
             suggestion.SundayUid = Pick(item => Has(item, "sunday") && !Has(item, "casual") ? 10 : 0);
         }
 
+        // 公共假期：名称含 Public Holiday；临时工项还要含 Casual，全职 / 兼职项排除带 Casual 的。
+        // 排在年假之前挑，免得 Public Holiday Pay 被年假的 holiday pay 规则认走。
+        if (current.PublicHolidayCasualUid is null)
+        {
+            suggestion.PublicHolidayCasualUid = Pick(item =>
+                IsLeaveSideCategory(item) ? 0 : Has(item, "public holiday") && Has(item, "casual") ? 10 : 0);
+        }
+
+        if (current.PublicHolidayUid is null)
+        {
+            suggestion.PublicHolidayUid = Pick(item =>
+                IsLeaveSideCategory(item) ? 0 : Has(item, "public holiday") && !Has(item, "casual") ? 10 : 0);
+        }
+
         if (current.PersonalLeaveUid is null)
         {
             suggestion.PersonalLeaveUid = Pick(item =>
@@ -286,7 +302,7 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
         {
             // MYOB 澳洲账套的休年假类别叫 Annual Leave Pay；新西兰 / 旧账套可能叫 Holiday Leave Pay。两者并列时同样不猜。
             suggestion.HolidayLeaveUid = Pick(item =>
-                IsLeaveSideCategory(item) ? 0
+                IsLeaveSideCategory(item) || Has(item, "public") ? 0
                 : Has(item, "annual leave pay") || Has(item, "holiday leave pay") ? 20
                 : Has(item, "holiday leave") ? 15
                 : Has(item, "annual leave") ? 12
@@ -348,6 +364,8 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
         SundayUid = row.SundayUid,
         SaturdayCasualUid = row.SaturdayCasualUid,
         SundayCasualUid = row.SundayCasualUid,
+        PublicHolidayUid = row.PublicHolidayUid,
+        PublicHolidayCasualUid = row.PublicHolidayCasualUid,
         PersonalLeaveUid = row.PersonalLeaveUid,
         HolidayLeaveUid = row.HolidayLeaveUid,
     };
@@ -362,6 +380,8 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
             SundayUid = Clean(mapping.SundayUid),
             SaturdayCasualUid = Clean(mapping.SaturdayCasualUid),
             SundayCasualUid = Clean(mapping.SundayCasualUid),
+            PublicHolidayUid = Clean(mapping.PublicHolidayUid),
+            PublicHolidayCasualUid = Clean(mapping.PublicHolidayCasualUid),
             PersonalLeaveUid = Clean(mapping.PersonalLeaveUid),
             HolidayLeaveUid = Clean(mapping.HolidayLeaveUid),
         };
@@ -375,6 +395,8 @@ public sealed class MyobPayCategoryService : IMyobPayCategoryService
         [MyobPayCategoryKeys.Sunday] = mapping.SundayUid,
         [MyobPayCategoryKeys.SaturdayCasual] = mapping.SaturdayCasualUid,
         [MyobPayCategoryKeys.SundayCasual] = mapping.SundayCasualUid,
+        [MyobPayCategoryKeys.PublicHoliday] = mapping.PublicHolidayUid,
+        [MyobPayCategoryKeys.PublicHolidayCasual] = mapping.PublicHolidayCasualUid,
         [MyobPayCategoryKeys.PersonalLeave] = mapping.PersonalLeaveUid,
         [MyobPayCategoryKeys.HolidayLeave] = mapping.HolidayLeaveUid,
     };
