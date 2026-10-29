@@ -105,7 +105,14 @@
     "all": "All",
     "apply": "Show {{count}} staff",
     "applyUnknown": "Show results",
-    "optionsFailed": "Could not load the filter options. Try again."
+    "optionsFailed": "Could not load the filter options. Try again.",
+    "storePageTitle": "Choose store",
+    "storeCount": "{{count}} stores",
+    "storeSearch": "Search store name or code",
+    "myStores": "My stores",
+    "storeEmpty": "No matching stores",
+    "clearStore": "Clear store",
+    "roleHint": "Only roles below your level"
   },
   "rolesList": {
     "noAccess": "You don't have access to the role list",

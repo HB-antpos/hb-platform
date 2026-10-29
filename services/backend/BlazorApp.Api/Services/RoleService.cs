@@ -736,6 +736,49 @@ namespace BlazorApp.Api.Services
         }
 
         /// <summary>
+        /// 获取有效等级严格低于指定账号等级的活跃角色。
+        /// 口径与改写权限（ValidateTargetLevelAsync / ValidateRoleGrantLevelAsync）一致：
+        /// 角色有效等级 &lt; 操作者等级才可见；操作者没有有效角色（等级 0）时返回空列表。
+        /// </summary>
+        public async Task<ApiResponse<List<RoleDto>>> GetActiveRolesBelowUserLevelAsync(string userGuid)
+        {
+            try
+            {
+                var db = _context.Db;
+                var actorLevel = await UserAccessMutationSecurity.GetUserLevelAsync(db, userGuid);
+
+                var roles = await db.Queryable<Role>()
+                    .Where(r => r.IsActive && !r.IsDeleted)
+                    .OrderBy(r => r.RoleName)
+                    .ToListAsync();
+
+                var visible = roles
+                    .Where(r => UserAccessMutationSecurity.EffectiveRoleLevel(r.RoleName, r.Level) < actorLevel)
+                    .Select(r => new RoleDto
+                    {
+                        RoleGUID = r.RoleGUID,
+                        RoleName = r.RoleName,
+                        Description = r.Description,
+                        IsActive = r.IsActive,
+                        Level = r.Level,
+                        CreatedAt = r.CreatedAt,
+                        UpdatedAt = r.UpdatedAt ?? r.CreatedAt,
+                    })
+                    .ToList();
+
+                return ApiResponse<List<RoleDto>>.OK(visible, "获取活跃角色成功");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取低于当前等级的活跃角色失败");
+                return ApiResponse<List<RoleDto>>.Error(
+                    "获取活跃角色失败",
+                    "GET_ACTIVE_ROLES_FAILED"
+                );
+            }
+        }
+
+        /// <summary>
         /// 根据GUID获取角色详情
         /// </summary>
         public async Task<ApiResponse<RoleDetailDto>> GetRoleByGuidAsync(string roleGuid)

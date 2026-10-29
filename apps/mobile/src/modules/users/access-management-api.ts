@@ -85,6 +85,14 @@ function readOptionalBoolean(
   return typeof value === "boolean" ? value : undefined;
 }
 
+function readOptionalNumber(
+  source: Record<string, unknown>,
+  ...keys: string[]
+) {
+  const value = readValue(source, ...keys);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function readRequiredBoolean(
   source: Record<string, unknown>,
   ...keys: string[]
@@ -132,11 +140,13 @@ function normalizeAccessRole(value: unknown): UserAccessRole {
   if (!isRecord(value)) throw new Error(INVALID_RESPONSE_MESSAGE);
   const description = readOptionalString(value, "description", "Description");
   const isActive = readOptionalBoolean(value, "isActive", "IsActive");
+  const level = readOptionalNumber(value, "level", "Level");
   return {
     roleGUID: readRequiredString(value, "roleGUID", "RoleGUID"),
     roleName: readRequiredString(value, "roleName", "RoleName"),
     ...(description ? { description } : {}),
     ...(isActive === undefined ? {} : { isActive }),
+    ...(level === undefined ? {} : { level }),
   };
 }
 
@@ -379,6 +389,18 @@ export async function fetchUserAccessPermissionAccess(userGuid: string, config?:
 
 export async function fetchAccessRoleCatalog(config?: AxiosRequestConfig) {
   const response = await apiClient.get("/Roles/active", config);
+  return normalizeAccessRoleList(response.data);
+}
+
+/**
+ * 人员列表角色筛选专用目录：只含等级严格低于当前登录人的角色（管理员仍是全部）。
+ * 与分配角色用的 fetchAccessRoleCatalog 分开：后者对店长仍只给员工角色，不能直接放宽。
+ */
+export async function fetchBelowActorRoleCatalog(config?: AxiosRequestConfig) {
+  const response = await apiClient.get("/Roles/active", {
+    ...config,
+    params: { ...config?.params, scope: "below-actor" },
+  });
   return normalizeAccessRoleList(response.data);
 }
 

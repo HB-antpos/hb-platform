@@ -38,6 +38,12 @@ namespace BlazorApp.Api.Interfaces
         Task<ApiResponse<List<RoleDto>>> GetActiveRolesAsync();
 
         /// <summary>
+        /// 获取有效等级严格低于指定账号等级的活跃角色（用于人员列表的角色筛选）。
+        /// </summary>
+        /// <param name="userGuid">当前操作者</param>
+        Task<ApiResponse<List<RoleDto>>> GetActiveRolesBelowUserLevelAsync(string userGuid);
+
+        /// <summary>
         /// 根据GUID获取角色详情
         /// </summary>
         /// <param name="roleGuid">角色GUID</param>

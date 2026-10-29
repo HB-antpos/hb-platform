@@ -6,6 +6,7 @@ import {
   assignUserAccessStores as assignExistingUserAccessStores,
   assignUserDirectPermissions as assignExistingUserDirectPermissions,
   fetchAccessRoleCatalog as fetchExistingAccessRoleCatalog,
+  fetchBelowActorRoleCatalog as fetchExistingBelowActorRoleCatalog,
   fetchAccessStoreCatalog as fetchExistingAccessStoreCatalog,
   fetchUserAccessPermissionAccess as fetchExistingUserAccessPermissionAccess,
   fetchUserAccessRoles as fetchExistingUserAccessRoles,
@@ -645,6 +646,11 @@ export function fetchAccessStoreCatalog(actorGuid: string, signal?: AbortSignal)
 
 export function fetchAccessRoleCatalog(actorGuid: string, signal?: AbortSignal) {
   return fetchExistingAccessRoleCatalog(accountBoundRequestConfig(actorGuid, signal));
+}
+
+/** 人员列表角色筛选用：等级严格低于当前登录人的角色。 */
+export function fetchRoleFilterCatalog(actorGuid: string, signal?: AbortSignal) {
+  return fetchExistingBelowActorRoleCatalog(accountBoundRequestConfig(actorGuid, signal));
 }
 
 export function fetchUserAccessStores(userGuid: string, actorGuid: string, signal?: AbortSignal) {

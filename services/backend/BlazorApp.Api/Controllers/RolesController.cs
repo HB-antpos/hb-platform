@@ -19,6 +19,9 @@ namespace BlazorApp.Api.Controllers
     [Authorize]
     public class RolesController : ControllerBase
     {
+        /// <summary>角色目录范围：只列等级严格低于当前登录人的角色（人员列表角色筛选用）。</summary>
+        public const string ActiveRolesScopeBelowActor = "below-actor";
+
         private readonly IRoleService _roleService;
         private readonly ILogger<RolesController> _logger;
 
@@ -112,7 +115,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         [HttpGet("active")]
         [Authorize]
-        public async Task<IActionResult> GetActiveRoles()
+        public async Task<IActionResult> GetActiveRoles([FromQuery] string? scope = null)
         {
             try
             {
@@ -157,6 +160,14 @@ namespace BlazorApp.Api.Controllers
                 if (!hasFullCatalogAccess && !isStoreManager)
                 {
                     return Forbid();
+                }
+
+                // scope=below-actor：人员列表的角色筛选专用，列出等级严格低于当前登录人的全部角色
+                // （与改写权限同一规则）；管理员仍看全部。默认目录（分配角色等场景）行为不变。
+                if (string.Equals(scope, ActiveRolesScopeBelowActor, StringComparison.OrdinalIgnoreCase)
+                    && !isAdmin)
+                {
+                    return Ok(await _roleService.GetActiveRolesBelowUserLevelAsync(currentUserGuid));
                 }
 
                 var result = await _roleService.GetActiveRolesAsync();
