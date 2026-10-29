@@ -23,16 +23,10 @@ public sealed class MyobOptions
     public bool TimesheetPushEnabled { get; set; }
 
     /// <summary>
-    /// Timesheet 写入探针（临时，实测后删除）只对这一个连接生效；空 = 探针关闭。
-    /// 值是公司文件的 BusinessId（MYOB 的 cf_uri，一个 GUID，库里唯一）。只在实测窗口内配置（Myob__WriteProbeBusinessId），测完立刻从服务器 .env 删除。方案 docs/plans/2026-10-29-myob-timesheet-push.md 第 3 节。
+    /// Timesheet 推送灰度白名单：逗号分隔的公司文件连接 GUID（Myob__TimesheetPushConnectionGuids）。
+    /// **空 = 全部禁止**（即使总闸已开）；<c>*</c> = 全部公司文件；否则只有列出的公司文件允许推送 / 撤销。灰度期只放一个公司文件。
     /// </summary>
-    public string WriteProbeBusinessId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 探针只允许写这一张 MYOB 员工卡的 Employee ID（DisplayID，如 0086，Myob__WriteProbeEmployeeDisplayId）；空 = 探针关闭。
-    /// 探针会在员工名册里按它查出唯一一张卡，并且只接受「姓 test、名 test、启用中」的专用测试卡，其他卡一律拒绝。
-    /// </summary>
-    public string WriteProbeEmployeeDisplayId { get; set; } = string.Empty;
+    public string TimesheetPushConnectionGuids { get; set; } = string.Empty;
 
     /// <summary>
     /// 空格分隔。公司文件（/{cf_uri}/、/Info）、公司设置（只读，含 GET /Company，授权后校验公司名与 ABN 用它）、

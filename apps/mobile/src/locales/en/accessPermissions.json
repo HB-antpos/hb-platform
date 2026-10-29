@@ -285,6 +285,10 @@
       "name": "Email payslip PDF",
       "description": "Email a payslip as a MYOB default-style PDF attachment to the employee."
     },
+    "Myob.Timesheet.Push": {
+      "name": "Push hours to MYOB",
+      "description": "Push a pay period's transfer hours to the MYOB Timesheet and undo a pushed batch, on the web admin (writes live MYOB data)."
+    },
     "OrderFront": {
       "name": "Access ordering portal",
       "description": "Open the web ordering portal and the app's order pages. Core permission for the Ordering staff role."

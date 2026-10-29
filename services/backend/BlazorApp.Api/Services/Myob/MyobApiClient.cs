@@ -60,16 +60,20 @@ public sealed record MyobTimesheetStatus(bool HasEntries, bool HasProcessedEntri
 /// <summary>Timesheet 里的一天：Date 保留 MYOB 返回的原文（用来核对日期格式），Hours 保留原有小数位。</summary>
 public sealed record MyobTimesheetEntryRecord(string? Date, decimal? Hours, bool Processed);
 
-/// <summary>Timesheet 的一行（一个工资类别）：只取类别 UID 与每天的工时，不取 Job / Notes。</summary>
-public sealed record MyobTimesheetLineRecord(string? CategoryUid, IReadOnlyList<MyobTimesheetEntryRecord> Entries);
+/// <summary>
+/// Timesheet 的一行（一个工资类别）：只取类别 UID 与每天的工时；Job / Notes 内容不保存，只用 HasExtras 标出「这一行带了它们」
+/// （推送前快照还原不了这两项，所以带它们的行覆盖前必须由人确认）。
+/// </summary>
+public sealed record MyobTimesheetLineRecord(
+    string? CategoryUid, IReadOnlyList<MyobTimesheetEntryRecord> Entries, bool HasExtras = false);
 
-/// <summary>PUT Timesheet 的一天。Date 原样写进请求体，由调用方决定格式（yyyy-MM-dd 或带时间）。</summary>
+/// <summary>PUT Timesheet 的一天。Date 原样写进请求体（实测 yyyy-MM-dd 被接受，读回为 yyyy-MM-ddT00:00:00）。</summary>
 public sealed record MyobTimesheetPutEntry(string Date, decimal Hours);
 
 public sealed record MyobTimesheetPutLine(string CategoryUid, IReadOnlyList<MyobTimesheetPutEntry> Entries);
 
 /// <summary>
-/// PUT / DELETE Timesheet 的结果：HTTP 状态码与 MYOB 错误类型名 / 错误码（只取 Errors[0].Name 与 Errors[0].ErrorCode，不回显响应体）。
+/// PUT Timesheet 的结果：HTTP 状态码与 MYOB 错误类型名 / 错误码（只取 Errors[0].Name 与 Errors[0].ErrorCode，不回显响应体）。
 /// 非 2xx 不抛异常，由调用方判断。
 /// </summary>
 public sealed record MyobTimesheetPutResult(int StatusCode, string? ErrorName, string? ErrorCode = null)
@@ -141,9 +145,9 @@ public interface IMyobApiClient
         throw new NotSupportedException();
 
     /// <summary>
-    /// PUT /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：**写 MYOB**。
-    /// 目前只有临时的写入探针（Myob__WriteProbe*，只对一个连接、一张测试员工卡）调用；正式推送在探针实测、方案定稿之后另批实现。
-    /// 默认实现抛 NotSupportedException。
+    /// PUT /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&amp;EndDate=：**写 MYOB**，整体覆盖该员工该日期区间（2026-10-30 实测）。
+    /// 唯一调用方是 <c>MyobTimesheetPushService</c>（推送与撤销）；客户端层再看一眼总闸 Myob__TimesheetPushEnabled，
+    /// 关闭时不发任何请求、返回状态码 0 / PUSH_DISABLED（双保险，防止将来别的代码路径绕过服务层）。默认实现抛 NotSupportedException。
     /// </summary>
     Task<MyobTimesheetPutResult> PutTimesheetAsync(
         string businessId,
@@ -153,14 +157,6 @@ public interface IMyobApiClient
         DateTime endDate,
         IReadOnlyList<MyobTimesheetPutLine> lines,
         CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
-
-    /// <summary>
-    /// DELETE /{cf_uri}/Payroll/Timesheet/{employeeUid}?StartDate=&EndDate=：**写 MYOB**。官方文档只列了 DELETE，没说删什么、已发薪记录能不能删，
-    /// 所以目前只有临时的写入探针调用，实测后才决定正式推送 / 撤销用不用它。默认实现抛 NotSupportedException。
-    /// </summary>
-    Task<MyobTimesheetPutResult> DeleteTimesheetAsync(
-        string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 }
 
@@ -679,7 +675,11 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
                         }
                     }
 
-                    result.Add(new MyobTimesheetLineRecord(categoryUid, entries));
+                    var hasJob = line.TryGetProperty("Job", out var job) && job.ValueKind == JsonValueKind.Object;
+                    var hasNotes = line.TryGetProperty("Notes", out var notes)
+                        && notes.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(notes.GetString());
+                    result.Add(new MyobTimesheetLineRecord(categoryUid, entries, hasJob || hasNotes));
                 }
             }
 
@@ -700,6 +700,11 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         IReadOnlyList<MyobTimesheetPutLine> lines,
         CancellationToken cancellationToken)
     {
+        if (!_options.TimesheetPushEnabled)
+        {
+            return new MyobTimesheetPutResult(0, "PUSH_DISABLED");
+        }
+
         // 属性名按 MYOB 的 PascalCase 原样写（不套 Web 默认的 camelCase）。
         var payload = new
         {
@@ -715,19 +720,6 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         using var request = CreateTimesheetRequest(HttpMethod.Put, businessId, accessToken, employeeUid, startDate, endDate);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
 
-        using var response = await SendAsync(request, cancellationToken);
-        return await ReadWriteResultAsync(response, cancellationToken);
-    }
-
-    public async Task<MyobTimesheetPutResult> DeleteTimesheetAsync(
-        string businessId,
-        string accessToken,
-        string employeeUid,
-        DateTime startDate,
-        DateTime endDate,
-        CancellationToken cancellationToken)
-    {
-        using var request = CreateTimesheetRequest(HttpMethod.Delete, businessId, accessToken, employeeUid, startDate, endDate);
         using var response = await SendAsync(request, cancellationToken);
         return await ReadWriteResultAsync(response, cancellationToken);
     }

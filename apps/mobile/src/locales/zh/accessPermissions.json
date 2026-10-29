@@ -285,6 +285,10 @@
       "name": "邮件发送工资单 PDF",
       "description": "把 MYOB 默认样式工资单 PDF 以邮件发给员工"
     },
+    "Myob.Timesheet.Push": {
+      "name": "推送工时到 MYOB",
+      "description": "Web 页面 /pos-admin/myob「推送与对账」页签 - 把工资周期的转账工时推送到 MYOB Timesheet，并可按批次撤销（会写 MYOB 生产数据）"
+    },
     "OrderFront": {
       "name": "前台订货",
       "description": "Web 订货前台与移动端「订货单」- 进入前台订货入口（Order / 订货员角色核心权限）"
