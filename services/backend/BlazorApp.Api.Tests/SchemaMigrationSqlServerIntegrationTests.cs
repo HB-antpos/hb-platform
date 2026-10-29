@@ -4142,6 +4142,51 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单查看记录表与权限码_新表_权限入库不授权_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54370, missing.Number);
+
+        // 权限表存在时：两个新权限码幂等写入，重复执行不重复插入；不触碰角色权限表。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        Assert.Equal(2, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Myob.Payslip.ViewManagedStore', N'Myob.Payslip.ViewAllStores') AND IsDeleted = 0"));
+
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipViewLog (LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, MyobEmployeeUid, PaymentDate, ViewedAt)
+            VALUES (N'l-1', N'u-actor', N'c-1', NULL, N'uid-1', '2026-10-23', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayslipViewLog WHERE LogGuid = N'l-1'"));
+
+        // 查询索引缺失 → 54373；列宽漂移 → 54371（选不在索引里的 ActorUserGuid：SQL Server 不允许修改索引依赖的列）。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobPayslipViewLog_Connection_Employee_ViewedAt ON dbo.MyobPayslipViewLog;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54373, noIndex.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN ActorUserGuid nvarchar(20) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54371, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
