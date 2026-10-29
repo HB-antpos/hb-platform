@@ -2,8 +2,12 @@ import {
   buildInvoiceDetailsGridRequest,
   buildInvoiceGridRequest,
   normalizeActiveLocalSuppliersResponse,
+  normalizeBarcodeMatchedProduct,
+  normalizeCheckProductsResponse,
   normalizeInvoiceDetailsGridResponse,
+  normalizeInvoiceDetailsResponse,
   normalizeInvoiceGridResponse,
+  normalizeProductsByBarcodeResponse,
 } from "./api";
 import { getInvoiceInboundStatusLabel } from "./types";
 
@@ -244,3 +248,65 @@ assertDeepEqual(
   ],
   "active suppliers also normalize direct array payloads"
 );
+
+// ---- 一期新增：与 Web 对齐的明细字段、全量明细、匹配商品、检测结果 ----
+const fullDetails = normalizeInvoiceDetailsResponse([
+  {
+    DetailGUID: "d-1",
+    ItemNumber: "SB-5001",
+    Barcode: "9300001234567",
+    AdditionalBarcodes: ["9300001234574", "", 5],
+    ProductType: 2,
+    IsCreatedByThisInvoice: true,
+    ExistingProductCount: "1",
+    BarcodeStatus: 1,
+    BarcodeMatchCount: "1",
+    ActivityType: 2,
+    DiscountRate: "0.1",
+    AutoPricing: true,
+    PricingFloatRate: "2",
+    NewAutoRetailPrice: "24.99",
+    IsSpecialProduct: 0,
+    StoreIsAutoPricing: null,
+  },
+  { detailGUID: "d-2" },
+]);
+assertEqual(fullDetails.length, 2, "full details payload keeps all rows");
+assertDeepEqual(fullDetails[0]?.additionalBarcodes, ["9300001234574"], "additional barcodes drop blanks and non-strings");
+assertEqual(fullDetails[0]?.productType, 2, "product type normalized");
+assertEqual(fullDetails[0]?.isCreatedByThisInvoice, true, "created-by-this-invoice flag normalized");
+assertEqual(fullDetails[0]?.existingProductCount, 1, "existing product count normalized");
+assertEqual(fullDetails[0]?.barcodeMatchCount, 1, "barcode match count normalized");
+assertEqual(fullDetails[0]?.activityType, 2, "activity type normalized");
+assertEqual(fullDetails[0]?.discountRate, 0.1, "discount rate stays decimal");
+assertEqual(fullDetails[0]?.autoPricing, true, "auto pricing normalized");
+assertEqual(fullDetails[0]?.newAutoRetailPrice, 24.99, "new auto retail price normalized");
+assertEqual(fullDetails[0]?.isSpecialProduct, false, "numeric 0 means not special product");
+assertEqual(fullDetails[0]?.storeIsAutoPricing, null, "store pricing state stays null when absent");
+assertEqual(fullDetails[1]?.productType, null, "missing product type is null");
+assertEqual(fullDetails[1]?.autoPricing, null, "missing auto pricing is null, not false");
+assertEqual(fullDetails[1]?.activityType, 0, "missing activity type defaults to none");
+assertEqual(fullDetails[1]?.existingProductCount, null, "missing existing product count stays null (unchecked), not 0");
+assertEqual(normalizeInvoiceDetailsResponse({ data: [{ detailGUID: "d-3" }] }).length, 1, "details accept envelope data");
+assertEqual(normalizeInvoiceDetailsResponse(null).length, 0, "details tolerate empty payload");
+
+const matched = normalizeProductsByBarcodeResponse({
+  barcode: "9300002233445",
+  matchedProducts: [
+    { ProductCode: "P9", ProductName: "Board", SupplierCode: "S1", SupplierName: "Sunrise", ItemNumber: "BB-210A", Barcode: "9300002233445", IsMultiCode: 1, IsBundle: false, ProductType: 2 },
+  ],
+});
+assertEqual(matched.length, 1, "products-by-barcode keeps matched products");
+assertEqual(matched[0]?.productCode, "P9", "matched product code");
+assertEqual(matched[0]?.isMultiCode, true, "matched product multi-code flag");
+assertEqual(normalizeBarcodeMatchedProduct(null).productCode, "", "matched product tolerates empty input");
+
+const checked = normalizeCheckProductsResponse({
+  results: [
+    { detailGuid: "d-1", productStatus: 1, barcodeStatus: 1, existingProductCount: 1, barcodeMatchCount: 1, productInfo: { productCode: "P9" } },
+  ],
+  summary: { total: 1 },
+});
+assertEqual(checked[0]?.detailGuid, "d-1", "check result detail guid");
+assertEqual(checked[0]?.productCode, "P9", "check result takes product code from productInfo");
+assertEqual(normalizeCheckProductsResponse({}).length, 0, "check result tolerates missing results");
