@@ -100,6 +100,23 @@ public interface IMyobApiClient
     /// </summary>
     Task<MyobTimesheetStatus> GetTimesheetStatusAsync(
         string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// GET /{cf_uri}/Report/Payroll/EmployeePayrollAdvice：已发薪工资单（只读），自动翻页拉全量。需要 scope sme-payroll。
+    /// 只返回展示用精简对象（不含年薪 / 时薪 / 生日 / 支票号）。筛选写法官方文档没有说明，须先用探针核对再依赖服务端筛选。
+    /// 默认实现抛 NotSupportedException：既有测试替身无需改动，真实客户端覆盖。
+    /// </summary>
+    Task<IReadOnlyList<MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
+        string businessId, string accessToken, MyobPayrollAdviceQuery query, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    /// <summary>
+    /// 探针：用固定查询串（$top / $skip / $orderby / $filter 的组合，由调用方的固定模板生成，不接受用户输入）读工资单报表，
+    /// 沿 NextPageLink 最多翻 maxPages 页，只返回字段结构与计数，响应体（含姓名、金额）不出此方法。非 2xx 不抛异常，状态码写进结果。
+    /// </summary>
+    Task<MyobAdviceProbeResult> ProbePayrollAdviceAsync(
+        string businessId, string accessToken, string query, int maxPages, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }
 
 /// <summary>
@@ -291,12 +308,14 @@ public sealed class MyobApiClient : IMyobApiClient
         string businessId,
         string accessToken,
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? query = null)
     {
         const int maxPages = 50;
         var baseUrl = _options.ApiBaseUrl.TrimEnd('/');
         var baseHost = new Uri(baseUrl).Host;
-        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{path}?$top=1000";
+        // query 由调用方的强类型构造器生成（见 MyobAdviceQueries），自带 $top；为空时沿用默认 $top=1000。
+        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{path}?{(string.IsNullOrEmpty(query) ? "$top=1000" : query)}";
         var result = new List<T>();
 
         for (var page = 0; page < maxPages && url is not null; page++)
@@ -353,6 +372,66 @@ public sealed class MyobApiClient : IMyobApiClient
             .Select(item => new MyobWageCategoryRecord(
                 item.Uid!, item.Name!.Trim(), string.IsNullOrWhiteSpace(item.WageType) ? null : item.WageType.Trim()))
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
+        string businessId,
+        string accessToken,
+        MyobPayrollAdviceQuery query,
+        CancellationToken cancellationToken)
+    {
+        var items = await GetAllPagesAsync<PayrollAdvicePayload>(
+            businessId, accessToken, MyobAdviceQueries.ReportPath, cancellationToken, MyobAdviceQueries.Build(query));
+        return items
+            .Select(PayrollAdvicePayload.ToRecord)
+            .OfType<MyobPayrollAdviceRecord>()
+            .ToList();
+    }
+
+    public async Task<MyobAdviceProbeResult> ProbePayrollAdviceAsync(
+        string businessId,
+        string accessToken,
+        string query,
+        int maxPages,
+        CancellationToken cancellationToken)
+    {
+        var baseUrl = _options.ApiBaseUrl.TrimEnd('/');
+        var baseHost = new Uri(baseUrl).Host;
+        string? url = $"{baseUrl}/{Uri.EscapeDataString(businessId)}/{MyobAdviceQueries.ReportPath}?{query}";
+        var accumulator = new MyobAdviceProbeAccumulator();
+        var stopwatch = Stopwatch.StartNew();
+        int? status = null;
+        var pages = 0;
+
+        while (url is not null && pages < maxPages)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.TryAddWithoutValidation("x-myobapi-key", _options.ClientId);
+            request.Headers.TryAddWithoutValidation("x-myobapi-version", "v2");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await SendAsync(request, cancellationToken);
+            status = (int)response.StatusCode;
+            pages++;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                accumulator.AddError(body);
+                url = null;
+                break;
+            }
+
+            var next = accumulator.AddPage(body);
+            url = !string.IsNullOrWhiteSpace(next)
+                && Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
+                && string.Equals(nextUri.Host, baseHost, StringComparison.OrdinalIgnoreCase)
+                    ? nextUri.ToString()
+                    : null;
+        }
+
+        // 还有下一页但已达上限 = 被截断，计数只是下限。
+        return accumulator.Build(status, stopwatch.ElapsedMilliseconds, pages, truncated: url is not null);
     }
 
     public async Task<MyobTimesheetStatus> GetTimesheetStatusAsync(
