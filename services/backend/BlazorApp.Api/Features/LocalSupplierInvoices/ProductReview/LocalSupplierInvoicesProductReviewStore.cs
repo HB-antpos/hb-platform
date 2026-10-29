@@ -428,19 +428,6 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
                 linkedProducts[row.ProductCode!] = row;
         }
 
-        var productCodes = products.Values.Concat(linkedProducts.Values)
-            .Select(x => x.ProductCode).Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x!).Distinct().ToList();
-        var storePrices = new Dictionary<string, StoreRetailPrice>();
-        if (productCodes.Count > 0)
-        {
-            var rows = await QueryInChunksParallelAsync<StoreRetailPrice, string>(productCodes, 200, (queryDb, chunk) =>
-                queryDb.Queryable<StoreRetailPrice>().Where(x => x.StoreCode == header.StoreCode
-                    && x.ProductCode != null && chunk.Contains(x.ProductCode) && x.IsDeleted == false).ToListAsync());
-            foreach (var row in rows.Where(x => !string.IsNullOrWhiteSpace(x.ProductCode)))
-                storePrices[row.ProductCode!] = row;
-        }
-
         var barcodeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var productCodesByBarcode = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var barcodeOwnerProducts = new Dictionary<string, List<Product>>(StringComparer.OrdinalIgnoreCase);
@@ -466,6 +453,22 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
                     && x.MultiBarcode != null && chunk.Contains(x.MultiBarcode) && x.IsDeleted == false).ToListAsync());
             foreach (var multiCode in multiCodes)
                 AddBarcodeMatch(barcodeCounts, productCodesByBarcode, multiCode.MultiBarcode, multiCode.ProductCode);
+        }
+
+        // 分店价格要等条码占用者查完再取：评估器可能把「同货号、条码唯一占用者」自动关联为本行商品，
+        // 这类商品也要带上本店价格（上次进货价、自动定价状态），否则关联后价格字段是空的。
+        var productCodes = products.Values.Concat(linkedProducts.Values)
+            .Concat(barcodeOwnerProducts.Values.SelectMany(owners => owners))
+            .Select(x => x.ProductCode).Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!).Distinct().ToList();
+        var storePrices = new Dictionary<string, StoreRetailPrice>();
+        if (productCodes.Count > 0)
+        {
+            var rows = await QueryInChunksParallelAsync<StoreRetailPrice, string>(productCodes, 200, (queryDb, chunk) =>
+                queryDb.Queryable<StoreRetailPrice>().Where(x => x.StoreCode == header.StoreCode
+                    && x.ProductCode != null && chunk.Contains(x.ProductCode) && x.IsDeleted == false).ToListAsync());
+            foreach (var row in rows.Where(x => !string.IsNullOrWhiteSpace(x.ProductCode)))
+                storePrices[row.ProductCode!] = row;
         }
 
         // 副码已有的「一品多码」归属：副码都已挂在本行商品上时，检测不能再默认「添加多码」（执行会因已存在而失败）。

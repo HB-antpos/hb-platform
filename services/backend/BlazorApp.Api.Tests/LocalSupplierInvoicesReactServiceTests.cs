@@ -1811,6 +1811,51 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CheckProductsAsync_有副条码且主条码没有任何商品占用时_默认添加多码而非等待操作()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-add-multi-free-main-check", "INV-ADD-MULTI-FREE-MAIN-CHECK", new DateTime(2026, 1, 9));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-add-multi-free-main-target",
+                ProductCode = "P-ADD-MULTI-FREE-MAIN-TARGET",
+                ItemNumber = "88842",
+                Barcode = "191554882676",
+                ProductName = "Men Travel Perfume Assorted 35mL",
+                LocalSupplierCode = "SUP01",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                // 主条码是新条码、没有任何商品占用：执行校验会放行并把主条码一并登记为多码，检测不应再让人等。
+                DetailGUID = "detail-add-multi-free-main-check",
+                InvoiceGUID = "invoice-add-multi-free-main-check",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ItemNumber = "88842",
+                Barcode = "840417950999",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "191554882690" }),
+                ProductName = "Men Travel Perfume Assorted 35mL",
+                Quantity = 48,
+                PurchasePrice = 1.6546m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-add-multi-free-main-check",
+                DetailGuids = new List<string> { "detail-add-multi-free-main-check" },
+            });
+
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-add-multi-free-main-check");
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("P-ADD-MULTI-FREE-MAIN-TARGET", detail.ProductCode);
+            Assert.Equal((int)DetailAction.AddMultiCode, detail.ActivityType);
+        }
+
+        [Fact]
         public async Task QueryInChunksParallelAsync_多Chunk查询使用独立连接()
         {
             var service = CreateService();

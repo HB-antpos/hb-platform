@@ -127,6 +127,7 @@ import {
   compareNullableNumbers,
   compareNullableText,
   filterBooleanColumn,
+  matchesActionTypeColumnFilter,
   matchesTextColumnFilter,
   matchesNumberColumnFilter,
   parseNumberColumnFilter,
@@ -217,6 +218,8 @@ import ProductSetCodeMaintenanceModal from './ProductSetCodeMaintenanceModal'
 import PricingEditor from './PricingEditor'
 import type { PricingEditorChange } from './pricingEditorChanges'
 import {
+  ACTION_COLUMN_FILTER_ACTION_PREFIX,
+  ACTION_COLUMN_FILTER_BUCKET_PREFIX,
   DETAIL_PROGRESS_BUCKETS,
   EXECUTED_DETAIL_ACTION,
   filterDetailsByProgressBucket,
@@ -224,6 +227,7 @@ import {
   getDetailProgressStats,
   getExecutedPercent,
   getPendingExecutionDetailGuids,
+  PENDING_DETAIL_ACTIONS,
   type DetailProgressBucket,
   type DetailProgressBucketFilter,
 } from './progressBuckets'
@@ -1140,6 +1144,25 @@ export default function InvoiceEditPage() {
     }),
     [t],
   )
+
+  // 操作列表头过滤：处理进度为一级，「待执行」下再按具体操作拆分；计数按全部明细（与进度条同口径），不随当前筛选变化。
+  const actionColumnFilters = useMemo(() => {
+    const withCount = (label: string, count: number) => `${label} ${count}`
+    return [
+      {
+        text: withCount(progressBucketLabels.pending, progressStats.pending),
+        value: `${ACTION_COLUMN_FILTER_BUCKET_PREFIX}pending`,
+        children: PENDING_DETAIL_ACTIONS.map((action) => ({
+          text: withCount((detailActionConfig[action] ?? detailActionConfig[DetailActionEnum.None]).label, progressStats.pendingByAction[action]),
+          value: `${ACTION_COLUMN_FILTER_ACTION_PREFIX}${action}`,
+        })),
+      },
+      ...(['waiting', 'unchecked', 'none', 'executed'] as const).map((bucket) => ({
+        text: withCount(progressBucketLabels[bucket], progressStats[bucket]),
+        value: `${ACTION_COLUMN_FILTER_BUCKET_PREFIX}${bucket}`,
+      })),
+    ]
+  }, [detailActionConfig, progressBucketLabels, progressStats])
 
   const pasteFieldLabels: Record<PasteFieldKey, string> = useMemo(
     () => ({
@@ -3626,6 +3649,10 @@ export default function InvoiceEditPage() {
         key: 'action',
         width: isAdmin ? 144 : 112,
         fixed: 'right',
+        filters: actionColumnFilters,
+        filterMode: 'tree',
+        filteredValue: (columnFilteredValues.action ?? null) as React.Key[] | null,
+        onFilter: (value, record) => matchesActionTypeColumnFilter(record, value, rowActions),
         render: (_: unknown, record: LocalSupplierInvoiceItemDto) => {
           const maintenanceProductCode = record.productCode?.trim()
           const currentAction = rowActions[record.detailGUID] ?? record.activityType ?? 0

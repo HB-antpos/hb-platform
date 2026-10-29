@@ -1,5 +1,6 @@
 import type { Key } from 'react'
 import type { LocalSupplierInvoiceItemDto } from '../../../../types/localSupplierInvoice'
+import { isActionColumnFilterKey, matchesActionColumnFilterKey } from './progressBuckets'
 import {
   getBarcodeStatusFilter,
   getActionTypeFilter,
@@ -205,5 +206,8 @@ export function matchesActionTypeColumnFilter(
   value: Key | boolean,
   rowActions: Record<string, number> = {},
 ) {
+  // 操作列表头过滤的取值是 bucket:xxx / action:N（按处理进度匹配）；纯数字沿用旧口径，按操作类型直接匹配。
+  const text = String(value)
+  if (isActionColumnFilterKey(text)) return matchesActionColumnFilterKey(record, text, rowActions)
   return getActionTypeFilter(record, rowActions) === (Number(value) as ActionTypeFilter)
 }
