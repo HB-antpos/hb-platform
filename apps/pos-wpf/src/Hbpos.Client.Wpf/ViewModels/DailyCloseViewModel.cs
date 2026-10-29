@@ -27,6 +27,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
     private readonly Func<DateTime, Task<bool>>? _confirmLinklySettlementAsync;
     private readonly Func<IPostDailyCloseRestartCoordinator?>? _restartCoordinatorProvider;
+    private readonly Func<DateTimeOffset?, TimeSpan?>? _requestAutoLogout;
     private DailyCloseReport? _currentReport;
     private DailyCloseDraftScope? _dailyCloseDraftScope;
     private int _archivePreviewVersion;
@@ -104,7 +105,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         IOperationAuthorizationService? operationAuthorizationService = null,
         ILinklySettlementService? linklySettlementService = null,
         Func<DateTime, Task<bool>>? confirmLinklySettlementAsync = null,
-        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null)
+        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null,
+        Func<DateTimeOffset?, TimeSpan?>? requestAutoLogout = null)
     {
         _dailyCloseService = dailyCloseService;
         _dailyClosePrintService = dailyClosePrintService;
@@ -117,6 +119,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         _linklySettlementService = linklySettlementService;
         _confirmLinklySettlementAsync = confirmLinklySettlementAsync;
         _restartCoordinatorProvider = restartCoordinatorProvider;
+        _requestAutoLogout = requestAutoLogout;
         if (session.CashierSession is not null)
         {
             _cashierSessionContext.SetCurrent(session.CashierSession);
@@ -661,9 +664,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         var auditRecorded = false;
         var correlation = OperationAuditEvents.CreateCorrelation();
 
-        // 日结保存成功后才可能提示重启（开机超过阈值天数）；提示放在 finally 里 IsBusy 复位之后，
-        // 这样「日结页忙」不会把重启安全检查自己拦住。
-        DateTime? restartPromptBusinessDate = null;
+        // 日结保存成功后才排凌晨重启（开机超过阈值天数）并安排自动登出；都放在 finally 里 IsBusy 复位之后，
+        // 这样自动结算等后续步骤都已结束，状态文案也不会被覆盖。
+        DateTime? savedBusinessDate = null;
         var returnToPosDeferred = false;
         try
         {
@@ -681,7 +684,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 correlation.CorrelationId,
                 correlation.TraceId);
             auditRecorded = true;
-            restartPromptBusinessDate = archive.Report.BusinessDate;
+            savedBusinessDate = archive.Report.BusinessDate;
             ClearDailyCloseDraft(clearReportSnapshot: true);
             SelectedTabIndex = HistoryTabIndex;
 
@@ -728,7 +731,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 }
                 else
                 {
-                    // 先不立刻回收银台：若随后要提示重启，浮层应盖在日结页上（日结页没有扫码输入，倒计时期间更安全）。
+                    // 先不立刻回收银台：排定凌晨重启、安排自动登出之后再回去。
                     returnToPosDeferred = true;
                 }
 
@@ -782,11 +785,24 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         finally
         {
             IsBusy = false;
-            if (restartPromptBusinessDate is { } businessDate &&
-                await RunRestartPromptAsync(businessDate, cancellationToken))
+            if (savedBusinessDate is { } businessDate)
             {
-                // 被安全检查拦下后，收银员选择回到收银台处理购物车/付款。
-                returnToPosDeferred = true;
+                var restartAt = await ScheduleOvernightRestartAsync(businessDate, cancellationToken);
+                if (restartAt is { } scheduled)
+                {
+                    StatusMessage = $"{StatusMessage} {Format(
+                        "dailyClose.status.restartScheduled",
+                        "This computer has been running for a long time and will restart automatically at {0}.",
+                        scheduled.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture))}";
+                }
+
+                if (RequestAutoLogout(restartAt) is { } logoutDelay)
+                {
+                    StatusMessage = $"{StatusMessage} {Format(
+                        "dailyClose.status.autoLogout",
+                        "The cashier will be signed out automatically in {0} seconds.",
+                        (int)logoutDelay.TotalSeconds)}";
+                }
             }
 
             if (returnToPosDeferred)
@@ -797,33 +813,46 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 日结保存之后提示重启（是否提示、检查、倒计时、重启都在协调器里）。返回 true 表示收银员选择了「回到收银台」。
-    /// 任何异常都在这里吞掉：提示是附加功能，不能影响日结本身。
+    /// 日结保存之后排凌晨重启（是否需要、排到几点都在协调器里），返回排定的时间。
+    /// 任何异常都在这里吞掉：重启是附加功能，不能影响日结本身。
     /// </summary>
-    private async Task<bool> RunRestartPromptAsync(DateTime businessDate, CancellationToken cancellationToken)
+    private async Task<DateTimeOffset?> ScheduleOvernightRestartAsync(DateTime businessDate, CancellationToken cancellationToken)
     {
         try
         {
             var coordinator = _restartCoordinatorProvider?.Invoke();
-            if (coordinator is null)
-            {
-                return false;
-            }
-
-            var outcome = await coordinator.RunAsync(Session, businessDate, cancellationToken);
-            return outcome == RestartFlowOutcome.GoToPos;
+            return coordinator is null
+                ? null
+                : await coordinator.ScheduleAfterDailyCloseAsync(Session, businessDate, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             ConsoleLog.WriteError(
                 "RestartAfterClose",
-                $"restart prompt after daily close failed error={ex.GetType().Name}",
+                $"schedule restart after daily close failed error={ex.GetType().Name}",
                 exception: ex);
-            return false;
+            return null;
         }
         catch (OperationCanceledException)
         {
-            return false;
+            return null;
+        }
+    }
+
+    /// <summary>请主界面在日结后自动登出当前收银员；返回登出前的等待时间，未安排时返回 null。</summary>
+    private TimeSpan? RequestAutoLogout(DateTimeOffset? restartAt)
+    {
+        try
+        {
+            return _requestAutoLogout?.Invoke(restartAt);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError(
+                "DailyCloseAutoLogout",
+                $"request auto logout after daily close failed error={ex.GetType().Name}",
+                exception: ex);
+            return null;
         }
     }
 

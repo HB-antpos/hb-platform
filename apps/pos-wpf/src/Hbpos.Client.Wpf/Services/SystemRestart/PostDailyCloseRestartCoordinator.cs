@@ -58,7 +58,7 @@ public interface IRestartPromptUi
 
 public enum RestartFlowOutcome
 {
-    /// <summary>不满足提示条件（开关关、开机不够久、今天已提示过）。</summary>
+    /// <summary>不满足条件（开关关、开机不够久、没有排定或还没到凌晨重启时间）。</summary>
     NotDue,
 
     Later,
@@ -80,11 +80,21 @@ public enum RestartFlowOutcome
 public interface IPostDailyCloseRestartCoordinator
 {
     /// <summary>
-    /// 日结成功保存之后调用。内部自行判断是否需要提示；任何异常都在内部消化，绝不影响日结流程。
+    /// 日结成功保存之后调用：开关开且开机满阈值天数时，把重启排到下一个凌晨（本地时间，见 <see cref="SystemRestartOptions.OvernightRestartHour"/>），
+    /// 不弹窗、不打断收银员。返回排定的重启时间；不需要重启时返回 null。任何异常都在内部消化，绝不影响日结流程。
     /// </summary>
-    Task<RestartFlowOutcome> RunAsync(
+    Task<DateTimeOffset?> ScheduleAfterDailyCloseAsync(
         PosSessionState session,
         DateTime businessDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 由主界面定时调用：到了排定的凌晨重启时间就无人值守地执行「安全检查 → 可取消倒计时 → 冲刷上传 → 重启」。
+    /// 有硬性问题时不弹阻止界面、保留排定，下次调用再查；过了可执行窗口就作废。
+    /// shutdown.exe 以当前用户身份运行，Windows 工作站上普通用户自带关机权限，不需要管理员、不会弹 UAC。
+    /// </summary>
+    Task<RestartFlowOutcome> RunScheduledIfDueAsync(
+        PosSessionState session,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -115,72 +125,152 @@ public sealed class PostDailyCloseRestartCoordinator(
 
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
-    public async Task<RestartFlowOutcome> RunAsync(
+    // 同一原因被拦时只记一次日志与审计：凌晨定时检查每 30 秒一次，不能把日志刷满。
+    private string? _lastScheduledBlockReason;
+
+    public async Task<DateTimeOffset?> ScheduleAfterDailyCloseAsync(
         PosSessionState session,
         DateTime businessDate,
         CancellationToken cancellationToken = default)
     {
         var correlation = OperationAuditEvents.CreateCorrelation();
         var log = new ApplicationLogContext(TraceId: correlation.TraceId);
-        var uptime = TimeSpan.Zero;
         try
         {
             if (!await settingsStore.IsPromptEnabledAsync(cancellationToken))
             {
-                return RestartFlowOutcome.NotDue;
+                return null;
             }
 
-            var uptimeSeconds = resourceSampler.Capture().SystemUptimeSeconds;
-            if (uptimeSeconds is null)
+            var uptime = CaptureUptime();
+            if (uptime is null || uptime.Value < options.UptimeThreshold)
             {
-                return RestartFlowOutcome.NotDue;
-            }
-
-            uptime = TimeSpan.FromSeconds(uptimeSeconds.Value);
-            if (uptime < options.UptimeThreshold)
-            {
-                return RestartFlowOutcome.NotDue;
+                return null;
             }
 
             var businessDay = DateOnly.FromDateTime(businessDate);
+            var existing = await settingsStore.GetScheduledRestartAtAsync(cancellationToken);
             if (await settingsStore.GetLastPromptBusinessDateAsync(cancellationToken) == businessDay)
             {
+                // 同一营业日补做日结：已经排过就沿用原来的时间，不重复排、不重复审计。
                 ConsoleLog.WriteInformation(
                     LogCategory,
-                    $"prompt skipped: already prompted for businessDate={businessDay:yyyy-MM-dd}",
+                    $"schedule skipped: already scheduled for businessDate={businessDay:yyyy-MM-dd}",
                     log);
+                return existing;
+            }
+
+            var restartAt = ComputeOvernightRestartAt(_clock.GetLocalNow(), _clock.LocalTimeZone, options);
+            await settingsStore.SetScheduledRestartAtAsync(restartAt, cancellationToken);
+            await settingsStore.MarkPromptedAsync(businessDay, cancellationToken);
+            _lastScheduledBlockReason = null;
+
+            ConsoleLog.WriteInformation(
+                LogCategory,
+                $"overnight-scheduled restartAt={restartAt:O} uptimeDays={FormatDays(uptime.Value)} thresholdDays={options.UptimeThresholdDays} businessDate={businessDay:yyyy-MM-dd}",
+                log);
+            RecordAudit(
+                session,
+                "Skipped",
+                "OVERNIGHT_SCHEDULED",
+                $"{Describe(uptime.Value, null)};restartAt={restartAt:yyyy-MM-ddTHH:mmzzz}",
+                correlation);
+            return restartAt;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // 排定重启是日结之后的附加功能：自身出任何问题都只记日志，不能反过来影响日结与收银。
+            ConsoleLog.WriteError(LogCategory, $"schedule overnight restart failed error={ex.GetType().Name} message={ex.Message}", log, ex);
+            return null;
+        }
+    }
+
+    public async Task<RestartFlowOutcome> RunScheduledIfDueAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default)
+    {
+        var correlation = OperationAuditEvents.CreateCorrelation();
+        var log = new ApplicationLogContext(TraceId: correlation.TraceId);
+        try
+        {
+            var restartAt = await settingsStore.GetScheduledRestartAtAsync(cancellationToken);
+            if (restartAt is null)
+            {
                 return RestartFlowOutcome.NotDue;
             }
 
-            // 弹窗前先预检：一开始就有硬性问题时不打扰收银员（弹了又拦只会让人困惑），只留日志与审计。
-            var preflight = await safetyChecker.CheckAsync(cancellationToken);
-            if (!preflight.IsSafe)
+            var now = _clock.GetUtcNow();
+            if (now < restartAt.Value)
             {
-                LogBlocked("blocked-before-prompt", preflight, log);
-                RecordAudit(session, "Skipped", preflight.HardIssues[0].ReasonCode, Describe(uptime, preflight), correlation);
+                return RestartFlowOutcome.NotDue;
+            }
+
+            var uptime = CaptureUptime() ?? TimeSpan.Zero;
+            if (now > restartAt.Value + options.OvernightWindow)
+            {
+                // 过了窗口（整晚关机 / POS 没开 / 一直被拦）：作废，绝不在营业时间突然重启；下次日结会重新排。
+                await ClearScheduleAsync(cancellationToken);
+                ConsoleLog.WriteInformation(LogCategory, $"overnight-expired restartAt={restartAt.Value:O}", log);
+                RecordAudit(session, "Skipped", "OVERNIGHT_WINDOW_MISSED", Describe(uptime, null), correlation);
+                return RestartFlowOutcome.NotDue;
+            }
+
+            if (!await settingsStore.IsPromptEnabledAsync(cancellationToken))
+            {
+                // 排定之后又在设置页关掉了开关：取消这次重启。
+                await ClearScheduleAsync(cancellationToken);
+                ConsoleLog.WriteInformation(LogCategory, "overnight-cancelled: switch turned off", log);
+                return RestartFlowOutcome.NotDue;
+            }
+
+            if (uptime < options.UptimeThreshold)
+            {
+                // 排定之后电脑已经重启过（开机时长清零），不需要再重启。
+                await ClearScheduleAsync(cancellationToken);
+                ConsoleLog.WriteInformation(LogCategory, $"overnight-cancelled: already restarted uptimeDays={FormatDays(uptime)}", log);
+                return RestartFlowOutcome.NotDue;
+            }
+
+            var report = await safetyChecker.CheckAsync(cancellationToken);
+            if (!report.IsSafe)
+            {
+                // 无人值守：不弹阻止界面，保留排定，下次定时检查再看（例如凌晨上传 / 结算还在进行）。
+                var reason = report.HardIssues[0].ReasonCode;
+                if (_lastScheduledBlockReason != reason)
+                {
+                    _lastScheduledBlockReason = reason;
+                    LogBlocked("overnight-blocked", report, log);
+                    RecordAudit(session, "Skipped", reason, Describe(uptime, report) + ";overnight=true", correlation);
+                }
+
                 return RestartFlowOutcome.Blocked;
             }
 
-            // 营业日标记在弹出时就写：每营业日最多提示一次，哪怕随后程序被关掉也不会反复弹。
-            await settingsStore.MarkPromptedAsync(businessDay, cancellationToken);
-
-            var pendingUploads = preflight.SoftIssues.Sum(issue => issue.Count);
-            ConsoleLog.WriteInformation(
-                LogCategory,
-                $"prompt-shown uptimeSeconds={uptimeSeconds.Value} thresholdDays={options.UptimeThresholdDays} businessDate={businessDay:yyyy-MM-dd} pendingUploads={pendingUploads}",
-                log);
-
-            var choice = await ui.ShowPromptAsync(new RestartPromptInfo(uptime, pendingUploads), cancellationToken);
-            if (choice == RestartPromptChoice.Later)
+            ConsoleLog.WriteInformation(LogCategory, $"overnight-due restartAt={restartAt.Value:O} uptimeDays={FormatDays(uptime)}", log);
+            var countdown = await RunCountdownAsync(cancellationToken);
+            if (countdown == CountdownEnd.Cancelled)
             {
+                // 有人在店里点了「取消重启」：今晚不再重启。
                 ui.Hide();
-                ConsoleLog.WriteInformation(LogCategory, "prompt-later", log);
-                RecordAudit(session, "Skipped", "PROMPT_LATER", Describe(uptime, null), correlation);
-                return RestartFlowOutcome.Later;
+                await ClearScheduleAsync(cancellationToken);
+                ConsoleLog.WriteInformation(LogCategory, "overnight-countdown-cancelled", log);
+                RecordAudit(session, "Skipped", "COUNTDOWN_CANCELLED", Describe(uptime, null) + ";overnight=true", correlation);
+                return RestartFlowOutcome.Cancelled;
             }
 
-            ConsoleLog.WriteInformation(LogCategory, "confirmed", log);
-            return await ConfirmedFlowAsync(session, uptime, correlation, log, isTest: false, cancellationToken);
+            if (countdown == CountdownEnd.BecameUnsafe)
+            {
+                ui.Hide();
+                return RestartFlowOutcome.Blocked;
+            }
+
+            // 先清掉排定再下发：无论重启成功还是命令失败，都不会在本窗口内反复尝试。
+            await ClearScheduleAsync(cancellationToken);
+            return await ExecuteRestartAsync(session, uptime, correlation, log, isTest: false, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -189,11 +279,56 @@ public sealed class PostDailyCloseRestartCoordinator(
         }
         catch (Exception ex)
         {
-            // 重启提示是日结之后的附加功能：自身出任何问题都只记日志，不能反过来影响日结与收银。
-            ConsoleLog.WriteError(LogCategory, $"restart flow failed error={ex.GetType().Name} message={ex.Message}", log, ex);
+            ConsoleLog.WriteError(LogCategory, $"overnight restart failed error={ex.GetType().Name} message={ex.Message}", log, ex);
             HideQuietly();
             return RestartFlowOutcome.Failed;
         }
+    }
+
+    /// <summary>
+    /// 计算日结后的重启时间（本地时间）：今天凌晨重启时间还没到就排今天；正处在今天的可执行窗口里就立即；否则排到明天凌晨。
+    /// </summary>
+    internal static DateTimeOffset ComputeOvernightRestartAt(
+        DateTimeOffset localNow,
+        TimeZoneInfo timeZone,
+        SystemRestartOptions options)
+    {
+        var today = AtLocalHour(localNow.Date, options.OvernightRestartHour, timeZone);
+        if (localNow < today)
+        {
+            return today;
+        }
+
+        if (localNow < today + options.OvernightWindow)
+        {
+            return localNow;
+        }
+
+        return AtLocalHour(localNow.Date.AddDays(1), options.OvernightRestartHour, timeZone);
+    }
+
+    private static DateTimeOffset AtLocalHour(DateTime date, int hour, TimeZoneInfo timeZone)
+    {
+        var local = DateTime.SpecifyKind(date.Date.AddHours(hour), DateTimeKind.Unspecified);
+        // 夏令时跳过的那一小时不存在：顺延一小时。
+        if (timeZone.IsInvalidTime(local))
+        {
+            local = local.AddHours(1);
+        }
+
+        return new DateTimeOffset(local, timeZone.GetUtcOffset(local));
+    }
+
+    private TimeSpan? CaptureUptime()
+    {
+        var uptimeSeconds = resourceSampler.Capture().SystemUptimeSeconds;
+        return uptimeSeconds is null ? null : TimeSpan.FromSeconds(uptimeSeconds.Value);
+    }
+
+    private async Task ClearScheduleAsync(CancellationToken cancellationToken)
+    {
+        _lastScheduledBlockReason = null;
+        await settingsStore.ClearScheduledRestartAsync(cancellationToken);
     }
 
     public async Task<RestartFlowOutcome> RunTestAsync(

@@ -117,6 +117,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly DeviceReregistrationCoordinator _deviceReregistrationCoordinator;
     private readonly CatalogStartupCoordinator _catalogStartupCoordinator;
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DailyCloseAutoLogoutTracker _dailyCloseAutoLogout = new();
+    /// <summary>凌晨重启检查间隔；首次检查推迟 1 分钟，等启动流程（本地库、设备授权）先就绪。</summary>
+    private static readonly TimeSpan ScheduledRestartCheckInterval = TimeSpan.FromSeconds(30);
+    private DateTimeOffset _nextScheduledRestartCheckUtc = DateTimeOffset.UtcNow.AddMinutes(1);
+    private int _scheduledRestartCheckRunning;
+    private Func<IPostDailyCloseRestartCoordinator?>? _restartCoordinatorProvider;
     /// <summary>营业时间的连通性检查 / 运行状态心跳间隔；夜间静默窗口内由 <see cref="BackgroundPollingSchedule"/> 降频。</summary>
     private static readonly TimeSpan ConnectivityNormalInterval = TimeSpan.FromSeconds(15);
 
@@ -563,6 +569,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _attendanceQrPanel = attendanceQrPanel;
         _posTerminalWorkflowFactory = posTerminalWorkflowFactory;
         _mainChildViewModelFactory = CreateMainChildViewModelFactory();
+        _mainChildViewModelFactory.RequestAutoLogoutAfterDailyClose = ScheduleAutoLogoutAfterDailyClose;
 
         _cardRecoveryPresenter = CreateCardRecoveryPresenter();
 
@@ -842,11 +849,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _syncOrchestrator?.ConfigureAudit(logOutboxStore, operationAuditUploadService, deviceAuthorizationState);
     }
 
-    /// <summary>配置日结后「重启提示」协调器（见 <see cref="MainChildViewModelFactory.RestartCoordinatorProvider"/>）。</summary>
+    /// <summary>配置日结后「凌晨自动重启」协调器（见 <see cref="MainChildViewModelFactory.RestartCoordinatorProvider"/>），主界面时钟也用它检查是否到点。</summary>
     internal void ConfigureRestartPrompt(
         Func<IPostDailyCloseRestartCoordinator?> coordinatorProvider,
         ISystemRestartSettingsStore? settingsStore = null)
     {
+        _restartCoordinatorProvider = coordinatorProvider;
         _mainChildViewModelFactory.RestartCoordinatorProvider = coordinatorProvider;
         _mainChildViewModelFactory.SystemRestartSettingsStore = settingsStore;
     }
@@ -3416,7 +3424,133 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnClockTimerTick(object? sender, EventArgs e)
     {
         RefreshClock();
-        ExpireEmergencySessionIfNeeded(DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        ExpireEmergencySessionIfNeeded(now);
+        _ = AutoLogoutAfterDailyCloseSafeAsync(now);
+        _ = RunScheduledRestartIfDueSafeAsync(now);
+    }
+
+    /// <summary>日结保存成功后由日结页调用：安排稍后自动登出当前收银员，返回等待时间；没有收银员登录时返回 null。</summary>
+    internal TimeSpan? ScheduleAutoLogoutAfterDailyClose(DateTimeOffset? restartAt) =>
+        ScheduleAutoLogoutAfterDailyClose(restartAt, DateTimeOffset.UtcNow);
+
+    internal TimeSpan? ScheduleAutoLogoutAfterDailyClose(DateTimeOffset? restartAt, DateTimeOffset nowUtc)
+    {
+        var cashier = _cashierSessionContext.CurrentSession ?? Session.CashierSession;
+        if (cashier is null || IsLifetimeEnding)
+        {
+            return null;
+        }
+
+        var delay = _dailyCloseAutoLogout.Schedule(
+            DailyCloseAutoLogoutTracker.CreateCashierKey(cashier.CashierId, cashier.UserGuid),
+            _cart.Lines.Count,
+            nowUtc,
+            restartAt);
+        ConsoleLog.WriteInformation(
+            "DailyCloseAutoLogout",
+            $"scheduled delaySeconds={delay.TotalSeconds:0} restartAt={restartAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? "none"}");
+        StatusMessage = string.Format(
+            _localization.CurrentCulture,
+            _localization.T("shell.cashierLogin.status.autoLogoutPending"),
+            (int)delay.TotalSeconds);
+        return delay;
+    }
+
+    /// <summary>
+    /// 时钟驱动：日结后的等待时间到了就自动登出（回到扫码登录）。收银员期间又开始收银或已换人则作废；
+    /// 和手动锁屏一样只清收银员会话，购物车、离线缓存、设备授权原样保留。
+    /// </summary>
+    internal async Task AutoLogoutAfterDailyCloseIfDueAsync(DateTimeOffset nowUtc)
+    {
+        if (!_dailyCloseAutoLogout.IsPending || IsLifetimeEnding)
+        {
+            return;
+        }
+
+        var cashier = _cashierSessionContext.CurrentSession ?? Session.CashierSession;
+        var payment = CachedCashPaymentScreen;
+        var decision = _dailyCloseAutoLogout.Evaluate(
+            nowUtc,
+            cashier is null ? null : DailyCloseAutoLogoutTracker.CreateCashierKey(cashier.CashierId, cashier.UserGuid),
+            _cart.Lines.Count,
+            isPaymentActive: payment is not null &&
+                (payment.IsCardPaymentInProgress || payment.IsPaymentInteractionLocked || payment.PaymentTenders.Count > 0),
+            isScreenBusy: DailyClose?.IsBusy == true);
+        if (decision == DailyCloseAutoLogoutDecision.Cancelled)
+        {
+            ConsoleLog.WriteInformation("DailyCloseAutoLogout", "cancelled: cashier resumed work or changed");
+            return;
+        }
+
+        if (decision != DailyCloseAutoLogoutDecision.Logout)
+        {
+            return;
+        }
+
+        var message = _localization.T("shell.cashierLogin.status.autoLoggedOut");
+        if (_dailyCloseAutoLogout.RestartAt is { } restartAt)
+        {
+            message += " " + string.Format(
+                _localization.CurrentCulture,
+                _localization.T("shell.cashierLogin.status.restartScheduled"),
+                restartAt.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        // 下一位收银员登录后直接回到收银台，而不是停在上一位的日结页。
+        if (ReferenceEquals(CurrentScreen, DailyClose))
+        {
+            _screenNavigator.ShowPos();
+        }
+
+        ConsoleLog.WriteInformation("DailyCloseAutoLogout", "signed out after daily close");
+        await SignOutCashierAsync("DAILY_CLOSE_AUTO_LOGOUT", message);
+    }
+
+    private async Task AutoLogoutAfterDailyCloseSafeAsync(DateTimeOffset nowUtc)
+    {
+        try
+        {
+            await AutoLogoutAfterDailyCloseIfDueAsync(nowUtc);
+        }
+        catch (Exception ex)
+        {
+            // 时钟回调不得把异常逃逸到 WPF Dispatcher。
+            ConsoleLog.WriteError("DailyCloseAutoLogout", "auto logout after daily close failed", exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// 每 30 秒问一次协调器：日结后排定的凌晨重启是否到时间（判定、安全检查、倒计时、审计都在协调器里）。
+    /// 在 UI 线程上执行，倒计时浮层可以直接显示；同一时刻只跑一个检查。
+    /// </summary>
+    private async Task RunScheduledRestartIfDueSafeAsync(DateTimeOffset nowUtc)
+    {
+        if (IsLifetimeEnding ||
+            _restartCoordinatorProvider is null ||
+            nowUtc < _nextScheduledRestartCheckUtc ||
+            Interlocked.Exchange(ref _scheduledRestartCheckRunning, 1) != 0)
+        {
+            return;
+        }
+
+        _nextScheduledRestartCheckUtc = nowUtc + ScheduledRestartCheckInterval;
+        try
+        {
+            var coordinator = _restartCoordinatorProvider();
+            if (coordinator is not null)
+            {
+                await coordinator.RunScheduledIfDueAsync(Session);
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError("RestartAfterClose", "scheduled restart check failed", exception: ex);
+        }
+        finally
+        {
+            Volatile.Write(ref _scheduledRestartCheckRunning, 0);
+        }
     }
 
     internal void ExpireEmergencySessionIfNeeded(DateTimeOffset now)
@@ -4262,7 +4396,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _applicationExitService.Exit();
     }
 
-    internal async Task LockCashierAsync()
+    internal Task LockCashierAsync() =>
+        SignOutCashierAsync("MANUAL_LOCK", _localization.T("shell.cashierLogin.status.locked"));
+
+    private async Task SignOutCashierAsync(string reasonCode, string statusMessage)
     {
         var cashier = _cashierSessionContext.CurrentSession ?? Session.CashierSession;
         if (cashier is null)
@@ -4270,6 +4407,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _dailyCloseAutoLogout.Cancel();
         RevokeOperationAuthorizationsForSessionChange();
 
         OperationAuditEvents.RecordAction(
@@ -4277,9 +4415,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             OperationAuditTypes.CashierLogout,
             "Succeeded",
             CreateCashierLoginAuditSession(cashier),
-            reasonCode: "MANUAL_LOCK");
+            reasonCode: reasonCode);
 
-        // 关键逻辑：手动锁屏只清当前收银员会话，购物车、离线缓存和设备授权必须原样保留。
+        // 关键逻辑：锁屏 / 日结后自动登出都只清当前收银员会话，购物车、离线缓存和设备授权必须原样保留。
         _cashierSessionContext.Clear();
         Session = Session with
         {
@@ -4290,7 +4428,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CashierBarcodeInput = string.Empty;
         _screenNavigator.ApplySessionToScreens();
         OnPropertyChanged(nameof(IsCashierLoginOverlayOpen));
-        StatusMessage = _localization.T("shell.cashierLogin.status.locked");
+        StatusMessage = statusMessage;
         await ReportRuntimeStatusSafeAsync(Session.IsOnline, CancellationToken.None, clearCashier: true);
     }
 

@@ -451,6 +451,9 @@
   <data name="shell.cashierLogin.diagnose" xml:space="preserve"><value>Diagnose network</value></data>
   <data name="shell.cashierLogin.status.success" xml:space="preserve"><value>Cashier login successful.</value></data>
   <data name="shell.cashierLogin.status.locked" xml:space="preserve"><value>Signed out. Sign in again.</value></data>
+  <data name="shell.cashierLogin.status.autoLogoutPending" xml:space="preserve"><value>Daily close done. Signing out automatically in {0} seconds.</value></data>
+  <data name="shell.cashierLogin.status.autoLoggedOut" xml:space="preserve"><value>Daily close done. Signed out automatically.</value></data>
+  <data name="shell.cashierLogin.status.restartScheduled" xml:space="preserve"><value>The computer will restart automatically at {0}.</value></data>
   <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve"><value>To pay with a voucher, tap Voucher first, then scan the voucher code.</value></data>
   <data name="shell.scanner.status.unsupportedScreen" xml:space="preserve"><value>This page does not accept scans. Go back to the sales screen to scan.</value></data>
   <data name="shell.cashierLogin.status.sessionExpired" xml:space="preserve"><value>Cashier session expired. Sign in again.</value></data>
@@ -930,6 +933,8 @@
   <data name="dailyClose.status.refreshed" xml:space="preserve"><value>Daily close summary refreshed.</value></data>
   <data name="dailyClose.status.saving" xml:space="preserve"><value>Saving and printing daily close...</value></data>
   <data name="dailyClose.status.savedPrinted" xml:space="preserve"><value>Daily close saved and receipt printed.</value></data>
+  <data name="dailyClose.status.restartScheduled" xml:space="preserve"><value>This computer has been running for a long time and will restart automatically at {0}.</value></data>
+  <data name="dailyClose.status.autoLogout" xml:space="preserve"><value>The cashier will be signed out automatically in {0} seconds.</value></data>
   <data name="dailyClose.status.savedPrintFailed" xml:space="preserve"><value>Daily close saved, but printing failed: {0}</value></data>
   <data name="dailyClose.status.historyLoading" xml:space="preserve"><value>Loading daily close history...</value></data>
   <data name="dailyClose.status.historyEmpty" xml:space="preserve"><value>No daily close history found for the selected date.</value></data>
@@ -1754,10 +1759,10 @@
   <data name="restart.failed.detail" xml:space="preserve"><value>code={0} · uptime={1}
 Logged with reference {2}</value></data>
   <data name="restart.failed.ok" xml:space="preserve"><value>Got it</value></data>
-  <data name="settings.restartPrompt.title" xml:space="preserve"><value>Restart reminder</value></data>
-  <data name="settings.restartPrompt.description" xml:space="preserve"><value>After daily close, remind to restart this POS when it has been running for 7 days or more.</value></data>
-  <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Remind to restart after daily close</value></data>
-  <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>The POS only restarts after the cashier confirms and every safety check passes. Saved for this device only.</value></data>
+  <data name="settings.restartPrompt.title" xml:space="preserve"><value>Overnight restart</value></data>
+  <data name="settings.restartPrompt.description" xml:space="preserve"><value>If this POS has been running for 7 days or more, it restarts the computer automatically in the early morning (3:00 by default) after daily close.</value></data>
+  <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Restart overnight after daily close</value></data>
+  <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>Shows a 30-second countdown that can be cancelled, and skips the restart if a sale, payment or card task is unfinished. No admin prompt. Saved for this device only.</value></data>
   <data name="settings.scanner.title" xml:space="preserve"><value>Scanner sensitivity</value></data>
   <data name="settings.scanner.description" xml:space="preserve"><value>A second read of the same barcode within this time is ignored, so one scan never adds an item twice.</value></data>
   <data name="settings.scanner.help" xml:space="preserve"><value>Raise it if one scan adds an item twice; lower it if scanning two identical items quickly only adds one. Saved for this device only.</value></data>
