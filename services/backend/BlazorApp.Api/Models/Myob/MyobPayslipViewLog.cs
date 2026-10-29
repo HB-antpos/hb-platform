@@ -5,7 +5,7 @@ namespace BlazorApp.Api.Models.Myob;
 /// <summary>
 /// HBweb 库 dbo.MyobPayslipViewLog：谁在何时打开了谁的哪一期工资单。
 /// 只记操作人、公司文件、被查看员工（我方 GUID，未绑定时为空）、MYOB 员工卡 UID 与支付日期，不记金额、姓名或工资内容。
-/// 表由迁移 20261029.003-myob-payslip 创建；Action / Recipient 两列由 20261029.004-myob-payslip-export 增加，不进 SqlSugarContext 的 tableTypes。
+/// 表由迁移 20261029.003-myob-payslip 创建；Action / Recipient 两列由 20261029.005-myob-payslip-export 增加，不进 SqlSugarContext 的 tableTypes。
 /// </summary>
 [SugarTable("MyobPayslipViewLog")]
 internal sealed class MyobPayslipViewLog

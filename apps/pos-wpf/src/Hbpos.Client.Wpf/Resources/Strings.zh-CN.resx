@@ -1215,6 +1215,21 @@
   <data name="shell.colorTheme.elder.hint" xml:space="preserve">
     <value>大字、分区配色、高对比</value>
   </data>
+  <data name="shell.colorThemeOnboarding.title" xml:space="preserve">
+    <value>欢迎，{0}</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.subtitle" xml:space="preserve">
+    <value>第一次登录，选一套你习惯的界面配色</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.hint" xml:space="preserve">
+    <value>点卡片即可预览整屏效果；以后可在右上角「界面配色」随时更换，换哪台收银机都会跟着你</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.confirm" xml:space="preserve">
+    <value>使用「{0}」开始收银</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.preselectedHint" xml:space="preserve">
+    <value>已预选本机上次使用的配色</value>
+  </data>
   <data name="shell.languageToggle" xml:space="preserve">
     <value>中 / EN</value>
   </data>

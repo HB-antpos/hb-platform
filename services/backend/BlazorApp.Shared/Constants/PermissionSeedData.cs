@@ -472,7 +472,7 @@ namespace BlazorApp.Shared.Constants
                 // 历史工资单：默认不授予任何角色；入库由迁移 20261029.003-myob-payslip 幂等完成。
                 new(Permissions.Myob.Payslip.ViewManagedStore, "查看管辖分店员工工资单", "系统管理", "Web 页面 /pos-admin/myob「工资单」页签 - 查看管辖分店员工在 MYOB 里的历史工资单（只读）"),
                 new(Permissions.Myob.Payslip.ViewAllStores, "查看全部分店员工工资单", "系统管理", "Web 页面 /pos-admin/myob「工资单」页签 - 查看全部分店与公司文件的历史工资单，含未绑定员工（只读）"),
-                // 工资单导出：默认不授予任何角色；入库由迁移 20261029.004-myob-payslip-export 幂等完成。
+                // 工资单导出：默认不授予任何角色；入库由迁移 20261029.005-myob-payslip-export 幂等完成。
                 new(Permissions.Myob.Payslip.Download, "下载工资单 PDF", "系统管理", "在 Web「工资单」明细与手机端工资单页下载 MYOB 默认样式的 PDF"),
                 new(Permissions.Myob.Payslip.Email, "邮件发送工资单 PDF", "系统管理", "把 MYOB 默认样式工资单 PDF 以邮件发给员工"),
                 new(Permissions.System.ManageAppDownloads, "管理 App 下载", "系统管理", "系统管理 - 登记 OTA 更新和生成回撤命令"),

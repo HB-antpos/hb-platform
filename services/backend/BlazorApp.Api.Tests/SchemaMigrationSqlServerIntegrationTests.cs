@@ -4047,6 +4047,53 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 员工界面偏好表_可重复执行_主键生效_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表不存在：校验报 54380。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54380, missing.Number);
+
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql);
+        // 重复执行是空操作：员工已保存的偏好不受影响。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Graphite', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.UserPreference WHERE UserGUID = N'user-1' AND PreferenceValue = N'Graphite'"));
+
+        // 主键：同一员工同一偏好键只能一行；不同偏好键可并存。
+        // 只认主键冲突（2627），避免语句本身写错也被当成「主键生效」。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Paper', SYSUTCDATETIME());
+            """));
+        Assert.Equal(2627, duplicate.Number);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-ipad.colorTheme', N'Paper', SYSUTCDATETIME());
+            """);
+
+        // 主键被删 → 54382；列宽漂移 → 54381。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.UserPreference DROP CONSTRAINT PK_UserPreference;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54382, noPrimaryKey.Number);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.UserPreference ALTER COLUMN PreferenceValue nvarchar(50) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54381, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB工资类别映射_临时工周末两列_旧表加列_可重复执行_保留既有映射_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -4194,7 +4241,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
 
         var missing = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
-        Assert.Equal(54380, missing.Number);
+        Assert.Equal(54390, missing.Number);
 
         // 先建上一版（20261029.003）的表与权限表，再放入一条旧查看记录，验证加列不破坏既有行。
         await ExecuteNonQueryAsync(main, """
@@ -4210,10 +4257,10 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             VALUES (N'l-old', N'u-actor', N'c-1', NULL, N'uid-1', '2026-10-23', SYSUTCDATETIME());
             """);
 
-        // 列缺失 → 54381；Apply 后通过；重复执行不重复插入权限。
+        // 列缺失 → 54391；Apply 后通过；重复执行不重复插入权限。
         var noAction = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
-        Assert.Equal(54381, noAction.Number);
+        Assert.Equal(54391, noAction.Number);
         await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
         await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql);
         await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
@@ -4222,11 +4269,11 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         Assert.Equal(2, await ScalarIntAsync(main,
             "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Myob.Payslip.Download', N'Myob.Payslip.Email') AND IsDeleted = 0"));
 
-        // Recipient 列宽漂移 → 54382。
+        // Recipient 列宽漂移 → 54392。
         await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN Recipient nvarchar(50) NULL;");
         var width = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
-        Assert.Equal(54382, width.Number);
+        Assert.Equal(54392, width.Number);
     }
 
     [SchemaMigrationSqlServerFact]

@@ -30,6 +30,9 @@ public interface IColorThemeService
 
     /// <summary>立即切换主题并保存为本机偏好。</summary>
     Task SelectAsync(PosColorTheme theme, CancellationToken cancellationToken = default);
+
+    /// <summary>只切换界面、不保存（首次选择窗里点卡片预览用）；确认后再调用 <see cref="SelectAsync"/>。</summary>
+    void Preview(PosColorTheme theme);
 }
 
 /// <summary>把主题落到界面资源上；与偏好读写分开，便于在没有 WPF 资源的环境下测试服务。</summary>
@@ -87,6 +90,8 @@ public sealed class ColorThemeService : IColorThemeService
         }
     }
 
+    public void Preview(PosColorTheme theme) => Apply(theme);
+
     internal static PosColorTheme Parse(string? value)
     {
         // 已删除的旧主题：「经典」（Default）改由彩色的糖果紫接替，「暖纸」（Paper）回到默认蓝色。
@@ -98,6 +103,25 @@ public sealed class ColorThemeService : IColorThemeService
         return Enum.TryParse<PosColorTheme>(value, ignoreCase: true, out var theme) && Enum.IsDefined(theme)
             ? theme
             : FallbackTheme;
+    }
+
+    /// <summary>只认枚举名（忽略大小写），用于员工偏好；数字、空值与未知名称都返回 false。</summary>
+    internal static bool TryParse(string? value, out PosColorTheme theme)
+    {
+        theme = FallbackTheme;
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || char.IsDigit(trimmed[0]) || trimmed[0] is '-' or '+')
+        {
+            return false;
+        }
+
+        if (!Enum.TryParse<PosColorTheme>(trimmed, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+        {
+            return false;
+        }
+
+        theme = parsed;
+        return true;
     }
 
     private void Apply(PosColorTheme theme)

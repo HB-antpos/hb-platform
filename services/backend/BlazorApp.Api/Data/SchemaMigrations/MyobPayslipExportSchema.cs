@@ -1,12 +1,12 @@
 namespace BlazorApp.Api.Data.SchemaMigrations;
 
 /// <summary>
-/// MYOB 工资单导出（迁移 20261029.004-myob-payslip-export）：下载 PDF / 邮件发送工资单，在原有查看记录上留痕。
+/// MYOB 工资单导出（迁移 20261029.005-myob-payslip-export）：下载 PDF / 邮件发送工资单，在原有查看记录上留痕。
 /// - dbo.MyobPayslipViewLog 增加两列：Action（View / Download / Email，既有行默认 View）与 Recipient（邮件收件邮箱，其余动作为空）。
 ///   仍然只记「谁、何时、哪一期、做了什么、发给哪个邮箱」，不记金额、姓名或工资内容。
 /// - 新权限码 Myob.Payslip.Download / Myob.Payslip.Email 幂等写入 HbwebSysPermissions，不授予任何角色（生产手动授权）。
 /// 只给已存在的表加两列并插入两行权限；回退只需删除这两列、两条权限行并移除迁移账本行（先部署旧版主 API 即可，旧版不读这两列）。
-/// 错误号自成一段 54380–54389：54380 表缺失、54381 Action 列签名、54382 Recipient 列签名。
+/// 错误号自成一段 54390–54389：54390 表缺失、54391 Action 列签名、54392 Recipient 列签名。
 /// 生产须显式执行 --schema=migrate，且要先于新版主 API 上线（新版写查看记录时会写 Action 列）。
 /// </summary>
 internal static class MyobPayslipExportSchema
@@ -55,20 +55,20 @@ END CATCH;
     // 只读门禁：两列的类型 / 长度 / 可空性必须精确匹配（nvarchar 的 max_length 是字节数，字符数 * 2）。
     internal const string VerifySql = """
 IF OBJECT_ID(N'dbo.MyobPayslipViewLog', N'U') IS NULL
-    THROW 54380, N'MYOB payslip view log table is missing.', 1;
+    THROW 54390, N'MYOB payslip view log table is missing.', 1;
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.columns c JOIN sys.types ty ON ty.[user_type_id] = c.[user_type_id]
     WHERE c.[object_id] = OBJECT_ID(N'dbo.MyobPayslipViewLog') AND c.[name] = N'Action'
       AND ty.[name] = N'nvarchar' AND c.[max_length] = 40 AND c.[is_nullable] = 0
 )
-    THROW 54381, N'MYOB payslip view log Action column is missing or incompatible.', 1;
+    THROW 54391, N'MYOB payslip view log Action column is missing or incompatible.', 1;
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.columns c JOIN sys.types ty ON ty.[user_type_id] = c.[user_type_id]
     WHERE c.[object_id] = OBJECT_ID(N'dbo.MyobPayslipViewLog') AND c.[name] = N'Recipient'
       AND ty.[name] = N'nvarchar' AND c.[max_length] = 508 AND c.[is_nullable] = 1
 )
-    THROW 54382, N'MYOB payslip view log Recipient column is missing or incompatible.', 1;
+    THROW 54392, N'MYOB payslip view log Recipient column is missing or incompatible.', 1;
 """;
 }

@@ -146,6 +146,81 @@
         }
       }
     },
+    "/api/v1/cashiers/me/preferences/color-theme": {
+      "get": {
+        "tags": [
+          "CashierPreferences"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "CashierPreferences"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashierColorThemePreferenceUpdateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashierColorThemePreferenceUpdateRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashierColorThemePreferenceUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashierColorThemePreferenceDtoApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/cashiers/barcode-login": {
       "post": {
         "tags": [
@@ -7245,6 +7320,54 @@
             "nullable": true
           },
           "deviceCode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashierColorThemePreferenceDto": {
+        "type": "object",
+        "properties": {
+          "userGuid": {
+            "type": "string",
+            "nullable": true
+          },
+          "colorTheme": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashierColorThemePreferenceDtoApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CashierColorThemePreferenceDto"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashierColorThemePreferenceUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "userGuid": {
+            "type": "string",
+            "nullable": true
+          },
+          "colorTheme": {
             "type": "string",
             "nullable": true
           }

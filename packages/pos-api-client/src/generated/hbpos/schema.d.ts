@@ -129,6 +129,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cashiers/me/preferences/color-theme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                        "application/json": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                        "text/json": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CashierColorThemePreferenceUpdateRequest"];
+                    "text/json": components["schemas"]["CashierColorThemePreferenceUpdateRequest"];
+                    "application/*+json": components["schemas"]["CashierColorThemePreferenceUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                        "application/json": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                        "text/json": components["schemas"]["CashierColorThemePreferenceDtoApiResult"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cashiers/barcode-login": {
         parameters: {
             query?: never;
@@ -5775,6 +5839,20 @@ export interface components {
             storeCode?: string | null;
             userBarcode?: string | null;
             deviceCode?: string | null;
+        };
+        CashierColorThemePreferenceDto: {
+            userGuid?: string | null;
+            colorTheme?: string | null;
+        };
+        CashierColorThemePreferenceDtoApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["CashierColorThemePreferenceDto"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        CashierColorThemePreferenceUpdateRequest: {
+            userGuid?: string | null;
+            colorTheme?: string | null;
         };
         CashierSessionDto: {
             cashierId?: string | null;

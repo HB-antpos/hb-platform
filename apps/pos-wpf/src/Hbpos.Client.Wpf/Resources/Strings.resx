@@ -431,6 +431,11 @@
   <data name="shell.colorTheme.celadon.hint" xml:space="preserve"><value>Soft all-day comfort</value></data>
   <data name="shell.colorTheme.elder" xml:space="preserve"><value>Easy View</value></data>
   <data name="shell.colorTheme.elder.hint" xml:space="preserve"><value>Large text, clear zones, high contrast</value></data>
+  <data name="shell.colorThemeOnboarding.title" xml:space="preserve"><value>Welcome, {0}</value></data>
+  <data name="shell.colorThemeOnboarding.subtitle" xml:space="preserve"><value>First time here. Pick the color theme you like.</value></data>
+  <data name="shell.colorThemeOnboarding.hint" xml:space="preserve"><value>Tap a card to preview it on the whole screen. You can change it anytime from Color theme at the top right, and it follows you to every register.</value></data>
+  <data name="shell.colorThemeOnboarding.confirm" xml:space="preserve"><value>Start with {0}</value></data>
+  <data name="shell.colorThemeOnboarding.preselectedHint" xml:space="preserve"><value>Preselected: the theme last used on this register</value></data>
   <data name="shell.languageToggle" xml:space="preserve"><value>中 / EN</value></data>
   <data name="shell.language.saveFailedRestartMayRevert" xml:space="preserve"><value>Language changed for this session, but saving failed. It may revert after restart.</value></data>
   <data name="shell.cashierLogin.overlayTitle" xml:space="preserve"><value>Cashier login required</value></data>

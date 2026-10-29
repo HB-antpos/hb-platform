@@ -264,7 +264,7 @@
 - **Memo**：报表接口没有对应字段，PDF 里保留标签与空行。**Pay Slip For**：接口只给整段姓名，原样显示（MYOB 原版是 “Surname, GIVEN”）。**Entitlement 行**的小时数放 HOURS 列（真实原版未见，待用带假期累计的真实 PDF 核对）。
 - **接口**（`api/react/v1/myob/payslips`）：`GET pdf`（文件流）、`GET email-target`（档案邮箱 / 主题 / 文件名 / 当前登录人邮箱）、`POST email`；`GET detail` 新增 `hourlyRate`、`referenceNumber`、扁平 `lines`（含 `typeLabel`）、`canDownloadPdf`、`canSendEmail`。
 - **权限**：新增 `Myob.Payslip.Download`、`Myob.Payslip.Email`（默认不授予任何角色；须同时具备原有两个查看码之一）。两个码在 `PermissionSurfaceCatalog` 登记为 Web + 手机端；原有两个查看码也从「仅 Web」改成 Web + 手机端。
-- **留痕**：`MyobPayslipViewLog` 增加 `Action`（View / Download / Email / EmailFailed）与 `Recipient`（邮件收件邮箱）；邮件先写记录再发送，失败改成 EmailFailed。迁移 `20261029.004-myob-payslip-export`（加两列 + 写两个权限码），**必须先于新版主 API 部署**。
+- **留痕**：`MyobPayslipViewLog` 增加 `Action`（View / Download / Email / EmailFailed）与 `Recipient`（邮件收件邮箱）；邮件先写记录再发送，失败改成 EmailFailed。迁移 `20261029.005-myob-payslip-export`（加两列 + 写两个权限码），**必须先于新版主 API 部署**。
 - **邮件**：复用发票邮箱后台的公司 SMTP（同监护人邮件做法）；正文中英双语、不含金额；PDF **不加密码**（用户已定）；每次一个员工、一个收件人；档案邮箱存在且收件人不同时须确认，档案没有邮箱时手填只用于本次。
 - **手机端**：新增「工资单 Payslips」页面（人员管理分组，路由 `payslips`），列表 + 详情（MYOB 样式）+ 下载 PDF（系统分享）+ 发邮件（底部弹层）；只做管理者查看，员工看自己的工资单仍不做。纯 JS，不涉及原生包。
-- **发布顺序**：迁移 `20261029.004` → 主 API → Web → 手机端 OTA（用户之前说「下次一起发」）。
+- **发布顺序**：迁移 `20261029.005` → 主 API → Web → 手机端 OTA（用户之前说「下次一起发」）。

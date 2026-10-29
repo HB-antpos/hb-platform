@@ -264,6 +264,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
 
+    Task ApplyUserPreferenceAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserPreferenceAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipExportAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipExportAsync(CancellationToken cancellationToken);
@@ -1668,6 +1672,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MyobPayslipSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserPreferenceAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPreferenceSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后过精确签名（列 / 主键），通过后协调器才登记账本。
+        await VerifyUserPreferenceAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserPreferenceAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPreferenceSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
