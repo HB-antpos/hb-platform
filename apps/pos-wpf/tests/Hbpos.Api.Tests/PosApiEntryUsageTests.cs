@@ -303,6 +303,65 @@ public sealed class PosApiEntryUsageTests
     }
 
     [Fact]
+    public async Task Middleware_counts_any_exception_thrown_after_the_client_disconnected_as_4xx()
+    {
+        // 线上实例：客户端断开后 SqlClient 抛 SqlException "Operation cancelled by user"，
+        // 不是 OperationCanceledException；只要 RequestAborted 已触发就是客户端断开。
+        using var cts = new CancellationTokenSource();
+        var context = Context("/api/v1/devices/runtime-status", entry: "aws", storeCode: "S001");
+        context.RequestAborted = cts.Token;
+        var (middleware, counter) = CreateMiddleware(_ =>
+        {
+            cts.Cancel();
+            throw new InvalidOperationException("Operation cancelled by user.");
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => middleware.InvokeAsync(context));
+
+        Assert.Equal(new PosApiEntryUsageDelta(1, 1, 0), Assert.Single(counter.Drain(D1)).Value);
+    }
+
+    [Fact]
+    public async Task Middleware_counts_unexpected_end_of_request_content_as_4xx_even_before_abort_is_signalled()
+    {
+        // 请求体没传完客户端就断了：Kestrel 抛 BadHttpRequestException，此时 RequestAborted 未必已触发。
+        var (middleware, counter) = CreateMiddleware(_ =>
+            throw new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest));
+
+        await Assert.ThrowsAsync<BadHttpRequestException>(() =>
+            middleware.InvokeAsync(Context("/api/v1/devices/runtime-status", entry: "aws", storeCode: "S001")));
+
+        Assert.Equal(new PosApiEntryUsageDelta(1, 1, 0), Assert.Single(counter.Drain(D1)).Value);
+    }
+
+    [Fact]
+    public async Task Middleware_counts_unexpected_end_of_request_content_wrapped_in_another_exception_as_4xx()
+    {
+        var (middleware, counter) = CreateMiddleware(_ =>
+            throw new InvalidOperationException(
+                "binding failed",
+                new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest)));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            middleware.InvokeAsync(Context("/api/v1/orders", entry: "aws", storeCode: "S001")));
+
+        Assert.Equal(new PosApiEntryUsageDelta(1, 1, 0), Assert.Single(counter.Drain(D1)).Value);
+    }
+
+    [Fact]
+    public async Task Middleware_still_counts_other_bad_requests_and_real_failures_as_5xx_when_the_client_is_still_connected()
+    {
+        // 不能把所有异常都算成断开：客户端仍连着时，其他 BadHttpRequestException 和 SQL 超时之类仍记 5xx。
+        var (middleware, counter) = CreateMiddleware(_ =>
+            throw new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge));
+
+        await Assert.ThrowsAsync<BadHttpRequestException>(() =>
+            middleware.InvokeAsync(Context("/api/v1/orders", entry: "aws", storeCode: "S001")));
+
+        Assert.Equal(new PosApiEntryUsageDelta(1, 0, 1), Assert.Single(counter.Drain(D1)).Value);
+    }
+
+    [Fact]
     public async Task Middleware_never_breaks_the_response_when_recording_fails()
     {
         // 时钟抛异常：统计失败必须被吞掉，响应照常。

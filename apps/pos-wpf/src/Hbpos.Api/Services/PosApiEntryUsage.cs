@@ -212,16 +212,42 @@ public sealed class PosApiEntryUsageMiddleware(
         catch (Exception exception)
         {
             // 异常冒泡出管线时响应状态码还是默认的 200（Kestrel 事后才改成 500），所以这里显式覆盖：
-            // 客户端主动断开引起的取消按 nginx 习惯记 499（落在 4xx），其余算服务端 5xx。
-            statusOverride = exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested
-                ? 499
-                : 500;
+            // 客户端主动断开引起的异常按 nginx 习惯记 499（落在 4xx），其余算服务端 5xx。
+            statusOverride = IsClientDisconnect(exception, context) ? 499 : 500;
             throw;
         }
         finally
         {
             RecordSafely(context, statusOverride);
         }
+    }
+
+    /// <summary>
+    /// 异常是否由客户端中途断开连带引起。边缘机（nginx）在客户端断开时会立刻关闭到源站的连接，
+    /// 这类异常不能记成服务端 5xx，否则只走边缘机入口的线路会凭空多出 5xx。
+    /// </summary>
+    private static bool IsClientDisconnect(Exception exception, HttpContext context)
+    {
+        // 连接已断开（RequestAborted 已触发）时，底层抛出的异常类型五花八门：
+        // OperationCanceledException、SqlClient 的 SqlException "Operation cancelled by user"……
+        // 所以只认 RequestAborted，不按异常类型猜。
+        if (context.RequestAborted.IsCancellationRequested)
+        {
+            return true;
+        }
+
+        // 请求体还没读完客户端就走了：Kestrel 抛 BadHttpRequestException（Unexpected end of request content），
+        // 这时 RequestAborted 不一定已经触发，单独识别。其他 BadHttpRequestException（如请求体过大）不在此列。
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is BadHttpRequestException
+                && current.Message.Contains("Unexpected end of request content", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RecordSafely(HttpContext context, int statusOverride)
