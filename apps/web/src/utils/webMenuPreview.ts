@@ -105,6 +105,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageFaceCameras: [P.FaceCapture.CamerasManage],
   canManageMyobConnections: [P.Myob.ConnectionManage],
   canBindMyobEmployees: [P.Myob.EmployeeBind],
+  canPushMyobTimesheet: [P.Myob.TimesheetPush],
   // 任一权限可见：连接与映射 / 员工绑定 / 发薪公司（编辑工资）
   canAccessMyob: [P.Myob.ConnectionManage, P.Myob.EmployeeBind, P.Attendance.PayrollEdit],
   // 工资单页签：任一权限可见；从菜单授予时只补第一个（管辖分店），移除时两个权限码一并撤销。

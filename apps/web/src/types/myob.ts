@@ -466,6 +466,8 @@ export interface MyobPreviewRow {
   /** 已绑定的 MYOB 员工卡姓名；未绑定为 null。 */
   myobName: string | null
   myobState: MyobTimesheetState
+  /** 推送状态（后端 MyobPreviewPushStateDto）：未推送 / 已推送 / 需重新推送，及最近一次记录。 */
+  push: MyobPreviewPushState
   detail: MyobPreviewDetail
 }
 
@@ -489,8 +491,114 @@ export interface MyobTimesheetPreview {
   /** 后端已按「可推送 → 被拦截 → 不推送」排序，同档按姓名。 */
   rows: MyobPreviewRow[]
   totals: MyobPreviewTotals
-  /** 推送功能是否已开放；本批恒为 false。 */
+  /** 推送功能是否已开放：总闸 Myob__TimesheetPushEnabled 开 + 该公司文件在灰度白名单里（权限另由 canPushMyobTimesheet 决定）。 */
   pushEnabled: boolean
+}
+
+// ───────────────────────── Timesheet 推送与撤销 ─────────────────────────
+// 契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobTimesheetPushDtos.cs 为准。
+// 路由 /api/react/v1/myob/timesheet/{push, batches, batches/{id}, batches/{id}/undo}，权限 Myob.Timesheet.Push；会写 MYOB 生产数据。
+
+/** 预览行的推送状态。 */
+export type MyobPushState = 'NotPushed' | 'Pushed' | 'NeedsRepush' | 'ProcessedSkipped' | 'Failed' | 'Mismatch'
+
+export interface MyobPreviewPushState {
+  state: MyobPushState
+  needsRepush: boolean
+  /** 最近一条记录的状态（MyobPushStatus）；没有记录为 null。 */
+  lastStatus: string | null
+  lastBatchGuid: string | null
+  lastPushedAt: string | null
+}
+
+/**
+ * 推送 / 撤销结果里单个员工的状态。Blocked 只在返回里出现（被拦截项挡住，没落库）；
+ * Undo* 三个是撤销被拒绝的原因。后端给了不认识的状态一律按 Failed 处理，不把未知值显示成成功。
+ */
+export type MyobPushStatus =
+  | 'Pushed'
+  | 'UpToDate'
+  | 'SkippedProcessed'
+  | 'SkippedHasEntries'
+  | 'Blocked'
+  | 'Failed'
+  | 'Mismatch'
+  | 'Undone'
+  | 'UndoConflict'
+  | 'UndoBlockedProcessed'
+  | 'UndoBlockedNewer'
+  | 'Running'
+
+export interface MyobPushRequest {
+  connectionGuid: string
+  /** 工资周期起始日 yyyy-MM-dd。 */
+  periodStart: string
+  /** 本块 1–10 人；客户端只传「推谁」，工时由服务端重新规划。 */
+  userGuids: string[]
+  /** 第二块起带上第一块返回的批次号。 */
+  batchGuid?: string
+  /** 用户在确认弹窗里按人勾选「覆盖」的员工（MYOB 里已有未发薪内容的人）。 */
+  overwriteUserGuids: string[]
+  /** 已知晓的提示项码；员工命中的提示必须全部被覆盖。 */
+  acknowledgedHintCodes: string[]
+}
+
+export interface MyobPushUserResult {
+  userGuid: string
+  userName: string
+  status: MyobPushStatus
+  /** 拦截 / 失败 / 跳过的原因码；没有为 null。 */
+  code: string | null
+  /** 后端给的说明（不含 MYOB 响应体）；没有为 null。 */
+  message: string | null
+  pushedHours: number
+}
+
+export interface MyobPushResult {
+  batchGuid: string
+  connectionGuid: string
+  periodStart: string
+  results: MyobPushUserResult[]
+}
+
+export interface MyobPushBatchSummary {
+  batchGuid: string
+  startedAt: string
+  actorUserGuid: string | null
+  actorName: string | null
+  total: number
+  pushed: number
+  upToDate: number
+  skipped: number
+  failed: number
+  mismatch: number
+  undone: number
+  /** 本批真正写过 MYOB、且还没撤销的员工数。 */
+  undoable: number
+}
+
+export interface MyobPushBatchItem {
+  userGuid: string
+  userName: string
+  status: MyobPushStatus
+  errorCode: string | null
+  errorStatus: number | null
+  pushedHours: number
+  startedAt: string
+  finishedAt: string | null
+  undoneAt: string | null
+}
+
+export interface MyobPushBatchDetail {
+  summary: MyobPushBatchSummary
+  connectionGuid: string
+  periodStart: string
+  items: MyobPushBatchItem[]
+}
+
+export interface MyobUndoResult {
+  batchGuid: string
+  results: MyobPushUserResult[]
 }
 
 // ───────────────────────── 从 MYOB 同步资料到我方 ─────────────────────────
