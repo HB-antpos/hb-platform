@@ -383,6 +383,9 @@ public sealed class MyobPreviewRowDto
     /// <summary>MyobTimesheetStates。</summary>
     public string MyobState { get; set; } = MyobTimesheetStates.Unknown;
 
+    /// <summary>推送状态：未推送 / 已推送 / 需重新推送，及最近一次推送记录。</summary>
+    public MyobPreviewPushStateDto Push { get; set; } = new();
+
     public MyobPreviewDetailDto Detail { get; set; } = new();
 }
 

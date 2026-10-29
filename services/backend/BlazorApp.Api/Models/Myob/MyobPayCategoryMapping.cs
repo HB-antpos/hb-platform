@@ -29,11 +29,11 @@ internal sealed class MyobPayCategoryMapping
     [SugarColumn(Length = 50, IsNullable = true)]
     public string? SundayCasualUid { get; set; }
 
-    /// <summary>全职 / 兼职的公共假期。列由迁移 20261030.001-myob-pay-category-public-holiday 新增，可空。</summary>
+    /// <summary>全职 / 兼职的公共假期。列由迁移 20261030.002-myob-pay-category-public-holiday 新增，可空。</summary>
     [SugarColumn(Length = 50, IsNullable = true)]
     public string? PublicHolidayUid { get; set; }
 
-    /// <summary>临时工（Casual）的公共假期。列由迁移 20261030.001-myob-pay-category-public-holiday 新增，可空。</summary>
+    /// <summary>临时工（Casual）的公共假期。列由迁移 20261030.002-myob-pay-category-public-holiday 新增，可空。</summary>
     [SugarColumn(Length = 50, IsNullable = true)]
     public string? PublicHolidayCasualUid { get; set; }
 

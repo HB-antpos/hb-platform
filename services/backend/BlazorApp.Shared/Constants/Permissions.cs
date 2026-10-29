@@ -652,6 +652,13 @@ namespace BlazorApp.Shared.Constants
                 /// <summary>把工资单 PDF 以邮件发给员工（须同时具备上面任一查看权限；发送会写查看记录，含收件邮箱）。</summary>
                 public const string Email = "Myob.Payslip.Email";
             }
+
+            // Timesheet 推送：会写 MYOB 的生产数据，默认不授予任何角色（含店长），由管理员在生产手动授权给财务账号。
+            public static class Timesheet
+            {
+                /// <summary>把工资周期的转账工时推送到 MYOB Timesheet，并撤销已推送的批次（预览仍用 Attendance.Payroll.Edit）。</summary>
+                public const string Push = "Myob.Timesheet.Push";
+            }
         }
 
         public static class SeasonalCards

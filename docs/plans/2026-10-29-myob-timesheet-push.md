@@ -1,7 +1,7 @@
 # MYOB Timesheet 推送（PUT）· 方案
 
-> 状态：**方案已确认（2026-10-29），未开始实现**。第 10 节：实测环境**改为用一个生产公司文件（B）**（用户 2026-10-29 改选，不再新建测试文件）；其余按推荐项：新增权限码 `Myob.Timesheet.Push`；MYOB 已有未发薪记录时允许覆盖但须单独勾选；可挑人推。第 3 节的「实测」未做之前，任何写 MYOB 的正式推送代码都不合入、不开总闸。
-> 进度：已选 Robinson Road；测试卡 `test test`（Employee ID `0086`）已在该生产文件里建好，连接已授权。探针 #1080 已合并；2026-10-30 读官方文档后补测 DELETE、三种日期写法与 MYOB 错误码（本 PR）。待在测试卡上补全 Payroll Details、部署主 API 后运行（第 3.3 节）。
+> 状态：**方案已确认（2026-10-29）；第 3 节实测已完成（2026-10-30，结论见 3.4）；批 1 后端已实现（本 PR）**。第 10 节：实测环境**改为用一个生产公司文件（B）**（用户 2026-10-29 改选，不再新建测试文件）；其余按推荐项：新增权限码 `Myob.Timesheet.Push`；MYOB 已有未发薪记录时允许覆盖但须单独勾选；可挑人推。第 3 节的「实测」未做之前，任何写 MYOB 的正式推送代码都不合入、不开总闸。
+> 进度：已选 Robinson Road；测试卡 `test test` 已在该生产文件里建好，连接已授权。探针 #1080 / #1081 已合并并于 2026-10-30 上线实测一次，`finalClean=true`，测试卡已清空；实测结论见 3.4。批 1（后端推送 / 撤销、迁移 `20261030.001-myob-timesheet-push`、权限码 `Myob.Timesheet.Push`）随本 PR 实现，**探针代码同 PR 删除**；总闸仍默认关，Web（批 2）未做。
 > 范围：把「工资周期锁定后的转账工时」写进发薪公司的 MYOB Timesheet，并能**按批次撤销**。不跑 Pay Run、不报 STP、不写员工卡、不碰现金部分。
 > 与总方案关系：落实 `2026-10-27-myob-payroll-integration.md` 第 8 节「阶段 2：推送 Timesheet」。已有的预览、类别映射、员工绑定、发薪公司规则全部沿用，本方案只新增「写」与「撤销」。
 
@@ -10,10 +10,10 @@
 | 问题 | 结论 |
 |---|---|
 | 要做什么 | 在预览页「推送到 MYOB」按钮背后，实现 `PUT /{cf_uri}/Payroll/Timesheet/{EmployeeUID}`，按员工逐个写；每次写入前后各读一次 MYOB 校验。 |
-| 能不能撤销 | **发薪前能，发薪后不能**（Processed 的记录 API 不能改）。撤销 = 用推送前留下的快照再 PUT 回去（原来没有就清空；清空可能用 DELETE，文档只列了它、没说细节，以实测为准）。**撤销的具体做法取决于第 3 节实测**。 |
+| 能不能撤销 | **发薪前能，发薪后不能**（Processed 的记录 API 不能改）。撤销 = 用推送前留下的快照再 PUT 回去；原来没有记录就 PUT 空 `Lines`（**实测可清空；DELETE 返回 405 不可用**）。 |
 | 最大风险 | PUT 的语义（覆盖 / 合并 / 能否清空）官方文档没写透，我无法保证。所以**先做实测，再写代码**。 |
 | 安全阀 | ① 总闸 `Myob__TimesheetPushEnabled` 默认关（已存在）；② 新增灰度白名单（按公司文件）；③ 新权限码 `Myob.Timesheet.Push`，默认不授予任何角色；④ 每次推送重新服务端校验，不信任预览结果。 |
-| 要建表吗 | 要：`MyobTimesheetPush`（总方案第 4 节已规划），迁移 `20261029.005-myob-timesheet-push`（当前最大是 `.004`）。 |
+| 要建表吗 | 要：`MyobTimesheetPush`，迁移 **`20261030.001-myob-timesheet-push`**（`20261029.005` 已被工资单导出占用）；同一迁移幂等写入权限码 `Myob.Timesheet.Push`。 |
 | 发布顺序 | 迁移 → 主 API（总闸关）→ Web → 灰度打开总闸。无移动端改动、无 OTA、无原生包。 |
 | 回滚 | 关总闸立刻停止所有写入；已写入的批次用「撤销」恢复；代码可整体回滚，新表留着无害。 |
 
@@ -59,9 +59,9 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 |---|---|
 | 支持 `GET \| PUT \| POST \| DELETE`；`Employee.UID` 在 PUT 创建时必填、`PayrollCategory.UID` 在 PUT 时必填；`Entries[].Processed` 表示「已被发薪使用」；字段 `StartDate` / `EndDate` / `Lines[]`（含 `Notes` ≤255、`Job` 等）/ `Entries[].UID / Date / Hours / Processed`；分页默认 400、最多 1000 | PUT 是覆盖还是合并；**DELETE 删什么**（整个区间 / 一行 / 一条）、已发薪的记录能不能删；Processed 记录能不能改；Hours 的精度（类型写 Integer，示例却是 `7.6`）；日期格式（文字写 `YYYY-MM-DD HH:MM:SS`，示例是 `yyyy-MM-ddT00:00:00`）；区间外的 Entries 怎么处理 |
 
-另据 MYOB 错误码页（较旧，以实测为准）：条目日期落在 StartDate~EndDate 之外 = 220；StartDate 晚于 EndDate = 221；类别没挂到员工 = 34001；公司文件的 Timesheet 设置未开 = 34003。
+另据 MYOB 错误码页（较旧）：条目日期落在 StartDate~EndDate 之外 = 220；StartDate 晚于 EndDate = 221；类别没挂到员工 = 34001；公司文件的 Timesheet 设置未开 = 34003。**实测：区间外日期返回 400 `DateOutOfRange`，ErrorCode 是 221（不是 220）**，见 3.4。
 
-**更正**：此前方案与对话里说「MYOB 没有 DELETE Timesheet」是错的——文档列了 DELETE。它可能是比「PUT 空数组」更干净的清空 / 撤销办法，探针已加测（见 3.2），结论出来前撤销的做法（4.5）仍以实测为准。
+**更正**：此前方案与对话里说「MYOB 没有 DELETE Timesheet」是错的——文档列了 DELETE。**但实测带 StartDate / EndDate 的 DELETE 返回 405（Method Not Allowed），不能用**；清空靠 PUT 空 `Lines`（见 3.4）。
 
 以下几点官方文档没有明确写，凭记忆不可靠，**每一条都要用真实请求确认**，结果写回本节：
 
@@ -105,10 +105,26 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 
 1. 在 MYOB 里补全 `test test` 卡的 Payroll Details：时薪制；工资类别挂 `Base Hourly`、`SATURDAY…`、`SUNDAY…`（以及可选的 `Personal Leave Pay`、`Holiday Leave Pay`）；不要放进任何 Pay Run。若 MYOB 有「使用 Timesheet」之类的开关，打开它（探针也会顺带验证第 9 条是否需要）。
 2. 在「连接与映射」里确认 Robinson Road 的工资类别映射已保存（平日 / 周六至少两项）；没保存也可以在请求里直接给类别 UID。
-3. 服务器 `.env` 临时加：`Myob__WriteProbeBusinessId=<Robinson Road 的 BusinessId>`、`Myob__WriteProbeEmployeeDisplayId=0086`，重启主 API。
+3. ~~服务器 `.env` 临时加 `Myob__WriteProbeBusinessId` / `Myob__WriteProbeEmployeeDisplayId`~~ **（实际执行时更正）**：服务器 compose 没有 `env_file`，也没映射这两个变量，只改 `.env` 传不进容器。实际做法是 `.env` 加 `MYOB_WRITE_PROBE_*` 两行（先备份）+ 服务器端临时 `docker-compose.override.yml` 做映射，重建容器；测完两处都删并再重建。另外 **`test test` 卡在 MYOB 里没填 Employee ID，读到的是 `*None`，不是 `0086`**，配置用 `*None`（探针要求匹配恰好一张、姓名 test test、启用中，校验照旧生效）。
 4. 财务不在 MYOB 跑 Pay Run 的时段，管理员登录后调用 `POST /api/react/v1/myob/timesheet/write-probe`，Body：`{"businessId":"<Robinson Road 的 BusinessId>","periodStart":"<今天或之后的某个周一，yyyy-MM-dd>"}`。
 5. 把返回结果（只含状态码 / 错误类型名 / 该测试卡自己的日期与小时）记入第 3 节表格；确认 `verdicts.finalClean=true`。若为 false，按提示在 MYOB 的 Enter Timesheet 里手工清掉 `test test` 卡的记录。
 6. 立刻从 `.env` 删掉两个变量并重启；探针代码在第 1 批实现提交里移除。
+
+### 3.4 实测结果（2026-10-30 08:3x 悉尼，Robinson Road，`test test` 卡，周期 2026-11-09 ~ 11-29）
+
+一次运行，所有写入均 200，结束时 `finalClean=true`、残留 0，测试卡已清空。
+
+| # | 结论 |
+|---|---|
+| 1 | **PUT 是整体覆盖**该员工该日期区间内的全部行：先写平日两天，再只发周六一行，读回只剩周六，平日行消失。所以重推 / 撤销必须按「整个区间的完整内容」发。 |
+| 2 | **DELETE（带 StartDate / EndDate）返回 405，不可用。** 三种清空办法都有效：`Lines` 空数组（记录消失）、每行 `Entries` 空数组（记录消失）、全部工时改 0（记录还在、工时为 0）。撤销采用 `Lines: []`。 |
+| 3 | 日期 `yyyy-MM-dd` 被接受，读回为 `2026-11-09T00:00:00`；7.333 小时读回 `7.333000`（**保留 3 位小数**）。 |
+| 4 | 区间外的一天：**HTTP 400，`DateOutOfRange`，ErrorCode 221**，且不会存下。 |
+| 5 | 含 Processed 区间的 PUT：**生产不测、不依赖**；正式推送在发 PUT 前先 GET，有 Processed 就不发。 |
+| 6 | 最小请求体（`Employee.UID`、`StartDate` / `EndDate`、`Lines[].PayrollCategory.UID`、`Entries[].Date / Hours`，不带 Job / Notes / Processed）被接受。 |
+| 7 | 给卡没有的类别写入：**未测**（没提供 UnassignedCategoryUid）；错误文案以首次灰度为准。 |
+| 8 | 单步耗时：PUT 约 0.7–3.4 秒，GET 约 0.5–1.9 秒；未触发限流。 |
+| 9 | 测试卡上类别（平日 / 周六）挂好后所有 PUT 都 200；「使用 Timesheet」开关对 Process Payroll 是否必需仍须财务在灰度时核对（第 9 节）。 |
 
 ## 4. 后端
 
@@ -116,22 +132,22 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 
 `IMyobApiClient` 新增（接口默认实现抛 `NotSupportedException`，既有测试替身不用改，沿用 `GetPayrollAdvicesAsync` 的做法）：
 
-- `GetTimesheetAsync(businessId, token, employeeUid, start, end, ct)` → `MyobTimesheetSnapshot`：只保留 `Lines[] { PayrollCategory.UID, Entries[] { Date, Hours, Processed } }`，**不保留** Job / Notes 以外的敏感内容；`GetTimesheetStatusAsync` 内部改为复用它。
+- `GetTimesheetLinesAsync(businessId, token, employeeUid, start, end, ct)` → `List<MyobTimesheetLineRecord>`（已随探针 PR 加入）：只保留 `Lines[] { PayrollCategory.UID, Entries[] { Date, Hours, Processed } }`，不保留 Job / Notes；404 或空体 = 没有记录。
 - `PutTimesheetAsync(businessId, token, employeeUid, start, end, lines, ct)`：`PUT /{cf_uri}/Payroll/Timesheet/{uid}?StartDate=&EndDate=`，请求体按第 3 节实测定稿。走现有 `SendAsync`（共用 130ms 限流闸）。
-- 5xx 与超时**重试 1 次**（PUT 整体覆盖是幂等的；若实测结果是「合并」，则不重试，改为失败后 GET 再判断）。4xx 不重试。
+- 5xx 与网络错误**重试 1 次**（实测 PUT 是整体覆盖，幂等），4xx 不重试；重试放在推送服务里（`PutWithRetryAsync`），客户端本身只发一次。
 - 错误只带状态码，**不回显 MYOB 响应体**（沿用 `MyobApiException` 约束）。
-- 所有写路径只此一处，并且在客户端内再校验一次总闸（双保险，见 4.6）。
+- 所有写路径只此一处（`DeleteTimesheetAsync` 已随探针删除），并且在客户端内再校验一次总闸（双保险，见 4.6）：总闸关闭时 `PutTimesheetAsync` 不发请求、返回状态码 0 / `PUSH_DISABLED`。客户端拿不到连接 GUID，所以只看总闸，灰度白名单在控制器 / 服务层。
 
 ### 4.2 推送服务 `MyobTimesheetPushService`
 
 ```
-PushAsync(connectionGuid, periodStart, userGuids, batchGuid?, overwriteExisting, acknowledgedHintCodes, actor, ct)
+PushAsync(connectionGuid, periodStart, userGuids, batchGuid?, overwriteUserGuids, acknowledgedHintCodes, actor, ct)
 UndoBatchAsync(batchGuid, actor, ct)
 GetStatesAsync(connectionGuid, periodStart)     // 供预览行显示「已推送 / 需重新推送」
 ListBatchesAsync(connectionGuid, periodStart)
 ```
 
-**与预览共用同一段规划代码。** 现在规划逻辑在 `MyobTimesheetPreviewService.BuildRow` 里，只把结果摊成 DTO 网格。实现时抽出一个内部的 `MyobTimesheetPlanBuilder`（输入公司 / 周期 / 员工，输出每员工的 `MyobCompanyPlan` + 拦截项 + 提示项），预览和推送都调用它，保证「预览看到什么就推什么」，且推送**不信任客户端传来的任何工时数字**，客户端只传「公司、周期、要推的员工」。（改动 `BuildRow` 属于编辑现有符号，实现前按 CLAUDE.md 要求先跑 `impact` 并汇报影响面。）
+**与预览共用同一段规划代码。** 实现时没有把 `BuildRow` 整体搬走，而是让预览服务多暴露一个内部入口 `IMyobTimesheetPlanSource.ComputeAsync`（返回预览 DTO + 每个员工在本公司名下的分钟级 `MyobCompanyPlan` + 员工卡绑定 + 类别映射），`PreviewAsync` 变成它的薄包装，推送服务调用同一个入口，保证「预览看到什么就推什么」，且推送**不信任客户端传来的任何工时数字**，客户端只传「公司、周期、要推的员工」。（影响面：`MyobTimesheetPreviewService` 只被 DI 注册、`MyobTimesheetController` 与 `MyobTimesheetTests` 引用，改动为新增入口，公开签名不变；GitNexus 索引未收录该类，按全局约定退回 grep 核对。）
 
 **服务端重新校验（每块都做）**：
 
@@ -146,12 +162,12 @@ ListBatchesAsync(connectionGuid, periodStart)
 
 | 步骤 | 说明 |
 |---|---|
-| 1 GET 现状 | 取快照 `Before`（只存 类别 UID / 日期 / 小时 / Processed，不含金额） |
-| 2 判定 | `Processed` 有 → `SKIPPED_PROCESSED`；有未发薪记录且 `overwriteExisting=false` → `SKIPPED_HAS_ENTRIES`；MYOB 内容已等于目标且请求哈希与最近一次成功记录一致 → `UP_TO_DATE`；否则继续 |
-| 3 落库 | 写一条 `Pending`（含 `BeforeJson`、`RequestHash`、`PushedMinutes`），**写不进去就不推** |
-| 4 PUT | 请求体 = 规划行按 `(类别, 日期)` 合并，分钟 → 小时按实测精度取整 |
-| 5 校验 | 再 GET，对比：每个 `(类别, 日期)` 小时数一致（容差 0.005）、合计 = 规划合计。一致 → `PUSHED`；不一致 → `MISMATCH`（记下差异，提示人工核对，**不自动再写**） |
-| 6 失败 | 网络 / 5xx / 4xx → `FAILED`（只记状态码与错误码），可手动重试；`401/invalid_grant` → 连接标 `NeedsReauth`（沿用 token provider），本块剩余员工全部标 `FAILED` 并停止 |
+| 1 落库持锁 | **先**写一条 `Running`（过滤唯一索引保证同一周期同时只有一个），**写不进去就不推**。先加锁再读，保证下一步读到的就是「推送前快照」，不会被并发的另一次推送改旧 |
+| 2 GET 现状 | 取快照 `Before`（只存 类别 UID / 日期 / 小时，不含金额；Job / Notes 不保存，只标记「带了它们」；负工时保留，0 小时丢弃） |
+| 3 判定 | `Processed` 有 → `SKIPPED_PROCESSED`；MYOB 内容已等于目标 → `UP_TO_DATE`；有未发薪内容（含 Job / Notes、负工时）且该员工**不在 `overwriteUserGuids` 里** → `SKIPPED_HAS_ENTRIES`（覆盖**按人**确认，预览之后才出现记录的员工不会被静默覆盖）；否则把 `Before` / `After` 写进记录，继续。跳过 / 已是最新也是把这一行收成结局，不另插记录 |
+| 4 PUT | 请求体 = 规划行按 `(类别, 日期)` 合并，分钟 → 小时保留 3 位小数。**从这一步起不再响应调用方取消**（用户关页签不能让 MYOB 写了一半而记录卡在 Running） |
+| 5 校验 | 再 GET，对比：每个 `(类别, 日期)` 小时数一致（容差 0.0005）。一致 → `PUSHED`；不一致 → `MISMATCH`（记下实际内容，提示人工核对，**不自动再写**） |
+| 6 失败 | 4xx（MYOB 明确拒绝）→ `FAILED`（只记状态码与错误码，错误码截到 80 字），可手动重试。**网络 / 5xx 结果不确定**：重试 1 次仍失败则先回读——等于目标按 `PUSHED` 收尾（保留快照，可撤销）；等于推送前才记 `FAILED`；其余或回读失败记 `MISMATCH`，绝不把「可能已写入」的记录记成 `FAILED`（`FAILED` 够不着撤销）。`401/403` → 本块剩余员工全部标 `FAILED` 并停止 |
 
 **取整**：规划是分钟，MYOB 是小时。按 `(类别, 日期)` 汇总分钟后再换算，保留实测允许的小数位；若 MYOB 只收 2 位小数，则合计可能与分钟精确值差 ≤ 0.005 h × 条数，校验容差按这个算，并在结果里提示「合计差 x h」，不当作错误。
 
@@ -173,7 +189,7 @@ ListBatchesAsync(connectionGuid, periodStart)
 
 ### 4.4 数据：迁移 `20261029.005-myob-timesheet-push`
 
-表 `MyobTimesheetPush`（总方案第 4 节已定名，这里补全；不进 `SqlSugarContext` 自动建表，由迁移创建，幂等、`Verify` 与 `Apply` 分段，沿用 `MyobPayslipSchema` 的写法与测试）：
+表 `MyobTimesheetPush`（迁移 `20261030.001-myob-timesheet-push`，错误号 54400–54405；不进 `SqlSugarContext` 自动建表，由迁移创建，幂等、`Verify` 与 `Apply` 分段，沿用 `MyobPayslipExportSchema` 的写法与测试，并在本机隔离 SQL Server 上跑过集成测试）：
 
 | 列 | 类型 | 说明 |
 |---|---|---|
@@ -189,9 +205,11 @@ ListBatchesAsync(connectionGuid, periodStart)
 | `ActorUserGuid` / `StartedAt` / `FinishedAt` | | |
 | `UndoneAt` / `UndoneBy` / `UndoNote` | | |
 
-索引：`(ConnectionGuid, PeriodStart, UserGuid, StartedAt DESC)` 查最近一次；`(BatchGuid)`；过滤唯一索引保证「同 `(ConnectionGuid, PeriodStart)` 最多一个 `Running` 批次」。`Running` 超过 10 分钟视为陈旧，下次推送时自动标 `Failed` 后放行。
+索引：`(ConnectionGuid, PeriodStart, UserGuid, StartedAt DESC)` 查最近一次；`(BatchGuid)`；过滤唯一索引 `UX_MyobTimesheetPush_Running (ConnectionGuid, PeriodStart) WHERE Status = N'Running'` 保证「同 `(ConnectionGuid, PeriodStart)` 同一时刻最多一行 `Running`」——员工逐个处理，每行只在「落库到写完」之间是 Running，所以第二个并发请求的插入会被索引挡下，服务回 `PUSH_IN_PROGRESS`；另有请求入口的预检。`Running` 超过 10 分钟视为陈旧，下次推送时自动标 `Failed`（`MYOB_PUSH_STALE`）后放行。
 
-同一迁移幂等写入权限码 `Myob.Timesheet.Push`，**不授予任何角色**（与 `20261029.003` 同一做法：`WHERE NOT EXISTS`，不 `UPDATE` / `DELETE` / `DROP`）。
+状态值：`Running / Pushed / UpToDate / SkippedProcessed / SkippedHasEntries / Failed / Mismatch / Undone`；`Blocked`（被拦截项挡住）只在返回里出现、不落库；撤销被拒绝的 `UndoConflict / UndoBlockedProcessed / UndoBlockedNewer` 也只在返回里出现，记录保持 `Pushed` 并写 `UndoNote`，修复原因后可重试。
+
+同一迁移幂等写入权限码 `Myob.Timesheet.Push`，**不授予任何角色**（与 `20261029.003` 同一做法：`WHERE NOT EXISTS`，不 `UPDATE` / `DELETE` / `DROP`）。权限码落地清单已做：`Permissions.cs`、`PermissionSeedData`、`PermissionSurfaceCatalog`（Web 专用）、移动端 `accessPermissions.json` 中英文案；Web 访问判断随批 2。
 
 ### 4.5 撤销（按批次）
 
@@ -202,7 +220,7 @@ ListBatchesAsync(connectionGuid, periodStart)
 3. 若当前内容 ≠ 本批次的 `AfterJson`（说明有人在 MYOB 里手工改过）→ `UndoConflict`，**不覆盖**，提示人工处理；
 4. 否则把 `BeforeJson` PUT 回去：
    - 原来有记录 → PUT 原内容；
-   - 原来没有记录 → 按第 3 节实测的清空办法；若实测发现 API 无法清空，则撤销降级为「在 MYOB 的 Enter Timesheet 里手工清理」，界面只给出要清理的员工 / 日期清单，不假装能自动撤销；
+   - 原来没有记录 → PUT 空 `Lines`（实测可清空，见 3.4）；
 5. 再 GET 校验，记 `Undone`。
 
 撤销同样需要推送权限，同样受总闸控制；只能撤销**本批次**，且该员工在该周期**没有更新的批次**时才允许（防止撤销覆盖掉后来的重推）。
@@ -213,14 +231,18 @@ ListBatchesAsync(connectionGuid, periodStart)
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `push` | Body：`connectionGuid, periodStart, userGuids[≤10], batchGuid?, overwriteExisting, acknowledgedHintCodes[]`；返回 `batchGuid` 与逐员工结果 |
+| POST | `push` | Body：`connectionGuid, periodStart, userGuids[≤10], batchGuid?, overwriteUserGuids[], acknowledgedHintCodes[]`；返回 `batchGuid` 与逐员工结果。`batchGuid` 必须是 GUID，已存在的批次必须是同一公司文件、同一周期 |
 | GET | `batches?connectionGuid=&periodStart=` | 该周期的批次列表与每批汇总（成功 / 跳过 / 失败 / 已撤销数） |
 | GET | `batches/{batchGuid}` | 批次明细（逐员工状态、错误码，不含金额） |
 | POST | `batches/{batchGuid}/undo` | 撤销，返回逐员工结果 |
 
 预览接口返回的行里新增 `push: { state, lastBatchGuid, lastPushedAt, needsRepush }`；`PushEnabled` 继续由总闸 + 白名单 + 权限共同决定。
 
-**总闸与灰度**：`MyobOptions.TimesheetPushEnabled`（已有）+ 新增 `TimesheetPushConnectionGuids`（逗号分隔，空 = 不限，**默认空且总闸关**）。检查放三处：控制器入口、推送服务、`MyobApiClient.PutTimesheetAsync` 内（客户端层拿 `IOptions` 再看一眼，防止将来别的代码路径绕过服务层）。
+**总闸与灰度**：`MyobOptions.TimesheetPushEnabled`（已有）+ 新增 `TimesheetPushConnectionGuids`（逗号分隔；**空 = 全部禁止**，`*` = 全部公司文件；默认空且总闸关——只开总闸忘了配白名单也不会写任何公司文件）。检查放三处：推送服务入口、撤销入口、`MyobApiClient.PutTimesheetAsync` 内（客户端层拿 `IOptions` 再看一眼，防止将来别的代码路径绕过服务层；它拿不到连接 GUID，只看总闸）。
+
+### 4.6.1 撤销与批次查询的访问范围
+
+管理员可看 / 撤销所有批次；其他有 `Myob.Timesheet.Push` 的账号只能看 / 撤销**自己推送**的批次（批次是按推送者当时的分店范围算出来的，别人的批次可能含他管不到的分店员工）。撤销时每条记录按**自己的**公司文件 / 周期 / 周数处理；同一批次里同一员工写过多次时**最新的先撤**；后来的 `UpToDate` 没有改动 MYOB，不挡撤销；撤销写成功但没来得及记账时，重试会发现「MYOB 已是推送前的内容」并直接补记。
 
 ### 4.7 日志与隐私
 
@@ -275,12 +297,20 @@ ListBatchesAsync(connectionGuid, periodStart)
 | 批 | 内容 | 发布 |
 |---|---|---|
 | 0 | 你指定生产公司文件与测试员工卡（3.1）→ 临时探针 PR（3.2，只认该连接 + 该员工卡）→ 跑完把结果写回本方案，定稿 4.1 / 4.2 / 4.5 | 探针部署主 API（无迁移）；**无正式推送代码** |
-| 1 | 后端：客户端 GET / PUT、`MyobTimesheetPlanBuilder` 抽取、推送服务、撤销、迁移 `20261029.005`、权限码、测试 | 迁移 → 主 API；**总闸关** |
+| 1 | 后端：推送服务 + 撤销 + 批次查询、预览入口 `ComputeAsync` 与预览行 `push` 状态、迁移 `20261030.001`、权限码、删除探针、测试（**本 PR**） | 迁移 → 主 API；**总闸关** |
 | 2 | Web：确认弹窗、分块进度、结果、状态列、记录抽屉、撤销 | Web |
 | 3 | 灰度：管理员授权 `Myob.Timesheet.Push` 给 1 个财务账号 → 白名单只放 1 个公司文件 → **1 个员工、1 个未发薪周期**，在 MYOB 核对 → 同公司全员 → 再放其他公司文件 | 开总闸（服务器 `.env`），不需要发版 |
 | 4 | 撤销演练：在灰度员工上推 → 撤销 → 确认 MYOB 恢复 | — |
 
 PR 标题不需要「需重建原生包」标注（无移动端改动）。
+
+## 8.1 已知限制（批 1）
+
+- **快照只保存工资类别 / 日期 / 小时**：现有行里的 Job / Notes 不保存，覆盖后撤销也还原不了；带它们的行会被当作「有内容」，必须勾选覆盖，界面（批 2）要注明这一点。
+- **工时全部消失时推不了空**：员工已推送、之后转账计划变成空（全改现金）时，预览显示「需重新推送」，但推送会被拒（没有要推送的工时）；MYOB 里的旧工时请用「撤销」清掉。
+- 「周期已结束」的判断按固定 UTC+10 算「今天」，夏令时偏保守；推送还要求涉及分店已锁定，实际风险低。
+- 并发撤销没有加锁（只检查有没有 Running 的推送），极低概率；批次列表只取最近 2000 行记录。
+- 预览里的「已推送」只比对我方记录的哈希，不反映 MYOB 事后被人改；勾选 `checkMyob` 才会读 MYOB 现状。
 
 ## 9. 上线前置检查（MYOB 端，财务确认）
 
@@ -296,7 +326,7 @@ PR 标题不需要「需重建原生包」标注（无移动端改动）。
 
 1. **实测环境：B（用户 2026-10-29 改选）**，用一个生产公司文件，只对 1 张测试员工卡、未发薪且为空的周期；第 3 节第 5 条在生产不测（约束与理由见第 3.1 节）。
 2. **权限：** 新增 `Myob.Timesheet.Push`，默认不授予任何角色；预览仍用 `Attendance.Payroll.Edit`。
-3. **MYOB 里已有未发薪记录时：** 允许覆盖，但必须在确认弹窗里单独勾选。（`Processed` 的记录无论如何不覆盖。）
+3. **MYOB 里已有未发薪记录时：** 允许覆盖，但必须在确认弹窗里**按人**单独勾选（`overwriteUserGuids`）。（`Processed` 的记录无论如何不覆盖。）
 4. **推送粒度：** 按公司 × 周期，预览里可挑人推，也可全选。
 
 ## 11. 范围外

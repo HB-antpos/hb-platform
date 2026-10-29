@@ -1,7 +1,7 @@
 namespace BlazorApp.Api.Data.SchemaMigrations;
 
 /// <summary>
-/// MYOB 对接：公共假期单独映射（迁移 20261030.001-myob-pay-category-public-holiday）：
+/// MYOB 对接：公共假期单独映射（迁移 20261030.002-myob-pay-category-public-holiday）：
 /// 公假上班与带薪公假原先并入「平日」类别推送；现在全职 / 兼职与临时工（Casual）各有一个公共假期类别，
 /// 所以给 dbo.MyobPayCategoryMapping 加两个可空列 PublicHolidayUid / PublicHolidayCasualUid（只存 UID，不存名称）。
 /// 只做「列不存在才加」的加列：不改既有列、不删数据、不写权限表；两列可空，旧版主 API 不认识它们也能照常读写（被忽略）。

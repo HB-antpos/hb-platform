@@ -50,7 +50,7 @@ public sealed class MyobTimesheetTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(MyobConnection), typeof(MyobStoreMapping), typeof(EmployeeMyobLink), typeof(EmployeePayrollEmployer),
             typeof(MyobPayCategoryMapping), typeof(Store), typeof(User), typeof(UserStore), typeof(EmployeeProfile),
-            typeof(EmployeeMinorCompliance));
+            typeof(EmployeeMinorCompliance), typeof(MyobTimesheetPush));
     }
 
     public void Dispose()
@@ -624,10 +624,11 @@ public sealed class MyobTimesheetTests : IDisposable
 
     // ───────────────────────── MYOB 客户端（工资类别 / Timesheet 状态） ─────────────────────────
 
-    private static MyobApiClient ClientFor(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+    private static MyobApiClient ClientFor(Func<HttpRequestMessage, HttpResponseMessage> respond, bool pushEnabled = false) =>
         new(new HttpClient(new StubHandler(respond)), Options.Create(new MyobOptions
         {
             ClientId = "client-key", ClientSecret = "s", RedirectUri = "https://x/cb", MinRequestIntervalMs = 0,
+            TimesheetPushEnabled = pushEnabled,
         }));
 
     private static HttpResponseMessage Json(string body, System.Net.HttpStatusCode status = System.Net.HttpStatusCode.OK) =>
@@ -1199,7 +1200,12 @@ public sealed class MyobTimesheetTests : IDisposable
     {
         await SeedMainScenarioAsync();
         Assert.False((await PreviewInvAsync()).PushEnabled);
-        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        // 只开总闸、白名单为空：不放行任何公司文件。
+        var noList = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(noList.Data!.PushEnabled);
+
+        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Inv })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
         Assert.True(on.Data!.PushEnabled);
     }
 
@@ -1238,6 +1244,199 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(24m, BlazorApp.Api.Services.React.AttendanceReactService.DistributeApproved(requested, 99m).Sum(item => item.Hours));
     }
 
+    // ───────────────────────── 推送状态（预览行的 push 字段） ─────────────────────────
+
+    private async Task<(MyobTimesheetComputation Data, string Hash)> ComputeMeiAsync()
+    {
+        var computed = await Preview().ComputeAsync(Inv, null, false, CancellationToken.None);
+        Assert.True(computed.Success, computed.Message);
+        var data = computed.Data!;
+        var (cells, unmapped) = MyobTimesheetPushRules.BuildPlannedCells(data.Plans["u-mei"], data.MappingByKey);
+        Assert.Empty(unmapped);
+        var hash = MyobTimesheetPushRules.ComputeRequestHash(Inv, data.Links["u-mei"].MyobEmployeeUid, data.Start, data.End, cells);
+        return (data, hash);
+    }
+
+    private async Task AddPushRecordAsync(MyobTimesheetComputation data, string user, string status, string? hash, int minutesAgo = 5)
+    {
+        await _db.Insertable(new MyobTimesheetPush
+        {
+            BatchGuid = "batch-" + status, ConnectionGuid = Inv, PeriodStart = data.Start, Weeks = data.Weeks, UserGuid = user,
+            MyobEmployeeUid = data.Links[user].MyobEmployeeUid, Status = status, RequestHash = hash, PushedMinutes = 2040,
+            StartedAt = Now.AddMinutes(-minutesAgo), FinishedAt = Now.AddMinutes(-minutesAgo),
+        }).ExecuteCommandAsync();
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_没记录是未推送_哈希一致是已推送_哈希变了是需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        Assert.Equal(MyobPushStates.NotPushed, RowOf(await PreviewInvAsync(), "u-mei").Push.State);
+
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash);
+        var pushed = RowOf(await PreviewInvAsync(), "u-mei").Push;
+        Assert.Equal(MyobPushStates.Pushed, pushed.State);
+        Assert.False(pushed.NeedsRepush);
+        Assert.Equal(MyobPushStatuses.Pushed, pushed.LastStatus);
+        Assert.Equal("batch-Pushed", pushed.LastBatchGuid);
+        Assert.NotNull(pushed.LastPushedAt);
+
+        // 之后规划变了（哈希不同）→ 需重新推送；其他员工不受影响。
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.UpToDate, "0000", minutesAgo: 1);
+        var dto = await PreviewInvAsync();
+        Assert.Equal(MyobPushStates.NeedsRepush, RowOf(dto, "u-mei").Push.State);
+        Assert.True(RowOf(dto, "u-mei").Push.NeedsRepush);
+        Assert.Equal(MyobPushStates.NotPushed, RowOf(dto, "u-sarah").Push.State);
+    }
+
+    [Theory]
+    [InlineData(MyobPushStatuses.SkippedProcessed, MyobPushStates.ProcessedSkipped)]
+    [InlineData(MyobPushStatuses.Failed, MyobPushStates.Failed)]
+    [InlineData(MyobPushStatuses.Mismatch, MyobPushStates.Mismatch)]
+    [InlineData(MyobPushStatuses.Undone, MyobPushStates.NotPushed)]
+    public async Task 预览_推送状态_取最近一条记录_跳过失败不一致已撤销各自对应(string lastStatus, string expectedState)
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", lastStatus, hash, minutesAgo: 1);
+
+        var push = RowOf(await PreviewInvAsync(), "u-mei").Push;
+
+        Assert.Equal(expectedState, push.State);
+        Assert.Equal(lastStatus, push.LastStatus);
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_Running不算最近结果_周期被解锁时已推送也算需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Running, hash, minutesAgo: 1);
+        Assert.Equal(MyobPushStates.Pushed, RowOf(await PreviewInvAsync(), "u-mei").Push.State);
+
+        // 1014 被解锁：MYOB 里还留着旧工时 → 需重新推送（同时该员工因未锁定被拦截）。
+        _source.Stores["1014"] = _source.Stores["1014"] with { IsLocked = false };
+        var unlocked = RowOf(await PreviewInvAsync(), "u-mei");
+        Assert.Contains(unlocked.Blockers, blocker => blocker.Code == MyobBlockerCodes.StoreNotLocked);
+        Assert.Equal(MyobPushStates.NeedsRepush, unlocked.Push.State);
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_后来被跳过的重推不会盖住已推送_工时变了就显示需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.SkippedHasEntries, "0000", minutesAgo: 1);
+
+        var push = RowOf(await PreviewInvAsync(), "u-mei").Push;
+
+        Assert.Equal(MyobPushStates.Pushed, push.State); // 取最近一条「反映 MYOB 现状」的记录
+        Assert.Equal(MyobPushStatuses.Pushed, push.LastStatus);
+    }
+
+    [Fact]
+    public async Task 预览_PushEnabled由总闸与灰度白名单共同决定()
+    {
+        await SeedMainScenarioAsync();
+        Assert.False((await Preview().PreviewAsync(Inv, null, false, CancellationToken.None)).Data!.PushEnabled);
+
+        // 只开总闸、白名单为空：不放行任何公司文件。
+        var noList = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(noList.Data!.PushEnabled);
+
+        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Inv })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.True(on.Data!.PushEnabled);
+
+        var listed = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Aus })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(listed.Data!.PushEnabled);
+    }
+
+    // ───────────────────────── 客户端写入（PUT） ─────────────────────────
+
+    [Fact]
+    public async Task 客户端_PUT_请求体与地址符合实测形状_PascalCase_日期yyyyMMdd_空Lines可清空()
+    {
+        string? body = null;
+        string? method = null;
+        var handler = new StubHandler(request =>
+        {
+            method = request.Method.Method;
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json("", System.Net.HttpStatusCode.OK);
+        });
+        var client = new MyobApiClient(
+            new HttpClient(handler), Options.Create(new MyobOptions { ClientId = "k", MinRequestIntervalMs = 0, TimesheetPushEnabled = true }));
+
+        var result = await client.PutTimesheetAsync(
+            "biz", "token", "emp-1", Start, Start.AddDays(6),
+            [new MyobTimesheetPutLine("cat-1", [new MyobTimesheetPutEntry("2026-10-26", 7.5m)])], CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("PUT", method);
+        Assert.Contains("/biz/Payroll/Timesheet/emp-1?StartDate=2026-10-26&EndDate=2026-11-01", Assert.Single(handler.Urls), StringComparison.Ordinal);
+        Assert.Contains("\"Employee\":{\"UID\":\"emp-1\"}", body, StringComparison.Ordinal);
+        Assert.Contains("\"StartDate\":\"2026-10-26\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"EndDate\":\"2026-11-01\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"PayrollCategory\":{\"UID\":\"cat-1\"}", body, StringComparison.Ordinal);
+        Assert.Contains("\"Date\":\"2026-10-26\",\"Hours\":7.5", body, StringComparison.Ordinal);
+
+        await client.PutTimesheetAsync("biz", "token", "emp-1", Start, Start.AddDays(6), [], CancellationToken.None);
+        Assert.Contains("\"Lines\":[]", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task 客户端_PUT_总闸关闭时不发任何请求_双保险()
+    {
+        var handler = new StubHandler(_ => Json("", System.Net.HttpStatusCode.OK));
+        var client = new MyobApiClient(new HttpClient(handler), Options.Create(new MyobOptions { ClientId = "k", MinRequestIntervalMs = 0 }));
+
+        var result = await client.PutTimesheetAsync("biz", "token", "emp-1", Start, Start.AddDays(6), [], CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("PUSH_DISABLED", result.ErrorName);
+        Assert.Empty(handler.Urls);
+    }
+
+    [Fact]
+    public async Task 客户端_PUT_失败只取错误类型名和错误码_不回显响应体()
+    {
+        var client = ClientFor(_ => Json(
+            """{"Errors":[{"Name":"DateOutOfRange","ErrorCode":221,"Message":"secret-detail","AdditionalDetails":"secret"}]}""",
+            System.Net.HttpStatusCode.BadRequest), pushEnabled: true);
+
+        var result = await client.PutTimesheetAsync("b", "t", "e", Start, Start.AddDays(6), [], CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Equal("DateOutOfRange", result.ErrorName);
+        Assert.Equal("221", result.ErrorCode);
+        Assert.DoesNotContain("secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task 客户端_GET读回_解析类别UID与每天小时_日期原文带T000000_404和空体按没有记录()
+    {
+        var client = ClientFor(_ => Json(
+            """{"Employee":{"UID":"e"},"Lines":[{"PayrollCategory":{"UID":"cat-1"},"Entries":[{"Date":"2026-10-26T00:00:00","Hours":7.333000,"Processed":false},{"Date":"2026-10-27T00:00:00","Hours":0.000000,"Processed":true}]}]}"""));
+        var lines = await client.GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None);
+
+        var line = Assert.Single(lines);
+        Assert.Equal("cat-1", line.CategoryUid);
+        Assert.Equal(new MyobTimesheetEntryRecord("2026-10-26T00:00:00", 7.333m, false), line.Entries[0]);
+        Assert.True(line.Entries[1].Processed);
+
+        Assert.Empty(await ClientFor(_ => Json("{}", System.Net.HttpStatusCode.NotFound))
+            .GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None));
+        Assert.Empty(await ClientFor(_ => Json(""))
+            .GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None));
+    }
+
     // ───────────────────────── 控制器权限 ─────────────────────────
 
     [Fact]
@@ -1249,6 +1448,24 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("api/react/v1/myob/timesheet", typeof(MyobTimesheetController).GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()!.Template);
         Assert.Empty(typeof(MyobPayCategoryController).GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
         Assert.Empty(typeof(MyobTimesheetController).GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
+    }
+
+    [Fact]
+    public void 控制器权限_推送与撤销要求MyobTimesheetPush_不能沿用PayrollEdit_无匿名放行_路由与预览同前缀()
+    {
+        var type = typeof(MyobTimesheetPushController);
+        Assert.Equal(Permissions.Myob.Timesheet.Push, type.GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.NotEqual(Permissions.Attendance.Payroll.Edit, type.GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("api/react/v1/myob/timesheet", type.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()!.Template);
+        Assert.Empty(type.GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
+        // 四个动作各自的路由
+        var templates = type.GetMethods()
+            .Select(m => m.GetCustomAttribute<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>())
+            .Where(attribute => attribute is not null)
+            .Select(attribute => $"{attribute!.HttpMethods.Single()} {attribute.Template}")
+            .OrderBy(text => text, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["GET batches", "GET batches/{batchGuid}", "POST batches/{batchGuid}/undo", "POST push"], templates);
     }
 
     // ───────────────────────── 测试替身 ─────────────────────────
