@@ -15,6 +15,9 @@ import {
   countSelectedBatchExecuteActions,
   findLargePriceChangeRows,
   getPurchasePriceChangeRatio,
+  excludeDetailsFromBatchSnapshot,
+  findSkippableFailedRows,
+  isBatchExecuteValidationError,
   isPriceChangeConfirmRequiredError,
   pickPurchasePriceDirectionGuids,
   splitPurchasePriceDirectionGuids,
@@ -546,6 +549,53 @@ async function main() {
     assertDeepEqual(feedback.details, ['x'], '错误明细应原样带出供确认框展示')
   })
   if (confirmCodeFailure) failures.push(confirmCodeFailure)
+
+  const skipFailedRowsFailure = await runTest('校验失败的行可跳过其余执行：每条错误都要对应到某一行，且至少剩一行', () => {
+    const guids = ['d1', 'd2', 'd3', 'd4']
+    const rowErrors = [
+      '明细 d2 添加多码失败：主条码未匹配当前商品',
+      '明细 d2 添加多码失败：分店多码已被其他商品使用 9347864000830',
+      '明细 d4 添加多码失败：未找到商品编码',
+    ]
+    const skippable = findSkippableFailedRows(guids, rowErrors)
+    assertDeepEqual(skippable, { failedGuids: ['d2', 'd4'], remainingCount: 2 }, '同一行多条错误应合并，按提交顺序给出失败行')
+    assertEqual(findSkippableFailedRows(guids, [...rowErrors, '请选择新商品类型']), null, '有一条错误对不上行时不允许跳过')
+    assertEqual(findSkippableFailedRows(['d2'], ['明细 d2 添加多码失败：未找到商品编码']), null, '跳过后没有可执行行时不允许跳过')
+    assertEqual(findSkippableFailedRows(guids, []), null, '没有错误明细时不允许跳过')
+    assertEqual(findSkippableFailedRows(['d1', 'd12'], ['明细 d12 更新进货价失败：商品不存在']) ?.failedGuids.join(), 'd12', '明细编号前缀相近时不能误匹配')
+
+    assert(isBatchExecuteValidationError(new RequestError('批量执行校验失败', 400, { code: 'VALIDATION_ERROR' })), '应识别校验失败错误码')
+    assert(!isBatchExecuteValidationError(new RequestError('需二次确认', 400, { code: 'PRICE_CHANGE_CONFIRM_REQUIRED' })), '涨跌幅二次确认不属于可跳过的校验失败')
+    assert(!isBatchExecuteValidationError(new Error('x')), '非 RequestError 不应触发')
+  })
+  if (skipFailedRowsFailure) failures.push(skipFailedRowsFailure)
+
+  const excludeSnapshotFailure = await runTest('跳过失败行后，确认快照的明细、动作、新建计数和类型选择同步收敛', () => {
+    const snapshot = buildBatchExecuteSnapshot({
+      selectedRowKeys: ['c1', 'c2', 'u1'],
+      details: [
+        { detailGUID: 'c1', activityType: DetailAction.CreateProduct },
+        { detailGUID: 'c2', activityType: DetailAction.CreateProduct },
+        { detailGUID: 'u1', activityType: DetailAction.UpdatePurchasePrice },
+      ],
+      rowActions: {},
+      newProductProductTypeSelections: [
+        { detailGuid: 'c1', productType: 2 },
+        { detailGuid: 'c2', productType: 1 },
+      ],
+      confirmedAt: '2026-10-29T00:00:00.000Z',
+    })
+    const next = excludeDetailsFromBatchSnapshot(snapshot, ['c2'])
+
+    assertDeepEqual(next.detailGuids, ['c1', 'u1'], '应去掉失败行')
+    assertEqual(next.selectedCount, 2, '选中数应同步')
+    assertDeepEqual(next.expectedActions.map((item) => item.detailGuid), ['c1', 'u1'], '确认动作应与明细一致，否则后端会判确认已失效')
+    assertEqual(next.confirmedCreateProductCount, 1, '新建商品确认数应按剩余行重算')
+    assertDeepEqual(next.newProductProductTypeSelections, [{ detailGuid: 'c1', productType: 2 }], '被跳过行的类型选择应一并去掉')
+    assertEqual(next.confirmedAt, snapshot.confirmedAt, '确认时间保持不变')
+    assertEqual(snapshot.detailGuids.length, 3, '不应修改原快照')
+  })
+  if (excludeSnapshotFailure) failures.push(excludeSnapshotFailure)
 
   const confirmedFlagFailure = await runTest('batchExecuteActions 仅在已二次确认时发送 confirmedLargePriceChange', async () => {
     const originalFetch = globalThis.fetch
