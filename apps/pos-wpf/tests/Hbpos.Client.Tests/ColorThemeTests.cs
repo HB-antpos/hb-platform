@@ -306,7 +306,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             ("PosCardBorderBrush", "PosDividerBrush"),
             ("PosCartHeaderBrush", "PosSurfaceAltBrush"),
             ("PosCartAltRowBrush", "PosSurfaceAltBrush"),
-            ("PosCartSelectedRowBrush", "PosPrimarySoftBrush"),
+            // PosCartSelectedRowBrush 不在此列：购物车选中行底色已有意加深（见 Cart_selected_row_stands_out_from_neighbours_in_every_palette），不再等于 PosPrimarySoftBrush。
             ("PosDueAmountBrush", "PosAccentBrush"),
             ("PosClearKeyBrush", "PosSurfaceBrush"),
             ("PosNoBarcodeBrush", "PosPrimaryBrush"),
@@ -393,6 +393,34 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             if (Contrast(text, fill) < 4.5) failures.Add($"${amount} 面额数字 {Contrast(text, fill):F2}");
         }
 
+        Assert.True(failures.Count == 0, $"{name}: " + string.Join("; ", failures));
+    }
+
+    [Theory]
+    [InlineData("Default", 1.3)]
+    [InlineData("Blue", 1.5)]
+    [InlineData("Celadon", 1.5)]
+    [InlineData("Paper", 1.5)]
+    [InlineData("Graphite", 1.5)]
+    [InlineData("Elder", 1.5)]
+    public void Cart_selected_row_stands_out_from_neighbours_in_every_palette(string name, double minimumNeighbourContrast)
+    {
+        // 选中行与上下相邻的普通行 / 斑马纹行必须拉开对比，收银员才能一眼找到当前行；
+        // 同时正文仍要读得清、左侧色条要压得住选中底、选中的退货行里红字也要可读。
+        var colors = SolidColors(LoadPalette(name));
+        var selected = colors["PosCartSelectedRowBrush"];
+        var failures = new List<string>();
+
+        void Require(string label, double actual, double minimum)
+        {
+            if (actual < minimum) failures.Add($"{label} {actual:F2} < {minimum}");
+        }
+
+        Require("选中底 / 普通行", Contrast(selected, colors["PosSurfaceBrush"]), minimumNeighbourContrast);
+        Require("选中底 / 斑马纹行", Contrast(selected, colors["PosCartAltRowBrush"]), minimumNeighbourContrast);
+        Require("选中行正文", Contrast(colors["PosTextBrush"], selected), 7);
+        Require("色条 / 选中底", Contrast(colors["PosCartSelectedBarBrush"], selected), 3);
+        Require("选中退货行红字", Contrast(colors["PosDangerTextBrush"], colors["PosCartSelectedDangerRowBrush"]), 4.5);
         Assert.True(failures.Count == 0, $"{name}: " + string.Join("; ", failures));
     }
 

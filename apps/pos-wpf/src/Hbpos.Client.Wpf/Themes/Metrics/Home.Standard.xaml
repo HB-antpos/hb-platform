@@ -22,6 +22,7 @@
     <sys:Double x:Key="PosHomeCartQtyBoxHeight">32</sys:Double>  <!-- 数量框高 -->
     <sys:Double x:Key="PosHomeCartQtyFontSize">16</sys:Double>  <!-- 数量数字 -->
     <GridLength x:Key="PosHomeCartQtyColumnWidth">58</GridLength>  <!-- 数量框所在列宽（数量框宽 + 8） -->
+    <Thickness x:Key="PosHomeCartSelectedRowBorderThickness">6,0,0,1</Thickness>  <!-- 选中行边框：左侧 6px 色条 + 底部 1px 分隔 -->
 
     <!-- 汇总区与 Pay Now -->
     <GridLength x:Key="PosHomeSummaryBoxHeight">92</GridLength>  <!-- 汇总块总高（＝上行 + 下行） -->

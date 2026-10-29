@@ -96,11 +96,12 @@
                 </Setter.Value>
             </Setter>
             <Style.Triggers>
+                <!-- 选中行：加深的主题色底 + 左侧加粗色条（色条颜色与宽度按主题取，深色主题用更亮的蓝，长者主题加到 8px）。 -->
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosCartSelectedRowBrush}" />
                     <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
-                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
-                    <Setter Property="BorderThickness" Value="4,0,0,1" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosCartSelectedBarBrush}" />
+                    <Setter Property="BorderThickness" Value="{DynamicResource PosHomeCartSelectedRowBorderThickness}" />
                 </Trigger>
                 <DataTrigger Binding="{Binding HasZeroUnitPrice}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
@@ -112,6 +113,24 @@
                     <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                     <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
                 </DataTrigger>
+                <!-- 选中的零价 / 退货行：上面的红色触发器写在选中触发器之后会把选中态盖掉，
+                     这里放在最后重新叠加：红色语义保留（略深的红底），选中色条仍用主题色条，一眼能看出被选中。 -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                        <Condition Binding="{Binding HasZeroUnitPrice}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{DynamicResource PosCartSelectedDangerRowBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosCartSelectedBarBrush}" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                        <Condition Binding="{Binding IsReturnLine}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{DynamicResource PosCartSelectedDangerRowBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosCartSelectedBarBrush}" />
+                </MultiDataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -1406,14 +1425,24 @@
                                             <ColumnDefinition Width="{DynamicResource PosHomeCartThumbColumnWidth}" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
+                                        <!-- 缩略图底色与旧选中底同色会“融掉”；选中行里改回卡片底色，托出商品图。 -->
                                         <Border Width="{DynamicResource PosHomeCartThumbSize}"
                                                 Height="{DynamicResource PosHomeCartThumbSize}"
-                                                Background="{DynamicResource PosPrimarySoftBrush}"
                                                 CornerRadius="6"
                                                 Margin="0,0,12,0"
                                                 SnapsToDevicePixels="True"
                                                 UseLayoutRounding="True"
                                                 ClipToBounds="True">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=DataGridRow}, Path=IsSelected}" Value="True">
+                                                            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <Grid>
                                                 <Rectangle RadiusX="5"
                                                            RadiusY="5"

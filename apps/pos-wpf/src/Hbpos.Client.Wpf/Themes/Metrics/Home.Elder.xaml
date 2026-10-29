@@ -24,6 +24,7 @@
     <sys:Double x:Key="PosHomeCartQtyBoxHeight">42</sys:Double>
     <sys:Double x:Key="PosHomeCartQtyFontSize">25</sys:Double>
     <GridLength x:Key="PosHomeCartQtyColumnWidth">64</GridLength>
+    <Thickness x:Key="PosHomeCartSelectedRowBorderThickness">8,0,0,1</Thickness>
 
     <!-- 汇总区与 Pay Now -->
     <GridLength x:Key="PosHomeSummaryBoxHeight">100</GridLength>

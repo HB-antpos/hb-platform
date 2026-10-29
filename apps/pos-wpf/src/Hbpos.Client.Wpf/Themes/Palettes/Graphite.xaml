@@ -117,7 +117,11 @@
     <!-- 购物车斑马纹 -->
     <SolidColorBrush x:Key="PosCartAltRowBrush" Color="#FF191D22" />
     <!-- 购物车选中行底色 -->
-    <SolidColorBrush x:Key="PosCartSelectedRowBrush" Color="#FF1D3244" />
+    <SolidColorBrush x:Key="PosCartSelectedRowBrush" Color="#FF2B4B68" />
+    <!-- 购物车选中行左侧色条（深色主题需比主色更亮才醒目） -->
+    <SolidColorBrush x:Key="PosCartSelectedBarBrush" Color="#FF5DB0F2" />
+    <!-- 购物车选中的退货/零价行底色（保留红色语义，比普通退货行略深） -->
+    <SolidColorBrush x:Key="PosCartSelectedDangerRowBrush" Color="#FF5C2824" />
     <!-- 购物车应付合计金额色 -->
     <SolidColorBrush x:Key="PosDueAmountBrush" Color="#FFEFC05A" />
     <!-- 首页 Clear 键底色 -->
