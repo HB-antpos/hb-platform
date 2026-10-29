@@ -42,8 +42,11 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
     internal static IReadOnlyList<(PosColorTheme Theme, string[] Swatches)> Definitions { get; } =
     [
         (PosColorTheme.Blue, ["#FFF3F5F8", "#FF0B5ED7", "#FFF59E0B"]),
-        (PosColorTheme.Default, ["#FFF3F3F7", "#FF0056D2", "#FFFF8F00"]),
-        (PosColorTheme.Paper, ["#FFEDE9E1", "#FF1E5E59", "#FFAE4519"]),
+        // 彩色主题：背景、主色、第三块取该主题最有代表性的点缀色（键盘区 / 功能键）
+        (PosColorTheme.Candy, ["#FFF4F2FF", "#FF7C3AED", "#FFEA580C"]),
+        (PosColorTheme.Sunny, ["#FFFFF8EC", "#FFC2410C", "#FF0F766E"]),
+        (PosColorTheme.Ocean, ["#FFEEFAFC", "#FF0E7490", "#FFE11D48"]),
+        (PosColorTheme.Rainbow, ["#FFF5F8FF", "#FF1D4ED8", "#FF7C3AED"]),
         (PosColorTheme.Graphite, ["#FF14171B", "#FF2F76B8", "#FFEFC05A"]),
         (PosColorTheme.Celadon, ["#FFE1E8E3", "#FF245A74", "#FFF0E2A2"]),
         // 长者模式：购物车灰白、深蓝、支付绿

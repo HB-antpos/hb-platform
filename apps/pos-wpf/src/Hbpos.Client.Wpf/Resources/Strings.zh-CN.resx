@@ -1173,17 +1173,29 @@
   <data name="shell.colorTheme.blue.hint" xml:space="preserve">
     <value>清爽专业（默认）</value>
   </data>
-  <data name="shell.colorTheme.default" xml:space="preserve">
-    <value>经典</value>
+  <data name="shell.colorTheme.candy" xml:space="preserve">
+    <value>糖果紫</value>
   </data>
-  <data name="shell.colorTheme.default.hint" xml:space="preserve">
-    <value>原有配色</value>
+  <data name="shell.colorTheme.candy.hint" xml:space="preserve">
+    <value>鲜艳紫色、彩色图标</value>
   </data>
-  <data name="shell.colorTheme.paper" xml:space="preserve">
-    <value>暖纸</value>
+  <data name="shell.colorTheme.sunny" xml:space="preserve">
+    <value>阳光橙</value>
   </data>
-  <data name="shell.colorTheme.paper.hint" xml:space="preserve">
-    <value>白天明亮门店</value>
+  <data name="shell.colorTheme.sunny.hint" xml:space="preserve">
+    <value>温暖明亮、彩色图标</value>
+  </data>
+  <data name="shell.colorTheme.ocean" xml:space="preserve">
+    <value>海洋青</value>
+  </data>
+  <data name="shell.colorTheme.ocean.hint" xml:space="preserve">
+    <value>清爽青绿、功能键多彩</value>
+  </data>
+  <data name="shell.colorTheme.rainbow" xml:space="preserve">
+    <value>彩虹分区</value>
+  </data>
+  <data name="shell.colorTheme.rainbow.hint" xml:space="preserve">
+    <value>三区分色、功能键多彩</value>
   </data>
   <data name="shell.colorTheme.graphite" xml:space="preserve">
     <value>石墨夜</value>

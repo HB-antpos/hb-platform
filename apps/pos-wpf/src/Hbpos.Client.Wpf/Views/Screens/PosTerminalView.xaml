@@ -590,12 +590,19 @@
 
         <!-- 功能区按钮模板：与 CashierFlatButtonBaseStyle 同构（含键帽厚度层），只是悬停 / 按下底色改取 PosSidebarButton* 键。
              长者主题的功能键是深蓝底白字，沿用基础模板的浅灰 / 浅蓝悬停色会让白字变得不可读；
-             旧主题里这两个键取值等于原来的悬停（PosSurfaceAltBrush）/ 按下（PosPrimarySoftBrush）色。 -->
+             旧主题里这两个键取值等于原来的悬停（PosSurfaceAltBrush）/ 按下（PosPrimarySoftBrush）色。
+             TileBase 垫一层按钮自身底色：彩色主题（海洋青、彩虹分区）每个键底色不同，悬停 / 按下键取半透明深色，
+             叠在 TileBase 上只是把该键自己的颜色压深；其它主题这两个键不透明，TileBase 被完全盖住，外观不变。 -->
         <ControlTemplate x:Key="PosSidebarActionButtonTemplate" TargetType="{x:Type Button}">
             <Grid>
                 <Border x:Name="KeyShadow"
                         Background="{DynamicResource PosKeyShadowBrush}"
                         CornerRadius="5" />
+                <Border x:Name="TileBase"
+                        Margin="{DynamicResource PosHomeKeyDepth}"
+                        Background="{TemplateBinding Background}"
+                        CornerRadius="5"
+                        SnapsToDevicePixels="True" />
                 <Border x:Name="Root"
                         Margin="{DynamicResource PosHomeKeyDepth}"
                         Background="{TemplateBinding Background}"
@@ -754,10 +761,12 @@
 
         <!-- Card Recovery 功能键：平时与「设置」等普通功能键完全一致；存在待处理卡交易（HasOpenCardRecoveryAttempts）时
              换成琥珀警示键——底 / 描边 / 字色取 PosSidebarWarn*，并换用悬停 / 按下取警示专用键的模板。
-             图标与标签文字的颜色在各自元素上跟随（图标见 PosSidebarCardRecoveryIconStyle，标签直接取本按钮的前景色）。 -->
+             图标与标签文字的颜色在各自元素上跟随（图标见 PosSidebarCardRecoveryIconStyle，标签直接取本按钮的前景色）。
+             平时底色走样式（不写在按钮本地值上），否则会盖过下面的警示触发器。 -->
         <Style x:Key="PosSidebarCardRecoveryButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource PosSidebarActionButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource PosSidebarTileCardRecoveryBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosSidebarWarnButtonBrush}" />
@@ -2069,7 +2078,7 @@
             <!-- 关键逻辑：右侧操作区固定六行两列（Card Recovery / Attendance QR 与「设置」同款，已并入网格），
                  避免不同语言下按钮顺序和状态卡位置漂移；底部只剩状态卡，没有额外的整行入口。 -->
             <UniformGrid Grid.Row="0" Columns="2" Rows="6" Margin="8,13,8,8">
-                <Button Command="{Binding OpenSpecialProductsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileSpecialBrush}" Command="{Binding OpenSpecialProductsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="StarOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2077,7 +2086,7 @@
                         <TextBlock Text="{loc:Loc pos.terminal.actions.specialItems}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding OpenReturnsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileRefundBrush}" Command="{Binding OpenReturnsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="CashRefund" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarRefundIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2085,7 +2094,7 @@
                         <TextBlock Text="{loc:Loc Refund}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding HoldOrderCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileHoldBrush}" Command="{Binding HoldOrderCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="ClipboardTextOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarHoldIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2095,7 +2104,7 @@
                 </Button>
                 <!-- Recall Order：右上角圆形角标显示今天仍挂着的单数（HeldOrderBadgeText 0 单时为空、超过 99 为 99+；
                      IsHeldOrderBadgeVisible 为假或属性缺失时折叠）。内容放进 Grid 并让按钮内容撑满，角标才能贴到右上角。 -->
-                <Button Command="{Binding RecallOrderCommand}"
+                <Button Background="{DynamicResource PosSidebarTileRecallBrush}" Command="{Binding RecallOrderCommand}"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch"
                         Style="{StaticResource PosSidebarActionButtonStyle}">
@@ -2113,7 +2122,7 @@
                         </Border>
                     </Grid>
                 </Button>
-                <Button Command="{Binding OpenCashDrawerCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileDrawerBrush}" Command="{Binding OpenCashDrawerCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="CashRegister" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2121,7 +2130,7 @@
                         <TextBlock Text="{Binding OpenCashDrawerText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding PrintLastReceiptCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileReceiptBrush}" Command="{Binding PrintLastReceiptCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="ReceiptTextOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2129,7 +2138,7 @@
                         <TextBlock Text="{Binding PrintLastReceiptText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding LockCashierCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileLockBrush}" Command="{Binding LockCashierCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="LogoutVariant" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2137,7 +2146,7 @@
                         <TextBlock Text="{Binding LockCashierText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding OpenDailyCloseCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileDailyCloseBrush}" Command="{Binding OpenDailyCloseCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="CalendarCheckOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -2172,7 +2181,7 @@
                 </Button>
                 <!-- Attendance QR：点击仍由代码后置的 AttendanceQrLauncher_Click 打开二维码弹窗；
                      右上角胶囊角标显示剩余秒数，原来占一行的「Online verified …」说明文字改放按钮提示（ToolTip）。 -->
-                <Button x:Name="AttendanceQrLauncher"
+                <Button Background="{DynamicResource PosSidebarTileAttendanceBrush}" x:Name="AttendanceQrLauncher"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch"
                         Style="{StaticResource PosSidebarActionButtonStyle}"
@@ -2197,7 +2206,7 @@
                         </Border>
                     </Grid>
                 </Button>
-                <Button Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <Button Background="{DynamicResource PosSidebarTileSettingsBrush}" Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="CogOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />

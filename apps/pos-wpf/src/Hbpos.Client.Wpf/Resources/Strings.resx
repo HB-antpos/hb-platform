@@ -417,10 +417,14 @@
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
   <data name="shell.colorTheme.blue" xml:space="preserve"><value>Blue</value></data>
   <data name="shell.colorTheme.blue.hint" xml:space="preserve"><value>Crisp and clear (default)</value></data>
-  <data name="shell.colorTheme.default" xml:space="preserve"><value>Classic</value></data>
-  <data name="shell.colorTheme.default.hint" xml:space="preserve"><value>Original colors</value></data>
-  <data name="shell.colorTheme.paper" xml:space="preserve"><value>Paper</value></data>
-  <data name="shell.colorTheme.paper.hint" xml:space="preserve"><value>Bright daytime stores</value></data>
+  <data name="shell.colorTheme.candy" xml:space="preserve"><value>Candy</value></data>
+  <data name="shell.colorTheme.candy.hint" xml:space="preserve"><value>Vivid violet, colorful icons</value></data>
+  <data name="shell.colorTheme.sunny" xml:space="preserve"><value>Sunny</value></data>
+  <data name="shell.colorTheme.sunny.hint" xml:space="preserve"><value>Warm and bright, colorful icons</value></data>
+  <data name="shell.colorTheme.ocean" xml:space="preserve"><value>Ocean</value></data>
+  <data name="shell.colorTheme.ocean.hint" xml:space="preserve"><value>Fresh teal, multicolor keys</value></data>
+  <data name="shell.colorTheme.rainbow" xml:space="preserve"><value>Rainbow</value></data>
+  <data name="shell.colorTheme.rainbow.hint" xml:space="preserve"><value>Color-coded zones, multicolor keys</value></data>
   <data name="shell.colorTheme.graphite" xml:space="preserve"><value>Graphite</value></data>
   <data name="shell.colorTheme.graphite.hint" xml:space="preserve"><value>Evening shifts and dim light</value></data>
   <data name="shell.colorTheme.celadon" xml:space="preserve"><value>Celadon</value></data>

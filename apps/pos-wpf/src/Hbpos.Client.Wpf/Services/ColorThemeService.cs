@@ -7,14 +7,16 @@ namespace Hbpos.Client.Wpf.Services;
 /// <summary>收银主界面的配色主题；客显保持独立配色，不随主题切换。</summary>
 public enum PosColorTheme
 {
-    // Default 是改版前的原有配色，保留给已手动选过它的收银机；新装机默认用 Blue。
-    Default,
-    Paper,
     Graphite,
     Celadon,
     Blue,
     // 长者模式：高对比、大字、首页三区分色、内容区无描边；除色板外还会追加放大尺寸字典（见 WpfColorThemeApplier）。
-    Elder
+    Elder,
+    // 四套彩色主题：糖果紫 / 阳光橙只换色板（功能键白底彩色图标）；海洋青 / 彩虹分区的功能键每键一种底色（PosSidebarTile* 键）。
+    Candy,
+    Sunny,
+    Ocean,
+    Rainbow
 }
 
 public interface IColorThemeService
@@ -87,6 +89,12 @@ public sealed class ColorThemeService : IColorThemeService
 
     internal static PosColorTheme Parse(string? value)
     {
+        // 已删除的旧主题：「经典」（Default）改由彩色的糖果紫接替，「暖纸」（Paper）回到默认蓝色。
+        if (string.Equals(value, "Default", StringComparison.OrdinalIgnoreCase))
+        {
+            return PosColorTheme.Candy;
+        }
+
         return Enum.TryParse<PosColorTheme>(value, ignoreCase: true, out var theme) && Enum.IsDefined(theme)
             ? theme
             : FallbackTheme;
@@ -200,7 +208,7 @@ public sealed class WpfColorThemeApplier : IColorThemeApplier
             _originalMaterialTheme ??= paletteHelper.GetTheme();
             if (palette[PaletteMaterialPrimaryKey] is not Color primary)
             {
-                // 默认主题恢复 MaterialDesign 原配置，保证与改造前完全一致。
+                // 色板未提供主色时恢复 MaterialDesign 原配置（现有色板都提供主色，这里只是兜底）。
                 paletteHelper.SetTheme(_originalMaterialTheme);
                 return;
             }
