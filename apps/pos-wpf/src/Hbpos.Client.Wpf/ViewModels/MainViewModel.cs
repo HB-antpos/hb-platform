@@ -1016,6 +1016,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public string ActivePageTitleText => GetActivePageTitleText();
 
+    // 标题栏副屏按钮上的状态文字：随客显窗口模式与界面语言刷新。
+    public string CustomerDisplayStateText => _localization.T(CustomerDisplayWindowMode switch
+    {
+        CustomerDisplayWindowMode.Normal => "shell.customerDisplayState.normal",
+        CustomerDisplayWindowMode.Fullscreen => "shell.customerDisplayState.fullscreen",
+        _ => "shell.customerDisplayState.closed"
+    });
+
     private static readonly ObservableCollection<SyncQueueListItem> _emptySyncOrders = [];
     private static readonly ObservableCollection<OperationAuditQueueListItem> _emptyAuditLogs = [];
 
@@ -2203,6 +2211,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnCustomerDisplayWindowModeChanged(CustomerDisplayWindowMode value)
     {
         IsCustomerDisplayOpen = value != CustomerDisplayWindowMode.Closed;
+        OnPropertyChanged(nameof(CustomerDisplayStateText));
     }
 
     partial void OnIsDeviceReregistrationDialogOpenChanged(bool value)
@@ -2286,6 +2295,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // 登录弹窗左栏的连接状态条跟着在线状态和语言一起刷新。
         RaiseLoginConnectionChanged();
         OnPropertyChanged(nameof(ActivePageTitleText));
+        OnPropertyChanged(nameof(CustomerDisplayStateText));
         if (resetStatus || string.IsNullOrWhiteSpace(StatusMessage))
         {
             StatusMessage = _localization.T("StatusOfflineReady");

@@ -35,6 +35,9 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
 
     public string MenuTitle { get; private set; } = string.Empty;
 
+    // 标题栏按钮上显示的当前配色名称。
+    public string CurrentThemeName => Options.FirstOrDefault(option => option.IsSelected)?.Name ?? string.Empty;
+
     // 预览色块：背景、主色、重点金额，与 Themes/Palettes 中的色板一致。
     internal static IReadOnlyList<(PosColorTheme Theme, string[] Swatches)> Definitions { get; } =
     [
@@ -59,6 +62,8 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
         {
             option.IsSelected = option.Theme == _colorThemeService.Current;
         }
+
+        OnPropertyChanged(nameof(CurrentThemeName));
     }
 
     private void RefreshText()
@@ -71,6 +76,8 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
             option.Name = _localization.T(key);
             option.Hint = _localization.T(key + ".hint");
         }
+
+        OnPropertyChanged(nameof(CurrentThemeName));
     }
 }
 
