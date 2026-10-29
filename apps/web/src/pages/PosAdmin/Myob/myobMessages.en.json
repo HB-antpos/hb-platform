@@ -679,6 +679,222 @@
         "reason": "Blocked reason",
         "myobCard": "MYOB employee card"
       }
+    },
+    "sync": {
+      "entry": {
+        "button": "Sync profiles from MYOB",
+        "row": "Sync profile",
+        "noPermission": "Syncing requires the \"Employee profiles · Edit\" permission",
+        "selectRow": "Select {{name}}"
+      },
+      "title": "Sync profiles from MYOB",
+      "readOnly": "Read-only on MYOB: nothing in MYOB is changed",
+      "fetchedAt": "MYOB data fetched {{age}}",
+      "refresh": "Refresh",
+      "close": "Close",
+      "age": {
+        "justNow": "just now",
+        "minutes": "{{count}} min ago",
+        "hours": "{{count}} h ago",
+        "days": "{{count}} d ago"
+      },
+      "steps": {
+        "select": "Choose fields",
+        "review": "Review changes",
+        "done": "Done"
+      },
+      "step1": {
+        "fieldsTitle": "Fields to sync",
+        "fieldsHint": "Numbers = bound employees in the current scope",
+        "selectAll": "Select all",
+        "selectDiff": "Only with differences",
+        "clear": "Clear",
+        "groups": {
+          "basic": "Basic details",
+          "employment": "Employment & pay"
+        },
+        "groupSource": "MYOB source → our field",
+        "sensitive": "Sensitive",
+        "sensitiveNote": "Sensitive fields are unchecked by default and must be ticked manually. They are written through the sensitive-data edit path, and an undoable sync record is kept.",
+        "fillable": "Fill {{count}}",
+        "differs": "Differ {{count}}",
+        "modeTitle": "When our value exists and differs from MYOB",
+        "modes": {
+          "FillEmpty": {
+            "title": "Fill empty only, never overwrite (recommended)",
+            "desc": "Written only when ours is empty. Differences are listed; tick them one by one in the next step."
+          },
+          "Overwrite": {
+            "title": "MYOB wins, overwrite all",
+            "desc": "Differences are ticked by default. A snapshot is kept before writing, so it can be undone."
+          }
+        },
+        "scopeTitle": "Scope",
+        "scope": {
+          "selected": "Only the {{count}} selected",
+          "selectedNames": "Ticked in the list: {{names}}",
+          "selectedNamesMore": "Ticked in the list: {{names}} and others ({{count}} in total)",
+          "all": "All {{count}} currently bound employees",
+          "allSkip": "{{count}} with no MYOB card are skipped automatically",
+          "allNoSkip": "Applies only to employees that still have a MYOB card",
+          "single": "Only {{name}}",
+          "singleDesc": "Single-employee sync; the scope is fixed to this one person",
+          "rescope": "Re-preview only {{name}} (same fields as last time)"
+        },
+        "summary": "{{fields}} fields selected ({{sensitive}} sensitive) · scope {{people}} people",
+        "next": "Next: review changes",
+        "cancel": "Cancel",
+        "loadFailed": "Failed to load field statistics",
+        "retry": "Retry",
+        "noPermission": "You do not have the \"Employee profiles · Edit\" permission, so MYOB data cannot be written to employee profiles. Ask an administrator to grant it.",
+        "unavailable": "Not readable from MYOB right now"
+      },
+      "step2": {
+        "subtitle": "Nothing has been written yet · this is a preview, only ticked items are written · Mode: {{mode}}",
+        "modeName": {
+          "FillEmpty": "Fill empty only",
+          "Overwrite": "MYOB wins"
+        },
+        "cards": {
+          "employees": "Employees to update",
+          "changes": "Field changes",
+          "checked": "{{count}} ticked",
+          "skipped": "Skipped",
+          "skippedDetail": "{{noDiff}} no difference · {{missing}} card missing",
+          "sensitive": "Sensitive fields",
+          "person": "people",
+          "item": "items"
+        },
+        "sensitiveBanner": "{{count}} sensitive items ticked (birthday, bank, super). Bank account and super member numbers show only the last 4 digits; the full value is sent only when writing.",
+        "sensitiveBannerNone": "This preview has {{total}} sensitive items (birthday, bank, super), none ticked. Bank account and super member numbers show only the last 4 digits.",
+        "pendingBanner": "{{names}} has a pending sensitive-data request, which is voided automatically once sensitive fields are written.",
+        "filters": {
+          "all": "All changes",
+          "overwrite": "Differences (overwrite)",
+          "sensitive": "Sensitive only"
+        },
+        "checkAllFill": "Tick all fill-empty",
+        "uncheckAll": "Untick all",
+        "columns": {
+          "employee": "Employee",
+          "field": "Field",
+          "ours": "Our value",
+          "myob": "MYOB value",
+          "mode": "Mode"
+        },
+        "empty": "(empty)",
+        "kind": {
+          "Fill": "Fill",
+          "Overwrite": "Overwrite"
+        },
+        "pendingTag": "Pending request will be voided",
+        "checkRow": "Write {{field}} for {{name}}",
+        "ack": "I have checked the sensitive fields (birthday, bank, super)",
+        "willWrite": "{{count}} items to write · {{people}} people",
+        "back": "Back",
+        "confirm": "Confirm sync of {{count}} items",
+        "loadFailed": "Failed to build the preview",
+        "retry": "Retry",
+        "emptyPreview": "No differences to sync for the selected fields in this scope",
+        "emptyFiltered": "No changes under this filter",
+        "submitFailed": "Sync failed",
+        "unavailableBanner": "These fields could not be read from MYOB right now (the payment details API may not be permitted), so they are not synced: {{fields}}"
+      },
+      "step3": {
+        "subtitle": "This sync {{time}} · by {{actor}}",
+        "writtenTitle": "{{people}} people · {{changes}} items written",
+        "noneWritten": "Nothing was written this time",
+        "sensitiveChip": "Includes {{count}} sensitive items",
+        "otherLine": "{{people}} more people ({{changes}} items) were not written (see below); {{skipped}} needed no sync",
+        "otherNoFailed": "{{skipped}} people needed no sync",
+        "otherFailedOnly": "{{people}} people ({{changes}} items) were not written (see below)",
+        "writtenSection": "What was written",
+        "columns": {
+          "employee": "Employee",
+          "fields": "Fields written",
+          "result": "Result"
+        },
+        "writtenCount": "{{count}} written",
+        "rest": "{{people}} more people · {{changes}} items written",
+        "expandAll": "Show all",
+        "collapse": "Collapse",
+        "failedTag": "{{count}} failed",
+        "failedHead": "{{name}} · {{fields}} ({{count}} items)",
+        "rescope": "Re-preview this person",
+        "undoTitle": "A snapshot was kept; undo is available for 7 days",
+        "undoDesc": "Only the fields written in this sync are restored; fields changed by someone since are left alone. After an undo, the record is marked as undone.",
+        "undo": "Undo this sync",
+        "undoConfirmTitle": "Undo this sync?",
+        "undoConfirmContent": "The {{changes}} items written for {{people}} people are restored to their previous values. Fields changed by someone after the sync are not restored.",
+        "undoConfirmOk": "Undo",
+        "undoCancel": "Cancel",
+        "undone": "Sync undone: {{changes}} items restored for {{people}} people",
+        "undoneCard": "This sync has been undone",
+        "undoSkipped": "{{count}} items were not restored because they were changed after the sync",
+        "undoFailed": "Failed to undo",
+        "footerNote": "This sync is recorded; review or undo it under \"Sync history\"",
+        "viewHistory": "Sync history",
+        "done": "Done"
+      },
+      "batch": {
+        "title": "Sync history",
+        "hint": "The latest 30 syncs; a whole sync can be undone within 7 days",
+        "empty": "No syncs yet",
+        "loadFailed": "Failed to load sync history",
+        "retry": "Retry",
+        "columns": {
+          "time": "Time",
+          "actor": "By",
+          "scope": "People / items",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "scope": "{{people}} people · {{changes}} items",
+        "scopeSensitive": "{{count}} sensitive",
+        "status": {
+          "Active": "Can undo",
+          "Undone": "Undone",
+          "Expired": "Expired"
+        },
+        "undoneBy": "Undone by {{name}} at {{time}}",
+        "deadline": "Undo until {{time}}",
+        "undo": "Undo"
+      },
+      "errors": {
+        "noPermission": "No \"Employee profiles · Edit\" permission, so syncing is not allowed",
+        "noFields": "Select at least one field to sync",
+        "batchNotFound": "This sync record was not found",
+        "batchAlreadyUndone": "This sync has already been undone",
+        "batchExpired": "This sync is older than 7 days and can no longer be undone",
+        "notBound": "This employee is no longer bound; nothing was written",
+        "cardMissing": "The employee's card no longer exists in MYOB; nothing was written",
+        "valueChanged": "This employee's profile changed after the preview; nothing was written to avoid overwriting their edit",
+        "versionConflict": "This employee's sensitive data changed after the preview; nothing was written to avoid overwriting their edit",
+        "pendingNeedsConfirm": "This employee has a pending sensitive-data request; confirm voiding it before writing",
+        "writeFailed": "Write failed; this employee's profile was not changed"
+      },
+      "fields": {
+        "name": "Name",
+        "phone": "Mobile",
+        "email": "Email",
+        "birthday": "Birthday",
+        "gender": "Gender",
+        "address": "Address",
+        "employmentType": "Employment type",
+        "bank": "Bank account",
+        "super": "Super"
+      },
+      "sources": {
+        "name": "MYOB first + last name → our name",
+        "phone": "Normalised to 04xx xxx xxx before comparing",
+        "email": "Email is the binding match key; changing it affects future scoring, so it is unchecked by default",
+        "birthday": "Date of birth in MYOB payroll details",
+        "gender": "MYOB payroll details → male / female",
+        "address": "Street, city, state and postcode joined on one line",
+        "employmentType": "Full-time→Full-time · Part-time→Part-time · Casual→Temporary · Other is not synced",
+        "bank": "BSB + account number (the preview shows only the last 4 digits)",
+        "super": "Fund name + code + member number"
+      }
     }
   }
 }

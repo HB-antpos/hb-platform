@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import {
+  applyMyobEmployeeSync,
   getMyobCompanies,
   getMyobPayCategories,
+  getMyobSyncBatches,
+  getMyobSyncFieldStats,
   getMyobTimesheetPreview,
   normalizeMyobCompanies,
   normalizeMyobConnection,
@@ -9,10 +12,17 @@ import {
   normalizeMyobPayCategories,
   normalizeMyobPreviewRow,
   normalizeMyobPreviewStatus,
+  normalizeMyobSyncApplyResult,
+  normalizeMyobSyncBatches,
+  normalizeMyobSyncFieldStats,
+  normalizeMyobSyncPreview,
+  normalizeMyobSyncUndoResult,
   normalizeMyobStatus,
   normalizeMyobStoreMappings,
   normalizeMyobTimesheetPreview,
+  previewMyobEmployeeSync,
   saveMyobPayCategoryMapping,
+  undoMyobSyncBatch,
 } from './myobService'
 
 // 契约：MyobDtos.cs，camelCase；后端字段缺失 / 类型异常时前端不崩。
@@ -350,6 +360,142 @@ try {
   await assert.rejects(getMyobTimesheetPreview('c1'), /no access/)
 } finally {
   globalThis.fetch = originalFetch2
+}
+
+// ───────────────────────── 从 MYOB 同步资料到我方（契约：MyobEmployeeSyncDtos.cs） ─────────────────────────
+
+// field-stats：缺 canWrite 按无权限处理；空字段键的行被丢弃
+const syncStats = normalizeMyobSyncFieldStats({
+  connectionGuid: 'c1',
+  fetchedAt: '2026-10-29T01:00:00',
+  boundCount: 18,
+  missingCardCount: 1,
+  fields: [
+    { field: 'name', sensitive: false, defaultSelected: true, myobHasValue: 17, fillable: 0, differs: 1 },
+    { field: 'bank', sensitive: true, defaultSelected: false, myobHasValue: 2, fillable: 2, differs: 0 },
+    { sensitive: true },
+  ],
+  canWrite: true,
+  unavailableFields: ['bank', '', 3],
+})
+assert.deepEqual(syncStats.unavailableFields, ['bank'])
+assert.equal(syncStats.fields.length, 2)
+assert.equal(syncStats.fields[1].sensitive, true)
+assert.equal(syncStats.fields[1].defaultSelected, false)
+assert.equal(syncStats.canWrite, true)
+assert.equal(normalizeMyobSyncFieldStats({ fields: [] }).canWrite, false)
+assert.deepEqual(normalizeMyobSyncFieldStats({ fields: [] }).unavailableFields, [])
+assert.deepEqual(normalizeMyobSyncFieldStats(null).fields, [])
+
+// preview：展示文本空为 null；未知 kind 按补空处理；没有 userGuid 的员工被丢弃
+const syncPreview = normalizeMyobSyncPreview({
+  connectionGuid: 'c1',
+  mode: 'Overwrite',
+  fields: ['name', 'phone'],
+  unavailableFields: ['super'],
+  summary: { employeeCount: 1, changeCount: 2, defaultCheckedCount: 2, overwriteCount: 1, sensitiveCount: 0, skippedNoDiff: 6 },
+  employees: [
+    {
+      userGuid: 'u1',
+      userName: 'Ella',
+      storeLabels: ['1002'],
+      hasPendingSensitiveRequest: true,
+      sensitiveRevision: 3,
+      changes: [
+        { field: 'phone', ourDisplay: '', myobDisplay: '0412 345 881', kind: 'Fill', defaultChecked: true, ourHash: 'h1', myobHash: 'h2' },
+        { field: 'name', ourDisplay: 'Ella', myobDisplay: 'Ella B', kind: 'Weird', defaultChecked: false, note: 'x' },
+      ],
+    },
+    { userName: 'no guid' },
+  ],
+})
+assert.equal(syncPreview.mode, 'Overwrite')
+assert.deepEqual(syncPreview.unavailableFields, ['super'])
+assert.equal(syncPreview.employees.length, 1)
+assert.equal(syncPreview.employees[0].sensitiveRevision, 3)
+assert.equal(syncPreview.employees[0].changes[0].ourDisplay, null)
+assert.equal(syncPreview.employees[0].changes[1].kind, 'Fill')
+assert.equal(syncPreview.summary.skippedNoDiff, 6)
+assert.equal(syncPreview.summary.skippedMissingCard, 0)
+assert.equal(normalizeMyobSyncPreview(undefined).mode, 'FillEmpty')
+
+// apply 结果：没有批次时 batchGuid / undoDeadline 为 null
+const syncApplyNone = normalizeMyobSyncApplyResult({
+  batchGuid: null,
+  failed: [{ userGuid: 'u1', userName: 'Kathryn', fields: ['bank', 'super'], code: 'MYOB_SYNC_VALUE_CHANGED', message: 'm' }, {}],
+})
+assert.equal(syncApplyNone.batchGuid, null)
+assert.equal(syncApplyNone.undoDeadline, null)
+assert.equal(syncApplyNone.failed.length, 1)
+assert.deepEqual(syncApplyNone.failed[0].fields, ['bank', 'super'])
+
+// 批次：未知状态按已过期处理，且不可撤销
+const syncBatches = normalizeMyobSyncBatches([
+  { batchGuid: 'b1', status: 'Active', canUndo: true, undoDeadline: '2026-11-05T00:00:00Z', changeCount: 18 },
+  { batchGuid: 'b2', status: 'Weird', canUndo: true },
+  { status: 'Active' },
+])
+assert.equal(syncBatches.length, 2)
+assert.equal(syncBatches[0].canUndo, true)
+assert.equal(syncBatches[1].status, 'Expired')
+assert.equal(syncBatches[1].canUndo, false)
+assert.deepEqual(normalizeMyobSyncBatches('nope'), [])
+assert.deepEqual(normalizeMyobSyncUndoResult({ restoredChangeCount: 4, skippedChanged: [{ userGuid: 'u1', userName: 'A', fields: ['phone'] }] }), {
+  restoredEmployeeCount: 0,
+  restoredChangeCount: 4,
+  skippedChanged: [{ userGuid: 'u1', userName: 'A', fields: ['phone'] }],
+})
+
+// 请求：路由、方法、请求体
+const originalFetch3 = globalThis.fetch
+const syncCalls: Array<{ url: string; method: string; body: unknown }> = []
+let syncBody: unknown = null
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  syncCalls.push({ url: String(input), method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : null })
+  return new Response(JSON.stringify(syncBody), { status: 200, headers: { 'content-type': 'application/json' } })
+}) as typeof fetch
+try {
+  syncBody = { success: true, data: { connectionGuid: 'c1', canWrite: true, fields: [] } }
+  const statsResult = await getMyobSyncFieldStats({ connectionGuid: 'c1', userGuids: ['u1'], refresh: true })
+  assert.equal(statsResult.canWrite, true)
+  assert.equal(syncCalls[0].method, 'POST')
+  assert.ok(syncCalls[0].url.endsWith('/api/react/v1/myob/employee-sync/field-stats'), syncCalls[0].url)
+  assert.deepEqual(syncCalls[0].body, { connectionGuid: 'c1', userGuids: ['u1'], refresh: true })
+
+  syncBody = { success: true, data: { connectionGuid: 'c1', employees: [] } }
+  const previewRequest = { connectionGuid: 'c1', fields: ['name' as const], mode: 'FillEmpty' as const }
+  await previewMyobEmployeeSync(previewRequest)
+  assert.equal(syncCalls[1].method, 'POST')
+  assert.ok(syncCalls[1].url.endsWith('/api/react/v1/myob/employee-sync/preview'), syncCalls[1].url)
+  assert.deepEqual(syncCalls[1].body, previewRequest)
+
+  syncBody = { success: true, data: { batchGuid: 'b1', writtenEmployeeCount: 1, writtenChangeCount: 2, undoDeadline: '2026-11-05T00:00:00Z' } }
+  const applyRequest = {
+    connectionGuid: 'c1',
+    items: [{ userGuid: 'u1', expectedSensitiveRevision: 2, changes: [{ field: 'phone' as const, ourHash: 'a', myobHash: 'b' }] }],
+    confirmSupersedePendingSensitiveRequests: false,
+  }
+  const applied = await applyMyobEmployeeSync(applyRequest)
+  assert.equal(applied.batchGuid, 'b1')
+  assert.ok(syncCalls[2].url.endsWith('/api/react/v1/myob/employee-sync/apply'), syncCalls[2].url)
+  assert.deepEqual(syncCalls[2].body, applyRequest)
+
+  syncBody = { success: true, data: [{ batchGuid: 'b1', status: 'Active', canUndo: true }] }
+  assert.equal((await getMyobSyncBatches('c1')).length, 1)
+  assert.equal(syncCalls[3].method, 'GET')
+  assert.ok(syncCalls[3].url.includes('/api/react/v1/myob/employee-sync/batches'), syncCalls[3].url)
+  assert.ok(syncCalls[3].url.includes('connectionGuid=c1'), syncCalls[3].url)
+
+  syncBody = { success: true, data: { restoredEmployeeCount: 1, restoredChangeCount: 2, skippedChanged: [] } }
+  assert.equal((await undoMyobSyncBatch('b 1/x')).restoredChangeCount, 2)
+  assert.equal(syncCalls[4].method, 'POST')
+  assert.ok(syncCalls[4].url.endsWith('/api/react/v1/myob/employee-sync/batches/b%201%2Fx/undo'), syncCalls[4].url)
+
+  // 业务失败：错误码前缀由调用方（extractMyobError）解析
+  syncBody = { success: false, message: 'MYOB_SYNC_NO_PERMISSION: no edit' }
+  await assert.rejects(getMyobSyncFieldStats({ connectionGuid: 'c1' }), /no edit/)
+} finally {
+  globalThis.fetch = originalFetch3
 }
 
 console.log('myobService.test: ok')

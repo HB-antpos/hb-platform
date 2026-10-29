@@ -679,6 +679,222 @@
         "reason": "被拦截原因",
         "myobCard": "MYOB 员工卡"
       }
+    },
+    "sync": {
+      "entry": {
+        "button": "从 MYOB 同步资料",
+        "row": "同步资料",
+        "noPermission": "需要「员工个人信息 · 编辑」权限才能同步资料",
+        "selectRow": "选择 {{name}}"
+      },
+      "title": "从 MYOB 同步资料到我方",
+      "readOnly": "只读取 MYOB，不会改动 MYOB 里的任何资料",
+      "fetchedAt": "MYOB 数据拉取于 {{age}}",
+      "refresh": "刷新",
+      "close": "关闭",
+      "age": {
+        "justNow": "刚刚",
+        "minutes": "{{count}} 分钟前",
+        "hours": "{{count}} 小时前",
+        "days": "{{count}} 天前"
+      },
+      "steps": {
+        "select": "选择字段",
+        "review": "核对差异",
+        "done": "完成"
+      },
+      "step1": {
+        "fieldsTitle": "要同步哪些字段",
+        "fieldsHint": "数字 = 本次范围内已绑定员工的情况",
+        "selectAll": "全选",
+        "selectDiff": "只选有差异的",
+        "clear": "清空",
+        "groups": {
+          "basic": "基本资料",
+          "employment": "用工与资金"
+        },
+        "groupSource": "MYOB 来源 → 我方字段",
+        "sensitive": "敏感",
+        "sensitiveNote": "敏感字段默认不勾，需要你手动勾选；写入时走「敏感资料直改」，并留下可撤销的同步记录。",
+        "fillable": "补空 {{count}}",
+        "differs": "不同 {{count}}",
+        "modeTitle": "遇到我方已有值、且和 MYOB 不一样时",
+        "modes": {
+          "FillEmpty": {
+            "title": "只补空，不覆盖（推荐）",
+            "desc": "我方为空才写入；有差异的只列出，下一步逐项勾选"
+          },
+          "Overwrite": {
+            "title": "以 MYOB 为准，全部覆盖",
+            "desc": "有差异的也默认勾上；写入前留快照，可撤销"
+          }
+        },
+        "scopeTitle": "同步范围",
+        "scope": {
+          "selected": "只同步勾选的 {{count}} 人",
+          "selectedNames": "列表里勾了 {{names}}",
+          "selectedNamesMore": "列表里勾了 {{names}} 等 {{count}} 人",
+          "all": "当前「已绑定」全部 {{count}} 人",
+          "allSkip": "MYOB 里已找不到卡的 {{count}} 人自动跳过",
+          "allNoSkip": "只对 MYOB 里仍有员工卡的人生效",
+          "single": "只同步 {{name}}",
+          "singleDesc": "单人同步，范围固定为这 1 人",
+          "rescope": "只重新预览 {{name}}（沿用上次的字段）"
+        },
+        "summary": "已选 {{fields}} 个字段（含 {{sensitive}} 个敏感）· 范围 {{people}} 人",
+        "next": "下一步：核对差异",
+        "cancel": "取消",
+        "loadFailed": "加载字段统计失败",
+        "retry": "重试",
+        "noPermission": "你没有「员工个人信息 · 编辑」权限，不能把 MYOB 资料写入员工档案。请联系管理员授权后再试。",
+        "unavailable": "MYOB 暂时读取不到"
+      },
+      "step2": {
+        "subtitle": "还没有写入任何数据 · 下面是预览，勾上的才会写入我方 · 写入方式：{{mode}}",
+        "modeName": {
+          "FillEmpty": "只补空",
+          "Overwrite": "以 MYOB 为准"
+        },
+        "cards": {
+          "employees": "将更新员工",
+          "changes": "字段变更",
+          "checked": "已勾 {{count}}",
+          "skipped": "跳过",
+          "skippedDetail": "{{noDiff}} 无差异 · {{missing}} 卡已不存在",
+          "sensitive": "含敏感字段",
+          "person": "人",
+          "item": "项"
+        },
+        "sensitiveBanner": "已勾选 {{count}} 项敏感资料（生日、银行、退休金）。银行账号与退休金会员号只显示末 4 位，完整值仅在写入时传输。",
+        "sensitiveBannerNone": "本次预览含 {{total}} 项敏感资料（生日、银行、退休金），目前都没有勾选。银行账号与退休金会员号只显示末 4 位。",
+        "pendingBanner": "其中 {{names}} 有待审的敏感资料申请，写入敏感字段后该申请会自动作废。",
+        "filters": {
+          "all": "全部变更",
+          "overwrite": "仅有差异（覆盖）",
+          "sensitive": "仅敏感"
+        },
+        "checkAllFill": "全部勾选补空项",
+        "uncheckAll": "取消全部",
+        "columns": {
+          "employee": "员工",
+          "field": "字段",
+          "ours": "我方现值",
+          "myob": "MYOB 的值",
+          "mode": "方式"
+        },
+        "empty": "（空）",
+        "kind": {
+          "Fill": "补空",
+          "Overwrite": "覆盖"
+        },
+        "pendingTag": "待审申请将作废",
+        "checkRow": "写入 {{name}} 的{{field}}",
+        "ack": "我已核对敏感字段（生日、银行、退休金）",
+        "willWrite": "将写入 {{count}} 项 · 涉及 {{people}} 人",
+        "back": "返回",
+        "confirm": "确认同步 {{count}} 项",
+        "loadFailed": "生成预览失败",
+        "retry": "重试",
+        "emptyPreview": "所选字段在范围内没有需要同步的差异",
+        "emptyFiltered": "这个筛选下没有变更",
+        "submitFailed": "同步失败",
+        "unavailableBanner": "以下字段 MYOB 暂时读取不到（可能是付款详情接口没有权限），本次不会同步：{{fields}}"
+      },
+      "step3": {
+        "subtitle": "本次同步 {{time}} · 操作人 {{actor}}",
+        "writtenTitle": "已写入 {{people}} 人 · {{changes}} 项",
+        "noneWritten": "本次没有写入任何资料",
+        "sensitiveChip": "含 {{count}} 项敏感字段",
+        "otherLine": "另有 {{people}} 人 {{changes}} 项没有写入（见下方），{{skipped}} 人无需同步",
+        "otherNoFailed": "{{skipped}} 人无需同步",
+        "otherFailedOnly": "另有 {{people}} 人 {{changes}} 项没有写入（见下方）",
+        "writtenSection": "已写入的内容",
+        "columns": {
+          "employee": "员工",
+          "fields": "写入的字段",
+          "result": "结果"
+        },
+        "writtenCount": "已写入 {{count}}",
+        "rest": "其余 {{people}} 人 · {{changes}} 项已写入",
+        "expandAll": "展开全部",
+        "collapse": "收起",
+        "failedTag": "失败 {{count}} 人",
+        "failedHead": "{{name}} · {{fields}} {{count}} 项",
+        "rescope": "重新预览这 1 人",
+        "undoTitle": "本次同步已留快照，7 天内可撤销",
+        "undoDesc": "只还原本次写入的字段；写入之后又被人改过的字段不会动。撤销后这条记录会标为「已撤销」。",
+        "undo": "撤销本次同步",
+        "undoConfirmTitle": "撤销本次同步？",
+        "undoConfirmContent": "会把本次写入的 {{people}} 人 {{changes}} 项还原成写入前的值；写入之后又被人改过的字段不会还原。",
+        "undoConfirmOk": "确认撤销",
+        "undoCancel": "取消",
+        "undone": "已撤销本次同步：还原 {{people}} 人 · {{changes}} 项",
+        "undoneCard": "本次同步已撤销",
+        "undoSkipped": "{{count}} 项因写入后被改过，没有还原",
+        "undoFailed": "撤销失败",
+        "footerNote": "本次同步已留记录，可在「查看同步记录」里回看和撤销",
+        "viewHistory": "查看同步记录",
+        "done": "完成"
+      },
+      "batch": {
+        "title": "同步记录",
+        "hint": "最近 30 次同步；7 天内可整批撤销",
+        "empty": "还没有同步记录",
+        "loadFailed": "加载同步记录失败",
+        "retry": "重试",
+        "columns": {
+          "time": "时间",
+          "actor": "操作人",
+          "scope": "人数 / 项数",
+          "status": "状态",
+          "actions": "操作"
+        },
+        "scope": "{{people}} 人 · {{changes}} 项",
+        "scopeSensitive": "含敏感 {{count}} 项",
+        "status": {
+          "Active": "可撤销",
+          "Undone": "已撤销",
+          "Expired": "已过期"
+        },
+        "undoneBy": "{{name}} 于 {{time}} 撤销",
+        "deadline": "撤销截止 {{time}}",
+        "undo": "撤销"
+      },
+      "errors": {
+        "noPermission": "没有「员工个人信息 · 编辑」权限，不能同步资料",
+        "noFields": "请至少选择一个要同步的字段",
+        "batchNotFound": "找不到这次同步记录",
+        "batchAlreadyUndone": "这次同步已经撤销过了",
+        "batchExpired": "这次同步已超过 7 天，不能再撤销",
+        "notBound": "该员工已不是已绑定状态，没有写入",
+        "cardMissing": "MYOB 里已找不到这位员工的卡，没有写入",
+        "valueChanged": "预览之后这位员工的资料已被修改，为避免覆盖对方的改动，没有写入",
+        "versionConflict": "预览之后这位员工的敏感资料版本变了，为避免覆盖对方的改动，没有写入",
+        "pendingNeedsConfirm": "这位员工有待审的敏感资料申请，需要确认作废后才能写入",
+        "writeFailed": "写入失败，没有改动这位员工的资料"
+      },
+      "fields": {
+        "name": "姓名",
+        "phone": "手机",
+        "email": "邮箱",
+        "birthday": "生日",
+        "gender": "性别",
+        "address": "住址",
+        "employmentType": "用工类型",
+        "bank": "银行账户",
+        "super": "退休金"
+      },
+      "sources": {
+        "name": "MYOB 名 + 姓 → 我方姓名",
+        "phone": "统一成 04xx xxx xxx 再比较",
+        "email": "邮箱是绑定匹配依据，改了会影响今后打分，默认不选",
+        "birthday": "MYOB 薪资详情的出生日期",
+        "gender": "MYOB 薪资详情 → 男 / 女",
+        "address": "街道、城市、州、邮编拼成一行",
+        "employmentType": "全职→全职 · 兼职→兼职 · Casual→临时工 · Other 不同步",
+        "bank": "BSB + 账号（预览里账号只显示末 4 位）",
+        "super": "基金名称 + 代码 + 会员号"
+      }
     }
   }
 }

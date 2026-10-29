@@ -476,3 +476,173 @@ export interface MyobTimesheetPreview {
   /** 推送功能是否已开放；本批恒为 false。 */
   pushEnabled: boolean
 }
+
+// ───────────────────────── 从 MYOB 同步资料到我方 ─────────────────────────
+// 契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobEmployeeSyncDtos.cs 为准（权限 Myob.Employee.Bind + EmployeeProfiles.Edit）。
+// 只读 MYOB、只写我方员工资料；必须先预览再写入，写入前留快照，7 天内可整批撤销。
+
+/** 可同步的字段键；birthday / bank / super 为敏感字段。 */
+export type MyobSyncField = 'name' | 'phone' | 'email' | 'birthday' | 'gender' | 'address' | 'employmentType' | 'bank' | 'super'
+
+/** FillEmpty 只补空；Overwrite 以 MYOB 为准（有差异的也默认勾上）。 */
+export type MyobSyncMode = 'FillEmpty' | 'Overwrite'
+
+/** Fill 我方为空补上；Overwrite 我方已有值且不同。 */
+export type MyobSyncChangeKind = 'Fill' | 'Overwrite'
+
+/** 范围：userGuids 为空 / 缺省 = 该公司文件下全部已绑定员工。 */
+export interface MyobSyncScopeRequest {
+  connectionGuid: string
+  userGuids?: string[]
+  /** true = 忽略 MYOB 缓存重新拉取。 */
+  refresh?: boolean
+}
+
+export interface MyobSyncFieldStat {
+  field: MyobSyncField
+  sensitive: boolean
+  defaultSelected: boolean
+  myobHasValue: number
+  /** 我方为空、MYOB 有值（可补空）的员工数。 */
+  fillable: number
+  /** 我方与 MYOB 都有值且不同的员工数。 */
+  differs: number
+}
+
+export interface MyobSyncFieldStats {
+  connectionGuid: string
+  fetchedAt: string
+  boundCount: number
+  missingCardCount: number
+  fields: MyobSyncFieldStat[]
+  /** 当前用户有 EmployeeProfiles.Edit；false 时前端不提供同步入口。 */
+  canWrite: boolean
+  /** MYOB 数据没拉到的字段键（如付款详情接口没权限）：按「MYOB 无值」统计，前端灰显、不可选。 */
+  unavailableFields: MyobSyncField[]
+}
+
+export interface MyobSyncPreviewRequest {
+  connectionGuid: string
+  userGuids?: string[]
+  refresh?: boolean
+  fields: MyobSyncField[]
+  mode: MyobSyncMode
+}
+
+export interface MyobSyncChange {
+  field: MyobSyncField
+  sensitive: boolean
+  /** 我方现值展示文本；空为 null。银行账号只给末 4 位。 */
+  ourDisplay: string | null
+  myobDisplay: string | null
+  kind: MyobSyncChangeKind
+  defaultChecked: boolean
+  note: string | null
+  /** 规范化哈希；写入时原样带回，服务端据此发现「预览后被改过」。 */
+  ourHash: string
+  myobHash: string
+}
+
+export interface MyobSyncEmployee {
+  userGuid: string
+  userName: string
+  storeLabels: string[]
+  employeeType: string | null
+  /** 有待审敏感资料申请；写入敏感字段会使其作废。 */
+  hasPendingSensitiveRequest: boolean
+  /** 预览时的敏感资料版本号；apply 原样带回。 */
+  sensitiveRevision: number
+  changes: MyobSyncChange[]
+}
+
+export interface MyobSyncPreviewSummary {
+  employeeCount: number
+  changeCount: number
+  defaultCheckedCount: number
+  overwriteCount: number
+  sensitiveCount: number
+  pendingSensitiveRequestCount: number
+  skippedNoDiff: number
+  skippedMissingCard: number
+}
+
+export interface MyobSyncPreview {
+  connectionGuid: string
+  fetchedAt: string
+  mode: MyobSyncMode
+  fields: MyobSyncField[]
+  summary: MyobSyncPreviewSummary
+  /** 同 MyobSyncFieldStats.unavailableFields。 */
+  unavailableFields: MyobSyncField[]
+  employees: MyobSyncEmployee[]
+}
+
+export interface MyobSyncApplyChangeItem {
+  field: MyobSyncField
+  ourHash: string
+  myobHash: string
+}
+
+export interface MyobSyncApplyEmployeeItem {
+  userGuid: string
+  expectedSensitiveRevision: number
+  changes: MyobSyncApplyChangeItem[]
+}
+
+export interface MyobSyncApplyRequest {
+  connectionGuid: string
+  items: MyobSyncApplyEmployeeItem[]
+  /** 员工有待审敏感申请时，写入敏感字段会使其作废；用户确认后传 true。 */
+  confirmSupersedePendingSensitiveRequests: boolean
+}
+
+export interface MyobSyncWritten {
+  userGuid: string
+  userName: string
+  fields: MyobSyncField[]
+}
+
+export interface MyobSyncFailure {
+  userGuid: string
+  userName: string
+  /** 该员工没有写入的字段。 */
+  fields: MyobSyncField[]
+  /** MYOB_SYNC_* 错误码。 */
+  code: string
+  message: string
+}
+
+export interface MyobSyncApplyResult {
+  /** 没有任何写入成功时为 null（不留批次，也不可撤销）。 */
+  batchGuid: string | null
+  writtenEmployeeCount: number
+  writtenChangeCount: number
+  writtenSensitiveCount: number
+  written: MyobSyncWritten[]
+  failed: MyobSyncFailure[]
+  /** 撤销截止时间（UTC）= 写入时间 + 7 天。 */
+  undoDeadline: string | null
+}
+
+export type MyobSyncBatchStatus = 'Active' | 'Undone' | 'Expired'
+
+export interface MyobSyncBatch {
+  batchGuid: string
+  createdAt: string
+  actorName: string | null
+  employeeCount: number
+  changeCount: number
+  sensitiveCount: number
+  status: MyobSyncBatchStatus
+  canUndo: boolean
+  undoDeadline: string
+  undoneAt: string | null
+  undoneByName: string | null
+}
+
+export interface MyobSyncUndoResult {
+  restoredEmployeeCount: number
+  restoredChangeCount: number
+  /** 写入之后又被人改过、因此没有还原的字段。 */
+  skippedChanged: MyobSyncWritten[]
+}

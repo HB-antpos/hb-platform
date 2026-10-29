@@ -100,6 +100,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string MyobConnectionMigrationId = "20261027.002-myob-connection";
     internal const string MyobEmployeeBindingMigrationId = "20261027.003-myob-employee-binding";
     internal const string MyobPayCategoryMigrationId = "20261027.004-myob-pay-category";
+    internal const string MyobEmployeeSyncBatchMigrationId = "20261029.001-myob-employee-sync-batch";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -391,6 +392,11 @@ internal sealed class SchemaMigrationCoordinator
             MyobPayCategoryMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyMyobPayCategoryAsync(cancellationToken)
+        ),
+        new(
+            MyobEmployeeSyncBatchMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMyobEmployeeSyncBatchAsync(cancellationToken)
         ),
     ];
 

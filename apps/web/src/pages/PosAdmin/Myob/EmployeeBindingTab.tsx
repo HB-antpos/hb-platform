@@ -23,6 +23,7 @@ import type {
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import BindingDrawer from './BindingDrawer'
 import BindingListView from './BindingListView'
+import MyobSyncDrawer from './MyobSyncDrawer'
 import { MissingPanel, TypeIssuesPanel } from './MissingPanels'
 import {
   buildBatchConfirmItems,
@@ -57,6 +58,14 @@ interface EmployeeBindingTabProps {
 interface DrawerState {
   row: MyobBindingRow
   preselectUid: string | null
+}
+
+/** 「从 MYOB 同步资料」抽屉的入口参数；seq 每次打开递增，作为抽屉的 key 让状态重新开始。 */
+interface SyncTarget {
+  seq: number
+  guids: string[]
+  names: string[]
+  locked: boolean
 }
 
 export default function EmployeeBindingTab({
@@ -94,6 +103,12 @@ export default function EmployeeBindingTab({
   const [ignoringUids, setIgnoringUids] = useState<ReadonlySet<string>>(new Set())
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const requestSeq = useRef(0)
+  // 从 MYOB 同步资料：列表勾选、抽屉入口、权限（以 field-stats.canWrite 为准；null = 还没问过）
+  const [syncSelected, setSyncSelected] = useState<string[]>([])
+  const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null)
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [syncCanWrite, setSyncCanWrite] = useState<boolean | null>(null)
+  const syncSeq = useRef(0)
 
   // 去绑定：外部指定公司时切换选中
   useEffect(() => {
@@ -146,6 +161,9 @@ export default function EmployeeBindingTab({
     setKeyword('')
     setSubTab('list')
     setDrawer(null)
+    setSyncSelected([])
+    setSyncTarget(null)
+    setSyncOpen(false)
     if (selectedGuid) {
       void load(false)
     } else {
@@ -159,6 +177,15 @@ export default function EmployeeBindingTab({
   }, [snapshot, onCountsChange])
 
   const rows = snapshot?.rows ?? []
+  // 只保留仍是「已绑定且 MYOB 卡在」的勾选（解除绑定 / 刷新后失效的勾选自动丢弃）
+  const syncableRows = useMemo(
+    () => (snapshot?.rows ?? []).filter((row) => row.status === 'Bound' && !!row.link && !row.link.cardMissing),
+    [snapshot],
+  )
+  const syncSelectedValid = useMemo(
+    () => syncSelected.filter((guid) => syncableRows.some((row) => row.userGuid === guid)),
+    [syncSelected, syncableRows],
+  )
   const connectionName = snapshot?.connectionName || selected?.name || ''
 
   const setBusy = (guids: string[], on: boolean) =>
@@ -291,6 +318,23 @@ export default function EmployeeBindingTab({
     }
     return result
   }
+
+  /** row = null：批量入口，范围 = 列表勾选（可为空，抽屉里再选「全部」）；row 非空：单人入口。 */
+  const handleSync = (row: MyobBindingRow | null) => {
+    const picked = row ? [row] : syncableRows.filter((item) => syncSelectedValid.includes(item.userGuid))
+    syncSeq.current += 1
+    setSyncTarget({
+      seq: syncSeq.current,
+      guids: picked.map((item) => item.userGuid),
+      names: picked.map((item) => item.userName),
+      locked: row !== null,
+    })
+    setSyncOpen(true)
+  }
+
+  const handleSyncCanWrite = useCallback((canWrite: boolean) => setSyncCanWrite(canWrite), [])
+  // 同步 / 撤销改了员工资料（姓名、邮箱、分店等列表会显示的内容）：静默重新加载列表
+  const handleSyncChanged = useCallback(() => void load(false), [load])
 
   const handleCopyOurs = (item: MyobOnlyInOurs) =>
     void copyTextToClipboard(item.copyText || [item.userName, item.email].filter(Boolean).join('\n'), {
@@ -502,6 +546,10 @@ export default function EmployeeBindingTab({
               onKeywordChange={setKeyword}
               onRowAction={handleRowAction}
               onBatchConfirm={handleBatchConfirm}
+              syncSelectedGuids={syncSelectedValid}
+              onSyncSelectedChange={setSyncSelected}
+              canSync={syncCanWrite}
+              onSync={handleSync}
             />
           ) : subTab === 'missing' ? (
             <MissingPanel
@@ -528,6 +576,22 @@ export default function EmployeeBindingTab({
           preselectUid={drawer?.preselectUid ?? null}
           onClose={() => setDrawer(null)}
           onConfirm={handleDrawerConfirm}
+        />
+      ) : null}
+
+      {selectedGuid && syncTarget ? (
+        <MyobSyncDrawer
+          key={`${selectedGuid}:${syncTarget.seq}`}
+          open={syncOpen}
+          connectionGuid={selectedGuid}
+          connectionName={connectionName}
+          selectedGuids={syncTarget.guids}
+          selectedNames={syncTarget.names}
+          singleLocked={syncTarget.locked}
+          boundCount={snapshot?.counts.bound ?? 0}
+          onClose={() => setSyncOpen(false)}
+          onCanWriteChange={handleSyncCanWrite}
+          onChanged={handleSyncChanged}
         />
       ) : null}
     </div>

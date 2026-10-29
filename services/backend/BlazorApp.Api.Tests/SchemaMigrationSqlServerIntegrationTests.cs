@@ -4047,6 +4047,63 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql));
+        Assert.Equal(54360, missing.Number);
+
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobEmployeeSyncBatch
+                (BatchGuid, ConnectionGuid, CreatedAt, EmployeeCount, ChangeCount, SensitiveCount, ChangesJson)
+            VALUES (N'b-1', N'c-1', SYSUTCDATETIME(), 1, 2, 0, N'[{"userGuid":"u-1","field":"Phone","before":"1","after":"2"}]');
+            """);
+        // 重复执行不影响已写入的批次；批次号唯一。
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobEmployeeSyncBatch WHERE BatchGuid = N'b-1'"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobEmployeeSyncBatch
+                (BatchGuid, ConnectionGuid, CreatedAt, EmployeeCount, ChangeCount, SensitiveCount, ChangesJson)
+            VALUES (N'b-1', N'c-1', SYSUTCDATETIME(), 0, 0, 0, N'[]');
+            """));
+        // ChangesJson 是 nvarchar(max)：超过 4000 字符的快照必须能存下。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobEmployeeSyncBatch
+                (BatchGuid, ConnectionGuid, CreatedAt, EmployeeCount, ChangeCount, SensitiveCount, ChangesJson)
+            VALUES (N'b-big', N'c-1', SYSUTCDATETIME(), 1, 1, 0, REPLICATE(CAST(N'x' AS nvarchar(max)), 10000));
+            """);
+        Assert.Equal(10000, await ScalarIntAsync(main, "SELECT CAST(LEN(ChangesJson) AS int) FROM dbo.MyobEmployeeSyncBatch WHERE BatchGuid = N'b-big'"));
+
+        // 列宽漂移 → 54361（ChangesJson 被改成 nvarchar(4000)）；还原后通过。
+        await ExecuteNonQueryAsync(main, "DELETE dbo.MyobEmployeeSyncBatch WHERE BatchGuid = N'b-big';");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobEmployeeSyncBatch ALTER COLUMN ChangesJson nvarchar(4000) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql));
+        Assert.Equal(54361, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobEmployeeSyncBatch ALTER COLUMN ChangesJson nvarchar(max) NOT NULL;");
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql);
+
+        // 查询索引缺失 → 54363；重跑 Apply 可补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobEmployeeSyncBatch_Connection_CreatedAt ON dbo.MyobEmployeeSyncBatch;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql));
+        Assert.Equal(54363, noIndex.Number);
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql);
+
+        // 主键缺失 → 54362。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobEmployeeSyncBatch DROP CONSTRAINT PK_MyobEmployeeSyncBatch;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql));
+        Assert.Equal(54362, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

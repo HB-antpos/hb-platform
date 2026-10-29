@@ -1,5 +1,5 @@
-import { CheckCircleOutlined, SearchOutlined } from '@ant-design/icons'
-import { Button, Empty, Grid, Input, Tag } from 'antd'
+import { CheckCircleOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons'
+import { Button, Empty, Grid, Input, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -39,6 +39,13 @@ interface BindingListViewProps {
   onKeywordChange: (keyword: string) => void
   onRowAction: (action: BindingRowAction, row: MyobBindingRow) => void
   onBatchConfirm: () => void
+  /** 「从 MYOB 同步资料」勾选的员工 guid（只对已绑定行有意义）。 */
+  syncSelectedGuids: string[]
+  onSyncSelectedChange: (guids: string[]) => void
+  /** 同步权限：false = 没有 EmployeeProfiles.Edit，入口禁用并提示；true / null（还不知道）可点。 */
+  canSync: boolean | null
+  /** 批量入口（row = null）/ 单人入口（row = 该员工）。 */
+  onSync: (row: MyobBindingRow | null) => void
 }
 
 export default function BindingListView({
@@ -53,6 +60,10 @@ export default function BindingListView({
   onKeywordChange,
   onRowAction,
   onBatchConfirm,
+  syncSelectedGuids,
+  onSyncSelectedChange,
+  canSync,
+  onSync,
 }: BindingListViewProps) {
   const { t } = useTranslation()
   // 窄屏（<768px）不固定操作列：固定列会占掉大半屏宽，其余列只能被挤成一条缝，改成整表横向滚动
@@ -60,6 +71,11 @@ export default function BindingListView({
   const filtered = useMemo(() => filterBindingRows(rows, filter, keyword), [rows, filter, keyword])
   // 批量条数 = 实际会提交的高分建议条数（取全部行，不受当前筛选 / 搜索影响）
   const batchCount = useMemo(() => buildBatchConfirmItems(rows).length, [rows])
+
+  const syncDisabled = canSync === false || batchBusy
+  // 单人「同步资料」：只对已绑定且 MYOB 卡还在的行（卡已不存在的后端会跳过，没必要给入口）
+  const syncable = (row: MyobBindingRow) => row.status === 'Bound' && !!row.link && !row.link.cardMissing
+  const hasBound = counts.bound > 0
 
   const columns: ColumnsType<MyobBindingRow> = [
     {
@@ -143,11 +159,20 @@ export default function BindingListView({
       title: t('myob.employees.columns.actions'),
       key: 'actions',
       fixed: wide ? 'right' : undefined,
-      width: 200,
+      width: 280,
       render: (_, row) => {
         const busy = busyUserGuids.has(row.userGuid)
         return (
           <div className="myob-actions" style={{ flexWrap: 'nowrap', alignItems: 'center' }}>
+            {syncable(row) ? (
+              <Tooltip title={canSync === false ? t('myob.sync.entry.noPermission') : undefined}>
+                <span>
+                  <Button size="small" icon={<SyncOutlined />} disabled={syncDisabled || busy} onClick={() => onSync(row)}>
+                    {t('myob.sync.entry.row')}
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : null}
             {getBindingRowActions(row.status).map((action, index) => (
               <RowActionButton
                 key={action}
@@ -179,6 +204,15 @@ export default function BindingListView({
             <span className="myob-chip-count">{getFilterCount(counts, item)}</span>
           </button>
         ))}
+        {hasBound ? (
+          <Tooltip title={canSync === false ? t('myob.sync.entry.noPermission') : undefined}>
+            <span className="myob-sync-entry">
+              <Button icon={<SyncOutlined />} disabled={syncDisabled} onClick={() => onSync(null)}>
+                {t('myob.sync.entry.button')}
+              </Button>
+            </span>
+          </Tooltip>
+        ) : null}
         <Input
           allowClear
           className="myob-chips-search"
@@ -210,6 +244,15 @@ export default function BindingListView({
         metricId="pos-admin.myob.employee-bindings"
         rowKey="userGuid"
         size="middle"
+        // 勾选只用于「从 MYOB 同步资料」的范围；只有已绑定行能勾，不影响「批量确认高分建议」（它按 buildBatchConfirmItems(rows) 取全部行）
+        rowSelection={{
+          selectedRowKeys: syncSelectedGuids,
+          onChange: (keys) => onSyncSelectedChange(keys.map(String)),
+          getCheckboxProps: (row) => ({
+            disabled: !syncable(row),
+            'aria-label': t('myob.sync.entry.selectRow', { name: row.userName }),
+          }),
+        }}
         columns={columns}
         dataSource={filtered}
         // 窄屏横向滚动，操作列固定在右侧

@@ -49,6 +49,22 @@ import type {
   MyobStoreMappingChange,
   MyobStoreMappingItem,
   MyobStoreMappings,
+  MyobSyncApplyRequest,
+  MyobSyncApplyResult,
+  MyobSyncBatch,
+  MyobSyncBatchStatus,
+  MyobSyncChange,
+  MyobSyncEmployee,
+  MyobSyncFailure,
+  MyobSyncField,
+  MyobSyncFieldStat,
+  MyobSyncFieldStats,
+  MyobSyncMode,
+  MyobSyncPreview,
+  MyobSyncPreviewRequest,
+  MyobSyncScopeRequest,
+  MyobSyncUndoResult,
+  MyobSyncWritten,
   MyobTypeIssue,
 } from '../types/myob'
 import request, { unwrapApiData } from '../utils/request'
@@ -866,4 +882,208 @@ export async function getMyobTimesheetPreview(
     },
   })
   return normalizeMyobTimesheetPreview(unwrapApiData(response))
+}
+
+// ───────────────────────── 从 MYOB 同步资料到我方 ─────────────────────────
+// 契约：MyobEmployeeSyncDtos.cs。权限：Myob.Employee.Bind，服务端另要求 EmployeeProfiles.Edit（field-stats.canWrite 反映）。
+
+function syncField(value: unknown): MyobSyncField | null {
+  // 字段键原样保留（未知键界面按原文显示），只丢弃空值
+  return typeof value === 'string' && value !== '' ? (value as MyobSyncField) : null
+}
+
+function syncFieldList(value: unknown): MyobSyncField[] {
+  return list(value, syncField)
+}
+
+function normalizeSyncMode(value: unknown): MyobSyncMode {
+  return value === 'Overwrite' ? 'Overwrite' : 'FillEmpty'
+}
+
+function normalizeSyncFieldStat(raw: unknown): MyobSyncFieldStat | null {
+  const item = record(raw)
+  const field = syncField(item.field)
+  if (!field) {
+    return null
+  }
+  return {
+    field,
+    sensitive: bool(item.sensitive),
+    defaultSelected: bool(item.defaultSelected),
+    myobHasValue: int(item.myobHasValue),
+    fillable: int(item.fillable),
+    differs: int(item.differs),
+  }
+}
+
+export function normalizeMyobSyncFieldStats(payload: unknown): MyobSyncFieldStats {
+  const data = record(payload)
+  return {
+    connectionGuid: text(data.connectionGuid),
+    fetchedAt: text(data.fetchedAt),
+    boundCount: int(data.boundCount),
+    missingCardCount: int(data.missingCardCount),
+    fields: list(data.fields, normalizeSyncFieldStat),
+    // 缺字段按没权限处理：宁可隐藏入口，也不让没有权限的人走到写入那一步
+    canWrite: bool(data.canWrite, false),
+    unavailableFields: syncFieldList(data.unavailableFields),
+  }
+}
+
+function normalizeSyncChange(raw: unknown): MyobSyncChange | null {
+  const item = record(raw)
+  const field = syncField(item.field)
+  if (!field) {
+    return null
+  }
+  return {
+    field,
+    sensitive: bool(item.sensitive),
+    ourDisplay: nullableText(item.ourDisplay),
+    myobDisplay: nullableText(item.myobDisplay),
+    kind: item.kind === 'Overwrite' ? 'Overwrite' : 'Fill',
+    defaultChecked: bool(item.defaultChecked),
+    note: nullableText(item.note),
+    ourHash: text(item.ourHash),
+    myobHash: text(item.myobHash),
+  }
+}
+
+function normalizeSyncEmployee(raw: unknown): MyobSyncEmployee | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  if (!userGuid) {
+    return null
+  }
+  return {
+    userGuid,
+    userName: text(item.userName),
+    storeLabels: textList(item.storeLabels),
+    employeeType: nullableText(item.employeeType),
+    hasPendingSensitiveRequest: bool(item.hasPendingSensitiveRequest),
+    sensitiveRevision: int(item.sensitiveRevision),
+    changes: list(item.changes, normalizeSyncChange),
+  }
+}
+
+export function normalizeMyobSyncPreview(payload: unknown): MyobSyncPreview {
+  const data = record(payload)
+  const summary = record(data.summary)
+  return {
+    connectionGuid: text(data.connectionGuid),
+    fetchedAt: text(data.fetchedAt),
+    mode: normalizeSyncMode(data.mode),
+    fields: syncFieldList(data.fields),
+    summary: {
+      employeeCount: int(summary.employeeCount),
+      changeCount: int(summary.changeCount),
+      defaultCheckedCount: int(summary.defaultCheckedCount),
+      overwriteCount: int(summary.overwriteCount),
+      sensitiveCount: int(summary.sensitiveCount),
+      pendingSensitiveRequestCount: int(summary.pendingSensitiveRequestCount),
+      skippedNoDiff: int(summary.skippedNoDiff),
+      skippedMissingCard: int(summary.skippedMissingCard),
+    },
+    unavailableFields: syncFieldList(data.unavailableFields),
+    employees: list(data.employees, normalizeSyncEmployee),
+  }
+}
+
+function normalizeSyncWritten(raw: unknown): MyobSyncWritten | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  return userGuid ? { userGuid, userName: text(item.userName), fields: syncFieldList(item.fields) } : null
+}
+
+function normalizeSyncFailure(raw: unknown): MyobSyncFailure | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  return userGuid
+    ? { userGuid, userName: text(item.userName), fields: syncFieldList(item.fields), code: text(item.code), message: text(item.message) }
+    : null
+}
+
+export function normalizeMyobSyncApplyResult(payload: unknown): MyobSyncApplyResult {
+  const data = record(payload)
+  return {
+    batchGuid: nullableText(data.batchGuid),
+    writtenEmployeeCount: int(data.writtenEmployeeCount),
+    writtenChangeCount: int(data.writtenChangeCount),
+    writtenSensitiveCount: int(data.writtenSensitiveCount),
+    written: list(data.written, normalizeSyncWritten),
+    failed: list(data.failed, normalizeSyncFailure),
+    undoDeadline: nullableText(data.undoDeadline),
+  }
+}
+
+const SYNC_BATCH_STATUSES: readonly MyobSyncBatchStatus[] = ['Active', 'Undone', 'Expired']
+
+function normalizeSyncBatch(raw: unknown): MyobSyncBatch | null {
+  const item = record(raw)
+  const batchGuid = text(item.batchGuid)
+  if (!batchGuid) {
+    return null
+  }
+  const status = SYNC_BATCH_STATUSES.find((value) => value === item.status) ?? 'Expired'
+  return {
+    batchGuid,
+    createdAt: text(item.createdAt),
+    actorName: nullableText(item.actorName),
+    employeeCount: int(item.employeeCount),
+    changeCount: int(item.changeCount),
+    sensitiveCount: int(item.sensitiveCount),
+    status,
+    // 状态不是可撤销（含未知状态）时，即使后端 canUndo 误为 true 也不显示撤销入口
+    canUndo: bool(item.canUndo) && status === 'Active',
+    undoDeadline: text(item.undoDeadline),
+    undoneAt: nullableText(item.undoneAt),
+    undoneByName: nullableText(item.undoneByName),
+  }
+}
+
+export function normalizeMyobSyncBatches(payload: unknown): MyobSyncBatch[] {
+  return list(payload, normalizeSyncBatch)
+}
+
+export function normalizeMyobSyncUndoResult(payload: unknown): MyobSyncUndoResult {
+  const data = record(payload)
+  return {
+    restoredEmployeeCount: int(data.restoredEmployeeCount),
+    restoredChangeCount: int(data.restoredChangeCount),
+    skippedChanged: list(data.skippedChanged, normalizeSyncWritten),
+  }
+}
+
+/** 第 1 步：范围内每个字段「补空 N / 不同 M」；userGuids 为空 = 全部已绑定员工。 */
+export async function getMyobSyncFieldStats(payload: MyobSyncScopeRequest): Promise<MyobSyncFieldStats> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/employee-sync/field-stats`, payload)
+  return normalizeMyobSyncFieldStats(unwrapApiData(response))
+}
+
+/** 第 2 步：逐员工逐字段的差异预览，不写入。 */
+export async function previewMyobEmployeeSync(payload: MyobSyncPreviewRequest): Promise<MyobSyncPreview> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/employee-sync/preview`, payload)
+  return normalizeMyobSyncPreview(unwrapApiData(response))
+}
+
+/** 确认写入（留快照）；部分员工失败时 failed 非空，调用方逐条展示。 */
+export async function applyMyobEmployeeSync(payload: MyobSyncApplyRequest): Promise<MyobSyncApplyResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/employee-sync/apply`, payload)
+  return normalizeMyobSyncApplyResult(unwrapApiData(response))
+}
+
+/** 同步记录（最近 30 条）。 */
+export async function getMyobSyncBatches(connectionGuid: string): Promise<MyobSyncBatch[]> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/employee-sync/batches`, {
+    params: { connectionGuid },
+  })
+  return normalizeMyobSyncBatches(unwrapApiData(response))
+}
+
+/** 7 天内整批撤销；只还原本次写入且之后没被改过的字段。 */
+export async function undoMyobSyncBatch(batchGuid: string): Promise<MyobSyncUndoResult> {
+  const response = await request.post<ApiResponse<unknown>>(
+    `${MYOB_BASE}/employee-sync/batches/${encodeURIComponent(batchGuid)}/undo`,
+  )
+  return normalizeMyobSyncUndoResult(unwrapApiData(response))
 }
