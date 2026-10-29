@@ -147,6 +147,7 @@ import {
 } from '../listPagination'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import UserMobileMenuPermissionManager from './UserMobileMenuPermissionManager'
+import UserDrawerTabFooter from './UserDrawerTabFooter'
 import UserCashierBarcodeModal from './UserCashierBarcodeModal'
 import UserBatchActions from './UserBatchActions'
 import { NeutralChip, PendingChangesBar, RoleChip, StatusDot } from '../accessAdminUi'
@@ -258,6 +259,8 @@ export default function SystemUsersPage() {
   const [permSaving, setPermSaving] = useState(false)
   const [permLoadError, setPermLoadError] = useState<string | null>(null)
   const [permissionPlatform, setPermissionPlatform] = useState<PermissionPlatform>('web')
+  const [permSearch, setPermSearch] = useState('')
+  const [permOnlyGranted, setPermOnlyGranted] = useState(false)
 
   const [posPermissionUser, setPosPermissionUser] = useState<UserDto | null>(null)
   const [posPermissionStores, setPosPermissionStores] = useState<UserStoreDto[]>([])
@@ -875,6 +878,8 @@ export default function SystemUsersPage() {
     setEditingUser(null)
     setEditTab(initialTab)
     setPermissionPlatform(isCurrentUserScoped ? 'pos' : 'web')
+    setPermSearch('')
+    setPermOnlyGranted(false)
     permissionRequestGuardRef.current.invalidate()
     permissionSaveGuardRef.current.invalidate()
     setAllRoles([])
@@ -1679,14 +1684,6 @@ export default function SystemUsersPage() {
     [permCategories],
   )
 
-  const visiblePermissionCategories = platformPermissionCategories[permissionPlatform]
-  const visiblePermissionCodes = useMemo(
-    () => visiblePermissionCategories.flatMap((category) =>
-      category.permissions.map((permission) => permission.name),
-    ),
-    [visiblePermissionCategories],
-  )
-
   const directPermSet = useMemo(() => {
     return new Set(directPermKeys)
   }, [directPermKeys])
@@ -1697,6 +1694,48 @@ export default function SystemUsersPage() {
       directPermKeys,
     ))
   }, [directPermKeys, permissionState])
+
+  const platformCategoriesForTree = platformPermissionCategories[permissionPlatform]
+  const normalizedPermSearch = permSearch.trim().toLowerCase()
+  const isPermTreeFiltered = Boolean(normalizedPermSearch) || permOnlyGranted
+  // 搜索与「只看已授权」只裁剪树里显示的节点。visiblePermissionCodes 始终等于树里实际存在的权限，
+  // 勾选合并（mergeVisibleDirectPermissionSelection）只覆盖这些节点，被筛掉的直接授权草稿原样保留。
+  const visiblePermissionCategories = useMemo(() => {
+    if (!isPermTreeFiltered) return platformCategoriesForTree
+    return platformCategoriesForTree
+      .map((category) => {
+        const categoryMatches = Boolean(normalizedPermSearch)
+          && category.displayName.toLowerCase().includes(normalizedPermSearch)
+        return {
+          ...category,
+          permissions: category.permissions.filter((permission) =>
+            (!permOnlyGranted || effectivePermSet.has(permission.name))
+            && (!normalizedPermSearch
+              || categoryMatches
+              || permission.name.toLowerCase().includes(normalizedPermSearch)
+              || permission.displayName.toLowerCase().includes(normalizedPermSearch)),
+          ),
+        }
+      })
+      .filter((category) => category.permissions.length > 0)
+  }, [effectivePermSet, isPermTreeFiltered, normalizedPermSearch, permOnlyGranted, platformCategoriesForTree])
+  const visiblePermissionCodes = useMemo(
+    () => visiblePermissionCategories.flatMap((category) =>
+      category.permissions.map((permission) => permission.name),
+    ),
+    [visiblePermissionCategories],
+  )
+  // 分类右侧的「已授权 / 总数」按整个分类统计，不受搜索筛选影响。
+  const permCategoryGrantedCounts = useMemo(() => {
+    const counts = new Map<string, { granted: number; total: number }>()
+    for (const category of platformCategoriesForTree) {
+      counts.set(category.category, {
+        granted: category.permissions.filter((permission) => effectivePermSet.has(permission.name)).length,
+        total: category.permissions.length,
+      })
+    }
+    return counts
+  }, [effectivePermSet, platformCategoriesForTree])
 
   const isPermissionStateReadOnly = Boolean(
     permissionState?.isSuperAdmin || permissionState?.implicitAllPermissions,
@@ -1713,10 +1752,33 @@ export default function SystemUsersPage() {
     return !arePermissionSetsEqual(directPermKeys, originalDirectPermKeys)
   }, [directPermKeys, originalDirectPermKeys])
 
+  // 底部保存栏显示的未保存条数：新增 + 移除的直接授权数。
+  const directPermChangeCount = useMemo(() => {
+    const original = new Set(originalDirectPermKeys)
+    const current = new Set(directPermKeys)
+    let count = 0
+    current.forEach((code) => {
+      if (!original.has(code)) count += 1
+    })
+    original.forEach((code) => {
+      if (!current.has(code)) count += 1
+    })
+    return count
+  }, [directPermKeys, originalDirectPermKeys])
+
   const permTreeData = useMemo<DataNode[]>(() => {
     return visiblePermissionCategories.map((cat) => ({
       key: `category:${cat.category}`,
-      title: <strong>{cat.displayName}</strong>,
+      // 筛选后分类下只剩部分权限，分类勾选框会按剩余项显示成「全选」造成误解，筛选期间隐藏分类级勾选。
+      checkable: !isPermTreeFiltered,
+      title: (
+        <span className="users-ws-perm-category">
+          <strong>{cat.displayName}</strong>
+          <span className="users-ws-perm-count">
+            {permCategoryGrantedCounts.get(cat.category)?.granted ?? 0} / {permCategoryGrantedCounts.get(cat.category)?.total ?? 0}
+          </span>
+        </span>
+      ),
       children: cat.permissions.map((p) => ({
         key: p.name,
         disableCheckbox: inheritedPermSet.has(p.name) && !directPermSet.has(p.name),
@@ -1737,7 +1799,7 @@ export default function SystemUsersPage() {
         ),
       })),
     }))
-  }, [directPermSet, inheritedPermSet, permissionSourceMap, t, visiblePermissionCategories])
+  }, [directPermSet, inheritedPermSet, isPermTreeFiltered, permCategoryGrantedCounts, permissionSourceMap, t, visiblePermissionCategories])
 
   const checkedPermKeys = useMemo(() => {
     return visiblePermissionCodes.filter((permissionCode) => effectivePermSet.has(permissionCode))
@@ -2138,6 +2200,21 @@ export default function SystemUsersPage() {
     isSelf: Boolean(editingUser && editingUser.userGUID === currentUser?.userGUID),
   })
 
+  // 「功能权限」「移动端菜单」共用同一份直接授权草稿，底部保存栏也共用；管理员 / 隐式全权限只读时不显示。
+  const directPermFooter = canEditCurrentPermissionState ? (
+    <UserDrawerTabFooter
+      status={directPermChangeCount > 0
+        ? t('system.usersWorkspace.pendingChanges', '{{count}} 项未保存的更改', { count: directPermChangeCount })
+        : t('system.usersWorkspace.permSaveHint', '修改后需保存才会生效')}
+      discardLabel={t('system.usersWorkspace.discardChanges', '放弃更改')}
+      saveLabel={t('system.users.savePermissionAssign', '保存权限分配')}
+      saving={permSaving}
+      dirty={hasDirectPermChanges}
+      onDiscard={() => setDirectPermKeys(originalDirectPermKeys)}
+      onSave={() => void handleSavePermissions()}
+    />
+  ) : null
+
   const editTabItems = [
     {
       key: 'info',
@@ -2432,104 +2509,115 @@ export default function SystemUsersPage() {
       label: t('system.users.functionPermissions', '功能权限'),
       children: (
         <Spin spinning={permLoading}>
-          {!canEditUserPermissions ? (
-            <Alert
-              type="info"
-              showIcon
-              message={t(
-                'system.users.permissionAccessUnavailable',
-                '当前账号没有权限委派资格，无法读取或修改该用户的权限范围。',
-              )}
-            />
-          ) : permLoadError ? (
-            <Alert type="error" showIcon message={permLoadError} />
-          ) : !permissionState ? (
-            <Empty description={t('system.users.noPermData', '暂无权限数据')} />
-          ) : (
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Typography.Text type="secondary">
-                {t(
-                  'system.users.permEditDesc',
-                  '当前有效权限共 {{effectiveCount}} 项，其中角色继承 {{inheritedCount}} 项，直接授权 {{directCount}} 项。角色标签表示继承来源。',
-                  {
-                    effectiveCount: effectivePermSet.size,
-                    inheritedCount: inheritedPermSet.size,
-                    directCount: directPermKeys.length,
-                  },
-                )}
-              </Typography.Text>
-
-              {isPermissionStateReadOnly ? (
-                <Alert
-                  type="info"
-                  showIcon
-                  message={t(
-                    'system.users.superAdminPermissionsReadOnly',
-                    '管理员默认拥有全部权限和移动端菜单，此处仅供查看。',
-                  )}
-                />
-              ) : null}
-
-              <Segmented
-                value={permissionPlatform}
-                options={[
-                  {
-                    label: `${t('system.users.webPermissions', 'Web 端')} (${platformPermissionCategories.web.reduce((count, category) => count + category.permissions.length, 0)})`,
-                    value: 'web',
-                  },
-                  {
-                    label: `${t('system.users.posAccountPermissions', 'POS 端')} (${platformPermissionCategories.pos.reduce((count, category) => count + category.permissions.length, 0)})`,
-                    value: 'pos',
-                  },
-                ]}
-                onChange={(value) => setPermissionPlatform(value as PermissionPlatform)}
-              />
-
+          <div className="users-ws-tab-body">
+            {!canEditUserPermissions ? (
               <Alert
                 type="info"
                 showIcon
-                message={permissionPlatform === 'pos'
-                  ? t(
-                      'system.users.posAccountPermissionTip',
-                      '此处为账号级 POS 权限；分店覆盖请使用用户列表中的收银权限。',
-                    )
-                  : t(
-                      'system.users.webPermissionTip',
-                      'Web 端包含网页与 HbwebExpo 共用的非 POS 账号权限。',
-                    )}
+                message={t(
+                  'system.users.permissionAccessUnavailable',
+                  '当前账号没有权限委派资格，无法读取或修改该用户的权限范围。',
+                )}
               />
-
-              {visiblePermissionCategories.length === 0 ? (
-                <Empty description={t('system.users.noPermData', '暂无权限数据')} />
-              ) : (
-                <Tree
-                  key={permissionPlatform}
-                  treeData={permTreeData}
-                  checkedKeys={checkedPermKeys}
-                  checkable
-                  disabled={!canEditCurrentPermissionState || permSaving}
-                  selectable={false}
-                  defaultExpandAll
-                  onCheck={handlePermissionCheck}
-                  style={{ background: '#fafafa', padding: 12, borderRadius: 8 }}
-                />
-              )}
-
-              {canEditCurrentPermissionState ? (
-                <div style={{ textAlign: 'right' }}>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    loading={permSaving}
-                    disabled={!hasDirectPermChanges}
-                    onClick={() => void handleSavePermissions()}
-                  >
-                    {t('system.users.savePermissionAssign', '保存权限分配')}
-                  </Button>
+            ) : permLoadError ? (
+              <Alert type="error" showIcon message={permLoadError} />
+            ) : !permissionState ? (
+              <Empty description={t('system.users.noPermData', '暂无权限数据')} />
+            ) : (
+              <>
+                <div className="users-ws-tab-toolbar">
+                  <Segmented
+                    value={permissionPlatform}
+                    options={[
+                      {
+                        label: `${t('system.users.webPermissions', 'Web 端')} (${platformPermissionCategories.web.reduce((count, category) => count + category.permissions.length, 0)})`,
+                        value: 'web',
+                      },
+                      {
+                        label: `${t('system.users.posAccountPermissions', 'POS 端')} (${platformPermissionCategories.pos.reduce((count, category) => count + category.permissions.length, 0)})`,
+                        value: 'pos',
+                      },
+                    ]}
+                    onChange={(value) => setPermissionPlatform(value as PermissionPlatform)}
+                  />
+                  <Typography.Text type="secondary">
+                    {t(
+                      'system.usersWorkspace.effectivePermissionSummary',
+                      '当前有效权限 {{effective}} 项（角色继承 {{inherited}} · 直接授权 {{direct}}）',
+                      {
+                        effective: effectivePermSet.size,
+                        inherited: inheritedPermSet.size,
+                        direct: directPermKeys.length,
+                      },
+                    )}
+                  </Typography.Text>
                 </div>
-              ) : null}
-            </Space>
-          )}
+
+                {isPermissionStateReadOnly ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={t(
+                      'system.users.superAdminPermissionsReadOnly',
+                      '管理员默认拥有全部权限和移动端菜单，此处仅供查看。',
+                    )}
+                  />
+                ) : null}
+
+                <Alert
+                  type="info"
+                  showIcon
+                  message={permissionPlatform === 'pos'
+                    ? t(
+                        'system.users.posAccountPermissionTip',
+                        '此处为账号级 POS 权限；分店覆盖请使用用户列表中的收银权限。',
+                      )
+                    : t(
+                        'system.users.webPermissionTip',
+                        'Web 端包含网页与 HbwebExpo 共用的非 POS 账号权限。',
+                      )}
+                />
+
+                <div className="users-ws-perm-filter">
+                  <Input
+                    allowClear
+                    className="users-ws-perm-search"
+                    prefix={<SearchOutlined />}
+                    placeholder={t('system.usersWorkspace.permSearchPlaceholder', '搜索权限名称或代码')}
+                    value={permSearch}
+                    onChange={(event) => setPermSearch(event.target.value)}
+                  />
+                  <Checkbox checked={permOnlyGranted} onChange={(event) => setPermOnlyGranted(event.target.checked)}>
+                    {t('system.usersWorkspace.permOnlyGranted', '只看已授权')}
+                  </Checkbox>
+                </div>
+
+                {visiblePermissionCategories.length === 0 ? (
+                  <Empty
+                    description={isPermTreeFiltered
+                      ? t('system.usersWorkspace.permNoMatch', '没有匹配的权限')
+                      : t('system.users.noPermData', '暂无权限数据')}
+                  />
+                ) : (
+                  <div className="users-ws-perm-tree">
+                    <Tree
+                      // 筛选条件变化时重新挂载，让新出现的分类同样默认展开。
+                      key={`${permissionPlatform}:${normalizedPermSearch}:${permOnlyGranted}`}
+                      treeData={permTreeData}
+                      checkedKeys={checkedPermKeys}
+                      checkable
+                      blockNode
+                      disabled={!canEditCurrentPermissionState || permSaving}
+                      selectable={false}
+                      defaultExpandAll
+                      onCheck={handlePermissionCheck}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {directPermFooter}
         </Spin>
       ),
     },
@@ -2538,17 +2626,21 @@ export default function SystemUsersPage() {
       label: t('system.users.mobileMenu', '移动端菜单'),
       children: (
         <Spin spinning={permLoading}>
-          {!canEditUserPermissions ? (
-            <Alert
-              type="info"
-              showIcon
-              message={t(
-                'system.users.permissionAccessUnavailable',
-                '当前账号没有权限委派资格，无法读取或修改该用户的权限范围。',
+          {!canEditUserPermissions || permLoadError ? (
+            <div className="users-ws-tab-body">
+              {!canEditUserPermissions ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message={t(
+                    'system.users.permissionAccessUnavailable',
+                    '当前账号没有权限委派资格，无法读取或修改该用户的权限范围。',
+                  )}
+                />
+              ) : (
+                <Alert type="error" showIcon message={permLoadError} />
               )}
-            />
-          ) : permLoadError ? (
-            <Alert type="error" showIcon message={permLoadError} />
+            </div>
           ) : (
             <UserMobileMenuPermissionManager
               permissionState={permissionState}
@@ -2557,9 +2649,8 @@ export default function SystemUsersPage() {
               scoped={isCurrentUserScoped}
               canEdit={canEditCurrentPermissionState}
               saving={permSaving}
-              hasChanges={hasDirectPermChanges}
+              footer={directPermFooter}
               onChange={setDirectPermKeys}
-              onSave={() => void handleSavePermissions()}
             />
           )}
         </Spin>
@@ -2893,20 +2984,23 @@ export default function SystemUsersPage() {
           key: 'profile',
           label: t('system.usersWorkspace.tabEmployeeProfile', '个人信息'),
           children: drawerUser ? (
-            <Suspense fallback={<Spin />}>
-              <ManagedEmployeeProfileEditor
-                key={drawerUser.userGUID}
-                userGuid={drawerUser.userGUID}
-                canEdit={editOpen && access.canEditEmployeeProfiles}
-                onDirtyChange={setProfileDirtyCount}
-                // 敏感资料（银行 / 公积金 / 证件）仍只在管理员的「员工个人信息维护」页修改。
-                onOpenFullEditor={
-                  access.isAdmin
-                    ? () => navigate(`/system/employee-profiles?keyword=${encodeURIComponent(drawerUser.username)}`)
-                    : undefined
-                }
-              />
-            </Suspense>
+            // 编辑器本身不带外边距（员工资料页的抽屉自带 24px），这里套 users-ws-tab-body 与其它页签对齐。
+            <div className="users-ws-tab-body users-ws-profile-tab">
+              <Suspense fallback={<Spin />}>
+                <ManagedEmployeeProfileEditor
+                  key={drawerUser.userGUID}
+                  userGuid={drawerUser.userGUID}
+                  canEdit={editOpen && access.canEditEmployeeProfiles}
+                  onDirtyChange={setProfileDirtyCount}
+                  // 敏感资料（银行 / 公积金 / 证件）仍只在管理员的「员工个人信息维护」页修改。
+                  onOpenFullEditor={
+                    access.isAdmin
+                      ? () => navigate(`/system/employee-profiles?keyword=${encodeURIComponent(drawerUser.username)}`)
+                      : undefined
+                  }
+                />
+              </Suspense>
+            </div>
           ) : null,
         },
       ]
@@ -3176,6 +3270,8 @@ export default function SystemUsersPage() {
           setRoleSaving(false)
           setStoreSaving(false)
           setPermissionPlatform('web')
+          setPermSearch('')
+          setPermOnlyGranted(false)
           form.resetFields()
           // 只读查看、登录记录与收银权限同在这个抽屉，关闭时一并清理。
           setDetailOpen(false)

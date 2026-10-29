@@ -199,7 +199,7 @@ export default function ManagedEmployeeProfileEditor({
         <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('system.employeeProfiles.managed.readOnlyNotice')} />
       ) : null}
 
-      <div className="sys-emp-managed-tags" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div className="sys-emp-managed-tags">
         <span>
           <span className="sys-emp-sub">{t('system.employeeProfiles.managed.stores')}：</span>
           {detail.storeNames.length ? (
@@ -251,15 +251,16 @@ export default function ManagedEmployeeProfileEditor({
         </section>
       </Form>
 
-      <section className="sys-emp-section">
-        <h4 className="sys-emp-section-title">
+      {/* 敏感资料只读，收进一张卡片与上面可编辑的表单区分开。 */}
+      <section className="sys-emp-managed-sensitive">
+        <h4 className="sys-emp-section-title sys-emp-managed-sensitive-head">
           {t('system.employeeProfiles.managed.sensitiveTitle')}
           <span className="sys-emp-sensitive">
             <LockOutlined style={{ fontSize: 11 }} />
             {t('system.employeeProfiles.drawer.sensitive')}
           </span>
         </h4>
-        <div className="sys-emp-grid-2">
+        <div className="sys-emp-grid-2 sys-emp-managed-sensitive-body">
           <ReadonlyField label={t('system.employeeProfiles.bankBsb')} mono>
             {detail.bankBsb ?? notFilled}
           </ReadonlyField>
@@ -281,23 +282,23 @@ export default function ManagedEmployeeProfileEditor({
               : notFilled}
           </ReadonlyField>
         </div>
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginTop: 12 }}
-          message={t('system.employeeProfiles.managed.sensitiveNotice')}
-          action={
-            onOpenFullEditor ? (
-              <Button size="small" type="link" onClick={onOpenFullEditor}>
-                {t('system.employeeProfiles.managed.openFullEditor')}
-              </Button>
-            ) : undefined
-          }
-        />
       </section>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginTop: 16 }}
+        message={t('system.employeeProfiles.managed.sensitiveNotice')}
+        action={
+          onOpenFullEditor ? (
+            <Button size="small" type="link" onClick={onOpenFullEditor}>
+              {t('system.employeeProfiles.managed.openFullEditor')}
+            </Button>
+          ) : undefined
+        }
+      />
 
       {canEdit ? (
-        <div className="sys-emp-drawer-footer" style={{ marginTop: 8 }}>
+        <div className="sys-emp-drawer-footer sys-emp-managed-footer">
           {dirtyCount > 0 ? (
             <span className="sys-emp-dirty">{t('system.employeeProfiles.managed.dirty', { count: dirtyCount })}</span>
           ) : null}
