@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "97f2a35d7be6ef32d2285a6ffdf7a4c7f27ec4ea8eb183b6298078ddfcb5b724",
+  "reviewedModuleTopologySha256": "6a34accc6497baf4c66af490b0cd1d944f8ae3637f818336e68ae316dab088c0",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -424,7 +424,7 @@
       "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券；新增主管结案相关稳定错误码 RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED / RETURN_RESOLUTION_EVIDENCE_REQUIRED / RETURN_SUPERVISOR_NOT_REFUNDED",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
       "canonicalRuntimeSha256": "7cfef7124e26edf8fc115f9e6cfb9da44418ef5b37359a0647f454c85b0fd7d7",
-      "canonicalTypeSha256": "1e2646b1154d71c8bf02cdcde2391b6d8d3583765e10f77ceff2e8e67fd9d0e8",
+      "canonicalTypeSha256": "2693985f703f0d12972097ecbef74ff515d893f85343cd47beec20ee2946e3e7",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -451,8 +451,8 @@
       "package": "pos-domain",
       "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮；state 暴露 requiredVoucherRefundCents，提示代金券买的部分至少须退代金券的金额；暴露 resolveBySupervisor 与 supervisorResolutionAvailable / supervisorWaitingRecorded，供 Unknown 页展示主管结案",
       "baselineCanonicalRuntimeSha256": "c31c130fc7b0d8ecf8d6ad9be3b1a32e7edbd9ecca17d831f22a1f1cdfa9ba8c",
-      "canonicalRuntimeSha256": "647c8821e4f1a61ec1a6462ddbe6e9c892d51322329a44dc99b9b6d157f15cf1",
-      "canonicalTypeSha256": "9c6fe180bc60610f4652c8877f19a0c162e39c5d5c2a4c1c4876953690979696",
+      "canonicalRuntimeSha256": "65a9f44bca443bdbeb52365676fbc27a7ce39f77d2c0e2ec7961845ab2ef1481",
+      "canonicalTypeSha256": "a41f0b1ea180c11128a7a986ef9f20427ebdd044bf46da4c5a4a0331b54f8a88",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -485,8 +485,8 @@
       "package": "pos-domain",
       "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划；新增 resolveUnknownBySupervisor：在 Unknown 状态下先取得强制另一名主管的授权，再调用执行端口 resolveUnknown，授权失败不改变 Unknown 锁定",
       "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
-      "canonicalRuntimeSha256": "f1cb550bc0837a51a1911e7c3d792723d79bee6955ee9d721cfbdea8849e7653",
-      "canonicalTypeSha256": "9f0857ff2bcde9b21bc3a0bd622d22cc9f818231a5ca8f9aa0bb5a583862af85",
+      "canonicalRuntimeSha256": "0f9182fad1e9c951b44320ca78f64ec356a9e2a3a804b8aca38723062baceb6a",
+      "canonicalTypeSha256": "d4caa552a9c62421300df54f3da553e8ae6b88bb5ccd0ebacb5e38aca411b6a8",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -517,10 +517,10 @@
     {
       "path": "features/receipts/receipt-reprint-service.ts",
       "package": "pos-receipt-core",
-      "reason": "退单（实收为负）没有找零结算，现金退单的历史重打与预览不再要求结算记录，按 WPF 打负数金额整单小票",
+      "reason": "退单（实收为负）没有找零结算，现金退单的历史重打与预览不再要求结算记录，按 WPF 打负数金额整单小票；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）",
       "baselineCanonicalRuntimeSha256": "684c7d190c53bc82ae8b0aec7c52e7eec4c5dc3e3fc2ea76a3d774c962c59b04",
-      "canonicalRuntimeSha256": "1c4d72537ee82059853a8307c8fbd7a0cc946a8624d70154bb9873fcc47d0a8d",
-      "canonicalTypeSha256": "842c0ae64278f105f5442bc4d3c32bbe0eb7bf778b4328cc88b8b85e4ac349c8",
+      "canonicalRuntimeSha256": "ce68be79337f2d1c42fc8e951c182d5a143908f54b6153c4a9f338a9030dc5ff",
+      "canonicalTypeSha256": "a775d2e8e23b6431eacf25ec02e6caacd54ac481800663edd0f9f04e19b6e6c6",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -607,10 +607,10 @@
     {
       "path": "features/receipts/receipt-document.ts",
       "package": "pos-receipt-core",
-      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配",
+      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）",
       "baselineCanonicalRuntimeSha256": "be588d9a3581e769fb819e30d22bc72e1f4873eaf98c2aa754416e1ccc9af8bc",
-      "canonicalRuntimeSha256": "7cce71c9dde2595bf2c9e8f207f2639d94aa74aab371627058e36814f134658d",
-      "canonicalTypeSha256": "8a6f5e200eac5d8f11321b96489a47aed653a47726e6a283f7d85bee3afb7ebd",
+      "canonicalRuntimeSha256": "beb5a90c1075854a64d14e0df9a0775ecebacbb1b20dbbdf55d0ce044d09a4d0",
+      "canonicalTypeSha256": "cf79572c2d71ca9e36a7b450c92a7fcc88eb255849dcb247b699facb2ffec35c",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",
@@ -640,6 +640,140 @@
           "workspace": "apps/pos-handheld",
           "script": "test:receipts",
           "path": "src/features/receipts/installment-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "core/contracts/daily-close.ts",
+      "package": "pos-domain",
+      "reason": "日结对齐 WPF #914：汇总与存档新增现金进位 cashRoundingCents（应有现金 = 现金净额 + 逐单 5 分进位），新增 sumCashRoundingCents 按订单合并现金 tender 后进位，并引入 money 的 roundAudCash",
+      "baselineCanonicalRuntimeSha256": "011edd57ad1d3a3605bb4710efd7ae6a3ad16967b1db2608cc3d9b0436586c22",
+      "canonicalRuntimeSha256": "56aa64de28ea0e8fd957514c0191f3d125082ed13d39e97b1cb38f76982bf68c",
+      "canonicalTypeSha256": "a750b4d430e5faf4181b01cab3739995350252ad09b99a13e111f93f05dc0e0d",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/core/contracts/daily-close.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "core/db/sqlite-daily-close-repository.ts",
+      "package": "pos-db",
+      "reason": "日结对齐 WPF #914：汇总按订单合并现金 tender 计算进位，应有现金含进位；存档校验 应有现金 = 现金净额 + 进位（进位不得超过订单数×2 分）并持久化 cash_rounding_cents，列不存在时按 0 读取",
+      "baselineCanonicalRuntimeSha256": "bf0e2926c5fc979d72ade18eef8da2e100e85a0f66600f497ae73145f7e36c7c",
+      "canonicalRuntimeSha256": "7e0acfe49308f93fb56d6d801485a87242ca7debab1ee007654440e130b46e2e",
+      "canonicalTypeSha256": "7f0db0799f5fa8f528c4f17b5bcefa767a980440e78e0761f75d671d2d32ea8a",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-repository.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/daily-close-receipt.ts",
+      "package": "pos-receipt-core",
+      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）",
+      "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
+      "canonicalRuntimeSha256": "af0d1518bad838c6ecc7d0ff38c92521d127fd45dd61eac37714c3cc78e920d9",
+      "canonicalTypeSha256": "6285e9af016526b6e0b686493b90ce0fa4c9a2f93485349dc4f204ba7c9fd942",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/daily-close-receipt.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/daily-close-receipt.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/daily-close-cash-slip.test.ts",
+          "pattern": "src/**/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/fulfilment/fulfilment-service.ts",
+      "package": "pos-domain",
+      "reason": "现金收款自动队列先开钱箱再打印小票，打印机缓慢或离线时不拖住钱箱（对齐 WPF #721）",
+      "baselineCanonicalRuntimeSha256": "def9a2b44a20f353bf24438c2140c1cbf430d19fe1129ec62078474fe758cc8a",
+      "canonicalRuntimeSha256": "08400f326d331e0d9e9d2246850ff56ec062536f87ec1c05f1afa511d4b37a83",
+      "canonicalTypeSha256": "e2cc3cc14409c851b0a36f08c7866bebc8b3ad4a0a6ec7e09e84bd6c187652e8",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:fulfilment",
+          "path": "src/features/fulfilment/fulfilment-service.test.ts",
+          "pattern": "src/features/fulfilment/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:fulfilment",
+          "path": "src/features/fulfilment/fulfilment-service.test.ts",
+          "pattern": "src/features/fulfilment/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/remote-history-receipt-reprint-service.ts",
+      "package": "pos-receipt-core",
+      "reason": "远程历史订单补打的小票状态行按净额判断：退款单（实收为负）打印 Refund，不再写死 Paid（对齐 WPF #885）",
+      "baselineCanonicalRuntimeSha256": "c86fef6188b45d8fc6d6043dd13bf46e83011213dfec136930205d0a45fdb9f2",
+      "canonicalRuntimeSha256": "d298ad1fadc768cb60cf18d19fd5f2ff26f89318a9717257aa4eb2f837c65456",
+      "canonicalTypeSha256": "d2d52af11d21d91aa355a302f902db043d1fc75fa240b3dbafc40833b71d5c76",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/remote-history-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/remote-history-receipt-reprint-service.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
         }
       ]

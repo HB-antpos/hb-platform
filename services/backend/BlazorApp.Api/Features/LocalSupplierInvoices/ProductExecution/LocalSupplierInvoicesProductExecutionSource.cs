@@ -1,4 +1,5 @@
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
@@ -56,6 +57,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     && price.ProductCode == productCode
                     && price.IsDeleted == false
                 );
+
+        /// <summary>
+        /// 批量查条码被哪些存活商品占用（主条码 + 分店多码 + 一品多码，不限供应商）。
+        /// 新建商品的主条码必须全局唯一，不能只按本单供应商判断，否则会跨供应商建出同条码的第二条商品。
+        /// </summary>
+        public async Task<Dictionary<string, List<ProductBarcodeOwner>>> FindBarcodeOwnersAsync(
+            IEnumerable<string?> barcodes
+        ) => await ProductDuplicateGuard.FindBarcodeOwnersAsync(_context.Db, barcodes);
 
         public async Task<bool> HasProductBarcodeAsync(string normalizedBarcode) =>
             await _context.Db.Queryable<Product>().AnyAsync(product =>

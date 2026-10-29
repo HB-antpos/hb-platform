@@ -31,6 +31,12 @@ namespace BlazorApp.Shared.Models
         [SugarColumn(IsNullable = false)]
         public bool IsActive { get; set; } = true;
 
+        /// <summary>
+        /// 角色等级，数值越大等级越高；账号等级取其所有有效角色的最高值。
+        /// 等级低的账号不能修改等级不低于自己的账号，也不能授予不低于自己等级的角色。
+        /// </summary>
+        [SugarColumn(IsNullable = false)]
+        public int Level { get; set; }
 
         /// <summary>
         /// 角色关联的用户列表（多对多导航属性）

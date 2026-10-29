@@ -28,6 +28,7 @@ import type {
 } from "@/modules/domestic-purchase/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { sortSuppliersByName } from "@/shared/utils/name-sort";
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
@@ -209,6 +210,9 @@ export function DomesticProductList() {
       cancelled = true;
     };
   }, [getErrorMessage, loadProducts]);
+
+  // 供应商筛选弹窗按名字排序（接口原序不保证顺序）。
+  const sortedSuppliers = useMemo(() => sortSuppliersByName(suppliers, language), [suppliers, language]);
 
   const activeFilterCount = useMemo(
     () => [selectedSupplier, appliedProductNo.trim()].filter(Boolean).length,
@@ -545,7 +549,7 @@ export function DomesticProductList() {
             >
               {t("productList.filters.allSuppliers")}
             </Button>
-            {suppliers.map((supplier) => {
+            {sortedSuppliers.map((supplier) => {
               const selected = selectedSupplier?.supplierCode === supplier.supplierCode;
               return (
                 <Button

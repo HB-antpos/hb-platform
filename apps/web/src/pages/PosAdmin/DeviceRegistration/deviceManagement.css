@@ -1099,3 +1099,122 @@
     transition: none;
   }
 }
+
+/* ===== 收银入口 · 线路用量（日 / 周 / 月） =====
+   线路配色沿用上面的 --dev-entry-*（挂在 .dev-entry-scope 上）：edge 蓝 / aws 紫 / direct 绿 / 未识别灰。 */
+.dev-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+@media (max-width: 960px) {
+  .dev-usage-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(n + 4) {
+    border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(4) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .dev-usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  }
+
+  .dev-usage-stats .dev-entry-stat:nth-child(odd) {
+    border-left: 0;
+  }
+}
+
+.dev-usage-section {
+  margin-bottom: 18px;
+}
+
+.dev-usage-heading {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dev-usage-legend {
+  margin-bottom: 6px;
+}
+
+/* 桶很多或窄屏时图表保持可读宽度，由外层横向滚动，页面本身不出现横向滚动条 */
+.dev-usage-chart-wrap {
+  overflow-x: auto;
+}
+
+.dev-usage-chart {
+  display: block;
+  width: 100%;
+  min-width: 560px;
+  height: auto;
+}
+
+.dev-usage-grid {
+  stroke: var(--ant-color-border-secondary, #eef0f4);
+  stroke-width: 1;
+}
+
+.dev-usage-axis {
+  fill: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 11px;
+}
+
+.dev-usage-seg-edge { fill: var(--dev-entry-edge); }
+.dev-usage-seg-aws { fill: var(--dev-entry-aws); }
+.dev-usage-seg-direct { fill: var(--dev-entry-direct); }
+.dev-usage-seg-unknown { fill: var(--dev-entry-gray); }
+
+.dev-usage-empty {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.dev-usage-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dev-usage-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.35;
+}
+
+.dev-usage-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-usage-num-warn {
+  color: var(--dev-entry-amber-text);
+  font-weight: 600;
+}
+
+.dev-usage-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-usage-partial {
+  margin: 0;
+  background: var(--dev-entry-gray-soft);
+  color: var(--dev-entry-gray-text);
+}

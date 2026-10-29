@@ -58,6 +58,11 @@ const ATTENDANCE_CONTEXT_ROUTE_NAMES = new Set([
   "attendance",
   "attendance-personal",
   "attendance-management",
+  // 工时统计与其单人明细、申请假期都是考勤子页，继续高亮「考勤」。
+  "attendance-hours",
+  "attendance-hours-detail",
+  "attendance-leave",
+  "attendance-leave-paid",
 ]);
 const ME_CONTEXT_ROUTE_NAMES = new Set(["employee-profile", "settings"]);
 // 促销海报编辑 / 待打印都从扫码查询页进入，属于扫码子页，继续高亮「扫码查询」。
@@ -104,7 +109,8 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
 }
 
 // 全屏作业页：PDA 小屏上底部留给页面自己的操作栏（如“完成拣货”），不显示全局底栏。
-const FULL_SCREEN_TASK_ROUTE_PREFIXES = ["/warehouse-picking"] as const;
+// 申请假期的两个子页底部有固定的提交按钮，与拣货一样隐藏一级导航，避免按钮被压住。
+const FULL_SCREEN_TASK_ROUTE_PREFIXES = ["/warehouse-picking", "/attendance-leave", "/attendance-leave-paid"] as const;
 
 export function shouldHidePrimaryTabBar(pathname: string | null | undefined) {
   if (!pathname) return false;

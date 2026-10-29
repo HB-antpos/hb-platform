@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   Modal as NativeModal,
   Pressable,
@@ -10,6 +10,7 @@ import {
 import { Button, Modal, Portal, RadioButton, Text } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HB_COLORS } from "@/shared/theme/tokens";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import type { Store } from "@/modules/shop/types";
 
 interface StorePickerModalProps {
@@ -50,7 +51,9 @@ export function StorePickerModal({
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isSheet = presentation === "sheet";
-  const rowCount = stores.length + (includeAllOption ? 1 : 0);
+  // 所有分店选择列表统一按名字排序：不依赖调用方传入的顺序（有的按编号、有的按接口顺序）。
+  const sortedStores = useMemo(() => sortStoresByName(stores), [stores]);
+  const rowCount = sortedStores.length + (includeAllOption ? 1 : 0);
   const maxListHeight = Math.max(160, Math.min(480, height * 0.58));
   const listHeight = Math.min(rowCount * 48, maxListHeight);
 
@@ -83,7 +86,7 @@ export function StorePickerModal({
               onPress={() => void onSelectStore(null)}
             />
           ) : null}
-          {stores.map((store) => (
+          {sortedStores.map((store) => (
             <PickerRow
               key={store.storeCode}
               label={store.storeName || store.storeCode}

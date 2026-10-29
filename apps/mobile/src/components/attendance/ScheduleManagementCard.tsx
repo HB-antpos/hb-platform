@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Alert,
+  Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -51,6 +53,27 @@ import {
   type ScheduleGridCell,
   type SchedulePublishState,
 } from "@/modules/attendance/schedule-grid";
+import {
+  DEFAULT_SHIFT,
+  SHIFT_PRESETS,
+  getAvailabilityConflict,
+  getCellMealBadge,
+  getPlacementVerdict,
+  isScheduleLocked,
+  type PlacementKind,
+  type PlacementSource,
+  type PlacementVerdict,
+} from "@/modules/attendance/schedule-placement";
+import {
+  clampScrollOffset,
+  getDragStartVerdict,
+  getEdgeScrollStep,
+  hitTestScheduleCell,
+  isSameDragCell,
+  type DragCellIndex,
+  type DragGridGeometry,
+} from "@/modules/attendance/schedule-drag";
+import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
 import type {
   AttendanceAvailability,
   AttendanceSchedule,
@@ -66,20 +89,25 @@ const ROW_HEADER_WIDTH = 104;
 const HEADER_HEIGHT = 52;
 const MIN_CELL_WIDTH = 56;
 const CELL_HEIGHT = 52;
+/** 长按多久后拿起班次开始拖动（毫秒）。 */
+const DRAG_LONG_PRESS_MS = 280;
+/** 拖动时跟手的小浮标尺寸；浮标显示在手指上方，避免被手指挡住。 */
+const DRAG_GHOST_WIDTH = 104;
+const DRAG_GHOST_HEIGHT = 32;
+const DRAG_GHOST_LIFT = 18;
+const DRAG_AUTO_SCROLL_INTERVAL_MS = 32;
+/** 手指要在左 / 右边缘带里停留这么久才开始自动滚动，避免拖到靠边的日期列时列在手底下漂移。 */
+const DRAG_AUTO_SCROLL_DWELL_MS = 280;
+/** 边缘带宽度（比一列的最小宽度 56 窄，保证最靠边的一整列仍有一半能直接点中）。 */
+const DRAG_AUTO_SCROLL_EDGE = 28;
 const STEP_MINUTES = 30;
 const SIDE_PANEL_WIDTH = 380;
 const ACCENT = ATTENDANCE_STATUS_TONES.accent;
 const LEAVE = ATTENDANCE_STATUS_TONES.warning;
 const UNAVAILABLE = ATTENDANCE_STATUS_TONES.danger;
-const QUICK_SHIFTS = [
-  { key: "nineToFiveThirty", startTime: "09:00", endTime: "17:30" },
-  { key: "tenToFour", startTime: "10:00", endTime: "16:00" },
-  { key: "nineToSeven", startTime: "09:00", endTime: "19:00" },
-  { key: "nineToNine", startTime: "09:00", endTime: "21:00" },
-];
 const EMPTY_FORM = {
-  startTime: "09:00",
-  endTime: "17:30",
+  startTime: DEFAULT_SHIFT.startTime,
+  endTime: DEFAULT_SHIFT.endTime,
   status: "Draft" as AttendanceScheduleStatus,
   remark: "",
   /** 店长指定的用餐次数；null 表示按班次时长默认。 */
@@ -97,6 +125,27 @@ type BatchTarget =
   | { mode: "employee"; userGuid: string; employeeName?: string }
   | { mode: "date"; workDate: string; weekdayIndex: number };
 type GridVariant = "card" | "fullscreen";
+
+/** 一次长按拖动的运行时状态：手指位置、格子几何都变得很快，放 ref 里不触发渲染。 */
+interface DragRuntime {
+  source: PlacementSource;
+  variant: GridVariant;
+  /** PanResponder 是否已接管手势（长按后手指没动就抬起时为 false，要自行收尾）。 */
+  granted: boolean;
+  /** 日期区内容与外层容器在屏幕上的位置是否已量到。 */
+  measured: boolean;
+  contentX: number;
+  contentY: number;
+  /** 量到 contentX 时的横向滚动偏移，用来换算之后滚动造成的位移。 */
+  scrollX0: number;
+  wrapperX: number;
+  wrapperY: number;
+  point: { x: number; y: number };
+  hover: DragCellIndex | null;
+  /** 手指进入边缘带的时刻；不在边缘带时为 null。 */
+  edgeSince: number | null;
+  timer: ReturnType<typeof setInterval> | null;
+}
 
 interface EditingTarget {
   schedule?: AttendanceSchedule;
@@ -239,7 +288,7 @@ function TimeStepField({
 }
 
 /**
- * 用餐次数步进：默认按班次时长推算（超过 4.5 小时 1 次、超过 9 小时 2 次），店长可增减（0 次＝不扣用餐）。
+ * 用餐次数步进：默认按班次时长推算（满 4.5 小时 1 次、超过 9 小时 2 次），店长可增减（0 次＝不扣用餐）。
  * 改过后显示「恢复默认」，回到按时长自动计算。
  */
 function MealBreakStepField({
@@ -338,6 +387,10 @@ export function ScheduleManagementCard({
   onDelete,
   onPublishWeek,
   onCopyPreviousWeek,
+  punchScheduleGuids,
+  punchesKnown,
+  onPlaceShift,
+  onDragActiveChange,
 }: {
   weekStartDate: string;
   storeCode?: string;
@@ -361,6 +414,14 @@ export function ScheduleManagementCard({
   onDelete: (scheduleGuid: string) => void;
   onPublishWeek: () => void;
   onCopyPreviousWeek: () => void;
+  /** 本周有打卡记录的排班 GUID：这些班次不能移动 / 复制（仍可删除）。 */
+  punchScheduleGuids: ReadonlySet<string>;
+  /** 是否成功拿到了本周打卡；拿不到（无权限 / 失败）时保守地锁今天及以前的班次。 */
+  punchesKnown: boolean;
+  /** 「点选目标格」放下：移动 / 复制 / 常用班次添加，由屏幕层落地并提示（含撤销）。 */
+  onPlaceShift: (source: PlacementSource, target: PlacementTargetCell) => void;
+  /** 长按拖动开始 / 结束：屏幕层据此暂时锁住整页纵向滚动，避免拖动时页面跟着动。 */
+  onDragActiveChange?: (active: boolean) => void;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const insets = useSafeAreaInsets();
@@ -373,6 +434,42 @@ export function ScheduleManagementCard({
   const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  // 「点选目标格」：拿起一个班次（移动 / 复制）或常用班次（添加）后，点格子放下
+  const [placement, setPlacement] = useState<PlacementSource | null>(null);
+  // 「长按拖动」：长按班次 / 常用班次拿起，手指拖到目标格松手放下（点选模式的快捷方式，落点规则相同）
+  const [drag, setDrag] = useState<{ source: PlacementSource; variant: GridVariant; label: string } | null>(null);
+  const [dragHover, setDragHover] = useState<DragCellIndex | null>(null);
+  const dragRuntimeRef = useRef<DragRuntime | null>(null);
+  // 每次渲染都更新成最新闭包；PanResponder 与定时器只创建一次，通过它读到最新的行 / 列宽 / 回调
+  const dragApiRef = useRef<{
+    move: (x: number, y: number) => void;
+    release: (x: number, y: number) => void;
+    finish: (commit: boolean) => void;
+    tick: () => void;
+  }>({ move: () => undefined, release: () => undefined, finish: () => undefined, tick: () => undefined });
+  const dragGhost = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const lastTouchRef = useRef({ x: 0, y: 0 });
+  const wrapperRefs = useRef<Record<GridVariant, View | null>>({ card: null, fullscreen: null });
+  const contentRefs = useRef<Record<GridVariant, View | null>>({ card: null, fullscreen: null });
+  const scrollRefs = useRef<Record<GridVariant, ScrollView | null>>({ card: null, fullscreen: null });
+  const scrollXRef = useRef<Record<GridVariant, number>>({ card: 0, fullscreen: 0 });
+  // 只在长按拿起后才接管手势，平时点按、滚动完全不受影响
+  const dragPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: () => Boolean(dragRuntimeRef.current && !dragRuntimeRef.current.granted),
+      onMoveShouldSetPanResponderCapture: () => Boolean(dragRuntimeRef.current && !dragRuntimeRef.current.granted),
+      onPanResponderGrant: () => {
+        if (dragRuntimeRef.current) dragRuntimeRef.current.granted = true;
+      },
+      onPanResponderMove: (_event, gesture) => dragApiRef.current.move(gesture.moveX, gesture.moveY),
+      // 松手时用抬起点再算一次落点：兜住 JS 线程忙时被合并 / 丢掉的最后几次 move
+      onPanResponderRelease: (event) =>
+        dragApiRef.current.release(event.nativeEvent.pageX, event.nativeEvent.pageY),
+      onPanResponderTerminate: () => dragApiRef.current.finish(false),
+      onPanResponderTerminationRequest: () => false,
+    }),
+  ).current;
   // 网格容器宽度：宽屏（横屏全屏）时把 7 天均分铺满，窄屏保持最小列宽并横向滚动。
   const [gridWidths, setGridWidths] = useState<Record<GridVariant, number>>({
     card: 0,
@@ -589,6 +686,293 @@ export function ScheduleManagementCard({
     setForm(EMPTY_FORM);
   };
 
+  const isLocked = (schedule: AttendanceSchedule) =>
+    isScheduleLocked({
+      scheduleGuid: schedule.scheduleGuid,
+      workDate: schedule.workDate,
+      today,
+      punchScheduleGuids,
+      punchesKnown,
+    });
+
+  // 编辑器里点「移到… / 复制到…」：关掉编辑器，进入点选目标格模式
+  const startPlacement = (kind: Extract<PlacementKind, "move" | "copy">, schedule: AttendanceSchedule) => {
+    setEditingTarget(null);
+    setBatchTarget(null);
+    setForm(EMPTY_FORM);
+    setPlacement({
+      kind,
+      schedule,
+      startTime: normalizeClockTime(schedule.startTime),
+      endTime: normalizeClockTime(schedule.endTime),
+    });
+  };
+
+  const startPresetPlacement = (preset: (typeof SHIFT_PRESETS)[number]) => {
+    setEditingTarget(null);
+    setPlacement({ kind: "preset", startTime: preset.startTime, endTime: preset.endTime });
+  };
+
+  // 当前「拿在手里」的内容：点选模式的 placement，或正在拖动的班次
+  const activeSource = placement ?? drag?.source ?? null;
+
+  const verdictFor = (source: PlacementSource, row: ScheduleRow, day: string): PlacementVerdict =>
+    getPlacementVerdict(source, {
+      userGuid: row.userGuid,
+      workDate: day,
+      schedules: row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
+      availability: availabilityMap.get(availabilityKey(row.userGuid, day)),
+    });
+
+  const placementVerdictOf = (row: ScheduleRow, day: string): PlacementVerdict | undefined =>
+    activeSource ? verdictFor(activeSource, row, day) : undefined;
+
+  // 点格子放下：交给 commitPlacement（点选与拖动共用同一套落点处理）
+  const handlePlacementPress = (row: ScheduleRow, day: string) => {
+    if (!placement) {
+      return;
+    }
+    commitPlacement(placement, row, day);
+  };
+
+  // 放下：不能放（重叠）直接提示；提醒（员工当天不能上班等）手机上没有悬停，必须二次确认
+  const commitPlacement = (source: PlacementSource, row: ScheduleRow, day: string) => {
+    if (!storeCode) {
+      return;
+    }
+    const verdict = verdictFor(source, row, day);
+    if (verdict.state === "noop") {
+      setPlacement(null);
+      return;
+    }
+    if (verdict.state === "bad") {
+      Alert.alert(t("scheduleManagement.placement.badOverlap"));
+      return;
+    }
+    const place = () => {
+      onPlaceShift(source, { storeCode, userGuid: row.userGuid, workDate: day });
+      setPlacement(null);
+    };
+    if (verdict.state === "warn") {
+      const name = row.employeeName || row.userGuid;
+      Alert.alert(
+        t("scheduleManagement.placement.warnTitle"),
+        t(
+          verdict.reason === "unavailable"
+            ? "scheduleManagement.placement.warnUnavailable"
+            : "scheduleManagement.placement.warnOutside",
+          { name },
+        ),
+        [
+          { text: t("common:actions.cancel"), style: "cancel" },
+          { text: t("scheduleManagement.placement.warnConfirm"), onPress: place },
+        ],
+      );
+      return;
+    }
+    place();
+  };
+
+  const cellWidthOf = (variant: GridVariant) =>
+    Math.max(MIN_CELL_WIDTH, Math.floor((gridWidths[variant] - ROW_HEADER_WIDTH - 2) / 7));
+
+  // 当前手指下的格子：用拿起时量到的日期区位置，扣掉之后横向滚动造成的位移再做命中测试
+  const updateDragHover = () => {
+    const runtime = dragRuntimeRef.current;
+    if (!runtime) {
+      return;
+    }
+    let next: DragCellIndex | null = null;
+    // 手指在固定姓名列上方时，下面可能压着已滚走的日期列，不能算命中
+    if (runtime.measured && runtime.point.x >= runtime.wrapperX + ROW_HEADER_WIDTH) {
+      const geometry: DragGridGeometry = {
+        originX: runtime.contentX - (scrollXRef.current[runtime.variant] - runtime.scrollX0),
+        originY: runtime.contentY,
+        cellWidth: cellWidthOf(runtime.variant),
+        headerHeight: HEADER_HEIGHT,
+        cellHeight: CELL_HEIGHT,
+        rowCount: rows.length,
+        dayCount: days.length,
+      };
+      next = hitTestScheduleCell(runtime.point, geometry) ?? null;
+    }
+    if (!isSameDragCell(next, runtime.hover)) {
+      runtime.hover = next;
+      setDragHover(next);
+    }
+  };
+
+  const moveDrag = (x: number, y: number) => {
+    const runtime = dragRuntimeRef.current;
+    if (!runtime) {
+      return;
+    }
+    runtime.point = { x, y };
+    dragGhost.setValue({
+      x: x - runtime.wrapperX - DRAG_GHOST_WIDTH / 2,
+      y: y - runtime.wrapperY - DRAG_GHOST_HEIGHT - DRAG_GHOST_LIFT,
+    });
+    updateDragHover();
+  };
+
+  // 手指停在日期区左 / 右边缘时自动横向滚动，才能拖到屏幕外的日期列
+  const tickDragAutoScroll = () => {
+    const runtime = dragRuntimeRef.current;
+    if (!runtime || !runtime.measured) {
+      return;
+    }
+    const { variant } = runtime;
+    const viewportWidth = gridWidths[variant] - ROW_HEADER_WIDTH - 2;
+    const step = getEdgeScrollStep({
+      pointX: runtime.point.x,
+      viewportLeft: runtime.wrapperX + ROW_HEADER_WIDTH,
+      viewportRight: runtime.wrapperX + gridWidths[variant],
+      edge: DRAG_AUTO_SCROLL_EDGE,
+    });
+    if (!step) {
+      runtime.edgeSince = null;
+      return;
+    }
+    const now = Date.now();
+    runtime.edgeSince ??= now;
+    if (now - runtime.edgeSince < DRAG_AUTO_SCROLL_DWELL_MS) {
+      return;
+    }
+    const current = scrollXRef.current[variant];
+    const next = clampScrollOffset(current + step, cellWidthOf(variant) * days.length, viewportWidth);
+    if (next === current) {
+      return;
+    }
+    scrollXRef.current[variant] = next;
+    scrollRefs.current[variant]?.scrollTo({ x: next, animated: false });
+    updateDragHover();
+  };
+
+  const finishDrag = (commit: boolean) => {
+    const runtime = dragRuntimeRef.current;
+    if (!runtime) {
+      return;
+    }
+    dragRuntimeRef.current = null;
+    if (runtime.timer) {
+      clearInterval(runtime.timer);
+    }
+    setDrag(null);
+    setDragHover(null);
+    onDragActiveChange?.(false);
+    if (!commit || !runtime.hover) {
+      return;
+    }
+    const row = rows[runtime.hover.rowIndex];
+    const day = days[runtime.hover.dayIndex];
+    if (row && day) {
+      commitPlacement(runtime.source, row, day);
+    }
+  };
+
+  const releaseDrag = (x: number, y: number) => {
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      moveDrag(x, y);
+    }
+    finishDrag(true);
+  };
+
+  dragApiRef.current = { move: moveDrag, release: releaseDrag, finish: finishDrag, tick: tickDragAutoScroll };
+
+  const beginDrag = (variant: GridVariant, source: PlacementSource) => {
+    if (isBusy || placement || dragRuntimeRef.current) {
+      return;
+    }
+    const point = { ...lastTouchRef.current };
+    const runtime: DragRuntime = {
+      source,
+      variant,
+      granted: false,
+      measured: false,
+      contentX: 0,
+      contentY: 0,
+      scrollX0: scrollXRef.current[variant],
+      wrapperX: 0,
+      wrapperY: 0,
+      point,
+      hover: null,
+      edgeSince: null,
+      timer: setInterval(() => dragApiRef.current.tick(), DRAG_AUTO_SCROLL_INTERVAL_MS),
+    };
+    dragRuntimeRef.current = runtime;
+    setEditingTarget(null);
+    setDrag({
+      source,
+      variant,
+      label: `${normalizeClockTime(source.startTime)}–${normalizeClockTime(source.endTime)}`,
+    });
+    onDragActiveChange?.(true);
+    // 先量外层容器（定位浮标），再量日期区内容（命中测试）；两次回调都到了才能算落点
+    wrapperRefs.current[variant]?.measure((_x, _y, _width, _height, pageX, pageY) => {
+      runtime.wrapperX = pageX;
+      runtime.wrapperY = pageY;
+      moveDrag(runtime.point.x, runtime.point.y);
+    });
+    contentRefs.current[variant]?.measure((_x, _y, _width, _height, pageX, pageY) => {
+      runtime.contentX = pageX;
+      runtime.contentY = pageY;
+      runtime.scrollX0 = scrollXRef.current[variant];
+      runtime.measured = true;
+      updateDragHover();
+    });
+  };
+
+  // 长按有班次的格子：拿起这条班次移动到别的格子（一格多班次、请假、空格不拖，仍走点开编辑器）
+  const handleCellLongPress = (variant: GridVariant, cell: ScheduleGridCell) => {
+    if (!storeCode || isBusy || placement) {
+      return;
+    }
+    const verdict = getDragStartVerdict(cell, isLocked);
+    if (verdict.state === "none") {
+      return;
+    }
+    if (verdict.state === "locked") {
+      Alert.alert(
+        t(
+          punchScheduleGuids.has(cell.schedules[0].scheduleGuid)
+            ? "scheduleManagement.placement.lockedNotice"
+            : "scheduleManagement.placement.lockedUnknownNotice",
+        ),
+      );
+      return;
+    }
+    const { schedule } = verdict;
+    beginDrag(variant, {
+      kind: "move",
+      schedule,
+      startTime: normalizeClockTime(schedule.startTime),
+      endTime: normalizeClockTime(schedule.endTime),
+    });
+  };
+
+  const handlePresetLongPress = (variant: GridVariant, preset: (typeof SHIFT_PRESETS)[number]) => {
+    if (!storeCode || isBusy || placement) {
+      return;
+    }
+    beginDrag(variant, { kind: "preset", startTime: preset.startTime, endTime: preset.endTime });
+  };
+
+  // 组件卸载时收尾，别让定时器和「整页锁滚动」残留
+  useEffect(
+    () => () => {
+      const runtime = dragRuntimeRef.current;
+      if (runtime?.timer) {
+        clearInterval(runtime.timer);
+      }
+      if (runtime) {
+        dragRuntimeRef.current = null;
+        onDragActiveChange?.(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const openBatch = (target: BatchTarget) => {
     if (!storeCode) {
       return;
@@ -696,8 +1080,8 @@ export function ScheduleManagementCard({
     closeEditor();
   };
 
-  const confirmDelete = () => {
-    const scheduleGuid = editingTarget?.schedule?.scheduleGuid;
+  const confirmDelete = (target?: AttendanceSchedule) => {
+    const scheduleGuid = (target ?? editingTarget?.schedule)?.scheduleGuid;
     if (!scheduleGuid) {
       return;
     }
@@ -879,6 +1263,11 @@ export function ScheduleManagementCard({
       const hasMinorFindings = cell.schedules.some(
         (item) => item.minorCompliance?.hasFindings,
       );
+      const hasAvailabilityConflict = cell.schedules.some(
+        (item) => !item.leaveType && getAvailabilityConflict(item, cell.availability),
+      );
+      // 用餐小标记：手动指定的（含 0）醒目，按时长自动扣的（≥4.5h 1 次、>9h 2 次）弱化显示，合计为 0 的自动班次不显示
+      const mealBadge = getCellMealBadge(cell.schedules);
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
           <Text
@@ -891,6 +1280,15 @@ export function ScheduleManagementCard({
           </Text>
           {cell.schedules.length > 1 ? (
             <Text style={styles.moreText}>+{cell.schedules.length - 1}</Text>
+          ) : null}
+          {mealBadge ? (
+            <Text style={[styles.mealBadge, mealBadge.manual ? null : styles.mealBadgeAuto]}>
+              {t("scheduleManagement.cell.mealBadge", { count: mealBadge.count })}
+            </Text>
+          ) : null}
+          {/* 与员工上报的不能上班 / 可上班时间冲突：只提醒不拦截，小三角标记 */}
+          {hasAvailabilityConflict ? (
+            <Text style={styles.conflictMark} accessibilityLabel={t("scheduleManagement.cell.conflictA11y")}>⚠︎</Text>
           ) : null}
           {/* 未成年用工合规只提醒不拦截：格子里用小标记提示店长，详情在提醒待办里看。 */}
           {hasMinorFindings ? (
@@ -920,7 +1318,93 @@ export function ScheduleManagementCard({
     return null;
   };
 
-  const renderGrid = (variant: GridVariant) => {
+  // 放置模式的提示条与常用班次托盘：拿起后点格子放下；没拿起时显示「添加班次」托盘
+  const renderPlacementBar = (variant: GridVariant) => {
+    if (!storeCode || !rows.length) {
+      return null;
+    }
+    if (placement) {
+      const shift = `${normalizeClockTime(placement.startTime)}–${normalizeClockTime(placement.endTime)}`;
+      const key = placement.kind === "move" ? "bannerMove" : placement.kind === "copy" ? "bannerCopy" : "bannerAdd";
+      return (
+        <View style={styles.placementBar}>
+          <Text variant="labelLarge" style={styles.placementBarText}>
+            {t(`scheduleManagement.placement.${key}`, { shift })}
+          </Text>
+          <Button compact mode="text" onPress={() => setPlacement(null)}>
+            {t("scheduleManagement.placement.cancel")}
+          </Button>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.trayBar}>
+        <Text variant="labelMedium" style={styles.muted}>
+          {t("scheduleManagement.placement.trayTitle")}
+        </Text>
+        <View style={styles.chipRow}>
+          {SHIFT_PRESETS.map((preset) => (
+            <Chip
+              key={`${preset.startTime}-${preset.endTime}`}
+              compact
+              disabled={isBusy}
+              onPress={() => startPresetPlacement(preset)}
+              delayLongPress={DRAG_LONG_PRESS_MS}
+              onLongPress={() => handlePresetLongPress(variant, preset)}
+            >
+              {`${preset.startTime}–${preset.endTime}`}
+            </Chip>
+          ))}
+        </View>
+        <Text variant="labelSmall" style={styles.muted}>
+          {t("scheduleManagement.placement.trayHint")}
+        </Text>
+      </View>
+    );
+  };
+
+  // 拖动时跟手的小浮标：显示在手指上方，位置用 Animated.Value 直接驱动，不触发整表重渲染
+  const renderDragGhost = (variant: GridVariant) =>
+    drag && drag.variant === variant ? (
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.dragGhost, { transform: dragGhost.getTranslateTransform() }]}
+      >
+        <Text variant="labelLarge" style={styles.dragGhostText}>
+          {drag.label}
+        </Text>
+      </Animated.View>
+    ) : null;
+
+  // 外层容器负责长按拖动的手势：记录最后触点（长按回调拿不到坐标）、接管拖动、没拖动就抬手时收尾
+  const renderGrid = (variant: GridVariant) => (
+    <View
+      ref={(node) => {
+        wrapperRefs.current[variant] = node;
+      }}
+      collapsable={false}
+      style={styles.dragRoot}
+      {...dragPanResponder.panHandlers}
+      onTouchStart={(event) => {
+        lastTouchRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      }}
+      onTouchMove={(event) => {
+        lastTouchRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      }}
+      onTouchEnd={() => {
+        if (dragRuntimeRef.current && !dragRuntimeRef.current.granted) finishDrag(false);
+      }}
+      onTouchCancel={() => {
+        if (dragRuntimeRef.current && !dragRuntimeRef.current.granted) finishDrag(false);
+      }}
+    >
+      {renderPlacementBar(variant)}
+      {renderGridBody(variant)}
+      {renderDragGhost(variant)}
+    </View>
+  );
+
+  const renderGridBody = (variant: GridVariant) => {
     const width = gridWidths[variant];
     const cellWidth = Math.max(
       MIN_CELL_WIDTH,
@@ -951,7 +1435,7 @@ export function ScheduleManagementCard({
                 accessibilityLabel={t("scheduleManagement.batch.employeeA11y", {
                   name: row.employeeName || row.userGuid,
                 })}
-                disabled={!storeCode || isBusy}
+                disabled={!storeCode || isBusy || Boolean(placement)}
                 onPress={() =>
                   openBatch({ mode: "employee", userGuid: row.userGuid, employeeName: row.employeeName })
                 }
@@ -979,8 +1463,25 @@ export function ScheduleManagementCard({
               </Pressable>
             ))}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View>
+          <ScrollView
+            ref={(node) => {
+              scrollRefs.current[variant] = node;
+            }}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            // 拖动中锁住日期区自己的滚动（改由靠边自动滚动）
+            scrollEnabled={!drag}
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              scrollXRef.current[variant] = event.nativeEvent.contentOffset.x;
+            }}
+          >
+            <View
+              ref={(node) => {
+                contentRefs.current[variant] = node;
+              }}
+              collapsable={false}
+            >
               <View style={styles.gridRow}>
                 {days.map((day, index) => {
                   const isToday = day === today;
@@ -992,7 +1493,7 @@ export function ScheduleManagementCard({
                       accessibilityLabel={t("scheduleManagement.batch.dateA11y", {
                         date: `${t(`weekdays.${index}`)} ${shortDate(day)}`,
                       })}
-                      disabled={!storeCode || isBusy || !rows.length}
+                      disabled={!storeCode || isBusy || !rows.length || Boolean(placement)}
                       onPress={() => openBatch({ mode: "date", workDate: day, weekdayIndex: index })}
                       style={({ pressed }) => [
                         styles.headerCell,
@@ -1019,25 +1520,38 @@ export function ScheduleManagementCard({
                 })}
               </View>
 
-              {rows.map((row) => (
+              {rows.map((row, rowIndex) => (
                 <View key={row.userGuid} style={styles.gridRow}>
                   {days.map((day, index) => {
                     const cell = classifyScheduleGridCell(
                       row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
                       availabilityMap.get(availabilityKey(row.userGuid, day)),
                     );
+                    const verdict = placementVerdictOf(row, day);
                     return (
                       <Pressable
                         key={`${row.userGuid}-${day}`}
                         accessibilityRole="button"
                         accessibilityLabel={`${row.employeeName || row.userGuid} ${t(`weekdays.${index}`)} ${shortDate(day)}`}
                         disabled={!storeCode || isBusy}
-                        onPress={() => openCell(row, day, index, cell)}
+                        onPress={() =>
+                          placement ? handlePlacementPress(row, day) : openCell(row, day, index, cell)
+                        }
+                        delayLongPress={DRAG_LONG_PRESS_MS}
+                        onLongPress={() => handleCellLongPress(variant, cell)}
                         style={({ pressed }) => [
                           styles.bodyCell,
                           styles.dayCell,
                           { width: cellWidth },
                           day === today ? styles.todayColumn : null,
+                          // 放置 / 拖动模式：可放蓝 / 提醒琥珀 / 不能放红，与 Web 拖拽的落点提示一致
+                          verdict?.state === "ok" ? styles.placementOk : null,
+                          verdict?.state === "warn" ? styles.placementWarn : null,
+                          verdict?.state === "bad" ? styles.placementBad : null,
+                          // 拖动时手指正下方的格子加粗描边
+                          drag && dragHover?.rowIndex === rowIndex && dragHover.dayIndex === index
+                            ? styles.dragHoverCell
+                            : null,
                           pressed ? styles.cellPressed : null,
                         ]}
                       >
@@ -1119,9 +1633,9 @@ export function ScheduleManagementCard({
             {t("scheduleManagement.quickShiftTitle")}
           </Text>
           <View style={styles.chipRow}>
-            {QUICK_SHIFTS.map((shift) => (
+            {SHIFT_PRESETS.map((shift) => (
               <Chip
-                key={shift.key}
+                key={`${shift.startTime}-${shift.endTime}`}
                 compact
                 selected={
                   form.startTime === shift.startTime &&
@@ -1135,7 +1649,7 @@ export function ScheduleManagementCard({
                   }))
                 }
               >
-                {t(`scheduleManagement.quickShifts.${shift.key}`)}
+                {`${shift.startTime}–${shift.endTime}`}
               </Chip>
             ))}
           </View>
@@ -1266,6 +1780,12 @@ export function ScheduleManagementCard({
     );
     const currentGuid = editingTarget.schedule?.scheduleGuid;
     const row = rows.find((item) => item.userGuid === editingTarget.userGuid);
+    // 正在编辑的时间与员工上报的冲突：只提醒，不拦截保存
+    const editorConflict = getAvailabilityConflict(
+      { startTime: form.startTime, endTime: form.endTime },
+      dayAvailability,
+    );
+    const editingLocked = editingTarget.schedule ? isLocked(editingTarget.schedule) : false;
 
     return (
       <>
@@ -1285,6 +1805,13 @@ export function ScheduleManagementCard({
               {describeAvailability(dayAvailability)}
             </Text>
           </View>
+          {editorConflict ? (
+            <Text variant="labelMedium" style={styles.conflictNotice}>
+              {t(editorConflict === "unavailable"
+                ? "scheduleManagement.editor.conflictUnavailable"
+                : "scheduleManagement.editor.conflictOutside")}
+            </Text>
+          ) : null}
           <View style={styles.infoRow}>
             <Text variant="bodySmall" style={styles.muted}>
               {t("scheduleManagement.editor.weekHoursLabel")}
@@ -1298,22 +1825,24 @@ export function ScheduleManagementCard({
         </View>
 
         {editingTarget.daySchedules.length && row ? (
-          // 同一天多个班次时在这里切换；也可以给同一员工再加一班。
+          // 同一天的班次都列在这里切换；每个班次块右侧的「×」直接删除（先确认）；也可以给同一员工再加一班。
           <View style={styles.chipRow}>
-            {editingTarget.daySchedules.length > 1
-              ? editingTarget.daySchedules.map((item) => (
-                  <Chip
-                    key={item.scheduleGuid}
-                    compact
-                    selected={item.scheduleGuid === currentGuid}
-                    onPress={() =>
-                      openEdit(item, row, editingTarget.weekdayIndex, editingTarget.daySchedules)
-                    }
-                  >
-                    {formatShiftShort(item.startTime, item.endTime)}
-                  </Chip>
-                ))
-              : null}
+            {editingTarget.daySchedules.map((item) => (
+              <Chip
+                key={item.scheduleGuid}
+                compact
+                selected={item.scheduleGuid === currentGuid}
+                onPress={() =>
+                  openEdit(item, row, editingTarget.weekdayIndex, editingTarget.daySchedules)
+                }
+                onClose={() => confirmDelete(item)}
+                closeIconAccessibilityLabel={t("scheduleManagement.placement.closeA11y", {
+                  shift: formatShiftShort(item.startTime, item.endTime),
+                })}
+              >
+                {formatShiftShort(item.startTime, item.endTime)}
+              </Chip>
+            ))}
             <Chip
               compact
               icon="plus"
@@ -1325,6 +1854,37 @@ export function ScheduleManagementCard({
               {t("scheduleManagement.editor.addShift")}
             </Chip>
           </View>
+        ) : null}
+
+        {editingTarget.schedule ? (
+          // 移动 / 复制：不在手机上拖动（要新增原生手势库），改成点选目标格；已有打卡的班次不能移动或复制
+          <View style={styles.placementActions}>
+            <Button
+              mode="outlined"
+              icon="arrow-right-bold-outline"
+              compact
+              disabled={editingLocked || isBusy}
+              onPress={() => startPlacement("move", editingTarget.schedule!)}
+            >
+              {t("scheduleManagement.placement.moveAction")}
+            </Button>
+            <Button
+              mode="outlined"
+              icon="content-copy"
+              compact
+              disabled={editingLocked || isBusy}
+              onPress={() => startPlacement("copy", editingTarget.schedule!)}
+            >
+              {t("scheduleManagement.placement.copyAction")}
+            </Button>
+          </View>
+        ) : null}
+        {editingLocked ? (
+          <Text variant="labelMedium" style={styles.muted}>
+            {t(punchesKnown
+              ? "scheduleManagement.placement.lockedNotice"
+              : "scheduleManagement.placement.lockedUnknownNotice")}
+          </Text>
         ) : null}
 
         {renderShiftFields()}
@@ -1357,7 +1917,7 @@ export function ScheduleManagementCard({
         <Button
           mode="outlined"
           textColor={HB_COLORS.danger}
-          onPress={confirmDelete}
+          onPress={() => confirmDelete()}
           disabled={isBusy}
         >
           {t("scheduleManagement.editor.setRest")}
@@ -1813,6 +2373,48 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   minorWarning: { color: "#B54708", fontSize: 11, fontWeight: "700", marginLeft: 2 },
+  conflictMark: { color: "#D46B08", fontSize: 11, fontWeight: "700", marginLeft: 1 },
+  conflictNotice: { color: "#B54708" },
+  mealBadge: { bottom: 0, color: "#667085", fontSize: 9, fontWeight: "700", position: "absolute", right: 2 },
+  // 自动扣餐：比手动指定的更浅更细，一眼能分辨
+  mealBadgeAuto: { color: "#98A2B3", fontWeight: "500" },
+  placementActions: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
+  placementBar: {
+    alignItems: "center",
+    backgroundColor: "#EFF8FF",
+    borderColor: "#B2DDFF",
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    justifyContent: "space-between",
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: 2,
+  },
+  placementBarText: { color: "#175CD3", flexShrink: 1 },
+  dragRoot: { gap: HB_SPACING.sm },
+  dragHoverCell: { borderColor: "#175CD3", borderWidth: 2 },
+  dragGhost: {
+    alignItems: "center",
+    backgroundColor: "#175CD3",
+    borderRadius: 8,
+    elevation: 8,
+    height: DRAG_GHOST_HEIGHT,
+    justifyContent: "center",
+    left: 0,
+    position: "absolute",
+    shadowColor: "#000",
+    shadowOffset: { height: 3, width: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    top: 0,
+    width: DRAG_GHOST_WIDTH,
+  },
+  dragGhostText: { color: HB_COLORS.white, fontWeight: "700" },
+  placementOk: { backgroundColor: "#F0F7FF" },
+  placementWarn: { backgroundColor: "#FFFBE6" },
+  placementBad: { backgroundColor: "#FFF1F0", opacity: 0.6 },
+  trayBar: { gap: HB_SPACING.xs },
   // 草稿班次：同样浅蓝底，用虚线描边区分未发布。
   shiftChipDraft: {
     borderColor: "#53B1FD",

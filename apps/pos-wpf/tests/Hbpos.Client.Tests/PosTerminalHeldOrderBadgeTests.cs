@@ -17,6 +17,9 @@ public sealed class PosTerminalHeldOrderBadgeTests
     private static readonly PosSessionState Session =
         new("HB POS", "S01", "Main Branch", "POS-01", "C001", "Alice", true, 0);
 
+    private static readonly Hbpos.Contracts.Cashiers.CashierSessionDto SignedInCashier =
+        new("C001", "U-1", "Alice", "S01", "POS-01", [], [], ["S01"], false, false, false);
+
     [Theory]
     [InlineData(0, "")]
     [InlineData(-3, "")]
@@ -202,6 +205,125 @@ public sealed class PosTerminalHeldOrderBadgeTests
     }
 
     [Fact]
+    public async Task Screen_shown_at_night_polls_every_five_minutes_instead_of_sixty_seconds()
+    {
+        var counter = new FakeHeldOrderTodayCountService { Count = 2 };
+        using var viewModel = CreateViewModel(counter, out var clock, startLocal: "2026-10-23T03:00:00Z");
+
+        viewModel.OnScreenShown();
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(1, counter.CallCount);
+
+        // 夜间 60 秒、4 分 59 秒都不应触发。
+        clock.Advance(TimeSpan.FromSeconds(60));
+        clock.Advance(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(59));
+        Assert.Equal(1, counter.CallCount);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(2, counter.CallCount);
+        Assert.False(counter.Calls[^1].Force);
+
+        // 下一轮仍是 5 分钟（每次 tick 后重设）。
+        clock.Advance(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59));
+        Assert.Equal(2, counter.CallCount);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(3, counter.CallCount);
+    }
+
+    [Fact]
+    public async Task Poll_interval_is_recomputed_on_every_tick_across_the_quiet_window_boundaries()
+    {
+        var counter = new FakeHeldOrderTodayCountService { Count = 1 };
+        // 21:58:30 打开首页：白天间隔 60 秒，21:59:30 触发；此时仍是白天，下一次 22:00:30。
+        using var viewModel = CreateViewModel(counter, out var clock, startLocal: "2026-10-22T21:58:30Z");
+        viewModel.OnScreenShown();
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(1, counter.CallCount);
+
+        clock.Advance(TimeSpan.FromSeconds(60)); // 21:59:30
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(2, counter.CallCount);
+
+        clock.Advance(TimeSpan.FromSeconds(60)); // 22:00:30，进入窗口，之后改为 5 分钟
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(3, counter.CallCount);
+
+        clock.Advance(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59));
+        Assert.Equal(3, counter.CallCount);
+        clock.Advance(TimeSpan.FromSeconds(1)); // 22:05:30
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(4, counter.CallCount);
+    }
+
+    [Fact]
+    public async Task Poll_lands_exactly_on_quiet_window_end_then_returns_to_sixty_seconds()
+    {
+        var counter = new FakeHeldOrderTodayCountService { Count = 1 };
+        // 05:57:00 打开首页：5 分钟间隔会落到 06:02，必须被截到 06:00 整。
+        using var viewModel = CreateViewModel(counter, out var clock, startLocal: "2026-10-23T05:57:00Z");
+        viewModel.OnScreenShown();
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(1, counter.CallCount);
+
+        clock.Advance(TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(59)); // 05:59:59
+        Assert.Equal(1, counter.CallCount);
+        clock.Advance(TimeSpan.FromSeconds(1)); // 06:00:00
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(2, counter.CallCount);
+
+        // 窗口已结束，恢复 60 秒。
+        clock.Advance(TimeSpan.FromSeconds(59));
+        Assert.Equal(2, counter.CallCount);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(3, counter.CallCount);
+    }
+
+    [Fact]
+    public async Task Hold_order_refresh_does_not_wait_for_the_slow_night_timer()
+    {
+        // 晚关门门店 22:00 后继续营业：挂单 / 取单走「立即重算」，不依赖夜间 5 分钟的定时器。
+        var counter = new FakeHeldOrderTodayCountService { Count = 0 };
+        using var viewModel = CreateViewModel(counter, out _, startLocal: "2026-10-22T23:00:00Z");
+        viewModel.OnScreenShown();
+        await viewModel.LastHeldOrderCountRefreshTask!;
+
+        counter.Count = 1;
+        await viewModel.RefreshHeldOrderTodayCountAsync(forceRemoteRefresh: true);
+
+        Assert.Equal(1, viewModel.HeldOrderTodayCount);
+        Assert.True(counter.Calls[^1].Force);
+    }
+
+    [Fact]
+    public async Task Cashier_sign_in_or_out_triggers_a_refresh_so_shared_orders_appear_right_after_login()
+    {
+        var counter = new FakeHeldOrderTodayCountService { Count = 1 };
+        using var viewModel = CreateViewModel(counter, out _, startLocal: "2026-10-23T03:00:00Z");
+        viewModel.OnScreenShown();
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(1, counter.CallCount);
+
+        // 未登录时统计服务不请求共享挂单；收银员登录后要立刻补取，不能等夜间 5 分钟的定时器。
+        counter.Count = 4;
+        viewModel.Session = Session with { CashierSession = SignedInCashier };
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(2, counter.CallCount);
+        Assert.False(counter.Calls[^1].Force);
+        Assert.Equal(4, viewModel.HeldOrderTodayCount);
+
+        // 同一登录状态下换收银员快照（权限刷新等）不重复刷新。
+        viewModel.Session = Session with { CashierSession = SignedInCashier with { PermissionCodes = ["x"] } };
+        Assert.Equal(2, counter.CallCount);
+
+        viewModel.Session = Session with { CashierSession = null };
+        await viewModel.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(3, counter.CallCount);
+    }
+
+    [Fact]
     public async Task Dispose_stops_polling_and_discards_in_flight_result()
     {
         var counter = new FakeHeldOrderTodayCountService();
@@ -266,9 +388,13 @@ public sealed class PosTerminalHeldOrderBadgeTests
         IHeldOrderTodayCountService? counter,
         out FakeTimeProvider clock,
         PosCartService? cart = null,
-        Func<Task>? onHoldOrderAsync = null)
+        Func<Task>? onHoldOrderAsync = null,
+        string? startLocal = null)
     {
-        clock = new FakeTimeProvider();
+        // FakeTimeProvider 的本地时区默认是 UTC，所以这里的 UTC 时刻就是设备本地时间。
+        // 默认从白天 10:00 起算：夜间静默窗口（22:00–06:00）会把兜底刷新放慢到 5 分钟，
+        // 而 FakeTimeProvider 自身的默认起点 2000-01-01 00:00 恰好落在窗口内。
+        clock = new FakeTimeProvider(DateTimeOffset.Parse(startLocal ?? "2026-10-22T10:00:00Z"));
         return new PosTerminalViewModel(
             new LocalSellableItemIndex(),
             cart ?? new PosCartService(),

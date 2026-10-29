@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -122,6 +123,31 @@ IF @result < 0 THROW 51062, '获取本地商品条码创建锁失败', 1;
                         {
                             await db.Ado.RollbackTranAsync();
                             return Conflict(new { success = false, message = "条码已被使用，请重新生成条码" });
+                        }
+                    }
+                    // 所有条码（不止 9529 自动条码）新建前都要查占用：主条码 / 分店多码 / 一品多码，不限供应商。
+                    // 此前只查 9529 开头的条码，手持和 Web 手填的普通条码可以跨供应商建出同条码的第二条商品。
+                    // 条码被占用时返回已有商品清单，客户端提示用户选用已有商品，不提供「仍然创建」。
+                    var requestedBarcode = ProductDuplicateGuard.NormalizeBarcode(dto.Barcode);
+                    if (requestedBarcode != null)
+                    {
+                        dto.Barcode = requestedBarcode;
+                        // 同一条码的并发创建必须串行，避免两个请求同时通过检查后各建一件。
+                        await ProductDuplicateGuard.AcquireBarcodeCreateLocksAsync(db, new[] { requestedBarcode });
+                        var barcodeOwners = await ProductDuplicateGuard.FindBarcodeOwnersAsync(
+                            db,
+                            new[] { requestedBarcode }
+                        );
+                        if (barcodeOwners.TryGetValue(requestedBarcode, out var owners) && owners.Count > 0)
+                        {
+                            await db.Ado.RollbackTranAsync();
+                            return Conflict(new
+                            {
+                                success = false,
+                                message = ProductDuplicateGuard.BuildBarcodeConflictMessage(requestedBarcode, owners),
+                                errorCode = ProductDuplicateGuard.BarcodeExistsErrorCode,
+                                existingProducts = ProductDuplicateGuard.ToResponsePayload(owners),
+                            });
                         }
                     }
                     // 业务口径：「供应商 + 货号」在存活商品里必须唯一（不同供应商可以有相同货号）。

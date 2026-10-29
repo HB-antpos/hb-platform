@@ -31,6 +31,9 @@ import { TodayPunchCard } from "@/components/attendance/TodayPunchCard";
 import { MyRequestsPanel } from "@/components/attendance/MyRequestsPanel";
 import { MySchedulePanel } from "@/components/attendance/MySchedulePanel";
 import { shiftDate } from "@/modules/attendance/attendance-my-week";
+import { executePlacement } from "@/modules/attendance/schedule-placement-actions";
+import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
+import type { PlacementSource } from "@/modules/attendance/schedule-placement";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import {
@@ -53,12 +56,15 @@ import {
   getMyAttendanceWeek,
   getMyAvailability,
   getAttendanceEmployees,
-  getPendingApprovals,
+  getAttendancePunchScheduleGuids,
+  getPendingApprovalBoard,
+  getProcessedApprovals,
   punchAttendance,
   publishAttendanceSchedulesWeek,
   previewMyAttendancePunchAdjustment,
   rejectAttendanceApproval,
   resolveAttendanceQr,
+  restoreAttendanceSchedule,
   startMyMealBreak,
   syncAttendanceHolidays,
   updateAttendanceHoliday,
@@ -240,8 +246,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const [activeManagementTab, setActiveManagementTab] =
     useState<AttendanceManagementTab>(() =>
       access.canViewAttendancePunchRecords ? "punches" : "schedule");
-  // 审核里「补录下班」跳到打卡记录时带上的日期；变化时重建打卡记录卡片。
-  const [managedPunchDate, setManagedPunchDate] = useState<string>();
+  // 审核「已处理」页签第一次打开后才拉取，避免每次进审核多一个请求。
+  const [processedApprovalsRequested, setProcessedApprovalsRequested] = useState(false);
   const [leaveRegisterVisible, setLeaveRegisterVisible] = useState(false);
   const [availabilitySheet, setAvailabilitySheet] = useState<{
     dates: string[];
@@ -254,10 +260,14 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     string | undefined
   >(undefined);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
+  // 排班网格长按拖动期间锁住整页纵向滚动，避免拖动时页面跟着动
+  const [isScheduleDragging, setIsScheduleDragging] = useState(false);
   const [managerWeekStartDate, setManagerWeekStartDate] =
     useState(getWeekStartDate);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarVisible, setSnackbarVisible] = useState(false);
+  // 带「撤销」按钮的提示（排班点选目标格放下后）：普通提示会清掉它
+  const [snackbarUndo, setSnackbarUndo] = useState<(() => void) | null>(null);
   const [attendanceScannerVisible, setAttendanceScannerVisible] = useState(false);
   const [attendanceScannerError, setAttendanceScannerError] = useState("");
   const [attendanceScannerPaused, setAttendanceScannerPaused] = useState(false);
@@ -363,6 +373,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   }, [activeMainTab, canViewAttendanceManagement, mode]);
 
   const showMessage = useCallback((message: string) => {
+    setSnackbarUndo(null);
     setSnackbarMessage(message);
     setSnackbarVisible(true);
   }, []);
@@ -398,9 +409,15 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   });
   const approvalsQuery = useQuery({
     queryKey: attendanceKeys.approvals(selectedStoreCode),
-    queryFn: () => getPendingApprovals(selectedStoreCode),
+    // 打开审核即触发后端对账（近 14 天排班补生成漏下班 / 加班），返回列表与新增条数。
+    queryFn: () => getPendingApprovalBoard(selectedStoreCode),
     // 页签上要显示待审数量，所以管理页任一页签都拉取。
     enabled: Boolean(isAuthenticated && user && isManagementTab),
+  });
+  const processedApprovalsQuery = useQuery({
+    queryKey: ["attendance", "approvals", "processed", selectedStoreCode ?? "all"],
+    queryFn: () => getProcessedApprovals(selectedStoreCode),
+    enabled: Boolean(isAuthenticated && user && isManagementTab && processedApprovalsRequested),
   });
   // 排班与登记请假只需要本店员工身份，走考勤自己的接口，避免要求用户管理权限 Users.View。
   const storeUsersQuery = useQuery({
@@ -443,6 +460,25 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       isAuthenticated && user && isScheduleManagementTab && selectedStoreCode,
     ),
   });
+  // 本周有打卡的排班：周排班接口不带打卡汇总，店长要靠它判断哪些班次不能移动 / 复制。
+  // 需要打卡查看权限；没有权限 / 失败只是「无法确认」，网格按保守规则锁今天及以前的班次。
+  const managedPunchScheduleGuidsQuery = useQuery({
+    queryKey: ["attendance", "punches", "week-schedule-guids", selectedStoreCode ?? "", managerWeekStartDate],
+    queryFn: () =>
+      getAttendancePunchScheduleGuids({
+        storeCode: selectedStoreCode!,
+        fromDate: managerWeekStartDate,
+        toDate: shiftDate(managerWeekStartDate, 6),
+      }),
+    enabled: Boolean(
+      isAuthenticated && user && isScheduleManagementTab && selectedStoreCode && canViewManagedPunches,
+    ),
+    retry: false,
+  });
+  const managedPunchScheduleGuids = useMemo(
+    () => new Set(managedPunchScheduleGuidsQuery.data ?? []),
+    [managedPunchScheduleGuidsQuery.data],
+  );
   const holidaysQuery = useQuery({
     queryKey: attendanceKeys.holidays(selectedStoreCode),
     queryFn: () => getAttendanceHolidays({ storeCode: selectedStoreCode }),
@@ -561,7 +597,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     mutationFn: approveAttendanceApproval,
     onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: ["attendance", "approvals", "pending"],
+        // 待审与已处理两个列表一起刷新。
+        queryKey: ["attendance", "approvals"],
       });
       await invalidateEmployeeData();
       showMessage(t("messages.approvalApproved"));
@@ -576,7 +613,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     mutationFn: rejectAttendanceApproval,
     onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: ["attendance", "approvals", "pending"],
+        // 待审与已处理两个列表一起刷新。
+        queryKey: ["attendance", "approvals"],
       });
       await invalidateEmployeeData();
       showMessage(t("messages.approvalRejected"));
@@ -653,6 +691,58 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       showMessage(
         getErrorMessage(error, "messages.cancelFailed"),
       ),
+  });
+
+  // 点选目标格放下：移动 / 复制 / 常用班次添加（换员工 = 新建 + 删除，见 executePlacement）。成功后给 8 秒「撤销」。
+  const placeShiftMutation = useMutation({
+    mutationFn: ({ source, target }: { source: PlacementSource; target: PlacementTargetCell }) =>
+      executePlacement(
+        {
+          createSchedule: createAttendanceSchedule,
+          updateSchedule: updateAttendanceSchedule,
+          deleteSchedule: deleteAttendanceSchedule,
+          restoreSchedule: restoreAttendanceSchedule,
+        },
+        source,
+        target,
+      ).then((result) => ({ result, target })),
+    onSuccess: async ({ result, target }) => {
+      await invalidateScheduleManagementData();
+      const name = storeUsersQuery.data?.find((item) => item.userGUID === target.userGuid);
+      const params = {
+        name: name ? (name.fullName || name.username || target.userGuid) : target.userGuid,
+        date: target.workDate.slice(5),
+      };
+      if (result.outcome === "transferDeleteFailed") {
+        showMessage(t("scheduleManagement.placement.transferDeleteFailed"));
+        return;
+      }
+      const text = `${t(`scheduleManagement.placement.${result.outcome}`, params)}${
+        result.downgraded ? t("scheduleManagement.placement.downgradedSuffix") : ""
+      }`;
+      showMessage(text);
+      const { undo } = result;
+      if (undo) {
+        setSnackbarUndo(() => async () => {
+          try {
+            await undo();
+            await invalidateScheduleManagementData();
+            showMessage(t("scheduleManagement.placement.undone"));
+          } catch {
+            await invalidateScheduleManagementData();
+            showMessage(t("scheduleManagement.placement.undoFailed"));
+          }
+        });
+      }
+    },
+    onError: async (error) => {
+      await invalidateScheduleManagementData();
+      showMessage(
+        t("scheduleManagement.placement.failed", {
+          reason: getErrorMessage(error, "messages.saveFailed"),
+        }),
+      );
+    },
   });
 
   const publishWeekMutation = useMutation({
@@ -783,6 +873,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     createScheduleBatchMutation.isPending ||
     updateScheduleMutation.isPending ||
     deleteScheduleMutation.isPending ||
+    placeShiftMutation.isPending ||
     publishWeekMutation.isPending;
   const isHolidayBusy =
     createHolidayMutation.isPending ||
@@ -811,7 +902,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     (isLeaveManagementTab && approvalsQuery.error);
 
   const pendingApprovals = useMemo(
-    () => approvalsQuery.data ?? [],
+    () => approvalsQuery.data?.items ?? [],
     [approvalsQuery.data],
   );
 
@@ -1203,11 +1294,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           preparation.verification.payload,
           // 只有下班才带用餐回答；上班卡即使误带，后端也会忽略。
           qrToday.nextPunchType === "ClockOut" ? pendingMealDeclarationRef.current : undefined,
+          qrToday.nextPunchType,
         ),
       ));
     } catch (error) {
       if (attendanceScannerSessionGate.isActive(session)) {
-        const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error));
+        const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error), qrToday.nextPunchType);
         failAttendanceQrProcessing(
           session,
           errorKey ? t(errorKey) : getErrorMessage(error, "messages.punchFailed"),
@@ -1479,6 +1571,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView
         contentContainerStyle={styles.content}
+        scrollEnabled={!isScheduleDragging}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -1784,8 +1877,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             ) : null}
             {isPunchManagementTab ? (
               <ManagedPunchRecordsCard
-                key={managedPunchDate ?? "today"}
-                initialWorkDate={managedPunchDate}
                 storeCode={selectedStoreCode}
                 canAdjust={access.canAdjustAttendancePunch}
                 onMessage={showMessage}
@@ -1819,6 +1910,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   deleteScheduleMutation.mutate(scheduleGuid)
                 }
                 onPublishWeek={handlePublishWeek}
+                punchScheduleGuids={managedPunchScheduleGuids}
+                punchesKnown={managedPunchScheduleGuidsQuery.isSuccess}
+                onPlaceShift={(source, target) =>
+                  placeShiftMutation.mutate({ source, target })
+                }
+                onDragActiveChange={setIsScheduleDragging}
                 onCopyPreviousWeek={() => {
                   if (!selectedStoreCode) {
                     showMessage(t("messages.selectStoreFirst"));
@@ -1853,18 +1950,29 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             {isLeaveManagementTab && !isManagementContentLoading ? (
               <>
                 <ManagerApprovalList
-                  title={t("sections.approvals")}
                   emptyMessage={t("approvals.empty")}
                   approvals={pendingApprovals}
+                  reconcile={approvalsQuery.data?.reconcile}
+                  processedApprovals={processedApprovalsQuery.data}
+                  isProcessedLoading={processedApprovalsQuery.isLoading}
+                  onShowProcessed={() => setProcessedApprovalsRequested(true)}
                   isBusy={isApprovalBusy}
                   canReview={canReviewAttendance}
-                  onApprove={(payload) => approveMutation.mutate(payload)}
-                  onReject={(payload) => rejectMutation.mutate(payload)}
-                  onFixMissingClockOut={canViewManagedPunches ? (approval) => {
-                    // 漏下班直接去打卡记录的那一天补录，店长不必再手动找日期。
-                    setManagedPunchDate(approval.workDate?.slice(0, 10));
-                    setActiveManagementTab("punches");
-                  } : undefined}
+                  canReviewSelf={access.canReviewOwnAttendance}
+                  canAdjustPunch={access.canAdjustAttendancePunch}
+                  currentUserGuid={user?.userGUID}
+                  storeCode={selectedStoreCode}
+                  storeName={selectedStoreName}
+                  // 详情页要等提交结果决定是否关闭，所以用 mutateAsync；失败提示仍由 mutation 的 onError 统一弹出。
+                  onApprove={async (payload) => { await approveMutation.mutateAsync(payload); }}
+                  onReject={async (payload) => { await rejectMutation.mutateAsync(payload); }}
+                  onMissingClockOutResolved={async (message) => {
+                    await Promise.all([
+                      queryClient.invalidateQueries({ queryKey: ["attendance", "approvals"] }),
+                      queryClient.invalidateQueries({ queryKey: ["attendance", "managed", "records"] }),
+                    ]);
+                    showMessage(message);
+                  }}
                 />
                 <Button
                   mode="outlined"
@@ -1984,6 +2092,20 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       <Snackbar
         visible={snackbarVisible}
         onDismiss={() => setSnackbarVisible(false)}
+        duration={snackbarUndo ? 8000 : undefined}
+        action={
+          snackbarUndo
+            ? {
+                label: t("scheduleManagement.placement.undo"),
+                onPress: () => {
+                  const undo = snackbarUndo;
+                  setSnackbarVisible(false);
+                  setSnackbarUndo(null);
+                  undo();
+                },
+              }
+            : undefined
+        }
       >
         {snackbarMessage}
       </Snackbar>

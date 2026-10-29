@@ -229,7 +229,11 @@ export default function PromotionsPage() {
     { title: t('posAdmin.promotions.applyQuantity', '门槛件数'), dataIndex: 'applyQuantity', key: 'applyQuantity', width: 110 },
     { title: t('posAdmin.promotions.fixedPrice', '固定总价'), dataIndex: 'fixedPrice', key: 'fixedPrice', width: 110, render: (v: number) => (v ?? 0).toFixed(2) },
     { title: t('posAdmin.promotions.productsCount', '商品数'), dataIndex: 'productsCount', key: 'productsCount', width: 100 },
-    { title: t('posAdmin.promotions.storesCount', '分店数'), dataIndex: 'storesCount', key: 'storesCount', width: 100 },
+    {
+      title: t('posAdmin.promotions.storesCount', '分店数'), dataIndex: 'storesCount', key: 'storesCount', width: 140,
+      // 统一口径：未绑定分店的促销收银不计算，列表里明确标出来，提醒补选分店。
+      render: (v: number) => (v > 0 ? v : <Tag color="red">{t('posAdmin.promotions.unboundStores', '未指定（收银不生效）')}</Tag>),
+    },
     {
       title: t('column.action'), key: 'actions', width: 200,
       render: (_, record) => (
@@ -261,7 +265,7 @@ export default function PromotionsPage() {
     return () => listRequestGuardRef.current.invalidate()
   }, [page, pageSize, sortField, sortOrder])
 
-  const editorUsesAllStoresScope = !selectedEditorStores?.length
+  const editorHasNoStores = !selectedEditorStores?.length
 
   return (
     <Card title={t('posAdmin.promotions.title', '促销管理（满减/固定组合价）')} extra={<Button type="primary" disabled={!canEdit} onClick={openCreate}>{t('posAdmin.promotions.createPromotion', '新建促销')}</Button>}>
@@ -291,15 +295,21 @@ export default function PromotionsPage() {
             <Form.Item name="fixedPrice" label={t('posAdmin.promotions.fixedPrice', '固定总价')} rules={[{ required: true, type: 'number', min: 0 }]}><InputNumber min={0} precision={2} style={{ width: 160 }} /></Form.Item>
             <Form.Item name="maxApplicationsPerOrder" label={t('posAdmin.promotions.maxApplicationsPerOrder', '每单最多次数')}><InputNumber min={1} style={{ width: 160 }} /></Form.Item>
           </Space>
-          <Form.Item label={t('posAdmin.promotions.applicableStores', '适用分店')}>
+          <Form.Item label={t('posAdmin.promotions.applicableStores', '适用分店')} required>
             <Space wrap>
-              <Form.Item name="stores" noStyle><Select mode="multiple" options={storeOptions} showSearch optionFilterProp="label" allowClear placeholder={t('posAdmin.promotions.allStoresPlaceholder', '全部分店')} style={{ minWidth: 360 }} /></Form.Item>
+              {/* 统一口径：分店必选，未绑定分店的促销收银不计算；后端新建 / 编辑同样拒绝空分店。 */}
+              <Form.Item
+                name="stores"
+                noStyle
+                rules={[{ required: true, type: 'array', min: 1, message: t('posAdmin.promotions.storesRequired', '请至少选择一家适用分店') }]}
+              >
+                <Select mode="multiple" options={storeOptions} showSearch optionFilterProp="label" allowClear placeholder={t('posAdmin.promotions.storesPlaceholder', '选择适用分店')} style={{ minWidth: 360 }} />
+              </Form.Item>
               <Button onClick={() => editorForm.setFieldsValue({ stores: storeOptions.map((x) => x.value) })}>{t('posAdmin.promotions.selectAll')}</Button>
-              <Button onClick={() => editorForm.setFieldsValue({ stores: [] })}>{t('posAdmin.promotions.setAllStores')}</Button>
             </Space>
-            {editorUsesAllStoresScope ? (
-              <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
-                {t('posAdmin.promotions.allStoresScopeHint', '未选择具体分店时，促销适用于全部分店。')}
+            {editorHasNoStores ? (
+              <div style={{ color: '#cf1322', fontSize: 12, marginTop: 4 }}>
+                {t('posAdmin.promotions.storesRequiredHint', '必须选择分店；未绑定分店的促销收银不会计算。')}
               </div>
             ) : null}
           </Form.Item>

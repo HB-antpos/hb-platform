@@ -199,6 +199,8 @@ assert.equal(shouldHidePrimaryTabBar("/warehouse-picking"), true, "拣货入口�
 assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/finish"), true, "拣货子页同样不显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse"), false, "仓库页等其它页面仍显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-pickingx"), false, "只按完整路径段匹配，避免误伤相似路由");
+assert.equal(shouldHidePrimaryTabBar("/attendance-leave-paid"), true, "带薪假申请页底部有固定提交按钮，不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/attendance-personal"), false, "我的考勤仍显示全局底栏");
 assert.equal(
   compactPrimaryItems("legacy-employee-logs", [...fullMenu, "legacy-employee-logs"])[0]?.active,
   true,

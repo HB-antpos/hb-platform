@@ -1,0 +1,89 @@
+{
+  "list": {
+    "search": "搜索姓名 / 账号",
+    "filterStore": "分店：{{value}}",
+    "filterRole": "角色：{{value}}",
+    "allStores": "全部分店",
+    "allManagedStores": "全部我管理的分店",
+    "allRoles": "全部角色",
+    "storeSheetTitle": "选择分店",
+    "roleSheetTitle": "选择角色",
+    "storeLocked": "只有这一家分店，已锁定",
+    "pending": "待补全",
+    "count": "共 {{count}} 人",
+    "countPending": "待补全 {{count}} 人",
+    "endOfList": "已显示全部 {{count}} 人",
+    "empty": "没有符合条件的员工",
+    "emptyPending": "没有待补全的员工",
+    "optionsFailed": "分店与角色选项加载失败，点此重试"
+  },
+  "row": {
+    "statusPending": "待补全",
+    "statusComplete": "已完善",
+    "noProfile": "尚未填写资料"
+  },
+  "missing": {
+    "banking": "缺银行",
+    "superannuation": "缺 Super",
+    "phone": "缺手机",
+    "birthday": "缺生日"
+  },
+  "entry": {
+    "title": "个人信息",
+    "complete": "已完善",
+    "pending": "待补全"
+  },
+  "edit": {
+    "title": "个人信息",
+    "cancel": "取消",
+    "save": "保存",
+    "saveWithCount": "保存（{{count}} 项改动）",
+    "saved": "已保存",
+    "sectionBasic": "基本资料",
+    "phone": "手机号",
+    "phonePlaceholder": "例如 0412 345 678",
+    "gender": "性别",
+    "employmentType": "员工类型",
+    "employmentUnset": "未设置",
+    "employmentLocked": "需要「修改职位类型」权限",
+    "address": "居住地址",
+    "addressPlaceholder": "街道、区、州、邮编",
+    "genders": {
+      "unknown": "未知",
+      "male": "男",
+      "female": "女",
+      "other": "其他"
+    },
+    "employmentTypes": {
+      "fullTime": "全职",
+      "partTime": "兼职",
+      "casual": "临时工"
+    },
+    "errors": {
+      "phoneTooLong": "手机号最多 {{max}} 个字符",
+      "addressTooLong": "地址最多 {{max}} 个字符",
+      "fixErrors": "有内容需要修改，请检查标红的字段。"
+    },
+    "readOnlyNotice": "你没有修改权限，只能查看这些资料。",
+    "sensitive": {
+      "title": "敏感资料（只读）",
+      "bank": "银行账户",
+      "super": "公积金 Super",
+      "birthdayIdentity": "生日 / 证件号",
+      "notProvided": "未填写",
+      "notice": "需员工本人在「我的资料」提交，经审核后生效。"
+    },
+    "failures": {
+      "scope": "这位员工不在你的管理范围内，无法修改。",
+      "positionType": "没有「修改职位类型」权限，员工类型未保存。",
+      "notFound": "员工不存在或已被移除。",
+      "forbidden": "没有权限执行此操作。",
+      "generic": "保存失败，请检查网络后重试。"
+    },
+    "loadFailed": "无法加载个人信息",
+    "loadForbidden": "这位员工不在你的管理范围内，或你没有查看权限。",
+    "retry": "重试",
+    "noAccess": "没有查看员工个人信息的权限",
+    "back": "返回"
+  }
+}

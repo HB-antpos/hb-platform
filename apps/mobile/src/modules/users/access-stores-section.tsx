@@ -6,8 +6,11 @@ import { InfoCard, NoticeBox } from "@/modules/people";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import {
-  filterAccessStores,
+  applyAccessStoreFilter,
+  countAccessStoresByState,
+  pinAccessStoresByState,
   resolveStoreStateOptions,
+  type AccessStoreFilter,
   type AccessStoreStateOption,
 } from "./access-page-logic";
 import { getUserAccessStoreState } from "./access-management";
@@ -53,7 +56,20 @@ export function AccessStoresSection({
 }: AccessStoresSectionProps) {
   const { t } = useAppTranslation(["peopleAccess", "common"]);
   const [query, setQuery] = useState("");
-  const filtered = useMemo(() => filterAccessStores(stores, query), [query, stores]);
+  const [stateFilter, setStateFilter] = useState<AccessStoreFilter>("all");
+  // 选中筛选时记下当时属于该档的分店：在结果里改档后行不会立刻消失，重新点芯片才按最新分配重取。
+  const [pinned, setPinned] = useState<ReadonlySet<string> | null>(null);
+  const counts = useMemo(() => countAccessStoresByState(stores, assignments), [assignments, stores]);
+  const filtered = useMemo(() => applyAccessStoreFilter(stores, query, pinned), [pinned, query, stores]);
+
+  const chooseFilter = (next: AccessStoreFilter) => {
+    setStateFilter(next);
+    setPinned(pinAccessStoresByState(stores, assignments, next));
+  };
+  // 店长没有「管理」档：没有管理分店时不显示这个芯片（已选中时保留，避免选中项消失）。
+  const filterKeys: AccessStoreFilter[] = (["all", "manage", "view", "unassigned"] as const).filter(
+    (key) => key !== "manage" || canGrantManage || counts.manage > 0 || stateFilter === "manage",
+  );
 
   if (!stores.length) {
     return (
@@ -70,11 +86,44 @@ export function AccessStoresSection({
   return (
     <View style={accessSectionStyles.stack}>
       {stores.length >= STORE_SEARCH_MIN ? (
-        <AccessSearchBox
-          value={query}
-          onChangeText={setQuery}
-          placeholder={t("stores.searchPlaceholder")}
-        />
+        <>
+          <AccessSearchBox
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t("stores.searchPlaceholder")}
+          />
+          <View style={styles.filterRow} accessibilityRole="radiogroup" accessibilityLabel={t("stores.filterA11y")}>
+            {filterKeys.map((key) => {
+              const selected = stateFilter === key;
+              const isManage = key === "manage";
+              const label = key === "all" ? t("stores.filterAll") : labelOf(key);
+              return (
+                <Pressable
+                  key={key}
+                  testID={`access-store-filter-${key}`}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${label} ${counts[key]}`}
+                  accessibilityState={{ selected }}
+                  hitSlop={6}
+                  onPress={() => chooseFilter(key)}
+                  style={[
+                    styles.filterChip,
+                    selected && (isManage ? styles.filterChipManage : styles.filterChipSelected),
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selected && styles.filterChipTextSelected,
+                    ]}
+                  >
+                    {`${label} ${counts[key]}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
       ) : null}
       {filtered.length === 0 ? (
         <AccessEmptyText>{t("stores.noMatch")}</AccessEmptyText>
@@ -193,6 +242,26 @@ function StoreStateSwitch({
 }
 
 const styles = StyleSheet.create({
+  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterChip: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outline,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 14,
+  },
+  filterChipSelected: { backgroundColor: HB_COLORS.textPrimary, borderColor: HB_COLORS.textPrimary },
+  filterChipManage: { backgroundColor: HB_COLORS.brand, borderColor: HB_COLORS.brand },
+  filterChipText: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+  },
+  filterChipTextSelected: { color: HB_COLORS.white, fontWeight: "800" },
   row: { gap: 6, paddingHorizontal: 14, paddingVertical: 12 },
   rowDivider: { borderTopColor: HB_COLORS.outlineMuted, borderTopWidth: StyleSheet.hairlineWidth },
   head: { alignItems: "center", flexDirection: "row", gap: 10 },

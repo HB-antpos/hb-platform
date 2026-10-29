@@ -568,6 +568,7 @@ namespace BlazorApp.Api.Services
                     RoleName = roleName,
                     Description = description,
                     IsActive = true,
+                    Level = Permissions.RoleLevels.ForRoleName(roleName),
                     CreatedAt = DateTime.UtcNow,
                 }
             );

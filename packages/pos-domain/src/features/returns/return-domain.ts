@@ -95,6 +95,9 @@ export type VoucherFundedRefundBasis = Readonly<{
 export type ReceiptReturnContext = Readonly<{
   originalOrderGuid: string;
   receiptLabel: string;
+  /** 原单售出时间与收银员，仅用于退货页摘要“订单 #单号 时间 收银员”（对齐 WPF #701）；缺省不显示。 */
+  soldAtIso?: string | null;
+  cashierName?: string | null;
   loadedFrom: "remote" | "local";
   returnRecordsMayBeStale: boolean;
   lines: readonly ReceiptReturnLine[];

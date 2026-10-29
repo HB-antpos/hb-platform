@@ -93,8 +93,9 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
     stores,
     isDeviceMode,
     deviceBoundStore: deviceBoundStoreCode ? stores.find((store) => store.storeCode === deviceBoundStoreCode) ?? null : null,
-    isAdmin: access.isAdmin,
-  }), [access.isAdmin, deviceBoundStoreCode, isDeviceMode, stores]);
+    // 仓库管理在服务端不限分店，但后端返回给它的分店 isPrimary 恒为 false，按 isPrimary 过滤会得到 0 家。
+    isAdmin: access.isAdmin || access.isWarehouseManager,
+  }), [access.isAdmin, access.isWarehouseManager, deviceBoundStoreCode, isDeviceMode, stores]);
   const posEnabledStores = useMemo(() => getPosEnabledStores(stores), [stores]);
   const store = stores.find((item) => item.storeCode === requestedStoreCode) ?? null;
   const storeAllowed = canCreateUsers && Boolean(requestedStoreCode) && isStoreManageable(requestedStoreCode, manageableStores);

@@ -1,3 +1,5 @@
+import type { PersonalCodeSymbology } from "./personal-code-symbology";
+
 export type PrinterBarcodeKind = "EAN13" | "CODE128";
 
 export type PrinterTransport = "classic" | "ble" | "dual" | "unknown";
@@ -87,4 +89,6 @@ export interface EmployeeCashierBarcodeLabelPrintPayload {
   employeeName: string;
   username: string;
   barcode: string;
+  /** 缺省为二维码；仅 "barcode" 时打印 EAN13 一维码。 */
+  symbology?: PersonalCodeSymbology;
 }

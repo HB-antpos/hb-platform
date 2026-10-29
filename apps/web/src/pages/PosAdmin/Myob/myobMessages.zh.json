@@ -1,0 +1,915 @@
+{
+  "myob": {
+    "title": "MYOB 对接",
+    "subtitle": "连接各公司文件的 MYOB 账号，并把分店对应到发薪公司",
+    "reload": "刷新",
+    "notice": {
+      "title": "授权须知",
+      "admin": "授权必须由该 MYOB 公司文件的 Administrator 登录 MYOB 后完成，其他角色授权会失败或权限不足。",
+      "perAbn": "每个 ABN 对应一个公司文件，每个公司文件各授权一次；授权后在下方为分店选择对应的公司文件。"
+    },
+    "callback": {
+      "connected": "MYOB 公司文件已连接",
+      "error": "MYOB 授权失败：{{reason}}"
+    },
+    "connections": {
+      "title": "已连接的公司文件",
+      "connect": "连接 MYOB 公司文件",
+      "empty": "还没有连接任何 MYOB 公司文件，点击右上角「连接 MYOB 公司文件」开始授权",
+      "loadFailed": "加载连接失败",
+      "retry": "重试",
+      "authorizeFailed": "获取 MYOB 授权地址失败",
+      "disconnectedTitle": "已断开（{{count}}）",
+      "columns": {
+        "company": "公司名",
+        "businessId": "BusinessId",
+        "abn": "ABN",
+        "status": "状态",
+        "authorized": "授权人 / 时间",
+        "lastRefreshed": "最近验证",
+        "stores": "已映射分店",
+        "actions": "操作"
+      },
+      "status": {
+        "Active": "已连接",
+        "NeedsReauth": "需重新授权",
+        "Disconnected": "已断开"
+      },
+      "copyBusinessId": "复制 BusinessId",
+      "copyDone": "已复制",
+      "copyFailed": "复制失败，请手动复制",
+      "storeCount": "{{count}} 家",
+      "noStores": "无",
+      "unknownCompany": "（未命名）"
+    },
+    "abn": {
+      "empty": "未填写",
+      "edit": "编辑 ABN",
+      "save": "保存",
+      "cancel": "取消",
+      "placeholder": "11 位数字，可含空格",
+      "invalid": "ABN 必须是 11 位数字",
+      "saved": "ABN 已更新",
+      "cleared": "ABN 已清除",
+      "saveFailed": "保存 ABN 失败"
+    },
+    "actions": {
+      "verify": "验证",
+      "verified": "验证通过，已刷新公司信息",
+      "verifyFailed": "验证失败",
+      "reauthorize": "重新授权",
+      "disconnect": "断开",
+      "disconnectTitle": "断开 {{name}}？",
+      "disconnectContent": "断开后会清除该公司文件的授权令牌，并移除它下面所有分店的映射（当前 {{count}} 家）。之后需重新授权并重新映射才能继续使用。",
+      "disconnectOk": "确认断开",
+      "disconnectCancel": "取消",
+      "disconnected": "已断开 {{name}}",
+      "disconnectFailed": "断开失败"
+    },
+    "mappings": {
+      "title": "分店 → 公司文件映射",
+      "hint": "分店所属的公司文件即默认发薪公司；仅可选择状态为「已连接」的公司文件。",
+      "empty": "没有分店数据",
+      "loadFailed": "加载分店映射失败",
+      "noConnections": "还没有可选的已连接公司文件，请先在上方连接。",
+      "showInactive": "显示未启用分店",
+      "inactive": "未启用",
+      "adoptAll": "一键采用全部建议（{{count}}）",
+      "adopt": "采用",
+      "suggestion": "建议：{{name}}",
+      "unsaved": "{{count}} 项未保存",
+      "save": "保存",
+      "saved": "已保存 {{count}} 项映射",
+      "saveFailed": "保存映射失败",
+      "discard": "放弃修改",
+      "columns": {
+        "store": "分店",
+        "abn": "分店 ABN",
+        "mapping": "当前映射",
+        "suggestion": "建议"
+      },
+      "select": "选择公司文件",
+      "needsReauthOption": "{{name}}（需重新授权）",
+      "noAbn": "未填写"
+    },
+    "errors": {
+      "notConfigured": "服务器尚未配置 MYOB 应用凭据，请联系管理员",
+      "invalidState": "授权状态已失效或不匹配，请重新发起授权",
+      "authorizationDenied": "授权被拒绝或已取消",
+      "tokenExchangeFailed": "换取 MYOB 令牌失败，授权码可能已过期，请重新授权",
+      "businessIdMissing": "MYOB 没有返回公司文件 ID，请确认选择了公司文件并重试",
+      "connectionNotFound": "找不到该 MYOB 连接",
+      "connectionNotActive": "该连接不是「已连接」状态",
+      "needsReauthorization": "该连接的授权已失效，请重新授权",
+      "invalidAbn": "ABN 格式不正确",
+      "storeNotFound": "找不到对应的分店",
+      "apiCallFailed": "调用 MYOB 接口失败，请稍后重试",
+      "unknown": "未知错误，请稍后重试或联系管理员"
+    },
+    "tabs": {
+      "connections": "连接与映射",
+      "employees": "员工绑定",
+      "payroll": "发薪公司",
+      "push": "推送与对账",
+      "preview": "预览",
+      "pending": "{{count}} 待处理",
+      "noAccess": "你没有可用的 MYOB 页签权限",
+      "ariaLabel": "MYOB 对接功能页签"
+    },
+    "employees": {
+      "company": {
+        "title": "选择发薪公司文件",
+        "hint": "员工按「发薪公司」列出；在 A 店上班但由 B 公司发薪的员工，出现在 B 公司的名单里并带「跨公司」角标",
+        "refresh": "刷新 MYOB 员工",
+        "refreshedAt": "（上次 {{time}}）",
+        "abn": "ABN {{abn}}",
+        "noAbn": "未填写 ABN",
+        "employeeCount": "员工 {{count}} 人由这家发薪",
+        "connectOther": "连接其他公司文件",
+        "empty": "还没有已连接的公司文件。请先让有「连接与映射」权限的同事连接 MYOB 公司文件。",
+        "loadFailed": "加载公司文件失败",
+        "refreshFailed": "刷新 MYOB 员工失败",
+        "refreshed": "已刷新 MYOB 员工",
+        "select": "选择 {{name}}",
+        "retry": "重试",
+        "emptyCanConnect": "还没有已连接的公司文件，点击「连接其他公司文件」开始授权。"
+      },
+      "title": "员工绑定 · {{name}}",
+      "hint": "系统按 邮箱 → 生日 → 姓名 → 手机 打分给出建议，你确认后才生效；不会改动 MYOB 里的任何资料",
+      "loadFailed": "加载员工绑定失败",
+      "subtabs": {
+        "list": "绑定列表",
+        "missing": "对方没有",
+        "typeIssues": "用工类型检查",
+        "aria": "员工绑定视图"
+      },
+      "filters": {
+        "all": "全部",
+        "bound": "已绑定",
+        "suggested": "高分建议",
+        "review": "需人工确认",
+        "unmatched": "未匹配"
+      },
+      "search": "搜索姓名 / 邮箱 / 分店",
+      "batch": {
+        "title": "{{count}} 条「邮箱 + 生日都一致」的高分建议可以批量确认",
+        "hint": "中分、冲突和手机/姓名有差异的不会被批量带上，需要逐条核对",
+        "view": "先看看这 {{count}} 条",
+        "confirm": "确认这 {{count}} 条",
+        "confirmTitle": "确认这 {{count}} 条绑定？",
+        "confirmContent": "将把这 {{count}} 位员工绑定到各自建议的 MYOB 员工卡。服务端会重新核对得分，不是高分的会被拒绝；绑定后随时可以解除，不会修改 MYOB 里的资料。",
+        "confirmOk": "确认绑定"
+      },
+      "columns": {
+        "ours": "我方员工",
+        "myobCard": "MYOB 员工卡（{{name}}）",
+        "basis": "匹配依据",
+        "score": "得分",
+        "status": "状态",
+        "actions": "操作"
+      },
+      "cross": "跨公司",
+      "noCandidate": "没有找到相近的员工卡",
+      "empty": "没有符合条件的员工",
+      "total": "共 {{total}} 人 · 本页 {{page}} 条（已按「建议 → 需确认 → 未匹配 → 已绑定」排序）",
+      "type": {
+        "FullTime": "全职",
+        "PartTime": "兼职",
+        "Temporary": "临时工"
+      },
+      "status": {
+        "Suggested": "高分建议",
+        "NeedsReview": "需人工确认",
+        "Conflict": "冲突",
+        "Unmatched": "未匹配",
+        "Bound": "已绑定",
+        "conflictBoundTo": "该卡已绑定 {{name}}",
+        "boundBy": "{{who}} · {{time}}",
+        "cardMissing": "MYOB 里找不到这张卡了（已删除或停用）"
+      },
+      "basis": {
+        "email": "邮箱",
+        "birthday": "生日",
+        "name": "姓名",
+        "phone": "手机"
+      },
+      "signal": {
+        "match": "一致",
+        "mismatch": "不一致",
+        "unknown": "无法比对"
+      },
+      "scoreAria": "得分 {{score}}",
+      "actions": {
+        "confirm": "确认绑定",
+        "review": "核对并绑定",
+        "change": "换一个",
+        "searchOther": "搜索其他卡",
+        "searchMyob": "搜索 MYOB 员工卡",
+        "unbind": "解除绑定",
+        "confirmed": "已绑定 {{name}}",
+        "batchConfirmed": "已确认 {{count}} 条绑定",
+        "confirmFailed": "确认绑定失败",
+        "unbindTitle": "解除 {{name}} 的绑定？",
+        "unbindContent": "解除后该员工回到待处理列表，需要时可重新绑定；不会修改 MYOB 里的资料。",
+        "unbindOk": "确认解除",
+        "cancel": "取消",
+        "unbound": "已解除 {{name}} 的绑定",
+        "unbindFailed": "解除绑定失败"
+      },
+      "failures": {
+        "title": "{{ok}} 条已绑定，{{count}} 条失败",
+        "titleAllFailed": "{{count}} 条绑定失败",
+        "line": "{{name}}：{{reason}}",
+        "ok": "知道了",
+        "userNotFound": "找不到这位员工",
+        "cardNotFound": "MYOB 里找不到这张员工卡（请先刷新 MYOB 员工）",
+        "cardAlreadyBound": "这张卡已经被别的员工绑定",
+        "userAlreadyBound": "这位员工已经绑定了 MYOB 员工卡",
+        "notHighScore": "不再是高分建议，请改用「核对并绑定」逐条核对",
+        "linkNotFound": "找不到这条绑定记录（可能已被解除）"
+      },
+      "entitlement": {
+        "both": "年假 / 病假累计",
+        "annualOnly": "只挂了年假累计",
+        "sickOnly": "只挂了病假累计",
+        "none": "无年假 / 病假累计"
+      },
+      "missing": {
+        "hint": "帮财务找出两边对不上的人，以及用工类型和 MYOB 设置不相符的人",
+        "ours": {
+          "title": "我方有、MYOB 没有",
+          "hint": "请财务在 MYOB 新建员工卡；建好后点「刷新」，系统会自动给出建议",
+          "copy": "复制资料",
+          "copied": "已复制 {{name}} 的资料",
+          "joined": "入职 {{date}}",
+          "note": "「复制资料」只复制姓名、邮箱、生日、手机到剪贴板，方便你粘贴到 MYOB 新建员工卡；系统不会自动在 MYOB 建卡。",
+          "empty": "没有需要在 MYOB 新建的员工"
+        },
+        "theirs": {
+          "title": "MYOB 有、我方没有",
+          "hint": "可能是已离职未停用、别家公司的人，或我方还没建档",
+          "create": "我方建档",
+          "ignore": "忽略",
+          "ignored": "已忽略 {{name}}",
+          "ignoreFailed": "忽略失败",
+          "active": "在职",
+          "inactive": "MYOB 已停用",
+          "empty": "MYOB 里没有多出来的人"
+        }
+      },
+      "typeIssues": {
+        "title": "用工类型检查",
+        "hint": "只提示，不阻止；年假 / 病假余额只对全职、兼职显示（临时工不显示余额）",
+        "columns": {
+          "employee": "员工",
+          "ourType": "我方用工类型",
+          "myobStatus": "MYOB 现状",
+          "issue": "问题",
+          "advice": "建议"
+        },
+        "codes": {
+          "missingLeave": "假期余额拉不到",
+          "temporaryHasLeave": "临时工不应有假期累计",
+          "unknown": "用工类型与 MYOB 设置不一致"
+        },
+        "actions": {
+          "fix": {
+            "missingLeave": "告知财务在 MYOB 补设",
+            "temporaryHasLeave": "告知财务在 MYOB 修改",
+            "generic": "告知财务"
+          }
+        },
+        "notes": {
+          "missingLeave": "请在 MYOB 给 {{name}}（{{type}}，{{stores}}）的员工卡补设「年假 / 病假」累计，否则系统拉不到假期余额。",
+          "temporaryHasLeave": "{{name}}（{{type}}，{{stores}}）在系统里是临时工，但 MYOB 员工卡挂了年假 / 病假累计，请核对并修改。",
+          "generic": "{{name}}（{{type}}，{{stores}}）的用工类型与 MYOB 设置不一致，请核对。"
+        },
+        "noteCopied": "已复制给财务的说明，可直接粘贴发送",
+        "mystatus": "MYOB 用工状态：{{status}}",
+        "empty": "没有用工类型不一致的员工"
+      },
+      "birthdayLine": "生日 {{birthday}}"
+    },
+    "drawer": {
+      "title": "为 {{name}} 选择 MYOB 员工卡",
+      "subtitle": "只读取 MYOB 员工卡，确认后不会修改 MYOB 里的资料",
+      "close": "关闭",
+      "search": "在 {{company}} 的 MYOB 员工里搜索：姓名 / 邮箱 / 手机末 4 位",
+      "phone": "手机 {{value}}",
+      "birthday": "生日 {{value}}",
+      "notFilled": "未填写",
+      "unselectable": "不可选",
+      "boundTo": "已绑定给 {{name}}（我方）",
+      "candidatesTitle": "候选员工卡",
+      "empty": "没有找到匹配的员工卡，换个关键字试试",
+      "loadFailed": "加载候选员工卡失败",
+      "retry": "重试",
+      "scoreAria": "得分 {{score}}",
+      "compareTitle": "逐项对比",
+      "compare": {
+        "ours": "我方",
+        "theirs": "MYOB",
+        "result": "结果",
+        "same": "一致",
+        "diff": "不同",
+        "unknown": "无法比对",
+        "typeSame": "相符",
+        "typeDiff": "不符",
+        "fields": {
+          "name": "姓名",
+          "email": "邮箱",
+          "phone": "手机",
+          "birthday": "生日",
+          "type": "用工类型"
+        }
+      },
+      "warn": {
+        "both": "邮箱不同、生日无法比对，仅靠 姓名 + 手机 判断。请确认这确实是同一个人再绑定；绑定后随时可以解除。",
+        "email": "邮箱不同，请确认这确实是同一个人再绑定；绑定后随时可以解除。",
+        "birthday": "生日无法比对，请确认这确实是同一个人再绑定；绑定后随时可以解除。"
+      },
+      "cancel": "取消",
+      "confirm": "确认绑定到 {{name}}"
+    },
+    "payroll": {
+      "title": "发薪公司（按「员工 × 上班分店」）",
+      "hint": "默认：工时由上班分店所属的公司发薪。只有「在 A 店上班、由 B 公司发薪」这类例外才需要设置；同一个分店的工时不会拆给两家公司",
+      "search": "搜索员工",
+      "allStores": "全部分店",
+      "crossOnly": "只看跨公司",
+      "reload": "刷新",
+      "loadFailed": "加载发薪公司失败",
+      "retry": "重试",
+      "empty": "没有符合条件的员工",
+      "total": "共 {{total}} 行",
+      "columns": {
+        "employee": "员工",
+        "store": "上班分店",
+        "defaultCompany": "该分店所属公司（默认）",
+        "effectiveCompany": "本期实际发薪公司",
+        "effectiveFrom": "生效起",
+        "actions": "操作"
+      },
+      "cross": "跨公司",
+      "otherStores": "另有 {{stores}}",
+      "override": "例外",
+      "byStore": "按分店",
+      "unset": "未设置",
+      "set": "设置",
+      "edit": "编辑",
+      "editAria": "设置 {{name}} 在 {{store}} 的发薪公司"
+    },
+    "payrollDrawer": {
+      "title": "{{name}} 的发薪公司",
+      "subtitle": "需要「编辑工资」权限；每次修改都会记入审计",
+      "close": "关闭",
+      "loadFailed": "加载发薪公司详情失败",
+      "retry": "重试",
+      "columns": {
+        "store": "上班分店",
+        "defaultCompany": "默认公司",
+        "override": "改由其他公司发"
+      },
+      "byStoreOption": "按分店（{{company}}）",
+      "byStoreNoCompany": "按分店（分店还没映射公司）",
+      "noDefault": "未映射",
+      "effectiveFrom": "生效日期",
+      "effectiveHint": "只能选工资周期起始日，避免周期中途把同一分店的工时拆开",
+      "periodStart": "{{date}}（周期起始日）",
+      "currentPeriod": "{{date}}（当前期起始日）",
+      "noAllowedDates": "当前没有可选的生效日期，暂时无法保存",
+      "unbound": {
+        "title": "{{company}} 还没有绑定 {{name}}。",
+        "body": "保存后推送工时前，需要先在「员工绑定」里绑定。",
+        "go": "去绑定"
+      },
+      "history": "历史",
+      "historyEmpty": "还没有修改记录",
+      "historyOverride": "{{date}} 起 · {{store}} 由 {{company}} 发薪",
+      "historyDefault": "{{date}} 起 · {{store}} 改回按分店",
+      "historyBy": "设置人 {{who}} · {{time}}",
+      "cancel": "取消",
+      "save": "保存",
+      "saved": "已保存 {{name}} 的发薪公司",
+      "saveFailed": "保存发薪公司失败",
+      "noChanges": "没有改动"
+    },
+    "payCategories": {
+      "title": "Timesheet 工资类别映射",
+      "hint": "推送工时前，要告诉系统「我方的哪一档工时，对应 MYOB 里的哪个工资类别」。每个公司文件单独设置一次。",
+      "refresh": "重新读取 MYOB 工资类别",
+      "refreshedAt": "（上次 {{time}}）",
+      "refreshed": "已重新读取 MYOB 工资类别",
+      "refreshFailed": "重新读取 MYOB 工资类别失败",
+      "loadFailed": "读取 MYOB 工资类别失败",
+      "loadFailedShort": "读取失败",
+      "loadingShort": "读取中…",
+      "retry": "重试",
+      "noCompanies": "还没有已连接的公司文件，请先在上方连接并验证。",
+      "noCategories": "没有从 {{name}} 读到任何工资类别。请确认该公司文件在 MYOB 里已设置工资类别，然后点右上角「重新读取」。",
+      "companyAria": "选择要设置工资类别映射的公司文件",
+      "mappedCount": "已映射 {{mapped}} / {{total}} 项",
+      "complete": "已完整",
+      "incomplete": "未完整",
+      "columns": {
+        "ours": "我方工时",
+        "arrow": "对应",
+        "myob": "MYOB 工资类别（读取自 {{name}}）",
+        "note": "说明"
+      },
+      "rows": {
+        "weekday": {
+          "label": "平日",
+          "sub": "含公假上班、带薪公假",
+          "note": "公假上班、带薪公假也走这个类别（公假转账价须等于平日价）"
+        },
+        "saturday": {
+          "label": "周六",
+          "sub": "全职、兼职",
+          "note": "时薪倍数由 MYOB 类别决定，需与我方周六转账价一致"
+        },
+        "sunday": {
+          "label": "周日",
+          "sub": "全职、兼职",
+          "note": "时薪倍数由 MYOB 类别决定，需与我方周日转账价一致"
+        },
+        "saturdayCasual": {
+          "label": "周六（临时工）",
+          "sub": "Casual",
+          "note": "临时工的周六用单独的 MYOB 类别；公司里没有临时工周六工时可以不设，有了没设则该员工不能推送"
+        },
+        "sundayCasual": {
+          "label": "周日（临时工）",
+          "sub": "Casual",
+          "note": "临时工的周日用单独的 MYOB 类别；公司里没有临时工周日工时可以不设，有了没设则该员工不能推送"
+        },
+        "personalLeave": {
+          "label": "病假",
+          "sub": "推送为 Personal Leave Pay",
+          "note": "MYOB 按此类别扣病假余额"
+        },
+        "holidayLeave": {
+          "label": "年假",
+          "sub": "推送为 Holiday Leave Pay",
+          "note": "MYOB 按此类别扣年假余额"
+        }
+      },
+      "placeholder": "请选择 MYOB 工资类别…",
+      "selectAria": "为「{{label}}」选择 MYOB 工资类别",
+      "noMatch": "没有匹配的工资类别",
+      "state": {
+        "suggested": "按名称相近推荐",
+        "suggestedHint": "已预填，可改；保存后才生效",
+        "unset": "未设置",
+        "optional": "可选",
+        "unsetHint": "没找到名称相近的类别，请手动选择；未设置前这类工时不能推送",
+        "missing": "类别已失效",
+        "missingHint": "MYOB 里找不到这个类别，请重新选择",
+        "edited": "已修改"
+      },
+      "note": {
+        "notPushedLabel": "不推送的：",
+        "notPushed": "年假折现（现金发放）由财务在 MYOB 手工处理。",
+        "prereqLabel": "MYOB 端前置配置",
+        "prereq": "（由财务确认）：工资设置里开启「使用 Timesheet 记录工资」、周起始日与我方一致、员工工资明细里挂上上面这些类别。"
+      },
+      "remaining": "还差 {{count}} 项必填未选择，5 项必填都选好才能保存",
+      "unsaved": "有未保存的改动",
+      "suggestionsUnsaved": "名称相近的推荐还没保存，确认无误后点「保存映射」",
+      "cancel": "取消",
+      "save": "保存映射",
+      "saved": "已保存 {{name}} 的工资类别映射",
+      "saveFailed": "保存工资类别映射失败",
+      "leave": {
+        "title": "放弃未保存的工资类别映射？",
+        "content": "你改过工资类别映射但还没保存，现在离开会丢失这些改动。",
+        "ok": "放弃并离开",
+        "cancel": "留在本页"
+      },
+      "switch": {
+        "title": "放弃未保存的改动？",
+        "content": "当前公司的工资类别映射有未保存的改动，切换公司会丢失它们。",
+        "ok": "放弃并切换",
+        "cancel": "继续编辑"
+      }
+    },
+    "push": {
+      "title": "推送工时到 MYOB · 预览",
+      "hint": "只推送转账部分的工时；现金部分不进 MYOB。预览不会往 MYOB 写任何东西。",
+      "period": "工资周期",
+      "periodPlaceholder": "选择工资周期",
+      "weeksSuffix": "（{{count}} 周）",
+      "loadFailed": "加载推送预览失败",
+      "retry": "重试",
+      "reload": "刷新预览",
+      "check": "检查 MYOB 状态",
+      "recheck": "重新检查 MYOB 状态",
+      "checkHint": "会逐个员工读取 MYOB，较慢；用来确认本周期在 MYOB 里是否已有记录或已发薪。",
+      "cross": "跨公司",
+      "goBind": "去绑定",
+      "goBindAria": "去绑定 {{name}} 的 MYOB 员工卡",
+      "detail": "按日明细",
+      "detailAria": "查看 {{name}} 的按日推送明细",
+      "moreBlockers": "另有 {{count}} 项",
+      "total": "共 {{total}} 人",
+      "empty": "这个周期没有可推送的工时数据（该公司本期没有员工工时，或工时还没提交锁定）",
+      "range": "{{name}} · 工资周期 {{range}}",
+      "pushButton": "推送到 MYOB（{{count}} 人）",
+      "pushDisabledTip": "推送功能稍后开放",
+      "pushDisabledNote": "推送功能稍后开放",
+      "export": "导出预览 CSV",
+      "company": {
+        "aria": "选择要预览的发薪公司",
+        "count": "本期 {{count}} 人由这家发薪",
+        "empty": "还没有已连接的公司文件，请先让有「连接与映射」权限的同事连接并验证。"
+      },
+      "columns": {
+        "employee": "员工",
+        "stores": "分店",
+        "weekday": "平日",
+        "saturday": "周六",
+        "sunday": "周日",
+        "personalLeave": "病假",
+        "holidayLeave": "年假",
+        "pushedTotal": "推送合计",
+        "status": "状态"
+      },
+      "payMode": {
+        "Transfer": "全转账",
+        "Cash": "全现金",
+        "Mixed": "转账+现金 {{hours}}h/周"
+      },
+      "status": {
+        "ready": "可推送",
+        "readyCashOut": "可推送 · 折现不推",
+        "noTransfer": "无转账工时 · 不推送"
+      },
+      "blocker": {
+        "NOT_BOUND": "未绑定",
+        "STORE_NOT_LOCKED": "分店未锁定",
+        "STORE_NOT_MAPPED": "分店未映射",
+        "CATEGORY_NOT_MAPPED": "类别未映射",
+        "NO_RATE": "无时薪",
+        "NO_STORE_ACCESS": "无权限",
+        "MYOB_PROCESSED": "MYOB 已发薪",
+        "unknown": "被拦截"
+      },
+      "notes": {
+        "crossShare": "本公司分到转账额度 {{allocated}} h（共 {{total}} h，按工时比例 {{ratio}}）",
+        "crossShareNoRatio": "本公司分到转账额度 {{allocated}} h（共 {{total}} h）",
+        "bound": "已绑定 · {{name}}",
+        "leaveFirst": "病假 / 年假先于平日装入转账",
+        "myobHasEntries": "MYOB 里已有未发薪的记录",
+        "myobCheckFailed": "读取 MYOB 失败，状态未知"
+      },
+      "readiness": {
+        "aria": "推送前检查",
+        "locked": {
+          "title": "分店已提交锁定",
+          "none": "本期没有已锁定的分店"
+        },
+        "unlocked": {
+          "title": "{{count}} 家分店未锁定",
+          "item": "{{label}} · 涉及 {{count}} 人",
+          "noneTitle": "没有未锁定的分店",
+          "noneSub": "涉及的分店本期都已提交锁定"
+        },
+        "category": {
+          "title": "工资类别已映射 {{mapped}} / {{total}}",
+          "incomplete": "没映射完整的类别，相关工时不能推送",
+          "go": "去映射"
+        },
+        "processed": {
+          "title": "MYOB 已发薪的周期不覆盖",
+          "unchecked": "未检查：点上方「检查 MYOB 状态」后显示",
+          "some": "{{count}} 人在 MYOB 里已发薪，不会覆盖",
+          "failed": "{{count}} 人读取 MYOB 失败，请稍后重新检查",
+          "none": "本期 MYOB 里尚无已发薪记录"
+        },
+        "state": {
+          "ok": "正常",
+          "bad": "需要处理",
+          "warn": "请注意",
+          "muted": "未检查"
+        }
+      },
+      "hints": {
+        "title": "{{count}} 条提示，不阻止推送，请逐条知晓：",
+        "ack": "我已知晓以上提示",
+        "codes": {
+          "BIRTHDAY_REVIEW": "满 18 岁需调时薪",
+          "BELOW_MINIMUM_RATE": "低于最低时薪",
+          "PUBLIC_HOLIDAY_RATE_MISMATCH": "公假价与平日价不一致",
+          "ANNUAL_CASH_OUT_NOT_PUSHED": "年假折现不推送",
+          "unknown": "其他提示"
+        },
+        "nameSep": "："
+      },
+      "summary": {
+        "ready": "可推送 {{count}} 人 · 合计 ",
+        "hours": "{{hours}} h",
+        "blockedPrefix": "被拦截 ",
+        "people": "{{count}} 人",
+        "blockedSuffix": "（不会被悄悄跳过，会列在结果里）",
+        "noTransfer": "不推送 {{count}} 人"
+      },
+      "weekdays": {
+        "sun": "周日",
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六"
+      },
+      "drawer": {
+        "title": "{{name}} · 按日推送明细",
+        "close": "关闭",
+        "closeButton": "关闭",
+        "noDays": "这个周期没有按日数据",
+        "explain": {
+          "label": "怎么分的：",
+          "crossIntro": "先按各公司的工时比例分摊固定转账工时（{{pairs}}{{ratio}} → {{allocated}}）；再在本公司分到的额度里按 ",
+          "crossOutro": " 装入。",
+          "singleIntro": "固定转账工时按 ",
+          "singleOutro": " 装入，装不下的部分按现金发放。",
+          "orderChain": "周日 → 周六 → 带薪假 → 公假 → 平日",
+          "allTransfer": "全转账员工：本公司的实际工时全部按日推送，不涉及转账额度的分摊。",
+          "allCash": "全现金员工：没有转账工时，不会推送。"
+        },
+        "subtitle": {
+          "mixed": "转账 + 现金（固定转账 {{fixed}}h/周，本公司分到 {{allocated}} h）",
+          "transfer": "全转账",
+          "cash": "全现金"
+        },
+        "actualTitle": "本公司实际工时（{{stores}}）",
+        "actualEmpty": "本公司本期没有工时",
+        "pushedTitle": "将推送到 MYOB 的转账工时",
+        "pushedApi": "PUT Payroll/Timesheet",
+        "pushedNote": "按上方「怎么分的」的顺序装入转账额度；同一类别装不满时，按日期从早到晚填满，最后一天可能只填一部分。",
+        "pushedEmpty": "没有要推送的转账工时",
+        "cashTitle": "不推送（现金发放）",
+        "cashEmpty": "没有现金发放的工时",
+        "cashRow": "{{name}}（现金）",
+        "categoryHead": "类别",
+        "total": "合计",
+        "check": {
+          "ok": "校验通过",
+          "bad": "校验未通过",
+          "sep": "："
+        },
+        "annualCashOut": "另有 {{hours}} h 年假折现占用了转账额度，不会推送，请财务在 MYOB 手工处理。",
+        "kinds": {
+          "weekday": "平日",
+          "saturday": "周六",
+          "sunday": "周日",
+          "publicHolidayWork": "公假上班",
+          "publicHolidayPay": "带薪公假",
+          "sick": "病假",
+          "annual": "年假",
+          "annualCashOut": "年假折现"
+        },
+        "pushedRows": {
+          "weekday": "平日",
+          "saturday": "周六",
+          "sunday": "周日",
+          "saturdayCasual": "周六（临时工）",
+          "sundayCasual": "周日（临时工）",
+          "personalLeave": "病假（Personal Leave Pay）",
+          "holidayLeave": "年假（Holiday Leave Pay）"
+        }
+      },
+      "csv": {
+        "employee": "员工",
+        "stores": "分店",
+        "payMode": "发放方式",
+        "weekday": "平日",
+        "saturday": "周六",
+        "sunday": "周日",
+        "personalLeave": "病假",
+        "holidayLeave": "年假",
+        "pushedTotal": "推送合计",
+        "cashOut": "年假折现（不推送）",
+        "status": "状态",
+        "reason": "被拦截原因",
+        "myobCard": "MYOB 员工卡"
+      }
+    },
+    "sync": {
+      "entry": {
+        "button": "从 MYOB 同步资料",
+        "row": "同步资料",
+        "noPermission": "需要「员工个人信息 · 编辑」权限才能同步资料",
+        "selectRow": "选择 {{name}}"
+      },
+      "title": "从 MYOB 同步资料到我方",
+      "readOnly": "只读取 MYOB，不会改动 MYOB 里的任何资料",
+      "fetchedAt": "MYOB 数据拉取于 {{age}}",
+      "refresh": "刷新",
+      "close": "关闭",
+      "age": {
+        "justNow": "刚刚",
+        "minutes": "{{count}} 分钟前",
+        "hours": "{{count}} 小时前",
+        "days": "{{count}} 天前"
+      },
+      "steps": {
+        "select": "选择字段",
+        "review": "核对差异",
+        "done": "完成"
+      },
+      "step1": {
+        "fieldsTitle": "要同步哪些字段",
+        "fieldsHint": "数字 = 本次范围内已绑定员工的情况",
+        "selectAll": "全选",
+        "selectDiff": "只选有差异的",
+        "clear": "清空",
+        "groups": {
+          "basic": "基本资料",
+          "employment": "用工与资金"
+        },
+        "groupSource": "MYOB 来源 → 我方字段",
+        "sensitive": "敏感",
+        "sensitiveNote": "敏感字段默认不勾，需要你手动勾选；写入时走「敏感资料直改」，并留下可撤销的同步记录。",
+        "fillable": "补空 {{count}}",
+        "differs": "不同 {{count}}",
+        "modeTitle": "遇到我方已有值、且和 MYOB 不一样时",
+        "modes": {
+          "FillEmpty": {
+            "title": "只补空，不覆盖（推荐）",
+            "desc": "我方为空才写入；有差异的只列出，下一步逐项勾选"
+          },
+          "Overwrite": {
+            "title": "以 MYOB 为准，全部覆盖",
+            "desc": "有差异的也默认勾上；写入前留快照，可撤销"
+          }
+        },
+        "scopeTitle": "同步范围",
+        "scope": {
+          "selected": "只同步勾选的 {{count}} 人",
+          "selectedNames": "列表里勾了 {{names}}",
+          "selectedNamesMore": "列表里勾了 {{names}} 等 {{count}} 人",
+          "all": "当前「已绑定」全部 {{count}} 人",
+          "allSkip": "MYOB 里已找不到卡的 {{count}} 人自动跳过",
+          "allNoSkip": "只对 MYOB 里仍有员工卡的人生效",
+          "single": "只同步 {{name}}",
+          "singleDesc": "单人同步，范围固定为这 1 人",
+          "rescope": "只重新预览 {{name}}（沿用上次的字段）"
+        },
+        "summary": "已选 {{fields}} 个字段（含 {{sensitive}} 个敏感）· 范围 {{people}} 人",
+        "next": "下一步：核对差异",
+        "cancel": "取消",
+        "loadFailed": "加载字段统计失败",
+        "retry": "重试",
+        "noPermission": "你没有「员工个人信息 · 编辑」权限，不能把 MYOB 资料写入员工档案。请联系管理员授权后再试。",
+        "unavailable": "MYOB 暂时读取不到"
+      },
+      "step2": {
+        "subtitle": "还没有写入任何数据 · 下面是预览，勾上的才会写入我方 · 写入方式：{{mode}}",
+        "modeName": {
+          "FillEmpty": "只补空",
+          "Overwrite": "以 MYOB 为准"
+        },
+        "cards": {
+          "employees": "将更新员工",
+          "changes": "字段变更",
+          "checked": "已勾 {{count}}",
+          "skipped": "跳过",
+          "skippedDetail": "{{noDiff}} 无差异 · {{missing}} 卡已不存在",
+          "sensitive": "含敏感字段",
+          "person": "人",
+          "item": "项"
+        },
+        "sensitiveBanner": "已勾选 {{count}} 项敏感资料（生日、银行、退休金）。银行账号与退休金会员号只显示末 4 位，完整值仅在写入时传输。",
+        "sensitiveBannerNone": "本次预览含 {{total}} 项敏感资料（生日、银行、退休金），目前都没有勾选。银行账号与退休金会员号只显示末 4 位。",
+        "pendingBanner": "其中 {{names}} 有待审的敏感资料申请，写入敏感字段后该申请会自动作废。",
+        "filters": {
+          "all": "全部变更",
+          "overwrite": "仅有差异（覆盖）",
+          "sensitive": "仅敏感"
+        },
+        "checkAllFill": "全部勾选补空项",
+        "uncheckAll": "取消全部",
+        "columns": {
+          "employee": "员工",
+          "field": "字段",
+          "ours": "我方现值",
+          "myob": "MYOB 的值",
+          "mode": "方式"
+        },
+        "empty": "（空）",
+        "kind": {
+          "Fill": "补空",
+          "Overwrite": "覆盖"
+        },
+        "pendingTag": "待审申请将作废",
+        "checkRow": "写入 {{name}} 的{{field}}",
+        "ack": "我已核对敏感字段（生日、银行、退休金）",
+        "willWrite": "将写入 {{count}} 项 · 涉及 {{people}} 人",
+        "back": "返回",
+        "confirm": "确认同步 {{count}} 项",
+        "loadFailed": "生成预览失败",
+        "retry": "重试",
+        "emptyPreview": "所选字段在范围内没有需要同步的差异",
+        "emptyFiltered": "这个筛选下没有变更",
+        "submitFailed": "同步失败",
+        "unavailableBanner": "以下字段 MYOB 暂时读取不到（可能是付款详情接口没有权限），本次不会同步：{{fields}}"
+      },
+      "step3": {
+        "subtitle": "本次同步 {{time}} · 操作人 {{actor}}",
+        "writtenTitle": "已写入 {{people}} 人 · {{changes}} 项",
+        "noneWritten": "本次没有写入任何资料",
+        "sensitiveChip": "含 {{count}} 项敏感字段",
+        "otherLine": "另有 {{people}} 人 {{changes}} 项没有写入（见下方），{{skipped}} 人无需同步",
+        "otherNoFailed": "{{skipped}} 人无需同步",
+        "otherFailedOnly": "另有 {{people}} 人 {{changes}} 项没有写入（见下方）",
+        "writtenSection": "已写入的内容",
+        "columns": {
+          "employee": "员工",
+          "fields": "写入的字段",
+          "result": "结果"
+        },
+        "writtenCount": "已写入 {{count}}",
+        "rest": "其余 {{people}} 人 · {{changes}} 项已写入",
+        "expandAll": "展开全部",
+        "collapse": "收起",
+        "failedTag": "失败 {{count}} 人",
+        "failedHead": "{{name}} · {{fields}} {{count}} 项",
+        "rescope": "重新预览这 1 人",
+        "undoTitle": "本次同步已留快照，7 天内可撤销",
+        "undoDesc": "只还原本次写入的字段；写入之后又被人改过的字段不会动。撤销后这条记录会标为「已撤销」。",
+        "undo": "撤销本次同步",
+        "undoConfirmTitle": "撤销本次同步？",
+        "undoConfirmContent": "会把本次写入的 {{people}} 人 {{changes}} 项还原成写入前的值；写入之后又被人改过的字段不会还原。",
+        "undoConfirmOk": "确认撤销",
+        "undoCancel": "取消",
+        "undone": "已撤销本次同步：还原 {{people}} 人 · {{changes}} 项",
+        "undoneCard": "本次同步已撤销",
+        "undoSkipped": "{{count}} 项因写入后被改过，没有还原",
+        "undoFailed": "撤销失败",
+        "footerNote": "本次同步已留记录，可在「查看同步记录」里回看和撤销",
+        "viewHistory": "查看同步记录",
+        "done": "完成"
+      },
+      "batch": {
+        "title": "同步记录",
+        "hint": "最近 30 次同步；7 天内可整批撤销",
+        "empty": "还没有同步记录",
+        "loadFailed": "加载同步记录失败",
+        "retry": "重试",
+        "columns": {
+          "time": "时间",
+          "actor": "操作人",
+          "scope": "人数 / 项数",
+          "status": "状态",
+          "actions": "操作"
+        },
+        "scope": "{{people}} 人 · {{changes}} 项",
+        "scopeSensitive": "含敏感 {{count}} 项",
+        "status": {
+          "Active": "可撤销",
+          "Undone": "已撤销",
+          "Expired": "已过期"
+        },
+        "undoneBy": "{{name}} 于 {{time}} 撤销",
+        "deadline": "撤销截止 {{time}}",
+        "undo": "撤销"
+      },
+      "errors": {
+        "noPermission": "没有「员工个人信息 · 编辑」权限，不能同步资料",
+        "noFields": "请至少选择一个要同步的字段",
+        "batchNotFound": "找不到这次同步记录",
+        "batchAlreadyUndone": "这次同步已经撤销过了",
+        "batchExpired": "这次同步已超过 7 天，不能再撤销",
+        "notBound": "该员工已不是已绑定状态，没有写入",
+        "cardMissing": "MYOB 里已找不到这位员工的卡，没有写入",
+        "valueChanged": "预览之后这位员工的资料已被修改，为避免覆盖对方的改动，没有写入",
+        "versionConflict": "预览之后这位员工的敏感资料版本变了，为避免覆盖对方的改动，没有写入",
+        "pendingNeedsConfirm": "这位员工有待审的敏感资料申请，需要确认作废后才能写入",
+        "writeFailed": "写入失败，没有改动这位员工的资料"
+      },
+      "fields": {
+        "name": "姓名",
+        "phone": "手机",
+        "email": "邮箱",
+        "birthday": "生日",
+        "gender": "性别",
+        "address": "住址",
+        "employmentType": "用工类型",
+        "bank": "银行账户",
+        "super": "退休金"
+      },
+      "sources": {
+        "name": "MYOB 名 + 姓 → 我方姓名",
+        "phone": "统一成 04xx xxx xxx 再比较",
+        "email": "邮箱是绑定匹配依据，改了会影响今后打分，默认不选",
+        "birthday": "MYOB 薪资详情的出生日期",
+        "gender": "MYOB 薪资详情 → 男 / 女",
+        "address": "街道、城市、州、邮编拼成一行",
+        "employmentType": "全职→全职 · 兼职→兼职 · Casual→临时工 · Other 不同步",
+        "bank": "BSB + 账号（预览里账号只显示末 4 位）",
+        "super": "基金名称 + 代码 + 会员号"
+      }
+    }
+  }
+}

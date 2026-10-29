@@ -1208,6 +1208,36 @@ export function parseAudInput(value: string): Money | null {
   return Object.freeze({ currency: "AUD", cents });
 }
 
+/**
+ * 快捷现金金额累加（对齐 WPF #822）：连点 $50、$20 得到 $70，而不是被后一次覆盖。
+ * 只有当前输入框内容仍等于上一次快捷现金写入的文本时才累加；收银员手输、换支付方式或快照刷新
+ * 改动了输入框后，下一次快捷金额重新从该面额开始，不会把默认的整笔尾款误加进去。
+ */
+export function nextQuickCashAmountText(
+  currentText: string,
+  lastQuickCashText: string | null,
+  addDollars: number,
+): string {
+  const addCents = Math.round(addDollars * 100);
+  const accumulating = lastQuickCashText !== null && currentText === lastQuickCashText;
+  const baseCents = accumulating ? (parseAudInput(currentText)?.cents ?? 0) : 0;
+  return centsToAmountInput(baseCents + addCents);
+}
+
+/**
+ * 快捷现金是否已够付（累加到 >= 剩余应付）：已够后停用快捷键，避免误点把找零越加越大。
+ * 只在“累加模式”下判断——刚进入现金页时输入框默认就是整笔尾款，不能因此把快捷键全部置灰。
+ */
+export function isQuickCashSufficient(
+  currentText: string,
+  lastQuickCashText: string | null,
+  remaining: Money,
+): boolean {
+  if (lastQuickCashText === null || currentText !== lastQuickCashText) return false;
+  const amount = parseAudInput(currentText);
+  return amount !== null && amount.cents >= remaining.cents;
+}
+
 function paymentRecoveryDeadlineFields(
   options: PaymentRecoverOptions,
 ): Readonly<{ signal: AbortSignal; deadlineAtMs: number }> | Record<string, never> {

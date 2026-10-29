@@ -1195,7 +1195,7 @@ public sealed class ProductSetCodeTypeRepairRunner
     {
         UUID = UuidHelper.GenerateUuid7(), StoreCode = storeCode, ProductCode = product.ProductCode, StoreProductCode = product.ProductCode,
         SupplierCode = product.LocalSupplierCode, PurchasePrice = purchasePrice, StoreRetailPriceValue = product.RetailPrice,
-        DiscountRate = 1m, IsActive = product.IsActive, IsAutoPricing = product.IsAutoPricing, IsSpecialProduct = product.IsSpecialProduct,
+        DiscountRate = 0m, IsActive = product.IsActive, IsAutoPricing = product.IsAutoPricing, IsSpecialProduct = product.IsSpecialProduct,
         IsDeleted = false, CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
     };
 

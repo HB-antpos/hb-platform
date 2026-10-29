@@ -142,6 +142,9 @@ export const P = {
     View: 'EmployeeProfiles.View',
     Edit: 'EmployeeProfiles.Edit',
     EditPositionType: 'EmployeeProfiles.EditPositionType',
+    // 员工个人信息维护（Web 页面 / 用户管理「个人信息」页签 / 移动端共用）：管理员全部分店，店长限管理分店。
+    ViewManagedStore: 'EmployeeProfiles.ViewManagedStore',
+    EditManagedStore: 'EmployeeProfiles.EditManagedStore',
   },
   StoreProducts: {
     View: 'StoreProducts.View',
@@ -210,6 +213,12 @@ export const P = {
       ViewAllStores: 'SeasonalCards.Remaining.ViewAllStores',
     },
   },
+  // MYOB 对接（后台菜单「MYOB 对接」）：连接公司文件与分店映射，与后端 Permissions.Myob.Connection.Manage 一致（新权限默认不授予，Admin 靠角色放行）。
+  Myob: {
+    ConnectionManage: 'Myob.Connection.Manage',
+    // 员工绑定页签（把我方员工与 MYOB 员工卡对应起来），与后端 Permissions.Myob.Employee.Bind 一致。
+    EmployeeBind: 'Myob.Employee.Bind',
+  },
   // 门店人脸抓拍摄像机管理（系统菜单「人脸抓拍摄像机」）：独立顶层权限码，与后端 Permissions.FaceCapture.Cameras.Manage 一致。
   FaceCapture: {
     CamerasManage: 'FaceCapture.Cameras.Manage',
@@ -247,12 +256,18 @@ export const P = {
     PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
+    // 审核本人申请：默认不授予任何角色，生产手动授权
+    ApprovalReviewSelf: 'Attendance.Approval.ReviewSelf',
     HolidayViewStore: 'Attendance.Holiday.ViewStore',
     HolidayEditManagedStore: 'Attendance.Holiday.EditManagedStore',
     LeaveApplySelf: 'Attendance.Leave.ApplySelf',
     LeaveViewManagedStore: 'Attendance.Leave.ViewManagedStore',
     LeaveReviewManagedStore: 'Attendance.Leave.ReviewManagedStore',
     SettingsEdit: 'Attendance.Settings.Edit',
+    // 工资：查看工资表 / 时薪表、编辑与提交锁定、解锁已提交周期；默认谁都没有
+    PayrollView: 'Attendance.Payroll.View',
+    PayrollEdit: 'Attendance.Payroll.Edit',
+    PayrollUnlock: 'Attendance.Payroll.Unlock',
     AdminView: 'Attendance.Admin.View',
   },
 } as const

@@ -31,6 +31,42 @@
         "updatedOn": "最近更新 {{date}}",
         "dirty": "已修改 {{count}} 项",
         "sensitiveNotice": "管理员直接修改的敏感资料立即生效并记入审计日志；若该员工有待审核的修改申请，保存时会提示确认并将其作废。"
+      },
+      "filters": {
+        "store": "分店",
+        "role": "角色",
+        "allStores": "全部分店",
+        "allRoles": "全部角色"
+      },
+      "columns": {
+        "store": "分店",
+        "role": "角色"
+      },
+      "managed": {
+        "drawerTitle": "员工个人信息",
+        "basic": "基本信息",
+        "phone": "手机号",
+        "phonePlaceholder": "例如 0412 345 678",
+        "stores": "分店",
+        "roles": "角色",
+        "noStore": "未分配分店",
+        "employmentLocked": "需要「修改职位类型」权限才能修改",
+        "sensitiveTitle": "敏感资料（只读）",
+        "sensitiveNotice": "银行、公积金、生日、证件须由员工本人在「我的资料」提交并经审核后生效；管理员可到「员工个人信息维护」页直接修改。",
+        "birthday": "生日",
+        "filled": "已填写",
+        "incompleteNotice": "资料待补全：{{missing}}",
+        "readOnlyNotice": "当前账号只有查看权限，不能修改。",
+        "dirty": "已修改 {{count}} 项",
+        "reset": "还原",
+        "save": "保存个人信息",
+        "saveSuccess": "个人信息已保存",
+        "saveFailed": "保存失败，请稍后重试",
+        "loadFailed": "加载员工个人信息失败",
+        "scopeForbidden": "无权维护该员工的个人信息",
+        "positionForbidden": "无权修改职位类型",
+        "updatedMeta": "最近更新 {{date}}",
+        "openFullEditor": "到「员工个人信息维护」修改敏感资料"
       }
     }
   }

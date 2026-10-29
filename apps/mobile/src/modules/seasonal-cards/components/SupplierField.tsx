@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { HelperText, Icon, Text } from "react-native-paper";
 import { OptionPickerSheet } from "@/components/ui/OptionPickerSheet";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { sortSuppliersByName } from "@/shared/utils/name-sort";
 import type { SeasonalCardSupplierOption } from "@/modules/seasonal-cards/types";
 import { SEASONAL_CARD_COLORS } from "./palette";
 
@@ -23,6 +24,7 @@ export function SupplierField({
   recentSuppliers,
   loadErrorMessage,
   disabled = false,
+  language,
   onSelect,
 }: {
   title: string;
@@ -37,17 +39,20 @@ export function SupplierField({
   recentSuppliers: SeasonalCardSupplierOption[];
   loadErrorMessage?: string | null;
   disabled?: boolean;
+  /** 界面语言，用于名字排序（中文按拼音）。 */
+  language?: string;
   onSelect: (supplier: SeasonalCardSupplierOption) => void;
 }) {
   const [pickerVisible, setPickerVisible] = useState(false);
   // 搜索同时匹配名称与编码（OptionPickerSheet 按 label 与 value 过滤）。
+  // 完整列表按供应商名字排序；「最近使用」是按使用时间的分组，保持原样不动。
   const pickerOptions = useMemo(
     () =>
-      suppliers.map((supplier) => ({
+      sortSuppliersByName(suppliers, language).map((supplier) => ({
         value: supplier.supplierCode,
         label: `${supplier.supplierName} · ${supplier.supplierCode}`,
       })),
-    [suppliers]
+    [suppliers, language]
   );
   const hasSelection = Boolean(selectedCode);
 

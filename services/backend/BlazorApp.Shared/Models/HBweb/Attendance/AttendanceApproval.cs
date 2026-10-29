@@ -40,5 +40,11 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = true)]
         public int? ApprovedOvertimeMinutes { get; set; }
+
+        /// <summary>
+        /// 本人审批：持 Attendance.Approval.ReviewSelf 的审核人处理了自己的申请。列由迁移 20261026.001 添加。
+        /// </summary>
+        [SugarColumn(IsNullable = false)]
+        public bool IsSelfReview { get; set; }
     }
 }

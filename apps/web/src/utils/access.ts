@@ -116,7 +116,14 @@ function createEmptyAccess(): AccessControl {
     canReviewAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
+    canReviewOwnAttendance: false,
+    canViewAttendancePayroll: false,
+    canViewAttendanceHours: false,
+    canAdjustAttendancePunches: false,
+    canEditAttendancePayroll: false,
+    canUnlockAttendancePayroll: false,
     canViewEmployeeProfiles: false,
+    canEditEmployeeProfiles: false,
     canViewSystemLogs: false,
     canViewPerformanceBaseline: false,
     canViewOperationAudits: false,
@@ -126,6 +133,9 @@ function createEmptyAccess(): AccessControl {
     canViewDailyCloseRecords: false,
     canViewSeasonalCardStats: false,
     canManageFaceCameras: false,
+    canManageMyobConnections: false,
+    canBindMyobEmployees: false,
+    canAccessMyob: false,
     canAccessFaceMatch: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
@@ -361,17 +371,25 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.PunchViewManagedStore)
-  const canReviewAttendance =
-    isAdmin ||
-    hasPermission(P.Attendance.AdminView) ||
-    hasPermission(P.Attendance.ApprovalReviewManagedStore) ||
-    hasPermission(P.Attendance.LeaveReviewManagedStore)
+  // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口）。
+  const canReviewAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewManagedStore)
   const canEditAttendanceHoliday =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
     hasPermission(P.Attendance.HolidayEditManagedStore)
   const canEditAttendanceSettings = isAdmin || hasPermission(P.Attendance.SettingsEdit)
-  const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.View)
+  // 本人审核、工资三项都是新权限，默认谁都没有；不随 Attendance.Admin.View 自动获得
+  const canReviewOwnAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewSelf)
+  const canEditAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollEdit)
+  const canUnlockAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollUnlock)
+  const canViewAttendancePayroll = isAdmin || hasPermission(P.Attendance.PayrollView)
+  // 「工时与工资」页：工时统计只要打卡查看权限，工资表 / 时薪表另要 Payroll.View，任一即可进页
+  const canViewAttendanceHours = canViewAttendancePunches || canViewAttendancePayroll
+  // 店长代员工补卡（审核台填漏下班的实际下班时间）：后端 managed/punch-adjustments 只认这一个权限
+  const canAdjustAttendancePunches = isAdmin || hasPermission(P.Attendance.PunchAdjustManagedStore)
+  // 员工个人信息维护改认独立的新权限（与手机端共用）；原 EmployeeProfiles.View/Edit 只保留给本人资料与管理员改敏感资料。
+  const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.ViewManagedStore)
+  const canEditEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.EditManagedStore)
   const canViewSystemLogs = isAdmin || hasPermission(P.System.ViewLogs)
   const canViewPerformanceBaseline =
     isAdmin || hasPermission(P.System.ViewPerformanceBaseline)
@@ -384,6 +402,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSeasonalCardStats = isAdmin || hasPermission(P.SeasonalCards.Remaining.ViewAllStores)
   // 人脸抓拍摄像机管理只认独立权限码（会签发摄像机推送令牌），不挂在系统设置权限下。
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
+  const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
+  const canBindMyobEmployees = isAdmin || hasPermission(P.Myob.EmployeeBind)
+  // MYOB 对接页入口：三个页签各有独立权限（连接与映射 / 员工绑定 / 发薪公司 = 编辑工资），任一即可进入，页内只显示有权限的页签。
+  const canAccessMyob = canManageMyobConnections || canBindMyobEmployees || canEditAttendancePayroll
   // 人脸比对页任一 FaceMatch.* 权限即可进入；各页签（档案 / 统计 / 名单 / 复核）页内再按各自权限码显示。
   const canAccessFaceMatch =
     isAdmin ||
@@ -525,7 +547,14 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canReviewAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
+    canReviewOwnAttendance,
+    canViewAttendancePayroll,
+    canViewAttendanceHours,
+    canAdjustAttendancePunches,
+    canEditAttendancePayroll,
+    canUnlockAttendancePayroll,
     canViewEmployeeProfiles,
+    canEditEmployeeProfiles,
     canViewSystemLogs,
     canViewPerformanceBaseline,
     canViewOperationAudits,
@@ -535,6 +564,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewDailyCloseRecords,
     canViewSeasonalCardStats,
     canManageFaceCameras,
+    canManageMyobConnections,
+    canBindMyobEmployees,
+    canAccessMyob,
     canAccessFaceMatch,
     canManageScheduledTasks,
     canManageSystemSettings,

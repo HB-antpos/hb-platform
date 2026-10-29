@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { TabItem } from '../types/router'
 import { getAffixTabs, normalizePersistedTabs, resolveRoute } from '../router/routes'
+import {
+  type CloseScope,
+  getClosableKeys,
+  isLockedTab,
+  moveTabWithinGroup,
+  normalizeTabOrder,
+  setTabLocked,
+} from './tabsLogic'
 
 interface TabsState {
   activeKey: string
@@ -12,6 +20,8 @@ interface TabsState {
   ensureTab: (tab: TabItem) => void
   updateTabTitle: (key: string, title: string) => void
   moveTab: (activeKey: string, overKey: string) => void
+  lockTab: (key: string) => void
+  unlockTab: (key: string) => void
   removeTab: (key: string) => string
   removeOtherTabs: (key: string) => string[]
   removeLeftTabs: (key: string) => string[]
@@ -22,11 +32,26 @@ interface TabsState {
 const defaultTabs = getAffixTabs()
 const defaultActiveKey = defaultTabs[0]?.key ?? '/dashboard'
 
-function arrayMove<T>(items: T[], from: number, to: number) {
-  const nextItems = [...items]
-  const [target] = nextItems.splice(from, 1)
-  nextItems.splice(to, 0, target)
-  return nextItems
+// 批量关闭统一走 getClosableKeys：固定页签与已锁定页签永远跳过，目标页签保留并成为当前页签。
+function removeTabsByScope(
+  get: () => TabsState,
+  set: (partial: Partial<TabsState>) => void,
+  key: string,
+  scope: CloseScope,
+): string[] {
+  const currentTabs = get().tabs
+  if (!currentTabs.some((item) => item.key === key)) {
+    return []
+  }
+
+  const removedKeys = getClosableKeys(currentTabs, key, scope)
+  const removedSet = new Set(removedKeys)
+  set({
+    tabs: currentTabs.filter((item) => !removedSet.has(item.key)),
+    activeKey: key,
+  })
+
+  return removedKeys
 }
 
 export const useTabsStore = create<TabsState>()(
@@ -61,29 +86,20 @@ export const useTabsStore = create<TabsState>()(
         })
       },
       moveTab: (activeKey, overKey) => {
-        if (activeKey === overKey) {
-          return
+        // 锁定组与普通组各自排序，跨组的拖动在 moveTabWithinGroup 里被忽略。
+        const nextTabs = moveTabWithinGroup(get().tabs, activeKey, overKey)
+        if (nextTabs !== get().tabs) {
+          set({ tabs: nextTabs })
         }
-
-        const currentTabs = get().tabs
-        const fixedTabs = currentTabs.filter((item) => item.affix)
-        const movableTabs = currentTabs.filter((item) => !item.affix)
-        const activeIndex = movableTabs.findIndex((item) => item.key === activeKey)
-        const overIndex = movableTabs.findIndex((item) => item.key === overKey)
-
-        if (activeIndex < 0 || overIndex < 0) {
-          return
-        }
-
-        set({
-          tabs: [...fixedTabs, ...arrayMove(movableTabs, activeIndex, overIndex)],
-        })
       },
+      lockTab: (key) => set({ tabs: setTabLocked(get().tabs, key, true) }),
+      unlockTab: (key) => set({ tabs: setTabLocked(get().tabs, key, false) }),
       removeTab: (key) => {
         const currentTabs = get().tabs
         const target = currentTabs.find((item) => item.key === key)
 
-        if (!target || target.affix) {
+        // 固定页签与已锁定页签不能被关闭。
+        if (!target || target.affix || isLockedTab(target)) {
           return get().activeKey
         }
 
@@ -101,57 +117,9 @@ export const useTabsStore = create<TabsState>()(
 
         return nextActiveKey
       },
-      removeOtherTabs: (key) => {
-        const keepKeys = new Set([...defaultTabs.map((item) => item.key), key])
-        const removedKeys = get()
-          .tabs.filter((item) => !keepKeys.has(item.key))
-          .map((item) => item.key)
-
-        set({
-          tabs: get().tabs.filter((item) => keepKeys.has(item.key)),
-          activeKey: key,
-        })
-
-        return removedKeys
-      },
-      removeLeftTabs: (key) => {
-        const currentTabs = get().tabs
-        const index = currentTabs.findIndex((item) => item.key === key)
-        if (index <= 0) {
-          return []
-        }
-
-        const removedKeys = currentTabs
-          .slice(0, index)
-          .filter((item) => !item.affix)
-          .map((item) => item.key)
-
-        set({
-          tabs: currentTabs.filter((item, itemIndex) => item.affix || itemIndex >= index),
-          activeKey: key,
-        })
-
-        return removedKeys
-      },
-      removeRightTabs: (key) => {
-        const currentTabs = get().tabs
-        const index = currentTabs.findIndex((item) => item.key === key)
-        if (index < 0) {
-          return []
-        }
-
-        const removedKeys = currentTabs
-          .slice(index + 1)
-          .filter((item) => !item.affix)
-          .map((item) => item.key)
-
-        set({
-          tabs: currentTabs.filter((item, itemIndex) => item.affix || itemIndex <= index),
-          activeKey: key,
-        })
-
-        return removedKeys
-      },
+      removeOtherTabs: (key) => removeTabsByScope(get, set, key, 'others'),
+      removeLeftTabs: (key) => removeTabsByScope(get, set, key, 'left'),
+      removeRightTabs: (key) => removeTabsByScope(get, set, key, 'right'),
       resetTabs: () =>
         set({
           tabs: defaultTabs,
@@ -163,7 +131,8 @@ export const useTabsStore = create<TabsState>()(
       // 读取旧版本存下的页签时，把已并入合并页的单页页签归到合并页（同组只留一个）。
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<Pick<TabsState, 'tabs' | 'activeKey' | 'pinTabsBar'>>
-        const tabs = Array.isArray(saved.tabs) ? normalizePersistedTabs(saved.tabs) : current.tabs
+        // 存下来的顺序再按「固定 → 锁定 → 普通」归整一次，防止手改存储或旧数据导致分段错乱。
+        const tabs = Array.isArray(saved.tabs) ? normalizeTabOrder(normalizePersistedTabs(saved.tabs)) : current.tabs
         const activeKey = saved.activeKey
           ? resolveRoute(saved.activeKey)?.meta.navGroup ?? saved.activeKey
           : current.activeKey

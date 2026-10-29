@@ -44,6 +44,7 @@
         "generic": "修改登录权限失败，请稍后重试"
       },
       "tabProfile": "资料",
+      "tabEmployeeProfile": "个人信息",
       "tabAssignments": "角色与分店",
       "lastLogin": "最近登录",
       "createdAt": "创建于",

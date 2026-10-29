@@ -1101,6 +1101,82 @@ public sealed class RoleServicePermissionTests : IDisposable
         Assert.Equal("StoreStaff", role.RoleName);
     }
 
+    private static RolesController CreateRolesController(IRoleService roleService, string userGuid) =>
+        new(roleService, NullLogger<RolesController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        new[] { new Claim(ClaimTypes.NameIdentifier, userGuid) },
+                        "TestAuth"
+                    )),
+                },
+            },
+        };
+
+    [Fact]
+    public async Task RolesController_GetActiveRoles_BelowActorScope_StoreManagerGetsLowerLevelRolesInsteadOfEmployeeOnly()
+    {
+        var roleService = new Mock<IRoleService>();
+        roleService
+            .Setup(service => service.UserHasPermissionAsync("manager-1", It.IsAny<string>()))
+            .ReturnsAsync(ApiResponse<bool>.OK(true));
+        roleService
+            .Setup(service => service.UserHasRoleAsync("manager-1", "StoreManager"))
+            .ReturnsAsync(ApiResponse<bool>.OK(true));
+        roleService
+            .Setup(service => service.GetActiveRolesBelowUserLevelAsync("manager-1"))
+            .ReturnsAsync(ApiResponse<List<RoleDto>>.OK(new List<RoleDto>
+            {
+                new() { RoleGUID = "role-staff", RoleName = "StoreStaff", IsActive = true },
+                new() { RoleGUID = "role-wh-staff", RoleName = "WarehouseStaff", IsActive = true },
+            }));
+        var controller = CreateRolesController(roleService.Object, "manager-1");
+
+        var action = await controller.GetActiveRoles(RolesController.ActiveRolesScopeBelowActor);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var response = Assert.IsType<ApiResponse<List<RoleDto>>>(ok.Value);
+        Assert.Equal(
+            new[] { "StoreStaff", "WarehouseStaff" },
+            response.Data!.Select(role => role.RoleName).ToArray()
+        );
+        // 默认目录（员工角色过滤）不应被走到
+        roleService.Verify(service => service.GetActiveRolesAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task RolesController_GetActiveRoles_BelowActorScope_AdminStillGetsFullCatalog()
+    {
+        var roleService = new Mock<IRoleService>();
+        roleService
+            .Setup(service => service.UserHasRoleAsync("admin-1", "Admin"))
+            .ReturnsAsync(ApiResponse<bool>.OK(true));
+        roleService
+            .Setup(service => service.UserHasPermissionAsync("admin-1", It.IsAny<string>()))
+            .ReturnsAsync(ApiResponse<bool>.OK(true));
+        roleService
+            .Setup(service => service.GetActiveRolesAsync())
+            .ReturnsAsync(ApiResponse<List<RoleDto>>.OK(new List<RoleDto>
+            {
+                new() { RoleGUID = "role-admin", RoleName = "Admin", IsActive = true },
+                new() { RoleGUID = "role-staff", RoleName = "StoreStaff", IsActive = true },
+            }));
+        var controller = CreateRolesController(roleService.Object, "admin-1");
+
+        var action = await controller.GetActiveRoles(RolesController.ActiveRolesScopeBelowActor);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var response = Assert.IsType<ApiResponse<List<RoleDto>>>(ok.Value);
+        Assert.Equal(2, response.Data!.Count);
+        roleService.Verify(
+            service => service.GetActiveRolesBelowUserLevelAsync(It.IsAny<string>()),
+            Times.Never
+        );
+    }
+
     [Fact]
     public void UsersController_ExposesScopedAccessPermissionsEndpoint()
     {

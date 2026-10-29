@@ -9,6 +9,87 @@ public sealed class ShellCatalogServiceTests
     private static readonly DateTimeOffset Timestamp = new(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
 
     [Fact]
+    public async Task RefreshPromotionsAsync_applies_changed_rules_once_and_skips_unchanged_rules()
+    {
+        var cart = new PosCartService();
+        var cartChanges = 0;
+        cart.CartChanged += (_, _) => cartChanges++;
+        var sync = new PromotionRefreshCatalogSyncService();
+        var service = new ShellCatalogService(new LocalSellableItemIndex(), new FakeLocalCatalogRepository(), sync, cart);
+
+        // 首次拉到新促销（PDA 刚添加）：应用到购物车并通知变化。
+        sync.Rules = [CreatePromotionRule("P1")];
+        Assert.True(await service.RefreshPromotionsAsync("S01"));
+        var changesAfterFirstApply = cartChanges;
+        Assert.True(changesAfterFirstApply > 0);
+
+        // 规则内容完全相同（内容相等但是新的 DTO / 列表实例）：不再应用，不打扰收银。
+        sync.Rules = [CreatePromotionRule("P1")];
+        Assert.False(await service.RefreshPromotionsAsync("S01"));
+        Assert.Equal(changesAfterFirstApply, cartChanges);
+
+        // 规则变了（价格被改）：再次应用。
+        sync.Rules = [CreatePromotionRule("P1", fixedPrice: 2.00m)];
+        Assert.True(await service.RefreshPromotionsAsync("S01"));
+        Assert.True(cartChanges > changesAfterFirstApply);
+
+        // 促销被删除或停用：空规则也要应用，让旧促销失效。
+        sync.Rules = [];
+        Assert.True(await service.RefreshPromotionsAsync("S01"));
+        Assert.Equal(["S01", "S01", "S01", "S01"], sync.RefreshStoreCodes);
+    }
+
+    [Fact]
+    public async Task RefreshPromotionsAsync_does_nothing_when_the_sync_service_cannot_refresh_promotions()
+    {
+        var cart = new PosCartService();
+        var cartChanges = 0;
+        cart.CartChanged += (_, _) => cartChanges++;
+        // FixedResultCatalogSyncService 没有实现 RefreshPromotionRulesAsync，走接口默认实现（返回 null）。
+        var service = new ShellCatalogService(
+            new LocalSellableItemIndex(),
+            new FakeLocalCatalogRepository(),
+            new FixedResultCatalogSyncService(),
+            cart);
+
+        Assert.False(await service.RefreshPromotionsAsync("S01"));
+        Assert.Equal(0, cartChanges);
+    }
+
+    [Fact]
+    public async Task RefreshPromotionsAsync_propagates_failures_and_keeps_the_applied_rules()
+    {
+        var cart = new PosCartService();
+        var sync = new PromotionRefreshCatalogSyncService { Rules = [CreatePromotionRule("P1")] };
+        var service = new ShellCatalogService(new LocalSellableItemIndex(), new FakeLocalCatalogRepository(), sync, cart);
+        Assert.True(await service.RefreshPromotionsAsync("S01"));
+
+        // 网络失败：抛给调用方记日志；之后恢复且规则未变，仍按「无变化」处理，不会误重算。
+        sync.Failure = new HttpRequestException("network timeout");
+        await Assert.ThrowsAsync<HttpRequestException>(() => service.RefreshPromotionsAsync("S01"));
+
+        sync.Failure = null;
+        Assert.False(await service.RefreshPromotionsAsync("S01"));
+    }
+
+    [Fact]
+    public async Task RefreshPromotionsAsync_skips_while_a_catalog_sync_is_running()
+    {
+        var sync = new CoordinatedCatalogSyncService();
+        var service = new ShellCatalogService(new LocalSellableItemIndex(), new FakeLocalCatalogRepository(), sync, new PosCartService());
+
+        var regularTask = service.SyncCatalogAndReloadAsync("S01", forceFullDownload: false);
+        await sync.RegularStarted.Task.WaitUntilCompletedAsync(() => sync.Describe(regularTask));
+        Assert.True(service.IsCatalogSyncActive);
+
+        // 目录同步进行中：同步自己会刷新促销，定时刷新直接跳过，不并发写库。
+        Assert.False(await service.RefreshPromotionsAsync("S01"));
+
+        sync.ReleaseRegularIfNotCanceled();
+        await regularTask;
+    }
+
+    [Fact]
     public async Task SyncCatalogAndReloadAsync_ResetCancelsRunningRegularSyncAndDoesNotOverlapWrites()
     {
         var priceIndex = new LocalSellableItemIndex();
@@ -408,6 +489,50 @@ public sealed class ShellCatalogServiceTests
             return $"calls=[{string.Join(", ", Calls)}] regularStarted={RegularStarted.Task.IsCompleted} " +
                    $"resetStarted={ResetStarted.Task.IsCompleted} regularCanceled={RegularCanceled} tasks=[{taskStates}]";
         }
+    }
+
+    private sealed class PromotionRefreshCatalogSyncService : ILocalCatalogSyncService
+    {
+        public IReadOnlyList<CatalogPromotionRuleDto> Rules { get; set; } = [];
+
+        public Exception? Failure { get; set; }
+
+        public List<string> RefreshStoreCodes { get; } = [];
+
+        public Task<LocalCatalogSyncResult> FullSyncAsync(
+            string storeCode,
+            CancellationToken cancellationToken = default,
+            IProgress<CatalogSyncProgress>? progress = null,
+            bool forceFullDownload = false)
+        {
+            return Task.FromResult(new LocalCatalogSyncResult(storeCode, 0, 0, 0, 0));
+        }
+
+        public Task<IReadOnlyList<CatalogPromotionRuleDto>?> RefreshPromotionRulesAsync(
+            string storeCode,
+            CancellationToken cancellationToken = default)
+        {
+            RefreshStoreCodes.Add(storeCode);
+            return Failure is null
+                ? Task.FromResult<IReadOnlyList<CatalogPromotionRuleDto>?>(Rules)
+                : Task.FromException<IReadOnlyList<CatalogPromotionRuleDto>?>(Failure);
+        }
+    }
+
+    private static CatalogPromotionRuleDto CreatePromotionRule(string promotionId, decimal fixedPrice = 2.50m)
+    {
+        return new CatalogPromotionRuleDto(
+            promotionId,
+            "Tissue 2 for $2.50",
+            IsExclusive: false,
+            Priority: 0,
+            ApplyQuantity: 2,
+            FixedPrice: fixedPrice,
+            MaxApplicationsPerOrder: null,
+            EffectiveStart: Timestamp,
+            EffectiveEnd: Timestamp.AddDays(7),
+            UpdatedAt: null,
+            Products: [new CatalogPromotionProductDto("HB038-109", 1)]);
     }
 
     private sealed class FixedResultCatalogSyncService : ILocalCatalogSyncService

@@ -19,10 +19,10 @@ import {
 } from "./close-selection";
 import { formatUtcInZone } from "./dates";
 import { resolveCashErrorMessage } from "./errors";
-import { formatAud, formatSignedAud } from "./money";
+import { formatAud } from "./money";
 import type { CashDailyDevice } from "./types";
 import { useInvalidateCashData } from "./use-store-cash";
-import { NoticeBanner, StatusChip, ValueRow } from "./ui";
+import { NoticeBanner, StatusChip, ValueRow, VarianceRow } from "./ui";
 
 export function DeviceCloseCard({
   storeCode,
@@ -131,11 +131,10 @@ export function DeviceCloseCard({
             </Text>
             <ValueRow label={t("daily.counted")} value={formatAud(archive.countedCash)} strong />
             <ValueRow label={t("daily.expected")} value={formatAud(archive.expectedCash)} muted />
-            <ValueRow
+            <VarianceRow
               label={t("daily.variance")}
-              value={formatSignedAud(archive.variance)}
-              muted={archive.variance === 0}
-              valueStyle={archive.variance === 0 ? undefined : styles.varianceValue}
+              value={archive.variance}
+              statusLabels={{ short: t("daily.varianceShort"), over: t("daily.varianceOver"), even: t("daily.varianceEven") }}
             />
           </View>
         );
@@ -238,7 +237,6 @@ const styles = StyleSheet.create({
   archiveBody: { flex: 1, minWidth: 0, gap: 2 },
   archiveTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: HB_SPACING.xs },
   closeId: { flex: 1, minWidth: 0, color: HB_COLORS.textPrimary, fontSize: 13, fontWeight: "600" },
-  varianceValue: { color: HB_COLORS.danger },
   editor: { gap: HB_SPACING.xs },
   input: { backgroundColor: HB_COLORS.white },
   actions: { flexDirection: "row", justifyContent: "flex-end", gap: HB_SPACING.xs, flexWrap: "wrap" },

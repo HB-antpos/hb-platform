@@ -330,3 +330,38 @@ test("服务端规则复刻自检：不满足规则的请求会被拒绝（防�
     { ok: false, code: "INVALID_CASH_DIFFERENCE" },
   );
 });
+
+test("现金进位：请求带 cashRoundingAmount，差额按 实点 − (现金净额 + 进位) 通过服务端规则；按旧口径（只减净额）算的差额被拒", () => {
+  // 现金净额 108.00，进位 +0.03 → 应有现金 108.03；实点 = 100 + 2×5 + 2 + 3×0.05 = 112.15，差额 = +4.12。
+  const rounded = archiveFixture({ cashRoundingCents: 3 });
+  assert.equal(rounded.expectedCashCents, 10_803);
+  assert.equal(rounded.varianceCents, 412);
+
+  const request = mapDailyCloseArchiveToSyncRequest(rounded, { clientKind: "Ipad" });
+  assert.equal(request.cashRoundingAmount, 0.03);
+  assert.equal(request.cashDifference, 4.12);
+  assert.deepEqual(validateAgainstServerRules(request, SCOPE), { ok: true });
+
+  // 没有进位的旧存档：cashRoundingAmount 为 0，口径与之前完全一致。
+  const plain = mapDailyCloseArchiveToSyncRequest(archiveFixture(), { clientKind: "Ipad" });
+  assert.equal(plain.cashRoundingAmount, 0);
+  assert.deepEqual(validateAgainstServerRules(plain, SCOPE), { ok: true });
+
+  // 进位被丢掉（等同客户端没升级）：差额 4.12 ≠ 实点 − 净额 = 4.15，超出 1 分容差。
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashRoundingAmount: 0 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_DIFFERENCE" },
+  );
+  // 订单数 7 单，进位最多 ±14 分，另加 1 分容差：+0.16 必然是数据有问题。
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashRoundingAmount: 0.16 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_ROUNDING" },
+  );
+  // 负进位同样映射（-0.02 → -0.02），且不产生 -0。
+  const negative = mapDailyCloseArchiveToSyncRequest(
+    archiveFixture({ cashRoundingCents: -2 }),
+    { clientKind: "Ipad" },
+  );
+  assert.equal(negative.cashRoundingAmount, -0.02);
+  assert.deepEqual(validateAgainstServerRules(negative, SCOPE), { ok: true });
+});

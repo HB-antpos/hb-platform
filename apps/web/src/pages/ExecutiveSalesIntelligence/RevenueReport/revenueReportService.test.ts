@@ -20,7 +20,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       lastDay: { date: '2026-09-03T00:00:00', compareDate: '2025-09-04T00:00:00', branches: [], hourly: [{ hour: '09:00', branchCode: 'S1', revenue: 3, revenueLY: 2, orderCount: 1, orderCountLY: 1, percentage: 100, isPeak: true }] },
     },
     statisticStatus: pending ? 'Pending' : 'Fresh',
-    ...(pending ? {} : { statisticsLastSuccessfulAtUtc: '2026-09-03T06:12:00Z' }),
+    ...(pending ? {} : { statisticsLastSuccessfulAtUtc: '2026-09-03T06:12:00Z', branchTimeZones: { S1: 'Australia/Sydney' } }),
     cacheVersion: 'revenue-v1',
   }), { status: 200, headers: { 'content-type': 'application/json' } })
 }) as typeof fetch
@@ -49,10 +49,12 @@ try {
   assert.equal(snapshot.data.weeklyComparePending, false, 'Store 同期完整状态必须与小时缺口分别保留')
   assert.equal(snapshot.data.statisticsLastSuccessfulAtUtc, '2026-09-03T06:12:00Z', '统计发布时间必须随快照带回，决定累计对比的截止整点')
   assert.equal(snapshot.data.lastDay?.hourly[0]?.orderCount, 1, '区间最后一天的分店小时数据必须随快照带回')
+  assert.deepEqual(snapshot.data.branchTimeZones, { S1: 'Australia/Sydney' }, '门店时区必须随快照带回，两端按门店本地时间算截止整点')
   pending = true
   const waiting = await fetchRevenueReportSnapshot(period, ['S1', 'S2'], ['S1'], controller.signal)
   assert.equal(waiting.statisticStatus, 'Pending', 'Pending 整页快照必须交给查询 hook 轮询')
   assert.equal(waiting.data.statisticsLastSuccessfulAtUtc, null, '旧后端缺字段时归一为 null，由页面回退为不对齐')
+  assert.equal(waiting.data.branchTimeZones, undefined, '旧后端没有时区字段时保持 undefined，页面回退为固定 UTC+10')
 } finally {
   globalThis.fetch = originalFetch
 }

@@ -731,7 +731,7 @@ namespace BlazorApp.Api.Services
                                         SupplierCode = p.LocalSupplierCode,
                                         PurchasePrice = p.PurchasePrice,
                                         StoreRetailPriceValue = p.RetailPrice,
-                                        DiscountRate = 1.0000m,
+                                        DiscountRate = 0m, // 0 = 无折扣；曾写 1（=减免 100%）造成整行免单
                                         IsActive = p.IsActive,
                                         IsAutoPricing = p.IsAutoPricing,
                                         IsSpecialProduct = p.IsSpecialProduct,

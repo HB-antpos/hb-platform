@@ -16,8 +16,10 @@ assert.doesNotMatch(screen, /useStoreUsers\(/,
   "考勤页不得再调用用户管理的店员列表");
 assert.match(screen, /enabled: Boolean\(isAuthenticated && user && isManagementTab\)/,
   "待审数量角标需要在管理页任一页签拉取待审事项");
-assert.match(screen, /onFixMissingClockOut=\{canViewManagedPunches \?/,
-  "漏下班补录入口只在能看打卡记录时出现");
+assert.match(screen, /canAdjustPunch=\{access\.canAdjustAttendancePunch\}/,
+  "漏下班在审核详情里直接补下班卡，必须按修改打卡权限放行");
+assert.match(screen, /canReviewSelf=\{access\.canReviewOwnAttendance\}/,
+  "本人审核只认 Attendance.Approval.ReviewSelf");
 assert.match(screen, /value: "requests"/, "员工端必须提供「申请」页签");
 
 assert.match(availabilitySheet, /AvailabilityBatchSaveError/,

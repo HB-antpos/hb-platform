@@ -18,7 +18,7 @@ import {
   timeZoneOf,
   weekdayKeyOf,
 } from './logic'
-import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, StoreSelect, type Tr } from './parts'
+import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, StoreSelect, VarianceAmount, type Tr } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -267,8 +267,8 @@ function ArchiveTable({ archives, timeZone, tr }: { archives: CashCloseArchive[]
       title: tr('daily.archive.variance'),
       key: 'variance',
       align: 'right',
-      width: 100,
-      render: (_, archive) => <Amount value={archive.variance} signed />,
+      width: 160,
+      render: (_, archive) => <VarianceAmount value={archive.variance} tr={tr} />,
     },
     {
       title: tr('daily.archive.included'),

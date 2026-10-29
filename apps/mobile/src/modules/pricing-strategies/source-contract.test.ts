@@ -122,4 +122,9 @@ assert.match(i18nSource, /pricingStrategies: pricingStrategiesZh/);
 assert.match(i18nSource, /pricingStrategies: pricingStrategiesEn/);
 assert.match(i18nSource, /"pricingStrategies"/);
 
+// 分店 / 供应商下拉统一按名字排序（排序在使用处，不改接口缓存里的原序）
+assert.match(read("src/modules/pricing-strategies/PricingStrategiesScreen.tsx"), /sortedStores\.map\([\s\S]*sortedSuppliers\.map\(/);
+assert.match(read("src/modules/pricing-strategies/QuickTryCard.tsx"), /sortedStores\.map\([\s\S]*sortedSuppliers\.map\(/);
+assert.match(read("src/modules/pricing-strategies/PricingStrategyEditScreen.tsx"), /"stores" \? sortedStores : sortedSuppliers/);
+
 console.log("pricing-strategies source-contract.test.ts: ok");

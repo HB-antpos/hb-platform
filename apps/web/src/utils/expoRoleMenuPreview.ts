@@ -170,6 +170,7 @@ const TAB_PATHS: Record<string, string> = {
   'seasonal-cards': '/(shell)/seasonal-cards',
   'attendance-personal': '/(shell)/attendance-personal',
   'attendance-management': '/(shell)/attendance-management',
+  'attendance-hours': '/(shell)/attendance-hours',
   'product-query': '/(shell)/product-query',
   'price-updates': '/(shell)/price-updates',
   'pricing-strategies': '/(shell)/pricing-strategies',
@@ -218,6 +219,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'seasonal-cards': { zhTitle: '节日贺卡', enTitle: 'Seasonal Cards' },
   'attendance-personal': { zhTitle: '考勤', enTitle: 'Attendance' },
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
+  'attendance-hours': { zhTitle: '工时统计', enTitle: 'Staff hours' },
   'product-query': { zhTitle: '商品维护', enTitle: 'Products' },
   'price-updates': { zhTitle: '价格和标签', enTitle: 'Prices & labels' },
   'pricing-strategies': { zhTitle: '自动价格策略', enTitle: 'Pricing rules' },
@@ -446,6 +448,14 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     ...ROUTE_LABELS['attendance-management'],
   },
   {
+    routeName: 'attendance-hours',
+    titleKey: 'tabs.attendanceHours',
+    icon: 'clock-outline',
+    permissionCodes: [P.Attendance.PunchViewManagedStore],
+    order: 56,
+    ...ROUTE_LABELS['attendance-hours'],
+  },
+  {
     routeName: 'seasonal-cards',
     titleKey: 'tabs.seasonalCards',
     icon: 'gift-outline',
@@ -460,8 +470,9 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'users',
     titleKey: 'tabs.users',
     icon: 'account-group-outline',
-    // 与后端 FullAppMenu 一致：员工管理只认 Users.ViewStoreStaff（Users.View 通过单向别名包含它）。
-    permissionCodes: [P.Users.ViewStoreStaff],
+    // 与后端 FullAppMenu 一致：「人员管理」合并入口，Users.ViewStoreStaff（Users.View 通过单向别名包含它）
+    // 或「资料」页签的 EmployeeProfiles.ViewManagedStore 任一即可见。
+    permissionCodes: [P.Users.ViewStoreStaff, P.EmployeeProfiles.ViewManagedStore],
     order: 57,
     ...ROUTE_LABELS.users,
   },

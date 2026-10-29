@@ -11,10 +11,12 @@ import {
   getImportCellDiff,
   getImportRowClassName,
   getImportRowErrors,
+  IMPORT_FILLER_MIN_WIDTH,
   isBlankImportRow,
   matchesImportFilter,
   mergeEnglishNamesById,
   mergeTranslationsById,
+  resolveImportColumnWidths,
   resolveImportRowKind,
   snapshotTranslationTargets,
   splitProductsByResolution,
@@ -274,5 +276,45 @@ assertDeepEqual(
 )
 assertDeepEqual(splitProductsByResolution(conflictProducts, { global: 'override' }).override.map((row) => row.id), ['p1', 'p2', 'p3'], '全部覆盖')
 assertDeepEqual(splitProductsByResolution(conflictProducts, { global: 'increase' }).increase.map((row) => row.id), ['p1', 'p2', 'p3'], '全部增加')
+
+/* ------------------------------ 列宽分配 ------------------------------ */
+
+const FIXED_WIDTH = 444 // 勾选 + 件数 + 图 + 货号 + 条码 + 国内价，与 index.tsx 里这些列的 width 一致
+const sumWidths = (result: ReturnType<typeof resolveImportColumnWidths>) => Object.values(result.widths).reduce((sum, width) => sum + width, 0)
+
+// 窄屏（容器 ≤ 最小宽度）：保持原来的列宽，基础合计正好等于最小宽度 968，不出现横向滚动条
+const narrow = resolveImportColumnWidths(960, 968, true)
+assertEqual(narrow.baseTotal, 968, '检测后基础列宽合计应等于表格最小宽度')
+assertDeepEqual(
+  narrow.widths,
+  { oemPrice: 64, midPackQuantity: 52, casePackQuantity: 52, volume: 68, status: 126, productName: 70, englishName: 92 },
+  '窄屏列宽保持原值',
+)
+assertEqual(narrow.leftover, 0, '窄屏没有剩余空间')
+assertDeepEqual(resolveImportColumnWidths(0, 968, true).widths, narrow.widths, '没量到容器宽度（0）时按窄屏处理')
+
+// 中屏：多出的空间先补足后面的窄列（装箱 / 体积 / 状态），再给名称列
+const middle = resolveImportColumnWidths(1100, 968, true)
+assertDeepEqual(
+  [middle.widths.casePackQuantity, middle.widths.volume, middle.widths.status],
+  [68, 84, 162],
+  '后面的窄列应先涨到可完整显示的宽度',
+)
+assertEqual(middle.widths.productName + middle.widths.englishName > 162, true, '后列补足后仍有空间时才放宽名称列')
+assertEqual(FIXED_WIDTH + sumWidths(middle) + middle.leftover, 1100, '分配后列宽 + 剩余 = 容器宽度')
+
+// 宽屏：名称列有上限，不再独吞剩余空间；剩余空间留给空白填充列
+const wide = resolveImportColumnWidths(2350, 968, true)
+assertEqual(wide.widths.productName, 280, '商品名称列封顶')
+assertEqual(wide.widths.englishName, 360, '英文名称列封顶')
+assertEqual(wide.widths.status, 162, '状态列封顶')
+assertEqual(wide.leftover >= IMPORT_FILLER_MIN_WIDTH, true, '超宽屏应留出空白填充列的空间')
+assertEqual(FIXED_WIDTH + sumWidths(wide) + wide.leftover, 2350, '超宽屏列宽 + 剩余 = 容器宽度')
+
+// 检测前没有状态列，只有一个 44 的删除列；表格仍按最小宽度 968 起算
+const beforeDetect = resolveImportColumnWidths(960, 968, false)
+assertEqual('status' in beforeDetect.widths, false, '检测前不分配状态列宽度')
+assertEqual(beforeDetect.baseTotal, 886, '检测前基础列宽合计：固定列 444 + 删除列 44 + 后列 236 + 名称列 162')
+assertEqual(FIXED_WIDTH + 44 + sumWidths(beforeDetect) + beforeDetect.leftover, 968, '检测前列宽 + 剩余 = 最小宽度')
 
 console.log('ProductImport.gridRules.logic.test: ok')

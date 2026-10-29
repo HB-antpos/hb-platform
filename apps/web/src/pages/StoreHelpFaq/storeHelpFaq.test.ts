@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { STORE_HELP_FAQ_GROUPS, STORE_HELP_FAQ_PATH, type StoreHelpFaqLanguage, type StoreHelpFaqTab } from './faqContent'
+import {
+  STORE_HELP_FAQ_PATH,
+  type StoreHelpFaqGroup,
+  type StoreHelpFaqLanguage,
+  type StoreHelpFaqTab,
+} from './faqContent'
 import {
   buildStoreHelpFaqNumbering,
   filterStoreHelpFaqGroups,
@@ -16,6 +21,10 @@ import {
 
 const appSource = readFileSync('src/App.tsx', 'utf8')
 const publicPathSource = readFileSync('src/pages/MobilePrivacy/publicPath.ts', 'utf8')
+// 问答内容已落库，页面在接口失败时使用的兜底快照就是这里断言的数据（与后端种子逐字节一致，见 faqData.test.ts）
+const STORE_HELP_FAQ_GROUPS = (JSON.parse(readFileSync('src/pages/StoreHelpFaq/faqSnapshot.json', 'utf8')) as {
+  tabs: Record<StoreHelpFaqTab, StoreHelpFaqGroup[]>
+}).tabs
 
 // 路由：懒加载 + 免登录白名单
 assert.equal(STORE_HELP_FAQ_PATH, '/support/faq')
@@ -77,8 +86,9 @@ for (const tab of tabs) {
   }
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
+// 快照当前的题数（防止快照被误截断）；刷新快照后同步更新这两个数字
 assert.equal(countQuestions('pos'), 28)
-assert.equal(countQuestions('mobile'), 15)
+assert.equal(countQuestions('mobile'), 17)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
@@ -99,8 +109,10 @@ const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
 assert.equal(mobileNumbering.get('revenue-report'), 5)
 assert.equal(mobileNumbering.get('product-report'), 6)
 assert.equal(mobileNumbering.get('supplier-invoices'), 10)
-assert.equal(mobileNumbering.get('floating-button'), 14)
-assert.equal(mobileNumbering.get('app-download'), 15)
+assert.equal(mobileNumbering.get('promotions-manage'), 12)
+assert.equal(mobileNumbering.get('promotion-not-applied'), 13)
+assert.equal(mobileNumbering.get('floating-button'), 16)
+assert.equal(mobileNumbering.get('app-download'), 17)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))

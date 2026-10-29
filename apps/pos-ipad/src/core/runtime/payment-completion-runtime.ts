@@ -6,6 +6,7 @@ import type {
 } from "../../features/payments/runtime/payment-completion-planner";
 import {
   buildSaleReceiptDocument,
+  defaultSaleStatusText,
   documentToEscPosBytes,
 } from "../../features/receipts";
 import type {
@@ -144,7 +145,7 @@ implements PaymentReceiptRendererPort {
           reference: null,
         })),
         cashChangeCents: null,
-        statusText: "*** Paid ***",
+        statusText: defaultSaleStatusText(order.actualAmount.cents),
         includeMachineCodes: true,
         printedAtIso: order.soldAtIso,
       }),

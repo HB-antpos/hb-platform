@@ -1,18 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Icon, IconButton, SegmentedButtons, Text, TextInput, TouchableRipple } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CreateBatchKeyboard, CreateBatchNumberInput } from "./CreateBatchNumberInput";
 import { CreateBatchProductEditor } from "./CreateBatchProductEditor";
 import { newProduct, validSubItems, type ProductDraft } from "./create-batch-draft";
+import { sortSuppliersByName } from "@/shared/utils/name-sort";
 import { ProductCreationType } from "./types";
 import { useCreateBatch, type CreateBatchCallbacks } from "./use-create-batch";
 
 /** 创建和选择共用一个原生 Modal，避免 Portal 菜单出现在遮罩下面。 */
 export function CreateBatchModal(props: CreateBatchCallbacks) {
   const form = useCreateBatch(props);
-  const { t } = form;
+  const { t, language } = form;
   const insets = useSafeAreaInsets();
+  // 供应商选择列表按名字排序（接口原序不保证顺序）。
+  const sortedSuppliers = useMemo(() => sortSuppliersByName(form.suppliers, language), [form.suppliers, language]);
   const [batchType, setBatchType] = useState(ProductCreationType.Normal);
   const [batchCount, setBatchCount] = useState("5");
   const [batchPrice, setBatchPrice] = useState("");
@@ -44,7 +47,7 @@ export function CreateBatchModal(props: CreateBatchCallbacks) {
   }, [setProducts]);
 
   const options = form.panel === "supplier"
-    ? form.suppliers.map((supplier) => ({ key: supplier.supplierCode, title: `${supplier.supplierCode} · ${supplier.supplierName}`, description: "", selected: supplier.supplierCode === form.supplier?.supplierCode, select: () => form.selectSupplier(supplier) }))
+    ? sortedSuppliers.map((supplier) => ({ key: supplier.supplierCode, title: `${supplier.supplierCode} · ${supplier.supplierName}`, description: "", selected: supplier.supplierCode === form.supplier?.supplierCode, select: () => form.selectSupplier(supplier) }))
     : form.panel === "prefix"
       ? [{ key: "__none__", title: t("create.noPrefix"), description: "", selected: !form.prefix, select: () => form.selectPrefix(null) }, ...form.prefixes.map((prefix) => ({ key: prefix.prefixCode || prefix.prefixName, title: prefix.prefixName || prefix.prefixCode, description: prefix.prefixDescription || "", selected: Boolean(form.prefix && prefix.prefixCode === form.prefix.prefixCode && prefix.prefixName === form.prefix.prefixName), select: () => form.selectPrefix(prefix) }))]
       : form.templates.map((template) => ({ key: template.templateId, title: template.templateName, description: `${template.setProductName} · ${t("wizard.subItems", { count: template.setQuantity })}`, selected: false, select: () => void form.apply(template.templateId) }));

@@ -12,13 +12,14 @@ public sealed class AttendanceMealBreakRulesTests
 
     [Theory]
     [InlineData(0, 0)]
-    [InlineData(270, 0)] // 正好 4.5 小时按低一档
+    [InlineData(269, 0)]
+    [InlineData(270, 1)] // 正好 4.5 小时起扣 1 次
     [InlineData(271, 1)]
     [InlineData(480, 1)]
-    [InlineData(540, 1)] // 正好 9 小时按低一档
+    [InlineData(540, 1)] // 正好 9 小时仍按 1 次（2 次要超过 9 小时）
     [InlineData(541, 2)]
     [InlineData(720, 2)]
-    public void DefaultCount_ThresholdsAreExclusive(int durationMinutes, int expected) =>
+    public void DefaultCount_Thresholds_4_5HoursInclusive_9HoursExclusive(int durationMinutes, int expected) =>
         Assert.Equal(expected, AttendanceMealBreakRules.DefaultCount(durationMinutes));
 
     [Fact]

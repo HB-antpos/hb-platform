@@ -186,6 +186,8 @@ public sealed class DailyCloseViewModelTests
 
         // 应有现金 145.35，未点钞时为短款。
         Assert.Equal(CashDifferenceStatus.Short, viewModel.CashDifferenceStatus);
+        // 页面显示的差额文本与小票同一格式：短款是 -$145.35，不是正数，也不是括号写法。
+        Assert.Equal("-$145.35", viewModel.CashDifferenceText);
 
         viewModel.Denominations.Single(item => item.Label == "$100").Count = 1;
         viewModel.Denominations.Single(item => item.Label == "$20").Count = 2;
@@ -195,10 +197,14 @@ public sealed class DailyCloseViewModelTests
         viewModel.Denominations.Single(item => item.Label == "5c").Count = 1;
         Assert.Equal(145.35m, viewModel.CountedCashAmount);
         Assert.Equal(CashDifferenceStatus.Balanced, viewModel.CashDifferenceStatus);
+        Assert.Equal("+$0.00", viewModel.CashDifferenceText);
 
         viewModel.Denominations.Single(item => item.Label == "$1").Count = 1;
         Assert.Equal(CashDifferenceStatus.Over, viewModel.CashDifferenceStatus);
+        Assert.Equal("+$1.00", viewModel.CashDifferenceText);
         Assert.Contains(nameof(DailyCloseViewModel.CashDifferenceStatus), changes);
+        // 点钞数量变化时差额文本必须一起刷新，否则页面停在旧符号。
+        Assert.Contains(nameof(DailyCloseViewModel.CashDifferenceText), changes);
 
         viewModel.SelectedDate = DateTime.Today.AddDays(-1);
 
@@ -220,6 +226,9 @@ public sealed class DailyCloseViewModelTests
         Assert.Equal(955.20m, archive.NetAmount);
         Assert.Equal(18, archive.OrderCount);
         Assert.Equal(CashDifferenceStatus.Short, archive.DifferenceStatus);
+        // 历史日结的差额文本与小票同一格式，短款带 - 号。
+        Assert.Equal(DailyCloseMoneyFormat.SignedMoney(archive.CashDifference), archive.CashDifferenceText);
+        Assert.StartsWith("-", archive.CashDifferenceText, StringComparison.Ordinal);
         Assert.Equal(archive.Archive.ShortArchiveId, archive.ShortArchiveId);
         Assert.Equal(archive.SavedAt.ToLocalTime().ToString("HH:mm"), archive.ClosedTimeDisplay);
         Assert.Equal(CashDifferenceStatus.Over, CashDifferenceStatusResolver.From(0.05m));

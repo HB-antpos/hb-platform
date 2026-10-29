@@ -116,7 +116,16 @@ export interface AccessControl {
   canReviewAttendance: boolean
   canEditAttendanceHoliday: boolean
   canEditAttendanceSettings: boolean
+  canReviewOwnAttendance: boolean
+  canViewAttendancePayroll: boolean
+  canViewAttendanceHours: boolean
+  canAdjustAttendancePunches: boolean
+  canEditAttendancePayroll: boolean
+  canUnlockAttendancePayroll: boolean
+  /** 员工个人信息维护页 / 用户管理「个人信息」页签：EmployeeProfiles.ViewManagedStore。 */
   canViewEmployeeProfiles: boolean
+  /** 修改非敏感资料：EmployeeProfiles.EditManagedStore。 */
+  canEditEmployeeProfiles: boolean
   canViewSystemLogs: boolean
   canViewPerformanceBaseline: boolean
   canViewOperationAudits: boolean
@@ -130,6 +139,12 @@ export interface AccessControl {
   canViewSeasonalCardStats: boolean
   /** 人脸抓拍摄像机管理页：独立权限 FaceCapture.Cameras.Manage。 */
   canManageFaceCameras: boolean
+  /** MYOB 对接页（连接公司文件、分店映射）：独立权限 Myob.Connection.Manage。 */
+  canManageMyobConnections: boolean
+  /** MYOB 对接页「员工绑定」页签：独立权限 Myob.Employee.Bind。 */
+  canBindMyobEmployees: boolean
+  /** MYOB 对接页入口：连接管理 / 员工绑定 / 编辑工资（发薪公司页签）三者任一；页内各页签再按各自权限显示。 */
+  canAccessMyob: boolean
   /** 人脸比对页：FaceMatch.* 五个权限码任一（页签再按各自权限显示）。 */
   canAccessFaceMatch: boolean
   canManageScheduledTasks: boolean

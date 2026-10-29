@@ -40,6 +40,7 @@ import {
 import { normalizeStatisticsFreshness } from "../reports/statistics-freshness";
 import {
   normalizePromotionsResponse,
+  normalizeStatusCounts,
   normalizeValidPromotionsResponse,
 } from "../promotions/api";
 import { normalizeWarehousePriceSyncResponse } from "../product-maintenance/warehouse-price-sync";
@@ -2041,9 +2042,9 @@ async function run() {
     priority: 20,
     effectiveStart: "2026-07-14T00:00:00.000Z",
   });
-  await createProductPromotion("总部活动", {
+  await createProductPromotion("未绑定分店活动", {
     priority: 15,
-    // 全部门店关联已软删除时，应按总部活动处理。
+    // 全部门店关联已软删除＝未绑定分店：收银不计算，接口也不再返回（不再当成总部 / 全店活动）。
     stores: [{ storeCode: "REV002", isDeleted: true }],
   });
   await createProductPromotion("其他门店活动", {
@@ -2080,11 +2081,33 @@ async function run() {
         .map((promotion) => promotion.name),
       earlierActivity.name,
       laterActivity.name,
-      "总部活动",
       "Demo Mug Bundle",
     ],
-    "商品活动只应返回当前分店或总部的有效关联，并按优先级、开始时间和 ID 稳定排序",
+    "商品活动只应返回绑定当前分店的有效关联，并按优先级、开始时间和 ID 稳定排序",
   );
+
+  // 商品查询页「本商品促销」与促销页分段数量（新接口）：只算绑定当前分店的，未结束的都返回（含停用）。
+  await createProductPromotion("本店停用活动", { priority: 1, isEnabled: false });
+  const storeProductPromotions = normalizeValidPromotionsResponse(
+    await request(
+      "GET",
+      "/react/v1/promotions/store/by-product?productCode=REV-PROD-001&storeCode=REV001",
+    ),
+  );
+  const storeProductNames = storeProductPromotions.map((promotion) => promotion.name);
+  assert.ok(storeProductNames.includes("本店停用活动"), "按商品查询包含已停用但未结束的本店促销");
+  assert.ok(!storeProductNames.includes("未绑定分店活动"), "未绑定分店的不返回");
+  assert.ok(!storeProductNames.includes("其他门店活动"), "其他门店的不返回");
+  const statusCounts = normalizeStatusCounts(
+    await request("GET", "/react/v1/promotions/store/status-counts?storeCode=REV001"),
+  );
+  assert.ok(statusCounts.total > 0, "状态数量接口不能被 /store/{id} 正则截走");
+  assert.equal(
+    statusCounts.active + statusCounts.upcoming + statusCounts.disabled + statusCounts.ended,
+    statusCounts.total,
+    "四个分段互斥且合计等于全部",
+  );
+  assert.ok(statusCounts.disabled >= 1, "停用的本店促销计入已停用");
 
   const getProductDetail = () =>
     request(

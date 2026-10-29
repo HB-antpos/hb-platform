@@ -27,7 +27,9 @@ public sealed class PriceIndexBuilderTests
     [Theory]
     [InlineData(20, 0.2)]
     [InlineData(0.2, 0.2)]
-    [InlineData(100, 1)]
+    [InlineData(50, 0.5)]
+    [InlineData(99, 0.99)]
+    [InlineData(0.99, 0.99)]
     public void Build_NormalizesStoreRetailDiscountRate(decimal sourceDiscountRate, decimal expectedDiscountRate)
     {
         var items = _builder.Build("S01", new PriceIndexInput(
@@ -42,8 +44,11 @@ public sealed class PriceIndexBuilderTests
         Assert.Equal(expectedDiscountRate, barcodeItem.DiscountRate);
     }
 
+    // 折扣保护：1（歧义：1% 还是 100%）与 100（100%）都会把整行折成 $0，一律不下发（1002 店 10-24/25 事故）。
     [Theory]
     [InlineData(-1)]
+    [InlineData(1)]
+    [InlineData(100)]
     [InlineData(101)]
     public void Build_IgnoresInvalidStoreRetailDiscountRate(decimal sourceDiscountRate)
     {
@@ -62,6 +67,7 @@ public sealed class PriceIndexBuilderTests
     [Theory]
     [InlineData(20, 0.2)]
     [InlineData(0.2, 0.2)]
+    [InlineData(99, 0.99)]
     public void Build_NormalizesStoreMultiCodeDiscountRate(decimal sourceDiscountRate, decimal expectedDiscountRate)
     {
         var items = _builder.Build("S01", new PriceIndexInput(
@@ -74,6 +80,23 @@ public sealed class PriceIndexBuilderTests
 
         var item = Assert.Single(items);
         Assert.Equal(expectedDiscountRate, item.DiscountRate);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(100)]
+    public void Build_IgnoresFullDiscountRateOnStoreMultiCodeProduct(decimal sourceDiscountRate)
+    {
+        var items = _builder.Build("S01", new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Apple", null, null, 10m, null)],
+            [],
+            [new StoreMultiCodeProductRecord("P01", "M01", "MULTI01", 6m, null, ReferenceCode: "SMCP-UUID-01", DiscountRate: sourceDiscountRate)],
+            [],
+            []));
+
+        var item = Assert.Single(items);
+        Assert.Null(item.DiscountRate);
     }
 
     [Fact]
@@ -203,6 +226,48 @@ public sealed class PriceIndexBuilderTests
         Assert.Equal(12m, setItem.RetailPrice);
         Assert.Equal(PriceSourceKind.ProductSetCode, setItem.PriceSource);
         Assert.Equal("SET-UUID-01", setItem.ReferenceCode);
+    }
+
+    [Fact]
+    public void Build_SetCodeWithoutOwnPriceFollowsMainStoreRetailPrice()
+    {
+        // 复现 SW0126：副条码 SetRetailPrice 为 NULL、门店多码价也为 NULL，应按主条码门店价走，而不是 $0.00。
+        var items = _builder.Build("S01", new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Wrapping Paper", "SW0126", "MAIN01", 4m, null)],
+            [new StoreRetailPriceRecord("P01", 3.5m, null, ReferenceCode: "SRP-UUID-01", DiscountRate: 0.1m)],
+            [new StoreMultiCodeProductRecord("P01", "SET-P01", "SETBAR01", null, null, ReferenceCode: "SMCP-UUID-01")],
+            [],
+            [new ProductSetCodeRecord("P01", "SET-P01", "SETBAR01", null, null, ReferenceCode: "SET-UUID-01")]));
+
+        var setItem = Assert.Single(items, x => x.LookupCode == "SETBAR01");
+        Assert.Equal(3.5m, setItem.RetailPrice);
+        Assert.Equal(PriceSourceKind.ProductSetCode, setItem.PriceSource);
+        Assert.Equal("SET-UUID-01", setItem.ReferenceCode);
+        Assert.Equal(0.1m, setItem.DiscountRate);
+        Assert.Equal("P01", setItem.ProductCode);
+        Assert.False(setItem.IsSpecialProduct);
+    }
+
+    [Fact]
+    public void Build_SetCodeWithNullPriceFallsBackToProductBasePrice() => AssertSetFallsBackToProductBasePrice(null);
+
+    [Fact]
+    public void Build_SetCodeWithZeroPriceFallsBackToProductBasePrice() => AssertSetFallsBackToProductBasePrice(0m);
+
+    private void AssertSetFallsBackToProductBasePrice(decimal? setRetailPrice)
+    {
+        var items = _builder.Build("S01", new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Apple Set", null, null, 10m, null)],
+            [],
+            [],
+            [],
+            [new ProductSetCodeRecord("P01", "SET-P01", "SETBAR01", setRetailPrice, null, ReferenceCode: "SET-UUID-01")]));
+
+        var setItem = Assert.Single(items);
+        Assert.Equal(10m, setItem.RetailPrice);
+        Assert.Equal(PriceSourceKind.ProductSetCode, setItem.PriceSource);
     }
 
     [Fact]

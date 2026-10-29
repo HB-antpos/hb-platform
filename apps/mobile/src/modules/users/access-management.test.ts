@@ -517,4 +517,163 @@ assert.equal(delegatedStaffAccess.reason, "noPermission");
   assert.equal(planStoreManagerGrant({ ...base, assignments: afterSet }).kind, "already", "设置后再点不会重复动草稿");
 }
 
+// ───────── 仓库管理：不限分店的受限委派者 ─────────
+{
+  const warehouseBase = {
+    isDeviceMode: false,
+    isAdmin: false,
+    isStoreManager: false,
+    isWarehouseManager: true,
+    canManageStores: true,
+    canManageRoles: true,
+    canManagePos: true,
+    currentUserGuid: "warehouse-1",
+    targetUserGuid: "staff-1",
+    targetStatus: 1,
+    targetRoleNames: ["StoreStaff"],
+    // 后端对仓库管理返回的分店 isPrimary 恒为 false，所以「可管理分店」是 0，资格不能依赖它。
+    hasManageableStores: false,
+  };
+
+  assert.deepEqual(
+    getUserAccessEligibility(warehouseBase),
+    {
+      canOpen: true,
+      storesMode: "editable",
+      rolesMode: "editable",
+      permissionsMode: "editable",
+      canManagePos: true,
+      canGrantStoreManagement: true,
+      reason: null,
+    },
+    "仓库管理没有主分店也能改店员的分店、角色、权限，并可授管理关系",
+  );
+
+  // 只有仓库管理角色（没有店长角色）同样放行；sean 这种同时有两个角色的账号以仓库管理为准。
+  assert.equal(getUserAccessEligibility(warehouseBase).canOpen, true);
+  assert.equal(
+    getUserAccessEligibility({ ...warehouseBase, isStoreManager: true }).canGrantStoreManagement,
+    true,
+    "同时有店长角色时仍按仓库管理口径：可授管理关系",
+  );
+
+  // 店长账号可以被仓库管理调整（要能把店长改成店员），也可以维护它的直接权限和按店 POS 权限；
+  // 订货员 / 仓库员工等既不是员工也不是店长的目标不开放权限分段。
+  const storeManagerTarget = getUserAccessEligibility({
+    ...warehouseBase,
+    targetUserGuid: "manager-1",
+    targetRoleNames: ["StoreManager"],
+  });
+  assert.equal(storeManagerTarget.canOpen, true, "仓库管理可以调整店长账号");
+  assert.equal(storeManagerTarget.storesMode, "editable");
+  assert.equal(storeManagerTarget.rolesMode, "editable");
+  assert.equal(storeManagerTarget.permissionsMode, "editable", "仓库管理可以维护店长的直接权限");
+  assert.equal(storeManagerTarget.canManagePos, true, "仓库管理可以维护店长的按店 POS 权限");
+  for (const roleName of ["Order", "WarehouseStaff", "User"]) {
+    const other = getUserAccessEligibility({
+      ...warehouseBase,
+      targetUserGuid: "other-1",
+      targetRoleNames: [roleName],
+    });
+    assert.equal(other.permissionsMode, "hidden", `${roleName} 目标不开放权限分段`);
+    assert.equal(other.canManagePos, false);
+  }
+  // 店长操作者对店长目标仍然被拒（放宽只给仓库管理）。
+  assert.equal(
+    getUserAccessEligibility({
+      ...warehouseBase,
+      isWarehouseManager: false,
+      isStoreManager: true,
+      hasManageableStores: true,
+      targetRoleNames: ["StoreManager"],
+    }).reason,
+    "privilegedTarget",
+  );
+
+  // 提权保护：管理员与仓库管理账号永远不可改，别名也一样。
+  for (const roleName of [...adminAliases, "WarehouseManager", "仓库经理", "Warehouse", "仓库管理员", "WarehouseAdmin"]) {
+    const denied = getUserAccessEligibility({
+      ...warehouseBase,
+      targetUserGuid: "protected-1",
+      targetRoleNames: ["StoreStaff", roleName],
+    });
+    assert.equal(denied.canOpen, false, `${roleName} 账号不能被仓库管理修改`);
+    assert.equal(denied.reason, "privilegedTarget");
+  }
+
+  // 本人、停用目标、设备模式照常拒绝 / 收窄。
+  assert.equal(
+    getUserAccessEligibility({ ...warehouseBase, targetUserGuid: "warehouse-1" }).reason,
+    "self",
+    "仓库管理不能改本人",
+  );
+  assert.equal(getUserAccessEligibility({ ...warehouseBase, isDeviceMode: true }).reason, "deviceMode");
+  assert.equal(
+    getUserAccessEligibility({ ...warehouseBase, targetStatus: 0 }).canManagePos,
+    false,
+    "停用目标不开放 POS 权限入口",
+  );
+
+  // 没有仓库管理标记的普通非管理员（没有店长角色）仍然无权；店长行为不变（仍不能授管理关系）。
+  assert.equal(
+    getUserAccessEligibility({ ...warehouseBase, isWarehouseManager: false }).reason,
+    "noPermission",
+  );
+  assert.equal(
+    getUserAccessEligibility({
+      ...warehouseBase,
+      isWarehouseManager: false,
+      isStoreManager: true,
+      hasManageableStores: true,
+    }).canGrantStoreManagement,
+    false,
+    "店长仍然只能授查看关系",
+  );
+  assert.equal(
+    getUserAccessEligibility({
+      ...warehouseBase,
+      isWarehouseManager: false,
+      isStoreManager: true,
+      hasManageableStores: false,
+    }).canOpen,
+    false,
+    "店长没有可管理分店时仍然不能进入（仓库管理的放宽不外溢）",
+  );
+
+  // 角色目录：仓库管理和店长一样，只暴露员工角色，管理员 / 仓库管理 / 订货员等都不在可编辑目录里。
+  const catalog: UserAccessRole[] = [
+    { roleGUID: "r-admin", roleName: "Admin" },
+    { roleGUID: "r-warehouse", roleName: "WarehouseManager" },
+    { roleGUID: "r-staff", roleName: "StoreStaff" },
+    { roleGUID: "r-order", roleName: "Order" },
+  ] as UserAccessRole[];
+  assert.deepEqual(
+    limitUserAccessRolesForActor(catalog, false).map((role) => role.roleName),
+    ["StoreStaff"],
+    "店长只看到「店员」一行",
+  );
+  // 仓库管理可以设置店长：目录里多一行派生的「店长」（不可勾选，点它引导去分店设为「管理」）；
+  // 管理员、仓库管理、订货员等永远不出现。
+  const catalogWithManager = [
+    ...catalog,
+    { roleGUID: "r-manager", roleName: "StoreManager" },
+    { roleGUID: "r-manager-cn", roleName: "店长" },
+  ] as UserAccessRole[];
+  assert.deepEqual(
+    limitUserAccessRolesForActor(catalogWithManager, false, true).map((role) => role.roleName),
+    ["StoreStaff", "StoreManager", "店长"],
+    "仓库管理：店员 + 派生的店长，不含管理员 / 仓库管理 / 订货员",
+  );
+  assert.deepEqual(
+    limitUserAccessRolesForActor(catalogWithManager, false).map((role) => role.roleName),
+    ["StoreStaff"],
+    "店长（非仓库管理）仍看不到店长行",
+  );
+  assert.equal(
+    limitUserAccessRolesForActor(catalogWithManager, true, true).length,
+    catalogWithManager.length,
+    "管理员看到全部",
+  );
+}
+
 console.log("user access management pure logic tests passed");

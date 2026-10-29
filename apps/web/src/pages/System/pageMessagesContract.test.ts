@@ -54,7 +54,11 @@ const pages = [
   {
     name: '员工个人信息维护',
     keyPattern: /['"`](system\.employeeProfiles\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/System/EmployeeProfiles/index.tsx'],
+    // 共用编辑器（员工资料页与用户管理「个人信息」页签共用）也用同一份页面级文案，需一并核对键名。
+    sources: [
+      'src/pages/System/EmployeeProfiles/index.tsx',
+      'src/pages/System/EmployeeProfiles/ManagedEmployeeProfileEditor.tsx',
+    ],
     messages: {
       zh: 'src/pages/System/EmployeeProfiles/employeeProfilesMessages.zh.json',
       en: 'src/pages/System/EmployeeProfiles/employeeProfilesMessages.en.json',
@@ -101,6 +105,8 @@ const pages = [
       // 收银入口视图 + 设备列表「线路」列
       'src/pages/PosAdmin/DeviceRegistration/PosApiEntryPanel.tsx',
       'src/pages/PosAdmin/DeviceRegistration/posApiEntryCells.tsx',
+      // 线路用量视图（日 / 周 / 月）
+      'src/pages/PosAdmin/DeviceRegistration/PosApiEntryUsagePanel.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/DeviceRegistration/deviceManagementMessages.zh.json',
@@ -110,16 +116,83 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/DeviceRegistration/index.tsx',
   },
   {
-    // 排班考勤页既有文案在全局；用餐未休息加工时新增的 meal.* 键在页面级消息文件。
+    // 排班考勤页既有文案在全局；用餐未休息加工时（meal.*）、工资参数（payrollSettings.*）、已删除排班（deletedSchedules.*）、周排班单元格就地编辑（cellEditor.*）新增键在页面级消息文件。
     name: '排班考勤',
-    keyPattern: /['"`](posAdmin\.scheduleAttendance\.meal\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/PosAdmin/ScheduleAttendance/index.tsx'],
+    keyPattern: /['"`](posAdmin\.scheduleAttendance\.(?:meal|payrollSettings|deletedSchedules|cellEditor)\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/AttendancePayrollSettingsFields.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/DeletedSchedulesDrawer.tsx',
+      'src/pages/PosAdmin/ScheduleAttendance/ScheduleCellEditor.tsx',
+    ],
     messages: {
       zh: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json',
       en: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.en.json',
     },
     registerImport: "from './scheduleAttendanceMessages.zh.json'",
     registerSource: 'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
+  },
+  {
+    // 考勤审核工作台：文案全部在页面级消息文件
+    name: '考勤审核',
+    keyPattern: /['"`](attendanceReview\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: ['src/pages/PosAdmin/AttendanceReview/index.tsx'],
+    messages: {
+      zh: 'src/pages/PosAdmin/AttendanceReview/attendanceReviewMessages.zh.json',
+      en: 'src/pages/PosAdmin/AttendanceReview/attendanceReviewMessages.en.json',
+    },
+    registerImport: "from './attendanceReviewMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/AttendanceReview/index.tsx',
+  },
+  {
+    // 工时与工资（工时统计 / 工资表 / 个人时薪表）：文案全部在页面级消息文件
+    name: '工时与工资',
+    keyPattern: /['"`](attendancePayroll\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/AttendancePayroll/index.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/HoursTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/PayTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/RatesTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/payrollExport.ts',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/AttendancePayroll/attendancePayrollMessages.zh.json',
+      en: 'src/pages/PosAdmin/AttendancePayroll/attendancePayrollMessages.en.json',
+    },
+    registerImport: "from './attendancePayrollMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/AttendancePayroll/index.tsx',
+  },
+  {
+    // MYOB 对接：文案全部在页面级消息文件（菜单标题 menu.myob 在全局语言包）；错误码 / 状态映射键写在 myobLogic.ts 与 myobEmployeeLogic.ts
+    name: 'MYOB 对接',
+    keyPattern: /['"`](myob\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/Myob/index.tsx',
+      'src/pages/PosAdmin/Myob/ConnectionsPanel.tsx',
+      'src/pages/PosAdmin/Myob/StoreMappingsPanel.tsx',
+      'src/pages/PosAdmin/Myob/AbnCell.tsx',
+      'src/pages/PosAdmin/Myob/myobLogic.ts',
+      // 阶段 1：员工绑定 + 发薪公司
+      'src/pages/PosAdmin/Myob/myobEmployeeLogic.ts',
+      'src/pages/PosAdmin/Myob/EmployeeBindingTab.tsx',
+      'src/pages/PosAdmin/Myob/BindingListView.tsx',
+      'src/pages/PosAdmin/Myob/BindingDrawer.tsx',
+      'src/pages/PosAdmin/Myob/MissingPanels.tsx',
+      'src/pages/PosAdmin/Myob/MyobBadges.tsx',
+      'src/pages/PosAdmin/Myob/PayrollEmployersTab.tsx',
+      'src/pages/PosAdmin/Myob/PayrollEmployerDrawer.tsx',
+      // 阶段 2：工资类别映射 + 只读推送预览
+      'src/pages/PosAdmin/Myob/myobTimesheetLogic.ts',
+      'src/pages/PosAdmin/Myob/PayCategoryMappingCard.tsx',
+      'src/pages/PosAdmin/Myob/PushPreviewTab.tsx',
+      'src/pages/PosAdmin/Myob/PushDetailDrawer.tsx',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',
+      en: 'src/pages/PosAdmin/Myob/myobMessages.en.json',
+    },
+    registerImport: "from './myobMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/Myob/index.tsx',
   },
   {
     name: '支付终端配置',

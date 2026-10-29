@@ -22,6 +22,8 @@ export interface UserAccessRole {
   roleName: string;
   description?: string;
   isActive?: boolean;
+  /** 角色等级（数值越大越高）；后端 Level 为 0 表示未单独设置。 */
+  level?: number;
 }
 
 export interface AccessPermission {
@@ -122,6 +124,8 @@ export interface UserAccessEligibilityContext {
   isDeviceMode: boolean;
   isAdmin: boolean;
   isStoreManager: boolean;
+  /** 仓库管理：不限分店的受限委派者（可授员工角色、授管理 / 查看分店关系，但不能碰管理员与仓库管理账号）。 */
+  isWarehouseManager?: boolean;
   canManageStores: boolean;
   canManageRoles: boolean;
   canManagePos: boolean;

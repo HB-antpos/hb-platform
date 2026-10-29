@@ -1,3 +1,4 @@
+import { roundAudCash } from "./money";
 import type { AuditEventDraft } from "./order";
 
 export const AUD_CASH_DENOMINATIONS_CENTS = Object.freeze([
@@ -39,6 +40,13 @@ export type DailyCloseSummary = DailyCloseScope &
     orderCount: number;
     returnQuantity: string;
     tenders: readonly DailyCloseTenderBreakdown[];
+    /**
+     * 现金进位合计（分，带符号）：钱箱里实际收付的是 5 分进位后的现金，而 tender 记的是订单精确金额，
+     * 两者每单可差 ±2 分。应有现金 = 现金净额 + 现金进位；对账必须拿进位后的金额比，否则每天都有几分钱的假差额。
+     * 对齐 WPF #914 的 CashRoundingAmount。
+     */
+    cashRoundingCents: number;
+    /** 应有现金 = 现金 tender 净额 + cashRoundingCents。 */
     expectedCashCents: number;
   }>;
 
@@ -80,6 +88,28 @@ export interface DailyCloseRepositoryPort {
       limit: number;
     }>,
   ): Promise<readonly DailyCloseArchive[]>;
+}
+
+/**
+ * 当日现金进位合计。入参是“每张订单的现金 tender 合计（销售为正、退款为负，分）”，
+ * 每单按收银时同一规则（AUD 5 分、远离零）进位，进位后的金额减精确金额就是这张订单的进位。
+ * 只看现金 tender，不依赖订单头里的收款/找零字段，历史订单同样可算（与 WPF ReadCashRoundingAmountAsync 一致）。
+ */
+export function sumCashRoundingCents(
+  cashCentsByOrder: readonly number[],
+): number {
+  let total = 0;
+  for (const cashCents of cashCentsByOrder) {
+    if (!Number.isSafeInteger(cashCents)) {
+      throw new TypeError("Daily close order cash total must be integer cents.");
+    }
+    const rounded = roundAudCash({ currency: "AUD", cents: cashCents }).cents;
+    total += rounded - cashCents;
+    if (!Number.isSafeInteger(total)) {
+      throw new TypeError("Daily close cash rounding exceeds safe integer bounds.");
+    }
+  }
+  return total;
 }
 
 export function normalizeDailyCloseCounts(

@@ -378,7 +378,7 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.Path == "/dashboard");
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/schedule-attendance");
+        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
     }
 
     [Fact]
@@ -537,8 +537,70 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.Path == "/dashboard");
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/schedule-attendance");
+        Assert.Contains(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
         Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/sales-orders");
+    }
+
+    [Fact]
+    public void BuildMenu_ShowsAttendanceGroupForApprovalReviewPermissionOnly()
+    {
+        // 考勤审核已并入「排班考勤」合并页：审核权限显示合并页入口（页内只剩审核标签），不显示工时与工资
+        var reviewer = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore)));
+        var reviewerPosAdmin = Assert.Single(reviewer, item => item.Path == "/pos-admin");
+        var attendance = Assert.Single(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance");
+        Assert.Equal("menu.scheduleAttendance", attendance.TitleKey);
+        Assert.Equal("CalendarOutlined", attendance.Icon);
+        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/payroll");
+        // 旧叶子不再单独出现在菜单里
+        Assert.DoesNotContain(reviewerPosAdmin.Children!, item => item.Path == "/pos-admin/attendance-review");
+
+        // 只有查看审批、请假审核权限：与 Web 一致，不显示审核工作台（合并页也不出现）
+        var viewer = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Attendance.Approval.ViewManagedStore),
+            new Claim("permission", Permissions.Attendance.Leave.ReviewManagedStore)));
+        Assert.DoesNotContain(
+            viewer.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            item => item.Path == "/pos-admin/attendance");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Attendance.Punch.ViewManagedStore)]
+    [InlineData(Permissions.Attendance.Payroll.View)]
+    [InlineData(Permissions.Myob.Connection.Manage)]
+    public void BuildMenu_ShowsPayrollGroupWithPunchViewPayrollViewOrMyobPermission(string permission)
+    {
+        // 工时与工资合并页含工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见
+        var menu = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", permission)));
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        var payroll = Assert.Single(posAdmin.Children!, item => item.Path == "/pos-admin/payroll");
+        Assert.Equal("menu.attendancePayroll", payroll.TitleKey);
+        Assert.Equal("AccountBookOutlined", payroll.Icon);
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance");
+        // 旧叶子不再单独出现在菜单里
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/attendance-payroll");
+        Assert.DoesNotContain(posAdmin.Children!, item => item.Path == "/pos-admin/myob");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Attendance.Payroll.Edit)]
+    [InlineData(Permissions.Attendance.Payroll.Unlock)]
+    [InlineData(Permissions.Attendance.Admin.View)]
+    public void BuildMenu_HidesPayrollGroupWithoutPunchViewPayrollViewOrMyobPermission(string permission)
+    {
+        // 工资编辑 / 解锁不隐含查看；Attendance.Admin.View 也不连带工资权限与 MYOB 对接
+        var menu = _service.BuildMenu(CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", permission)));
+
+        Assert.DoesNotContain(
+            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            item => item.Path == "/pos-admin/payroll");
     }
 
     [Fact]
@@ -862,11 +924,11 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildMenu_ShowsEmployeeProfilesWithEmployeeProfileViewPermission()
+    public void BuildMenu_ShowsEmployeeProfilesWithEmployeeProfileViewManagedStorePermission()
     {
         var user = CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
-            new Claim("permission", Permissions.EmployeeProfiles.View)
+            new Claim("permission", Permissions.EmployeeProfiles.ViewManagedStore)
         );
 
         var menu = _service.BuildMenu(user);
@@ -877,7 +939,8 @@ public class NavigationServiceTests
             systemMenu.Children!,
             item =>
                 item.Path == "/system/accounts"
-                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
+                && item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.ViewManagedStore)
+                && !item.AnyPermissions!.Contains(Permissions.EmployeeProfiles.View)
         );
     }
 
@@ -1039,7 +1102,7 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(45, menu.Count);
+        Assert.Equal(46, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
@@ -1069,6 +1132,7 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.RouteName == "traffic-stats");
         Assert.Contains(menu, item => item.RouteName == "attendance-personal");
         Assert.Contains(menu, item => item.RouteName == "attendance-management");
+        Assert.Contains(menu, item => item.RouteName == "attendance-hours");
         Assert.Contains(menu, item => item.RouteName == "seasonal-cards");
         Assert.Contains(menu, item => item.RouteName == "advertisements");
         Assert.Contains(menu, item => item.RouteName == "promotions");
@@ -1451,6 +1515,30 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅凭查看管理分店打卡权限可见工时统计入口()
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Punch.ViewManagedStore)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "attendance-hours");
+        Assert.Equal("tabs.attendanceHours", item.TitleKey);
+        Assert.Equal("clock-outline", item.Icon);
+        Assert.Equal(Permissions.Attendance.Punch.ViewManagedStore, item.Permission);
+        // 只有审核权限、没有查看打卡权限的账号看不到工时统计。
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore))),
+            entry => entry.RouteName == "attendance-hours");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含工时统计()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "attendance-hours");
+        }
+    }
+
+    [Fact]
     public void BuildAppMenu_HidesAttendanceRoutesWithoutAttendancePermissions()
     {
         var user = CreateUser(new Claim("permission", Permissions.Orders.View));
@@ -1459,6 +1547,7 @@ public class NavigationServiceTests
 
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-personal");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance-management");
+        Assert.DoesNotContain(menu, item => item.RouteName == "attendance-hours");
         Assert.DoesNotContain(menu, item => item.RouteName == "attendance");
     }
 
@@ -1610,6 +1699,17 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅有ViewManagedStore时可进入人员管理资料页签_不显示用户管理()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.EmployeeProfiles.ViewManagedStore));
+
+        var menu = _service.BuildAppMenu(user);
+
+        Assert.Contains(menu, item => item.RouteName == "users");
+        Assert.DoesNotContain(menu, item => item.RouteName == "user-admin");
+    }
+
+    [Fact]
     public void BuildAppMenu_持有UsersView时经别名同时显示员工管理与用户管理()
     {
         var user = CreateUser(new Claim("permission", Permissions.Users.View));
@@ -1618,7 +1718,9 @@ public class NavigationServiceTests
 
         Assert.Contains(menu, item => item.RouteName == "users");
         Assert.Contains(menu, item => item.RouteName == "user-admin");
-        Assert.Equal(Permissions.Users.ViewStoreStaff, Assert.Single(menu, item => item.RouteName == "users").Permission);
+        // 「人员管理」合并入口改为多权限任一可见（ViewStoreStaff 或「资料」页签的 ViewManagedStore）；
+        // 移动端菜单 DTO 只带单个 Permission，多权限入口由服务端过滤后下发，Permission 为空。
+        Assert.Null(Assert.Single(menu, item => item.RouteName == "users").Permission);
         Assert.Equal(Permissions.Users.View, Assert.Single(menu, item => item.RouteName == "user-admin").Permission);
     }
 

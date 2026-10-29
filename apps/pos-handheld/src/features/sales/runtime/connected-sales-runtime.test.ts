@@ -81,6 +81,31 @@ test("目录搜索和 HID 精确扫码只使用本地目录，并以稳定 produ
   );
 });
 
+test("折扣保护：目录折扣率 ≥ 1 或为负的脏数据被忽略，按原价加购，不会变成 0 元", async () => {
+  for (const discountRate of [1, 1.5, 100, -0.2]) {
+    const dependencies = connected({
+      catalog: new Catalog([item({ retailPriceCents: 399, discountRate })]),
+    });
+
+    const [searchResult] = await dependencies.workflow.searchProducts("tea");
+    await dependencies.workflow.addProduct(searchResult!);
+
+    const line = dependencies.cart.getSnapshot().lines[0]!;
+    assert.equal(line.discount.cents, 0, `折扣率 ${discountRate} 不应产生折扣`);
+    assert.equal(line.actualAmount.cents, 399, `折扣率 ${discountRate} 应按原价 399`);
+  }
+
+  // 四舍五入到 100% 的小数（0.99996）封顶 9999 基点，行仍至少剩 1 分。
+  const capped = connected({
+    catalog: new Catalog([item({ retailPriceCents: 10_000, discountRate: 0.99996 })]),
+  });
+  const [cappedResult] = await capped.workflow.searchProducts("tea");
+  await capped.workflow.addProduct(cappedResult!);
+  const cappedLine = capped.cart.getSnapshot().lines[0]!;
+  assert.equal(cappedLine.discount.cents, 9_999);
+  assert.equal(cappedLine.actualAmount.cents, 1);
+});
+
 test("HID 扫码先发布权威购物车结果再结束 timing", async () => {
   const dependencies = connected({ catalog: new Catalog([item()]) });
   const order: string[] = [];

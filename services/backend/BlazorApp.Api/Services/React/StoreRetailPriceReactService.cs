@@ -782,7 +782,11 @@ namespace BlazorApp.Api.Services.React
                     if (dto.StoreRetailPriceValue.HasValue)
                         update = update.SetColumns(x => x.StoreRetailPriceValue == dto.StoreRetailPriceValue.Value);
                     if (dto.DiscountRate.HasValue)
-                        update = update.SetColumns(x => x.DiscountRate == dto.DiscountRate.Value);
+                    {
+                        // SetColumns 绕过实体 AOP，这里显式校验；表达式里只放局部变量，避免 SqlSugar 解析方法调用。
+                        var discountRate = StoreDiscountRate.RequireValid(dto.DiscountRate.Value);
+                        update = update.SetColumns(x => x.DiscountRate == discountRate);
+                    }
                     if (dto.IsActive.HasValue)
                         update = update.SetColumns(x => x.IsActive == dto.IsActive.Value);
                     if (dto.IsAutoPricing.HasValue)
@@ -2004,7 +2008,7 @@ namespace BlazorApp.Api.Services.React
                 SupplierCode = hq.H供应商编码,
                 PurchasePrice = hq.H进货价,
                 StoreRetailPriceValue = hq.H分店零售价,
-                DiscountRate = hq.H折扣率,
+                DiscountRate = StoreDiscountRate.Normalize(hq.H折扣率),
                 IsActive = hq.H使用状态,
                 IsAutoPricing = hq.H是否自动定价,
                 IsSpecialProduct = hq.H是否特殊商品,

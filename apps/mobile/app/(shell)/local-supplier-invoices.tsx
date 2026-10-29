@@ -30,6 +30,7 @@ import {
 } from "@/modules/local-supplier-invoices/navigation";
 import { getInvoiceInboundStatusLabel } from "@/modules/local-supplier-invoices/types";
 import { getDefaultListDateRange } from "@/shared/utils/default-list-date-range";
+import { sortSuppliersByName } from "@/shared/utils/name-sort";
 import {
   clearInvoiceDateRange,
   formatInvoiceDateRangeDisplay,
@@ -677,6 +678,8 @@ export default function LocalSupplierInvoicesScreen() {
       null,
     [draftFilters.supplierCode, suppliers]
   );
+  // 供应商筛选弹窗按名字排序（「全部供应商」固定在最前，在渲染处单独输出）。
+  const sortedSuppliers = useMemo(() => sortSuppliersByName(suppliers, language), [suppliers, language]);
   const monthCells = useMemo(() => buildMonthGrid(dateRangeDisplayMonth), [dateRangeDisplayMonth]);
   const calendarWeeks = useMemo(() => chunkWeeks(monthCells), [monthCells]);
   const today = useMemo(() => formatMonthDate(new Date()), []);
@@ -1930,7 +1933,7 @@ export default function LocalSupplierInvoicesScreen() {
                 <Text variant="bodyMedium">{t("messages.suppliersLoading")}</Text>
               </View>
             ) : suppliers.length ? (
-              suppliers.map((supplier) => (
+              sortedSuppliers.map((supplier) => (
                 <View key={supplier.supplierCode} style={styles.pickerRow}>
                   <RadioButton
                     value={supplier.supplierCode}

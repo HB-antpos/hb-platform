@@ -27,14 +27,18 @@ const STORE_STAFF_ROLE_NAMES = new Set([
   "员工",
 ]);
 
-const PRIVILEGED_ROLE_NAMES = new Set([
-  ...ADMIN_ROLE_NAMES,
-  ...STORE_MANAGER_ROLE_NAMES,
+const WAREHOUSE_MANAGER_ROLE_NAMES = new Set([
   "warehousemanager",
   "warehouse",
   "仓库经理",
   "仓库管理员",
   "warehouseadmin",
+]);
+
+const PRIVILEGED_ROLE_NAMES = new Set([
+  ...ADMIN_ROLE_NAMES,
+  ...STORE_MANAGER_ROLE_NAMES,
+  ...WAREHOUSE_MANAGER_ROLE_NAMES,
 ]);
 
 function normalizeIdentityValue(value: string) {
@@ -65,6 +69,10 @@ export function isStoreManagerRoleName(roleName: string) {
 
 export function isStoreStaffRoleName(roleName: string) {
   return STORE_STAFF_ROLE_NAMES.has(normalizeIdentityValue(roleName));
+}
+
+export function isWarehouseManagerRoleName(roleName: string) {
+  return WAREHOUSE_MANAGER_ROLE_NAMES.has(normalizeIdentityValue(roleName));
 }
 
 export function hasPrivilegedAccessRole(roleNames: string[]) {
@@ -231,10 +239,18 @@ export function filterUserAccessRoles(
 export function limitUserAccessRolesForActor(
   roles: UserAccessRole[],
   isAdmin: boolean,
+  /** 仓库管理：可以设置店长（经「管理」分店派生），所以目录里多出「店长」这一行。 */
+  isWarehouseManager = false,
 ) {
   if (isAdmin) return roles;
   // 店长只能增删员工角色；其他既有角色由后端保留且不在可编辑目录中暴露。
-  return roles.filter((role) => isStoreStaffRoleName(role.roleName));
+  // 仓库管理在此基础上多看到「店长」派生行（不可直接勾选，点它引导去分店设为「管理」）；
+  // 管理员 / 仓库管理角色永远不出现在目录里。
+  return roles.filter(
+    (role) =>
+      isStoreStaffRoleName(role.roleName) ||
+      (isWarehouseManager && isStoreManagerRoleName(role.roleName)),
+  );
 }
 
 function deniedEligibility(
@@ -296,28 +312,45 @@ export function getUserAccessEligibility(
   ) {
     return deniedEligibility("self");
   }
-  if (!context.isAdmin && hasPrivilegedAccessRole(context.targetRoleNames)) {
+  // 仓库管理（非管理员）按「仓库管理委派」口径：不限分店，只保护管理员与仓库管理账号，
+  // 店长账号可以改（要能把店长调成店员）；与服务端 IsWarehouseProtectedTargetAsync 一致。
+  const isWarehouseDelegate = !context.isAdmin && Boolean(context.isWarehouseManager);
+  const protectedTarget = isWarehouseDelegate
+    ? context.targetRoleNames.some(
+        (roleName) =>
+          isAccessAdminRoleName(roleName) || isWarehouseManagerRoleName(roleName),
+      )
+    : !context.isAdmin && hasPrivilegedAccessRole(context.targetRoleNames);
+  if (protectedTarget) {
     return deniedEligibility("privilegedTarget");
   }
 
-  // 账号授权只开放给管理员和店长；普通员工即使误带管理权限码也不能进入。
-  if (!context.isAdmin && !context.isStoreManager) {
+  // 账号授权只开放给管理员、仓库管理和店长；普通员工即使误带管理权限码也不能进入。
+  if (!context.isAdmin && !isWarehouseDelegate && !context.isStoreManager) {
     return deniedEligibility("noPermission");
   }
 
-  const canUseStoreScope = context.isAdmin || context.hasManageableStores;
-  const targetIsEmployee = context.targetRoleNames.some((roleName) =>
+  // 仓库管理在服务端是不限分店的，不依赖登录态里的主分店（后端对仓库管理返回的分店 isPrimary 恒为 false）。
+  const canUseStoreScope =
+    context.isAdmin || isWarehouseDelegate || context.hasManageableStores;
+  const targetIsStoreStaff = context.targetRoleNames.some((roleName) =>
     isStoreStaffRoleName(roleName),
   );
+  // 仓库管理还可以维护店长账号的权限（服务端限定：本人拥有且非提升类的权限）；店长操作者只能维护员工。
+  const targetIsEmployee =
+    targetIsStoreStaff ||
+    (isWarehouseDelegate &&
+      context.targetRoleNames.some((roleName) => isStoreManagerRoleName(roleName)));
   const storesMode = context.isAdmin
     ? "editable"
     : canUseStoreScope
       ? "editable"
       : "hidden";
   const rolesMode = canUseStoreScope ? "editable" : "hidden";
+  const isDelegate = context.isStoreManager || isWarehouseDelegate;
   const permissionsMode =
     context.isAdmin ||
-    (context.isStoreManager &&
+    (isDelegate &&
       canUseStoreScope &&
       targetIsEmployee &&
       context.targetStatus === 1)
@@ -325,7 +358,7 @@ export function getUserAccessEligibility(
       : "hidden";
   const canManagePos = Boolean(
     (context.isAdmin ||
-      (context.isStoreManager && context.canManagePos && targetIsEmployee)) &&
+      (isDelegate && context.canManagePos && targetIsEmployee)) &&
     canUseStoreScope &&
     context.targetStatus === 1,
   );
@@ -343,7 +376,8 @@ export function getUserAccessEligibility(
     rolesMode,
     permissionsMode,
     canManagePos,
-    canGrantStoreManagement: context.isAdmin,
+    // 管理员和仓库管理可以授「管理」分店关系（派生店长角色）；店长只能授查看关系。
+    canGrantStoreManagement: context.isAdmin || isWarehouseDelegate,
     reason: null,
   };
 }

@@ -909,7 +909,7 @@ namespace BlazorApp.Api.Services
             };
         }
 
-        private static string? Normalize(string? value)
+        internal static string? Normalize(string? value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
@@ -932,7 +932,7 @@ namespace BlazorApp.Api.Services
             }
         }
 
-        private static string? MaskAccount(string? value)
+        internal static string? MaskAccount(string? value)
         {
             var normalized = Normalize(value);
             return normalized is null
@@ -995,7 +995,7 @@ namespace BlazorApp.Api.Services
             IdentityId = dto.IdentityId ?? profile?.IdentityId,
         };
 
-        private static EmployeeGender? ParseGender(string? value)
+        internal static EmployeeGender? ParseGender(string? value)
         {
             return Normalize(value)?.ToLowerInvariant() switch
             {
@@ -1009,7 +1009,7 @@ namespace BlazorApp.Api.Services
             };
         }
 
-        private static EmployeeType? ParseEmployeeType(string? value)
+        internal static EmployeeType? ParseEmployeeType(string? value)
         {
             return Normalize(value)?.ToLowerInvariant() switch
             {
@@ -1027,7 +1027,7 @@ namespace BlazorApp.Api.Services
             };
         }
 
-        private static string? FormatGender(EmployeeGender? value)
+        internal static string? FormatGender(EmployeeGender? value)
         {
             return value switch
             {
@@ -1039,7 +1039,7 @@ namespace BlazorApp.Api.Services
             };
         }
 
-        private static string? FormatEmployeeType(EmployeeType? value)
+        internal static string? FormatEmployeeType(EmployeeType? value)
         {
             return value switch
             {

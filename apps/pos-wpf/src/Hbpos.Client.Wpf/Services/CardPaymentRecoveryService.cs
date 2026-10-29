@@ -5921,7 +5921,11 @@ public sealed class CardPaymentRecoveryService(
 
     private static bool IsCancelResponseCode(string? responseCode)
     {
-        return string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
+        // 中文注释：TM = OPERATOR CANCELLED（收银员/顾客在刷卡机上取消），不是银行拒绝；
+        // 云端 API（LinklyCloudBackendAsyncService.IsCancelledResponseCode）早已按取消处理，这里对齐，
+        // 否则恢复中心会把被取消的交易标成 Declined（10-25 1033 店实测）。
+        return string.Equals(responseCode, "TM", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CA", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCEL", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) ||

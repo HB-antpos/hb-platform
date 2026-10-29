@@ -198,7 +198,11 @@
     "keyword": "详情关键字",
     "keywordPlaceholder": "订单号 / 条码 / 商品编码 / 金额",
     "storeRequired": "至少选择一家分店",
-    "optionsHint": "员工与设备选项来自上一次查询的分店和时间"
+    "optionsHint": "员工与设备选项来自上一次查询的分店和时间",
+    "storePageTitle": "选择分店",
+    "storesDone": "完成",
+    "storesTotal": "共 {{count}} 家",
+    "storeEmpty": "没有匹配的分店"
   },
   "employees": {
     "sort": {

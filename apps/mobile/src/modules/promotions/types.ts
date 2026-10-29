@@ -34,9 +34,26 @@ export interface PromotionListItem {
 
 export type PromotionDetail = PromotionListItem;
 
+/** 店级列表状态分段，取值与后端 PromotionStoreStatusFilters 一致。 */
+export type PromotionStatusFilter = "active" | "upcoming" | "disabled" | "ended" | "all";
+
+/** 单条促销在某一时刻的状态（四种互斥，与后端分段判定一致）。 */
+export type PromotionLifecycleStatus = "active" | "upcoming" | "disabled" | "ended";
+
+export interface PromotionStatusCounts {
+  active: number;
+  upcoming: number;
+  disabled: number;
+  ended: number;
+  total: number;
+}
+
 export interface PromotionGridQuery {
   storeCode: string;
   keyword?: string;
+  status?: PromotionStatusFilter;
+  /** 仅「全部」分段有效：隐藏已结束（请求时翻译成后端的 notended 过滤）。 */
+  hideEnded?: boolean;
   page?: number;
   pageSize?: number;
   sortModel?: Array<{ colId: string; sort: "asc" | "desc" }>;

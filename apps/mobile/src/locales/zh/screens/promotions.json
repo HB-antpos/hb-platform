@@ -1,80 +1,193 @@
 {
-  "title": "促销",
-  "subtitle": "当前门店：{{store}}",
+  "title": "促销管理",
   "actions": {
     "create": "新建促销",
-    "edit": "编辑",
-    "copyToStore": "复制到本店",
-    "addProduct": "添加商品"
+    "copyToStore": "复制到本店"
   },
   "filters": {
     "keyword": "搜索促销名称"
   },
+  "segments": {
+    "active": "生效中",
+    "upcoming": "未开始",
+    "disabled": "已停用",
+    "ended": "已结束",
+    "all": "全部"
+  },
   "scope": {
-    "storeOnly": "本店",
+    "storeOnly": "本店独享",
     "multiStore": "多店",
-    "headquarters": "总部",
-    "unknown": "未知"
+    "multiStoreCount": "多店 · {{count}} 店"
   },
   "status": {
-    "enabled": "已启用",
+    "active": "生效中",
+    "upcoming": "未开始",
     "disabled": "已停用",
+    "ended": "已结束",
     "exclusive": "排他",
     "stackable": "可叠加"
+  },
+  "list": {
+    "today": "今天 {{date}}",
+    "sortEndAsc": "按结束时间排序",
+    "sortEndDesc": "按结束时间倒序",
+    "productFilter": "只看含「{{name}}」的促销",
+    "clearProductFilter": "取消商品筛选",
+    "hideEnded": "隐藏已结束",
+    "loadMore": "加载更多"
+  },
+  "card": {
+    "ruleQuantity": "{{count}}件",
+    "productCount": "{{count}} 商品",
+    "longTerm": "长期",
+    "daysLeft": "剩 {{count}} 天",
+    "startsIn": "{{count}} 天后开始",
+    "toggleLabel": "启用或停用「{{name}}」",
+    "lockedLabel": "多店促销，只读"
   },
   "fields": {
     "unnamed": "未命名促销",
     "name": "促销名称",
-    "description": "说明",
-    "effectiveStart": "开始时间",
-    "effectiveEnd": "结束时间",
-    "applyQuantity": "满足数量",
-    "fixedPrice": "组合价",
+    "effectiveStart": "开始日期",
+    "effectiveEnd": "结束日期",
+    "applyQuantity": "买满数量",
+    "fixedPrice": "组合总价",
     "priority": "优先级",
-    "enabled": "启用",
-    "exclusive": "排他促销",
-    "productCode": "商品编码",
-    "unitWeight": "权重",
     "priorityValue": "优先级 {{value}}",
-    "ruleValue": "满 {{count}} 件 ${{price}}",
-    "productsAndStores": "{{products}} 个商品 · {{stores}} 个门店"
+    "enabled": "启用",
+    "exclusive": "排他",
+    "maxApplications": "每单最多次数"
   },
-  "form": {
-    "createTitle": "新建本店促销",
-    "editTitle": "编辑本店促销",
-    "storeReadonly": "只应用于：{{store}}",
-    "priorityHint": "新建和复制默认优先级为 0；调高后可能影响排他促销启用冲突。",
-    "products": "商品明细"
+  "editor": {
+    "createTitle": "新建促销",
+    "editTitle": "编辑促销",
+    "namePlaceholder": "如：Halloween 服装 2 件价",
+    "decrease": "减少",
+    "increase": "增加",
+    "unitPriceHint": "均价 ${{price}} / 件",
+    "periodTitle": "有效期",
+    "startTime": "开始时间",
+    "endTime": "结束时间",
+    "productsTitle": "参与商品 · {{count}}",
+    "scanAdd": "扫码添加",
+    "searchAdd": "搜索",
+    "productsEmpty": "还没有商品，点「扫码添加」或「搜索」加入。",
+    "productLoading": "正在查询本店价格…",
+    "noRetailPrice": "本店暂无零售价",
+    "productRetail": "零售 ${{retail}}",
+    "productPrice": "零售 ${{retail}} → 均价 ${{unit}}",
+    "productNotDiscount": "零售 ${{retail}} · {{count}} 件 ${{price}} 比原价还贵",
+    "showMoreProducts": "再显示 {{count}} 个",
+    "removeProduct": "移除「{{name}}」",
+    "weightMenu": "「{{name}}」高级设置",
+    "weightHint": "长按商品行可设置权重（默认 1）",
+    "weightTitle": "商品权重",
+    "weightDescription": "权重表示该商品按几件计入「买满数量」，一般保持 1。",
+    "weightBadge": "权重 ×{{value}}",
+    "singleNotDiscount": "「{{name}}」零售价 ${{retail}}，买 {{count}} 件原价 ${{original}}，不高于组合价 ${{price}}，顾客享受不到优惠。只有一个商品时不能保存，请调低组合价。",
+    "mixedNotDiscountOne": "「{{name}}」零售价 ${{retail}}，买 {{count}} 件原价 ${{original}} 低于组合价 ${{price}}，顾客不会享受到优惠。建议移出或另建促销。",
+    "mixedNotDiscountMany": "{{names}} 等 {{count}} 个商品买满后比原价还贵，顾客不会享受到优惠。建议移出或另建促销。",
+    "advancedTitle": "适用与高级",
+    "appliesTo": "适用分店",
+    "storeOnlyValue": "本店独享 · {{store}}",
+    "exclusiveHint": "开启后与同时段其他促销不叠加",
+    "priorityNewHint": "新建固定为 0",
+    "priorityKeepHint": "保持原优先级",
+    "maxApplicationsHint": "留空表示不限",
+    "unlimited": "不限",
+    "discardTitle": "放弃修改？",
+    "discardMessage": "当前修改还没有保存。",
+    "keepEditing": "继续编辑",
+    "discard": "放弃",
+    "backToEdit": "返回修改"
+  },
+  "quickRange": {
+    "sevenDays": "7 天",
+    "monthEnd": "到月底",
+    "thirtyDays": "30 天"
+  },
+  "validation": {
+    "nameRequired": "请输入促销名称",
+    "quantityTooSmall": "买满数量至少 2 件",
+    "priceRequired": "请输入组合总价",
+    "notDiscount": "只有一个商品时，组合价必须比原价便宜",
+    "productsRequired": "请至少添加一个商品",
+    "rangeInvalid": "结束时间必须晚于开始时间",
+    "maxApplicationsInvalid": "每单最多次数须为正整数"
+  },
+  "conflict": {
+    "title": "可能与排他促销冲突",
+    "message": "与 {{names}} 等 {{count}} 条促销时间重叠，且有排他设置，收银时可能只生效其中一条。",
+    "endBefore": "改到 {{time}} 结束",
+    "saveAnyway": "仍然保存"
+  },
+  "endNow": {
+    "button": "提前结束",
+    "title": "提前结束促销？",
+    "message": "「{{name}}」的结束时间将改为现在，收银端随后不再计算该促销。",
+    "confirm": "提前结束",
+    "done": "促销已结束",
+    "failed": "提前结束失败"
+  },
+  "detail": {
+    "title": "促销详情",
+    "productsAndStores": "{{products}} 商品 · {{stores}} 家分店",
+    "productsPreview": "参与商品（前 {{count}} 个）",
+    "productsAll": "参与商品 · {{count}}",
+    "viewAll": "查看全部 {{count}} 个",
+    "multiStoreNote": "这条促销覆盖 {{count}} 家分店，只能查看，不能修改或停用。",
+    "readOnlyNote": "你没有编辑促销的权限，只能查看。"
   },
   "copy": {
     "title": "复制到本店",
-    "description": "将“{{name}}”复制成只属于当前门店的新促销，然后再修改。"
+    "description": "把「{{name}}」复制成只属于 {{store}} 的新促销（默认停用、优先级 0），然后再修改。原多店促销不变，仍在本店生效。",
+    "nameLabel": "新促销名称",
+    "stackWarning": "复制后两条同时生效会叠加计价；若只想用本店版本，请把本店版设为排他并调高优先级。",
+    "confirm": "复制并去编辑"
+  },
+  "scan": {
+    "listButton": "扫码查商品促销",
+    "listTitle": "扫码查商品促销",
+    "listSubtitle": "扫商品条码，只看包含该商品的促销",
+    "editorTitle": "扫码添加商品",
+    "editorSubtitle": "可连续扫码，扫到的商品加入参与商品",
+    "looking": "正在查询 {{barcode}}…",
+    "notFound": "本店没有找到条码 {{barcode}} 对应的商品",
+    "added": "已加入：{{name}}",
+    "duplicated": "已在列表中：{{name}}",
+    "multipleUseFirst": "条码对应多个商品，已按「{{name}}」筛选",
+    "failed": "扫码查询失败",
+    "permissionTitle": "需要相机权限",
+    "permissionDescription": "允许使用相机后才能扫描商品条码。",
+    "grantPermission": "允许使用相机"
+  },
+  "search": {
+    "title": "搜索添加商品",
+    "candidatesTitle": "条码匹配到多个商品，请选择",
+    "placeholder": "商品名称、条码或编码",
+    "searching": "正在搜索…",
+    "empty": "没有找到商品"
   },
   "empty": {
-    "selectStoreTitle": "请选择门店",
-    "selectStoreDescription": "选择门店后查看本店、多店和总部促销。",
+    "selectStoreTitle": "没有可管理的分店",
+    "selectStoreDescription": "当前账号没有可管理的分店，无法查看促销。",
     "noDataTitle": "暂无促销",
-    "noDataDescription": "当前门店还没有相关促销。"
-  },
-  "pagination": {
-    "previous": "上一页",
-    "next": "下一页",
-    "page": "第 {{page}} / {{pageCount}} 页"
-  },
-  "store": {
-    "empty": "未选择"
+    "noDataDescription": "当前分段下没有促销。",
+    "noProductPromotion": "本店没有包含该商品的未结束促销。"
   },
   "messages": {
-    "selectStoreFirst": "请先选择门店",
     "loadFailed": "加载促销失败",
     "detailFailed": "加载促销详情失败",
     "detailMissing": "未找到促销详情",
-    "nameRequired": "请输入促销名称",
     "saveFailed": "保存促销失败",
     "saved": "促销已保存",
+    "saveConflict": "与同时段的排他促销冲突，未保存。请调整有效期或关闭排他后再试。",
     "copyFailed": "复制促销失败",
-    "copied": "已复制为本店促销",
-    "copyBeforeEdit": "多店/总部促销需要先复制到本店后再修改",
-    "enableFailed": "更新启用状态失败"
+    "copied": "已复制为本店促销，默认停用",
+    "enabled": "已启用「{{name}}」",
+    "disabled": "已停用「{{name}}」",
+    "enableFailed": "更新启用状态失败",
+    "enableConflict": "与同时段的排他促销冲突，无法启用。请先调整有效期或停用另一条。",
+    "storeForbidden": "无权访问当前分店的促销"
   }
 }

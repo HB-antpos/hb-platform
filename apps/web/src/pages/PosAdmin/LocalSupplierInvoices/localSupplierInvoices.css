@@ -960,6 +960,22 @@ button.lsi-wb-pricing:focus-visible {
   font-size: 12px;
 }
 
+/* 「条码已属于某商品，建议选用」提示：商品匹配列很窄，允许换行并最多显示三行，完整内容在悬浮提示里。 */
+.lsi-wb-match-link.lsi-wb-suggested.ant-btn {
+  max-width: 100%;
+  color: #b45309;
+  text-align: left;
+  white-space: normal;
+  line-height: 16px;
+}
+
+.lsi-wb-match-link.lsi-wb-suggested.ant-btn > span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .lsi-wb-action-pill.ant-btn {
   height: 24px;
   padding: 0 6px 0 8px;

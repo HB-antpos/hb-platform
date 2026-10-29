@@ -65,6 +65,8 @@ export class OrderRepositoryLocalReturnLookup
       storeCode: order.storeCode,
       originalOrderGuid: order.orderGuid,
       receiptLabel: order.orderGuid,
+      soldAtIso: order.soldAtIso,
+      cashierName: order.cashierName,
       lines,
       capacities: groupLocalTenderCapacities(order.orderGuid, order.tenders),
       // mapVerifiedTender 会丢弃代金券 tender，占比必须按原单全部 tender 的原始金额先算；

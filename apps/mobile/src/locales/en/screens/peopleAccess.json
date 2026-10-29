@@ -46,7 +46,9 @@
     "emptyDescription": "There are no stores available for this account.",
     "missingStoreGuid": "This store has no access identifier, so POS permissions cannot be opened.",
     "managerNotice": "Accounts with a \"Manage\" store get the Store manager role automatically. If no store is set to \"Manage\", the role is removed.",
-    "scopeNotice": "You can only change the stores you manage. Only admins can grant \"Manage\"."
+    "scopeNotice": "You can only change the stores you manage. Only admins can grant \"Manage\".",
+    "filterAll": "All",
+    "filterA11y": "Filter stores by access"
   },
   "roles": {
     "searchPlaceholder": "Search roles",
@@ -58,6 +60,7 @@
     "derivedHintOn": "Comes from a \"Manage\" store. To remove it, set that store to \"View\"",
     "highPrivilege": "High privilege",
     "managerLimit": "Store managers can only add or remove the Store staff role for staff at their stores.",
+    "warehouseLimit": "Warehouse managers can set the role to Store staff. To make someone a store manager, set a store to \"Manage\" under Stores. Admin and Warehouse manager cannot be assigned.",
     "grantManager": {
       "set": "{{store}} set to \"Manage\", pending save",
       "choose": "This staff member has more than one store. Choose which one to set to \"Manage\", then tap Save.",
@@ -75,6 +78,7 @@
     "copyFromColleague": "Copy from colleague",
     "copyToOthers": "Copy to others",
     "managerLimit": "Store managers can only grant permissions they have themselves.",
+    "warehouseLimit": "Warehouse managers can only grant permissions they hold themselves, excluding role-management and system-settings permissions.",
     "implicitNotice": "This account is an admin and has all permissions by default.",
     "source": {
       "inherited": "Inherited from {{roles}}",

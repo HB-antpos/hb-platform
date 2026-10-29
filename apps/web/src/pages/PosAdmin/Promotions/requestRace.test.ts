@@ -181,7 +181,7 @@ for (const [label, block] of [['保存', saveMutation], ['删除', deleteMutatio
 }
 const optionsEffect = extractBlock(source, 'useEffect(() => {\n    ;(async () => {', '\n\n  useEffect(() => {\n    void loadData()', 'Promotions 选项初始化 effect')
 assertEqual(count(optionsEffect, 'loadData('), 0, 'Promotions 选项初始化不得重复加载主列表')
-const listEffect = extractBlock(source, 'useEffect(() => {\n    void loadData()', '\n\n  const editorUsesAllStoresScope', 'Promotions 列表 effect')
+const listEffect = extractBlock(source, 'useEffect(() => {\n    void loadData()', '\n\n  const editorHasNoStores', 'Promotions 列表 effect')
 assertEqual(count(listEffect, 'loadData('), 1, 'Promotions 列表 effect 每次只能加载一次')
 assert(listEffect.includes('listRequestGuardRef.current.invalidate()'), 'Promotions effect 清理时应使旧请求失效')
 assertEqual(count(source, 'await latestLoadDataRef.current()'), 3, 'Promotions mutation 后仍应显式刷新列表')

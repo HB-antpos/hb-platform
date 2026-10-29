@@ -257,6 +257,49 @@
   font-weight: 600;
 }
 
+/* 日结差额：短款红 / 长款橙 / 已平绿，色值与「日结记录」页保持一致（#cf1322 / #ad6800 / #237804）。 */
+.store-cash-variance {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.store-cash-variance.is-short {
+  color: #cf1322;
+}
+
+.store-cash-variance.is-over {
+  color: #ad6800;
+}
+
+.store-cash-variance.is-even {
+  color: #237804;
+}
+
+.store-cash-variance-glyph {
+  font-size: 11px;
+}
+
+.store-cash-variance-label {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.store-cash-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .store-cash-muted,
 .store-cash-empty {
   color: #98a2b3;

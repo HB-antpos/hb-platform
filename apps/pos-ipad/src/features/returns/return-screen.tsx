@@ -310,7 +310,10 @@ export function ReturnScreen({
           {state.orderSummary ? (
             <View style={styles.orderBanner} testID="return-order-summary">
               <Text style={styles.orderTitle}>
-                {t("order.summary", { order: state.orderSummary })}
+                {`${t("order.summary", { order: state.orderSummary })}${formatOrderMeta(
+                    state.orderSoldAtIso,
+                    state.orderCashierName,
+                  )}`}
               </Text>
               <Text style={styles.orderSource}>
                 {t(
@@ -1303,3 +1306,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
+
+/** 摘要后缀“  时间  收银员”（对齐 WPF #701：订单 #单号  时间  收银员）；缺失的部分省略。 */
+function formatOrderMeta(
+  soldAtIso: string | null | undefined,
+  cashierName: string | null | undefined,
+): string {
+  const parts: string[] = [];
+  const sold = soldAtIso ? new Date(soldAtIso) : null;
+  if (sold && Number.isFinite(sold.getTime())) {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    parts.push(
+      `${sold.getFullYear()}-${pad(sold.getMonth() + 1)}-${pad(sold.getDate())} ${pad(sold.getHours())}:${pad(sold.getMinutes())}`,
+    );
+  }
+  const cashier = cashierName?.trim();
+  if (cashier) parts.push(cashier);
+  return parts.length > 0 ? `  ${parts.join("  ")}` : "";
+}

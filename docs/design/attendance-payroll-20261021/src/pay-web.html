@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="shell.css">
+<style>
+.tbl{background:#fff;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#FAFAFA;font-weight:600;color:var(--t2);font-size:12px;padding:7px 6px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+th.l,td.l{text-align:left}
+th.g{background:#F2F4F7;color:var(--t1);text-align:center;font-size:12.5px}
+th.gt{background:#EFF8FF;color:var(--acc)} th.gc{background:#F0FDF9;color:#107569}
+td{border-bottom:1px solid #F0F0F0;padding:9px 6px;text-align:right;font-variant-numeric:tabular-nums;vertical-align:middle;white-space:nowrap}
+td.sep,th.sep{border-left:1px solid var(--line2)}
+td.t{background:#F8FBFF} td.cs{background:#F6FEFB}
+td.tot{font-weight:700;font-size:14px}
+td small{display:block;color:var(--t3);font-size:11px}
+.emp{display:flex;gap:7px;align-items:center}
+.emp .av{width:28px;height:28px;font-size:10.5px}
+.emp .nm{font-weight:600}
+.note{white-space:normal;text-align:left;min-width:136px;color:var(--t2);font-size:12.5px}
+.note .ed{border:1px dashed var(--line);border-radius:6px;padding:4px 7px;display:block}
+.fin{display:inline-block;border:1px dashed #F79009;background:var(--warnbg);color:var(--warn);border-radius:4px;padding:0 5px;font-weight:700}
+tr.sum td{background:#FAFAFA;font-weight:700}
+.formula{background:#fff;border:1px solid var(--line2);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--t2);display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.formula code{font-family:inherit;background:var(--muted);border-radius:5px;padding:2px 7px;color:var(--t1)}
+</style></head>
+<body><div class="canvas" id="cv">
+<h1>工资表 · Web（同一个两周周期）</h1>
+<div class="sub">按每个人的发放方式算钱。周末、公假按实际工时，用时薪表里各自的时薪；带薪假期按平日转账时薪；现金时薪只有一个价，不分周末和公假（全现金员工所有工时都按它）。只算已批准的加班。年假工时由财务按累计带薪小时核定（虚线框可改）。提交后本期锁定。时薪、补贴都是样例数字。</div>
+<div class="screen">
+  <div class="top"><div class="logo">HB</div><span class="crumb">门店运营 / 排班考勤 / <b>工时与工资</b></span><span style="margin-left:auto;color:var(--t2)">Sarah Kim</span></div>
+  <div class="body">
+    <div class="side"><div><i class="ti ti-calendar-week"></i></div><div><i class="ti ti-checklist"></i><span class="bd">7</span></div><div class="on"><i class="ti ti-table"></i></div><div><i class="ti ti-fingerprint"></i></div><div><i class="ti ti-calendar-user"></i></div><div><i class="ti ti-beach"></i></div><div><i class="ti ti-settings"></i></div></div>
+    <div class="main">
+      <div class="ph">
+        <h2>工时与工资</h2>
+        <span class="segc"><span>1 周</span><span class="on">2 周</span></span>
+        <span class="sel"><i class="ti ti-chevron-left"></i><b>第 41–42 周</b> · 10-05 ~ 10-18<i class="ti ti-chevron-right"></i></span>
+        <span class="sel"><i class="ti ti-building-store"></i>Chermside<i class="ti ti-chevron-down"></i></span>
+        <span style="flex:1"></span>
+        <span class="btn" style="height:32px"><i class="ti ti-download"></i>导出 Excel</span>
+        <span class="btn dis" style="height:32px"><i class="ti ti-lock"></i>提交并锁定 · 还有 6 项待处理</span>
+      </div>
+      <div class="ptabs"><div>工时统计</div><div class="on">工资表</div><div>个人时薪表</div></div>
+      <div class="formula">
+        <span><b style="color:var(--t1)">应付工时</b> <code>实际计薪工时（平日 / 六 / 日 / 公）+ 带薪假期（年假按财务核定）</code></span>
+        <span><b style="color:var(--acc)">转账</b> <code>固定工时/周 × 周数，按 周日 → 周六 → 带薪假 → 公假 → 平日 依次装，各档用转账时薪</code></span>
+        <span><b style="color:#107569">现金</b> <code>剩下的工时 × 现金时薪（只有一个价，不分周末 / 公假）± 补贴</code></span>
+      </div>
+      <div class="kpis" id="kpis"></div>
+      <div class="tbl"><table id="t"></table></div>
+    </div>
+  </div>
+</div>
+<div class="note-grid">
+  <div class="notes"><b>三种发放方式</b><ol><li><span class="mode m-transfer">全转账</span> 各档工时 × 各档转账时薪，带薪假 × 平日转账时薪。</li><li><span class="mode m-cash">全现金</span> 全部工时（含带薪假）× 现金时薪，± 补贴；现金时薪不分周末和公假。</li><li><span class="mode m-mix">转账+现金</span> 先按「固定工时 / 周 × 周数」装进转账，顺序 <b>周日 → 周六 → 带薪假 → 公假 → 平日</b>；剩下的走现金，统一按现金时薪，再 ± 现金补贴。</li></ol></div>
+  <div class="notes"><b>年假由财务核定 · 提交并锁定</b><ol><li>年假休息按每个工作日 8 h 申请（周末、公假不算）；系统不累计余额，财务按员工累计的带薪小时在<span class="fin">虚线框</span>里填核定工时，默认等于申请工时。年假发放同样处理。</li><li>待处理清零后才能提交；提交后本期的排班、打卡、补卡、审批、时薪、备注、核定工时都不能再改，要改先「解锁」（单独权限，留记录）。</li></ol></div>
+  <div class="notes"><b>新权限（默认谁都没有，手动授权）</b><ol><li><code>Attendance.Payroll.View</code> 看工资表、时薪表。</li><li><code>Attendance.Payroll.Edit</code> 改时薪、备注、年假核定工时，提交并锁定。</li><li><code>Attendance.Payroll.Unlock</code> 解锁已提交的周期。</li><li><code>Attendance.Approval.ReviewSelf</code> 审核本人申请。</li></ol></div>
+</div>
+</div>
+<script src="period-data.js"></script>
+<script>
+const R=P.map(e=>({e,...prow(e,0,14)}));
+const S=k=>R.reduce((a,r)=>a+r[k],0); const HS=k=>R.reduce((a,r)=>a+r.H[k],0);
+const allow=R.reduce((a,r)=>a+r.e.pay.allow,0);
+document.getElementById('kpis').innerHTML=`
+ <div class="kpi"><div class="l">应付工时合计</div><div class="v">${hrs(S('total'))} h</div><div class="s">平日 ${hrs(HS('wd'))} · 六 ${hrs(HS('sat'))} · 日 ${hrs(HS('sun'))} · 公 ${hrs(HS('ph'))} · 假 ${hrs(S('leavePay'))}</div></div>
+ <div class="kpi"><div class="l">转账合计</div><div class="v" style="color:var(--acc)">${money(S('tAmt'))}</div><div class="s">${hrs(S('tH'))} h</div></div>
+ <div class="kpi"><div class="l">现金合计（含补贴）</div><div class="v" style="color:#107569">${money(S('cAmt')+allow)}</div><div class="s">${hrs(S('cH'))} h · 补贴 ${money(allow)}</div></div>
+ <div class="kpi warn"><div class="l">本期应发合计</div><div class="v">${money(S('pay'))}</div><div class="s" style="color:var(--warn)">还有 6 项待处理，处理后数字会变</div></div>`;
+const ML={transfer:['全转账','m-transfer'],cash:['全现金','m-cash'],mix:['转账+现金','m-mix']};
+const comp=B=>ORDER.filter(k=>B[k]).map(k=>`${LB[k]} ${hrs(B[k])}`).join(' · ');
+const z=v=>v?hrs(v):'—';
+let h=`<tr><th class="g l"></th><th class="g sep" colspan="6">应付工时（h）</th><th class="g gt sep" colspan="2">转账</th><th class="g gc sep" colspan="3">现金</th><th class="g sep" colspan="2"></th></tr>
+<tr><th class="l">员工 / 方式</th><th class="sep">平日</th><th>周六</th><th>周日</th><th>公假</th><th>带薪假</th><th>合计</th><th class="sep">工时（按档）</th><th>金额</th><th class="sep">工时（按档）</th><th>补贴 ±</th><th>金额</th><th class="sep">应发</th><th class="l">备注</th></tr>`;
+for(const r of R){const e=r.e,p=e.pay,[ml,mc]=ML[p.mode];
+  const annualTxt=r.annual?(r.annualPay!==r.annual?`年 申请 ${hrs(r.annual)} → 核定 <span class="fin">${hrs(r.annualPay)}</span>`:`年 核定 <span class="fin">${hrs(r.annual)}</span>`):'';
+  const cashTxt=r.cash?`发 核定 <span class="fin">${hrs(r.cash)}</span>`:'';
+  const ld=[r.sick?`病 ${hrs(r.sick)}`:'',r.ph?`公 ${hrs(r.ph)}`:'',annualTxt,cashTxt].filter(Boolean).join(' · ');
+  const fixed=p.mode==='mix'?`<span style="font-size:11px;color:var(--t3);margin-left:4px">固定 ${p.fixedPerWeek} h/周</span>`:'';
+  h+=`<tr><td class="l"><div class="emp"><div class="av" style="background:${e.c}">${e.av}</div><div><div class="nm">${e.name} <span style="font-size:11.5px;color:var(--t3);font-weight:400">${e.type}${e.age?` · ${e.age} 岁`:''}</span></div><div style="margin-top:2px"><span class="mode ${mc}">${ml}</span>${fixed}</div></div></div></td>
+  <td class="sep">${z(r.H.wd)}</td><td>${z(r.H.sat)}</td><td>${z(r.H.sun)}</td><td>${z(r.H.ph)}</td><td>${z(r.leavePay)}${ld?`<small>${ld}</small>`:''}</td><td style="font-weight:700">${hrs(r.total)}</td>
+  <td class="sep t">${r.tH?hrs(r.tH):'—'}<small>${r.tH?comp(r.T):''}</small></td><td class="t" style="font-weight:600">${r.tAmt?money(r.tAmt):'—'}</td>
+  <td class="sep cs">${r.cH?hrs(r.cH):'—'}<small>${r.cH?comp(r.C):''}</small></td><td class="cs" style="color:${p.allow<0?'var(--bad)':p.allow>0?'var(--ok)':'var(--t3)'}">${p.allow?(p.allow>0?'+':'')+money(p.allow):'—'}</td><td class="cs" style="font-weight:600">${(r.cAmt||p.allow)?money(r.cAmt+p.allow):'—'}</td>
+  <td class="sep tot">${money(r.pay)}</td><td class="note"><span class="ed">${p.note||'<span style="color:var(--t3)">添加备注</span>'}</span></td></tr>`;}
+h+=`<tr class="sum"><td class="l">合计 · ${R.length} 人</td><td class="sep">${hrs(HS('wd'))}</td><td>${hrs(HS('sat'))}</td><td>${hrs(HS('sun'))}</td><td>${hrs(HS('ph'))}</td><td>${hrs(S('leavePay'))}</td><td>${hrs(S('total'))}</td><td class="sep t">${hrs(S('tH'))}</td><td class="t">${money(S('tAmt'))}</td><td class="sep cs">${hrs(S('cH'))}</td><td class="cs">${money(allow)}</td><td class="cs">${money(S('cAmt')+allow)}</td><td class="sep">${money(S('pay'))}</td><td></td></tr>`;
+document.getElementById('t').innerHTML=h;
+document.body.setAttribute('data-h',document.getElementById('cv').offsetHeight);
+</script>
+</body></html>

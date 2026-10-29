@@ -68,6 +68,11 @@ function normalizeAttendanceSegment(value: unknown) {
   }
 }
 
+/** 手动指定的用餐次数：只认 0–3 的整数，null / 缺失 / 其他一律当作自动（undefined）。 */
+function normalizeMealBreakCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 3 ? value : undefined
+}
+
 export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleDto {
   const source = asRecord(value)
   const segments = readCompat<unknown[]>(source, 'segments', 'Segments')
@@ -102,6 +107,8 @@ export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleD
     crossStoreMissingClockOutStoreCode: readCompat<string>(source, 'crossStoreMissingClockOutStoreCode', 'CrossStoreMissingClockOutStoreCode'),
     segments: Array.isArray(segments) ? segments.map(normalizeAttendanceSegment) : undefined,
     // 用餐扣除与计薪工时：旧后端不返回时都是 undefined，记录表不显示用餐列内容。
+    // mealBreakCount：null＝自动，统一收成 undefined；只认 0–3 的整数。
+    mealBreakCount: normalizeMealBreakCount(readCompat<unknown>(source, 'mealBreakCount', 'MealBreakCount')),
     effectiveMealBreakCount: readCompat<number>(source, 'effectiveMealBreakCount', 'EffectiveMealBreakCount'),
     mealDeductionMinutes: readCompat<number>(source, 'mealDeductionMinutes', 'MealDeductionMinutes'),
     approvedMealAddBackMinutes: readCompat<number>(source, 'approvedMealAddBackMinutes', 'ApprovedMealAddBackMinutes'),
@@ -157,6 +164,7 @@ export function normalizeAttendancePunch(value: unknown): AttendancePunchDto {
     isBreakBoundary: readCompat<boolean>(source, 'isBreakBoundary', 'IsBreakBoundary'),
     supersedesPunchGuid: readCompat<string>(source, 'supersedesPunchGuid', 'SupersedesPunchGuid'),
     adjustmentGuid: readCompat<string>(source, 'adjustmentGuid', 'AdjustmentGuid'),
+    isSystemAutoClockOut: readCompat<boolean>(source, 'isSystemAutoClockOut', 'IsSystemAutoClockOut'),
   }
 }
 
@@ -207,6 +215,56 @@ export function normalizeAttendanceApproval(value: unknown): AttendanceApprovalD
     approvedOvertimeMinutes: readCompat<number>(source, 'approvedOvertimeMinutes', 'ApprovedOvertimeMinutes'),
     adjustment: adjustment ? normalizeAttendanceAdjustment(adjustment) : undefined,
     mealClaim: normalizeAttendanceMealClaim(readCompat<unknown>(source, 'mealClaim', 'MealClaim')),
+    isSelfReview: readCompat<boolean>(source, 'isSelfReview', 'IsSelfReview'),
+    leave: normalizeAttendanceApprovalLeave(readCompat<unknown>(source, 'leave', 'Leave')),
+    publicHolidayPay: normalizeAttendanceApprovalPublicHoliday(readCompat<unknown>(source, 'publicHolidayPay', 'PublicHolidayPay')),
+  }
+}
+
+/** 后端 DateTime / TimeSpan 统一成 YYYY-MM-DD / HH:mm，前端只按字符串比较与显示。 */
+const dateOnly = (value: unknown) => (typeof value === 'string' ? value.slice(0, 10) : '')
+const clockOnly = (value: unknown) => (typeof value === 'string' ? value.slice(0, 5) : '')
+
+function normalizeAttendanceApprovalLeave(value: unknown): AttendanceApprovalDto['leave'] {
+  if (!value || typeof value !== 'object') return undefined
+  const source = asRecord(value)
+  const schedules = readCompat<unknown[]>(source, 'schedules', 'Schedules')
+  return {
+    leaveType: readCompat<NonNullable<AttendanceApprovalDto['leave']>['leaveType']>(source, 'leaveType', 'LeaveType') ?? 'AnnualLeave',
+    startDate: dateOnly(readCompat<string>(source, 'startDate', 'StartDate')),
+    endDate: dateOnly(readCompat<string>(source, 'endDate', 'EndDate')),
+    dayCount: readCompat<number>(source, 'dayCount', 'DayCount'),
+    paidHours: readCompat<number>(source, 'paidHours', 'PaidHours'),
+    reason: readCompat<string>(source, 'reason', 'Reason'),
+    attachmentUrls: (readCompat<unknown[]>(source, 'attachmentUrls', 'AttachmentUrls') ?? []).map(String),
+    schedules: Array.isArray(schedules)
+      ? schedules.map((item) => {
+          const row = asRecord(item)
+          return {
+            scheduleGuid: readCompat<string>(row, 'scheduleGuid', 'ScheduleGuid') ?? '',
+            workDate: dateOnly(readCompat<string>(row, 'workDate', 'WorkDate')),
+            startTime: clockOnly(readCompat<string>(row, 'startTime', 'StartTime')),
+            endTime: clockOnly(readCompat<string>(row, 'endTime', 'EndTime')),
+            paidHours: readCompat<number>(row, 'paidHours', 'PaidHours') ?? 0,
+            hasPunch: readCompat<boolean>(row, 'hasPunch', 'HasPunch') ?? false,
+          }
+        })
+      : undefined,
+    scheduleConflicts: (readCompat<unknown[]>(source, 'scheduleConflicts', 'ScheduleConflicts') ?? []).map(String),
+  }
+}
+
+function normalizeAttendanceApprovalPublicHoliday(value: unknown): AttendanceApprovalDto['publicHolidayPay'] {
+  if (!value || typeof value !== 'object') return undefined
+  const source = asRecord(value)
+  return {
+    holidayDate: dateOnly(readCompat<string>(source, 'holidayDate', 'HolidayDate')),
+    holidayName: readCompat<string>(source, 'holidayName', 'HolidayName'),
+    ordinaryCount: readCompat<number>(source, 'ordinaryCount', 'OrdinaryCount') ?? 0,
+    lookbackWeeks: readCompat<number>(source, 'lookbackWeeks', 'LookbackWeeks') ?? 0,
+    suggestedHours: readCompat<number>(source, 'suggestedHours', 'SuggestedHours'),
+    hours: readCompat<number>(source, 'hours', 'Hours'),
+    status: readCompat<string>(source, 'status', 'Status'),
   }
 }
 
@@ -271,6 +329,34 @@ export function normalizeAttendancePunchAdjustment(value: unknown): AttendancePu
   }
 }
 
+// 规格第 1 节新增的考勤参数（卡 B）；旧后端不返回时保持 undefined，设置页据此隐藏这一组。
+const PAYROLL_SETTING_KEYS = [
+  'defaultPeriodWeeks',
+  'fortnightAnchorDate',
+  'publicHolidayLookbackWeeks',
+  'publicHolidayMinCount',
+  'sickLeaveSubmitDays',
+  'annualLeaveLeadWeeks',
+  'annualLeaveMaxWeeks',
+  'annualCashOutLeadDays',
+  'annualCashOutMaxWeeks',
+  'birthdayRemindDays',
+  'employeeSegmentLimit',
+  'managerSegmentLimit',
+  'autoClockOutAtMidnight',
+] as const satisfies readonly (keyof AttendanceSettingsDto)[]
+
+function normalizeAttendancePayrollSettings(source: UnknownRecord): Partial<AttendanceSettingsDto> {
+  const result: Record<string, unknown> = {}
+  for (const key of PAYROLL_SETTING_KEYS) {
+    const value = readCompat<unknown>(source, key, key.charAt(0).toUpperCase() + key.slice(1))
+    if (value !== undefined && value !== null) result[key] = value
+  }
+  // 日期统一成 YYYY-MM-DD，方便 DatePicker 解析
+  if (typeof result.fortnightAnchorDate === 'string') result.fortnightAnchorDate = result.fortnightAnchorDate.slice(0, 10)
+  return result as Partial<AttendanceSettingsDto>
+}
+
 export function normalizeAttendanceSettings(value: unknown): AttendanceSettingsDto {
   const source = asRecord(value)
   return {
@@ -285,6 +371,7 @@ export function normalizeAttendanceSettings(value: unknown): AttendanceSettingsD
     overtimeMinimumMinutes: readCompat<number>(source, 'overtimeMinimumMinutes', 'OvertimeMinimumMinutes'),
     requireOvertimeApproval: readCompat<boolean>(source, 'requireOvertimeApproval', 'RequireOvertimeApproval'),
     allowManagerDirectOwnAdjustment: readCompat<boolean>(source, 'allowManagerDirectOwnAdjustment', 'AllowManagerDirectOwnAdjustment'),
+    ...normalizeAttendancePayrollSettings(source),
   }
 }
 
@@ -477,6 +564,21 @@ export async function createMyAttendancePunchAdjustment(
   payload: SaveAttendancePunchAdjustmentPayload,
 ): Promise<AttendancePunchAdjustmentDto> {
   const response = await request.post<unknown>(MY_PUNCH_ADJUSTMENTS_ENDPOINT, payload)
+  return normalizeAttendancePunchAdjustment(unwrapAttendanceApiData(response))
+}
+
+/** 店长代员工补卡（漏下班填实际下班时间）：先 preview 拿 previewRevision，再原样提交。 */
+export async function previewManagedAttendancePunchAdjustment(
+  payload: SaveAttendancePunchAdjustmentPayload & { userGuid: string },
+): Promise<AttendancePunchAdjustmentPreviewDto> {
+  const response = await request.post<unknown>(`${API_BASE}/managed/punch-adjustments/preview`, payload)
+  return normalizeAttendancePunchAdjustmentPreview(unwrapAttendanceApiData(response))
+}
+
+export async function createManagedAttendancePunchAdjustment(
+  payload: SaveAttendancePunchAdjustmentPayload & { userGuid: string },
+): Promise<AttendancePunchAdjustmentDto> {
+  const response = await request.post<unknown>(`${API_BASE}/managed/punch-adjustments`, payload)
   return normalizeAttendancePunchAdjustment(unwrapAttendanceApiData(response))
 }
 

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="shell.css">
+<style>
+.pg{flex:1;overflow:hidden;padding:12px;display:flex;flex-direction:column;gap:10px}
+.who{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line2);border-radius:10px;padding:8px 10px;font-size:13px}
+.who .av{width:30px;height:30px;font-size:11px}
+.tc{background:var(--surface);border:1px solid var(--line2);border-radius:12px;padding:11px 12px;display:flex;gap:11px;align-items:flex-start}
+.tc .ic{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:21px;flex:none}
+.tc .t{font-size:15px;font-weight:700}
+.tc .d{font-size:12.5px;color:var(--t2);margin-top:3px;line-height:1.5}
+.tc .ar{margin-left:auto;color:var(--t3);font-size:18px;align-self:center}
+.sh{font-size:12.5px;font-weight:700;color:var(--t2);margin:2px 2px -2px}
+.mine{background:#fff;border:1px solid var(--line2);border-radius:10px;padding:9px 11px;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.box{background:var(--surface);border:1px solid var(--line2);border-radius:12px;padding:12px}
+.box h4{font-size:13px;color:var(--t2);font-weight:700;margin-bottom:9px;display:flex;justify-content:space-between}
+.box h4 span{font-weight:500;color:var(--t3)}
+.dc{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin-bottom:7px;font-size:13.5px;background:#fff}
+.dc .ck{width:20px;height:20px;border-radius:10px;border:1.5px solid var(--line);flex:none}
+.dc.on{border:2px solid var(--action);background:#F5F9FF}
+.dc.on .ck{background:var(--action);border-color:var(--action);position:relative}
+.dc.on .ck:after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.dc.no{color:var(--t3);background:var(--muted);border-style:dashed}
+.dc .r{margin-left:auto;font-size:12px;color:var(--t3)}
+.photo{display:flex;gap:8px}
+.cert{width:96px;height:120px;border-radius:8px;border:1px solid var(--line2);background:#fff;padding:9px 8px;display:flex;flex-direction:column;gap:5px;position:relative;box-shadow:0 1px 3px rgba(16,24,40,.08)}
+.cert i{display:block;height:4px;border-radius:2px;background:#D0D5DD}
+.cert .stamp{position:absolute;right:8px;bottom:10px;width:30px;height:30px;border-radius:15px;border:2px solid #F04438;opacity:.6}
+.add{width:96px;height:120px;border-radius:8px;border:1.5px dashed var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--t2);font-size:12px;background:#fff}
+.add i{font-size:24px}
+.chk{font-size:13px;line-height:1.9}
+.chk .ok{color:var(--ok)}
+.rng{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+.rng .in{height:40px;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;background:#fff}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:10px;font-size:11.5px;text-align:center}
+.cal b{font-weight:600;color:var(--t3);font-size:11px}
+.cal span{height:30px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:6px;color:var(--t2);line-height:1.1}
+.cal span small{font-size:9px;font-weight:600}
+.cal .x{color:#D0D5DD}
+.cal .s{background:var(--violetbg);color:var(--violet);font-weight:700}
+.cal .w{background:repeating-linear-gradient(135deg,#F2F4F7 0 4px,#fff 4px 8px);color:var(--t3);border:1px solid var(--line2)}
+.sumr{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px dashed var(--line2)}
+.foot{background:var(--surface);border-top:1px solid var(--line2);padding:10px 12px 26px;display:flex;gap:10px}
+.foot .btn{height:44px;font-size:15px}
+.tip{font-size:12px;color:var(--t2);line-height:1.5}
+.inp{color:var(--t3);font-size:13.5px}
+</style></head>
+<body><div class="canvas" id="cv">
+<h1>带薪病假 / 带薪年假 · 移动端</h1>
+<div class="sub">员工 Emma Walsh（兼职），今天 2026-10-20 周二。只有全职、兼职能看到带薪假；临时工只显示「其他请假」。日期规则全部来自考勤设置，可以改。年假休息每个工作日记 8 h，周末和公假不算；最终发多少由财务按累计的带薪小时核定。</div>
+<div class="row">
+
+<div class="col">
+<div class="cap"><span>A</span>选择假期类型（员工）</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span></div>
+  <div class="appbar"><i class="ti ti-chevron-left"></i><div class="ttl">申请假期</div></div>
+  <div class="pg">
+    <div class="who"><div class="av" style="background:#1570EF">EW</div><b>Emma Walsh</b><span class="bg b-ty">兼职</span><span style="margin-left:auto;color:var(--t3);font-size:12px">Chermside</span></div>
+    <div class="tc"><div class="ic" style="background:var(--badbg);color:var(--bad)"><i class="ti ti-first-aid-kit"></i></div><div><div class="t">带薪病假</div><div class="d">有排班但生病没上班的日子<br>生病当天起 <b>4 天内</b>提交 · 必须拍医嘱</div></div><i class="ti ti-chevron-right ar"></i></div>
+    <div class="tc"><div class="ic" style="background:var(--violetbg);color:var(--violet)"><i class="ti ti-beach"></i></div><div><div class="t">带薪年假 · 休息</div><div class="d">提前 <b>≥ 4 周</b> · 一次最多 <b>2 周</b><br>每个工作日 <b>8 h</b>，周末、公假不算</div></div><i class="ti ti-chevron-right ar"></i></div>
+    <div class="tc"><div class="ic" style="background:#F0FDF9;color:#107569"><i class="ti ti-cash"></i></div><div><div class="t">带薪年假 · 发放（照常上班）</div><div class="d">提前 <b>≥ 2 天</b> · 最多 <b>4 周</b><br>照常排班，另外发年假工资</div></div><i class="ti ti-chevron-right ar"></i></div>
+    <div class="tc"><div class="ic" style="background:var(--muted);color:var(--t2)"><i class="ti ti-calendar-off"></i></div><div><div class="t">其他请假（无薪）</div><div class="d">沿用现在的请假</div></div><i class="ti ti-chevron-right ar"></i></div>
+    <div class="sh">我的申请</div>
+    <div class="mine"><span><span class="bg b-al">年</span> 11-17 ~ 11-28 · 72 h</span><span class="pill p-warn">待审核</span></div>
+    <div class="mine"><span><span class="bg b-al">年</span> 10-06 ~ 10-08 · 24 h</span><span class="pill p-ok">已批准 · 财务核定 20 h</span></div>
+  </div>
+</div>
+<div class="notes"><ol><li>三种带薪假各一张卡，规则直接写在卡上。</li><li>临时工（Casual）不显示前三张卡。</li><li>系统不累计年假 / 病假余额；年假最终发多少由财务核定，员工在「我的申请」里能看到核定结果。</li></ol></div>
+</div>
+
+<div class="col">
+<div class="cap"><span>B</span>带薪病假</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span></div>
+  <div class="appbar"><i class="ti ti-chevron-left"></i><div class="ttl">带薪病假</div></div>
+  <div class="pg">
+    <div class="box"><h4>生病的日子 <span>只列 10-16 以后有排班的日子</span></h4>
+      <div class="dc no"><span class="ck"></span>10-16 周五 · 09:00–13:00<span class="r">已上班</span></div>
+      <div class="dc no"><span class="ck"></span>10-17 周六 · 09:00–17:00<span class="r">已上班</span></div>
+      <div class="dc on"><span class="ck"></span><b>10-19 周一 · 09:00–15:00</b><span class="r" style="color:var(--action)">5.5 h</span></div>
+      <div class="tip">10-15 及以前已超过 4 天，不能再申请；带薪工时 = 当天排班工时扣餐。</div>
+    </div>
+    <div class="box"><h4>医嘱照片 <span>必填，最多 3 张</span></h4>
+      <div class="photo"><div class="cert"><i style="width:60%;background:#98A2B3"></i><i></i><i></i><i style="width:80%"></i><i></i><i style="width:50%"></i><span class="stamp"></span></div><div class="add"><i class="ti ti-camera"></i>拍照</div><div class="add"><i class="ti ti-photo"></i>相册</div></div>
+    </div>
+    <div class="box" style="padding:10px 12px"><div class="inp">备注（选填），例如：发烧，看了 GP</div></div>
+  </div>
+  <div class="foot"><span class="btn pri" style="flex:1">提交 · 带薪 5.5 h</span></div>
+</div>
+<div class="notes"><ol><li>只能选<b>有排班、没打卡</b>、在 4 天内的日子；已上班、过期的置灰并写原因。</li><li>没拍医嘱不能提交。</li><li>批准后：工时统计那天显示「病 5.5 📎」，工资按平日时薪计。</li></ol></div>
+</div>
+
+<div class="col">
+<div class="cap"><span>C</span>带薪年假 · 休息</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span></div>
+  <div class="appbar"><i class="ti ti-chevron-left"></i><div class="ttl">带薪年假 · 休息</div></div>
+  <div class="pg">
+    <div class="box"><h4>日期 <span>最早可选 11-17</span></h4>
+      <div class="rng"><div class="in">11-17 周二</div><span style="color:var(--t3)">至</span><div class="in">11-28 周六</div></div>
+      <div class="cal"><b>一</b><b>二</b><b>三</b><b>四</b><b>五</b><b>六</b><b>日</b>
+        <span class="x">16</span><span class="s">17<small>8h</small></span><span class="s">18<small>8h</small></span><span class="s">19<small>8h</small></span><span class="s">20<small>8h</small></span><span class="w">21</span><span class="w">22</span>
+        <span class="s">23<small>8h</small></span><span class="s">24<small>8h</small></span><span class="s">25<small>8h</small></span><span class="s">26<small>8h</small></span><span class="s">27<small>8h</small></span><span class="w">28</span><span>29</span>
+      </div>
+    </div>
+    <div class="box"><h4>规则检查</h4><div class="chk">
+      <div class="ok"><i class="ti ti-circle-check"></i> 提前 4 周以上（距今 28 天）</div>
+      <div class="ok"><i class="ti ti-circle-check"></i> 不超过 2 周（共 12 天）</div>
+      <div class="ok"><i class="ti ti-circle-check"></i> 这几天还没有已发布的排班</div></div></div>
+    <div class="box"><h4>申请的带薪工时</h4>
+      <div class="sumr"><span>工作日 9 天 × 8 h</span><b>72 h</b></div>
+      <div class="sumr"><span>周末 3 天、公共假期 0 天</span><b style="color:var(--t3)">不算</b></div>
+      <div class="tip" style="margin-top:6px">最后发多少，由财务按你累计的带薪小时核定。批准后 11-17 ~ 11-28 自动标「不能上班」，排班时这些格子会被拦住。</div>
+    </div>
+  </div>
+  <div class="foot"><span class="btn pri" style="flex:1">提交申请 · 72 h</span></div>
+</div>
+<div class="notes"><ol><li>日历只让选 4 周以后的日子；工作日格子标 8h，周末、公假用斜纹表示不算。</li><li>「年假发放（照常上班）」用同一个页面：提前 2 天、最多 4 周，不标不能上班，同样由财务核定。</li><li><span class="need">合规需确认</span> 年假折现在多数 award 里有条件（书面协议、每次单独同意、折现后余额不能少于 4 周等），请会计核对。</li></ol></div>
+</div>
+
+<div class="col">
+<div class="cap"><span>D</span>店长审核病假</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span></div>
+  <div class="appbar"><i class="ti ti-chevron-left"></i><div class="ttl">病假审核</div><span class="pill p-warn">待审核</span></div>
+  <div class="pg">
+    <div class="box" style="display:flex;gap:10px;align-items:center"><div class="av" style="background:#1570EF">EW</div><div style="flex:1"><div style="font-size:16px;font-weight:700">Emma Walsh <span class="bg b-ty">兼职</span></div><div style="font-size:12.5px;color:var(--t2)">提交于 10-20 08:40 · 生病后第 1 天</div></div></div>
+    <div class="box"><h4>病假日期</h4>
+      <div class="sumr"><span>10-19 周一</span><b>排班 09:00–15:00</b></div>
+      <div class="sumr"><span>当天打卡</span><b style="color:var(--t3)">无</b></div>
+      <div class="sumr" style="border:0"><span>带薪工时</span><b style="color:var(--bad)">5.5 h</b></div>
+    </div>
+    <div class="box"><h4>医嘱 <span>点开看大图</span></h4><div class="photo"><div class="cert"><i style="width:60%;background:#98A2B3"></i><i></i><i></i><i style="width:80%"></i><i></i><i style="width:50%"></i><span class="stamp"></span></div><div style="font-size:12.5px;color:var(--t2);line-height:1.6;align-self:center">1 张 · 10-20 08:38 拍摄<br>备注：发烧，看了 GP</div></div></div>
+    <div class="box"><div class="chk"><div class="ok"><i class="ti ti-circle-check"></i> 4 天内提交</div><div class="ok"><i class="ti ti-circle-check"></i> 当天有排班、没打卡</div></div></div>
+  </div>
+  <div class="foot"><span class="btn dan" style="flex:1">拒绝</span><span class="btn pri" style="flex:2">批准 5.5 h 带薪病假</span></div>
+</div>
+<div class="notes"><ol><li>审核页把排班、打卡、医嘱放在一屏，店长不用切页面核对。</li><li>拒绝必须写原因（例如医嘱看不清，请重拍）。</li><li>Web 审核页同样新增「病假 / 年假 / 年假发放」三类。</li></ol></div>
+</div>
+
+</div></div>
+<script>document.body.setAttribute('data-h',document.getElementById('cv').offsetHeight)</script>
+</body></html>

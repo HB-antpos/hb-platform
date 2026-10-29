@@ -1,0 +1,915 @@
+{
+  "myob": {
+    "title": "MYOB Integration",
+    "subtitle": "Connect each company file's MYOB account and map stores to their paying company",
+    "reload": "Refresh",
+    "notice": {
+      "title": "Before you authorise",
+      "admin": "Authorisation must be completed by the Administrator of the MYOB company file, signed in to MYOB. Other roles will fail or lack permission.",
+      "perAbn": "Each ABN maps to one company file, and each company file is authorised once. After connecting, choose the company file for each store below."
+    },
+    "callback": {
+      "connected": "MYOB company file connected",
+      "error": "MYOB authorisation failed: {{reason}}"
+    },
+    "connections": {
+      "title": "Connected company files",
+      "connect": "Connect MYOB company file",
+      "empty": "No MYOB company file is connected yet. Click \"Connect MYOB company file\" at the top right to start.",
+      "loadFailed": "Failed to load connections",
+      "retry": "Retry",
+      "authorizeFailed": "Failed to get the MYOB authorisation URL",
+      "disconnectedTitle": "Disconnected ({{count}})",
+      "columns": {
+        "company": "Company",
+        "businessId": "BusinessId",
+        "abn": "ABN",
+        "status": "Status",
+        "authorized": "Authorised by / at",
+        "lastRefreshed": "Last verified",
+        "stores": "Mapped stores",
+        "actions": "Actions"
+      },
+      "status": {
+        "Active": "Connected",
+        "NeedsReauth": "Needs reauthorisation",
+        "Disconnected": "Disconnected"
+      },
+      "copyBusinessId": "Copy BusinessId",
+      "copyDone": "Copied",
+      "copyFailed": "Copy failed, please copy manually",
+      "storeCount": "{{count}} stores",
+      "noStores": "None",
+      "unknownCompany": "(unnamed)"
+    },
+    "abn": {
+      "empty": "Not set",
+      "edit": "Edit ABN",
+      "save": "Save",
+      "cancel": "Cancel",
+      "placeholder": "11 digits, spaces allowed",
+      "invalid": "ABN must be 11 digits",
+      "saved": "ABN updated",
+      "cleared": "ABN cleared",
+      "saveFailed": "Failed to save ABN"
+    },
+    "actions": {
+      "verify": "Verify",
+      "verified": "Verified. Company details refreshed",
+      "verifyFailed": "Verification failed",
+      "reauthorize": "Reauthorise",
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect {{name}}?",
+      "disconnectContent": "This clears the authorisation token for this company file and removes the mappings of all stores under it ({{count}} now). You will need to reauthorise and map the stores again to use it.",
+      "disconnectOk": "Disconnect",
+      "disconnectCancel": "Cancel",
+      "disconnected": "Disconnected {{name}}",
+      "disconnectFailed": "Failed to disconnect"
+    },
+    "mappings": {
+      "title": "Store → company file mapping",
+      "hint": "A store's company file is its default paying company. Only connected company files can be chosen.",
+      "empty": "No stores",
+      "loadFailed": "Failed to load store mappings",
+      "noConnections": "No connected company file to choose from. Connect one above first.",
+      "showInactive": "Show inactive stores",
+      "inactive": "Inactive",
+      "adoptAll": "Adopt all suggestions ({{count}})",
+      "adopt": "Adopt",
+      "suggestion": "Suggested: {{name}}",
+      "unsaved": "{{count}} unsaved",
+      "save": "Save",
+      "saved": "Saved {{count}} mapping changes",
+      "saveFailed": "Failed to save mappings",
+      "discard": "Discard changes",
+      "columns": {
+        "store": "Store",
+        "abn": "Store ABN",
+        "mapping": "Current mapping",
+        "suggestion": "Suggestion"
+      },
+      "select": "Choose company file",
+      "needsReauthOption": "{{name}} (needs reauthorisation)",
+      "noAbn": "Not set"
+    },
+    "errors": {
+      "notConfigured": "MYOB app credentials are not configured on the server. Contact an administrator",
+      "invalidState": "The authorisation state is invalid or expired. Please start again",
+      "authorizationDenied": "Authorisation was denied or cancelled",
+      "tokenExchangeFailed": "Failed to exchange the MYOB token. The code may have expired. Please authorise again",
+      "businessIdMissing": "MYOB did not return a company file ID. Make sure a company file is selected and try again",
+      "connectionNotFound": "MYOB connection not found",
+      "connectionNotActive": "The connection is not in Connected state",
+      "needsReauthorization": "The authorisation has expired. Please reauthorise",
+      "invalidAbn": "Invalid ABN format",
+      "storeNotFound": "Store not found",
+      "apiCallFailed": "MYOB API call failed. Please try again later",
+      "unknown": "Unknown error. Try again later or contact an administrator"
+    },
+    "tabs": {
+      "connections": "Connections & mapping",
+      "employees": "Employee binding",
+      "payroll": "Paying company",
+      "push": "Push & reconcile",
+      "preview": "Preview",
+      "pending": "{{count}} to review",
+      "noAccess": "You do not have access to any MYOB tab",
+      "ariaLabel": "MYOB integration sections"
+    },
+    "employees": {
+      "company": {
+        "title": "Choose the paying company file",
+        "hint": "Employees are listed by their paying company. Someone who works at a store of company A but is paid by company B appears in B's list with a \"Cross-company\" badge.",
+        "refresh": "Refresh MYOB employees",
+        "refreshedAt": " (last {{time}})",
+        "abn": "ABN {{abn}}",
+        "noAbn": "No ABN",
+        "employeeCount": "{{count}} employees paid by this company",
+        "connectOther": "Connect another company file",
+        "empty": "No company file is connected yet. Ask a colleague with the \"Connections & mapping\" permission to connect one.",
+        "loadFailed": "Failed to load company files",
+        "refreshFailed": "Failed to refresh MYOB employees",
+        "refreshed": "MYOB employees refreshed",
+        "select": "Select {{name}}",
+        "retry": "Retry",
+        "emptyCanConnect": "No company file is connected yet. Click \"Connect another company file\" to start authorising one."
+      },
+      "title": "Employee binding · {{name}}",
+      "hint": "Suggestions are scored by email, then birthday, name and phone. They only take effect after you confirm, and nothing in MYOB is changed.",
+      "loadFailed": "Failed to load employee binding",
+      "subtabs": {
+        "list": "Bindings",
+        "missing": "Missing on one side",
+        "typeIssues": "Employment type check",
+        "aria": "Employee binding views"
+      },
+      "filters": {
+        "all": "All",
+        "bound": "Bound",
+        "suggested": "Strong match",
+        "review": "Needs review",
+        "unmatched": "Unmatched"
+      },
+      "search": "Search name / email / store",
+      "batch": {
+        "title": "{{count}} strong matches (email and birthday both agree) can be confirmed in one go",
+        "hint": "Partial matches, conflicts and rows with a phone or name difference are never included; review those one by one.",
+        "view": "Show these {{count}}",
+        "confirm": "Confirm these {{count}}",
+        "confirmTitle": "Confirm these {{count}} bindings?",
+        "confirmContent": "These {{count}} employees will be bound to their suggested MYOB cards. The server re-scores each one and rejects any that is no longer a strong match. You can unbind at any time; nothing in MYOB is changed.",
+        "confirmOk": "Confirm"
+      },
+      "columns": {
+        "ours": "Our employee",
+        "myobCard": "MYOB card ({{name}})",
+        "basis": "Matched on",
+        "score": "Score",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "cross": "Cross-company",
+      "noCandidate": "No similar employee card found",
+      "empty": "No employees match",
+      "total": "{{total}} employees · {{page}} on this page (sorted: suggested, review, unmatched, bound)",
+      "type": {
+        "FullTime": "Full-time",
+        "PartTime": "Part-time",
+        "Temporary": "Casual"
+      },
+      "status": {
+        "Suggested": "Strong match",
+        "NeedsReview": "Needs review",
+        "Conflict": "Conflict",
+        "Unmatched": "Unmatched",
+        "Bound": "Bound",
+        "conflictBoundTo": "Card already bound to {{name}}",
+        "boundBy": "{{who}} · {{time}}",
+        "cardMissing": "This card no longer exists in MYOB (deleted or inactive)"
+      },
+      "basis": {
+        "email": "Email",
+        "birthday": "Birthday",
+        "name": "Name",
+        "phone": "Phone"
+      },
+      "signal": {
+        "match": "Match",
+        "mismatch": "Mismatch",
+        "unknown": "Cannot compare"
+      },
+      "scoreAria": "Score {{score}}",
+      "actions": {
+        "confirm": "Confirm binding",
+        "review": "Review and bind",
+        "change": "Pick another",
+        "searchOther": "Search other cards",
+        "searchMyob": "Search MYOB cards",
+        "unbind": "Unbind",
+        "confirmed": "Bound {{name}}",
+        "batchConfirmed": "Confirmed {{count}} bindings",
+        "confirmFailed": "Failed to confirm binding",
+        "unbindTitle": "Unbind {{name}}?",
+        "unbindContent": "The employee goes back to the to-do list and can be bound again. Nothing in MYOB is changed.",
+        "unbindOk": "Unbind",
+        "cancel": "Cancel",
+        "unbound": "Unbound {{name}}",
+        "unbindFailed": "Failed to unbind"
+      },
+      "failures": {
+        "title": "{{ok}} bound, {{count}} failed",
+        "titleAllFailed": "{{count}} bindings failed",
+        "line": "{{name}}: {{reason}}",
+        "ok": "Got it",
+        "userNotFound": "Employee not found",
+        "cardNotFound": "This card was not found in MYOB (refresh MYOB employees first)",
+        "cardAlreadyBound": "This card is already bound to another employee",
+        "userAlreadyBound": "This employee is already bound to a MYOB card",
+        "notHighScore": "No longer a strong match; use \"Review and bind\" instead",
+        "linkNotFound": "Binding not found (it may have been unbound already)"
+      },
+      "entitlement": {
+        "both": "Annual / sick leave entitlements",
+        "annualOnly": "Annual leave entitlement only",
+        "sickOnly": "Sick leave entitlement only",
+        "none": "No annual / sick leave entitlements"
+      },
+      "missing": {
+        "hint": "Find people who exist on only one side, and employment types that do not match MYOB.",
+        "ours": {
+          "title": "In our system, not in MYOB",
+          "hint": "Ask finance to create the employee card in MYOB, then click Refresh; suggestions appear automatically.",
+          "copy": "Copy details",
+          "copied": "Copied details for {{name}}",
+          "joined": "Joined {{date}}",
+          "note": "\"Copy details\" only copies name, email, birthday and phone to the clipboard so you can paste them into a new MYOB card. The system never creates cards in MYOB.",
+          "empty": "Nobody needs a new MYOB card"
+        },
+        "theirs": {
+          "title": "In MYOB, not in our system",
+          "hint": "Possibly left but not deactivated, belongs to another company, or not set up on our side yet.",
+          "create": "Set up on our side",
+          "ignore": "Ignore",
+          "ignored": "Ignored {{name}}",
+          "ignoreFailed": "Failed to ignore",
+          "active": "Active",
+          "inactive": "Inactive in MYOB",
+          "empty": "No extra people in MYOB"
+        }
+      },
+      "typeIssues": {
+        "title": "Employment type check",
+        "hint": "Advice only, nothing is blocked. Annual / sick leave balances show only for full-time and part-time staff (not casual).",
+        "columns": {
+          "employee": "Employee",
+          "ourType": "Our employment type",
+          "myobStatus": "MYOB today",
+          "issue": "Issue",
+          "advice": "Suggestion"
+        },
+        "codes": {
+          "missingLeave": "Leave balances unavailable",
+          "temporaryHasLeave": "Casual staff should not have leave entitlements",
+          "unknown": "Employment type does not match MYOB"
+        },
+        "actions": {
+          "fix": {
+            "missingLeave": "Tell finance to set up in MYOB",
+            "temporaryHasLeave": "Tell finance to fix in MYOB",
+            "generic": "Tell finance"
+          }
+        },
+        "notes": {
+          "missingLeave": "Please add annual / sick leave entitlements to the MYOB card of {{name}} ({{type}}, {{stores}}); otherwise leave balances cannot be fetched.",
+          "temporaryHasLeave": "{{name}} ({{type}}, {{stores}}) is casual in our system, but the MYOB card has annual / sick leave entitlements. Please check and fix.",
+          "generic": "The employment type of {{name}} ({{type}}, {{stores}}) does not match MYOB. Please check."
+        },
+        "noteCopied": "Note for finance copied; paste it to send",
+        "mystatus": "MYOB employment status: {{status}}",
+        "empty": "No employment type mismatches"
+      },
+      "birthdayLine": "Birthday {{birthday}}"
+    },
+    "drawer": {
+      "title": "Choose a MYOB card for {{name}}",
+      "subtitle": "MYOB cards are read only; confirming does not change anything in MYOB.",
+      "close": "Close",
+      "search": "Search {{company}} MYOB employees: name / email / last 4 phone digits",
+      "phone": "Phone {{value}}",
+      "birthday": "Birthday {{value}}",
+      "notFilled": "Not filled in",
+      "unselectable": "Unavailable",
+      "boundTo": "Already bound to {{name}} (ours)",
+      "candidatesTitle": "Candidate cards",
+      "empty": "No matching cards. Try another keyword.",
+      "loadFailed": "Failed to load candidate cards",
+      "retry": "Retry",
+      "scoreAria": "Score {{score}}",
+      "compareTitle": "Side by side",
+      "compare": {
+        "ours": "Ours",
+        "theirs": "MYOB",
+        "result": "Result",
+        "same": "Match",
+        "diff": "Different",
+        "unknown": "Cannot compare",
+        "typeSame": "Consistent",
+        "typeDiff": "Inconsistent",
+        "fields": {
+          "name": "Name",
+          "email": "Email",
+          "phone": "Phone",
+          "birthday": "Birthday",
+          "type": "Employment type"
+        }
+      },
+      "warn": {
+        "both": "The emails differ and the birthday cannot be compared, so only name and phone support this match. Make sure it is the same person before binding; you can unbind at any time.",
+        "email": "The emails differ. Make sure it is the same person before binding; you can unbind at any time.",
+        "birthday": "The birthday cannot be compared. Make sure it is the same person before binding; you can unbind at any time."
+      },
+      "cancel": "Cancel",
+      "confirm": "Bind to {{name}}"
+    },
+    "payroll": {
+      "title": "Paying company (by employee x store)",
+      "hint": "By default, hours are paid by the company that owns the store worked at. Only exceptions (works at a store of company A but is paid by company B) need to be set. Hours of one store are never split between two companies.",
+      "search": "Search employee",
+      "allStores": "All stores",
+      "crossOnly": "Cross-company only",
+      "reload": "Refresh",
+      "loadFailed": "Failed to load paying companies",
+      "retry": "Retry",
+      "empty": "No employees match",
+      "total": "{{total}} rows",
+      "columns": {
+        "employee": "Employee",
+        "store": "Store worked",
+        "defaultCompany": "Store's company (default)",
+        "effectiveCompany": "Paying company this period",
+        "effectiveFrom": "Effective from",
+        "actions": "Actions"
+      },
+      "cross": "Cross-company",
+      "otherStores": "Also {{stores}}",
+      "override": "Exception",
+      "byStore": "By store",
+      "unset": "Not set",
+      "set": "Set",
+      "edit": "Edit",
+      "editAria": "Set the paying company of {{name}} at {{store}}"
+    },
+    "payrollDrawer": {
+      "title": "Paying company of {{name}}",
+      "subtitle": "Requires the \"Edit payroll\" permission; every change is audited.",
+      "close": "Close",
+      "loadFailed": "Failed to load paying company details",
+      "retry": "Retry",
+      "columns": {
+        "store": "Store worked",
+        "defaultCompany": "Default company",
+        "override": "Pay from another company"
+      },
+      "byStoreOption": "By store ({{company}})",
+      "byStoreNoCompany": "By store (store not mapped to a company)",
+      "noDefault": "Not mapped",
+      "effectiveFrom": "Effective from",
+      "effectiveHint": "Only pay-period start dates can be chosen, so one store's hours are never split mid-period.",
+      "periodStart": "{{date}} (period start)",
+      "currentPeriod": "{{date}} (current period start)",
+      "noAllowedDates": "There is no selectable effective date right now, so this cannot be saved.",
+      "unbound": {
+        "title": "{{company}} has not bound {{name}} yet.",
+        "body": "Bind them under \"Employee binding\" before pushing hours.",
+        "go": "Go to binding"
+      },
+      "history": "History",
+      "historyEmpty": "No changes yet",
+      "historyOverride": "From {{date}} · {{store}} paid by {{company}}",
+      "historyDefault": "From {{date}} · {{store}} back to by-store",
+      "historyBy": "Set by {{who}} · {{time}}",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saved": "Saved the paying company of {{name}}",
+      "saveFailed": "Failed to save paying company",
+      "noChanges": "No changes"
+    },
+    "payCategories": {
+      "title": "Timesheet pay category mapping",
+      "hint": "Before pushing hours, tell the system which MYOB pay category each tier of our hours maps to. Set once per company file.",
+      "refresh": "Re-read MYOB pay categories",
+      "refreshedAt": " (last {{time}})",
+      "refreshed": "MYOB pay categories re-read",
+      "refreshFailed": "Failed to re-read MYOB pay categories",
+      "loadFailed": "Failed to read MYOB pay categories",
+      "loadFailedShort": "Read failed",
+      "loadingShort": "Reading…",
+      "retry": "Retry",
+      "noCompanies": "No company file is connected yet. Connect and verify one above first.",
+      "noCategories": "No pay categories were read from {{name}}. Check that pay categories are set up in MYOB, then click \"Re-read\" at the top right.",
+      "companyAria": "Choose the company file to map pay categories for",
+      "mappedCount": "{{mapped}} / {{total}} mapped",
+      "complete": "Complete",
+      "incomplete": "Incomplete",
+      "columns": {
+        "ours": "Our hours",
+        "arrow": "Maps to",
+        "myob": "MYOB pay category (read from {{name}})",
+        "note": "Notes"
+      },
+      "rows": {
+        "weekday": {
+          "label": "Weekday",
+          "sub": "Includes public-holiday work and paid public holiday",
+          "note": "Public-holiday work and paid public holiday also use this category (the public-holiday transfer rate must equal the weekday rate)"
+        },
+        "saturday": {
+          "label": "Saturday",
+          "sub": "Full-time and part-time",
+          "note": "The pay multiplier comes from the MYOB category; it must match our Saturday transfer rate"
+        },
+        "sunday": {
+          "label": "Sunday",
+          "sub": "Full-time and part-time",
+          "note": "The pay multiplier comes from the MYOB category; it must match our Sunday transfer rate"
+        },
+        "saturdayCasual": {
+          "label": "Saturday (casual)",
+          "sub": "Casual",
+          "note": "Casual staff use a separate MYOB category on Saturdays; leave it empty if the company has no casual Saturday hours, but a casual employee with such hours cannot be pushed until it is set"
+        },
+        "sundayCasual": {
+          "label": "Sunday (casual)",
+          "sub": "Casual",
+          "note": "Casual staff use a separate MYOB category on Sundays; leave it empty if the company has no casual Sunday hours, but a casual employee with such hours cannot be pushed until it is set"
+        },
+        "personalLeave": {
+          "label": "Sick leave",
+          "sub": "Pushed as Personal Leave Pay",
+          "note": "MYOB deducts the sick-leave balance by this category"
+        },
+        "holidayLeave": {
+          "label": "Annual leave",
+          "sub": "Pushed as Holiday Leave Pay",
+          "note": "MYOB deducts the annual-leave balance by this category"
+        }
+      },
+      "placeholder": "Choose a MYOB pay category…",
+      "selectAria": "Choose the MYOB pay category for \"{{label}}\"",
+      "noMatch": "No matching pay category",
+      "state": {
+        "suggested": "Suggested by name",
+        "suggestedHint": "Pre-filled, editable; takes effect only after saving",
+        "unset": "Not set",
+        "optional": "Optional",
+        "unsetHint": "No similarly named category found; choose one manually. These hours cannot be pushed until it is set",
+        "missing": "Category gone",
+        "missingHint": "This category no longer exists in MYOB; choose it again",
+        "edited": "Edited"
+      },
+      "note": {
+        "notPushedLabel": "Not pushed: ",
+        "notPushed": "annual-leave cash-out (paid as cash) is handled manually in MYOB by finance. ",
+        "prereqLabel": "MYOB-side prerequisites",
+        "prereq": " (confirmed by finance): turn on \"Use Timesheets to record payroll\" in payroll settings, align the week start day with ours, and attach the categories above to each employee's pay details."
+      },
+      "remaining": "{{count}} required still to choose; all 5 required must be chosen before saving",
+      "unsaved": "You have unsaved changes",
+      "suggestionsUnsaved": "Suggested categories are not saved yet; click \"Save mapping\" once you have checked them",
+      "cancel": "Cancel",
+      "save": "Save mapping",
+      "saved": "Pay category mapping saved for {{name}}",
+      "saveFailed": "Failed to save the pay category mapping",
+      "leave": {
+        "title": "Discard the unsaved pay category mapping?",
+        "content": "You changed the pay category mapping but have not saved it. Leaving now will lose these changes.",
+        "ok": "Discard and leave",
+        "cancel": "Stay on this page"
+      },
+      "switch": {
+        "title": "Discard unsaved changes?",
+        "content": "The pay category mapping of the current company has unsaved changes. Switching company will lose them.",
+        "ok": "Discard and switch",
+        "cancel": "Keep editing"
+      }
+    },
+    "push": {
+      "title": "Push hours to MYOB · Preview",
+      "hint": "Only the transfer part of hours is pushed; the cash part never goes into MYOB. The preview writes nothing to MYOB.",
+      "period": "Pay period",
+      "periodPlaceholder": "Choose a pay period",
+      "weeksSuffix": " ({{count}} wk)",
+      "loadFailed": "Failed to load the push preview",
+      "retry": "Retry",
+      "reload": "Refresh preview",
+      "check": "Check MYOB status",
+      "recheck": "Re-check MYOB status",
+      "checkHint": "Reads MYOB employee by employee, so it is slow; it confirms whether MYOB already has records or a processed pay for this period.",
+      "cross": "Cross-company",
+      "goBind": "Bind",
+      "goBindAria": "Bind {{name}} to a MYOB employee card",
+      "detail": "Daily detail",
+      "detailAria": "View the daily push detail of {{name}}",
+      "moreBlockers": "+{{count}} more",
+      "total": "{{total}} employees",
+      "empty": "No hours to push in this period (this company has no employee hours, or hours are not submitted and locked yet)",
+      "range": "{{name}} · Pay period {{range}}",
+      "pushButton": "Push to MYOB ({{count}})",
+      "pushDisabledTip": "Pushing opens up later",
+      "pushDisabledNote": "Pushing opens up later",
+      "export": "Export preview CSV",
+      "company": {
+        "aria": "Choose the paying company to preview",
+        "count": "{{count}} paid by this company this period",
+        "empty": "No company file is connected yet. Ask a colleague with the \"Connections & mapping\" permission to connect and verify one."
+      },
+      "columns": {
+        "employee": "Employee",
+        "stores": "Store",
+        "weekday": "Weekday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "personalLeave": "Sick",
+        "holidayLeave": "Annual",
+        "pushedTotal": "Pushed total",
+        "status": "Status"
+      },
+      "payMode": {
+        "Transfer": "All transfer",
+        "Cash": "All cash",
+        "Mixed": "Transfer + cash {{hours}}h/wk"
+      },
+      "status": {
+        "ready": "Ready",
+        "readyCashOut": "Ready · cash-out not pushed",
+        "noTransfer": "No transfer hours · not pushed"
+      },
+      "blocker": {
+        "NOT_BOUND": "Not bound",
+        "STORE_NOT_LOCKED": "Store not locked",
+        "STORE_NOT_MAPPED": "Store not mapped",
+        "CATEGORY_NOT_MAPPED": "Category not mapped",
+        "NO_RATE": "No pay rate",
+        "NO_STORE_ACCESS": "No access",
+        "MYOB_PROCESSED": "Paid in MYOB",
+        "unknown": "Blocked"
+      },
+      "notes": {
+        "crossShare": "This company gets {{allocated}} h of transfer allowance (of {{total}} h, split by hours {{ratio}})",
+        "crossShareNoRatio": "This company gets {{allocated}} h of transfer allowance (of {{total}} h)",
+        "bound": "Bound · {{name}}",
+        "leaveFirst": "Sick / annual leave is loaded into transfer before weekday",
+        "myobHasEntries": "MYOB already has unprocessed entries",
+        "myobCheckFailed": "Could not read MYOB; status unknown"
+      },
+      "readiness": {
+        "aria": "Pre-push checks",
+        "locked": {
+          "title": "Stores submitted and locked",
+          "none": "No locked stores this period"
+        },
+        "unlocked": {
+          "title": "Unlocked stores: {{count}}",
+          "item": "{{label}} · {{count}} affected",
+          "noneTitle": "No unlocked stores",
+          "noneSub": "All stores involved are submitted and locked"
+        },
+        "category": {
+          "title": "Pay categories mapped {{mapped}} / {{total}}",
+          "incomplete": "Hours of unmapped categories cannot be pushed",
+          "go": "Go to mapping"
+        },
+        "processed": {
+          "title": "Processed pays in MYOB are not overwritten",
+          "unchecked": "Not checked: click \"Check MYOB status\" above to see",
+          "some": "{{count}} already paid in MYOB; they will not be overwritten",
+          "failed": "Could not read MYOB for {{count}}; please check again later",
+          "none": "No processed pay in MYOB for this period"
+        },
+        "state": {
+          "ok": "OK",
+          "bad": "Needs action",
+          "warn": "Attention",
+          "muted": "Not checked"
+        }
+      },
+      "hints": {
+        "title": "{{count}} notes that do not block pushing; please acknowledge each:",
+        "ack": "I have read the notes above",
+        "codes": {
+          "BIRTHDAY_REVIEW": "Turning 18: pay rate to change",
+          "BELOW_MINIMUM_RATE": "Below minimum rate",
+          "PUBLIC_HOLIDAY_RATE_MISMATCH": "Public-holiday rate differs from weekday rate",
+          "ANNUAL_CASH_OUT_NOT_PUSHED": "Annual-leave cash-out not pushed",
+          "unknown": "Other notes"
+        },
+        "nameSep": ": "
+      },
+      "summary": {
+        "ready": "Ready: {{count}} · total ",
+        "hours": "{{hours}} h",
+        "blockedPrefix": "Blocked: ",
+        "people": "{{count}}",
+        "blockedSuffix": " (never skipped silently; they are listed in the result)",
+        "noTransfer": "Not pushed: {{count}}"
+      },
+      "weekdays": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "drawer": {
+        "title": "{{name}} · Daily push detail",
+        "close": "Close",
+        "closeButton": "Close",
+        "noDays": "No daily data for this period",
+        "explain": {
+          "label": "How hours are split: ",
+          "crossIntro": "First the fixed transfer hours are split between the companies by hours worked ({{pairs}}{{ratio}} → {{allocated}}); then, within this company's share, hours are loaded in the order ",
+          "crossOutro": ".",
+          "singleIntro": "Fixed transfer hours are loaded in the order ",
+          "singleOutro": "; whatever does not fit is paid as cash.",
+          "orderChain": "Sunday → Saturday → Paid leave → Public holiday → Weekday",
+          "allTransfer": "All-transfer employee: all of this company's actual hours are pushed by day; no transfer allowance is split.",
+          "allCash": "All-cash employee: no transfer hours, nothing is pushed."
+        },
+        "subtitle": {
+          "mixed": "Transfer + cash (fixed transfer {{fixed}}h/wk, this company gets {{allocated}} h)",
+          "transfer": "All transfer",
+          "cash": "All cash"
+        },
+        "actualTitle": "Actual hours at this company ({{stores}})",
+        "actualEmpty": "No hours at this company this period",
+        "pushedTitle": "Transfer hours to push to MYOB",
+        "pushedApi": "PUT Payroll/Timesheet",
+        "pushedNote": "Loaded into the transfer allowance in the order shown under \"How hours are split\"; when a category does not fill, days are filled from earliest to latest, so the last day may be partly filled.",
+        "pushedEmpty": "No transfer hours to push",
+        "cashTitle": "Not pushed (paid as cash)",
+        "cashEmpty": "No cash hours",
+        "cashRow": "{{name}} (cash)",
+        "categoryHead": "Category",
+        "total": "Total",
+        "check": {
+          "ok": "Check passed",
+          "bad": "Check failed",
+          "sep": ": "
+        },
+        "annualCashOut": "A further {{hours}} h of annual-leave cash-out uses up transfer allowance but is not pushed; finance handles it manually in MYOB.",
+        "kinds": {
+          "weekday": "Weekday",
+          "saturday": "Saturday",
+          "sunday": "Sunday",
+          "publicHolidayWork": "Public-holiday work",
+          "publicHolidayPay": "Paid public holiday",
+          "sick": "Sick leave",
+          "annual": "Annual leave",
+          "annualCashOut": "Annual-leave cash-out"
+        },
+        "pushedRows": {
+          "weekday": "Weekday",
+          "saturday": "Saturday",
+          "sunday": "Sunday",
+          "saturdayCasual": "Saturday (casual)",
+          "sundayCasual": "Sunday (casual)",
+          "personalLeave": "Sick (Personal Leave Pay)",
+          "holidayLeave": "Annual (Holiday Leave Pay)"
+        }
+      },
+      "csv": {
+        "employee": "Employee",
+        "stores": "Stores",
+        "payMode": "Pay mode",
+        "weekday": "Weekday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "personalLeave": "Sick",
+        "holidayLeave": "Annual",
+        "pushedTotal": "Pushed total",
+        "cashOut": "Annual-leave cash-out (not pushed)",
+        "status": "Status",
+        "reason": "Blocked reason",
+        "myobCard": "MYOB employee card"
+      }
+    },
+    "sync": {
+      "entry": {
+        "button": "Sync profiles from MYOB",
+        "row": "Sync profile",
+        "noPermission": "Syncing requires the \"Employee profiles · Edit\" permission",
+        "selectRow": "Select {{name}}"
+      },
+      "title": "Sync profiles from MYOB",
+      "readOnly": "Read-only on MYOB: nothing in MYOB is changed",
+      "fetchedAt": "MYOB data fetched {{age}}",
+      "refresh": "Refresh",
+      "close": "Close",
+      "age": {
+        "justNow": "just now",
+        "minutes": "{{count}} min ago",
+        "hours": "{{count}} h ago",
+        "days": "{{count}} d ago"
+      },
+      "steps": {
+        "select": "Choose fields",
+        "review": "Review changes",
+        "done": "Done"
+      },
+      "step1": {
+        "fieldsTitle": "Fields to sync",
+        "fieldsHint": "Numbers = bound employees in the current scope",
+        "selectAll": "Select all",
+        "selectDiff": "Only with differences",
+        "clear": "Clear",
+        "groups": {
+          "basic": "Basic details",
+          "employment": "Employment & pay"
+        },
+        "groupSource": "MYOB source → our field",
+        "sensitive": "Sensitive",
+        "sensitiveNote": "Sensitive fields are unchecked by default and must be ticked manually. They are written through the sensitive-data edit path, and an undoable sync record is kept.",
+        "fillable": "Fill {{count}}",
+        "differs": "Differ {{count}}",
+        "modeTitle": "When our value exists and differs from MYOB",
+        "modes": {
+          "FillEmpty": {
+            "title": "Fill empty only, never overwrite (recommended)",
+            "desc": "Written only when ours is empty. Differences are listed; tick them one by one in the next step."
+          },
+          "Overwrite": {
+            "title": "MYOB wins, overwrite all",
+            "desc": "Differences are ticked by default. A snapshot is kept before writing, so it can be undone."
+          }
+        },
+        "scopeTitle": "Scope",
+        "scope": {
+          "selected": "Only the {{count}} selected",
+          "selectedNames": "Ticked in the list: {{names}}",
+          "selectedNamesMore": "Ticked in the list: {{names}} and others ({{count}} in total)",
+          "all": "All {{count}} currently bound employees",
+          "allSkip": "{{count}} with no MYOB card are skipped automatically",
+          "allNoSkip": "Applies only to employees that still have a MYOB card",
+          "single": "Only {{name}}",
+          "singleDesc": "Single-employee sync; the scope is fixed to this one person",
+          "rescope": "Re-preview only {{name}} (same fields as last time)"
+        },
+        "summary": "{{fields}} fields selected ({{sensitive}} sensitive) · scope {{people}} people",
+        "next": "Next: review changes",
+        "cancel": "Cancel",
+        "loadFailed": "Failed to load field statistics",
+        "retry": "Retry",
+        "noPermission": "You do not have the \"Employee profiles · Edit\" permission, so MYOB data cannot be written to employee profiles. Ask an administrator to grant it.",
+        "unavailable": "Not readable from MYOB right now"
+      },
+      "step2": {
+        "subtitle": "Nothing has been written yet · this is a preview, only ticked items are written · Mode: {{mode}}",
+        "modeName": {
+          "FillEmpty": "Fill empty only",
+          "Overwrite": "MYOB wins"
+        },
+        "cards": {
+          "employees": "Employees to update",
+          "changes": "Field changes",
+          "checked": "{{count}} ticked",
+          "skipped": "Skipped",
+          "skippedDetail": "{{noDiff}} no difference · {{missing}} card missing",
+          "sensitive": "Sensitive fields",
+          "person": "people",
+          "item": "items"
+        },
+        "sensitiveBanner": "{{count}} sensitive items ticked (birthday, bank, super). Bank account and super member numbers show only the last 4 digits; the full value is sent only when writing.",
+        "sensitiveBannerNone": "This preview has {{total}} sensitive items (birthday, bank, super), none ticked. Bank account and super member numbers show only the last 4 digits.",
+        "pendingBanner": "{{names}} has a pending sensitive-data request, which is voided automatically once sensitive fields are written.",
+        "filters": {
+          "all": "All changes",
+          "overwrite": "Differences (overwrite)",
+          "sensitive": "Sensitive only"
+        },
+        "checkAllFill": "Tick all fill-empty",
+        "uncheckAll": "Untick all",
+        "columns": {
+          "employee": "Employee",
+          "field": "Field",
+          "ours": "Our value",
+          "myob": "MYOB value",
+          "mode": "Mode"
+        },
+        "empty": "(empty)",
+        "kind": {
+          "Fill": "Fill",
+          "Overwrite": "Overwrite"
+        },
+        "pendingTag": "Pending request will be voided",
+        "checkRow": "Write {{field}} for {{name}}",
+        "ack": "I have checked the sensitive fields (birthday, bank, super)",
+        "willWrite": "{{count}} items to write · {{people}} people",
+        "back": "Back",
+        "confirm": "Confirm sync of {{count}} items",
+        "loadFailed": "Failed to build the preview",
+        "retry": "Retry",
+        "emptyPreview": "No differences to sync for the selected fields in this scope",
+        "emptyFiltered": "No changes under this filter",
+        "submitFailed": "Sync failed",
+        "unavailableBanner": "These fields could not be read from MYOB right now (the payment details API may not be permitted), so they are not synced: {{fields}}"
+      },
+      "step3": {
+        "subtitle": "This sync {{time}} · by {{actor}}",
+        "writtenTitle": "{{people}} people · {{changes}} items written",
+        "noneWritten": "Nothing was written this time",
+        "sensitiveChip": "Includes {{count}} sensitive items",
+        "otherLine": "{{people}} more people ({{changes}} items) were not written (see below); {{skipped}} needed no sync",
+        "otherNoFailed": "{{skipped}} people needed no sync",
+        "otherFailedOnly": "{{people}} people ({{changes}} items) were not written (see below)",
+        "writtenSection": "What was written",
+        "columns": {
+          "employee": "Employee",
+          "fields": "Fields written",
+          "result": "Result"
+        },
+        "writtenCount": "{{count}} written",
+        "rest": "{{people}} more people · {{changes}} items written",
+        "expandAll": "Show all",
+        "collapse": "Collapse",
+        "failedTag": "{{count}} failed",
+        "failedHead": "{{name}} · {{fields}} ({{count}} items)",
+        "rescope": "Re-preview this person",
+        "undoTitle": "A snapshot was kept; undo is available for 7 days",
+        "undoDesc": "Only the fields written in this sync are restored; fields changed by someone since are left alone. After an undo, the record is marked as undone.",
+        "undo": "Undo this sync",
+        "undoConfirmTitle": "Undo this sync?",
+        "undoConfirmContent": "The {{changes}} items written for {{people}} people are restored to their previous values. Fields changed by someone after the sync are not restored.",
+        "undoConfirmOk": "Undo",
+        "undoCancel": "Cancel",
+        "undone": "Sync undone: {{changes}} items restored for {{people}} people",
+        "undoneCard": "This sync has been undone",
+        "undoSkipped": "{{count}} items were not restored because they were changed after the sync",
+        "undoFailed": "Failed to undo",
+        "footerNote": "This sync is recorded; review or undo it under \"Sync history\"",
+        "viewHistory": "Sync history",
+        "done": "Done"
+      },
+      "batch": {
+        "title": "Sync history",
+        "hint": "The latest 30 syncs; a whole sync can be undone within 7 days",
+        "empty": "No syncs yet",
+        "loadFailed": "Failed to load sync history",
+        "retry": "Retry",
+        "columns": {
+          "time": "Time",
+          "actor": "By",
+          "scope": "People / items",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "scope": "{{people}} people · {{changes}} items",
+        "scopeSensitive": "{{count}} sensitive",
+        "status": {
+          "Active": "Can undo",
+          "Undone": "Undone",
+          "Expired": "Expired"
+        },
+        "undoneBy": "Undone by {{name}} at {{time}}",
+        "deadline": "Undo until {{time}}",
+        "undo": "Undo"
+      },
+      "errors": {
+        "noPermission": "No \"Employee profiles · Edit\" permission, so syncing is not allowed",
+        "noFields": "Select at least one field to sync",
+        "batchNotFound": "This sync record was not found",
+        "batchAlreadyUndone": "This sync has already been undone",
+        "batchExpired": "This sync is older than 7 days and can no longer be undone",
+        "notBound": "This employee is no longer bound; nothing was written",
+        "cardMissing": "The employee's card no longer exists in MYOB; nothing was written",
+        "valueChanged": "This employee's profile changed after the preview; nothing was written to avoid overwriting their edit",
+        "versionConflict": "This employee's sensitive data changed after the preview; nothing was written to avoid overwriting their edit",
+        "pendingNeedsConfirm": "This employee has a pending sensitive-data request; confirm voiding it before writing",
+        "writeFailed": "Write failed; this employee's profile was not changed"
+      },
+      "fields": {
+        "name": "Name",
+        "phone": "Mobile",
+        "email": "Email",
+        "birthday": "Birthday",
+        "gender": "Gender",
+        "address": "Address",
+        "employmentType": "Employment type",
+        "bank": "Bank account",
+        "super": "Super"
+      },
+      "sources": {
+        "name": "MYOB first + last name → our name",
+        "phone": "Normalised to 04xx xxx xxx before comparing",
+        "email": "Email is the binding match key; changing it affects future scoring, so it is unchecked by default",
+        "birthday": "Date of birth in MYOB payroll details",
+        "gender": "MYOB payroll details → male / female",
+        "address": "Street, city, state and postcode joined on one line",
+        "employmentType": "Full-time→Full-time · Part-time→Part-time · Casual→Temporary · Other is not synced",
+        "bank": "BSB + account number (the preview shows only the last 4 digits)",
+        "super": "Fund name + code + member number"
+      }
+    }
+  }
+}

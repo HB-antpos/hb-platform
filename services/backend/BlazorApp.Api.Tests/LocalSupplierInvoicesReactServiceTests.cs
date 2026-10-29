@@ -1811,6 +1811,51 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CheckProductsAsync_有副条码且主条码没有任何商品占用时_默认添加多码而非等待操作()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-add-multi-free-main-check", "INV-ADD-MULTI-FREE-MAIN-CHECK", new DateTime(2026, 1, 9));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-add-multi-free-main-target",
+                ProductCode = "P-ADD-MULTI-FREE-MAIN-TARGET",
+                ItemNumber = "88842",
+                Barcode = "191554882676",
+                ProductName = "Men Travel Perfume Assorted 35mL",
+                LocalSupplierCode = "SUP01",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                // 主条码是新条码、没有任何商品占用：执行校验会放行并把主条码一并登记为多码，检测不应再让人等。
+                DetailGUID = "detail-add-multi-free-main-check",
+                InvoiceGUID = "invoice-add-multi-free-main-check",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ItemNumber = "88842",
+                Barcode = "840417950999",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "191554882690" }),
+                ProductName = "Men Travel Perfume Assorted 35mL",
+                Quantity = 48,
+                PurchasePrice = 1.6546m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-add-multi-free-main-check",
+                DetailGuids = new List<string> { "detail-add-multi-free-main-check" },
+            });
+
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-add-multi-free-main-check");
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("P-ADD-MULTI-FREE-MAIN-TARGET", detail.ProductCode);
+            Assert.Equal((int)DetailAction.AddMultiCode, detail.ActivityType);
+        }
+
+        [Fact]
         public async Task QueryInChunksParallelAsync_多Chunk查询使用独立连接()
         {
             var service = CreateService();
@@ -3208,6 +3253,77 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_明细无零售价时多码价跟随主条码分店价()
+        {
+            // 生产形态（SW0126）：进货单明细 RetailPrice 为空；Type2 多码与分店投影必须跟随主条码价，不能写成 NULL。
+            await SeedStoreAndSupplierAsync();
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-guid-2",
+                StoreCode = "S02",
+                StoreName = "Second Store",
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await InsertInvoiceAsync("invoice-multi-follow", "INV-MULTI-FOLLOW", new DateTime(2026, 10, 14));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-follow",
+                ProductCode = "P-MULTI-FOLLOW",
+                ItemNumber = "SW0126",
+                Barcode = "9333527454072",
+                ProductName = "Wrapping Paper Kraft",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 1.22m,
+                RetailPrice = 4m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreRetailPrice
+            {
+                UUID = "srp-multi-follow-s01",
+                StoreCode = "S01",
+                ProductCode = "P-MULTI-FOLLOW",
+                PurchasePrice = 1.22m,
+                StoreRetailPriceValue = 3.5m,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-follow",
+                InvoiceGUID = "invoice-multi-follow",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-FOLLOW",
+                ItemNumber = "SW0126",
+                Barcode = "9333527365828",
+                ProductName = "Wrapping Paper Kraft",
+                PurchasePrice = 1.22m,
+                RetailPrice = null,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-follow",
+                new List<string> { "detail-multi-follow" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            var global = await _db.Queryable<ProductSetCode>()
+                .SingleAsync(x => x.ProductCode == "P-MULTI-FOLLOW" && x.SetBarcode == "9333527365828");
+            var projections = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P-MULTI-FOLLOW")
+                .ToListAsync();
+            Assert.Equal(2, global.SetType);
+            Assert.Equal(3.5m, global.SetRetailPrice);
+            Assert.Equal(3.5m, projections.Single(x => x.StoreCode == "S01").MultiCodeRetailPrice);
+            // S02 没有分店价：回退商品主档价。
+            Assert.Equal(4m, projections.Single(x => x.StoreCode == "S02").MultiCodeRetailPrice);
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_AddMultiCode_副条码被其他商品占用时回滚()
         {
             await SeedStoreAndSupplierAsync();
@@ -3429,6 +3545,129 @@ namespace BlazorApp.Api.Tests
             var validationDetails = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
             Assert.Contains(validationDetails.Errors, error => error.Contains("主条码未匹配当前商品", StringComparison.Ordinal));
             Assert.Equal(0, multiCodeCount);
+            Assert.Equal(0, productSetCodeCount);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_主档条码是货号占位且主条码无人占用时主条码与副码一并写入()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-multi-placeholder", "INV-MULTI-PLACEHOLDER", new DateTime(2026, 1, 12));
+            // 复现 89986：主档条码是货号占位值，发票上 4 个真实条码（1 主 + 3 副）库里都没人占用。
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-placeholder",
+                ProductCode = "P-MULTI-PLACEHOLDER",
+                ItemNumber = "89986",
+                Barcode = "89986",
+                ProductType = 0,
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 1.35m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-placeholder",
+                InvoiceGUID = "invoice-multi-placeholder",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-PLACEHOLDER",
+                ItemNumber = "89986",
+                Barcode = "191554897779",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[]
+                {
+                    "191554897809",
+                    "191554897793",
+                    "191554897786",
+                }),
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                PurchasePrice = 1.35m,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-placeholder",
+                new List<string> { "detail-multi-placeholder" },
+                "tester"
+            );
+
+            var expectedBarcodes = new[] { "191554897779", "191554897786", "191554897793", "191554897809" };
+            var productSetCodes = await _db.Queryable<ProductSetCode>()
+                .Where(x => x.ProductCode == "P-MULTI-PLACEHOLDER")
+                .OrderBy(x => x.SetBarcode)
+                .ToListAsync();
+            var storeMultiCodes = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P-MULTI-PLACEHOLDER")
+                .OrderBy(x => x.MultiBarcode)
+                .ToListAsync();
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "P-MULTI-PLACEHOLDER");
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(4, result.Data?.AddedMultiCodes);
+            Assert.Equal(expectedBarcodes, productSetCodes.Select(x => x.SetBarcode).ToArray());
+            Assert.Equal(expectedBarcodes, storeMultiCodes.Select(x => x.MultiBarcode).ToArray());
+            Assert.Equal(2, product.ProductType);
+            // 主档原条码（占位值）不动，新条码都只作为多码挂上去。
+            Assert.Equal("89986", product.Barcode);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_主条码已是其他商品分店多码时校验失败并回滚()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-multi-main-other-multi", "INV-MULTI-MAIN-OTHER-MULTI", new DateTime(2026, 1, 12));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-main-other-multi",
+                ProductCode = "P-MULTI-MAIN-OTHER-MULTI",
+                ItemNumber = "89986",
+                Barcode = "89986",
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                LocalSupplierCode = "SUP01",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreMultiCodeProduct
+            {
+                UUID = "multi-main-other-owner",
+                StoreCode = "S01",
+                ProductCode = "P-MULTI-MAIN-OTHER-OWNER",
+                MultiCodeProductCode = "MULTI-MAIN-OTHER-001",
+                StoreMultiCodeProductCode = "S01MULTI-MAIN-OTHER-001",
+                MultiBarcode = "191554897779",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-main-other-multi",
+                InvoiceGUID = "invoice-multi-main-other-multi",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-MAIN-OTHER-MULTI",
+                ItemNumber = "89986",
+                Barcode = "191554897779",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "191554897809" }),
+                ProductName = "Men Perfume Mini Best Selling 30mL",
+                PurchasePrice = 1.35m,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-main-other-multi",
+                new List<string> { "detail-multi-main-other-multi" },
+                "tester"
+            );
+
+            var multiCodeCount = await _db.Queryable<StoreMultiCodeProduct>().CountAsync();
+            var productSetCodeCount = await _db.Queryable<ProductSetCode>().CountAsync();
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.Code);
+            var validationDetails = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Contains(validationDetails.Errors, error => error.Contains("191554897779", StringComparison.Ordinal));
+            Assert.Equal(1, multiCodeCount);
             Assert.Equal(0, productSetCodeCount);
         }
 

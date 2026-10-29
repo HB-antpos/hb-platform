@@ -42,7 +42,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canAccessDashboard: [P.Dashboard.View],
   canAccessOrderFront: [P.OrderFront.View],
   canReadStore: [P.Stores.View],
-  canViewEmployeeProfiles: [P.EmployeeProfiles.View],
+  canViewEmployeeProfiles: [P.EmployeeProfiles.ViewManagedStore],
   canViewSystemLogs: [P.System.ViewLogs],
   canViewPerformanceBaseline: [P.System.ViewPerformanceBaseline],
   canManageScheduledTasks: [P.System.ManageScheduledTasks],
@@ -90,6 +90,10 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManagePromotions: [P.Promotions.View],
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
+  // 与 access.ts 一致：审核入口只认 Approval.ReviewManagedStore（请假审核也走同一接口）
+  canReviewAttendance: [P.Attendance.ApprovalReviewManagedStore],
+  // 任一权限可见；从菜单授予时只补第一个（打卡查看＝工时统计），工资需另授 Payroll.View
+  canViewAttendanceHours: [P.Attendance.PunchViewManagedStore, P.Attendance.PayrollView],
   canManageStoreOps: [P.Store.ManageOperations],
   canViewStoreCash: [P.Cash.OverviewView],
   canViewOperationAudits: [P.PosTerminal.AuditView],
@@ -99,6 +103,10 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewDailyCloseRecords: [P.DailyCloseRecords.View],
   canViewSeasonalCardStats: [P.SeasonalCards.Remaining.ViewAllStores],
   canManageFaceCameras: [P.FaceCapture.CamerasManage],
+  canManageMyobConnections: [P.Myob.ConnectionManage],
+  canBindMyobEmployees: [P.Myob.EmployeeBind],
+  // 任一权限可见：连接与映射 / 员工绑定 / 发薪公司（编辑工资）
+  canAccessMyob: [P.Myob.ConnectionManage, P.Myob.EmployeeBind, P.Attendance.PayrollEdit],
   // 人脸比对页：任一权限可见；从菜单授予时只补第一个（管理），移除时五个权限码一并撤销。
   canAccessFaceMatch: [
     P.FaceMatch.Manage,
@@ -132,8 +140,8 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
         path: '/system/accounts',
         title: 'menu.groupAccounts',
         children: [
-          { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
           { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole' },
+          { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
           { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole' },
           { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },
         ],
@@ -240,7 +248,22 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
         ],
       },
       { path: '/pos-admin/advertisements', title: 'menu.advertisements', accessKey: 'canManageAdvertisements' },
-      { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
+      {
+        path: '/pos-admin/attendance',
+        title: 'menu.scheduleAttendance',
+        children: [
+          { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
+          { path: '/pos-admin/attendance-review', title: 'menu.attendanceReview', accessKey: 'canReviewAttendance' },
+        ],
+      },
+      {
+        path: '/pos-admin/payroll',
+        title: 'menu.attendancePayroll',
+        children: [
+          { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours' },
+          { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob' },
+        ],
+      },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },

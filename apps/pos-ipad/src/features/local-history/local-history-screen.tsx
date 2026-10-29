@@ -31,6 +31,8 @@ import {
   LocalHistoryReceiptPreview,
 } from "./local-history-receipt-preview";
 
+import { quickHistoryDateRange } from "@hb/pos-domain/features/remote-history/quick-date-range";
+import { HistoryQuickRangeRow } from "@/ui/controls/history-quick-range-row";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
 import {
   PosKeyboardAwareScrollView,
@@ -134,10 +136,15 @@ export function LocalHistoryScreen({
 
   const loading = state.kind === "loading";
   const hasRows = state.rows.length > 0;
-  const applyFilters = () => {
+  const applyFilters = (
+    dates: Readonly<{ from: string; to: string }> = {
+      from: fromDate,
+      to: toDate,
+    },
+  ) => {
     const range = localHistoryBusinessDayRange(
-      fromDate,
-      toDate,
+      dates.from,
+      dates.to,
       state.businessTimeZone,
     );
     if (!range) {
@@ -228,6 +235,22 @@ export function LocalHistoryScreen({
           value={toDate}
           width={layout.filterWidth}
         />
+        <HistoryQuickRangeRow
+          disabled={loading}
+          labels={{
+            today: t("filters.quickToday"),
+            yesterday: t("filters.quickYesterday"),
+            last7days: t("filters.quickLast7Days"),
+          }}
+          onSelect={(kind) => {
+            // 点了立即查询（对齐 WPF #608）。
+            const range = quickHistoryDateRange(kind, new Date(), state.businessTimeZone);
+            setFromDate(range.from);
+            setToDate(range.to);
+            applyFilters(range);
+          }}
+          testIDPrefix="local-history"
+        />
         <FilterField
           compact={layout.compact}
           grow
@@ -245,7 +268,7 @@ export function LocalHistoryScreen({
           compact={layout.compact}
           disabled={loading}
           label={t("action.apply")}
-          onPress={applyFilters}
+          onPress={() => applyFilters()}
           testID="local-history-apply-filters"
           tone="secondary"
         />

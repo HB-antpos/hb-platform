@@ -86,6 +86,15 @@ export function formatSignedAud(value: number | null | undefined): string {
   return cents > 0 ? `+${formatAud(value)}` : formatAud(value);
 }
 
+/** 日结差额（实点 − 应有）三态：负为短款、正为长款、0 为已平。按分比较，不足 1 分的残差算已平。 */
+export type VarianceKind = "short" | "over" | "even";
+
+export function classifyVariance(value: number): VarianceKind {
+  const cents = toCents(value);
+  if (cents < 0) return "short";
+  return cents > 0 ? "over" : "even";
+}
+
 /** 把金额转成输入框初始文本（建议存款额等预填），整数不带小数。 */
 export function amountToInputText(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "";

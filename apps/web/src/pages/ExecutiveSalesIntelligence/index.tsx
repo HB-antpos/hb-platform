@@ -20,7 +20,6 @@ import {
   buildHourlySeries,
   filterHourlyRowsByBranch,
   formatHourLabel,
-  formatLocalClockTime,
   getDisplayCutoffHour,
   groupHourlySeriesByBranch,
   parseHourKey,
@@ -46,6 +45,13 @@ import {
   fetchRevenueReportSnapshot,
   type RevenueReportSnapshot,
 } from './RevenueReport/revenueReportService'
+import {
+  buildStoreTimeZoneMap,
+  formatClockTimeAtOffset,
+  getCutoffClockAnchorUtc,
+  resolveCutoffClock,
+  shiftHourlyRowsToClock,
+} from './RevenueReport/storeCutoffClock'
 import cumulativeStyles from './RevenueReport/cumulative.module.css'
 import styles from './styles.module.css'
 
@@ -93,7 +99,32 @@ export default function ExecutiveSalesIntelligence() {
     { active, enabled: hasStoreScope, refresh, metricId: 'revenue-whole-page' },
   )
   const selectedBranchCode = selectedBranch?.branchCode ?? null
-  const allHourlyRows = reportQuery.data?.hourly
+  // 截止整点按门店时区：选中单店用本店时间，全部分店用范围内最东门店的时间（夏令时期间即悉尼），
+  // 其余门店的小时桶平移到同一时钟，排行与卡片的同一截止整点对每家店都是「本店已结束的整点」，与移动端一致。
+  // 旧后端不返回门店时区时退回固定 UTC+10，不平移，行为与之前相同。
+  const snapshotData = reportQuery.data
+  const timeZoneByBranch = useMemo(() => buildStoreTimeZoneMap(snapshotData?.branchTimeZones), [snapshotData?.branchTimeZones])
+  const scopeBranchCodes = useMemo(
+    () => [...new Set([
+      ...(snapshotData?.branches ?? []).map(branch => branch.branchCode),
+      ...Object.keys(snapshotData?.branchTimeZones ?? {}),
+    ])],
+    [snapshotData?.branches, snapshotData?.branchTimeZones],
+  )
+  const cutoffClock = useMemo(
+    () => resolveCutoffClock({
+      branchCodes: scopeBranchCodes,
+      referenceBranchCodes: selectedBranchCode ? [selectedBranchCode] : scopeBranchCodes,
+      timeZoneByBranch,
+      atUtc: getCutoffClockAnchorUtc(selection.endDate),
+    }),
+    [scopeBranchCodes, selectedBranchCode, selection.endDate, timeZoneByBranch],
+  )
+  const referenceOffsetMinutes = cutoffClock.referenceOffsetMinutes
+  const allHourlyRows = useMemo(
+    () => snapshotData?.hourly ? shiftHourlyRowsToClock(snapshotData.hourly, cutoffClock) : undefined,
+    [cutoffClock, snapshotData?.hourly],
+  )
   const scopedHourlyRows = useMemo(
     () => allHourlyRows ? filterHourlyRowsByBranch(allHourlyRows, selectedBranchCode) : undefined,
     [allHourlyRows, selectedBranchCode],
@@ -125,9 +156,9 @@ export default function ExecutiveSalesIntelligence() {
   const statisticsLastSuccessfulAtUtc = reportQuery.data?.statisticsLastSuccessfulAtUtc
   const defaultCutoff = useMemo(
     () => selectedDate && selection.compare
-      ? resolveDefaultCutoff({ selectedDate, todayKey, statisticsCompletedAtUtc: statisticsLastSuccessfulAtUtc })
+      ? resolveDefaultCutoff({ selectedDate, todayKey, statisticsCompletedAtUtc: statisticsLastSuccessfulAtUtc, utcOffsetMinutes: referenceOffsetMinutes })
       : null,
-    [selectedDate, selection.compare, todayKey, statisticsLastSuccessfulAtUtc],
+    [referenceOffsetMinutes, selectedDate, selection.compare, todayKey, statisticsLastSuccessfulAtUtc],
   )
   const seriesByBranch = useMemo(() => groupHourlySeriesByBranch(allHourlyRows ?? []), [allHourlyRows])
   const allStoreSeries = useMemo(() => buildHourlySeries(allHourlyRows ?? []), [allHourlyRows])
@@ -141,7 +172,7 @@ export default function ExecutiveSalesIntelligence() {
   // 今天总要对齐到最近完整整点；历史日期默认整天，用户点选某个整点后才对齐。
   const alignToCutoff = cumulativeActive && effectiveCutoffHour < FULL_DAY_CUTOFF_HOUR
   const cutoffLabel = formatHourLabel(getDisplayCutoffHour(allStoreSeries, effectiveCutoffHour))
-  const liveClock = formatLocalClockTime(statisticsLastSuccessfulAtUtc)
+  const liveClock = formatClockTimeAtOffset(statisticsLastSuccessfulAtUtc, referenceOffsetMinutes)
   const compareWeekday = period.compareStartDate ? new Date(`${period.compareStartDate}T00:00:00Z`).getUTCDay() : null
   const compareDayLabel = period.compareStartDate && compareWeekday !== null
     ? `${period.compareStartDate} ${text(['周日', '周一', '周二', '周三', '周四', '周五', '周六'][compareWeekday]!, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][compareWeekday]!)}`
@@ -155,9 +186,9 @@ export default function ExecutiveSalesIntelligence() {
   const rangeEndsToday = !selectedDate && selection.endDate === todayKey && selection.compare
   const rangeCutoff = useMemo(
     () => rangeEndsToday
-      ? resolveDefaultCutoff({ selectedDate: todayKey, todayKey, statisticsCompletedAtUtc: statisticsLastSuccessfulAtUtc })
+      ? resolveDefaultCutoff({ selectedDate: todayKey, todayKey, statisticsCompletedAtUtc: statisticsLastSuccessfulAtUtc, utcOffsetMinutes: referenceOffsetMinutes })
       : null,
-    [rangeEndsToday, todayKey, statisticsLastSuccessfulAtUtc],
+    [rangeEndsToday, referenceOffsetMinutes, todayKey, statisticsLastSuccessfulAtUtc],
   )
   // 与单日一样 fail-closed：缺统计时间、旧后端没有最后一天数据、分时未齐时都不对齐。
   const rangeAlignActive = Boolean(rangeCutoff?.live) && lastDay !== null && lastDayDate === selection.endDate
@@ -165,11 +196,16 @@ export default function ExecutiveSalesIntelligence() {
   const rangeCutoffHour = rangeAlignActive && rangeCutoff ? rangeCutoff.cutoffHour : FULL_DAY_CUTOFF_HOUR
   const rangeCutoffLabel = formatHourLabel(rangeCutoffHour)
   const rangeDayCount = Math.round((Date.parse(selection.endDate) - Date.parse(selection.startDate)) / 86_400_000) + 1
-  const lastDaySeriesByBranch = useMemo(() => groupHourlySeriesByBranch(lastDay?.hourly ?? []), [lastDay])
+  // 今天的分店×小时与单日一样平移到参考时钟，截止整点才对每家店含义一致。
+  const lastDayHourly = useMemo(
+    () => lastDay ? shiftHourlyRowsToClock(lastDay.hourly, cutoffClock) : [],
+    [cutoffClock, lastDay],
+  )
+  const lastDaySeriesByBranch = useMemo(() => groupHourlySeriesByBranch(lastDayHourly), [lastDayHourly])
   const alignedHourlyRows = useMemo(() => {
     if (!scopedHourlyRows || !rangeAlignActive || !lastDay) return scopedHourlyRows
-    return alignRangeHourlyRows(scopedHourlyRows, filterHourlyRowsByBranch(lastDay.hourly, selectedBranchCode), rangeCutoffHour)
-  }, [lastDay, rangeAlignActive, rangeCutoffHour, scopedHourlyRows, selectedBranchCode])
+    return alignRangeHourlyRows(scopedHourlyRows, filterHourlyRowsByBranch(lastDayHourly, selectedBranchCode), rangeCutoffHour)
+  }, [lastDay, lastDayHourly, rangeAlignActive, rangeCutoffHour, scopedHourlyRows, selectedBranchCode])
   const hourlyQuery = { ...reportQuery, data: alignedHourlyRows }
 
   const branches = useMemo(() => {
@@ -197,7 +233,7 @@ export default function ExecutiveSalesIntelligence() {
         : text('今天的分时统计尚未齐全', 'today’s hourly statistics are incomplete')
     : null
   // 拿不到截止整点时，单日今天的旧时段表按 UTC+10 墙钟推断：之后的小时未到、当前小时进行中。
-  const fallbackClockHour = selectedDate === todayKey && !cumulativeActive ? referenceClockHour() : null
+  const fallbackClockHour = selectedDate === todayKey && !cumulativeActive ? referenceClockHour(Date.now(), referenceOffsetMinutes) : null
 
   useEffect(() => {
     // 换日期后回到默认截止整点，避免沿用上一天点选的时刻。

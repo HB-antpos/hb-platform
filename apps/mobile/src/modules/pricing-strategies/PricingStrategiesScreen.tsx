@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { fetchPricingStrategy, updatePricingStrategy } from "./api";
-import { buildToggledPayload, countActiveFilters, createDefaultListFilters, PRICING_LIST_PAGE_SIZE } from "./logic";
+import { buildToggledPayload, countActiveFilters, createDefaultListFilters, PRICING_LIST_PAGE_SIZE, sortNamedOptions } from "./logic";
 import { QuickTryCard } from "./QuickTryCard";
 import { PRICING_COLORS, PricingScreenMessage, useApiErrorText, usePricingGuard } from "./shared";
 import { StrategyCard } from "./StrategyCard";
@@ -30,7 +30,7 @@ export function PricingStrategiesScreen() {
 }
 
 function PricingStrategiesContent({ canEdit, onBack }: { canEdit: boolean; onBack: () => void }) {
-  const { t } = useAppTranslation("pricingStrategies");
+  const { t, language } = useAppTranslation("pricingStrategies");
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -44,6 +44,9 @@ function PricingStrategiesContent({ canEdit, onBack }: { canEdit: boolean; onBac
   const [snack, setSnack] = useState("");
   const query = usePricingStrategyList(filters);
   const { stores, suppliers, storeNames, supplierNames } = usePricingScopeOptions();
+  // 分店 / 供应商下拉按名字排序（「全部」固定在最前）。
+  const sortedStores = useMemo(() => sortNamedOptions(stores, language), [stores, language]);
+  const sortedSuppliers = useMemo(() => sortNamedOptions(suppliers, language), [suppliers, language]);
 
   // 搜索框防抖 400ms，避免每敲一个字发一次请求。
   useEffect(() => {
@@ -197,8 +200,8 @@ function PricingStrategiesContent({ canEdit, onBack }: { canEdit: boolean; onBac
         cancelLabel={t("actions.cancel")}
         options={
           picker === "store"
-            ? [{ value: "", label: t("list.allStores") }, ...stores.map((store) => ({ value: store.code, label: store.name }))]
-            : [{ value: "", label: t("list.allSuppliers") }, ...suppliers.map((supplier) => ({ value: supplier.code, label: supplier.name }))]
+            ? [{ value: "", label: t("list.allStores") }, ...sortedStores.map((store) => ({ value: store.code, label: store.name }))]
+            : [{ value: "", label: t("list.allSuppliers") }, ...sortedSuppliers.map((supplier) => ({ value: supplier.code, label: supplier.name }))]
         }
         selectedValue={(picker === "store" ? filters.storeCode : filters.supplierCode) ?? ""}
         searchable

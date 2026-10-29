@@ -6,6 +6,15 @@ public sealed class OperationAuditQueryDto
 
     public DateTimeOffset? ToUtc { get; set; }
 
+    /// <summary>
+    /// 门店本地时间范围（不带时区，如 2026-10-27T16:20:24），含首尾。
+    /// 提供且可解析时优先于 FromUtc / ToUtc：每家门店按自己的时区换算成 UTC 再过滤，与销售明细的墙钟时间对齐。
+    /// 只给其中一端时，另一端回退到 FromUtc / ToUtc / 默认值。
+    /// </summary>
+    public string? FromLocal { get; set; }
+
+    public string? ToLocal { get; set; }
+
     public string? StoreCode { get; set; }
 
     /// <summary>分店，可多选；与 StoreCode 合并。为空时按权限范围内全部分店。</summary>
@@ -195,6 +204,9 @@ public sealed class OperationAuditContextDto
 
 public class OperationAuditListItemDto
 {
+    /// <summary>该门店的时区（IANA ID）；前端按它显示发生时间，与销售明细的门店墙钟对齐。</summary>
+    public string? StoreTimeZoneId { get; set; }
+
     public Guid EventId { get; set; }
 
     public int SchemaVersion { get; set; }

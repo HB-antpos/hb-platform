@@ -49,7 +49,11 @@ export class ActivePromotionSnapshotLoader {
       if (snapshot === null) return { status: "no-active-snapshot" };
 
       assertSnapshotScope(snapshot, storeCode);
-      const promotions = snapshot.promotions.map(parsePromotionDefinition);
+      // 负固定价规则是总部配置错误：整条忽略（不参与互斥选择、不计入规则数），其余规则照常生效，
+      // 不能因为一条坏规则让整份促销快照失效而丢掉全部折扣（对齐 WPF #742 D5）。
+      const promotions = snapshot.promotions
+        .filter((record) => !hasNegativeFixedPrice(record))
+        .map(parsePromotionDefinition);
       assertUniquePromotionIds(promotions);
       // 中文注释：applyPromotionSnapshot 在副本重算成功后才发布；任何异常均保留旧金额。
       this.activeCart.applyPromotionSnapshot(promotions, input.asOfIso);
@@ -63,6 +67,22 @@ export class ActivePromotionSnapshotLoader {
       // 保留上一份已验证规则，绝不能清空折扣后继续收银。
       return { status: "fallback" };
     }
+  }
+}
+
+/**
+ * 规则的固定价是否为负数。只在定义 JSON 可解析且 fixedPrice 是有限负数时返回 true；
+ * 其它任何损坏仍交给严格解析抛错（整份快照回退），不能顺手放过。
+ */
+export function hasNegativeFixedPrice(
+  record: Readonly<{ promotionId: string; definitionJson: string }>,
+): boolean {
+  try {
+    const fixedPrice = parseObject(record.definitionJson, "promotion definition")
+      .fixedPrice;
+    return typeof fixedPrice === "number" && Number.isFinite(fixedPrice) && fixedPrice < 0;
+  } catch {
+    return false;
   }
 }
 

@@ -92,6 +92,7 @@ import {
   type PaymentDraftPersistenceIds,
 } from "./sqlite-payment-draft-recovery-store";
 import { SqlitePaymentRecoveryCenterStore } from "./sqlite-payment-recovery-center-store";
+import { SqliteLocalReturnRecordReader } from "@hb/pos-db/core/db/sqlite-local-return-records";
 import { SqliteSquareRefundSettlementStore } from "@hb/pos-db/core/db/sqlite-square-refund-settlement-store";
 import { SqlitePaymentProtectedMaterialReader } from "@hb/pos-db/core/db/sqlite-payment-protected-material";
 import { SqliteRefundVoucherPrintMaterial } from "./sqlite-refund-voucher-print-material";
@@ -509,6 +510,11 @@ export class PosDatabase implements DatabasePort {
       this.connection,
       encryptor,
     );
+  }
+
+  /** 退货查单只读：合并本机已提交但尚未同步的退货明细（对齐 WPF #683）。 */
+  public localReturnRecords(): SqliteLocalReturnRecordReader {
+    return new SqliteLocalReturnRecordReader(this.connection);
   }
 
   /** 原支付引用只进入二次加密 Vault；退货 feature 只持有不透明 capacityId。 */

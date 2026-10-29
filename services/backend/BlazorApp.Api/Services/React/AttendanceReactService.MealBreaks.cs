@@ -600,7 +600,11 @@ namespace BlazorApp.Api.Services.React
                 schedule.MealBreakCount,
                 schedule.StartTime,
                 schedule.EndTime);
-            var deduction = AttendanceMealBreakRules.DeductionMinutes(effective, session.WorkedMinutes);
+            // 段间满 30 分钟的空档已算一次用餐且不在工时里，扣除次数要减去它（下限 0）。
+            var deduction = AttendanceMealBreakRules.DeductionMinutes(
+                effective,
+                session.WorkedMinutes,
+                AttendanceMealBreakRules.CountQualifyingGapBreaks(session.Segments));
             // 加回不能超过当前扣除：批准后店长又把排班用餐改少（甚至改成 0）时，
             // 计薪工时不能因此超过实际工时（与加班的批准分钟封顶到候选分钟同一做法）。
             var approvedAddBack = Math.Min(

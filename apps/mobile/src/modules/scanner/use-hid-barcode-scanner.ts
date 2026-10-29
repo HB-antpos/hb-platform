@@ -22,6 +22,11 @@ interface UseHidBarcodeScannerOptions {
   enabled?: boolean;
   idleMs?: number;
   minLength?: number;
+  /**
+   * 只用隐藏 TextInput 接收扫码，不订阅原生按键监听。
+   * 原生监听视图挂在 Activity 根视图上，Modal（底部弹层）是独立窗口收不到按键，弹层内必须用这个模式。
+   */
+  textInputOnly?: boolean;
   onScan: (barcode: string) => void | Promise<void>;
 }
 
@@ -81,6 +86,7 @@ export function useHidBarcodeScanner({
   enabled = true,
   idleMs = 50,
   minLength = 3,
+  textInputOnly = false,
   onScan,
 }: UseHidBarcodeScannerOptions) {
   const onScanRef = useRef(onScan);
@@ -243,10 +249,10 @@ export function useHidBarcodeScanner({
   }, [enabled, focusHiddenInput]);
 
   useEffect(() => {
-    if (forceTextInput && enabled) {
+    if ((forceTextInput || textInputOnly) && enabled) {
       setTimeout(() => focusHiddenInput(), 50);
     }
-  }, [forceTextInput, enabled, focusHiddenInput]);
+  }, [forceTextInput, textInputOnly, enabled, focusHiddenInput]);
 
   useEffect(() => {
     if (enabled) {
@@ -291,14 +297,14 @@ export function useHidBarcodeScanner({
     const lease = acquireHidNativeListenerLease({
       module: mod,
       enabled,
-      nativeMode: !forceTextInput,
+      nativeMode: !forceTextInput && !textInputOnly,
       onKeyPress,
     });
 
     return () => lease.release();
-  }, [forceTextInput, enabled, nativeKeyBuffer]);
+  }, [forceTextInput, textInputOnly, enabled, nativeKeyBuffer]);
 
-  if (getNativeModule() && !forceTextInput) {
+  if (getNativeModule() && !forceTextInput && !textInputOnly) {
     return {
       mode: "native" as const,
       textInputProps: null,

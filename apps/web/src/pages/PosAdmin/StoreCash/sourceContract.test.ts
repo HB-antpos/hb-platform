@@ -79,6 +79,13 @@ for (const source of allPageSources) {
 // 样式：窄屏换行、宽表格在容器内滚动、减少动画偏好
 assert(css.includes('@media (max-width: 767px)') && css.includes('prefers-reduced-motion'), '必须有窄屏与减少动画处理')
 assert(css.includes('.store-cash-negative') && css.includes('#cf1322'), '负数用醒目色')
+// 日结差额：短款红 / 长款橙 / 已平绿三色，且带 ▼▲✓ 标识；日结存档与总览都必须用专用组件，不能退回只给负数上色的 Amount
+assert(
+  css.includes('.store-cash-variance.is-short') && css.includes('.store-cash-variance.is-over') && css.includes('.store-cash-variance.is-even'),
+  '日结差额三态样式',
+)
+assert(daily.includes('<VarianceAmount value={archive.variance}'), '日结存档差异列用 VarianceAmount')
+assert(!/<Amount value=\{[^}]*[vV]ariance[^}]*\}/.test(daily + overview), '日结差额不能再用 Amount')
 for (const source of [overview, daily, deposits, expenses]) {
   assert(/scroll=\{\{ x: \d+ \}\}/.test(source), '宽表格横向滚动')
 }

@@ -159,6 +159,9 @@ if (app.Environment.IsDevelopment())
 app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 
+// 收银入口用量统计：放在最外层，让限流 429 / 鉴权 401 也计入；只统计 /api/*，失败不影响响应。
+app.UseMiddleware<PosApiEntryUsageMiddleware>();
+
 // 目录热路径结构化日志：仅慢请求与 5xx 错误记录 Method/Path 与耗时，
 // 不记录完整查询串、游标、lease ID、商品与凭据，避免大目录下载刷爆诊断日志。
 app.Use(async (context, next) =>

@@ -25,8 +25,12 @@ export type OperationAuditReviewStatus = LegacyReviewStatus
 export type OperationAuditRuleCode = LegacyRuleCode | 'emergencyOverride'
 
 export interface OperationAuditQueryParams {
+  /** 兼容旧后端：按悉尼换算的 UTC 范围；后端支持 fromLocal / toLocal 时以后者为准。 */
   fromUtc: string
   toUtc: string
+  /** 门店本地时间范围（不带时区，YYYY-MM-DDTHH:mm:ss）；后端按每家分店各自的时区换算成 UTC。 */
+  fromLocal?: string
+  toLocal?: string
   storeCode?: string
   /** 分店多选；数组按重复键展开为 storeCodes=a&storeCodes=b。 */
   storeCodes?: string[]
@@ -64,6 +68,8 @@ export interface OperationAuditListItem {
   isOfflineCached: boolean
   isEmergencyOverride: boolean
   storeCode: string
+  /** 分店时区（IANA）；时间按它显示，缺失（旧后端）时回退悉尼。 */
+  storeTimeZoneId?: string | null
   deviceCode: string
   deviceSystem?: string | null
   appVersion?: string

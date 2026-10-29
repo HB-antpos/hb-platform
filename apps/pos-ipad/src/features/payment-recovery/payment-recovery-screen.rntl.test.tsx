@@ -152,7 +152,7 @@ test("较窄横屏收紧双栏间距并保留可触达的恢复操作", async ()
   expect(screen.getByTestId("payment-recovery-open-manual")).toBeTruthy();
 });
 
-test("人工核实默认三项未选且未确认，完整有效证据和等额金额后才允许提交", async () => {
+test("人工核实默认三项未选且未确认，不需要证据，选好结果并确认后即可提交（已扣款还须等额金额）", async () => {
   const { service, submissions } = createService();
   const screen = await render(<PaymentRecoveryScreen service={service} />);
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
@@ -168,7 +168,6 @@ test("人工核实默认三项未选且未确认，完整有效证据和等额�
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-amount"), "1.00");
   expect(screen.getByText("The verified amount must match AU$0.99.")).toBeTruthy();
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-amount"), "0.99");
-  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-evidence"), "  RECEIPT-77  ");
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-note"), "  Checked terminal journal  ");
   await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
 
@@ -181,7 +180,6 @@ test("人工核实默认三项未选且未确认，完整有效证据和等额�
     recordId: pendingRecord.id,
     finding: "paid",
     verifiedAmountCents: 99,
-    evidenceReference: "RECEIPT-77",
     note: "Checked terminal journal",
   }]));
 });
@@ -195,7 +193,6 @@ test("确认未扣款不提交伪造金额，并显示完整中文主管验证�
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
   expect(screen.queryByTestId("payment-recovery-manual-amount")).toBeNull();
-  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-evidence"), "REF-UNPAID");
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-note"), "核对终端流水未扣款");
   await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
   expect(screen.getByText("验证主管并确认未收款")).toBeTruthy();
@@ -214,7 +211,6 @@ test("提交时隐藏人工面板让主管原生弹窗显示，授权失败后�
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-paid"));
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-amount"), "0.99");
-  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-evidence"), "RECEIPT-DRAFT");
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-note"), "Retain this note");
   await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
   await fireEvent.press(screen.getByTestId("payment-recovery-manual-submit"));
@@ -223,7 +219,6 @@ test("提交时隐藏人工面板让主管原生弹窗显示，授权失败后�
   rejectAuthorization?.(new Error("SUPERVISOR_CANCELLED"));
   await waitFor(() => expect(screen.getByTestId("payment-recovery-manual-modal")).toBeTruthy());
   expect(screen.getByTestId("payment-recovery-manual-amount").props.value).toBe("0.99");
-  expect(screen.getByTestId("payment-recovery-manual-evidence").props.value).toBe("RECEIPT-DRAFT");
   expect(screen.getByTestId("payment-recovery-manual-note").props.value).toBe("Retain this note");
 });
 
@@ -244,6 +239,68 @@ test("人工未扣款与明确失败可继续原单，中英文动作准确", as
 });
 
 
+test("证据输入已取消：表单里没有证据框，备注选填，不写备注也能提交", async () => {
+  const { service, submissions } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
+  expect(screen.queryByTestId("payment-recovery-manual-evidence")).toBeNull();
+  expect(screen.getByText("Verification note (optional)")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
+  const submit = screen.getByTestId("payment-recovery-manual-submit");
+  expect(submit.props.accessibilityState.disabled).toBe(false);
+  await fireEvent.press(submit);
+  await waitFor(() => expect(submissions).toEqual([{
+    recordId: pendingRecord.id,
+    finding: "unpaid",
+    verifiedAmountCents: null,
+    note: "",
+  }]));
+});
+
+test("备注预设：已扣款 2 个、未扣款 3 个、仍无法确认没有；点击追加到备注且不重复", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+  expect(screen.queryByTestId("payment-recovery-manual-presets")).toBeNull();
+
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-paid"));
+  expect(screen.getByText("Terminal shows payment successful")).toBeTruthy();
+  expect(screen.getByText("Customer showed payment record")).toBeTruthy();
+  expect(screen.queryByTestId("payment-recovery-manual-preset-unpaidTerminalOffline")).toBeNull();
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-preset-paidTerminalSuccess"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-preset-paidCustomerRecord"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-preset-paidTerminalSuccess"));
+  expect(screen.getByTestId("payment-recovery-manual-note").props.value)
+    .toBe("Terminal shows payment successful; Customer showed payment record");
+
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
+  for (const id of ["unpaidTerminalFailed", "unpaidTerminalOffline", "unpaidTerminalStuck"]) {
+    expect(screen.getByTestId(`payment-recovery-manual-preset-${id}`)).toBeTruthy();
+  }
+  expect(screen.queryByTestId("payment-recovery-manual-preset-paidTerminalSuccess")).toBeNull();
+
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-uncertain"));
+  expect(screen.queryByTestId("payment-recovery-manual-presets")).toBeNull();
+});
+
+test("中文预设：刷卡机显示支付成功 / 顾客提供支付记录；未扣款：显示失败 / 离线 / 卡住了，用中文分号连接", async () => {
+  mockLanguage = "zh-CN";
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-paid"));
+  expect(screen.getByText("刷卡机显示支付成功")).toBeTruthy();
+  expect(screen.getByText("顾客提供支付记录")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-preset-paidTerminalSuccess"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-preset-paidCustomerRecord"));
+  expect(screen.getByTestId("payment-recovery-manual-note").props.value).toBe("刷卡机显示支付成功；顾客提供支付记录");
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
+  expect(screen.getByText("刷卡机显示失败")).toBeTruthy();
+  expect(screen.getByText("刷卡机离线")).toBeTruthy();
+  expect(screen.getByText("刷卡机卡住了")).toBeTruthy();
+});
+
 test("M34：终端批准不同金额时展示实扣金额，禁用已收款，未收款需确认冲正后才提交", async () => {
   const record: PaymentRecoveryRecord = { ...pendingRecord, amountCents: 1_000, terminalAmountMismatchCents: 1_500 };
   const { service, submissions } = createService(record);
@@ -257,7 +314,6 @@ test("M34：终端批准不同金额时展示实扣金额，禁用已收款，�
   expect(screen.getByTestId("payment-recovery-finding-paid").props.accessibilityState.disabled).toBe(true);
   expect(screen.getByText("Register reversal required")).toBeTruthy();
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
-  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-evidence"), "TERMINAL-9001");
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-note"), "Terminal shows AU$15.00");
   await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
   // 缺少“终端已扣款需冲正”确认时不能提交。
@@ -269,7 +325,6 @@ test("M34：终端批准不同金额时展示实扣金额，禁用已收款，�
     recordId: pendingRecord.id,
     finding: "unpaid",
     verifiedAmountCents: null,
-    evidenceReference: "TERMINAL-9001",
     note: "Terminal shows AU$15.00",
     terminalChargeAcknowledged: true,
   }]));

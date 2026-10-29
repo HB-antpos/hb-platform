@@ -58,15 +58,15 @@ async function run() {
   const firstLoad = coordinator.load("P01", "S01");
   const secondLoad = coordinator.load("P02", "S01");
   pending.get("P02")?.resolve([promotion("promo-p02")]);
-  await secondLoad;
+  assert.deepEqual((await secondLoad)?.map((item) => item.id), ["promo-p02"], "最新请求返回自己的促销，扫码提示音据此判定");
   pending.get("P01")?.resolve([promotion("promo-p01")]);
-  await firstLoad;
+  assert.equal(await firstLoad, null, "被取代的旧请求返回 null，不能让扫码提示音误报促销");
   assert.deepEqual(currentIds(), ["promo-p02"], "迟到的旧成功响应不得覆盖最新商品");
 
   const invalidatedLoad = coordinator.load("P03", "S01");
   coordinator.invalidate();
   pending.get("P03")?.resolve([promotion("promo-p03")]);
-  await invalidatedLoad;
+  assert.equal(await invalidatedLoad, null, "失效后的请求返回 null");
   assert.deepEqual(currentIds(), [], "清空或切店后旧成功响应不得恢复活动");
 
   const oldFailure = coordinator.load("P04", "S01");
@@ -74,12 +74,12 @@ async function run() {
   pending.get("P05")?.resolve([promotion("promo-p05")]);
   await latestSuccess;
   pending.get("P04")?.reject(new Error("旧请求失败"));
-  await oldFailure;
+  assert.equal(await oldFailure, null, "失败的请求返回 null");
   assert.deepEqual(currentIds(), ["promo-p05"], "旧失败不得清除最新成功结果");
 
   const latestFailure = coordinator.load("P06", "S02");
   pending.get("P06")?.reject(new Error("最新请求失败"));
-  await latestFailure;
+  assert.equal(await latestFailure, null, "最新请求失败也返回 null");
   assert.deepEqual(currentIds(), [], "最新请求失败时应隐藏活动");
   assert.equal(failures.length, 1, "仅报告仍然有效的最新请求失败");
   assert.deepEqual(failures[0]?.context, { productCode: "P06", storeCode: "S02" });

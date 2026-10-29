@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import { Button, Dialog, HelperText, Portal, Text, TextInput } from "react-native-paper";
 import { MonthDatePicker } from "@/components/attendance/MonthDatePicker";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { canSubmitEntries } from "./access";
@@ -44,7 +45,7 @@ export function EntryFormScreen() {
 }
 
 function EntryFormContent({ onBack }: { onBack: () => void }) {
-  const { t } = useAppTranslation(["faceMatch", "common"]);
+  const { t, language } = useAppTranslation(["faceMatch", "common"]);
   const router = useRouter();
   const describeError = useFaceErrorMessage();
   const issueText = useIssueText();
@@ -52,6 +53,8 @@ function EntryFormContent({ onBack }: { onBack: () => void }) {
   const configQuery = useFaceMatchConfig(true);
   const { stores, isLoading: storesLoading } = useFaceStoreOptions();
   const storeNames = useStoreNameMap(stores);
+  // 适用分店多选芯片统一按分店名字排序。
+  const sortedStores = useMemo(() => sortStoresByName(stores, language), [stores, language]);
   const [values, setValues] = useState<EntryFormValues>(createEmptyEntryForm);
   const [photos, setPhotos] = useState<FacePhotoDraft[]>([]);
   const [showErrors, setShowErrors] = useState(false);
@@ -181,7 +184,7 @@ function EntryFormContent({ onBack }: { onBack: () => void }) {
               <Text style={styles.muted}>{storesLoading ? t("states.loading") : t("form.noStores")}</Text>
             ) : (
               <View style={styles.chips}>
-                {stores.map((store) => (
+                {sortedStores.map((store) => (
                   <FilterChip
                     key={store.storeCode}
                     label={formatStoreLabel(store.storeCode, storeNames)}

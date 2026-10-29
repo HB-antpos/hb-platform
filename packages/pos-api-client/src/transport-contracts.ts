@@ -42,6 +42,11 @@ export class HbposApiError extends Error {
    * undefined 表示本地构造的错误或无 HTTP 响应，无从判断。
    */
   public readonly apiEnvelope: boolean | undefined;
+  /**
+   * 服务端 429 限流时 Retry-After 头给出的等待秒数（只认整数秒；缺失或格式不识别为 undefined）。
+   * 供设备激活页提示“请等待 N 分钟”，不影响其它调用方。
+   */
+  public readonly retryAfterSeconds: number | undefined;
 
   public constructor(
     message: string,
@@ -51,6 +56,7 @@ export class HbposApiError extends Error {
       code?: string;
       networkCode?: string;
       apiEnvelope?: boolean;
+      retryAfterSeconds?: number;
     }>,
   ) {
     super(message);
@@ -60,6 +66,7 @@ export class HbposApiError extends Error {
     this.code = details.code;
     this.networkCode = details.networkCode;
     this.apiEnvelope = details.apiEnvelope;
+    this.retryAfterSeconds = details.retryAfterSeconds;
   }
 }
 

@@ -3,10 +3,13 @@ import { StyleSheet, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { StoreFilterRow } from "@/components/ui/StoreFilterRow";
 import { OptionChipWrap } from "@/modules/people/people-frame";
 import { NoticeBox, SegmentTabs } from "@/modules/people/ui";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { AdminStorePickerPage } from "./admin-store-picker-page";
+import { splitStoreLabel } from "@/shared/utils/store-picker-logic";
 import {
   ADMIN_SORT_ORDER,
   buildAdminFilterKey,
@@ -29,6 +32,8 @@ const STATUS_ORDER: readonly AdminStatusFilter[] = ["all", "active", "inactive"]
 /**
  * 「筛选与排序」底部弹层（设计稿 A1④）：分店 / 角色 / 状态 / 排序一次选好，底部按钮直接显示结果人数。
  * 取代原来的两个居中单选框。选项（分店、角色）加载失败时，错误显示在弹层里，不会被弹层挡住。
+ * 分店可能有几十家，所以主页只放一行「分店」选择器，点开进「选择分店」二级页（可搜索）；
+ * 角色 / 状态 / 排序留在主页，不需要滚动就能看到。
  * 弹层里的修改先放在草稿里，点「查看 N 人」才生效；搜索关键词在页面上，不属于弹层，重置时保留。
  */
 export function AdminUserFilterSheet({
@@ -38,6 +43,7 @@ export function AdminUserFilterSheet({
   allowed,
   storeOptions,
   roleOptions,
+  myStoreGuids,
   showStoreSection,
   showRoleSection,
   storesError,
@@ -53,6 +59,8 @@ export function AdminUserFilterSheet({
   allowed: boolean;
   storeOptions: FilterOption[];
   roleOptions: FilterOption[];
+  /** 当前账号的主分店 GUID，二级页用来生成「我的主分店」快捷项。 */
+  myStoreGuids: readonly string[];
   showStoreSection: boolean;
   showRoleSection: boolean;
   storesError: boolean;
@@ -63,10 +71,14 @@ export function AdminUserFilterSheet({
 }) {
   const { t } = useAppTranslation(["people", "common"]);
   const [draft, setDraft] = useState<AdminUserFilters>(filters);
+  const [page, setPage] = useState<"main" | "store">("main");
 
-  // 每次打开都从当前已生效的筛选开始，上次没点「查看」的草稿不保留。
+  // 每次打开都从当前已生效的筛选开始、停在主页，上次没点「查看」的草稿不保留。
   useEffect(() => {
-    if (visible) setDraft(filters);
+    if (visible) {
+      setDraft(filters);
+      setPage("main");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在打开时同步；打开期间 filters 不会变化
   }, [visible]);
 
@@ -84,6 +96,30 @@ export function AdminUserFilterSheet({
     typeof previewQuery.data === "number"
       ? t("people:sheet.apply", { count: previewQuery.data })
       : t("people:sheet.applyUnknown");
+
+  const selectedStore = storeOptions.find((option) => option.value === draft.storeGuid);
+
+  // 二级页：选一家分店后写进草稿并回到主页，不需要底部按钮。
+  if (page === "store") {
+    return (
+      <BusinessSheet
+        visible={visible}
+        title={t("people:sheet.storePageTitle")}
+        onDismiss={onDismiss}
+        onBack={() => setPage("main")}
+      >
+        <AdminStorePickerPage
+          options={storeOptions}
+          myStoreGuids={myStoreGuids}
+          selected={draft.storeGuid}
+          onSelect={(storeGuid) => {
+            setDraft((current) => ({ ...current, storeGuid }));
+            setPage("main");
+          }}
+        />
+      </BusinessSheet>
+    );
+  }
 
   return (
     <BusinessSheet
@@ -117,16 +153,20 @@ export function AdminUserFilterSheet({
 
       {showStoreSection ? (
         <Section title={t("people:sheet.store")}>
-          <OptionChipWrap
-            items={[{ key: "", label: t("people:sheet.all") }, ...storeOptions.map((option) => ({ key: option.value, label: option.label }))]}
-            value={draft.storeGuid}
-            onChange={(storeGuid) => setDraft((current) => ({ ...current, storeGuid }))}
+          <StoreFilterRow
+            label={selectedStore ? splitStoreLabel(selectedStore.label).name : t("people:sheet.all")}
+            caption={selectedStore ? splitStoreLabel(selectedStore.label).code : t("people:sheet.storeCount", { count: storeOptions.length })}
+            active={Boolean(selectedStore)}
+            accessibilityLabel={t("people:sheet.storePageTitle")}
+            clearLabel={t("people:sheet.clearStore")}
+            onPress={() => setPage("store")}
+            onClear={() => setDraft((current) => ({ ...current, storeGuid: "" }))}
           />
         </Section>
       ) : null}
 
       {showRoleSection ? (
-        <Section title={t("people:sheet.role")}>
+        <Section title={t("people:sheet.role")} hint={t("people:sheet.roleHint")}>
           <OptionChipWrap
             items={[{ key: "", label: t("people:sheet.all") }, ...roleOptions.map((option) => ({ key: option.value, label: option.label }))]}
             value={draft.roleGuid}
@@ -154,10 +194,13 @@ export function AdminUserFilterSheet({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {hint ? <Text style={styles.sectionHint}>{hint}</Text> : null}
+      </View>
       {children}
     </View>
   );
@@ -169,5 +212,7 @@ const styles = StyleSheet.create({
   errorBlock: { gap: 4 },
   retry: { alignSelf: "flex-start" },
   section: { gap: 8 },
+  sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
   sectionTitle: { color: HB_COLORS.textSecondary, fontSize: 12.5, fontWeight: "700" },
+  sectionHint: { flexShrink: 1, color: HB_COLORS.textSecondary, fontSize: 11.5 },
 });

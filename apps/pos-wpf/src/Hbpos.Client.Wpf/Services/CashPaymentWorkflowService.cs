@@ -2718,7 +2718,11 @@ public sealed class CashPaymentWorkflowService(
 
     private static bool IsCancelResponseCode(string? responseCode)
     {
-        return string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
+        // 中文注释：TM = OPERATOR CANCELLED（收银员/顾客在刷卡机上取消），不是银行拒绝；
+        // 云端 API（LinklyCloudBackendAsyncService.IsCancelledResponseCode）早已按取消处理，这里对齐，
+        // 否则恢复中心会把被取消的交易标成 Declined（10-25 1033 店实测）。
+        return string.Equals(responseCode, "TM", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "C0", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CA", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCEL", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) ||
@@ -2727,7 +2731,10 @@ public sealed class CashPaymentWorkflowService(
 
     private static bool IsTimeoutResponseCode(string? responseCode)
     {
-        return string.Equals(responseCode, "TO", StringComparison.OrdinalIgnoreCase) ||
+        // 中文注释：Linkly 文档 Appendix B：TI = Operator Timeout（Input timeout，未在时限内操作刷卡机，未扣款）。
+        // 恢复服务早已认 TI，这里对齐，否则实时失败的 TI 会被记成 Declined。
+        return string.Equals(responseCode, "TI", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(responseCode, "TO", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(responseCode, "TIMEOUT", StringComparison.OrdinalIgnoreCase);
     }
 

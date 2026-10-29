@@ -39,6 +39,8 @@ export interface DetailActorFacts {
   roleNames: readonly string[];
   isAdmin: boolean;
   isStoreManager: boolean;
+  /** 仓库管理：不限分店的受限委派者，授权页按「全部分店 + 可授管理关系」处理。 */
+  isWarehouseManager?: boolean;
   /** 店长级管理者：只能在自己的分店范围内操作，不能动本人和更高权限账号。 */
   isStoreLevelManager: boolean;
   hasPermission: (permission: string) => boolean;
@@ -85,6 +87,15 @@ export interface DetailPermissions {
   canOpenPos: boolean;
   canCopyPermissions: boolean;
   canViewLoginRecords: boolean;
+  /**
+   * 「个人信息」入口（员工个人信息维护）：显示条件必须同时满足，不满足整行隐藏（不是置灰）——
+   * ① 持有 EmployeeProfiles.ViewManagedStore；② 目标在自己管理的分店（店长版 scope.storeManageable，管理员版按 adminScopeOk）；
+   * ③ 不是本人；④ 目标不是受保护角色（管理员 / 店长 / 仓库经理，对非管理员操作者）。
+   * 服务端会再次强制范围，客户端只负责显示。
+   */
+  canOpenProfile: boolean;
+  /** 个人信息页可保存：在 canOpenProfile 之上再要求 EmployeeProfiles.EditManagedStore，否则页面只读、不显示保存按钮。 */
+  canEditProfile: boolean;
   access: UserAccessEligibility;
 }
 
@@ -132,6 +143,7 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     isDeviceMode: scope.isDeviceMode,
     isAdmin: actor.isAdmin,
     isStoreManager: actor.isStoreManager,
+    isWarehouseManager: actor.isWarehouseManager,
     canManageStores: actor.hasPermission(PERMISSIONS.Users.ManageStores),
     canManageRoles: actor.hasPermission(PERMISSIONS.Users.ManageRoles),
     canManagePos: actor.hasPermission(PERMISSIONS.Users.ManagePos),
@@ -143,6 +155,14 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
   });
   // 本人详情不提供授权类操作（getUserAccessEligibility 对管理员本人是放行的，这里统一收紧）。
   const canOpenAccess = !isSelf && access.canOpen;
+
+  // 个人信息入口：权限码是「新码」（客户端 hasPermission 对管理员恒为 true，其余人只认显式授予的码）。
+  // 店长版要求目标分店在自己的管理分店内；管理员版走全局接口，范围用 adminScopeOk（受保护目标 + 店长级不动本人）裁决。
+  const canOpenProfile = actor.hasPermission(PERMISSIONS.EmployeeProfiles.ViewManagedStore)
+    && !isSelf
+    && !isProtectedTarget
+    && (variant === "store" ? scope.storeManageable : adminScopeOk);
+  const canEditProfile = canOpenProfile && actor.hasPermission(PERMISSIONS.EmployeeProfiles.EditManagedStore);
 
   const canPrintBarcode = !isSelf && canManageStaffBarcode({
     authenticated: scope.authenticated,
@@ -167,8 +187,14 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     canPrintBarcode,
     canOpenAccess,
     canOpenPos: !isSelf && access.canManagePos,
-    canCopyPermissions: canOpenAccess && access.permissionsMode === "editable",
+    // 复制权限在服务端只支持员工目标；仓库管理可编辑店长的权限，但店长账号不开放「复制」。
+    canCopyPermissions:
+      canOpenAccess
+      && access.permissionsMode === "editable"
+      && (actor.isAdmin || targetRoles.some((roleName) => isStoreStaffRoleName(roleName))),
     canViewLoginRecords: variant === "admin" && actor.hasPermission(PERMISSIONS.Users.View),
+    canOpenProfile,
+    canEditProfile,
     access,
   };
 }

@@ -15,7 +15,10 @@ public sealed record RawScannerInputResult(
 public sealed class RawScannerInputProcessor
 {
     public static readonly TimeSpan DefaultScanTimeout = TimeSpan.FromMilliseconds(120);
-    public const int DefaultMinBarcodeLength = 3;
+    // 中文注释：扫码枪识别的最小条码长度。短于该长度的输入一律视为误触丢弃（3~4 位的内部短码，如气球充气 L303，
+    // 走“特殊商品”页或手动搜索，不靠扫码枪；生产近 30 天这类短码加购 185 次、扫码 0 次）。
+    // Raw Input 路径与窗口层键盘兜底缓冲共用此值，避免两条路径长度规则不一致。
+    public const int DefaultMinBarcodeLength = 5;
 
     private readonly TimeSpan _scanTimeout;
     private readonly int _minBarcodeLength;

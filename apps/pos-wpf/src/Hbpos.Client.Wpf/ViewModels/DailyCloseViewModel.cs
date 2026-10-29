@@ -270,6 +270,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
     public decimal CashDifference => CountedCashAmount - ExpectedCashAmount;
 
+    /// <summary>页面显示的差额文本，与小票同一格式（+$x / -$x），不再用 XAML 的 C2（负数写法随区域设置变化）。</summary>
+    public string CashDifferenceText => DailyCloseMoneyFormat.SignedMoney(CashDifference);
+
     public CashDifferenceStatus CashDifferenceStatus => CashDifferenceStatusResolver.From(CashDifference);
 
     public bool IsBusinessDateToday => BusinessDate == DateTime.Today;
@@ -1526,6 +1529,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     partial void OnExpectedCashAmountChanged(decimal value)
     {
         OnPropertyChanged(nameof(CashDifference));
+        OnPropertyChanged(nameof(CashDifferenceText));
         OnPropertyChanged(nameof(CashDifferenceStatus));
     }
 
@@ -1985,6 +1989,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CoinSubtotal));
         OnPropertyChanged(nameof(CountedCashAmount));
         OnPropertyChanged(nameof(CashDifference));
+        OnPropertyChanged(nameof(CashDifferenceText));
         OnPropertyChanged(nameof(CashDifferenceStatus));
         SaveAndPrintCommand.NotifyCanExecuteChanged();
     }
@@ -2100,6 +2105,9 @@ public sealed record DailyCloseArchiveListItemViewModel(DailyCloseArchive Archiv
     public decimal CountedCashAmount => Archive.CountedCashAmount;
 
     public decimal CashDifference => Archive.CashDifference;
+
+    /// <summary>已存档日结的差额文本，与小票同一格式（+$x / -$x）。</summary>
+    public string CashDifferenceText => DailyCloseMoneyFormat.SignedMoney(CashDifference);
 
     public string ClosedAtDisplay => SavedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
 

@@ -2,6 +2,7 @@ import type {
   AttendanceMealDeclaration,
   AttendancePunch,
   AttendancePunchMutationResult,
+  AttendancePunchType,
   AttendancePunchPayload,
   AttendancePunchVerificationPayload,
   AttendancePunchVerificationState,
@@ -184,6 +185,7 @@ export function buildAttendanceQrPunchPayload(
   punchAuthorizationToken: string | undefined,
   verification: AttendancePunchVerificationPayload,
   mealDeclaration?: AttendanceMealDeclaration,
+  expectedPunchType?: AttendancePunchType,
 ): AttendancePunchPayload {
   return {
     qrToken,
@@ -194,6 +196,8 @@ export function buildAttendanceQrPunchPayload(
     locationCapturedAtUtc: verification.locationCapturedAtUtc,
     // 扫码前问过「吃饭休息了吗」才带；没问过（上班、或不缺休息）时保持原 payload。
     ...(mealDeclaration ? { mealDeclaration } : {}),
+    // 扫码前刚拉的今日状态决定这次是上班还是下班；带给后端核对，不一致就拒绝而不是悄悄记成另一种卡。
+    ...(expectedPunchType ? { expectedPunchType } : {}),
   };
 }
 
@@ -311,6 +315,7 @@ const ATTENDANCE_ERROR_KEYS: Record<string, string> = {
   ERR_NETWORK: "messages.qrNetworkRequired",
   ECONNABORTED: "messages.qrNetworkRequired",
   DAY_COMPLETE: "messages.qrDayComplete",
+  PUNCH_TYPE_MISMATCH: "messages.punchTypeMismatch",
   QR_REQUIRED: "messages.qrRequired",
   // 当班开始/结束休息的错误码。
   NO_OPEN_SEGMENT: "messages.mealNoOpenSegment",
@@ -318,7 +323,13 @@ const ATTENDANCE_ERROR_KEYS: Record<string, string> = {
   MEAL_BREAK_ALREADY_OPEN: "messages.mealBreakAlreadyOpen",
 };
 
-export function getAttendancePunchErrorKey(errorCode?: string) {
+export function getAttendancePunchErrorKey(errorCode?: string, expectedPunchType?: AttendancePunchType) {
+  // 期望上班却被拒 = 系统记录已上班；期望下班却被拒 = 系统记录已下班。
+  if (errorCode === "PUNCH_TYPE_MISMATCH" && expectedPunchType) {
+    return expectedPunchType === "ClockIn"
+      ? "messages.punchTypeMismatchAlreadyIn"
+      : "messages.punchTypeMismatchAlreadyOut";
+  }
   return errorCode ? ATTENDANCE_ERROR_KEYS[errorCode] : undefined;
 }
 

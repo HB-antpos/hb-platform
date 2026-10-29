@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   amountToInputText,
+  classifyVariance,
   diffAmounts,
   formatAud,
   formatSignedAud,
@@ -77,3 +78,11 @@ assert.equal(amountToInputText(1234.5), "1234.50");
 assert.equal(amountToInputText(null), "");
 
 console.log("money.test.ts: ok");
+
+// 日结差额三态：负短款 / 正长款 / 0 与不足 1 分的残差为已平
+assert.equal(classifyVariance(-0.01), "short");
+assert.equal(classifyVariance(-5), "short");
+assert.equal(classifyVariance(12.5), "over");
+assert.equal(classifyVariance(0), "even");
+assert.equal(classifyVariance(0.004), "even");
+assert.equal(classifyVariance(-0.004), "even");

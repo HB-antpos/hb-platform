@@ -428,7 +428,37 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
                 linkedProducts[row.ProductCode!] = row;
         }
 
+        var barcodeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var productCodesByBarcode = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var barcodeOwnerProducts = new Dictionary<string, List<Product>>(StringComparer.OrdinalIgnoreCase);
+        if (barcodes.Count > 0)
+        {
+            var barcodeProducts = await QueryInChunksParallelAsync<Product, string>(barcodes, 200, (queryDb, chunk) =>
+                queryDb.Queryable<Product>().Where(p => p.IsDeleted == false && p.Barcode != null && chunk.Contains(p.Barcode)).ToListAsync());
+            foreach (var product in barcodeProducts)
+            {
+                AddBarcodeMatch(barcodeCounts, productCodesByBarcode, product.Barcode, product.ProductCode);
+                // 保留主条码占用者的完整商品信息，供「货号不存在但条码已被占用」时提示用户选用已有商品。
+                if (!string.IsNullOrWhiteSpace(product.Barcode) && !string.IsNullOrWhiteSpace(product.ProductCode))
+                {
+                    var key = product.Barcode.Trim();
+                    if (!barcodeOwnerProducts.TryGetValue(key, out var owners))
+                        barcodeOwnerProducts[key] = owners = new List<Product>();
+                    owners.Add(product);
+                }
+            }
+
+            var multiCodes = await QueryInChunksParallelAsync<StoreMultiCodeProduct, string>(barcodes, 200, (queryDb, chunk) =>
+                queryDb.Queryable<StoreMultiCodeProduct>().Where(x => x.StoreCode == header.StoreCode
+                    && x.MultiBarcode != null && chunk.Contains(x.MultiBarcode) && x.IsDeleted == false).ToListAsync());
+            foreach (var multiCode in multiCodes)
+                AddBarcodeMatch(barcodeCounts, productCodesByBarcode, multiCode.MultiBarcode, multiCode.ProductCode);
+        }
+
+        // 分店价格要等条码占用者查完再取：评估器可能把「同货号、条码唯一占用者」自动关联为本行商品，
+        // 这类商品也要带上本店价格（上次进货价、自动定价状态），否则关联后价格字段是空的。
         var productCodes = products.Values.Concat(linkedProducts.Values)
+            .Concat(barcodeOwnerProducts.Values.SelectMany(owners => owners))
             .Select(x => x.ProductCode).Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x!).Distinct().ToList();
         var storePrices = new Dictionary<string, StoreRetailPrice>();
@@ -439,22 +469,6 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
                     && x.ProductCode != null && chunk.Contains(x.ProductCode) && x.IsDeleted == false).ToListAsync());
             foreach (var row in rows.Where(x => !string.IsNullOrWhiteSpace(x.ProductCode)))
                 storePrices[row.ProductCode!] = row;
-        }
-
-        var barcodeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var productCodesByBarcode = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        if (barcodes.Count > 0)
-        {
-            var barcodeProducts = await QueryInChunksParallelAsync<Product, string>(barcodes, 200, (queryDb, chunk) =>
-                queryDb.Queryable<Product>().Where(p => p.IsDeleted == false && p.Barcode != null && chunk.Contains(p.Barcode)).ToListAsync());
-            foreach (var product in barcodeProducts)
-                AddBarcodeMatch(barcodeCounts, productCodesByBarcode, product.Barcode, product.ProductCode);
-
-            var multiCodes = await QueryInChunksParallelAsync<StoreMultiCodeProduct, string>(barcodes, 200, (queryDb, chunk) =>
-                queryDb.Queryable<StoreMultiCodeProduct>().Where(x => x.StoreCode == header.StoreCode
-                    && x.MultiBarcode != null && chunk.Contains(x.MultiBarcode) && x.IsDeleted == false).ToListAsync());
-            foreach (var multiCode in multiCodes)
-                AddBarcodeMatch(barcodeCounts, productCodesByBarcode, multiCode.MultiBarcode, multiCode.ProductCode);
         }
 
         // 副码已有的「一品多码」归属：副码都已挂在本行商品上时，检测不能再默认「添加多码」（执行会因已存在而失败）。
@@ -482,7 +496,8 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             storePrices,
             barcodeCounts,
             productCodesByBarcode,
-            additionalBarcodeOwners
+            additionalBarcodeOwners,
+            barcodeOwnerProducts
         );
     }
 
@@ -538,7 +553,8 @@ internal sealed record LocalSupplierInvoicesProductReviewData(
     Dictionary<string, StoreRetailPrice> StorePricesByProductCode,
     Dictionary<string, int> BarcodeMatchCounts,
     Dictionary<string, HashSet<string>> ProductCodesByBarcode,
-    Dictionary<string, HashSet<string>> AdditionalBarcodeOwners);
+    Dictionary<string, HashSet<string>> AdditionalBarcodeOwners,
+    Dictionary<string, List<Product>> BarcodeOwnerProducts);
 
 internal sealed class BarcodeProductProjection
 {

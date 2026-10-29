@@ -1,12 +1,14 @@
 import { RequestError } from '../../../utils/request'
 import { readFileSync } from 'node:fs'
 import {
+  buildManagedProfilePayload,
   countChangedFormFields,
   createLatestRequestGuard,
   getExpectedSensitiveRevision,
   getChangedSensitiveFields,
   getProfileCompletion,
   getProfileInitials,
+  getRequestErrorCode,
   getReviewChangedFields,
   getStablePaletteIndex,
   shortenIdentifier,
@@ -276,5 +278,51 @@ assertEqual(
 const pageSource = readFileSync('src/pages/System/EmployeeProfiles/index.tsx', 'utf8')
 const editSource = pageSource.slice(pageSource.indexOf('const handleEdit'), pageSource.indexOf('const handleSubmit'))
 assert(!editSource.includes('getAdminSensitiveChangeRequests'), '编辑抽屉打开不得依赖待审列表辅助请求')
+
+// 员工个人信息维护（/managed）：只提交改动过的非敏感字段，未改的键一律不带，清空带空字符串。
+const managedInitial = { phone: '0412 345 678', gender: 'male' as const, employmentType: 'partTime' as const, address: '1 Old St' }
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload(managedInitial, { ...managedInitial }, { canEditEmploymentType: true })),
+  '{}',
+  '没有任何修改时不应提交任何字段',
+)
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload(managedInitial, { ...managedInitial, phone: ' 0400 000 111 ' }, { canEditEmploymentType: true })),
+  JSON.stringify({ phone: '0400 000 111' }),
+  '只改手机号时只带 phone，且去掉首尾空白',
+)
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload(managedInitial, { ...managedInitial, address: '   ', gender: undefined }, { canEditEmploymentType: true })),
+  JSON.stringify({ address: '', gender: '' }),
+  '清空地址 / 性别应带空字符串，让后端区分清空与未改',
+)
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload(managedInitial, { ...managedInitial, employmentType: 'fullTime' }, { canEditEmploymentType: false })),
+  '{}',
+  '没有「修改职位类型」权限时，员工类型被改动也不提交',
+)
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload(managedInitial, { ...managedInitial, employmentType: 'fullTime' }, { canEditEmploymentType: true })),
+  JSON.stringify({ employmentType: 'fullTime' }),
+  '有权限时员工类型改动应提交',
+)
+assertEqual(
+  JSON.stringify(buildManagedProfilePayload({}, { phone: '', address: undefined }, { canEditEmploymentType: true })),
+  '{}',
+  '空串与 undefined 视为同一个「未填写」',
+)
+assertEqual(
+  getRequestErrorCode(new RequestError('x', 403, { errorCode: 'EMPLOYEE_PROFILE_MANAGED_SCOPE_FORBIDDEN' })),
+  'EMPLOYEE_PROFILE_MANAGED_SCOPE_FORBIDDEN',
+  '应能从请求异常里取出后端 errorCode',
+)
+assertEqual(getRequestErrorCode(new Error('plain')), undefined, '非 RequestError 没有 errorCode')
+
+const managedPageSource = readFileSync('src/pages/System/EmployeeProfiles/index.tsx', 'utf8')
+assert(managedPageSource.includes('getManagedEmployeeProfiles'), '员工列表应走 /managed 接口，带分店 / 角色过滤')
+assert(
+  managedPageSource.includes('if (!canEditProfiles) {\n      return\n    }'),
+  '非管理员不得请求管理员专用的待审核数量接口',
+)
 
 console.log('employeeProfiles.logic.test: ok')

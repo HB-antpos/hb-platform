@@ -277,16 +277,18 @@ export class FulfilmentService {
     let printed = 0;
     let drawersOpened = 0;
 
+    // 中文注释：现金收款最高频，钱箱优先于小票打印（对齐 WPF #721：开钱箱紧跟提示音）。
+    // 钱箱与打印相互独立，现金订单已提交后即可请求开箱；打印机缓慢或离线时不能让收银员干等钱箱。
+    // 状态不确定绝不自动补脉冲。
+    for (const candidate of await this.options.store.listRequiredDrawerEvents()) {
+      const result = await this.sendRequiredDrawer(candidate.eventId, false);
+      if (result.state === "Completed") drawersOpened += 1;
+    }
+
     // 中文注释：只能自动声明 Queued；Failed 需要人为确认，Sending/Ambiguous 绝不可猜测重放。
     for (const candidate of await this.options.store.listQueuedPrintJobs()) {
       const result = await this.sendQueuedPrint(candidate.jobId, false);
       if (result.state === "Printed") printed += 1;
-    }
-
-    // 中文注释：钱箱与打印相互独立，现金订单已提交后即可请求开箱；状态不确定绝不自动补脉冲。
-    for (const candidate of await this.options.store.listRequiredDrawerEvents()) {
-      const result = await this.sendRequiredDrawer(candidate.eventId, false);
-      if (result.state === "Completed") drawersOpened += 1;
     }
 
     return { printed, drawersOpened };

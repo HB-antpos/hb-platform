@@ -1,4 +1,4 @@
-import { afterEach, expect, jest, test } from "@jest/globals";
+import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { act, cleanup, render, waitFor } from "@testing-library/react-native";
 import { AppState } from "react-native";
 
@@ -101,7 +101,8 @@ function receiptProfileServices(
 }
 
 test("设备认证就绪后立即同步一次下发资料，之后前台在线每 60 秒一次，后台与卸载后不再轮询", async () => {
-  jest.useFakeTimers();
+  // 固定为白天：夜间窗口会把周期放慢到 5 分钟，测试不能依赖运行时刻。
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
   const { requestSync, services } = receiptProfileServices();
   mockRuntime = { services };
   const previous = AppState.currentState;
@@ -135,6 +136,91 @@ test("设备认证就绪后立即同步一次下发资料，之后前台在线�
   } finally {
     AppState.currentState = previous;
   }
+});
+
+test("夜间（22:00–06:00）小票资料周期检查放慢到 5 分钟（对齐 WPF #926）", async () => {
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 23, 0, 0) });
+  const { requestSync, services } = receiptProfileServices();
+  mockRuntime = { services };
+  const previous = AppState.currentState;
+  try {
+    AppState.currentState = "active";
+    const screen = await render(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    requestSync.mockClear();
+
+    await act(async () => { jest.advanceTimersByTime(4 * 60_000); });
+    expect(requestSync).not.toHaveBeenCalledWith("timer");
+    await act(async () => { jest.advanceTimersByTime(70_000); });
+    expect(requestSync).toHaveBeenCalledWith("timer");
+    await screen.unmount();
+  } finally {
+    AppState.currentState = previous;
+  }
+});
+
+describe("设备运行状态心跳（对齐 WPF #613）", () => {
+  function heartbeatServices(
+    overrides: Readonly<Record<string, unknown>> = {},
+  ) {
+    const report = jest.fn(async () => undefined);
+    const { services } = receiptProfileServices();
+    return { report, services: { ...services, runtimeStatus: { report }, ...overrides } };
+  }
+
+  test("设备已认证且在线：立即上报一次，白天每 30 秒一次，卸载后停止", async () => {
+    jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
+    const { report, services } = heartbeatServices();
+    mockRuntime = { services };
+    const previous = AppState.currentState;
+    try {
+      AppState.currentState = "active";
+      const screen = await render(<RuntimeWorkBridge />);
+      await act(async () => { await Promise.resolve(); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(30_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      await screen.unmount();
+      await act(async () => { jest.advanceTimersByTime(120_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+    } finally {
+      AppState.currentState = previous;
+    }
+  });
+
+  test("夜间放慢到 5 分钟；后台不发；设备未认证或离线不发；上报失败被吞掉", async () => {
+    jest.useFakeTimers({ now: new Date(2026, 9, 27, 23, 0, 0) });
+    const { report, services } = heartbeatServices();
+    report.mockRejectedValue(new Error("offline"));
+    mockRuntime = { services };
+    const previous = AppState.currentState;
+    try {
+      AppState.currentState = "active";
+      const screen = await render(<RuntimeWorkBridge />);
+      await act(async () => { await Promise.resolve(); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(4 * 60_000); });
+      expect(report).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(70_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      AppState.currentState = "background";
+      await act(async () => { jest.advanceTimersByTime(10 * 60_000); });
+      expect(report).toHaveBeenCalledTimes(2);
+      await screen.unmount();
+
+      for (const device of ["registration-required", "pending-approval", "locked"]) {
+        const locked = heartbeatServices({ device });
+        mockRuntime = { services: locked.services };
+        AppState.currentState = "active";
+        const view = await render(<RuntimeWorkBridge />);
+        await act(async () => { jest.advanceTimersByTime(10 * 60_000); });
+        expect(locked.report).not.toHaveBeenCalled();
+        await view.unmount();
+      }
+    } finally {
+      AppState.currentState = previous;
+    }
+  });
 });
 
 test("设备尚未认证（待注册、待审批、已锁定）时不暴露下发资料同步：启动与定时都不请求", async () => {

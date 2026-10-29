@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getVerifiedScanPrintTarget, resolveScannedCodeLabel } from "./scan-label";
+import { getVerifiedScanPrintTarget, resolveScannedCodeLabel, shouldAutoPrintDiscountLabel } from "./scan-label";
 import type { ProductDetail, ScanLabelResult } from "./types";
 
 const result: ScanLabelResult = {
@@ -107,5 +107,15 @@ assert.deepEqual(resolveScannedCodeLabel(baseDetail, "9528000000001"), { kind: "
 // 码表分页未加载到的码：返回 null，调用方不得回退打印主档。
 assert.equal(resolveScannedCodeLabel(baseDetail, "9527815000099"), null);
 assert.equal(resolveScannedCodeLabel(baseDetail, "  "), null);
+
+// 自动打印补打折扣标签的判定：与手动「折扣标签」按钮同口径（折扣率 > 0），其余一律不补打。
+assert.equal(shouldAutoPrintDiscountLabel(0.2), true);
+assert.equal(shouldAutoPrintDiscountLabel(1), true);
+assert.equal(shouldAutoPrintDiscountLabel(0), false);
+assert.equal(shouldAutoPrintDiscountLabel(-0.1), false);
+assert.equal(shouldAutoPrintDiscountLabel(null), false);
+assert.equal(shouldAutoPrintDiscountLabel(undefined), false);
+assert.equal(shouldAutoPrintDiscountLabel(Number.NaN), false);
+assert.equal(shouldAutoPrintDiscountLabel(Number.POSITIVE_INFINITY), false);
 
 console.log("scan-label.test.ts: ok");

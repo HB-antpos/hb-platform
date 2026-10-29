@@ -213,7 +213,7 @@ export function useCreateBatch({ onDismiss, onReturnToList, onCreated }: CreateB
   };
 
   return {
-    t, products, setProducts, step, panel, query, setQuery, notice, supplier, prefix, suppliers, prefixes, templates,
+    t, language, products, setProducts, step, panel, query, setQuery, notice, supplier, prefix, suppliers, prefixes, templates,
     supplierLoading, prefixLoading, templateLoading, supplierError, prefixError, templateError, busy, creationUncertain,
     templateName, setTemplateName, totals: summarizeBatch(products),
     loadSuppliers, loadPrefixes, loadTemplates, openPanel, selectSupplier, next, submit, apply, saveTemplate, addBatch,

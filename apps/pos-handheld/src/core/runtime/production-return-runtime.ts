@@ -108,7 +108,9 @@ export type ProductionReturnRuntimeDependencies = Readonly<{
     | "catalogSnapshots"
     | "returnCapacityVault"
     | "returnExecutionLedger"
-  >;
+  > &
+    /** 缺省时退货查单不合并本机未同步的退货（测试替身可不提供）。 */
+    Partial<Pick<PosDatabase, "localReturnRecords">>;
   repositories: Pick<PosRepositoryBundle, "orders">;
   encryptor: SensitivePayloadEncryptor;
   currentCashier: CurrentCashierSession;
@@ -344,6 +346,7 @@ function createPresenterForLease(
       localOrders: context.localOrders,
       localCatalog: context.localCatalog,
       capacityVault: context.capacityVault,
+      localReturnRecords: input.database.localReturnRecords?.(),
       createOpaqueId: () => runtimeId(input),
     }),
     collector,

@@ -198,7 +198,11 @@
     "keyword": "Detail keyword",
     "keywordPlaceholder": "Order / barcode / product code / amount",
     "storeRequired": "Choose at least one store",
-    "optionsHint": "Staff and device options come from the last query's stores and time"
+    "optionsHint": "Staff and device options come from the last query's stores and time",
+    "storePageTitle": "Choose stores",
+    "storesDone": "Done",
+    "storesTotal": "{{count}} stores",
+    "storeEmpty": "No matching stores"
   },
   "employees": {
     "sort": {

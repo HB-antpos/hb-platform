@@ -7,6 +7,8 @@ import {
   LINKLY_SAFE_OPERATOR_KEYS,
   PaymentPresenter,
   parseAudInput,
+  isQuickCashSufficient,
+  nextQuickCashAmountText,
 } from "./payment-presenter";
 
 import type {
@@ -1523,3 +1525,23 @@ function deferred<T>(): {
 async function tick(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
+
+test("快捷现金金额累加：连点 $50、$20 得到 $70；手输改动后重新从面额开始（对齐 WPF #822）", () => {
+  // 首次点击：输入框默认是整笔尾款（如 37.45），不能把它加进去。
+  assert.equal(nextQuickCashAmountText("37.45", null, 50), "50.00");
+  // 输入框仍等于上一次快捷现金文本时累加。
+  assert.equal(nextQuickCashAmountText("50.00", "50.00", 20), "70.00");
+  assert.equal(nextQuickCashAmountText("70.00", "70.00", 100), "170.00");
+  // 收银员手输/键盘改过输入框后重新开始。
+  assert.equal(nextQuickCashAmountText("75", "70.00", 5), "5.00");
+});
+
+test("快捷现金累加到够付后停用快捷键；默认整笔尾款或手输时不停用", () => {
+  const remaining = { currency: "AUD" as const, cents: 6_500 };
+  assert.equal(isQuickCashSufficient("65.00", null, remaining), false);
+  assert.equal(isQuickCashSufficient("50.00", "50.00", remaining), false);
+  assert.equal(isQuickCashSufficient("70.00", "70.00", remaining), true);
+  assert.equal(isQuickCashSufficient("65.00", "65.00", remaining), true);
+  // 手输后即使数值够，也不属于累加模式。
+  assert.equal(isQuickCashSufficient("80", "70.00", remaining), false);
+});

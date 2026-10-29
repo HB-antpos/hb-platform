@@ -437,22 +437,32 @@ export function createProductionPaymentRuntime(
           if (!["Submitted", "Pending", "Unknown"].includes(attempt.state)) {
             throw new Error("PAYMENT_RECOVERY_RECONCILIATION_NOT_UNRESOLVED");
           }
-          if (attempt.operation !== "purchase" || !attempt.providerEnvironment?.trim() ||
-              !(attempt.provider === "square" ? attempt.references.checkoutId?.trim()
-                : attempt.provider === "linkly-cloud" ? attempt.references.sessionId?.trim() : false)) {
+          // 只有 purchase 才有“已扣款”可言；缺少会话 / 结账标识时无法只读查询，按人工确认为准继续。
+          if (attempt.operation !== "purchase") {
             throw new Error("PAYMENT_RECOVERY_QUERY_ONLY_IDENTITY_REQUIRED");
           }
+          const canQuery = Boolean(attempt.providerEnvironment?.trim()) &&
+            Boolean(attempt.provider === "square" ? attempt.references.checkoutId?.trim()
+              : attempt.provider === "linkly-cloud" ? attempt.references.sessionId?.trim() : false);
           let queryCompleted = false;
           let queryUnresolved = false;
-          // 主管确认已扣款前先只读查询原 attempt；provider 终态会先进入账本并阻断人工 tender。
-          await createQueryOnlyAttempts((result) => {
-            queryCompleted = true;
-            queryUnresolved = result.state === "Unknown" || result.state === "Pending";
-          }).recoverAttempt(current.attemptId);
+          if (canQuery) {
+            try {
+              // 主管确认已扣款前先只读查询原 attempt；provider 终态会先进入账本并阻断人工 tender。
+              await createQueryOnlyAttempts((result) => {
+                queryCompleted = true;
+                queryUnresolved = result.state === "Unknown" || result.state === "Pending";
+              }).recoverAttempt(current.attemptId);
+            } catch {
+              // 人工确认为准（用户 10-24 决定）：刷卡机 / 支付方离线或查询报错不再拦住主管的“已收款”结论。
+              queryCompleted = false;
+              queryUnresolved = false;
+            }
+          }
           requireScopedCurrentCashier(input);
-          // 通用状态机可能把本地异常写为 Unknown；这不构成已查询支付方的证据。
-          if (!queryCompleted) throw new Error("PAYMENT_RECOVERY_RECONCILIATION_REQUIRED");
-          if (!queryUnresolved) throw new Error("PAYMENT_RECOVERY_RECONCILIATION_NOT_UNRESOLVED");
+          // 只有支付方明确给出终态（批准 / 拒绝）时才拒绝：那是要由系统直接采用的事实，不是失败的核验。
+          // 查询没做成（离线、报错、缺标识）或仍在处理 / 未知，都按主管的人工结论继续，只冻结本地状态快照。
+          if (queryCompleted && !queryUnresolved) throw new Error("PAYMENT_RECOVERY_RECONCILIATION_NOT_UNRESOLVED");
           reconciliationId = await recoveryCenterStore.recordProviderReconciliation({
             ...terminalScope,
             recordId: current.recordId,

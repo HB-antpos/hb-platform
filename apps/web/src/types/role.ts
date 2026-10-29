@@ -13,6 +13,8 @@ export interface RoleDto {
   roleName: string
   description?: string
   isActive: boolean
+  /** 角色等级，数值越大等级越高；旧后端没有该字段。 */
+  level?: number
   createdAt: string
   updatedAt: string
   userCount: number
@@ -47,12 +49,15 @@ export interface UpdateRoleDto {
   roleName: string
   description?: string
   isActive?: boolean
+  /** 不传表示保持原值。 */
+  level?: number
 }
 
 export interface CreateRoleDto {
   roleName: string
   description?: string
   isActive?: boolean
+  level?: number
 }
 
 export interface RoleOptionDto {

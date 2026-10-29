@@ -161,6 +161,47 @@ test("筛选只提交日期、终端和关键词，可信门店仍由 presenter 
   );
 });
 
+test("快捷日期范围按设备本地日历日取今天 / 昨天 / 近 7 天并立即查询（对齐 WPF #608）", async () => {
+  jest.useFakeTimers({
+    now: new Date(2026, 6, 27, 12, 0, 0),
+    doNotFake: [
+      "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+      "setImmediate", "clearImmediate", "queueMicrotask", "nextTick",
+      "requestAnimationFrame", "cancelAnimationFrame", "performance",
+    ],
+  });
+  try {
+    const presenter = new RemoteHistoryPresenter({
+      port,
+      trustedStoreCode: "S1",
+      currentDeviceCode: "IPAD-1",
+      online: true,
+      permissionCodes: [REMOTE_HISTORY_VIEW_PERMISSION],
+      now: () => new Date(2026, 6, 27, 12, 0, 0),
+    });
+    const setFilters = jest.spyOn(presenter, "setFilters");
+    const screen = await render(<RemoteHistoryScreen presenter={presenter} />);
+    await waitFor(() => expect(screen.getByTestId("remote-history-list")).toBeTruthy());
+
+    const startOf = (day: number) => new Date(2026, 6, day, 0, 0, 0, 0).toISOString();
+    const endOf = (day: number) => new Date(2026, 6, day, 23, 59, 59, 999).toISOString();
+    await fireEvent.press(screen.getByTestId("remote-history-quick-yesterday"));
+    expect(setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ soldFromIso: startOf(26), soldToIso: endOf(26) }),
+    );
+    await fireEvent.press(screen.getByTestId("remote-history-quick-last7days"));
+    expect(setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ soldFromIso: startOf(21), soldToIso: endOf(27) }),
+    );
+    await fireEvent.press(screen.getByTestId("remote-history-quick-today"));
+    expect(setFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ soldFromIso: startOf(27), soldToIso: endOf(27) }),
+    );
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test("日期只能通过弹层选择，并按本地自然日边界提交", async () => {
   const presenter = new RemoteHistoryPresenter({
     port,

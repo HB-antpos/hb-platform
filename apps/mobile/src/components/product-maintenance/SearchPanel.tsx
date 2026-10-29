@@ -58,7 +58,8 @@ export function SearchPanel({
   useEffect(() => {
     const subscription = Keyboard.addListener("keyboardDidHide", () => {
       // Zebra 收起软键盘后输入框仍可能保持焦点；失焦才会交还隐藏扫码输入框。
-      if (searchbarRef.current?.isFocused()) searchbarRef.current.blur();
+      // 仅限安卓：iOS 模拟器 / 外接键盘下软键盘本就不弹，聚焦即触发 keyboardDidHide，会让搜索框刚聚焦就被失焦、无法输入。
+      if (Platform.OS === "android" && searchbarRef.current?.isFocused()) searchbarRef.current.blur();
     });
     return () => subscription.remove();
   }, []);

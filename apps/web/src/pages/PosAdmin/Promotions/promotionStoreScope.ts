@@ -11,11 +11,15 @@ export function getPromotionStoreCodes(stores?: PromotionStoreItemDto[] | null) 
     .filter((storeCode): storeCode is string => !!storeCode)
 }
 
-export function isPromotionAllStoresScope(source: PromotionStoreScopeSource) {
-  /* 后端约定：空 stores 表示总部/全部分店，保存时继续保持空数组。 */
-  return source.scopeType === 'Headquarters' || getPromotionStoreCodes(source.stores).length === 0
+/**
+ * 是否未绑定任何分店。
+ * 统一口径：分店必选；未绑定分店的促销收银端不计算（不再视为全部分店），后端新建 / 编辑也会拒绝空分店。
+ */
+export function isPromotionWithoutStores(source: PromotionStoreScopeSource) {
+  return getPromotionStoreCodes(source.stores).length === 0
 }
 
+/** 编辑时回填原始分店；旧的未绑定促销回填为空，由表单必填校验要求补选。 */
 export function getPromotionEditorStoreCodes(source: PromotionStoreScopeSource) {
-  return isPromotionAllStoresScope(source) ? [] : getPromotionStoreCodes(source.stores)
+  return getPromotionStoreCodes(source.stores)
 }

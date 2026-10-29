@@ -628,6 +628,17 @@ export enum DetailAction {
   AddMultiCode = 5,
 }
 
+/** 商品检测时建议选用的已有商品：本行货号在本供应商下不存在，但条码已被其他存活商品占用。 */
+export interface ProductCheckSuggestedProduct {
+  productCode?: string
+  itemNumber?: string
+  productName?: string
+  localSupplierCode?: string
+  productImage?: string
+  /** 与本行货号相同（忽略大小写）：通常就是同一个商品挂在别的供应商名下。 */
+  sameItemNumber?: boolean
+}
+
 export interface ProductCheckResult {
   detailGuid: string
   productStatus: ProductStatus
@@ -650,6 +661,8 @@ export interface ProductCheckResult {
   }
   barcodeMatchCount?: number
   defaultAction?: DetailAction
+  /** 仅提示：不改变状态和默认操作，也不自动关联；最多 3 个，同货号的排前面。 */
+  suggestedExistingProducts?: ProductCheckSuggestedProduct[]
 }
 
 export interface CheckProductsRequest {

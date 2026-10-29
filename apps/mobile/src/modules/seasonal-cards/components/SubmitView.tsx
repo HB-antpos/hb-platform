@@ -641,6 +641,7 @@ export function SeasonalCardSubmitView({
             recentSuppliers={recentSuppliers}
             loadErrorMessage={suppliersQuery.isError ? t("messages.supplierLoadFailed") : null}
             disabled={isBusy || !storeCode}
+            language={language}
             onSelect={(option) => setSupplier({ ...option, storeCode })}
           />
         </View>

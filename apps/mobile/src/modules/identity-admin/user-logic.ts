@@ -1,5 +1,5 @@
 import type { AccessControl, CurrentUser, UserStoreDto } from "@/modules/auth/types";
-import { hasPrivilegedAccessRole, isStoreStaffRoleName } from "@/modules/users/access-management";
+import { hasPrivilegedAccessRole } from "@/modules/users/access-management";
 
 export interface IdentityUserForm {
   username: string; email: string; fullName: string; isActive: boolean; password: string; confirmPassword: string;
@@ -29,8 +29,12 @@ export function canModifyIdentityUser(actor: CurrentUser | null, access: AccessC
   return actor?.userGUID.toLowerCase() !== target.userGUID.toLowerCase() && !hasPrivilegedAccessRole(target.roleNames);
 }
 
-export function selectableIdentityRoles<T extends { roleGUID: string; roleName: string }>(roles: T[], scoped: boolean) {
-  return scoped ? roles.filter(role => isStoreStaffRoleName(role.roleName)) : roles;
+/**
+ * 角色筛选项排序：等级高的在前（店长 → 店员 → 用户），同级按名字；没有等级的排最后。
+ * 哪些角色可选已由服务端 scope=below-actor 按「严格低于当前登录人等级」过滤，这里不再二次裁剪。
+ */
+export function sortRolesByLevel<T extends { roleName: string; level?: number }>(roles: readonly T[]): T[] {
+  return [...roles].sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || a.roleName.localeCompare(b.roleName));
 }
 
 export function isUncertainIdentityWrite(error: unknown) {

@@ -1501,7 +1501,9 @@ function normalizeQuantityFactor(value: number): number {
 
 function normalizeDiscountRate(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null;
-  return Math.min(1, Math.max(0, value));
+  // 折扣保护：≥ 1（100% 及以上）是脏数据，不能当成「全部折掉」存进本机目录，按没有折扣处理；负数按 0。
+  if (value >= 1) return null;
+  return Math.max(0, value);
 }
 
 function normalizeOptionalTimestamp(value: string | null): string | null {

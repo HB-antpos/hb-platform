@@ -44,7 +44,7 @@ import {
 } from 'antd'
 import type { RangePickerProps } from 'antd/es/date-picker'
 import type { ColumnsType, TableProps } from 'antd/es/table'
-import dayjs, { type Dayjs } from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import {
   useCallback,
   useEffect,
@@ -124,6 +124,13 @@ import {
   toLegacyEmployeeSummary,
   type OperationAuditTableSortOrder,
 } from './operationLogsLogic'
+import {
+  formatStoreTime,
+  getStoreNow,
+  storePickerValueToLocal,
+  storePickerValueToUtcIso,
+  utcToStorePickerValue,
+} from './operationLogsTime'
 import PosLogDetailPanel from './PosLogDetailPanel'
 import PosProductSummary from './PosProductSummary'
 
@@ -225,8 +232,10 @@ function DraggableHeaderCell({ children, style, ...props }: DraggableHeaderCellP
   )
 }
 
+// 时间范围里的 Dayjs 是「悉尼墙钟」，与销售明细口径一致；提交时才换算成 UTC。
 function getDefaultTimeRange(): [Dayjs, Dayjs] {
-  return [dayjs().subtract(7, 'day'), dayjs()]
+  const now = getStoreNow()
+  return [now.subtract(7, 'day'), now]
 }
 
 function getOutcomeColor(outcome: OperationAuditOutcome) {
@@ -338,8 +347,12 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
       const values = form.getFieldsValue()
       const [from, to] = values.timeRange ?? getDefaultTimeRange()
       return buildOperationAuditQuery({
-        startUtc: from.toISOString(),
-        endUtc: to.toISOString(),
+        // 范围是「各分店自己的本地时间」：startLocal / endLocal 交给后端按每家分店的时区换算；
+        // startUtc / endUtc（按悉尼）只给尚未升级的旧后端兜底。
+        startUtc: storePickerValueToUtcIso(from),
+        endUtc: storePickerValueToUtcIso(to),
+        startLocal: storePickerValueToLocal(from),
+        endLocal: storePickerValueToLocal(to),
         storeCode: '',
         storeCodes: values.storeCodes,
         cashierKeyword: values.cashierKeyword ?? '',
@@ -569,7 +582,8 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
 
   const showCashierDay = (record: OperationAuditListItem) => {
     if (!record.cashierId) return
-    const day = dayjs(record.occurredAtUtc)
+    // 「这一天」按这条日志所属分店的自然日算，不是浏览器本地日。
+    const day = utcToStorePickerValue(record.occurredAtUtc, record.storeTimeZoneId)
     form.setFieldsValue({
       timeRange: [day.startOf('day'), day.endOf('day')],
       deviceCode: undefined,
@@ -657,7 +671,7 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
         width: 175,
         sorter: true,
         sortOrder: sortBy === 'occurredAtUtc' ? sortOrder : null,
-        render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm:ss'),
+        render: (value: string, record) => formatStoreTime(value, record.storeTimeZoneId),
       },
       {
         title: t('operationLogs.columns.store'),
@@ -864,10 +878,11 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
     )
   }
 
+  const storeNow = getStoreNow()
   const timeRangePresets: RangePickerProps['presets'] = [
-    { label: t('operationLogs.presets.today'), value: [dayjs().startOf('day'), dayjs()] },
-    { label: t('operationLogs.presets.last7Days'), value: [dayjs().subtract(7, 'day'), dayjs()] },
-    { label: t('operationLogs.presets.last30Days'), value: [dayjs().subtract(30, 'day'), dayjs()] },
+    { label: t('operationLogs.presets.today'), value: [storeNow.startOf('day'), storeNow] },
+    { label: t('operationLogs.presets.last7Days'), value: [storeNow.subtract(7, 'day'), storeNow] },
+    { label: t('operationLogs.presets.last30Days'), value: [storeNow.subtract(30, 'day'), storeNow] },
   ]
   const currentUserName = currentUser?.fullName || currentUser?.username || ''
   const lensName = t(`legacyEmployeeLogs.lens.${risk.riskLens}.title`)

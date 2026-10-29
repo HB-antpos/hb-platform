@@ -22,6 +22,8 @@ assert.ok(modal.includes('id="batch-count" order={0}') && modal.includes('id="ba
 assert.ok(editor.includes('CreateBatchNumberInput'), "套装及子项复用键盘操作");
 assert.ok(modal.includes('onRequestClose={form.dismiss}'), "Android 系统返回遵守提交关闭保护");
 assert.ok(modal.includes('form.creationUncertain') && modal.includes('form.returnToList'), "结果未知时只保留返回批次列表入口");
+assert.ok(modal.includes('sortSuppliersByName(form.suppliers, language)') && modal.includes('sortedSuppliers.map('), "创建批次的供应商选择列表按名字排序");
+assert.ok(readFileSync(resolve(directory, "DomesticProductList.tsx"), "utf8").includes('sortedSuppliers.map('), "商品列表的供应商筛选按名字排序");
 for (const language of ["zh", "en"]) {
   const locale = JSON.parse(readFileSync(resolve(directory, `../../locales/${language}/screens/domesticPurchase.json`), "utf8"));
   assert.equal(locale.create.next, language === "zh" ? "下一步" : "Next");

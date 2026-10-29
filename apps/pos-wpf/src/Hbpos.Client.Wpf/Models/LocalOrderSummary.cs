@@ -1,4 +1,5 @@
 using System.Globalization;
+using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Linkly;
 using Hbpos.Contracts.Orders;
 
@@ -125,10 +126,27 @@ public static class PaymentReferenceDisplay
             string.IsNullOrWhiteSpace(transaction.CardType) ? null : transaction.CardType.Trim(),
             string.IsNullOrWhiteSpace(transaction.MaskedCardNumber) ? null : transaction.MaskedCardNumber.Trim(),
             string.IsNullOrWhiteSpace(transaction.AuthCode) ? null : $"Auth {transaction.AuthCode.Trim()}",
-            string.IsNullOrWhiteSpace(transaction.ResponseText) ? null : transaction.ResponseText.Trim()
+            FormatResponseText(transaction)
         }.Where(part => !string.IsNullOrWhiteSpace(part));
 
         var summary = string.Join(" | ", parts);
         return string.IsNullOrWhiteSpace(summary) ? null : summary;
+    }
+
+    private static string? FormatResponseText(CardTransactionDto transaction)
+    {
+        var text = string.IsNullOrWhiteSpace(transaction.ResponseText) ? null : transaction.ResponseText.Trim();
+        // 中文注释：ANZ 终端偶发在批准（00/08/11 + 批准码）的回包里带着 OPERATOR TIMEOUT 文案
+        // （终端批准后等操作员确认超时，10-25 1033 店实测，交易与小票均为 APPROVED）。
+        // 批准码为准：展示层把明显的超时/取消/拒绝文案换成 APPROVED，避免店员和顾客误以为没付成功；
+        // 库里的原始 ResponseText 不改，仍可用于排查。
+        if (text is not null &&
+            LinklyApprovalResponseCodes.IsApproved(transaction.ResponseCode) &&
+            !text.Contains("APPROVED", StringComparison.OrdinalIgnoreCase))
+        {
+            return "APPROVED";
+        }
+
+        return text;
     }
 }

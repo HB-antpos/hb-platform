@@ -1,4 +1,8 @@
 import type { PagedResult } from './api'
+import type {
+  AttendanceApprovalLeaveDetailDto,
+  AttendanceApprovalPublicHolidayDto,
+} from './attendancePayroll'
 
 export type AttendanceScheduleStatus = 'Draft' | 'Active' | 'Cancelled'
 export type AttendanceAvailabilityStatus = 'Active' | 'Cancelled'
@@ -12,7 +16,7 @@ export type AttendancePunchStatus =
   | 'PendingApproval'
   | 'Approved'
   | 'Rejected'
-export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut' | 'MealBreak'
+export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut' | 'MealBreak' | 'PublicHolidayPay'
 export type AttendanceReviewStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
 export type AttendanceScheduleState = 'NotStarted' | 'InProgress' | 'Completed' | 'MissingClockOut' | string
 export type AttendanceSegmentStatus = 'NotStarted' | 'Open' | 'Completed' | 'MissingClockOut' | string
@@ -64,6 +68,8 @@ export interface AttendanceScheduleDto {
   earlyLeaveMinutes?: number
   crossStoreMissingClockOutStoreCode?: string
   segments?: AttendanceScheduleSegmentDto[]
+  /** 店长手动指定的用餐次数（0–3）；缺省 / null＝按班次时长自动。 */
+  mealBreakCount?: number | null
   /** 排班有效用餐次数（指定值优先，否则按时长默认）；旧后端不返回。 */
   effectiveMealBreakCount?: number
   /** 计薪时扣除的用餐分钟（是否休息过都按排班扣）。 */
@@ -105,6 +111,10 @@ export interface SaveAttendanceSchedulePayload {
   endTime: string
   status?: AttendanceScheduleStatus
   remark?: string
+  /** 用餐次数（0–3）；新建不传＝自动，更新不传＝后端保持原值。 */
+  mealBreakCount?: number
+  /** 仅更新用：true＝恢复按时长自动（后端把次数写回 null）。 */
+  resetMealBreakCount?: boolean
 }
 
 export interface AttendanceAvailabilityDto {
@@ -150,6 +160,8 @@ export interface AttendancePunchDto {
   segmentStatus?: AttendanceSegmentStatus
   isBreakBoundary?: boolean
   supersedesPunchGuid?: string
+  /** 门店时区 00:00 系统补的自动下班卡（该时段不计薪）。 */
+  isSystemAutoClockOut?: boolean
   adjustmentGuid?: string
 }
 
@@ -191,11 +203,19 @@ export interface AttendanceApprovalDto {
   adjustment?: AttendanceAdjustmentDetailDto
   /** sourceType 为 MealBreak 时的用餐声明。 */
   mealClaim?: AttendanceMealClaimDto
+  /** 审核人与申请人是同一人（持 Attendance.Approval.ReviewSelf 审本人申请），审批记录可按 isSelfReview 筛选。 */
+  isSelfReview?: boolean
+  /** 请假（含带薪病假、年假、年假发放）的类型、区间、带薪工时与医嘱。 */
+  leave?: AttendanceApprovalLeaveDetailDto
+  /** sourceType 为 PublicHolidayPay 时的公假与规则命中次数。 */
+  publicHolidayPay?: AttendanceApprovalPublicHolidayDto
 }
 
 export interface ReviewAttendanceApprovalPayload {
   reviewRemark?: string
   approvedOvertimeMinutes?: number
+  /** 带薪公假批准时由店长确认的工时（null 用建议工时）。 */
+  approvedPaidHours?: number
 }
 
 export interface AttendanceAdjustmentDetailDto {
@@ -343,6 +363,22 @@ export interface AttendanceSettingsDto {
   overtimeMinimumMinutes?: number
   requireOvertimeApproval?: boolean
   allowManagerDirectOwnAdjustment?: boolean
+  // ===== 规格第 1 节新增（卡 B）；旧后端不返回 =====
+  /** 工时统计默认周期：1 或 2 周。 */
+  defaultPeriodWeeks?: 1 | 2
+  /** 双周起始日（与发薪周期对齐），YYYY-MM-DD。 */
+  fortnightAnchorDate?: string
+  publicHolidayLookbackWeeks?: number
+  publicHolidayMinCount?: number
+  sickLeaveSubmitDays?: number
+  annualLeaveLeadWeeks?: number
+  annualLeaveMaxWeeks?: number
+  annualCashOutLeadDays?: number
+  annualCashOutMaxWeeks?: number
+  birthdayRemindDays?: number
+  employeeSegmentLimit?: number
+  managerSegmentLimit?: number
+  autoClockOutAtMidnight?: boolean
 }
 
 export type SaveAttendanceSettingsPayload = Pick<
@@ -358,6 +394,19 @@ export type SaveAttendanceSettingsPayload = Pick<
   | 'overtimeMinimumMinutes'
   | 'requireOvertimeApproval'
   | 'allowManagerDirectOwnAdjustment'
+  | 'defaultPeriodWeeks'
+  | 'fortnightAnchorDate'
+  | 'publicHolidayLookbackWeeks'
+  | 'publicHolidayMinCount'
+  | 'sickLeaveSubmitDays'
+  | 'annualLeaveLeadWeeks'
+  | 'annualLeaveMaxWeeks'
+  | 'annualCashOutLeadDays'
+  | 'annualCashOutMaxWeeks'
+  | 'birthdayRemindDays'
+  | 'employeeSegmentLimit'
+  | 'managerSegmentLimit'
+  | 'autoClockOutAtMidnight'
 >>
 
 export type AttendancePagedResult<T> = PagedResult<T>

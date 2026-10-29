@@ -15,7 +15,7 @@ import {
   EMPTY_CELL,
   formatCount,
 } from './logic'
-import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, storeOptionLabel } from './parts'
+import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, storeOptionLabel, VarianceAmount } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -148,7 +148,7 @@ export default function OverviewTab({ context, filters, query, active, tr, tf, e
       align: 'right',
       width: 120,
       sorter: (left, right) => compareNullableNumber(left.closeVariance, right.closeVariance),
-      render: (_, row) => <Amount value={row.closeVariance} signed />,
+      render: (_, row) => <VarianceAmount value={row.closeVariance} tr={tr} showLabel={false} />,
     },
     {
       title: tr('overview.columns.closeDays'),
@@ -290,7 +290,7 @@ export default function OverviewTab({ context, filters, query, active, tr, tf, e
           value={<Amount value={totals?.inflowCash ?? null} />}
           sub={connected ? (
             <span>
-              {tr('kpi.variance')} <Amount value={totals?.closeVariance ?? null} signed />
+              {tr('kpi.variance')} <VarianceAmount value={totals?.closeVariance ?? null} tr={tr} />
             </span>
           ) : tr('kpi.dailyCloseMissing')}
         />
@@ -370,7 +370,7 @@ export default function OverviewTab({ context, filters, query, active, tr, tf, e
                   {connected ? tr('overview.uncoveredDays', { count: totals.uncoveredDayCount }) : EMPTY_CELL}
                 </MeasuredTable.Summary.Cell>
                 <MeasuredTable.Summary.Cell index={3} align="right"><Amount value={totals.inflowCash} /></MeasuredTable.Summary.Cell>
-                <MeasuredTable.Summary.Cell index={4} align="right"><Amount value={totals.closeVariance} signed /></MeasuredTable.Summary.Cell>
+                <MeasuredTable.Summary.Cell index={4} align="right"><VarianceAmount value={totals.closeVariance} tr={tr} showLabel={false} /></MeasuredTable.Summary.Cell>
                 <MeasuredTable.Summary.Cell index={5} />
                 <MeasuredTable.Summary.Cell index={6} align="right">
                   <div className="store-cash-cell-stack store-cash-cell-stack-end">

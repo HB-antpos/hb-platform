@@ -100,6 +100,7 @@ import {
   type ReceiptPreviewSettingsSource,
 } from "../../features/receipts";
 import {
+  buildDailyCloseCashSlip,
   buildDailyCloseReceipt,
   dailyCloseReceiptToEscPosBytes,
 } from "@hb/pos-receipt-core/features/receipts/daily-close-receipt";
@@ -2538,7 +2539,7 @@ export function createProductionPosRuntimeServices(
               ) {
                 throw new Error("DAILY_CLOSE_PRINTER_UNAVAILABLE");
               }
-              const document = buildDailyCloseReceipt({
+              const receiptInput = {
                 archive: job.archive,
                 locale: currentSettings.locale,
                 paper: currentSettings.paper,
@@ -2547,11 +2548,13 @@ export function createProductionPosRuntimeServices(
                 storeName:
                   currentSettings.storeName || session.storeCode,
                 returnPolicy: currentSettings.returnPolicy,
-              });
+              };
               await printer.connect(currentSettings.peripheralId);
               const result = await printer.print(
                 `daily-close:${job.archive.closeId}:${input.createId()}`,
-                dailyCloseReceiptToEscPosBytes(document),
+                dailyCloseReceiptToEscPosBytes(
+                  buildDailyCloseReceipt(receiptInput),
+                ),
               );
               if (result.status !== "printed") {
                 throw Object.assign(
@@ -2561,6 +2564,23 @@ export function createProductionPosRuntimeServices(
                       result.errorCode ??
                       "DAILY_CLOSE_PRINT_NOT_CONFIRMED",
                   },
+                );
+              }
+              // 日结单打完驱动会自动切纸；现金单作为第二个任务单独出一张，随现金封存交接（对齐 WPF #478）。
+              // 日结单已确认打印，现金单失败时用专用错误码如实告知，不重复打印日结单。
+              const cashSlipResult = await printer.print(
+                `daily-close-cash-slip:${job.archive.closeId}:${input.createId()}`,
+                dailyCloseReceiptToEscPosBytes(
+                  buildDailyCloseCashSlip({
+                    ...receiptInput,
+                    returnPolicy: undefined,
+                  }),
+                ),
+              ).catch((): { status: "failed" } => ({ status: "failed" }));
+              if (cashSlipResult.status !== "printed") {
+                throw Object.assign(
+                  new Error("DAILY_CLOSE_CASH_SLIP_NOT_CONFIRMED"),
+                  { code: "DAILY_CLOSE_CASH_SLIP_NOT_CONFIRMED" },
                 );
               }
               trustedSalesSession(

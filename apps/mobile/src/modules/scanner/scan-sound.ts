@@ -1,5 +1,12 @@
 import { createAudioPlayer } from "expo-audio";
 import type { ScanFeedbackState } from "@/modules/scanner/types";
+import {
+  BELL_PATTERNS,
+  BELL_SAMPLE_RATE,
+  getBellPatternDurationMs,
+  renderBellPattern,
+  type ScanHighlightKind,
+} from "@/modules/scanner/scan-bell-tones";
 
 type PlayableScanStatus = Exclude<ScanFeedbackState["status"], "ready" | "scanning">;
 type GeneratedToneKey =
@@ -80,6 +87,7 @@ const SOUND_PATTERNS: Record<GeneratedToneKey, ToneStep[]> = {
 const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 const soundUriCache = new Map<GeneratedToneKey, string>();
+const highlightUriCache = new Map<ScanHighlightKind, string>();
 const activePlayers = new Set<ReturnType<typeof createAudioPlayer>>();
 
 function writeAscii(view: DataView, offset: number, value: string) {
@@ -106,12 +114,9 @@ function encodeBase64(bytes: Uint8Array) {
   return output;
 }
 
-function createWaveDataUri(pattern: ToneStep[]) {
-  const totalSamples = pattern.reduce(
-    (sum, step) => sum + Math.max(1, Math.floor((step.durationMs / 1000) * SAMPLE_RATE)),
-    0
-  );
-  const pcmByteLength = totalSamples * 2;
+/** -1..1 的单声道采样 -> 16 位 PCM WAV data URI。 */
+function samplesToWaveDataUri(samples: ArrayLike<number>, sampleRate: number) {
+  const pcmByteLength = samples.length * 2;
   const buffer = new ArrayBuffer(WAV_HEADER_SIZE + pcmByteLength);
   const view = new DataView(buffer);
 
@@ -122,33 +127,39 @@ function createWaveDataUri(pattern: ToneStep[]) {
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
   view.setUint16(22, 1, true);
-  view.setUint32(24, SAMPLE_RATE, true);
-  view.setUint32(28, SAMPLE_RATE * 2, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   writeAscii(view, 36, "data");
   view.setUint32(40, pcmByteLength, true);
 
+  for (let index = 0; index < samples.length; index += 1) {
+    view.setInt16(WAV_HEADER_SIZE + index * 2, Math.round(samples[index] * PCM_MAX), true);
+  }
+
+  return `data:audio/wav;base64,${encodeBase64(new Uint8Array(buffer))}`;
+}
+
+function createWaveDataUri(pattern: ToneStep[]) {
+  const samples: number[] = [];
   let sampleIndex = 0;
-  let byteOffset = WAV_HEADER_SIZE;
 
   for (const step of pattern) {
     const sampleCount = Math.max(1, Math.floor((step.durationMs / 1000) * SAMPLE_RATE));
     const volume = step.volume ?? 0.3;
 
     for (let index = 0; index < sampleCount; index += 1) {
-      const amplitude =
+      samples.push(
         step.frequency > 0
           ? Math.sin((2 * Math.PI * step.frequency * sampleIndex) / SAMPLE_RATE) * volume
-          : 0;
-
-      view.setInt16(byteOffset, Math.round(amplitude * PCM_MAX), true);
-      byteOffset += 2;
+          : 0
+      );
       sampleIndex += 1;
     }
   }
 
-  return `data:audio/wav;base64,${encodeBase64(new Uint8Array(buffer))}`;
+  return samplesToWaveDataUri(samples, SAMPLE_RATE);
 }
 
 function getPatternDurationMs(key: GeneratedToneKey) {
@@ -166,15 +177,29 @@ function getSoundUri(key: GeneratedToneKey) {
   return uri;
 }
 
+function getHighlightSoundUri(kind: ScanHighlightKind) {
+  const cached = highlightUriCache.get(kind);
+  if (cached) {
+    return cached;
+  }
+
+  const uri = samplesToWaveDataUri(renderBellPattern(BELL_PATTERNS[kind]), BELL_SAMPLE_RATE);
+  highlightUriCache.set(kind, uri);
+  return uri;
+}
+
 export function preloadScanFeedbackSounds() {
   for (const key of Object.keys(SOUND_PATTERNS) as GeneratedToneKey[]) {
     getSoundUri(key);
   }
+  for (const kind of Object.keys(BELL_PATTERNS) as ScanHighlightKind[]) {
+    getHighlightSoundUri(kind);
+  }
 }
 
-function playGeneratedTone(key: GeneratedToneKey) {
+function playWaveUri(uri: string, durationMs: number) {
   try {
-    const player = createAudioPlayer({ uri: getSoundUri(key) });
+    const player = createAudioPlayer({ uri });
     // createAudioPlayer 不会自动释放；短音播放期间保留引用，结束后释放原生资源。
     activePlayers.add(player);
     setTimeout(() => {
@@ -184,11 +209,20 @@ function playGeneratedTone(key: GeneratedToneKey) {
       } catch (error) {
         console.warn("[scan-sound] failed to release sound", error);
       }
-    }, getPatternDurationMs(key) + PLAYER_CLEANUP_PADDING_MS);
+    }, durationMs + PLAYER_CLEANUP_PADDING_MS);
     player.play();
   } catch (error) {
     console.warn("[scan-sound] failed to play sound", error);
   }
+}
+
+function playGeneratedTone(key: GeneratedToneKey) {
+  playWaveUri(getSoundUri(key), getPatternDurationMs(key));
+}
+
+/** 折扣 / 促销 / 多码的铃音提示。 */
+export function playScanHighlightSound(kind: ScanHighlightKind) {
+  playWaveUri(getHighlightSoundUri(kind), getBellPatternDurationMs(kind));
 }
 
 export function playBarcodeCapturedSound() {

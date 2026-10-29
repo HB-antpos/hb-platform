@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="StoreDiscountRateTests.cs" />
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
     <Compile Include="ProductImageDescriptionTests.cs" />
     <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
@@ -137,16 +138,21 @@
     <Compile Include="UsersCashierBarcodeAuthorizationTests.cs" />
     <Compile Include="EmployeeProfileSelfServiceTests.cs" />
     <Compile Include="EmployeeProfileSensitiveChangeServiceTests.cs" />
+    <Compile Include="EmployeeProfileManagedServiceTests.cs" />
     <Compile Include="SqlSugarContextNoLockTransactionTests.cs" />
     <Compile Include="StoreUsersReactServiceTests.cs" />
     <Compile Include="PersonNameFormatterTests.cs" />
     <Compile Include="UserNamePartsTests.cs" />
     <Compile Include="StoreUserCashierBarcodeServiceTests.cs" />
     <Compile Include="UserStoreManagementRelationTests.cs" />
+    <Compile Include="RoleLevelAccessTests.cs" />
     <Compile Include="AttendanceReactServiceTests.cs" />
     <Compile Include="AttendanceReactServiceMealBreakTests.cs" />
     <Compile Include="AttendanceReactServiceApprovalNotificationTests.cs" />
     <Compile Include="AttendanceReactServiceLocationBatchTests.cs" />
+    <Compile Include="AttendanceReactServiceReviewRoundTests.cs" />
+    <Compile Include="PayrollCalculatorTests.cs" />
+    <Compile Include="AttendanceReactServicePayrollTests.cs" />
     <Compile Include="AttendanceApproverResolverTests.cs" />
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />
@@ -161,11 +167,15 @@
     <Compile Include="SeedDataServiceTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionContractTests.cs" />
     <Compile Include="UserStorePosTerminalPermissionServiceTests.cs" />
+    <Compile Include="WarehouseManagerUserAccessTests.cs" />
     <Compile Include="NavigationServiceTests.cs" />
     <Compile Include="StoreProductInsightRulesTests.cs" />
     <Compile Include="StoreProductInsightQueryServiceTests.cs" />
     <Compile Include="SeasonalProductInsightQueryServiceTests.cs" />
     <Compile Include="StoreProductInsightsControllerTests.cs" />
+    <Compile Include="ProductDuplicateGuardTests.cs" />
+    <Compile Include="ProductDuplicateInvoiceFlowTests.cs" />
+    <Compile Include="ProductDuplicateCreateEntryPointTests.cs" />
     <Compile Include="StaticReportAccessControllerTests.cs" />
     <Compile Include="ProductBranchSalesServiceTests.cs" />
     <Compile Include="ProductBranchSalesControllerTests.cs" />
@@ -268,6 +278,7 @@
     <Compile Include="ContainerAllocationSalesReportServiceTests.cs" />
     <Compile Include="ContainerAllocationSalesAuthorizationPipelineTests.cs" />
     <Compile Include="BrowserExtensionTests.cs" />
+    <Compile Include="HelpFaqTests.cs" />
     <Compile Include="LocalSupplierCategoryLogicTests.cs" />
     <Compile Include="LocalSupplierCategoryServiceTests.cs" />
     <Compile Include="LocalSupplierCategorySqlServerIntegrationTests.cs" />
@@ -381,6 +392,7 @@
     <Compile Include="ApplicationLogServiceTests.cs" />
     <Compile Include="OperationAuditQueryServiceTests.cs" />
     <Compile Include="OperationAuditRiskQueryTests.cs" />
+    <Compile Include="OperationAuditStoreTimeZonesTests.cs" />
     <Compile Include="DailyCloseRecordsTests.cs" />
     <Compile Include="InstallmentAmendLinesPermissionTests.cs" />
     <Compile Include="PosOperationAuditRiskEvaluatorTests.cs" />
@@ -477,6 +489,13 @@
     <Compile Include="SupplierPreorderImageCopyTests.cs" />
     <Compile Include="SupplierPreorderRevisionTests.cs" />
     <Compile Include="PosApiEntryTests.cs" />
+    <Compile Include="PosApiEntryUsageTests.cs" />
+    <Compile Include="MainApiEntryUsageTests.cs" />
+    <Compile Include="MyobConnectionTests.cs" />
+    <Compile Include="MyobEmployeeBindingTests.cs" />
+    <Compile Include="MyobEmployeeSyncTests.cs" />
+    <Compile Include="MyobPayrollAdviceTests.cs" />
+    <Compile Include="MyobTimesheetTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />

@@ -48,12 +48,12 @@ export const MEAL_BREAK_MINUTES = 30;
 export const MAX_MEAL_BREAK_COUNT = 3;
 
 /**
- * 按班次时长推算的默认用餐次数：超过 9 小时 2 次、超过 4.5 小时 1 次，否则 0 次。
- * 门槛均为「超过」，正好 4.5 / 9 小时按低一档。
+ * 按班次时长推算的默认用餐次数：超过 9 小时 2 次、达到 4.5 小时（含）1 次，否则 0 次。
+ * 4.5 小时是「达到即扣」，9 小时仍是「超过」才扣第 2 次（正好 9 小时按 1 次）。
  */
 export function defaultMealBreakCount(durationMinutes: number) {
   if (durationMinutes > 9 * 60) return 2;
-  if (durationMinutes > 4.5 * 60) return 1;
+  if (durationMinutes >= 4.5 * 60) return 1;
   return 0;
 }
 

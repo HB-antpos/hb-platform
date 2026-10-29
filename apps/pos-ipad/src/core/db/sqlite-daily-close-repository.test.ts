@@ -143,6 +143,14 @@ test("M17 无损升级 M6 日结并允许同日保存多个冻结归档", async 
     assert.equal(nulLegacy?.storeCode, "legacy-unknown-store");
     assert.equal(nulLegacy?.deviceCode, "legacy-unknown-device");
 
+    // 保存新存档走最新表结构（含 M54 的 cash_rounding_cents 列与重建后的触发器）；
+    // 旧 M6 数据在剩余迁移之后仍应可读。
+    await applyMigrations(connection, () => T1);
+    assert.equal(
+      (await repository.getArchive("legacy-close"))?.cashRoundingCents,
+      0,
+    );
+
     const first = archive("close-a", "audit-close-a");
     const second = archive("close-b", "audit-close-b");
     assert.equal((await repository.saveArchive(first)).replayed, false);
@@ -263,6 +271,180 @@ test("summarize 仅统计同门店设备半开区间内的本地完成订单，�
         netCents: -300,
       },
     ]);
+  });
+});
+
+test("summarize 的应有现金 = 现金净额 + 逐单 5 分进位（销售进位、退款反向、混合多笔现金先合并）", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const seed = (
+      orderGuid: string,
+      sequence: number,
+      lineKind: "sale" | "return",
+      tenders: readonly (readonly ["cash" | "card" | "voucher", number])[],
+    ) =>
+      seedOrder(connection, {
+        orderGuid,
+        sequence,
+        soldAtIso: T0,
+        state: "PendingSync",
+        deviceCode: "DEVICE-1",
+        lineKind,
+        quantity: "1",
+        tenders,
+      });
+    // 1003 → 收 1005，进位 +2。
+    await seed("round-up", 1, "sale", [["cash", 1003]]);
+    // 2001 → 收 2000，进位 -1。
+    await seed("round-down", 2, "sale", [["cash", 2001]]);
+    // 混合支付里两笔现金 301 + 402 = 703 → 收 705，进位 +2（必须先合并再进位，分开算会得 0 + -2）。
+    await seed("mixed", 3, "sale", [
+      ["cash", 301],
+      ["cash", 402],
+      ["card", 500],
+    ]);
+    // 退款 -1003 → 付出 1005，进位 -2。
+    await seed("refund", 4, "return", [["cash", -1003]]);
+    // 已是 5 分整数倍、纯刷卡订单都没有进位。
+    await seed("exact", 5, "sale", [["cash", 1000]]);
+    await seed("card-only", 6, "sale", [["card", 777]]);
+
+    const summary = await new SqliteDailyCloseRepository(connection).summarize(
+      scope,
+    );
+    const cash = summary.tenders.find((item) => item.method === "cash");
+    // 现金净额保持订单精确金额：1003 + 2001 + 703 + 1000 - 1003 = 3704。
+    assert.equal(cash?.netCents, 3704);
+    assert.equal(summary.cashRoundingCents, 1); // +2 -1 +2 -2 +0
+    assert.equal(summary.expectedCashCents, 3705);
+  });
+});
+
+test("带现金进位的日结可以归档，读回一致；应有现金与净额+进位不符、进位超出订单数上限都被拒绝", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const repository = new SqliteDailyCloseRepository(connection);
+
+    // 进位 +2：归档转换触发器必须接受 expected = 净额 + 进位（旧触发器会拒绝）。
+    const saved = await repository.saveArchive(
+      archive("close-rounded", "audit-close-rounded", 2),
+    );
+    assert.equal(saved.archive.cashRoundingCents, 2);
+    assert.equal(saved.archive.expectedCashCents, 802);
+    const readBack = await repository.getArchive("close-rounded");
+    assert.equal(readBack?.cashRoundingCents, 2);
+    assert.equal(readBack?.expectedCashCents, 802);
+    assert.equal(
+      await scalar(
+        connection,
+        `SELECT cash_rounding_cents AS count
+         FROM local_daily_closes WHERE close_id = 'close-rounded'`,
+      ),
+      2,
+    );
+
+    // 声称进位 2 却把应有现金写成净额 800：与 净额+进位 不符。
+    const base = archive("close-mismatch", "audit-close-mismatch", 2);
+    await assert.rejects(
+      async () =>
+        repository.saveArchive({
+          ...base,
+          archive: { ...base.archive, expectedCashCents: 800 },
+        }),
+      /expected cash does not match cash net plus rounding/,
+    );
+
+    // 订单数 2 单，进位最多 ±4 分：5 分一定是数据有问题。
+    await assert.rejects(
+      async () =>
+        repository.saveArchive(
+          archive("close-too-much", "audit-close-too-much", 5),
+        ),
+      /cash rounding exceeds/,
+    );
+    assert.equal(await repository.getArchive("close-mismatch"), null);
+    assert.equal(await repository.getArchive("close-too-much"), null);
+  });
+});
+
+test("M54 升级：旧存档补 cash_rounding_cents = 0，应有现金口径不变，且归档字段不可变", async () => {
+  await withDatabase(async (connection) => {
+    const previous = POS_DATABASE_MIGRATIONS.filter(
+      (migration) => migration.version <= 53,
+    );
+    await applyMigrations(connection, () => T0, previous);
+    // 升级前的原生存档：按 M53 的表结构、走触发器认可的完整归档流程写入（没有 cash_rounding_cents 列）。
+    await connection.run(
+      `INSERT INTO audit_events (
+        event_id, event_type, occurred_at_iso, order_guid,
+        correlation_id, payload_json, uploaded_at_iso
+      ) VALUES (
+        'audit-pre-m54', 'DAILY_CLOSE_SAVE', ?, NULL, 'close-pre-m54', '{}', NULL
+      )`,
+      [T1],
+    );
+    await connection.run(
+      `INSERT INTO local_daily_closes (
+        close_id, business_date, period_from_iso, period_to_iso,
+        store_code, device_code, saved_cashier_id, saved_cashier_name,
+        order_count, return_quantity, expected_cash_cents,
+        counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
+        variance_cents, terminal_audit_event_id, saved_at_iso,
+        source_kind, state
+      ) VALUES (
+        'close-pre-m54', ?, ?, ?, 'STORE-1', 'DEVICE-1', 'cashier-1',
+        'Cashier One', 1, '0', 800, 800, 0, 800, 0, 'audit-pre-m54', ?,
+        'native', 'Preparing'
+      )`,
+      [scope.businessDate, scope.periodFromIso, scope.periodToIso, T1],
+    );
+    for (const [method, net] of [
+      ["cash", 800],
+      ["card", 0],
+      ["voucher", 0],
+    ] as const) {
+      await connection.run(
+        `INSERT INTO daily_close_totals (
+          close_id, tender_method, sales_cents, refund_cents, net_cents
+        ) VALUES ('close-pre-m54', ?, ?, 0, ?)`,
+        [method, net, net],
+      );
+    }
+    for (const denomination of AUD_CASH_DENOMINATIONS_CENTS) {
+      const quantity = denomination === 200 ? 4 : 0;
+      await connection.run(
+        `INSERT INTO cash_denominations (
+          close_id, denomination_cents, quantity, subtotal_cents
+        ) VALUES ('close-pre-m54', ?, ?, ?)`,
+        [denomination, quantity, denomination * quantity],
+      );
+    }
+    await connection.run(
+      `UPDATE local_daily_closes SET state = 'Archived'
+       WHERE close_id = 'close-pre-m54'`,
+    );
+
+    await applyMigrations(connection, () => T1);
+    assert.equal(
+      await schemaVersion(connection),
+      POS_DATABASE_MIGRATIONS.at(-1)?.version,
+    );
+    assert.equal(
+      await scalar(
+        connection,
+        `SELECT cash_rounding_cents AS count
+         FROM local_daily_closes WHERE close_id = 'close-pre-m54'`,
+      ),
+      0,
+    );
+    // 已归档的存档不能事后改进位（不可变触发器包含新列）。
+    await assert.rejects(
+      connection.run(
+        `UPDATE local_daily_closes SET cash_rounding_cents = 5
+         WHERE close_id = 'close-pre-m54'`,
+      ),
+      /DAILY_CLOSE_ARCHIVE_IMMUTABLE/,
+    );
   });
 });
 
@@ -400,6 +582,7 @@ test("真实 SQLite：日结非订单审计冻结归档 scope，且只由相同�
 function archive(
   closeId: string,
   auditId: string,
+  cashRoundingCents = 0,
 ): Parameters<SqliteDailyCloseRepository["saveArchive"]>[0] {
   const denominations = normalizeDailyCloseCounts([
     { denominationCents: 10_000, quantity: 1 },
@@ -444,12 +627,14 @@ function archive(
         netCents: -300,
       },
     ],
-    expectedCashCents: 800,
+    cashRoundingCents,
+    // 应有现金 = 现金净额 800 + 现金进位。
+    expectedCashCents: 800 + cashRoundingCents,
     denominations,
     notesSubtotalCents,
     coinsSubtotalCents,
     countedCashCents,
-    varianceCents: countedCashCents - 800,
+    varianceCents: countedCashCents - (800 + cashRoundingCents),
   };
   return {
     archive: archiveValue,

@@ -15,9 +15,28 @@ public sealed class KeyboardScannerFallbackBufferTests
         Assert.Null(buffer.Process(Key.D9, now));
         Assert.Null(buffer.Process(Key.D3, now.AddMilliseconds(10)));
         Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(20)));
-        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(30));
+        Assert.Null(buffer.Process(Key.D1, now.AddMilliseconds(30)));
+        Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(40)));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(50));
 
-        Assert.Equal("930", barcode);
+        Assert.Equal("93010", barcode);
+    }
+
+    [Fact]
+    public void Process_DropsInputShorterThanTheSharedMinimumLength()
+    {
+        // 与 Raw Input 路径共用 RawScannerInputProcessor.DefaultMinBarcodeLength（5）：4 位及以下视为误触。
+        Assert.Equal(5, RawScannerInputProcessor.DefaultMinBarcodeLength);
+        var buffer = new KeyboardScannerFallbackBuffer();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Null(buffer.Process(Key.D9, now));
+        Assert.Null(buffer.Process(Key.D3, now.AddMilliseconds(10)));
+        Assert.Null(buffer.Process(Key.D0, now.AddMilliseconds(20)));
+        Assert.Null(buffer.Process(Key.D1, now.AddMilliseconds(30)));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(40));
+
+        Assert.Null(barcode);
     }
 
     [Fact]
@@ -42,9 +61,11 @@ public sealed class KeyboardScannerFallbackBufferTests
         Assert.Null(buffer.Process(Key.ImeProcessed, now, Key.A));
         Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(10), Key.B));
         Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(20), Key.C));
-        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(30));
+        Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(30), Key.D));
+        Assert.Null(buffer.Process(Key.ImeProcessed, now.AddMilliseconds(40), Key.E));
+        var barcode = buffer.Process(Key.Enter, now.AddMilliseconds(50));
 
-        Assert.Equal("ABC", barcode);
+        Assert.Equal("ABCDE", barcode);
     }
 
     [Fact]

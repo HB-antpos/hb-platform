@@ -85,6 +85,43 @@ function permissionsFor(input: Partial<DetailPermissionInput> & Pick<DetailPermi
   });
 }
 
+// ───────────── 仓库管理（不限分店的受限委派者） ─────────────
+{
+  const warehouse: DetailActorFacts = {
+    userGuid: "wh-1",
+    roleNames: ["WarehouseManager", "StoreManager"],
+    isAdmin: false,
+    isStoreManager: true,
+    isWarehouseManager: true,
+    // 同时有仓库管理和店长角色（线上 sean 账号）：不属于「店长级」，走管理员版详情。
+    isStoreLevelManager: false,
+    hasPermission: () => true,
+  };
+  // 后端对仓库管理返回的分店 isPrimary 恒为 false，所以可管理分店为 0——资格不能依赖它。
+  const noManageable = scope({ hasManageableStores: false });
+
+  let p = permissionsFor({ actor: warehouse, scope: noManageable });
+  assertEqual(p.canOpenAccess, true, "仓库管理对店员可进授权页（不依赖可管理分店）");
+  assertEqual(p.canOpenPos, true, "仓库管理对店员可进 POS 权限");
+  assertEqual(p.canCopyPermissions, true, "仓库管理对店员可复制权限");
+
+  p = permissionsFor({ actor: warehouse, scope: noManageable, target: target({ roleNames: ["StoreManager"] }) });
+  assertEqual(p.canOpenAccess, true, "仓库管理可管理店长账号的授权");
+  assertEqual(p.canOpenPos, true, "仓库管理可维护店长的按店 POS 权限");
+  assertEqual(p.access.permissionsMode, "editable", "仓库管理可维护店长的直接权限");
+  assertEqual(p.canCopyPermissions, false, "复制权限服务端只支持员工目标：店长目标不显示入口");
+
+  for (const roleName of ["Admin", "WarehouseManager"]) {
+    p = permissionsFor({ actor: warehouse, scope: noManageable, target: target({ roleNames: [roleName] }) });
+    assertEqual(p.canOpenAccess, false, `仓库管理不能管理 ${roleName} 账号`);
+    assertEqual(p.canOpenPos, false, `仓库管理不能维护 ${roleName} 账号的 POS 权限`);
+  }
+
+  // 店长级管理者对店长目标仍然只读。
+  p = permissionsFor({ actor: actor("manager"), target: target({ roleNames: ["StoreManager"] }) });
+  assertEqual(p.canOpenAccess, false, "店长不能管理店长账号");
+}
+
 // ───────────── 变体选择 ─────────────
 
 assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, isIosReview: false }), "admin", "全局用户权限 + account 会话 = 管理员版");
@@ -438,5 +475,58 @@ assertEqual(shortenGuid("abc"), "abc", "很短的值原样显示");
 
 assertEqual(summarizeActiveSessions([{ status: "active" }, { status: "revoked" }, { status: "active" }], 3), { active: 2, capped: false }, "有效会话 2 个");
 assertEqual(summarizeActiveSessions([{ status: "active" }], 80), { active: 1, capped: true }, "只读了一页：N+");
+
+// ───────────── 「个人信息」入口（员工个人信息维护）：四个条件同时满足才显示，不满足整行隐藏 ─────────────
+{
+  const EP = PERMISSIONS.EmployeeProfiles;
+  assertEqual(EP.ViewManagedStore, "EmployeeProfiles.ViewManagedStore", "查看权限码");
+  assertEqual(EP.EditManagedStore, "EmployeeProfiles.EditManagedStore", "修改权限码");
+
+  // 店长版：manager 持有 ViewManagedStore（+ 可选 EditManagedStore）。
+  const viewOnly = actor("manager", [EP.ViewManagedStore]);
+  const viewEdit = actor("manager", [EP.ViewManagedStore, EP.EditManagedStore]);
+  const noCode = actor("manager");
+
+  let p = permissionsFor({ actor: viewOnly });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [true, false], "只有 ViewManagedStore：能进入但不能保存");
+  p = permissionsFor({ actor: viewEdit });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [true, true], "有 View + Edit：能进入也能保存");
+  p = permissionsFor({ actor: noCode });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [false, false], "没有 ViewManagedStore：整行隐藏");
+  // 只有 EditManagedStore、没有 View：入口不显示，也不能保存（Edit 以 View 为前提）。
+  p = permissionsFor({ actor: actor("manager", [EP.EditManagedStore]) });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [false, false], "只有 Edit 没有 View：不显示");
+
+  // 目标不在自己管理的分店：隐藏。
+  p = permissionsFor({ actor: viewEdit, scope: scope({ storeManageable: false }) });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [false, false], "目标不在管理分店：隐藏");
+  // 本人：隐藏。
+  p = permissionsFor({ actor: viewEdit, target: target({ userGuid: "mgr-1" }) });
+  assertEqual([p.canOpenProfile, p.canEditProfile], [false, false], "本人：隐藏");
+  // 受保护角色（管理员 / 店长 / 仓库经理）对非管理员操作者：隐藏。
+  for (const roleName of ["Admin", "StoreManager", "WarehouseManager"]) {
+    p = permissionsFor({ actor: viewEdit, target: target({ roleNames: [roleName] }) });
+    assertEqual(p.canOpenProfile, false, `受保护目标 ${roleName}：隐藏`);
+  }
+
+  // 管理员版：走 adminScopeOk，storeManageable 恒 true（不看当前分店）。
+  const adminVariant = (a: DetailActorFacts, t: DetailTargetFacts = target()) =>
+    resolveDetailPermissions({ variant: "admin", actor: a, target: t, scope: scope({ storeManageable: true }) });
+  p = adminVariant(actor("admin"));
+  assertEqual([p.canOpenProfile, p.canEditProfile], [true, true], "管理员：对店员可进入、可保存");
+  p = adminVariant(actor("admin"), target({ roleNames: ["StoreManager"] }));
+  assertEqual(p.canOpenProfile, true, "管理员对店长账号仍可进入（isProtectedTarget 只针对非管理员）");
+  p = adminVariant(actor("admin"), target({ userGuid: "admin-1" }));
+  assertEqual(p.canOpenProfile, false, "管理员本人：隐藏（服务端也排除本人）");
+  // 非管理员的全局用户查看者（如仓库经理）：受保护目标隐藏，店员可进。
+  const delegate = actor("viewer", [EP.ViewManagedStore, EP.EditManagedStore]);
+  p = adminVariant(delegate);
+  assertEqual([p.canOpenProfile, p.canEditProfile], [true, true], "管理员版非管理员持有码：对店员可进入");
+  p = adminVariant(delegate, target({ roleNames: ["Admin"] }));
+  assertEqual(p.canOpenProfile, false, "管理员版非管理员：受保护目标隐藏");
+  // 管理员版店长级操作者：本人隐藏（adminScopeOk 的店长级不动本人规则）。
+  p = adminVariant({ ...actor("manager", [EP.ViewManagedStore]), isStoreLevelManager: true }, target({ userGuid: "mgr-1" }));
+  assertEqual(p.canOpenProfile, false, "店长级管理者本人：隐藏");
+}
 
 console.log("detail-rules.test.ts: ok");

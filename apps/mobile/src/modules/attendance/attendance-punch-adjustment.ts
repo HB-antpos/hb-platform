@@ -223,6 +223,7 @@ export function normalizeAttendancePunchAdjustment(
     scheduleGuid: asOptionalString(pick(raw, "scheduleGuid", "ScheduleGuid")),
     originalPunchGuid: asOptionalString(pick(raw, "originalPunchGuid", "OriginalPunchGuid")),
     originalPunchTimeLocal: asOptionalString(pick(raw, "originalPunchTimeLocal", "OriginalPunchTimeLocal")),
+    originalIsSystemAutoClockOut: asBoolean(pick(raw, "originalIsSystemAutoClockOut", "OriginalIsSystemAutoClockOut")),
     punchType: asString(pick(raw, "punchType", "PunchType"), "ClockIn") as AttendancePunchAdjustment["punchType"],
     requestedPunchTimeLocal: asString(pick(raw, "requestedPunchTimeLocal", "RequestedPunchTimeLocal")),
     requestedPunchTimeUtc: asOptionalString(pick(raw, "requestedPunchTimeUtc", "RequestedPunchTimeUtc")),

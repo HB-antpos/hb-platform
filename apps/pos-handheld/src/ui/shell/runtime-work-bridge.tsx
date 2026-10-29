@@ -1,3 +1,7 @@
+import {
+  getBackgroundPollingIntervalMs,
+  isBackgroundPollDue,
+} from "@hb/pos-domain/core/contracts/background-polling";
 import { useEffect, useMemo, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
@@ -9,6 +13,12 @@ import {
 
 import type { ExpoPosRuntimeServices } from "@/core/runtime/expo-pos-runtime";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+
+/**
+ * 设备运行状态心跳周期：后台设备管理页以 45 秒为在线阈值（夜间窗口放宽到 12 分钟，见 WPF #926），
+ * 白天 30 秒一次，夜间由 background-polling 放慢到 5 分钟。
+ */
+const RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS = 30_000;
 
 /** 总部下发小票资料的定时检查周期。 */
 const RECEIPT_PROFILE_SYNC_INTERVAL_MS = 60_000;
@@ -79,12 +89,54 @@ export function RuntimeWorkBridge() {
     if (!controller || !receiptProfileEnabled || connectivity !== "online") {
       return undefined;
     }
+    // 夜间（22:00–06:00）放慢到 5 分钟（对齐 WPF #926）：基础定时器仍按 60 秒唤醒，
+    // 距上次执行不足当前目标间隔时跳过；回前台、网络恢复等事件触发的同步不受影响。
+    // 启动与网络恢复时本来就会立即同步一次，周期计时从挂载时刻起算。
+    let lastRunAtMs: number | null = Date.now();
     const timer = setInterval(() => {
       if (AppState.currentState !== "active") return;
+      const intervalMs = getBackgroundPollingIntervalMs(
+        new Date(),
+        RECEIPT_PROFILE_SYNC_INTERVAL_MS,
+      );
+      if (!isBackgroundPollDue(Date.now(), lastRunAtMs, intervalMs)) return;
+      lastRunAtMs = Date.now();
       controller.onReceiptProfileTimer();
     }, RECEIPT_PROFILE_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [connectivity, controller, receiptProfileEnabled]);
+
+  const runtimeStatus = runtime.services?.runtimeStatus ?? null;
+  const deviceAuthorized = isDeviceAuthorized(runtime.services);
+  useEffect(() => {
+    // 设备已认证且在线时上报运行状态心跳（在线、应用版本），后台设备管理页据此显示（对齐 WPF #613）。
+    // 心跳是看板信息：失败只吞掉，绝不影响收银；后台不发，回前台立即补发一次。
+    if (!runtimeStatus || !deviceAuthorized || connectivity !== "online") {
+      return undefined;
+    }
+    let lastRunAtMs = Date.now();
+    const send = () => {
+      lastRunAtMs = Date.now();
+      void runtimeStatus.report().catch(() => undefined);
+    };
+    if (AppState.currentState === "active") send();
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      const intervalMs = getBackgroundPollingIntervalMs(
+        new Date(),
+        RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS,
+      );
+      if (!isBackgroundPollDue(Date.now(), lastRunAtMs, intervalMs)) return;
+      send();
+    }, RUNTIME_STATUS_HEARTBEAT_INTERVAL_MS);
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") send();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [connectivity, deviceAuthorized, runtimeStatus]);
 
   useEffect(() => {
     if (!controller || connectivity === "checking") return undefined;

@@ -62,6 +62,14 @@ export interface CodeLabelTarget {
   discountRate: number;
 }
 
+/**
+ * 自动打印时，普通标签打完后是否还要补打折扣标签：折扣率为大于 0 的有限数才补打。
+ * 口径与手动「折扣标签」按钮一致（storePrice.discountRate > 0），null / undefined / 0 / 负数 / NaN 都不补打。
+ */
+export function shouldAutoPrintDiscountLabel(discountRate: number | null | undefined): boolean {
+  return typeof discountRate === "number" && Number.isFinite(discountRate) && discountRate > 0;
+}
+
 export type ScannedCodeLabel = CodeLabelTarget | { kind: "product" } | { kind: "clearance" };
 
 /**

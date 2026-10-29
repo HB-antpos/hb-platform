@@ -2552,9 +2552,62 @@ export function registerIosReviewAppRoutes(
     },
   );
 
-  register(transport, ["POST"], "/react/v1/promotions/store/grid", () => ({
-    data: page(state().promotions),
-  }));
+  // 店级促销状态分段：与后端 ApplyStoreStatusFilter 同口径（已结束优先，其次停用，再按开始时间）。
+  const reviewPromotionStatus = (promotion: JsonRecord, now: number) => {
+    const startsAt = Date.parse(String(promotion.effectiveStart ?? ""));
+    const endsAt = Date.parse(String(promotion.effectiveEnd ?? ""));
+    if (Number.isFinite(endsAt) && endsAt < now) return "ended";
+    if (promotion.isEnabled === false) return "disabled";
+    if (Number.isFinite(startsAt) && startsAt > now) return "upcoming";
+    return "active";
+  };
+  // 只算绑定了当前分店（未软删除）的促销；未绑定分店的不属于任何分店，与真实接口一致。
+  const isBoundToStore = (promotion: JsonRecord, storeCode: string) => {
+    const stores = Array.isArray(promotion.stores) ? promotion.stores : [];
+    return stores.some((store) => {
+      const link = asRecord(store);
+      return link.isDeleted !== true && String(link.storeCode ?? "") === storeCode;
+    });
+  };
+  register(transport, ["POST"], "/react/v1/promotions/store/grid", ({ body }) => {
+    const status = String(asRecord(body).status ?? "").toLowerCase();
+    const now = Date.parse(state().now);
+    const items = state().promotions.filter(
+      (promotion) => !status || status === "all" || reviewPromotionStatus(promotion, now) === status,
+    );
+    return { data: page(items) };
+  });
+  // 注意：两个固定路径必须注册在下面 /store/{id} 正则之前（按注册顺序匹配），否则会被当成促销 ID。
+  register(transport, ["GET"], "/react/v1/promotions/store/status-counts", ({ query }) => {
+    const storeCode = query.get("storeCode") ?? "";
+    const now = Date.parse(state().now);
+    const counts = { active: 0, upcoming: 0, disabled: 0, ended: 0, total: 0 };
+    for (const promotion of state().promotions) {
+      if (promotion.isDeleted === true || !isBoundToStore(promotion, storeCode)) continue;
+      counts[reviewPromotionStatus(promotion, now)] += 1;
+      counts.total += 1;
+    }
+    return { data: counts };
+  });
+  register(transport, ["GET"], "/react/v1/promotions/store/by-product", ({ query }) => {
+    const productCode = (query.get("productCode") ?? "").trim();
+    const storeCode = query.get("storeCode") ?? "";
+    const now = Date.parse(state().now);
+    const items = state().promotions.filter((promotion) => {
+      const products = Array.isArray(promotion.products) ? promotion.products : [];
+      const endsAt = Date.parse(String(promotion.effectiveEnd ?? ""));
+      return (
+        promotion.isDeleted !== true
+        && !(Number.isFinite(endsAt) && endsAt < now)
+        && isBoundToStore(promotion, storeCode)
+        && products.some((product) => {
+          const link = asRecord(product);
+          return link.isDeleted !== true && String(link.productCode ?? "") === productCode;
+        })
+      );
+    });
+    return { data: clone(items) };
+  });
   register(transport, ["POST"], "/react/v1/promotions/store", ({ body }) => {
     const current = state();
     const promotion: JsonRecord = {
@@ -2650,7 +2703,7 @@ export function registerIosReviewAppRoutes(
         .filter((promotion) => {
           const products = Array.isArray(promotion.products) ? promotion.products : [];
           const stores = Array.isArray(promotion.stores) ? promotion.stores : [];
-          // 与真实接口一致：软删除关联既不能匹配商品/门店，也不能阻止总部活动判定。
+          // 与真实接口一致：软删除关联不能匹配商品/门店；未绑定任何分店的活动不再当成全店活动返回。
           const activeStores = stores.filter(
             (store) => asRecord(store).isDeleted !== true,
           );
@@ -2663,7 +2716,7 @@ export function registerIosReviewAppRoutes(
               );
             },
           );
-          const storeMatches = activeStores.length === 0 || activeStores.some(
+          const storeMatches = activeStores.some(
             (store) => String(asRecord(store).storeCode ?? "") === storeCode,
           );
           const startsAt = Date.parse(String(promotion.effectiveStart ?? ""));

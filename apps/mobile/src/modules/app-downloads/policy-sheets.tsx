@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Chip, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { sortStoresByName } from "@/shared/utils/name-sort";
 import {
   confirmationLabels,
   fieldLabels,
@@ -264,6 +265,8 @@ export function StoreScopeFields({
   onToggle: (guid: string) => void;
   copy: Copy;
 }) {
+  // 目标分店多选芯片统一按分店名字排序（接口原序不保证）。
+  const sortedStores = useMemo(() => sortStoresByName(stores), [stores]);
   return (
     <View style={styles.group}>
       <Text style={styles.groupTitle}>{copy.editor.scope}</Text>
@@ -277,7 +280,7 @@ export function StoreScopeFields({
       />
       {scope === "stores" ? (
         <View style={styles.chips}>
-          {stores.map((store) => (
+          {sortedStores.map((store) => (
             <Chip
               key={store.storeGuid}
               selected={selected.includes(store.storeGuid)}

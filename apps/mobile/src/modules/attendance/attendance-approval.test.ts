@@ -3,6 +3,7 @@ import {
   buildAttendanceApprovalReviewRequest,
   getSupplementalAttendanceApprovalDetail,
   isKnownAttendanceApprovalSourceType,
+  parsePublicHolidayPayHours,
   validateAttendanceMealBreakApproval,
   validateAttendanceOvertimeApproval,
 } from "./attendance-approval";
@@ -119,5 +120,20 @@ assert.equal(
   }),
   "remarkRequired",
 );
+
+// 带薪公假确认（卡 B）：批准体带 approvedPaidHours，工时 0 < h ≤ 24、最多 2 位小数。
+assert.equal(isKnownAttendanceApprovalSourceType("PublicHolidayPay"), true);
+assert.deepEqual(
+  buildAttendanceApprovalReviewRequest({ approvalGuid: "a", remark: " ", approvedPaidHours: 7.6 }),
+  { reviewRemark: undefined, approvedPaidHours: 7.6 },
+);
+assert.equal("approvedPaidHours" in buildAttendanceApprovalReviewRequest({ approvalGuid: "a" }), false);
+assert.equal(parsePublicHolidayPayHours("7.6"), 7.6);
+assert.equal(parsePublicHolidayPayHours("7.666"), 7.67);
+assert.equal(parsePublicHolidayPayHours("24"), 24);
+assert.equal(parsePublicHolidayPayHours("0"), null);
+assert.equal(parsePublicHolidayPayHours("24.5"), null);
+assert.equal(parsePublicHolidayPayHours("abc"), null);
+assert.equal(parsePublicHolidayPayHours(" "), null);
 
 console.log("attendance-approval.test.ts: ok");

@@ -1,4 +1,8 @@
 import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
+import {
+  formatRuntimeAppVersion,
+  RuntimeStatusReporter,
+} from "@hb/pos-sync/core/sync/runtime-status-reporter";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -30,7 +34,7 @@ import {
 import { HbposCatalogFileSync } from "../../features/catalog/catalog-file-sync";
 import { ExpoCatalogFileStore } from "../../features/catalog/expo-catalog-file-store";
 import type { SettingsPaymentSettingsInput } from "../../features/settings";
-import { createApiEntryModeCoordinatorFor } from "../api/api-entry-mode-store";
+import { getApiEntryModeCoordinator } from "../api/api-entry-mode-store";
 import {
   createAxiosHbposTransport,
   createFreshCashierAxiosHbposTransport,
@@ -181,6 +185,8 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     scanner: Readonly<{ router: HidScannerRouter }>;
     applicationLog: ApplicationLogRuntime;
     updateIdentity: ExpoPosUpdateIdentity;
+    /** 设备运行状态心跳（在线、应用版本），由运行时工作桥按节奏触发；失败由调用方吞掉。 */
+    runtimeStatus: Pick<RuntimeStatusReporter, "report">;
     /** 原生壳版本号与 build 号，供登录页、收银页显示，路由层无需直接加载原生模块。 */
     nativeAppVersion: NativeAppVersion;
   }>;
@@ -385,8 +391,9 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
     Constants.expoConfig?.extra as HbposExtraConfig | undefined;
   const secureStore = new ExpoSecureStoreAdapter();
   // POS API 首选入口：先从本机（AsyncStorage）读取记住的值喂给共享选择器（失败静默，保持默认 edge），
-  // 必须赶在第一个 API 请求之前；之后每次 receipt-profile/sync 的服务端取值会覆盖它。
-  const apiEntryMode = createApiEntryModeCoordinatorFor();
+  // 必须赶在第一个 API 请求之前；之后每次 receipt-profile/sync 的服务端取值会覆盖它
+  // （设置页的「本机手动指定」例外：存在时优先于后台值，规则见协调器）。
+  const apiEntryMode = getApiEntryModeCoordinator();
   await apiEntryMode.restore();
   const attendanceSecurity =
     createExpoAttendanceSecurityAdapter();
@@ -1289,6 +1296,10 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       scanner: Object.freeze({ router: scannerRouter }),
       applicationLog: activeApplicationLog,
       updateIdentity,
+      runtimeStatus: new RuntimeStatusReporter({
+        api: deviceApi,
+        appVersion: formatRuntimeAppVersion(appVersion, updateIdentity),
+      }),
       nativeAppVersion: resolveNativeAppVersion({
         applicationVersion: Application.nativeApplicationVersion,
         constantsVersion: Constants.nativeAppVersion,

@@ -55,11 +55,14 @@ public static class AttendanceWorkSessionCalculator
             }
 
             openSegment.ClockOut = AttendancePunchProjection.ToDto(punch);
-            openSegment.DurationMinutes = Math.Max(
-                0,
-                (int)Math.Round(
-                    (punch.PunchTimeUtc - openSegment.ClockIn!.PunchTimeUtc).TotalMinutes,
-                    MidpointRounding.AwayFromZero));
+            // 午夜自动下班卡的时间是系统补的 24:00，不是真实下班时间：该段不计时长（不计薪），等店长填实际时间。
+            openSegment.DurationMinutes = punch.IsSystemAutoClockOut
+                ? 0
+                : Math.Max(
+                    0,
+                    (int)Math.Round(
+                        (punch.PunchTimeUtc - openSegment.ClockIn!.PunchTimeUtc).TotalMinutes,
+                        MidpointRounding.AwayFromZero));
             openSegment.Status = "Break";
             openSegment = null;
         }
@@ -82,7 +85,11 @@ public static class AttendanceWorkSessionCalculator
         }
 
         var scheduledEnd = schedule.WorkDate.Date.Add(schedule.EndTime);
+        // 最后一段由系统自动下班卡闭合 = 员工其实漏打下班：不能定稿（否则 24:00 会算成迟走和加班），按漏下班处理。
+        var autoClosedBySystem = result.Segments.Count > 0
+            && result.Segments[^1].ClockOut?.IsSystemAutoClockOut == true;
         var canFinalize = !result.HasOpenSegment
+            && !autoClosedBySystem
             && result.CompletedSegmentCount > 0
             && (result.CompletedSegmentCount >= segmentLimit
                 || result.Segments[^1].ClockOut!.PunchTimeLocal
@@ -143,8 +150,9 @@ public static class AttendanceWorkSessionCalculator
             ? RoundOvertimeMinutes(finalClockOut.Value - scheduledEnd)
             : 0;
         result.CandidateOvertimeMinutes = result.EarlyOvertimeMinutes + result.LateOvertimeMinutes;
-        result.HasMissingClockOut = result.HasOpenSegment
-            && nowLocal > scheduledEnd.AddMinutes(earlyLeaveGraceMinutes);
+        result.HasMissingClockOut = autoClosedBySystem
+            || (result.HasOpenSegment
+                && nowLocal > scheduledEnd.AddMinutes(earlyLeaveGraceMinutes));
         result.ScheduleState = result.HasMissingClockOut
             ? "MissingClockOut"
             : result.HasOpenSegment
@@ -191,5 +199,6 @@ internal static class AttendancePunchProjection
         Source = item.Source,
         SupersedesPunchGuid = item.SupersedesPunchGuid,
         AdjustmentGuid = item.AdjustmentGuid,
+        IsSystemAutoClockOut = item.IsSystemAutoClockOut,
     };
 }

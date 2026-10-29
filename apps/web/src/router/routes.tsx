@@ -16,6 +16,7 @@ import {
   InboxOutlined,
   IdcardOutlined,
   KeyOutlined,
+  LinkOutlined,
   MailOutlined,
   MoneyCollectOutlined,
   NumberOutlined,
@@ -79,6 +80,8 @@ const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashR
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
+const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
+const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
 const PosAdminDeviceRegistrationPage = lazy(() => import('../pages/PosAdmin/DeviceRegistration'))
 const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/SupplierManagement'))
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
@@ -174,6 +177,7 @@ const iconMap = {
   GiftOutlined: <GiftOutlined />,
   InboxOutlined: <InboxOutlined />,
   IdcardOutlined: <IdcardOutlined />,
+  LinkOutlined: <LinkOutlined />,
   MailOutlined: <MailOutlined />,
   UserOutlined: <UserOutlined />,
   TeamOutlined: <TeamOutlined />,
@@ -215,8 +219,8 @@ const ACCOUNTS_NAV_GROUP: NavGroupDefinition = {
   title: 'menu.groupAccounts',
   icon: 'TeamOutlined',
   tabs: [
-    { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
     { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole', keepAlive: true, element: <SystemUsersPage /> },
+    { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
     { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole', keepAlive: true, element: <SystemRolesPage /> },
     { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole', keepAlive: true, element: <SystemPermissionsPage /> },
   ],
@@ -279,6 +283,38 @@ const SETTLEMENT_CASH_NAV_GROUP: NavGroupDefinition = {
   ],
 }
 
+const SCHEDULE_ATTENDANCE_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/attendance',
+  title: 'menu.scheduleAttendance',
+  icon: 'CalendarOutlined',
+  tabs: [
+    // 考勤审核已并入页内「考勤记录」后面的子标签（?tab=review，由页面按 canReviewAttendance 显示）；
+    // 只有审核权限的账号也要能进入本页，所以入口权限是「排班查看或审核任一」。
+    // 侧栏「排班考勤」菜单仍带待审数角标（见 AdminLayout）。旧地址 /pos-admin/attendance-review 见下方重定向路由。
+    {
+      path: '/pos-admin/schedule-attendance',
+      title: 'menu.scheduleAttendance',
+      accessKey: 'canViewAttendanceSchedule',
+      anyAccessKeys: ['canViewAttendanceSchedule', 'canReviewAttendance'],
+      keepAlive: true,
+      element: <PosAdminScheduleAttendancePage />,
+    },
+  ],
+}
+
+const ATTENDANCE_PAYROLL_NAV_GROUP: NavGroupDefinition = {
+  path: '/pos-admin/payroll',
+  title: 'menu.attendancePayroll',
+  icon: 'AccountBookOutlined',
+  tabs: [
+    // 工时统计（打卡查看权限）/ 工资表 / 个人时薪表（Attendance.Payroll.View），任一可见。
+    { path: '/pos-admin/attendance-payroll', title: 'menu.attendancePayroll', accessKey: 'canViewAttendanceHours', keepAlive: true, element: <PosAdminAttendancePayrollPage /> },
+    // MYOB 对接：连接与映射（Myob.Connection.Manage）/ 员工绑定（Myob.Employee.Bind）/ 发薪公司（Attendance.Payroll.Edit），三者任一可进入，页内按各自权限显示页签。
+    // 不保活：授权完成后后端重定向回 /pos-admin/myob?myob=connected|error，页面必须按新进入重新加载并读取参数。
+    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob', keepAlive: false, element: <PosAdminMyobPage /> },
+  ],
+}
+
 export const NAV_GROUPS: NavGroupDefinition[] = [
   DEVICES_NAV_GROUP,
   ACCOUNTS_NAV_GROUP,
@@ -287,6 +323,8 @@ export const NAV_GROUPS: NavGroupDefinition[] = [
   FACE_RECOGNITION_NAV_GROUP,
   PRODUCTS_PRICING_NAV_GROUP,
   SETTLEMENT_CASH_NAV_GROUP,
+  SCHEDULE_ATTENDANCE_NAV_GROUP,
+  ATTENDANCE_PAYROLL_NAV_GROUP,
 ]
 
 /** 合并页展开成路由：一个可见菜单项 + 每个标签一条隐藏路由（地址不变），全部渲染同一个合并页外壳。 */
@@ -311,7 +349,8 @@ function navGroupRoutes(group: NavGroupDefinition): AppRouteItem[] {
         hidden: true,
         // 按组缓存外壳；敏感标签由外壳在切走 / 离开时自行卸载（见 NavGroupPage）。
         keepAlive: true,
-        accessKey: tab.accessKey,
+        // 声明了 anyAccessKeys 的标签以它为准（路由守卫里 accessKey 与 anyAccessKeys 要同时满足，不能两个都写）。
+        ...(tab.anyAccessKeys?.length ? { anyAccessKeys: tab.anyAccessKeys } : { accessKey: tab.accessKey }),
         activeMenu: group.path,
         navGroup: group.path,
       },
@@ -842,16 +881,9 @@ export const appRoutes: AppRouteItem[] = [
         },
         element: <PosAdminAdvertisementsPage />,
       },
-      {
-        path: '/pos-admin/schedule-attendance',
-        meta: {
-          title: 'menu.scheduleAttendance',
-          icon: 'CalendarOutlined',
-          keepAlive: true,
-          accessKey: 'canViewAttendanceSchedule',
-        },
-        element: <PosAdminScheduleAttendancePage />,
-      },
+      // 排班考勤（含考勤审核）、工时与工资（含 MYOB 对接）各合并为一个侧栏菜单项，标签沿用原地址。
+      ...navGroupRoutes(SCHEDULE_ATTENDANCE_NAV_GROUP),
+      ...navGroupRoutes(ATTENDANCE_PAYROLL_NAV_GROUP),
       {
         path: '/pos-admin/cash-register-users',
         meta: {
@@ -873,6 +905,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewEmployeeOperationLogs',
         },
         element: <PosAdminEmployeeLogsPage />,
+      },
+      {
+        // 旧「考勤审核」地址（书签、分享链接、工时页「去审核」）转到排班考勤页内的「考勤审核」子标签。
+        path: '/pos-admin/attendance-review',
+        meta: {
+          title: 'menu.attendanceReview',
+          hidden: true,
+          accessKey: 'canReviewAttendance',
+          activeMenu: '/pos-admin/attendance',
+        },
+        element: <Navigate to="/pos-admin/schedule-attendance?tab=review" replace />,
       },
       {
         // 旧「老系统操作日志」地址（书签、分享链接）转到合并页的老收银来源。
@@ -1158,7 +1201,9 @@ export function getBreadcrumbItems(pathname: string, access: AccessControl, curr
   if (navGroup) {
     const groupTitleKey = titleMap.get(navGroup)
     const groupTitles = groupTitleKey ? [i18n.t(groupTitleKey)] : []
-    const tabTitles = route.path === navGroup ? [] : [i18n.t(route.meta.title)]
+    // 标签与合并页同名时（排班考勤 / 工时与工资的首个标签）只保留一级，避免面包屑重复。
+    const tabTitle = i18n.t(route.meta.title)
+    const tabTitles = route.path === navGroup || groupTitles.includes(tabTitle) ? [] : [tabTitle]
     return [...titles, ...groupTitles, ...tabTitles].map((title) => ({ title }))
   }
 

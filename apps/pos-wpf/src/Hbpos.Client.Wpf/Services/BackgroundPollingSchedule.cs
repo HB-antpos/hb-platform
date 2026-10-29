@@ -46,6 +46,34 @@ public static class BackgroundPollingSchedule
         return timeOfDay >= QuietStart || timeOfDay < QuietEnd;
     }
 
+    /// <summary>下一次轮询延迟的下限，避免静默窗口结束瞬间算出接近 0 的延迟而空转。</summary>
+    internal static readonly TimeSpan MinimumPollDelay = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// 「每次 tick 后重算下一次延迟」的轮询（挂单角标、收银员会话刷新）使用：
+    /// - 白天：原间隔；
+    /// - 夜间静默窗口：<see cref="QuietInterval"/>（绝不比原间隔更短），但不会越过窗口终点——
+    ///   延迟被截到「距 06:00 的剩余时间」，保证窗口一结束就立刻补一次轮询并恢复原间隔，
+    ///   而不是最多再等 5 分钟（早上开门第一单前权限 / 挂单数据已是最新）。
+    /// 夜间最多每 5 分钟一次，窗口末尾那次可能更短，但不低于 <see cref="MinimumPollDelay"/>。
+    /// </summary>
+    public static TimeSpan GetNextPollDelay(DateTimeOffset localNow, TimeSpan normalInterval)
+    {
+        var interval = GetInterval(localNow, normalInterval);
+        if (!IsQuietHours(localNow))
+        {
+            return interval;
+        }
+
+        var timeOfDay = localNow.TimeOfDay;
+        // 跨午夜：22:00 之后要等到次日 06:00；00:00–06:00 直接等到当天 06:00。
+        var untilQuietEnd = timeOfDay >= QuietStart
+            ? TimeSpan.FromDays(1) - timeOfDay + QuietEnd
+            : QuietEnd - timeOfDay;
+        var delay = untilQuietEnd < interval ? untilQuietEnd : interval;
+        return delay < MinimumPollDelay ? MinimumPollDelay : delay;
+    }
+
     /// <summary>
     /// 返回当前应使用的轮询间隔：夜间静默窗口内取 <see cref="QuietInterval"/>（但绝不比原间隔更短），其余时间用原间隔。
     /// </summary>

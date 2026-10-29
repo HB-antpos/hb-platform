@@ -1,9 +1,14 @@
 import type { AccessControl } from '../types/auth'
 import type { NavGroupDefinition, NavGroupTab } from '../types/router'
 
+/** 标签的访问键：声明了 anyAccessKeys 就用它（任一为真），否则只看 accessKey。 */
+export function getNavGroupTabAccessKeys(tab: NavGroupTab): (keyof AccessControl)[] {
+  return tab.anyAccessKeys?.length ? tab.anyAccessKeys : [tab.accessKey]
+}
+
 /** 当前账号能看到的标签（逐个按原页面的 accessKey 过滤，顺序不变）。 */
 export function getVisibleNavGroupTabs(group: NavGroupDefinition, access: AccessControl): NavGroupTab[] {
-  return group.tabs.filter((tab) => access[tab.accessKey] === true)
+  return group.tabs.filter((tab) => getNavGroupTabAccessKeys(tab).some((key) => access[key] === true))
 }
 
 /** 当前地址对应的标签；地址不属于本组（合并页被缓存在后台）时返回 undefined。 */
@@ -34,5 +39,5 @@ export function shouldMountNavGroupTab(
 
 /** 合并页的任一标签有权限即可见。 */
 export function getNavGroupAccessKeys(group: NavGroupDefinition): (keyof AccessControl)[] {
-  return Array.from(new Set(group.tabs.map((tab) => tab.accessKey)))
+  return Array.from(new Set(group.tabs.flatMap(getNavGroupTabAccessKeys)))
 }

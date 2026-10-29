@@ -36,7 +36,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
             typeof(PosOperationAuditItem),
             typeof(PosOperationAuditFlag),
             typeof(PosOperationAuditReview),
-            typeof(BlazorApp.Shared.Models.Product));
+            typeof(BlazorApp.Shared.Models.Product),
+            typeof(BlazorApp.Shared.Models.Store));
     }
 
     [Fact]
@@ -139,6 +140,42 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
 
         Assert.Empty(result.Items);
         Assert.Equal(0, result.Total);
+    }
+
+    // 仓库经理（含中文/历史别名）不限分店：即使名下没有任何 UserStore 关联也能看全部分店，详情同样可读。
+    [Theory]
+    [InlineData("WarehouseManager")]
+    [InlineData("仓库经理")]
+    [InlineData("仓库管理员")]
+    public async Task QueryAsync_WarehouseManagerSeesAllStoresWithoutAssignedStores(string role)
+    {
+        var now = DateTime.UtcNow;
+        await InsertAuditAsync("bri", "BRI", now.AddMinutes(-3));
+        var otherId = await InsertAuditAsync("syd", "SYD", now.AddMinutes(-2));
+        await InsertAuditAsync("other", "OTHER", now.AddMinutes(-1));
+        var service = CreateService(role, [], assignedStoreCodes: []);
+
+        var all = await service.QueryAsync(new OperationAuditQueryDto(), now);
+        var one = await service.QueryAsync(new OperationAuditQueryDto { StoreCode = "SYD" }, now);
+        var detail = await service.GetDetailAsync(otherId);
+
+        Assert.Equal(["BRI", "OTHER", "SYD"], all.Items.Select(item => item.StoreCode).Order(StringComparer.Ordinal));
+        Assert.Single(one.Items);
+        Assert.Equal(OperationAuditDetailAccessStatus.Found, detail.Status);
+    }
+
+    // 同时兼任店长时，仓库经理的不限分店口径优先，不能被店长的“关联分店为空”拒绝。
+    [Fact]
+    public async Task QueryAsync_WarehouseManagerWhoIsAlsoStoreManagerStaysUnrestricted()
+    {
+        var now = DateTime.UtcNow;
+        await InsertAuditAsync("bri", "BRI", now.AddMinutes(-2));
+        await InsertAuditAsync("syd", "SYD", now.AddMinutes(-1));
+        var service = CreateService(["WarehouseManager", "StoreManager"], [], assignedStoreCodes: []);
+
+        var result = await service.QueryAsync(new OperationAuditQueryDto(), now);
+
+        Assert.Equal(2, result.Total);
     }
 
     [Fact]
@@ -642,8 +679,108 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         Assert.Null(result.Data);
     }
 
+    [Fact]
+    public async Task QueryAsync_LocalRangeIsConvertedPerStoreTimeZone()
+    {
+        // 现场案例：同一个门店墙钟 16:24:52，昆士兰店（UTC+10）= 06:24:52Z，悉尼店（UTC+11）= 05:24:52Z。
+        await InsertStoreAsync("QLD1", "Australia/Brisbane");
+        await InsertStoreAsync("SYD1", "Australia/Sydney");
+        await InsertAuditAsync("qld-in-range", "QLD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd-in-range", "SYD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        // 墙钟 15:24:52 / 17:24:52，各自在范围之外。
+        await InsertAuditAsync("qld-early", "QLD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd-late", "SYD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        // 门店表里没有的编码按悉尼处理。
+        await InsertAuditAsync("unknown-in-range", "UNKNOWN", new DateTime(2026, 10, 27, 5, 25, 0, DateTimeKind.Utc));
+        var service = CreateService("Admin", withProductDb: true);
+
+        var result = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T16:20:00", ToLocal = "2026-10-27T16:29:00" },
+            new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(
+            ["qld-in-range", "syd-in-range", "unknown-in-range"],
+            result.Items.Select(item => item.ReceiptNumber).OrderBy(value => value, StringComparer.Ordinal).ToArray());
+        Assert.Equal("Australia/Brisbane", result.Items.Single(item => item.ReceiptNumber == "qld-in-range").StoreTimeZoneId);
+        Assert.Equal("Australia/Sydney", result.Items.Single(item => item.ReceiptNumber == "syd-in-range").StoreTimeZoneId);
+        Assert.Equal("Australia/Sydney", result.Items.Single(item => item.ReceiptNumber == "unknown-in-range").StoreTimeZoneId);
+    }
+
+    [Fact]
+    public async Task QueryAsync_LocalRangeStillRespectsStoreFilterAndManageableScope()
+    {
+        await InsertStoreAsync("QLD1", "Australia/Brisbane");
+        await InsertStoreAsync("SYD1", "Australia/Sydney");
+        await InsertAuditAsync("qld", "QLD1", new DateTime(2026, 10, 27, 6, 24, 52, DateTimeKind.Utc));
+        await InsertAuditAsync("syd", "SYD1", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var now = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+        var query = new OperationAuditQueryDto { FromLocal = "2026-10-27T16:00:00", ToLocal = "2026-10-27T17:00:00" };
+
+        var onlyQld = await CreateService("Admin", withProductDb: true)
+            .QueryAsync(new OperationAuditQueryDto { FromLocal = query.FromLocal, ToLocal = query.ToLocal, StoreCodes = ["QLD1"] }, now);
+        var manager = await CreateService("StoreManager", ["SYD1"], withProductDb: true).QueryAsync(query, now);
+
+        Assert.Equal(["qld"], onlyQld.Items.Select(item => item.ReceiptNumber).ToArray());
+        Assert.Equal(["syd"], manager.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task QueryAsync_LocalRangeFallsBackToSydneyWithoutStoreData()
+    {
+        // 没有主库连接（测试替身 / 查询失败）时所有门店按悉尼换算，不能因此查空或抛错。
+        await InsertAuditAsync("syd", "ANY", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var service = CreateService("Admin");
+
+        var result = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T16:20:00", ToLocal = "2026-10-27T16:29:00" },
+            new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(["syd"], result.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task QueryAsync_InvertedLocalRangeReturnsEmptyAndZonedValuesAreIgnored()
+    {
+        await InsertAuditAsync("syd", "ANY", new DateTime(2026, 10, 27, 5, 24, 52, DateTimeKind.Utc));
+        var service = CreateService("Admin");
+        var now = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+
+        var inverted = await service.QueryAsync(
+            new OperationAuditQueryDto { FromLocal = "2026-10-27T17:00:00", ToLocal = "2026-10-27T16:00:00" }, now);
+        // 带 Z 的 FromLocal 无效，整体回退到 FromUtc / ToUtc。
+        var zoned = await service.QueryAsync(
+            new OperationAuditQueryDto
+            {
+                FromLocal = "2026-10-27T16:20:00Z",
+                ToLocal = "2026-10-27T16:29:00Z",
+                FromUtc = new DateTimeOffset(2026, 10, 27, 5, 0, 0, TimeSpan.Zero),
+                ToUtc = new DateTimeOffset(2026, 10, 27, 6, 0, 0, TimeSpan.Zero),
+            }, now);
+
+        Assert.Empty(inverted.Items);
+        Assert.Equal(["syd"], zoned.Items.Select(item => item.ReceiptNumber).ToArray());
+    }
+
+    private async Task InsertStoreAsync(string storeCode, string timeZoneId)
+    {
+        await _db.Insertable(new BlazorApp.Shared.Models.Store
+        {
+            StoreCode = storeCode,
+            StoreName = storeCode,
+            TimeZoneId = timeZoneId,
+        }).ExecuteCommandAsync();
+    }
+
     private OperationAuditQueryService CreateService(
         string role,
+        IReadOnlyList<string>? storeCodes = null,
+        bool scopeAllowed = true,
+        bool withProductDb = false,
+        IReadOnlyList<string>? assignedStoreCodes = null
+    ) => CreateService([role], storeCodes, scopeAllowed, withProductDb, assignedStoreCodes);
+
+    private OperationAuditQueryService CreateService(
+        IReadOnlyList<string> roles,
         IReadOnlyList<string>? storeCodes = null,
         bool scopeAllowed = true,
         bool withProductDb = false,
@@ -651,7 +788,7 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
     )
     {
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, "test-user"), new Claim(ClaimTypes.Role, role)],
+            roles.Select(role => new Claim(ClaimTypes.Role, role)).Prepend(new Claim(ClaimTypes.NameIdentifier, "test-user")),
             "Test"
         );
         var accessor = new HttpContextAccessor

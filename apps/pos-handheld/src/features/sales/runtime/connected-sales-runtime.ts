@@ -1807,5 +1807,8 @@ function normalizeLookupCode(value: string): string {
 /** 目录接口使用 0..1 小数；购物车合同统一保存整数基点。 */
 function discountRateToBasisPoints(discountRate: number | null): number {
   if (discountRate === null || !Number.isFinite(discountRate)) return 0;
-  return Math.min(10_000, Math.max(0, Math.round(discountRate * 10_000)));
+  // 折扣保护：目录折扣是自动给的，不能全免。≥ 1（100% 及以上）与负数是脏数据（1002 店 10-24/25：
+  // 分店价被写成 1，旧代码夹成 100% 折扣整行 $0），一律忽略按原价卖；封顶 9999 基点（99.99%）。
+  if (discountRate <= 0 || discountRate >= 1) return 0;
+  return Math.min(9_999, Math.round(discountRate * 10_000));
 }

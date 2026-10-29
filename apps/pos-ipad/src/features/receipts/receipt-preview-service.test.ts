@@ -160,3 +160,38 @@ test("预览的打印时间固定使用订单成交时间", async () => {
     (line) => line.kind === "text" && line.text === "*** Paid ***",
   ));
 });
+
+test("退款订单（净额为负）预览与补打状态行打印 Refund，而不是 Paid（对齐 WPF #885）", async () => {
+  const refund = order({
+    originalOrderGuid: "99999999-9999-4999-8999-999999999999",
+    total: createAud(-1_000),
+    discount: createAud(0),
+    actualAmount: createAud(-1_000),
+    lines: [{
+      ...order().lines[0]!,
+      quantity: "-1",
+      unitPrice: createAud(1_000),
+      discount: createAud(0),
+      actualAmount: createAud(-1_000),
+      kind: "return",
+      returnSourceKey: "receipt:o:l",
+      originalOrderGuid: "99999999-9999-4999-8999-999999999999",
+      originalOrderDetailGuid: "line-orig",
+    }],
+    tenders: [{
+      tenderGuid: "tender-refund",
+      method: "card",
+      amount: createAud(-1_000),
+      reference: "4111111111111234",
+      reservationToken: null,
+    }],
+  });
+  const preview = await service(refund).getPreview(refund.orderGuid);
+
+  assert.ok(preview?.lines.some(
+    (line) => line.kind === "text" && line.text === "*** Refund ***",
+  ));
+  assert.equal(preview?.lines.some(
+    (line) => line.kind === "text" && line.text === "*** Paid ***",
+  ), false);
+});

@@ -143,6 +143,10 @@
   },
   "cashierBarcode": {
     "title": "Personal code",
+    "symbology": {
+      "qr": "QR code",
+      "barcode": "Barcode"
+    },
     "loading": "Loading personal code...",
     "empty": "No personal code yet. Refresh to create one.",
     "loadFailed": "Failed to load personal code.",

@@ -5,6 +5,7 @@ using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -177,18 +178,6 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             }
         }
 
-        private static List<string> GetDetailBarcodesForMultiCode(StoreLocalSupplierInvoiceDetails detail)
-        {
-            var additionalBarcodes = DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson);
-            if (additionalBarcodes.Count > 0)
-                return additionalBarcodes;
-
-            // 关键位置：旧流程没有副条码字段，仍然使用明细 Barcode 新增一条多码，保持历史行为。
-            return string.IsNullOrWhiteSpace(detail.Barcode)
-                ? new List<string>()
-                : NormalizeAdditionalBarcodeValues(null, new[] { detail.Barcode });
-        }
-
         private static string? NormalizePastedTextField(string? value, int maxLength)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -267,6 +256,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             var detailsToBackfill = new List<StoreLocalSupplierInvoiceDetails>();
             var pricingStrategyCache = new Dictionary<decimal, PricingStrategy?>();
 
+            // 防御性复核：锁内校验器已经拦过一次，这里在写入前最后一刻再查一遍，保证没有任何入口能绕过，
+            // 把别的供应商已占用（主条码/分店多码/一品多码）的条码再建成第二条商品。冲突行计失败，调用方整单回滚。
+            var barcodeOwners = await ProductDuplicateGuard.FindBarcodeOwnersAsync(
+                db,
+                details.Select(detail => detail.Barcode)
+            );
+            var createdBarcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var detail in details)
             {
                 // 验证必填字段
@@ -287,6 +284,23 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 if (detail.PurchasePrice == null || detail.PurchasePrice <= 0)
                 {
                     result.Errors.Add($"创建商品失败：进货价必须大于0");
+                    result.FailedCount++;
+                    continue;
+                }
+
+                var mainBarcode = ProductDuplicateGuard.NormalizeBarcode(detail.Barcode)!;
+                if (barcodeOwners.TryGetValue(mainBarcode, out var owners) && owners.Count > 0)
+                {
+                    result.Errors.Add(
+                        $"创建商品失败：{ProductDuplicateGuard.BuildBarcodeConflictMessage(mainBarcode, owners)}"
+                    );
+                    result.FailedCount++;
+                    continue;
+                }
+
+                if (!createdBarcodes.Add(mainBarcode))
+                {
+                    result.Errors.Add($"创建商品失败：本次执行内条码重复 {mainBarcode}");
                     result.FailedCount++;
                     continue;
                 }
@@ -407,6 +421,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         additionalBarcode,
                         activeStores,
                         calculatedRetailPrice,
+                        // 新建商品时各分店主价都等于本次算出的零售价，多码直接跟随它。
+                        _ => calculatedRetailPrice,
                         now,
                         userName,
                         productSetCodesToCreate,
@@ -742,6 +758,12 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 .Distinct()
                 .ToList();
 
+            // 一品多码（SetType=2）的价格跟随主条码：总部关系取本单分店主价，分店投影取各自分店主价，
+            // 分店主价缺失时回退商品主档价。进货单明细的零售价通常为空，不能作为多码价（否则收银出 $0.00）。
+            var productRetailPrices = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            var storeMainPrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            // 商品主档当前的主条码，用来判断发票主条码是否已归属该商品。
+            var productMainBarcodes = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             if (productCodesToUpdate.Count > 0)
             {
                 var products = await db.Queryable<Product>()
@@ -750,8 +772,26 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         && productCodesToUpdate.Contains(p.ProductCode)
                         && p.IsDeleted == false
                     )
-                    .Select(p => new { p.ProductCode, p.ProductType })
+                    .Select(p => new { p.ProductCode, p.ProductType, p.RetailPrice, p.Barcode })
                     .ToListAsync();
+                foreach (var product in products)
+                {
+                    productRetailPrices.TryAdd(product.ProductCode!, product.RetailPrice);
+                    productMainBarcodes.TryAdd(product.ProductCode!, product.Barcode);
+                }
+
+                var storePrices = await db.Queryable<StoreRetailPrice>()
+                    .Where(x =>
+                        x.ProductCode != null
+                        && productCodesToUpdate.Contains(x.ProductCode)
+                        && x.IsActive
+                        && x.IsDeleted == false
+                        && x.StoreRetailPriceValue != null
+                    )
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.StoreRetailPriceValue })
+                    .ToListAsync();
+                foreach (var price in storePrices.Where(x => x.StoreRetailPriceValue > 0m))
+                    storeMainPrices.TryAdd(BuildStorePriceKey(price.StoreCode, price.ProductCode), price.StoreRetailPriceValue!.Value);
 
                 var uuidsToUpdate = products
                     .Where(p => p.ProductType != 2)
@@ -777,8 +817,10 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             // 关键位置：多码可能早已挂在同一商品上（之前执行过或其它入口加过），已有的关系与分店记录跳过，
             // 只补缺失的分店，并沿用已有关系的多码商品编码，保证总部与分店仍指向同一个多码商品。
             // 按大写比较，与校验口径（SqlFunc.ToUpper）一致，不依赖数据库排序规则是否区分大小写。
+            // 这里按「主条码未归属」取最大集合（主条码 + 副码）做已有关系的预查；逐行是否真写主条码见下方 mainBarcodeOwned。
             var requestedBarcodes = details
-                .SelectMany(GetDetailBarcodesForMultiCode)
+                .SelectMany(detail => LocalSupplierInvoicesBarcodeRules.ResolveMultiCodeBarcodes(
+                    detail.Barcode, detail.AdditionalBarcodesJson, mainBarcodeOwned: false))
                 .Select(x => x.Trim().ToUpperInvariant())
                 .Where(x => x.Length > 0)
                 .Distinct()
@@ -817,7 +859,17 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     result.FailedCount++;
                     continue;
                 }
-                var barcodesToAdd = GetDetailBarcodesForMultiCode(detail);
+                // 关键位置：主条码已是商品主档条码、或已挂为本店多码时视为已归属，只写副码；
+                // 否则主条码是这行要登记的新条码，与副码一并写入（校验端已排除被其他商品占用的情况）。
+                productMainBarcodes.TryGetValue(detail.ProductCode, out var productMainBarcode);
+                var mainBarcode = detail.Barcode.Trim();
+                var mainBarcodeOwned = string.Equals(productMainBarcode?.Trim(), mainBarcode, StringComparison.OrdinalIgnoreCase)
+                    || existingStoreMultiCodes.Contains(BuildStoreMultiCodeKey(
+                        LocalSupplierInvoicesRules.ResolveDetailStoreCode(detail.StoreCode, header.StoreCode),
+                        detail.ProductCode,
+                        mainBarcode));
+                var barcodesToAdd = LocalSupplierInvoicesBarcodeRules.ResolveMultiCodeBarcodes(
+                    detail.Barcode, detail.AdditionalBarcodesJson, mainBarcodeOwned);
                 if (barcodesToAdd.Count == 0)
                 {
                     result.Errors.Add($"添加多码失败：条码不能为空");
@@ -835,12 +887,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         .Where(storeCode => !existingStoreMultiCodes.Contains(
                             BuildStoreMultiCodeKey(storeCode, detail.ProductCode, barcodeToAdd)))
                         .ToList();
+                    productRetailPrices.TryGetValue(detail.ProductCode!, out var productRetailPrice);
+                    var invoiceStoreCode = detail.StoreCode ?? header.StoreCode;
                     AppendMultiCodeEntities(
                         detail,
                         detail.ProductCode!,
                         barcodeToAdd,
                         missingStores,
-                        detail.RetailPrice,
+                        ResolveMainPrice(storeMainPrices, invoiceStoreCode, detail.ProductCode!, productRetailPrice),
+                        storeCode => ResolveMainPrice(storeMainPrices, storeCode, detail.ProductCode!, productRetailPrice),
                         now,
                         userName,
                         productSetCodesToCreate,
@@ -875,12 +930,26 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         private static string BuildStoreMultiCodeKey(string? storeCode, string? productCode, string? barcode) =>
             $"{storeCode?.Trim()}|{productCode?.Trim()}|{barcode?.Trim()}";
 
+        private static string BuildStorePriceKey(string? storeCode, string? productCode) =>
+            $"{storeCode?.Trim()}|{productCode?.Trim()}";
+
+        /// <summary>主条码价：分店主价（&gt;0）优先，缺失时回退商品主档价；都没有时为 null。</summary>
+        private static decimal? ResolveMainPrice(
+            IReadOnlyDictionary<string, decimal> storeMainPrices,
+            string? storeCode,
+            string productCode,
+            decimal? productRetailPrice) =>
+            storeMainPrices.TryGetValue(BuildStorePriceKey(storeCode, productCode), out var storePrice)
+                ? storePrice
+                : productRetailPrice is > 0m ? productRetailPrice : null;
+
         private static void AppendMultiCodeEntities(
             StoreLocalSupplierInvoiceDetails detail,
             string productCode,
             string barcodeToAdd,
             IEnumerable<string> activeStores,
             decimal? retailPrice,
+            Func<string, decimal?> storeRetailPrice,
             DateTime now,
             string userName,
             List<ProductSetCode> productSetCodesToCreate,
@@ -926,7 +995,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     MultiBarcode = barcodeToAdd,
                     // 与全局关系保持相同规则，门店投影等待同事务统一回算。
                     PurchasePrice = null,
-                    MultiCodeRetailPrice = retailPrice,
+                    MultiCodeRetailPrice = storeRetailPrice(storeCode),
                     DiscountRate = detail.DiscountRate,
                     IsAutoPricing = detail.AutoPricing ?? true,
                     IsSpecialProduct = detail.IsSpecialProduct ?? false,

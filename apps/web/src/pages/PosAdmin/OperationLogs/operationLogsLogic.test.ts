@@ -29,6 +29,29 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
+const localRangeBase = {
+  startUtc: '2026-10-27T05:20:24.000Z',
+  endUtc: '2026-10-27T05:29:24.000Z',
+  storeCode: '',
+  cashierKeyword: '',
+  deviceCode: '',
+  deviceSystem: '',
+  operationType: '',
+  outcome: '',
+  productKeyword: '',
+  orderGuid: '',
+  keyword: '',
+  page: 1,
+  pageSize: 20,
+  sortBy: 'occurredAtUtc',
+  sortOrder: 'desc',
+} as const
+
+function pickLocalRange(query: ReturnType<typeof buildOperationAuditQuery>) {
+  const { fromLocal, toLocal, fromUtc, toUtc } = query
+  return { ...(fromLocal ? { fromLocal } : {}), ...(toLocal ? { toLocal } : {}), fromUtc, toUtc }
+}
+
 assertDeepEqual(
   buildOperationAuditQuery({
     startUtc: '2026-07-01T00:00:00.000Z',
@@ -537,3 +560,20 @@ assertDeepEqual(
 }
 
 console.log('operationLogsLogic.test: ok')
+
+// 门店本地时间范围：传了就带 fromLocal / toLocal 给后端按分店时区换算；只给一端或空串时不带，沿用 UTC 范围。
+assertDeepEqual(
+  {
+    withLocal: pickLocalRange(buildOperationAuditQuery({ ...localRangeBase, startLocal: '2026-10-27T16:20:24', endLocal: ' 2026-10-27T16:29:24 ' })),
+    onlyOne: pickLocalRange(buildOperationAuditQuery({ ...localRangeBase, startLocal: '2026-10-27T16:20:24' })),
+    blank: pickLocalRange(buildOperationAuditQuery({ ...localRangeBase, startLocal: ' ', endLocal: '' })),
+    none: pickLocalRange(buildOperationAuditQuery(localRangeBase)),
+  },
+  {
+    withLocal: { fromLocal: '2026-10-27T16:20:24', toLocal: '2026-10-27T16:29:24', fromUtc: '2026-10-27T05:20:24.000Z', toUtc: '2026-10-27T05:29:24.000Z' },
+    onlyOne: { fromUtc: '2026-10-27T05:20:24.000Z', toUtc: '2026-10-27T05:29:24.000Z' },
+    blank: { fromUtc: '2026-10-27T05:20:24.000Z', toUtc: '2026-10-27T05:29:24.000Z' },
+    none: { fromUtc: '2026-10-27T05:20:24.000Z', toUtc: '2026-10-27T05:29:24.000Z' },
+  },
+  '门店本地时间范围透传，缺一端或为空时不传',
+)

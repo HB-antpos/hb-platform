@@ -5,7 +5,7 @@ namespace BlazorApp.Api.Services.Attendance;
 
 /// <summary>
 /// 排班用餐规则（后端口径）。默认次数规则与移动端 attendance-my-week.ts 保持一致：
-/// 班次超过 9 小时 2 次、超过 4.5 小时 1 次，每次 30 分钟；排班上指定过次数（含 0）就用指定值。
+/// 班次超过 9 小时 2 次、达到 4.5 小时（含）1 次，每次 30 分钟；排班上指定过次数（含 0）就用指定值。
 /// 此前只有移动端会算，后端不知道有效次数，所以下班检查、工时扣除都要在这里再算一遍。
 /// </summary>
 public static class AttendanceMealBreakRules
@@ -38,11 +38,11 @@ public static class AttendanceMealBreakRules
         return endTime > startTime ? minutes : minutes + 1440;
     }
 
-    /// <summary>按班次时长推算的默认用餐次数；门槛均为「超过」，正好 4.5 / 9 小时按低一档。</summary>
+    /// <summary>按班次时长推算的默认用餐次数：达到 4.5 小时（含）1 次；超过 9 小时 2 次，正好 9 小时仍按 1 次。</summary>
     public static int DefaultCount(int durationMinutes)
     {
         if (durationMinutes > 9 * 60) return 2;
-        if (durationMinutes > 270) return 1;
+        if (durationMinutes >= 270) return 1;
         return 0;
     }
 
@@ -57,9 +57,14 @@ public static class AttendanceMealBreakRules
     public static int RequiredCount(int effectiveCount, int workedMinutes) =>
         Math.Min(Math.Max(0, effectiveCount), Math.Max(0, workedMinutes) / WorkMinutesPerMeal);
 
-    /// <summary>计薪时从工时里扣除的用餐分钟数；是否休息过都按排班扣，未休息的差额靠审批加回。</summary>
-    public static int DeductionMinutes(int effectiveCount, int workedMinutes) =>
-        RequiredCount(effectiveCount, workedMinutes) * MealBreakMinutes;
+    /// <summary>
+    /// 计薪时从工时里扣除的用餐分钟数；是否休息过都按排班扣，未休息的差额靠审批加回。
+    /// 段间满 30 分钟的空档本身已不在实际工时里（员工打了下班卡），每个空档抵掉一次扣餐，避免同一顿饭扣两次：
+    /// 扣餐 = max(0, min(有效次数, ⌊实际工时 / 4h⌋) − 合格空档数) × 30。
+    /// </summary>
+    public static int DeductionMinutes(int effectiveCount, int workedMinutes, int qualifyingGapCount = 0) =>
+        Math.Max(0, RequiredCount(effectiveCount, workedMinutes) - Math.Max(0, qualifyingGapCount))
+        * MealBreakMinutes;
 
     /// <summary>相邻班段之间满 30 分钟的空档个数；每个空档算一次已用餐。</summary>
     public static int CountQualifyingGapBreaks(IReadOnlyList<AttendanceShiftSegmentDto> segments)

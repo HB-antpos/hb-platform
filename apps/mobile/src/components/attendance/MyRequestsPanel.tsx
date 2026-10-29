@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Card, Icon, IconButton, SegmentedButtons, Text, TextInput } from "react-native-paper";
+import { useRouter } from "expo-router";
+import { ActivityIndicator, Button, Card, Icon, Text } from "react-native-paper";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import {
   cancelLeaveRequest,
-  createLeaveRequest,
   getMyAttendancePunchAdjustments,
   getMyLeaveRequests,
 } from "@/modules/attendance/api";
@@ -14,13 +13,13 @@ import {
   isPendingRequestStatus,
   leaveDayCount,
   type MyRequestItem,
-  shiftDate,
 } from "@/modules/attendance/attendance-my-week";
 import { resolveAttendancePunchDisplayTime } from "@/modules/attendance/attendance-device-time";
-import type { AttendanceLeaveType } from "@/modules/attendance/types";
+import { isPaidLeaveType } from "@/modules/attendance/leave-types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
+import { leaveHomeHref } from "./leave/leave-route-guard";
 
 const STATUS_TONES: Record<string, AttendanceStatusTone> = {
   pending: "warning",
@@ -45,54 +44,26 @@ function hhmm(value?: string) {
   return timePart?.slice(0, 5) || "--:--";
 }
 
-/** 日期前后切换：请假日期跨度短，左右点按比手输或二级日历更快。 */
-function DateStepper({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const { t } = useAppTranslation(["attendance", "common"]);
-  return (
-    <View style={styles.dateBox}>
-      <Text variant="labelSmall" style={styles.muted}>{label}</Text>
-      <View style={styles.dateRow}>
-        <IconButton
-          icon="chevron-left"
-          size={18}
-          accessibilityLabel={t("myAttendance.leaveSheet.previousDay", { label })}
-          onPress={() => onChange(shiftDate(value, -1))}
-        />
-        <Text variant="titleSmall" style={styles.tabular}>{value}</Text>
-        <IconButton
-          icon="chevron-right"
-          size={18}
-          accessibilityLabel={t("myAttendance.leaveSheet.nextDay", { label })}
-          onPress={() => onChange(shiftDate(value, 1))}
-        />
-      </View>
-    </View>
-  );
-}
-
 /**
  * 员工「申请」页：发起补卡/请假，并集中查看本人申请进度（含审核人与驳回原因）。
+ * 「请假」进入「申请假期」页（带薪病假 / 年假 / 其他请假），原请假表单已移到 leave/OtherLeaveSheet。
  */
 export function MyRequestsPanel({
   storeCode,
-  today,
   canApplyLeave,
   onRequestCorrection,
   onMessage,
 }: {
   storeCode?: string;
+  /** 保留以免改动调用方；申请假期页改用后端给的门店今天。 */
   today: string;
   canApplyLeave: boolean;
   onRequestCorrection: () => void;
   onMessage: (message: string) => void;
 }) {
-  const { t } = useAppTranslation(["attendance", "common"]);
+  const { t } = useAppTranslation(["attendance", "common", "attendanceLeave"]);
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const [leaveSheetVisible, setLeaveSheetVisible] = useState(false);
-  const [leaveType, setLeaveType] = useState<AttendanceLeaveType>("AnnualLeave");
-  const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(today);
-  const [reason, setReason] = useState("");
 
   const adjustmentsQuery = useQuery({
     queryKey: ["attendance", "my", "punch-adjustments"],
@@ -104,16 +75,6 @@ export function MyRequestsPanel({
     enabled: canApplyLeave,
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["attendance", "my", "leave-requests"] });
-  const createLeaveMutation = useMutation({
-    mutationFn: createLeaveRequest,
-    onSuccess: async () => {
-      setLeaveSheetVisible(false);
-      setReason("");
-      onMessage(t("myAttendance.leaveSheet.submitted"));
-      await invalidate();
-    },
-    onError: (error) => onMessage(error instanceof Error ? error.message : t("messages.saveFailed")),
-  });
   const cancelLeaveMutation = useMutation({
     mutationFn: cancelLeaveRequest,
     onSuccess: invalidate,
@@ -126,16 +87,9 @@ export function MyRequestsPanel({
   );
   const pending = items.filter((item) => isPendingRequestStatus(item.status));
   const done = items.filter((item) => !isPendingRequestStatus(item.status));
-  const dayCount = leaveDayCount(startDate, endDate);
   const isLoading = adjustmentsQuery.isLoading || leavesQuery.isLoading;
 
-  const openLeaveSheet = () => {
-    setLeaveType("AnnualLeave");
-    setStartDate(today);
-    setEndDate(today);
-    setReason("");
-    setLeaveSheetVisible(true);
-  };
+  const openLeaveHome = () => router.push(leaveHomeHref(storeCode));
 
   const renderItem = (item: MyRequestItem, isLast: boolean) => {
     const key = statusKey(item.status);
@@ -154,7 +108,10 @@ export function MyRequestsPanel({
     } else if (item.leave) {
       const leave = item.leave;
       title = t("myAttendance.requests.leaveTitle", {
-        leaveType: t(`leaveTypes.${leave.leaveType}`, leave.leaveType),
+        // 带薪三类的名称在 attendanceLeave 命名空间。
+        leaveType: isPaidLeaveType(leave.leaveType)
+          ? t(`attendanceLeave:leaveTypes.${leave.leaveType}`)
+          : t(`leaveTypes.${leave.leaveType}`, leave.leaveType),
         range: leave.startDate === leave.endDate
           ? monthDay(leave.startDate)
           : `${monthDay(leave.startDate)}–${monthDay(leave.endDate)}`,
@@ -207,7 +164,7 @@ export function MyRequestsPanel({
           <Text variant="labelLarge">{t("adjustment.open")}</Text>
         </Pressable>
         {canApplyLeave ? (
-          <Pressable accessibilityRole="button" onPress={openLeaveSheet} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
+          <Pressable accessibilityRole="button" onPress={openLeaveHome} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
             <Icon source="beach" size={20} color={HB_COLORS.action} />
             <Text variant="labelLarge">{t("myAttendance.requests.applyLeave")}</Text>
           </Pressable>
@@ -237,64 +194,6 @@ export function MyRequestsPanel({
         </Card.Content>
       </Card>
 
-      <BusinessSheet
-        visible={leaveSheetVisible}
-        title={t("myAttendance.requests.applyLeave")}
-        onDismiss={() => setLeaveSheetVisible(false)}
-        footer={(
-          <Button
-            mode="contained"
-            disabled={!storeCode || dayCount === 0 || createLeaveMutation.isPending}
-            loading={createLeaveMutation.isPending}
-            onPress={() => createLeaveMutation.mutate({
-              storeCode,
-              leaveType,
-              startDate,
-              endDate,
-              reason: reason.trim() || undefined,
-            })}
-          >
-            {t("myAttendance.leaveSheet.submit", { count: dayCount })}
-          </Button>
-        )}
-      >
-        <View style={styles.content}>
-          <SegmentedButtons
-            value={leaveType}
-            onValueChange={(value) => setLeaveType(value as AttendanceLeaveType)}
-            buttons={[
-              { value: "AnnualLeave", label: t("leaveTypes.AnnualLeave") },
-              { value: "SickLeave", label: t("leaveTypes.SickLeave") },
-            ]}
-          />
-          <View style={styles.dateBoxes}>
-            <DateStepper
-              label={t("fields.startDate")}
-              value={startDate}
-              onChange={(value) => {
-                setStartDate(value);
-                // 开始日期后移超过结束日期时，结束日期跟着走，避免出现 0 天。
-                if (value > endDate) setEndDate(value);
-              }}
-            />
-            <DateStepper label={t("fields.endDate")} value={endDate} onChange={setEndDate} />
-          </View>
-          {dayCount === 0 ? (
-            <Text variant="bodySmall" style={styles.dangerText}>{t("myAttendance.leaveSheet.invalidRange")}</Text>
-          ) : null}
-          <TextInput
-            mode="outlined"
-            dense
-            label={t("fields.reason")}
-            value={reason}
-            onChangeText={setReason}
-            maxLength={500}
-          />
-          {leaveType === "SickLeave" ? (
-            <Text variant="bodySmall" style={styles.muted}>{t("myAttendance.leaveSheet.sickHint")}</Text>
-          ) : null}
-        </View>
-      </BusinessSheet>
     </>
   );
 }
@@ -322,16 +221,6 @@ const styles = StyleSheet.create({
   },
   content: { gap: HB_SPACING.xs },
   dangerText: { color: HB_COLORS.danger },
-  dateBox: {
-    borderColor: HB_COLORS.outline,
-    borderRadius: HB_RADIUS.control,
-    borderWidth: StyleSheet.hairlineWidth,
-    flex: 1,
-    paddingTop: HB_SPACING.xs,
-    paddingHorizontal: HB_SPACING.xs,
-  },
-  dateBoxes: { flexDirection: "row", gap: HB_SPACING.xs },
-  dateRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   flexText: { flex: 1 },
   groupGap: { marginTop: HB_SPACING.sm },
   item: {
@@ -344,6 +233,5 @@ const styles = StyleSheet.create({
   itemLast: { borderBottomWidth: 0 },
   muted: { color: HB_COLORS.textSecondary },
   pressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  tabular: { fontVariant: ["tabular-nums"] },
   withdraw: { alignSelf: "flex-end" },
 });

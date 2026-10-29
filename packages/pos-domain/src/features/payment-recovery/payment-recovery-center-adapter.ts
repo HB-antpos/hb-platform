@@ -1,4 +1,9 @@
 import type { PaymentRecoveryCenterRecord } from "./payment-recovery-center-contract";
+import {
+  MANUAL_EVIDENCE_NOT_ENTERED,
+  MANUAL_NOTE_NOT_ENTERED,
+  normalizeVerificationNote,
+} from "./payment-recovery-presenter";
 
 import type {
   ManualPaymentVerificationInput,
@@ -65,7 +70,13 @@ export class PaymentRecoveryCenterAdapter implements PaymentRecoveryCenterServic
     this.showProcessedRecord(recordId);
   }
   public async submitManualVerification(input: ManualPaymentVerificationInput) {
-    await this.run("manual-verifying", () => this.operations.submitManualVerification(input));
+    // 人工确认为准：证据与备注都可以不填，这里补占位值满足账本的非空约束。
+    const normalized: ManualPaymentVerificationInput = {
+      ...input,
+      evidenceReference: input.evidenceReference?.trim() || MANUAL_EVIDENCE_NOT_ENTERED,
+      note: normalizeVerificationNote(input.note ?? "") || MANUAL_NOTE_NOT_ENTERED,
+    };
+    await this.run("manual-verifying", () => this.operations.submitManualVerification(normalized));
     this.showProcessedRecord(input.recordId);
   }
   public async checkRefundSettlements(): Promise<void> {

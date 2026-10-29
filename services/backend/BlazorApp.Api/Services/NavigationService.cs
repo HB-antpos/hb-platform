@@ -80,7 +80,7 @@ namespace BlazorApp.Api.Services
                     // 设备与远程：设备管理 / 紧急登录密钥 / RustDesk 远程维护。
                     new() { Path = "/system/devices", TitleKey = "menu.groupDevicesRemote", Icon = "BuildOutlined", AnyPermissions = new List<string> { Permissions.DeviceRegistration.View, Permissions.System.ManageSettings } },
                     // 账号与权限：员工个人信息 / 用户 / 角色 / 权限。Web 用户管理只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
-                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.View, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
+                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.ViewManagedStore, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
                     // 系统监控：中心日志 / 性能质量基线 / 定时统计任务。
                     new() { Path = "/system/monitoring", TitleKey = "menu.groupMonitoring", Icon = "FileTextOutlined", AnyPermissions = new List<string> { Permissions.System.ViewLogs, Permissions.System.ViewPerformanceBaseline, Permissions.System.ManageScheduledTasks } },
                     // 支付与发票：支付终端配置 / 发票邮箱配置。
@@ -172,7 +172,12 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     // 节日贺卡分店填报统计：总部查看全部分店的剩余贺卡填报；独立权限码，店长的填报 / 本店查看权限不能打开。
                     new() { Path = "/pos-admin/seasonal-card-stats",  TitleKey = "menu.seasonalCardStats",      Icon = "GiftOutlined",               Permission = Permissions.SeasonalCards.Remaining.ViewAllStores },
-                    new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
+                    // 排班考勤合并页：排班考勤 / 考勤审核两个标签，任一权限即可见（标签再按各自权限显示）。
+                    // 考勤审核与 Web canReviewAttendance 一致，只认审批 / 驳回接口的权限。
+                    new() { Path = "/pos-admin/attendance",            TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           AnyPermissions = new List<string> { Permissions.Attendance.Schedule.ViewStore, Permissions.Attendance.Approval.ReviewManagedStore } },
+                    // 工时与工资合并页：工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见（页内再按各自权限显示标签与页签）。
+                    // 工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View；MYOB 对接页签：连接 / 分店映射、员工绑定看独立权限码（默认不授予任何角色）；发薪公司页签看 Attendance.Payroll.Edit，但工资编辑不隐含查看，不单独打开本菜单。
+                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
@@ -396,6 +401,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "attendance-hours",
+                TitleKey = "tabs.attendanceHours",
+                Icon = "clock-outline",
+                // 移动端店长「工时统计」：与 Web 工时页签同用 Punch.ViewManagedStore，接口再按管理分店校验；
+                // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.Attendance.Punch.ViewManagedStore,
+                Order = 56,
+            },
+            new()
+            {
                 RouteName = "seasonal-cards",
                 TitleKey = "tabs.seasonalCards",
                 Icon = "gift-outline",
@@ -413,7 +428,12 @@ namespace BlazorApp.Api.Services
                 TitleKey = "tabs.users",
                 Icon = "account-group-outline",
                 // 「员工管理」只认 ViewStoreStaff（Users.View 通过别名满足）；「用户管理」user-admin 仍用 Users.View。
-                Permission = Permissions.Users.ViewStoreStaff,
+                // 「人员管理」合并入口新增「资料」页签（员工个人信息维护），只持有 EmployeeProfiles.ViewManagedStore 的账号也要能进入。
+                AnyPermissions = new[]
+                {
+                    Permissions.Users.ViewStoreStaff,
+                    Permissions.EmployeeProfiles.ViewManagedStore,
+                },
                 Order = 57,
             },
             new()
@@ -880,7 +900,10 @@ namespace BlazorApp.Api.Services
                 Permissions.SupplierPreorder.Order,
                 Permissions.SupplierPreorder.Manage,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
-                Permissions.DeviceRegistration.MobileActivationCodes.Manage
+                Permissions.DeviceRegistration.MobileActivationCodes.Manage,
+                // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
+                Permissions.Myob.Connection.Manage,
+                Permissions.Myob.Employee.Bind
             );
         }
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { act, cleanup, render, waitFor } from "@testing-library/react-native";
 import * as Network from "expo-network";
 import {
@@ -266,12 +266,67 @@ test("系统持续报告离线时，周期任务仍重新探测并识别后端�
     expect(usePosShellStore.getState().connectivity).toBe("offline");
   });
 
+  // 周期任务按“距上次探测是否已满 30 秒”判定到期：模拟真实定时器 30 秒后才触发。
+  const realNow = Date.now();
+  jest.spyOn(Date, "now").mockReturnValue(realNow + 30_000);
   await act(async () => {
     periodicProbe?.();
   });
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(usePosShellStore.getState().connectivity).toBe("online");
+  });
+});
+
+describe("周期探测节奏（对齐 WPF #926 夜间降频）", () => {
+  async function renderAt(hour: number, reachable: boolean) {
+    jest.useFakeTimers({ now: new Date(2026, 9, 27, hour, 0, 0) });
+    const fetchMock = jest.fn(
+      async () => ({ ok: reachable }),
+    ) as unknown as typeof fetch;
+    (globalThis as { fetch: typeof fetch }).fetch = fetchMock;
+    await act(async () => {
+      await render(<NetworkStatusBridge />);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("白天每 30 秒周期探测一次", async () => {
+    const fetchMock = await renderAt(12, true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("夜间且后端可达时放慢到 5 分钟", async () => {
+    const fetchMock = await renderAt(23, true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(4 * 60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(70_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("夜间但后端不可达时仍按 30 秒重试，恢复后尽快翻回在线", async () => {
+    const fetchMock = await renderAt(23, false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

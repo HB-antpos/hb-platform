@@ -84,6 +84,7 @@ namespace BlazorApp.Api.Services
                         RoleName = "Admin",
                         Description = "系统管理员 - 拥有所有权限",
                         IsActive = true,
+                        Level = BlazorApp.Shared.Constants.Permissions.RoleLevels.SuperAdmin,
                         CreatedAt = DateTime.UtcNow,
                     },
                     new Role
@@ -92,6 +93,7 @@ namespace BlazorApp.Api.Services
                         RoleName = "Manager",
                         Description = "店铺管理员 - 管理店铺数据",
                         IsActive = true,
+                        Level = BlazorApp.Shared.Constants.Permissions.RoleLevels.Manager,
                         CreatedAt = DateTime.UtcNow,
                     },
                     new Role
@@ -100,6 +102,7 @@ namespace BlazorApp.Api.Services
                         RoleName = "User",
                         Description = "普通用户 - 查看权限",
                         IsActive = true,
+                        Level = BlazorApp.Shared.Constants.Permissions.RoleLevels.User,
                         CreatedAt = DateTime.UtcNow,
                     },
                 };

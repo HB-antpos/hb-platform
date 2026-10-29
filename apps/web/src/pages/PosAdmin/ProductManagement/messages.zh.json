@@ -1,6 +1,14 @@
 {
   "posAdmin": {
     "products": {
+      "duplicateBarcode": {
+        "title": "该条码已有商品，请选用已有商品",
+        "intro": "条码 {{barcode}} 已属于下面的商品（任何供应商的存活商品都算占用），不能重复新建：",
+        "supplier": "供应商",
+        "more": "另有 {{count}} 个商品未列出",
+        "hint": "请在商品列表里搜索该条码，选用已有商品；如果这确实是另一件商品，请先更换条码。",
+        "ok": "知道了"
+      },
       "supplierCategory": {
         "column": "供应商分类",
         "columnHint": "商品在供应商网站上的分类。Hot Bargain（200）的商品等同仓库分类；商品分类用于 POS，仓库分类来自 HQ。",

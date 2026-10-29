@@ -376,6 +376,10 @@
   },
   "staffBarcode": {
     "title": "Staff personal code",
+    "symbology": {
+      "qr": "QR code",
+      "barcode": "Barcode"
+    },
     "emptyDescription": "This staff member has no personal code yet. Create one to show the QR code, or create and print one label.",
     "printCount": "Confirmed prints: {{count}}",
     "printer": "Label printer: {{printer}} · {{status}}",

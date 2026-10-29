@@ -38,5 +38,13 @@ namespace BlazorApp.Shared.Models
         /// </summary>
         [SugarColumn(IsNullable = true)]
         public int? MealBreakCount { get; set; }
+
+        /// <summary>软删除时间（UTC）；与 IsDeleted 一起供「已删除排班」列表与恢复使用。列由迁移 20261026.001 添加。</summary>
+        [SugarColumn(IsNullable = true)]
+        public DateTime? DeletedAt { get; set; }
+
+        /// <summary>软删除操作者用户名。</summary>
+        [SugarColumn(IsNullable = true, Length = 100)]
+        public string? DeletedBy { get; set; }
     }
 }

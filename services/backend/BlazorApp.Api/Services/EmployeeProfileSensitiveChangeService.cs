@@ -23,8 +23,9 @@ public sealed class EmployeeProfileSensitiveChangeService
     public const string ReviewScopeForbiddenCode =
         "EMPLOYEE_PROFILE_SENSITIVE_REVIEW_SCOPE_FORBIDDEN";
 
-    private static readonly string[] StoreManagerRoleAliases = ["StoreManager", "店长", "经理"];
-    private static readonly string[] ProtectedTargetRoleAliases =
+    // 员工个人信息维护（EmployeeProfileManagedService）与敏感资料审核共用同一套「店长 / 受保护目标」判定。
+    internal static readonly string[] StoreManagerRoleAliases = ["StoreManager", "店长", "经理"];
+    internal static readonly string[] ProtectedTargetRoleAliases =
     [
         .. Permissions.SuperAdminRoleNames,
         "WarehouseManager", "仓库经理", "StoreManager", "店长", "经理",

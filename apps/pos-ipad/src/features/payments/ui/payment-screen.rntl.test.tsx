@@ -3705,3 +3705,78 @@ test("新收款被活动退货拦截后，显示原退货恢复提示并允许�
   await fireEvent.press(screen.getByTestId("payment-back"));
   expect(onBack).toHaveBeenCalledTimes(1);
 });
+
+test("Lay-by 订单总额不足 $50 时弹窗说明起订金额与当前金额，可改用普通付款或继续（对齐 WPF #891）", async () => {
+  const onToggle = jest.fn();
+  const { presenter } = createUiPresenter({
+    fieldIssue: "installment-total-below-minimum",
+    total: aud(3_200),
+    remaining: aud(3_200),
+    checkout: {
+      flow: "installment-create",
+      lines: [],
+      installmentCustomer: null,
+      cash: { tenderedCents: 0, appliedCents: 0, changeCents: 0 },
+      canConfirm: false,
+      fullInstallmentConfirmationRequired: false,
+    },
+  });
+  const screen = await render(
+    <PaymentScreen
+      installmentModeControl={{
+        enabled: true,
+        locked: false,
+        issue: null,
+        onToggle,
+      }}
+      locale="en"
+      presenter={presenter}
+      showStatusStrip={false}
+    />,
+  );
+
+  expect(screen.getByTestId("payment-installment-minimum-notice")).toBeTruthy();
+  expect(screen.getByText("Lay-by minimum not met")).toBeTruthy();
+  expect(
+    screen.getByText(/at least \$50\.00; this order is \$32\.00\./),
+  ).toBeTruthy();
+
+  await fireEvent.press(screen.getByTestId("payment-installment-minimum-regular"));
+  expect(onToggle).toHaveBeenCalledWith(false);
+  await waitFor(() =>
+    expect(screen.queryByTestId("payment-installment-minimum-notice")).toBeNull(),
+  );
+  await screen.unmount();
+});
+
+test("普通付款或金额达标时不弹 Lay-by 起订金额提示；关闭后同一金额不再重复提示", async () => {
+  const regular = createUiPresenter({ fieldIssue: "installment-total-below-minimum" });
+  const regularScreen = await render(
+    <PaymentScreen locale="en" presenter={regular.presenter} showStatusStrip={false} />,
+  );
+  expect(regularScreen.queryByTestId("payment-installment-minimum-notice")).toBeNull();
+  await regularScreen.unmount();
+
+  const { presenter } = createUiPresenter({
+    fieldIssue: "installment-total-below-minimum",
+    total: aud(4_000),
+    remaining: aud(4_000),
+    checkout: {
+      flow: "installment-create",
+      lines: [],
+      installmentCustomer: null,
+      cash: { tenderedCents: 0, appliedCents: 0, changeCents: 0 },
+      canConfirm: false,
+      fullInstallmentConfirmationRequired: false,
+    },
+  });
+  const screen = await render(
+    <PaymentScreen locale="en" presenter={presenter} showStatusStrip={false} />,
+  );
+  expect(screen.getByTestId("payment-installment-minimum-notice")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("payment-installment-minimum-dismiss"));
+  await waitFor(() =>
+    expect(screen.queryByTestId("payment-installment-minimum-notice")).toBeNull(),
+  );
+  await screen.unmount();
+});

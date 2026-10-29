@@ -337,6 +337,9 @@ export function CashierLoginScreen({
                 accessibilityLabel={text.inputLabel}
                 autoFocus
                 autoCapitalize="characters"
+                // 蓝牙扫码枪不带回车时按扫码节奏自动提交（等效回车，对齐手持）；手动输入间隔大，不触发。
+                // 不启用 mediumSpeedHidSubmit：iPad 蓝牙 HID 连发很快，且软键盘手输不应被慢速判定误提交。
+                autoSubmitOnScanIdle
                 autoCorrect={false}
                 editable={!submitting && !blocked}
                 onBlur={handleBarcodeBlur}

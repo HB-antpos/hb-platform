@@ -1,3 +1,4 @@
+import { quickHistoryDateRange } from "@hb/pos-domain/features/remote-history/quick-date-range";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -26,6 +27,7 @@ import type {
   RemoteOrderHistorySummary,
   RemoteOrderPaymentPreview,
 } from "@hb/pos-domain/core/contracts/remote-history";
+import { HistoryQuickRangeRow } from "@/ui/controls/history-quick-range-row";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
 import {
   PosKeyboardAwareScrollView,
@@ -76,8 +78,13 @@ export function RemoteHistoryScreen({
   }, [presenter]);
 
   const loading = state.kind === "loading";
-  const applyFilters = () => {
-    const range = localDateRange(fromDate, toDate);
+  const applyFilters = (
+    dates: Readonly<{ from: string; to: string }> = {
+      from: fromDate,
+      to: toDate,
+    },
+  ) => {
+    const range = localDateRange(dates.from, dates.to);
     if (!range) {
       setDateInvalid(true);
       return;
@@ -148,6 +155,22 @@ export function RemoteHistoryScreen({
               testID="remote-history-date-to"
               value={toDate}
             />
+            <HistoryQuickRangeRow
+              disabled={loading || state.kind === "offline"}
+              labels={{
+                today: t("filters.quickToday"),
+                yesterday: t("filters.quickYesterday"),
+                last7days: t("filters.quickLast7Days"),
+              }}
+              onSelect={(kind) => {
+                // 设备本地日历日；点了立即查询（对齐 WPF #608）。
+                const range = quickHistoryDateRange(kind, new Date());
+                setFromDate(range.from);
+                setToDate(range.to);
+                applyFilters(range);
+              }}
+              testIDPrefix="remote-history"
+            />
             <FilterField
               label={t("filters.device")}
               onChangeText={setDeviceCode}
@@ -166,7 +189,7 @@ export function RemoteHistoryScreen({
             <ActionButton
               disabled={loading || state.kind === "offline"}
               label={t("action.apply")}
-              onPress={applyFilters}
+              onPress={() => applyFilters()}
               testID="remote-history-apply-filters"
               tone="secondary"
               wide

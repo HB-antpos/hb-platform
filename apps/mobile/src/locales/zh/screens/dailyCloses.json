@@ -138,7 +138,12 @@
     "reset": "重置",
     "backToFilters": "返回筛选",
     "viewResults": "查看结果",
-    "viewCount": "查看 {{count}} 条"
+    "viewCount": "查看 {{count}} 条",
+    "storePageTitle": "选择分店",
+    "storesDone": "完成",
+    "storesTotal": "共 {{count}} 家",
+    "storesSelected": "已选 {{count}} 家",
+    "storeEmpty": "没有匹配的分店"
   },
   "detail": {
     "title": "日结详情",

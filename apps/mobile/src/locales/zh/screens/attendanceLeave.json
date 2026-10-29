@@ -1,0 +1,185 @@
+{
+  "title": "申请假期",
+  "leaveTypes": {
+    "PaidSick": "带薪病假",
+    "PaidAnnual": "带薪年假·休息",
+    "AnnualCashOut": "带薪年假·发放"
+  },
+  "employmentType": {
+    "FullTime": "全职",
+    "PartTime": "兼职",
+    "Casual": "临时工"
+  },
+  "units": {
+    "days_one": "{{count}} 天",
+    "days_other": "{{count}} 天",
+    "weeks_one": "{{count}} 周",
+    "weeks_other": "{{count}} 周",
+    "hours": "{{hours}} h"
+  },
+  "weekday": {
+    "mon": "周一",
+    "tue": "周二",
+    "wed": "周三",
+    "thu": "周四",
+    "fri": "周五",
+    "sat": "周六",
+    "sun": "周日"
+  },
+  "date": {
+    "monthDay": "{{mm}}-{{dd}}",
+    "dayWithWeekday": "{{md}} {{weekday}}",
+    "range": "{{start}} ~ {{end}}"
+  },
+  "calendar": {
+    "title": "{{year}}年{{month}}",
+    "previousMonth": "上个月",
+    "nextMonth": "下个月",
+    "hoursTag": "{{hours}}h",
+    "notCounted": "不计工时",
+    "header": {
+      "mon": "一",
+      "tue": "二",
+      "wed": "三",
+      "thu": "四",
+      "fri": "五",
+      "sat": "六",
+      "sun": "日"
+    },
+    "months": {
+      "1": "1月",
+      "2": "2月",
+      "3": "3月",
+      "4": "4月",
+      "5": "5月",
+      "6": "6月",
+      "7": "7月",
+      "8": "8月",
+      "9": "9月",
+      "10": "10月",
+      "11": "11月",
+      "12": "12月"
+    },
+    "monthsShort": {
+      "1": "1月",
+      "2": "2月",
+      "3": "3月",
+      "4": "4月",
+      "5": "5月",
+      "6": "6月",
+      "7": "7月",
+      "8": "8月",
+      "9": "9月",
+      "10": "10月",
+      "11": "11月",
+      "12": "12月"
+    }
+  },
+  "home": {
+    "paidSick": {
+      "title": "带薪病假",
+      "line1": "有排班但生病没上班的日子",
+      "line2": "生病当天起 {{days}}内提交 · 必须拍医嘱"
+    },
+    "paidAnnual": {
+      "title": "带薪年假 · 休息",
+      "line1": "提前 ≥ {{lead}} · 一次最多 {{max}}",
+      "line2": "每个工作日 {{hours}} h，周末、公假不算"
+    },
+    "cashOut": {
+      "title": "带薪年假 · 发放（照常上班）",
+      "line1": "提前 ≥ {{lead}} · 最多 {{max}}",
+      "line2": "照常排班，另外发年假工资"
+    },
+    "other": {
+      "title": "其他请假（无薪）",
+      "line1": "沿用现在的请假"
+    },
+    "casualHint": "临时工只能申请其他请假（无薪）。",
+    "optionsFailed": "带薪假规则暂时读不到，目前只能申请其他请假。",
+    "myRequests": "我的申请",
+    "empty": "还没有请假申请"
+  },
+  "requests": {
+    "line": "{{range}} · {{amount}}",
+    "rejectedRemark": "驳回原因：{{remark}}",
+    "badge": {
+      "PaidSick": "病",
+      "PaidAnnual": "年",
+      "AnnualCashOut": "发",
+      "other": "假"
+    },
+    "status": {
+      "pending": "待审核",
+      "approved": "已批准",
+      "approvedWithHours": "已批准 · 财务核定 {{hours}} h",
+      "rejected": "已驳回",
+      "cancelled": "已撤回"
+    }
+  },
+  "sick": {
+    "title": "带薪病假",
+    "daysTitle": "生病的日子",
+    "daysAside": "只列 {{date}} 以后有排班的日子",
+    "shiftLine": "{{day}} · {{start}}–{{end}}",
+    "worked": "已上班",
+    "empty": "这几天没有可申请的排班。",
+    "footnote": "{{date}} 及以前已超过 {{days}}，不能再申请；带薪工时 = 当天排班工时扣餐。",
+    "photosTitle": "医嘱照片",
+    "photosAside": "必填，最多 {{max}} 张",
+    "reasonPlaceholder": "备注（选填），例如：发烧，看了 GP",
+    "submit": "提交",
+    "submitWithHours": "提交 · 带薪 {{hours}} h",
+    "needDay": "先选生病的日子",
+    "needPhoto": "请拍医嘱照片",
+    "photoFailed": "有照片没传上去，请重试或删除",
+    "uploading": "照片还在上传…"
+  },
+  "photo": {
+    "camera": "拍照",
+    "library": "相册",
+    "thumb": "医嘱照片 {{index}}",
+    "remove": "删除第 {{index}} 张照片",
+    "uploading": "正在上传",
+    "failed": "上传失败，点按重试",
+    "tooMany": "最多 {{max}} 张，多选的没有加入",
+    "pickFailed": "没能读取照片，请重试",
+    "cameraPermission": "没有相机权限，无法拍照",
+    "libraryPermission": "没有相册权限，无法选图",
+    "openSettings": "去设置开启"
+  },
+  "annual": {
+    "titlePaidAnnual": "带薪年假 · 休息",
+    "titleCashOut": "带薪年假 · 发放",
+    "dateTitle": "日期",
+    "earliest": "最早可选 {{date}}",
+    "to": "至",
+    "startPlaceholder": "开始日期",
+    "endPlaceholder": "结束日期",
+    "checksTitle": "规则检查",
+    "pickHint": "在日历上依次点开始日和结束日。",
+    "checkLead": "提前 {{lead}}以上（距今 {{days}}）",
+    "checkMax": "不超过 {{max}}（共 {{days}}）",
+    "checkNoSchedule": "这几天还没有已发布的排班",
+    "checkScheduleConflict": "{{dates}} 已有发布的排班",
+    "cashOutNotice": "照常排班，另外发年假工资；合规需会计确认。",
+    "hoursTitle": "申请的带薪工时",
+    "workdaysLine": "工作日 {{days}} × {{hours}} h",
+    "weekendPart": "周末 {{days}}",
+    "holidayPart": "公共假期 {{days}}",
+    "notCounted": "不算",
+    "financeNote": "最终发多少，由财务按你累计的带薪小时核定。",
+    "blockNote": "批准后 {{range}} 自动标「不能上班」，排班时这些格子会被拦住。",
+    "cashOutNote": "这些天照常排班，不会被标「不能上班」。",
+    "submit": "提交申请 · {{hours}} h",
+    "submitPlain": "提交申请"
+  },
+  "messages": {
+    "loadFailed": "读取失败",
+    "retry": "重试",
+    "submitFailed": "提交失败，请重试",
+    "notAllowed": "你没有申请假期的权限，或还没有登录。",
+    "notEligible": "临时工不能申请带薪假，可以回到上一页申请其他请假（无薪）。",
+    "unknownType": "不认识的假期类型，请返回重新选择。"
+  }
+}

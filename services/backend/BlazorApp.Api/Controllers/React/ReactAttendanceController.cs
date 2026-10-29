@@ -72,6 +72,17 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> DeleteSchedule(string scheduleGuid) =>
             Ok(await _service.DeleteScheduleAsync(scheduleGuid));
 
+        // 软删除的排班列表与找回；恢复后重新对账派生审批。
+        [HttpGet("schedules/deleted")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> GetDeletedSchedules([FromQuery] AttendanceScheduleQueryDto query) =>
+            Ok(await _service.GetDeletedSchedulesAsync(query));
+
+        [HttpPost("schedules/{scheduleGuid}/restore")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> RestoreSchedule(string scheduleGuid) =>
+            Ok(await _service.RestoreScheduleAsync(scheduleGuid));
+
         [HttpGet("my/today")]
         [Authorize(Policy = Permissions.Attendance.Schedule.ViewSelf)]
         public async Task<IActionResult> GetMyToday(
@@ -194,14 +205,28 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> CancelMyLeaveRequest(string leaveGuid) =>
             Ok(await _service.CancelMyLeaveRequestAsync(leaveGuid));
 
+        [HttpGet("my/leave-options")]
+        [Authorize(Policy = Permissions.Attendance.Leave.ApplySelf)]
+        public async Task<IActionResult> GetMyLeaveOptions([FromQuery] string? storeCode) =>
+            Ok(await _service.GetMyLeaveOptionsAsync(storeCode));
+
+        [HttpPost("managed/leave-requests/{leaveGuid}/revoke")]
+        [Authorize(Policy = Permissions.Attendance.Leave.ReviewManagedStore)]
+        public async Task<IActionResult> RevokeManagedLeaveRequest(
+            string leaveGuid,
+            [FromBody] ReviewAttendanceApprovalDto? request
+        ) => Ok(await _service.RevokeManagedLeaveRequestAsync(leaveGuid, request ?? new ReviewAttendanceApprovalDto()));
+
         [HttpPost("managed/leave-requests")]
         [Authorize(Policy = Permissions.Attendance.Leave.ReviewManagedStore)]
         public async Task<IActionResult> CreateManagedLeaveRequest(
             [FromBody] CreateManagedAttendanceLeaveRequestDto request
         ) => Ok(await _service.CreateManagedLeaveRequestAsync(request));
 
+        // 店长（Leave.ReviewManagedStore）与员工本人（Leave.ApplySelf）都可以拿签名；
+        // 两个权限是「或」关系，由服务层判断，员工的对象键限制在本人目录。
         [HttpPost("leave-attachments/upload-signature")]
-        [Authorize(Policy = Permissions.Attendance.Leave.ReviewManagedStore)]
+        [Authorize]
         public async Task<IActionResult> GetLeaveAttachmentUploadSignature(
             [FromBody] DirectUploadRequest request
         ) => Ok(await _service.GetLeaveAttachmentUploadSignatureAsync(request));
@@ -288,5 +313,53 @@ namespace BlazorApp.Api.Controllers.React
         [Authorize(Policy = Permissions.Attendance.Settings.Edit)]
         public async Task<IActionResult> UpdateSettings([FromBody] UpdateAttendanceSettingsDto request) =>
             Ok(await _service.UpdateSettingsAsync(request));
+
+        // ---- 工时统计与工资（规格第 2 节）；工资三项权限默认谁都没有，Edit / Unlock 不隐含 View ----
+
+        [HttpGet("payroll/hours")]
+        [Authorize(Policy = Permissions.Attendance.Punch.ViewManagedStore)]
+        public async Task<IActionResult> GetPayrollHours([FromQuery] AttendancePayrollQueryDto query) =>
+            Ok(await _service.GetPayrollHoursAsync(query));
+
+        [HttpGet("payroll/pay")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.View)]
+        public async Task<IActionResult> GetPayrollPay([FromQuery] AttendancePayrollQueryDto query) =>
+            Ok(await _service.GetPayrollPayAsync(query));
+
+        [HttpGet("payroll/rates")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.View)]
+        public async Task<IActionResult> GetPayRates([FromQuery] AttendancePayRateQueryDto query) =>
+            Ok(await _service.GetPayRatesAsync(query));
+
+        [HttpGet("payroll/rates/{userGuid}/history")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.View)]
+        public async Task<IActionResult> GetPayRateHistory(string userGuid, [FromQuery] string? storeCode) =>
+            Ok(await _service.GetPayRateHistoryAsync(userGuid, storeCode));
+
+        [HttpPost("payroll/rates")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
+        public async Task<IActionResult> CreatePayRate([FromBody] CreateEmployeePayRateDto request) =>
+            Ok(await _service.CreatePayRateAsync(request));
+
+        [HttpPut("payroll/periods/notes")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
+        public async Task<IActionResult> UpsertPayPeriodNote([FromBody] UpsertAttendancePayPeriodNoteDto request) =>
+            Ok(await _service.UpsertPayPeriodNoteAsync(request));
+
+        [HttpPut("payroll/periods/leave-approvals")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
+        public async Task<IActionResult> UpsertPayPeriodLeaveApproval(
+            [FromBody] UpsertAttendancePayPeriodLeaveApprovalDto request
+        ) => Ok(await _service.UpsertPayPeriodLeaveApprovalAsync(request));
+
+        [HttpPost("payroll/periods/submit")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
+        public async Task<IActionResult> SubmitPayPeriod([FromBody] AttendancePayPeriodKeyDto request) =>
+            Ok(await _service.SubmitPayPeriodAsync(request));
+
+        [HttpPost("payroll/periods/unlock")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Unlock)]
+        public async Task<IActionResult> UnlockPayPeriod([FromBody] UnlockAttendancePayPeriodDto request) =>
+            Ok(await _service.UnlockPayPeriodAsync(request));
     }
 }

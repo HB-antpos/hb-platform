@@ -127,6 +127,7 @@ import {
   compareNullableNumbers,
   compareNullableText,
   filterBooleanColumn,
+  matchesActionTypeColumnFilter,
   matchesTextColumnFilter,
   matchesNumberColumnFilter,
   parseNumberColumnFilter,
@@ -155,6 +156,9 @@ import {
   findLargePriceChangeRows,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
+  excludeDetailsFromBatchSnapshot,
+  findSkippableFailedRows,
+  isBatchExecuteValidationError,
   isPriceChangeConfirmRequiredError,
   PRICE_CHANGE_CONFIRM_RATIO,
   type LargePriceChangeRow,
@@ -193,6 +197,12 @@ import {
   isProductLinkConfirmed,
   mergeProductCheckResult,
 } from './matchedProductLink'
+import {
+  describeSuggestedProduct,
+  getRowSuggestedProducts,
+  mergeSuggestedExistingProducts,
+  type SuggestedExistingByDetail,
+} from './suggestedExistingProducts'
 import { resolveInvoiceEditGuid } from './invoiceEditRoute'
 import {
   BATCH_LINK_QUERY_CONCURRENCY,
@@ -211,6 +221,8 @@ import ProductSetCodeMaintenanceModal from './ProductSetCodeMaintenanceModal'
 import PricingEditor from './PricingEditor'
 import type { PricingEditorChange } from './pricingEditorChanges'
 import {
+  ACTION_COLUMN_FILTER_ACTION_PREFIX,
+  ACTION_COLUMN_FILTER_BUCKET_PREFIX,
   DETAIL_PROGRESS_BUCKETS,
   EXECUTED_DETAIL_ACTION,
   filterDetailsByProgressBucket,
@@ -218,6 +230,7 @@ import {
   getDetailProgressStats,
   getExecutedPercent,
   getPendingExecutionDetailGuids,
+  PENDING_DETAIL_ACTIONS,
   type DetailProgressBucket,
   type DetailProgressBucketFilter,
 } from './progressBuckets'
@@ -623,6 +636,8 @@ export default function InvoiceEditPage() {
 
   /* ---- 行内操作类型 (本地临时存储) ---- */
   const [rowActions, setRowActions] = useState<Record<string, number>>({})
+  // 商品检测给出的「建议选用的已有商品」（条码已被其他存活商品占用）：后端不落库，只存在于检测响应里，按行记在页面上。
+  const [suggestedExistingByDetail, setSuggestedExistingByDetail] = useState<SuggestedExistingByDetail>({})
 
   /* ---- 搜索 ---- */
   const [searchText, setSearchText] = useState('')
@@ -1132,6 +1147,25 @@ export default function InvoiceEditPage() {
     }),
     [t],
   )
+
+  // 操作列表头过滤：处理进度为一级，「待执行」下再按具体操作拆分；计数按全部明细（与进度条同口径），不随当前筛选变化。
+  const actionColumnFilters = useMemo(() => {
+    const withCount = (label: string, count: number) => `${label} ${count}`
+    return [
+      {
+        text: withCount(progressBucketLabels.pending, progressStats.pending),
+        value: `${ACTION_COLUMN_FILTER_BUCKET_PREFIX}pending`,
+        children: PENDING_DETAIL_ACTIONS.map((action) => ({
+          text: withCount((detailActionConfig[action] ?? detailActionConfig[DetailActionEnum.None]).label, progressStats.pendingByAction[action]),
+          value: `${ACTION_COLUMN_FILTER_ACTION_PREFIX}${action}`,
+        })),
+      },
+      ...(['waiting', 'unchecked', 'none', 'executed'] as const).map((bucket) => ({
+        text: withCount(progressBucketLabels[bucket], progressStats[bucket]),
+        value: `${ACTION_COLUMN_FILTER_BUCKET_PREFIX}${bucket}`,
+      })),
+    ]
+  }, [detailActionConfig, progressBucketLabels, progressStats])
 
   const pasteFieldLabels: Record<PasteFieldKey, string> = useMemo(
     () => ({
@@ -2078,6 +2112,8 @@ export default function InvoiceEditPage() {
       }
     })
     setRowActions((prev) => ({ ...prev, ...newActions }))
+    // 以本次检测结果刷新「建议选用」提示：选用后重新检测，建议为空即自动撤掉。
+    setSuggestedExistingByDetail((prev) => mergeSuggestedExistingProducts(prev, result.results))
   }
 
   const handleUpdateLastPurchasePrices = () => {
@@ -2335,6 +2371,35 @@ export default function InvoiceEditPage() {
     })
   }
 
+  // 校验阶段整批被拒时：把可对应到行的失败行摘出来，确认后只提交其余行（失败行保持原状态，不写任何数据）。
+  const confirmSkipFailedRows = (
+    skippable: { failedGuids: string[]; remainingCount: number },
+    errors: string[],
+    onConfirm: () => void,
+  ) => {
+    const visibleLines = errors.slice(0, 8)
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.skipFailedRowsTitle', { failed: skippable.failedGuids.length, count: skippable.remainingCount }),
+      width: 560,
+      content: (
+        <Space direction="vertical" size={4}>
+          <Alert type="info" showIcon message={t('posAdmin.invoiceWorkbench.skipFailedRowsContent')} />
+          <div style={{ maxHeight: 200, overflow: 'auto' }}>
+            {visibleLines.map((line, index) => (
+              <div key={index} style={{ color: '#ff4d4f', fontSize: 12 }}>{line}</div>
+            ))}
+            {errors.length > visibleLines.length && (
+              <div>{t('posAdmin.invoiceWorkbench.skipFailedRowsMore', { count: errors.length - visibleLines.length })}</div>
+            )}
+          </div>
+        </Space>
+      ),
+      okText: t('posAdmin.invoiceWorkbench.skipFailedRowsOk', { count: skippable.remainingCount }),
+      cancelText: t('common.cancel', '取消'),
+      onOk: onConfirm,
+    })
+  }
+
   const formatLargePriceChangeLine = (row: LargePriceChangeRow) => t('posAdmin.invoiceWorkbench.largePriceChangeRow', {
     item: row.itemNumber || '--',
     name: row.productName || '--',
@@ -2388,12 +2453,32 @@ export default function InvoiceEditPage() {
         })
         return
       }
+      // 整批被一条挡住时给出「跳过冲突行，执行其余」：只有每条错误都能对应到某一行才提供，整单级错误仍保持整批拒绝。
+      const skippable = isBatchExecuteValidationError(error)
+        ? findSkippableFailedRows(snapshot.detailGuids, feedback.details)
+        : null
+      const failureKey = `batch-execute-failed-${Date.now()}`
       notification.error({
+        key: failureKey,
         message: feedback.message,
         description: feedback.details.length ? (
           <Space direction="vertical" size={4}>
             {feedback.failure && <span>{formatBatchExecuteResultParts(feedback.failure)}</span>}
             {feedback.failure && renderBackgroundTaskDetailsButton(() => showBatchExecuteResultDetails(feedback.failure!))}
+            {skippable && (
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => {
+                  notification.destroy(failureKey)
+                  confirmSkipFailedRows(skippable, feedback.details, () => {
+                    void executeSelectedBatchActions(excludeDetailsFromBatchSnapshot(snapshot, skippable.failedGuids), options)
+                  })
+                }}
+              >
+                {t('posAdmin.invoiceWorkbench.skipFailedRowsAction', { count: skippable.remainingCount })}
+              </Button>
+            )}
           </Space>
         ) : feedback.message,
         duration: 0,
@@ -3572,6 +3657,23 @@ export default function InvoiceEditPage() {
                 </span>
               )
               : <span className="lsi-wb-match-new">{t('posAdmin.invoiceWorkbench.matchNotExists')}</span>
+          // 条码已被其他商品占用时，直接在行里提示「建议选用」；点开就是现有的匹配商品弹窗（里面有「选用」），不自动关联。
+          const suggestedProducts = canLinkMatchedProduct(record) && record.barcode
+            ? getRowSuggestedProducts(record, suggestedExistingByDetail)
+            : []
+          const suggestedHint = suggestedProducts.length > 0 ? (() => {
+            const first = describeSuggestedProduct(suggestedProducts[0])
+            const text = suggestedProducts.length > 1
+              ? t('posAdmin.invoiceWorkbench.suggestedExistingMore', { ...first, count: suggestedProducts.length })
+              : t('posAdmin.invoiceWorkbench.suggestedExisting', first)
+            return (
+              <Tooltip title={`${text}。${t('posAdmin.invoiceWorkbench.suggestedExistingTip')}`}>
+                <Button type="link" size="small" className="lsi-wb-match-link lsi-wb-suggested" onClick={openMatchedProducts}>
+                  {text}
+                </Button>
+              </Tooltip>
+            )
+          })() : null
           const barcodeLabel = barcodeStatus === 'normal'
             ? <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.barcodeNormal')}</span>
             : barcodeStatus === 'noMatch'
@@ -3580,6 +3682,7 @@ export default function InvoiceEditPage() {
           return (
             <div className="lsi-wb-cell">
               {productLine}
+              {suggestedHint}
               {barcodeStatus === 'notDetected' ? (
                 <span className="lsi-wb-sub">{t('posAdmin.invoiceWorkbench.barcodeUnchecked')}</span>
               ) : (
@@ -3598,6 +3701,10 @@ export default function InvoiceEditPage() {
         key: 'action',
         width: isAdmin ? 144 : 112,
         fixed: 'right',
+        filters: actionColumnFilters,
+        filterMode: 'tree',
+        filteredValue: (columnFilteredValues.action ?? null) as React.Key[] | null,
+        onFilter: (value, record) => matchesActionTypeColumnFilter(record, value, rowActions),
         render: (_: unknown, record: LocalSupplierInvoiceItemDto) => {
           const maintenanceProductCode = record.productCode?.trim()
           const currentAction = rowActions[record.detailGUID] ?? record.activityType ?? 0

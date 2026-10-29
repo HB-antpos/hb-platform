@@ -1,0 +1,89 @@
+{
+  "list": {
+    "search": "Search name or username",
+    "filterStore": "Store: {{value}}",
+    "filterRole": "Role: {{value}}",
+    "allStores": "All stores",
+    "allManagedStores": "All stores I manage",
+    "allRoles": "All roles",
+    "storeSheetTitle": "Choose store",
+    "roleSheetTitle": "Choose role",
+    "storeLocked": "Only one store, locked",
+    "pending": "To complete",
+    "count": "{{count}} staff",
+    "countPending": "{{count}} to complete",
+    "endOfList": "Showing all {{count}}",
+    "empty": "No matching staff",
+    "emptyPending": "No staff to complete",
+    "optionsFailed": "Couldn't load store and role options. Tap to retry."
+  },
+  "row": {
+    "statusPending": "To complete",
+    "statusComplete": "Complete",
+    "noProfile": "No details yet"
+  },
+  "missing": {
+    "banking": "No bank",
+    "superannuation": "No super",
+    "phone": "No phone",
+    "birthday": "No birthday"
+  },
+  "entry": {
+    "title": "Personal details",
+    "complete": "Complete",
+    "pending": "To complete"
+  },
+  "edit": {
+    "title": "Personal details",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saveWithCount": "Save ({{count}} changes)",
+    "saved": "Saved",
+    "sectionBasic": "Basic details",
+    "phone": "Phone",
+    "phonePlaceholder": "e.g. 0412 345 678",
+    "gender": "Gender",
+    "employmentType": "Employment type",
+    "employmentUnset": "Not set",
+    "employmentLocked": "Needs the Edit employment type permission",
+    "address": "Home address",
+    "addressPlaceholder": "Street, suburb, state, postcode",
+    "genders": {
+      "unknown": "Unknown",
+      "male": "Male",
+      "female": "Female",
+      "other": "Other"
+    },
+    "employmentTypes": {
+      "fullTime": "Full-time",
+      "partTime": "Part-time",
+      "casual": "Casual"
+    },
+    "errors": {
+      "phoneTooLong": "Phone can be at most {{max}} characters",
+      "addressTooLong": "Address can be at most {{max}} characters",
+      "fixErrors": "Some details need fixing. Check the fields marked in red."
+    },
+    "readOnlyNotice": "You can view these details but not edit them.",
+    "sensitive": {
+      "title": "Sensitive details (read only)",
+      "bank": "Bank account",
+      "super": "Super",
+      "birthdayIdentity": "Birthday / ID no.",
+      "notProvided": "Not provided",
+      "notice": "Staff submit these themselves in My profile. Changes take effect after review."
+    },
+    "failures": {
+      "scope": "This person isn't in the stores you manage, so you can't edit them.",
+      "positionType": "You don't have the Edit employment type permission, so the employment type wasn't saved.",
+      "notFound": "This staff member no longer exists.",
+      "forbidden": "You don't have permission to do this.",
+      "generic": "Couldn't save. Check your connection and try again."
+    },
+    "loadFailed": "Could not load personal details",
+    "loadForbidden": "This person isn't in the stores you manage, or you can't view their details.",
+    "retry": "Retry",
+    "noAccess": "You don't have permission to view staff personal details",
+    "back": "Back"
+  }
+}

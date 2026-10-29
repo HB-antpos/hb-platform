@@ -5,6 +5,7 @@ import {
   buildLegacyRedirect,
   buildLoginRecordsRoute,
   buildPosRoute,
+  buildProfileRoute,
 } from "./detail-navigation";
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
@@ -70,6 +71,12 @@ assertEqual(
   buildLegacyRedirect({ userGuid: "new", storeCode: "1008" }),
   { pathname: "/users/new", params: { storeCode: "1008" } },
   "user-admin/new 重定向到 /users/new",
+);
+
+assertEqual(
+  buildProfileRoute(target),
+  { pathname: "/users/[userGuid]/profile", params: { userGuid: "U-1" } },
+  "个人信息页只带 userGuid（数据由页面自己拉取，服务端强制范围）",
 );
 
 console.log("detail-navigation.test.ts: ok");

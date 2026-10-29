@@ -155,7 +155,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         _timeProvider = timeProvider ?? TimeProvider.System;
         // 「取单」按钮角标的统计服务；为 null（测试 / 预览）时不显示角标、不起定时器。
         _heldOrderTodayCountService = heldOrderTodayCountService;
-        _heldOrderCountScope = (session.StoreCode, session.DeviceCode, session.IsOnline);
+        _heldOrderCountScope = (session.StoreCode, session.DeviceCode, session.IsOnline, session.CashierSession is not null);
         _isNoSaleCashDrawerRescanRequiredAsync = isNoSaleCashDrawerRescanRequiredAsync;
         _isReturnsRescanRequiredAsync = isReturnsRescanRequiredAsync;
         _priceIndex = priceIndex;
@@ -505,7 +505,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
         OnPropertyChanged(nameof(OnlineText));
         OnPropertyChanged(nameof(PendingSyncText));
-        // 换门店 / 设备或联机状态变化时重算「取单」角标（首页可见时才刷新）。
+        // 换门店 / 设备、联机状态或收银员登录状态变化时重算「取单」角标（首页可见时才刷新）。
         OnSessionChangedForHeldOrderCount(value);
     }
 

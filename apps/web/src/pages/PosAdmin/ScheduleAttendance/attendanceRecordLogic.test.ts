@@ -10,13 +10,10 @@ import {
   resolvePunchAdjustmentOriginalGuid,
   canAdjustOwnAttendanceRecord,
   getProposedAdjustmentPunchStatus,
-  isKnownAttendanceApprovalSourceType,
-  getSupplementalAttendanceApprovalDetail,
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
-  insertAttendanceWeekdaysInText,
-  validateMealBreakApproval,
   buildAttendanceMealPaySummary,
+  splitExceptionDuration,
 } from './attendanceRecordLogic'
 import type { AttendanceScheduleDto } from '../../../types/scheduleAttendance'
 
@@ -40,42 +37,6 @@ assertEqual(
 assertEqual(insertAttendanceWeekday('2026-08-24', 'Mon'), '2026-08-24 Mon', '英文星期应插入日期之后')
 assertEqual(insertAttendanceWeekday('--', '周一'), '--', '空日期占位符不应附加星期')
 assertEqual(insertAttendanceWeekday('invalid', '周一'), 'invalid', '无法识别日期前缀时应保留原始显示值')
-assertEqual(
-  insertAttendanceWeekdaysInText(
-    '2026-07-23 – 2026-07-25 · Family care',
-    (value) => {
-      const weekdayIndex = getAttendanceWeekdayIndex(value)
-      return weekdayIndex === undefined ? undefined : ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][weekdayIndex]
-    },
-  ),
-  '2026-07-23 周四 – 2026-07-25 周六 · Family care',
-  '审核详情中的业务日期范围应逐个附加星期且保留其他原始文本',
-)
-
-for (const sourceType of ['Punch', 'Leave', 'PunchAdjustment', 'Overtime', 'MissingClockOut']) {
-  assertEqual(isKnownAttendanceApprovalSourceType(sourceType), true, `${sourceType} 应使用本地化审批文案`)
-}
-assertEqual(isKnownAttendanceApprovalSourceType('CustomApproval'), false, '未知来源应保留后端标题与明细回退')
-assertEqual(getSupplementalAttendanceApprovalDetail({
-  sourceType: 'Punch',
-  displayedTitle: 'Punch exception',
-  detail: 'ClockIn · Late · Traffic delay',
-}), 'ClockIn · Late · Traffic delay', '打卡 DTO 中的类型、状态和用户原因不得被吞掉')
-assertEqual(getSupplementalAttendanceApprovalDetail({
-  sourceType: 'Leave',
-  displayedTitle: 'Leave request',
-  detail: '2026-07-23 – 2026-07-25 · Family care',
-}), '2026-07-23 – 2026-07-25 · Family care', '请假 DTO 中的完整日期范围和用户原因不得被吞掉')
-assertEqual(getSupplementalAttendanceApprovalDetail({
-  sourceType: 'Leave',
-  displayedTitle: 'Leave request',
-  detail: ' Leave request ',
-}), undefined, '与展示标题重复的明细不得重复渲染')
-assertEqual(getSupplementalAttendanceApprovalDetail({
-  sourceType: 'MissingClockOut',
-  displayedTitle: 'Missing clock-out',
-  detail: 'backend system detail',
-}), undefined, '新类型不得恢复后端硬编码系统说明')
 
 const multiSegmentSchedule: AttendanceScheduleDto = {
   scheduleGuid: 'schedule-1',
@@ -363,12 +324,7 @@ assertEqual(
   '拒绝加班必须备注',
 )
 
-// 用餐未休息加工时
-assertEqual(isKnownAttendanceApprovalSourceType('MealBreak'), true, 'MealBreak 应走本地化展示文案')
-assertEqual(validateMealBreakApproval({ action: 'approve' }), null, '批准用餐加工时不需要备注')
-assertEqual(validateMealBreakApproval({ action: 'reject', remark: ' ' }), 'remarkRequired', '拒绝用餐加工时必须备注')
-assertEqual(validateMealBreakApproval({ action: 'reject', remark: '当天有轮休' }), null, '填写备注后可以拒绝')
-
+// 用餐未休息加工时（审批已在「考勤审核」页处理，这里只测记录表的用餐计薪汇总）
 const mealBaseSchedule: AttendanceScheduleDto = {
   scheduleGuid: 'meal-schedule',
   storeCode: 'S001',
@@ -395,5 +351,20 @@ assertEqual(mealSummary?.deductionMinutes, 30, '应展示用餐扣除分钟')
 assertEqual(mealSummary?.pendingAddBackMinutes, 30, '应展示待审加回分钟')
 assertEqual(mealSummary?.approvedAddBackMinutes, 0, '未批准时加回为 0')
 assertEqual(mealSummary?.paidMinutes, 490, '应展示后端算好的计薪工时')
+
+// 迟到 / 早退等异常时长：不足 60 分钟只显示分钟，满 60 分钟起拆成小时 + 分钟（整小时分钟为 0）
+const durationText = (minutes: number) => {
+  const { hours, minutes: rest } = splitExceptionDuration(minutes)
+  return `${hours}h${rest}m`
+}
+assertEqual(durationText(0), '0h0m', '0 分钟不拆小时')
+assertEqual(durationText(45), '0h45m', '不足 60 分钟只显示分钟')
+assertEqual(durationText(59), '0h59m', '59 分钟仍按分钟')
+assertEqual(durationText(60), '1h0m', '正好 60 分钟 = 1 小时')
+assertEqual(durationText(65), '1h5m', '65 分钟 = 1 小时 5 分')
+assertEqual(durationText(120), '2h0m', '整 2 小时')
+assertEqual(durationText(135), '2h15m', '135 分钟 = 2 小时 15 分')
+assertEqual(durationText(59.6), '1h0m', '小数分钟先四舍五入再拆分')
+assertEqual(durationText(-5), '0h0m', '负数按 0 处理')
 
 console.log('attendanceRecordLogic.test.ts: ok')

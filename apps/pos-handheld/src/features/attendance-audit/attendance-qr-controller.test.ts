@@ -47,8 +47,10 @@ class FakeCache implements AttendanceQrCachePort {
 
 class FakeConnectivity implements AttendanceConnectivityPort {
   public online = true;
+  public checks = 0;
 
   public async isOnline(): Promise<boolean> {
+    this.checks += 1;
     return this.online;
   }
 }
@@ -327,6 +329,44 @@ test("tick 与在线 refresh 使用独立调度器，销毁后同时取消且清
 
   assert.equal(fixture.scheduler.cancelled, 2);
   assert.equal(fixture.controller.getState().qrImageUri, null);
+});
+
+test("后台刷新自适应（对齐 WPF #927）：状态健康时 5 分钟一次，离线等异常 15 秒重试", async () => {
+  const fixture = createFixture();
+  fixture.controller.start();
+  await fixture.controller.refresh();
+  assert.equal(fixture.controller.getState().kind, "ready");
+  assert.equal(fixture.controller.getState().online, true);
+  const refreshTask = fixture.scheduler.tasks[1]!;
+  const registrations = () => fixture.remote.registrations.length;
+
+  // 健康：15 秒节拍唤醒也不重复登记。
+  const baseline = registrations();
+  fixture.clock.nowMs += 15_000;
+  refreshTask();
+  fixture.clock.nowMs += 15_000;
+  refreshTask();
+  await fixture.controller.refresh().catch(() => undefined);
+  assert.equal(registrations(), baseline + 1, "只有显式 refresh 登记了一次，节拍唤醒被跳过");
+
+  // 满 5 分钟后到期，节拍唤醒会再登记一次。
+  fixture.clock.nowMs += 5 * 60_000;
+  refreshTask();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(registrations(), baseline + 2);
+
+  // 离线（异常）：回到 15 秒重试。
+  fixture.connectivity.online = false;
+  fixture.clock.nowMs += 5 * 60_000;
+  refreshTask();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.controller.getState().online, false);
+  fixture.clock.nowMs += 15_000;
+  const before = fixture.connectivity.checks;
+  refreshTask();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(fixture.connectivity.checks > before, "异常状态 15 秒后再次检查连通性");
+  fixture.controller.destroy();
 });
 
 function createFixture() {
