@@ -50,6 +50,13 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
                 // 货号对不上主档，但明细已关联的商品拥有本行条码（手动选用的已有商品），沿用该关联。
                 ApplyProductMatch(result, detail, linkedProduct, data.StorePricesByProductCode, summary);
             }
+            else if (TryGetSameItemNumberBarcodeOwner(itemNumber, barcode, data.BarcodeOwnerProducts, out var barcodeOwner))
+            {
+                // 本供应商下货号对不上，但条码只被一个存活商品占用且货号完全相同：就是同一个商品挂在别的供应商名下，
+                // 直接按已有商品处理（回填商品编码，默认更新进货价），不再停在「等待操作」，也避免再新建出同货号同条码的重复商品。
+                // 条码被多个商品占用或货号不同的情况信心不够，仍走下面的建议选用，由人确认。
+                ApplyProductMatch(result, detail, barcodeOwner, data.StorePricesByProductCode, summary);
+            }
             else if (!string.IsNullOrWhiteSpace(itemNumber))
             {
                 result.ProductStatus = 2;
@@ -94,6 +101,28 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
             return false;
 
         product = linked;
+        return true;
+    }
+
+    /// <summary>
+    /// 条码只被一个存活商品作为主条码占用，且该商品货号与明细货号完全相同（忽略大小写和首尾空格）时，视为同一商品。
+    /// 要求「唯一占用者」：多个商品共用同一条码时无法判断是哪一个，交给人选。
+    /// </summary>
+    private static bool TryGetSameItemNumberBarcodeOwner(
+        string? itemNumber,
+        string? barcode,
+        Dictionary<string, List<Product>> ownersByBarcode,
+        out Product owner)
+    {
+        owner = null!;
+        if (string.IsNullOrWhiteSpace(itemNumber)
+            || string.IsNullOrWhiteSpace(barcode)
+            || !ownersByBarcode.TryGetValue(barcode.Trim(), out var owners)
+            || owners.Count != 1
+            || !string.Equals(owners[0].ItemNumber?.Trim(), itemNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        owner = owners[0];
         return true;
     }
 
@@ -233,12 +262,21 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
             .Any(barcode => !LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(additionalBarcodeOwners, barcode, productCode));
         if (productExists && hasAdditionalBarcodes)
         {
-            return LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(
+            if (LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(
                 productCodesByBarcode,
                 detail.Barcode,
-                result.ProductInfo?.ProductCode)
-                ? (int)DetailAction.AddMultiCode
-                : (int)DetailAction.WaitForOperation;
+                result.ProductInfo?.ProductCode))
+                return (int)DetailAction.AddMultiCode;
+
+            // 主条码不归本商品时与执行校验保持同一口径：已被别的商品占用（主条码或分店多码）才会被拒绝，需要人处理；
+            // 没有任何商品占用（主档条码是货号占位、或主条码是新条码）时执行会把主条码一并登记为多码，直接给「添加多码」。
+            var mainBarcode = detail.Barcode?.Trim();
+            // 主条码为空时执行校验会拒绝（主条码不能为空），仍留给人补条码。
+            var needsManualHandling = string.IsNullOrWhiteSpace(mainBarcode)
+                || (productCodesByBarcode.TryGetValue(mainBarcode, out var occupiers) && occupiers.Count > 0);
+            return needsManualHandling
+                ? (int)DetailAction.WaitForOperation
+                : (int)DetailAction.AddMultiCode;
         }
 
         if (!detail.PurchasePrice.HasValue || detail.PurchasePrice <= 0)

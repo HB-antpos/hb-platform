@@ -62,6 +62,35 @@ export function getDetailProgressBucket(
   return 'none'
 }
 
+/**
+ * 操作列表头过滤的取值。表头过滤把「处理进度」和「待执行下的具体操作」合成一棵互斥的树：
+ * - `bucket:xxx`：整段进度（pending / waiting / unchecked / none / executed）；
+ * - `action:N`：只匹配进度为待执行、且操作类型为 N 的行（未检测行即使手设了操作类型也不算）。
+ * 多个取值之间按「或」处理，和 antd 列过滤、行内导航的口径一致。
+ */
+export const ACTION_COLUMN_FILTER_BUCKET_PREFIX = 'bucket:'
+export const ACTION_COLUMN_FILTER_ACTION_PREFIX = 'action:'
+
+export function isActionColumnFilterKey(value: string) {
+  return value.startsWith(ACTION_COLUMN_FILTER_BUCKET_PREFIX) || value.startsWith(ACTION_COLUMN_FILTER_ACTION_PREFIX)
+}
+
+export function matchesActionColumnFilterKey(
+  detail: LocalSupplierInvoiceItemDto,
+  key: string,
+  rowActions: Record<string, number> = {},
+) {
+  const bucket = getDetailProgressBucket(detail, rowActions)
+  if (key.startsWith(ACTION_COLUMN_FILTER_BUCKET_PREFIX)) {
+    return bucket === key.slice(ACTION_COLUMN_FILTER_BUCKET_PREFIX.length)
+  }
+  if (key.startsWith(ACTION_COLUMN_FILTER_ACTION_PREFIX)) {
+    return bucket === 'pending'
+      && resolveDetailAction(detail, rowActions) === Number(key.slice(ACTION_COLUMN_FILTER_ACTION_PREFIX.length))
+  }
+  return false
+}
+
 export function getDetailProgressStats(
   details: LocalSupplierInvoiceItemDto[],
   rowActions: Record<string, number> = {},

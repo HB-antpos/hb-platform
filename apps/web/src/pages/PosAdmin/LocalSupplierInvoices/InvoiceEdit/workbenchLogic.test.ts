@@ -12,12 +12,14 @@ import { canLinkMatchedProduct, isProductLinkConfirmed, mergeProductCheckResult 
 import { buildPricingEditorChanges } from './pricingEditorChanges'
 import {
   filterDetailsByProgressBucket,
+  matchesActionColumnFilterKey,
   getDetailProgressBucket,
   getDetailProgressStats,
   getExecutedPercent,
   getPendingExecutionDetailGuids,
 } from './progressBuckets'
 import { filterInvoiceDetails, isBarcodeStatusAbnormal } from './statusFilters'
+import { matchesActionTypeColumnFilter } from './tableColumnFilters'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -70,6 +72,32 @@ assertEqual(
   stats.executed + stats.pending + stats.waiting + stats.unchecked + stats.none,
   stats.total,
   '五段合计必须等于明细行数',
+)
+
+// ---- 操作列表头过滤：bucket:xxx 按处理进度，action:N 只匹配待执行下的具体操作 ----
+const guidsByActionColumnFilter = (key: string, rowActions: Record<string, number> = {}) =>
+  details.filter((item) => matchesActionTypeColumnFilter(item, key, rowActions)).map((item) => item.detailGUID)
+assertDeepEqual(guidsByActionColumnFilter('bucket:executed'), ['executed'], '表头过滤 99 应归为已执行，而不是「无」')
+assertDeepEqual(guidsByActionColumnFilter('bucket:waiting'), ['wait'], '表头过滤应能单独筛出等待操作')
+assertDeepEqual(guidsByActionColumnFilter('bucket:unchecked'), ['unchecked'], '表头过滤应能单独筛出未检测行')
+assertDeepEqual(guidsByActionColumnFilter('bucket:none'), ['none'], '表头过滤应能单独筛出无需操作')
+assertDeepEqual(
+  guidsByActionColumnFilter('bucket:pending'),
+  filterDetailsByProgressBucket(details, 'pending').map((item) => item.detailGUID),
+  '表头过滤的待执行应与进度分段一致',
+)
+assertDeepEqual(
+  guidsByActionColumnFilter(`action:${DetailAction.CreateProduct}`),
+  ['create'],
+  '待执行下的具体操作只匹配对应操作类型',
+)
+assert(
+  !matchesActionColumnFilterKey({ detailGUID: 'u', activityType: DetailAction.CreateProduct }, `action:${DetailAction.CreateProduct}`),
+  '未检测行即使设了新建商品，也不算待执行下的新建商品',
+)
+assert(
+  matchesActionTypeColumnFilter(details[2], DetailAction.UpdatePurchasePrice),
+  '纯数字取值仍按操作类型直接匹配（兼容旧口径）',
 )
 assertDeepEqual(
   stats.pendingByAction,

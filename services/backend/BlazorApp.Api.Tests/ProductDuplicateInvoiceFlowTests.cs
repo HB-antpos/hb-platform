@@ -60,7 +60,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task 检测_本供应商货号不存在但条码被其他供应商商品占用_给出建议选用且默认待操作()
+        public async Task 检测_货号相同且条码只被其他供应商一个商品占用_自动关联为已有商品并默认更新进货价()
         {
             await SeedInvoiceAsync();
             // 同一商品挂在别的供应商名下：货号、条码都相同，本供应商下找不到。
@@ -69,14 +69,51 @@ namespace BlazorApp.Api.Tests
             var response = await CreateService().CheckProductsAsync(new CheckProductsRequest { InvoiceGuid = InvoiceGuid });
 
             Assert.True(response.Success, response.Message);
+            var linked = response.Data!.Results.Single(item => item.DetailGuid == "detail-1");
+            Assert.Equal(1, linked.ProductStatus); // 自动关联后按已有商品处理
+            Assert.Equal("EXIST-1", linked.ProductInfo?.ProductCode);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, linked.DefaultAction); // 不再等待操作，也不新建重复商品
+            Assert.Empty(linked.SuggestedExistingProducts);
+
+            // 关联结果要落库：商品编码回填到明细，后续执行「更新进货价」才找得到商品。
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>().SingleAsync(x => x.DetailGUID == "detail-1");
+            Assert.Equal("EXIST-1", detail.ProductCode);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+        }
+
+        [Fact]
+        public async Task 检测_货号不同但条码被其他供应商商品占用_只给建议选用且仍等待操作()
+        {
+            await SeedInvoiceAsync();
+            await SeedProductAsync("EXIST-1", "SUP02", "OTHER-ITEM", "Existing Under Other Supplier", OccupiedBarcode);
+
+            var response = await CreateService().CheckProductsAsync(new CheckProductsRequest { InvoiceGuid = InvoiceGuid });
+
+            Assert.True(response.Success, response.Message);
             var conflicted = response.Data!.Results.Single(item => item.DetailGuid == "detail-1");
-            Assert.Equal(2, conflicted.ProductStatus); // 本供应商下货号不存在
-            Assert.Equal((int)DetailAction.WaitForOperation, conflicted.DefaultAction); // 不默认新建，也不自动关联
+            Assert.Equal(2, conflicted.ProductStatus); // 货号不同信心不够：不自动关联
+            Assert.Equal((int)DetailAction.WaitForOperation, conflicted.DefaultAction); // 不默认新建，由人确认
             var suggestion = Assert.Single(conflicted.SuggestedExistingProducts);
             Assert.Equal("EXIST-1", suggestion.ProductCode);
-            Assert.Equal("NEW-ITEM-1", suggestion.ItemNumber);
+            Assert.Equal("OTHER-ITEM", suggestion.ItemNumber);
             Assert.Equal("SUP02", suggestion.LocalSupplierCode);
-            Assert.True(suggestion.SameItemNumber);
+            Assert.False(suggestion.SameItemNumber);
+        }
+
+        [Fact]
+        public async Task 检测_条码被多个商品占用_即使货号相同也不自动关联()
+        {
+            await SeedInvoiceAsync();
+            await SeedProductAsync("EXIST-1", "SUP02", "NEW-ITEM-1", "Existing Under Supplier 2", OccupiedBarcode);
+            await SeedProductAsync("EXIST-2", "SUP03", "NEW-ITEM-1", "Existing Under Supplier 3", OccupiedBarcode);
+
+            var response = await CreateService().CheckProductsAsync(new CheckProductsRequest { InvoiceGuid = InvoiceGuid });
+
+            Assert.True(response.Success, response.Message);
+            var conflicted = response.Data!.Results.Single(item => item.DetailGuid == "detail-1");
+            Assert.Equal(2, conflicted.ProductStatus);
+            Assert.Equal((int)DetailAction.WaitForOperation, conflicted.DefaultAction);
+            Assert.Equal(2, conflicted.SuggestedExistingProducts.Count);
         }
 
         [Fact]
