@@ -14,8 +14,15 @@ public sealed record MyobEmployeeDirectoryData(
     DateTime FetchedAt,
     IReadOnlyList<MyobDirectoryCard> Cards);
 
-/// <summary>名册里的一张员工卡：匹配用字段 + 给前端看的 DTO + 用工 / 假期累计信息。</summary>
-public sealed record MyobDirectoryCard(MyobMatchCard Match, MyobEmployeeCardDto Dto);
+/// <summary>资料同步额外需要、绑定页不展示的字段：第一条非空地址、性别、退休金基金名与会员号（均为 MYOB 原值）。</summary>
+public sealed record MyobSyncExtras(
+    MyobAddressRecord? Address,
+    string? Gender,
+    string? SuperFundName,
+    string? SuperMembershipNumber);
+
+/// <summary>名册里的一张员工卡：匹配用字段 + 给前端看的 DTO + 用工 / 假期累计信息 + 资料同步用的额外字段。</summary>
+public sealed record MyobDirectoryCard(MyobMatchCard Match, MyobEmployeeCardDto Dto, MyobSyncExtras? Extras = null);
 
 /// <summary>
 /// 拉取并缓存 MYOB 员工名册。缓存 10 分钟（MYOB 员工资料变动很慢，页面反复打开不必每次打 MYOB 的 8 次/秒配额）；
@@ -136,7 +143,12 @@ internal sealed class MyobEmployeeDirectory : IMyobEmployeeDirectory
                     HasAnnualEntitlement = hasAnnual,
                     HasSickEntitlement = hasSick,
                 };
-                return new MyobDirectoryCard(match, dto);
+                var extras = new MyobSyncExtras(
+                    employee.Addresses?.FirstOrDefault(),
+                    detail?.Gender,
+                    detail?.SuperFundName,
+                    detail?.SuperMembershipNumber);
+                return new MyobDirectoryCard(match, dto, extras);
             })
             .ToList();
 

@@ -13,7 +13,10 @@ public sealed record MyobTokenResponse(string AccessToken, string? RefreshToken,
 /// <summary>GET /{cf_uri}/Company 的摘要：公司名与 ABN / TFN（只有 11 位数字才是 ABN，由调用方判断）。</summary>
 public sealed record MyobCompanyInfo(string CompanyName, string? AbnOrTfn);
 
-/// <summary>Contact/Employee 的一条（只取绑定需要的字段）。邮箱 / 手机来自所有 Addresses 的合集。</summary>
+/// <summary>Contact/Employee.Addresses 的一条地址（资料同步用：拼成一行写入我方住址）。</summary>
+public sealed record MyobAddressRecord(string? Street, string? City, string? State, string? PostCode, string? Country);
+
+/// <summary>Contact/Employee 的一条（只取绑定与资料同步需要的字段）。邮箱 / 手机来自所有 Addresses 的合集；Addresses 保留原始地址行。</summary>
 public sealed record MyobEmployeeRecord(
     string Uid,
     string? DisplayId,
@@ -23,17 +26,30 @@ public sealed record MyobEmployeeRecord(
     bool IsIndividual,
     bool IsActive,
     IReadOnlyList<string> Emails,
-    IReadOnlyList<string> Phones);
+    IReadOnlyList<string> Phones,
+    IReadOnlyList<MyobAddressRecord>? Addresses = null);
 
 /// <summary>EmployeePayrollDetails.Entitlements 的一项：假期累计类别（只要名字和是否已分配）。</summary>
 public sealed record MyobEntitlementRecord(string? CategoryName, bool IsAssigned);
 
-/// <summary>Contact/EmployeePayrollDetails 的一条（只取绑定与类型检查需要的字段）。</summary>
+/// <summary>
+/// Contact/EmployeePayrollDetails 的一条（绑定、类型检查与资料同步需要的字段）。
+/// Gender 为 MYOB 原值（Male / Female / Other）；SuperFundName / SuperMembershipNumber 取自 Superannuation 节。
+/// </summary>
 public sealed record MyobEmployeePayrollRecord(
     string EmployeeUid,
     DateTime? DateOfBirth,
     string? EmploymentStatus,
-    IReadOnlyList<MyobEntitlementRecord> Entitlements);
+    IReadOnlyList<MyobEntitlementRecord> Entitlements,
+    string? Gender = null,
+    string? SuperFundName = null,
+    string? SuperMembershipNumber = null);
+
+/// <summary>EmployeePaymentDetails.BankAccounts 的一条。</summary>
+public sealed record MyobBankAccountRecord(string? Bsb, string? AccountNumber);
+
+/// <summary>Contact/EmployeePaymentDetails 的一条（资料同步只取银行账户）。</summary>
+public sealed record MyobEmployeePaymentRecord(string EmployeeUid, IReadOnlyList<MyobBankAccountRecord> BankAccounts);
 
 /// <summary>Payroll/PayrollCategory/Wage 的一条（只取映射需要的字段）。</summary>
 public sealed record MyobWageCategoryRecord(string Uid, string Name, string? WageType);
@@ -71,6 +87,9 @@ public interface IMyobApiClient
 
     /// <summary>GET /{cf_uri}/Contact/EmployeePayrollDetails，自动翻页拉全量。需要 scope sme-payroll。</summary>
     Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>GET /{cf_uri}/Contact/EmployeePaymentDetails，自动翻页拉全量（银行账户）。需要 scope sme-payroll；资料同步按需调用，失败不影响绑定页。</summary>
+    Task<IReadOnlyList<MyobEmployeePaymentRecord>> GetEmployeePaymentDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken);
 
     /// <summary>GET /{cf_uri}/Payroll/PayrollCategory/Wage：公司文件里的工资类别（用于 Timesheet 类别映射）。需要 scope sme-payroll。</summary>
     Task<IReadOnlyList<MyobWageCategoryRecord>> GetWageCategoriesAsync(string businessId, string accessToken, CancellationToken cancellationToken);
@@ -203,6 +222,14 @@ public sealed class MyobApiClient : IMyobApiClient
                     .Where(phone => !string.IsNullOrWhiteSpace(phone))
                     .Select(phone => phone!.Trim())
                     .Distinct(StringComparer.Ordinal)
+                    .ToList(),
+                (item.Addresses ?? [])
+                    .Where(address => !string.IsNullOrWhiteSpace(address.Street)
+                        || !string.IsNullOrWhiteSpace(address.City)
+                        || !string.IsNullOrWhiteSpace(address.PostCode))
+                    .Select(address => new MyobAddressRecord(
+                        address.Street?.Trim(), address.City?.Trim(), address.State?.Trim(),
+                        address.PostCode?.Trim(), address.Country?.Trim()))
                     .ToList()))
             .ToList();
     }
@@ -224,6 +251,33 @@ public sealed class MyobApiClient : IMyobApiClient
                     .Select(entitlement => new MyobEntitlementRecord(
                         entitlement.EntitlementCategory?.Name?.Trim(),
                         entitlement.IsAssigned ?? false))
+                    .ToList(),
+                string.IsNullOrWhiteSpace(item.Gender) ? null : item.Gender.Trim(),
+                string.IsNullOrWhiteSpace(item.Superannuation?.SuperannuationFund?.Name)
+                    ? null
+                    : item.Superannuation!.SuperannuationFund!.Name!.Trim(),
+                string.IsNullOrWhiteSpace(item.Superannuation?.EmployeeMembershipNumber)
+                    ? null
+                    : item.Superannuation!.EmployeeMembershipNumber!.Trim()))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<MyobEmployeePaymentRecord>> GetEmployeePaymentDetailsAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var items = await GetAllPagesAsync<EmployeePaymentPayload>(
+            businessId, accessToken, "Contact/EmployeePaymentDetails", cancellationToken);
+        return items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Employee?.Uid))
+            .Select(item => new MyobEmployeePaymentRecord(
+                item.Employee!.Uid!,
+                (item.BankAccounts ?? [])
+                    .Select(account => new MyobBankAccountRecord(
+                        string.IsNullOrWhiteSpace(account.BsbNumber) ? null : account.BsbNumber.Trim(),
+                        string.IsNullOrWhiteSpace(account.BankAccountNumber) ? null : account.BankAccountNumber.Trim()))
+                    .Where(account => account.Bsb is not null || account.AccountNumber is not null)
                     .ToList()))
             .ToList();
     }
@@ -552,6 +606,11 @@ public sealed class MyobApiClient : IMyobApiClient
         public string? Phone1 { get; set; }
         public string? Phone2 { get; set; }
         public string? Phone3 { get; set; }
+        public string? Street { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? PostCode { get; set; }
+        public string? Country { get; set; }
     }
 
     private sealed class EmployeePayrollPayload
@@ -559,7 +618,28 @@ public sealed class MyobApiClient : IMyobApiClient
         public EmployeeRefPayload? Employee { get; set; }
         public DateTime? DateOfBirth { get; set; }
         public string? EmploymentStatus { get; set; }
+        public string? Gender { get; set; }
+        public SuperannuationPayload? Superannuation { get; set; }
         public List<EntitlementPayload>? Entitlements { get; set; }
+    }
+
+    private sealed class SuperannuationPayload
+    {
+        public CategoryPayload? SuperannuationFund { get; set; }
+        public string? EmployeeMembershipNumber { get; set; }
+    }
+
+    private sealed class EmployeePaymentPayload
+    {
+        public EmployeeRefPayload? Employee { get; set; }
+        public List<BankAccountPayload>? BankAccounts { get; set; }
+    }
+
+    private sealed class BankAccountPayload
+    {
+        // MYOB 字段名是 BSBNumber；属性名大小写不敏感，BsbNumber 即可匹配。
+        public string? BsbNumber { get; set; }
+        public string? BankAccountNumber { get; set; }
     }
 
     private sealed class EmployeeRefPayload
