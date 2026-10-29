@@ -322,10 +322,11 @@ public sealed class MyobPayrollAdviceTests
     // ───────────────────────── 隐私边界 ─────────────────────────
 
     [Fact]
-    public void 工资单记录_不携带年薪时薪生日支票号和雇佣分类()
+    public void 工资单记录_不携带年薪生日和雇佣分类_时薪与支票号仅为还原MYOB页头而保留()
     {
         // 这些字段在真实响应里确实存在（探针已确认），所以载荷里就不声明、记录类型上也没有，缓存 / DTO / 日志不可能带出去。
-        var banned = new[] { "AnnualSalary", "HourlyRate", "DateOfBirth", "ChequeNumber", "EmploymentClassification" };
+        // 2026-10-29 起 HourlyRate / ChequeNumber 放开（MYOB 默认 Pay Slip 页头的 Hourly Rate / Reference Number），只进明细与 PDF。
+        var banned = new[] { "AnnualSalary", "DateOfBirth", "EmploymentClassification" };
         var recordProps = typeof(MyobPayrollAdviceRecord).GetProperties().Select(p => p.Name).ToHashSet();
         var payloadProps = typeof(PayrollAdvicePayload).GetProperties().Select(p => p.Name).ToHashSet();
         foreach (var name in banned)
@@ -333,6 +334,9 @@ public sealed class MyobPayrollAdviceTests
             Assert.DoesNotContain(name, recordProps);
             Assert.DoesNotContain(name, payloadProps);
         }
+
+        Assert.Contains("HourlyRate", recordProps);
+        Assert.Contains("ChequeNumber", recordProps);
     }
 
     [Fact]
@@ -340,9 +344,15 @@ public sealed class MyobPayrollAdviceTests
     {
         var detail = System.Text.Json.JsonSerializer.Serialize(new MyobPayslipDetailDto());
         var row = System.Text.Json.JsonSerializer.Serialize(new MyobPayslipRowDto());
-        foreach (var name in new[] { "annualSalary", "hourlyRate", "dateOfBirth", "chequeNumber", "bank", "tfn" })
+        // 明细只含还原页头所需的 hourlyRate / referenceNumber；列表行一律不含。
+        foreach (var name in new[] { "annualSalary", "dateOfBirth", "chequeNumber", "bank", "tfn" })
         {
             Assert.DoesNotContain(name, detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(name, row, StringComparison.OrdinalIgnoreCase);
+        }
+
+        foreach (var name in new[] { "hourlyRate", "referenceNumber" })
+        {
             Assert.DoesNotContain(name, row, StringComparison.OrdinalIgnoreCase);
         }
     }

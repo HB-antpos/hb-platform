@@ -221,6 +221,9 @@ export const P = {
     // 历史工资单（「工时与工资」页面的「工资单」页签，只读）：店长按管辖分店 / 财务与管理员看全部分店，与后端 Permissions.Myob.Payslip.* 一致。
     PayslipViewManagedStore: 'Myob.Payslip.ViewManagedStore',
     PayslipViewAllStores: 'Myob.Payslip.ViewAllStores',
+    // 工资单 PDF：下载 / 邮件发送各自独立授权（新权限默认不授予任何角色），与后端 Permissions.Myob.Payslip.Download / Email 一致。
+    PayslipDownload: 'Myob.Payslip.Download',
+    PayslipEmail: 'Myob.Payslip.Email',
   },
   // 门店人脸抓拍摄像机管理（系统菜单「人脸抓拍摄像机」）：独立顶层权限码，与后端 Permissions.FaceCapture.Cameras.Manage 一致。
   FaceCapture: {

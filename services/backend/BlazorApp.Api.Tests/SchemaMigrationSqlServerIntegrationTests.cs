@@ -4187,6 +4187,49 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单导出_查看记录加列与权限码_既有行默认View_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54380, missing.Number);
+
+        // 先建上一版（20261029.003）的表与权限表，再放入一条旧查看记录，验证加列不破坏既有行。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipViewLog (LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, MyobEmployeeUid, PaymentDate, ViewedAt)
+            VALUES (N'l-old', N'u-actor', N'c-1', NULL, N'uid-1', '2026-10-23', SYSUTCDATETIME());
+            """);
+
+        // 列缺失 → 54381；Apply 后通过；重复执行不重复插入权限。
+        var noAction = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54381, noAction.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobPayslipViewLog WHERE LogGuid = N'l-old' AND [Action] = N'View' AND Recipient IS NULL"));
+        Assert.Equal(2, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Myob.Payslip.Download', N'Myob.Payslip.Email') AND IsDeleted = 0"));
+
+        // Recipient 列宽漂移 → 54382。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN Recipient nvarchar(50) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54382, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 主API入口用量写入器_新行插入_旧行累加_分批_并发不丢数_失败整批回滚()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

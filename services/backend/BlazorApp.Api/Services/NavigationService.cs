@@ -411,6 +411,21 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "payslips",
+                TitleKey = "tabs.payslips",
+                Icon = "receipt-text-outline",
+                // 移动端「工资单」（只读查看 + 下载 / 邮件）：与 Web 工资单页签同口径，接口再按管辖分店与导出权限校验；
+                // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.Myob.Payslip.ViewManagedStore,
+                AnyPermissions = new[]
+                {
+                    Permissions.Myob.Payslip.ViewManagedStore,
+                    Permissions.Myob.Payslip.ViewAllStores,
+                },
+                Order = 56,
+            },
+            new()
+            {
                 RouteName = "seasonal-cards",
                 TitleKey = "tabs.seasonalCards",
                 Icon = "gift-outline",

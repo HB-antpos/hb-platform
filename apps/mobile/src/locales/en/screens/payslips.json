@@ -1,0 +1,146 @@
+{
+  "title": "Payslips",
+  "detailTitle": "Payslip",
+  "messages": {
+    "notAllowed": "You don't have permission to view payslips. \"View payslips for managed stores\" or \"View payslips for all stores\" is required.",
+    "reviewUnavailable": "Payslips aren't available in review demo mode.",
+    "missingKey": "This payslip link is incomplete. Open it again from the list."
+  },
+  "list": {
+    "searchPlaceholder": "Search name or employee ID",
+    "searchOpen": "Search",
+    "searchClose": "Close search",
+    "company": {
+      "all": "All companies",
+      "pickerTitle": "Select company"
+    },
+    "store": {
+      "all": "All stores",
+      "pickerTitle": "Select store"
+    },
+    "preset": {
+      "twoWeeks": "Last 2 weeks",
+      "threeMonths": "Last 3 months",
+      "fiscalYear": "This fiscal year",
+      "custom": "Custom"
+    },
+    "customTitle": "Payment date range",
+    "onlyUnassigned": "Unbound only ({{count}})",
+    "summary": {
+      "count": "Payslips",
+      "countValue": "{{count}}",
+      "gross": "Gross total",
+      "net": "Net total"
+    },
+    "basis": "By payment date · {{from}} — {{to}}",
+    "row": {
+      "gross": "Gross {{amount}}",
+      "unbound": "Unbound",
+      "unknown": "Store unknown",
+      "inferred": "Inferred"
+    },
+    "partial": {
+      "title": "{{count}} company file(s) couldn't be read, so these totals are incomplete",
+      "retry": "Retry"
+    },
+    "empty": {
+      "title": "No payslips in this period",
+      "description": "Try a wider date range, or switch company or store."
+    },
+    "error": {
+      "title": "Couldn't load payslips",
+      "retry": "Retry",
+      "stale": "Refresh failed. Showing the last data below."
+    },
+    "loading": "Reading payslips from MYOB…"
+  },
+  "detail": {
+    "paid": "Paid",
+    "samePaymentDate": "{{count}} payslips share this payment date",
+    "viewPdf": "View PDF as issued",
+    "viewPdfHint": "Opens in your viewer",
+    "downloadPdf": "Download PDF",
+    "sendEmail": "Email",
+    "downloading": "Downloading…",
+    "placement": {
+      "title": "Store placement and our hours",
+      "reference": "Reference only",
+      "Attendance": "Store placed from attendance",
+      "Inferred": "Store inferred from history, so it may be off",
+      "Unknown": "No matching store found",
+      "Unbound": "This MYOB employee isn't bound to one of our staff yet",
+      "noStore": "No store",
+      "viewHours": "View our hours",
+      "hoursLoading": "Reading attendance…",
+      "hoursPeriod": "Attendance period {{from}} — {{to}}",
+      "work": "Work {{hours}}",
+      "leave": "Leave {{hours}}",
+      "failed": "Couldn't read",
+      "total": "Total",
+      "hoursEmpty": "No attendance hours in this period.",
+      "hoursError": "Couldn't read attendance hours",
+      "retry": "Retry"
+    },
+    "disclaimer": "For reference only. The payslip issued by MYOB prevails. This view has been logged.",
+    "disclaimerEn": "For reference only — the payslip issued by MYOB prevails.",
+    "error": {
+      "title": "Couldn't load the payslip",
+      "retry": "Retry"
+    },
+    "loading": "Reading the payslip…"
+  },
+  "email": {
+    "title": "Email payslip PDF",
+    "recipient": "Recipient",
+    "recipientPlaceholder": "name@example.com",
+    "clear": "Clear recipient",
+    "matchesProfile": "Prefilled from the employee profile · matches the profile",
+    "differsFromProfile": "This differs from the employee profile email ({{masked}}). Check it, then confirm below.",
+    "confirmRecipient": "I've checked the recipient",
+    "noProfile": "No email on the employee profile. Enter the recipient manually.",
+    "issue": {
+      "empty": "Enter the recipient email.",
+      "invalid": "That email address doesn't look right.",
+      "multiple": "Send to one recipient at a time."
+    },
+    "copyToMe": "Copy me",
+    "copyToMeTo": "A copy goes to {{email}}",
+    "noMyEmail": "Your account has no email, so a copy can't be sent.",
+    "note": "Note (optional)",
+    "notePlaceholder": "A short note for the employee (no amounts)",
+    "attachment": "Attachment",
+    "notice": "The email carries the PDF only. Amounts aren't written in the body. Sending is logged.",
+    "cancel": "Cancel",
+    "send": "Send",
+    "sending": "Sending…",
+    "retry": "Retry",
+    "downloadPdf": "Download PDF",
+    "loadingTarget": "Reading recipient details…",
+    "targetError": "Couldn't read recipient details",
+    "targetRetry": "Try again",
+    "failedPrefix": "Send failed",
+    "sent": "Sent to {{to}} and logged",
+    "sentCopyFailed": "Sent to {{to}} and logged, but your copy didn't go through"
+  },
+  "errors": {
+    "codes": {
+      "MYOB_PAYSLIP_FORBIDDEN": "You don't have permission to do this.",
+      "MYOB_PAYSLIP_RECIPIENT_UNCONFIRMED": "This recipient differs from the employee profile. Tick \"I've checked the recipient\" first.",
+      "MYOB_PAYSLIP_EMAIL_INVALID": "That email address doesn't look right.",
+      "MYOB_PAYSLIP_EMAIL_NOT_CONFIGURED": "No sender mailbox is set up yet. Ask an administrator. The payslip is unaffected, so download the PDF and send it manually.",
+      "MYOB_PAYSLIP_EMAIL_SEND_FAILED": "The email service is unavailable right now. The payslip is unaffected. Retry, or download the PDF and send it manually.",
+      "PAYSLIP_PDF_INVALID": "The downloaded file isn't a valid PDF. Please try again.",
+      "PAYSLIP_SHARING_UNAVAILABLE": "This device can't share or save files.",
+      "PAYSLIP_INVALID_RESPONSE": "The payslip data looks wrong. Refresh and try again."
+    },
+    "notFound": "This payslip can't be found. MYOB may have updated it. Go back and refresh the list.",
+    "generic": "Request failed. Please try again later."
+  },
+  "a11y": {
+    "openPayslip": "{{name}}, net {{net}}, paid {{date}}, open payslip",
+    "filterChip": "{{label}}, tap to change",
+    "presetChip": "{{label}}, date range",
+    "back": "Back",
+    "paper": "MYOB default-style payslip"
+  }
+}

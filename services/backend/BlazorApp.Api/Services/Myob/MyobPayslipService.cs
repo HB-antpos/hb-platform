@@ -7,6 +7,7 @@ using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Caching.Memory;
+using MimeKit;
 using SqlSugar;
 
 namespace BlazorApp.Api.Services.Myob;
@@ -26,7 +27,24 @@ public interface IMyobPayslipService
     /// 但不写查看记录：它和打开明细属于同一次查看。
     /// </summary>
     Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 生成 MYOB 默认样式的工资单 PDF。需要 Myob.Payslip.Download，且看得到这张工资单（与明细同一套范围判断）；先写「Download」查看记录再返回文件。
+    /// </summary>
+    Task<ApiResponse<MyobPayslipPdfFile>> DownloadPdfAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
+
+    /// <summary>邮件弹窗预填：员工档案邮箱（脱敏另给）、主题、文件名、当前登录人邮箱。需要 Myob.Payslip.Email。不写查看记录。</summary>
+    Task<ApiResponse<MyobPayslipEmailTargetDto>> GetEmailTargetAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 把工资单 PDF 发给员工。需要 Myob.Payslip.Email；每次一个收件人；档案邮箱存在且收件人不同需 RecipientChangeConfirmed。
+    /// 先写「Email」查看记录（含收件邮箱）再发送，发送失败会把这条记录标成 EmailFailed。
+    /// </summary>
+    Task<ApiResponse<MyobPayslipEmailResultDto>> SendEmailAsync(MyobPayslipEmailRequest request, CancellationToken cancellationToken);
 }
+
+/// <summary>生成好的 PDF 文件。</summary>
+public sealed record MyobPayslipPdfFile(byte[] Content, string Filename);
 
 /// <summary>查「某用户是否有某权限码」的最小抽象：生产用 IRoleService（含管理员角色与权限别名），测试用假实现。</summary>
 public interface IMyobPayslipPermissionChecker
@@ -69,6 +87,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     private readonly IAttendancePayrollPushSource _source;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _time;
+    private readonly IMyobPayslipEmailSender? _emailSender;
 
     public MyobPayslipService(
         SqlSugarContext context,
@@ -78,8 +97,9 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         IMyobPayslipPermissionChecker permissions,
         IAttendancePayrollPushSource source,
         IMemoryCache cache,
-        TimeProvider? timeProvider = null)
-        : this(context.Db, client, tokens, scope, permissions, source, cache, timeProvider)
+        TimeProvider? timeProvider = null,
+        IMyobPayslipEmailSender? emailSender = null)
+        : this(context.Db, client, tokens, scope, permissions, source, cache, timeProvider, emailSender)
     {
     }
 
@@ -91,8 +111,10 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         IMyobPayslipPermissionChecker permissions,
         IAttendancePayrollPushSource source,
         IMemoryCache cache,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IMyobPayslipEmailSender? emailSender = null)
     {
+        _emailSender = emailSender;
         _db = db;
         _client = client;
         _tokens = tokens;
@@ -569,12 +591,19 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     /// 越权与不存在返回同样的 NotFound，不暴露这张工资单是否存在。工时接口也走这里重新取工资单，
     /// 不信任客户端传来的周期，避免用伪造的周期绕过「分店归属」判断。
     /// </summary>
-    private async Task<ResolveOutcome> ResolveSlipAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    private async Task<ResolveOutcome> ResolveSlipAsync(
+        MyobPayslipDetailRequest request, CancellationToken cancellationToken, string? extraPermission = null)
     {
         var access = await ResolveAccessAsync();
         if (access.Access is null)
         {
             return new ResolveOutcome(null, MyobPayslipErrorCodes.Forbidden, access.Message);
+        }
+
+        // 导出类操作（下载 / 邮件）在能看工资单之外还要有各自的权限；先判断，免得白白去请求一次 MYOB。
+        if (extraPermission is not null && !await _permissions.HasAsync(access.UserGuid, extraPermission))
+        {
+            return new ResolveOutcome(null, MyobPayslipErrorCodes.Forbidden, "你没有此操作的权限");
         }
 
         // 员工卡 UID 必须是合法 Guid（也是后面拼进 OData 表达式的前提）；日期必须是 yyyy-MM-dd。
@@ -649,19 +678,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         var (access, connection, chosen, sameDayCount, placed) = outcome.Slip;
 
         // 先记查看，再返回内容：记不下来就拒绝（宁可不给看，也不能无痕地看）。只记谁、哪一期，不记金额。
-        try
-        {
-            await _db.Insertable(new MyobPayslipViewLog
-            {
-                ActorUserGuid = access.UserGuid,
-                ConnectionGuid = connection.ConnectionGuid,
-                TargetUserGuid = placed.Link?.UserGuid,
-                MyobEmployeeUid = chosen.EmployeeUid,
-                PaymentDate = chosen.PaymentDate?.Date ?? DateTime.MinValue,
-                ViewedAt = _time.GetUtcNow().UtcDateTime,
-            }).ExecuteCommandAsync();
-        }
-        catch (Exception)
+        if (await TryWriteLogAsync(access, connection, placed, chosen, MyobPayslipLogActions.View, null) is null)
         {
             return ApiResponse<MyobPayslipDetailDto>.Error("暂时无法记录本次查看，已拒绝显示工资单，请稍后重试", MyobPayslipErrorCodes.ViewLogFailed);
         }
@@ -682,21 +699,40 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             GrossPay = chosen.GrossPay,
             NetPay = chosen.NetPay,
             SuperFundName = chosen.SuperFundName,
+            HourlyRate = chosen.HourlyRate,
+            ReferenceNumber = chosen.ChequeNumber,
             Placement = placed.Placement.Kind,
             Stores = ToStoreDtos(placed.Placement, labels),
             SamePaymentDateCount = sameDayCount,
+            CanDownloadPdf = await _permissions.HasAsync(access.UserGuid, Permissions.Myob.Payslip.Download),
+            CanSendEmail = await _permissions.HasAsync(access.UserGuid, Permissions.Myob.Payslip.Email),
         };
         foreach (var line in chosen.Lines)
         {
             var dto = new MyobPayslipLineDto
             {
                 Description = line.CategoryName,
+                Type = line.CategoryType,
+                TypeLabel = MyobPayslipPresentation.TypeLabel(line.CategoryType),
                 Hours = line.Hours,
                 Rate = line.CalculationRate,
                 Amount = line.Amount,
                 YearToDate = line.YearToDate,
             };
             LinesFor(detail, line.CategoryType).Add(dto);
+
+            // 扁平明细：与 MYOB 默认工资单通栏表一致（原始顺序 + Type 列）；假期累计的小时数放 Hours 列。
+            var (hours, amount) = MyobPayslipPresentation.NormalizeQuantity(line.CategoryType, line.Hours, line.Amount);
+            detail.Lines.Add(new MyobPayslipLineDto
+            {
+                Description = line.CategoryName,
+                Type = line.CategoryType,
+                TypeLabel = MyobPayslipPresentation.TypeLabel(line.CategoryType),
+                Hours = hours,
+                Rate = line.CalculationRate,
+                Amount = amount,
+                YearToDate = line.YearToDate,
+            });
         }
 
         return ApiResponse<MyobPayslipDetailDto>.OK(detail);
@@ -757,6 +793,229 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         dto.TotalWorkHours = dto.Stores.Sum(item => item.WorkHours);
         dto.TotalLeaveHours = dto.Stores.Sum(item => item.LeaveHours);
         return ApiResponse<MyobPayslipHoursDto>.OK(dto);
+    }
+
+    // ───────────────────────── 下载 PDF / 邮件发送 ─────────────────────────
+
+    /// <summary>写一条查看记录并返回它（失败返回 null）。只记谁、哪一期、做了什么、邮件收件邮箱，不记金额与姓名。</summary>
+    private async Task<MyobPayslipViewLog?> TryWriteLogAsync(
+        AccessResult access, MyobConnection connection, PlacedAdvice placed, MyobPayrollAdviceRecord slip, string action, string? recipient)
+    {
+        var log = new MyobPayslipViewLog
+        {
+            ActorUserGuid = access.UserGuid,
+            ConnectionGuid = connection.ConnectionGuid,
+            TargetUserGuid = placed.Link?.UserGuid,
+            MyobEmployeeUid = slip.EmployeeUid,
+            PaymentDate = slip.PaymentDate?.Date ?? DateTime.MinValue,
+            ViewedAt = _time.GetUtcNow().UtcDateTime,
+            Action = action,
+            Recipient = recipient,
+        };
+        try
+        {
+            await _db.Insertable(log).ExecuteCommandAsync();
+            return log;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> LoadUserEmailAsync(string? userGuid)
+    {
+        if (string.IsNullOrWhiteSpace(userGuid))
+        {
+            return null;
+        }
+
+        var email = (await _db.Queryable<User>()
+            .Where(user => user.UserGUID == userGuid && !user.IsDeleted)
+            .Select(user => user.Email)
+            .FirstAsync())?.Trim();
+        return string.IsNullOrEmpty(email) ? null : email;
+    }
+
+    private static string PeriodText(MyobPayrollAdviceRecord slip) =>
+        $"{MyobPayslipPresentation.Date(slip.PeriodStart)} to {MyobPayslipPresentation.Date(slip.PeriodEnd)}";
+
+    private static string EmailSubject(MyobPayrollAdviceRecord slip) =>
+        $"Your payslip – pay period {PeriodText(slip)} / 工资单";
+
+    public async Task<ApiResponse<MyobPayslipPdfFile>> DownloadPdfAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    {
+        var outcome = await ResolveSlipAsync(request, cancellationToken, Permissions.Myob.Payslip.Download);
+        if (outcome.Slip is null)
+        {
+            return ApiResponse<MyobPayslipPdfFile>.Error(outcome.Message ?? "找不到这张工资单", outcome.ErrorCode);
+        }
+
+        var (access, connection, chosen, _, placed) = outcome.Slip;
+        byte[] bytes;
+        try
+        {
+            bytes = MyobPayslipPdfRenderer.Render(MyobPayslipPdfModel.From(chosen, connection.BusinessName));
+        }
+        catch (Exception)
+        {
+            return ApiResponse<MyobPayslipPdfFile>.Error("工资单 PDF 生成失败，请稍后重试", MyobPayslipErrorCodes.PdfFailed);
+        }
+
+        // 先记下载，再给文件：记不下来就拒绝。
+        if (await TryWriteLogAsync(access, connection, placed, chosen, MyobPayslipLogActions.Download, null) is null)
+        {
+            return ApiResponse<MyobPayslipPdfFile>.Error("暂时无法记录本次下载，已拒绝提供文件，请稍后重试", MyobPayslipErrorCodes.ViewLogFailed);
+        }
+
+        return ApiResponse<MyobPayslipPdfFile>.OK(new MyobPayslipPdfFile(bytes, MyobPayslipPresentation.Filename(chosen.EmployeeName, chosen.PaymentDate)));
+    }
+
+    public async Task<ApiResponse<MyobPayslipEmailTargetDto>> GetEmailTargetAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+    {
+        var outcome = await ResolveSlipAsync(request, cancellationToken, Permissions.Myob.Payslip.Email);
+        if (outcome.Slip is null)
+        {
+            return ApiResponse<MyobPayslipEmailTargetDto>.Error(outcome.Message ?? "找不到这张工资单", outcome.ErrorCode);
+        }
+
+        var (access, _, chosen, _, placed) = outcome.Slip;
+        var profileEmail = await LoadUserEmailAsync(placed.Link?.UserGuid);
+        return ApiResponse<MyobPayslipEmailTargetDto>.OK(new MyobPayslipEmailTargetDto
+        {
+            Email = profileEmail,
+            MaskedEmail = profileEmail is null ? null : MyobPayslipPresentation.MaskEmail(profileEmail),
+            Source = profileEmail is null ? "none" : "profile",
+            Subject = EmailSubject(chosen),
+            Filename = MyobPayslipPresentation.Filename(chosen.EmployeeName, chosen.PaymentDate),
+            MyEmail = await LoadUserEmailAsync(access.UserGuid),
+        });
+    }
+
+    /// <summary>单个、不带显示名、不含逗号分号的邮箱地址。</summary>
+    internal static bool TryParseSingleEmail(string? text, out string email)
+    {
+        email = (text ?? string.Empty).Trim();
+        if (email.Length is 0 or > 254 || email.IndexOfAny([',', ';', ' ', '<', '>']) >= 0)
+        {
+            return false;
+        }
+
+        // 必须是 本地部分@带点的域名（MimeKit 会放过没有域名的 "abc"）。
+        var at = email.IndexOf('@');
+        return at > 0
+            && at == email.LastIndexOf('@')
+            && email[(at + 1)..].Contains('.')
+            && !email.EndsWith('.')
+            && MailboxAddress.TryParse(email, out var address)
+            && string.Equals(address.Address, email, StringComparison.Ordinal);
+    }
+
+    public async Task<ApiResponse<MyobPayslipEmailResultDto>> SendEmailAsync(MyobPayslipEmailRequest request, CancellationToken cancellationToken)
+    {
+        if (_emailSender is null)
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("邮件发送暂不可用", MyobPayslipErrorCodes.EmailNotConfigured);
+        }
+
+        var detailRequest = new MyobPayslipDetailRequest
+        {
+            ConnectionGuid = request.ConnectionGuid,
+            EmployeeUid = request.EmployeeUid,
+            PaymentDate = request.PaymentDate,
+            PeriodStart = request.PeriodStart,
+        };
+        var outcome = await ResolveSlipAsync(detailRequest, cancellationToken, Permissions.Myob.Payslip.Email);
+        if (outcome.Slip is null)
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error(outcome.Message ?? "找不到这张工资单", outcome.ErrorCode);
+        }
+
+        // 权限与范围通过后才校验邮件参数，避免对无权限的人泄露任何信息。
+        if (!TryParseSingleEmail(request.To, out var to))
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("收件人邮箱格式不正确（每次只能填一个邮箱）", MyobPayslipErrorCodes.EmailInvalid);
+        }
+
+        var note = request.Note?.Trim();
+        if (note is { Length: > 500 })
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("附言最多 500 字", MyobPayslipErrorCodes.EmailInvalid);
+        }
+
+        var (access, connection, chosen, _, placed) = outcome.Slip;
+
+        // 档案邮箱存在且与收件人不同：必须明确确认，防止发错人；档案没有邮箱时手填无需确认（只用于本次，不回写档案）。
+        var profileEmail = await LoadUserEmailAsync(placed.Link?.UserGuid);
+        if (profileEmail is not null
+            && !profileEmail.Equals(to, StringComparison.OrdinalIgnoreCase)
+            && !request.RecipientChangeConfirmed)
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("收件人与员工档案邮箱不同，请核对并确认后再发送", MyobPayslipErrorCodes.RecipientUnconfirmed);
+        }
+
+        string? cc = null;
+        if (request.CopyToMe)
+        {
+            cc = await LoadUserEmailAsync(access.UserGuid);
+            if (cc is null)
+            {
+                return ApiResponse<MyobPayslipEmailResultDto>.Error("你的账号没有邮箱，无法抄送给自己", MyobPayslipErrorCodes.EmailInvalid);
+            }
+        }
+
+        byte[] pdf;
+        try
+        {
+            pdf = MyobPayslipPdfRenderer.Render(MyobPayslipPdfModel.From(chosen, connection.BusinessName));
+        }
+        catch (Exception)
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("工资单 PDF 生成失败，请稍后重试", MyobPayslipErrorCodes.PdfFailed);
+        }
+
+        // 先记（含收件邮箱）再发送：记不下来就不发；发送失败把这条记录改成 EmailFailed，留下完整的尝试痕迹。
+        var log = await TryWriteLogAsync(access, connection, placed, chosen, MyobPayslipLogActions.Email, to);
+        if (log is null)
+        {
+            return ApiResponse<MyobPayslipEmailResultDto>.Error("暂时无法记录本次发送，已取消发送，请稍后重试", MyobPayslipErrorCodes.ViewLogFailed);
+        }
+
+        var sent = await _emailSender.SendAsync(
+            new MyobPayslipEmail(
+                to,
+                cc,
+                chosen.EmployeeName ?? string.Empty,
+                chosen.EmployerName ?? connection.BusinessName,
+                PeriodText(chosen),
+                MyobPayslipPresentation.Date(chosen.PaymentDate),
+                string.IsNullOrEmpty(note) ? null : note,
+                EmailSubject(chosen),
+                MyobPayslipPresentation.Filename(chosen.EmployeeName, chosen.PaymentDate),
+                pdf),
+            cancellationToken);
+        if (!sent.Success)
+        {
+            try
+            {
+                await _db.Updateable<MyobPayslipViewLog>()
+                    .SetColumns(item => item.Action == MyobPayslipLogActions.EmailFailed)
+                    .Where(item => item.LogGuid == log.LogGuid)
+                    .ExecuteCommandAsync();
+            }
+            catch (Exception)
+            {
+                // 标记失败不影响把发送失败的原因告诉用户。
+            }
+
+            return ApiResponse<MyobPayslipEmailResultDto>.Error(sent.Message ?? "邮件发送失败，请稍后重试", sent.ErrorCode ?? MyobPayslipErrorCodes.EmailSendFailed);
+        }
+
+        return ApiResponse<MyobPayslipEmailResultDto>.OK(new MyobPayslipEmailResultDto
+        {
+            SentTo = MyobPayslipPresentation.MaskEmail(to),
+            CopiedToMe = cc is not null,
+        });
     }
 
     private static List<MyobPayslipLineDto> LinesFor(MyobPayslipDetailDto detail, string? type) =>

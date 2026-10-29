@@ -201,6 +201,7 @@ const pages = [
     sources: [
       'src/pages/PosAdmin/Payslips/index.tsx',
       'src/pages/PosAdmin/Payslips/PayslipDrawer.tsx',
+      'src/pages/PosAdmin/Payslips/PayslipEmailModal.tsx',
       'src/pages/PosAdmin/Payslips/payslipLogic.ts',
     ],
     messages: {

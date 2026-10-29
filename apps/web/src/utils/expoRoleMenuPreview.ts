@@ -171,6 +171,7 @@ const TAB_PATHS: Record<string, string> = {
   'attendance-personal': '/(shell)/attendance-personal',
   'attendance-management': '/(shell)/attendance-management',
   'attendance-hours': '/(shell)/attendance-hours',
+  payslips: '/(shell)/payslips',
   'product-query': '/(shell)/product-query',
   'price-updates': '/(shell)/price-updates',
   'pricing-strategies': '/(shell)/pricing-strategies',
@@ -220,6 +221,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'attendance-personal': { zhTitle: '考勤', enTitle: 'Attendance' },
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
   'attendance-hours': { zhTitle: '工时统计', enTitle: 'Staff hours' },
+  payslips: { zhTitle: '工资单', enTitle: 'Payslips' },
   'product-query': { zhTitle: '商品维护', enTitle: 'Products' },
   'price-updates': { zhTitle: '价格和标签', enTitle: 'Prices & labels' },
   'pricing-strategies': { zhTitle: '自动价格策略', enTitle: 'Pricing rules' },
@@ -454,6 +456,16 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.Attendance.PunchViewManagedStore],
     order: 56,
     ...ROUTE_LABELS['attendance-hours'],
+  },
+  {
+    routeName: 'payslips',
+    titleKey: 'tabs.payslips',
+    icon: 'receipt-text-outline',
+    // 与后端 FullAppMenu 一致：手机端「工资单」与 Web 工资单页签同口径，管辖分店 / 全部分店查看权限任一即可见；
+    // 下载 PDF / 邮件发送另有独立权限（Myob.Payslip.Download / Email），不决定入口是否可见。
+    permissionCodes: [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores],
+    order: 56,
+    ...ROUTE_LABELS.payslips,
   },
   {
     routeName: 'seasonal-cards',

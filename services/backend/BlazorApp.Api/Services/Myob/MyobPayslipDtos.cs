@@ -1,7 +1,8 @@
 namespace BlazorApp.Api.Services.Myob;
 
 // MYOB 历史工资单（方案 docs/plans/2026-10-29-myob-payslip-history.md）。全局 JSON 为 camelCase；全部返回 ApiResponse<T>。
-// 隐私：这里的 DTO 只含展示字段。年薪、时薪、生日、支票号、雇佣分类在 MyobPayrollAdviceRecord 里就已被丢弃，不可能出现在响应里；
+// 隐私：这里的 DTO 只含展示字段。年薪、生日、雇佣分类在 MyobPayrollAdviceRecord 里就已被丢弃，不可能出现在响应里；
+// 时薪（Hourly Rate）与支票号（Reference Number）只在明细 / PDF 里出现（还原 MYOB 默认 Pay Slip 页头），列表 DTO 不含；
 // 银行账号 / TFN 本功能根本不读取。
 
 public static class MyobPayslipErrorCodes
@@ -10,6 +11,22 @@ public static class MyobPayslipErrorCodes
     public const string InvalidRange = "MYOB_PAYSLIP_INVALID_RANGE";
     public const string NotFound = "MYOB_PAYSLIP_NOT_FOUND";
     public const string ViewLogFailed = "MYOB_PAYSLIP_VIEW_LOG_FAILED";
+    public const string PdfFailed = "MYOB_PAYSLIP_PDF_FAILED";
+    public const string EmailInvalid = "MYOB_PAYSLIP_EMAIL_INVALID";
+    public const string RecipientUnconfirmed = "MYOB_PAYSLIP_RECIPIENT_UNCONFIRMED";
+    public const string EmailNotConfigured = "MYOB_PAYSLIP_EMAIL_NOT_CONFIGURED";
+    public const string EmailSendFailed = "MYOB_PAYSLIP_EMAIL_SEND_FAILED";
+}
+
+/// <summary>查看记录（MyobPayslipViewLog.Action）的动作取值。</summary>
+public static class MyobPayslipLogActions
+{
+    public const string View = "View";
+    public const string Download = "Download";
+    public const string Email = "Email";
+
+    /// <summary>邮件发送失败（记录先写、发送后失败时改成这个值）。</summary>
+    public const string EmailFailed = "EmailFailed";
 }
 
 /// <summary>「该公司文件里这一张工资单属于哪些分店」的归类结果。</summary>
@@ -114,6 +131,13 @@ public sealed class MyobPayslipListDto
 public sealed class MyobPayslipLineDto
 {
     public string? Description { get; set; }
+
+    /// <summary>MYOB 原始类别类型（Wage / Tax / Deduction / Superannuation / Entitlement / Expense…）。</summary>
+    public string? Type { get; set; }
+
+    /// <summary>MYOB 默认工资单 TYPE 列的显示文字（Wage → Wages，其余原样）。</summary>
+    public string? TypeLabel { get; set; }
+
     public decimal? Hours { get; set; }
     public decimal? Rate { get; set; }
     public decimal? Amount { get; set; }
@@ -135,8 +159,23 @@ public sealed class MyobPayslipDetailDto
     public decimal? GrossPay { get; set; }
     public decimal? NetPay { get; set; }
     public string? SuperFundName { get; set; }
+
+    /// <summary>MYOB 默认工资单页头的 Hourly Rate（还原版式用，不进列表）。</summary>
+    public decimal? HourlyRate { get; set; }
+
+    /// <summary>MYOB 默认工资单页头的 Reference Number（报表里叫 ChequeNumber）。</summary>
+    public string? ReferenceNumber { get; set; }
+
     public string Placement { get; set; } = MyobPayslipPlacements.Unknown;
     public List<MyobPayslipStoreDto> Stores { get; set; } = [];
+
+    /// <summary>按 MYOB 原始顺序的扁平明细（与默认工资单通栏表一致，含 Type 列）；下面按类型分组的数组为兼容保留。</summary>
+    public List<MyobPayslipLineDto> Lines { get; set; } = [];
+
+    /// <summary>当前账号能否下载 PDF / 邮件发送（Myob.Payslip.Download / Myob.Payslip.Email）；前端据此显示按钮，接口里仍会重新判断。</summary>
+    public bool CanDownloadPdf { get; set; }
+
+    public bool CanSendEmail { get; set; }
 
     // 按 MYOB 原始 Type 分区块；名称与英文用词保持 MYOB 原文。
     public List<MyobPayslipLineDto> Wages { get; set; } = [];
@@ -202,4 +241,49 @@ public sealed class MyobPayslipHoursDto
     public List<MyobPayslipStoreHoursDto> Stores { get; set; } = [];
     public decimal TotalWorkHours { get; set; }
     public decimal TotalLeaveHours { get; set; }
+}
+
+/// <summary>邮件发送弹窗打开时的预填信息。</summary>
+public sealed class MyobPayslipEmailTargetDto
+{
+    /// <summary>员工档案邮箱；没有则为空。</summary>
+    public string? Email { get; set; }
+
+    public string? MaskedEmail { get; set; }
+
+    /// <summary>"profile" = 来自员工档案；"none" = 档案里没有邮箱（收件人须手填，仅用于本次，不回写档案）。</summary>
+    public string Source { get; set; } = "none";
+
+    public string Subject { get; set; } = string.Empty;
+    public string Filename { get; set; } = string.Empty;
+
+    /// <summary>当前登录人的邮箱，供「抄送给我」；没有则为空。</summary>
+    public string? MyEmail { get; set; }
+}
+
+public sealed class MyobPayslipEmailRequest
+{
+    public string ConnectionGuid { get; set; } = string.Empty;
+    public string EmployeeUid { get; set; } = string.Empty;
+    public string PaymentDate { get; set; } = string.Empty;
+    public string? PeriodStart { get; set; }
+
+    /// <summary>收件人（单个邮箱；每次只发一个员工、一个收件人）。</summary>
+    public string To { get; set; } = string.Empty;
+
+    public bool CopyToMe { get; set; }
+
+    /// <summary>给员工的一句话（选填，≤500 字；会进邮件正文，提示用户不要写金额）。</summary>
+    public string? Note { get; set; }
+
+    /// <summary>档案邮箱存在且与 To 不同时，必须为 true（防止发错人）。</summary>
+    public bool RecipientChangeConfirmed { get; set; }
+}
+
+public sealed class MyobPayslipEmailResultDto
+{
+    /// <summary>已脱敏的收件邮箱（a***@example.com）。</summary>
+    public string SentTo { get; set; } = string.Empty;
+
+    public bool CopiedToMe { get; set; }
 }

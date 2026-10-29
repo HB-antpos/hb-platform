@@ -645,6 +645,12 @@ namespace BlazorApp.Shared.Constants
 
                 /// <summary>查看全部分店、全部公司文件的历史工资单，含「未绑定 / 无法确定分店」的工资单（财务 / 管理员）。</summary>
                 public const string ViewAllStores = "Myob.Payslip.ViewAllStores";
+
+                /// <summary>下载 MYOB 默认样式的工资单 PDF（须同时具备上面任一查看权限；下载会写查看记录）。</summary>
+                public const string Download = "Myob.Payslip.Download";
+
+                /// <summary>把工资单 PDF 以邮件发给员工（须同时具备上面任一查看权限；发送会写查看记录，含收件邮箱）。</summary>
+                public const string Email = "Myob.Payslip.Email";
             }
         }
 

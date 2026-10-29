@@ -19,8 +19,9 @@ public sealed record MyobPayrollAdviceLine(
 
 /// <summary>
 /// 一张已发薪工资单（展示用精简对象）。
-/// 隐私：反序列化时就不读取 AnnualSalary / HourlyRate / DateOfBirth / ChequeNumber / EmploymentClassification，
-/// 这些字段不会进入内存缓存、DTO 或日志。
+/// 隐私：反序列化时不读取 AnnualSalary / DateOfBirth / EmploymentClassification，这些字段不会进入内存缓存、DTO 或日志。
+/// 2026-10-29 起为了还原 MYOB 默认 Pay Slip 版式，放开 HourlyRate 与 ChequeNumber（MYOB 原版页头的 Hourly Rate / Reference Number）：
+/// 它们只用于明细页与 PDF，不进列表 DTO、不写日志；员工本来就能在 MYOB 发出的工资单里看到这两项。
 /// </summary>
 public sealed record MyobPayrollAdviceRecord(
     string? EmployerName,
@@ -35,6 +36,8 @@ public sealed record MyobPayrollAdviceRecord(
     decimal? GrossPay,
     decimal? NetPay,
     string? SuperFundName,
+    decimal? HourlyRate,
+    string? ChequeNumber,
     IReadOnlyList<MyobPayrollAdviceLine> Lines);
 
 /// <summary>
@@ -131,6 +134,8 @@ internal sealed class PayrollAdvicePayload
     public decimal? GrossPay { get; set; }
     public decimal? NetPay { get; set; }
     public NamedPayload? SuperannuationFund { get; set; }
+    public decimal? HourlyRate { get; set; }
+    public string? ChequeNumber { get; set; }
     public List<LinePayload>? Lines { get; set; }
 
     internal sealed class EmployerPayload
@@ -192,6 +197,8 @@ internal sealed class PayrollAdvicePayload
             item.GrossPay,
             item.NetPay,
             Clean(item.SuperannuationFund?.Name),
+            item.HourlyRate,
+            Clean(item.ChequeNumber),
             (item.Lines ?? [])
                 .Select(line => new MyobPayrollAdviceLine(
                     Clean(line.PayrollCategory?.Name),

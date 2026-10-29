@@ -3,10 +3,15 @@ import type {
   MyobPayslipCompany,
   MyobPayslipCompanyStatus,
   MyobPayslipDetail,
+  MyobPayslipEmailPayload,
+  MyobPayslipEmailResult,
+  MyobPayslipEmailTarget,
+  MyobPayslipFlatLine,
   MyobPayslipHours,
   MyobPayslipKey,
   MyobPayslipLine,
   MyobPayslipList,
+  MyobPayslipPdfFile,
   MyobPayslipPlacement,
   MyobPayslipQuery,
   MyobPayslipRow,
@@ -15,7 +20,8 @@ import type {
 } from '../types/myobPayslip'
 import request, { unwrapApiData } from '../utils/request'
 
-// 后端 MYOB 工资单控制器（只读）。权限：Myob.Payslip.ViewAllStores / Myob.Payslip.ViewManagedStore 任一；范围由后端按权限与管辖分店裁剪。
+// 后端 MYOB 工资单控制器。查看权限：Myob.Payslip.ViewAllStores / Myob.Payslip.ViewManagedStore 任一（范围由后端按权限与管辖分店裁剪）；
+// 下载 PDF / 邮件发送另需 Myob.Payslip.Download / Myob.Payslip.Email，是否可用以明细返回的 canDownloadPdf / canSendEmail 为准。
 const PAYSLIP_BASE = '/api/react/v1/myob/payslips'
 
 function text(value: unknown) {
@@ -133,6 +139,19 @@ function normalizeLine(raw: unknown): MyobPayslipLine | null {
   }
 }
 
+function normalizeFlatLine(raw: unknown): MyobPayslipFlatLine | null {
+  const item = record(raw)
+  return {
+    description: nullableText(item.description),
+    type: nullableText(item.type),
+    typeLabel: nullableText(item.typeLabel),
+    hours: nullableNumber(item.hours),
+    rate: nullableNumber(item.rate),
+    amount: nullableNumber(item.amount),
+    yearToDate: nullableNumber(item.yearToDate),
+  }
+}
+
 export function normalizeMyobPayslipDetail(payload: unknown): MyobPayslipDetail {
   const data = record(payload)
   return {
@@ -149,6 +168,8 @@ export function normalizeMyobPayslipDetail(payload: unknown): MyobPayslipDetail 
     grossPay: nullableNumber(data.grossPay),
     netPay: nullableNumber(data.netPay),
     superFundName: nullableText(data.superFundName),
+    hourlyRate: nullableNumber(data.hourlyRate),
+    referenceNumber: nullableText(data.referenceNumber),
     placement: normalizeMyobPayslipPlacement(data.placement),
     stores: list(data.stores, normalizeStore),
     wages: list(data.wages, normalizeLine),
@@ -157,7 +178,11 @@ export function normalizeMyobPayslipDetail(payload: unknown): MyobPayslipDetail 
     superannuation: list(data.superannuation, normalizeLine),
     entitlements: list(data.entitlements, normalizeLine),
     others: list(data.others, normalizeLine),
+    lines: list(data.lines, normalizeFlatLine),
     samePaymentDateCount: number(data.samePaymentDateCount),
+    // 权限开关只认明确的 true：字段缺失（旧后端）或类型异常一律不显示按钮。
+    canDownloadPdf: data.canDownloadPdf === true,
+    canSendEmail: data.canSendEmail === true,
   }
 }
 
@@ -229,4 +254,85 @@ export async function getMyobPayslipDetail(key: MyobPayslipKey): Promise<MyobPay
 export async function getMyobPayslipHours(key: MyobPayslipKey): Promise<MyobPayslipHours> {
   const response = await request.get<ApiResponse<unknown>>(`${PAYSLIP_BASE}/hours`, { params: keyParams(key) })
   return normalizeMyobPayslipHours(unwrapApiData(response))
+}
+
+/**
+ * 从 Content-Disposition 取文件名：优先 RFC 5987 的 filename*=UTF-8''...，其次 filename="..."。
+ * 去掉路径分隔符与控制字符，取不到返回 null（调用方用兜底名）。
+ */
+export function parseContentDispositionFilename(header: string | null | undefined): string | null {
+  if (!header) {
+    return null
+  }
+  let name: string | null = null
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header)
+  if (extended) {
+    try {
+      name = decodeURIComponent(extended[1].trim())
+    } catch {
+      name = null
+    }
+  }
+  if (!name) {
+    const plain = /filename\s*=\s*(?:"([^"]+)"|([^;]+))/.exec(header)
+    name = (plain?.[1] ?? plain?.[2] ?? '').trim() || null
+  }
+  // eslint-disable-next-line no-control-regex
+  const cleaned = name?.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim()
+  return cleaned || null
+}
+
+/**
+ * 下载工资单 PDF（会在后端留下一条下载记录，不含金额）。
+ * 需要登录态，所以走统一的 request 以 Blob 取回，再由调用方触发浏览器保存（不能用 window.open 直链）。
+ */
+export async function downloadMyobPayslipPdf(key: MyobPayslipKey, fallbackFilename: string): Promise<MyobPayslipPdfFile> {
+  let disposition: string | null = null
+  const blob = await request.get<Blob>(`${PAYSLIP_BASE}/pdf`, {
+    params: keyParams(key),
+    responseType: 'blob',
+    onResponse: (response) => {
+      disposition = response.headers.get('content-disposition')
+    },
+  })
+  return { blob, filename: parseContentDispositionFilename(disposition) ?? fallbackFilename }
+}
+
+export function normalizeMyobPayslipEmailTarget(payload: unknown): MyobPayslipEmailTarget {
+  const data = record(payload)
+  return {
+    email: nullableText(data.email),
+    maskedEmail: nullableText(data.maskedEmail),
+    source: typeof data.source === 'string' && data.source.toLowerCase() === 'profile' ? 'profile' : 'none',
+    subject: text(data.subject),
+    filename: text(data.filename),
+    myEmail: nullableText(data.myEmail),
+  }
+}
+
+/** 发送邮件弹窗打开时取：档案邮箱（及是否存在）、主题、附件名、当前登录人邮箱。 */
+export async function getMyobPayslipEmailTarget(key: MyobPayslipKey): Promise<MyobPayslipEmailTarget> {
+  const response = await request.get<ApiResponse<unknown>>(`${PAYSLIP_BASE}/email-target`, { params: keyParams(key) })
+  return normalizeMyobPayslipEmailTarget(unwrapApiData(response))
+}
+
+/** 整理发信请求体：periodStart 空值给 null，附言去首尾空白、空则给 null。 */
+export function buildMyobPayslipEmailBody(payload: MyobPayslipEmailPayload) {
+  return {
+    connectionGuid: payload.connectionGuid,
+    employeeUid: payload.employeeUid,
+    paymentDate: payload.paymentDate,
+    periodStart: payload.periodStart || null,
+    to: payload.to.trim(),
+    copyToMe: payload.copyToMe,
+    note: payload.note?.trim() || null,
+    recipientChangeConfirmed: payload.recipientChangeConfirmed,
+  }
+}
+
+/** 发送工资单 PDF 邮件：每次一个员工、一个收件人；档案无邮箱时手填地址只用于本次，不回写档案。 */
+export async function sendMyobPayslipEmail(payload: MyobPayslipEmailPayload): Promise<MyobPayslipEmailResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${PAYSLIP_BASE}/email`, buildMyobPayslipEmailBody(payload))
+  const data = record(unwrapApiData(response))
+  return { sentTo: text(data.sentTo), copiedToMe: data.copiedToMe === true }
 }

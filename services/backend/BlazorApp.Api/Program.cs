@@ -825,6 +825,7 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSou
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService, BlazorApp.Api.Services.Myob.MyobTimesheetPreviewService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipPermissionChecker, BlazorApp.Api.Services.Myob.RoleServicePayslipPermissionChecker>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipEmailSender, BlazorApp.Api.Services.Myob.MyobPayslipEmailSender>(); // 工资单 PDF 邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipService, BlazorApp.Api.Services.Myob.MyobPayslipService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务

@@ -1,0 +1,146 @@
+{
+  "title": "工资单",
+  "detailTitle": "工资单明细",
+  "messages": {
+    "notAllowed": "没有查看工资单的权限。需要「查看管辖分店员工工资单」或「查看全部分店员工工资单」权限。",
+    "reviewUnavailable": "审核演示模式不提供工资单。",
+    "missingKey": "缺少工资单参数，请从列表重新进入。"
+  },
+  "list": {
+    "searchPlaceholder": "搜索姓名或员工编号",
+    "searchOpen": "搜索",
+    "searchClose": "关闭搜索",
+    "company": {
+      "all": "全部公司",
+      "pickerTitle": "选择公司"
+    },
+    "store": {
+      "all": "全部分店",
+      "pickerTitle": "选择分店"
+    },
+    "preset": {
+      "twoWeeks": "最近两周",
+      "threeMonths": "近 3 个月",
+      "fiscalYear": "本财年",
+      "custom": "自定义"
+    },
+    "customTitle": "支付日期范围",
+    "onlyUnassigned": "只看未绑定（{{count}}）",
+    "summary": {
+      "count": "工资单",
+      "countValue": "{{count}} 张",
+      "gross": "税前合计",
+      "net": "实发合计"
+    },
+    "basis": "按支付日期统计 · {{from}} — {{to}}",
+    "row": {
+      "gross": "Gross {{amount}}",
+      "unbound": "未绑定",
+      "unknown": "分店未知",
+      "inferred": "推断"
+    },
+    "partial": {
+      "title": "有 {{count}} 个公司读取失败，下面的数字不完整",
+      "retry": "重试"
+    },
+    "empty": {
+      "title": "这段时间没有工资单",
+      "description": "试试放宽日期范围，或切换公司 / 分店。"
+    },
+    "error": {
+      "title": "工资单加载失败",
+      "retry": "重试",
+      "stale": "刷新失败，下面是上一次的数据。"
+    },
+    "loading": "正在读取 MYOB 工资单…"
+  },
+  "detail": {
+    "paid": "已发薪",
+    "samePaymentDate": "同一支付日共有 {{count}} 张工资单",
+    "viewPdf": "查看 PDF 原样",
+    "viewPdfHint": "用系统查看器打开",
+    "downloadPdf": "下载 PDF",
+    "sendEmail": "发送邮件",
+    "downloading": "正在下载…",
+    "placement": {
+      "title": "分店归属与我方考勤工时",
+      "reference": "仅供参考",
+      "Attendance": "按考勤归属分店",
+      "Inferred": "按历史记录推断分店，可能不准",
+      "Unknown": "没有找到对应分店",
+      "Unbound": "MYOB 员工还没有绑定我方员工",
+      "noStore": "没有归属分店",
+      "viewHours": "查看我方工时",
+      "hoursLoading": "正在读取考勤…",
+      "hoursPeriod": "考勤周期 {{from}} — {{to}}",
+      "work": "工作 {{hours}}",
+      "leave": "休假 {{hours}}",
+      "failed": "读取失败",
+      "total": "合计",
+      "hoursEmpty": "这个周期没有考勤工时。",
+      "hoursError": "读取考勤工时失败",
+      "retry": "重试"
+    },
+    "disclaimer": "仅供查看，以 MYOB 发出的工资单为准。已记录本次查看。",
+    "disclaimerEn": "For reference only — the payslip issued by MYOB prevails.",
+    "error": {
+      "title": "工资单明细加载失败",
+      "retry": "重试"
+    },
+    "loading": "正在读取工资单…"
+  },
+  "email": {
+    "title": "发送工资单 PDF",
+    "recipient": "收件人",
+    "recipientPlaceholder": "name@example.com",
+    "clear": "清空收件人",
+    "matchesProfile": "默认带入员工档案邮箱 · 与档案一致",
+    "differsFromProfile": "收件人与员工档案邮箱（{{masked}}）不同，请核对后勾选确认。",
+    "confirmRecipient": "我已核对收件人",
+    "noProfile": "员工档案没有邮箱，请手动填写收件人。",
+    "issue": {
+      "empty": "请填写收件人邮箱。",
+      "invalid": "邮箱格式不正确。",
+      "multiple": "一次只能发给一个收件人。"
+    },
+    "copyToMe": "抄送给我",
+    "copyToMeTo": "副本发到 {{email}}",
+    "noMyEmail": "你的账号没有邮箱，无法抄送。",
+    "note": "附言（选填）",
+    "notePlaceholder": "给员工的一句话（不要写金额）",
+    "attachment": "附件",
+    "notice": "邮件只带 PDF 附件，正文不写金额。发送会记入查看记录。",
+    "cancel": "取消",
+    "send": "发送",
+    "sending": "发送中…",
+    "retry": "重试",
+    "downloadPdf": "下载 PDF",
+    "loadingTarget": "正在读取收件信息…",
+    "targetError": "读取收件信息失败",
+    "targetRetry": "重新读取",
+    "failedPrefix": "发送失败",
+    "sent": "已发送至 {{to}}，已记录",
+    "sentCopyFailed": "已发送至 {{to}}，已记录；抄送给你未成功"
+  },
+  "errors": {
+    "codes": {
+      "MYOB_PAYSLIP_FORBIDDEN": "没有权限执行这个操作。",
+      "MYOB_PAYSLIP_RECIPIENT_UNCONFIRMED": "收件人与员工档案邮箱不同，请先勾选「我已核对收件人」。",
+      "MYOB_PAYSLIP_EMAIL_INVALID": "邮箱地址格式不正确。",
+      "MYOB_PAYSLIP_EMAIL_NOT_CONFIGURED": "系统还没有配置发件邮箱，请联系管理员。工资单不受影响，可先下载 PDF 再手动发送。",
+      "MYOB_PAYSLIP_EMAIL_SEND_FAILED": "邮件服务暂时不可用。工资单不受影响，可重试，或先下载 PDF 再手动发送。",
+      "PAYSLIP_PDF_INVALID": "下载的文件不是有效的 PDF，请重试。",
+      "PAYSLIP_SHARING_UNAVAILABLE": "这台设备不支持分享或保存文件。",
+      "PAYSLIP_INVALID_RESPONSE": "工资单数据格式异常，请刷新后重试。"
+    },
+    "notFound": "找不到这张工资单，可能已被 MYOB 更新，请返回列表刷新。",
+    "generic": "请求失败，请稍后重试。"
+  },
+  "a11y": {
+    "openPayslip": "{{name}}，实发 {{net}}，支付日 {{date}}，打开工资单",
+    "filterChip": "{{label}}，点按更改",
+    "presetChip": "{{label}}，日期范围",
+    "back": "返回",
+    "paper": "MYOB 默认样式工资单"
+  }
+}
