@@ -178,3 +178,28 @@ public sealed class MyobPayslipQuery
     /// <summary>绕过 10 分钟缓存重新读 MYOB。</summary>
     public bool Refresh { get; set; }
 }
+
+/// <summary>某分店在这张工资单周期里的我方考勤计薪工时（仅供参考，与 MYOB 工资单里的小时数可能不同）。</summary>
+public sealed class MyobPayslipStoreHoursDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreLabel { get; set; } = string.Empty;
+
+    /// <summary>实际上班计薪工时（工资表口径，已扣用餐）。</summary>
+    public decimal WorkHours { get; set; }
+
+    /// <summary>带薪假工时：病假 + 年假 + 带薪公假。</summary>
+    public decimal LeaveHours { get; set; }
+
+    /// <summary>该分店读取失败（只标这一行，其它分店照常）。</summary>
+    public bool Failed { get; set; }
+}
+
+public sealed class MyobPayslipHoursDto
+{
+    public string? PeriodStart { get; set; }
+    public string? PeriodEnd { get; set; }
+    public List<MyobPayslipStoreHoursDto> Stores { get; set; } = [];
+    public decimal TotalWorkHours { get; set; }
+    public decimal TotalLeaveHours { get; set; }
+}

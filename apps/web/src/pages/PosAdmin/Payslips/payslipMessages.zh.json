@@ -1,0 +1,188 @@
+{
+  "payslips": {
+    "title": "工资单",
+    "subtitle": "查看员工在 MYOB 里已发薪的历史工资单（只读）",
+    "cardTitle": "历史工资单",
+    "cardHint": "数据实时读取自 MYOB，只读；按支付日期筛选。工资单本身不分分店，分店由员工绑定、发薪公司与该周期的考勤推算。",
+    "fetchedAt": "MYOB 数据读取于 {{time}}",
+    "reload": "刷新",
+    "retry": "重试",
+    "total": "共 {{total}} 张",
+    "filters": {
+      "company": "发薪公司",
+      "allCompanies": "全部公司",
+      "store": "分店",
+      "allStores": "全部分店",
+      "dateRange": "支付日期",
+      "dateFrom": "开始日期",
+      "dateTo": "结束日期",
+      "search": "搜索员工姓名 / MYOB 编号",
+      "presetAria": "快速选择支付日期区间",
+      "presets": {
+        "last2Weeks": "最近两周",
+        "last3Months": "近 3 个月",
+        "thisFinancialYear": "本财年",
+        "lastFinancialYear": "上财年"
+      },
+      "rangeError": {
+        "incomplete": "请选择完整的支付日期区间",
+        "reversed": "开始日期不能晚于结束日期",
+        "tooLong": "支付日期区间最长 24 个月"
+      }
+    },
+    "view": {
+      "all": "全部 {{count}}",
+      "unassigned": "未归属 {{count}}",
+      "aria": "工资单视图",
+      "back": "返回全部工资单"
+    },
+    "notice": {
+      "title": "分店筛选说明：",
+      "body": "员工在多家分店工作且由同一公司发薪时，只有一张工资单，会同时出现在这些分店下，金额不拆分。带虚线的分店表示「该周期没有考勤数据，按员工当前分店推断」。"
+    },
+    "summary": {
+      "count": "工资单",
+      "employees": "涉及员工",
+      "gross": "税前合计",
+      "net": "实发合计",
+      "scope": "合计仅统计当前筛选结果",
+      "unitCount": "{{count}} 张",
+      "unitPeople": "{{count}} 人"
+    },
+    "columns": {
+      "employee": "员工",
+      "employeeMyob": "员工（MYOB）",
+      "stores": "分店",
+      "company": "发薪公司",
+      "paymentDate": "支付日期",
+      "period": "工资周期",
+      "gross": "税前",
+      "tax": "PAYG 税",
+      "net": "实发",
+      "reason": "未归属原因",
+      "actions": "操作"
+    },
+    "placement": {
+      "inferredTip": "该周期没有考勤数据，按员工当前分店推断",
+      "Unbound": "未绑定",
+      "Unknown": "无法确定分店",
+      "UnboundHint": "这张 MYOB 员工卡还没有绑定我方员工",
+      "UnknownHint": "已绑定，当期无考勤，当前分店不由本公司发薪"
+    },
+    "actions": {
+      "detail": "明细",
+      "detailAria": "查看 {{name}} {{date}} 的工资单明细",
+      "goBind": "去绑定",
+      "goBindAria": "去绑定 {{name}} 的 MYOB 员工卡",
+      "goPayroll": "查看发薪公司"
+    },
+    "unassignedBar": {
+      "message": "另有 {{count}} 张工资单无法归到分店",
+      "detail": "（员工未绑定 MYOB 员工卡，或该周期没有任何分店数据）。仅「全部分店」权限可见。",
+      "link": "查看未归属工资单"
+    },
+    "unassignedPage": {
+      "title": "历史工资单 · 未归属",
+      "hint": "这些工资单无法归到分店：员工还没绑定 MYOB 员工卡，或绑定了但该周期没有考勤数据、当前所属分店也对不上。仅「全部分店」权限可见。",
+      "howToTitle": "处理办法：",
+      "howTo": "未绑定的员工，先到「MYOB 对接 → 员工绑定」把 MYOB 员工卡和我方员工配对；「无法确定分店」的，核对该员工的分店归属、发薪公司设置（MYOB 对接 → 发薪公司）以及当期是否有排班。"
+    },
+    "companies": {
+      "failedTitle": "{{name}}：读取 MYOB 失败",
+      "ok": "读取成功",
+      "failed": "读取失败",
+      "count": "{{count}} 张",
+      "incomplete": "以上结果不含 {{names}} 发薪的员工，请勿当作完整名单。",
+      "goConnect": "去「MYOB 对接」重新授权",
+      "kinds": {
+        "reauth": "MYOB 授权已失效或授权范围不足，需要公司文件的管理员重新授权。",
+        "forbidden": "该公司文件没有开放工资读取权限，请联系公司文件管理员。",
+        "unavailable": "MYOB 暂时不可用或请求过于频繁，请稍后重试。",
+        "other": "读取 MYOB 工资单失败，请稍后重试。"
+      }
+    },
+    "states": {
+      "empty": {
+        "title": "这个条件下没有已发薪的工资单",
+        "description": "可能是该分店员工本期还没发薪、员工尚未绑定 MYOB 员工卡，或所选区间内 MYOB 没有记录。可以放宽日期，或先到「员工绑定」确认绑定情况。",
+        "clear": "清除筛选",
+        "goBind": "去员工绑定"
+      },
+      "noPermission": {
+        "title": "你没有查看工资单的权限",
+        "description": "工资单包含薪资等敏感信息。需要由管理员授予「查看管辖分店员工工资单」或「查看全部分店员工工资单」后才能使用。",
+        "back": "返回上一页"
+      },
+      "failed": {
+        "title": "暂时读不到 MYOB 的工资单",
+        "retry": "重试",
+        "goConnect": "查看连接状态",
+        "reauth": "MYOB 授权已失效或授权范围不足（401），需要公司文件的管理员到「MYOB 对接」重新授权。",
+        "forbidden": "该公司文件没有开放工资读取权限（403），请联系公司文件管理员。",
+        "unavailable": "MYOB 服务暂时不可用或请求过于频繁。工资单不会被缓存到我方，请稍后重试。",
+        "other": "读取 MYOB 工资单失败，请稍后重试。"
+      },
+      "loadFailed": "加载工资单失败"
+    },
+    "drawer": {
+      "title": "{{name}} 的工资单",
+      "close": "关闭",
+      "loadFailed": "加载工资单明细失败",
+      "notFound": "找不到这张工资单（可能已无权限查看，或已被 MYOB 更正）。",
+      "paid": "已发薪",
+      "period": "工资周期 {{range}}",
+      "paymentDate": "支付日期 {{date}}",
+      "gross": "税前 Gross Pay",
+      "net": "实发 Net Pay",
+      "samePaymentDate": "该员工同一支付日在本公司还有 {{count}} 张其它周期的工资单，请回到列表分别打开。",
+      "noLines": "这张工资单没有明细行。",
+      "fund": "基金：{{name}}",
+      "sections": {
+        "wages": {
+          "title": "Wages",
+          "sub": "工资"
+        },
+        "deductions": {
+          "title": "Deductions & Taxes",
+          "sub": "扣除与税"
+        },
+        "superannuation": {
+          "title": "Superannuation",
+          "sub": "退休金"
+        },
+        "entitlements": {
+          "title": "Leave accrual",
+          "sub": "假期累计（小时）"
+        },
+        "others": {
+          "title": "Other",
+          "sub": "其它"
+        }
+      },
+      "columns": {
+        "description": "Description",
+        "hours": "Hours",
+        "rate": "Rate",
+        "thisPay": "This pay",
+        "ytd": "YTD"
+      },
+      "disclaimerZh": "本工资单仅供查看，以 MYOB 发出的工资单为准。",
+      "disclaimerEn": "For reference only. The official payslip is the one issued from MYOB.",
+      "logged": "已记录本次查看（仅记录操作人与期别，不含金额）"
+    },
+    "hours": {
+      "title": "分店归属与我方考勤工时",
+      "sub": "工资单按公司发放，不分分店",
+      "noStores": "这张工资单没有可归属的分店，没有我方考勤工时。",
+      "load": "查看我方工时",
+      "loading": "正在读取我方考勤…",
+      "loadFailed": "读取我方工时失败，可重试",
+      "retry": "重试",
+      "work": "我方计薪工时",
+      "leave": "带薪假",
+      "storeFailed": "读取失败",
+      "total": "合计（仅参考）",
+      "note": "来自我方考勤（与工资表同一口径），与上面 MYOB 工资单里的小时数可能不同，以 MYOB 为准。"
+    }
+  }
+}
