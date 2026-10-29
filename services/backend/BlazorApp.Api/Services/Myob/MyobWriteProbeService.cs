@@ -76,6 +76,9 @@ public sealed class MyobWriteProbeStepDto
     /// <summary>MYOB 错误类型名（Errors[0].Name）或我方错误码；没有为 null。</summary>
     public string? ErrorName { get; set; }
 
+    /// <summary>MYOB 的错误码（Errors[0].ErrorCode，如 220 越界日期、34001 类别未挂卡、34003 Timesheet 设置未开）；没有为 null。</summary>
+    public string? ErrorCode { get; set; }
+
     public long ElapsedMs { get; set; }
 
     /// <summary>读取步骤：读到的全部记录；写入步骤为 null。</summary>
@@ -85,7 +88,7 @@ public sealed class MyobWriteProbeStepDto
 /// <summary>由各步结果推出的结论：true / false = 已证实，null = 没测到或数据不足。</summary>
 public sealed class MyobWriteProbeVerdictsDto
 {
-    /// <summary>被接受的日期写法：date = yyyy-MM-dd，datetime = yyyy-MM-ddT00:00:00；都被拒绝为 null。</summary>
+    /// <summary>被接受的日期写法：date = yyyy-MM-dd，datetime = yyyy-MM-ddT00:00:00，datetime-space = yyyy-MM-dd 00:00:00；都被拒绝为 null。</summary>
     public string? DateFormatAccepted { get; set; }
 
     /// <summary>只带员工 UID、日期区间、类别 UID 与每天工时（不带 Job / Notes / Processed）的请求体是否被接受。</summary>
@@ -101,6 +104,12 @@ public sealed class MyobWriteProbeVerdictsDto
 
     /// <summary>请求区间之外的一天（起始日 + 10）是否被存下来。</summary>
     public bool? OutOfRangeEntryStored { get; set; }
+
+    /// <summary>DELETE（带 StartDate / EndDate）的 HTTP 状态码；文档只列了 DELETE，没说它做什么。</summary>
+    public int? DeleteHttpStatus { get; set; }
+
+    /// <summary>DELETE 能否清空整个探针区间（文档没说，需实测）。</summary>
+    public bool? ClearWithDelete { get; set; }
 
     /// <summary>Lines 为空数组的 PUT 能否清空。</summary>
     public bool? ClearWithEmptyLines { get; set; }
@@ -156,6 +165,14 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
     private const string TestCardName = "test";
     private const int WindowDays = 7;
     private const int OutOfRangeOffset = 10;
+
+    /// <summary>依次试的日期写法（步骤键、说明）：文档文字写 YYYY-MM-DD HH:MM:SS，文档示例写 yyyy-MM-ddT00:00:00。</summary>
+    private static readonly (string Format, string Key, string Description)[] DateFormats =
+    [
+        ("date", "put-date-format", "平日两天，日期写 yyyy-MM-dd，最小请求体"),
+        ("datetime", "put-date-format-datetime", "改用 yyyy-MM-ddT00:00:00 再试（文档示例的写法）"),
+        ("datetime-space", "put-date-format-datetime-space", "再改用 yyyy-MM-dd 00:00:00 再试（文档文字写的格式）"),
+    ];
 
     private readonly ISqlSugarClient _db;
     private readonly IMyobApiClient _client;
@@ -362,28 +379,24 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
             var d2 = _start.AddDays(2);
 
             // ① 日期格式 + 最小请求体（不带 Job / Notes / Processed）
-            var put = await PutAsync("put-date-format", "平日两天，日期写 yyyy-MM-dd，最小请求体", _start, _end,
-                Lines((_weekdayUid, d0, 7.5m), (_weekdayUid, d1, 4m)), ct);
-            if (put?.Success == true)
+            // 官方文档写的是 YYYY-MM-DD HH:MM:SS，示例却是 yyyy-MM-ddT00:00:00：三种写法依次试，第一个被接受的用于之后所有步骤。
+            MyobTimesheetPutResult? put = null;
+            foreach (var (format, key, description) in DateFormats)
             {
-                V.DateFormatAccepted = "date";
-                V.MinimalBodyAccepted = true;
-            }
-            else
-            {
-                _dateFormat = "datetime";
-                put = await PutAsync("put-date-format-datetime", "改用 yyyy-MM-ddT00:00:00 再试", _start, _end,
-                    Lines((_weekdayUid, d0, 7.5m), (_weekdayUid, d1, 4m)), ct);
+                _dateFormat = format;
+                put = await PutAsync(key, description, _start, _end, Lines((_weekdayUid, d0, 7.5m), (_weekdayUid, d1, 4m)), ct);
                 if (put?.Success == true)
                 {
-                    V.DateFormatAccepted = "datetime";
+                    V.DateFormatAccepted = format;
                     V.MinimalBodyAccepted = true;
+                    break;
                 }
-                else
-                {
-                    V.MinimalBodyAccepted = false;
-                    return;
-                }
+            }
+
+            if (V.DateFormatAccepted is null)
+            {
+                V.MinimalBodyAccepted = false;
+                return;
             }
 
             await ReadAsync("read-after-first-put", "读回：日期原文、小时、Processed", _start, _wide, ct);
@@ -430,53 +443,72 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
             }
         }
 
+        /// <summary>
+        /// 四种清空办法（DELETE、Lines 为空数组、每行 Entries 为空数组、全部改成 0 小时）各自在「刚写好的记录」上独立测一遍，
+        /// 不是第一个有效就停，这样结论互不依赖，也能知道哪种最干净。
+        /// </summary>
         private async Task ClearTestsAsync(CancellationToken ct)
         {
-            var put = await PutAsync("clear-empty-lines", "Lines 为空数组", _start, _wide, [], ct);
-            var read = await ReadAsync("read-after-clear-empty-lines", "读回", _start, _wide, ct);
-            V.ClearWithEmptyLines = put?.Success == true && read.Entries is { Count: 0 };
-            if (V.ClearWithEmptyLines == true || read.Entries is null)
+            if (await SeedAsync("seed-for-delete", ct) is not null)
             {
-                return;
+                var deleted = await DeleteAsync("clear-delete", "DELETE（带 StartDate / EndDate 区间）", _start, _wide, ct);
+                V.DeleteHttpStatus = deleted?.StatusCode;
+                var read = await ReadAsync("read-after-clear-delete", "读回", _start, _wide, ct);
+                V.ClearWithDelete = deleted?.Success == true && read.Entries is { Count: 0 };
             }
 
-            put = await PutAsync("clear-empty-entries", "每行 Entries 为空数组", _start, _wide, EmptyEntryLines(), ct);
-            read = await ReadAsync("read-after-clear-empty-entries", "读回", _start, _wide, ct);
-            V.ClearWithEmptyEntries = put?.Success == true && read.Entries is { Count: 0 };
-            if (V.ClearWithEmptyEntries == true || read.Entries is null)
+            if (await SeedAsync("seed-for-empty-lines", ct) is not null)
             {
-                return;
+                var put = await PutAsync("clear-empty-lines", "Lines 为空数组", _start, _wide, [], ct);
+                var read = await ReadAsync("read-after-clear-empty-lines", "读回", _start, _wide, ct);
+                V.ClearWithEmptyLines = put?.Success == true && read.Entries is { Count: 0 };
             }
 
-            put = await PutAsync("clear-zero-hours", "把现有每一天的小时改成 0", _start, _wide, ZeroHourLines(read.Entries), ct);
-            read = await ReadAsync("read-after-clear-zero-hours", "读回", _start, _wide, ct);
-            V.ClearWithZeroHours = put?.Success == true && read.Entries is not null && read.Entries.All(entry => entry.Hours is null or 0m);
+            if (await SeedAsync("seed-for-empty-entries", ct) is not null)
+            {
+                var put = await PutAsync("clear-empty-entries", "每行 Entries 为空数组", _start, _wide, EmptyEntryLines(), ct);
+                var read = await ReadAsync("read-after-clear-empty-entries", "读回", _start, _wide, ct);
+                V.ClearWithEmptyEntries = put?.Success == true && read.Entries is { Count: 0 };
+            }
+
+            if (await SeedAsync("seed-for-zero-hours", ct) is { } seeded)
+            {
+                var put = await PutAsync("clear-zero-hours", "把现有每一天的小时改成 0", _start, _wide, ZeroHourLines(seeded), ct);
+                var read = await ReadAsync("read-after-clear-zero-hours", "读回", _start, _wide, ct);
+                V.ClearWithZeroHours = put?.Success == true && read.Entries is not null && read.Entries.All(entry => entry.Hours is null or 0m);
+            }
+        }
+
+        /// <summary>清空前先写两条记录并读回确认；写不进或读不到就返回 null（该清空办法跳过）。</summary>
+        private async Task<IReadOnlyList<MyobWriteProbeEntryDto>?> SeedAsync(string key, CancellationToken ct)
+        {
+            var put = await PutAsync(key, "清空前先写两条记录", _start, _end,
+                Lines((_weekdayUid, _start, 2m), (_saturdayUid, _start.AddDays(2), 1m)), ct);
+            var read = await ReadAsync(key + "-read", "确认已写入", _start, _wide, ct);
+            return put?.Success == true && read.Entries is { Count: > 0 } ? read.Entries : null;
         }
 
         private async Task CleanupAsync()
         {
             var ct = CancellationToken.None;
             var read = await ReadAsync("cleanup-read", "清理前读一次", _start, _wide, ct);
-            if (read.Entries is { Count: > 0 } && read.Entries.Any(entry => entry.Hours is not (null or 0m)))
+            if (read.Entries is { Count: > 0 })
             {
-                // 先用本次已验证有效的办法，再逐个降级。
-                var methods = new List<(string Key, Func<IReadOnlyList<MyobWriteProbeEntryDto>, IReadOnlyList<MyobTimesheetPutLine>> Build)>();
-                if (V.ClearWithEmptyLines != false)
+                // 连只剩 0 小时的记录也尽量清掉（清零测试会留下这样的记录）。已证实有效的办法排在前面，证实无效的跳过，没测到的排后面；零小时垫底。
+                var methods = new List<(bool? Verdict, string Key, Func<IReadOnlyList<MyobWriteProbeEntryDto>, Task> Apply)>
                 {
-                    methods.Add(("cleanup-empty-lines", _ => []));
-                }
-
-                if (V.ClearWithEmptyEntries != false)
+                    (V.ClearWithDelete, "cleanup-delete", _ => DeleteAsync("cleanup-delete", "清理", _start, _wide, ct)),
+                    (V.ClearWithEmptyLines, "cleanup-empty-lines", _ => PutAsync("cleanup-empty-lines", "清理", _start, _wide, [], ct)),
+                    (V.ClearWithEmptyEntries, "cleanup-empty-entries",
+                        _ => PutAsync("cleanup-empty-entries", "清理", _start, _wide, EmptyEntryLines(), ct)),
+                    (V.ClearWithZeroHours == true ? true : null, "cleanup-zero-hours",
+                        entries => PutAsync("cleanup-zero-hours", "清理", _start, _wide, ZeroHourLines(entries), ct)),
+                };
+                foreach (var (_, key, apply) in methods.Where(item => item.Verdict != false).OrderBy(item => item.Verdict == true ? 0 : 1))
                 {
-                    methods.Add(("cleanup-empty-entries", _ => EmptyEntryLines()));
-                }
-
-                methods.Add(("cleanup-zero-hours", entries => ZeroHourLines(entries)));
-                foreach (var (key, build) in methods)
-                {
-                    await PutAsync(key, "清理", _start, _wide, build(read.Entries ?? []), ct);
+                    await apply(read.Entries ?? []);
                     read = await ReadAsync(key + "-read", "清理后读回", _start, _wide, ct);
-                    if (read.Entries is not null && read.Entries.All(entry => entry.Hours is null or 0m))
+                    if (read.Entries is { Count: 0 })
                     {
                         break;
                     }
@@ -536,6 +568,30 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
                 result = await _client.PutTimesheetAsync(_businessId, _token, _employeeUid, from, to, lines, ct);
                 step.HttpStatus = result.StatusCode;
                 step.ErrorName = result.ErrorName;
+                step.ErrorCode = result.ErrorCode;
+            }
+            catch (MyobApiException ex)
+            {
+                step.HttpStatus = (int?)ex.StatusCode;
+                step.ErrorName = ex.Code;
+            }
+
+            step.ElapsedMs = watch.ElapsedMilliseconds;
+            return result;
+        }
+
+        private async Task<MyobTimesheetPutResult?> DeleteAsync(
+            string key, string description, DateTime from, DateTime to, CancellationToken ct)
+        {
+            var step = NewStep(key, description);
+            var watch = Stopwatch.StartNew();
+            MyobTimesheetPutResult? result = null;
+            try
+            {
+                result = await _client.DeleteTimesheetAsync(_businessId, _token, _employeeUid, from, to, ct);
+                step.HttpStatus = result.StatusCode;
+                step.ErrorName = result.ErrorName;
+                step.ErrorCode = result.ErrorCode;
             }
             catch (MyobApiException ex)
             {
@@ -598,7 +654,14 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
         };
 
         private string Format(DateTime date) =>
-            date.ToString(_dateFormat == "datetime" ? "yyyy-MM-ddT00:00:00" : "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            date.ToString(
+                _dateFormat switch
+                {
+                    "datetime" => "yyyy-MM-ddT00:00:00",
+                    "datetime-space" => "yyyy-MM-dd 00:00:00",
+                    _ => "yyyy-MM-dd",
+                },
+                CultureInfo.InvariantCulture);
 
         private static string Day(DateTime date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
