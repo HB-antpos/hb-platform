@@ -824,6 +824,7 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, 
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService, BlazorApp.Api.Services.Myob.MyobTimesheetPreviewService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipProbeService, BlazorApp.Api.Services.Myob.MyobPayslipProbeService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
