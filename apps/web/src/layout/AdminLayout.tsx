@@ -30,6 +30,7 @@ import {
 } from '../router/routes'
 import { useAuthStore } from '../store/auth'
 import { useTabsStore } from '../store/tabs'
+import { isLockedTab } from '../store/tabsLogic'
 
 const { Header, Sider, Content } = Layout
 
@@ -96,9 +97,19 @@ function DesktopAdminLayout() {
   }
 
   const handleRemoveTab = async (key: string) => {
+    const state = useTabsStore.getState()
+    const target = state.tabs.find((item) => item.key === key)
+    // 固定与已锁定页签不能关闭：store 会拒绝，这里提前返回，避免误销毁它的保活缓存。
+    if (!target || target.affix || isLockedTab(target)) {
+      return
+    }
+    // 右键可关闭任意页签：只有关掉的是当前页签才需要跳转，否则会把用户从当前页拽走。
+    const wasActive = state.activeKey === key
     const nextPath = removeTab(key)
     await keepAliveRef.current?.destroy(key)
-    navigate(nextPath)
+    if (wasActive) {
+      navigate(nextPath)
+    }
   }
 
   const handleRemoveOtherTabs = async (key: string) => {
@@ -127,6 +138,11 @@ function DesktopAdminLayout() {
 
   const handleRefreshCurrent = () => {
     keepAliveRef.current?.refresh(activeCacheKey)
+  }
+
+  // 页签右键「刷新页签」：按被点击页签的缓存 key 刷新，不一定是当前页签。
+  const handleRefreshTab = (key: string) => {
+    keepAliveRef.current?.refresh(key)
   }
 
   const handleLogout = async () => {
@@ -212,6 +228,7 @@ function DesktopAdminLayout() {
         <div className={`tabs-shell${pinTabsBar ? ' tabs-shell-pinned' : ''}`}>
           <AppTabs
             onRefreshCurrent={handleRefreshCurrent}
+            onRefreshTab={handleRefreshTab}
             onRemoveTab={handleRemoveTab}
             onRemoveOtherTabs={handleRemoveOtherTabs}
             onRemoveLeftTabs={handleRemoveLeftTabs}
