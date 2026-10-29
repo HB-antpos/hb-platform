@@ -329,48 +329,63 @@ body {
   position: relative;
 }
 
+/* 右键菜单的触发器容器：只负责包住页签节点，不改变页签布局。 */
+.app-tab-context-target {
+  display: flex;
+}
+
+/* 整个页签都是拖动区域（不再有左侧手柄），用抓手光标提示可拖；工作台等固定页签不可拖。 */
 .app-tab-sortable-node .ant-tabs-tab {
-  padding-left: 32px;
-}
-
-.app-tab-drag-handle {
-  position: absolute;
-  z-index: 1;
-  left: 8px;
-  top: 50%;
-  display: inline-flex;
-  width: 20px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #7b8798;
   cursor: grab;
-  touch-action: none;
-  transform: translateY(-50%);
 }
 
-.app-tab-drag-handle:hover,
-.app-tab-drag-handle:focus-visible {
-  background: rgba(22, 119, 255, 0.1);
-  color: #0958d9;
-}
-
-.app-tab-drag-handle:focus-visible {
-  outline: 2px solid #1677ff;
-  outline-offset: 1px;
-}
-
-.app-tab-sortable-node[data-dnd-kit-dragging='true'] .app-tab-drag-handle {
+.app-tab-sortable-node[data-dnd-kit-dragging='true'] .ant-tabs-tab {
   cursor: grabbing;
+}
+
+.app-tab-sortable-node:focus-within .ant-tabs-tab:not(.ant-tabs-tab-active) {
+  border-color: #cfe0ff !important;
 }
 
 .app-tab-sortable-node[data-dnd-kit-dragging='true'] {
   opacity: 0.85;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+/* 已锁定页签：底色略深一点，标题右侧用锁图标代替「×」。 */
+.app-tab-sortable-node[data-tab-locked='true'] .ant-tabs-tab:not(.ant-tabs-tab-active) {
+  background: #eaf0f9;
+}
+
+.app-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-tab-lock {
+  font-size: 12px;
+  color: #8a93a6;
+}
+
+.app-tabs .ant-tabs-tab-active .app-tab-lock {
+  color: #0958d9;
+}
+
+/* 锁定组最后一个页签右侧的分隔线，区分锁定组与普通组。 */
+.app-tab-sortable-node[data-tab-group-end='true'] {
+  margin-right: 6px;
+}
+
+.app-tab-sortable-node[data-tab-group-end='true']::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: -7px;
+  bottom: 0;
+  width: 1px;
+  background: #d5dcea;
+  pointer-events: none;
 }
 
 .app-tabs .ant-tabs-tab-btn {

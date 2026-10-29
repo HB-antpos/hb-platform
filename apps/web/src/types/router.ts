@@ -58,4 +58,6 @@ export interface TabItem {
   affix?: boolean
   closable?: boolean
   keepAlive?: boolean
+  /** 用户手动锁定：不能用「×」或批量操作关闭，排在固定页签之后、普通页签之前。 */
+  locked?: boolean
 }
