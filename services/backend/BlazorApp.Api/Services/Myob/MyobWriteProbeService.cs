@@ -15,7 +15,7 @@ namespace BlazorApp.Api.Services.Myob;
 //   POST /api/react/v1/myob/timesheet/write-probe   Body MyobWriteProbeRequest   Myob.Connection.Manage → MyobWriteProbeDto
 //
 // 安全约束（都在服务里硬性校验，不靠自觉）：
-// 1. 只对 Myob__WriteProbeConnectionGuid 指定的连接、Myob__WriteProbeEmployeeDisplayId（Employee ID）指定的员工卡生效，任一未配置 / 不符一律按「未开启」处理，不发任何请求；
+// 1. 只对 Myob__WriteProbeBusinessId（公司文件的 BusinessId）指定的连接、Myob__WriteProbeEmployeeDisplayId（Employee ID）指定的员工卡生效，任一未配置 / 不符一律按「未开启」处理，不发任何请求；
 //    员工卡还要在名册里恰好匹配一张，且是启用中、姓名都是 test 的专用测试卡，否则拒绝；
 // 2. 周期必须从今天或以后开始，且写入前先读整个探针区间：该卡只要有任何记录就中止，一次写入都不发；
 // 3. 无论中途成功与否，最后都会尽力清空（先用已验证有效的办法，再逐个降级），并再读一次确认；清不干净会明确告知，由人在 MYOB 里手工清理；
@@ -37,7 +37,8 @@ public static class MyobWriteProbeErrorCodes
 
 public sealed class MyobWriteProbeRequest
 {
-    public string ConnectionGuid { get; set; } = string.Empty;
+    /// <summary>MYOB 公司文件的 BusinessId（API 路径里的 cf_uri）；必须与配置 Myob__WriteProbeBusinessId 一致。</summary>
+    public string BusinessId { get; set; } = string.Empty;
 
     /// <summary>探针区间起始日 yyyy-MM-dd，必须是今天或以后；区间 = 起始日起 21 天，期间该测试卡不能有任何 Timesheet 记录。</summary>
     public string PeriodStart { get; set; } = string.Empty;
@@ -192,11 +193,11 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
 
     public async Task<ApiResponse<MyobWriteProbeDto>> RunAsync(MyobWriteProbeRequest request, CancellationToken cancellationToken)
     {
-        var connectionGuid = request.ConnectionGuid?.Trim() ?? string.Empty;
+        var businessId = request.BusinessId?.Trim() ?? string.Empty;
         var displayId = _options.WriteProbeEmployeeDisplayId?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(_options.WriteProbeConnectionGuid)
+        if (string.IsNullOrWhiteSpace(_options.WriteProbeBusinessId)
             || displayId.Length == 0
-            || !string.Equals(connectionGuid, _options.WriteProbeConnectionGuid.Trim(), StringComparison.Ordinal))
+            || !string.Equals(businessId, _options.WriteProbeBusinessId.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return ApiResponse<MyobWriteProbeDto>.Error("MYOB 写入探针未开启", MyobWriteProbeErrorCodes.NotEnabled);
         }
@@ -213,12 +214,13 @@ internal sealed class MyobWriteProbeService : IMyobWriteProbeService
         }
 
         var connection = await _db.Queryable<MyobConnection>()
-            .FirstAsync(item => item.ConnectionGuid == connectionGuid && item.Status == MyobConnectionStatuses.Active);
+            .FirstAsync(item => item.BusinessId == businessId && item.Status == MyobConnectionStatuses.Active);
         if (connection is null)
         {
             return ApiResponse<MyobWriteProbeDto>.Error("MYOB 连接不存在或未启用", MyobErrorCodes.ConnectionNotActive);
         }
 
+        var connectionGuid = connection.ConnectionGuid;
         var saved = MyobPayCategoryService.ToDictionary(await _categories.GetSavedMappingAsync(connectionGuid));
         var weekdayUid = FirstNonEmpty(request.WeekdayCategoryUid, saved.GetValueOrDefault(MyobPayCategoryKeys.Weekday));
         var saturdayUid = FirstNonEmpty(request.SaturdayCategoryUid, saved.GetValueOrDefault(MyobPayCategoryKeys.Saturday));

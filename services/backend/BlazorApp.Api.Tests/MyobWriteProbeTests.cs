@@ -23,6 +23,7 @@ public sealed class MyobWriteProbeTests : IDisposable
     private static readonly DateTime Now = new(2026, 11, 4, 3, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Start = new(2026, 11, 9);
     private const string Conn = "conn-rr";
+    private const string Biz = "11111111-2222-4333-8444-555555555555"; // 形如 MYOB 的 BusinessId（cf_uri）；测试用，与我方连接 GUID 刻意不同
     private const string Card = "card-test";
     private const string DisplayId = "0086";
     private const string Weekday = "cat-weekday";
@@ -46,7 +47,7 @@ public sealed class MyobWriteProbeTests : IDisposable
         _db.CodeFirst.InitTables(typeof(MyobConnection), typeof(MyobPayCategoryMapping));
         _db.Insertable(new MyobConnection
         {
-            ConnectionGuid = Conn, BusinessId = "biz-rr", BusinessName = "Robinson Road",
+            ConnectionGuid = Conn, BusinessId = Biz, BusinessName = "Robinson Road",
             Status = MyobConnectionStatuses.Active, AuthorizedAt = Now, CreatedAt = Now,
         }).ExecuteCommand();
     }
@@ -66,11 +67,11 @@ public sealed class MyobWriteProbeTests : IDisposable
         Options.Create(options ?? Enabled()),
         _time);
 
-    private static MyobOptions Enabled() => new() { WriteProbeConnectionGuid = Conn, WriteProbeEmployeeDisplayId = DisplayId };
+    private static MyobOptions Enabled() => new() { WriteProbeBusinessId = Biz, WriteProbeEmployeeDisplayId = DisplayId };
 
-    private static MyobWriteProbeRequest Request(string? periodStart = null, string? connection = null, string? unassigned = null) => new()
+    private static MyobWriteProbeRequest Request(string? periodStart = null, string? business = null, string? unassigned = null) => new()
     {
-        ConnectionGuid = connection ?? Conn,
+        BusinessId = business ?? Biz,
         PeriodStart = periodStart ?? "2026-11-09",
         WeekdayCategoryUid = Weekday,
         SaturdayCategoryUid = Saturday,
@@ -80,13 +81,14 @@ public sealed class MyobWriteProbeTests : IDisposable
     // ───────────────────────── 安全约束：一次写入都不发 ─────────────────────────
 
     [Theory]
-    [InlineData("", DisplayId, Conn)]
-    [InlineData(Conn, "", Conn)]
-    [InlineData(Conn, DisplayId, "some-other-connection")]
-    public async Task 未配置或连接不符_按未开启处理_不读不写(string configuredConnection, string configuredDisplayId, string requested)
+    [InlineData("", DisplayId, Biz)]
+    [InlineData(Biz, "", Biz)]
+    [InlineData(Biz, DisplayId, "some-other-business-id")]
+    [InlineData(Biz, DisplayId, Conn)] // 误把我方连接 GUID 当成 BusinessId 也不行
+    public async Task 未配置或公司文件不符_按未开启处理_不读不写(string configuredBusinessId, string configuredDisplayId, string requested)
     {
-        var options = new MyobOptions { WriteProbeConnectionGuid = configuredConnection, WriteProbeEmployeeDisplayId = configuredDisplayId };
-        var result = await Service(options).RunAsync(Request(connection: requested), CancellationToken.None);
+        var options = new MyobOptions { WriteProbeBusinessId = configuredBusinessId, WriteProbeEmployeeDisplayId = configuredDisplayId };
+        var result = await Service(options).RunAsync(Request(business: requested), CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal(MyobWriteProbeErrorCodes.NotEnabled, result.ErrorCode);

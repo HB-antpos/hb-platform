@@ -7,7 +7,7 @@ namespace BlazorApp.Api.Controllers.React
 {
     /// <summary>
     /// MYOB Timesheet 写入探针（临时接口）：在配置指定的一个公司文件、一张 test test 专用测试员工卡上实测 PUT Timesheet 的真实行为，
-    /// 方案 docs/plans/2026-10-29-myob-timesheet-push.md 第 3 节。配置（Myob__WriteProbeConnectionGuid / Myob__WriteProbeEmployeeDisplayId）
+    /// 方案 docs/plans/2026-10-29-myob-timesheet-push.md 第 3 节。配置（Myob__WriteProbeBusinessId /Myob__WriteProbeEmployeeDisplayId）
     /// 只在实测窗口内设置，未配置时本接口一律 404。权限沿用 Myob.Connection.Manage；实测完成后整个控制器与服务一并删除。
     /// </summary>
     [ApiController]

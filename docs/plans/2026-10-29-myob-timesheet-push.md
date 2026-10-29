@@ -77,16 +77,16 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 2. 测试卡要挂 `Base Hourly`、`SATURDAY`、`SUNDAY`、`Personal Leave Pay`、`Holiday Leave Pay`（用来测第 1~4、6、8 条）；**第 7 条（没挂类别时 PUT 返回什么）**用该卡暂时不挂 `Holiday Leave Pay` 的状态各测一次，或略过（不影响主流程，只影响错误文案）。
 3. 测试日期：只用**当前尚未发薪、且该卡 GET 为空**的周期；探针先 GET，发现该区间已有任何记录就**直接中止**，一次写入都不发。
 4. **第 5 条（对含 `Processed` 的区间 PUT 的返回）在生产不测。** 理由：若 MYOB 实际不拒绝，会改动历史已发薪数据，后果不可逆。正式推送的保护只靠我方预检（先 GET，有 `Processed` 就不发 PUT，见 4.2），该路径不会向含已发薪记录的区间发任何 PUT；因此这一条留作「未验证，不依赖」，写入第 3 节表格并在上线 Runbook 里标明。
-5. 该公司文件的 Administrator 已在「连接与映射」里授权，连接状态 Active（已确认）。**已定：Robinson Road，测试卡 `test test`、Employee ID `0086`。**配置用 Employee ID，探针自己在名册里查出 UID；还需要 Robinson Road 的**连接 GUID**（「连接与映射」页可看）。
+5. 该公司文件的 Administrator 已在「连接与映射」里授权，连接状态 Active（已确认）。**已定：Robinson Road，测试卡 `test test`、Employee ID `0086`。**配置用 Employee ID，探针自己在名册里查出 UID；还需要 Robinson Road 的 **BusinessId**（MYOB 公司文件 ID，一个 GUID；已提供，不写进仓库，只放服务器 `.env`）。
 6. 探针运行时间选财务不在 MYOB 里跑 Pay Run 的时段，并提前告知财务「`test test` 这张卡在做测试」。
 7. 测试卡当前状态（2026-10-29 截图）：Profile 已填；「Employee Self-Onboarding」状态为 **Sent**（MYOB 已向卡上的邮箱发过自助填写邀请，可忽略或在 MYOB 里取消）；**Payroll Details 还没确认**，见 3.3。
 
 ### 3.2 实测方式：一次性探针（沿用 `payslip-probe` 的做法，测完整体删除）
 
-- 临时接口 `POST api/react/v1/myob/timesheet/write-probe`，仅管理员；**只对环境变量 `Myob__WriteProbeConnectionGuid` 指定的那一个连接、`Myob__WriteProbeEmployeeDisplayId`（MYOB 的 Employee ID）指定的那一张员工卡生效**（任一未配置或不符直接 404）；员工卡还要在名册里恰好匹配一张，并且必须是启用中、姓和名都是 `test` 的专用测试卡，否则拒绝（`MYOB_WRITE_PROBE_TEST_CARD_NOT_ALLOWED`）。所以被误调或配错，也碰不到其他公司文件和真人员工。探针期间该连接是**生产文件**，所以这两个变量只在实测窗口内配置，测完立刻删除。
+- 临时接口 `POST api/react/v1/myob/timesheet/write-probe`，仅管理员；**只对环境变量 `Myob__WriteProbeBusinessId` 指定的那一个公司文件、`Myob__WriteProbeEmployeeDisplayId`（MYOB 的 Employee ID）指定的那一张员工卡生效**（任一未配置或不符直接 404）；员工卡还要在名册里恰好匹配一张，并且必须是启用中、姓和名都是 `test` 的专用测试卡，否则拒绝（`MYOB_WRITE_PROBE_TEST_CARD_NOT_ALLOWED`）。所以被误调或配错，也碰不到其他公司文件和真人员工。探针期间该连接是**生产文件**，所以这两个变量只在实测窗口内配置，测完立刻删除。
 - 按第 3 节 9 条各发一组固定的请求，响应体只在服务端消化，只回传：状态码、字段路径、Hours 与日期的取值种类 / 小数位、是否被拒绝、耗时。**不回显响应体。**
 - 写请求只发在测试文件的测试员工上，且每一组测完就清空（或恢复），最后再 GET 确认测试员工回到初始状态。
-- 探针代码单独一个 PR（标题注明「临时探针，实测后删除」），部署到主 API；`WriteProbeConnectionGuid` 只配测试文件。结果记入本节，探针在第 1 批后端实现提交里一并移除。
+- 探针代码单独一个 PR（标题注明「临时探针，实测后删除」），部署到主 API；`WriteProbeBusinessId` 只配 Robinson Road 这一个公司文件。结果记入本节，探针在第 1 批后端实现提交里一并移除。
 - 与总闸 `TimesheetPushEnabled` 无关：探针不走推送服务，也不会让正式推送接口开放。
 - 实际执行顺序（代码里的步骤键）：`precheck`（整个 21 天区间必须为空，否则中止、一次不写）→ `put-date-format`（日期写法与最小请求体，被拒则回退带时间的写法）→ `put-hours-scale`（7.333 小时）→ `put-other-category`（覆盖还是合并）→ `put-out-of-range`（越界一天）→ `clear-empty-lines` / `clear-empty-entries` / `clear-zero-hours`（逐个降级，找到有效的清空办法就停）→ 可选 `put-unassigned-category` → 无论成败都执行清理并 `final-check`。
 - 探针没有覆盖第 3 节的第 5 条（生产不测）和第 8 条里的限流 / 重试部分；耗时在每步 `ElapsedMs` 里。
@@ -95,8 +95,8 @@ POST timesheet/push（≤10 人一块，同一个 batchGuid，前端按块循环
 
 1. 在 MYOB 里补全 `test test` 卡的 Payroll Details：时薪制；工资类别挂 `Base Hourly`、`SATURDAY…`、`SUNDAY…`（以及可选的 `Personal Leave Pay`、`Holiday Leave Pay`）；不要放进任何 Pay Run。若 MYOB 有「使用 Timesheet」之类的开关，打开它（探针也会顺带验证第 9 条是否需要）。
 2. 在「连接与映射」里确认 Robinson Road 的工资类别映射已保存（平日 / 周六至少两项）；没保存也可以在请求里直接给类别 UID。
-3. 服务器 `.env` 临时加：`Myob__WriteProbeConnectionGuid=<Robinson Road 的连接 GUID>`、`Myob__WriteProbeEmployeeDisplayId=0086`，重启主 API。
-4. 财务不在 MYOB 跑 Pay Run 的时段，管理员登录后调用 `POST /api/react/v1/myob/timesheet/write-probe`，Body：`{"connectionGuid":"…","periodStart":"<今天或之后的某个周一，yyyy-MM-dd>"}`。
+3. 服务器 `.env` 临时加：`Myob__WriteProbeBusinessId=<Robinson Road 的 BusinessId>`、`Myob__WriteProbeEmployeeDisplayId=0086`，重启主 API。
+4. 财务不在 MYOB 跑 Pay Run 的时段，管理员登录后调用 `POST /api/react/v1/myob/timesheet/write-probe`，Body：`{"businessId":"<Robinson Road 的 BusinessId>","periodStart":"<今天或之后的某个周一，yyyy-MM-dd>"}`。
 5. 把返回结果（只含状态码 / 错误类型名 / 该测试卡自己的日期与小时）记入第 3 节表格；确认 `verdicts.finalClean=true`。若为 false，按提示在 MYOB 的 Enter Timesheet 里手工清掉 `test test` 卡的记录。
 6. 立刻从 `.env` 删掉两个变量并重启；探针代码在第 1 批实现提交里移除。
 

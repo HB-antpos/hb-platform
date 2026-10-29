@@ -24,9 +24,9 @@ public sealed class MyobOptions
 
     /// <summary>
     /// Timesheet 写入探针（临时，实测后删除）只对这一个连接生效；空 = 探针关闭。
-    /// 只在实测窗口内配置（Myob__WriteProbeConnectionGuid），测完立刻从服务器 .env 删除。方案 docs/plans/2026-10-29-myob-timesheet-push.md 第 3 节。
+    /// 值是公司文件的 BusinessId（MYOB 的 cf_uri，一个 GUID，库里唯一）。只在实测窗口内配置（Myob__WriteProbeBusinessId），测完立刻从服务器 .env 删除。方案 docs/plans/2026-10-29-myob-timesheet-push.md 第 3 节。
     /// </summary>
-    public string WriteProbeConnectionGuid { get; set; } = string.Empty;
+    public string WriteProbeBusinessId { get; set; } = string.Empty;
 
     /// <summary>
     /// 探针只允许写这一张 MYOB 员工卡的 Employee ID（DisplayID，如 0086，Myob__WriteProbeEmployeeDisplayId）；空 = 探针关闭。
