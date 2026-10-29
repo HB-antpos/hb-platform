@@ -15,27 +15,43 @@ import type {
 
 // ───────────────────────── 工资类别映射 ─────────────────────────
 
-/** 5 个类别键，顺序即页面行的顺序（与后端 MyobPayCategoryKeys.All 一致）。 */
+/** 全部 7 个类别键，顺序即页面行的顺序（与后端 MyobPayCategoryKeys.All 一致）。 */
 export const PAY_CATEGORY_KEYS: readonly MyobPayCategoryKey[] = [
   'weekday',
   'saturday',
   'sunday',
+  'saturdayCasual',
+  'sundayCasual',
   'personalLeave',
   'holidayLeave',
 ]
 
-export const PAY_CATEGORY_TOTAL = PAY_CATEGORY_KEYS.length
+/** 可选项：临时工（Casual）的周六 / 周日。公司里没有临时工周末工时就不用设；有了又没设，预览会拦截该员工。 */
+export const PAY_CATEGORY_OPTIONAL_KEYS: readonly MyobPayCategoryKey[] = ['saturdayCasual', 'sundayCasual']
+
+export function isOptionalPayCategory(key: MyobPayCategoryKey): boolean {
+  return PAY_CATEGORY_OPTIONAL_KEYS.includes(key)
+}
+
+/** 必填项（5 项）：「已映射 N / 5」「是否完整」「能否保存」只看这几项（与后端 MyobPayCategoryKeys.Required 一致）。 */
+const PAY_CATEGORY_REQUIRED_KEYS: readonly MyobPayCategoryKey[] = PAY_CATEGORY_KEYS.filter((key) => !isOptionalPayCategory(key))
+
+export const PAY_CATEGORY_TOTAL = PAY_CATEGORY_REQUIRED_KEYS.length
 
 const PAY_CATEGORY_FIELDS: Readonly<Record<MyobPayCategoryKey, keyof MyobPayCategoryMapping>> = {
   weekday: 'weekdayUid',
   saturday: 'saturdayUid',
   sunday: 'sundayUid',
+  saturdayCasual: 'saturdayCasualUid',
+  sundayCasual: 'sundayCasualUid',
   personalLeave: 'personalLeaveUid',
   holidayLeave: 'holidayLeaveUid',
 }
 
 export interface PayCategoryRowMeta {
   key: MyobPayCategoryKey
+  /** 可选行：可以不设、也允许清空。 */
+  optional: boolean
   /** 「我方工时」列主标题。 */
   labelKey: string
   /** 主标题下的灰色小字（含哪些工时 / 推送成哪个 MYOB 类别）。 */
@@ -45,11 +61,13 @@ export interface PayCategoryRowMeta {
 }
 
 export const PAY_CATEGORY_ROWS: readonly PayCategoryRowMeta[] = [
-  { key: 'weekday', labelKey: 'myob.payCategories.rows.weekday.label', subKey: 'myob.payCategories.rows.weekday.sub', noteKey: 'myob.payCategories.rows.weekday.note' },
-  { key: 'saturday', labelKey: 'myob.payCategories.rows.saturday.label', subKey: null, noteKey: 'myob.payCategories.rows.saturday.note' },
-  { key: 'sunday', labelKey: 'myob.payCategories.rows.sunday.label', subKey: null, noteKey: 'myob.payCategories.rows.sunday.note' },
-  { key: 'personalLeave', labelKey: 'myob.payCategories.rows.personalLeave.label', subKey: 'myob.payCategories.rows.personalLeave.sub', noteKey: 'myob.payCategories.rows.personalLeave.note' },
-  { key: 'holidayLeave', labelKey: 'myob.payCategories.rows.holidayLeave.label', subKey: 'myob.payCategories.rows.holidayLeave.sub', noteKey: 'myob.payCategories.rows.holidayLeave.note' },
+  { key: 'weekday', optional: false, labelKey: 'myob.payCategories.rows.weekday.label', subKey: 'myob.payCategories.rows.weekday.sub', noteKey: 'myob.payCategories.rows.weekday.note' },
+  { key: 'saturday', optional: false, labelKey: 'myob.payCategories.rows.saturday.label', subKey: 'myob.payCategories.rows.saturday.sub', noteKey: 'myob.payCategories.rows.saturday.note' },
+  { key: 'sunday', optional: false, labelKey: 'myob.payCategories.rows.sunday.label', subKey: 'myob.payCategories.rows.sunday.sub', noteKey: 'myob.payCategories.rows.sunday.note' },
+  { key: 'saturdayCasual', optional: true, labelKey: 'myob.payCategories.rows.saturdayCasual.label', subKey: 'myob.payCategories.rows.saturdayCasual.sub', noteKey: 'myob.payCategories.rows.saturdayCasual.note' },
+  { key: 'sundayCasual', optional: true, labelKey: 'myob.payCategories.rows.sundayCasual.label', subKey: 'myob.payCategories.rows.sundayCasual.sub', noteKey: 'myob.payCategories.rows.sundayCasual.note' },
+  { key: 'personalLeave', optional: false, labelKey: 'myob.payCategories.rows.personalLeave.label', subKey: 'myob.payCategories.rows.personalLeave.sub', noteKey: 'myob.payCategories.rows.personalLeave.note' },
+  { key: 'holidayLeave', optional: false, labelKey: 'myob.payCategories.rows.holidayLeave.label', subKey: 'myob.payCategories.rows.holidayLeave.sub', noteKey: 'myob.payCategories.rows.holidayLeave.note' },
 ]
 
 /** 草稿只记录用户改过的行：类别键 → 新选的 MYOB 类别 uid。改回与基线一致时删掉该键，保证「只记变化」。 */
@@ -167,16 +185,17 @@ export function getPayCategoryRowState(
   return getBasePayCategoryUid(data, key) !== null ? 'suggested' : 'unset'
 }
 
+/** 已选的必填项数（0–5）；可选的临时工两项不计入。 */
 export function countMappedValues(values: Record<MyobPayCategoryKey, string | null>): number {
-  return PAY_CATEGORY_KEYS.filter((key) => values[key] !== null).length
+  return PAY_CATEGORY_REQUIRED_KEYS.filter((key) => values[key] !== null).length
 }
 
 export interface PayCategorySaveState {
-  /** 还没选的项数（0–5）。 */
+  /** 还没选的必填项数（0–5）。 */
   remaining: number
   /** 与已保存映射相比有没有差异（含按名称推荐预填、失效项改选）。 */
   changed: boolean
-  /** 5 项都选了且有差异才允许保存。 */
+  /** 5 项必填都选了且有差异（含可选项的变化）才允许保存。 */
   canSave: boolean
 }
 
@@ -187,7 +206,7 @@ export function getPayCategorySaveState(data: MyobPayCategories, edits: PayCateg
   return { remaining, changed, canSave: remaining === 0 && changed }
 }
 
-/** 保存请求体；5 项没选齐返回 null（调用方不应发请求）。 */
+/** 保存请求体；5 项必填没选齐返回 null（调用方不应发请求）；临时工两项可以为 null（没设 / 清空）。 */
 export function buildPayCategoryMappingRequest(
   data: MyobPayCategories,
   edits: PayCategoryEdits,
@@ -200,6 +219,8 @@ export function buildPayCategoryMappingRequest(
     weekdayUid: values.weekday,
     saturdayUid: values.saturday,
     sundayUid: values.sunday,
+    saturdayCasualUid: values.saturdayCasual,
+    sundayCasualUid: values.sundayCasual,
     personalLeaveUid: values.personalLeave,
     holidayLeaveUid: values.holidayLeave,
   }
@@ -687,6 +708,8 @@ export const PUSHED_LABEL_KEYS: Readonly<Record<string, string>> = {
   weekday: 'myob.push.drawer.pushedRows.weekday',
   saturday: 'myob.push.drawer.pushedRows.saturday',
   sunday: 'myob.push.drawer.pushedRows.sunday',
+  saturdayCasual: 'myob.push.drawer.pushedRows.saturdayCasual',
+  sundayCasual: 'myob.push.drawer.pushedRows.sundayCasual',
   personalLeave: 'myob.push.drawer.pushedRows.personalLeave',
   holidayLeave: 'myob.push.drawer.pushedRows.holidayLeave',
 }

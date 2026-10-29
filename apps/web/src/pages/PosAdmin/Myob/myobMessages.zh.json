@@ -425,11 +425,23 @@
         },
         "saturday": {
           "label": "周六",
+          "sub": "全职、兼职",
           "note": "时薪倍数由 MYOB 类别决定，需与我方周六转账价一致"
         },
         "sunday": {
           "label": "周日",
+          "sub": "全职、兼职",
           "note": "时薪倍数由 MYOB 类别决定，需与我方周日转账价一致"
+        },
+        "saturdayCasual": {
+          "label": "周六（临时工）",
+          "sub": "Casual",
+          "note": "临时工的周六用单独的 MYOB 类别；公司里没有临时工周六工时可以不设，有了没设则该员工不能推送"
+        },
+        "sundayCasual": {
+          "label": "周日（临时工）",
+          "sub": "Casual",
+          "note": "临时工的周日用单独的 MYOB 类别；公司里没有临时工周日工时可以不设，有了没设则该员工不能推送"
         },
         "personalLeave": {
           "label": "病假",
@@ -449,6 +461,7 @@
         "suggested": "按名称相近推荐",
         "suggestedHint": "已预填，可改；保存后才生效",
         "unset": "未设置",
+        "optional": "可选",
         "unsetHint": "没找到名称相近的类别，请手动选择；未设置前这类工时不能推送",
         "missing": "类别已失效",
         "missingHint": "MYOB 里找不到这个类别，请重新选择",
@@ -460,7 +473,7 @@
         "prereqLabel": "MYOB 端前置配置",
         "prereq": "（由财务确认）：工资设置里开启「使用 Timesheet 记录工资」、周起始日与我方一致、员工工资明细里挂上上面这些类别。"
       },
-      "remaining": "还差 {{count}} 项未选择，5 项都选好才能保存",
+      "remaining": "还差 {{count}} 项必填未选择，5 项必填都选好才能保存",
       "unsaved": "有未保存的改动",
       "suggestionsUnsaved": "名称相近的推荐还没保存，确认无误后点「保存映射」",
       "cancel": "取消",
@@ -660,6 +673,8 @@
           "weekday": "平日",
           "saturday": "周六",
           "sunday": "周日",
+          "saturdayCasual": "周六（临时工）",
+          "sundayCasual": "周日（临时工）",
           "personalLeave": "病假（Personal Leave Pay）",
           "holidayLeave": "年假（Holiday Leave Pay）"
         }

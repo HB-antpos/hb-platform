@@ -4047,6 +4047,44 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资类别映射_临时工周末两列_旧表加列_可重复执行_保留既有映射_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54353。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.VerifySql));
+        Assert.Equal(54353, noTable.Number);
+
+        // 旧表（20261027.004）已有一行映射，加列后映射原样保留，新列为 NULL。
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayCategoryMapping (ConnectionGuid, WeekdayUid, SaturdayUid, UpdatedAt)
+            VALUES (N'c-1', N'cat-weekday', N'cat-sat', SYSUTCDATETIME());
+            """);
+        var lacksColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.VerifySql));
+        Assert.Equal(54354, lacksColumns.Number);
+
+        await ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE SaturdayUid = N'cat-sat' AND SaturdayCasualUid IS NULL AND SundayCasualUid IS NULL"));
+
+        // 重复执行不报错、不影响已写入的新列值。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.MyobPayCategoryMapping SET SaturdayCasualUid = N'cat-sat-casual' WHERE ConnectionGuid = N'c-1';");
+        await ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE SaturdayCasualUid = N'cat-sat-casual'"));
+
+        // 列宽漂移 → 54354。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping ALTER COLUMN SundayCasualUid nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.VerifySql));
+        Assert.Equal(54354, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

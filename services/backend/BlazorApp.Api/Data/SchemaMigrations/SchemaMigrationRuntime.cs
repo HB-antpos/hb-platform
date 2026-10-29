@@ -256,6 +256,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMyobEmployeeSyncBatchAsync(CancellationToken cancellationToken);
 
+    Task ApplyMyobPayCategoryCasualAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayCategoryCasualAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1612,6 +1616,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MyobEmployeeSyncBatchSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayCategoryCasualAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryCasualSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 加列后过精确签名，通过后协调器才登记账本。
+        await VerifyMyobPayCategoryCasualAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayCategoryCasualAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryCasualSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

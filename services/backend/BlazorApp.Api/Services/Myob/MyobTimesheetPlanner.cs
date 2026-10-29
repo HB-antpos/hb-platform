@@ -66,8 +66,8 @@ internal sealed class MyobPlanResult
 ///    全转账 = 每家都全进转账，全现金 = 不转账。分摊用分钟取整，余数按「工时多的公司先得、同量按公司标识」逐分钟补齐，结果确定、不会丢分钟。
 /// 2. 每家公司在分到的额度里按 <b>周日 → 周六 → 带薪公假 → 病假 → 年假 → 年假折现 → 公假上班 → 平日</b> 装入转账，
 ///    同一种内按日期从早到晚、同日按分店；某种全部进转账就按实际日期原样，只部分进入就从早到晚填满。
-/// 3. 类别：平日 / 公假上班 / 带薪公假 → 平日；周六、周日各自一类；病假 → Personal Leave Pay；年假 → Holiday Leave Pay；
-///    年假折现占用额度但不推送。
+/// 3. 类别：平日 / 公假上班 / 带薪公假 → 平日；周六、周日各自一类（全职 / 兼职共用，临时工用单独的类别）；
+///    病假 → Personal Leave Pay；年假 → Holiday Leave Pay；年假折现占用额度但不推送。
 /// 与 <see cref="PayrollCalculator"/> 的区别：它按档位汇总整期；这里要按天，且要先跨公司分摊。单公司员工两者的转账总工时一致。
 /// </summary>
 internal static class MyobTimesheetPlanner
@@ -85,12 +85,15 @@ internal static class MyobTimesheetPlanner
         MyobWorkKind.Weekday,
     ];
 
-    /// <summary>工时种类 → MYOB 类别键；年假折现不推送返回 null。</summary>
-    internal static string? CategoryOf(MyobWorkKind kind) => kind switch
+    /// <summary>
+    /// 工时种类 → MYOB 类别键；年假折现不推送返回 null。
+    /// 周六 / 周日按员工类型分流：全职与兼职共用一个类别，临时工（Casual）用单独的类别。
+    /// </summary>
+    internal static string? CategoryOf(MyobWorkKind kind, bool isCasual = false) => kind switch
     {
         MyobWorkKind.Weekday or MyobWorkKind.PublicHolidayWork or MyobWorkKind.PublicHolidayPay => MyobPayCategoryKeys.Weekday,
-        MyobWorkKind.Saturday => MyobPayCategoryKeys.Saturday,
-        MyobWorkKind.Sunday => MyobPayCategoryKeys.Sunday,
+        MyobWorkKind.Saturday => isCasual ? MyobPayCategoryKeys.SaturdayCasual : MyobPayCategoryKeys.Saturday,
+        MyobWorkKind.Sunday => isCasual ? MyobPayCategoryKeys.SundayCasual : MyobPayCategoryKeys.Sunday,
         MyobWorkKind.Sick => MyobPayCategoryKeys.PersonalLeave,
         MyobWorkKind.Annual => MyobPayCategoryKeys.HolidayLeave,
         _ => null,
@@ -112,7 +115,9 @@ internal static class MyobTimesheetPlanner
     /// <param name="fixedTransferHoursPerWeek">转账 + 现金时每周固定转账工时；其他模式忽略。</param>
     /// <param name="weeks">工资周期周数（1 或 2）：固定转账容量 = 每周工时 × 周数。</param>
     /// <param name="items">员工本期在所有公司名下的全部工时（分钟）；分钟 ≤ 0 的忽略。</param>
-    public static MyobPlanResult Plan(string payMode, decimal fixedTransferHoursPerWeek, int weeks, IEnumerable<MyobWorkItem> items)
+    /// <param name="isCasual">员工是临时工（Casual）：周六 / 周日推送到临时工专用的 MYOB 类别；其余类别不受影响。</param>
+    public static MyobPlanResult Plan(
+        string payMode, decimal fixedTransferHoursPerWeek, int weeks, IEnumerable<MyobWorkItem> items, bool isCasual = false)
     {
         var positive = items.Where(item => item.Minutes > 0).ToList();
         var byCompany = positive
@@ -124,7 +129,7 @@ internal static class MyobTimesheetPlanner
         var result = new MyobPlanResult();
         foreach (var (connection, companyItems) in byCompany.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
-            result.Companies[connection] = PlanCompany(connection, companyItems, capacity[connection]);
+            result.Companies[connection] = PlanCompany(connection, companyItems, capacity[connection], isCasual);
         }
 
         return result;
@@ -204,7 +209,7 @@ internal static class MyobTimesheetPlanner
         return result;
     }
 
-    private static MyobCompanyPlan PlanCompany(string connection, List<MyobWorkItem> items, int capacityMinutes)
+    private static MyobCompanyPlan PlanCompany(string connection, List<MyobWorkItem> items, int capacityMinutes, bool isCasual)
     {
         var actualByDayKind = new Dictionary<(DateTime, MyobWorkKind), int>();
         foreach (var item in items)
@@ -233,7 +238,7 @@ internal static class MyobTimesheetPlanner
                 left -= take;
                 var dayKind = (item.Date.Date, kind);
                 transferByDayKind[dayKind] = transferByDayKind.GetValueOrDefault(dayKind) + take;
-                var category = CategoryOf(kind);
+                var category = CategoryOf(kind, isCasual);
                 if (category is null)
                 {
                     cashOutTransfer += take;

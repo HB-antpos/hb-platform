@@ -259,6 +259,15 @@ export default function PayCategoryMappingCard({ connections, connectionsLoading
           </>
         )
       case 'unset':
+        // 可选行（临时工周末）没设是正常的：不报警，只提示什么时候需要设
+        if (meta.optional) {
+          return (
+            <>
+              <Tag>{t('myob.payCategories.state.optional')}</Tag>
+              {staticNote}
+            </>
+          )
+        }
         return (
           <>
             <Tag color="warning">{t('myob.payCategories.state.unset')}</Tag>
@@ -346,7 +355,8 @@ export default function PayCategoryMappingCard({ connections, connectionsLoading
                         optionFilterProp="label"
                         placeholder={t('myob.payCategories.placeholder')}
                         aria-label={t('myob.payCategories.selectAria', { label: t(meta.labelKey) })}
-                        status={state === 'missing' ? 'error' : state === 'unset' ? 'warning' : undefined}
+                        status={state === 'missing' ? 'error' : state === 'unset' && !meta.optional ? 'warning' : undefined}
+                        allowClear={meta.optional}
                         disabled={saving}
                         notFoundContent={t('myob.payCategories.noMatch')}
                         optionRender={(option) => <CategoryLabel name={String(option.data.label ?? '')} wageType={option.data.wageType} />}
@@ -354,7 +364,7 @@ export default function PayCategoryMappingCard({ connections, connectionsLoading
                           const category = categoryByUid.get(String(props.value))
                           return category ? <CategoryLabel name={category.name} wageType={category.wageType} /> : props.label
                         }}
-                        onChange={(uid: string) => setEdits((current) => setPayCategoryEdit(data, current, meta.key, uid))}
+                        onChange={(uid?: string) => setEdits((current) => setPayCategoryEdit(data, current, meta.key, uid ?? null))}
                       />
                     </td>
                     <td className="myob-pc-desc">{renderNote(meta, state)}</td>

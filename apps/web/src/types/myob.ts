@@ -299,8 +299,18 @@ export interface MyobPayrollEmployerQuery {
 // 契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobTimesheetDtos.cs 为准。
 // 工资类别映射接口权限 Myob.Connection.Manage；推送预览接口权限 Attendance.Payroll.Edit；日期一律 yyyy-MM-dd 字符串。
 
-/** 我方转账工时对应的 MYOB 工资类别键（5 项）。 */
-export type MyobPayCategoryKey = 'weekday' | 'saturday' | 'sunday' | 'personalLeave' | 'holidayLeave'
+/**
+ * 我方转账工时对应的 MYOB 工资类别键：5 项必填 + 2 项可选。
+ * saturday / sunday 是全职、兼职共用的周末类别；saturdayCasual / sundayCasual 是临时工（Casual）专用的周末类别（可选）。
+ */
+export type MyobPayCategoryKey =
+  | 'weekday'
+  | 'saturday'
+  | 'sunday'
+  | 'saturdayCasual'
+  | 'sundayCasual'
+  | 'personalLeave'
+  | 'holidayLeave'
 
 /** MYOB 里的一个工资类别（Payroll/PayrollCategory/Wage）。 */
 export interface MyobWageCategory {
@@ -310,11 +320,17 @@ export interface MyobWageCategory {
   wageType: string | null
 }
 
-/** 5 项映射：每项是 MYOB 工资类别的 UID，null = 未设置。同一结构用于「当前映射」「建议」与保存请求。 */
+/** 映射：每项是 MYOB 工资类别的 UID，null = 未设置。同一结构用于「当前映射」「建议」与保存请求。 */
 export interface MyobPayCategoryMapping {
   weekdayUid: string | null
+  /** 全职 / 兼职的周六。 */
   saturdayUid: string | null
+  /** 全职 / 兼职的周日。 */
   sundayUid: string | null
+  /** 临时工的周六（可选）。 */
+  saturdayCasualUid: string | null
+  /** 临时工的周日（可选）。 */
+  sundayCasualUid: string | null
   personalLeaveUid: string | null
   holidayLeaveUid: string | null
 }
@@ -329,9 +345,9 @@ export interface MyobPayCategories {
   mapping: MyobPayCategoryMapping
   /** 按名称相近给出的建议（只对尚未设置的项给出）。 */
   suggestions: MyobPayCategoryMapping
-  /** 已设置的项数（0–5）。 */
+  /** 已设置的必填项数（0–5；临时工的可选两项不计入）。 */
   mappedCount: number
-  /** 5 项都已设置，且都还在 MYOB 的类别里。 */
+  /** 5 项必填都已设置，且都还在 MYOB 的类别里。 */
   complete: boolean
   /** 已保存的映射里 MYOB 现在已找不到的类别键，需要重新选择。 */
   missingKeys: MyobPayCategoryKey[]

@@ -96,7 +96,8 @@ namespace BlazorApp.Api.Services.React
                     employee.SickItems.ToList(),
                     employee.PublicHolidayPayItems.ToList(),
                     DistributeApproved(employee.AnnualByDay, annual.ApprovedHours),
-                    DistributeApproved(employee.CashOutByDay, cashOut.ApprovedHours)));
+                    DistributeApproved(employee.CashOutByDay, cashOut.ApprovedHours),
+                    employee.EmploymentType));
             }
 
             return new PayrollPushStoreData(

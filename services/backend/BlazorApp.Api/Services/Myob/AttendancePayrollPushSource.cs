@@ -16,7 +16,9 @@ internal sealed record PayrollPushEmployee(
     IReadOnlyList<PayrollLeaveItem> Sick,
     IReadOnlyList<PayrollLeaveItem> PublicHolidayPay,
     IReadOnlyList<PayrollLeaveItem> Annual,
-    IReadOnlyList<PayrollLeaveItem> AnnualCashOut);
+    IReadOnlyList<PayrollLeaveItem> AnnualCashOut,
+    // FullTime / PartTime / Casual；没填员工类型为 null。临时工的周末工时要推到单独的 MYOB 类别。
+    string? EmploymentType = null);
 
 internal sealed record PayrollPushStoreData(
     string StoreCode,

@@ -8,7 +8,9 @@ import {
   HINT_CODE_LABEL_KEYS,
   KIND_LABEL_KEYS,
   PAY_CATEGORY_KEYS,
+  PAY_CATEGORY_OPTIONAL_KEYS,
   PAY_CATEGORY_ROWS,
+  PAY_CATEGORY_TOTAL,
   PUSHED_LABEL_KEYS,
   WEEKDAY_LABEL_KEYS,
   buildDayHeader,
@@ -20,6 +22,7 @@ import {
   buildPreviewCsvFileName,
   buildReadinessCards,
   canPushPreview,
+  countMappedValues,
   describeCrossShare,
   diffDays,
   escapeCsvField,
@@ -45,6 +48,7 @@ import {
   groupHints,
   guardCsvFormula,
   hasPayCategoryEdits,
+  isOptionalPayCategory,
   isPayCategoryMissing,
   parseIsoDate,
   reconcilePayCategoryEdits,
@@ -75,10 +79,23 @@ function categories(overrides: Record<string, unknown> = {}): MyobPayCategories 
   })
 }
 
-assert.deepEqual([...PAY_CATEGORY_KEYS], ['weekday', 'saturday', 'sunday', 'personalLeave', 'holidayLeave'])
-assert.deepEqual(PAY_CATEGORY_ROWS.map((row) => row.key), [...PAY_CATEGORY_KEYS], '页面 5 行与类别键一一对应、顺序一致')
+assert.deepEqual(
+  [...PAY_CATEGORY_KEYS],
+  ['weekday', 'saturday', 'sunday', 'saturdayCasual', 'sundayCasual', 'personalLeave', 'holidayLeave'],
+  '7 个键：全职 / 兼职的周六周日 + 临时工的周六周日（可选）',
+)
+assert.deepEqual(PAY_CATEGORY_ROWS.map((row) => row.key), [...PAY_CATEGORY_KEYS], '页面 7 行与类别键一一对应、顺序一致')
+assert.deepEqual(
+  PAY_CATEGORY_ROWS.filter((row) => row.optional).map((row) => row.key),
+  ['saturdayCasual', 'sundayCasual'],
+  '只有临时工周末两行是可选的',
+)
+assert.equal(PAY_CATEGORY_TOTAL, 5, '必填项数仍是 5：临时工两项不计入')
+assert.deepEqual([...PAY_CATEGORY_OPTIONAL_KEYS], ['saturdayCasual', 'sundayCasual'])
+assert.equal(isOptionalPayCategory('saturdayCasual'), true)
+assert.equal(isOptionalPayCategory('saturday'), false)
 
-// 全新公司：什么都没保存、也没有建议 → 5 项都「未设置」，不可保存，还差 5 项
+// 全新公司：什么都没保存、也没有建议 → 7 项都「未设置」，不可保存，还差 5 项必填
 const fresh = categories()
 assert.equal(PAY_CATEGORY_KEYS.every((key) => getPayCategoryRowState(fresh, {}, key) === 'unset'), true)
 assert.deepEqual(getPayCategorySaveState(fresh, {}), { remaining: 5, changed: false, canSave: false })
@@ -107,6 +124,8 @@ assert.deepEqual(buildPayCategoryMappingRequest(suggested, picked), {
   weekdayUid: 'base',
   saturdayUid: 'sat',
   sundayUid: 'sun',
+  saturdayCasualUid: null,
+  sundayCasualUid: null,
   personalLeaveUid: 'pers',
   holidayLeaveUid: 'hol',
 })
@@ -125,7 +144,11 @@ const complete = categories({
   complete: true,
 })
 assert.deepEqual(getPayCategorySaveState(complete, {}), { remaining: 0, changed: false, canSave: false })
-assert.equal(PAY_CATEGORY_KEYS.every((key) => getPayCategoryRowState(complete, {}, key) === 'set'), true)
+assert.equal(
+  PAY_CATEGORY_KEYS.filter((key) => !isOptionalPayCategory(key)).every((key) => getPayCategoryRowState(complete, {}, key) === 'set'),
+  true,
+)
+assert.equal(getPayCategoryRowState(complete, {}, 'saturdayCasual'), 'unset', '必填齐全后，没设的临时工项仍是「未设置」（可选，不拦保存）')
 const changed = setPayCategoryEdit(complete, {}, 'sunday', 'other')
 assert.deepEqual(getPayCategorySaveState(complete, changed), { remaining: 0, changed: true, canSave: true })
 assert.equal(resolvePayCategoryValues(complete, changed).sunday, 'other')
@@ -153,6 +176,41 @@ const missingWithSuggestion = categories({ mapping: { weekdayUid: 'gone' }, miss
 assert.equal(getBasePayCategoryUid(missingWithSuggestion, 'weekday'), null)
 // 建议指向的类别已不在 MYOB 列表里 → 不预填
 assert.equal(getBasePayCategoryUid(categories({ suggestions: { weekdayUid: 'ghost' } }), 'weekday'), null)
+
+// 临时工周末两项（可选）：不影响必填计数 / 完整度；设了或清空都算改动，保存请求体带上
+const casualPicked = setPayCategoryEdit(complete, {}, 'saturdayCasual', 'sat')
+assert.deepEqual(casualPicked, { saturdayCasual: 'sat' })
+assert.equal(getPayCategoryRowState(complete, casualPicked, 'saturdayCasual'), 'edited')
+assert.deepEqual(getPayCategorySaveState(complete, casualPicked), { remaining: 0, changed: true, canSave: true })
+assert.equal(buildPayCategoryMappingRequest(complete, casualPicked)?.saturdayCasualUid, 'sat')
+assert.equal(buildPayCategoryMappingRequest(complete, casualPicked)?.sundayCasualUid, null)
+assert.equal(countMappedValues(resolvePayCategoryValues(complete, casualPicked)), 5, '临时工两项不计入必填已选数')
+// 已保存临时工项后清空：草稿记为 null；请求体里该项为 null；再改回原值 → 草稿清空
+const casualSaved = categories({
+  mapping: {
+    weekdayUid: 'base', saturdayUid: 'sat', sundayUid: 'sun', saturdayCasualUid: 'other',
+    personalLeaveUid: 'pers', holidayLeaveUid: 'hol',
+  },
+  mappedCount: 5,
+  complete: true,
+})
+assert.equal(getPayCategoryRowState(casualSaved, {}, 'saturdayCasual'), 'set')
+const casualCleared = setPayCategoryEdit(casualSaved, {}, 'saturdayCasual', null)
+assert.deepEqual(casualCleared, { saturdayCasual: null })
+assert.equal(getPayCategoryRowState(casualSaved, casualCleared, 'saturdayCasual'), 'unset')
+assert.equal(buildPayCategoryMappingRequest(casualSaved, casualCleared)?.saturdayCasualUid, null)
+assert.deepEqual(setPayCategoryEdit(casualSaved, casualCleared, 'saturdayCasual', 'other'), {})
+// 临时工类别名称相近建议也走预填；MYOB 里这个类别被删：标失效，但必填依然完整
+const casualSuggested = categories({ suggestions: { saturdayCasualUid: 'sat' } })
+assert.equal(getPayCategoryRowState(casualSuggested, {}, 'saturdayCasual'), 'suggested')
+const casualMissing = categories({
+  mapping: { weekdayUid: 'base', saturdayUid: 'sat', sundayUid: 'sun', sundayCasualUid: 'gone', personalLeaveUid: 'pers', holidayLeaveUid: 'hol' },
+  missingKeys: ['sundayCasual'],
+  mappedCount: 5,
+  complete: true,
+})
+assert.equal(getPayCategoryRowState(casualMissing, {}, 'sundayCasual'), 'missing')
+assert.equal(getPayCategorySaveState(casualMissing, {}).remaining, 0)
 
 // 重新读取 MYOB 后对账草稿：选的类别没了 → 丢弃；与新基线一致 → 丢弃
 const afterRefresh = categories({ categories: [{ uid: 'base', name: 'Base Hourly' }, { uid: 'sat', name: 'Sat' }], suggestions: { sundayUid: 'sat' } })
