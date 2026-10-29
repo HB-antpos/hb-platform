@@ -224,6 +224,8 @@ export const P = {
     // 工资单 PDF：下载 / 邮件发送各自独立授权（新权限默认不授予任何角色），与后端 Permissions.Myob.Payslip.Download / Email 一致。
     PayslipDownload: 'Myob.Payslip.Download',
     PayslipEmail: 'Myob.Payslip.Email',
+    // Timesheet 推送与撤销（会写 MYOB 生产数据）：新权限默认不授予任何角色（含店长），与后端 Permissions.Myob.Timesheet.Push 一致。
+    TimesheetPush: 'Myob.Timesheet.Push',
   },
   // 门店人脸抓拍摄像机管理（系统菜单「人脸抓拍摄像机」）：独立顶层权限码，与后端 Permissions.FaceCapture.Cameras.Manage 一致。
   FaceCapture: {

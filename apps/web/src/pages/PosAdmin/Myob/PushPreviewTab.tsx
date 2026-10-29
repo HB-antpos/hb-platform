@@ -1,4 +1,4 @@
-import { DownloadOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { DownloadOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Checkbox, Empty, Grid, Select, Skeleton, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -7,14 +7,16 @@ import { useTranslation } from 'react-i18next'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { getMyobTimesheetPreview } from '../../../services/myobService'
 import type { MyobCompanyOption, MyobPreviewRow, MyobTimesheetPreview } from '../../../types/myob'
-import { formatAbnDisplay, extractMyobError } from './myobLogic'
+import { formatAbnDisplay, extractMyobError, formatMyobTime } from './myobLogic'
+import PushBatchesDrawer from './PushBatchesDrawer'
+import PushConfirmModal from './PushConfirmModal'
 import PushDetailDrawer from './PushDetailDrawer'
+import { canOpenPushConfirm, getPushableUserGuids, getPushStateView, isPushableRow, reconcileSelection } from './myobPushLogic'
 import {
   buildPeriodOptions,
   buildPreviewCsv,
   buildPreviewCsvFileName,
   buildReadinessCards,
-  canPushPreview,
   formatHours,
   formatHoursCell,
   formatPeriodRange,
@@ -59,6 +61,8 @@ interface PushPreviewTabProps {
   canGoBind: boolean
   /** 有连接管理权限才显示「去映射」。 */
   canGoMapping: boolean
+  /** 有 Myob.Timesheet.Push 才能挑人推送 / 看推送记录 / 撤销（预览只需编辑工资）。 */
+  canPush: boolean
   onGoBind: (connectionGuid: string) => void
   onGoMapping: (connectionGuid: string) => void
 }
@@ -90,6 +94,7 @@ export default function PushPreviewTab({
   active,
   canGoBind,
   canGoMapping,
+  canPush,
   onGoBind,
   onGoMapping,
 }: PushPreviewTabProps) {
@@ -108,6 +113,10 @@ export default function PushPreviewTab({
   const [error, setError] = useState<string | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const [detailUserGuid, setDetailUserGuid] = useState<string | null>(null)
+  // 挑人推送：默认选中所有可推送的人；预览刷新后把已选收敛到仍然可推送的人
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [batchesOpen, setBatchesOpen] = useState(false)
   const requestSeq = useRef(0)
   // 用户选的周期（null = 后端默认的上一个已结束周期）；用 ref 保证公司切换 / 重新激活时读到最新值
   const periodRef = useRef<string | null>(null)
@@ -125,8 +134,9 @@ export default function PushPreviewTab({
         if (seq === requestSeq.current) {
           setPreview(data)
           setError(null)
-          // 数据变了，「我已知晓」要重新勾
+          // 数据变了，「我已知晓」要重新勾；选择回到「全部可推送的人」
           setAcknowledged(false)
+          setSelected(new Set(getPushableUserGuids(data)))
         }
       } catch (err) {
         if (seq === requestSeq.current) {
@@ -147,6 +157,9 @@ export default function PushPreviewTab({
     setError(null)
     setDetailUserGuid(null)
     setAcknowledged(false)
+    setSelected(new Set())
+    setConfirmOpen(false)
+    setBatchesOpen(false)
     if (selectedGuid) {
       void load(selectedGuid, { periodStart: periodRef.current, checkMyob: false, reset: true })
     } else {
@@ -205,8 +218,16 @@ export default function PushPreviewTab({
   const hintGroups = useMemo(() => groupHints(preview?.hints ?? []), [preview])
   const readinessCards = useMemo(() => (preview ? buildReadinessCards(preview) : []), [preview])
   const checkedAlready = preview?.readiness.myobChecked === true
-  const pushAllowed = canPushPreview(preview, acknowledged)
-  const readyCount = preview?.totals.readyCount ?? 0
+  const effectiveSelected = useMemo(() => reconcileSelection(preview, selected), [preview, selected])
+  const selectedCount = effectiveSelected.size
+  const pushAllowed = canOpenPushConfirm(preview, canPush, selectedCount, acknowledged)
+  const pushableGuids = useMemo(() => getPushableUserGuids(preview), [preview])
+  // 推送 / 撤销完成后：按当前周期重新读取（保留「已检查 MYOB」状态，推送状态列和 MYOB 现状立刻更新）
+  const refreshAfterPush = () => {
+    if (selectedGuid) {
+      void load(selectedGuid, { periodStart: preview?.periodStart || periodRef.current, checkMyob: checkedAlready })
+    }
+  }
 
   const columns: ColumnsType<MyobPreviewRow> = [
     {
@@ -258,6 +279,29 @@ export default function PushPreviewTab({
       render: (_, row) => (
         <b className={`myob-push-hours${Math.abs(row.pushedTotal) < 0.005 ? ' myob-muted' : ''}`}>{formatHoursCell(row.pushedTotal)}</b>
       ),
+    },
+    {
+      title: t('myob.push.columns.pushState'),
+      key: 'pushState',
+      width: 150,
+      render: (_, row) => {
+        // 被拦截 / 没有可推送工时的行，没有记录就不占位
+        if (row.push.state === 'NotPushed' && row.push.lastStatus === null) {
+          return <span className="myob-muted">—</span>
+        }
+        const view = getPushStateView(row.push)
+        const tag = (
+          <Tag color={view.tone} style={{ marginInlineEnd: 0 }} tabIndex={view.tipKey ? 0 : undefined}>
+            {t(view.labelKey)}
+          </Tag>
+        )
+        return (
+          <div className="myob-push-status">
+            {view.tipKey ? <Tooltip title={t(view.tipKey)}>{tag}</Tooltip> : tag}
+            {view.lastAt ? <span className="myob-sub">{formatMyobTime(view.lastAt)}</span> : null}
+          </div>
+        )
+      },
     },
     {
       title: t('myob.push.columns.status'),
@@ -388,6 +432,11 @@ export default function PushPreviewTab({
               </Button>
               <span className="myob-sub myob-push-toolbar-hint">{t('myob.push.checkHint')}</span>
               <span className="myob-toolbar-spacer" />
+              {canPush ? (
+                <Button icon={<HistoryOutlined />} onClick={() => setBatchesOpen(true)}>
+                  {t('myob.push.batches.open')}
+                </Button>
+              ) : null}
               <Button icon={<ReloadOutlined />} loading={loading && !checking} disabled={checking} onClick={reloadPreview}>
                 {t('myob.push.reload')}
               </Button>
@@ -454,6 +503,17 @@ export default function PushPreviewTab({
                   dataSource={rows}
                   loading={loading}
                   rowClassName={getRowClassName}
+                  rowSelection={
+                    canPush && preview.pushEnabled
+                      ? {
+                          selectedRowKeys: [...effectiveSelected],
+                          onChange: (keys) => setSelected(new Set(keys.map(String))),
+                          // 被拦截 / 没有转账工时 / MYOB 里已发薪的行不能选
+                          getCheckboxProps: (row) => ({ disabled: !isPushableRow(row), 'aria-label': t('myob.push.selectAria', { name: row.userName }) }),
+                          preserveSelectedRowKeys: true,
+                        }
+                      : undefined
+                  }
                   scroll={{ x: 'max-content' }}
                   pagination={{
                     pageSize: PAGE_SIZE,
@@ -486,11 +546,21 @@ export default function PushPreviewTab({
                       <Button icon={<DownloadOutlined />} onClick={handleExport}>
                         {t('myob.push.export')}
                       </Button>
-                      <Tooltip title={preview.pushEnabled ? undefined : t('myob.push.pushDisabledTip')}>
-                        {/* 禁用按钮收不到鼠标事件，Tooltip 套在外层 span 上；本批不接任何推送请求 */}
+                      {canPush && preview.pushEnabled ? (
+                        <span className="myob-push-select">
+                          <Button type="link" size="small" onClick={() => setSelected(new Set(pushableGuids))}>
+                            {t('myob.push.selectAll', { count: pushableGuids.length })}
+                          </Button>
+                          <Button type="link" size="small" disabled={selectedCount === 0} onClick={() => setSelected(new Set())}>
+                            {t('myob.push.selectNone')}
+                          </Button>
+                        </span>
+                      ) : null}
+                      <Tooltip title={!canPush ? t('myob.push.noPermissionTip') : preview.pushEnabled ? undefined : t('myob.push.pushDisabledTip')}>
+                        {/* 禁用按钮收不到鼠标事件，Tooltip 套在外层 span 上 */}
                         <span>
-                          <Button type="primary" disabled={!pushAllowed} aria-describedby="myob-push-disabled-note">
-                            {t('myob.push.pushButton', { count: readyCount })}
+                          <Button type="primary" disabled={!pushAllowed} aria-describedby="myob-push-disabled-note" onClick={() => setConfirmOpen(true)}>
+                            {t('myob.push.pushButton', { count: selectedCount })}
                           </Button>
                         </span>
                       </Tooltip>
@@ -513,6 +583,37 @@ export default function PushPreviewTab({
       </section>
 
       <PushDetailDrawer row={detailRow} preview={preview} onClose={() => setDetailUserGuid(null)} />
+
+      {canPush && preview ? (
+        <>
+          <PushConfirmModal
+            open={confirmOpen}
+            preview={preview}
+            selectedUserGuids={[...effectiveSelected]}
+            hintsAcknowledged={acknowledged}
+            onClose={(changed) => {
+              setConfirmOpen(false)
+              if (changed) {
+                refreshAfterPush()
+              }
+            }}
+            onOpenBatches={() => {
+              setConfirmOpen(false)
+              setBatchesOpen(true)
+              refreshAfterPush()
+            }}
+          />
+          <PushBatchesDrawer
+            open={batchesOpen}
+            connectionGuid={preview.connectionGuid}
+            connectionName={preview.connectionName}
+            periodStart={preview.periodStart}
+            periodEnd={preview.periodEnd}
+            onClose={() => setBatchesOpen(false)}
+            onUndone={refreshAfterPush}
+          />
+        </>
+      ) : null}
     </div>
   )
 }
