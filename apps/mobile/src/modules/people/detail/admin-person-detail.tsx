@@ -54,6 +54,7 @@ import type { DetailEnvironment } from "./store-person-detail";
 import { MoreActionsSheet, type MoreRowModel } from "./more-actions-sheet";
 import { ConfirmDialog, PeopleSheet } from "./people-sheet";
 import { PersonHeader } from "./person-header";
+import { ManagedProfileEntry } from "../profiles/managed-profile-entry";
 import { buildPrefillTitle, personFromIdentityUser, type DetailRouteParams } from "./person-view";
 
 /**
@@ -618,6 +619,14 @@ export function AdminPersonDetail({
           <KvRow label={t("peopleDetail:rows.pos")} value={<Text style={detailStyles.rowValueText} numberOfLines={1}>{t("peopleDetail:rows.posByStore")}</Text>} onPress={openPos} />
         ) : null}
       </InfoCard>
+
+      {/* 个人信息（员工个人信息维护）入口：管理员版按 adminScopeOk 规则，不满足整行隐藏。 */}
+      {permissions.canOpenProfile ? (
+        <>
+          <SectionTitle title={t("peopleDetail:sections.profile")} />
+          <ManagedProfileEntry userGuid={userGuid} />
+        </>
+      ) : null}
 
       <SectionTitle title={t("peopleDetail:sections.account")} />
       <InfoCard>

@@ -1,7 +1,10 @@
 import { RequestError } from '../../../utils/request'
 import type {
+  EmployeeEmploymentType,
+  EmployeeProfileGender,
   EmployeeProfileSensitiveChangeStatus,
   EmployeeProfileSensitiveField,
+  SaveManagedEmployeeProfilePayload,
 } from '../../../types/employeeProfile'
 
 export const SENSITIVE_PROFILE_FIELDS = [
@@ -268,4 +271,47 @@ export async function handleSensitiveReviewFailure(
   // 任一审核冲突都同步刷新三处状态，终态详情返回后会立即撤下操作按钮。
   await Promise.all([refreshDetail(), refreshList(), refreshPendingCount()])
   return conflictKind
+}
+
+/** 员工个人信息维护（/managed）表单里可编辑的非敏感字段。 */
+export interface ManagedProfileFormValues {
+  phone?: string
+  gender?: EmployeeProfileGender
+  employmentType?: EmployeeEmploymentType
+  address?: string
+}
+
+function normalizeManagedText(value?: string | null) {
+  return value?.trim() ?? ''
+}
+
+/**
+ * 只提交「改动过」的字段：后端靠请求里「键有没有带」区分未改与清空，
+ * 所以没改的字段一律不带；被清空的字段带空字符串。
+ * 没有「修改职位类型」权限时，员工类型即使被改动也不提交（后端同样会拒绝）。
+ */
+export function buildManagedProfilePayload(
+  initial: ManagedProfileFormValues,
+  current: ManagedProfileFormValues,
+  options: { canEditEmploymentType: boolean },
+): SaveManagedEmployeeProfilePayload {
+  const payload: SaveManagedEmployeeProfilePayload = {}
+  if (normalizeManagedText(initial.phone) !== normalizeManagedText(current.phone)) {
+    payload.phone = normalizeManagedText(current.phone)
+  }
+  if (normalizeManagedText(initial.address) !== normalizeManagedText(current.address)) {
+    payload.address = normalizeManagedText(current.address)
+  }
+  if ((initial.gender ?? '') !== (current.gender ?? '')) {
+    payload.gender = current.gender ?? ''
+  }
+  if (options.canEditEmploymentType && (initial.employmentType ?? '') !== (current.employmentType ?? '')) {
+    payload.employmentType = current.employmentType ?? ''
+  }
+  return payload
+}
+
+/** 从请求异常里取后端 ApiResponse 的 errorCode，用于区分越权 / 职位类型无权等业务错误。 */
+export function getRequestErrorCode(error: unknown) {
+  return error instanceof RequestError ? readErrorCode(error.payload) : undefined
 }

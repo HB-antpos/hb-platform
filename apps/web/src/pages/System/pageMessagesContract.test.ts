@@ -54,7 +54,11 @@ const pages = [
   {
     name: '员工个人信息维护',
     keyPattern: /['"`](system\.employeeProfiles\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/System/EmployeeProfiles/index.tsx'],
+    // 共用编辑器（员工资料页与用户管理「个人信息」页签共用）也用同一份页面级文案，需一并核对键名。
+    sources: [
+      'src/pages/System/EmployeeProfiles/index.tsx',
+      'src/pages/System/EmployeeProfiles/ManagedEmployeeProfileEditor.tsx',
+    ],
     messages: {
       zh: 'src/pages/System/EmployeeProfiles/employeeProfilesMessages.zh.json',
       en: 'src/pages/System/EmployeeProfiles/employeeProfilesMessages.en.json',

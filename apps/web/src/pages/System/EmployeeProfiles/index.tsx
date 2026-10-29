@@ -30,17 +30,20 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import PageContainer from '../../../components/PageContainer'
 import {
   getAdminEmployeeProfile,
-  getAdminEmployeeProfiles,
   getAdminSensitiveChangeRequests,
+  getManagedEmployeeProfileFilterOptions,
+  getManagedEmployeeProfiles,
   saveAdminEmployeeProfile,
 } from '../../../services/employeeProfileService'
 import { useAuthStore } from '../../../store/auth'
 import type {
   EmployeeEmploymentType,
   EmployeeProfileDetailDto,
+  EmployeeProfileFilterOptions,
   EmployeeProfileGender,
   EmployeeProfileQueryDto,
   EmployeeProfileSummaryDto,
@@ -49,6 +52,7 @@ import {
   createLatestRequestGuard,
   runLatestGuardedRequest,
 } from '../../../utils/latestRequestGuard'
+import ManagedEmployeeProfileEditor from './ManagedEmployeeProfileEditor'
 import SensitiveChangeReviewPanel from './SensitiveChangeReviewPanel'
 import MinorEmploymentReviewPage from '../MinorEmploymentReview'
 import {
@@ -187,11 +191,20 @@ function mapProfileToFormValues(profile: EmployeeProfileDetailDto): EmployeeProf
 
 export default function SystemEmployeeProfilesPage() {
   const { t, i18n } = useTranslation()
-  // 后台编辑接口同时要求管理员角色与 EmployeeProfiles.Edit，管理员天然拥有全部权限，因此只按角色门控。
+  // 后台完整编辑器（含银行 / 公积金 / 证件等敏感资料）走 admin 接口：同时要求管理员角色与 EmployeeProfiles.Edit，
+  // 管理员天然拥有全部权限，因此只按角色门控。
+  // 其余账号（如店长）走 /managed 接口：只能查看 / 修改管理分店员工的非敏感资料，范围由后端强制。
   const access = useAuthStore((state) => state.access)
   const canEditProfiles = access.isAdmin
+  const canEditManagedProfiles = access.canEditEmployeeProfiles
+  const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
+  const [storeGuid, setStoreGuid] = useState<string | undefined>(undefined)
+  const [roleGuid, setRoleGuid] = useState<string | undefined>(undefined)
+  const [filterOptions, setFilterOptions] = useState<EmployeeProfileFilterOptions>({ stores: [], roles: [] })
+  const [managedEditingUser, setManagedEditingUser] = useState<EmployeeProfileSummaryDto | null>(null)
+  const managedDirtyRef = useRef(0)
   const [data, setData] = useState<EmployeeProfileSummaryDto[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -202,6 +215,8 @@ export default function SystemEmployeeProfilesPage() {
   const mountedRef = useRef(false)
   const desiredListQueryRef = useRef<DesiredEmployeeProfileQuery>({
     keyword: keyword || undefined,
+    storeGuid,
+    roleGuid,
     page,
     pageSize,
   })
@@ -256,6 +271,8 @@ export default function SystemEmployeeProfilesPage() {
 
     const query: DesiredEmployeeProfileQuery = {
       keyword: keyword || undefined,
+      storeGuid,
+      roleGuid,
       page,
       pageSize,
       ...overrides,
@@ -263,7 +280,7 @@ export default function SystemEmployeeProfilesPage() {
     // 分页请求 begin 前保存目标查询，避免保存操作晚完成后退回旧页。
     desiredListQueryRef.current = query
 
-    await runLatestGuardedRequest(listRequestGuardRef.current, () => getAdminEmployeeProfiles(query), {
+    await runLatestGuardedRequest(listRequestGuardRef.current, () => getManagedEmployeeProfiles(query), {
       onStart: () => setLoading(true),
       onSuccess: (result) => {
         setData(result.items)
@@ -298,6 +315,10 @@ export default function SystemEmployeeProfilesPage() {
   }, [])
 
   const loadPendingCount = async () => {
+    // 待审核（敏感资料变更 / 未成年用工合规）只有管理员能查：非管理员调这些 admin 接口只会 403。
+    if (!canEditProfiles) {
+      return
+    }
     try {
       const result = await getAdminSensitiveChangeRequests({ page: 1, pageSize: 1, status: 'Pending' })
       setPendingCount(result.total)
@@ -309,7 +330,25 @@ export default function SystemEmployeeProfilesPage() {
   useEffect(() => {
     void loadData({ page: 1, pageSize })
     void loadPendingCount()
+    // 筛选下拉由后端按调用者范围裁剪（店长只有管理分店，且不含上级角色）。
+    void getManagedEmployeeProfileFilterOptions()
+      .then((options) => {
+        if (mountedRef.current) {
+          setFilterOptions(options)
+        }
+      })
+      .catch((error) => console.error(error))
   }, [])
+
+  // 从「用户管理」抽屉跳来时带 ?keyword=用户名：页面被 keepAlive 缓存，需要监听参数变化而不只是首次挂载。
+  const keywordParam = searchParams.get('keyword')
+  useEffect(() => {
+    if (keywordParam === null) {
+      return
+    }
+    setKeyword(keywordParam)
+    void loadData({ keyword: keywordParam || undefined, page: 1, pageSize })
+  }, [keywordParam])
 
   // 抽屉内的分区导航跟随滚动高亮：取「顶边已越过吸顶导航」的最后一个分区；滚到底时强制选中最后一个。
   useEffect(() => {
@@ -349,6 +388,37 @@ export default function SystemEmployeeProfilesPage() {
     setEditingProfile(null)
     setDirtyCount(0)
     form.resetFields()
+  }
+
+  // 非管理员（如店长）：打开只含非敏感项的轻量抽屉；关闭前若有未保存修改先确认。
+  const closeManagedDrawer = () => {
+    if (managedDirtyRef.current > 0) {
+      Modal.confirm({
+        title: t('common.confirmDiscardTitle', '放弃未保存的修改？'),
+        okText: t('common.confirm', '确定'),
+        cancelText: t('common.cancel'),
+        onOk: () => {
+          managedDirtyRef.current = 0
+          setManagedEditingUser(null)
+        },
+      })
+      return
+    }
+    setManagedEditingUser(null)
+  }
+
+  // 按身份分流：管理员走完整编辑器（含敏感资料），其他人走 /managed 轻量编辑器。
+  const handleOpenRecord = (record: EmployeeProfileSummaryDto) => {
+    if (canEditProfiles) {
+      void handleEdit(record)
+      return
+    }
+    if (!getProfileKey(record)) {
+      message.error(t('system.employeeProfiles.missingRecordId'))
+      return
+    }
+    managedDirtyRef.current = 0
+    setManagedEditingUser(record)
   }
 
   const handleEdit = async (record: EmployeeProfileSummaryDto) => {
@@ -495,6 +565,56 @@ export default function SystemEmployeeProfilesPage() {
       },
     },
     {
+      title: t('system.employeeProfiles.columns.store'),
+      key: 'stores',
+      width: 170,
+      render: (_, record) => {
+        const names = record.storeNames ?? []
+        if (names.length === 0) {
+          return <span className="sys-emp-faint">--</span>
+        }
+        // 多分店最多显示 2 个，其余折叠成 +N，完整名单放 Tooltip。
+        const shown = names.slice(0, 2)
+        const hidden = names.slice(2)
+        return (
+          <Space size={[4, 4]} wrap>
+            {shown.map((name) => (
+              <Tag key={name} bordered={false} color="blue" style={{ marginInlineEnd: 0 }}>
+                {name}
+              </Tag>
+            ))}
+            {hidden.length > 0 ? (
+              <Tooltip title={hidden.join(' · ')}>
+                <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
+                  +{hidden.length}
+                </Tag>
+              </Tooltip>
+            ) : null}
+          </Space>
+        )
+      },
+    },
+    {
+      title: t('system.employeeProfiles.columns.role'),
+      key: 'roles',
+      width: 130,
+      render: (_, record) => {
+        const names = record.roleNames ?? []
+        if (names.length === 0) {
+          return <span className="sys-emp-faint">--</span>
+        }
+        return (
+          <Space size={[4, 4]} wrap>
+            {names.map((name) => (
+              <Tag key={name} bordered={false} style={{ marginInlineEnd: 0 }}>
+                {name}
+              </Tag>
+            ))}
+          </Space>
+        )
+      },
+    },
+    {
       title: t('system.employeeProfiles.employmentType'),
       dataIndex: 'employmentType',
       width: 100,
@@ -590,8 +710,9 @@ export default function SystemEmployeeProfilesPage() {
       fixed: 'right',
       align: 'right',
       render: (_, record) => (
-        <Button type="link" icon={<EditOutlined />} disabled={!canEditProfiles} onClick={() => void handleEdit(record)}>
-          {t('common.edit')}
+        // 管理员 = 完整编辑；其余账号只有 EditManagedStore 才是「编辑」，否则是只读「查看」。
+        <Button type="link" icon={<EditOutlined />} onClick={() => handleOpenRecord(record)}>
+          {canEditProfiles || canEditManagedProfiles ? t('common.edit') : t('common.view', '查看')}
         </Button>
       ),
     },
@@ -621,7 +742,7 @@ export default function SystemEmployeeProfilesPage() {
       title={t('system.employeeProfiles.pageTitle')}
       subtitle={hasLoaded ? t('system.employeeProfiles.totalCount', { count: total }) : undefined}
       extra={
-        pendingCount > 0 ? (
+        canEditProfiles && pendingCount > 0 ? (
           <Button className="sys-emp-pending-entry" icon={<LockOutlined />} onClick={() => setActiveTab('pending')}>
             {t('system.employeeProfiles.pendingEntry', { count: pendingCount })}
             <ArrowRightOutlined />
@@ -649,6 +770,36 @@ export default function SystemEmployeeProfilesPage() {
                       onChange={(event) => setKeyword(event.target.value)}
                       onPressEnter={() => void loadData({ page: 1, pageSize })}
                     />
+                    <Select
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      style={{ width: 200 }}
+                      placeholder={t('system.employeeProfiles.filters.allStores')}
+                      aria-label={t('system.employeeProfiles.filters.store')}
+                      value={storeGuid}
+                      options={filterOptions.stores.map((store) => ({ value: store.storeGuid, label: store.storeName }))}
+                      onChange={(value) => {
+                        const next = value ?? undefined
+                        setStoreGuid(next)
+                        void loadData({ storeGuid: next, page: 1, pageSize })
+                      }}
+                    />
+                    <Select
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      style={{ width: 160 }}
+                      placeholder={t('system.employeeProfiles.filters.allRoles')}
+                      aria-label={t('system.employeeProfiles.filters.role')}
+                      value={roleGuid}
+                      options={filterOptions.roles.map((role) => ({ value: role.roleGuid, label: role.roleName }))}
+                      onChange={(value) => {
+                        const next = value ?? undefined
+                        setRoleGuid(next)
+                        void loadData({ roleGuid: next, page: 1, pageSize })
+                      }}
+                    />
                     <Button type="primary" onClick={() => void loadData({ page: 1, pageSize })}>
                       {t('common.query')}
                     </Button>
@@ -660,10 +811,12 @@ export default function SystemEmployeeProfilesPage() {
                       />
                     </Tooltip>
                     <span className="sys-emp-toolbar-spacer" />
-                    <span className="sys-emp-mask-hint">
-                      <LockOutlined />
-                      {t('system.employeeProfiles.maskedHint')}
-                    </span>
+                    {canEditProfiles ? (
+                      <span className="sys-emp-mask-hint">
+                        <LockOutlined />
+                        {t('system.employeeProfiles.maskedHint')}
+                      </span>
+                    ) : null}
                   </div>
 
                   <MeasuredTable metricId="system.employee-profiles.table-1"
@@ -672,15 +825,15 @@ export default function SystemEmployeeProfilesPage() {
                     loading={loading}
                     columns={columns}
                     dataSource={data}
-                    scroll={{ x: 1100 }}
-                    rowClassName={() => (canEditProfiles ? 'sys-emp-row-clickable' : '')}
+                    scroll={{ x: 1400 }}
+                    rowClassName={() => 'sys-emp-row-clickable'}
                     onRow={(record) => ({
                       // 整行可点开编辑；行内按钮、头像预览等自带交互的元素不触发，避免重复打开。
                       onClick: (event) => {
-                        if (!canEditProfiles || (event.target as HTMLElement).closest('button, a, .ant-image')) {
+                        if ((event.target as HTMLElement).closest('button, a, .ant-image')) {
                           return
                         }
-                        void handleEdit(record)
+                        handleOpenRecord(record)
                       },
                     })}
                     pagination={{
@@ -696,7 +849,8 @@ export default function SystemEmployeeProfilesPage() {
                 </>
               ),
             },
-            {
+            // 待审核标签读的是管理员专用接口，非管理员不显示（店长的敏感资料审核在手机端「档案审核」）。
+            ...(canEditProfiles ? [{
               key: 'pending',
               label: (
                 <Space size={6}>
@@ -710,10 +864,56 @@ export default function SystemEmployeeProfilesPage() {
                   { key: 'minor-employment', label: '未成年用工合规', children: <MinorEmploymentReviewPage /> },
                 ]}
               />,
-            },
+            }] : []),
           ]}
         />
       </Card>
+
+      <Drawer
+        width={640}
+        destroyOnHidden
+        rootClassName="sys-emp-drawer"
+        open={managedEditingUser !== null}
+        onClose={closeManagedDrawer}
+        closable={{ placement: 'end' }}
+        title={
+          managedEditingUser ? (
+            <div className="sys-emp-drawer-head">
+              <Avatar
+                size={46}
+                src={managedEditingUser.avatarUrl || undefined}
+                style={{ ...getAvatarTone(getProfileKey(managedEditingUser)), flex: 'none', fontWeight: 600 }}
+              >
+                {getProfileInitials(managedEditingUser.displayName, managedEditingUser.username)}
+              </Avatar>
+              <div className="sys-emp-drawer-head-main">
+                <div className="sys-emp-drawer-title">
+                  <span>{managedEditingUser.displayName || managedEditingUser.username}</span>
+                </div>
+                <div className="sys-emp-drawer-meta">
+                  {managedEditingUser.username ? <span>@{managedEditingUser.username}</span> : null}
+                </div>
+              </div>
+            </div>
+          ) : (
+            t('system.employeeProfiles.managed.drawerTitle')
+          )
+        }
+      >
+        {managedEditingUser ? (
+          <ManagedEmployeeProfileEditor
+            key={getProfileKey(managedEditingUser)}
+            userGuid={managedEditingUser.userGUID || getProfileKey(managedEditingUser)}
+            canEdit={canEditManagedProfiles}
+            onDirtyChange={(count) => {
+              managedDirtyRef.current = count
+            }}
+            onSaved={() => {
+              void refreshDesiredList()
+            }}
+          />
+        ) : null}
+      </Drawer>
 
       <Drawer
         width={760}

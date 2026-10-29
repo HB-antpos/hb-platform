@@ -122,7 +122,10 @@ export interface AccessControl {
   canAdjustAttendancePunches: boolean
   canEditAttendancePayroll: boolean
   canUnlockAttendancePayroll: boolean
+  /** 员工个人信息维护页 / 用户管理「个人信息」页签：EmployeeProfiles.ViewManagedStore。 */
   canViewEmployeeProfiles: boolean
+  /** 修改非敏感资料：EmployeeProfiles.EditManagedStore。 */
+  canEditEmployeeProfiles: boolean
   canViewSystemLogs: boolean
   canViewPerformanceBaseline: boolean
   canViewOperationAudits: boolean

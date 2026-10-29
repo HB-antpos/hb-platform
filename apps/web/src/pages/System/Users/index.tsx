@@ -50,7 +50,8 @@ import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
 import dayjs from 'dayjs'
 import type { Dispatch, Key, ReactNode, SetStateAction } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { HasPermission } from '../../../components/Access'
 import PageContainer from '../../../components/PageContainer'
@@ -158,7 +159,10 @@ registerPageMessages({ zh: usersPageMessagesZh, en: usersPageMessagesEn })
 type PermissionPlatform = 'web' | 'pos'
 
 /** 统一用户抽屉的标签页；登录记录与收银权限也在抽屉内，不再单开弹窗。 */
-type UserDrawerTab = 'info' | 'assignments' | 'permissions' | 'mobile-menu' | 'login-records' | 'pos'
+type UserDrawerTab = 'info' | 'assignments' | 'permissions' | 'mobile-menu' | 'profile' | 'login-records' | 'pos'
+
+// 「个人信息」页签的编辑器与「员工个人信息维护」页共用同一个组件；按需加载，不拖大用户管理页的首包。
+const ManagedEmployeeProfileEditor = lazy(() => import('../EmployeeProfiles/ManagedEmployeeProfileEditor'))
 
 type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' | 'toggle-active' | 'toggle-login'
 
@@ -170,6 +174,9 @@ export default function SystemUsersPage() {
   const currentUser = useAuthStore((state) => state.currentUser)
   const access = useAuthStore((state) => state.access)
   const refreshCurrentUserSilently = useAuthStore((state) => state.refreshCurrentUserSilently)
+  const navigate = useNavigate()
+  // 「个人信息」页签里未保存的字段数；抽屉关闭前一并确认。
+  const [profileDirtyCount, setProfileDirtyCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [data, setData] = useState<UserDto[]>([])
@@ -2878,9 +2885,35 @@ export default function SystemUsersPage() {
   const posPermissionTabs = canManagePosTerminalPermissions
     ? [{ key: 'pos', label: t('system.users.posPermissions', '收银权限'), children: posPermissionPanel }]
     : []
+  // 「个人信息」页签：需要 EmployeeProfiles.ViewManagedStore（Web 与手机端共用的新权限）；
+  // 保存另需 EditManagedStore，且只有编辑抽屉里可改，只读查看时只能看。数据范围由后端强制。
+  const profileTabs = access.canViewEmployeeProfiles
+    ? [
+        {
+          key: 'profile',
+          label: t('system.usersWorkspace.tabEmployeeProfile', '个人信息'),
+          children: drawerUser ? (
+            <Suspense fallback={<Spin />}>
+              <ManagedEmployeeProfileEditor
+                key={drawerUser.userGUID}
+                userGuid={drawerUser.userGUID}
+                canEdit={editOpen && access.canEditEmployeeProfiles}
+                onDirtyChange={setProfileDirtyCount}
+                // 敏感资料（银行 / 公积金 / 证件）仍只在管理员的「员工个人信息维护」页修改。
+                onOpenFullEditor={
+                  access.isAdmin
+                    ? () => navigate(`/system/employee-profiles?keyword=${encodeURIComponent(drawerUser.username)}`)
+                    : undefined
+                }
+              />
+            </Suspense>
+          ) : null,
+        },
+      ]
+    : []
   const drawerTabItems: TabsProps['items'] = editOpen
-    ? [...editTabItems, loginRecordsTab, ...posPermissionTabs]
-    : [viewInfoTab, loginRecordsTab, ...posPermissionTabs]
+    ? [...editTabItems, ...profileTabs, loginRecordsTab, ...posPermissionTabs]
+    : [viewInfoTab, ...profileTabs, loginRecordsTab, ...posPermissionTabs]
   const userDrawerOpen = editOpen || detailOpen
 
   // 登录记录与收银权限标签页首次切到时才加载，并始终跟随抽屉当前用户。
@@ -2898,14 +2931,14 @@ export default function SystemUsersPage() {
 
   /** 关闭抽屉前若「角色与分店」或功能权限还有未保存的草稿，先确认再丢弃。 */
   const confirmCloseUserDrawer = (close: () => void) => {
-    if (assignmentChangeCount === 0 && !hasDirectPermChanges) {
+    if (assignmentChangeCount === 0 && !hasDirectPermChanges && profileDirtyCount === 0) {
       close()
       return
     }
     Modal.confirm({
       title: t('system.usersWorkspace.discardConfirmTitle', '放弃未保存的更改？'),
       content: t('system.usersWorkspace.discardConfirmContent', '关闭后 {{count}} 项未保存的更改将被丢弃。', {
-        count: assignmentChangeCount + (hasDirectPermChanges ? 1 : 0),
+        count: assignmentChangeCount + (hasDirectPermChanges ? 1 : 0) + profileDirtyCount,
       }),
       okText: t('system.usersWorkspace.discardChanges', '放弃更改'),
       okButtonProps: { danger: true },
@@ -3151,6 +3184,7 @@ export default function SystemUsersPage() {
           closeLoginRecords()
           resetPosPermissionState()
           setDrawerUser(null)
+          setProfileDirtyCount(0)
           setEditTab('info')
         })}
         destroyOnHidden

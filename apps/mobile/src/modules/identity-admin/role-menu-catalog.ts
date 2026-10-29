@@ -9,7 +9,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/system/stores", "Stores", "分店管理", ["Stores.View"]],
   // 与 NavigationService 一致：Web 用户管理菜单只认 Users.ViewWebConsole，移动端 users（员工管理）用 Users.ViewStoreStaff，user-admin（用户管理）仍用 Users.View。
   ["/system/users", "Users", "用户管理", ["Users.ViewWebConsole"]],
-  ["/system/employee-profiles", "Employee profiles", "员工档案", ["EmployeeProfiles.View"]],
+  // Web「员工个人信息维护」页改认独立的 EmployeeProfiles.ViewManagedStore（与手机端「人员管理 > 资料」共用）。
+  ["/system/employee-profiles", "Employee profiles", "员工档案", ["EmployeeProfiles.ViewManagedStore"]],
   ["/system/roles", "Roles", "角色管理", ["Roles.View"]],
   ["/system/permissions", "Permissions", "权限管理", ["Roles.View"]],
   ["/system/invoice-email-settings", "Invoice email settings", "发票邮箱设置", ["System.ManageSettings"]],
@@ -99,7 +100,8 @@ const MOBILE_MENU: MenuSource[] = ([
   // 「人员管理」(users) 是合并后的移动端入口（人员 / 角色 / 权限三个页签），菜单权限仍只认 Users.ViewStoreStaff
   // （Users.View 持有者经后端别名自动满足）。后端 FullAppMenu 仍下发 user-admin / roles / permissions 三项（旧版 App 在用），
   // 新版 App 里它们只剩重定向壳、不再是工作台入口，这里与后端保持一一对应，待旧版普及后随后端一起清理。
-  ["users", "Staff management", "人员管理", ["Users.ViewStoreStaff"]],
+  // 新增「资料」页签后，只持有 EmployeeProfiles.ViewManagedStore 的账号也能进入（与后端 FullAppMenu 的 AnyPermissions 一致）。
+  ["users", "Staff management", "人员管理", ["Users.ViewStoreStaff", "EmployeeProfiles.ViewManagedStore"]],
   ["user-admin", "User management", "用户管理", ["Users.View"]],
   ["cash-register-users", "Cashier barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
   ["roles", "Role management", "角色管理", ["Roles.View"]],

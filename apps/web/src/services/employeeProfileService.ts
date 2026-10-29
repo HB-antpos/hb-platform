@@ -1,6 +1,8 @@
 import type { ApiResponse, PagedResult } from '../types/api'
 import type {
   EmployeeProfileDetailDto,
+  EmployeeProfileFilterOptions,
+  EmployeeProfileManagedDetailDto,
   EmployeeProfileQueryDto,
   EmployeeProfileSensitiveChangeDetailDto,
   EmployeeProfileSensitiveChangeQueryDto,
@@ -11,11 +13,13 @@ import type {
   EmployeeProfileSensitiveReviewPayload,
   EmployeeProfileSummaryDto,
   SaveEmployeeProfilePayload,
+  SaveManagedEmployeeProfilePayload,
 } from '../types/employeeProfile'
 import request, { unwrapApiData, unwrapPagedResult } from '../utils/request'
 
 const ADMIN_BASE_PATH = '/api/EmployeeProfiles/admin'
 const ME_BASE_PATH = '/api/EmployeeProfiles/me'
+const MANAGED_BASE_PATH = '/api/EmployeeProfiles/managed'
 
 type BackendEmployeeProfile = Record<string, unknown>
 
@@ -106,6 +110,88 @@ export async function saveAdminEmployeeProfile(payload: SaveEmployeeProfilePaylo
     toBackendPayload(payload),
   )
   return mapEmployeeProfile<EmployeeProfileDetailDto>(unwrapApiData(response) as unknown as BackendEmployeeProfile)
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
+}
+
+/**
+ * 员工个人信息维护列表（Web 页面 / 手机端共用的 /managed 接口）：
+ * 数据范围由后端按身份强制（管理员全部分店，店长只限管理分店），这里只负责把过滤条件带上。
+ */
+export async function getManagedEmployeeProfiles(params: EmployeeProfileQueryDto): Promise<PagedResult<EmployeeProfileSummaryDto>> {
+  const response = await request.get<ApiResponse<PagedResult<EmployeeProfileSummaryDto>>>(MANAGED_BASE_PATH, {
+    params: {
+      page: params.page,
+      pageSize: params.pageSize,
+      search: params.keyword,
+      storeGuid: params.storeGuid,
+      roleGuid: params.roleGuid,
+    },
+  })
+  const result = unwrapPagedResult(response)
+  return {
+    ...result,
+    items: result.items.map((item) => ({
+      ...mapEmployeeProfile<EmployeeProfileSummaryDto>(item as BackendEmployeeProfile),
+      storeNames: asStringList((item as BackendEmployeeProfile).storeNames),
+      roleNames: asStringList((item as BackendEmployeeProfile).roleNames),
+    })),
+  }
+}
+
+export async function getManagedEmployeeProfileFilterOptions(): Promise<EmployeeProfileFilterOptions> {
+  const response = await request.get<ApiResponse<EmployeeProfileFilterOptions>>(`${MANAGED_BASE_PATH}/filter-options`)
+  const data = unwrapApiData(response)
+  return { stores: data?.stores ?? [], roles: data?.roles ?? [] }
+}
+
+function mapManagedDetail(raw: BackendEmployeeProfile): EmployeeProfileManagedDetailDto {
+  return {
+    userGUID: asString(raw.userGUID) ?? '',
+    username: asString(raw.username),
+    email: asString(raw.email),
+    fullName: asString(raw.fullName),
+    hasProfile: raw.hasProfile === true,
+    storeNames: asStringList(raw.storeNames),
+    roleNames: asStringList(raw.roleNames),
+    phone: asString(raw.phone),
+    gender: asString(raw.gender) as EmployeeProfileManagedDetailDto['gender'],
+    employmentType: asString(raw.employmentType) as EmployeeProfileManagedDetailDto['employmentType'],
+    address: asString(raw.address),
+    avatarUrl: asString(raw.avatarUrl),
+    bankBsb: asString(raw.bankBsb),
+    bankAccountNumber: asString(raw.bankAccountNumber),
+    superannuationCompanyName: asString(raw.superannuationCompanyName),
+    superannuationCompanyCode: asString(raw.superannuationCompanyCode),
+    superannuationAccountNumber: asString(raw.superannuationAccountNumber),
+    identityType: asString(raw.identityType),
+    identityId: asString(raw.identityId),
+    hasBirthday: raw.hasBirthday === true,
+    canEditEmploymentType: raw.canEditEmploymentType === true,
+    updatedAt: asString(raw.updatedAt),
+    updatedBy: asString(raw.updatedBy),
+  }
+}
+
+export async function getManagedEmployeeProfile(userGuid: string): Promise<EmployeeProfileManagedDetailDto> {
+  const response = await request.get<ApiResponse<EmployeeProfileManagedDetailDto>>(
+    `${MANAGED_BASE_PATH}/${encodeURIComponent(userGuid)}`,
+  )
+  return mapManagedDetail(unwrapApiData(response) as unknown as BackendEmployeeProfile)
+}
+
+/** 只提交「改动过」的非敏感字段；后端靠「键有没有带」区分未改与清空。 */
+export async function saveManagedEmployeeProfile(
+  userGuid: string,
+  payload: SaveManagedEmployeeProfilePayload,
+): Promise<EmployeeProfileManagedDetailDto> {
+  const response = await request.put<ApiResponse<EmployeeProfileManagedDetailDto>>(
+    `${MANAGED_BASE_PATH}/${encodeURIComponent(userGuid)}`,
+    payload,
+  )
+  return mapManagedDetail(unwrapApiData(response) as unknown as BackendEmployeeProfile)
 }
 
 export async function getMyEmployeeProfile(): Promise<EmployeeProfileDetailDto> {

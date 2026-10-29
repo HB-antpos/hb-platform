@@ -31,6 +31,42 @@
         "updatedOn": "Updated {{date}}",
         "dirty": "{{count}} field(s) modified",
         "sensitiveNotice": "Sensitive details changed by an administrator take effect immediately and are written to the audit log. If the employee has a pending change request, you will be asked to confirm and it will be voided on save."
+      },
+      "filters": {
+        "store": "Store",
+        "role": "Role",
+        "allStores": "All stores",
+        "allRoles": "All roles"
+      },
+      "columns": {
+        "store": "Store",
+        "role": "Role"
+      },
+      "managed": {
+        "drawerTitle": "Employee details",
+        "basic": "Basic info",
+        "phone": "Mobile number",
+        "phonePlaceholder": "e.g. 0412 345 678",
+        "stores": "Stores",
+        "roles": "Roles",
+        "noStore": "No store assigned",
+        "employmentLocked": "The \"edit position type\" permission is required to change this",
+        "sensitiveTitle": "Sensitive details (read-only)",
+        "sensitiveNotice": "Bank, super, birthday and ID details must be submitted by the employee under \"My profile\" and take effect after review. Administrators can edit them directly on the Employee Profiles page.",
+        "birthday": "Birthday",
+        "filled": "Provided",
+        "incompleteNotice": "Profile incomplete: {{missing}}",
+        "readOnlyNotice": "This account can view but not edit.",
+        "dirty": "{{count}} field(s) modified",
+        "reset": "Revert",
+        "save": "Save details",
+        "saveSuccess": "Details saved",
+        "saveFailed": "Save failed, please try again",
+        "loadFailed": "Failed to load employee details",
+        "scopeForbidden": "You are not allowed to maintain this employee's details",
+        "positionForbidden": "You are not allowed to change the position type",
+        "updatedMeta": "Last updated {{date}}",
+        "openFullEditor": "Edit sensitive details on the Employee Profiles page"
       }
     }
   }

@@ -193,4 +193,17 @@ assert.match(rules, /if \(input\.loginEnabled === false\) tags\.push\("loginDisa
 // 管理员列表：只给例外（=== false），店员与管理员两处口径一致，未知（undefined）不标。
 assert.equal((personListItem.match(/user\.loginEnabled === false\) tags\.push\("cannotLogin"\)/g) ?? []).length, 2, "店员与管理员列表都只在 loginEnabled === false 时标「不能登录」");
 
+
+// ───────── 「个人信息」入口：条件在纯函数里统一判断，不满足整行隐藏（不是置灰）─────────
+assert.match(
+  rules,
+  /const canOpenProfile = actor\.hasPermission\(PERMISSIONS\.EmployeeProfiles\.ViewManagedStore\)\s*&& !isSelf\s*&& !isProtectedTarget\s*&& \(variant === "store" \? scope\.storeManageable : adminScopeOk\)/,
+  "个人信息入口 = ViewManagedStore + 非本人 + 非受保护目标 + 管理分店（店长版）/ adminScopeOk（管理员版）",
+);
+assert.match(rules, /const canEditProfile = canOpenProfile && actor\.hasPermission\(PERMISSIONS\.EmployeeProfiles\.EditManagedStore\)/, "保存要在入口条件之上再要求 EditManagedStore");
+for (const [name, source] of [["店长版", storeDetail], ["管理员版", adminDetail]] as const) {
+  assert.match(source, /permissions\.canOpenProfile \? \(?\s*(?:<>\s*<SectionTitle[^]*?)?<ManagedProfileEntry userGuid=\{userGuid\} \/>/, `${name}个人信息入口只按 canOpenProfile 渲染，不满足不渲染（不是 disabled）`);
+}
+assert.match(read("app/(shell)/users/[userGuid]/profile.tsx"), /people\/profiles\/managed-profile-edit-screen/, "个人信息路由渲染编辑页");
+
 console.log("detail-screen-contract.test.ts: ok");

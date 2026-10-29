@@ -49,6 +49,10 @@ export const PERMISSIONS = {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",
     EditPositionType: "EmployeeProfiles.EditPositionType",
+    // 员工个人信息维护（人员管理「资料」页签与人员详情「个人信息」入口）：看 = ViewManagedStore，改非敏感资料 = EditManagedStore。
+    // 数据范围（管理员全部分店 / 店长限管理分店、排除本人与受保护角色）由服务端强制，客户端只负责显示。
+    ViewManagedStore: "EmployeeProfiles.ViewManagedStore",
+    EditManagedStore: "EmployeeProfiles.EditManagedStore",
   },
   Users: {
     View: "Users.View",

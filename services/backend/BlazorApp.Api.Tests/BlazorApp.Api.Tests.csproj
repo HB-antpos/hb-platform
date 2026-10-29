@@ -138,6 +138,7 @@
     <Compile Include="UsersCashierBarcodeAuthorizationTests.cs" />
     <Compile Include="EmployeeProfileSelfServiceTests.cs" />
     <Compile Include="EmployeeProfileSensitiveChangeServiceTests.cs" />
+    <Compile Include="EmployeeProfileManagedServiceTests.cs" />
     <Compile Include="SqlSugarContextNoLockTransactionTests.cs" />
     <Compile Include="StoreUsersReactServiceTests.cs" />
     <Compile Include="PersonNameFormatterTests.cs" />

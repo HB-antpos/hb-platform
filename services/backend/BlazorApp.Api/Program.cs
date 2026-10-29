@@ -788,6 +788,7 @@ builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // �
 builder.Services.AddScoped<IAccountEmailChangeService, AccountEmailChangeService>(); // 员工绑定 / 更换账号邮箱（验证码发到新邮箱）
 builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();
+builder.Services.AddScoped<EmployeeProfileManagedService>(); // 员工个人信息维护（Web / 移动端共用，按分店范围）
 builder.Services.AddScoped<EmployeeProfileMediaService>();
 builder.Services.AddScoped<EmployeeCashierBarcodeService>();
 builder.Services.AddScoped<StoreUserCashierBarcodeService>();

@@ -123,6 +123,7 @@ function createEmptyAccess(): AccessControl {
     canEditAttendancePayroll: false,
     canUnlockAttendancePayroll: false,
     canViewEmployeeProfiles: false,
+    canEditEmployeeProfiles: false,
     canViewSystemLogs: false,
     canViewPerformanceBaseline: false,
     canViewOperationAudits: false,
@@ -386,7 +387,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewAttendanceHours = canViewAttendancePunches || canViewAttendancePayroll
   // 店长代员工补卡（审核台填漏下班的实际下班时间）：后端 managed/punch-adjustments 只认这一个权限
   const canAdjustAttendancePunches = isAdmin || hasPermission(P.Attendance.PunchAdjustManagedStore)
-  const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.View)
+  // 员工个人信息维护改认独立的新权限（与手机端共用）；原 EmployeeProfiles.View/Edit 只保留给本人资料与管理员改敏感资料。
+  const canViewEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.ViewManagedStore)
+  const canEditEmployeeProfiles = isAdmin || hasPermission(P.EmployeeProfiles.EditManagedStore)
   const canViewSystemLogs = isAdmin || hasPermission(P.System.ViewLogs)
   const canViewPerformanceBaseline =
     isAdmin || hasPermission(P.System.ViewPerformanceBaseline)
@@ -551,6 +554,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canEditAttendancePayroll,
     canUnlockAttendancePayroll,
     canViewEmployeeProfiles,
+    canEditEmployeeProfiles,
     canViewSystemLogs,
     canViewPerformanceBaseline,
     canViewOperationAudits,

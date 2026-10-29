@@ -298,6 +298,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.EmployeeProfiles.Edit, "维护员工个人信息", "用户管理", "移动端「员工资料」编辑本人资料；Web 页面 /system/employee-profiles 后台编辑另需管理员角色 - 维护身份、银行、养老金、地址等资料"),
                 new(Permissions.EmployeeProfiles.EditPositionType, "修改职位类型", "用户管理", "个人信息 - 修改全职、兼职、临时工等职位类型，保存时仍需维护员工个人信息权限"),
                 new(Permissions.EmployeeProfiles.ReviewSensitiveManagedStore, "审核管理分店员工敏感资料", "用户管理", "移动端员工敏感资料审核 - 审核管理分店内普通员工提交的敏感资料变更"),
+                new(Permissions.EmployeeProfiles.ViewManagedStore, "查看员工个人信息（管理分店）", "用户管理", "Web「员工个人信息维护」页面与用户管理「个人信息」页签、移动端「人员管理 > 资料」与人员详情 - 查看管理范围内员工的个人信息（银行 / 公积金 / 证件号脱敏）；管理员全部分店，店长限管理分店"),
+                new(Permissions.EmployeeProfiles.EditManagedStore, "维护员工个人信息（管理分店）", "用户管理", "Web 与移动端 - 修改管理范围内员工的手机、性别、地址等非敏感资料（改职位类型另需修改职位类型权限；银行 / 公积金 / 证件 / 生日仍走员工提交审核）"),
                 new(Permissions.Roles.View, "查看角色", "角色管理", "Web 页面 /system/roles、/system/permissions 与移动端「角色」- 查看角色和权限配置"),
                 new(Permissions.Roles.Create, "创建角色", "角色管理", "Web 页面 /system/roles - 创建角色"),
                 new(Permissions.Roles.Edit, "编辑角色", "角色管理", "Web 页面 /system/roles - 编辑角色基础信息"),

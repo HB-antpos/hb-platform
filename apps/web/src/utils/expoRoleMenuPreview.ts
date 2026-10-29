@@ -470,8 +470,9 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'users',
     titleKey: 'tabs.users',
     icon: 'account-group-outline',
-    // 与后端 FullAppMenu 一致：员工管理只认 Users.ViewStoreStaff（Users.View 通过单向别名包含它）。
-    permissionCodes: [P.Users.ViewStoreStaff],
+    // 与后端 FullAppMenu 一致：「人员管理」合并入口，Users.ViewStoreStaff（Users.View 通过单向别名包含它）
+    // 或「资料」页签的 EmployeeProfiles.ViewManagedStore 任一即可见。
+    permissionCodes: [P.Users.ViewStoreStaff, P.EmployeeProfiles.ViewManagedStore],
     order: 57,
     ...ROUTE_LABELS.users,
   },
