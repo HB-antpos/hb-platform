@@ -200,11 +200,29 @@
   gap: 8px;
 }
 
-/* 抽屉 */
+/* 抽屉：正文是灰底，MYOB 纸面（白底黑字）与「我方工时」卡片坐在上面 */
+.payslip-drawer .ant-drawer-content-wrapper {
+  max-width: 100vw;
+}
+
 .payslip-drawer .ant-drawer-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding: 18px 20px;
+  background: var(--ant-color-bg-layout, #f5f6f8);
+}
+
+.payslip-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payslip-paper-caption {
+  margin: -6px 2px 2px;
+  font-size: 12.5px;
+  color: var(--ant-color-text-secondary, #667085);
 }
 
 .payslip-drawer-head {
@@ -232,34 +250,6 @@
   margin-inline-end: 0;
 }
 
-.payslip-big {
-  display: flex;
-  gap: 12px;
-}
-
-.payslip-big > div {
-  flex: 1;
-  padding: 12px 14px;
-  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
-  border-radius: 10px;
-  background: var(--ant-color-fill-quaternary, #fafbfc);
-}
-
-.payslip-big span {
-  display: block;
-  font-size: 12.5px;
-  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
-}
-
-.payslip-big b {
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-}
-
-.payslip-big .payslip-net b {
-  color: var(--ant-color-success, #389e0d);
-}
-
 .payslip-section-title {
   display: flex;
   justify-content: space-between;
@@ -272,38 +262,22 @@
   color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
 }
 
-.payslip-lines {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.payslip-lines th,
-.payslip-lines td {
-  padding: 7px 8px;
-  text-align: left;
-}
-
-.payslip-lines th {
-  background: var(--ant-color-fill-quaternary, #fafafa);
-  font-weight: 600;
-}
-
-.payslip-lines tbody tr + tr td {
-  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
-}
-
-.payslip-lines .payslip-num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .payslip-hours-card {
   padding: 12px 14px;
   border: 1px solid var(--ant-color-border-secondary, #eef0f4);
   border-radius: 10px;
   background: var(--ant-color-fill-quaternary, #fafbfc);
+}
+
+.payslip-hours-idle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.payslip-hours-idle .ant-tag {
+  margin-inline-end: 0;
 }
 
 .payslip-hours-row {
@@ -331,6 +305,208 @@
   color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
 }
 
+/* ───────── MYOB 默认 Pay Slip 纸面（按 MYOB 下载的真实 PDF 还原）─────────
+   纸面是一份文档：始终白底黑字，不跟随深色主题；数字列用等宽数字对齐。 */
+.payslip-paper {
+  background: #fff;
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 26px 26px 14px;
+  border: 1px solid #dcdfe4;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.payslip-m-co {
+  margin-bottom: 16px;
+  font-size: 17px;
+  text-transform: uppercase;
+}
+
+.payslip-m-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  row-gap: 5px;
+  column-gap: 20px;
+}
+
+.payslip-m-grid--gap {
+  margin-top: 20px;
+  padding-left: 9px;
+}
+
+.payslip-m-totals {
+  padding-top: 25px;
+}
+
+.payslip-m-kv {
+  display: flex;
+  white-space: nowrap;
+}
+
+.payslip-m-kv > span:first-child {
+  display: inline-block;
+  min-width: 96px;
+}
+
+.payslip-m-kv--w2 > span:first-child {
+  min-width: 128px;
+}
+
+.payslip-m-kv--r > span:first-child {
+  min-width: 110px;
+}
+
+.payslip-m-kv i {
+  margin-left: 22px;
+  font-style: normal;
+}
+
+.payslip-m-kv i.payslip-m-to {
+  margin-left: 8px;
+}
+
+.payslip-m-memo {
+  margin-top: 20px;
+  padding-left: 9px;
+  line-height: 1.7;
+}
+
+.payslip-m-tblw {
+  margin-top: 22px;
+}
+
+.payslip-m-tbl {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  border: 1px solid #777;
+}
+
+.payslip-m-tbl th {
+  padding: 2px 4px;
+  border: 1px solid #777;
+  background: #d9d9d9;
+  font-weight: 400;
+  text-transform: uppercase;
+}
+
+.payslip-m-tbl td {
+  padding: 1px 6px;
+  border-right: 1px solid #777;
+  border-left: 1px solid #777;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.payslip-m-tbl td:first-child {
+  text-align: left;
+}
+
+.payslip-m-tbl td:last-child,
+.payslip-m-tbl th:last-child {
+  text-align: center;
+}
+
+.payslip-m-tbl tr.payslip-m-fill td {
+  height: var(--payslip-fill, 110px);
+  padding: 0;
+}
+
+.payslip-m-page {
+  margin-top: 8px;
+  font-size: 10.5px;
+  text-align: right;
+}
+
+/* 发送邮件弹窗 */
+.payslip-email-sub {
+  margin-top: 1px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--ant-color-text-tertiary, #667085);
+}
+
+.payslip-email-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 6px;
+}
+
+.payslip-email-field > label:not(.ant-checkbox-wrapper) {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 13px;
+  color: var(--ant-color-text-secondary, #475467);
+}
+
+.payslip-email-field > label:not(.ant-checkbox-wrapper) em {
+  margin-right: 3px;
+  font-style: normal;
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+.payslip-email-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #98a2b3);
+}
+
+.payslip-email-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+.payslip-email-alert {
+  margin-top: 8px;
+}
+
+.payslip-email-confirm {
+  margin-top: 10px;
+  font-size: 13.5px;
+}
+
+.payslip-email-attach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--ant-color-border-secondary, #e4e7ec);
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, #fafbfc);
+}
+
+.payslip-email-attach b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.payslip-email-attach small {
+  display: block;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #98a2b3);
+}
+
+.payslip-email-attach-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: var(--ant-color-error-bg, #fff2f0);
+  color: var(--ant-color-error, #cf1322);
+  font-size: 18px;
+}
+
 @media (max-width: 767px) {
   .payslip-range,
   .payslip-search,
@@ -343,7 +519,7 @@
     margin-left: 0;
   }
 
-  .payslip-big b {
-    font-size: 18px;
+  .payslip-paper {
+    padding: 18px 14px 10px;
   }
 }

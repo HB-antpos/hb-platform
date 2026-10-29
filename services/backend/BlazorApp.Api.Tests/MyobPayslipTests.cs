@@ -53,7 +53,7 @@ public sealed class MyobPayslipTests : IDisposable
         });
         _db.CodeFirst.InitTables(
             typeof(MyobConnection), typeof(MyobStoreMapping), typeof(EmployeeMyobLink), typeof(EmployeePayrollEmployer),
-            typeof(MyobEmployeeIgnore), typeof(Store), typeof(UserStore), typeof(MyobPayslipViewLog));
+            typeof(MyobEmployeeIgnore), typeof(Store), typeof(UserStore), typeof(MyobPayslipViewLog), typeof(User));
         Seed();
     }
 
@@ -114,7 +114,7 @@ public sealed class MyobPayslipTests : IDisposable
         params MyobPayrollAdviceLine[] lines) =>
         new("Hot Bargain Pty Ltd", "12345678901", card, name, "E-" + name[..2],
             DateTime.Parse(periodStart ?? DateTime.Parse(paymentDate).AddDays(-13).ToString("yyyy-MM-dd")),
-            DateTime.Parse(paymentDate).AddDays(-4), DateTime.Parse(paymentDate), "Fortnightly", gross, net, "Sample Super",
+            DateTime.Parse(paymentDate).AddDays(-4), DateTime.Parse(paymentDate), "Fortnightly", gross, net, "Sample Super", 24m, "1263",
             lines.Length > 0
                 ? lines
                 :
@@ -124,8 +124,10 @@ public sealed class MyobPayslipTests : IDisposable
                     new MyobPayrollAdviceLine("Superannuation Guarantee", "Superannuation", null, null, 115m, 1150m),
                 ]);
 
+    private readonly FakeEmailSender _email = new();
+
     private MyobPayslipService Service(TimeProvider? time = null) =>
-        new(_db, _api, new FakeTokens(), _scope, _permissions, _source, _cache, time ?? new FakeTime(Now));
+        new(_db, _api, new FakeTokens(), _scope, _permissions, _source, _cache, time ?? new FakeTime(Now), _email);
 
     private static MyobPayslipQuery Q(string? storeCode = null, string? connection = null, string? keyword = null,
         bool unassigned = false, bool refresh = false, string? from = "2026-08-01", string? to = "2026-10-29") =>
@@ -637,7 +639,7 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal(Now, log.ViewedAt);
         // 查看记录实体只有这些列：没有金额、姓名等工资内容。
         Assert.Equal(
-            ["ActorUserGuid", "ConnectionGuid", "LogGuid", "MyobEmployeeUid", "PaymentDate", "TargetUserGuid", "ViewedAt"],
+            ["Action", "ActorUserGuid", "ConnectionGuid", "LogGuid", "MyobEmployeeUid", "PaymentDate", "Recipient", "TargetUserGuid", "ViewedAt"],
             typeof(MyobPayslipViewLog).GetProperties().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
     }
 
@@ -868,11 +870,15 @@ public sealed class MyobPayslipTests : IDisposable
         var detail = JsonSerializer.Serialize((await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data);
         foreach (var json in new[] { list, detail })
         {
-            foreach (var banned in new[] { "annualSalary", "hourlyRate", "dateOfBirth", "chequeNumber", "bsb", "accountNumber", "tfn" })
+            foreach (var banned in new[] { "annualSalary", "dateOfBirth", "chequeNumber", "bsb", "accountNumber", "tfn" })
             {
                 Assert.DoesNotContain(banned, json, StringComparison.OrdinalIgnoreCase);
             }
         }
+
+        // 时薪与支票号（Reference Number）只在明细里出现，列表行里没有。
+        Assert.DoesNotContain("hourlyRate", list, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("referenceNumber", list, StringComparison.OrdinalIgnoreCase);
     }
 
     // ───────────────────────── 控制器 ─────────────────────────
@@ -886,13 +892,17 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal("api/react/v1/myob/payslips", type.GetCustomAttribute<RouteAttribute>()!.Template);
 
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).ToList();
-        Assert.Equal(4, actions.Count);
-        Assert.All(actions, method => Assert.NotNull(method.GetCustomAttribute<HttpGetAttribute>()));
+        // 6 个动作：5 个只读 GET + 1 个邮件发送 POST（唯一一个有外部副作用的，需要 Myob.Payslip.Email）。
+        Assert.Equal(7, actions.Count);
+        var gets = actions.Where(method => method.GetCustomAttribute<HttpGetAttribute>() is not null).ToList();
+        var posts = actions.Where(method => method.GetCustomAttribute<HttpPostAttribute>() is not null).ToList();
+        Assert.Equal(6, gets.Count);
+        Assert.Equal("email", Assert.Single(posts).GetCustomAttribute<HttpPostAttribute>()!.Template);
         Assert.DoesNotContain(actions, method => method.GetCustomAttributes().Any(a =>
-            a is HttpPostAttribute or HttpPutAttribute or HttpDeleteAttribute or HttpPatchAttribute));
+            a is HttpPutAttribute or HttpDeleteAttribute or HttpPatchAttribute));
         Assert.Equal(
-            ["", "companies", "detail", "hours"],
-            actions.Select(method => method.GetCustomAttribute<HttpGetAttribute>()!.Template ?? string.Empty).OrderBy(t => t, StringComparer.Ordinal).ToArray());
+            ["", "companies", "detail", "email-target", "hours", "pdf"],
+            gets.Select(method => method.GetCustomAttribute<HttpGetAttribute>()!.Template ?? string.Empty).OrderBy(t => t, StringComparer.Ordinal).ToArray());
     }
 
     [Fact]
@@ -922,6 +932,335 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal((400, "no-store"), await Call(ApiResponse<MyobPayslipListDto>.Error("x", MyobPayslipErrorCodes.InvalidRange)));
     }
 
+    // ───────────────────────── 下载 PDF / 邮件发送（2026-10-29） ─────────────────────────
+
+    private void GivenUsers()
+    {
+        foreach (var (guid, email) in new[] { ("u-jane", "jane@example.com"), ("u-admin", "boss@example.com"), ("u-finance", "fin@example.com") })
+        {
+            _db.Insertable(new User { UserGUID = guid, Username = guid, Email = email, PasswordHash = "x" }).ExecuteCommand();
+        }
+    }
+
+    private void GrantExport(bool download = true, bool email = true)
+    {
+        if (download)
+        {
+            _permissions.Granted.Add(Permissions.Myob.Payslip.Download);
+        }
+
+        if (email)
+        {
+            _permissions.Granted.Add(Permissions.Myob.Payslip.Email);
+        }
+    }
+
+    private static MyobPayslipEmailRequest E(string to, bool copy = false, bool confirmed = false, string? note = null) =>
+        new() { ConnectionGuid = Inv, EmployeeUid = CardJane, PaymentDate = "2026-10-23", To = to, CopyToMe = copy, RecipientChangeConfirmed = confirmed, Note = note };
+
+    [Fact]
+    public async Task 明细_还原MYOB页头_时薪支票号扁平明细带Type_假期累计小时放Hours列_并带导出权限标志()
+    {
+        _api.Slips[Inv] =
+        [
+            Slip(CardJane, "Jane Sample", "2026-10-23", 1000m, 800m, null,
+                new MyobPayrollAdviceLine("Base Hourly", "Wage", 40m, 25m, 1000m, 10000m),
+                new MyobPayrollAdviceLine("PAYG Withholding", "Tax", null, null, -200m, -2000m),
+                new MyobPayrollAdviceLine("Annual Leave Accrual", "Entitlement", null, null, 4.35m, 51.7m)),
+        ];
+        _source.Pairs.Add(("u-jane", "1002"));
+        AsAdmin();
+
+        var without = (await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
+        Assert.False(without.CanDownloadPdf);
+        Assert.False(without.CanSendEmail);
+
+        GrantExport(download: true, email: false);
+        var detail = (await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
+        Assert.True(detail.CanDownloadPdf);
+        Assert.False(detail.CanSendEmail);
+        Assert.Equal(24m, detail.HourlyRate);
+        Assert.Equal("1263", detail.ReferenceNumber);
+        Assert.Equal(["Base Hourly", "PAYG Withholding", "Annual Leave Accrual"], detail.Lines.Select(l => l.Description).ToArray());
+        Assert.Equal(["Wages", "Tax", "Entitlement"], detail.Lines.Select(l => l.TypeLabel).ToArray());
+        var leave = detail.Lines[2];
+        Assert.Equal(4.35m, leave.Hours);
+        Assert.Null(leave.Amount);
+        // 分区数组保持原样（Entitlement 的 Amount 仍是小时数），兼容旧前端。
+        Assert.Equal(4.35m, Assert.Single(detail.Entitlements).Amount);
+    }
+
+    [Fact]
+    public async Task 下载PDF_没有Download权限_403_且不去请求MYOB_不写记录()
+    {
+        GivenSlips();
+        AsAdmin();
+        GrantExport(download: false);
+
+        var response = await Service().DownloadPdfAsync(D(Inv, CardJane), CancellationToken.None);
+
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, response.ErrorCode);
+        Assert.Equal(0, _api.Calls);
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 下载PDF_成功_是PDF_文件名按姓名与支付日_写Download记录_内容含MYOB页头字段()
+    {
+        GivenSlips();
+        AsAdmin();
+        GrantExport();
+        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
+
+        var response = await Service().DownloadPdfAsync(D(Inv, CardJane), CancellationToken.None);
+
+        Assert.True(response.Success);
+        var file = response.Data!;
+        Assert.Equal("Payslip_JANE-SAMPLE_2026-10-23.pdf", file.Filename);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(file.Content, 0, 4));
+
+        using var pdf = UglyToad.PdfPig.PdfDocument.Open(file.Content);
+        var text = string.Join(" ", pdf.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text));
+        foreach (var expected in new[]
+        {
+            "HOT", "BARGAIN", "Pay", "Slip", "For:", "Jane", "Reference", "Number:", "1263", "Payment", "Date:", "23/10/2026",
+            "Hourly", "Rate:", "$24.0000", "GROSS", "PAY:", "$1,000.00", "NET", "$800.00", "Memo/payslip", "DESCRIPTION",
+            "Wages", "Tax", "-$200.00", "Page", "of",
+        })
+        {
+            Assert.Contains(expected, text);
+        }
+
+        var log = Assert.Single(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+        Assert.Equal(MyobPayslipLogActions.Download, log.Action);
+        Assert.Equal("u-finance", log.ActorUserGuid);
+        Assert.Null(log.Recipient);
+    }
+
+    [Fact]
+    public async Task 下载PDF_店长只能下载管辖范围内的_越权找不到_且记录里没有金额()
+    {
+        GivenSlips();
+        AsManager("1005");
+        GrantExport();
+
+        var other = await Service().DownloadPdfAsync(D(Inv, CardJane), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, other.ErrorCode);
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+
+        var mine = await Service().DownloadPdfAsync(D(Inv, CardTom), CancellationToken.None);
+        Assert.True(mine.Success);
+    }
+
+    [Fact]
+    public async Task PDF_行数多时续页_每页都有页码()
+    {
+        var lines = Enumerable.Range(1, 100)
+            .Select(i => new MyobPayrollAdviceLine($"Category {i}", "Wage", 1m, 10m, 10m, 100m))
+            .ToArray();
+        _api.Slips[Inv] = [Slip(CardJane, "Jane Sample", "2026-10-23", 1000m, 800m, null, lines)];
+        AsAdmin();
+        GrantExport();
+
+        var file = (await Service().DownloadPdfAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
+
+        using var pdf = UglyToad.PdfPig.PdfDocument.Open(file.Content);
+        Assert.Equal(3, pdf.NumberOfPages);
+        var lastPage = string.Join(" ", pdf.GetPage(3).GetWords().Select(word => word.Text));
+        Assert.Contains("Category 100", lastPage);
+        Assert.Contains("Page 3 of 3", lastPage);
+    }
+
+    [Fact]
+    public async Task 邮件目标_档案邮箱与当前登录人邮箱_需要Email权限()
+    {
+        GivenSlips();
+        GivenUsers();
+        AsAdmin();
+        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
+
+        var denied = await Service().GetEmailTargetAsync(D(Inv, CardJane), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, denied.ErrorCode);
+
+        GrantExport();
+        var target = (await Service().GetEmailTargetAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
+        Assert.Equal("jane@example.com", target.Email);
+        Assert.Equal("j***@example.com", target.MaskedEmail);
+        Assert.Equal("profile", target.Source);
+        Assert.Equal("fin@example.com", target.MyEmail);
+        Assert.Equal("Payslip_JANE-SAMPLE_2026-10-23.pdf", target.Filename);
+        Assert.StartsWith("Your payslip", target.Subject);
+
+        // 档案里没有邮箱（Tom 没有用户邮箱行）：source = none。
+        var none = (await Service().GetEmailTargetAsync(D(Inv, CardTom), CancellationToken.None)).Data!;
+        Assert.Null(none.Email);
+        Assert.Equal("none", none.Source);
+        // 邮件目标只是弹窗预填，不写查看记录。
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 发邮件_收件人与档案一致_直接发_带PDF附件_正文不含金额_写Email记录含收件邮箱()
+    {
+        GivenSlips();
+        GivenUsers();
+        AsAdmin();
+        GrantExport();
+        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
+
+        var response = await Service().SendEmailAsync(E("jane@example.com", copy: true, note: "Thanks Jane"), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("j***@example.com", response.Data!.SentTo);
+        Assert.True(response.Data.CopiedToMe);
+        var mail = Assert.Single(_email.Sent);
+        Assert.Equal("jane@example.com", mail.ToEmail);
+        Assert.Equal("fin@example.com", mail.CcEmail);
+        Assert.Equal("Thanks Jane", mail.Note);
+        Assert.Equal("Payslip_JANE-SAMPLE_2026-10-23.pdf", mail.Filename);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(mail.PdfBytes, 0, 4));
+        Assert.Equal("Hot Bargain Pty Ltd", mail.CompanyName);
+
+        var log = Assert.Single(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+        Assert.Equal(MyobPayslipLogActions.Email, log.Action);
+        Assert.Equal("jane@example.com", log.Recipient);
+        Assert.Equal("u-finance", log.ActorUserGuid);
+    }
+
+    [Fact]
+    public async Task 发邮件_收件人与档案不同_未确认拒绝_确认后发送_档案没有邮箱时手填无需确认()
+    {
+        GivenSlips();
+        GivenUsers();
+        AsAdmin();
+        GrantExport();
+
+        var unconfirmed = await Service().SendEmailAsync(E("other@example.org"), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.RecipientUnconfirmed, unconfirmed.ErrorCode);
+        Assert.Empty(_email.Sent);
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+
+        var confirmed = await Service().SendEmailAsync(E("other@example.org", confirmed: true), CancellationToken.None);
+        Assert.True(confirmed.Success);
+        Assert.Equal("other@example.org", Assert.Single(_email.Sent).ToEmail);
+
+        // Tom 的档案没有邮箱：手填地址不需要确认。
+        _email.Sent.Clear();
+        var manual = await Service().SendEmailAsync(
+            new MyobPayslipEmailRequest { ConnectionGuid = Inv, EmployeeUid = CardTom, PaymentDate = "2026-10-23", To = "tom.private@example.net" },
+            CancellationToken.None);
+        Assert.True(manual.Success);
+        Assert.Equal("tom.private@example.net", Assert.Single(_email.Sent).ToEmail);
+    }
+
+    [Fact]
+    public async Task 发邮件_没有Email权限_邮箱格式不对_附言过长_抄送但自己没邮箱_都不会发送()
+    {
+        GivenSlips();
+        GivenUsers();
+        AsAdmin();
+
+        var denied = await Service().SendEmailAsync(E("jane@example.com"), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, denied.ErrorCode);
+        Assert.Equal(0, _api.Calls);
+
+        GrantExport();
+        foreach (var bad in new[] { "", "not-an-email", "a@b.com, c@d.com", "a@b.com;c@d.com", "Jane <jane@example.com>" })
+        {
+            var invalid = await Service().SendEmailAsync(E(bad, confirmed: true), CancellationToken.None);
+            Assert.Equal(MyobPayslipErrorCodes.EmailInvalid, invalid.ErrorCode);
+        }
+
+        var longNote = await Service().SendEmailAsync(E("jane@example.com", note: new string('x', 501)), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.EmailInvalid, longNote.ErrorCode);
+
+        // 默认管理员 u-admin 有邮箱；换成没有邮箱的账号再要求抄送。
+        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-noemail" };
+        var noCc = await Service().SendEmailAsync(E("jane@example.com", copy: true), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.EmailInvalid, noCc.ErrorCode);
+
+        Assert.Empty(_email.Sent);
+        Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 发邮件_发送失败_返回发送器的错误码_并把这条记录标成EmailFailed()
+    {
+        GivenSlips();
+        GivenUsers();
+        AsAdmin();
+        GrantExport();
+        _email.Result = ApiResponse<bool>.Error("smtp down", MyobPayslipErrorCodes.EmailSendFailed);
+
+        var response = await Service().SendEmailAsync(E("jane@example.com"), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal(MyobPayslipErrorCodes.EmailSendFailed, response.ErrorCode);
+        var log = Assert.Single(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+        Assert.Equal(MyobPayslipLogActions.EmailFailed, log.Action);
+        Assert.Equal("jane@example.com", log.Recipient);
+    }
+
+    [Fact]
+    public void 展示小工具_文件名_邮箱脱敏_日期金额格式_单邮箱校验()
+    {
+        Assert.Equal("Payslip_ALEX-MORGAN_2026-10-29.pdf", MyobPayslipPresentation.Filename("  Alex  Morgan ", new DateTime(2026, 10, 29)));
+        Assert.Equal("Payslip_EMPLOYEE_2026-10-29.pdf", MyobPayslipPresentation.Filename("张三", new DateTime(2026, 10, 29)));
+        Assert.Equal("Payslip_OBRIEN-J_2026-01-02.pdf", MyobPayslipPresentation.Filename("O'Brien, J", new DateTime(2026, 1, 2)));
+        Assert.Equal("a***@example.com", MyobPayslipPresentation.MaskEmail("alex@example.com"));
+        Assert.Equal(string.Empty, MyobPayslipPresentation.MaskEmail("nope"));
+        Assert.Equal("5/10/2026", MyobPayslipPresentation.Date(new DateTime(2026, 10, 5)));
+        Assert.Equal("$1,234.50", MyobPayslipPresentation.Money(1234.5m));
+        Assert.Equal("-$138.00", MyobPayslipPresentation.Money(-138m));
+        Assert.Equal("$24.0000", MyobPayslipPresentation.Money(24m, 4));
+        Assert.Equal(string.Empty, MyobPayslipPresentation.Money(null));
+        Assert.Equal("Wages", MyobPayslipPresentation.TypeLabel("Wage"));
+        Assert.Equal("Tax", MyobPayslipPresentation.TypeLabel(" Tax "));
+        Assert.Null(MyobPayslipPresentation.TypeLabel(null));
+        Assert.True(MyobPayslipService.TryParseSingleEmail(" jane@example.com ", out var email));
+        Assert.Equal("jane@example.com", email);
+        Assert.False(MyobPayslipService.TryParseSingleEmail("a@b.com,c@d.com", out _));
+        Assert.Equal("Alex", MyobPayslipEmailSender.FirstName("ALEX MORGAN"));
+        Assert.Equal(string.Empty, MyobPayslipEmailSender.FirstName(null));
+    }
+
+    [Fact]
+    public async Task 控制器_pdf成功返回文件流_失败返回JSON错误码_都不缓存()
+    {
+        var ok = new StubPayslipService(ApiResponse<MyobPayslipListDto>.OK(new MyobPayslipListDto()))
+        {
+            pdf = ApiResponse<MyobPayslipPdfFile>.OK(new MyobPayslipPdfFile([1, 2, 3], "Payslip_X_2026-10-23.pdf")),
+        };
+        var controller = new MyobPayslipController(ok)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() },
+        };
+        var file = Assert.IsType<FileContentResult>(await controller.DownloadPdf(new MyobPayslipDetailRequest(), CancellationToken.None));
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal("Payslip_X_2026-10-23.pdf", file.FileDownloadName);
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+
+        var denied = new StubPayslipService(ApiResponse<MyobPayslipListDto>.OK(new MyobPayslipListDto()))
+        {
+            pdf = ApiResponse<MyobPayslipPdfFile>.Error("x", MyobPayslipErrorCodes.Forbidden),
+        };
+        var deniedController = new MyobPayslipController(denied)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() },
+        };
+        var result = Assert.IsAssignableFrom<ObjectResult>(await deniedController.DownloadPdf(new MyobPayslipDetailRequest(), CancellationToken.None));
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public void 两个导出权限码_已登记_Web和移动端都生效_种子有说明()
+    {
+        foreach (var code in new[] { Permissions.Myob.Payslip.Download, Permissions.Myob.Payslip.Email })
+        {
+            Assert.Equal(PermissionSurface.Web | PermissionSurface.Mobile, PermissionSurfaceCatalog.Resolve(code));
+        }
+    }
+
     // ───────────────────────── 假对象 ─────────────────────────
 
     private sealed class StubPayslipService(ApiResponse<MyobPayslipListDto> list) : IMyobPayslipService
@@ -930,6 +1269,10 @@ public sealed class MyobPayslipTests : IDisposable
         public Task<ApiResponse<MyobPayslipListDto>> ListAsync(MyobPayslipQuery query, CancellationToken cancellationToken) => Task.FromResult(list);
         public Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApiResponse<MyobPayslipPdfFile>> DownloadPdfAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => Task.FromResult(pdf);
+        public Task<ApiResponse<MyobPayslipEmailTargetDto>> GetEmailTargetAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApiResponse<MyobPayslipEmailResultDto>> SendEmailAsync(MyobPayslipEmailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ApiResponse<MyobPayslipPdfFile> pdf { get; set; } = ApiResponse<MyobPayslipPdfFile>.Error("x", MyobPayslipErrorCodes.NotFound);
     }
 
     private sealed class FakeApi : IMyobApiClient
@@ -970,6 +1313,18 @@ public sealed class MyobPayslipTests : IDisposable
         public Task<IReadOnlyList<MyobEmployeePaymentRecord>> GetEmployeePaymentDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<MyobWageCategoryRecord>> GetWageCategoriesAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<MyobTimesheetStatus> GetTimesheetStatusAsync(string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeEmailSender : IMyobPayslipEmailSender
+    {
+        public List<MyobPayslipEmail> Sent { get; } = [];
+        public ApiResponse<bool> Result { get; set; } = ApiResponse<bool>.OK(true);
+
+        public Task<ApiResponse<bool>> SendAsync(MyobPayslipEmail email, CancellationToken cancellationToken = default)
+        {
+            Sent.Add(email);
+            return Task.FromResult(Result);
+        }
     }
 
     private sealed class FakeTokens : IMyobTokenProvider

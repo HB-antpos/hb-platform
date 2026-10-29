@@ -12,6 +12,8 @@ export interface RequestOptions {
   skipAuthRedirect?: boolean
   /** 仅在最终成功的响应上回调，供调用方读取响应头（如 X-Price-Notification）；回调异常不影响请求结果。 */
   onResponse?: (response: Response) => void
+  /** 成功响应按二进制读取（如下载 PDF）；失败响应仍按 JSON / 文本解析，错误码照常可读。 */
+  responseType?: 'blob'
 }
 
 export class RequestError extends Error {
@@ -152,7 +154,9 @@ async function rawFetch<T>(url: string, options: RequestOptions = {}): Promise<{
     cache,
   })
 
-  const payload = await parseResponse<T>(response)
+  // 下载类接口：只有成功时才读 Blob；失败时后端返回 JSON ApiResponse，仍走常规解析以拿到错误码。
+  const payload =
+    options.responseType === 'blob' && response.ok ? ((await response.blob()) as T) : await parseResponse<T>(response)
   return { response, payload }
 }
 

@@ -114,6 +114,7 @@ assertArrayEqual(
     'attendance-personal',
     'attendance-management',
     'attendance-hours',
+    'payslips',
     'seasonal-cards',
     'users',
     'legacy-employee-logs',
@@ -191,6 +192,22 @@ assertArrayEqual(
   ],
   'Web 权限预览的门店业务分组应包含商品进销和节日贺卡',
 )
+
+// 手机端工资单：管辖分店 / 全部分店查看权限任一可见；仅有下载或邮件权限（没有查看权限）不显示入口。
+for (const code of [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores]) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'payslips')?.visible,
+    true,
+    `拥有 ${code} 时应显示工资单入口`,
+  )
+}
+for (const code of [P.Myob.PayslipDownload, P.Myob.PayslipEmail]) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'payslips')?.visible,
+    false,
+    `仅有 ${code} 时不应显示工资单入口`,
+  )
+}
 
 // 现金入口只认独立的 Cash.Overview.View：没有该权限码不可见，有则可见且紧跟门店代金券。
 assertEqual(

@@ -254,3 +254,17 @@
 7. 「未绑定」「无法确定分店」的工资单是否只让财务看？推荐是。
 8. 同一员工同公司多店时，抽屉里是否显示我方考勤分店工时（仅参考）？推荐显示。
 9. 页签名称：「工资单」，放在 MYOB 页面第五个页签，可以吗？
+
+## 11. 修订（2026-10-29 晚）：MYOB 默认样式 + 下载 PDF + 邮件发送 + 手机端查看
+
+> 用户给了一张真实的 MYOB 默认工资单 PDF，按它还原；本节**覆盖**第 5、6.3、9、10（问题 5）节里与导出、手机端相冲突的部分。
+
+- **版式**：MYOB 默认 Pay Slip 是「一张通栏表 + TYPE 列」，不是分区块。页头含 ABN、Pay Slip For、Reference Number、Payment Date、Hourly Rate、Pay Period From/To、Superannuation Fund、GROSS PAY / NET PAY、Memo/payslip message；日期 d/M/yyyy 不补零；右下 Page x of y。Web 抽屉、PDF、邮件附件是同一份渲染逻辑（Web / 手机端纸面组件与后端 `MyobPayslipPdfRenderer` 对照同一设计稿）。
+- **字段放开**：`HourlyRate`、`ChequeNumber`（页头的 Reference Number）不再丢弃，进 `MyobPayrollAdviceRecord`（会随 10 分钟缓存驻留内存）；只出现在明细 DTO 与 PDF，列表 DTO 不含，不写日志。年薪、生日、雇佣分类仍然丢弃。
+- **Memo**：报表接口没有对应字段，PDF 里保留标签与空行。**Pay Slip For**：接口只给整段姓名，原样显示（MYOB 原版是 “Surname, GIVEN”）。**Entitlement 行**的小时数放 HOURS 列（真实原版未见，待用带假期累计的真实 PDF 核对）。
+- **接口**（`api/react/v1/myob/payslips`）：`GET pdf`（文件流）、`GET email-target`（档案邮箱 / 主题 / 文件名 / 当前登录人邮箱）、`POST email`；`GET detail` 新增 `hourlyRate`、`referenceNumber`、扁平 `lines`（含 `typeLabel`）、`canDownloadPdf`、`canSendEmail`。
+- **权限**：新增 `Myob.Payslip.Download`、`Myob.Payslip.Email`（默认不授予任何角色；须同时具备原有两个查看码之一）。两个码在 `PermissionSurfaceCatalog` 登记为 Web + 手机端；原有两个查看码也从「仅 Web」改成 Web + 手机端。
+- **留痕**：`MyobPayslipViewLog` 增加 `Action`（View / Download / Email / EmailFailed）与 `Recipient`（邮件收件邮箱）；邮件先写记录再发送，失败改成 EmailFailed。迁移 `20261029.005-myob-payslip-export`（加两列 + 写两个权限码），**必须先于新版主 API 部署**。
+- **邮件**：复用发票邮箱后台的公司 SMTP（同监护人邮件做法）；正文中英双语、不含金额；PDF **不加密码**（用户已定）；每次一个员工、一个收件人；档案邮箱存在且收件人不同时须确认，档案没有邮箱时手填只用于本次。
+- **手机端**：新增「工资单 Payslips」页面（人员管理分组，路由 `payslips`），列表 + 详情（MYOB 样式）+ 下载 PDF（系统分享）+ 发邮件（底部弹层）；只做管理者查看，员工看自己的工资单仍不做。纯 JS，不涉及原生包。
+- **发布顺序**：迁移 `20261029.005` → 主 API → Web → 手机端 OTA（用户之前说「下次一起发」）。

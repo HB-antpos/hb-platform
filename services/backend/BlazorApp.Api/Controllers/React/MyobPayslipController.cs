@@ -57,6 +57,39 @@ namespace BlazorApp.Api.Controllers.React
             return ToResult(await _service.GetHoursAsync(request ?? new MyobPayslipDetailRequest(), cancellationToken));
         }
 
+        /// <summary>
+        /// 下载 MYOB 默认样式的工资单 PDF（需 Myob.Payslip.Download，且看得到这张工资单；会写一条 Download 查看记录）。
+        /// 成功返回文件流；失败返回 JSON（403 / 404 / 400），前端据 Content-Type 区分。
+        /// </summary>
+        [HttpGet("pdf")]
+        public async Task<IActionResult> DownloadPdf([FromQuery] MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+        {
+            NoStore();
+            var result = await _service.DownloadPdfAsync(request ?? new MyobPayslipDetailRequest(), cancellationToken);
+            if (!result.Success || result.Data is null)
+            {
+                return ToResult(result);
+            }
+
+            return File(result.Data.Content, "application/pdf", result.Data.Filename);
+        }
+
+        /// <summary>邮件弹窗预填（需 Myob.Payslip.Email）：档案邮箱、主题、文件名、当前登录人邮箱。</summary>
+        [HttpGet("email-target")]
+        public async Task<IActionResult> GetEmailTarget([FromQuery] MyobPayslipDetailRequest request, CancellationToken cancellationToken)
+        {
+            NoStore();
+            return ToResult(await _service.GetEmailTargetAsync(request ?? new MyobPayslipDetailRequest(), cancellationToken));
+        }
+
+        /// <summary>把工资单 PDF 邮件发给员工（需 Myob.Payslip.Email；每次一个收件人；会写 Email 查看记录）。</summary>
+        [HttpPost("email")]
+        public async Task<IActionResult> SendEmail([FromBody] MyobPayslipEmailRequest request, CancellationToken cancellationToken)
+        {
+            NoStore();
+            return ToResult(await _service.SendEmailAsync(request ?? new MyobPayslipEmailRequest(), cancellationToken));
+        }
+
         private void NoStore() => Response.Headers.CacheControl = "no-store";
 
         // 无权限 403；找不到 404（越权与不存在不区分）；其余业务失败 400。
@@ -71,6 +104,7 @@ namespace BlazorApp.Api.Controllers.React
             {
                 MyobPayslipErrorCodes.Forbidden => StatusCode(StatusCodes.Status403Forbidden, result),
                 MyobPayslipErrorCodes.NotFound => NotFound(result),
+                MyobPayslipErrorCodes.PdfFailed or MyobPayslipErrorCodes.EmailSendFailed => StatusCode(StatusCodes.Status502BadGateway, result),
                 _ => BadRequest(result),
             };
         }

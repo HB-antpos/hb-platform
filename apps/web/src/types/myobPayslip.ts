@@ -1,5 +1,5 @@
 // MYOB 历史工资单（只读）。契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobPayslipDtos.cs 为准（camelCase）。
-// 隐私：年薪、时薪、生日、支票号、银行 / TFN 后端从不返回，这里也没有对应字段。
+// 隐私：年薪、生日、银行 / TFN 后端从不返回，这里也没有对应字段；时薪与 Reference Number 只在单张明细里返回（用于还原 MYOB 默认 Pay Slip），不进列表、不缓存。
 
 /** 工资单归类：有考勤分店 / 按当前分店推断 / 无法确定分店 / 员工卡未绑定。 */
 export type MyobPayslipPlacement = 'Attendance' | 'Inferred' | 'Unknown' | 'Unbound'
@@ -68,6 +68,19 @@ export interface MyobPayslipLine {
   yearToDate: number | null
 }
 
+/** MYOB 原始顺序的扁平明细行（Pay Slip 通栏表的一行）：Entitlement 行的小时数在 hours 列，amount 为空。 */
+export interface MyobPayslipFlatLine {
+  description: string | null
+  /** MYOB 原始类型，如 Wage / Tax / Superannuation / Entitlement。 */
+  type: string | null
+  /** 纸面 TYPE 列显示用，如 Wages / Tax / Superannuation / Entitlement。 */
+  typeLabel: string | null
+  hours: number | null
+  rate: number | null
+  amount: number | null
+  yearToDate: number | null
+}
+
 export interface MyobPayslipDetail {
   connectionGuid: string
   companyName: string
@@ -82,6 +95,8 @@ export interface MyobPayslipDetail {
   grossPay: number | null
   netPay: number | null
   superFundName: string | null
+  hourlyRate: number | null
+  referenceNumber: string | null
   placement: MyobPayslipPlacement
   stores: MyobPayslipStore[]
   wages: MyobPayslipLine[]
@@ -90,7 +105,13 @@ export interface MyobPayslipDetail {
   superannuation: MyobPayslipLine[]
   entitlements: MyobPayslipLine[]
   others: MyobPayslipLine[]
+  /** 纸面通栏表用：MYOB 原始顺序的扁平明细（分区数组仍保留，供兼容）。 */
+  lines: MyobPayslipFlatLine[]
   samePaymentDateCount: number
+  /** 当前账号是否有「下载工资单 PDF」权限（Myob.Payslip.Download）；没有则不渲染按钮。 */
+  canDownloadPdf: boolean
+  /** 当前账号是否有「邮件发送工资单 PDF」权限（Myob.Payslip.Email）。 */
+  canSendEmail: boolean
 }
 
 export interface MyobPayslipStoreHours {
@@ -127,4 +148,35 @@ export interface MyobPayslipKey {
   employeeUid: string
   paymentDate: string
   periodStart?: string | null
+}
+
+/** 下载结果：Blob + 文件名（取响应头 Content-Disposition，取不到用调用方给的兜底名）。 */
+export interface MyobPayslipPdfFile {
+  blob: Blob
+  filename: string
+}
+
+/** 发送邮件弹窗打开时取到的信息。source：profile = 员工档案里有邮箱，none = 没有。 */
+export interface MyobPayslipEmailTarget {
+  email: string | null
+  maskedEmail: string | null
+  source: 'profile' | 'none'
+  subject: string
+  filename: string
+  /** 当前登录人的邮箱，供「抄送给我」；没有则为 null。 */
+  myEmail: string | null
+}
+
+export interface MyobPayslipEmailPayload extends MyobPayslipKey {
+  to: string
+  copyToMe: boolean
+  note?: string | null
+  /** 档案邮箱存在且 to 与它不同时必须为 true。 */
+  recipientChangeConfirmed: boolean
+}
+
+export interface MyobPayslipEmailResult {
+  /** 已脱敏的收件地址，如 a***@example.com。 */
+  sentTo: string
+  copiedToMe: boolean
 }

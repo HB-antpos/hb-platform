@@ -130,49 +130,21 @@
       "loadFailed": "Failed to load payslip details",
       "notFound": "This payslip cannot be found (you may no longer have access, or MYOB has corrected it).",
       "paid": "Paid",
-      "period": "Pay period {{range}}",
-      "paymentDate": "Payment date {{date}}",
-      "gross": "Gross Pay",
-      "net": "Net Pay",
       "samePaymentDate": "This employee has {{count}} more payslips for other pay periods paid on the same date in this company file. Open them separately from the list.",
       "noLines": "This payslip has no detail lines.",
-      "fund": "Fund: {{name}}",
-      "sections": {
-        "wages": {
-          "title": "Wages",
-          "sub": "Wages"
-        },
-        "deductions": {
-          "title": "Deductions & Taxes",
-          "sub": "Deductions and tax"
-        },
-        "superannuation": {
-          "title": "Superannuation",
-          "sub": "Superannuation"
-        },
-        "entitlements": {
-          "title": "Leave accrual",
-          "sub": "Leave accrual (hours)"
-        },
-        "others": {
-          "title": "Other",
-          "sub": "Other"
-        }
-      },
-      "columns": {
-        "description": "Description",
-        "hours": "Hours",
-        "rate": "Rate",
-        "thisPay": "This pay",
-        "ytd": "YTD"
-      },
       "disclaimerZh": "本工资单仅供查看，以 MYOB 发出的工资单为准。",
       "disclaimerEn": "For reference only. The official payslip is the one issued from MYOB.",
-      "logged": "This view has been recorded (only who viewed which period; no amounts)"
+      "logged": "This view has been recorded; downloads and emails are recorded too (only who, which period and the recipient address; no amounts)",
+      "download": "Download PDF",
+      "sendEmail": "Send email",
+      "downloaded": "PDF downloaded and recorded",
+      "downloadFailed": "Failed to download the payslip PDF. Please retry",
+      "downloadForbidden": "You do not have permission to download payslip PDFs",
+      "paperCaption": "The page above is exactly what the downloaded PDF and the email attachment contain"
     },
     "hours": {
       "title": "Store assignment and our attendance hours",
-      "sub": "The payslip is issued by company, not by store",
+      "sub": "The payslip is issued by company, not by store · reference only, not in the PDF",
       "noStores": "This payslip has no assignable store, so there are no attendance hours.",
       "load": "Show our hours",
       "loading": "Reading attendance…",
@@ -183,6 +155,44 @@
       "storeFailed": "Read failed",
       "total": "Total (reference only)",
       "note": "From our attendance (same basis as the payroll sheet). It can differ from the hours on the MYOB payslip above; MYOB is authoritative."
+    },
+    "email": {
+      "title": "Send payslip PDF",
+      "subtitle": "{{name}} · Pay period {{range}}",
+      "loadingTarget": "Loading recipient details…",
+      "targetFailed": "Could not load recipient details. Please retry",
+      "recipient": "To",
+      "recipientPlaceholder": "Enter the recipient's email",
+      "recipientDefaultHint": "Defaults to the email in the employee profile",
+      "matchesProfile": "Matches profile",
+      "recipientInvalid": "Invalid email address",
+      "noProfileEmail": "The employee profile has no email. The address entered here is <b>used for this send only and is not saved to the profile</b>.",
+      "changedWarning": "This is <b>different</b> from the employee profile email ({{masked}}). Please check it before sending.",
+      "confirmRecipient": "I have checked the recipient and confirm sending to this address (required to send)",
+      "cc": "Cc",
+      "copyToMe": "Copy me ({{email}})",
+      "copyToMeNone": "Copy me (your account has no email)",
+      "subject": "Subject",
+      "note": "Message (optional)",
+      "notePlaceholder": "A short note to the employee, shown in the email body (do not include amounts)",
+      "attachment": "Attachment",
+      "attachmentHint": "Same file as \"Download PDF\"",
+      "info": "The email <b>carries the PDF only; the body contains no amounts</b>. Each send is recorded in the view log: who, when, which period, which address.",
+      "cancel": "Cancel",
+      "send": "Send",
+      "sending": "Sending…",
+      "retry": "Retry",
+      "download": "Download PDF",
+      "sent": "Sent to {{to}} and recorded",
+      "errors": {
+        "unconfirmed": "The recipient differs from the profile email. Tick \"I have checked the recipient\" first.",
+        "invalid": "Invalid email address. Please check and retry.",
+        "notConfigured": "The company sender mailbox is not configured yet, so the email cannot be sent. The payslip itself is unaffected; download the PDF and send it manually.",
+        "sendFailed": "Send failed: the mail service is temporarily unavailable. The payslip itself is unaffected. Retry, or download the PDF and send it manually.",
+        "forbidden": "You do not have permission to email payslips.",
+        "notFound": "This payslip cannot be found (you may no longer have access, or MYOB has corrected it).",
+        "other": "Send failed. Please retry later. The payslip itself is unaffected; you can download the PDF and send it manually."
+      }
     }
   }
 }

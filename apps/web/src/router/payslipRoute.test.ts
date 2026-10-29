@@ -161,11 +161,18 @@ assertEqual(getDefaultWebPath(buildAccess(createCurrentUser([MYOB_CONNECT, MANAG
 
 const pageSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/Payslips/index.tsx'), 'utf8')
 const drawerSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/Payslips/PayslipDrawer.tsx'), 'utf8')
-for (const [name, source] of [['列表页', pageSource], ['抽屉', drawerSource]] as const) {
+const paperSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/Payslips/PayslipPaper.tsx'), 'utf8')
+const emailModalSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/Payslips/PayslipEmailModal.tsx'), 'utf8')
+const downloadSource = readFileSync(join(process.cwd(), 'src/pages/PosAdmin/Payslips/payslipDownload.ts'), 'utf8')
+for (const [name, source] of [['列表页', pageSource], ['抽屉', drawerSource], ['纸面', paperSource], ['邮件弹窗', emailModalSource], ['下载', downloadSource]] as const) {
   assertEqual(/localStorage|sessionStorage|indexedDB/i.test(source), false, `${name}不得把工资数据写进浏览器存储`)
   assertEqual(/console\.(log|info|debug)/.test(source), false, `${name}不得把工资数据打到控制台`)
 }
-assertEqual(/exportCsv|buildCsv|download/i.test(pageSource + drawerSource), false, '本期不提供导出')
+// 工资数据没有 CSV / Excel 导出；PDF 下载与邮件发送是单张工资单的操作（独立权限，见下）。
+assertEqual(/exportCsv|buildCsv|exceljs/i.test(pageSource + drawerSource), false, '不提供 CSV / Excel 导出')
+assertEqual(/window\.open/.test(drawerSource + emailModalSource + downloadSource), false, '下载 PDF 需要登录态，不能 window.open 直链')
+assertEqual(drawerSource.includes('detail?.canDownloadPdf') && drawerSource.includes('detail?.canSendEmail'), true, '「下载 PDF」「发送邮件」按钮显示完全依赖明细返回的权限开关')
+assertEqual(/Myob\.Payslip\.(Download|Email)/.test(drawerSource), false, '按钮不在前端自行判断权限码')
 assertEqual(drawerSource.includes('getMyobPayslipHours'), true, '抽屉的我方工时走独立接口')
 assertEqual(/useEffect\([^)]*getMyobPayslipHours/s.test(drawerSource), false, '我方工时必须点击后才请求，不能在 effect 里自动加载')
 assertEqual(drawerSource.includes('payslips.drawer.disclaimerZh') && drawerSource.includes('payslips.drawer.disclaimerEn'), true, '抽屉页脚必须有「以 MYOB 为准」中英文声明')

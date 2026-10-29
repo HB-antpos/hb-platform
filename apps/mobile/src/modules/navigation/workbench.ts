@@ -80,6 +80,8 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "attendance-personal", labelKey: "routes.attendancePersonal", icon: "clock-check-outline" },
       { routeName: "attendance-management", labelKey: "routes.attendanceManagement", icon: "calendar-edit" },
       { routeName: "attendance-hours", labelKey: "routes.attendanceHours", icon: "clock-outline" },
+      // 工资单（MYOB 默认 Pay Slip 样式，管理者查看）：权限与管辖分店范围由后端菜单与接口把关。
+      { routeName: "payslips", labelKey: "routes.payslips", icon: "receipt-text-outline" },
       // 「人员管理」合并入口（路由名 users）：原「员工列表 / 用户管理 / 角色管理 / 权限管理」四个入口合成一个，
       // 进去后是「人员 / 角色 / 权限」页签（角色、权限只有满足 Roles.View 门禁的账号才有，见 people/people-hub-tabs.ts）。
       // user-admin / roles / permissions 三个路由名保留为重定向壳（旧版 App、推送、书签仍可能指向它们），不再作为工作台入口。

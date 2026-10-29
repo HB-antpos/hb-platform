@@ -1102,8 +1102,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(46, menu.Count);
+        Assert.Equal(47, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "payslips");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
@@ -1527,6 +1528,35 @@ public class NavigationServiceTests
         Assert.DoesNotContain(
             _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore))),
             entry => entry.RouteName == "attendance-hours");
+    }
+
+    [Fact]
+    public void BuildAppMenu_仅凭任一工资单查看权限可见工资单入口_导出权限本身不够()
+    {
+        foreach (var permission in new[] { Permissions.Myob.Payslip.ViewManagedStore, Permissions.Myob.Payslip.ViewAllStores })
+        {
+            var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", permission)));
+            var item = Assert.Single(menu, entry => entry.RouteName == "payslips");
+            Assert.Equal("tabs.payslips", item.TitleKey);
+            Assert.Equal("receipt-text-outline", item.Icon);
+        }
+
+        // 只有下载 / 邮件权限、没有查看权限：看不到入口（接口里也需要同时具备查看权限）。
+        foreach (var permission in new[] { Permissions.Myob.Payslip.Download, Permissions.Myob.Payslip.Email })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+                entry => entry.RouteName == "payslips");
+        }
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含工资单()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "payslips");
+        }
     }
 
     [Fact]

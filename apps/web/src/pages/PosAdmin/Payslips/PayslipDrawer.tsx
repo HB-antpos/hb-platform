@@ -1,21 +1,19 @@
-import { CloseOutlined, LockOutlined } from '@ant-design/icons'
-import { Alert, Button, Drawer, Skeleton, Tag } from 'antd'
+import { CloseOutlined, DownloadOutlined, FileTextOutlined, LockOutlined, MailOutlined } from '@ant-design/icons'
+import { Alert, Button, Drawer, Skeleton, Tag, message } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { getMyobPayslipDetail, getMyobPayslipHours } from '../../../services/myobPayslipService'
-import type {
-  MyobPayslipDetail,
-  MyobPayslipHours,
-  MyobPayslipKey,
-  MyobPayslipLine,
-  MyobPayslipStore,
-} from '../../../types/myobPayslip'
+import type { MyobPayslipDetail, MyobPayslipHours, MyobPayslipKey, MyobPayslipStore } from '../../../types/myobPayslip'
 import { extractMyobError } from '../Myob/myobLogic'
 
-import { countDetailLines, formatHours, formatMoney, formatPayslipPeriod } from './payslipLogic'
+import PayslipEmailModal from './PayslipEmailModal'
+import PayslipPaper from './PayslipPaper'
+import { downloadAndSavePayslipPdf } from './payslipDownload'
+import { buildPayslipPdfFilename, formatHours, formatPaperDate } from './payslipLogic'
 
 const NOT_FOUND_CODE = 'MYOB_PAYSLIP_NOT_FOUND'
+const FORBIDDEN_CODE = 'MYOB_PAYSLIP_FORBIDDEN'
 
 interface PayslipDrawerProps {
   /** 要打开的工资单；null 表示关闭。 */
@@ -48,67 +46,10 @@ export function PayslipStoreTags({ stores, inferred }: { stores: MyobPayslipStor
   )
 }
 
-function LinesTable({
-  lines,
-  mode,
-  ariaLabel,
-}: {
-  lines: MyobPayslipLine[]
-  /** wage：小时 / 费率 / 本期 / 累计；amount：本期 / 累计；hours：金额列实际是小时数（假期累计）。 */
-  mode: 'wage' | 'amount' | 'hours'
-  ariaLabel: string
-}) {
-  const { t } = useTranslation()
-  const money = (value: number | null) => (mode === 'hours' ? (value === null ? '—' : `${formatHours(value)} h`) : formatMoney(value))
-  return (
-    <table className="payslip-lines" aria-label={ariaLabel}>
-      <thead>
-        <tr>
-          <th>{t('payslips.drawer.columns.description')}</th>
-          {mode === 'wage' ? (
-            <>
-              <th className="payslip-num">{t('payslips.drawer.columns.hours')}</th>
-              <th className="payslip-num">{t('payslips.drawer.columns.rate')}</th>
-            </>
-          ) : null}
-          <th className="payslip-num">{t('payslips.drawer.columns.thisPay')}</th>
-          <th className="payslip-num">{t('payslips.drawer.columns.ytd')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((line, index) => (
-          <tr key={`${line.description ?? ''}-${index}`}>
-            <td>{line.description ?? '—'}</td>
-            {mode === 'wage' ? (
-              <>
-                <td className="payslip-num">{formatHours(line.hours)}</td>
-                <td className="payslip-num">{formatMoney(line.rate)}</td>
-              </>
-            ) : null}
-            <td className="payslip-num">{money(line.amount)}</td>
-            <td className="payslip-num">{money(line.yearToDate)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-function Section({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <p className="payslip-section-title">
-        {title}
-        <small>{sub}</small>
-      </p>
-      {children}
-    </section>
-  )
-}
-
 /**
- * 单张工资单明细抽屉（只读）。数据全部来自 MYOB，英文用词保持 MYOB 原文；页脚固定声明「以 MYOB 发出的为准」。
- * 打开抽屉会在后端留下一条查看记录（只记谁看了谁哪一期，不含金额）；「我方考勤工时」点击后才请求，不自动加载。
+ * 单张工资单明细抽屉。正文是 MYOB 默认 Pay Slip 纸面（与下载的 PDF / 邮件附件同一份版式），数据全部来自 MYOB；页脚固定声明「以 MYOB 发出的为准」。
+ * 打开 / 下载 / 发邮件都会在后端留下记录（只记操作人与期别、收件邮箱，不含金额）；「我方考勤工时」留在纸面之外、点击后才请求，不进 PDF / 邮件。
+ * 「下载 PDF」「发送邮件」是否显示完全取决于明细返回的 canDownloadPdf / canSendEmail（无权限不渲染）。
  */
 export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
   const { t } = useTranslation()
@@ -116,6 +57,8 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hours, setHours] = useState<HoursState>({ status: 'idle' })
+  const [downloading, setDownloading] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
   const detailSeq = useRef(0)
   const hoursSeq = useRef(0)
 
@@ -148,6 +91,7 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
     setDetail(null)
     setError(null)
     setHours({ status: 'idle' })
+    setEmailOpen(false)
     hoursSeq.current += 1
     if (target) {
       void load()
@@ -174,19 +118,55 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
     }
   }
 
+  // 下载 PDF：接口需要登录态，走统一请求封装取回 Blob 再触发浏览器保存；失败只给通用提示（不显示后端原文）。
+  const downloadPdf = async () => {
+    if (!target || !detail) {
+      return
+    }
+    setDownloading(true)
+    try {
+      await downloadAndSavePayslipPdf(target, buildPayslipPdfFilename(detail.employeeName, detail.paymentDate))
+      message.success(t('payslips.drawer.downloaded'))
+    } catch (err) {
+      const { code } = extractMyobError(err, '')
+      message.error(
+        code === FORBIDDEN_CODE
+          ? t('payslips.drawer.downloadForbidden')
+          : code === NOT_FOUND_CODE
+            ? t('payslips.drawer.notFound')
+            : t('payslips.drawer.downloadFailed'),
+      )
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const inferred = detail?.placement === 'Inferred'
-  const deductionLines = detail ? [...detail.taxes, ...detail.deductions] : []
 
   return (
     <Drawer
       open={target !== null}
-      width={640}
+      width={760}
       rootClassName="payslip-drawer"
       destroyOnClose
       onClose={onClose}
       // 关闭按钮放在标题栏右侧（antd 默认在左侧）
       closable={false}
-      extra={<Button type="text" icon={<CloseOutlined />} aria-label={t('payslips.drawer.close')} onClick={onClose} />}
+      extra={
+        <div className="payslip-drawer-actions">
+          {detail?.canDownloadPdf ? (
+            <Button color="primary" variant="outlined" icon={<DownloadOutlined />} loading={downloading} onClick={() => void downloadPdf()}>
+              {t('payslips.drawer.download')}
+            </Button>
+          ) : null}
+          {detail?.canSendEmail ? (
+            <Button color="primary" variant="outlined" icon={<MailOutlined />} onClick={() => setEmailOpen(true)}>
+              {t('payslips.drawer.sendEmail')}
+            </Button>
+          ) : null}
+          <Button type="text" icon={<CloseOutlined />} aria-label={t('payslips.drawer.close')} onClick={onClose} />
+        </div>
+      }
       title={
         <div className="payslip-drawer-head">
           <div>
@@ -239,63 +219,17 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
 
       {detail ? (
         <>
-          <div className="payslip-muted">
-            {t('payslips.drawer.period', { range: formatPayslipPeriod(detail.periodStart, detail.periodEnd) })}
-            {' · '}
-            {t('payslips.drawer.paymentDate', { date: detail.paymentDate })}
-          </div>
-
           {detail.samePaymentDateCount > 1 ? (
             <Alert type="info" showIcon message={t('payslips.drawer.samePaymentDate', { count: detail.samePaymentDateCount - 1 })} />
           ) : null}
 
-          <div className="payslip-big">
-            <div>
-              <span>{t('payslips.drawer.gross')}</span>
-              <b>{formatMoney(detail.grossPay)}</b>
-            </div>
-            <div className="payslip-net">
-              <span>{t('payslips.drawer.net')}</span>
-              <b>{formatMoney(detail.netPay)}</b>
-            </div>
+          {detail.lines.length === 0 ? <Alert type="warning" showIcon message={t('payslips.drawer.noLines')} /> : null}
+
+          {/* MYOB 默认 Pay Slip 纸面：与下载的 PDF / 邮件附件是同一份版式，所见即所发 */}
+          <PayslipPaper detail={detail} />
+          <div className="payslip-paper-caption">
+            <FileTextOutlined /> {t('payslips.drawer.paperCaption')}
           </div>
-
-          {countDetailLines([detail.wages, deductionLines, detail.superannuation, detail.entitlements, detail.others]) === 0 ? (
-            <Alert type="warning" showIcon message={t('payslips.drawer.noLines')} />
-          ) : null}
-
-          {detail.wages.length > 0 ? (
-            <Section title={t('payslips.drawer.sections.wages.title')} sub={t('payslips.drawer.sections.wages.sub')}>
-              <LinesTable lines={detail.wages} mode="wage" ariaLabel={t('payslips.drawer.sections.wages.title')} />
-            </Section>
-          ) : null}
-          {deductionLines.length > 0 ? (
-            <Section title={t('payslips.drawer.sections.deductions.title')} sub={t('payslips.drawer.sections.deductions.sub')}>
-              <LinesTable lines={deductionLines} mode="amount" ariaLabel={t('payslips.drawer.sections.deductions.title')} />
-            </Section>
-          ) : null}
-          {detail.superannuation.length > 0 ? (
-            <Section
-              title={t('payslips.drawer.sections.superannuation.title')}
-              sub={
-                detail.superFundName
-                  ? `${t('payslips.drawer.sections.superannuation.sub')} · ${t('payslips.drawer.fund', { name: detail.superFundName })}`
-                  : t('payslips.drawer.sections.superannuation.sub')
-              }
-            >
-              <LinesTable lines={detail.superannuation} mode="amount" ariaLabel={t('payslips.drawer.sections.superannuation.title')} />
-            </Section>
-          ) : null}
-          {detail.entitlements.length > 0 ? (
-            <Section title={t('payslips.drawer.sections.entitlements.title')} sub={t('payslips.drawer.sections.entitlements.sub')}>
-              <LinesTable lines={detail.entitlements} mode="hours" ariaLabel={t('payslips.drawer.sections.entitlements.title')} />
-            </Section>
-          ) : null}
-          {detail.others.length > 0 ? (
-            <Section title={t('payslips.drawer.sections.others.title')} sub={t('payslips.drawer.sections.others.sub')}>
-              <LinesTable lines={detail.others} mode="amount" ariaLabel={t('payslips.drawer.sections.others.title')} />
-            </Section>
-          ) : null}
 
           <section className="payslip-hours-card" aria-label={t('payslips.hours.title')}>
             <p className="payslip-section-title">
@@ -330,9 +264,10 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
                 <div className="payslip-hours-note">{t('payslips.hours.note')}</div>
               </>
             ) : (
-              <div>
+              <div className="payslip-hours-idle">
+                <PayslipStoreTags stores={detail.stores} inferred={inferred} />
                 {hours.status === 'error' ? (
-                  <div className="payslip-muted" style={{ marginBottom: 8 }}>
+                  <div className="payslip-muted" style={{ width: '100%' }}>
                     {t('payslips.hours.loadFailed')}
                   </div>
                 ) : null}
@@ -347,6 +282,17 @@ export default function PayslipDrawer({ target, onClose }: PayslipDrawerProps) {
             )}
           </section>
         </>
+      ) : null}
+
+      {/* 发送邮件弹窗：需要时才挂载，关闭即卸载，每次打开都是全新状态 */}
+      {emailOpen && target && detail ? (
+        <PayslipEmailModal
+          target={target}
+          employeeName={detail.employeeName}
+          periodLabel={`${formatPaperDate(detail.periodStart)} – ${formatPaperDate(detail.periodEnd)}`}
+          onClose={() => setEmailOpen(false)}
+          onDownloadPdf={downloadPdf}
+        />
       ) : null}
     </Drawer>
   )

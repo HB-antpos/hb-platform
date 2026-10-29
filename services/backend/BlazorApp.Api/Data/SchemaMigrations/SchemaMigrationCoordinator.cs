@@ -104,6 +104,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string MyobPayCategoryCasualMigrationId = "20261029.002-myob-pay-category-casual";
     internal const string MyobPayslipMigrationId = "20261029.003-myob-payslip";
     internal const string UserPreferenceMigrationId = "20261029.004-user-preference";
+    internal const string MyobPayslipExportMigrationId = "20261029.005-myob-payslip-export";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -415,6 +416,11 @@ internal sealed class SchemaMigrationCoordinator
             UserPreferenceMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyUserPreferenceAsync(cancellationToken)
+        ),
+        new(
+            MyobPayslipExportMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMyobPayslipExportAsync(cancellationToken)
         ),
     ];
 

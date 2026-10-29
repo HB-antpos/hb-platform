@@ -1,4 +1,4 @@
-import type { MyobPayslipCompanyStatus, MyobPayslipRow } from '../../../types/myobPayslip'
+import type { MyobPayslipCompanyStatus, MyobPayslipFlatLine, MyobPayslipRow } from '../../../types/myobPayslip'
 
 // 工资单页的纯逻辑：日期预设（澳洲财年）、金额 / 工时 / 周期格式化、错误归类、分店下拉。
 // 所有函数都是纯函数（today 由调用方传入），便于单测。
@@ -191,7 +191,67 @@ export function mergePayslipStoreOptions(
     .map(([value, label]) => ({ value, label }))
 }
 
-/** 抽屉里工资单明细是否有任何一行（用于「这张工资单没有明细行」的提示）。 */
-export function countDetailLines(lines: readonly unknown[][]): number {
-  return lines.reduce((total, section) => total + section.length, 0)
+// ───────────────────────── MYOB 纸面格式（Pay Slip 原样） ─────────────────────────
+
+const PAPER_NUMBER = new Intl.NumberFormat('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** 纸面日期：MYOB 原样 d/m/yyyy，不补零（5/10/2026）；取不到返回空串，不显示「—」。 */
+export function formatPaperDate(value: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? '')
+  return match ? `${Number(match[3])}/${Number(match[2])}/${match[1]}` : ''
+}
+
+/** 纸面金额：$1,234.00；负数 -$138.00；时薪用 4 位小数（$24.0000）；缺失留空（纸面上没有就是空格）。 */
+export function formatPaperMoney(value: number | null | undefined, digits = 2): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return ''
+  }
+  const absolute =
+    digits === 2
+      ? PAPER_NUMBER.format(Math.abs(value))
+      : new Intl.NumberFormat('en-AU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(value))
+  return `${value < 0 ? '-' : ''}$${absolute}`
+}
+
+/** 纸面小时数 / 假期累计：1,234.00，不带 $；缺失留空。 */
+export function formatPaperNumber(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value) ? '' : PAPER_NUMBER.format(value)
+}
+
+/** Entitlement 行（假期累计）的 YTD 是小时数，不是金额，纸面不带 $。 */
+export function isEntitlementLine(line: Pick<MyobPayslipFlatLine, 'type' | 'typeLabel'>): boolean {
+  return (line.type ?? line.typeLabel ?? '').trim().toLowerCase() === 'entitlement'
+}
+
+/** 纸面上一行的各列文本（与 MYOB 下载的 PDF 一致）。 */
+export function paperLineCells(line: MyobPayslipFlatLine) {
+  return {
+    description: line.description ?? '',
+    hours: formatPaperNumber(line.hours),
+    rate: formatPaperMoney(line.rate),
+    amount: formatPaperMoney(line.amount),
+    yearToDate: isEntitlementLine(line) ? formatPaperNumber(line.yearToDate) : formatPaperMoney(line.yearToDate),
+    type: line.typeLabel ?? line.type ?? '',
+  }
+}
+
+// ───────────────────────── 下载 / 邮件 ─────────────────────────
+
+/** 取不到响应头文件名时的兜底：Payslip_<姓名>_<支付日>.pdf（姓名空格改连字符，去掉路径与非法字符）。 */
+export function buildPayslipPdfFilename(employeeName: string, paymentDate: string): string {
+  const safeName = employeeName.trim().replace(/\s+/g, '-').replace(/[\\/:*?"<>|]/g, '') || 'Employee'
+  const safeDate = paymentDate.slice(0, 10).replace(/[^0-9-]/g, '') || 'date'
+  return `Payslip_${safeName}_${safeDate}.pdf`
+}
+
+// 前端先做一道常见格式校验；最终以后端 MYOB_PAYSLIP_EMAIL_INVALID 为准。
+const EMAIL_PATTERN = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/
+
+export function isValidEmailAddress(value: string): boolean {
+  return value.length <= 254 && EMAIL_PATTERN.test(value.trim())
+}
+
+/** 邮箱比较不分大小写、忽略首尾空白（用来判断是否「改了收件人」）。 */
+export function isSameEmailAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase()
 }

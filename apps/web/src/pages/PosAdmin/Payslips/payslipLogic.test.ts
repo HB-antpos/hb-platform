@@ -8,15 +8,21 @@ import {
   addDays,
   allCompaniesFailed,
   classifyPayslipError,
-  countDetailLines,
   firstFailureKind,
   formatHours,
   formatMoney,
+  formatPaperDate,
+  formatPaperMoney,
+  formatPaperNumber,
   formatPayslipPeriod,
   inclusiveDays,
+  isSameEmailAddress,
   isUnassignedPlacement,
+  isValidEmailAddress,
+  buildPayslipPdfFilename,
   matchPayslipPreset,
   mergePayslipStoreOptions,
+  paperLineCells,
   payslipRowKey,
   resolvePayslipPreset,
   sydneyToday,
@@ -168,6 +174,54 @@ assert.deepEqual(
 // 管辖分店为空数组 = 一个都不管，下拉为空（null 才表示不限分店）。
 assert.deepEqual(mergePayslipStoreOptions([], [row()], []), [])
 
-assert.equal(countDetailLines([[1, 2], [], [3]]), 3)
+// ───────────────────────── MYOB 纸面格式 ─────────────────────────
+
+// 日期 d/m/yyyy 不补零；带时间的 ISO 只取日期；取不到为空串。
+assert.equal(formatPaperDate('2026-10-05'), '5/10/2026')
+assert.equal(formatPaperDate('2026-10-29T00:00:00'), '29/10/2026')
+assert.equal(formatPaperDate(null), '')
+assert.equal(formatPaperDate('oops'), '')
+// 金额：本期 / YTD 带 $，负数 -$138.00，时薪 4 位小数，缺失留空。
+assert.equal(formatPaperMoney(11520), '$11,520.00')
+assert.equal(formatPaperMoney(-138), '-$138.00')
+assert.equal(formatPaperMoney(-2208), '-$2,208.00')
+assert.equal(formatPaperMoney(24, 4), '$24.0000')
+assert.equal(formatPaperMoney(0), '$0.00')
+assert.equal(formatPaperMoney(null), '')
+assert.equal(formatPaperNumber(1.15), '1.15')
+assert.equal(formatPaperNumber(30), '30.00')
+assert.equal(formatPaperNumber(undefined), '')
+// 纸面行：Entitlement 的 YTD 是小时数（不带 $），其余带 $；金额缺失留空。
+assert.deepEqual(paperLineCells({ description: 'Base Hourly', type: 'Wage', typeLabel: 'Wages', hours: 30, rate: 24, amount: 720, yearToDate: 11520 }), {
+  description: 'Base Hourly',
+  hours: '30.00',
+  rate: '$24.00',
+  amount: '$720.00',
+  yearToDate: '$11,520.00',
+  type: 'Wages',
+})
+assert.deepEqual(paperLineCells({ description: 'Annual Leave Accrual', type: 'Entitlement', typeLabel: 'Entitlement', hours: 1.15, rate: null, amount: null, yearToDate: 18.45 }), {
+  description: 'Annual Leave Accrual',
+  hours: '1.15',
+  rate: '',
+  amount: '',
+  yearToDate: '18.45',
+  type: 'Entitlement',
+})
+assert.equal(paperLineCells({ description: null, type: null, typeLabel: null, hours: null, rate: null, amount: null, yearToDate: null }).type, '')
+
+// ───────────────────────── 下载 / 邮件 ─────────────────────────
+
+assert.equal(buildPayslipPdfFilename('ALEX MORGAN', '2026-10-29'), 'Payslip_ALEX-MORGAN_2026-10-29.pdf')
+assert.equal(buildPayslipPdfFilename('  ', '2026-10-29T00:00:00'), 'Payslip_Employee_2026-10-29.pdf')
+assert.equal(buildPayslipPdfFilename('A/B:C', '2026-10-29'), 'Payslip_ABC_2026-10-29.pdf')
+assert.equal(isValidEmailAddress('alex.morgan@example.com'), true)
+assert.equal(isValidEmailAddress(' alex@example.com '), true)
+for (const bad of ['', 'alex', 'alex@', '@example.com', 'a@b', 'a b@example.com', 'a@example.com, b@example.com', 'a@example.com;b@example.com']) {
+  assert.equal(isValidEmailAddress(bad), false, `${bad} 不应通过`)
+}
+assert.equal(isSameEmailAddress('Alex@Example.com ', 'alex@example.com'), true)
+assert.equal(isSameEmailAddress('a@example.com', 'b@example.com'), false)
+assert.equal(isSameEmailAddress(null, ''), true)
 
 console.log('payslipLogic tests passed')

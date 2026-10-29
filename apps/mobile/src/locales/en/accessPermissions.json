@@ -277,6 +277,14 @@
       "name": "View payslips for all stores",
       "description": "View historical MYOB payslips for all stores and company files, including unmatched employees, on the web admin (read-only)."
     },
+    "Myob.Payslip.Download": {
+      "name": "Download payslip PDF",
+      "description": "Download payslips as MYOB default-style PDFs from the web admin payslip details and the mobile Payslips page."
+    },
+    "Myob.Payslip.Email": {
+      "name": "Email payslip PDF",
+      "description": "Email a payslip as a MYOB default-style PDF attachment to the employee."
+    },
     "OrderFront": {
       "name": "Access ordering portal",
       "description": "Open the web ordering portal and the app's order pages. Core permission for the Ordering staff role."

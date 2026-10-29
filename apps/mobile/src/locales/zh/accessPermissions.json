@@ -277,6 +277,14 @@
       "name": "查看全部分店员工工资单",
       "description": "Web 页面 /pos-admin/myob「工资单」页签 - 查看全部分店与公司文件的历史工资单，含未绑定员工（只读）"
     },
+    "Myob.Payslip.Download": {
+      "name": "下载工资单 PDF",
+      "description": "在 Web「工资单」明细与手机端工资单页下载 MYOB 默认样式的 PDF"
+    },
+    "Myob.Payslip.Email": {
+      "name": "邮件发送工资单 PDF",
+      "description": "把 MYOB 默认样式工资单 PDF 以邮件发给员工"
+    },
     "OrderFront": {
       "name": "前台订货",
       "description": "Web 订货前台与移动端「订货单」- 进入前台订货入口（Order / 订货员角色核心权限）"
