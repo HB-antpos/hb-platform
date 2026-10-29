@@ -300,8 +300,9 @@ export interface MyobPayrollEmployerQuery {
 // 工资类别映射接口权限 Myob.Connection.Manage；推送预览接口权限 Attendance.Payroll.Edit；日期一律 yyyy-MM-dd 字符串。
 
 /**
- * 我方转账工时对应的 MYOB 工资类别键：5 项必填 + 2 项可选。
- * saturday / sunday 是全职、兼职共用的周末类别；saturdayCasual / sundayCasual 是临时工（Casual）专用的周末类别（可选）。
+ * 我方转账工时对应的 MYOB 工资类别键：5 项必填 + 4 项可选。
+ * saturday / sunday / publicHoliday 是全职、兼职共用的类别；saturdayCasual / sundayCasual / publicHolidayCasual 是临时工（Casual）专用的类别（可选）。
+ * publicHoliday 含公假上班与带薪公假，不再并入 weekday。
  */
 export type MyobPayCategoryKey =
   | 'weekday'
@@ -309,6 +310,8 @@ export type MyobPayCategoryKey =
   | 'sunday'
   | 'saturdayCasual'
   | 'sundayCasual'
+  | 'publicHoliday'
+  | 'publicHolidayCasual'
   | 'personalLeave'
   | 'holidayLeave'
 
@@ -331,6 +334,10 @@ export interface MyobPayCategoryMapping {
   saturdayCasualUid: string | null
   /** 临时工的周日（可选）。 */
   sundayCasualUid: string | null
+  /** 全职 / 兼职的公共假期（公假上班 + 带薪公假，可选）。 */
+  publicHolidayUid: string | null
+  /** 临时工的公共假期（可选）。 */
+  publicHolidayCasualUid: string | null
   personalLeaveUid: string | null
   holidayLeaveUid: string | null
 }
@@ -407,11 +414,12 @@ export interface MyobPreviewBlocker {
   ref: string | null
 }
 
-/** 要推送的转账工时，按 5 个 MYOB 类别汇总（小时）。 */
+/** 要推送的转账工时，按 6 个口径汇总（小时）；周六 / 周日 / 公共假期含全职兼职与临时工两个 MYOB 类别的合计。 */
 export interface MyobPushHours {
   weekday: number
   saturday: number
   sunday: number
+  publicHoliday: number
   personalLeave: number
   holidayLeave: number
 }

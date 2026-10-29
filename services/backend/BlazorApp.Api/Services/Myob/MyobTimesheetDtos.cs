@@ -28,19 +28,25 @@ public static class MyobPayCategoryKeys
     /// <summary>临时工（Casual）的周日：与全职 / 兼职的周日是不同的 MYOB 类别。</summary>
     public const string SundayCasual = "sundayCasual";
 
+    /// <summary>公共假期（全职 / 兼职，两者同一个类别）：公假上班与带薪公假都推送到这里，不再并入平日。</summary>
+    public const string PublicHoliday = "publicHoliday";
+
+    /// <summary>临时工（Casual）的公共假期：与全职 / 兼职的公共假期是不同的 MYOB 类别。</summary>
+    public const string PublicHolidayCasual = "publicHolidayCasual";
+
     /// <summary>病假 → MYOB 的 Personal Leave Pay。</summary>
     public const string PersonalLeave = "personalLeave";
 
     /// <summary>年假 → MYOB 的 Holiday Leave Pay。</summary>
     public const string HolidayLeave = "holidayLeave";
 
-    /// <summary>全部 7 个键，顺序即预览里的行顺序。</summary>
+    /// <summary>全部 9 个键，顺序即预览里的行顺序。</summary>
     public static readonly string[] All =
-        [Weekday, Saturday, Sunday, SaturdayCasual, SundayCasual, PersonalLeave, HolidayLeave];
+        [Weekday, Saturday, Sunday, SaturdayCasual, SundayCasual, PublicHoliday, PublicHolidayCasual, PersonalLeave, HolidayLeave];
 
     /// <summary>
-    /// 必填的 5 项（「映射是否完整」只看这 5 项）。临时工的两项可选：
-    /// 公司里没有临时工周末工时就不用设；有了又没设，预览会用 CATEGORY_NOT_MAPPED 拦住该员工。
+    /// 必填的 5 项（「映射是否完整」只看这 5 项）。临时工周末与两项公共假期都可选：
+    /// 公司里没有对应工时就不用设；有了又没设，预览会用 CATEGORY_NOT_MAPPED 拦住该员工。
     /// </summary>
     public static readonly string[] Required = [Weekday, Saturday, Sunday, PersonalLeave, HolidayLeave];
 }
@@ -71,6 +77,12 @@ public sealed class MyobPayCategoryMappingDto
 
     /// <summary>临时工的周日（可选）。</summary>
     public string? SundayCasualUid { get; set; }
+
+    /// <summary>全职 / 兼职的公共假期（公假上班 + 带薪公假，可选）。</summary>
+    public string? PublicHolidayUid { get; set; }
+
+    /// <summary>临时工的公共假期（可选）。</summary>
+    public string? PublicHolidayCasualUid { get; set; }
 
     public string? PersonalLeaveUid { get; set; }
     public string? HolidayLeaveUid { get; set; }
@@ -257,6 +269,9 @@ public sealed class MyobPushHoursDto
     public decimal Weekday { get; set; }
     public decimal Saturday { get; set; }
     public decimal Sunday { get; set; }
+
+    /// <summary>公共假期（公假上班 + 带薪公假），含全职 / 兼职与临时工两个 MYOB 类别的合计。</summary>
+    public decimal PublicHoliday { get; set; }
     public decimal PersonalLeave { get; set; }
     public decimal HolidayLeave { get; set; }
 }

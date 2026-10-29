@@ -260,6 +260,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMyobPayCategoryCasualAsync(CancellationToken cancellationToken);
 
+    Task ApplyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1650,6 +1654,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MyobPayCategoryCasualSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryPublicHolidaySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 加列后过精确签名，通过后协调器才登记账本。
+        await VerifyMyobPayCategoryPublicHolidayAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryPublicHolidaySchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

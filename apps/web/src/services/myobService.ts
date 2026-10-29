@@ -611,16 +611,26 @@ function num(value: unknown, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-/** 类别键与映射字段的对应；顺序即页面行的顺序（临时工周末两项可选，不计入「已映射」必填项数）。 */
+/** 类别键与映射字段的对应；顺序即页面行的顺序（临时工周末与公共假期四项可选，不计入「已映射」必填项数）。 */
 const PAY_CATEGORY_FIELDS: ReadonlyArray<readonly [MyobPayCategoryKey, keyof MyobPayCategoryMapping]> = [
   ['weekday', 'weekdayUid'],
   ['saturday', 'saturdayUid'],
   ['sunday', 'sundayUid'],
   ['saturdayCasual', 'saturdayCasualUid'],
   ['sundayCasual', 'sundayCasualUid'],
+  ['publicHoliday', 'publicHolidayUid'],
+  ['publicHolidayCasual', 'publicHolidayCasualUid'],
   ['personalLeave', 'personalLeaveUid'],
   ['holidayLeave', 'holidayLeaveUid'],
 ]
+
+/** 可选类别键（不计入「已映射」必填项数），与后端 MyobPayCategoryKeys.Required 之外的键一致。 */
+const OPTIONAL_PAY_CATEGORY_KEYS: ReadonlySet<MyobPayCategoryKey> = new Set([
+  'saturdayCasual',
+  'sundayCasual',
+  'publicHoliday',
+  'publicHolidayCasual',
+])
 
 export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMapping {
   const item = record(raw)
@@ -630,6 +640,8 @@ export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMa
     sundayUid: nullableText(item.sundayUid),
     saturdayCasualUid: nullableText(item.saturdayCasualUid),
     sundayCasualUid: nullableText(item.sundayCasualUid),
+    publicHolidayUid: nullableText(item.publicHolidayUid),
+    publicHolidayCasualUid: nullableText(item.publicHolidayCasualUid),
     personalLeaveUid: nullableText(item.personalLeaveUid),
     holidayLeaveUid: nullableText(item.holidayLeaveUid),
   }
@@ -650,7 +662,7 @@ export function normalizeMyobPayCategories(payload: unknown): MyobPayCategories 
   const mappedCount =
     typeof data.mappedCount === 'number'
       ? Math.min(5, Math.max(0, int(data.mappedCount)))
-      : PAY_CATEGORY_FIELDS.filter(([key, field]) => key !== 'saturdayCasual' && key !== 'sundayCasual' && mapping[field] !== null).length
+      : PAY_CATEGORY_FIELDS.filter(([key, field]) => !OPTIONAL_PAY_CATEGORY_KEYS.has(key) && mapping[field] !== null).length
   return {
     connectionGuid: text(data.connectionGuid),
     connectionName: text(data.connectionName),
@@ -749,6 +761,7 @@ function normalizePushHours(raw: unknown): MyobPushHours {
     weekday: num(item.weekday),
     saturday: num(item.saturday),
     sunday: num(item.sunday),
+    publicHoliday: num(item.publicHoliday),
     personalLeave: num(item.personalLeave),
     holidayLeave: num(item.holidayLeave),
   }
