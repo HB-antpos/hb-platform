@@ -21,6 +21,14 @@ internal sealed class MyobPayCategoryMapping
     [SugarColumn(Length = 50, IsNullable = true)]
     public string? SundayUid { get; set; }
 
+    /// <summary>临时工（Casual）的周六。列由迁移 20261029.002-myob-pay-category-casual 新增，可空。</summary>
+    [SugarColumn(Length = 50, IsNullable = true)]
+    public string? SaturdayCasualUid { get; set; }
+
+    /// <summary>临时工（Casual）的周日。列由迁移 20261029.002-myob-pay-category-casual 新增，可空。</summary>
+    [SugarColumn(Length = 50, IsNullable = true)]
+    public string? SundayCasualUid { get; set; }
+
     /// <summary>病假 → MYOB Personal Leave Pay。</summary>
     [SugarColumn(Length = 50, IsNullable = true)]
     public string? PersonalLeaveUid { get; set; }

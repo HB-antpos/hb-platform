@@ -101,6 +101,55 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
+    public void 规划_临时工_周六周日走临时工专用类别_平日和假期类别不变_全职兼职不受影响()
+    {
+        var items = new[]
+        {
+            W(Inv, "1014", "2026-10-26", MyobWorkKind.Weekday, 8),
+            W(Inv, "1014", "2026-10-27", MyobWorkKind.PublicHolidayWork, 4),
+            W(Inv, "1014", "2026-10-31", MyobWorkKind.Saturday, 4),
+            W(Inv, "1014", "2026-11-01", MyobWorkKind.Sunday, 5),
+        };
+
+        var casual = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeTransfer, 0m, 1, items, isCasual: true).Companies[Inv];
+        Assert.Equal(240, Minutes(casual, MyobPayCategoryKeys.SaturdayCasual));
+        Assert.Equal(300, Minutes(casual, MyobPayCategoryKeys.SundayCasual));
+        Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Saturday));
+        Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Sunday));
+        Assert.Equal(720, Minutes(casual, MyobPayCategoryKeys.Weekday)); // 平日 8h + 公假上班 4h 仍是平日类别
+        Assert.Equal(casual.CapacityMinutes, casual.PushedMinutes);
+
+        // 全职 / 兼职（默认）：周末仍走原来的类别，没有任何临时工类别的行。
+        foreach (var regular in new[]
+                 {
+                     MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeTransfer, 0m, 1, items).Companies[Inv],
+                     MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeTransfer, 0m, 1, items, isCasual: false).Companies[Inv],
+                 })
+        {
+            Assert.Equal(240, Minutes(regular, MyobPayCategoryKeys.Saturday));
+            Assert.Equal(300, Minutes(regular, MyobPayCategoryKeys.Sunday));
+            Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SaturdayCasual));
+            Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SundayCasual));
+        }
+    }
+
+    [Fact]
+    public void 规划_临时工_转账加现金_周末仍先进转账_额度分配与全职一致()
+    {
+        var items = new[]
+        {
+            W(Inv, "1013", "2026-10-26", MyobWorkKind.Weekday, 8),
+            W(Inv, "1013", "2026-10-31", MyobWorkKind.Saturday, 8),
+        };
+        var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 10m, 1, items, isCasual: true).Companies[Inv];
+
+        Assert.Equal(600, plan.CapacityMinutes);
+        Assert.Equal(480, Minutes(plan, MyobPayCategoryKeys.SaturdayCasual)); // 周六先进转账
+        Assert.Equal(120, Minutes(plan, MyobPayCategoryKeys.Weekday));
+        Assert.Equal(360, plan.CashByDayKind.Sum(pair => pair.Value));         // 现金里的是平日 6h，与类别无关
+    }
+
+    [Fact]
     public void 规划_全现金_不推送任何工时()
     {
         var plan = MyobTimesheetPlanner.Plan(
@@ -333,6 +382,86 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
+    public async Task 类别映射_建议_临时工周末只认名字带Casual的类别_全职兼职周末不会被Casual抢走或误选()
+    {
+        await SeedConnectionsAsync();
+        _api.Categories =
+        [
+            new("base", "Base Hourly", "Hourly"),
+            new("sat", "SATURDAY (x1.25)", "Hourly"), new("sat-c", "SATURDAY CASUAL (x1.5)", "Hourly"),
+            new("sun", "SUNDAY (x1.5)", "Hourly"), new("sun-c", "SUNDAY CASUAL (x1.75)", "Hourly"),
+        ];
+        var dto = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("sat", dto.Suggestions.SaturdayUid);
+        Assert.Equal("sun", dto.Suggestions.SundayUid);
+        Assert.Equal("sat-c", dto.Suggestions.SaturdayCasualUid);
+        Assert.Equal("sun-c", dto.Suggestions.SundayCasualUid);
+
+        // 没有名字带 Casual 的类别：临时工两项不猜（不能把全职的周末类别也推荐给临时工）。
+        _api.Categories = [new("sat", "SATURDAY (x1.25)", "Hourly"), new("sun", "SUNDAY (x1.5)", "Hourly")];
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var noCasual = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("sat", noCasual.Suggestions.SaturdayUid);
+        Assert.Null(noCasual.Suggestions.SaturdayCasualUid);
+        Assert.Null(noCasual.Suggestions.SundayCasualUid);
+    }
+
+    [Fact]
+    public async Task 类别映射_临时工周末两项可选_保存读回_不影响完整度_不能与其他项选同一类别()
+    {
+        await SeedConnectionsAsync();
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-sat-c", "Saturday Casual", "Hourly"),
+            new MyobWageCategoryRecord("cat-sun-c", "Sunday Casual", "Hourly"),
+        ]).ToList();
+
+        // 只设必填 5 项：已完整，临时工两项为空。
+        await SaveCompleteMappingAsync();
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-sat-c", "Saturday Casual", "Hourly"),
+            new MyobWageCategoryRecord("cat-sun-c", "Sunday Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var basic = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.True(basic.Complete);
+        Assert.Equal(5, basic.MappedCount);
+        Assert.Null(basic.Mapping.SaturdayCasualUid);
+        Assert.Equal("cat-sat-c", basic.Suggestions.SaturdayCasualUid); // 没设的临时工项照样给建议
+
+        // 再设临时工两项：存取一致，必填计数仍是 5。
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            SaturdayCasualUid = "cat-sat-c", SundayCasualUid = "cat-sun-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var full = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("cat-sat-c", full.Mapping.SaturdayCasualUid);
+        Assert.Equal("cat-sun-c", full.Mapping.SundayCasualUid);
+        Assert.Equal(5, full.MappedCount);
+        Assert.True(full.Complete);
+        Assert.Null(full.Suggestions.SaturdayCasualUid); // 已设置的项不再给建议
+
+        // 临时工周六与全职周六选同一个类别：拒绝；不存在的类别：拒绝。
+        var duplicate = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            SaturdayUid = "cat-sat", SaturdayCasualUid = "cat-sat",
+        }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryDuplicate, duplicate.ErrorCode);
+        var ghost = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto { SundayCasualUid = "cat-ghost" }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryNotFound, ghost.ErrorCode);
+
+        // 临时工类别在 MYOB 里被删：标出缺失项，但必填项仍完整。
+        _api.Categories = StandardCategories().ToList();
+        var missing = (await Categories().GetAsync(Inv, true, CancellationToken.None)).Data!;
+        Assert.Equal([MyobPayCategoryKeys.SaturdayCasual, MyobPayCategoryKeys.SundayCasual], missing.MissingKeys);
+        Assert.True(missing.Complete);
+    }
+
+    [Fact]
     public async Task 类别映射_建议_Salary型类别不入选_Annual与Holiday_Leave_Pay并列也不猜()
     {
         await SeedConnectionsAsync();
@@ -494,9 +623,9 @@ public sealed class MyobTimesheetTests : IDisposable
         string user, string name, PayrollRate? rate, IEnumerable<PayrollWorkItem> work,
         IEnumerable<PayrollLeaveItem>? sick = null, IEnumerable<PayrollLeaveItem>? holidayPay = null,
         IEnumerable<PayrollLeaveItem>? annual = null, IEnumerable<PayrollLeaveItem>? cashOut = null,
-        DateTime? birthday = null, int? age = null) =>
+        DateTime? birthday = null, int? age = null, string? employmentType = null) =>
         new(user, name, birthday, age, rate is null ? [] : [rate], work.ToList(), (sick ?? []).ToList(),
-            (holidayPay ?? []).ToList(), (annual ?? []).ToList(), (cashOut ?? []).ToList());
+            (holidayPay ?? []).ToList(), (annual ?? []).ToList(), (cashOut ?? []).ToList(), employmentType);
 
     private static PayrollLeaveItem Leave(string date, double hours) => new(DateTime.Parse(date), (decimal)hours);
 
@@ -629,6 +758,76 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("2026-10-26", mei.Detail.Days[0]);
         Assert.Equal(8m, mei.Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.Weekday).Hours[0]);
         Assert.Equal(30m, mei.Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.Weekday).Total);
+    }
+
+    [Fact]
+    public async Task 预览_临时工周末按临时工类别推送_汇总列仍按周六周日合计_没映射临时工类别时拦截_全职兼职不受影响()
+    {
+        await SeedConnectionsAsync();
+        // 只映射必填 5 项（临时工两项没设）
+        await SaveCompleteMappingAsync();
+        await SeedStoreAsync("1014", "Kawana", Inv, locked: true,
+            Emp("u-cas", "Cas", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-31", PayrollBucket.Saturday, 4), Work("2026-11-01", PayrollBucket.Sunday, 5)],
+                employmentType: "Casual"),
+            Emp("u-ft", "Fran", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-31", PayrollBucket.Saturday, 4), Work("2026-11-01", PayrollBucket.Sunday, 5)],
+                employmentType: "FullTime"),
+            Emp("u-pt", "Pat", Rate("Transfer"),
+                [Work("2026-10-31", PayrollBucket.Saturday, 4)], employmentType: "PartTime"),
+            Emp("u-unk", "Unk", Rate("Transfer"),
+                [Work("2026-10-31", PayrollBucket.Saturday, 4)])); // 没填员工类型：按全职 / 兼职处理
+        foreach (var user in new[] { "u-cas", "u-ft", "u-pt", "u-unk" })
+        {
+            await SeedUserAsync(user, user, "1014");
+            await BindAsync(user);
+            _source.Pairs.Add((user, "1014"));
+        }
+
+        var dto = await PreviewInvAsync();
+        // 临时工周末工时要用临时工类别，但还没映射：拦截，Ref 指向对应类别键。
+        var cas = RowOf(dto, "u-cas");
+        Assert.Equal(MyobPreviewStatuses.Blocked, cas.Status);
+        Assert.Contains(cas.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.SaturdayCasual);
+        Assert.Contains(cas.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.SundayCasual);
+        Assert.DoesNotContain(cas.Blockers, item => item.Ref == MyobPayCategoryKeys.Saturday || item.Ref == MyobPayCategoryKeys.Sunday);
+        Assert.Equal(["saturdayCasual", "sundayCasual", "weekday"], cas.Detail.Pushed.Select(item => item.Key).Order().ToArray());
+        Assert.Equal(4m, cas.Pushed.Saturday); // 汇总列仍是「周六」口径
+        Assert.Equal(5m, cas.Pushed.Sunday);
+        Assert.Equal(17m, cas.PushedTotal);
+
+        // 全职 / 兼职 / 没填类型：周末走原类别，没有任何拦截。
+        foreach (var user in new[] { "u-ft", "u-pt", "u-unk" })
+        {
+            var row = RowOf(dto, user);
+            Assert.Equal(MyobPreviewStatuses.Ready, row.Status);
+            Assert.Empty(row.Blockers);
+            Assert.DoesNotContain(row.Detail.Pushed, item => item.Key is MyobPayCategoryKeys.SaturdayCasual or MyobPayCategoryKeys.SundayCasual);
+        }
+
+        // 必填项齐全 = 就绪卡完整，不因为临时工两项没设而变成「不完整」。
+        Assert.Equal(5, dto.Readiness.CategoryMappedCount);
+        Assert.True(dto.Readiness.CategoryComplete);
+
+        // 补上临时工两项映射：拦截消失，网格行带 MYOB 类别名。
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-sat-c", "Saturday Casual", "Hourly"),
+            new MyobWageCategoryRecord("cat-sun-c", "Sunday Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            SaturdayCasualUid = "cat-sat-c", SundayCasualUid = "cat-sun-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var ready = RowOf(await PreviewInvAsync(), "u-cas");
+        Assert.Equal(MyobPreviewStatuses.Ready, ready.Status);
+        Assert.Empty(ready.Blockers);
+        Assert.Equal("Saturday Casual", ready.Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.SaturdayCasual).Label);
+        Assert.Equal("Sunday Casual", ready.Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.SundayCasual).Label);
     }
 
     [Fact]

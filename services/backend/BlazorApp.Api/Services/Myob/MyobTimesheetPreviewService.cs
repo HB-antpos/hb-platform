@@ -126,8 +126,10 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         var mapping = await _categories.GetSavedMappingAsync(connectionGuid);
         var mappingByKey = MyobPayCategoryService.ToDictionary(mapping);
         var categoryNames = _categories.GetCachedCategoryNames(connectionGuid);
-        dto.Readiness.CategoryMappedCount = mappingByKey.Count(pair => pair.Value is not null);
-        dto.Readiness.CategoryComplete = dto.Readiness.CategoryMappedCount == MyobPayCategoryKeys.All.Length;
+        // 完整度只看必填 5 项；临时工周末两项可选（真有临时工周末工时又没设，会在员工行上拦截）。
+        dto.Readiness.CategoryMappedCount = mappingByKey.Count(
+            pair => pair.Value is not null && MyobPayCategoryKeys.Required.Contains(pair.Key));
+        dto.Readiness.CategoryComplete = dto.Readiness.CategoryMappedCount == MyobPayCategoryKeys.Required.Length;
 
         // ① 发薪公司：本公司名下的员工 = 至少有一个上班分店在该周期由本公司发薪
         var workforce = await new MyobWorkforceLoader(_db).LoadAsync(start);
@@ -330,9 +332,11 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
 
         // 没有时薪记录：不知道转账 / 现金怎么分，不能规划
         var payMode = rate is null ? null : (PayrollCalculator.IsValidPayMode(rate.PayMode) ? rate.PayMode : PayrollCalculator.PayModeTransfer);
+        // 临时工（Casual）周末推到单独的 MYOB 类别；员工类型没填按全职 / 兼职处理。
+        var isCasual = string.Equals(profile?.EmploymentType, "Casual", StringComparison.OrdinalIgnoreCase);
         var plan = payMode is null
             ? null
-            : MyobTimesheetPlanner.Plan(payMode, rate!.FixedTransferHoursPerWeek, weeks, items);
+            : MyobTimesheetPlanner.Plan(payMode, rate!.FixedTransferHoursPerWeek, weeks, items, isCasual);
         if (payMode is null && items.Count > 0)
         {
             blockers.Add(new MyobPreviewBlockerDto { Code = MyobBlockerCodes.NoRate, Message = "本期没有生效的时薪记录，无法确定转账 / 现金分配" });
@@ -386,8 +390,11 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
                 : $"推送合计 {MyobTimesheetPlanner.Hours(pushedMinutes):0.00} h 与转账额度 {MyobTimesheetPlanner.Hours(mine.CapacityMinutes):0.00} h 对不上，请联系开发核对。";
 
             row.Pushed.Weekday = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.Weekday));
-            row.Pushed.Saturday = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.Saturday));
-            row.Pushed.Sunday = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.Sunday));
+            // 汇总列按「周六 / 周日」口径，全职 / 兼职与临时工两个类别合并；分开的数在日网格里。
+            row.Pushed.Saturday = MyobTimesheetPlanner.Hours(
+                SumMinutes(mine, MyobPayCategoryKeys.Saturday) + SumMinutes(mine, MyobPayCategoryKeys.SaturdayCasual));
+            row.Pushed.Sunday = MyobTimesheetPlanner.Hours(
+                SumMinutes(mine, MyobPayCategoryKeys.Sunday) + SumMinutes(mine, MyobPayCategoryKeys.SundayCasual));
             row.Pushed.PersonalLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.PersonalLeave));
             row.Pushed.HolidayLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.HolidayLeave));
             row.PushedTotal = MyobTimesheetPlanner.Hours(pushedMinutes);
@@ -703,6 +710,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         MyobPayCategoryKeys.Weekday => "平日",
         MyobPayCategoryKeys.Saturday => "周六",
         MyobPayCategoryKeys.Sunday => "周日",
+        MyobPayCategoryKeys.SaturdayCasual => "周六（临时工）",
+        MyobPayCategoryKeys.SundayCasual => "周日（临时工）",
         MyobPayCategoryKeys.PersonalLeave => "病假",
         _ => "年假",
     };

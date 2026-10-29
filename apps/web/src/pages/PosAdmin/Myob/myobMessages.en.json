@@ -425,11 +425,23 @@
         },
         "saturday": {
           "label": "Saturday",
+          "sub": "Full-time and part-time",
           "note": "The pay multiplier comes from the MYOB category; it must match our Saturday transfer rate"
         },
         "sunday": {
           "label": "Sunday",
+          "sub": "Full-time and part-time",
           "note": "The pay multiplier comes from the MYOB category; it must match our Sunday transfer rate"
+        },
+        "saturdayCasual": {
+          "label": "Saturday (casual)",
+          "sub": "Casual",
+          "note": "Casual staff use a separate MYOB category on Saturdays; leave it empty if the company has no casual Saturday hours, but a casual employee with such hours cannot be pushed until it is set"
+        },
+        "sundayCasual": {
+          "label": "Sunday (casual)",
+          "sub": "Casual",
+          "note": "Casual staff use a separate MYOB category on Sundays; leave it empty if the company has no casual Sunday hours, but a casual employee with such hours cannot be pushed until it is set"
         },
         "personalLeave": {
           "label": "Sick leave",
@@ -449,6 +461,7 @@
         "suggested": "Suggested by name",
         "suggestedHint": "Pre-filled, editable; takes effect only after saving",
         "unset": "Not set",
+        "optional": "Optional",
         "unsetHint": "No similarly named category found; choose one manually. These hours cannot be pushed until it is set",
         "missing": "Category gone",
         "missingHint": "This category no longer exists in MYOB; choose it again",
@@ -460,7 +473,7 @@
         "prereqLabel": "MYOB-side prerequisites",
         "prereq": " (confirmed by finance): turn on \"Use Timesheets to record payroll\" in payroll settings, align the week start day with ours, and attach the categories above to each employee's pay details."
       },
-      "remaining": "{{count}} still to choose; all 5 must be chosen before saving",
+      "remaining": "{{count}} required still to choose; all 5 required must be chosen before saving",
       "unsaved": "You have unsaved changes",
       "suggestionsUnsaved": "Suggested categories are not saved yet; click \"Save mapping\" once you have checked them",
       "cancel": "Cancel",
@@ -660,6 +673,8 @@
           "weekday": "Weekday",
           "saturday": "Saturday",
           "sunday": "Sunday",
+          "saturdayCasual": "Saturday (casual)",
+          "sundayCasual": "Sunday (casual)",
           "personalLeave": "Sick (Personal Leave Pay)",
           "holidayLeave": "Annual (Holiday Leave Pay)"
         }

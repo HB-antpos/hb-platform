@@ -173,11 +173,26 @@ assert.deepEqual(payCategories.mapping, {
   weekdayUid: 'u-base',
   saturdayUid: null,
   sundayUid: null,
+  saturdayCasualUid: null,
+  sundayCasualUid: null,
   personalLeaveUid: null,
   holidayLeaveUid: null,
 })
 assert.equal(payCategories.suggestions.saturdayUid, 'u-sat')
 assert.deepEqual(payCategories.missingKeys, ['weekday'], '未知的类别键丢弃')
+
+// 临时工周末两项：后端新字段原样读出；旧后端没有这两个字段时读成 null，不崩；没给 mappedCount 时只数必填项
+const casualCategories = normalizeMyobPayCategories({
+  mapping: { weekdayUid: 'a', saturdayUid: 'b', saturdayCasualUid: 'c', sundayCasualUid: 'd' },
+  suggestions: { sundayCasualUid: 'e' },
+  missingKeys: ['saturdayCasual', 'sundayCasual', 'bogus'],
+})
+assert.equal(casualCategories.mapping.saturdayCasualUid, 'c')
+assert.equal(casualCategories.mapping.sundayCasualUid, 'd')
+assert.equal(casualCategories.suggestions.sundayCasualUid, 'e')
+assert.deepEqual(casualCategories.missingKeys, ['saturdayCasual', 'sundayCasual'])
+assert.equal(casualCategories.mappedCount, 2, '缺 mappedCount 时只数必填项（weekday / saturday），临时工两项不计入')
+assert.equal(normalizeMyobPayCategories({ mapping: { weekdayUid: 'a' } }).mapping.saturdayCasualUid, null)
 assert.equal(payCategories.updatedAt, null)
 
 // 空 / 异常响应不崩，给安全默认
@@ -335,7 +350,10 @@ try {
   await getMyobPayCategories('c1', true)
   assert.ok(stage2Calls[1].url.includes('refresh=true'), stage2Calls[1].url)
 
-  const mapping = { weekdayUid: 'a', saturdayUid: 'b', sundayUid: 'c', personalLeaveUid: 'd', holidayLeaveUid: 'e' }
+  const mapping = {
+    weekdayUid: 'a', saturdayUid: 'b', sundayUid: 'c', saturdayCasualUid: 'f', sundayCasualUid: null,
+    personalLeaveUid: 'd', holidayLeaveUid: 'e',
+  }
   await saveMyobPayCategoryMapping('c 1/x', mapping)
   assert.equal(stage2Calls[2].method, 'PUT')
   assert.ok(stage2Calls[2].url.endsWith('/api/react/v1/myob/pay-categories/c%201%2Fx'), stage2Calls[2].url)

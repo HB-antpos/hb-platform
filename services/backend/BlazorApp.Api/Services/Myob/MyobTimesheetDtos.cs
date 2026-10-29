@@ -10,14 +10,23 @@ namespace BlazorApp.Api.Services.Myob;
 //   GET /api/react/v1/myob/timesheet/preview?connectionGuid=&periodStart=&checkMyob=   Attendance.Payroll.Edit → MyobTimesheetPreviewDto
 //        periodStart 省略 = 上一个已结束的工资周期；checkMyob=true 时才逐个员工去 MYOB 读 Timesheet 判断「已有记录 / 已发薪」（会产生 MYOB 读请求）。
 
-/// <summary>我方转账工时对应的 MYOB 工资类别（5 项）。</summary>
+/// <summary>我方转账工时对应的 MYOB 工资类别（5 项必填 + 2 项临时工周末可选）。</summary>
 public static class MyobPayCategoryKeys
 {
     /// <summary>平日（含公假上班、带薪公假）。</summary>
     public const string Weekday = "weekday";
 
+    /// <summary>周六（全职 / 兼职，两者同一个类别）。</summary>
     public const string Saturday = "saturday";
+
+    /// <summary>周日（全职 / 兼职，两者同一个类别）。</summary>
     public const string Sunday = "sunday";
+
+    /// <summary>临时工（Casual）的周六：与全职 / 兼职的周六是不同的 MYOB 类别。</summary>
+    public const string SaturdayCasual = "saturdayCasual";
+
+    /// <summary>临时工（Casual）的周日：与全职 / 兼职的周日是不同的 MYOB 类别。</summary>
+    public const string SundayCasual = "sundayCasual";
 
     /// <summary>病假 → MYOB 的 Personal Leave Pay。</summary>
     public const string PersonalLeave = "personalLeave";
@@ -25,7 +34,15 @@ public static class MyobPayCategoryKeys
     /// <summary>年假 → MYOB 的 Holiday Leave Pay。</summary>
     public const string HolidayLeave = "holidayLeave";
 
-    public static readonly string[] All = [Weekday, Saturday, Sunday, PersonalLeave, HolidayLeave];
+    /// <summary>全部 7 个键，顺序即预览里的行顺序。</summary>
+    public static readonly string[] All =
+        [Weekday, Saturday, Sunday, SaturdayCasual, SundayCasual, PersonalLeave, HolidayLeave];
+
+    /// <summary>
+    /// 必填的 5 项（「映射是否完整」只看这 5 项）。临时工的两项可选：
+    /// 公司里没有临时工周末工时就不用设；有了又没设，预览会用 CATEGORY_NOT_MAPPED 拦住该员工。
+    /// </summary>
+    public static readonly string[] Required = [Weekday, Saturday, Sunday, PersonalLeave, HolidayLeave];
 }
 
 /// <summary>MYOB 里的一个工资类别（Payroll/PayrollCategory/Wage）。</summary>
@@ -38,12 +55,23 @@ public sealed class MyobWageCategoryDto
     public string? WageType { get; set; }
 }
 
-/// <summary>5 项映射：每项是 MYOB 工资类别的 UID，null = 未设置。同一个结构用于「当前映射」「建议映射」与保存请求。</summary>
+/// <summary>映射：每项是 MYOB 工资类别的 UID，null = 未设置。同一个结构用于「当前映射」「建议映射」与保存请求。</summary>
 public sealed class MyobPayCategoryMappingDto
 {
     public string? WeekdayUid { get; set; }
+
+    /// <summary>全职 / 兼职的周六。</summary>
     public string? SaturdayUid { get; set; }
+
+    /// <summary>全职 / 兼职的周日。</summary>
     public string? SundayUid { get; set; }
+
+    /// <summary>临时工的周六（可选）。</summary>
+    public string? SaturdayCasualUid { get; set; }
+
+    /// <summary>临时工的周日（可选）。</summary>
+    public string? SundayCasualUid { get; set; }
+
     public string? PersonalLeaveUid { get; set; }
     public string? HolidayLeaveUid { get; set; }
 }
@@ -65,10 +93,10 @@ public sealed class MyobPayCategoriesDto
     /// <summary>按名称相近给出的建议（只对尚未设置的项给出；已设置的项为 null）。</summary>
     public MyobPayCategoryMappingDto Suggestions { get; set; } = new();
 
-    /// <summary>已设置的项数（0–5）。</summary>
+    /// <summary>已设置的必填项数（0–5；临时工的可选两项不计入）。</summary>
     public int MappedCount { get; set; }
 
-    /// <summary>5 项都已设置，且都还在 MYOB 的类别里。</summary>
+    /// <summary>5 项必填都已设置，且都还在 MYOB 的类别里。</summary>
     public bool Complete { get; set; }
 
     /// <summary>已保存的映射里，MYOB 现在已找不到的类别键（MyobPayCategoryKeys），需要重新选择。</summary>
@@ -182,7 +210,7 @@ public sealed class MyobPreviewReadinessDto
 
     public List<MyobUnlockedStoreDto> UnlockedStores { get; set; } = [];
 
-    /// <summary>工资类别已映射的项数（0–5）与是否完整。</summary>
+    /// <summary>工资类别已映射的必填项数（0–5）与是否完整。</summary>
     public int CategoryMappedCount { get; set; }
 
     public bool CategoryComplete { get; set; }
@@ -220,7 +248,10 @@ public sealed class MyobPreviewBlockerDto
     public string? Ref { get; set; }
 }
 
-/// <summary>要推送的转账工时，按 5 个 MYOB 类别汇总（小时，2 位小数）。</summary>
+/// <summary>
+/// 要推送的转账工时，按 5 个口径汇总（小时，2 位小数）。
+/// Saturday / Sunday 含全职 / 兼职与临时工两个 MYOB 类别的合计；要看分开的数在日网格 Detail.Pushed 里（行键 saturdayCasual / sundayCasual）。
+/// </summary>
 public sealed class MyobPushHoursDto
 {
     public decimal Weekday { get; set; }

@@ -611,11 +611,13 @@ function num(value: unknown, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-/** 5 个类别键与映射字段的对应；顺序即页面行的顺序。 */
+/** 类别键与映射字段的对应；顺序即页面行的顺序（临时工周末两项可选，不计入「已映射」必填项数）。 */
 const PAY_CATEGORY_FIELDS: ReadonlyArray<readonly [MyobPayCategoryKey, keyof MyobPayCategoryMapping]> = [
   ['weekday', 'weekdayUid'],
   ['saturday', 'saturdayUid'],
   ['sunday', 'sundayUid'],
+  ['saturdayCasual', 'saturdayCasualUid'],
+  ['sundayCasual', 'sundayCasualUid'],
   ['personalLeave', 'personalLeaveUid'],
   ['holidayLeave', 'holidayLeaveUid'],
 ]
@@ -626,6 +628,8 @@ export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMa
     weekdayUid: nullableText(item.weekdayUid),
     saturdayUid: nullableText(item.saturdayUid),
     sundayUid: nullableText(item.sundayUid),
+    saturdayCasualUid: nullableText(item.saturdayCasualUid),
+    sundayCasualUid: nullableText(item.sundayCasualUid),
     personalLeaveUid: nullableText(item.personalLeaveUid),
     holidayLeaveUid: nullableText(item.holidayLeaveUid),
   }
@@ -643,7 +647,10 @@ export function normalizeMyobPayCategories(payload: unknown): MyobPayCategories 
   const mapping = normalizeMyobPayCategoryMapping(data.mapping)
   const categories = list(data.categories, normalizeWageCategory)
   const knownKeys = new Set<string>(PAY_CATEGORY_FIELDS.map(([key]) => key))
-  const mappedCount = typeof data.mappedCount === 'number' ? Math.min(5, Math.max(0, int(data.mappedCount))) : PAY_CATEGORY_FIELDS.filter(([, field]) => mapping[field] !== null).length
+  const mappedCount =
+    typeof data.mappedCount === 'number'
+      ? Math.min(5, Math.max(0, int(data.mappedCount)))
+      : PAY_CATEGORY_FIELDS.filter(([key, field]) => key !== 'saturdayCasual' && key !== 'sundayCasual' && mapping[field] !== null).length
   return {
     connectionGuid: text(data.connectionGuid),
     connectionName: text(data.connectionName),
