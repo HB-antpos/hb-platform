@@ -1266,6 +1266,15 @@
   <data name="shell.cashierLogin.status.locked" xml:space="preserve">
     <value>已登出，请重新登录。</value>
   </data>
+  <data name="shell.cashierLogin.status.autoLogoutPending" xml:space="preserve">
+    <value>日结已完成，{0} 秒后自动登出。</value>
+  </data>
+  <data name="shell.cashierLogin.status.autoLoggedOut" xml:space="preserve">
+    <value>日结已完成，已自动登出。</value>
+  </data>
+  <data name="shell.cashierLogin.status.restartScheduled" xml:space="preserve">
+    <value>电脑将于 {0} 自动重启。</value>
+  </data>
   <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve">
     <value>如需用代金券付款，请先点「代金券」再扫券码。</value>
   </data>
@@ -2682,6 +2691,12 @@
   <data name="dailyClose.status.savedPrinted" xml:space="preserve">
     <value>日结已保存并打印。</value>
   </data>
+  <data name="dailyClose.status.restartScheduled" xml:space="preserve">
+    <value>这台电脑已连续运行较长时间，将于 {0} 自动重启。</value>
+  </data>
+  <data name="dailyClose.status.autoLogout" xml:space="preserve">
+    <value>收银员将在 {0} 秒后自动登出。</value>
+  </data>
   <data name="dailyClose.status.savedPrintFailed" xml:space="preserve">
     <value>日结已保存，但打印失败：{0}</value>
   </data>
@@ -4056,16 +4071,16 @@
     <value>知道了</value>
   </data>
   <data name="settings.restartPrompt.title" xml:space="preserve">
-    <value>重启提醒</value>
+    <value>凌晨自动重启</value>
   </data>
   <data name="settings.restartPrompt.description" xml:space="preserve">
-    <value>日结完成后，如果这台收银机已连续运行 7 天以上，提醒重启。</value>
+    <value>日结完成后，如果这台收银机已连续运行 7 天以上，会在凌晨（默认 3:00）自动重启电脑。</value>
   </data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve">
-    <value>日结后提醒重启</value>
+    <value>日结后凌晨自动重启</value>
   </data>
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
-    <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
+    <value>重启前有 30 秒可取消的倒计时；有未完成的销售、付款或刷卡任务就不重启。不需要管理员权限、不弹 UAC，仅保存在本机。</value>
   </data>
   <data name="settings.scanner.title" xml:space="preserve">
     <value>扫码枪灵敏度</value>

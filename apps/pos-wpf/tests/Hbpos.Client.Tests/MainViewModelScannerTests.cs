@@ -244,6 +244,45 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Daily_close_auto_logout_signs_the_cashier_out_after_the_delay()
+    {
+        var context = new CashierSessionContext();
+        context.SetCurrent(new CashierSessionDto(
+            "1042", "guid-1042", "Alice", "S001", "POS-01", [], [], ["S001"], false, false, false));
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cashierSessionContext: context);
+        var now = DateTimeOffset.Parse("2026-10-29T11:00:00Z");
+        DateTimeOffset restartAt = new DateTime(2026, 10, 30, 3, 0, 0, DateTimeKind.Local);
+
+        var delay = viewModel.ScheduleAutoLogoutAfterDailyClose(restartAt, now);
+
+        Assert.Equal(TimeSpan.FromSeconds(30), delay);
+        Assert.Equal("Daily close done. Signing out automatically in 30 seconds.", viewModel.StatusMessage);
+
+        await viewModel.AutoLogoutAfterDailyCloseIfDueAsync(now.AddSeconds(10));
+        Assert.NotNull(context.CurrentSession);
+
+        await viewModel.AutoLogoutAfterDailyCloseIfDueAsync(now.AddSeconds(30));
+        Assert.Null(context.CurrentSession);
+        Assert.Null(viewModel.Session.CashierSession);
+        Assert.Equal(string.Empty, viewModel.Session.CashierId);
+        Assert.Equal(
+            "Daily close done. Signed out automatically. The computer will restart automatically at 03:00.",
+            viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public void Daily_close_auto_logout_is_not_scheduled_without_a_cashier()
+    {
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cashierSessionContext: new CashierSessionContext());
+
+        Assert.Null(viewModel.ScheduleAutoLogoutAfterDailyClose(null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public void Active_page_title_defaults_to_pos_before_startup_navigation()
     {
         var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService());

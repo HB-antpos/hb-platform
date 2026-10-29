@@ -3,14 +3,16 @@ using Microsoft.Extensions.Configuration;
 namespace Hbpos.Client.Wpf.Services;
 
 /// <summary>
-/// 「日结后提示重启收银机」的数值参数。全部来自 appsettings 的 <c>Maintenance:RestartPrompt:*</c>，不做界面输入；
-/// 非法或越界的值一律回落到默认值，避免配置写错导致永远不提示或倒计时变成 0。
+/// 「日结后凌晨自动重启收银机」的数值参数。全部来自 appsettings 的 <c>Maintenance:RestartPrompt:*</c>，不做界面输入；
+/// 非法或越界的值一律回落到默认值，避免配置写错导致永远不重启或倒计时变成 0。
 /// </summary>
 public sealed record SystemRestartOptions(
     int UptimeThresholdDays,
     int CountdownSeconds,
     int UploadWaitSeconds,
-    int SystemShutdownDelaySeconds)
+    int SystemShutdownDelaySeconds,
+    int OvernightRestartHour = SystemRestartOptions.DefaultOvernightRestartHour,
+    int OvernightWindowMinutes = SystemRestartOptions.DefaultOvernightWindowMinutes)
 {
     public const int DefaultUptimeThresholdDays = 7;
     public const int DefaultCountdownSeconds = 30;
@@ -19,6 +21,11 @@ public sealed record SystemRestartOptions(
     // 中文注释：交给 shutdown.exe 的 /t 秒数。应用已先完成收尾再调命令，这 15 秒只是应用退出的缓冲，
     // 同时也是「应用退出卡住时系统仍会重启」的兜底。
     public const int DefaultSystemShutdownDelaySeconds = 15;
+
+    // 中文注释：日结后排到本地时间凌晨几点重启，以及从这个时间起多长时间内仍可执行；
+    // 过了窗口（例如整晚关机、POS 没开）就作废，绝不会拖到第二天营业时间才突然重启。
+    public const int DefaultOvernightRestartHour = 3;
+    public const int DefaultOvernightWindowMinutes = 120;
 
     public const string SectionName = "Maintenance:RestartPrompt";
 
@@ -31,6 +38,9 @@ public sealed record SystemRestartOptions(
     /// <summary>开机时长阈值。</summary>
     public TimeSpan UptimeThreshold => TimeSpan.FromDays(UptimeThresholdDays);
 
+    /// <summary>凌晨重启的可执行窗口长度（从排定时间算起）。</summary>
+    public TimeSpan OvernightWindow => TimeSpan.FromMinutes(OvernightWindowMinutes);
+
     public static SystemRestartOptions FromConfiguration(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -38,7 +48,9 @@ public sealed record SystemRestartOptions(
             ReadInt(configuration, "UptimeDays", DefaultUptimeThresholdDays, min: 1, max: 365),
             ReadInt(configuration, "CountdownSeconds", DefaultCountdownSeconds, min: 5, max: 300),
             ReadInt(configuration, "UploadWaitSeconds", DefaultUploadWaitSeconds, min: 0, max: 300),
-            ReadInt(configuration, "SystemShutdownDelaySeconds", DefaultSystemShutdownDelaySeconds, min: 5, max: 120));
+            ReadInt(configuration, "SystemShutdownDelaySeconds", DefaultSystemShutdownDelaySeconds, min: 5, max: 120),
+            ReadInt(configuration, "OvernightHour", DefaultOvernightRestartHour, min: 0, max: 6),
+            ReadInt(configuration, "OvernightWindowMinutes", DefaultOvernightWindowMinutes, min: 15, max: 360));
     }
 
     private static int ReadInt(IConfiguration configuration, string name, int fallback, int min, int max)

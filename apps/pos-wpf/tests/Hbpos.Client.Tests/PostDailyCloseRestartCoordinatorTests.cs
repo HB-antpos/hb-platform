@@ -5,103 +5,156 @@ using Microsoft.Extensions.Time.Testing;
 
 namespace Hbpos.Client.Tests;
 
-/// <summary>日结后重启协调器的完整流程：触发条件、阻止、稍后、倒计时取消、成功与失败，全部用虚拟时间与假界面驱动。</summary>
+/// <summary>
+/// 日结后凌晨自动重启协调器的完整流程：日结后排定（不弹窗）、凌晨到点无人值守执行（阻止、窗口作废、倒计时取消、成功与失败），
+/// 以及设置页测试入口；全部用虚拟时间（本地时区固定为 UTC）与假界面驱动。
+/// </summary>
 public sealed class PostDailyCloseRestartCoordinatorTests
 {
     private static readonly DateTime BusinessDate = new(2026, 10, 15);
 
+    // 默认「现在」是 2026-10-15 08:00（本地 = UTC），下一个凌晨 3 点是 10-16 03:00。
+    private static readonly DateTimeOffset NextNight = new(2026, 10, 16, 3, 0, 0, TimeSpan.Zero);
+
+    // ---------- 日结后排定 ----------
+
     [Fact]
-    public async Task Not_due_when_prompt_is_disabled()
+    public async Task Not_scheduled_when_switch_is_disabled()
     {
         var harness = new Harness();
         await harness.Store.SetPromptEnabledAsync(false);
 
-        var outcome = await harness.RunAsync();
-
-        Assert.Equal(RestartFlowOutcome.NotDue, outcome);
-        Assert.Equal(0, harness.Ui.PromptShown);
+        Assert.Null(await harness.ScheduleAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
     }
 
     [Fact]
-    public async Task Not_due_when_uptime_is_below_threshold()
+    public async Task Not_scheduled_when_uptime_is_below_threshold()
     {
         var harness = new Harness { UptimeSeconds = (long)TimeSpan.FromDays(6.9).TotalSeconds };
 
-        var outcome = await harness.RunAsync();
-
-        Assert.Equal(RestartFlowOutcome.NotDue, outcome);
-        Assert.Equal(0, harness.Ui.PromptShown);
+        Assert.Null(await harness.ScheduleAsync());
         Assert.Empty(harness.Audit.Events);
     }
 
     [Fact]
-    public async Task Not_due_when_uptime_is_unknown()
+    public async Task Not_scheduled_when_uptime_is_unknown()
     {
         var harness = new Harness { UptimeSeconds = null };
 
-        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunAsync());
+        Assert.Null(await harness.ScheduleAsync());
     }
 
     [Fact]
-    public async Task Prompts_once_per_business_date_even_after_later()
+    public async Task Schedules_next_overnight_restart_without_any_prompt()
     {
         var harness = new Harness();
-        harness.Ui.PromptChoice = RestartPromptChoice.Later;
 
-        Assert.Equal(RestartFlowOutcome.Later, await harness.RunAsync());
-        // 同一营业日再次日结（例如补做）不再提示。
-        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunAsync());
-        // 下一个营业日会再提示。
-        Assert.Equal(RestartFlowOutcome.Later, await harness.RunAsync(BusinessDate.AddDays(1)));
+        var restartAt = await harness.ScheduleAsync();
 
-        Assert.Equal(2, harness.Ui.PromptShown);
+        Assert.Equal(NextNight, restartAt);
+        Assert.Equal(NextNight, await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(0, harness.Ui.PromptShown);
+        Assert.Equal(0, harness.Ui.CountdownShown);
+        Assert.Equal(0, harness.Checker.CheckCalls);
         Assert.Equal(0, harness.Restart.Calls);
-    }
-
-    [Fact]
-    public async Task Later_records_skipped_audit_and_does_not_restart()
-    {
-        var harness = new Harness();
-        harness.Ui.PromptChoice = RestartPromptChoice.Later;
-
-        await harness.RunAsync();
-
         var audit = Assert.Single(harness.Audit.Events);
         Assert.Equal("SYSTEM_RESTART", audit.OperationType);
         Assert.Equal("Skipped", audit.Outcome);
-        Assert.Equal("PROMPT_LATER", audit.ReasonCode);
+        Assert.Equal("OVERNIGHT_SCHEDULED", audit.ReasonCode);
         Assert.Contains("uptimeDays=9.0", audit.SafeMessage);
-        Assert.Equal(0, harness.Exit.Calls);
-        Assert.True(harness.Ui.Hidden > 0);
+        Assert.Contains("restartAt=2026-10-16T03:00", audit.SafeMessage);
     }
 
     [Fact]
-    public async Task Hard_issue_before_prompt_blocks_silently_and_keeps_the_day_open_for_next_close()
+    public async Task Daily_close_after_midnight_schedules_the_same_night()
     {
-        var harness = new Harness();
-        harness.Checker.Report = Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 2));
+        var harness = new Harness(new DateTimeOffset(2026, 10, 16, 1, 30, 0, TimeSpan.Zero));
 
-        var outcome = await harness.RunAsync();
-
-        Assert.Equal(RestartFlowOutcome.Blocked, outcome);
-        Assert.Equal(0, harness.Ui.PromptShown);
-        var audit = Assert.Single(harness.Audit.Events);
-        Assert.Equal("Skipped", audit.Outcome);
-        Assert.Equal("BLOCKED_CART", audit.ReasonCode);
-        // 没弹窗就不占用当天的提示名额。
-        Assert.Null(await harness.Store.GetLastPromptBusinessDateAsync());
+        Assert.Equal(NextNight, await harness.ScheduleAsync());
     }
 
     [Fact]
-    public async Task Confirmed_flow_runs_countdown_flushes_checkpoints_and_restarts()
+    public async Task Daily_close_inside_the_window_is_due_right_away()
+    {
+        var now = new DateTimeOffset(2026, 10, 16, 3, 40, 0, TimeSpan.Zero);
+        var harness = new Harness(now);
+
+        Assert.Equal(now, await harness.ScheduleAsync());
+    }
+
+    [Fact]
+    public async Task Same_business_date_keeps_the_original_schedule()
     {
         var harness = new Harness();
-        harness.Ui.PromptChoice = RestartPromptChoice.RestartNow;
+
+        Assert.Equal(NextNight, await harness.ScheduleAsync());
+        // 同一营业日补做日结：沿用原时间、不重复审计。
+        Assert.Equal(NextNight, await harness.ScheduleAsync());
+        Assert.Single(harness.Audit.Events);
+    }
+
+    [Fact]
+    public async Task Schedule_errors_are_swallowed_and_never_reach_the_daily_close_flow()
+    {
+        var harness = new Harness();
+        harness.Settings.Exception = new InvalidOperationException("db locked");
+
+        Assert.Null(await harness.ScheduleAsync());
+    }
+
+    [Fact]
+    public void Overnight_time_skips_a_daylight_saving_gap()
+    {
+        // 自定义时区：10-04 03:00 起跳到 04:00（03:00 不存在）。
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+            new DateTime(2026, 1, 1),
+            new DateTime(2026, 12, 31),
+            TimeSpan.FromHours(1),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 3, 0, 0), 10, 4),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 3, 0, 0), 4, 5));
+        var zone = TimeZoneInfo.CreateCustomTimeZone("Test DST", TimeSpan.FromHours(10), "Test DST", "Test", "Test DST", [rule]);
+        var localNow = new DateTimeOffset(2026, 10, 3, 22, 0, 0, TimeSpan.FromHours(10));
+
+        var restartAt = PostDailyCloseRestartCoordinator.ComputeOvernightRestartAt(localNow, zone, SystemRestartOptions.Default);
+
+        Assert.Equal(new DateTimeOffset(2026, 10, 4, 4, 0, 0, TimeSpan.FromHours(11)), restartAt);
+    }
+
+    // ---------- 凌晨到点无人值守执行 ----------
+
+    [Fact]
+    public async Task Overnight_check_is_not_due_without_a_schedule()
+    {
+        var harness = new Harness();
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Equal(0, harness.Checker.CheckCalls);
+    }
+
+    [Fact]
+    public async Task Overnight_check_is_not_due_before_the_scheduled_time()
+    {
+        var harness = new Harness();
+        await harness.ScheduleAsync();
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Equal(0, harness.Ui.CountdownShown);
+        Assert.Equal(NextNight, await harness.Store.GetScheduledRestartAtAsync());
+    }
+
+    [Fact]
+    public async Task Due_restart_runs_countdown_flushes_checkpoints_and_restarts_unattended()
+    {
+        var harness = new Harness();
+        await harness.SetDueAsync();
         harness.Checker.Flush = new RestartUploadFlushResult(0, false, TimeSpan.FromSeconds(2));
 
-        var outcome = await harness.RunWithClockAsync();
+        var outcome = await harness.RunOvernightWithClockAsync();
 
         Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        Assert.Equal(0, harness.Ui.PromptShown);
+        Assert.Equal(0, harness.Ui.BlockedShown);
         Assert.Equal(1, harness.Ui.CountdownShown);
         Assert.Equal(30, harness.Ui.CountdownTotal);
         Assert.Equal(0, harness.Ui.LastRemaining);
@@ -111,6 +164,7 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         Assert.Equal(1, harness.Restart.Calls);
         Assert.Equal(TimeSpan.FromSeconds(15), harness.Restart.LastDelay);
         Assert.Equal(1, harness.Exit.Calls);
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
 
         var audit = Assert.Single(harness.Audit.Events);
         Assert.Equal("Succeeded", audit.Outcome);
@@ -119,105 +173,111 @@ public sealed class PostDailyCloseRestartCoordinatorTests
     }
 
     [Fact]
-    public async Task Restart_now_button_skips_remaining_countdown_but_still_rechecks()
+    public async Task Hard_issue_keeps_the_schedule_shows_no_ui_and_audits_once_then_restarts_when_clear()
     {
         var harness = new Harness();
-        harness.Ui.CountdownAction = RestartCountdownAction.RestartNow;
+        await harness.SetDueAsync();
+        harness.Checker.Report = Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 2));
 
-        var outcome = await harness.RunWithClockAsync();
+        Assert.Equal(RestartFlowOutcome.Blocked, await harness.RunOvernightAsync());
+        Assert.Equal(RestartFlowOutcome.Blocked, await harness.RunOvernightAsync());
 
-        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
-        // 点「立即重启」仍要过最后一次检查：预检 + 闸门 + 最终检查至少 3 次。
-        Assert.True(harness.Checker.CheckCalls >= 3);
-    }
-
-    [Fact]
-    public async Task Cancelling_countdown_stops_restart_and_records_audit()
-    {
-        var harness = new Harness();
-        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
-
-        var outcome = await harness.RunWithClockAsync();
-
-        Assert.Equal(RestartFlowOutcome.Cancelled, outcome);
+        Assert.Equal(0, harness.Ui.BlockedShown);       // 无人值守：不弹阻止界面
+        Assert.Equal(0, harness.Ui.CountdownShown);
         Assert.Equal(0, harness.Restart.Calls);
-        Assert.Equal(0, harness.Exit.Calls);
-        Assert.Equal(0, harness.Checkpoint.Calls);
-        var audit = Assert.Single(harness.Audit.Events);
-        Assert.Equal("COUNTDOWN_CANCELLED", audit.ReasonCode);
-        Assert.Equal("Skipped", audit.Outcome);
-    }
+        Assert.NotNull(await harness.Store.GetScheduledRestartAtAsync());
+        var audit = Assert.Single(harness.Audit.Events); // 同一原因只记一次
+        Assert.Equal("BLOCKED_CART", audit.ReasonCode);
+        Assert.Contains("overnight=true", audit.SafeMessage);
 
-    [Fact]
-    public async Task Hard_issue_after_confirm_shows_blocked_and_dismiss_ends_without_restart()
-    {
-        var harness = new Harness();
-        harness.Checker.Sequence.Enqueue(RestartSafetyReport.Safe);                              // 预检
-        harness.Checker.Sequence.Enqueue(Report(Hard(RestartSafetyIssueCode.PaymentActive)));    // 闸门
-        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.Dismiss);
-
-        var outcome = await harness.RunWithClockAsync();
-
-        Assert.Equal(RestartFlowOutcome.Blocked, outcome);
-        Assert.Equal(1, harness.Ui.BlockedShown);
-        Assert.Equal(0, harness.Restart.Calls);
-        Assert.Contains(harness.Audit.Events, e => e.ReasonCode == "BLOCKED_PAYMENT" && e.Outcome == "Skipped");
-    }
-
-    [Fact]
-    public async Task Blocked_then_recheck_proceeds_once_the_problem_is_fixed()
-    {
-        var harness = new Harness();
-        harness.Checker.Sequence.Enqueue(RestartSafetyReport.Safe);                              // 预检
-        harness.Checker.Sequence.Enqueue(Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 1)));  // 闸门：被拦
-        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.Recheck);                         // 之后默认安全
-
-        var outcome = await harness.RunWithClockAsync();
-
-        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
-        Assert.Equal(1, harness.Ui.BlockedShown);
+        harness.Checker.Report = RestartSafetyReport.Safe;
+        Assert.Equal(RestartFlowOutcome.Initiated, await harness.RunOvernightWithClockAsync());
         Assert.Equal(1, harness.Restart.Calls);
     }
 
     [Fact]
-    public async Task Blocked_go_to_pos_is_reported_to_the_caller()
+    public async Task Missed_window_clears_the_schedule_and_never_restarts_during_business_hours()
     {
         var harness = new Harness();
-        harness.Checker.Sequence.Enqueue(RestartSafetyReport.Safe);
-        harness.Checker.Sequence.Enqueue(Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 1)));
-        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.GoToPos);
+        await harness.Store.SetScheduledRestartAtAsync(harness.Now - TimeSpan.FromHours(3));
 
-        Assert.Equal(RestartFlowOutcome.GoToPos, await harness.RunWithClockAsync());
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(0, harness.Checker.CheckCalls);
+        Assert.Equal(0, harness.Restart.Calls);
+        Assert.Equal("OVERNIGHT_WINDOW_MISSED", Assert.Single(harness.Audit.Events).ReasonCode);
+    }
+
+    [Fact]
+    public async Task Turning_the_switch_off_after_scheduling_cancels_the_restart()
+    {
+        var harness = new Harness();
+        await harness.SetDueAsync();
+        await harness.Store.SetPromptEnabledAsync(false);
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
         Assert.Equal(0, harness.Restart.Calls);
     }
 
     [Fact]
-    public async Task Becoming_unsafe_at_the_final_check_never_restarts()
+    public async Task Computer_already_restarted_since_scheduling_cancels_the_restart()
     {
         var harness = new Harness();
-        // 预检、闸门通过；倒计时中途每 5 秒复查通过；最后一次检查才出问题（模拟最后一刻有新状态）。
-        harness.Checker.UnsafeAfterCalls = 2 + 6; // 2 次前置 + 6 次倒计时复查（5/10/…/30 秒）之后
-        harness.Checker.UnsafeForCalls = 2;       // 最终检查与回到闸门的重新检查都不安全
-        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.Dismiss);
+        await harness.SetDueAsync();
+        harness.UptimeSeconds = 3600;
 
-        var outcome = await harness.RunWithClockAsync();
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(0, harness.Restart.Calls);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_overnight_countdown_drops_tonights_restart()
+    {
+        var harness = new Harness();
+        await harness.SetDueAsync();
+        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
+
+        var outcome = await harness.RunOvernightWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Cancelled, outcome);
+        Assert.Equal(0, harness.Restart.Calls);
+        Assert.Equal(0, harness.Checkpoint.Calls);
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        var audit = Assert.Single(harness.Audit.Events);
+        Assert.Equal("COUNTDOWN_CANCELLED", audit.ReasonCode);
+        Assert.Contains("overnight=true", audit.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Becoming_unsafe_during_the_countdown_hides_it_and_keeps_the_schedule()
+    {
+        var harness = new Harness();
+        await harness.SetDueAsync();
+        harness.Checker.UnsafeAfterCalls = 1; // 第一次检查通过，倒计时中的复查出问题
+
+        var outcome = await harness.RunOvernightWithClockAsync();
 
         Assert.Equal(RestartFlowOutcome.Blocked, outcome);
         Assert.Equal(0, harness.Restart.Calls);
-        Assert.Equal(0, harness.Exit.Calls);
+        Assert.Equal(0, harness.Ui.BlockedShown);
+        Assert.True(harness.Ui.Hidden > 0);
+        Assert.NotNull(await harness.Store.GetScheduledRestartAtAsync());
     }
 
     [Fact]
     public async Task Pending_uploads_after_wait_still_proceed_and_are_audited()
     {
         var harness = new Harness();
+        await harness.SetDueAsync();
         harness.Checker.Flush = new RestartUploadFlushResult(3, true, TimeSpan.FromSeconds(30));
 
-        var outcome = await harness.RunWithClockAsync();
+        var outcome = await harness.RunOvernightWithClockAsync();
 
         Assert.Equal(RestartFlowOutcome.Initiated, outcome);
         var audit = Assert.Single(harness.Audit.Events);
-        Assert.Equal("Succeeded", audit.Outcome);
         Assert.Equal("UPLOAD_PENDING_PROCEEDED", audit.ReasonCode);
         Assert.Contains("uploadRemaining=3", audit.SafeMessage);
     }
@@ -226,51 +286,50 @@ public sealed class PostDailyCloseRestartCoordinatorTests
     public async Task Checkpoint_failure_does_not_stop_the_restart()
     {
         var harness = new Harness();
+        await harness.SetDueAsync();
         harness.Checkpoint.Exception = new InvalidOperationException("locked");
 
-        var outcome = await harness.RunWithClockAsync();
-
-        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        Assert.Equal(RestartFlowOutcome.Initiated, await harness.RunOvernightWithClockAsync());
         Assert.Equal(1, harness.Restart.Calls);
     }
 
     [Fact]
-    public async Task Command_failure_shows_failure_audits_failed_and_keeps_pos_running()
+    public async Task Command_failure_shows_failure_clears_schedule_and_keeps_pos_running()
     {
         var harness = new Harness();
+        await harness.SetDueAsync();
         harness.Restart.Result = new SystemRestartResult(SystemRestartStatus.Failed, 5, "Access is denied.");
 
-        var outcome = await harness.RunWithClockAsync();
+        var outcome = await harness.RunOvernightWithClockAsync();
 
         Assert.Equal(RestartFlowOutcome.Failed, outcome);
         Assert.Equal(0, harness.Exit.Calls);
         var failure = Assert.Single(harness.Ui.Failures);
         Assert.Equal(5, failure.ExitCode);
         Assert.StartsWith("RB-20261015-", failure.ReferenceCode);
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync()); // 不在本窗口内反复尝试
         var audit = Assert.Single(harness.Audit.Events);
         Assert.Equal("Failed", audit.Outcome);
         Assert.Equal("COMMAND_FAILED", audit.ReasonCode);
-        Assert.Contains("exitCode=5", audit.SafeMessage);
     }
 
     [Fact]
-    public async Task Internal_errors_are_swallowed_and_never_reach_the_daily_close_flow()
+    public async Task Overnight_internal_errors_are_swallowed()
     {
         var harness = new Harness();
+        await harness.SetDueAsync();
         harness.Checker.Exception = new InvalidOperationException("kaboom");
 
-        var outcome = await harness.RunAsync();
-
-        Assert.Equal(RestartFlowOutcome.Failed, outcome);
+        Assert.Equal(RestartFlowOutcome.Failed, await harness.RunOvernightAsync());
         Assert.Equal(0, harness.Restart.Calls);
     }
 
     // ---------- 设置页「重启电脑」测试入口 ----------
 
     [Fact]
-    public async Task Test_run_ignores_switch_uptime_and_daily_limit_and_skips_the_prompt()
+    public async Task Test_run_ignores_switch_uptime_and_schedule_and_skips_the_prompt()
     {
-        // 开关关、开机才 1 小时、今天已提示过：测试入口都不受影响。
+        // 开关关、开机才 1 小时、今天已排过：测试入口都不受影响。
         var harness = new Harness { UptimeSeconds = 3600 };
         await harness.Store.SetPromptEnabledAsync(false);
         await harness.Store.MarkPromptedAsync(DateOnly.FromDateTime(BusinessDate));
@@ -278,7 +337,7 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         var outcome = await harness.RunTestWithClockAsync();
 
         Assert.Equal(RestartFlowOutcome.Initiated, outcome);
-        Assert.Equal(0, harness.Ui.PromptShown);          // 不再弹「建议重启」
+        Assert.Equal(0, harness.Ui.PromptShown);          // 不弹「建议重启」
         Assert.Equal(1, harness.Ui.CountdownShown);       // 仍有可取消倒计时
         Assert.Equal(1, harness.Restart.Calls);
         Assert.Equal(1, harness.Exit.Calls);
@@ -288,7 +347,7 @@ public sealed class PostDailyCloseRestartCoordinatorTests
     }
 
     [Fact]
-    public async Task Test_run_does_not_consume_the_business_day_prompt_quota()
+    public async Task Test_run_does_not_consume_the_business_day_schedule_quota()
     {
         var harness = new Harness();
         harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
@@ -296,6 +355,7 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         await harness.RunTestWithClockAsync();
 
         Assert.Null(await harness.Store.GetLastPromptBusinessDateAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
     }
 
     [Fact]
@@ -313,6 +373,49 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         var audit = Assert.Single(harness.Audit.Events);
         Assert.Equal("BLOCKED_CART", audit.ReasonCode);
         Assert.Contains("test=true", audit.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Test_run_blocked_then_recheck_proceeds_once_the_problem_is_fixed()
+    {
+        var harness = new Harness();
+        harness.Checker.Sequence.Enqueue(Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 1)));  // 闸门：被拦
+        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.Recheck);                         // 之后默认安全
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        Assert.Equal(1, harness.Ui.BlockedShown);
+        Assert.Equal(1, harness.Restart.Calls);
+    }
+
+    [Fact]
+    public async Task Test_run_restart_now_button_skips_remaining_countdown_but_still_rechecks()
+    {
+        var harness = new Harness();
+        harness.Ui.CountdownAction = RestartCountdownAction.RestartNow;
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        // 点「立即重启」仍要过最后一次检查：闸门 + 最终检查至少 2 次。
+        Assert.True(harness.Checker.CheckCalls >= 2);
+    }
+
+    [Fact]
+    public async Task Test_run_becoming_unsafe_at_the_final_check_never_restarts()
+    {
+        var harness = new Harness();
+        // 闸门通过；倒计时中途每 5 秒复查通过；最后一次检查才出问题（模拟最后一刻有新状态）。
+        harness.Checker.UnsafeAfterCalls = 1 + 6; // 1 次闸门 + 6 次倒计时复查（5/10/…/30 秒）之后
+        harness.Checker.UnsafeForCalls = 2;       // 最终检查与回到闸门的重新检查都不安全
+        harness.Ui.BlockedChoices.Enqueue(RestartBlockedChoice.Dismiss);
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Blocked, outcome);
+        Assert.Equal(0, harness.Restart.Calls);
+        Assert.Equal(0, harness.Exit.Calls);
     }
 
     [Fact]
@@ -353,11 +456,24 @@ public sealed class PostDailyCloseRestartCoordinatorTests
 
     private sealed class Harness
     {
-        private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 15, 8, 0, 0, TimeSpan.Zero));
+        private readonly FakeTimeProvider _time;
+        private PostDailyCloseRestartCoordinator? _coordinator;
+
+        public Harness(DateTimeOffset? now = null)
+        {
+            _time = new FakeTimeProvider(now ?? new DateTimeOffset(2026, 10, 15, 8, 0, 0, TimeSpan.Zero));
+            // 本地时区固定为 UTC，凌晨重启时间与机器所在时区无关。
+            _time.SetLocalTimeZone(TimeZoneInfo.Utc);
+            Store = new SystemRestartSettingsStore(Settings);
+        }
 
         public long? UptimeSeconds { get; set; } = (long)TimeSpan.FromDays(9).TotalSeconds;
 
-        public SystemRestartSettingsStore Store { get; } = new(new InMemorySettings());
+        public DateTimeOffset Now => _time.GetUtcNow();
+
+        public InMemorySettings Settings { get; } = new();
+
+        public SystemRestartSettingsStore Store { get; }
 
         public FakeChecker Checker { get; } = new();
 
@@ -371,25 +487,31 @@ public sealed class PostDailyCloseRestartCoordinatorTests
 
         public FakeAudit Audit { get; } = new();
 
-        public Task<RestartFlowOutcome> RunAsync(DateTime? businessDate = null) => CreateCoordinator()
-            .RunAsync(Session(), businessDate ?? BusinessDate);
+        public Task<DateTimeOffset?> ScheduleAsync(DateTime? businessDate = null) => Coordinator
+            .ScheduleAfterDailyCloseAsync(Session(), businessDate ?? BusinessDate);
+
+        /// <summary>模拟日结后已排定、且刚好到点（1 分钟前）。</summary>
+        public Task SetDueAsync() => Store.SetScheduledRestartAtAsync(Now - TimeSpan.FromMinutes(1));
+
+        public Task<RestartFlowOutcome> RunOvernightAsync() => Coordinator.RunScheduledIfDueAsync(Session());
+
+        public async Task<RestartFlowOutcome> RunOvernightWithClockAsync()
+        {
+            var task = Coordinator.RunScheduledIfDueAsync(Session());
+            await SystemRestartFoundationTests.AdvanceUntilCompletedAsync(task, _time);
+            return await task;
+        }
 
         public async Task<RestartFlowOutcome> RunTestWithClockAsync()
         {
-            var task = CreateCoordinator().RunTestAsync(Session());
+            var task = Coordinator.RunTestAsync(Session());
             await SystemRestartFoundationTests.AdvanceUntilCompletedAsync(task, _time);
             return await task;
         }
 
-        public async Task<RestartFlowOutcome> RunWithClockAsync()
-        {
-            var task = CreateCoordinator().RunAsync(Session(), BusinessDate);
-            await SystemRestartFoundationTests.AdvanceUntilCompletedAsync(task, _time);
-            return await task;
-        }
-
-        private PostDailyCloseRestartCoordinator CreateCoordinator() => new(
-            new FakeSampler(UptimeSeconds),
+        // 同一个实例贯穿整个测试：生产里协调器是单例（「同一原因只审计一次」依赖它）。
+        private PostDailyCloseRestartCoordinator Coordinator => _coordinator ??= new(
+            new FakeSampler(() => UptimeSeconds),
             Store,
             Checker,
             Restart,
@@ -404,9 +526,9 @@ public sealed class PostDailyCloseRestartCoordinatorTests
             new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
     }
 
-    private sealed class FakeSampler(long? uptimeSeconds) : IRuntimeResourceSampler
+    private sealed class FakeSampler(Func<long?> uptimeSeconds) : IRuntimeResourceSampler
     {
-        public RuntimeResourceSnapshot Capture() => new(uptimeSeconds, null, null);
+        public RuntimeResourceSnapshot Capture() => new(uptimeSeconds(), null, null);
     }
 
     private sealed class FakeChecker : IRestartSafetyChecker
@@ -575,8 +697,13 @@ public sealed class PostDailyCloseRestartCoordinatorTests
     {
         private readonly Dictionary<string, string> _values = [];
 
+        /// <summary>设置后读取会失败（模拟本地库被锁）。</summary>
+        public Exception? Exception { get; set; }
+
         public Task<string?> GetValueAsync(string key, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
+            Exception is not null
+                ? Task.FromException<string?>(Exception)
+                : Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
 
         public Task SetValueAsync(string key, string value, CancellationToken cancellationToken = default)
         {
