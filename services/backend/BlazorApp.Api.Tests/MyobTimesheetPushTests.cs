@@ -909,6 +909,34 @@ public sealed class MyobTimesheetPushTests : IDisposable
         Assert.Empty(_myob.PutCalls);
     }
 
+    [Fact]
+    public void compose_必须把总闸与白名单映射进容器_默认关闭_否则服务器env里写了也传不进去()
+    {
+        // compose 没有 env_file，只有显式映射的变量才会进容器；这两项漏了，灰度那一步就没法从 .env 打开 / 关闭。
+        var compose = File.ReadAllText(Path.Combine(FindRepoRoot(), "services/backend/docker-compose.yml"));
+
+        Assert.Contains("Myob__TimesheetPushEnabled=${MYOB_TIMESHEET_PUSH_ENABLED:-false}", compose, StringComparison.Ordinal);
+        Assert.Contains("Myob__TimesheetPushConnectionGuids=${MYOB_TIMESHEET_PUSH_CONNECTION_GUIDS:-}", compose, StringComparison.Ordinal);
+        // 探针的两项配置已随探针删除，不能再留在 compose 里。
+        Assert.DoesNotContain("WriteProbe", compose, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "services/backend/BlazorApp.Api/Program.cs")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("找不到仓库根目录");
+    }
+
     // ───────────────────────── 批次查询 ─────────────────────────
 
     [Fact]

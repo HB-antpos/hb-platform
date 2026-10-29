@@ -48,6 +48,10 @@ services:
       - Myob__ClientId=${MYOB_CLIENT_ID:-}
       - Myob__ClientSecret=${MYOB_CLIENT_SECRET:-}
       - Myob__RedirectUri=${MYOB_REDIRECT_URI:-}
+      # Timesheet 推送总闸（默认关）与灰度白名单（逗号分隔的公司文件连接 GUID；空 = 全部禁止，* = 全部公司文件）。
+      # 本 compose 没有 env_file：不在这里映射，服务器 .env 里写了也传不进容器。开 / 关只需改 .env 并重建容器，不需要发版。
+      - Myob__TimesheetPushEnabled=${MYOB_TIMESHEET_PUSH_ENABLED:-false}
+      - Myob__TimesheetPushConnectionGuids=${MYOB_TIMESHEET_PUSH_CONNECTION_GUIDS:-}
       # 远程维护仅在迁移、安装包校验与客户端验收准备好后启用；秘密只从服务器注入。
       - RemoteMaintenance__Enabled=${REMOTE_MAINTENANCE_ENABLED:-false}
       # 下发给已安装/新装 RustDesk 的服务器地址：这是 WPF 启动对账的唯一开关。
