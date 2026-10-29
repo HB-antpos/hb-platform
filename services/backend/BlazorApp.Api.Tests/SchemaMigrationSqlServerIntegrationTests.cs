@@ -4172,7 +4172,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
         Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayslipViewLog WHERE LogGuid = N'l-1'"));
 
-        // 查询索引缺失 → 54373；主键缺失 → 54372；列宽漂移 → 54371。
+        // 查询索引缺失 → 54373；列宽漂移 → 54371（选不在索引里的 ActorUserGuid：SQL Server 不允许修改索引依赖的列）。
         await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobPayslipViewLog_Connection_Employee_ViewedAt ON dbo.MyobPayslipViewLog;");
         var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
@@ -4180,7 +4180,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
         await ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql);
 
-        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN MyobEmployeeUid nvarchar(20) NOT NULL;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN ActorUserGuid nvarchar(20) NOT NULL;");
         var width = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
         Assert.Equal(54371, width.Number);
