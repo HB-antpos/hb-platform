@@ -4062,7 +4062,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         // 重复执行是空操作：员工已保存的偏好不受影响。
         await ExecuteNonQueryAsync(main, """
             INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
-            VALUES (Nuser-1, Npos-wpf.colorTheme, NGraphite, SYSUTCDATETIME());
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Graphite', SYSUTCDATETIME());
             """);
         await ExecuteNonQueryAsync(main, UserPreferenceSchema.ApplySql);
         await ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql);
@@ -4070,13 +4070,15 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             "SELECT COUNT(*) FROM dbo.UserPreference WHERE UserGUID = N'user-1' AND PreferenceValue = N'Graphite'"));
 
         // 主键：同一员工同一偏好键只能一行；不同偏好键可并存。
-        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+        // 只认主键冲突（2627），避免语句本身写错也被当成「主键生效」。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
             INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
-            VALUES (Nuser-1, Npos-wpf.colorTheme, NPaper, SYSUTCDATETIME());
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Paper', SYSUTCDATETIME());
             """));
+        Assert.Equal(2627, duplicate.Number);
         await ExecuteNonQueryAsync(main, """
             INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
-            VALUES (Nuser-1, Npos-ipad.colorTheme, NPaper, SYSUTCDATETIME());
+            VALUES (N'user-1', N'pos-ipad.colorTheme', N'Paper', SYSUTCDATETIME());
             """);
 
         // 主键被删 → 54382；列宽漂移 → 54381。
