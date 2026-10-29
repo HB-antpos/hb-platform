@@ -241,6 +241,63 @@ export function isPriceChangeConfirmRequiredError(error: unknown): boolean {
   return (error.payload as { code?: unknown } | undefined)?.code === PRICE_CHANGE_CONFIRM_REQUIRED_CODE
 }
 
+/** 后端校验阶段整批拒绝（零写入）时的固定错误码；与涨跌幅二次确认的错误码区分开。 */
+export const BATCH_EXECUTE_VALIDATION_ERROR_CODE = 'VALIDATION_ERROR'
+
+export function isBatchExecuteValidationError(error: unknown): boolean {
+  if (!(error instanceof RequestError)) return false
+  return (error.payload as { code?: unknown } | undefined)?.code === BATCH_EXECUTE_VALIDATION_ERROR_CODE
+}
+
+export interface SkippableFailedRows {
+  /** 校验失败、可以跳过的明细（按提交顺序）。 */
+  failedGuids: string[]
+  /** 跳过后剩下要执行的明细数。 */
+  remainingCount: number
+}
+
+/**
+ * 从后端校验错误里找出「可以跳过」的失败行。
+ * 后端每条行级错误都以「明细 {guid} …」开头，这里只拿本次提交的明细编号去匹配，不解析别的内容。
+ * 只有同时满足下面三点才允许跳过，否则仍保持整批拒绝：
+ * - 每一条错误都能对应到某一行（有一条对不上，说明是整单级错误，跳过行解决不了）；
+ * - 至少有一行失败；
+ * - 跳过后还剩至少一行可执行。
+ */
+export function findSkippableFailedRows(
+  detailGuids: readonly string[],
+  errors: readonly string[],
+): SkippableFailedRows | null {
+  if (!errors.length) return null
+  const failed = new Set<string>()
+  for (const error of errors) {
+    const guid = detailGuids.find((candidate) => error.startsWith(`明细 ${candidate} `))
+    if (!guid) return null
+    failed.add(guid)
+  }
+  const failedGuids = detailGuids.filter((guid) => failed.has(guid))
+  if (failedGuids.length === 0 || failedGuids.length >= detailGuids.length) return null
+  return { failedGuids, remainingCount: detailGuids.length - failedGuids.length }
+}
+
+/** 从确认快照里去掉指定明细，计数与新建商品类型选择同步收敛，供「跳过失败行」后重新提交。 */
+export function excludeDetailsFromBatchSnapshot(
+  snapshot: BatchExecuteSnapshot,
+  excludedGuids: readonly string[],
+): BatchExecuteSnapshot {
+  const excluded = new Set(excludedGuids)
+  const detailGuids = snapshot.detailGuids.filter((guid) => !excluded.has(guid))
+  const expectedActions = snapshot.expectedActions.filter((item) => !excluded.has(item.detailGuid))
+  return {
+    ...snapshot,
+    selectedCount: detailGuids.length,
+    detailGuids,
+    expectedActions,
+    confirmedCreateProductCount: expectedActions.filter((item) => item.action === DetailAction.CreateProduct).length,
+    newProductProductTypeSelections: snapshot.newProductProductTypeSelections.filter((item) => !excluded.has(item.detailGuid)),
+  }
+}
+
 export function getNewProductWithAdditionalBarcodesRows(
   selectedRowKeys: Key[],
   details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'additionalBarcodes' | 'itemNumber' | 'barcode' | 'productName'>>,

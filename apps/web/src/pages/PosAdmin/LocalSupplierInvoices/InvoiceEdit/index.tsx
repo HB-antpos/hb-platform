@@ -155,6 +155,9 @@ import {
   findLargePriceChangeRows,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
+  excludeDetailsFromBatchSnapshot,
+  findSkippableFailedRows,
+  isBatchExecuteValidationError,
   isPriceChangeConfirmRequiredError,
   PRICE_CHANGE_CONFIRM_RATIO,
   type LargePriceChangeRow,
@@ -2345,6 +2348,35 @@ export default function InvoiceEditPage() {
     })
   }
 
+  // 校验阶段整批被拒时：把可对应到行的失败行摘出来，确认后只提交其余行（失败行保持原状态，不写任何数据）。
+  const confirmSkipFailedRows = (
+    skippable: { failedGuids: string[]; remainingCount: number },
+    errors: string[],
+    onConfirm: () => void,
+  ) => {
+    const visibleLines = errors.slice(0, 8)
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.skipFailedRowsTitle', { failed: skippable.failedGuids.length, count: skippable.remainingCount }),
+      width: 560,
+      content: (
+        <Space direction="vertical" size={4}>
+          <Alert type="info" showIcon message={t('posAdmin.invoiceWorkbench.skipFailedRowsContent')} />
+          <div style={{ maxHeight: 200, overflow: 'auto' }}>
+            {visibleLines.map((line, index) => (
+              <div key={index} style={{ color: '#ff4d4f', fontSize: 12 }}>{line}</div>
+            ))}
+            {errors.length > visibleLines.length && (
+              <div>{t('posAdmin.invoiceWorkbench.skipFailedRowsMore', { count: errors.length - visibleLines.length })}</div>
+            )}
+          </div>
+        </Space>
+      ),
+      okText: t('posAdmin.invoiceWorkbench.skipFailedRowsOk', { count: skippable.remainingCount }),
+      cancelText: t('common.cancel', '取消'),
+      onOk: onConfirm,
+    })
+  }
+
   const formatLargePriceChangeLine = (row: LargePriceChangeRow) => t('posAdmin.invoiceWorkbench.largePriceChangeRow', {
     item: row.itemNumber || '--',
     name: row.productName || '--',
@@ -2398,12 +2430,32 @@ export default function InvoiceEditPage() {
         })
         return
       }
+      // 整批被一条挡住时给出「跳过冲突行，执行其余」：只有每条错误都能对应到某一行才提供，整单级错误仍保持整批拒绝。
+      const skippable = isBatchExecuteValidationError(error)
+        ? findSkippableFailedRows(snapshot.detailGuids, feedback.details)
+        : null
+      const failureKey = `batch-execute-failed-${Date.now()}`
       notification.error({
+        key: failureKey,
         message: feedback.message,
         description: feedback.details.length ? (
           <Space direction="vertical" size={4}>
             {feedback.failure && <span>{formatBatchExecuteResultParts(feedback.failure)}</span>}
             {feedback.failure && renderBackgroundTaskDetailsButton(() => showBatchExecuteResultDetails(feedback.failure!))}
+            {skippable && (
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => {
+                  notification.destroy(failureKey)
+                  confirmSkipFailedRows(skippable, feedback.details, () => {
+                    void executeSelectedBatchActions(excludeDetailsFromBatchSnapshot(snapshot, skippable.failedGuids), options)
+                  })
+                }}
+              >
+                {t('posAdmin.invoiceWorkbench.skipFailedRowsAction', { count: skippable.remainingCount })}
+              </Button>
+            )}
           </Space>
         ) : feedback.message,
         duration: 0,
