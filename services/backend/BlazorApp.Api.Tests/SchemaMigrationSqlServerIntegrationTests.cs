@@ -4247,12 +4247,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             VALUES (N'link-2', N'other-order', N'hash-1', N'protected-2', SYSUTCDATETIME(), DATEADD(day, 90, SYSUTCDATETIME()));
             """));
 
-        // 列宽漂移 → 54431。
-        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN TokenHash nvarchar(32) NOT NULL;");
+        // 列宽漂移 → 54431。用没有索引依赖的 BranchCode 列模拟（TokenHash 上有唯一索引，SQL Server 不允许直接改它的宽度）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(10) NULL;");
         var width = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
         Assert.Equal(54431, width.Number);
-        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN TokenHash nvarchar(64) NOT NULL;");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(20) NULL;");
         await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
 
         // 令牌唯一索引缺失 → 54433；重新执行迁移补回。
