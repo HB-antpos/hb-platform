@@ -199,6 +199,73 @@ public sealed class AuthSessionControllerTests : IDisposable
         authService.Verify(service => service.LoginAsync(It.IsAny<LoginRequest>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("Login")]
+    [InlineData("SessionLogin")]
+    public async Task Login_WhenLoginKeyIsEmail_IssuesTokensForTheAccountLoginAsyncResolved(string action)
+    {
+        // 回归：输入是邮箱（不等于用户名）时，LoginAsync 已通过，控制器不能再按输入的用户名重查用户，
+        // 否则会密码正确却查不到人、返回「用户名或密码错误」。
+        await _db.Insertable(
+            new User
+            {
+                UserGUID = "email-user-1",
+                Username = "test",
+                Email = "someone@example.com",
+                PasswordHash = "hashed",
+                FullName = "Email User",
+                IsActive = true,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            }
+        ).ExecuteCommandAsync();
+
+        var authService = new Mock<IAuthService>();
+        authService
+            .Setup(service => service.LoginAsync(It.Is<LoginRequest>(request => request.Username == "someone@example.com")))
+            .ReturnsAsync(
+                new LoginResponse
+                {
+                    Success = true,
+                    User = new LoginUserDto { UserGUID = "email-user-1", Username = "test", Email = "someone@example.com" },
+                }
+            );
+        authService
+            .Setup(service => service.GenerateTokensAsync(
+                It.Is<User>(user => user.UserGUID == "email-user-1"),
+                It.IsAny<string>(),
+                It.IsAny<string>()
+            ))
+            .ReturnsAsync(
+                new TokenResponse
+                {
+                    AccessToken = "email-access-token",
+                    RefreshToken = "email-refresh-token",
+                    AccessTokenExpiry = DateTime.UtcNow.AddMinutes(15),
+                    RefreshTokenExpiry = DateTime.UtcNow.AddDays(7),
+                    Success = true,
+                }
+            );
+
+        var controller = CreateController(authService.Object);
+
+        var result = await InvokeAsync(controller, action, new LoginRequest
+        {
+            Username = "someone@example.com",
+            Password = "Secret123",
+            PasswordFormat = "raw",
+        });
+
+        Assert.NotNull(result);
+        Assert.True(GetBoolean(result!, "Success"));
+        authService.Verify(service => service.GenerateTokensAsync(
+            It.Is<User>(user => user.UserGUID == "email-user-1"),
+            It.IsAny<string>(),
+            It.IsAny<string>()
+        ), Times.Once);
+    }
+
     [Fact]
     public async Task SessionLogin_RecordsResolvedLoginIpOnUser()
     {
