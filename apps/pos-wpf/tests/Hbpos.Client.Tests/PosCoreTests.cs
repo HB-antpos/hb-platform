@@ -773,7 +773,9 @@ public sealed class PosCoreTests
         viewModel.LoadFromOrder(order);
 
         Assert.Contains(viewModel.ReceiptPreviewRows, row => row.Text.Contains("===== TAX INVOICE =====", StringComparison.Ordinal));
-        Assert.Contains(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(order.OrderGuid.ToString(), StringComparison.Ordinal));
+        // 普通单的条码预览行是 GUID 末 8 位（与小票单号同口径），不再含整串 GUID；完整 GUID 只在二维码里。
+        Assert.Contains(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(ReceiptOrderShortCode.Create(order.OrderGuid), StringComparison.Ordinal));
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(order.OrderGuid.ToString(), StringComparison.Ordinal));
         Assert.Equal(order.OrderGuid.ToString("D"), Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
         Assert.Contains(viewModel.ReceiptPreviewRows, row => row.Text.Contains("GST", StringComparison.Ordinal));
     }
