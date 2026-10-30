@@ -268,6 +268,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifySmsSendLogAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1706,6 +1710,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             SmsSendLogSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceSettingsSingleActiveSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建索引后过精确签名，通过后协调器才登记账本；已有同名但定义不符的索引不会被误标为完成。
+        await VerifyAttendanceSettingsSingleActiveAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceSettingsSingleActiveSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
