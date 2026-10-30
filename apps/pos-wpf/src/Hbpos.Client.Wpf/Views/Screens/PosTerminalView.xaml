@@ -2179,11 +2179,24 @@
                         </Border>
                     </Grid>
                 </Button>
-                <!-- Attendance QR：点击仍由代码后置的 AttendanceQrLauncher_Click 打开二维码弹窗；
-                     右上角胶囊角标显示剩余秒数，原来占一行的「Online verified …」说明文字改放按钮提示（ToolTip）。 -->
+                <Button Background="{DynamicResource PosSidebarTileSettingsBrush}" Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
+                    <StackPanel>
+                        <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
+                            <materialDesign:PackIcon Kind="CogOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="{Binding SettingsText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                    </StackPanel>
+                </Button>
+                <!-- Attendance QR：与「设置」对调位置，排在退出键旁边。按钮里直接显示当前完整二维码（白底含静区，整数倍像素缩放），
+                     点击仍由代码后置的 AttendanceQrLauncher_Click 打开放大的二维码弹窗；
+                     二维码占满整格（按钮外边距 / 内边距收到最小），剩余秒数是压在二维码正中的小圆标（只显示数字、尽量小，
+                     避免盖住太多模块影响扫码；放大弹窗里的二维码不加任何遮挡），二维码还没生成时退回图标 + 标题，
+                     原来占一行的「Online verified …」说明文字放按钮提示（ToolTip）。 -->
                 <Button Background="{DynamicResource PosSidebarTileAttendanceBrush}" x:Name="AttendanceQrLauncher"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch"
+                        Margin="1"
+                        Padding="1"
                         Style="{StaticResource PosSidebarActionButtonStyle}"
                         Click="AttendanceQrLauncher_Click"
                         AutomationProperties.Name="{loc:Loc attendance.qr.open}">
@@ -2195,24 +2208,39 @@
                         </TextBlock>
                     </Button.ToolTip>
                     <Grid>
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel x:Name="AttendanceQrLauncherPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                                 <materialDesign:PackIcon Kind="Qrcode" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <TextBlock Text="{loc:Loc attendance.qr.title}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AttendanceQrPanel.QrImage}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
                         </StackPanel>
-                        <Border x:Name="AttendanceQrSecondsBadge" Style="{StaticResource PosSidebarBadgeStyle}">
-                            <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining, StringFormat={}{0}s}" Style="{StaticResource PosSidebarBadgeTextStyle}" />
+                        <Border x:Name="AttendanceQrLauncherCode"
+                                Background="White"
+                                CornerRadius="4"
+                                HorizontalAlignment="Center"
+                                IsHitTestVisible="False">
+                            <Image Source="{Binding AttendanceQrPanel.QrImage}"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                   SnapsToDevicePixels="True" />
+                        </Border>
+                        <Border x:Name="AttendanceQrSecondsBadge" Style="{StaticResource PosSidebarBadgeStyle}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0"
+                                Height="18" MinWidth="18" Padding="3,0" CornerRadius="9"
+                                BorderBrush="White" BorderThickness="1.5">
+                            <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining}" Style="{StaticResource PosSidebarBadgeTextStyle}" FontSize="11" />
                         </Border>
                     </Grid>
-                </Button>
-                <Button Background="{DynamicResource PosSidebarTileSettingsBrush}" Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
-                    <StackPanel>
-                        <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="CogOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <TextBlock Text="{Binding SettingsText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
-                    </StackPanel>
                 </Button>
                 <Button Command="{Binding ExitApplicationCommand}" Style="{StaticResource PosSidebarExitButtonStyle}">
                     <StackPanel>
