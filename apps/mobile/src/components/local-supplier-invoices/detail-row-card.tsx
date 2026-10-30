@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
-import { Button, Text } from "react-native-paper";
+import { Button, Icon, Text } from "react-native-paper";
 import { DetailTag } from "@/components/local-supplier-invoices/detail-tag";
 import {
   ACTION_TONE,
@@ -28,6 +28,10 @@ interface DetailRowCardProps {
   showWorkbench: boolean;
   /** 管理员：点卡片可编辑。 */
   canEditRow: boolean;
+  /** 多选模式（二期 B）：点卡片切换勾选，不再打开编辑。 */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (detail: LocalSupplierInvoiceItem) => void;
   onPress: (detail: LocalSupplierInvoiceItem) => void;
   onCopy: (label: string, value: string) => void;
   onOpenProduct: (detail: LocalSupplierInvoiceItem) => void;
@@ -50,6 +54,9 @@ export const DetailRowCard = memo(function DetailRowCard({
   editedKey,
   showWorkbench,
   canEditRow,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
   onPress,
   onCopy,
   onOpenProduct,
@@ -127,8 +134,17 @@ export const DetailRowCard = memo(function DetailRowCard({
   );
 
   const body = (
-    <View style={styles.card}>
+    <View style={[styles.card, selectionMode && selected ? styles.cardSelected : null]}>
       <View style={styles.top}>
+        {selectionMode ? (
+          <View style={styles.check}>
+            <Icon
+              source={selected ? "checkbox-marked" : "checkbox-blank-outline"}
+              size={22}
+              color={selected ? HB_COLORS.brand : HB_COLORS.textSecondary}
+            />
+          </View>
+        ) : null}
         {detail.productImage ? (
           <Image source={{ uri: detail.productImage }} style={styles.thumb} />
         ) : (
@@ -226,6 +242,17 @@ export const DetailRowCard = memo(function DetailRowCard({
     </View>
   );
 
+  if (selectionMode) {
+    return (
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: selected }}
+        onPress={() => onToggleSelect?.(detail)}
+      >
+        {body}
+      </Pressable>
+    );
+  }
   if (!canEditRow) return body;
   return (
     <Pressable accessibilityRole="button" accessibilityHint={t("detail.edit.rowTitle")} onPress={() => onPress(detail)}>
@@ -243,7 +270,9 @@ const styles = StyleSheet.create({
     padding: HB_SPACING.sm,
     gap: HB_SPACING.xs,
   },
+  cardSelected: { borderColor: HB_COLORS.brand, backgroundColor: "#F5F9FF" },
   top: { flexDirection: "row", gap: HB_SPACING.xs },
+  check: { justifyContent: "center" },
   thumb: { width: 44, height: 44, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   thumbEmpty: { alignItems: "center", justifyContent: "center", padding: 2 },
   thumbText: { fontSize: 10, color: HB_COLORS.textSecondary, textAlign: "center" },

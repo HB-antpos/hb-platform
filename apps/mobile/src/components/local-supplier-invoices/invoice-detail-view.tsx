@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Icon, IconButton, Modal, Portal, Snackbar, Text, TextInput } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  BatchActionSheet,
+  BatchEditSheet,
+  BatchExecuteSheet,
+  type BatchExecuteSheetData,
+} from "@/components/local-supplier-invoices/batch-sheets";
 import { DetailRowCard } from "@/components/local-supplier-invoices/detail-row-card";
 import { DetailTag } from "@/components/local-supplier-invoices/detail-tag";
 import { EditLineSheet } from "@/components/local-supplier-invoices/edit-line-sheet";
@@ -16,7 +22,11 @@ import { InvoiceSalesAnalysisView } from "@/components/local-supplier-invoices/i
 import { MoreFiltersSheet } from "@/components/local-supplier-invoices/more-filters-sheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
+  batchExecuteInvoiceDetails,
+  batchSetInvoiceDetailAction,
+  batchUpdateInvoiceDetails,
   batchUpsertInvoiceDetails,
+  getBatchExecuteFailure,
   checkInvoiceProducts,
   checkInvoiceProductsSync,
   deleteInvoiceDetails,
@@ -30,24 +40,42 @@ import {
   updateInvoiceHeader,
 } from "@/modules/local-supplier-invoices/api";
 import {
+  BATCH_LINK_QUERY_CONCURRENCY,
   DETAIL_PROGRESS_BUCKETS,
   DETAIL_PROGRESS_BUCKET_COLORS,
+  PRICE_CHANGE_CONFIRM_REQUIRED_CODE,
   applyDetailFilters,
+  buildBatchExecuteRequest,
   buildInvoiceDetailSaveItems,
   buildInvoiceDetailSnapshotIndex,
+  constrainSelectionToVisible,
   countActiveMoreFilterGroups,
+  countNewProductsWithAdditionalBarcodes,
   countEditedInvoiceDetailRows,
   createEmptyDetailFilters,
   createEmptyDetailMoreFilters,
+  excludeFromBatchExecuteRequest,
+  findLargePriceChangeRows,
+  findSkippableFailedRows,
   getDetailFilterCounts,
   getDetailProgressStats,
   getEditedInvoiceDetailFields,
   getExecutedPercent,
   getPriceChangeStats,
+  groupExecuteTargets,
   hasActiveDetailFilters,
   isProductLinkConfirmed,
+  mapWithConcurrency,
+  pickBatchLinkCandidates,
+  pickChosenGuids,
+  pickExecuteTargets,
+  resolveSingleMatchedProductCode,
   runCheckProducts,
   toggleFilterValue,
+  type BatchEditFields,
+  type BatchExecuteRequest,
+  type ExecuteChoice,
+  type NewProductType,
   type DetailFilters,
   type DetailMoreFilters,
   type DetailProgressBucket,
@@ -147,7 +175,19 @@ export function InvoiceDetailView({
   // 提示条画在本弹层内部：详情是全屏 Modal，列表页的 Snackbar 在它下面，用户根本看不到（检测完成等长任务反馈尤其需要）。
   const [toast, setToast] = useState("");
   const notify = useCallback((message: string) => setToast(message), []);
+  // 关底部弹层（或系统确认框）后紧接着弹提示时，Paper Snackbar 的入场动画会被打断、看不到（模拟器实测）：
+  // 先清空，等弹层收起再弹。
+  const notifyAfterSheet = useCallback((message: string) => {
+    setToast("");
+    setTimeout(() => setToast(message), 350);
+  }, []);
   const [checking, setChecking] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedGuids, setSelectedGuids] = useState<string[]>([]);
+  const [batchActionVisible, setBatchActionVisible] = useState(false);
+  const [batchEditVisible, setBatchEditVisible] = useState(false);
+  const [executeData, setExecuteData] = useState<BatchExecuteSheetData | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
   // 检测在后台任务里跑，页面关闭后要停止轮询；同时避免连点重复提交。
   const checkingRef = useRef(false);
   const unmountedRef = useRef(false);
@@ -465,6 +505,256 @@ export function InvoiceDetailView({
     });
   }, [details.length, filtersActive, runAfterUnsavedGuard, startCheck, t, visible]);
 
+  // ---- 二期 B/C：多选与批量操作（入口只在 canEditRows = Edit + 管理员时出现） ----
+  const visibleGuids = useMemo(() => visible.map((row) => row.detailGuid), [visible]);
+  // 筛选变化后看不到的勾选自动去掉，批量操作只作用于眼前能看到的行（与 Web 一致）。
+  useEffect(() => {
+    setSelectedGuids((current) => constrainSelectionToVisible(current, visibleGuids));
+  }, [visibleGuids]);
+  const selectedSet = useMemo(() => new Set(selectedGuids), [selectedGuids]);
+  const allVisibleSelected = visibleGuids.length > 0 && visibleGuids.every((guid) => selectedSet.has(guid));
+  const pendingExecutable = useMemo(
+    () => pickExecuteTargets(details, { selectedGuids: [], visibleGuids: [] }),
+    [details]
+  );
+
+  const enterSelection = useCallback(() => {
+    if (checkingRef.current) {
+      notify(t("detail.check.busy"));
+      return;
+    }
+    // 批量操作完成后都会重读明细：先处理未保存的单行修改。
+    runAfterUnsavedGuard(() => {
+      setEditingGuid(null);
+      setSelectedGuids([]);
+      setSelectionMode(true);
+    });
+  }, [notify, runAfterUnsavedGuard, t]);
+  const exitSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedGuids([]);
+  }, []);
+  const toggleSelect = useCallback((detail: LocalSupplierInvoiceItem) => {
+    setSelectedGuids((current) => (current.includes(detail.detailGuid)
+      ? current.filter((guid) => guid !== detail.detailGuid)
+      : [...current, detail.detailGuid]));
+  }, []);
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelectedGuids(allVisibleSelected ? [] : visibleGuids);
+  }, [allVisibleSelected, visibleGuids]);
+
+  /** 批量写入后：重读明细与表头，并让列表关闭详情时静默刷新。 */
+  const reloadAfterBatch = useCallback(async () => {
+    onDataChanged?.();
+    await loadDetails(false);
+    await refreshHeader();
+  }, [loadDetails, onDataChanged, refreshHeader]);
+
+  const requireSelection = useCallback(() => {
+    if (selectedGuids.length) return true;
+    notify(t("detail.batch.selectFirst"));
+    return false;
+  }, [notify, selectedGuids.length, t]);
+
+  // 批量设置操作类型：立即落库，同时推进快照（不算未保存修改）；勾选保留，方便接着执行。
+  const batchSetAction = useCallback(async (action: number) => {
+    const targets = [...selectedGuids];
+    setBatchBusy(true);
+    try {
+      await batchSetInvoiceDetailAction(guid, targets, action);
+      const chosen = new Set(targets);
+      const patch = (rows: LocalSupplierInvoiceItem[]) => rows.map((row) => (
+        chosen.has(row.detailGuid) ? { ...row, activityType: action } : row
+      ));
+      setDetails(patch);
+      setSnapshot(patch);
+      setBatchActionVisible(false);
+      notifyAfterSheet(t("detail.batch.setActionDone", { count: targets.length, action: t(`detail.action.${action}`) }));
+    } catch (error) {
+      notify(getErrorMessage(error, "detail.batch.setActionFailed"));
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [getErrorMessage, guid, notify, notifyAfterSheet, selectedGuids, t]);
+
+  // 批量编辑：等后端写完再重读（Web 是先改本地再后台提交；手机端网络不稳，以服务端结果为准更稳妥）。
+  const batchEdit = useCallback(async (fields: BatchEditFields) => {
+    const targets = [...selectedGuids];
+    setBatchBusy(true);
+    try {
+      await batchUpdateInvoiceDetails(guid, targets, fields);
+      setBatchEditVisible(false);
+      setSelectedGuids([]);
+      notifyAfterSheet(t("detail.batch.editDone", { count: targets.length }));
+      await reloadAfterBatch();
+    } catch (error) {
+      notify(getErrorMessage(error, "detail.batch.editFailed"));
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [getErrorMessage, guid, notify, notifyAfterSheet, reloadAfterBatch, selectedGuids, t]);
+
+  // 批量选用条码匹配商品：只处理条码恰好匹配到一个商品的行，回填后重新检测这些行确认关联生效。
+  const runBatchLink = useCallback(async (candidates: LocalSupplierInvoiceItem[]) => {
+    setBatchBusy(true);
+    try {
+      const lookups = await mapWithConcurrency(candidates, BATCH_LINK_QUERY_CONCURRENCY, (detail) => fetchProductsByBarcode(guid, detail.barcode));
+      const items: { detailGUID: string; productCode: string }[] = [];
+      let multiCount = 0;
+      let queryFailed = 0;
+      lookups.forEach((result, index) => {
+        if (result.status === "rejected") { queryFailed += 1; return; }
+        const code = resolveSingleMatchedProductCode(result.value);
+        if (code) items.push({ detailGUID: candidates[index].detailGuid, productCode: code });
+        else multiCount += 1;
+      });
+      if (!items.length) {
+        notifyAfterSheet(t("detail.batch.linkNone", { multi: multiCount, failed: queryFailed }));
+        return;
+      }
+      await batchUpsertInvoiceDetails(guid, items);
+      const results = await checkInvoiceProducts(guid, items.map((item) => item.detailGUID));
+      const linked = items.filter((item) => isProductLinkConfirmed(results.find((row) => row.detailGuid === item.detailGUID), item.productCode)).length;
+      notifyAfterSheet(t("detail.batch.linkDone", { linked, multi: multiCount, failed: queryFailed, notLinked: items.length - linked }));
+      await reloadAfterBatch();
+    } catch (error) {
+      notify(getErrorMessage(error, "detail.match.loadFailed"));
+      await loadDetails(false);
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [getErrorMessage, guid, loadDetails, notify, notifyAfterSheet, reloadAfterBatch, t]);
+
+  const requestBatchLink = useCallback(() => {
+    if (!requireSelection()) return;
+    const { candidates, ineligibleCount } = pickBatchLinkCandidates(selectedGuids, details);
+    if (!candidates.length) {
+      notify(t("detail.batch.linkNoCandidate"));
+      return;
+    }
+    Alert.alert(
+      t("detail.batch.linkTitle"),
+      t("detail.batch.linkBody", { count: candidates.length, ineligible: ineligibleCount }),
+      [
+        { text: t("detail.edit.cancel"), style: "cancel" },
+        { text: t("detail.batch.linkConfirm"), onPress: () => { void runBatchLink(candidates); } },
+      ]
+    );
+  }, [details, notify, requireSelection, runBatchLink, selectedGuids, t]);
+
+  // ---- 批量执行（二期 C）：只执行新建商品 / 更新进货价，不同步 HQ、只写本单分店 ----
+  const executeTargetsRef = useRef<string[]>([]);
+
+  const openExecute = useCallback((fromSelection: boolean) => {
+    if (checkingRef.current) {
+      notify(t("detail.check.busy"));
+      return;
+    }
+    if (fromSelection && !requireSelection()) return;
+    runAfterUnsavedGuard(() => {
+      const targets = pickExecuteTargets(details, {
+        selectedGuids: fromSelection ? selectedGuids : [],
+        visibleGuids,
+      });
+      if (!targets.guids.length) {
+        notify(targets.webOnlyCount > 0
+          ? t("detail.batch.execNothingWebOnly", { count: targets.webOnlyCount })
+          : t("detail.batch.execNothing"));
+        return;
+      }
+      executeTargetsRef.current = targets.guids;
+      setExecuteData({
+        fromSelection,
+        groups: groupExecuteTargets(targets.guids, details),
+        webOnlyCount: targets.webOnlyCount,
+        noActionCount: targets.noActionCount,
+        newWithAdditionalCount: countNewProductsWithAdditionalBarcodes(targets.guids, details),
+      });
+    });
+  }, [details, notify, requireSelection, runAfterUnsavedGuard, selectedGuids, t, visibleGuids]);
+
+  /** 进货价涨跌超 40% 的二次确认（#586）：列出最多 5 行，确认后带标志提交。 */
+  const confirmLargePriceChange = useCallback((rows: { itemNumber: string; productName: string; lastPurchasePrice: number; purchasePrice: number; ratio: number }[], total: number, onConfirm: () => void, onCancel: () => void) => {
+    const lines = rows.slice(0, 5).map((row) => t("detail.batch.largeLine", {
+      item: row.itemNumber || "--",
+      name: row.productName || "--",
+      last: row.lastPurchasePrice.toFixed(2),
+      current: row.purchasePrice.toFixed(2),
+      percent: `${row.ratio > 0 ? "+" : ""}${(row.ratio * 100).toFixed(1)}%`,
+    }));
+    if (total > lines.length) lines.push(t("detail.batch.largeMore", { count: total - lines.length }));
+    Alert.alert(
+      t("detail.batch.largeTitle", { limit: 40 }),
+      `${t("detail.batch.largeBody", { count: total, limit: 40 })}\n\n${lines.join("\n")}`,
+      [
+        { text: t("detail.edit.cancel"), style: "cancel", onPress: onCancel },
+        { text: t("detail.batch.largeConfirm"), style: "destructive", onPress: onConfirm },
+      ]
+    );
+  }, [t]);
+
+  const submitExecute = useCallback(async (request: BatchExecuteRequest) => {
+    setBatchBusy(true);
+    try {
+      const result = await batchExecuteInvoiceDetails(guid, request);
+      setExecuteData(null);
+      setSelectedGuids([]);
+      notifyAfterSheet(t("detail.batch.execDone", {
+        created: result.createdProducts,
+        prices: result.updatedPurchasePrices,
+        stores: result.updatedStorePrices,
+        skipped: result.skipped,
+      }));
+      await reloadAfterBatch();
+    } catch (error) {
+      const failure = getBatchExecuteFailure(error);
+      // 前端明细过期：后端发现有超限涨跌而本次没确认过，补一次确认后重试。
+      if (failure?.code === PRICE_CHANGE_CONFIRM_REQUIRED_CODE && !request.confirmedLargePriceChange) {
+        const rows = findLargePriceChangeRows(request.detailGuids, details);
+        confirmLargePriceChange(rows, Math.max(rows.length, failure.errors.length), () => {
+          void submitExecute({ ...request, confirmedLargePriceChange: true });
+        }, () => undefined);
+        return;
+      }
+      const message = failure?.message || getErrorMessage(error, "detail.batch.execFailed");
+      const skippable = failure ? findSkippableFailedRows(request.detailGuids, failure.errors) : null;
+      const detailLines = (failure?.errors ?? []).slice(0, 5).join("\n");
+      if (skippable) {
+        Alert.alert(t("detail.batch.execFailedTitle"), `${message}\n\n${detailLines}`, [
+          { text: t("detail.edit.cancel"), style: "cancel" },
+          {
+            text: t("detail.batch.execSkipFailed", { failed: skippable.failedGuids.length, remaining: skippable.remainingCount }),
+            onPress: () => { void submitExecute(excludeFromBatchExecuteRequest(request, skippable.failedGuids)); },
+          },
+        ]);
+      } else {
+        Alert.alert(t("detail.batch.execFailedTitle"), detailLines ? `${message}\n\n${detailLines}` : message);
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [confirmLargePriceChange, details, getErrorMessage, guid, notifyAfterSheet, reloadAfterBatch, t]);
+
+  const confirmExecute = useCallback((choice: ExecuteChoice, newProductType: NewProductType) => {
+    if (!executeData) return;
+    const chosen = pickChosenGuids(executeTargetsRef.current, executeData.groups, choice);
+    if (!chosen.length) {
+      notify(t("detail.batch.execChooseOne"));
+      return;
+    }
+    const build = (confirmedLargePriceChange: boolean) => buildBatchExecuteRequest(chosen, details, {
+      newProductType,
+      confirmedAt: new Date().toISOString(),
+      confirmedLargePriceChange,
+    });
+    const large = findLargePriceChangeRows(chosen, details);
+    if (large.length) {
+      confirmLargePriceChange(large, large.length, () => { void submitExecute(build(true)); }, () => undefined);
+      return;
+    }
+    void submitExecute(build(false));
+  }, [confirmLargePriceChange, details, executeData, notify, submitExecute, t]);
+
   // ---- 筛选操作 ----
   const toggleQuick = (filter: DetailQuickFilter) => setFilters((current) => ({
     ...current,
@@ -502,13 +792,16 @@ export function InvoiceDetailView({
         editedKey={getEditedInvoiceDetailFields(item, snapshotIndex).join("|")}
         showWorkbench={showWorkbench}
         canEditRow={canEditRows}
+        selectionMode={selectionMode}
+        selected={selectionMode && selectedSet.has(item.detailGuid)}
+        onToggleSelect={toggleSelect}
         onPress={handleRowPress}
         onCopy={onCopy}
         onOpenProduct={handleOpenProduct}
         t={t}
       />
     </View>
-  ), [canEditRows, handleOpenProduct, handleRowPress, onCopy, showWorkbench, snapshotIndex, t]);
+  ), [canEditRows, handleOpenProduct, handleRowPress, onCopy, selectedSet, selectionMode, showWorkbench, snapshotIndex, t, toggleSelect]);
 
   // ---- 头部（随列表一起滚动，给明细让出垂直空间） ----
   const header = (
@@ -615,6 +908,30 @@ export function InvoiceDetailView({
               );
             })}
           </ScrollView>
+          {canEditRows && !selectionMode ? (
+            <View style={styles.batchEntryRow}>
+              <Button
+                compact
+                mode="outlined"
+                icon="checkbox-multiple-outline"
+                disabled={checking || batchBusy}
+                onPress={enterSelection}
+                style={styles.batchEntryButton}
+              >
+                {t("detail.batch.enter")}
+              </Button>
+              <Button
+                compact
+                mode="contained"
+                icon="play-circle-outline"
+                disabled={checking || batchBusy || pendingExecutable.guids.length === 0}
+                onPress={() => openExecute(false)}
+                style={styles.batchEntryButton}
+              >
+                {t("detail.batch.execPending", { count: pendingExecutable.guids.length })}
+              </Button>
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -733,7 +1050,28 @@ export function InvoiceDetailView({
             }}
           />
 
-          {hasUnsaved ? (
+          {selectionMode ? (
+            <View style={styles.selectionBar}>
+              <View style={styles.selectionTop}>
+                <View style={styles.selectionCountRow}>
+                  <Text style={styles.selectionCount}>{t("detail.batch.selectedCount", { count: selectedGuids.length })}</Text>
+                  {batchBusy ? <ActivityIndicator size="small" color={HB_COLORS.white} /> : null}
+                </View>
+                <View style={styles.selectionTopActions}>
+                  <Button compact textColor="#8FC2FF" disabled={!visibleGuids.length || batchBusy} onPress={toggleSelectAllVisible}>
+                    {allVisibleSelected ? t("detail.batch.clearSelection") : t("detail.batch.selectAllVisible", { count: visibleGuids.length })}
+                  </Button>
+                  <Button compact textColor={HB_COLORS.white} disabled={batchBusy} onPress={exitSelection}>{t("detail.batch.done")}</Button>
+                </View>
+              </View>
+              <View style={styles.selectionActions}>
+                <SelectionAction icon="tag-multiple-outline" label={t("detail.batch.setAction")} disabled={batchBusy} onPress={() => { if (requireSelection()) setBatchActionVisible(true); }} />
+                <SelectionAction icon="pencil-outline" label={t("detail.batch.edit")} disabled={batchBusy} onPress={() => { if (requireSelection()) setBatchEditVisible(true); }} />
+                <SelectionAction icon="link-variant" label={t("detail.batch.link")} disabled={batchBusy} onPress={requestBatchLink} />
+                <SelectionAction icon="play-circle-outline" label={t("detail.batch.execSelected")} primary disabled={batchBusy} onPress={() => openExecute(true)} />
+              </View>
+            </View>
+          ) : hasUnsaved ? (
             <View style={styles.unsavedBar}>
               <Text style={styles.unsavedText}>{t("detail.unsaved.count", { count: editedCount })}</Text>
               <View style={styles.unsavedActions}>
@@ -772,6 +1110,33 @@ export function InvoiceDetailView({
             t={t}
           />
         ) : null}
+        {canEditRows ? (
+          <>
+            <BatchActionSheet
+              visible={batchActionVisible}
+              count={selectedGuids.length}
+              busy={batchBusy}
+              onPick={(action) => { void batchSetAction(action); }}
+              onDismiss={() => setBatchActionVisible(false)}
+              t={t}
+            />
+            <BatchEditSheet
+              visible={batchEditVisible}
+              count={selectedGuids.length}
+              busy={batchBusy}
+              onSubmit={(fields) => { void batchEdit(fields); }}
+              onDismiss={() => setBatchEditVisible(false)}
+              t={t}
+            />
+            <BatchExecuteSheet
+              data={executeData}
+              busy={batchBusy}
+              onConfirm={confirmExecute}
+              onDismiss={() => setExecuteData(null)}
+              t={t}
+            />
+          </>
+        ) : null}
         {showWorkbench ? (
           <MoreFiltersSheet
             visible={moreVisible}
@@ -797,6 +1162,23 @@ export function InvoiceDetailView({
         ) : null}
       </Modal>
     </Portal>
+  );
+}
+
+/** 多选底栏的一个操作：图标在上、文字在下，四个等分一行（375pt 宽也放得下）。 */
+function SelectionAction({ icon, label, onPress, disabled, primary }: { icon: string; label: string; onPress: () => void; disabled?: boolean; primary?: boolean }) {
+  const color = disabled ? "rgba(255,255,255,0.4)" : primary ? "#8FC2FF" : HB_COLORS.white;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      onPress={onPress}
+      style={styles.selectionAction}
+    >
+      <Icon source={icon} size={20} color={color} />
+      <Text style={[styles.selectionActionText, { color }]} numberOfLines={1}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -896,5 +1278,23 @@ const styles = StyleSheet.create({
     borderRadius: HB_RADIUS.surface,
   },
   unsavedText: { flex: 1, fontSize: 13, color: HB_COLORS.white },
+  batchEntryRow: { flexDirection: "row", gap: HB_SPACING.xs, paddingTop: 2 },
+  batchEntryButton: { flex: 1 },
+  selectionBar: {
+    marginHorizontal: HB_SPACING.sm,
+    marginBottom: HB_SPACING.xs,
+    paddingHorizontal: HB_SPACING.xs,
+    paddingVertical: 4,
+    gap: 2,
+    backgroundColor: HB_COLORS.textPrimary,
+    borderRadius: HB_RADIUS.surface,
+  },
+  selectionTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: HB_SPACING.xs },
+  selectionCount: { fontSize: 13, fontWeight: "700", color: HB_COLORS.white },
+  selectionTopActions: { flexDirection: "row", alignItems: "center" },
+  selectionActions: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.2)", paddingTop: 4 },
+  selectionAction: { flex: 1, minHeight: 48, alignItems: "center", justifyContent: "center", gap: 2 },
+  selectionActionText: { fontSize: 11.5, fontWeight: "600" },
+  selectionCountRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   unsavedActions: { flexDirection: "row", alignItems: "center", gap: 4 },
 });
