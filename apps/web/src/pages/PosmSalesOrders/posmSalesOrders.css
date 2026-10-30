@@ -544,6 +544,91 @@
 
 .posm-order-drawer-footer-hint {
   flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* 订单详情抽屉：小票页签与在线二维码气泡 */
+.posm-order-drawer-tabs > .ant-tabs-nav {
+  margin: 0;
+  padding: 0 20px;
+}
+
+.posm-order-drawer-receipt {
+  display: flex;
+  justify-content: center;
+  min-height: 420px;
+  padding: 28px 0 36px;
+  background: #eef1f5;
+}
+
+.posm-order-drawer-receipt-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.posm-receipt-popover {
+  width: 260px;
+}
+
+.posm-receipt-popover-title {
+  font-weight: 600;
+}
+
+.posm-receipt-popover-title small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.posm-receipt-popover-qr {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 8px;
+}
+
+.posm-receipt-popover-url {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: rgba(0, 0, 0, 0.65);
+  word-break: break-all;
+}
+
+.posm-receipt-popover-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.posm-receipt-popover-actions .ant-btn {
+  flex: 1 1 0;
+}
+
+.posm-receipt-popover-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.posm-receipt-popover-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0 8px;
   color: rgba(0, 0, 0, 0.55);
 }

@@ -1,13 +1,23 @@
-import { CloseOutlined, CopyOutlined, DownloadOutlined, DownOutlined, FilePdfOutlined, PictureOutlined, UpOutlined } from '@ant-design/icons'
-import { Button, Drawer, Skeleton, Space, Tooltip, message } from 'antd'
+import { CloseOutlined, CopyOutlined, DownloadOutlined, DownOutlined, FilePdfOutlined, PictureOutlined, PrinterOutlined, UpOutlined } from '@ant-design/icons'
+import { Button, Drawer, Skeleton, Space, Tabs, Tooltip, message } from 'antd'
+import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import ProductListImage from '../../components/ProductListImage'
+import { registerPageMessages } from '../../i18n/registerPageMessages'
 import type { PosmSalesOrder, PosmSalesOrderDetailResponse } from '../../types/posmSalesOrder'
 
 import OrderStatusTag, { PaymentMethodsText } from './OrderStatusTag'
 import { formatMoney, orderActualAmount, paymentMethodKey } from './posmSalesOrdersLogic'
+import ReceiptPaper from './receipt/ReceiptPaper'
+import ReceiptQrPopover from './receipt/ReceiptQrPopover'
+import { posmReceiptMessages } from './receipt/receiptMessages'
+import { useOrderReceipt } from './receipt/useOrderReceipt'
 import { formatPosmSalesOrderTime } from './time'
+
+// 在线小票文案随订单页代码块懒注册，不进首屏 i18n 包。
+registerPageMessages(posmReceiptMessages)
 
 interface OrderDetailDrawerProps {
   open: boolean
@@ -49,6 +59,9 @@ export default function OrderDetailDrawer({
 }: OrderDetailDrawerProps) {
   const { t } = useTranslation()
   const orderGuid = order?.orderGuid ?? ''
+  // 页签：默认停在「小票」，↑ ↓ 切换订单时保持当前页签。
+  const [activeTab, setActiveTab] = useState<'receipt' | 'items'>('receipt')
+  const receipt = useOrderReceipt(orderGuid, open)
   const lines = detail?.orderDetails ?? []
   const payments = detail?.paymentDetails ?? []
   const quantity = lines.reduce((sum, line) => sum + (line.quantity ?? 0), 0)
@@ -100,6 +113,16 @@ export default function OrderDetailDrawer({
       footer={
         <div className="posm-order-drawer-footer">
           <span className="posm-order-drawer-footer-hint">{t('posmOrders.drawer.keyboardHint', '↑ ↓ 切换订单 · Esc 关闭')}</span>
+          <ReceiptQrPopover
+            orderGuid={orderGuid}
+            link={receipt.view?.link ?? null}
+            disabled={!orderGuid || !receipt.view}
+            onEnsure={receipt.ensureLink}
+            onRegenerate={receipt.regenerate}
+          />
+          <Button icon={<PrinterOutlined />} disabled={!receipt.view} onClick={() => window.print()}>
+            {t('posmReceipt.print', '打印小票')}
+          </Button>
           <Button icon={<FilePdfOutlined />} disabled={!orderGuid} onClick={() => onPreviewInvoice(orderGuid)}>
             {t('posmOrders.previewInvoice', '预览发票')}
           </Button>
@@ -109,6 +132,36 @@ export default function OrderDetailDrawer({
         </div>
       }
     >
+      <Tabs
+        className="posm-order-drawer-tabs"
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as 'receipt' | 'items')}
+        items={[
+          {
+            key: 'receipt',
+            label: t('posmReceipt.tabReceipt', '小票'),
+            children: (
+              <div className="posm-order-drawer-receipt">
+                {receipt.loading && !receipt.view ? (
+                  <Skeleton active paragraph={{ rows: 8 }} title={false} style={{ maxWidth: 360 }} />
+                ) : receipt.error ? (
+                  <div className="posm-order-drawer-receipt-error">
+                    <span>{receipt.error || t('posmReceipt.loadFailed', '小票加载失败')}</span>
+                    <Button size="small" onClick={() => void receipt.reload()}>
+                      {t('posmReceipt.retry', '重试')}
+                    </Button>
+                  </div>
+                ) : receipt.view ? (
+                  <ReceiptPaper document={receipt.view.document} />
+                ) : null}
+              </div>
+            ),
+          },
+          {
+            key: 'items',
+            label: t('posmReceipt.tabItems', '商品明细'),
+            children: (
+              <>
       <dl className="posm-order-drawer-meta">
         <div>
           <dt>{t('posmOrders.drawer.time', '时间')}</dt>
@@ -204,6 +257,21 @@ export default function OrderDetailDrawer({
           <strong>{formatMoney(orderActualAmount(order?.totalAmount, order?.discountAmount))}</strong>
         </div>
       </div>
+              </>
+            ),
+          },
+        ]}
+      />
+
+      {/* 打印用纸面：平时隐藏，window.print() 时 @media print 只输出它（80mm 纸宽）。 */}
+      {open && receipt.view
+        ? createPortal(
+            <div id="posm-receipt-print-root">
+              <ReceiptPaper document={receipt.view.document} variant="print" />
+            </div>,
+            document.body,
+          )
+        : null}
     </Drawer>
   )
 }

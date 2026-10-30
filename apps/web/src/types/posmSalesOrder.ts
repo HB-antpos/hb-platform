@@ -117,3 +117,35 @@ export interface PosmSalesOrderSortState {
   field: PosmSalesOrderSortField
   direction: PosmSalesOrderSortDirection
 }
+
+/**
+ * 在线小票：后端已按收银机 42 列规则排好版，前端只按行绘制。
+ * kind：text 文本行、separator 分隔线、blank 空行、barcode Code128（text 为条码内容）、qr 二维码（text 为内容）。
+ */
+export interface PosReceiptLine {
+  kind: 'text' | 'separator' | 'blank' | 'barcode' | 'qr'
+  text: string
+  align: 'left' | 'center'
+  bold: boolean
+}
+
+export interface PosReceiptDocument {
+  orderGuid: string
+  /** 订单 GUID 去横杠后末 8 位大写。 */
+  shortCode: string
+  /** 只用于纸外状态标签着色，纸面文字保持黑白。 */
+  statusKind: 'paid' | 'refund'
+  lines: PosReceiptLine[]
+}
+
+export interface PosReceiptShareLink {
+  url: string
+  expiresAtUtc: string
+  createdAtUtc: string
+  openCount: number
+}
+
+export interface PosReceiptStaffView {
+  document: PosReceiptDocument
+  link: PosReceiptShareLink | null
+}
