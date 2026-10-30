@@ -4,7 +4,7 @@
     "toEnglish": "EN",
     "toChinese": "中"
   },
-  "username": "Username",
+  "username": "Username or email",
   "password": "Password",
   "userMode": "User login",
   "rememberUsername": "Remember username",
@@ -161,7 +161,7 @@
     "doneDescription": "Log in with your new password. You've been logged out on other devices.",
     "backToLogin": "Back to login",
     "loginNameLabel": "Your username",
-    "loginNameHint": "Older accounts don't log in with an email address. Use the username above.",
+    "loginNameHint": "You can log in with the username above or with your email address.",
     "copy": "Copy",
     "copied": "Copied",
     "backToLoginPrefilled": "Log in (username filled in)",

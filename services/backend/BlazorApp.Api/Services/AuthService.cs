@@ -63,19 +63,27 @@ namespace BlazorApp.Api.Services
         {
             try
             {
-                // 🔍 从数据库查询用户信息（用户名大小写不敏感）
-                var usernameLower = (request.Username ?? string.Empty).Trim().ToLower();
-                var list = await _dbContext
-                    .Db.Queryable<User>()
-                    .Includes(u => u.Roles)
-                    .Where(u =>
-                        u.Username.ToLower() == usernameLower
-                        && u.IsActive
-                        && !u.IsDeleted
-                    )
-                    .Take(1)
-                    .ToListAsync();
-                var user = list.FirstOrDefault();
+                // 🔍 从数据库查询用户信息（大小写不敏感）：登录名既可以是用户名，也可以是邮箱。
+                // 关键逻辑：用户名与邮箱各自有唯一索引，但同一输入可能同时是 A 的用户名、B 的邮箱
+                //（线上约 72 个账号直接用邮箱当用户名）。命中多条时一律「用户名优先」，
+                // 保证原本能用用户名登录的人不会因为新增邮箱登录而登录到别人账号。
+                var loginKey = (request.Username ?? string.Empty).Trim().ToLower();
+                var candidates = loginKey.Length == 0
+                    ? new List<User>()
+                    : await _dbContext
+                        .Db.Queryable<User>()
+                        .Includes(u => u.Roles)
+                        .Where(u =>
+                            (u.Username.ToLower() == loginKey || u.Email.Trim().ToLower() == loginKey)
+                            && u.IsActive
+                            && !u.IsDeleted
+                        )
+                        .Take(5)
+                        .ToListAsync();
+                var user =
+                    candidates.FirstOrDefault(u =>
+                        string.Equals(u.Username, loginKey, StringComparison.OrdinalIgnoreCase)
+                    ) ?? candidates.FirstOrDefault();
 
                 // ❌ 用户不存在或密码验证失败；旧客户端未传格式时按 clientSha256 兼容处理。
                 if (user == null || !VerifyPassword(request.Password, user.PasswordHash, request.PasswordFormat, out var needsPasswordRehash))
