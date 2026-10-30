@@ -1,5 +1,7 @@
 import type {
   BarcodeMatchedProduct,
+  CheckProductsJobSnapshot,
+  CheckProductsSummary,
   GridFilterModel,
   GridRequest,
   GridResult,
@@ -7,12 +9,16 @@ import type {
   InvoiceDetailsGridQuery,
   InvoiceGridQuery,
   InvoiceListPageSize,
+  InvoiceSalesAnalysis,
+  InvoiceSalesAnalysisRow,
   LocalSupplierOption,
   LocalSupplierInvoice,
   LocalSupplierInvoiceItem,
   ProductCheckRowResult,
   UpdateInvoiceHeaderRequest,
 } from "@/modules/local-supplier-invoices/types";
+import { DEFAULT_INVOICE_DATE_FIELD } from "@/modules/local-supplier-invoices/types";
+import { toCreatedAtInstantRange } from "@/modules/local-supplier-invoices/date-range";
 import type { InvoiceDetailUpsertItem } from "@/modules/local-supplier-invoices/detail/inline-edit";
 
 const BASE_PATH = "/react/v1/local-supplier-invoices";
@@ -158,10 +164,9 @@ export function buildInvoiceGridRequest(query: InvoiceGridQuery): GridRequest {
   const invoiceFilter = textFilter(query.filters?.invoiceNo);
   const productFilter = textFilter(query.filters?.productKeyword);
   const inboundStatus = query.filters?.inboundStatus;
-  const orderDateFilter = dateRangeFilter(
-    query.filters?.orderDateFrom,
-    query.filters?.orderDateTo
-  );
+  const dateField = query.filters?.dateField ?? DEFAULT_INVOICE_DATE_FIELD;
+  const dateRange = { from: query.filters?.dateFrom, to: query.filters?.dateTo };
+  const productChecked = query.filters?.productChecked;
 
   if (storeFilter) filterModel.storeCode = storeFilter;
   if (supplierFilter) filterModel.supplierCode = supplierFilter;
@@ -176,7 +181,29 @@ export function buildInvoiceGridRequest(query: InvoiceGridQuery): GridRequest {
       filter: String(inboundStatus),
     };
   }
-  if (orderDateFilter) filterModel.OrderDate = orderDateFilter;
+  if (dateField === "orderDate") {
+    // 订单日期是业务日期，直接按天传，后端包含结束日整天。
+    const orderDateFilter = dateRangeFilter(dateRange.from, dateRange.to);
+    if (orderDateFilter) filterModel.OrderDate = orderDateFilter;
+  } else {
+    // 创建日期库里存 UTC：换算成带时区的时刻区间再传（见 toCreatedAtInstantRange）。
+    const createdAtRange = toCreatedAtInstantRange(dateRange);
+    if (createdAtRange) {
+      filterModel.CreatedAt = { filterType: "date", type: "inRange", ...createdAtRange };
+    }
+  }
+  // 后端按有效明细是否全部完成检测过滤；false 表示「待检测」，必须显式传 "false"，不能省略。
+  if (productChecked === true || productChecked === false) {
+    filterModel.IsProductChecked = {
+      filterType: "text",
+      type: "equals",
+      filter: String(productChecked),
+    };
+  }
+  // 后端只认 true，false 不收窄；关闭时不带该条件，请求体与旧版一致。
+  if (query.filters?.hasUncreatedProducts) {
+    filterModel.HasUncreatedProducts = { filterType: "text", type: "equals", filter: "true" };
+  }
 
   return {
     startRow,
@@ -185,7 +212,7 @@ export function buildInvoiceGridRequest(query: InvoiceGridQuery): GridRequest {
     filterModel: Object.keys(filterModel).length ? filterModel : undefined,
     sortModel: [
       {
-        colId: query.sort?.colId ?? "OrderDate",
+        colId: query.sort?.colId ?? "CreatedAt",
         sort: query.sort?.direction ?? "desc",
       },
     ],
@@ -245,6 +272,14 @@ export function normalizeInvoice(raw: unknown): LocalSupplierInvoice {
     remarks: asString(pick(item, "remarks", "Remarks")),
     createdAt: asString(pick(item, "createdAt", "CreatedAt")),
     updatedAt: asString(pick(item, "updatedAt", "UpdatedAt")),
+    // 缺失 = 后端没返回汇总（旧版），保持 null，避免把「不知道」误报成待检测。
+    isProductChecked: asNullableBool(pick(item, "isProductChecked", "IsProductChecked")),
+    uncheckedDetailCount: asNumber(pick(item, "uncheckedDetailCount", "UncheckedDetailCount"), 0),
+    newProductDetailCount: asNumber(pick(item, "newProductDetailCount", "NewProductDetailCount"), 0),
+    createdHereProductDetailCount: asNumber(
+      pick(item, "createdHereProductDetailCount", "CreatedHereProductDetailCount"),
+      0
+    ),
   };
 }
 
@@ -469,4 +504,160 @@ export async function checkInvoiceProducts(invoiceGuid: string, detailGuids: str
   const client = await getApiClient();
   const response = await client.post(`${BASE_PATH}/check-products`, { invoiceGuid, detailGuids });
   return normalizeCheckProductsResponse(response.data);
+}
+
+// ---------------------------------------------------------------------------
+// 二期 A：整单商品检测（后台任务）+ 单张进货单销量分析
+// ---------------------------------------------------------------------------
+
+function buildCheckSummaryFromResults(results: unknown): CheckProductsSummary | null {
+  if (!Array.isArray(results)) return null;
+  const rows = normalizeCheckProductsResponse({ results });
+  return {
+    total: rows.length,
+    productExists: rows.filter((row) => row.productStatus === 1).length,
+    productNotExists: rows.filter((row) => row.productStatus === 2).length,
+    barcodeNormal: rows.filter((row) => row.barcodeStatus === 1).length,
+    barcodeAbnormal: rows.filter((row) => row.barcodeStatus === 2).length,
+  };
+}
+
+/** 检测汇总：优先用后端给的 summary，缺失时按逐行结果自行统计；两者都没有返回 null。 */
+export function normalizeCheckProductsSummary(payload: unknown): CheckProductsSummary | null {
+  const root = asRecord(payload) ?? {};
+  const summary = asRecord(pick(root, "summary", "Summary"));
+  if (summary) {
+    return {
+      total: asNumber(pick(summary, "total", "Total"), 0),
+      productExists: asNumber(pick(summary, "productExists", "ProductExists"), 0),
+      productNotExists: asNumber(pick(summary, "productNotExists", "ProductNotExists"), 0),
+      barcodeNormal: asNumber(pick(summary, "barcodeNormal", "BarcodeNormal"), 0),
+      barcodeAbnormal: asNumber(pick(summary, "barcodeAbnormal", "BarcodeAbnormal"), 0),
+    };
+  }
+  return buildCheckSummaryFromResults(pick(root, "results", "Results"));
+}
+
+/** 任务快照；接口客户端通常已解开 {success,data} 信封，这里仍兼容未解开的情况。 */
+export function normalizeCheckProductsJob(payload: unknown): CheckProductsJobSnapshot {
+  const root = asRecord(payload) ?? {};
+  const job = asRecord(pick(root, "data", "Data")) ?? root;
+  return {
+    jobId: asString(pick(job, "jobId", "JobId", "jobID")),
+    status: asString(pick(job, "status", "Status")),
+    message: asString(pick(job, "message", "Message")),
+    summary: normalizeCheckProductsSummary(pick(job, "result", "Result")),
+  };
+}
+
+/** 同一张单已有检测任务在跑时后端返回 409 并带 existingJobId：直接接着等那个任务，不重复提交。 */
+function getExistingCheckJobId(error: unknown): string | null {
+  const response = (error as { response?: { status?: number; data?: unknown } } | null)?.response;
+  if (response?.status !== 409) return null;
+  const root = asRecord(response.data) ?? {};
+  const data = asRecord(pick(root, "data", "Data")) ?? {};
+  const jobId = asString(pick(data, "existingJobId", "ExistingJobId"));
+  return jobId || null;
+}
+
+/** 后端后台任务接口分批发布时 404 表示当前环境还没有该端点，调用方可回退到同步检测。 */
+export function isMissingCheckJobEndpoint(error: unknown): boolean {
+  return (error as { response?: { status?: number } } | null)?.response?.status === 404;
+}
+
+/** 提交整单（或指定行）商品检测任务；detailGuids 缺省 = 整张单。需要 LocalPurchase.Edit。 */
+export async function startCheckProductsJob(
+  invoiceGuid: string,
+  detailGuids?: string[]
+): Promise<CheckProductsJobSnapshot> {
+  const client = await getApiClient();
+  try {
+    const response = await client.post(`${BASE_PATH}/check-products/jobs`, { invoiceGuid, detailGuids });
+    return normalizeCheckProductsJob(response.data);
+  } catch (error) {
+    const existingJobId = getExistingCheckJobId(error);
+    if (existingJobId) {
+      return { jobId: existingJobId, status: "Running", message: "", summary: null };
+    }
+    throw error;
+  }
+}
+
+export async function fetchCheckProductsJob(invoiceGuid: string, jobId: string) {
+  const client = await getApiClient();
+  const response = await client.get(
+    `${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/check-products/jobs/${encodeURIComponent(jobId)}`
+  );
+  return normalizeCheckProductsJob(response.data);
+}
+
+/** 旧同步检测：只用于后台任务接口 404 的回退，返回汇总。 */
+export async function checkInvoiceProductsSync(invoiceGuid: string, detailGuids?: string[]) {
+  const client = await getApiClient();
+  const response = await client.post(`${BASE_PATH}/check-products`, { invoiceGuid, detailGuids });
+  return normalizeCheckProductsSummary(response.data);
+}
+
+function asNullableString(value: unknown): string | null {
+  const text = asString(value).trim();
+  return text ? text : null;
+}
+
+export function normalizeInvoiceSalesAnalysisRow(raw: unknown): InvoiceSalesAnalysisRow | null {
+  const row = asRecord(raw);
+  if (!row) return null;
+  const detailGuid = asString(pick(row, "detailGUID", "DetailGUID", "detailGuid"));
+  if (!detailGuid) return null;
+  return {
+    detailGuid,
+    productCode: asString(pick(row, "productCode", "ProductCode")),
+    itemNumber: asString(pick(row, "itemNumber", "ItemNumber")),
+    barcode: asString(pick(row, "barcode", "Barcode")),
+    productName: asString(pick(row, "productName", "ProductName")),
+    quantity: asNullableNumber(pick(row, "quantity", "Quantity")),
+    purchasePrice: asNullableNumber(pick(row, "purchasePrice", "PurchasePrice")),
+    retailPrice: asNullableNumber(pick(row, "retailPrice", "RetailPrice")),
+    amount: asNullableNumber(pick(row, "amount", "Amount")),
+    salesQty30: asNumber(pick(row, "salesQty30", "SalesQty30"), 0),
+    salesQty60: asNumber(pick(row, "salesQty60", "SalesQty60"), 0),
+    salesQty90: asNumber(pick(row, "salesQty90", "SalesQty90"), 0),
+    previousPurchaseDate: asNullableString(pick(row, "previousPurchaseDate", "PreviousPurchaseDate")),
+    previousToCurrentDays: asNullableNumber(pick(row, "previousToCurrentDays", "PreviousToCurrentDays")),
+    salesSincePreviousPurchase: asNullableNumber(
+      pick(row, "salesSincePreviousPurchase", "SalesSincePreviousPurchase")
+    ),
+    salesStatisticLastUpdate: asNullableString(
+      pick(row, "salesStatisticLastUpdate", "SalesStatisticLastUpdate")
+    ),
+  };
+}
+
+const DEFAULT_SALES_ANALYSIS_NOTE =
+  "进货后30/60/90天销量从本次进货日期次日开始统计；上次到本次区间销量仍按历史区间显示。";
+
+export function normalizeInvoiceSalesAnalysis(payload: unknown): InvoiceSalesAnalysis {
+  const root = asRecord(payload) ?? {};
+  const data = asRecord(pick(root, "data", "Data")) ?? root;
+  const items = pick(data, "items", "Items");
+  return {
+    invoiceGuid: asString(pick(data, "invoiceGUID", "InvoiceGUID", "invoiceGuid")),
+    invoiceNo: asString(pick(data, "invoiceNo", "InvoiceNo")),
+    storeName: asString(pick(data, "storeName", "StoreName")),
+    supplierName: asString(pick(data, "supplierName", "SupplierName")),
+    orderDate: asNullableString(pick(data, "orderDate", "OrderDate")),
+    inboundDate: asNullableString(pick(data, "inboundDate", "InboundDate")),
+    analysisDate: asNullableString(pick(data, "analysisDate", "AnalysisDate")),
+    salesStatisticLastUpdate: asNullableString(pick(data, "salesStatisticLastUpdate", "SalesStatisticLastUpdate")),
+    calculationNote: asString(pick(data, "calculationNote", "CalculationNote")) || DEFAULT_SALES_ANALYSIS_NOTE,
+    items: Array.isArray(items)
+      ? items.map(normalizeInvoiceSalesAnalysisRow).filter((row): row is InvoiceSalesAnalysisRow => row !== null)
+      : [],
+  };
+}
+
+/** 单张进货单销量分析（只读，需要 LocalPurchase.View 且单据在可管理分店范围内）。 */
+export async function fetchInvoiceSalesAnalysis(invoiceGuid: string) {
+  const client = await getApiClient();
+  const response = await client.get(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/sales-analysis`);
+  return normalizeInvoiceSalesAnalysis(response.data);
 }

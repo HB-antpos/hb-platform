@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Icon, IconButton, Modal, Portal, Text, TextInput } from "react-native-paper";
+import { ActivityIndicator, Button, Icon, IconButton, Modal, Portal, Snackbar, Text, TextInput } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DetailRowCard } from "@/components/local-supplier-invoices/detail-row-card";
 import { DetailTag } from "@/components/local-supplier-invoices/detail-tag";
@@ -12,15 +12,20 @@ import {
   formatOrderDate,
   formatQuantity,
 } from "@/components/local-supplier-invoices/invoice-detail-format";
+import { InvoiceSalesAnalysisView } from "@/components/local-supplier-invoices/invoice-sales-analysis-view";
 import { MoreFiltersSheet } from "@/components/local-supplier-invoices/more-filters-sheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   batchUpsertInvoiceDetails,
   checkInvoiceProducts,
+  checkInvoiceProductsSync,
   deleteInvoiceDetails,
+  fetchCheckProductsJob,
   fetchInvoice,
   fetchInvoiceDetailsAll,
   fetchProductsByBarcode,
+  isMissingCheckJobEndpoint,
+  startCheckProductsJob,
   updateInvoiceDetailAction,
   updateInvoiceHeader,
 } from "@/modules/local-supplier-invoices/api";
@@ -41,6 +46,7 @@ import {
   getPriceChangeStats,
   hasActiveDetailFilters,
   isProductLinkConfirmed,
+  runCheckProducts,
   toggleFilterValue,
   type DetailFilters,
   type DetailMoreFilters,
@@ -83,7 +89,8 @@ export interface InvoiceDetailViewProps {
     view: { priceChange: InvoiceDetailPriceChangeFilter; search: string }
   ) => void;
   onCopy: (label: string, value: string) => void;
-  notify: (message: string) => void;
+  /** 商品检测等会改变列表上「待检测 / 新品」汇总的操作完成后通知列表：关闭详情时重查一次。 */
+  onDataChanged?: () => void;
 }
 
 function buildInitialFilters(view: InvoiceDetailInitialView | null): DetailFilters {
@@ -116,7 +123,7 @@ export function InvoiceDetailView({
   onInvoiceUpdated,
   onOpenProduct,
   onCopy,
-  notify,
+  onDataChanged,
 }: InvoiceDetailViewProps) {
   const { t, language } = useAppTranslation(["localSupplierInvoices", "common"]);
   const guid = invoice.invoiceGuid;
@@ -136,6 +143,14 @@ export function InvoiceDetailView({
   const [headerSaving, setHeaderSaving] = useState(false);
   const [editingGuid, setEditingGuid] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [salesVisible, setSalesVisible] = useState(false);
+  // 提示条画在本弹层内部：详情是全屏 Modal，列表页的 Snackbar 在它下面，用户根本看不到（检测完成等长任务反馈尤其需要）。
+  const [toast, setToast] = useState("");
+  const notify = useCallback((message: string) => setToast(message), []);
+  const [checking, setChecking] = useState(false);
+  // 检测在后台任务里跑，页面关闭后要停止轮询；同时避免连点重复提交。
+  const checkingRef = useRef(false);
+  const unmountedRef = useRef(false);
   const requestIdRef = useRef(0);
   const listRef = useRef<FlatList<LocalSupplierInvoiceItem>>(null);
   const pendingAnchorRef = useRef<string | null>(initialView?.detailGuid ?? null);
@@ -367,6 +382,89 @@ export function InvoiceDetailView({
       .finally(() => setHeaderSaving(false));
   }, [getErrorMessage, guid, invoice, loadDetails, notify, onInvoiceUpdated, t]);
 
+  // ---- 商品检测（后台任务；写入类，仅 LocalPurchase.Edit + 管理员，入口只在 canEditRows 时出现） ----
+  const hasUnsavedRef = useRef(hasUnsaved);
+  hasUnsavedRef.current = hasUnsaved;
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => { unmountedRef.current = true; };
+  }, []);
+
+  /** detailGuids 缺省 = 整张单。检测结果由服务端写回明细，完成后重读明细与表头即可。 */
+  const startCheck = useCallback((detailGuids?: string[]) => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    setChecking(true);
+    notify(t("detail.check.started"));
+    void (async () => {
+      try {
+        const outcome = await runCheckProducts(
+          {
+            startJob: startCheckProductsJob,
+            getJob: fetchCheckProductsJob,
+            checkSync: checkInvoiceProductsSync,
+            isMissingEndpoint: isMissingCheckJobEndpoint,
+            sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+            isCancelled: () => unmountedRef.current,
+          },
+          guid,
+          detailGuids
+        );
+        if (outcome.kind === "cancelled") return;
+        if (outcome.kind === "failed") {
+          notify(outcome.message || t("detail.check.failed"));
+          return;
+        }
+        if (outcome.kind === "timeout") {
+          notify(t("detail.check.timeout"));
+          return;
+        }
+        onDataChanged?.();
+        // 检测期间用户又改了行（未保存）时不重读明细，免得把他的修改冲掉。
+        if (hasUnsavedRef.current) {
+          notify(t("detail.check.doneKeepEdits"));
+          return;
+        }
+        await loadDetails(false);
+        await refreshHeader();
+        const summary = outcome.summary;
+        notify(summary
+          ? t("detail.check.done", {
+            total: summary.total,
+            exists: summary.productExists,
+            notExists: summary.productNotExists,
+            abnormal: summary.barcodeAbnormal,
+          })
+          : t("detail.check.doneNoSummary"));
+      } catch (error) {
+        if (!unmountedRef.current) notify(getErrorMessage(error, "detail.check.failed"));
+      } finally {
+        checkingRef.current = false;
+        if (!unmountedRef.current) setChecking(false);
+      }
+    })();
+  }, [getErrorMessage, guid, loadDetails, notify, onDataChanged, refreshHeader, t]);
+
+  const requestCheck = useCallback(() => {
+    if (checkingRef.current) return;
+    // 检测完成后会重读明细，先让用户处理未保存修改。
+    runAfterUnsavedGuard(() => {
+      const scoped = filtersActive && visible.length > 0 && visible.length < details.length;
+      if (!scoped) {
+        startCheck(undefined);
+        return;
+      }
+      const visibleGuids = visible.map((row) => row.detailGuid);
+      Alert.alert(t("detail.check.scopeTitle"), t("detail.check.scopeBody"), [
+        { text: t("detail.check.scopeAll", { count: details.length }), onPress: () => startCheck(undefined) },
+        { text: t("detail.check.scopeVisible", { count: visible.length }), onPress: () => startCheck(visibleGuids) },
+        { text: t("detail.edit.cancel"), style: "cancel" },
+      ]);
+    });
+  }, [details.length, filtersActive, runAfterUnsavedGuard, startCheck, t, visible]);
+
   // ---- 筛选操作 ----
   const toggleQuick = (filter: DetailQuickFilter) => setFilters((current) => ({
     ...current,
@@ -388,7 +486,14 @@ export function InvoiceDetailView({
   const handleOpenProduct = useCallback((detail: LocalSupplierInvoiceItem) => {
     runAfterUnsavedGuard(() => onOpenProduct(detail, { priceChange: toPriceChangeFilter(filters), search: filters.searchText }));
   }, [filters, onOpenProduct, runAfterUnsavedGuard]);
-  const handleRowPress = useCallback((detail: LocalSupplierInvoiceItem) => setEditingGuid(detail.detailGuid), []);
+  const handleRowPress = useCallback((detail: LocalSupplierInvoiceItem) => {
+    // 检测完成后会重读明细，期间改行容易被冲掉：先拦住并提示。
+    if (checkingRef.current) {
+      notify(t("detail.check.busy"));
+      return;
+    }
+    setEditingGuid(detail.detailGuid);
+  }, [notify, t]);
 
   const renderItem = useCallback(({ item }: { item: LocalSupplierInvoiceItem }) => (
     <View style={styles.rowWrap}>
@@ -468,7 +573,21 @@ export function InvoiceDetailView({
         <View style={styles.progressCard}>
           <View style={styles.progressTitleRow}>
             <Text style={styles.progressTitle}>{t("detail.progress.title")}</Text>
-            <Text style={styles.context}>{t("detail.progress.executedPercent", { percent: executedPercent })}</Text>
+            <View style={styles.progressTitleActions}>
+              <Text style={styles.context}>{t("detail.progress.executedPercent", { percent: executedPercent })}</Text>
+              {canEditRows ? (
+                <Button
+                  compact
+                  mode="contained-tonal"
+                  icon="text-box-search-outline"
+                  loading={checking}
+                  disabled={checking}
+                  onPress={requestCheck}
+                >
+                  {checking ? t("detail.check.running") : t("detail.check.action")}
+                </Button>
+              ) : null}
+            </View>
           </View>
           <View style={styles.bar}>
             {DETAIL_PROGRESS_BUCKETS.map((bucket) => (
@@ -562,6 +681,13 @@ export function InvoiceDetailView({
           <View style={styles.navBar}>
             <IconButton accessibilityLabel={t("actions.returnToInvoices")} icon="chevron-left" onPress={requestClose} style={styles.navButton} />
             <Text style={styles.navTitle} numberOfLines={1}>{t("detailTitle")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setSalesVisible(true)}
+              style={styles.navAction}
+            >
+              <Text style={styles.navActionText}>{t("salesAnalysis.open")}</Text>
+            </Pressable>
             {canEditHeader ? (
               <Pressable
                 accessibilityRole="button"
@@ -627,6 +753,12 @@ export function InvoiceDetailView({
           )}
         </SafeAreaView>
 
+        <Snackbar visible={Boolean(toast)} onDismiss={() => setToast("")} duration={4000}>
+          {toast}
+        </Snackbar>
+        {salesVisible ? (
+          <InvoiceSalesAnalysisView invoice={invoice} onClose={() => setSalesVisible(false)} />
+        ) : null}
         {canEditRows ? (
           <EditLineSheet
             detail={editingDetail}
@@ -724,6 +856,7 @@ const styles = StyleSheet.create({
   },
   progressTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   progressTitle: { fontSize: 13, fontWeight: "700", color: HB_COLORS.textPrimary },
+  progressTitleActions: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
   bar: { height: 8, borderRadius: 4, overflow: "hidden", flexDirection: "row", backgroundColor: HB_COLORS.surfaceMuted },
   bucketRow: { flexDirection: "row", gap: 5 },
   bucket: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, borderRadius: 14, borderWidth: 1, borderColor: HB_COLORS.outlineMuted, backgroundColor: HB_COLORS.white },

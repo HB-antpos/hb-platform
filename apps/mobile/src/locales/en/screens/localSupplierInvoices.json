@@ -10,6 +10,8 @@
     "moreFilters": "More filters",
     "allInboundStatuses": "All",
     "orderDateRange": "Order date",
+    "createdAtRange": "Created date",
+    "dateField": "Date type",
     "dateFrom": "From date",
     "dateTo": "To date",
     "emptyDate": "Not selected",
@@ -17,6 +19,8 @@
     "dateRangeFrom": "From {{date}}",
     "dateRangeTo": "Until {{date}}",
     "dateRangeTitle": "Select order date range",
+    "dateRangeTitleOrder": "Select order date range",
+    "dateRangeTitleCreated": "Select created date range",
     "applyDateRange": "Apply date range",
     "allStores": "All stores",
     "managedStores": "Managed stores",
@@ -26,6 +30,8 @@
     "supplierPickerTitle": "Select supplier",
     "pageSize": "Per page",
     "sort": "Sort",
+    "createdAtDesc": "Created ↓",
+    "createdAtAsc": "Created ↑",
     "orderDateDesc": "Order date ↓",
     "orderDateAsc": "Order date ↑",
     "invoiceNoAsc": "Invoice no. ↑",
@@ -37,10 +43,18 @@
     "detailSearch": "Search product / barcode",
     "detailSearchFull": "Search item no. / barcode / name",
     "productKeywordPlaceholder": "Match products: item no. / barcode / name",
-    "appliedDateRange": "Order date: {{range}} (tap to change)"
+    "appliedDateRange": "{{field}}: {{range}} (tap to change)",
+    "allCheckStatuses": "All checks",
+    "checkPending": "To check",
+    "checkDone": "Checked",
+    "hasUncreatedProducts": "Has uncreated products"
   },
   "labels": {
     "orderDate": "Order date",
+    "createdAt": "Created",
+    "checkPending": "To check",
+    "checkPendingCount": "To check {{count}}",
+    "newProductCount": "New {{count}}",
     "storeCaption": "Store",
     "invoiceInfo": "Invoice information",
     "remarks": "Remarks",
@@ -100,6 +114,21 @@
     "restoreInvoiceMissing": "Couldn't return to the original invoice. It's not on the current page."
   },
   "detail": {
+    "check": {
+      "action": "Check products",
+      "running": "Checking…",
+      "started": "Product check started — you can stay on this page",
+      "busy": "Product check is running, please wait before editing",
+      "done": "Check complete: {{total}} rows, {{exists}} found, {{notExists}} missing, {{abnormal}} barcode issues",
+      "doneNoSummary": "Check complete",
+      "doneKeepEdits": "Check complete. You have unsaved edits so the rows were not refreshed — save and reopen to see the result",
+      "failed": "Product check failed",
+      "timeout": "The check is still running in the background — reopen this invoice later to see the result",
+      "scopeTitle": "Which products to check?",
+      "scopeBody": "A filter is active. You can check only the filtered rows or the whole invoice.",
+      "scopeAll": "Whole invoice ({{count}})",
+      "scopeVisible": "Current filter ({{count}})"
+    },
     "flowStatus": {
       "0": "Draft",
       "1": "Submitted",
@@ -292,5 +321,36 @@
     },
     "deleteDone": "Deleted",
     "deleteFailed": "Delete failed"
+  },
+  "salesAnalysis": {
+    "title": "Sales analysis",
+    "open": "Sales analysis",
+    "loading": "Loading sales analysis…",
+    "note": "Sales for 30/60/90 days after purchase are counted from the day after this purchase date; sales between the previous and this purchase keep the historical window.",
+    "loadFailed": "Failed to load sales analysis",
+    "empty": "This invoice has no products to analyse",
+    "emptyFiltered": "No products match the search",
+    "searchPlaceholder": "Search item no. / barcode / name",
+    "products": "Products",
+    "sales30": "30-day sales",
+    "sales90": "90-day sales",
+    "zeroSales90": "No sales in 90d",
+    "days30": "30 days after",
+    "days60": "60 days",
+    "days90": "90 days",
+    "updatedAt": "Sales stats updated {{time}}",
+    "purchased": "Bought {{qty}}",
+    "price": "Cost {{purchase}} · Retail {{retail}}",
+    "previous": "Previous purchase {{date}}",
+    "interval": "{{days}} days apart",
+    "intervalSales": "Sold between {{qty}}",
+    "noPrevious": "No previous purchase on record",
+    "visibleOfTotal": "Showing {{visible}} of {{total}} products",
+    "sort": {
+      "default": "Invoice order",
+      "sales30Desc": "30-day sales ↓",
+      "sales90Desc": "90-day sales ↓",
+      "sales90Asc": "90-day sales ↑ (slow)"
+    }
   }
 }

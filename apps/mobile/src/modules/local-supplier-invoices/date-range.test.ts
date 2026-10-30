@@ -1,8 +1,10 @@
 import {
   clearInvoiceDateRange,
   formatInvoiceDateRangeDisplay,
+  getDefaultInvoiceDateFilters,
   selectInvoiceDateRange,
-  toInvoiceOrderDateFilters,
+  toCreatedAtInstantRange,
+  toInvoiceDateRangeFilters,
 } from "./date-range";
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
@@ -92,19 +94,76 @@ assertDeepEqual(
 );
 
 assertDeepEqual(
-  toInvoiceOrderDateFilters({ from: "2026-05-01", to: "2026-05-31" }),
-  { orderDateFrom: "2026-05-01", orderDateTo: "2026-05-31" },
-  "helper preserves existing invoice filter wire shape"
+  toInvoiceDateRangeFilters({ from: "2026-05-01", to: "2026-05-31" }),
+  { dateFrom: "2026-05-01", dateTo: "2026-05-31" },
+  "helper maps a range onto the generic dateFrom/dateTo filter fields"
 );
 
 assertEqual(
-  Object.prototype.hasOwnProperty.call(toInvoiceOrderDateFilters({}), "orderDateFrom"),
+  Object.prototype.hasOwnProperty.call(toInvoiceDateRangeFilters({}), "dateFrom"),
   false,
-  "empty helper mapping omits orderDateFrom"
+  "empty helper mapping omits dateFrom"
 );
 
 assertEqual(
-  Object.prototype.hasOwnProperty.call(toInvoiceOrderDateFilters({}), "orderDateTo"),
+  Object.prototype.hasOwnProperty.call(toInvoiceDateRangeFilters({}), "dateTo"),
   false,
-  "empty helper mapping omits orderDateTo"
+  "empty helper mapping omits dateTo"
+);
+
+// 默认口径：创建日期、含今天往前数 90 个自然日（与 Web 一致）。
+assertDeepEqual(
+  getDefaultInvoiceDateFilters(new Date(2026, 9, 30, 15, 20)),
+  { dateField: "createdAt", dateFrom: "2026-08-02", dateTo: "2026-10-30" },
+  "default invoice date filter is created date, last 90 calendar days including today"
+);
+assertDeepEqual(
+  getDefaultInvoiceDateFilters(new Date(2026, 0, 10)),
+  { dateField: "createdAt", dateFrom: "2025-10-13", dateTo: "2026-01-10" },
+  "default 90-day window crosses the year boundary"
+);
+assertDeepEqual(
+  getDefaultInvoiceDateFilters(new Date(2028, 2, 1)),
+  { dateField: "createdAt", dateFrom: "2027-12-03", dateTo: "2028-03-01" },
+  "default 90-day window counts the leap day"
+);
+
+// 创建时间区间：本地日期 -> 带时区时刻 [起日 0 点, 止日次日 0 点)。期望值同样用本地 Date 构造，测试与所在时区无关。
+assertDeepEqual(
+  toCreatedAtInstantRange({ from: "2026-10-06", to: "2026-10-08" }),
+  {
+    filter: new Date(2026, 9, 6).toISOString(),
+    filterTo: new Date(2026, 9, 9).toISOString(),
+  },
+  "created-at range starts at local midnight of the first day and ends at midnight after the last day"
+);
+assertDeepEqual(
+  toCreatedAtInstantRange({ from: "2026-10-31", to: "2026-10-31" }),
+  {
+    filter: new Date(2026, 9, 31).toISOString(),
+    filterTo: new Date(2026, 10, 1).toISOString(),
+  },
+  "single-day created-at range spans exactly that local day and rolls over the month end"
+);
+assertDeepEqual(
+  toCreatedAtInstantRange({ from: "2026-10-06" }, new Date(2026, 9, 30, 9, 0)),
+  {
+    filter: new Date(2026, 9, 6).toISOString(),
+    filterTo: new Date(2026, 9, 31).toISOString(),
+  },
+  "from-only created-at range ends tomorrow midnight"
+);
+assertDeepEqual(
+  toCreatedAtInstantRange({ to: "2026-10-06" }),
+  {
+    filter: new Date(2000, 0, 1).toISOString(),
+    filterTo: new Date(2026, 9, 7).toISOString(),
+  },
+  "to-only created-at range starts at an open lower bound"
+);
+assertEqual(toCreatedAtInstantRange({}), null, "empty created-at range sends no filter");
+assertEqual(
+  toCreatedAtInstantRange({ from: "2026-02-31", to: "2026-03-05" }),
+  null,
+  "unparseable created-at date sends no filter instead of a shifted one"
 );
