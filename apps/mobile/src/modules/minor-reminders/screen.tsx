@@ -32,41 +32,7 @@ import {
   type MinorReminder,
 } from "./api";
 import { MinorEmployeeRequestsPanel } from "./minor-employee-requests";
-
-/**
- * 后端 MinorEmploymentComplianceCalculator 生成的提示正文只有中文；
- * 英文界面按 ruleId 显示对应英文，未知规则回退为后端原文。
- */
-const RULE_MESSAGES_EN: Record<string, string> = {
-  QLD_ORDINARY_RETAIL_MINIMUM_AGE:
-    "Under 13 for ordinary QLD retail work. HR must check for a special permit or exemption. Rostering can continue.",
-  NSW_AWARD_REVIEW:
-    "The QLD 4/8/12/38-hour limits don't apply to NSW retail. Check against school arrangements, the applicable award and company policy.",
-  AWARD_BREAK_REVIEW:
-    "Worked 4 hours in a row. Check breaks under the applicable award. No exemption has been assumed.",
-  QLD_PARTICIPATION_REVIEW:
-    "Not covered by the QLD school-age hour limits. School arrangements and the applicable award still need checking.",
-  QLD_SCHOOL_DAY_DAILY_LIMIT:
-    "Daily hours exceed the QLD limit for school-age children.",
-  QLD_NON_SCHOOL_DAY_DAILY_LIMIT:
-    "Daily hours exceed the QLD limit for school-age children.",
-  QLD_SCHOOL_WEEKLY_LIMIT:
-    "Weekly hours (week starting Sunday) exceed the QLD limit for school-age children.",
-  QLD_NON_SCHOOL_WEEKLY_LIMIT:
-    "Weekly hours (week starting Sunday) exceed the QLD limit for school-age children.",
-  QLD_NIGHT_WORK: "Shift falls within the QLD restricted hours of 10 pm – 6 am.",
-  QLD_SAME_EMPLOYER_REST:
-    "Less than 12 hours between consecutive shifts with the same employer.",
-  SCHOOL_ATTENDANCE_CONFLICT: "Shift overlaps the declared school hours.",
-  COMMUTE_SCHOOL_CONFLICT:
-    "Not enough travel time from school to the store. This is a safety reminder, not a cut to legal hours.",
-  COMMUTE_LATEST_END_CONFLICT:
-    "Shift ends after the declared latest safe finish time.",
-  COMMUTE_HOMEWARD_CONFLICT:
-    "The trip home after this shift misses the declared last transport option.",
-  AWARD_UNKNOWN:
-    "The applicable award or agreement is unknown. HR needs to check break and minimum shift rules.",
-};
+import { localizeMinorRuleMessage } from "./rule-messages";
 
 export function MinorRemindersScreen() {
   const { language } = useAppTranslation("attendance");
@@ -208,8 +174,7 @@ export function MinorRemindersScreen() {
                   {categories[item.ruleCategory] ?? item.ruleCategory}
                 </Text>
                 <Text>
-                  {(en && item.ruleId && RULE_MESSAGES_EN[item.ruleId]) ||
-                    item.message}
+                  {localizeMinorRuleMessage(item, language)}
                 </Text>
                 {item.actualMinutes != null && item.limitMinutes != null ? (
                   <Text>
