@@ -19,29 +19,33 @@ import {
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { formatDateTime } from "@/components/local-supplier-invoices/invoice-detail-format";
 import { InvoiceDetailView, type InvoiceDetailInitialView } from "@/components/local-supplier-invoices/invoice-detail-view";
+import { InvoiceSalesAnalysisView } from "@/components/local-supplier-invoices/invoice-sales-analysis-view";
 import { fetchInvoices } from "@/modules/local-supplier-invoices/api";
 import {
   buildLocalSupplierInvoicesReturnParams,
   decodeLocalSupplierInvoicesReturnParams,
 } from "@/modules/local-supplier-invoices/navigation";
-import { getInvoiceInboundStatusLabel } from "@/modules/local-supplier-invoices/types";
-import { getDefaultListDateRange } from "@/shared/utils/default-list-date-range";
 import { sortSuppliersByName } from "@/shared/utils/name-sort";
 import {
   clearInvoiceDateRange,
   formatInvoiceDateRangeDisplay,
+  getDefaultInvoiceDateFilters,
   selectInvoiceDateRange,
-  toInvoiceOrderDateFilters,
+  toInvoiceDateRangeFilters,
   type InvoiceDateRangeValue,
 } from "@/modules/local-supplier-invoices/date-range";
-import type {
-  InvoiceDetailPriceChangeFilter,
-  InvoiceGridFilters,
-  InvoiceGridSort,
-  InvoiceListPageSize,
-  LocalSupplierInvoice,
-  LocalSupplierInvoiceItem,
+import {
+  DEFAULT_INVOICE_DATE_FIELD,
+  getInvoiceInboundStatusLabel,
+  type InvoiceDateField,
+  type InvoiceDetailPriceChangeFilter,
+  type InvoiceGridFilters,
+  type InvoiceGridSort,
+  type InvoiceListPageSize,
+  type LocalSupplierInvoice,
+  type LocalSupplierInvoiceItem,
 } from "@/modules/local-supplier-invoices/types";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
@@ -66,6 +70,8 @@ const LIST_PAGE_SIZES: InvoiceListPageSize[] = [20, 50, 100];
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const GRID_DAYS = 42;
 const SORT_OPTIONS: SortOption[] = [
+  { colId: "CreatedAt", direction: "desc", labelKey: "filters.createdAtDesc" },
+  { colId: "CreatedAt", direction: "asc", labelKey: "filters.createdAtAsc" },
   { colId: "OrderDate", direction: "desc", labelKey: "filters.orderDateDesc" },
   { colId: "OrderDate", direction: "asc", labelKey: "filters.orderDateAsc" },
   { colId: "InvoiceNo", direction: "asc", labelKey: "filters.invoiceNoAsc" },
@@ -135,18 +141,20 @@ function buildInvoiceListRequestKey({
     filters.supplierCode ?? "",
     filters.invoiceNo ?? "",
     filters.inboundStatus ?? "",
-    filters.orderDateFrom ?? "",
-    filters.orderDateTo ?? "",
+    filters.dateField ?? DEFAULT_INVOICE_DATE_FIELD,
+    filters.dateFrom ?? "",
+    filters.dateTo ?? "",
+    filters.productChecked ?? "",
+    filters.hasUncreatedProducts ?? "",
     filters.productKeyword ?? "",
     sort.colId,
     sort.direction,
   ]);
 }
 
-/** 进货单列表默认只查最近 6 个月；用户可在日期弹窗里清除区间看全部。 */
-function buildDefaultInvoiceDateFilters(): Pick<InvoiceGridFilters, "orderDateFrom" | "orderDateTo"> {
-  const range = getDefaultListDateRange();
-  return toInvoiceOrderDateFilters({ from: range.from, to: range.to });
+/** 进货单列表默认只查最近 90 天（创建日期，与 Web 一致）；用户可在日期弹窗里清除区间看全部。 */
+function buildDefaultInvoiceDateFilters(): Pick<InvoiceGridFilters, "dateField" | "dateFrom" | "dateTo"> {
+  return getDefaultInvoiceDateFilters();
 }
 
 function pad2(value: number) {
@@ -355,14 +363,18 @@ export default function LocalSupplierInvoicesScreen() {
     returnFilterSupplierCode?: string | string[];
     returnFilterInvoiceNo?: string | string[];
     returnFilterInboundStatus?: string | string[];
-    returnFilterOrderDateFrom?: string | string[];
-    returnFilterOrderDateTo?: string | string[];
+    returnFilterDateField?: string | string[];
+    returnFilterDateFrom?: string | string[];
+    returnFilterDateTo?: string | string[];
+    returnFilterProductChecked?: string | string[];
+    returnFilterHasUncreatedProducts?: string | string[];
+    returnFilterProductKeyword?: string | string[];
     returnSortColId?: string | string[];
     returnSortDirection?: string | string[];
   }>();
   const [draftFilters, setDraftFilters] = useState<InvoiceGridFilters>(buildDefaultInvoiceDateFilters);
   const [filters, setFilters] = useState<InvoiceGridFilters>(buildDefaultInvoiceDateFilters);
-  const [sort, setSort] = useState<InvoiceGridSort>({ colId: "OrderDate", direction: "desc" });
+  const [sort, setSort] = useState<InvoiceGridSort>({ colId: "CreatedAt", direction: "desc" });
   const [sortMenuVisible, setSortMenuVisible] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
@@ -380,6 +392,10 @@ export default function LocalSupplierInvoicesScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<LocalSupplierInvoice | null>(null);
+  // 销量分析是只读页面，列表卡片与明细页都能进；列表这边的入口单独记一份当前单据。
+  const [salesAnalysisInvoice, setSalesAnalysisInvoice] = useState<LocalSupplierInvoice | null>(null);
+  // 明细页做了商品检测等会改变列表汇总（待检测 / 新品）的操作后置位，关闭详情时据此静默重查一次列表。
+  const listStaleRef = useRef(false);
   // 从商品编辑返回时要恢复的明细视图（筛选 / 搜索 / 滚动到的那一行）；点开新单据时清空。
   const [detailInitialView, setDetailInitialView] = useState<InvoiceDetailInitialView | null>(null);
   const [snackbar, setSnackbar] = useState("");
@@ -411,8 +427,12 @@ export default function LocalSupplierInvoicesScreen() {
       returnFilterSupplierCode: searchParams.returnFilterSupplierCode,
       returnFilterInvoiceNo: searchParams.returnFilterInvoiceNo,
       returnFilterInboundStatus: searchParams.returnFilterInboundStatus,
-      returnFilterOrderDateFrom: searchParams.returnFilterOrderDateFrom,
-      returnFilterOrderDateTo: searchParams.returnFilterOrderDateTo,
+      returnFilterDateField: searchParams.returnFilterDateField,
+      returnFilterDateFrom: searchParams.returnFilterDateFrom,
+      returnFilterDateTo: searchParams.returnFilterDateTo,
+      returnFilterProductChecked: searchParams.returnFilterProductChecked,
+      returnFilterHasUncreatedProducts: searchParams.returnFilterHasUncreatedProducts,
+      returnFilterProductKeyword: searchParams.returnFilterProductKeyword,
       returnSortColId: searchParams.returnSortColId,
       returnSortDirection: searchParams.returnSortDirection,
     }),
@@ -424,8 +444,12 @@ export default function LocalSupplierInvoicesScreen() {
       searchParams.returnDetailSearch,
       searchParams.returnFilterInvoiceNo,
       searchParams.returnFilterInboundStatus,
-      searchParams.returnFilterOrderDateFrom,
-      searchParams.returnFilterOrderDateTo,
+      searchParams.returnFilterDateField,
+      searchParams.returnFilterDateFrom,
+      searchParams.returnFilterDateTo,
+      searchParams.returnFilterProductChecked,
+      searchParams.returnFilterHasUncreatedProducts,
+      searchParams.returnFilterProductKeyword,
       searchParams.returnFilterStoreCode,
       searchParams.returnFilterSupplierCode,
       searchParams.returnInvoiceGuid,
@@ -441,7 +465,7 @@ export default function LocalSupplierInvoicesScreen() {
     const match = SORT_OPTIONS.find(
       (option) => option.colId === sort.colId && option.direction === sort.direction
     );
-    return t(match?.labelKey ?? "filters.orderDateDesc");
+    return t(match?.labelKey ?? "filters.createdAtDesc");
   }, [sort, t]);
 
   const listPageCount = getPageCount(total, pageSize);
@@ -478,9 +502,9 @@ export default function LocalSupplierInvoicesScreen() {
       month: "long",
     }).format(dateRangeDisplayMonth);
   }, [dateRangeDisplayMonth, language]);
-  const orderDateRangeLabel = useMemo(() => {
-    const from = normalizeMonthDate(draftFilters.orderDateFrom);
-    const to = normalizeMonthDate(draftFilters.orderDateTo);
+  const dateRangeLabel = useMemo(() => {
+    const from = normalizeMonthDate(draftFilters.dateFrom);
+    const to = normalizeMonthDate(draftFilters.dateTo);
 
     return formatInvoiceDateRangeDisplay(
       { from, to },
@@ -491,19 +515,21 @@ export default function LocalSupplierInvoicesScreen() {
         rangeSeparator: " ~ ",
       }
     ).text;
-  }, [draftFilters.orderDateFrom, draftFilters.orderDateTo, t]);
+  }, [draftFilters.dateFrom, draftFilters.dateTo, t]);
+  const draftDateField: InvoiceDateField = draftFilters.dateField ?? DEFAULT_INVOICE_DATE_FIELD;
+  const appliedDateField: InvoiceDateField = filters.dateField ?? DEFAULT_INVOICE_DATE_FIELD;
   const productKeywordApplied =
     Boolean(filters.productKeyword?.trim())
     && (draftFilters.productKeyword ?? "").trim() === filters.productKeyword?.trim();
   const appliedDateRangeLabel = useMemo(() => formatInvoiceDateRangeDisplay(
-    { from: normalizeMonthDate(filters.orderDateFrom), to: normalizeMonthDate(filters.orderDateTo) },
+    { from: normalizeMonthDate(filters.dateFrom), to: normalizeMonthDate(filters.dateTo) },
     {
       allDatesLabel: t("filters.allDates"),
       formatFrom: (date) => t("filters.dateRangeFrom", { date }),
       formatTo: (date) => t("filters.dateRangeTo", { date }),
       rangeSeparator: " ~ ",
     }
-  ).text, [filters.orderDateFrom, filters.orderDateTo, t]);
+  ).text, [filters.dateFrom, filters.dateTo, t]);
 
   const bindDeviceStore = useCallback(
     (nextFilters: InvoiceGridFilters) =>
@@ -728,6 +754,28 @@ export default function LocalSupplierInvoicesScreen() {
     setPage(1);
   }, [bindDeviceStore, filters]);
 
+  /** 检测状态页签：与入库状态一样点击立即生效；undefined = 全部，false = 待检测，true = 已检测。 */
+  const applyProductChecked = useCallback((productChecked?: boolean) => {
+    const nextFilters = bindDeviceStore({ ...filters, productChecked });
+    setDraftFilters((current) => ({ ...current, productChecked }));
+    setFilters(nextFilters);
+    setPage(1);
+  }, [bindDeviceStore, filters]);
+
+  /** 「有商品未创建」开关：立即生效；关闭时存 undefined，请求体里不带该条件。 */
+  const toggleHasUncreatedProducts = useCallback(() => {
+    const hasUncreatedProducts = filters.hasUncreatedProducts ? undefined : true;
+    const nextFilters = bindDeviceStore({ ...filters, hasUncreatedProducts });
+    setDraftFilters((current) => ({ ...current, hasUncreatedProducts }));
+    setFilters(nextFilters);
+    setPage(1);
+  }, [bindDeviceStore, filters]);
+
+  const selectDateField = useCallback((dateField: InvoiceDateField) => {
+    // 只换日期口径，区间保持不变；点「搜索」后才生效，和其他草稿筛选一致。
+    setDraftFilters((current) => ({ ...current, dateField }));
+  }, []);
+
   const clearProductKeyword = useCallback(() => {
     // 清空商品匹配立即生效：输入框的 × 与「搜索」按钮行为一致，不需要再点一次搜索。
     setDraftFilters((current) => ({ ...current, productKeyword: undefined }));
@@ -736,7 +784,7 @@ export default function LocalSupplierInvoicesScreen() {
   }, [bindDeviceStore]);
 
   const clearFilters = useCallback(() => {
-    // 「清除」回到默认条件（最近 6 个月），而不是全历史；要看全部日期请在日期弹窗里清除区间。
+    // 「清除」回到默认条件（创建日期近 90 天），而不是全历史；要看全部日期请在日期弹窗里清除区间。
     const emptyFilters = bindDeviceStore(buildDefaultInvoiceDateFilters());
     setDraftFilters(emptyFilters);
     setFilters(emptyFilters);
@@ -751,6 +799,14 @@ export default function LocalSupplierInvoicesScreen() {
   const closeDetails = useCallback(() => {
     setSelectedInvoice(null);
     setDetailInitialView(null);
+    if (listStaleRef.current) {
+      listStaleRef.current = false;
+      void loadInvoices(true);
+    }
+  }, [loadInvoices]);
+
+  const handleDetailDataChanged = useCallback(() => {
+    listStaleRef.current = true;
   }, []);
 
   /** 明细页保存、改表头后同步：列表卡片与详情头部共用同一份数据。 */
@@ -853,23 +909,23 @@ export default function LocalSupplierInvoicesScreen() {
     setSupplierPickerVisible(false);
   }, []);
 
-  const updateOrderDateRange = useCallback((nextRange: InvoiceDateRangeValue) => {
-    const nextFilters = toInvoiceOrderDateFilters(nextRange);
+  const updateDateRange = useCallback((nextRange: InvoiceDateRangeValue) => {
+    const nextFilters = toInvoiceDateRangeFilters(nextRange);
     setDraftFilters((current) => ({
       ...current,
-      orderDateFrom: nextFilters.orderDateFrom,
-      orderDateTo: nextFilters.orderDateTo,
+      dateFrom: nextFilters.dateFrom,
+      dateTo: nextFilters.dateTo,
     }));
   }, []);
 
   const openDateRangeModal = useCallback(() => {
-    const from = normalizeMonthDate(draftFilters.orderDateFrom);
-    const to = normalizeMonthDate(draftFilters.orderDateTo);
+    const from = normalizeMonthDate(draftFilters.dateFrom);
+    const to = normalizeMonthDate(draftFilters.dateTo);
     setDateRangeSnapshot({ from, to });
     const displayMonth = parseMonthDate(from || to) ?? new Date();
     setDateRangeDisplayMonth(getMonthStart(displayMonth));
     setDateRangeModalVisible(true);
-  }, [draftFilters.orderDateFrom, draftFilters.orderDateTo]);
+  }, [draftFilters.dateFrom, draftFilters.dateTo]);
 
   const closeDateRangeModal = useCallback(() => {
     setDateRangeModalVisible(false);
@@ -878,28 +934,28 @@ export default function LocalSupplierInvoicesScreen() {
 
   const cancelDateRangeModal = useCallback(() => {
     if (dateRangeSnapshot) {
-      updateOrderDateRange(dateRangeSnapshot);
+      updateDateRange(dateRangeSnapshot);
     }
     closeDateRangeModal();
-  }, [closeDateRangeModal, dateRangeSnapshot, updateOrderDateRange]);
+  }, [closeDateRangeModal, dateRangeSnapshot, updateDateRange]);
 
   const applyDateRangeModal = useCallback(() => {
     closeDateRangeModal();
   }, [closeDateRangeModal]);
 
   const clearDateRange = useCallback(() => {
-    updateOrderDateRange(clearInvoiceDateRange());
-  }, [updateOrderDateRange]);
+    updateDateRange(clearInvoiceDateRange());
+  }, [updateDateRange]);
 
   const selectRangeDate = useCallback(
     (dateString: string) => {
-      const from = normalizeMonthDate(draftFilters.orderDateFrom);
-      const to = normalizeMonthDate(draftFilters.orderDateTo);
-      updateOrderDateRange(selectInvoiceDateRange({ from, to }, dateString));
+      const from = normalizeMonthDate(draftFilters.dateFrom);
+      const to = normalizeMonthDate(draftFilters.dateTo);
+      updateDateRange(selectInvoiceDateRange({ from, to }, dateString));
 
       setDateRangeDisplayMonth(getMonthStart(parseMonthDate(dateString) ?? new Date()));
     },
-    [draftFilters.orderDateFrom, draftFilters.orderDateTo, updateOrderDateRange]
+    [draftFilters.dateFrom, draftFilters.dateTo, updateDateRange]
   );
 
   const renderPagination = (
@@ -1002,10 +1058,13 @@ export default function LocalSupplierInvoicesScreen() {
           />
         </View>
 
-        {/* 默认带 6 个月日期区间且日期入口收在「更多筛选」里，这里把已生效的区间显式写出来，避免用户不知道只查了一部分。 */}
+        {/* 默认带 90 天日期区间且日期入口收在「更多筛选」里，这里把已生效的字段与区间显式写出来，避免用户不知道只查了一部分。 */}
         <Pressable onPress={() => setFiltersExpanded(true)}>
           <Text variant="bodySmall" style={styles.appliedDateHint}>
-            {t("filters.appliedDateRange", { range: appliedDateRangeLabel })}
+            {t("filters.appliedDateRange", {
+              field: t(appliedDateField === "orderDate" ? "filters.orderDateRange" : "filters.createdAtRange"),
+              range: appliedDateRangeLabel,
+            })}
           </Text>
         </Pressable>
 
@@ -1033,6 +1092,41 @@ export default function LocalSupplierInvoicesScreen() {
               </Button>
             );
           })}
+        </ScrollView>
+
+        {/* 检测状态：待检测 = 还有明细没做过商品检测；与「有商品未创建」都是店长/仓库找待办的入口，所有能看列表的人可用。 */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.inboundTabs}
+        >
+          {([
+            { value: undefined, label: t("filters.allCheckStatuses") },
+            { value: false as const, label: t("filters.checkPending") },
+            { value: true as const, label: t("filters.checkDone") },
+          ]).map((option) => {
+            const selected = filters.productChecked === option.value;
+            return (
+              <Button
+                key={String(option.value ?? "all")}
+                compact
+                mode={selected ? "contained" : "text"}
+                onPress={() => applyProductChecked(option.value)}
+                style={styles.inboundTab}
+              >
+                {option.label}
+              </Button>
+            );
+          })}
+          <Button
+            compact
+            icon={filters.hasUncreatedProducts ? "check" : undefined}
+            mode={filters.hasUncreatedProducts ? "contained" : "outlined"}
+            onPress={toggleHasUncreatedProducts}
+            style={styles.inboundTab}
+          >
+            {t("filters.hasUncreatedProducts")}
+          </Button>
         </ScrollView>
 
         {filtersExpanded ? <View style={styles.filterPanel}>
@@ -1081,22 +1175,43 @@ export default function LocalSupplierInvoicesScreen() {
                 )}
               </Surface>
             </Pressable>
-            <Pressable onPress={openDateRangeModal} style={styles.filterInput}>
+            <View style={[styles.filterInput, styles.filterInputFull]}>
+              <Text variant="labelMedium" style={styles.pickerFieldLabel}>
+                {t("filters.dateField")}
+              </Text>
+              <View style={styles.dateFieldRow}>
+                {([
+                  { value: "createdAt" as const, label: t("filters.createdAtRange") },
+                  { value: "orderDate" as const, label: t("filters.orderDateRange") },
+                ]).map((option) => (
+                  <Button
+                    key={option.value}
+                    compact
+                    mode={draftDateField === option.value ? "contained" : "outlined"}
+                    onPress={() => selectDateField(option.value)}
+                    style={styles.dateFieldButton}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </View>
+            </View>
+            <Pressable onPress={openDateRangeModal} style={[styles.filterInput, styles.filterInputFull]}>
               <Surface style={styles.pickerField} elevation={0}>
                 <View style={styles.pickerFieldText}>
                   <Text variant="labelMedium" style={styles.pickerFieldLabel}>
-                    {t("filters.orderDateRange")}
+                    {t(draftDateField === "orderDate" ? "filters.orderDateRange" : "filters.createdAtRange")}
                   </Text>
                   <Text
                     variant="bodyLarge"
                     numberOfLines={1}
                     style={
-                      draftFilters.orderDateFrom || draftFilters.orderDateTo
+                      draftFilters.dateFrom || draftFilters.dateTo
                         ? undefined
                         : styles.pickerPlaceholder
                     }
                   >
-                    {orderDateRangeLabel}
+                    {dateRangeLabel}
                   </Text>
                 </View>
                 <IconButton icon="calendar-month-outline" size={20} />
@@ -1203,6 +1318,29 @@ export default function LocalSupplierInvoicesScreen() {
                     <Text variant="bodySmall" style={styles.invoiceSecondaryMeta} numberOfLines={1}>
                       {invoice.storeName || invoice.storeCode || "--"} · {formatDate(invoice.orderDate)}
                     </Text>
+                    <Text variant="bodySmall" style={styles.invoiceSecondaryMeta} numberOfLines={1}>
+                      {t("labels.createdAt")}: {formatDateTime(invoice.createdAt)}
+                    </Text>
+                    {invoice.isProductChecked === false || invoice.newProductDetailCount > 0 ? (
+                      <View style={styles.invoiceTagRow}>
+                        {invoice.isProductChecked === false ? (
+                          <View style={[styles.inboundStatusBadge, styles.inboundStatusBadgeWarning]}>
+                            <Text variant="labelSmall" style={[styles.inboundStatusBadgeText, styles.inboundStatusBadgeTextWarning]}>
+                              {invoice.uncheckedDetailCount > 0
+                                ? t("labels.checkPendingCount", { count: invoice.uncheckedDetailCount })
+                                : t("labels.checkPending")}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {invoice.newProductDetailCount > 0 ? (
+                          <View style={styles.inboundStatusBadge}>
+                            <Text variant="labelSmall" style={styles.inboundStatusBadgeText}>
+                              {t("labels.newProductCount", { count: invoice.newProductDetailCount })}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
                     <View style={styles.invoiceFooterRow}>
                       <Text variant="bodySmall" style={styles.invoiceSecondaryMeta}>
                         {t("labels.receivedAmount")}: {formatMoney(invoice.receivedTotalAmount)}
@@ -1217,6 +1355,15 @@ export default function LocalSupplierInvoicesScreen() {
                           {t("labels.priceDecrease")}: {formatNumber(invoice.priceDecreaseItemCount)}
                         </Text>
                       ) : null}
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t("salesAnalysis.open")}
+                        hitSlop={8}
+                        onPress={() => setSalesAnalysisInvoice(invoice)}
+                        style={styles.salesLink}
+                      >
+                        <Text variant="labelMedium" style={styles.salesLinkText}>{t("salesAnalysis.open")}</Text>
+                      </Pressable>
                     </View>
                   </View>
                   <View style={styles.invoiceChevron}>
@@ -1249,7 +1396,15 @@ export default function LocalSupplierInvoicesScreen() {
           onInvoiceUpdated={handleInvoiceUpdated}
           onOpenProduct={openProduct}
           onCopy={handleCopyDetailValue}
-          notify={setSnackbar}
+          onDataChanged={handleDetailDataChanged}
+        />
+      ) : null}
+
+      {salesAnalysisInvoice ? (
+        <InvoiceSalesAnalysisView
+          key={salesAnalysisInvoice.invoiceGuid}
+          invoice={salesAnalysisInvoice}
+          onClose={() => setSalesAnalysisInvoice(null)}
         />
       ) : null}
 
@@ -1347,7 +1502,7 @@ export default function LocalSupplierInvoicesScreen() {
           contentContainerStyle={styles.dateModal}
         >
           <View style={styles.pickerModalHeader}>
-            <Text variant="titleMedium">{t("filters.dateRangeTitle")}</Text>
+            <Text variant="titleMedium">{t(draftDateField === "orderDate" ? "filters.dateRangeTitleOrder" : "filters.dateRangeTitleCreated")}</Text>
             <Button onPress={cancelDateRangeModal}>
               {t("common:actions.cancel")}
             </Button>
@@ -1378,8 +1533,8 @@ export default function LocalSupplierInvoicesScreen() {
             {calendarWeeks.map((week, weekIndex) => (
               <View key={weekIndex} style={styles.calendarWeekRow}>
                 {week.map((cell) => {
-                  const from = normalizeMonthDate(draftFilters.orderDateFrom);
-                  const to = normalizeMonthDate(draftFilters.orderDateTo);
+                  const from = normalizeMonthDate(draftFilters.dateFrom);
+                  const to = normalizeMonthDate(draftFilters.dateTo);
                   const isSelectedStart = Boolean(from && cell.dateString === from);
                   const isSelectedEnd = Boolean(to && cell.dateString === to);
                   const isSingleSelected = isSelectedStart && !to;
@@ -1515,6 +1670,16 @@ const styles = StyleSheet.create({
     minWidth: 150,
   },
   disabledField: { opacity: 0.8 },
+  filterInputFull: { width: "100%" },
+  dateFieldRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  dateFieldButton: {
+    borderRadius: 8,
+    flex: 1,
+  },
   appliedDateHint: {
     color: "#667085",
     paddingHorizontal: 4,
@@ -1628,6 +1793,21 @@ const styles = StyleSheet.create({
   },
   invoiceSecondaryMeta: {
     color: "#667085",
+  },
+  invoiceTagRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  salesLink: {
+    marginLeft: "auto",
+    minHeight: 28,
+    justifyContent: "center",
+  },
+  salesLinkText: {
+    color: "#0958D9",
+    fontWeight: "700",
   },
   invoiceFooterRow: {
     flexDirection: "row",

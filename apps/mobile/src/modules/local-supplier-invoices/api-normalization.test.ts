@@ -1,9 +1,13 @@
 import {
   buildInvoiceDetailsGridRequest,
   buildInvoiceGridRequest,
+  isMissingCheckJobEndpoint,
   normalizeActiveLocalSuppliersResponse,
   normalizeBarcodeMatchedProduct,
+  normalizeCheckProductsJob,
   normalizeCheckProductsResponse,
+  normalizeCheckProductsSummary,
+  normalizeInvoice,
   normalizeInvoiceDetailsGridResponse,
   normalizeInvoiceDetailsResponse,
   normalizeInvoiceGridResponse,
@@ -36,8 +40,8 @@ assertEqual(defaultListRequest.endRow, 20, "default list end row uses page size 
 assertEqual(defaultListRequest.pageSize, 20, "default list page size is 20");
 assertDeepEqual(
   defaultListRequest.sortModel,
-  [{ colId: "OrderDate", sort: "desc" }],
-  "default list sort is order date descending"
+  [{ colId: "CreatedAt", sort: "desc" }],
+  "default list sort is created time descending"
 );
 
 const filteredListRequest = buildInvoiceGridRequest({
@@ -48,8 +52,9 @@ const filteredListRequest = buildInvoiceGridRequest({
     supplierCode: " SUP ",
     invoiceNo: " INV ",
     inboundStatus: 1,
-    orderDateFrom: "2026-01-02",
-    orderDateTo: "2026-01-05",
+    dateField: "orderDate",
+    dateFrom: "2026-01-02",
+    dateTo: "2026-01-05",
     productKeyword: " 9328644 ",
   },
   sort: { colId: "InvoiceNo", direction: "asc" },
@@ -79,8 +84,8 @@ const blankDateRequest = buildInvoiceGridRequest({
   filters: {
     storeCode: " STO ",
     supplierCode: " LOC ",
-    orderDateFrom: "   ",
-    orderDateTo: "",
+    dateFrom: "   ",
+    dateTo: "",
     productKeyword: "   ",
   },
 });
@@ -95,7 +100,8 @@ assertDeepEqual(
 
 const dateFromOnlyRequest = buildInvoiceGridRequest({
   filters: {
-    orderDateFrom: "2026-02-01",
+    dateField: "orderDate",
+    dateFrom: "2026-02-01",
   },
 });
 assertDeepEqual(
@@ -112,7 +118,8 @@ assertDeepEqual(
 
 const dateToOnlyRequest = buildInvoiceGridRequest({
   filters: {
-    orderDateTo: "2026-02-28",
+    dateField: "orderDate",
+    dateTo: "2026-02-28",
   },
 });
 assertDeepEqual(
@@ -125,6 +132,69 @@ assertDeepEqual(
     },
   },
   "to-only order date uses lessThanOrEqual grid filter"
+);
+
+// 创建日期（默认口径）：本地日期区间换算成带时区的时刻区间再传 CreatedAt，字段名与 Web 一致。
+const createdAtRequest = buildInvoiceGridRequest({
+  filters: { dateFrom: "2026-10-06", dateTo: "2026-10-08" },
+});
+assertDeepEqual(
+  createdAtRequest.filterModel,
+  {
+    CreatedAt: {
+      filterType: "date",
+      type: "inRange",
+      filter: new Date(2026, 9, 6).toISOString(),
+      filterTo: new Date(2026, 9, 9).toISOString(),
+    },
+  },
+  "default date field sends the created-at instant range, not OrderDate"
+);
+
+// 同一份区间换成订单日期口径，不能再带 CreatedAt。
+const orderDateModeRequest = buildInvoiceGridRequest({
+  filters: { dateField: "orderDate", dateFrom: "2026-10-06", dateTo: "2026-10-08" },
+});
+assertDeepEqual(
+  Object.keys(orderDateModeRequest.filterModel ?? {}),
+  ["OrderDate"],
+  "order date mode sends only the OrderDate filter"
+);
+
+// 检测状态：待检测必须显式传 "false"（省略 = 全部），已检测传 "true"。
+assertDeepEqual(
+  buildInvoiceGridRequest({ filters: { productChecked: false } }).filterModel,
+  { IsProductChecked: { filterType: "text", type: "equals", filter: "false" } },
+  "pending-check filter sends an explicit false"
+);
+assertDeepEqual(
+  buildInvoiceGridRequest({ filters: { productChecked: true } }).filterModel,
+  { IsProductChecked: { filterType: "text", type: "equals", filter: "true" } },
+  "checked filter sends true"
+);
+assertEqual(
+  buildInvoiceGridRequest({ filters: { productChecked: undefined } }).filterModel,
+  undefined,
+  "no check-status filter leaves the request body unchanged"
+);
+
+// 有商品未创建：只在开启时带条件，关闭（false / undefined）与旧版请求体一致。
+assertDeepEqual(
+  buildInvoiceGridRequest({ filters: { hasUncreatedProducts: true } }).filterModel,
+  { HasUncreatedProducts: { filterType: "text", type: "equals", filter: "true" } },
+  "uncreated-products filter sends true when enabled"
+);
+assertEqual(
+  buildInvoiceGridRequest({ filters: { hasUncreatedProducts: false } }).filterModel,
+  undefined,
+  "disabled uncreated-products filter is omitted"
+);
+
+// 创建时间排序列透传给后端（后端 CreatedAt 排序、列名大小写不敏感）。
+assertDeepEqual(
+  buildInvoiceGridRequest({ sort: { colId: "CreatedAt", direction: "asc" } }).sortModel,
+  [{ colId: "CreatedAt", sort: "asc" }],
+  "created time sort is forwarded"
 );
 
 const invalidListRequest = buildInvoiceGridRequest({ page: -1, pageSize: 999 });
@@ -310,3 +380,57 @@ const checked = normalizeCheckProductsResponse({
 assertEqual(checked[0]?.detailGuid, "d-1", "check result detail guid");
 assertEqual(checked[0]?.productCode, "P9", "check result takes product code from productInfo");
 assertEqual(normalizeCheckProductsResponse({}).length, 0, "check result tolerates missing results");
+
+// ---- 二期 A：检测任务快照 / 汇总 / 404 判定 / 列表检测汇总字段 ----
+assertDeepEqual(
+  normalizeCheckProductsJob({
+    jobId: "job-9",
+    status: "Succeeded",
+    message: "ok",
+    result: { summary: { total: 5, productExists: 3, productNotExists: 2, barcodeNormal: 4, barcodeAbnormal: 1 } },
+  }),
+  {
+    jobId: "job-9",
+    status: "Succeeded",
+    message: "ok",
+    summary: { total: 5, productExists: 3, productNotExists: 2, barcodeNormal: 4, barcodeAbnormal: 1 },
+  },
+  "check job snapshot reads the backend summary"
+);
+assertDeepEqual(
+  normalizeCheckProductsJob({ success: true, data: { JobId: "job-10", Status: "Running" } }),
+  { jobId: "job-10", status: "Running", message: "", summary: null },
+  "unwrapped envelope and PascalCase job fields are tolerated; running job has no summary yet"
+);
+assertDeepEqual(
+  normalizeCheckProductsSummary({
+    results: [
+      { detailGuid: "a", productStatus: 1, barcodeStatus: 1 },
+      { detailGuid: "b", productStatus: 2, barcodeStatus: 2 },
+      { detailGuid: "c", productStatus: 2, barcodeStatus: 1 },
+    ],
+  }),
+  { total: 3, productExists: 1, productNotExists: 2, barcodeNormal: 2, barcodeAbnormal: 1 },
+  "missing summary is rebuilt from the per-row results"
+);
+assertEqual(normalizeCheckProductsSummary({}), null, "no summary and no results gives null");
+assertEqual(isMissingCheckJobEndpoint({ response: { status: 404 } }), true, "404 means the job endpoint is not deployed");
+assertEqual(isMissingCheckJobEndpoint({ response: { status: 403 } }), false, "403 is a real permission error, not a missing endpoint");
+assertEqual(isMissingCheckJobEndpoint(new Error("boom")), false, "errors without a response are not a missing endpoint");
+
+const checkedInvoice = normalizeInvoice({
+  InvoiceGUID: "i1",
+  IsProductChecked: false,
+  UncheckedDetailCount: 4,
+  NewProductDetailCount: 2,
+  CreatedHereProductDetailCount: 1,
+});
+assertEqual(checkedInvoice.isProductChecked, false, "list item keeps an explicit pending-check flag");
+assertEqual(checkedInvoice.uncheckedDetailCount, 4, "list item reads unchecked detail count");
+assertEqual(checkedInvoice.newProductDetailCount, 2, "list item reads new product count");
+assertEqual(checkedInvoice.createdHereProductDetailCount, 1, "list item reads created-here count");
+assertEqual(
+  normalizeInvoice({ InvoiceGUID: "i2" }).isProductChecked,
+  null,
+  "missing check summary stays null instead of being reported as pending"
+);

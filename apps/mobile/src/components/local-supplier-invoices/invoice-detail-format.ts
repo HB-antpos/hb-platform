@@ -47,3 +47,15 @@ export function formatOrderDate(value?: string | null) {
   const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
   return match ? match[1] : value;
 }
+
+function pad2(value: number) {
+  return value.toString().padStart(2, "0");
+}
+
+/** 时间显示到分钟（YYYY-MM-DD HH:mm，设备本地时区）；后端给的是 UTC 时刻。解析失败时退回原串前 16 位。 */
+export function formatDateTime(value?: string | null) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}

@@ -10,6 +10,8 @@
     "moreFilters": "更多筛选",
     "allInboundStatuses": "全部",
     "orderDateRange": "订单日期",
+    "createdAtRange": "创建日期",
+    "dateField": "日期类型",
     "dateFrom": "开始日期",
     "dateTo": "结束日期",
     "emptyDate": "未选择",
@@ -17,6 +19,8 @@
     "dateRangeFrom": "{{date}} 起",
     "dateRangeTo": "截至 {{date}}",
     "dateRangeTitle": "选择订单日期范围",
+    "dateRangeTitleOrder": "选择订单日期范围",
+    "dateRangeTitleCreated": "选择创建日期范围",
     "applyDateRange": "应用日期范围",
     "allStores": "全部分店",
     "managedStores": "可管理分店",
@@ -26,6 +30,8 @@
     "supplierPickerTitle": "选择供应商",
     "pageSize": "每页",
     "sort": "排序",
+    "createdAtDesc": "创建时间 ↓",
+    "createdAtAsc": "创建时间 ↑",
     "orderDateDesc": "订单时间 ↓",
     "orderDateAsc": "订单时间 ↑",
     "invoiceNoAsc": "单号 ↑",
@@ -37,10 +43,18 @@
     "detailSearch": "搜索商品 / 条码",
     "detailSearchFull": "搜索货号 / 条码 / 商品名称",
     "productKeywordPlaceholder": "商品匹配：货号 / 条码 / 商品名",
-    "appliedDateRange": "订单日期：{{range}}（点此修改）"
+    "appliedDateRange": "{{field}}：{{range}}（点此修改）",
+    "allCheckStatuses": "全部检测",
+    "checkPending": "待检测",
+    "checkDone": "已检测",
+    "hasUncreatedProducts": "有商品未创建"
   },
   "labels": {
     "orderDate": "订单时间",
+    "createdAt": "创建时间",
+    "checkPending": "待检测",
+    "checkPendingCount": "待检测 {{count}}",
+    "newProductCount": "新品 {{count}}",
     "storeCaption": "所属分店",
     "invoiceInfo": "单据信息",
     "remarks": "备注",
@@ -100,6 +114,21 @@
     "restoreInvoiceMissing": "未能恢复原订单，当前页里没有找到该单据"
   },
   "detail": {
+    "check": {
+      "action": "检测商品",
+      "running": "检测中…",
+      "started": "已开始检测商品，可留在本页等待",
+      "busy": "正在检测商品，请稍候再编辑",
+      "done": "检测完成：共 {{total}} 条，商品存在 {{exists}} 条，不存在 {{notExists}} 条，条码异常 {{abnormal}} 条",
+      "doneNoSummary": "检测完成",
+      "doneKeepEdits": "检测完成。你有未保存的修改，所以没有刷新明细，保存后重新进入即可看到结果",
+      "failed": "商品检测失败",
+      "timeout": "检测仍在后台进行，请稍后重新打开这张单查看结果",
+      "scopeTitle": "检测哪些商品？",
+      "scopeBody": "当前设置了筛选，可以只检测筛选出的商品，也可以检测整张单。",
+      "scopeAll": "整张单（{{count}} 条）",
+      "scopeVisible": "当前筛选（{{count}} 条）"
+    },
     "flowStatus": {
       "0": "草稿",
       "1": "已提交",
@@ -292,5 +321,36 @@
     },
     "deleteDone": "已删除",
     "deleteFailed": "删除失败"
+  },
+  "salesAnalysis": {
+    "title": "销量分析",
+    "open": "销量分析",
+    "loading": "正在加载销量分析…",
+    "note": "进货后30/60/90天销量从本次进货日期次日开始统计；上次到本次区间销量仍按历史区间显示。",
+    "loadFailed": "销量分析加载失败",
+    "empty": "这张进货单没有可分析的商品",
+    "emptyFiltered": "没有符合搜索条件的商品",
+    "searchPlaceholder": "搜索货号 / 条码 / 商品名称",
+    "products": "商品数",
+    "sales30": "30天销量",
+    "sales90": "90天销量",
+    "zeroSales90": "90天无销量",
+    "days30": "进货后30天",
+    "days60": "60天",
+    "days90": "90天",
+    "updatedAt": "销量统计更新于 {{time}}",
+    "purchased": "进货 {{qty}}",
+    "price": "进价 {{purchase}} · 零售 {{retail}}",
+    "previous": "上次进货 {{date}}",
+    "interval": "间隔 {{days}} 天",
+    "intervalSales": "期间销量 {{qty}}",
+    "noPrevious": "没有上次进货记录",
+    "visibleOfTotal": "显示 {{visible}} / {{total}} 个商品",
+    "sort": {
+      "default": "明细顺序",
+      "sales30Desc": "30天销量 ↓",
+      "sales90Desc": "90天销量 ↓",
+      "sales90Asc": "90天销量 ↑（滞销）"
+    }
   }
 }

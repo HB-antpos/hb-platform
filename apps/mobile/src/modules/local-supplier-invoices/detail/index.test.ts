@@ -24,6 +24,8 @@ const expected = [
   "isHeaderDirty",
   "canLinkMatchedProduct",
   "isProductLinkConfirmed",
+  "runCheckProducts",
+  "CHECK_JOB_POLL_INTERVAL_MS",
 ] as const;
 
 for (const name of expected) {

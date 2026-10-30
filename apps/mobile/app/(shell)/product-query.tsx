@@ -474,8 +474,12 @@ function ProductQueryContent() {
     returnFilterSupplierCode?: string | string[];
     returnFilterInvoiceNo?: string | string[];
     returnFilterInboundStatus?: string | string[];
-    returnFilterOrderDateFrom?: string | string[];
-    returnFilterOrderDateTo?: string | string[];
+    returnFilterDateField?: string | string[];
+    returnFilterDateFrom?: string | string[];
+    returnFilterDateTo?: string | string[];
+    returnFilterProductChecked?: string | string[];
+    returnFilterHasUncreatedProducts?: string | string[];
+    returnFilterProductKeyword?: string | string[];
     returnSortColId?: string | string[];
     returnSortDirection?: string | string[];
   }>();
@@ -494,8 +498,12 @@ function ProductQueryContent() {
       returnFilterSupplierCode: queryParams.returnFilterSupplierCode,
       returnFilterInvoiceNo: queryParams.returnFilterInvoiceNo,
       returnFilterInboundStatus: queryParams.returnFilterInboundStatus,
-      returnFilterOrderDateFrom: queryParams.returnFilterOrderDateFrom,
-      returnFilterOrderDateTo: queryParams.returnFilterOrderDateTo,
+      returnFilterDateField: queryParams.returnFilterDateField,
+      returnFilterDateFrom: queryParams.returnFilterDateFrom,
+      returnFilterDateTo: queryParams.returnFilterDateTo,
+      returnFilterProductChecked: queryParams.returnFilterProductChecked,
+      returnFilterHasUncreatedProducts: queryParams.returnFilterHasUncreatedProducts,
+      returnFilterProductKeyword: queryParams.returnFilterProductKeyword,
       returnSortColId: queryParams.returnSortColId,
       returnSortDirection: queryParams.returnSortDirection,
     }),
@@ -507,8 +515,12 @@ function ProductQueryContent() {
       queryParams.returnDetailSearch,
       queryParams.returnFilterInvoiceNo,
       queryParams.returnFilterInboundStatus,
-      queryParams.returnFilterOrderDateFrom,
-      queryParams.returnFilterOrderDateTo,
+      queryParams.returnFilterDateField,
+      queryParams.returnFilterDateFrom,
+      queryParams.returnFilterDateTo,
+      queryParams.returnFilterProductChecked,
+      queryParams.returnFilterHasUncreatedProducts,
+      queryParams.returnFilterProductKeyword,
       queryParams.returnFilterStoreCode,
       queryParams.returnFilterSupplierCode,
       queryParams.returnInvoiceGuid,
