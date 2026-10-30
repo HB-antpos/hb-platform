@@ -513,6 +513,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<DeviceAuthorizationState>(),
             entryPreference: sp.GetRequiredService<IApiEntryPreferenceService>()));
         services.AddSingleton<IReceiptTextFormatter, ReceiptTextFormatter>();
+        // 中文注释：位图条码输出口暂为「不可用」默认实现（SDK 位图函数签名未验证），原生条码失败时降级为文字单号。
+        services.AddSingleton<IReceiptBitmapSink>(UnavailableReceiptBitmapSink.Instance);
         services.AddSingleton<IReceiptPrinterDriver, XpReceiptPrinterDriver>();
         services.AddSingleton<IReceiptPrintService, ReceiptPrintService>();
         services.AddSingleton<ILinklyBankReceiptPrinter, LinklyBankReceiptPrinter>();

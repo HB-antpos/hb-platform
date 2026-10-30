@@ -370,7 +370,7 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         OrderSummaryText = Format(
             "returns.orderSummary.format",
             "#{0}  {1:yyyy-MM-dd HH:mm}  {2}",
-            result.Order.OrderGuid.ToString("N")[..8].ToUpperInvariant(),
+            ReceiptOrderShortCode.Create(result.Order.OrderGuid),
             result.Order.SoldAt.ToLocalTime(),
             result.Order.CashierName);
         foreach (var line in result.Order.Lines)
@@ -880,7 +880,7 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
             OrderSummaryText = Format(
                 "returns.orderSummary.format",
                 "#{0}  {1:yyyy-MM-dd HH:mm}  {2}",
-                _currentOrder.OrderGuid.ToString("N")[..8].ToUpperInvariant(),
+                ReceiptOrderShortCode.Create(_currentOrder.OrderGuid),
                 _currentOrder.SoldAt.ToLocalTime(),
                 _currentOrder.CashierName);
         }

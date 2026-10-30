@@ -18,6 +18,8 @@ internal static class PrinterStages
     /// <summary>状态读取成功，但打印机报告盖子打开、缺纸、故障或未就绪。</summary>
     internal const string StatusFlags = "status-flags";
     internal const string Barcode = "barcode";
+    /// <summary>原生条码打印失败后降级为位图条码或只印文字单号（小票仍正常出完）。</summary>
+    internal const string BarcodeFallback = "barcode-fallback";
     internal const string QrCode = "qr-code";
     internal const string Text = "text";
     internal const string Cut = "cut";
@@ -118,6 +120,40 @@ internal static class PrinterLinkLogState
         catch (Exception)
         {
             // 同上：不能让日志的异常盖住真正的打印异常。
+        }
+    }
+
+    /// <summary>
+    /// 条码降级（位图成功或只剩文字）记一条 Warning。小票其实打印成功了，所以不计入「连续失败」状态机，
+    /// 只留下可检索的线索：哪台机器的原生条码指令在失败、SDK 返回码是多少。
+    /// </summary>
+    internal static void RecordBarcodeDegraded(
+        PrinterCallTrace trace,
+        string outcome,
+        int nativeSdkResult,
+        int barcodeLength)
+    {
+        try
+        {
+            var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["status"] = "degraded",
+                ["operation"] = trace.Operation,
+                ["stage"] = PrinterStages.BarcodeFallback,
+                ["port"] = trace.Port,
+                ["outcome"] = outcome,
+                ["nativeSdkResult"] = nativeSdkResult,
+                ["barcodeLength"] = barcodeLength
+            };
+            ConsoleLog.WriteWarning(
+                Category,
+                $"printer {trace.Operation} barcode degraded stage={PrinterStages.BarcodeFallback} outcome={outcome} " +
+                $"nativeSdkResult={nativeSdkResult} barcodeLength={barcodeLength} port={trace.Port}",
+                new ApplicationLogContext(Properties: properties));
+        }
+        catch (Exception)
+        {
+            // 日志环节出错不能影响出纸。
         }
     }
 
