@@ -64,6 +64,12 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>原生构建号精确匹配，与 AppVersion 搭配使用。</summary>
         public string? AppBuildVersion { get; set; }
+
+        /// <summary>
+        /// 版本状态筛选：latest 已是该系统最新原生包 / behind 原生包落后 / unreported 未上报版本；
+        /// 空或 all 表示不筛选。
+        /// </summary>
+        public string? VersionState { get; set; }
     }
 
     /// <summary>
@@ -108,6 +114,14 @@ namespace BlazorApp.Shared.DTOs
         public string? LastSeenUserFullName { get; set; }
 
         public int? RegisteredDeviceId { get; set; }
+
+        /// <summary>该设备所在系统当前在用的最新原生版本号（以全部设备中的最高版本为准）。</summary>
+        public string? LatestAppVersion { get; set; }
+
+        public string? LatestAppBuildVersion { get; set; }
+
+        /// <summary>latest / behind / unreported；心跳回执里不计算，为空。</summary>
+        public string? VersionState { get; set; }
     }
 
     /// <summary>

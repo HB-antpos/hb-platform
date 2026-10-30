@@ -215,6 +215,17 @@ namespace BlazorApp.Shared.DTOs
         public string? RustDeskClientVersion { get; set; }
 
         /// <summary>
+        /// WPF 更新策略当前的目标版本；仅 Windows POS 设备且有策略时填充，其余为空
+        /// </summary>
+        public string? TargetAppVersion { get; set; }
+
+        /// <summary>
+        /// 版本状态：latest 已是策略版本 / behind 待升级 / ahead 高于策略版本 /
+        /// notTargeted 不在策略放量范围 / unreported 未上报版本；非 Windows POS 设备为空
+        /// </summary>
+        public string? VersionState { get; set; }
+
+        /// <summary>
         /// 设备最近一次请求实际走的 POS API 入口（edge / aws / direct），后台「入口」列展示用；未上报（老客户端 / 尚未经新入口）时为空
         /// </summary>
         public string? LastApiEntry { get; set; }
@@ -473,5 +484,51 @@ namespace BlazorApp.Shared.DTOs
         /// 关键词搜索（设备硬件识别码、系统设备编号、分店代码、备注）
         /// </summary>
         public string? Keyword { get; set; }
+    }
+
+    /// <summary>
+    /// 设备注册列表的版本汇总：当前策略目标版本、各版本设备数与各状态设备数。
+    /// 与分页列表使用同一套筛选条件（分店、类型、系统、状态、关键词），但不含版本条件本身，
+    /// 这样点选某个版本后其余版本仍可切换。
+    /// </summary>
+    public class DeviceVersionSummaryDto
+    {
+        /// <summary>WPF 更新策略当前目标版本；没有策略时为空。</summary>
+        public string? TargetVersion { get; set; }
+
+        /// <summary>策略放量范围：all / stores / devices；没有策略时为空。</summary>
+        public string? TargetScope { get; set; }
+
+        /// <summary>筛选条件下的设备总数。</summary>
+        public int Total { get; set; }
+
+        /// <summary>按版本分组，版本号从新到旧，未上报垫底。</summary>
+        public List<DeviceVersionSummaryItemDto> Items { get; set; } = new();
+
+        public DeviceVersionStateCountsDto States { get; set; } = new();
+    }
+
+    public class DeviceVersionSummaryItemDto
+    {
+        /// <summary>规范化后的版本号；该组设备都没有上报版本时为空。</summary>
+        public string? AppVersion { get; set; }
+
+        public int Total { get; set; }
+    }
+
+    public class DeviceVersionStateCountsDto
+    {
+        public int Latest { get; set; }
+
+        public int Behind { get; set; }
+
+        public int Ahead { get; set; }
+
+        public int NotTargeted { get; set; }
+
+        public int Unreported { get; set; }
+
+        /// <summary>不参与版本状态判断的设备（非 Windows POS，或没有策略）。</summary>
+        public int NotApplicable { get; set; }
     }
 }

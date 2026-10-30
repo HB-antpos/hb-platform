@@ -109,18 +109,35 @@ namespace BlazorApp.Api.Services
             var pageSize = Math.Clamp(query.PageSize, 1, 100);
             var threshold = GetOnlineThreshold(EnsureUtc(_utcNow()));
             var queryable = BuildQuery(query, threshold);
+            var latestBySystem = await LoadLatestBySystemAsync();
+            var versionState = NormalizeVersionState(query.VersionState);
 
-            var total = await queryable.CountAsync();
-            var items = await queryable
-                .OrderByDescending(item => item.LastSeenAtUtc)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
+            int total;
+            List<MobileAppDeviceStatus> items;
+            if (versionState == null)
+            {
+                total = await queryable.CountAsync();
+                items = await queryable
+                    .OrderByDescending(item => item.LastSeenAtUtc)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync();
+            }
+            else
+            {
+                // 关键逻辑：版本状态依赖「该系统最新版本」，没法下推到 SQL。设备总量只有几十到几百台，
+                // 先按其余条件取出，再在内存里按状态过滤和分页，保证总数与分页一致。
+                var matched = (await queryable.OrderByDescending(item => item.LastSeenAtUtc).ToListAsync())
+                    .Where(item => ResolveVersionState(item, latestBySystem) == versionState)
+                    .ToList();
+                total = matched.Count;
+                items = matched.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+            }
 
             return ApiResponse<PagedResult<MobileAppDeviceStatusDto>>.OK(
                 new PagedResult<MobileAppDeviceStatusDto>
                 {
-                    Items = items.Select(item => MapToDto(item, threshold)).ToList(),
+                    Items = items.Select(item => MapToDto(item, threshold, latestBySystem)).ToList(),
                     Total = total,
                     Page = page,
                     PageSize = pageSize,
@@ -146,6 +163,16 @@ namespace BlazorApp.Api.Services
                     threshold
                 )
                 .ToListAsync();
+
+            // 选了版本状态时，汇总条要和下方列表保持同一口径。
+            var summaryVersionState = NormalizeVersionState(query.VersionState);
+            if (summaryVersionState != null)
+            {
+                var latestBySystem = await LoadLatestBySystemAsync();
+                allItems = allItems
+                    .Where(item => ResolveVersionState(item, latestBySystem) == summaryVersionState)
+                    .ToList();
+            }
 
             var online = allItems.Count(item => item.LastSeenAtUtc >= threshold);
             var android = allItems.Count(item => ResolveSystemBucket(item) == "android");
@@ -326,13 +353,105 @@ namespace BlazorApp.Api.Services
             entity.IsDeleted = false;
         }
 
-        private static MobileAppDeviceStatusDto MapToDto(
-            MobileAppDeviceStatus entity,
-            DateTime onlineThreshold
+        /// <summary>
+        /// 每个系统当前在用的最新原生版本（版本号 + 构建号取最高）。这是「在用的最高版本」而不是发布清单，
+        /// 个别设备装了更新的测试包时，其余设备会显示为落后。
+        /// </summary>
+        private async Task<Dictionary<string, (string? Version, string? Build)>> LoadLatestBySystemAsync()
+        {
+            var rows = await _db
+                .Queryable<MobileAppDeviceStatus>()
+                .Where(item => !item.IsDeleted)
+                .ToListAsync();
+            var latest = new Dictionary<string, (string? Version, string? Build)>(
+                StringComparer.OrdinalIgnoreCase
+            );
+            foreach (var row in rows)
+            {
+                var version = NormalizeText(row.AppVersion, 80);
+                if (version == null)
+                {
+                    continue;
+                }
+
+                var build = NormalizeText(row.AppBuildVersion, 80);
+                var key = ResolveSystemLabel(row) ?? string.Empty;
+                if (
+                    !latest.TryGetValue(key, out var current)
+                    || IsNewerNative(version, build, current.Version, current.Build)
+                )
+                {
+                    latest[key] = (version, build);
+                }
+            }
+
+            return latest;
+        }
+
+        private static bool IsNewerNative(
+            string version,
+            string? build,
+            string? currentVersion,
+            string? currentBuild
         )
         {
+            // CompareVersionTextDescending：左边更新时返回负数。
+            var result = CompareVersionTextDescending(version, currentVersion);
+            return result != 0 ? result < 0 : CompareVersionTextDescending(build, currentBuild) < 0;
+        }
+
+        private static string ResolveVersionState(
+            MobileAppDeviceStatus entity,
+            IReadOnlyDictionary<string, (string? Version, string? Build)> latestBySystem
+        )
+        {
+            var version = NormalizeText(entity.AppVersion, 80);
+            if (version == null)
+            {
+                return "unreported";
+            }
+
+            if (!latestBySystem.TryGetValue(ResolveSystemLabel(entity) ?? string.Empty, out var latest))
+            {
+                return "latest";
+            }
+
+            var build = NormalizeText(entity.AppBuildVersion, 80);
+            var isLatest =
+                CompareVersionTextDescending(version, latest.Version) == 0
+                && CompareVersionTextDescending(build, latest.Build) == 0;
+            return isLatest ? "latest" : "behind";
+        }
+
+        private static string? NormalizeVersionState(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "latest" => "latest",
+                "behind" => "behind",
+                "unreported" => "unreported",
+                _ => null,
+            };
+        }
+
+        private static MobileAppDeviceStatusDto MapToDto(
+            MobileAppDeviceStatus entity,
+            DateTime onlineThreshold,
+            IReadOnlyDictionary<string, (string? Version, string? Build)>? latestBySystem = null
+        )
+        {
+            var hasLatest = latestBySystem != null;
+            (string? Version, string? Build) latest = default;
+            if (hasLatest)
+            {
+                latestBySystem!.TryGetValue(ResolveSystemLabel(entity) ?? string.Empty, out latest);
+            }
+
             return new MobileAppDeviceStatusDto
             {
+                LatestAppVersion = latest.Version,
+                LatestAppBuildVersion = latest.Build,
+                VersionState = hasLatest ? ResolveVersionState(entity, latestBySystem!) : null,
                 Id = entity.Id,
                 HardwareId = entity.HardwareId,
                 SystemDeviceNumber = entity.SystemDeviceNumber,

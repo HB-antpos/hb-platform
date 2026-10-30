@@ -31,6 +31,13 @@ namespace BlazorApp.Api.Controllers
         private readonly DeviceActivationOptions _deviceActivationOptions;
         private readonly MobileDeviceActivationOptions _mobileDeviceActivationOptions;
         private readonly RemoteMaintenanceService? _remoteMaintenanceService;
+        private readonly WpfAppReleaseService? _wpfAppReleaseService;
+
+        /// <summary>
+        /// 按版本筛选 / 汇总时一次最多扫描的设备数。设备注册表按硬件重复登记，实际量远小于此值，
+        /// 超出时只会少算，不会报错（日志会记警告）。
+        /// </summary>
+        private const int VersionScanLimit = 5000;
 
         public DeviceRegistrationController(
             IDeviceRegistrationService deviceService,
@@ -40,9 +47,11 @@ namespace BlazorApp.Api.Controllers
             UserLoginDeviceAuditService? loginDeviceAuditService = null,
             IOptions<DeviceActivationOptions>? deviceActivationOptions = null,
             IOptions<MobileDeviceActivationOptions>? mobileDeviceActivationOptions = null,
-            RemoteMaintenanceService? remoteMaintenanceService = null
+            RemoteMaintenanceService? remoteMaintenanceService = null,
+            WpfAppReleaseService? wpfAppReleaseService = null
         )
         {
+            _wpfAppReleaseService = wpfAppReleaseService;
             _deviceService = deviceService;
             _logger = logger;
             _mapper = mapper;
@@ -87,21 +96,51 @@ namespace BlazorApp.Api.Controllers
             [FromQuery] string? deviceType = null,
             [FromQuery] string? deviceSystem = null,
             [FromQuery] int? status = null,
-            [FromQuery] string? keyword = null
+            [FromQuery] string? keyword = null,
+            [FromQuery] string? appVersions = null,
+            [FromQuery] string? versionState = null
         )
         {
             try
             {
-                var (devices, total) = await _deviceService.GetDevicesPagedAsync(
-                    page,
-                    pageSize,
-                    storeCode,
-                    deviceType,
-                    deviceSystem,
-                    status,
-                    keyword
-                );
-                var deviceDtos = _mapper.Map<List<DeviceListItemDto>>(devices);
+                if (!DeviceVersionStateResolver.TryNormalizeState(versionState, out var requestedState))
+                {
+                    return BadRequest(new { success = false, message = "versionState 取值无效" });
+                }
+
+                var requestedVersions = DeviceVersionStateResolver.ParseVersionList(appVersions);
+                var snapshot = await LoadWpfPolicySnapshotAsync();
+                List<DeviceListItemDto> deviceDtos;
+                int total;
+                if (requestedVersions.Count == 0 && requestedState == null)
+                {
+                    // 没有版本条件时走原来的数据库分页，行为不变；版本状态只给本页设备补上。
+                    var (devices, pagedTotal) = await _deviceService.GetDevicesPagedAsync(
+                        page,
+                        pageSize,
+                        storeCode,
+                        deviceType,
+                        deviceSystem,
+                        status,
+                        keyword
+                    );
+                    deviceDtos = _mapper.Map<List<DeviceListItemDto>>(devices);
+                    total = pagedTotal;
+                    DeviceVersionStateResolver.Annotate(deviceDtos, snapshot);
+                }
+                else
+                {
+                    // 版本状态依赖策略范围，没法下推到 SQL：先按其余条件取全量，再在内存里按版本过滤和分页。
+                    var all = await LoadAllForVersionAsync(
+                        storeCode, deviceType, deviceSystem, status, keyword, snapshot);
+                    var matched = all
+                        .Where(device => DeviceVersionStateResolver.Matches(device, requestedVersions, requestedState))
+                        .ToList();
+                    total = matched.Count;
+                    var safePage = Math.Max(page, 1);
+                    var safePageSize = Math.Max(pageSize, 1);
+                    deviceDtos = matched.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToList();
+                }
 
                 // 远程版本：只为本页设备批量取 RustDesk 客户端版本号，不带任何远程维护凭据。
                 string? rustDeskLatestVersion = null;
@@ -204,10 +243,109 @@ namespace BlazorApp.Api.Controllers
             [FromQuery] string? deviceType = null,
             [FromQuery] string? deviceSystem = null,
             [FromQuery] int? status = null,
+            [FromQuery] string? keyword = null,
+            [FromQuery] string? appVersions = null,
+            [FromQuery] string? versionState = null
+        )
+        {
+            return GetDevicesPaged(
+                page,
+                pageSize,
+                storeCode,
+                deviceType,
+                deviceSystem,
+                status,
+                keyword,
+                appVersions,
+                versionState
+            );
+        }
+
+        /// <summary>
+        /// 移动端设备注册列表的版本汇总：策略目标版本、各版本设备数、各状态设备数。
+        /// 筛选条件与分页列表一致，但不含版本条件，点选某个版本后其余版本仍可切换。
+        /// </summary>
+        [HttpGet("mobile/device-management/version-summary")]
+        [Authorize(Policy = Permissions.DeviceRegistration.View)]
+        public async Task<IActionResult> GetMobileAdminVersionSummary(
+            [FromQuery] string? storeCode = null,
+            [FromQuery] string? deviceType = null,
+            [FromQuery] string? deviceSystem = null,
+            [FromQuery] int? status = null,
             [FromQuery] string? keyword = null
         )
         {
-            return GetDevicesPaged(page, pageSize, storeCode, deviceType, deviceSystem, status, keyword);
+            try
+            {
+                var snapshot = await LoadWpfPolicySnapshotAsync();
+                var all = await LoadAllForVersionAsync(
+                    storeCode, deviceType, deviceSystem, status, keyword, snapshot);
+                return Ok(
+                    new
+                    {
+                        success = true,
+                        data = DeviceVersionStateResolver.BuildSummary(all, snapshot),
+                    }
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取设备版本汇总失败");
+                return StatusCode(500, new { success = false, message = "获取设备版本汇总失败" });
+            }
+        }
+
+        /// <summary>
+        /// 读取 WPF 更新策略快照；读取失败只记日志并按「没有策略」处理，不能因为版本信息拖垮设备列表。
+        /// </summary>
+        private async Task<WpfPolicyTargetSnapshot?> LoadWpfPolicySnapshotAsync()
+        {
+            if (_wpfAppReleaseService == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await _wpfAppReleaseService.GetPolicyTargetSnapshotAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "读取 WPF 更新策略失败，设备列表不显示版本状态");
+                return null;
+            }
+        }
+
+        private async Task<List<DeviceListItemDto>> LoadAllForVersionAsync(
+            string? storeCode,
+            string? deviceType,
+            string? deviceSystem,
+            int? status,
+            string? keyword,
+            WpfPolicyTargetSnapshot? snapshot
+        )
+        {
+            var (devices, total) = await _deviceService.GetDevicesPagedAsync(
+                1,
+                VersionScanLimit,
+                storeCode,
+                deviceType,
+                deviceSystem,
+                status,
+                keyword
+            );
+            if (total > devices.Count)
+            {
+                _logger.LogWarning(
+                    "设备版本筛选只扫描了前 {Scanned} 台，实际共 {Total} 台",
+                    devices.Count,
+                    total
+                );
+            }
+
+            var dtos = _mapper.Map<List<DeviceListItemDto>>(devices);
+            DeviceVersionStateResolver.Annotate(dtos, snapshot);
+            return dtos;
         }
 
         /// <summary>
