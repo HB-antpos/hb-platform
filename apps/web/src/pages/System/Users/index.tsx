@@ -114,6 +114,10 @@ import {
 } from './userPermissions'
 import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPermissions'
 import { getCreateUserErrorFeedback, getLevelDeniedMessage, getUpdateUserFieldError } from './createUserFeedback'
+import { NewStaffBirthdayAndGuardian, NewStaffPhoneItem, formatBirthdayValue } from './NewStaffProfileFields'
+import type { NewStaffFormInputs } from './NewStaffProfileFields'
+import { buildNewStaffPayloadFields } from './newStaffProfileRules'
+import { formatSydneyIsoDate } from '../../../utils/sydneyDate'
 import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
   LOGIN_TOGGLE_ERROR_MESSAGES,
@@ -169,6 +173,9 @@ type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' |
 
 /** 开关「允许登录」只需要的用户字段；列表行与详情对象都满足。 */
 type LoginToggleTarget = Pick<UserDto, 'userGUID' | 'username' | 'email' | 'fullName' | 'lastLoginAt' | 'roleNames'>
+
+/** 「创建用户」表单值：生日在表单里是 Dayjs、监护人是扁平字段，提交前由 buildNewStaffPayloadFields 转成请求体。 */
+type CreateUserFormValues = Omit<CreateUserDto, 'phone' | 'birthday' | 'guardian'> & NewStaffFormInputs & { confirmPassword: string }
 
 export default function SystemUsersPage() {
   const { t } = useTranslation()
@@ -285,7 +292,7 @@ export default function SystemUsersPage() {
   const [createLoading, setCreateLoading] = useState(false)
   const [createFeedback, setCreateFeedback] = useState<ReturnType<typeof getCreateUserErrorFeedback> | null>(null)
   const [createTab, setCreateTab] = useState('info')
-  const [createForm] = Form.useForm<CreateUserDto & { confirmPassword: string }>()
+  const [createForm] = Form.useForm<CreateUserFormValues>()
 
   const [createRoleTargetKeys, setCreateRoleTargetKeys] = useState<string[]>([])
   const [createRoleLoading, setCreateRoleLoading] = useState(false)
@@ -1614,6 +1621,11 @@ export default function SystemUsersPage() {
         return
       }
       setCreateLoading(true)
+      // 新建员工：电话、生日必填；未满 18 岁才带监护人（生日改回成年时残留的监护人值不提交）。
+      const newStaffFields = buildNewStaffPayloadFields(
+        { ...values, birthday: formatBirthdayValue(values.birthday) },
+        formatSydneyIsoDate(),
+      )
       const payload: CreateUserDto = {
         username: values.username,
         email: values.email,
@@ -1625,6 +1637,7 @@ export default function SystemUsersPage() {
         isActive: values.isActive ?? true,
         roleGuids: createRoleTargetKeys,
         storeGuids: createStoreTargetKeys,
+        ...newStaffFields,
       }
       const created = await createUser(payload)
       if (createStoreTargetKeys.length > 0) {
@@ -1657,7 +1670,15 @@ export default function SystemUsersPage() {
       clearCreateFormState()
       void loadData(1, pageSize, sortBy, sortOrder)
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) return
+      if (typeof error === 'object' && error !== null && 'errorFields' in error) {
+        // 在「角色」「分店」页签点「新建」时基本信息有缺项：切回「基本信息」并定位到第一个标红字段。
+        setCreateTab('info')
+        const firstField = (error as { errorFields?: Array<{ name: (string | number)[] }> }).errorFields?.[0]?.name
+        if (firstField) {
+          window.setTimeout(() => createForm.scrollToField(firstField, { block: 'center', focus: true }), 0)
+        }
+        return
+      }
       console.error(error)
       const feedback = getCreateUserErrorFeedback(error, t)
       if (!feedback) return
@@ -3330,7 +3351,8 @@ export default function SystemUsersPage() {
           setCreateOpen(false)
           clearCreateFormState()
         }}
-        footer={createTab === 'info' ? [
+        // 三个页签都显示「新建」：在「角色」「分店」页签提交时若基本信息有缺项，会自动切回「基本信息」。
+        footer={[
           <Button key="cancel" disabled={createLoading} onClick={() => {
             if (createLoading) return
             setCreateOpen(false)
@@ -3341,7 +3363,7 @@ export default function SystemUsersPage() {
           <Button key="submit" type="primary" loading={createLoading} onClick={() => void handleCreateSubmit()}>
             {t('common.create', '新建')}
           </Button>,
-        ] : null}
+        ]}
         destroyOnHidden
       >
         {createFeedback && !createFeedback.field ? (
@@ -3367,7 +3389,7 @@ export default function SystemUsersPage() {
                   form={createForm}
                   layout="vertical"
                   style={{ maxWidth: 480 }}
-                  onValuesChange={(changed: Partial<CreateUserDto>, all: Partial<CreateUserDto>) => {
+                  onValuesChange={(changed: Partial<CreateUserFormValues>, all: Partial<CreateUserFormValues>) => {
                     if (!('givenName' in changed)) return
                     const nickname = syncCreateNicknameWithGivenName(createGivenNameRef.current, changed.givenName ?? '', all.nickname ?? '')
                     if (nickname !== null) createForm.setFieldsValue({ nickname })
@@ -3394,6 +3416,7 @@ export default function SystemUsersPage() {
                   >
                     <Input />
                   </Form.Item>
+                  <NewStaffPhoneItem />
                   <Form.Item
                     label={t('system.users.password', '密码')}
                     name="password"
@@ -3429,6 +3452,7 @@ export default function SystemUsersPage() {
                   </Form.Item>
                   {/* 创建表单是单列窄表单（maxWidth 480），四个拆分字段用两列网格排布以免过长 */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 16 }}>{userNamePartItems}</div>
+                  <NewStaffBirthdayAndGuardian />
                   <Form.Item label={t('common.status', '状态')} name="isActive" valuePropName="checked" initialValue={true}>
                     <Switch checkedChildren={t('common.active', '启用')} unCheckedChildren={t('common.inactive', '停用')} />
                   </Form.Item>

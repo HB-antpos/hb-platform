@@ -226,6 +226,22 @@ const pages = [
     registerSource: 'src/pages/System/PaymentTerminalSettings/index.tsx',
   },
   {
+    // 用户管理「创建用户」新建员工字段（电话 / 生日 / 监护人）的新增键在页面级消息文件。
+    name: '用户管理新建员工',
+    keyPattern: /['"`](system\.usersNewStaff\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/System/Users/NewStaffProfileFields.tsx',
+      'src/pages/System/Users/newStaffProfileRules.ts',
+      'src/pages/System/Users/createUserFeedback.ts',
+    ],
+    messages: {
+      zh: 'src/pages/System/Users/usersPageMessages.zh.json',
+      en: 'src/pages/System/Users/usersPageMessages.en.json',
+    },
+    registerImport: "from './usersPageMessages.zh.json'",
+    registerSource: 'src/pages/System/Users/index.tsx',
+  },
+  {
     name: '广告管理',
     keyPattern: /['"`](posAdmin\.advertisements\.[A-Za-z0-9_.]+)['"`]/g,
     sources: [

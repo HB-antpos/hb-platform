@@ -28,6 +28,54 @@
       "fullNameTooLong": "姓名合起来不能超过 {{max}} 个字符"
     }
   },
+  "newStaff": {
+    "phoneHint": "04 开头的澳洲手机号",
+    "birthday": "生日",
+    "birthdayPlaceholder": "选择日期",
+    "birthdayHint": "用于判断是否未成年；只有店长和 HR 能看到",
+    "age": "{{age}} 岁",
+    "minorAge": "{{age}} 岁 · 未成年",
+    "guardian": {
+      "title": "监护人",
+      "description": "未满 18 岁必须填写。创建后可在员工详情里给家长发英文签字链接（邮件 + 短信）。",
+      "name": "监护人姓名",
+      "relationship": "关系",
+      "phone": "监护人手机",
+      "phoneHint": "04 开头，用于接收签字短信和验证码",
+      "email": "监护人邮箱",
+      "emailPlaceholder": "家长邮箱"
+    },
+    "relationships": {
+      "Mother": "母亲",
+      "Father": "父亲",
+      "Legal guardian": "法定监护人",
+      "Other": "其他"
+    },
+    "errors": {
+      "phoneRequired": "请填写电话",
+      "phoneInvalid": "请输入澳洲手机号（04 开头共 10 位）",
+      "birthdayRequired": "请选择生日",
+      "birthdayInvalid": "生日不能晚于今天，也不能早于 1940 年",
+      "guardianNameRequired": "请填写监护人姓名",
+      "guardianRelationshipRequired": "请选择关系",
+      "guardianPhoneRequired": "请填写监护人手机",
+      "guardianPhoneInvalid": "监护人手机必须是 04 开头的澳洲手机号",
+      "guardianPhoneSame": "不能和员工本人的电话相同",
+      "guardianEmailRequired": "请填写监护人邮箱",
+      "guardianEmailInvalid": "请输入正确的邮箱地址",
+      "guardianEmailSame": "不能和员工本人的邮箱相同"
+    },
+    "serverErrors": {
+      "birthdayRequired": "请填写生日",
+      "birthdayInvalid": "生日无效：不能晚于今天，也不能早于 1940 年",
+      "phoneRequired": "请填写有效的电话",
+      "emailRequired": "请填写邮箱",
+      "guardianRequired": "员工未满 18 岁，必须填写监护人姓名、关系、手机和邮箱",
+      "guardianPhoneInvalid": "监护人手机必须是 04 开头的澳洲手机号",
+      "guardianEmailInvalid": "监护人邮箱格式无效",
+      "guardianDuplicate": "监护人的手机和邮箱不能和员工本人相同"
+    }
+  },
   "discard": {
     "title": "放弃修改？",
     "message": "你有未保存的修改，离开后会丢失。",

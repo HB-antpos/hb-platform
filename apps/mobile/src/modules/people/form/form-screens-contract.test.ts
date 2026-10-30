@@ -18,6 +18,8 @@ const adminForm = read("src/modules/people/form/admin-create-form.ts");
 const editScreen = read("src/modules/people/form/person-edit-screen.tsx");
 const editForm = read("src/modules/people/form/person-edit-form.ts");
 const formUi = read("src/modules/people/form/form-ui.tsx");
+const newStaffProfile = read("src/modules/people/form/new-staff-profile.ts");
+const newStaffFields = read("src/modules/people/form/new-staff-fields.tsx");
 
 // ── 路由入口 ──
 assert.match(newRoute, /resolveCreateVariant\(/, "新增页必须按 storeCode 与身份在店长版 / 管理员版之间切换");
@@ -48,7 +50,23 @@ assert.match(adminScreen, /retryAdminStoreAssignment\(/, "第二步失败只能�
 assert.match(adminScreen, /kind: "uncertain"/, "建号结果未知时必须冻结表单");
 assert.match(adminScreen, /isUncertainIdentityWrite/, "必须区分明确失败与结果未知");
 assert.doesNotMatch(adminScreen, /console\.warn\([^)]*,\s*(?:error|outcome\.error|result\.error)\)/, "请求带密码：不得把 Axios 错误对象写进日志");
-assert.doesNotMatch(adminForm, /phone/, "管理员创建接口不支持电话，不得发送");
+assert.match(adminForm, /validateNewStaffProfile\(values, values\.email, today\)/, "管理员版新增：电话、生日、未成年监护人必填");
+assert.match(adminForm, /buildNewStaffProfileBody\(values, today\)/, "管理员版新增必须带电话、生日（未成年带监护人）");
+
+// ── 新建员工必填规则（设计图 7、9）：两个新增页共用同一套规则与组件 ──
+assert.match(staffForm, /validateNewStaffProfile\(values, values\.email, today\)/, "店长版新增：电话、生日、未成年监护人必填");
+assert.match(staffForm, /buildNewStaffProfileBody\(values, today\)/, "店长版新增必须带电话、生日（未成年带监护人）");
+assert.match(newStaffProfile, /validateNewStaffPhone\(phone, /, "电话沿用现有的澳洲手机号校验");
+assert.match(newStaffProfile, /todayInSydney\(/, "年龄必须按悉尼当天算");
+assert.match(newStaffProfile, /if \(isNewStaffMinor\(values\.birthday, today\)\) \{\s*body\.guardian/, "只有未成年才提交监护人");
+assert.match(newStaffFields, /BirthdayPickerDialog/, "生日复用员工资料的纯 JS 日期弹窗，不新增原生依赖");
+for (const [name, source] of [["staff", staffScreen], ["admin", adminScreen]] as const) {
+  assert.match(source, /<NewStaffPhoneField/, `${name}：电话用共享组件`);
+  assert.match(source, /<NewStaffBirthdayField/, `${name}：生日用共享组件`);
+  assert.match(source, /\{minor \? \(\s*<View onLayout=\{anchor\("guardian"\)\}>\s*<NewStaffGuardianSection/, `${name}：监护人一节只在未成年时出现`);
+  assert.match(source, /resolveNewStaffServerErrorKey\(readApiErrorCode\(/, `${name}：服务端必填规则错误要按错误码处理`);
+  assert.match(source, /scrollToFirst\(/, `${name}：校验失败滚到第一个错误`);
+}
 assert.match(adminForm, /passwordFormat: "raw"/, "直接设置的初始密码按 raw 提交");
 
 // ── 编辑整页：不改启停状态，保存后按需提示发设置密码邮件，未保存改动先确认 ──
@@ -100,6 +118,16 @@ for (const key of [
   "edit.emailErrors.required",
   "name.familyName",
   "name.givenName",
+  // 新建员工：监护人关系（提交英文值，显示本地化文案）、字段错误码、服务端错误码。
+  "newStaff.relationships.Mother",
+  "newStaff.relationships.Father",
+  "newStaff.relationships.Legal guardian",
+  "newStaff.relationships.Other",
+  ...[...newStaffFields.matchAll(/"(newStaff\.errors\.[A-Za-z]+)"/g)].map((match) => match[1]),
+  ...[...newStaffProfile.matchAll(/: "([a-zA-Z]+)",?\n/g)]
+    .map((match) => match[1])
+    .filter((key) => /^(?:birthday|phone|email|guardian)[A-Z]/.test(key))
+    .map((key) => `newStaff.serverErrors.${key}`),
 ]) {
   assert.notEqual(lookup(bundles.peopleForm, key), undefined, `缺少动态文案键 peopleForm:${key}`);
 }

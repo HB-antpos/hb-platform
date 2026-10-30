@@ -170,5 +170,129 @@
     "printerTitle": "Label printer · {{status}}",
     "changePrinter": "Change",
     "changeHint": "Changing the printer happens in this sheet, so you stay on the current page."
+  },
+  "minor": {
+    "section": "Under-18 employment compliance",
+    "rows": {
+      "form": "Consent form",
+      "status": "Status",
+      "guardian": "Guardian",
+      "contact": "Contact",
+      "sent": "Sent",
+      "expires": "Valid until",
+      "signed": "Guardian signed",
+      "reviewComment": "Return note"
+    },
+    "forms": {
+      "QLD_CE1": "QLD CE1 child employment consent",
+      "NSW_COMPANY_CONSENT": "NSW company consent for under-18 staff",
+      "UNSUPPORTED_STATE": "Store state not confirmed"
+    },
+    "stages": {
+      "not_sent": "Not sent",
+      "awaiting_guardian": "Awaiting guardian",
+      "link_expired": "Link expired",
+      "pending_review": "Pending review",
+      "returned": "Returned",
+      "approved": "Approved"
+    },
+    "notFilled": "Not provided",
+    "guardianWithRelation": "{{name}} ({{relation}})",
+    "sydneyTime": "{{time}} (Sydney time)",
+    "channels": {
+      "email": "Email",
+      "sms": "SMS"
+    },
+    "relationships": {
+      "Mother": "Mother",
+      "Father": "Father",
+      "Legal guardian": "Legal guardian",
+      "Other": "Other"
+    },
+    "actions": {
+      "send": "Send guardian signing link",
+      "resend": "Resend",
+      "revoke": "Void link",
+      "copyLink": "Copy link"
+    },
+    "hints": {
+      "not_sent": "The guardian gets an English email / SMS, completes the details and signs by hand. Signed forms come back here as \"Pending review\".",
+      "awaiting_guardian": "Resending voids the old link. Once the guardian signs, the status changes to \"Pending review\" and is reviewed in Staff profile review.",
+      "link_expired": "The link has expired. You can resend it; once signed, the status changes to \"Pending review\".",
+      "pending_review": "The guardian has signed. Review it in Staff profile review.",
+      "returned": "Returned for changes. Resend it from here so the guardian can update and sign again.",
+      "approved": "Approved. Nothing more to send."
+    },
+    "partial": {
+      "emailFailed": "The email wasn't sent{{reason}}.",
+      "smsFailed": "The SMS wasn't sent{{reason}}.",
+      "reasonPrefix": ": {{reason}}",
+      "emailDelivered": "The email was delivered.",
+      "smsDelivered": "The SMS was delivered.",
+      "linkStillValid": "The link is still valid; you can also copy it and forward it to the guardian."
+    },
+    "sheet": {
+      "title": "Send guardian signing link",
+      "subtitle": "{{name}} · Age {{age}} · {{state}} · Form follows the store's state",
+      "guardianName": "Guardian name",
+      "relationship": "Relationship",
+      "sendEmail": "Send email",
+      "sendSms": "Send SMS",
+      "emailPlaceholder": "Guardian email",
+      "phone": "Guardian phone",
+      "phonePlaceholder": "e.g. 0412 345 678",
+      "smsOn": "SMS service on",
+      "smsOff": "SMS service off",
+      "smsServiceOffHint": "SMS isn't enabled, so only email can be used.",
+      "smsNotMobileHint": "Landlines can't receive SMS. Enter an Australian mobile starting with 04, or send by email only.",
+      "expiry": "Link valid for",
+      "expiryDays_one": "{{count}} day",
+      "expiryDays_other": "{{count}} days",
+      "codeBoth": "With both on, the guardian can open either one; the verification code goes to their mobile by SMS.",
+      "codeSms": "The verification code goes to the guardian's mobile by SMS.",
+      "codeEmail": "The verification code goes to the guardian's email.",
+      "englishNote": "Everything the guardian sees (email, SMS and signing page) is in English.",
+      "resendWarning": "Resending voids the link sent earlier; the guardian must sign with the new link.",
+      "submit": "Send",
+      "cancel": "Cancel"
+    },
+    "validation": {
+      "nameRequired": "Enter the guardian's name",
+      "phoneRequired": "Enter the guardian's phone",
+      "phoneInvalid": "Phone number format is invalid",
+      "emailRequired": "Email is required when sending by email",
+      "emailInvalid": "Email format is invalid",
+      "channelRequired": "Turn on at least one way to send (email or SMS)"
+    },
+    "messages": {
+      "sentBoth": "Sent to the guardian's email and mobile",
+      "sentEmail": "Sent to the guardian's email",
+      "sentSms": "Sent to the guardian's mobile",
+      "partial": "Some messages failed. Copy the link to forward it to the guardian",
+      "noneSent": "Neither the email nor the SMS was sent. Copy the link to forward it to the guardian",
+      "revoked": "Link voided",
+      "linkCopied": "Link copied",
+      "copyFailed": "Couldn't copy. Long-press the link to copy it"
+    },
+    "confirmRevoke": {
+      "title": "Void the signing link?",
+      "message": "The old link will stop working and the status goes back to \"Not sent\". You can send a new link any time.",
+      "confirm": "Void link"
+    },
+    "errors": {
+      "channelRequired": "Turn on at least one way to send (email or SMS).",
+      "contactRequired": "Enter the guardian's name and a valid phone. A valid email is also required when sending by email.",
+      "smsNotConfigured": "SMS isn't enabled. Turn off SMS and send by email.",
+      "smsPhoneInvalid": "The guardian's phone isn't an Australian mobile (starting with 04), so it can't receive SMS.",
+      "versionConflict": "Someone else updated this record. It has been refreshed; please check and try again.",
+      "invalidStatus": "This can't be done in the current status. Refresh and try again.",
+      "dobRequired": "The employee's date of birth is missing. Add it first.",
+      "notMinor": "This employee is 18 or older; no guardian signature is needed.",
+      "forbidden": "You don't manage this employee's store.",
+      "stateUnconfirmed": "Can't tell whether the store is in NSW or QLD. Complete the store address or time zone first.",
+      "storeRequired": "The employee has no primary store, so the state can't be determined.",
+      "sendFailed": "Couldn't send. Please try again later.",
+      "revokeFailed": "Couldn't void the link. Please try again later."
+    }
   }
 }

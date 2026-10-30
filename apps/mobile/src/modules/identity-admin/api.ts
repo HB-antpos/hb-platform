@@ -436,6 +436,17 @@ export async function createIdentityUser(input: IdentityCreateUserInput, actorGu
     isActive: input.isActive ?? true,
     roleGuids: input.roleGuids ?? [],
     storeGuids: input.storeGuids ?? [],
+    // 新建员工必填规则（电话 / 生日 / 未成年监护人）：有值才发送，未传时请求体与此前一致。
+    ...(input.phone?.trim() ? { phone: input.phone.trim() } : {}),
+    ...(input.birthday?.trim() ? { birthday: input.birthday.trim() } : {}),
+    ...(input.guardian ? {
+      guardian: {
+        name: input.guardian.name.trim(),
+        relationship: input.guardian.relationship.trim(),
+        phone: input.guardian.phone.trim(),
+        email: input.guardian.email.trim(),
+      },
+    } : {}),
   }, accountBoundRequestConfig(actorGuid));
   return normalizeIdentityUser(response.data);
 }

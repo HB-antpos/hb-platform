@@ -54,10 +54,8 @@
   },
   "form": {
     "loadFailed": "无法加载资料",
-    "intro": "完整填写 CE1 / NSW 企业同意书资料。草稿可保存不完整，家长电话和邮箱在签署前必填。",
-    "requestFrom": "{{name}} 请你填写未成年用工资料",
-    "requestFromManager": "店长请你填写未成年用工资料",
-    "requestHint": "填好后发送签署邮件给监护人，监护人签字后再提交 HR 审核，这条待办会自动完成。",
+    "readOnlyNotice": "资料由店长或 HR 发送给家长填写并签字，你无需操作。这里只显示已有资料与审核进度。",
+    "noRecord": "目前还没有你的未成年用工资料。店长或 HR 发送签字链接后，家长填写的内容会显示在这里。",
     "statusLine": "状态：{{status}} · 版本 {{version}}",
     "refreshStatus": "刷新状态",
     "reviewComment": "HR 备注：{{comment}}",
@@ -168,17 +166,6 @@
       "latestTransport": "最晚可用交通时间",
       "latestWorkEnd": "本人最晚可工作时间"
     },
-    "actions": {
-      "saveDraft": "保存草稿",
-      "sendEmail": "发送签署邮件给监护人",
-      "resendEmail": "重新发送签署邮件（旧链接作废）",
-      "sendSms": "短信发送签署链接给监护人",
-      "resendSms": "重新发送签署短信（旧链接作废）",
-      "shareLink": "监护人收不到邮件？改为转发链接",
-      "shareLinkButton": "分享签署链接",
-      "submit": "提交 HR 审核",
-      "saveFirst": "请先保存新版本"
-    },
     "amended": {
       "title": "监护人签署时修改了：{{fields}}",
       "note": "下面的资料已更新为监护人修改后的内容，不需要你重新填写。"
@@ -186,32 +173,15 @@
     "awaiting": {
       "title": "等待监护人签署",
       "emailSent": "签署邮件已发送到监护人邮箱。",
-      "emailFailed": "签署邮件未能发出，请改为转发链接或重新发送。",
-      "linkGenerated": "已生成转发链接，请发给监护人。",
+      "emailFailed": "签署邮件未能发出，店长或 HR 会重新发送。",
+      "linkGenerated": "签署链接已生成，等待监护人打开。",
       "verified": "监护人已打开链接并通过邮箱验证码核验，等待签字。",
       "notVerified": "监护人打开链接后，需要输入发到其邮箱的验证码才能查看和签署。",
-      "expired": "链接已过期，请重新发送。",
+      "expired": "链接已过期，店长或 HR 会重新发送。",
       "smsSent": "签署链接已短信发送到监护人手机。",
-      "smsFailed": "签署短信未能发出，请改为转发链接或重新发送。",
+      "smsFailed": "签署短信未能发出，店长或 HR 会重新发送。",
       "verifiedSms": "监护人已打开链接并通过短信验证码核验，等待签字。",
       "notVerifiedSms": "监护人打开链接后，需要输入短信发到其手机的验证码才能查看和签署。"
-    },
-    "invite": {
-      "emailSent": "签署邮件已发送到 {{email}}。请提醒监护人查收（可能在垃圾邮件里），打开链接后会再收到一封验证码邮件。",
-      "guardianEmail": "监护人邮箱",
-      "emailFailed": "邮件发送失败：{{error}}。可以把下面的链接转发给监护人。",
-      "linkNote": "监护人打开后仍需输入发到其邮箱的验证码，只有监护人本人能完成签署。",
-      "smsSent": "签署链接已短信发送到 {{phone}}。监护人打开链接后，会再收到一条验证码短信。",
-      "guardianPhone": "监护人手机",
-      "smsFailed": "短信发送失败：{{error}}。可以把下面的链接转发给监护人。",
-      "linkNoteSms": "监护人打开后仍需输入短信发到其手机的验证码，只有监护人本人能完成签署。"
-    },
-    "errors": {
-      "server": "服务器未能完成操作，请刷新后重试",
-      "saveFailed": "保存失败：{{message}}",
-      "inviteFailed": "发起签署失败：{{message}}",
-      "submitFailed": "提交失败：{{message}}",
-      "inviteRequired": "签署前必须填写家长电话、邮箱及一名完整备用联系人"
     }
   },
   "review": {

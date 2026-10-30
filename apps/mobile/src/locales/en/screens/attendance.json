@@ -1002,8 +1002,6 @@
   "minorCompliance": {
     "scheduleSavedWithWarnings": "Shift saved with {{count}} minor employment warning(s)",
     "reminderLink": "Minor employment reminders",
-    "warningTitle": "Minor employment warnings ({{count}})",
-    "punchNotAffected": "This warning does not affect this punch; a supervisor can follow up in the reminders list.",
     "cellWarning": "Minor employment warning"
   }
 }

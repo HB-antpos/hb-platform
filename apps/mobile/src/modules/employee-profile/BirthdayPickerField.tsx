@@ -67,6 +67,88 @@ function PickerColumn({
 }
 
 /**
+ * 年/月/日三列点选的生日弹窗（纯 JS，不依赖原生日期组件，OTA 可发布）。
+ * 员工资料的 BirthdayPickerField 与人员管理的「新增员工 / 新增账号」共用。
+ * `today` 决定「不能晚于今天」的边界（新增员工按悉尼当天）；`minYear` 收紧最早可选年份（新增员工为 1940）。
+ */
+export function BirthdayPickerDialog({
+  visible,
+  value,
+  onDismiss,
+  onConfirm,
+  onClear,
+  today,
+  minYear,
+}: {
+  visible: boolean;
+  value: string;
+  onDismiss: () => void;
+  onConfirm: (value: string) => void;
+  /** 传入且已有值时显示「清除」。 */
+  onClear?: () => void;
+  today?: Date;
+  minYear?: number;
+}) {
+  const { t } = useAppTranslation(["employeeProfile", "common"]);
+  const [draft, setDraft] = useState<BirthdayParts>(() => parseBirthdayParts(value, today));
+  // 每次打开都从当前值重新定位。
+  useEffect(() => {
+    if (visible) setDraft(parseBirthdayParts(value, today));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- today 只用于打开时定位，不随它重置草稿
+  }, [visible, value]);
+  const years = useMemo(
+    () => getBirthdayYearOptions(today).filter((year) => minYear === undefined || year >= minYear),
+    [minYear, today]
+  );
+  const months = useMemo(
+    () => Array.from({ length: getMaxBirthdayMonth(draft.year, today) }, (_, index) => index + 1),
+    [draft.year, today]
+  );
+  const days = useMemo(
+    () => Array.from({ length: getMaxBirthdayDay(draft.year, draft.month, today) }, (_, index) => index + 1),
+    [draft.month, draft.year, today]
+  );
+  const draftValue = formatBirthdayParts(draft);
+  const draftError = validateBirthday(draftValue, today) ?? (minYear !== undefined && draft.year < minYear ? "tooOld" : null);
+  const draftAge = draftError ? null : calculateAge(draftValue, today);
+  const select = (key: ColumnKey, next: number) => setDraft((current) => updateBirthdayParts(current, { [key]: next }, today));
+  const pad = (number: number) => String(number).padStart(2, "0");
+
+  return (
+    <Portal>
+      <Dialog visible={visible} onDismiss={onDismiss}>
+        <Dialog.Title>{t("birthdayPicker.title")}</Dialog.Title>
+        <Dialog.Content style={styles.dialogContent}>
+          <Text variant="titleMedium" style={styles.preview}>
+            {draftAge === null ? draftValue : t("birthday.withAge", { date: draftValue, age: draftAge })}
+          </Text>
+          <View style={styles.columns}>
+            <PickerColumn label={t("birthdayPicker.year")} values={years} selected={draft.year} format={String} onSelect={(next) => select("year", next)} />
+            <PickerColumn label={t("birthdayPicker.month")} values={months} selected={draft.month} format={pad} onSelect={(next) => select("month", next)} />
+            <PickerColumn label={t("birthdayPicker.day")} values={days} selected={draft.day} format={pad} onSelect={(next) => select("day", next)} />
+          </View>
+          {draftError ? <HelperText type="error" visible>{t(`birthday.errors.${draftError}`)}</HelperText> : null}
+        </Dialog.Content>
+        <Dialog.Actions>
+          {value && onClear ? (
+            <Button onPress={onClear}>{t("birthdayPicker.clear")}</Button>
+          ) : null}
+          <Button onPress={onDismiss}>{t("common:actions.cancel")}</Button>
+          <Button
+            mode="contained"
+            buttonColor={ACCENT}
+            disabled={Boolean(draftError)}
+            onPress={() => onConfirm(draftValue)}
+          >
+            {t("common:actions.confirm")}
+          </Button>
+        </Dialog.Actions>
+      </Dialog>
+    </Portal>
+  );
+}
+
+/**
  * 纯 JS 生日选择器：年/月/日三列点选，不依赖任何原生日期组件（OTA 可发布）。
  * 联动规则见 birthday-picker.ts，确认前仍以 birthday.ts 的 validateBirthday 兜底校验。
  */
@@ -86,29 +168,13 @@ export function BirthdayPickerField({
 }) {
   const { t } = useAppTranslation(["employeeProfile", "common"]);
   const [visible, setVisible] = useState(false);
-  const [draft, setDraft] = useState<BirthdayParts>(() => parseBirthdayParts(value));
-  const years = useMemo(() => getBirthdayYearOptions(), []);
-  const months = useMemo(
-    () => Array.from({ length: getMaxBirthdayMonth(draft.year) }, (_, index) => index + 1),
-    [draft.year]
-  );
-  const days = useMemo(
-    () => Array.from({ length: getMaxBirthdayDay(draft.year, draft.month) }, (_, index) => index + 1),
-    [draft.month, draft.year]
-  );
   const error = validateBirthday(value);
   const age = error ? null : calculateAge(value);
-  const draftValue = formatBirthdayParts(draft);
-  const draftError = validateBirthday(draftValue);
-  const draftAge = draftError ? null : calculateAge(draftValue);
 
   const open = () => {
     if (disabled) return;
-    setDraft(parseBirthdayParts(value));
     setVisible(true);
   };
-  const select = (key: ColumnKey, next: number) => setDraft((current) => updateBirthdayParts(current, { [key]: next }));
-  const pad = (number: number) => String(number).padStart(2, "0");
 
   return (
     <>
@@ -137,36 +203,13 @@ export function BirthdayPickerField({
           ? t(`birthday.errors.${error}`)
           : [age === null ? null : t("birthday.age", { age }), confirmedLabel].filter(Boolean).join(" · ")}
       </HelperText>
-      <Portal>
-        <Dialog visible={visible} onDismiss={() => setVisible(false)}>
-          <Dialog.Title>{t("birthdayPicker.title")}</Dialog.Title>
-          <Dialog.Content style={styles.dialogContent}>
-            <Text variant="titleMedium" style={styles.preview}>
-              {draftAge === null ? draftValue : t("birthday.withAge", { date: draftValue, age: draftAge })}
-            </Text>
-            <View style={styles.columns}>
-              <PickerColumn label={t("birthdayPicker.year")} values={years} selected={draft.year} format={String} onSelect={(next) => select("year", next)} />
-              <PickerColumn label={t("birthdayPicker.month")} values={months} selected={draft.month} format={pad} onSelect={(next) => select("month", next)} />
-              <PickerColumn label={t("birthdayPicker.day")} values={days} selected={draft.day} format={pad} onSelect={(next) => select("day", next)} />
-            </View>
-            {draftError ? <HelperText type="error" visible>{t(`birthday.errors.${draftError}`)}</HelperText> : null}
-          </Dialog.Content>
-          <Dialog.Actions>
-            {value ? (
-              <Button onPress={() => { onChange(""); setVisible(false); }}>{t("birthdayPicker.clear")}</Button>
-            ) : null}
-            <Button onPress={() => setVisible(false)}>{t("common:actions.cancel")}</Button>
-            <Button
-              mode="contained"
-              buttonColor={ACCENT}
-              disabled={Boolean(draftError)}
-              onPress={() => { onChange(draftValue); setVisible(false); }}
-            >
-              {t("common:actions.confirm")}
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      <BirthdayPickerDialog
+        visible={visible}
+        value={value}
+        onDismiss={() => setVisible(false)}
+        onConfirm={(next) => { onChange(next); setVisible(false); }}
+        onClear={() => { onChange(""); setVisible(false); }}
+      />
     </>
   );
 }

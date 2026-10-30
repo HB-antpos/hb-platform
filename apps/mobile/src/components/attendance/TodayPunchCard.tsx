@@ -22,7 +22,6 @@ import {
   resolveAttendanceMealPanelState,
 } from "@/modules/attendance/attendance-meal-break";
 import { MEAL_BREAK_MINUTES } from "@/modules/attendance/attendance-my-week";
-import { localizeMinorRuleMessage } from "@/modules/minor-reminders/rule-messages";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
@@ -102,7 +101,7 @@ export function TodayPunchCard({
   onStartMealBreak?: (storeCode: string) => void;
   onEndMealBreak?: (storeCode: string) => void;
 }) {
-  const { t, language } = useAppTranslation(["attendance", "common"]);
+  const { t } = useAppTranslation(["attendance", "common"]);
   // 迟到 / 早退等异常时长：不足 60 分钟显示分钟，满 60 分钟起显示「X 小时 Y 分钟」（整小时不带分钟）。
   const formatExceptionDuration = (totalMinutes: number) => {
     const { hours, minutes } = splitExceptionDuration(totalMinutes);
@@ -305,23 +304,6 @@ export function TodayPunchCard({
             <View style={styles.banner}>
               <Icon source="information-outline" size={16} color={HB_COLORS.warning} />
               <Text variant="bodySmall" style={styles.bannerText}>{alertMessage}</Text>
-            </View>
-          ) : null}
-          {/* 未成年用工合规只提醒、不影响打卡；最多展示两条，完整内容由主管在提醒待办跟进。 */}
-          {today?.minorCompliance?.hasFindings ? (
-            <View accessibilityRole="alert" style={styles.banner}>
-              <Icon source="shield-alert-outline" size={16} color={HB_COLORS.warning} />
-              <View style={styles.flexText}>
-                <Text variant="labelLarge" style={styles.bannerText}>
-                  {t("minorCompliance.warningTitle", { count: today.minorCompliance.findings.length })}
-                </Text>
-                {today.minorCompliance.findings.slice(0, 2).map((finding) => (
-                  <Text key={`${finding.ruleId}-${finding.workDate ?? "current"}`} variant="bodySmall" style={styles.bannerText}>
-                    {localizeMinorRuleMessage(finding, language)}
-                  </Text>
-                ))}
-                <Text variant="bodySmall" style={styles.muted}>{t("minorCompliance.punchNotAffected")}</Text>
-              </View>
             </View>
           ) : null}
           {lastQrPunch ? (

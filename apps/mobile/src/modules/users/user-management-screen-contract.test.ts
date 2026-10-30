@@ -91,7 +91,13 @@ assert.match(createSource, /t\("staff\.submit"\)/, "新建页主按钮必须显�
 assert.match(createSource, /t\("created\.headline"\)/, "创建成功必须给出明确反馈");
 assert.match(createSource, /t\("created\.inviteSent"/, "创建成功页必须显示初始密码邮件的发送状态");
 assert.match(createSource, /resendInvite/, "邮件没发出时店长必须能重发");
-assert.match(createSource, /validateNewStaffPhone\(values\.phone, t\)/, "新建时必须校验澳洲手机号");
+// 电话改为必填：店长版新增走共享的 validateNewStaffProfile，其中沿用 validateNewStaffPhone 校验澳洲手机号。
+assert.match(createSource, /validateNewStaffProfile\(values, values\.email, today\)/, "新建时电话、生日必填");
+assert.match(
+  readFileSync(resolve(currentDirectory, "../people/form/new-staff-profile.ts"), "utf8"),
+  /validateNewStaffPhone\(phone, /,
+  "新建时必须校验澳洲手机号"
+);
 assert.doesNotMatch(source, /createMutation/, "列表页不再承载创建表单");
 // 「店长重置密码改为发送设置密码邮件（setupEmailMutation）」随重置密码入口迁到详情页，由详情页的契约测试锁定。
 // 创建在新增页、编辑在编辑整页（列表页不再承载保存表单）。

@@ -394,6 +394,23 @@ async function run() {
     });
     assert.equal("nickname" in (createBodies[1] as Record<string, unknown>), false, "创建时空昵称不发送");
     assert.equal("givenName" in (createBodies[0] as Record<string, unknown>), false, "未提供姓名段时请求体与此前一致");
+    for (const key of ["phone", "birthday", "guardian"]) {
+      assert.equal(key in (createBodies[0] as Record<string, unknown>), false, `未提供 ${key} 时请求体与此前一致`);
+    }
+
+    // 新建员工必填规则：电话 / 生日 / 监护人（未成年）去首尾空白后发送，监护人关系保持英文值。
+    await api.createIdentityUser({
+      username: "dan",
+      email: "dan@example.test",
+      password: "secret12",
+      phone: " 0412 345 678 ",
+      birthday: "2011-03-02",
+      guardian: { name: " Linh Nguyen ", relationship: "Legal guardian", phone: "0423 111 222 ", email: " linh@example.test" },
+    }, "actor-1");
+    const minorBody = requests.filter((item) => item.method === "post" && item.url === "/Users").map((item) => item.body)[2] as Record<string, unknown>;
+    assert.equal(minorBody.phone, "0412 345 678");
+    assert.equal(minorBody.birthday, "2011-03-02");
+    assert.deepEqual(minorBody.guardian, { name: "Linh Nguyen", relationship: "Legal guardian", phone: "0423 111 222", email: "linh@example.test" });
 
     await api.updateIdentityUser("user/1", {
       username: "bob",

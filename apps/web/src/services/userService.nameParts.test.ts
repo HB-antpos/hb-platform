@@ -80,6 +80,35 @@ try {
   assert.equal(second?.givenName, 'Sam', 'PascalCase 字段也要读取')
   assert.equal(second?.nickname, undefined, 'null 昵称规范为 undefined')
   assert.equal(third?.givenName, undefined, '缺省字段保持 undefined')
+
+  // 新建员工：电话、生日透传；监护人只在传入时出现（成年不带 Guardian 字段）。
+  calls.length = 0
+  nextResponseData = { userGUID: 'u2' }
+  await createUser({
+    username: 'mia.nguyen',
+    email: 'mia.nguyen@example.com',
+    password: 'secret-1',
+    phone: '0423 111 222',
+    birthday: '2011-03-02',
+    guardian: { name: 'Linh Nguyen', relationship: 'Mother', phone: '0412 345 678', email: 'linh@example.com' },
+  })
+  assert.equal(calls[0]?.body?.Phone, '0423 111 222')
+  assert.equal(calls[0]?.body?.Birthday, '2011-03-02')
+  assert.deepEqual(calls[0]?.body?.Guardian, {
+    Name: 'Linh Nguyen',
+    Relationship: 'Mother',
+    Phone: '0412 345 678',
+    Email: 'linh@example.com',
+  })
+  await createUser({
+    username: 'adult.staff',
+    email: 'adult@example.com',
+    password: 'secret-1',
+    phone: '0423 111 333',
+    birthday: '1990-01-01',
+  })
+  assert.equal(calls[1]?.body?.Birthday, '1990-01-01')
+  assert.equal('Guardian' in (calls[1]?.body ?? {}), false, '成年员工不带 Guardian')
 } finally {
   globalThis.fetch = originalFetch
 }

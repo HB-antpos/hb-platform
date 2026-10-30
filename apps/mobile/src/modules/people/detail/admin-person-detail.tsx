@@ -51,6 +51,7 @@ import {
 import { DetailScaffold } from "./detail-scaffold";
 import { DetailAppBar, DetailStateScreen, detailStyles } from "./detail-ui";
 import type { DetailEnvironment } from "./store-person-detail";
+import { MinorGuardianSection } from "./minor-guardian-section";
 import { MoreActionsSheet, type MoreRowModel } from "./more-actions-sheet";
 import { ConfirmDialog, PeopleSheet } from "./people-sheet";
 import { PersonHeader } from "./person-header";
@@ -627,6 +628,9 @@ export function AdminPersonDetail({
           <ManagedProfileEntry userGuid={userGuid} />
         </>
       ) : null}
+
+      {/* 未成年用工合规：只对未满 18 岁的员工显示，由店长 / HR 给家长发送签字链接（员工本人不再操作）。 */}
+      <MinorGuardianSection userGuid={userGuid} onMessage={setSnackbar} />
 
       <SectionTitle title={t("peopleDetail:sections.account")} />
       <InfoCard>
