@@ -1047,6 +1047,43 @@
                         <TextBlock Text="{Binding PreviewSoldAt}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                     </StackPanel>
 
+                    <!-- 分页：仅本机与在线来源显示；首页 / 末页时对应按钮只禁用不隐藏，避免布局跳动。 -->
+                    <StackPanel x:Name="HistoryPager"
+                                DockPanel.Dock="Right"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Margin="12,0,0,0"
+                                Visibility="{Binding IsPagerVisible, Converter={StaticResource BoolToVis}}">
+                        <Button Command="{Binding PreviousPageCommand}"
+                                Height="40"
+                                Padding="12,0"
+                                AutomationProperties.AutomationId="TransactionHistoryPreviousPage"
+                                Style="{StaticResource HistoryIconTextButtonStyle}">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="ChevronLeft" Width="18" Height="18" Margin="0,0,4,0" />
+                                <TextBlock Text="{loc:Loc history.pager.previous}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Text="{Binding PageLabel}"
+                                   MinWidth="72"
+                                   Margin="10,0"
+                                   TextAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                   AutomationProperties.AutomationId="TransactionHistoryPageLabel" />
+                        <Button Command="{Binding NextPageCommand}"
+                                Height="40"
+                                Padding="12,0"
+                                AutomationProperties.AutomationId="TransactionHistoryNextPage"
+                                Style="{StaticResource HistoryIconTextButtonStyle}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{loc:Loc history.pager.next}" VerticalAlignment="Center" />
+                                <materialDesign:PackIcon Kind="ChevronRight" Width="18" Height="18" Margin="4,0,0,0" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
                     <Button DockPanel.Dock="Right"
                             Command="{Binding ConfirmInstallmentPickupCommand}"
                             CommandParameter="{Binding SelectedOrder}"

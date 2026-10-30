@@ -40,7 +40,8 @@ public sealed record LocalOrderHistoryQuery(
     DateTimeOffset? SoldFrom = null,
     DateTimeOffset? SoldTo = null,
     string? DeviceCode = null,
-    string? Keyword = null);
+    string? Keyword = null,
+    int Skip = 0);
 
 public sealed record LocalPayment(
     Guid PaymentGuid,

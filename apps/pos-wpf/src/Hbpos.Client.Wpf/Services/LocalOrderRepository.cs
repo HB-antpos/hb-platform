@@ -476,8 +476,8 @@ public sealed class LocalOrderRepository(LocalSqliteStore store) : ILocalOrderRe
                     )
                   )
             GROUP BY o.OrderGuid
-            ORDER BY o.SoldAt DESC
-            LIMIT $Take;
+            ORDER BY o.SoldAt DESC, o.OrderGuid
+            LIMIT $Take OFFSET $Skip;
             """;
         command.Parameters.AddWithValue("$SoldFrom", query.SoldFrom?.ToString("O") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$SoldTo", query.SoldTo?.ToString("O") ?? (object)DBNull.Value);
@@ -487,6 +487,7 @@ public sealed class LocalOrderRepository(LocalSqliteStore store) : ILocalOrderRe
             "$NormalizedOrderKeywordLike",
             string.IsNullOrEmpty(normalizedOrderKeyword) ? string.Empty : $"%{normalizedOrderKeyword}%");
         command.Parameters.AddWithValue("$Take", Math.Clamp(take, 1, 500));
+        command.Parameters.AddWithValue("$Skip", Math.Max(query.Skip, 0));
 
         var summaries = new List<LocalOrderSummary>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

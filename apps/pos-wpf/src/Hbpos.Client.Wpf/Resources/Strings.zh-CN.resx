@@ -3781,6 +3781,15 @@
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>近 7 天</value>
   </data>
+  <data name="history.pager.previous" xml:space="preserve">
+    <value>上一页</value>
+  </data>
+  <data name="history.pager.next" xml:space="preserve">
+    <value>下一页</value>
+  </data>
+  <data name="history.pager.page" xml:space="preserve">
+    <value>第 {0} 页</value>
+  </data>
   <data name="cardRecovery.v2.channelAll" xml:space="preserve">
     <value>全部</value>
   </data>
