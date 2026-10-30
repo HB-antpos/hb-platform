@@ -513,11 +513,17 @@ namespace BlazorApp.Api.Controllers
             var ipAddress = _clientIpResolver.Resolve(Request.HttpContext);
             var userAgent = Request.Headers["User-Agent"].ToString();
 
-            var usernameLower = (request.Username ?? string.Empty).Trim().ToLower();
+            // 关键逻辑：登录名可以是用户名或邮箱，LoginAsync 已经确定了是哪个账号。
+            // 这里必须按它返回的 UserGUID 取用户，不能再按输入的用户名重查，否则邮箱登录会密码通过却查不到人。
+            var loggedInUserGuid = loginResponse.User?.UserGUID;
+            if (string.IsNullOrWhiteSpace(loggedInUserGuid))
+            {
+                return null;
+            }
             var userList = await _dbContext
                 .Db.Queryable<User>()
                 .Includes(u => u.Roles)
-                .Where(u => u.Username.ToLower() == usernameLower && u.IsActive && !u.IsDeleted)
+                .Where(u => u.UserGUID == loggedInUserGuid && u.IsActive && !u.IsDeleted)
                 .Take(1)
                 .ToListAsync();
             var user = userList.FirstOrDefault();

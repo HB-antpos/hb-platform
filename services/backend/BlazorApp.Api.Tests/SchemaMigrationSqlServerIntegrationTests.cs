@@ -4219,6 +4219,132 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 考勤设置唯一索引_建索引前先查重不动数据_可重复执行_只约束未删除行_识别定义漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：Apply 报 54420，Verify 报 54422。
+        var applyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql));
+        Assert.Equal(54420, applyNoTable.Number);
+        var verifyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54422, verifyNoTable.Number);
+
+        // 表由 SqlSugar CodeFirst 建出（与生产启动建表一致）；先塞两条未删除行模拟历史重复。
+        using (var setup = CreateAttendanceSettingsClient(main))
+        {
+            setup.CodeFirst.InitTables(typeof(BlazorApp.Shared.Models.AttendanceSettings));
+            setup.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "dup-1" }).ExecuteCommand();
+            setup.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "dup-2" }).ExecuteCommand();
+        }
+
+        // 有重复：Apply 报 54421，两行原样保留，索引没建；Verify 报 54423（索引缺失）。
+        var duplicates = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql));
+        Assert.Equal(54421, duplicates.Number);
+        Assert.Equal(2, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+        Assert.Equal(0, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dbo.AttendanceSettings') AND [name] = N'UX_AttendanceSettings_SingleActive'"));
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, missingIndex.Number);
+
+        // 人工处理重复（这里把其中一条软删除）后重跑：建索引成功，可重复执行。
+        await ExecuteNonQueryAsync(main,
+            "UPDATE dbo.AttendanceSettings SET IsDeleted = 1 WHERE CreatedBy = N'dup-2';");
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+        Assert.Equal(2, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+
+        // 约束生效：第二条未删除行被拒（2601 / 2627）；已删除行与 IsDeleted 为 NULL 的行不受约束，可以并存。
+        using (var db = CreateAttendanceSettingsClient(main))
+        {
+            var rejected = await Assert.ThrowsAnyAsync<Exception>(() =>
+                db.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "third-live" })
+                    .ExecuteCommandAsync());
+            Assert.True(BlazorApp.Api.Services.React.AttendancePunchPersistenceException.IsUniqueConstraintViolation(rejected));
+            db.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "third-deleted", IsDeleted = true })
+                .ExecuteCommand();
+        }
+        await ExecuteNonQueryAsync(main,
+            "UPDATE dbo.AttendanceSettings SET IsDeleted = NULL WHERE CreatedBy = N'third-deleted';");
+        Assert.Equal(3, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+
+        // 定义漂移：同名但非唯一的索引 → Verify 报 54423；Apply 遇同名索引不会改写，Verify 仍报 54423。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_AttendanceSettings_SingleActive ON dbo.AttendanceSettings;");
+        await ExecuteNonQueryAsync(main,
+            "CREATE NONCLUSTERED INDEX UX_AttendanceSettings_SingleActive ON dbo.AttendanceSettings (IsDeleted);");
+        var drifted = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, drifted.Number);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        var stillDrifted = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, stillDrifted.Number);
+    }
+
+    // 真实 SQL Server 上的并发首建：16 个各自独立连接的请求同时发现“没有设置行”并抢着创建，
+    // 其中一半放在事务里（模拟事务内调用方）。数据库唯一索引只放行一条，输家重读赢家，所有人拿到同一个 Id。
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤设置首次创建_十六路并发只留下一行_输家重读赢家且Id已回填()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        using (var setup = CreateAttendanceSettingsClient(main))
+        {
+            setup.CodeFirst.InitTables(typeof(BlazorApp.Shared.Models.AttendanceSettings));
+        }
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+
+        const int workers = 16;
+        using var startLine = new ManualResetEventSlim(false);
+        var tasks = Enumerable.Range(0, workers).Select(index => Task.Run(async () =>
+        {
+            using var db = CreateAttendanceSettingsClient(main);
+            startLine.Wait();
+            if (index % 2 == 0)
+            {
+                return (await BlazorApp.Api.Services.React.AttendanceReactService.GetOrCreateSettingsAsync(db)).Id;
+            }
+
+            await db.Ado.BeginTranAsync();
+            try
+            {
+                var settings = await BlazorApp.Api.Services.React.AttendanceReactService.GetOrCreateSettingsAsync(db);
+                await db.Ado.CommitTranAsync();
+                return settings.Id;
+            }
+            catch
+            {
+                await db.Ado.RollbackTranAsync();
+                throw;
+            }
+        })).ToArray();
+        startLine.Set();
+        var ids = await Task.WhenAll(tasks);
+
+        Assert.All(ids, id => Assert.True(id > 0));
+        Assert.Single(ids.Distinct());
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+    }
+
+    private static SqlSugar.SqlSugarClient CreateAttendanceSettingsClient(string connectionString) =>
+        new(new SqlSugar.ConnectionConfig
+        {
+            ConnectionString = connectionString,
+            DbType = SqlSugar.DbType.SqlServer,
+            IsAutoCloseConnection = true,
+            InitKeyType = SqlSugar.InitKeyType.Attribute,
+        });
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
