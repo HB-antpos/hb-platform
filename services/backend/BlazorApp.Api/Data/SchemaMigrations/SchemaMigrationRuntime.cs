@@ -272,6 +272,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken);
 
+    Task ApplyPosReceiptShareLinkAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1732,6 +1736,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             AttendanceSettingsSingleActiveSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosReceiptShareLinkSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后过精确签名，通过后协调器才登记账本。
+        await VerifyPosReceiptShareLinkAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosReceiptShareLinkSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
