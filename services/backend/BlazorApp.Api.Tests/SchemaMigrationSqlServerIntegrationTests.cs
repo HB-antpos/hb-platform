@@ -4219,6 +4219,61 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 在线小票分享链接表_新表_可重复执行_令牌哈希唯一_识别列漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54430。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54430, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 重复执行不报错、不丢已写入的行；OpenCount 有默认值 0。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosReceiptShareLink (Id, OrderGuid, TokenHash, TokenProtected, CreatedAtUtc, ExpiresAtUtc)
+            VALUES (N'link-1', N'7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab', N'hash-1', N'protected-1', SYSUTCDATETIME(), DATEADD(day, 90, SYSUTCDATETIME()));
+            """);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PosReceiptShareLink WHERE OpenCount = 0"));
+
+        // 令牌哈希唯一：同一哈希第二次插入必须被拒绝（公开接口按哈希查到至多一行的前提）。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosReceiptShareLink (Id, OrderGuid, TokenHash, TokenProtected, CreatedAtUtc, ExpiresAtUtc)
+            VALUES (N'link-2', N'other-order', N'hash-1', N'protected-2', SYSUTCDATETIME(), DATEADD(day, 90, SYSUTCDATETIME()));
+            """));
+
+        // 列宽漂移 → 54431。用没有索引依赖的 BranchCode 列模拟（TokenHash 上有唯一索引，SQL Server 不允许直接改它的宽度）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(10) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54431, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(20) NULL;");
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 令牌唯一索引缺失 → 54433；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_PosReceiptShareLink_TokenHash ON dbo.PosReceiptShareLink;");
+        var noTokenIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54433, noTokenIndex.Number);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 订单索引缺失 → 54434；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_PosReceiptShareLink_Order ON dbo.PosReceiptShareLink;");
+        var noOrderIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54434, noOrderIndex.Number);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PosReceiptShareLink"));
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 考勤设置唯一索引_建索引前先查重不动数据_可重复执行_只约束未删除行_识别定义漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

@@ -110,6 +110,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string SmsSendLogMigrationId = "20261030.003-sms-send-log";
     internal const string AttendanceSettingsSingleActiveMigrationId =
         "20261030.004-attendance-settings-single-active";
+    internal const string PosReceiptShareLinkMigrationId = "20261030.005-pos-receipt-share-link";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -446,6 +447,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendanceSettingsSingleActiveMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendanceSettingsSingleActiveAsync(cancellationToken)
+        ),
+        new(
+            PosReceiptShareLinkMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosReceiptShareLinkAsync(cancellationToken)
         ),
     ];
 

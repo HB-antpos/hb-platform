@@ -440,6 +440,8 @@ builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
 builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
 builder.Services.AddRateLimiter(PasswordResetRateLimits.Configure);
+// 客人在线小票匿名接口按可信 IP 限流（挡令牌枚举）。
+builder.Services.AddRateLimiter(PosReceiptRateLimits.Configure);
 builder.Services.AddRateLimiter(NetworkDiagnosticsRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
@@ -1422,6 +1424,10 @@ builder.Services.AddScoped<IDeviceRegistrationReactService, DeviceRegistrationRe
 builder.Services.AddScoped<DeviceActivationCodeManagementService>();
 builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDeviceStatusProvider>();
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
+// POS 订单在线小票：员工生成分享链接（迁移 20261030.005 建表，须先于本版本上线）、客人免登录只读打开。
+builder.Services.Configure<BlazorApp.Api.Features.PosReceipts.PosReceiptOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.PosReceipts.PosReceiptOptions.SectionName));
+builder.Services.AddScoped<BlazorApp.Api.Features.PosReceipts.IPosReceiptService, BlazorApp.Api.Features.PosReceipts.PosReceiptService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
 // 分店现金管理（存银行 / 现金支出 / 现金池）。现金池流入只认日结实点现金：取数口读 POSM_DailyClose
