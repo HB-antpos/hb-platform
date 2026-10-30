@@ -182,8 +182,8 @@ public sealed class SmsSenderTests : IDisposable
         var options = new SmsOptions
         {
             Enabled = true,
-            AccountSid = "ACtest",
-            AuthToken = "token",
+            Username = "ops@example.test",
+            ApiKey = "key",
             From = "HotBargain",
             LogHashKey = HashKey,
             PerPhoneHourLimit = 2,
@@ -218,8 +218,8 @@ public sealed class SmsSenderTests : IDisposable
     }
 
     [Theory]
-    [InlineData("AccountSid")]
-    [InlineData("AuthToken")]
+    [InlineData("Username")]
+    [InlineData("ApiKey")]
     [InlineData("From")]
     [InlineData("LogHashKey")]
     public async Task 总闸打开但缺任何一项必填配置_仍然拒发(string missing)
@@ -228,8 +228,8 @@ public sealed class SmsSenderTests : IDisposable
         {
             switch (missing)
             {
-                case "AccountSid": o.AccountSid = ""; break;
-                case "AuthToken": o.AuthToken = " "; break;
+                case "Username": o.Username = ""; break;
+                case "ApiKey": o.ApiKey = " "; break;
                 case "From": o.From = ""; break;
                 case "LogHashKey": o.LogHashKey = ""; break;
             }
@@ -404,60 +404,107 @@ public sealed class SmsSenderTests : IDisposable
     }
 }
 
-public sealed class TwilioSmsGatewayTests
+public sealed class ClickSendSmsGatewayTests
 {
     private static SmsOptions Options() => new()
     {
         Enabled = true,
-        AccountSid = "AC123",
-        AuthToken = "secret-token",
+        Username = "ops@example.test",
+        ApiKey = "secret-key",
         From = "HotBargain",
         LogHashKey = "k",
         ApiBaseUrl = "https://sms.example.test/",
     };
 
-    private static (TwilioSmsGateway Gateway, StubHandler Handler) Create(Func<HttpRequestMessage, HttpResponseMessage> respond)
+    private static (ClickSendSmsGateway Gateway, StubHandler Handler) Create(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var handler = new StubHandler(respond);
-        var gateway = new TwilioSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), NullLogger<TwilioSmsGateway>.Instance);
+        var gateway = new ClickSendSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), NullLogger<ClickSendSmsGateway>.Instance);
         return (gateway, handler);
     }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string json) =>
         new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
+    private static string Accepted(string status, string messageId = "11111111-2222-3333-4444-555555555555") =>
+        """{"http_code":200,"response_code":"SUCCESS","response_msg":"Here are your data.","data":{"total_price":0.05,"queued_count":1,"messages":[{"to":"+61412345678","message_id":"__ID__","status":"__STATUS__"}]}}"""
+            .Replace("__ID__", messageId)
+            .Replace("__STATUS__", status);
+
     [Fact]
-    public async Task 成功_请求地址认证头和表单字段正确_返回消息ID()
+    public async Task 成功_请求地址认证头和JSON字段正确_返回消息ID()
     {
-        var (gateway, handler) = Create(_ => Json(HttpStatusCode.Created, """{"sid":"SM999","status":"queued"}"""));
+        var (gateway, handler) = Create(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS", "msg-999")));
 
         var result = await gateway.SendAsync("+61412345678", "Hot Bargain: hello", CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.Equal("SM999", result.ProviderMessageId);
+        Assert.Equal("msg-999", result.ProviderMessageId);
         Assert.Null(result.ErrorCode);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal("https://sms.example.test/2010-04-01/Accounts/AC123/Messages.json", request.Uri);
+        Assert.Equal("https://sms.example.test/v3/sms/send", request.Uri);
         Assert.Equal("Basic", request.AuthScheme);
-        Assert.Equal(Convert.ToBase64String(Encoding.ASCII.GetBytes("AC123:secret-token")), request.AuthParameter);
-        var form = System.Web.HttpUtility.ParseQueryString(request.Body);
-        Assert.Equal("+61412345678", form["To"]);
-        Assert.Equal("HotBargain", form["From"]);
-        Assert.Equal("Hot Bargain: hello", form["Body"]);
+        Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("ops@example.test:secret-key")), request.AuthParameter);
+        using var sent = System.Text.Json.JsonDocument.Parse(request.Body);
+        var message = Assert.Single(sent.RootElement.GetProperty("messages").EnumerateArray());
+        Assert.Equal("+61412345678", message.GetProperty("to").GetString());
+        Assert.Equal("HotBargain", message.GetProperty("from").GetString());
+        Assert.Equal("Hot Bargain: hello", message.GetProperty("body").GetString());
     }
 
-    [Fact]
-    public async Task 服务商拒绝_返回服务商错误码_不带号码和正文()
+    [Theory]
+    [InlineData("INVALID_RECIPIENT", "CLICKSEND_INVALID_RECIPIENT")]
+    [InlineData("INSUFFICIENT_CREDIT", "CLICKSEND_INSUFFICIENT_CREDIT")]
+    [InlineData("FROM_NOT_ALLOWED", "CLICKSEND_FROM_NOT_ALLOWED")]
+    public async Task HTTP200但单条状态失败_按单条状态返回错误码(string status, string expected)
     {
-        var (gateway, _) = Create(_ => Json(HttpStatusCode.BadRequest,
-            """{"code":21211,"message":"The 'To' number +61412345678 is not a valid phone number.","status":400}"""));
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.OK, Accepted(status)));
 
         var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
 
         Assert.False(result.Success);
-        Assert.Equal("TWILIO_21211", result.ErrorCode);
+        Assert.Null(result.ProviderMessageId);
+        Assert.Equal(expected, result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 认证失败_返回服务商顶层错误码_不带号码和正文()
+    {
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.Unauthorized,
+            """{"http_code":401,"response_code":"UNAUTHORIZED","response_msg":"Invalid credentials for +61412345678."}"""));
+
+        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("CLICKSEND_UNAUTHORIZED", result.ErrorCode);
         Assert.DoesNotContain("412345678", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task 状态文本含号码或符号_入库前被清洗并截断()
+    {
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.OK,
+            Accepted("bad number +61412345678 and a very long free text that must never be stored verbatim")));
+
+        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorCode);
+        Assert.True(result.ErrorCode!.Length <= 60);
+        Assert.Matches("^[A-Z0-9_]+$", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task HTTP200但没有消息明细_不当作成功()
+    {
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.OK,
+            """{"http_code":200,"response_code":"SUCCESS","data":{"messages":[]}}"""));
+
+        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("CLICKSEND_NO_MESSAGE", result.ErrorCode);
     }
 
     [Fact]
@@ -474,7 +521,7 @@ public sealed class TwilioSmsGatewayTests
     [Fact]
     public async Task 网络异常_返回统一错误码_不抛出()
     {
-        var (gateway, _) = Create(_ => throw new HttpRequestException("connection refused to https://sms.example.test/ AC123"));
+        var (gateway, _) = Create(_ => throw new HttpRequestException("connection refused to https://sms.example.test/ ops@example.test"));
 
         var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
 

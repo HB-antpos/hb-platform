@@ -12,11 +12,11 @@ public sealed class SmsOptions
     /// <summary>总闸，默认关。只有服务器 .env 显式写 SMS_ENABLED=true 并重建容器才会真正发短信。</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Twilio Account SID。</summary>
-    public string AccountSid { get; set; } = string.Empty;
+    /// <summary>ClickSend 用户名（账号邮箱）。</summary>
+    public string Username { get; set; } = string.Empty;
 
-    /// <summary>Twilio Auth Token。</summary>
-    public string AuthToken { get; set; } = string.Empty;
+    /// <summary>ClickSend API Key（在 ClickSend 后台 API Credentials 页生成，可随时重置）。</summary>
+    public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>发件方：字母 sender ID（最长 11 位，澳洲需先在服务商处登记）或 E.164 号码。</summary>
     public string From { get; set; } = string.Empty;
@@ -37,11 +37,11 @@ public sealed class SmsOptions
     public int GlobalDayLimit { get; set; } = 300;
 
     /// <summary>服务商接口地址，测试时可指向本地假服务。</summary>
-    public string ApiBaseUrl { get; set; } = "https://api.twilio.com";
+    public string ApiBaseUrl { get; set; } = "https://rest.clicksend.com";
 
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(AccountSid)
-        && !string.IsNullOrWhiteSpace(AuthToken)
+        !string.IsNullOrWhiteSpace(Username)
+        && !string.IsNullOrWhiteSpace(ApiKey)
         && !string.IsNullOrWhiteSpace(From)
         && !string.IsNullOrWhiteSpace(LogHashKey);
 

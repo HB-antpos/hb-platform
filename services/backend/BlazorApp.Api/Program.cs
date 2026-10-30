@@ -784,7 +784,7 @@ builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocument
 builder.Services.Configure<MinorEmploymentOptions>(builder.Configuration.GetSection(MinorEmploymentOptions.SectionName));
 builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.Configure<BlazorApp.Api.Services.Sms.SmsOptions>(builder.Configuration.GetSection(BlazorApp.Api.Services.Sms.SmsOptions.SectionName)); // 短信通道配置：总闸默认关，密钥只从服务器 .env 注入
-builder.Services.AddHttpClient<BlazorApp.Api.Services.Sms.ISmsGateway, BlazorApp.Api.Services.Sms.TwilioSmsGateway>(client => client.Timeout = TimeSpan.FromSeconds(15)); // 短信服务商（Twilio REST），换服务商只改这一行
+builder.Services.AddHttpClient<BlazorApp.Api.Services.Sms.ISmsGateway, BlazorApp.Api.Services.Sms.ClickSendSmsGateway>(client => client.Timeout = TimeSpan.FromSeconds(15)); // 短信服务商（ClickSend REST），换服务商只改这一行
 builder.Services.AddScoped<BlazorApp.Api.Services.Sms.ISmsSender, BlazorApp.Api.Services.Sms.SmsSender>(); // 短信发送：总闸、澳洲手机号规范化、按号与全站限流、发送记录
 builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 员工邮箱验证码设置 / 找回密码
