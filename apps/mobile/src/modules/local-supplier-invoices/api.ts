@@ -20,6 +20,8 @@ import type {
 import { DEFAULT_INVOICE_DATE_FIELD } from "@/modules/local-supplier-invoices/types";
 import { toCreatedAtInstantRange } from "@/modules/local-supplier-invoices/date-range";
 import type { InvoiceDetailUpsertItem } from "@/modules/local-supplier-invoices/detail/inline-edit";
+import type { BatchEditFields } from "@/modules/local-supplier-invoices/detail/batch-edit";
+import type { BatchExecuteRequest } from "@/modules/local-supplier-invoices/detail/batch-execute";
 
 const BASE_PATH = "/react/v1/local-supplier-invoices";
 const ACTIVE_LOCAL_SUPPLIERS_PATH = "/react/v1/local-suppliers/active";
@@ -596,6 +598,81 @@ export async function checkInvoiceProductsSync(invoiceGuid: string, detailGuids?
   const client = await getApiClient();
   const response = await client.post(`${BASE_PATH}/check-products`, { invoiceGuid, detailGuids });
   return normalizeCheckProductsSummary(response.data);
+}
+
+// ---------------------------------------------------------------------------
+// 二期 B/C：批量设置操作、批量编辑、批量执行（仅管理员入口；后端还要求能访问全部启用分店）
+// ---------------------------------------------------------------------------
+
+/** 批量设置操作类型：立即落库（与单行改操作类型一样不计入未保存修改）。 */
+export async function batchSetInvoiceDetailAction(invoiceGuid: string, detailGuids: string[], action: number) {
+  const client = await getApiClient();
+  await client.put(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details/batch-action`, { detailGuids, action });
+}
+
+/** 批量编辑价格类字段：items 只带主键，改哪些字段由 editFields 的 update* 开关决定。 */
+export async function batchUpdateInvoiceDetails(invoiceGuid: string, detailGuids: string[], editFields: BatchEditFields) {
+  const client = await getApiClient();
+  await client.post(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details/batch-update`, {
+    items: detailGuids.map((detailGUID) => ({ detailGUID })),
+    editFields,
+  });
+}
+
+export interface BatchExecuteResult {
+  createdProducts: number;
+  updatedPurchasePrices: number;
+  updatedStorePrices: number;
+  updatedItemNumbers: number;
+  addedMultiCodes: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export function normalizeBatchExecuteResult(payload: unknown): BatchExecuteResult {
+  const root = asRecord(payload) ?? {};
+  // 成功时客户端通常已解开 {success,data}；失败体的逐行结果在 details 里。
+  const data = asRecord(pick(root, "data", "Data")) ?? asRecord(pick(root, "details", "Details")) ?? root;
+  const errors = pick(data, "errors", "Errors");
+  return {
+    createdProducts: asNumber(pick(data, "createdProducts", "CreatedProducts"), 0),
+    updatedPurchasePrices: asNumber(pick(data, "updatedPurchasePrices", "UpdatedPurchasePrices"), 0),
+    updatedStorePrices: asNumber(pick(data, "updatedStorePrices", "UpdatedStorePrices"), 0),
+    updatedItemNumbers: asNumber(pick(data, "updatedItemNumbers", "UpdatedItemNumbers"), 0),
+    addedMultiCodes: asNumber(pick(data, "addedMultiCodes", "AddedMultiCodes"), 0),
+    skipped: asNumber(pick(data, "skipped", "Skipped"), 0),
+    failed: asNumber(pick(data, "failed", "Failed"), 0),
+    errors: Array.isArray(errors) ? errors.map((item) => asString(item)).filter(Boolean) : [],
+  };
+}
+
+/** 批量执行失败的分类：后端失败体 {success:false, message, code, details}。 */
+export interface BatchExecuteFailure {
+  code: string;
+  message: string;
+  errors: string[];
+}
+
+export function getBatchExecuteFailure(error: unknown): BatchExecuteFailure | null {
+  const data = (error as { response?: { data?: unknown } } | null)?.response?.data;
+  const root = asRecord(data);
+  if (!root) return null;
+  return {
+    code: asString(pick(root, "code", "Code")),
+    message: asString(pick(root, "message", "Message")),
+    errors: normalizeBatchExecuteResult({ details: pick(root, "details", "Details") }).errors,
+  };
+}
+
+/** 同步执行（没有后台任务）；成功的行后端写回操作类型 99「已执行」。 */
+export async function batchExecuteInvoiceDetails(invoiceGuid: string, request: BatchExecuteRequest) {
+  const client = await getApiClient();
+  const response = await client.post(`${BASE_PATH}/${encodeURIComponent(invoiceGuid)}/details/batch-execute`, {
+    invoiceGuid,
+    ...request,
+  });
+  return normalizeBatchExecuteResult(response.data);
 }
 
 function asNullableString(value: unknown): string | null {

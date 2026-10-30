@@ -1,5 +1,7 @@
 import {
   buildInvoiceDetailsGridRequest,
+  getBatchExecuteFailure,
+  normalizeBatchExecuteResult,
   buildInvoiceGridRequest,
   isMissingCheckJobEndpoint,
   normalizeActiveLocalSuppliersResponse,
@@ -434,3 +436,22 @@ assertEqual(
   null,
   "missing check summary stays null instead of being reported as pending"
 );
+
+// 二期 C：批量执行返回与失败体
+assertDeepEqual(
+  normalizeBatchExecuteResult({ createdProducts: 2, updatedPurchasePrices: 3, updatedStorePrices: 3, skipped: 1, errors: ["明细 a 失败"] }),
+  { createdProducts: 2, updatedPurchasePrices: 3, updatedStorePrices: 3, updatedItemNumbers: 0, addedMultiCodes: 0, skipped: 1, failed: 0, errors: ["明细 a 失败"] },
+  "batch execute result reads unwrapped data"
+);
+assertEqual(normalizeBatchExecuteResult({ success: true, data: { CreatedProducts: 4 } }).createdProducts, 4, "batch execute result reads enveloped PascalCase data");
+assertDeepEqual(
+  getBatchExecuteFailure({ response: { status: 400, data: { success: false, message: "批量执行确认已失效", code: "VALIDATION_ERROR", details: { errors: ["明细 a x", "明细 b y"] } } } }),
+  { code: "VALIDATION_ERROR", message: "批量执行确认已失效", errors: ["明细 a x", "明细 b y"] },
+  "batch execute failure reads code, message and per-row errors"
+);
+assertEqual(
+  getBatchExecuteFailure({ response: { status: 400, data: { success: false, message: "m", code: "PRICE_CHANGE_CONFIRM_REQUIRED" } } })?.code,
+  "PRICE_CHANGE_CONFIRM_REQUIRED",
+  "price change confirm code is surfaced"
+);
+assertEqual(getBatchExecuteFailure(new Error("network")), null, "network errors have no failure body");
