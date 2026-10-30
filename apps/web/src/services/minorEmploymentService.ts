@@ -9,6 +9,11 @@ import type {
   MinorEmploymentRisk,
   ParentSignatureDocument,
   ParentSignatureSubmit,
+  GuardianLinkSendPayload,
+  GuardianLinkSendResult,
+  MinorStaffComplianceItem,
+  MinorStaffComplianceList,
+  MinorStaffComplianceQuery,
 } from '../types/minorEmployment'
 import request, { RequestError, unwrapApiData, unwrapPagedResult } from '../utils/request'
 
@@ -279,4 +284,96 @@ export function mapHistory(value: unknown): MinorEmploymentHistoryEntry[] {
       return { id: `${version.id ?? version.Id}-${index}`, version: number(version.version ?? version.Version), action: text(audit.action ?? audit.Action) ?? '', actor: text(audit.actorLabel ?? audit.ActorLabel), createdAt: text(audit.createdAt ?? audit.CreatedAt), comment: text(meta.comment ?? meta.Comment) }
     })
   })
+}
+
+// ---- 店长 / HR 发送家长签字链接（Web「员工个人信息维护 → 未成年用工合规」与手机「人员管理」共用后端） ----
+const STAFF_PATH = '/api/minor-employment/staff'
+const STAFF_STAGES = new Set<MinorStaffComplianceItem['stage']>(['not_sent', 'awaiting_guardian', 'link_expired', 'pending_review', 'returned', 'approved'])
+const optionalBool = (value: unknown) => (typeof value === 'boolean' ? value : null)
+
+export function mapStaffComplianceItem(value: unknown): MinorStaffComplianceItem {
+  const raw = record(value)
+  const stage = text(raw.stage) as MinorStaffComplianceItem['stage'] | undefined
+  const state = text(raw.stateCode)
+  const form = text(raw.formType)
+  return {
+    userGUID: text(raw.userGUID ?? raw.userGuid) ?? '',
+    employeeName: text(raw.employeeName) ?? '',
+    username: text(raw.username),
+    storeCode: text(raw.storeCode),
+    storeName: text(raw.storeName),
+    stateCode: state === 'NSW' || state === 'QLD' ? state : 'UNKNOWN',
+    formType: form === 'QLD_CE1' || form === 'NSW_COMPANY_CONSENT' ? form : 'UNSUPPORTED_STATE',
+    birthday: text(raw.birthday),
+    age: number(raw.age) ?? 0,
+    complianceId: number(raw.complianceId),
+    version: number(raw.version),
+    revision: number(raw.revision),
+    complianceStatus: text(raw.complianceStatus),
+    // 未知阶段按「未发送」兜底，至少还能发送，不会让行卡死。
+    stage: stage && STAFF_STAGES.has(stage) ? stage : 'not_sent',
+    needsAction: raw.needsAction === true,
+    canSend: raw.canSend === true,
+    canRevoke: raw.canRevoke === true,
+    guardianName: text(raw.guardianName),
+    guardianRelationship: text(raw.guardianRelationship),
+    guardianEmail: text(raw.guardianEmail),
+    guardianPhone: text(raw.guardianPhone),
+    maskedGuardianEmail: text(raw.maskedGuardianEmail),
+    maskedGuardianPhone: text(raw.maskedGuardianPhone),
+    linkExpiresAtUtc: text(raw.linkExpiresAtUtc),
+    lastSentAtUtc: text(raw.lastSentAtUtc),
+    lastSentEmail: optionalBool(raw.lastSentEmail),
+    lastSentSms: optionalBool(raw.lastSentSms),
+    guardianSignedAtUtc: text(raw.guardianSignedAtUtc),
+    reviewComment: text(raw.reviewComment),
+    returnFields: Array.isArray(raw.returnFields) ? (raw.returnFields as unknown[]).filter((item): item is string => typeof item === 'string') : [],
+  }
+}
+
+/** 未满 18 岁员工列表；needsActionCount 不受筛选影响。 */
+export async function getMinorStaffComplianceList(query: MinorStaffComplianceQuery = {}): Promise<MinorStaffComplianceList> {
+  const response = await request.get<ApiResponse<Raw>>(STAFF_PATH, {
+    params: { storeCode: query.storeCode, stateCode: query.stateCode, keyword: query.keyword, needsActionOnly: query.needsActionOnly ? 'true' : 'false' },
+  })
+  const data = record(unwrapApiData(response))
+  return {
+    items: Array.isArray(data.items) ? (data.items as unknown[]).map(mapStaffComplianceItem) : [],
+    needsActionCount: number(data.needsActionCount) ?? 0,
+    smsAvailable: data.smsAvailable === true,
+  }
+}
+
+/** 发送 / 重新发送家长签字链接；部分渠道失败不算接口失败，结果里带 signingUrl 供手动转发。 */
+export async function sendMinorGuardianLink(userGuid: string, payload: GuardianLinkSendPayload): Promise<GuardianLinkSendResult> {
+  const response = await request.post<ApiResponse<Raw>>(`${STAFF_PATH}/${encodeURIComponent(userGuid)}/guardian-link`, payload)
+  const data = record(unwrapApiData(response))
+  return {
+    item: mapStaffComplianceItem(data.item),
+    expiresAtUtc: text(data.expiresAtUtc) ?? '',
+    emailRequested: data.emailRequested === true,
+    emailSent: data.emailSent === true,
+    emailError: text(data.emailError),
+    smsRequested: data.smsRequested === true,
+    smsSent: data.smsSent === true,
+    smsError: text(data.smsError),
+    codeChannel: String(data.codeChannel ?? '').toLowerCase() === 'sms' ? 'sms' : 'email',
+    signingUrl: text(data.signingUrl),
+    message: text(record(response).message),
+  }
+}
+
+/** 作废当前待签字链接。 */
+export async function revokeMinorGuardianLink(userGuid: string, expected: { expectedVersion: number; expectedRevision: number }) {
+  const response = await request.post<ApiResponse<Raw>>(`${STAFF_PATH}/${encodeURIComponent(userGuid)}/guardian-link/revoke`, expected)
+  return mapStaffComplianceItem(unwrapApiData(response))
+}
+
+/** 取后端原始中文提示与 errorCode；unwrapApiData 会把 code 拼进 message，这里优先读响应体里的 message。 */
+export function minorStaffRequestError(error: unknown, fallback: string) {
+  if (error instanceof RequestError) {
+    const payload = record(error.payload)
+    return { code: text(payload.errorCode ?? payload.ErrorCode ?? payload.code), message: text(payload.message ?? payload.Message) ?? error.message ?? fallback }
+  }
+  return { code: undefined, message: error instanceof Error && error.message ? error.message : fallback }
 }

@@ -19,7 +19,8 @@ public sealed class MinorEmploymentOptions
 
 public interface IMinorGuardianEmailSender
 {
-    Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, CancellationToken cancellationToken = default);
+    /// <param name="verificationCodeBySms">验证码会短信发到监护人手机时为 true，邮件里相应写「your mobile」而不是本邮箱。</param>
+    Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, bool verificationCodeBySms = false, CancellationToken cancellationToken = default);
 
     Task<ApiResponse<bool>> SendVerificationCodeAsync(string toEmail, string guardianName, string code, DateTime expiresAtUtc, CancellationToken cancellationToken = default);
 }
@@ -40,9 +41,9 @@ public sealed class MinorGuardianEmailSender : IMinorGuardianEmailSender
         _logger = logger;
     }
 
-    public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+    public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, bool verificationCodeBySms = false, CancellationToken cancellationToken = default)
     {
-        var content = BuildSigningLink(guardianName, childName, signingUrl, FormatSydney(expiresAtUtc));
+        var content = BuildSigningLink(guardianName, childName, signingUrl, FormatSydney(expiresAtUtc), verificationCodeBySms);
         return SendAsync(toEmail, content.Subject, content.Text, content.Html, "signing-link", cancellationToken);
     }
 
@@ -53,20 +54,22 @@ public sealed class MinorGuardianEmailSender : IMinorGuardianEmailSender
         return SendAsync(toEmail, content.Subject, content.Text, content.Html, "verification-code", cancellationToken);
     }
 
-    internal static EmailContent BuildSigningLink(string guardianName, string childName, string signingUrl, string expiresText)
+    internal static EmailContent BuildSigningLink(string guardianName, string childName, string signingUrl, string expiresText, bool verificationCodeBySms = false)
     {
+        // 家长要先补全孩子的学校、通勤等资料再签字，所以文案是 complete and sign；验证码去向跟发送方式走。
+        var codeTarget = verificationCodeBySms ? "your mobile" : "this email address";
         var subject = $"Parent/guardian consent for {childName} – Hot Bargain";
         var text =
             $"Dear {guardianName},\n\n" +
-            $"{childName} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.\n\n" +
-            $"Open this link to review and sign (valid until {expiresText}, Sydney time):\n{signingUrl}\n\n" +
-            "For your security, a one-time verification code will be sent to this email address after you open the link.\n" +
+            $"{childName} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to complete the remaining details and sign the minor employment consent form.\n\n" +
+            $"Open this link to complete and sign (valid until {expiresText}, Sydney time):\n{signingUrl}\n\n" +
+            $"For your security, a one-time verification code will be sent to {codeTarget} after you open the link.\n" +
             "If you did not expect this email, please ignore it or contact the store manager.\n";
         var html =
             $"<p>Dear {Encode(guardianName)},</p>" +
-            $"<p>{Encode(childName)} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.</p>" +
-            $"<p><a href=\"{Encode(signingUrl)}\">Review and sign the consent form</a><br/>Valid until {Encode(expiresText)} (Sydney time).</p>" +
-            "<p>For your security, a one-time verification code will be sent to this email address after you open the link. If you did not expect this email, please ignore it or contact the store manager.</p>";
+            $"<p>{Encode(childName)} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to complete the remaining details and sign the minor employment consent form.</p>" +
+            $"<p><a href=\"{Encode(signingUrl)}\">Complete and sign the consent form</a><br/>Valid until {Encode(expiresText)} (Sydney time).</p>" +
+            $"<p>For your security, a one-time verification code will be sent to {codeTarget} after you open the link. If you did not expect this email, please ignore it or contact the store manager.</p>";
         return new EmailContent(subject, text, html);
     }
 

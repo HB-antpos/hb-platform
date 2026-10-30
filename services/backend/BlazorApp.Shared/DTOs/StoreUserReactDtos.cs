@@ -103,6 +103,19 @@ namespace BlazorApp.Shared.DTOs
 
         public string? Phone { get; set; }
 
+        /// <summary>生日。店长新增员工时必填（控制器校验），写入员工资料。</summary>
+        public DateTime? Birthday { get; set; }
+
+        /// <summary>监护人；生日未满 18 岁时必填，预填进未成年用工合规草稿。</summary>
+        public NewStaffGuardianDto? Guardian { get; set; }
+
+        /// <summary>
+        /// 由「新建账号」控制器置为 true：服务在权限与门店范围检查之后，按新建员工规则校验生日、电话、监护人。
+        /// 不参与 JSON 序列化，客户端无法关闭；批量导入等内部流程不设置，保持原行为。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool RequireNewStaffProfile { get; set; }
+
         [Required(ErrorMessage = "分店代码不能为空")]
         public string StoreCode { get; set; } = string.Empty;
 

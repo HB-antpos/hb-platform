@@ -25,7 +25,7 @@ public static class SmsMessages
 
     /// <summary>监护人签署链接。<paramref name="validUntilText"/> 是已带时区的有效期文字，如 05/11 14:00 Sydney time。</summary>
     public static string GuardianSigningLink(string childName, string signingUrl, string validUntilText) =>
-        $"{Brand}: please review and sign the consent form for {SafeName(childName, "your child")}: {signingUrl} Valid until {validUntilText}.";
+        $"{Brand}: please complete and sign the consent form for {SafeName(childName, "your child")}: {signingUrl} Valid until {validUntilText}.";
 
     /// <summary>
     /// 姓名进短信前的净化：去掉变音符号（José → Jose），过滤后仍含非允许字符（如中文名）就用兜底词。

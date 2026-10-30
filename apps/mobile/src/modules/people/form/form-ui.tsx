@@ -2,7 +2,7 @@
  * 新增 / 编辑整页表单的共用界面部件（设计稿 A3）：页面壳、带标签的输入框、开关行、
  * 姓名区（姓 / 名 / 中间名一行 + 昵称 / 电话一行）、放弃修改确认框与离开拦截。
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +12,7 @@ import {
   TextInput as NativeTextInput,
   View,
   type KeyboardTypeOptions,
+  type LayoutChangeEvent,
   type TextInputProps,
 } from "react-native";
 import { useNavigation } from "expo-router";
@@ -39,6 +40,7 @@ export function FormScreen({
   footer,
   scrollToTopKey,
   overlay,
+  scrollRef: externalScrollRef,
 }: {
   title: string;
   subtitle?: string;
@@ -50,11 +52,14 @@ export function FormScreen({
   scrollToTopKey?: number;
   /** 铺在整页上的内容（Snackbar 等），放在页壳内才能贴着屏幕底部显示。 */
   overlay?: ReactNode;
+  /** 页面需要自己控制滚动（如校验失败滚到第一个错误，见 useFieldAnchors）时传入。 */
+  scrollRef?: RefObject<ScrollView | null>;
 }) {
-  const scrollRef = useRef<ScrollView>(null);
+  const internalScrollRef = useRef<ScrollView>(null);
+  const scrollRef = externalScrollRef ?? internalScrollRef;
   useEffect(() => {
     if (scrollToTopKey) scrollRef.current?.scrollTo({ y: 0, animated: true });
-  }, [scrollToTopKey]);
+  }, [scrollRef, scrollToTopKey]);
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right", "bottom"]}>
       <View style={styles.header}>
@@ -143,6 +148,8 @@ export interface FormFieldProps {
   mono?: boolean;
   testID?: string;
   onBlur?: () => void;
+  /** 传入时整个输入框变成按钮（不可键入），点击打开选择器（如生日）。 */
+  onPress?: () => void;
 }
 
 export function FormField({
@@ -166,37 +173,55 @@ export function FormField({
   mono = false,
   testID,
   onBlur,
+  onPress,
 }: FormFieldProps) {
   const locked = readOnly || disabled;
+  const box = (
+    <View
+      style={[styles.inputBox, locked && styles.inputBoxLocked, Boolean(error) && styles.inputBoxError]}
+      pointerEvents={onPress ? "none" : undefined}
+    >
+      <NativeTextInput
+        testID={testID}
+        style={[styles.input, mono && styles.mono, locked && styles.inputLocked]}
+        value={value}
+        onChangeText={onChangeText}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        placeholderTextColor="#98A2B3"
+        editable={!locked && !onPress}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={false}
+        maxLength={maxLength}
+        secureTextEntry={secureTextEntry}
+        textContentType={textContentType}
+        autoComplete={autoComplete}
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: locked }}
+      />
+      {/* PeopleTag 自带 alignSelf: flex-start，会贴到输入框顶部；包一层居中。 */}
+      {adornment ? <View style={styles.adornment}>{adornment}</View> : null}
+      {trailing}
+    </View>
+  );
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel} numberOfLines={1}>
         {label}
         {required ? <Text style={styles.required}>{" *"}</Text> : null}
       </Text>
-      <View style={[styles.inputBox, locked && styles.inputBoxLocked, Boolean(error) && styles.inputBoxError]}>
-        <NativeTextInput
-          testID={testID}
-          style={[styles.input, mono && styles.mono, locked && styles.inputLocked]}
-          value={value}
-          onChangeText={onChangeText}
-          onBlur={onBlur}
-          placeholder={placeholder}
-          placeholderTextColor="#98A2B3"
-          editable={!locked}
-          keyboardType={keyboardType}
-          autoCapitalize={autoCapitalize}
-          autoCorrect={false}
-          maxLength={maxLength}
-          secureTextEntry={secureTextEntry}
-          textContentType={textContentType}
-          autoComplete={autoComplete}
-          accessibilityLabel={label}
+      {onPress ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={value ? `${label} ${value}` : label}
           accessibilityState={{ disabled: locked }}
-        />
-        {adornment}
-        {trailing}
-      </View>
+          disabled={locked}
+          onPress={onPress}
+        >
+          {box}
+        </Pressable>
+      ) : box}
       {error ? (
         <Text style={styles.errorText} accessibilityLiveRegion="polite">{error}</Text>
       ) : hint ? (
@@ -242,7 +267,8 @@ export function SwitchRow({
         <Text style={styles.switchTitle}>{title}</Text>
         {description ? <Text style={styles.switchDescription}>{description}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onValueChange} disabled={disabled} accessibilityLabel={title} />
+      {/* RN 的 iOS Switch 默认自带 alignSelf: flex-start，会贴到行顶；显式居中才和左侧文字对齐。 */}
+      <Switch value={value} onValueChange={onValueChange} disabled={disabled} accessibilityLabel={title} style={styles.switchControl} />
     </View>
   );
 }
@@ -424,6 +450,39 @@ export function useLeaveGuard(dirty: boolean) {
   return { confirmVisible, keepEditing, discard, leaveWith };
 }
 
+// ───────────────────────── 滚到第一个错误 ─────────────────────────
+
+/**
+ * 校验失败时滚到第一个出错的字段。用法：把 `scrollRef` 传给 FormScreen，
+ * 用 `<View onLayout={anchor("phone")}>` 包住 ScrollView 的直接子项（位置才是相对滚动内容的），
+ * 再按页面从上到下的顺序把出错的锚点传给 `scrollToFirst`。
+ * 关键逻辑：顶部错误条和字段红字出现后布局会下移，所以等 onLayout 回报新位置后再滚动。
+ */
+export function useFieldAnchors<K extends string>() {
+  const scrollRef = useRef<ScrollView>(null);
+  const positions = useRef(new Map<K, number>());
+  const [request, setRequest] = useState<{ tick: number; keys: K[] } | null>(null);
+
+  useEffect(() => {
+    if (!request) return;
+    const timer = setTimeout(() => {
+      const first = request.keys.find((key) => positions.current.has(key));
+      const y = first === undefined ? 0 : positions.current.get(first) ?? 0;
+      scrollRef.current?.scrollTo({ y: Math.max(y - HB_SPACING.sm, 0), animated: true });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [request]);
+
+  const anchor = useCallback((key: K) => (event: LayoutChangeEvent) => {
+    positions.current.set(key, event.nativeEvent.layout.y);
+  }, []);
+  const scrollToFirst = useCallback((keys: K[]) => {
+    setRequest((current) => ({ tick: (current?.tick ?? 0) + 1, keys }));
+  }, []);
+
+  return { scrollRef, anchor, scrollToFirst };
+}
+
 // ───────────────────────── 小部件 ─────────────────────────
 
 /** 输入框右侧的显示 / 隐藏密码按钮。 */
@@ -481,6 +540,8 @@ const styles = StyleSheet.create({
   switchRow: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.sm, minHeight: 56, paddingHorizontal: 14, paddingVertical: 10 },
   switchDivider: { borderTopColor: HB_COLORS.outlineMuted, borderTopWidth: StyleSheet.hairlineWidth },
   switchText: { flex: 1, minWidth: 0 },
+  switchControl: { alignSelf: "center" },
+  adornment: { alignSelf: "center" },
   switchTitle: { color: HB_COLORS.textPrimary, fontSize: 14.5, fontWeight: "700" },
   switchDescription: { color: HB_COLORS.textSecondary, fontSize: 12.5, lineHeight: 17, marginTop: 1 },
   visibilityToggle: { borderRadius: HB_RADIUS.control },

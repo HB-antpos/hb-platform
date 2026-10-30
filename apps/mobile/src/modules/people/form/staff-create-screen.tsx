@@ -5,6 +5,7 @@
  * 页面只做只读说明，不提供角色或分店选择；其他角色 / 分店请找管理员。
  * 邮箱必填，默认作为账号；「允许登录 App 和 Web」默认关闭——关闭时只建账号与资料（考勤、排班等照常使用），
  * 不发密码邮件；开启时系统给员工邮箱发初始密码，员工用它登录并自己设密码，店长全程不经手密码。
+ * 电话、生日必填；生日未满 18 岁时在「登录信息」之前出现「监护人」一节（设计图 7），规则见 new-staff-profile.ts。
  */
 import { useCallback, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -22,8 +23,16 @@ import {
   FormScreen,
   NameFields,
   SwitchRow,
+  useFieldAnchors,
   useLeaveGuard,
 } from "./form-ui";
+import { NewStaffBirthdayField, NewStaffGuardianSection, NewStaffPhoneField } from "./new-staff-fields";
+import {
+  isNewStaffMinor,
+  markNewStaffServerError,
+  resolveNewStaffServerErrorKey,
+  sydneyToday,
+} from "./new-staff-profile";
 import {
   buildStaffCreatePayload,
   EMPTY_STAFF_CREATE_FORM,
@@ -33,7 +42,7 @@ import {
   type StaffCreateErrors,
   type StaffCreateFormValues,
 } from "./staff-create-form";
-import { resolveIdentityConflictField } from "./identity-conflict";
+import { readApiErrorCode, resolveIdentityConflictField } from "./identity-conflict";
 import { resolvePersonName } from "../person-name";
 import { InfoCard, NoticeBox, PeopleTag, SectionTitle } from "../ui";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -56,7 +65,10 @@ import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
 import { applyCreateNameChange } from "./person-form";
 
-const NO_ERRORS: StaffCreateErrors = { names: {} };
+const NO_ERRORS: StaffCreateErrors = { names: {}, guardian: {} };
+
+/** 校验失败时滚动定位用的锚点（按页面从上到下的顺序）。 */
+type StaffAnchor = "names" | "phone" | "birthday" | "guardian" | "email" | "username";
 
 export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode: string }) {
   const router = useRouter();
@@ -81,6 +93,10 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
   const [inviteResult, setInviteResult] = useState<PasswordSetupEmailResult | null>(null);
   const [inviteError, setInviteError] = useState("");
   const [barcodeVisible, setBarcodeVisible] = useState(false);
+  // 悉尼「今天」：年龄标签、未成年判断、校验与请求体都以它为准（页面内取一次）。
+  const today = useMemo(() => sydneyToday(), []);
+  const { scrollRef, anchor, scrollToFirst } = useFieldAnchors<StaffAnchor>();
+  const minor = isNewStaffMinor(values.birthday, today);
 
   const canCreateUsers = access.isAdmin
     || access.hasPermission(PERMISSIONS.Users.Create)
@@ -112,21 +128,36 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
 
   const handleEmailChange = (value: string) => {
     patch({ email: value, ...(usernameEdited ? {} : { username: resolveUsernameFromEmail(value) }) });
-    setErrors((current) => ({ ...current, email: undefined, ...(usernameEdited ? {} : { username: undefined }) }));
+    setErrors((current) => ({
+      ...current,
+      email: undefined,
+      ...(usernameEdited ? {} : { username: undefined }),
+      // 「监护人邮箱不能和本人相同」依赖本人邮箱，改了就先清掉，提交时重新判断。
+      guardian: { ...current.guardian, email: current.guardian.email === "sameAsStaff" ? undefined : current.guardian.email },
+    }));
   };
 
   const handleSubmit = async () => {
     setFormError("");
     // 邮箱 / 账号 / 电话的文案来自 userManagement.messages.*；姓名错误返回错误码，由 NameFields 按字段翻译。
-    const nextErrors = validateStaffCreateForm(values, (key) => t(`userManagement:${key}`));
+    const nextErrors = validateStaffCreateForm(values, (key) => t(`userManagement:${key}`), today);
     setErrors(nextErrors);
     if (hasStaffCreateErrors(nextErrors)) {
       setFormError(t("form.fixErrors"));
-      setErrorTick((tick) => tick + 1);
+      // 滚到第一个标红的字段（顺序与页面一致）。
+      const failed: Record<StaffAnchor, boolean> = {
+        names: Object.values(nextErrors.names).some(Boolean),
+        phone: Boolean(nextErrors.phone),
+        birthday: Boolean(nextErrors.birthday),
+        guardian: Object.values(nextErrors.guardian).some(Boolean),
+        email: Boolean(nextErrors.email),
+        username: Boolean(nextErrors.username),
+      };
+      scrollToFirst((Object.keys(failed) as StaffAnchor[]).filter((key) => failed[key]));
       return;
     }
     try {
-      const user = await createMutation.mutateAsync(buildStaffCreatePayload(values, requestedStoreCode));
+      const user = await createMutation.mutateAsync(buildStaffCreatePayload(values, requestedStoreCode, today));
       // 员工侧与管理员侧各有自己的缓存键，建号后两边都要失效，管理员侧列表才能看到新账号。
       void queryClient.invalidateQueries({ queryKey: ["identity-admin"] });
       setCreated(user);
@@ -137,12 +168,20 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
       // 账号 / 邮箱被其他人占用：标红对应字段，而不是只在表单顶部给一句通用失败。
       const conflictField = resolveIdentityConflictField(error);
+      // 新建员工必填规则被服务端拒绝：标红对应字段；中文界面显示后端原文，英文界面按错误码给英文文案。
+      const ruleKey = resolveNewStaffServerErrorKey(readApiErrorCode(error));
       if (conflictField) {
         setErrors((current) => ({
           ...current,
           [conflictField]: conflictField === "username" ? t("form.usernameTaken") : t("form.emailTaken"),
         }));
         setFormError(t("form.fixErrors"));
+      } else if (ruleKey) {
+        setErrors((current) => ({
+          ...markNewStaffServerError(current, ruleKey),
+          ...(ruleKey === "emailRequired" ? { email: t("userManagement:messages.emailRequired") } : {}),
+        }));
+        setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: `newStaff.serverErrors.${ruleKey}` }));
       } else {
         setFormError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.saveFailed" }));
       }
@@ -282,6 +321,7 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
         onClose={handleClose}
         closeLabel={t("form.cancel")}
         scrollToTopKey={errorTick}
+        scrollRef={scrollRef}
         footer={(
           <FormFooter
             cancelLabel={t("form.cancel")}
@@ -315,47 +355,89 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
         </InfoCard>
 
         <SectionTitle title={t("form.sectionName")} />
-        <NameFields
-          values={values.names}
-          onChange={(key, value) => {
-            // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
-            patch({ names: applyCreateNameChange(values.names, key, value) });
-            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
-          }}
-          errors={errors.names}
-          phone={{
-            value: values.phone,
-            onChange: (value) => { patch({ phone: value }); setErrors((current) => ({ ...current, phone: undefined })); },
-            error: errors.phone,
-          }}
-          disabled={pending}
-        />
+        <View onLayout={anchor("names")}>
+          <NameFields
+            values={values.names}
+            onChange={(key, value) => {
+              // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
+              patch({ names: applyCreateNameChange(values.names, key, value) });
+              setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
+            }}
+            errors={errors.names}
+            disabled={pending}
+          />
+        </View>
+        {/* 电话改为必填、单独一行；下面是必填的生日（设计图 7）。 */}
+        <View onLayout={anchor("phone")}>
+          <NewStaffPhoneField
+            value={values.phone}
+            onChange={(value) => {
+              patch({ phone: value });
+              // 「监护人手机不能和本人相同」依赖本人电话，改了就先清掉，提交时重新判断。
+              setErrors((current) => ({
+                ...current,
+                phone: undefined,
+                guardian: { ...current.guardian, phone: current.guardian.phone === "sameAsStaff" ? undefined : current.guardian.phone },
+              }));
+            }}
+            error={errors.phone}
+            disabled={pending}
+          />
+        </View>
+        <View onLayout={anchor("birthday")}>
+          <NewStaffBirthdayField
+            value={values.birthday}
+            onChange={(value) => { patch({ birthday: value }); setErrors((current) => ({ ...current, birthday: undefined, guardian: {} })); }}
+            today={today}
+            error={errors.birthday}
+            disabled={pending}
+          />
+        </View>
+
+        {/* 未满 18 岁才出现；改回成年生日时收起，已填内容保留但不提交。 */}
+        {minor ? (
+          <View onLayout={anchor("guardian")}>
+            <NewStaffGuardianSection
+              values={values.guardian}
+              onChange={(key, value) => {
+                patch({ guardian: { ...values.guardian, [key]: value } });
+                setErrors((current) => ({ ...current, guardian: { ...current.guardian, [key]: undefined } }));
+              }}
+              errors={errors.guardian}
+              disabled={pending}
+            />
+          </View>
+        ) : null}
 
         <SectionTitle title={t("form.sectionLogin")} />
-        <FormField
-          label={t("staff.email")}
-          required
-          value={values.email}
-          onChangeText={handleEmailChange}
-          keyboardType="email-address"
-          textContentType="emailAddress"
-          maxLength={254}
-          error={errors.email}
-          hint={values.loginEnabled ? t("staff.emailHelper") : t("staff.emailHelperNoLogin")}
-          disabled={pending}
-          testID="staff-email"
-        />
-        <FormField
-          label={t("staff.username")}
-          required
-          value={values.username}
-          onChangeText={(value) => { setUsernameEdited(true); patch({ username: value }); setErrors((current) => ({ ...current, username: undefined })); }}
-          maxLength={50}
-          error={errors.username}
-          hint={t("staff.usernameHelper")}
-          disabled={pending}
-          testID="staff-username"
-        />
+        <View onLayout={anchor("email")}>
+          <FormField
+            label={t("staff.email")}
+            required
+            value={values.email}
+            onChangeText={handleEmailChange}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            maxLength={254}
+            error={errors.email}
+            hint={values.loginEnabled ? t("staff.emailHelper") : t("staff.emailHelperNoLogin")}
+            disabled={pending}
+            testID="staff-email"
+          />
+        </View>
+        <View onLayout={anchor("username")}>
+          <FormField
+            label={t("staff.username")}
+            required
+            value={values.username}
+            onChangeText={(value) => { setUsernameEdited(true); patch({ username: value }); setErrors((current) => ({ ...current, username: undefined })); }}
+            maxLength={50}
+            error={errors.username}
+            hint={t("staff.usernameHelper")}
+            disabled={pending}
+            testID="staff-username"
+          />
+        </View>
 
         <InfoCard>
           <SwitchRow

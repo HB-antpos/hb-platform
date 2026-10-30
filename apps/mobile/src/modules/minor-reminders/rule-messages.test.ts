@@ -30,9 +30,9 @@ for (const match of calculator.matchAll(/"(QLD_[A-Z_]+)"/g)) backendRuleIds.add(
 assert.ok(backendRuleIds.size >= 20, "应能从后端提取到全部规则");
 for (const id of backendRuleIds) assert.ok(RULE_MESSAGES_EN[id], `缺少 ${id} 的英文文案`);
 
-// 打卡页必须走共用翻译，不能直接显示后端中文原文
+// 员工本人的打卡卡片不再显示未成年用工提醒横幅（改由店长 / HR 在人员详情跟进，主管侧提醒待办不变）。
 const card = readFileSync(resolve(directory, "../../components/attendance/TodayPunchCard.tsx"), "utf8");
-assert.match(card, /localizeMinorRuleMessage\(finding, language\)/);
-assert.doesNotMatch(card, /\{finding\.message\}/);
+assert.doesNotMatch(card, /minorCompliance/);
+assert.doesNotMatch(card, /localizeMinorRuleMessage|\{finding\.message\}/);
 
 console.log("rule-messages.test.ts: ok");

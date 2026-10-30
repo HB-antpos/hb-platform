@@ -66,4 +66,11 @@ assert(sent.length === 1 && sent[0].fullName === 'Uncle Sam' && sent[0].email ==
 const noWork = clone(initial); noWork.otherWork.hasOtherWork = false
 assert(JSON.stringify((toAmendments(initial, noWork, snapshot)!.otherWork as { employers: unknown[] }).employers) === '[]', 'employers must be cleared when there is no other work')
 
+// 门店新建的草稿没有其他工作资料：视为"未回答"(null)；家长选"没有"算一次填写并提交 false。
+const blank = toReviewValues({ GuardianName: 'Casey Morgan', FormData: { ChildGivenName: 'Alex' } })
+assert(blank.otherWork.hasOtherWork === null, 'missing other work must be unanswered')
+assert(toAmendments(blank, clone(blank), {}) === undefined, 'unanswered and untouched must not produce amendments')
+const answered = clone(blank); answered.otherWork.hasOtherWork = false
+assert((toAmendments(blank, answered, {})!.otherWork as { hasOtherWork: boolean }).hasOtherWork === false, 'answering "No" must be sent')
+
 console.log('guardianAmendments.test: ok')

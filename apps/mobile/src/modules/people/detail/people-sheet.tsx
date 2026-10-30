@@ -77,7 +77,7 @@ export function PeopleSheet({
         <View style={styles.header}>
           <View style={styles.heading}>
             <Text accessibilityRole="header" style={styles.title} numberOfLines={2}>{title}</Text>
-            {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
+            {subtitle ? <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text> : null}
           </View>
           <IconButton
             icon="close"

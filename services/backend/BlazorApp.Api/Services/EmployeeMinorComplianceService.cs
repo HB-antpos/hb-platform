@@ -19,7 +19,7 @@ namespace BlazorApp.Api.Services;
 /// 未成年用工档案、家长签署和 HR 审核的独立服务。
 /// 合规状态只产生提醒，不参与排班发布授权判断。
 /// </summary>
-public sealed class EmployeeMinorComplianceService
+public sealed partial class EmployeeMinorComplianceService
 {
     public const string ServerConsentScope = "I consent to the employer collecting and using this signed minor employment record for lawful employment administration, safety and roster risk reminders.";
     public const string VersionConflictCode = "MINOR_COMPLIANCE_VERSION_CONFLICT";
@@ -170,7 +170,7 @@ public sealed class EmployeeMinorComplianceService
         if (channel == GuardianChannelSms) return await DeliverSigningLinkBySmsAsync(row, result, signingUrl);
         var send = _emailSender is null
             ? ApiResponse<bool>.Error("邮件服务未配置", "GUARDIAN_EMAIL_NOT_CONFIGURED")
-            : await _emailSender.SendSigningLinkAsync(row.GuardianEmail!, row.GuardianName, ChildDisplayName(row), signingUrl, row.GuardianTokenExpiresAtUtc.Value);
+            : await _emailSender.SendSigningLinkAsync(row.GuardianEmail!, row.GuardianName, ChildDisplayName(row), signingUrl, row.GuardianTokenExpiresAtUtc.Value, verificationCodeBySms: false);
         if (send.Success)
         {
             // 邮件已直达监护人，不再把链接回传到员工手机。
@@ -252,9 +252,10 @@ public sealed class EmployeeMinorComplianceService
             amended = EmployeeMinorGuardianAmendments.Apply(row, currentContacts, dto.Amendments, JsonOptions);
             var calendarError = EmployeeMinorGuardianAmendments.ValidateSchoolCalendar(Parse<EmployeeMinorSchoolCalendarDto>(row.SchoolCalendarJson));
             if (calendarError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(calendarError, "MINOR_COMPLIANCE_SCHOOL_CALENDAR_INVALID");
-            var formError = ValidateFormCompleteness(row);
-            if (formError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
         }
+        // 店长 / HR 发送时只需要监护人联系方式，孩子与学校资料由家长在签署页补全，所以完整性放到签字这一步统一校验。
+        var formError = ValidateFormCompleteness(row);
+        if (formError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
         var effectiveContacts = amended?.Contacts ?? currentContacts;
         var contactError = ValidateGuardianContact(row);
         if (contactError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(contactError, InvalidGuardianContactCode);
@@ -274,7 +275,10 @@ public sealed class EmployeeMinorComplianceService
         row.GuardianSignedAtUtc = DateTime.UtcNow;
         row.GuardianSignatureHash = Hash($"{row.Id}:{row.Version}:{row.GuardianSignedName}:{dto.SignatureData}:{dto.ConsentScope}:{row.GuardianSignedAtUtc:O}");
         row.GuardianTokenUsed = true;
-        row.Status = "signed_pending_employee_submit";
+        // 家长签完直接进入 HR 审核，不再需要员工在 App 里点「提交」。
+        row.Status = "pending_hr_review";
+        row.SubmittedAtUtc = row.GuardianSignedAtUtc;
+        row.SubmittedBy = "guardian";
         var emailVerifiedAtUtc = row.GuardianEmailVerifiedAtUtc;
         row.GuardianSessionHash = null;
         row.GuardianSessionExpiresAtUtc = null;
@@ -320,6 +324,13 @@ public sealed class EmployeeMinorComplianceService
                 ip = Truncate(clientIp, 64),
                 userAgent = Truncate(userAgent, 200),
             });
+            await AuditAsync(row.Id, "submitted_for_hr_review", new { by = "guardian" });
+            // 店长发起的「请员工填写」请求随家长签字一并完成。
+            var completedAt = DateTime.UtcNow;
+            await _context.Db.Updateable<EmployeeMinorComplianceRequest>()
+                .SetColumns(x => new EmployeeMinorComplianceRequest { Status = EmployeeMinorComplianceRequest.StatusCompleted, CompletedAtUtc = completedAt, CompletedComplianceId = row.Id, UpdatedAt = completedAt })
+                .Where(x => x.UserGUID == row.UserGUID && x.Status == EmployeeMinorComplianceRequest.StatusOpen)
+                .ExecuteCommandAsync();
         });
         if (!signTransaction.IsSuccess)
         {
@@ -580,10 +591,12 @@ public sealed class EmployeeMinorComplianceService
             .InnerJoin<Store>((us, st) => us.StoreGUID == st.StoreGUID)
             .InnerJoin<EmployeeProfile>((us, st, ep) => ep.UserGUID == us.UserGUID)
             .InnerJoin<User>((us, st, ep, u) => u.UserGUID == us.UserGUID)
-            .Where((us, st, ep, u) => us.IsPrimary && !us.IsDeleted && !st.IsDeleted && !ep.IsDeleted && !u.IsDeleted && u.IsActive
+            .Where((us, st, ep, u) => !us.IsDeleted && !st.IsDeleted && !ep.IsDeleted && !u.IsDeleted && u.IsActive
                 && storeCodes.Contains(st.StoreCode) && ep.Birthday != null && ep.Birthday > adultCutoff)
-            .Select((us, st, ep, u) => new { u.UserGUID, u.FullName, u.Username, st.StoreCode, ep.Birthday })
+            .Select((us, st, ep, u) => new { u.UserGUID, u.FullName, u.Username, st.StoreCode, ep.Birthday, us.IsPrimary, us.AssignedAt })
             .ToListAsync();
+        // 普通店员的关联是 IsPrimary=false；同一员工关联多家店时只保留一行（主分店优先，其次最早关联）。
+        rows = rows.GroupBy(x => x.UserGUID).Select(g => g.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.AssignedAt).First()).ToList();
         var userGuids = rows.Select(x => x.UserGUID).Distinct().ToArray();
         var compliances = userGuids.Length == 0 ? new List<EmployeeMinorCompliance>() : await _context.Db.Queryable<EmployeeMinorCompliance>()
             .Where(x => userGuids.Contains(x.UserGUID) && !x.IsDeleted).ToListAsync();
@@ -790,7 +803,9 @@ public sealed class EmployeeMinorComplianceService
         if (contacts.Any(x => string.IsNullOrWhiteSpace(x.FullName) || string.IsNullOrWhiteSpace(x.Phone) || !ValidPhone(x.Phone))) return "备用联系人必须填写有效电话";
         var guardianPhone = NormalizePhone(row.GuardianPhone);
         if (contacts.Any(x => NormalizePhone(x.Phone) == guardianPhone || (!string.IsNullOrWhiteSpace(x.Mobile) && NormalizePhone(x.Mobile) == guardianPhone)
-            || string.Equals(x.Email?.Trim(), row.GuardianEmail?.Trim(), StringComparison.OrdinalIgnoreCase))) return "备用联系人必须独立于家长联系人";
+            // 邮箱只在两边都填了时才比较：只发短信时监护人可以没有邮箱，空对空不算重复。
+            || (!string.IsNullOrWhiteSpace(x.Email) && !string.IsNullOrWhiteSpace(row.GuardianEmail)
+                && string.Equals(x.Email.Trim(), row.GuardianEmail.Trim(), StringComparison.OrdinalIgnoreCase)))) return "备用联系人必须独立于家长联系人";
         return null;
     }
     private static bool ValidPhone(string? value) => !string.IsNullOrWhiteSpace(value) && PhonePattern.IsMatch(value) && value.Count(char.IsDigit) is >= 8 and <= 15;
@@ -799,9 +814,23 @@ public sealed class EmployeeMinorComplianceService
         var digits = new string(value?.Where(char.IsDigit).ToArray() ?? Array.Empty<char>());
         return digits.StartsWith("61", StringComparison.Ordinal) && digits.Length == 11 ? "0" + digits[2..] : digits;
     }
-    private async Task<Store?> ResolveEmploymentStoreAsync(string userGuid) => await _context.Db.Queryable<UserStore>().InnerJoin<Store>((us, store) => us.StoreGUID == store.StoreGUID).Where((us, store) => us.UserGUID == userGuid && us.IsPrimary && !us.IsDeleted && !store.IsDeleted).Select((us, store) => store).FirstAsync();
+    /// <summary>
+    /// 员工的工作门店：有主分店（IsPrimary，系统里表示「可管理」）用主分店，否则用最早关联的分店。
+    /// 普通店员的分店关联都是 IsPrimary=false，只认主分店会把他们全部漏掉。
+    /// </summary>
+    private async Task<Store?> ResolveEmploymentStoreAsync(string userGuid) => await _context.Db.Queryable<UserStore>().InnerJoin<Store>((us, store) => us.StoreGUID == store.StoreGUID)
+        .Where((us, store) => us.UserGUID == userGuid && !us.IsDeleted && !store.IsDeleted)
+        .OrderBy((us, store) => us.IsPrimary, OrderByType.Desc).OrderBy((us, store) => us.AssignedAt).OrderBy((us, store) => us.CreatedAt)
+        .Select((us, store) => store).FirstAsync();
     private async Task<bool> CanAccessHrRowAsync(EmployeeMinorCompliance row) { var scope = await _storeScope.GetScopeAsync(); return scope.IsAuthenticated && scope.IsAllowed && (scope.IsAdmin || scope.StoreGuids.Contains(row.StoreGUID ?? string.Empty)); }
-    private string? ValidateGuardianContact(EmployeeMinorCompliance row) => string.IsNullOrWhiteSpace(row.GuardianName) ? "家长/监护人姓名为必填" : string.IsNullOrWhiteSpace(row.GuardianPhone) || !ValidPhone(row.GuardianPhone) ? "家长电话（手机或固定电话）为必填且格式无效" : string.IsNullOrWhiteSpace(row.GuardianEmail) || !new EmailAddressAttribute().IsValid(row.GuardianEmail) ? "家长邮箱为必填且格式无效" : null;
+    /// <summary>监护人姓名、电话必填；邮箱在验证码走邮件时必填，走短信时可以不填，但填了必须有效。</summary>
+    private static string? ValidateGuardianContact(EmployeeMinorCompliance row)
+    {
+        if (string.IsNullOrWhiteSpace(row.GuardianName)) return "家长/监护人姓名为必填";
+        if (string.IsNullOrWhiteSpace(row.GuardianPhone) || !ValidPhone(row.GuardianPhone)) return "家长电话（手机或固定电话）为必填且格式无效";
+        if (string.IsNullOrWhiteSpace(row.GuardianEmail)) return IsSmsChannel(row) ? null : "家长邮箱为必填且格式无效";
+        return new EmailAddressAttribute().IsValid(row.GuardianEmail) ? null : "家长邮箱为必填且格式无效";
+    }
     private async Task<EmployeeMinorComplianceDto> MapAsync(EmployeeMinorCompliance row)
     {
         var contacts = await _context.Db.Queryable<EmployeeMinorComplianceContact>()

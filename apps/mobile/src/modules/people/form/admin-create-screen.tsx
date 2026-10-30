@@ -9,6 +9,8 @@
  *
  * 创建分两步（建号 → 写入「管理」分店）：第一步成功后账号已存在、无法回滚，因此第二步失败时
  * 停在本页提示「第 2 步失败」，只重试第二步，绝不重复创建；建号结果未知（超时 / 5xx）时冻结表单，先核对。
+ *
+ * 「姓名与联系」补上必填电话和生日；未满 18 岁时出现「监护人」一节（设计图 9，与店长版共用组件）。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -32,7 +34,14 @@ import {
   type AdminCreateErrors,
   type AdminCreateFormValues,
 } from "./admin-create-form";
-import { resolveIdentityConflictField, type IdentityConflictField } from "./identity-conflict";
+import { readApiErrorCode, resolveIdentityConflictField, type IdentityConflictField } from "./identity-conflict";
+import { NewStaffBirthdayField, NewStaffGuardianSection, NewStaffPhoneField } from "./new-staff-fields";
+import {
+  isNewStaffMinor,
+  markNewStaffServerError,
+  resolveNewStaffServerErrorKey,
+  sydneyToday,
+} from "./new-staff-profile";
 import { RolePickerSheet, StoreAssignmentSheet } from "./admin-pickers";
 import { CreatedResult, type CreatedNotice } from "./created-result";
 import {
@@ -42,6 +51,7 @@ import {
   FormScreen,
   NameFields,
   SwitchRow,
+  useFieldAnchors,
   useLeaveGuard,
   VisibilityToggle,
 } from "./form-ui";
@@ -73,7 +83,10 @@ import { useAuthStore } from "@/store/auth-store";
 import { listSeparator } from "@/shared/i18n/punctuation";
 import { applyCreateNameChange } from "./person-form";
 
-const NO_ERRORS: AdminCreateErrors = { names: {} };
+const NO_ERRORS: AdminCreateErrors = { names: {}, guardian: {} };
+
+/** 校验失败时滚动定位用的锚点（按页面从上到下的顺序）。 */
+type AdminAnchor = "email" | "username" | "names" | "phone" | "birthday" | "guardian" | "password" | "confirmPassword";
 
 type Stage =
   | { kind: "editing" }
@@ -104,6 +117,10 @@ export function AdminCreateScreen() {
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [barcodeVisible, setBarcodeVisible] = useState(false);
   const inFlight = useRef(false);
+  // 悉尼「今天」：年龄标签、未成年判断、校验与请求体都以它为准（页面内取一次）。
+  const today = useMemo(() => sydneyToday(), []);
+  const { scrollRef, anchor, scrollToFirst } = useFieldAnchors<AdminAnchor>();
+  const minor = isNewStaffMinor(values.birthday, today);
 
   const catalogRoles = useQuery({
     queryKey: ["identity-admin", actorKey, "role-options"],
@@ -174,18 +191,29 @@ export function AdminCreateScreen() {
   const handleSubmit = async () => {
     if (inFlight.current || stage.kind !== "editing" || !canCreate || !isCurrentSession()) return;
     setFormError("");
-    const nextErrors = validateAdminCreateForm(values, (key) => t(`userManagement:${key}`));
+    const nextErrors = validateAdminCreateForm(values, (key) => t(`userManagement:${key}`), today);
     setErrors(nextErrors);
     if (hasAdminCreateErrors(nextErrors)) {
       setFormError(t("form.fixErrors"));
-      setErrorTick((tick) => tick + 1);
+      // 滚到第一个标红的字段（顺序与页面一致）。
+      const failed: Record<AdminAnchor, boolean> = {
+        email: Boolean(nextErrors.email),
+        username: Boolean(nextErrors.username),
+        names: Object.values(nextErrors.names).some(Boolean),
+        phone: Boolean(nextErrors.phone),
+        birthday: Boolean(nextErrors.birthday),
+        guardian: Object.values(nextErrors.guardian).some(Boolean),
+        password: Boolean(nextErrors.password),
+        confirmPassword: Boolean(nextErrors.confirmPassword),
+      };
+      scrollToFirst((Object.keys(failed) as AdminAnchor[]).filter((key) => failed[key]));
       return;
     }
 
     inFlight.current = true;
     setSubmitting(true);
     try {
-      const outcome = await runAdminCreate(deps, buildAdminCreateInput(values), values.assignments);
+      const outcome = await runAdminCreate(deps, buildAdminCreateInput(values, today), values.assignments);
       if (!isCurrentSession()) return;
       if (outcome.kind === "ok") {
         await invalidateEverywhere();
@@ -193,9 +221,17 @@ export function AdminCreateScreen() {
       } else if (outcome.kind === "createFailed") {
         // 账号 / 邮箱被其他人占用：标红对应字段，而不是只在表单顶部给一句通用失败。
         const conflictField = resolveIdentityConflictField(outcome.error);
+        // 新建员工必填规则被服务端拒绝：标红对应字段；中文界面显示后端原文，英文界面按错误码给英文文案。
+        const ruleKey = resolveNewStaffServerErrorKey(readApiErrorCode(outcome.error));
         if (conflictField) {
           setErrors((current) => ({ ...current, [conflictField]: identityConflictMessage(conflictField) }));
           fail(outcome.error, t("form.fixErrors"));
+        } else if (ruleKey) {
+          setErrors((current) => ({
+            ...markNewStaffServerError(current, ruleKey),
+            ...(ruleKey === "emailRequired" ? { email: t("userManagement:messages.emailRequired") } : {}),
+          }));
+          failWith(outcome.error, `newStaff.serverErrors.${ruleKey}`);
         } else {
           failWith(outcome.error, "adminCreate.createFailed");
         }
@@ -446,48 +482,101 @@ export function AdminCreateScreen() {
         onClose={handleClose}
         closeLabel={t("form.cancel")}
         scrollToTopKey={errorTick}
+        scrollRef={scrollRef}
         footer={footer}
       >
         {formError ? <NoticeBox tone={stage.kind === "editing" ? "red" : "amber"} icon="alert-circle-outline">{formError}</NoticeBox> : null}
 
-        <FormField
-          label={t("adminCreate.email")}
-          required
-          value={values.email}
-          onChangeText={(value) => {
-            patch({ email: value, ...(usernameEdited ? {} : { username: defaultUsernameFromEmail(value) }) });
-            setErrors((current) => ({ ...current, email: undefined, ...(usernameEdited ? {} : { username: undefined }) }));
-          }}
-          keyboardType="email-address"
-          textContentType="emailAddress"
-          maxLength={254}
-          error={errors.email}
-          disabled={frozen}
-          testID="admin-email"
-        />
-        <FormField
-          label={t("adminCreate.username")}
-          required
-          value={values.username}
-          onChangeText={(value) => { setUsernameEdited(true); patch({ username: value }); setErrors((current) => ({ ...current, username: undefined })); }}
-          maxLength={50}
-          error={errors.username}
-          hint={t("adminCreate.usernameHelper")}
-          disabled={frozen}
-          testID="admin-username"
-        />
+        <View onLayout={anchor("email")}>
+          <FormField
+            label={t("adminCreate.email")}
+            required
+            value={values.email}
+            onChangeText={(value) => {
+              patch({ email: value, ...(usernameEdited ? {} : { username: defaultUsernameFromEmail(value) }) });
+              setErrors((current) => ({
+                ...current,
+                email: undefined,
+                ...(usernameEdited ? {} : { username: undefined }),
+                // 「监护人邮箱不能和本人相同」依赖本人邮箱，改了就先清掉，提交时重新判断。
+                guardian: { ...current.guardian, email: current.guardian.email === "sameAsStaff" ? undefined : current.guardian.email },
+              }));
+            }}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            maxLength={254}
+            error={errors.email}
+            disabled={frozen}
+            testID="admin-email"
+          />
+        </View>
+        <View onLayout={anchor("username")}>
+          <FormField
+            label={t("adminCreate.username")}
+            required
+            value={values.username}
+            onChangeText={(value) => { setUsernameEdited(true); patch({ username: value }); setErrors((current) => ({ ...current, username: undefined })); }}
+            maxLength={50}
+            error={errors.username}
+            hint={t("adminCreate.usernameHelper")}
+            disabled={frozen}
+            testID="admin-username"
+          />
+        </View>
 
         <SectionTitle title={t("form.sectionName")} />
-        <NameFields
-          values={values.names}
-          onChange={(key, value) => {
-            // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
-            patch({ names: applyCreateNameChange(values.names, key, value) });
-            setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
-          }}
-          errors={errors.names}
-          disabled={frozen}
-        />
+        <View onLayout={anchor("names")}>
+          <NameFields
+            values={values.names}
+            onChange={(key, value) => {
+              // 新增账号：昵称默认跟名一致（见 applyCreateNameChange）。
+              patch({ names: applyCreateNameChange(values.names, key, value) });
+              setErrors((current) => ({ ...current, names: { ...current.names, [key]: undefined, nickname: undefined, fullName: undefined } }));
+            }}
+            errors={errors.names}
+            disabled={frozen}
+          />
+        </View>
+        {/* 新增：必填电话与生日（设计图 9）；未满 18 岁时出现「监护人」一节，与店长版同一组件。 */}
+        <View onLayout={anchor("phone")}>
+          <NewStaffPhoneField
+            value={values.phone}
+            onChange={(value) => {
+              patch({ phone: value });
+              // 「监护人手机不能和本人相同」依赖本人电话，改了就先清掉，提交时重新判断。
+              setErrors((current) => ({
+                ...current,
+                phone: undefined,
+                guardian: { ...current.guardian, phone: current.guardian.phone === "sameAsStaff" ? undefined : current.guardian.phone },
+              }));
+            }}
+            error={errors.phone}
+            disabled={frozen}
+          />
+        </View>
+        <View onLayout={anchor("birthday")}>
+          <NewStaffBirthdayField
+            value={values.birthday}
+            onChange={(value) => { patch({ birthday: value }); setErrors((current) => ({ ...current, birthday: undefined, guardian: {} })); }}
+            today={today}
+            error={errors.birthday}
+            disabled={frozen}
+          />
+        </View>
+        {/* 改回成年生日时收起，已填内容保留但不提交。 */}
+        {minor ? (
+          <View onLayout={anchor("guardian")}>
+            <NewStaffGuardianSection
+              values={values.guardian}
+              onChange={(key, value) => {
+                patch({ guardian: { ...values.guardian, [key]: value } });
+                setErrors((current) => ({ ...current, guardian: { ...current.guardian, [key]: undefined } }));
+              }}
+              errors={errors.guardian}
+              disabled={frozen}
+            />
+          </View>
+        ) : null}
 
         <SectionTitle title={t("adminCreate.sectionRolesStores")} />
         <InfoCard>
@@ -531,35 +620,39 @@ export function AdminCreateScreen() {
 
         <SectionTitle title={t("adminCreate.sectionPassword")} />
         <NoticeBox tone="gray" icon="email-off-outline">{t("adminCreate.passwordEmailUnsupported")}</NoticeBox>
-        <FormField
-          label={t("adminCreate.password")}
-          required
-          value={values.password}
-          onChangeText={(value) => { patch({ password: value }); setErrors((current) => ({ ...current, password: undefined, confirmPassword: undefined })); }}
-          secureTextEntry={!passwordVisible}
-          // 这是替别人设的初始密码，不能让系统「强密码」建议把它存进管理员自己的钥匙串。
-          textContentType="none"
-          autoComplete="off"
-          maxLength={100}
-          error={errors.password ? t(`adminCreate.passwordErrors.${errors.password}`) : undefined}
-          hint={t("adminCreate.passwordHelper")}
-          disabled={frozen}
-          trailing={<VisibilityToggle visible={passwordVisible} onToggle={() => setPasswordVisible((current) => !current)} showLabel={t("adminCreate.showPassword")} hideLabel={t("adminCreate.hidePassword")} />}
-          testID="admin-password"
-        />
-        <FormField
-          label={t("adminCreate.confirmPassword")}
-          required
-          value={values.confirmPassword}
-          onChangeText={(value) => { patch({ confirmPassword: value }); setErrors((current) => ({ ...current, confirmPassword: undefined })); }}
-          secureTextEntry={!passwordVisible}
-          textContentType="none"
-          autoComplete="off"
-          maxLength={100}
-          error={errors.confirmPassword ? t("adminCreate.passwordErrors.mismatch") : undefined}
-          disabled={frozen}
-          testID="admin-confirm-password"
-        />
+        <View onLayout={anchor("password")}>
+          <FormField
+            label={t("adminCreate.password")}
+            required
+            value={values.password}
+            onChangeText={(value) => { patch({ password: value }); setErrors((current) => ({ ...current, password: undefined, confirmPassword: undefined })); }}
+            secureTextEntry={!passwordVisible}
+            // 这是替别人设的初始密码，不能让系统「强密码」建议把它存进管理员自己的钥匙串。
+            textContentType="none"
+            autoComplete="off"
+            maxLength={100}
+            error={errors.password ? t(`adminCreate.passwordErrors.${errors.password}`) : undefined}
+            hint={t("adminCreate.passwordHelper")}
+            disabled={frozen}
+            trailing={<VisibilityToggle visible={passwordVisible} onToggle={() => setPasswordVisible((current) => !current)} showLabel={t("adminCreate.showPassword")} hideLabel={t("adminCreate.hidePassword")} />}
+            testID="admin-password"
+          />
+        </View>
+        <View onLayout={anchor("confirmPassword")}>
+          <FormField
+            label={t("adminCreate.confirmPassword")}
+            required
+            value={values.confirmPassword}
+            onChangeText={(value) => { patch({ confirmPassword: value }); setErrors((current) => ({ ...current, confirmPassword: undefined })); }}
+            secureTextEntry={!passwordVisible}
+            textContentType="none"
+            autoComplete="off"
+            maxLength={100}
+            error={errors.confirmPassword ? t("adminCreate.passwordErrors.mismatch") : undefined}
+            disabled={frozen}
+            testID="admin-confirm-password"
+          />
+        </View>
       </FormScreen>
 
       <RolePickerSheet

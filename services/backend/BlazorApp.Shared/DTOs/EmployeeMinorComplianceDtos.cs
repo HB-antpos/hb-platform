@@ -351,3 +351,113 @@ public sealed class EmployeeMinorManagerCandidateDto
     public string? StateCode { get; set; }
     public EmployeeMinorComplianceRequestDto? OpenRequest { get; set; }
 }
+
+/// <summary>
+/// 店长 / HR 视角下一名未满 18 岁员工的合规概况（Web「未成年用工合规」页签与手机「人员管理 → 员工详情」共用）。
+/// 没有任何合规记录的员工也会返回，<see cref="Stage"/> 为 not_sent。
+/// </summary>
+public sealed class EmployeeMinorStaffComplianceDto
+{
+    public string UserGUID { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? Username { get; set; }
+    public string? StoreCode { get; set; }
+    public string? StoreName { get; set; }
+    /// <summary>按门店所在州：NSW / QLD；无法判断时为 UNKNOWN。</summary>
+    public string StateCode { get; set; } = "UNKNOWN";
+    public string FormType { get; set; } = string.Empty;
+    public DateTime Birthday { get; set; }
+    public int Age { get; set; }
+    public int? ComplianceId { get; set; }
+    public int? Version { get; set; }
+    public int? Revision { get; set; }
+    /// <summary>最新版本的原始状态（draft / awaiting_guardian_signature / pending_hr_review / approved / returned …）；没有记录时为空。</summary>
+    public string? ComplianceStatus { get; set; }
+    /// <summary>
+    /// 界面用的处理阶段：not_sent（没发或已作废）/ awaiting_guardian（链接有效，等家长签字）/ link_expired（链接过期）/
+    /// pending_review（家长已签，待 HR 审核）/ returned（退回修改）/ approved（审核通过）。
+    /// </summary>
+    public string Stage { get; set; } = "not_sent";
+    public bool NeedsAction { get; set; }
+    public bool CanSend { get; set; }
+    public bool CanRevoke { get; set; }
+    public string? GuardianName { get; set; }
+    public string? GuardianRelationship { get; set; }
+    /// <summary>未打码的监护人联系方式，只用于发送弹窗预填；列表显示用打码字段。</summary>
+    public string? GuardianEmail { get; set; }
+    public string? GuardianPhone { get; set; }
+    public string? MaskedGuardianEmail { get; set; }
+    public string? MaskedGuardianPhone { get; set; }
+    public DateTime? LinkExpiresAtUtc { get; set; }
+    public DateTime? LastSentAtUtc { get; set; }
+    /// <summary>最近一次发送：null = 没选这个渠道，true = 已送达，false = 发送失败。</summary>
+    public bool? LastSentEmail { get; set; }
+    public bool? LastSentSms { get; set; }
+    public DateTime? GuardianSignedAtUtc { get; set; }
+    public string? ReviewComment { get; set; }
+    public List<string> ReturnFields { get; set; } = new();
+}
+
+public sealed class EmployeeMinorStaffComplianceListDto
+{
+    public List<EmployeeMinorStaffComplianceDto> Items { get; set; } = new();
+    /// <summary>需要处理（未发送 / 链接过期 / 退回修改）的人数，用于页签红点。</summary>
+    public int NeedsActionCount { get; set; }
+    /// <summary>短信服务是否可用；不可用时发送弹窗里的短信开关置灰。</summary>
+    public bool SmsAvailable { get; set; }
+}
+
+/// <summary>单个员工的合规概况；员工未满 18 岁才有 <see cref="Item"/>。</summary>
+public sealed class EmployeeMinorStaffComplianceDetailDto
+{
+    public EmployeeMinorStaffComplianceDto? Item { get; set; }
+    public bool SmsAvailable { get; set; }
+}
+
+/// <summary>店长 / HR 发送家长签字链接：邮件、短信各一个开关，至少开一个。</summary>
+public sealed class EmployeeMinorGuardianLinkSendDto
+{
+    [Required, StringLength(200)] public string GuardianName { get; set; } = string.Empty;
+    [StringLength(100)] public string? GuardianRelationship { get; set; }
+    [StringLength(254)] public string? GuardianEmail { get; set; }
+    [StringLength(50)] public string? GuardianPhone { get; set; }
+    public bool SendEmail { get; set; }
+    public bool SendSms { get; set; }
+    /// <summary>链接有效天数，1–7。</summary>
+    public int ExpiryDays { get; set; } = 3;
+    /// <summary>界面读到的最新版本与修改序号；没有记录时都为空。用于防止两个人同时发送互相覆盖。</summary>
+    public int? ExpectedVersion { get; set; }
+    public int? ExpectedRevision { get; set; }
+}
+
+public sealed class EmployeeMinorGuardianLinkSendResultDto
+{
+    public EmployeeMinorStaffComplianceDto Item { get; set; } = new();
+    public DateTime ExpiresAtUtc { get; set; }
+    public bool EmailRequested { get; set; }
+    public bool EmailSent { get; set; }
+    public string? EmailError { get; set; }
+    public bool SmsRequested { get; set; }
+    public bool SmsSent { get; set; }
+    public string? SmsError { get; set; }
+    /// <summary>验证码去向：sms / email。短信没发出去时自动改为 email。</summary>
+    public string CodeChannel { get; set; } = "email";
+    /// <summary>只要有渠道失败就回传链接，供复制后手动转发；全部成功时为空。</summary>
+    public string? SigningUrl { get; set; }
+}
+
+public sealed class EmployeeMinorGuardianLinkRevokeDto
+{
+    public int ExpectedVersion { get; set; }
+    public int ExpectedRevision { get; set; }
+}
+
+/// <summary>新建员工时一并录入的监护人（员工未满 18 岁时四项必填）。</summary>
+public sealed class NewStaffGuardianDto
+{
+    [StringLength(200)] public string? Name { get; set; }
+    /// <summary>英文值：Mother / Father / Legal guardian / Other（会印在英文同意书上）。</summary>
+    [StringLength(100)] public string? Relationship { get; set; }
+    [StringLength(50)] public string? Phone { get; set; }
+    [StringLength(254)] public string? Email { get; set; }
+}

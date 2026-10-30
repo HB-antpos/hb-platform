@@ -5,6 +5,8 @@ import zh from '../../../i18n/locales/zh.json'
 import { createUser } from '../../../services/userService'
 import { AUTH_EXPIRED_EVENT, RequestError, unwrapApiData } from '../../../utils/request'
 import { getCreateUserErrorFeedback, getLevelDeniedMessage, getUpdateUserFieldError } from './createUserFeedback'
+import usersPageEn from './usersPageMessages.en.json'
+import usersPageZh from './usersPageMessages.zh.json'
 
 const i18n = createInstance()
 await i18n.init({
@@ -13,6 +15,9 @@ await i18n.init({
   resources: { zh: { translation: zh }, en: { translation: en } },
   interpolation: { escapeValue: false },
 })
+// 新建员工（NEW_STAFF_*）的文案在页面级消息文件，运行时由页面 registerPageMessages 注册，这里同样补上。
+i18n.addResourceBundle('zh', 'translation', usersPageZh, true, false)
+i18n.addResourceBundle('en', 'translation', usersPageEn, true, false)
 
 function businessError(payload: Parameters<typeof unwrapApiData>[0]) {
   try {
@@ -68,6 +73,31 @@ assert.equal(
   getUpdateUserFieldError(usernameError, i18n.getFixedT('en'))?.message,
   'This username is already in use. Please use a different username and save again.',
 )
+
+// 新建员工必填规则（后端 NEW_STAFF_*，HTTP 200 + success:false）：显示原因并定位到对应字段，不能落到「结果待确认」。
+for (const [code, serverMessage, field, expected] of [
+  ['NEW_STAFF_BIRTHDAY_REQUIRED', '请填写生日（看不到生日一栏请先更新 App）', 'birthday', /请填写生日/],
+  ['NEW_STAFF_BIRTHDAY_INVALID', '生日无效', 'birthday', /生日无效.*1940/],
+  ['NEW_STAFF_PHONE_REQUIRED', '请填写电话', 'phone', /电话/],
+  ['NEW_STAFF_EMAIL_REQUIRED', '请填写邮箱', 'email', /邮箱/],
+  ['NEW_STAFF_GUARDIAN_REQUIRED', '员工未满 18 岁…', 'guardianName', /未满 18 岁.*监护人/],
+  ['NEW_STAFF_GUARDIAN_PHONE_INVALID', '监护人手机必须是 04 开头的澳洲手机号', 'guardianPhone', /04 开头/],
+  ['NEW_STAFF_GUARDIAN_EMAIL_INVALID', '监护人邮箱格式无效', 'guardianEmail', /监护人邮箱/],
+  ['NEW_STAFF_GUARDIAN_DUPLICATE', '监护人手机不能和员工本人的电话相同', 'guardianPhone', /监护人手机不能和员工本人的电话相同/],
+  ['NEW_STAFF_GUARDIAN_DUPLICATE', '监护人邮箱不能和员工本人的邮箱相同', 'guardianEmail', /监护人邮箱不能和员工本人的邮箱相同/],
+] as const) {
+  const feedback = feedbackFor(businessError({ success: false, errorCode: code, message: serverMessage }))
+  assert.equal(feedback.field, field, code)
+  assert.equal(feedback.resultUnconfirmed, undefined, code)
+  assert.match(feedback.message, expected, code)
+  assert.ok(!feedback.message.includes('NEW_STAFF_'), code)
+  const enFeedback = getCreateUserErrorFeedback(
+    businessError({ success: false, errorCode: code, message: serverMessage }),
+    i18n.getFixedT('en'),
+  )
+  assert.equal(enFeedback?.field, field)
+  assert.doesNotMatch(enFeedback?.message ?? '', /[一-鿿]|system\.usersNewStaff\./, `${code} 英文文案缺失`)
+}
 
 for (const [code, status, expected] of [
   ['ADMIN_REQUIRED', 403, /没有.*权限.*管理员/],

@@ -67,7 +67,8 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         var signature = SignDto(1); signature.SignedName = saved.Data.GuardianName;
         var signedResult = await service.SignGuardianAsync(token, signature, session);
         Assert.True(signedResult.Success, signedResult.Message);
-        Assert.True((await service.SubmitAsync(1)).Success);
+        // 家长签完直接进入 HR 审核，员工不再需要提交。
+        Assert.Equal("pending_hr_review", signedResult.Data!.Status);
         Assert.True((await service.ReviewAsync(saved.Data.Id, new() { Version = 1, Comment = "Confirm school dates", ReturnFields = ["schoolCalendar"] }, false)).Success);
         var signed = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id);
         Assert.False((await service.InviteGuardianAsync(new() { Version = signed.Version, Revision = signed.Revision })).Success);
@@ -124,8 +125,10 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         var service = Service("employee", storage);
         var sign = await service.SignGuardianAsync("token", SignDto(1), await VerifyAsync(service, "token"));
         Assert.True(sign.Success, sign.Message);
-        Assert.Equal("signed_pending_employee_submit", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
-        Assert.True((await service.SubmitAsync(1)).Success);
+        Assert.Equal("pending_hr_review", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
+        Assert.Contains(await _db.Queryable<EmployeeMinorComplianceAudit>().Where(x => x.ComplianceId == row.Id).Select(x => x.Action).ToListAsync(), action => action == "submitted_for_hr_review");
+        // 旧的员工提交入口不能再把已进入审核的版本提交第二次。
+        Assert.False((await service.SubmitAsync(1)).Success);
         Assert.True((await service.ReviewAsync(row.Id, new() { Version = 1 }, true)).Success);
         Assert.True((await service.GetDocumentAsync(row.Id)).Success);
         Assert.Equal("approved", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
@@ -482,7 +485,7 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         var token = _mail.LastSigningUrl!.Split("#token=")[1];
         var sign = SignDto(1); sign.SignedName = saved.Data.GuardianName;
         Assert.True((await employee.SignGuardianAsync(token, sign, await VerifyAsync(employee, token))).Success);
-        Assert.True((await employee.SubmitAsync(1)).Success);
+        // 家长签字即完成店长发起的填写请求。
         var closed = await _db.Queryable<EmployeeMinorComplianceRequest>().InSingleAsync(created.Data.Id);
         Assert.Equal(EmployeeMinorComplianceRequest.StatusCompleted, closed.Status);
         Assert.Equal(saved.Data.Id, closed.CompletedComplianceId);
@@ -605,6 +608,259 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         Assert.False(await _db.Queryable<EmployeeMinorComplianceAudit>().AnyAsync(x => x.ComplianceId == row.Id && x.Action == "guardian_amended"));
     }
 
+    // ───────────── 店长 / HR 发送家长签字链接 ─────────────
+
+    private async Task SeedStaffMinorAsync()
+    {
+        await SeedEmploymentAsync();
+        await _db.Insertable(new User { UserGUID = "employee", Username = "teen", FullName = "Teen Worker", GivenName = "Teen", FamilyName = "Worker", Email = "teen@example.test", IsActive = true }).ExecuteCommandAsync();
+    }
+
+    private static EmployeeMinorGuardianLinkSendDto StaffSend(bool email = true, bool sms = true, int? version = null, int? revision = null) => new()
+    {
+        GuardianName = "Parent", GuardianRelationship = "Mother", GuardianEmail = "parent@example.test", GuardianPhone = "0412 345 678",
+        SendEmail = email, SendSms = sms, ExpiryDays = 3, ExpectedVersion = version, ExpectedRevision = revision,
+    };
+
+    [Fact]
+    public async Task 门店发送_没有记录的未成年员工_新建草稿并邮件短信都发出_列表显示待家长签字()
+    {
+        await SeedStaffMinorAsync();
+        var sms = new FakeSms();
+        var manager = Service("manager", new MemoryStore(), sms: sms);
+
+        var listBefore = await manager.GetStaffComplianceListAsync(null, null, null, needsActionOnly: true);
+        Assert.True(listBefore.Success, listBefore.Message);
+        var before = Assert.Single(listBefore.Data!.Items);
+        Assert.Equal("not_sent", before.Stage);
+        Assert.Equal(1, listBefore.Data.NeedsActionCount);
+        Assert.Equal("QLD", before.StateCode);
+
+        var sent = await manager.SendGuardianLinkAsync("employee", StaffSend());
+
+        Assert.True(sent.Success, sent.Message);
+        Assert.True(sent.Data!.EmailSent);
+        Assert.True(sent.Data.SmsSent);
+        Assert.Null(sent.Data.SigningUrl);
+        Assert.Equal("sms", sent.Data.CodeChannel);
+        Assert.Equal("awaiting_guardian", sent.Data.Item.Stage);
+        Assert.True(sent.Data.Item.LastSentEmail);
+        Assert.True(sent.Data.Item.LastSentSms);
+        Assert.Contains("complete and sign", Assert.Single(sms.Sent).Body);
+        Assert.Equal("parent@example.test", _mail.LastTo);
+        var row = await _db.Queryable<EmployeeMinorCompliance>().SingleAsync(x => x.UserGUID == "employee");
+        Assert.Equal(1, row.Version);
+        Assert.Equal("awaiting_guardian_signature", row.Status);
+        Assert.Equal("QLD_CE1", row.FormType);
+        Assert.Equal("Mother", row.GuardianRelationship);
+        // 孩子姓名取员工资料，雇主取门店资料，家长只需补全学校等资料。
+        var form = JsonSerializer.Deserialize<EmployeeMinorCe1FormDto>(row.FormDataJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal("Teen", form.ChildGivenName);
+        Assert.Equal("Worker", form.ChildFamilyName);
+        Assert.False(string.IsNullOrWhiteSpace(form.EmployerCompanyName));
+        Assert.Equal(0, (await manager.GetStaffComplianceListAsync(null, null, null, needsActionOnly: true)).Data!.NeedsActionCount);
+    }
+
+    [Fact]
+    public async Task 门店发送_短信失败邮件成功_验证码改走邮件并回传链接()
+    {
+        await SeedStaffMinorAsync();
+        var manager = Service("manager", new MemoryStore(), sms: new FakeSms { Fail = true });
+
+        var sent = await manager.SendGuardianLinkAsync("employee", StaffSend());
+
+        Assert.True(sent.Success, sent.Message);
+        Assert.True(sent.Data!.EmailSent);
+        Assert.False(sent.Data.SmsSent);
+        Assert.Equal("email", sent.Data.CodeChannel);
+        Assert.StartsWith("https://hotbargain.vip/minor-employment/sign#token=", sent.Data.SigningUrl);
+        Assert.False(sent.Data.Item.LastSentSms);
+        Assert.Equal("email", (await _db.Queryable<EmployeeMinorCompliance>().SingleAsync(x => x.UserGUID == "employee")).GuardianInviteChannel);
+        // 家长用邮件里的链接打开后，验证码发到邮箱。
+        var token = sent.Data.SigningUrl!.Split("#token=")[1];
+        var code = await manager.SendGuardianCodeAsync(token);
+        Assert.True(code.Success, code.Message);
+        Assert.Equal("email", code.Data!.CodeChannel);
+    }
+
+    [Fact]
+    public async Task 门店发送_校验渠道联系方式与成年_短信不可用或固话不能走短信()
+    {
+        await SeedStaffMinorAsync();
+        await _db.Insertable(new User { UserGUID = "adult", Username = "adult", IsActive = true }).ExecuteCommandAsync();
+        await _db.Insertable(new UserStore { UserGUID = "adult", StoreGUID = "store-01", IsPrimary = true }).ExecuteCommandAsync();
+        await _db.Insertable(new EmployeeProfile { UserGUID = "adult", Birthday = new DateTime(1990, 1, 1) }).ExecuteCommandAsync();
+        var manager = Service("manager", new MemoryStore(), sms: new FakeSms { Available = false });
+
+        Assert.Equal("MINOR_GUARDIAN_CHANNEL_REQUIRED", (await manager.SendGuardianLinkAsync("employee", StaffSend(false, false))).ErrorCode);
+        Assert.Equal(EmployeeMinorComplianceService.GuardianSmsNotConfiguredCode, (await manager.SendGuardianLinkAsync("employee", StaffSend(false, true))).ErrorCode);
+        var noEmail = StaffSend(true, false); noEmail.GuardianEmail = null;
+        Assert.Equal(EmployeeMinorComplianceService.InvalidGuardianContactCode, (await manager.SendGuardianLinkAsync("employee", noEmail)).ErrorCode);
+        var noPhone = StaffSend(true, false); noPhone.GuardianPhone = "";
+        Assert.Equal(EmployeeMinorComplianceService.InvalidGuardianContactCode, (await manager.SendGuardianLinkAsync("employee", noPhone)).ErrorCode);
+        Assert.Equal("NOT_MINOR", (await manager.SendGuardianLinkAsync("adult", StaffSend(true, false))).ErrorCode);
+        var withSms = Service("manager", new MemoryStore(), sms: new FakeSms());
+        var landline = StaffSend(false, true); landline.GuardianPhone = "07 3000 1111";
+        Assert.Equal(EmployeeMinorComplianceService.GuardianSmsPhoneInvalidCode, (await withSms.SendGuardianLinkAsync("employee", landline)).ErrorCode);
+        // 校验失败一律不落库。
+        Assert.False(await _db.Queryable<EmployeeMinorCompliance>().AnyAsync());
+        // 只发短信时可以不填邮箱。
+        var smsOnly = StaffSend(false, true); smsOnly.GuardianEmail = null;
+        Assert.True((await withSms.SendGuardianLinkAsync("employee", smsOnly)).Success);
+    }
+
+    [Fact]
+    public async Task 门店发送_只能操作可管理门店_版本过期被拒()
+    {
+        await SeedStaffMinorAsync();
+        var otherScope = new CurrentUserManageableStoreScope { IsAllowed = true, IsAuthenticated = true, StoreGuids = ["store-02"], StoreCodes = ["02"] };
+        var outsider = Service("outsider", new MemoryStore(), otherScope);
+        Assert.Equal("FORBIDDEN", (await outsider.SendGuardianLinkAsync("employee", StaffSend(true, false))).ErrorCode);
+        Assert.Empty((await outsider.GetStaffComplianceListAsync(null, null, null, false)).Data!.Items);
+        Assert.Equal("FORBIDDEN", (await outsider.GetStaffComplianceAsync("employee")).ErrorCode);
+
+        var manager = Service("manager", new MemoryStore());
+        Assert.True((await manager.SendGuardianLinkAsync("employee", StaffSend(true, false))).Success);
+        // 界面拿着「没有记录」的旧数据再发一次：版本冲突，不能覆盖。
+        Assert.Equal(EmployeeMinorComplianceService.VersionConflictCode, (await manager.SendGuardianLinkAsync("employee", StaffSend(true, false))).ErrorCode);
+    }
+
+    [Fact]
+    public async Task 门店重新发送作废旧链接_作废后回到未发送_家长签字后不能再发()
+    {
+        await SeedStaffMinorAsync();
+        var manager = Service("manager", new MemoryStore());
+        var first = await manager.SendGuardianLinkAsync("employee", StaffSend(true, false));
+        var oldToken = _mail.LastSigningUrl!.Split("#token=")[1];
+        var item = first.Data!.Item;
+
+        var resend = await manager.SendGuardianLinkAsync("employee", StaffSend(true, false, item.Version, item.Revision));
+        Assert.True(resend.Success, resend.Message);
+        var newToken = _mail.LastSigningUrl!.Split("#token=")[1];
+        Assert.NotEqual(oldToken, newToken);
+        Assert.Equal("GUARDIAN_TOKEN_INVALID", (await manager.GetGuardianSessionAsync(oldToken)).ErrorCode);
+        Assert.True((await manager.GetGuardianSessionAsync(newToken)).Success);
+        Assert.Equal(1, resend.Data!.Item.Version);
+
+        var revoked = await manager.RevokeGuardianLinkAsync("employee", new() { ExpectedVersion = resend.Data.Item.Version!.Value, ExpectedRevision = resend.Data.Item.Revision!.Value });
+        Assert.True(revoked.Success, revoked.Message);
+        Assert.Equal("not_sent", revoked.Data!.Stage);
+        Assert.Equal("GUARDIAN_TOKEN_INVALID", (await manager.GetGuardianSessionAsync(newToken)).ErrorCode);
+
+        var again = await manager.SendGuardianLinkAsync("employee", StaffSend(true, false, revoked.Data.Version, revoked.Data.Revision));
+        Assert.True(again.Success, again.Message);
+        await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => x.Status == "pending_hr_review").Where(x => x.UserGUID == "employee").ExecuteCommandAsync();
+        var current = (await manager.GetStaffComplianceAsync("employee")).Data!.Item!;
+        Assert.Equal("pending_review", current.Stage);
+        Assert.False(current.CanSend);
+        Assert.Equal("INVALID_STATUS", (await manager.SendGuardianLinkAsync("employee", StaffSend(true, false, current.Version, current.Revision))).ErrorCode);
+    }
+
+    [Fact]
+    public async Task 家长补全门店草稿后签字_缺学校与备用联系人不能签_补全后直接进入HR审核()
+    {
+        await SeedStaffMinorAsync();
+        var storage = new MemoryStore();
+        var manager = Service("manager", storage);
+        Assert.True((await manager.SendGuardianLinkAsync("employee", StaffSend(true, false))).Success);
+        var token = _mail.LastSigningUrl!.Split("#token=")[1];
+        var session = await VerifyAsync(manager, token);
+
+        var incomplete = await manager.SignGuardianAsync(token, SignDto(1), session);
+        Assert.Equal("MINOR_COMPLIANCE_FORM_INCOMPLETE", incomplete.ErrorCode);
+
+        var sign = SignDto(1);
+        sign.Amendments = new()
+        {
+            SchoolCalendar = new EmployeeMinorSchoolCalendarDto { SchoolProvider = "Example High School" },
+            Contacts = [new() { FullName = "Aunt", Phone = "0400 333 444", Email = "aunt@example.test" }],
+        };
+        var signed = await manager.SignGuardianAsync(token, sign, session);
+        Assert.True(signed.Success, signed.Message);
+        var row = await _db.Queryable<EmployeeMinorCompliance>().SingleAsync(x => x.UserGUID == "employee");
+        Assert.Equal("pending_hr_review", row.Status);
+        Assert.Equal("guardian", row.SubmittedBy);
+        Assert.NotNull(row.DocumentObjectKey);
+        Assert.Equal("pending_review", (await manager.GetStaffComplianceAsync("employee")).Data!.Item!.Stage);
+    }
+
+    [Fact]
+    public async Task 普通店员只有非主分店关联_也能被店长列出并发送()
+    {
+        // 店长新建的店员与门店的关联是 IsPrimary=false（IsPrimary 表示「可管理」），不能因此漏掉。
+        await _db.Insertable(new Store { StoreGUID = "store-01", StoreCode = "01", Address = "1 Example St, Brisbane QLD 4000" }).ExecuteCommandAsync();
+        await _db.Insertable(new UserStore { UserGUID = "employee", StoreGUID = "store-01", IsPrimary = false }).ExecuteCommandAsync();
+        await _db.Insertable(new EmployeeProfile { UserGUID = "employee", Birthday = new DateTime(2012, 1, 1) }).ExecuteCommandAsync();
+        await _db.Insertable(new User { UserGUID = "employee", Username = "teen", FullName = "Teen Worker", IsActive = true }).ExecuteCommandAsync();
+        var managerScope = new CurrentUserManageableStoreScope { IsAllowed = true, IsAuthenticated = true, IsStoreManager = true, StoreGuids = ["store-01"], StoreCodes = ["01"] };
+        var manager = Service("manager", new MemoryStore(), managerScope);
+
+        var item = Assert.Single((await manager.GetStaffComplianceListAsync(null, null, null, false)).Data!.Items);
+        Assert.Equal("01", item.StoreCode);
+        Assert.Equal("QLD", item.StateCode);
+        Assert.NotNull((await manager.GetStaffComplianceAsync("employee")).Data!.Item);
+        var sent = await manager.SendGuardianLinkAsync("employee", StaffSend(true, false));
+        Assert.True(sent.Success, sent.Message);
+        Assert.Single((await manager.GetManagerCandidatesAsync(null)).Data!);
+    }
+
+    [Fact]
+    public async Task 只发短信_监护人没有邮箱_备用联系人也没邮箱时仍可签字()
+    {
+        await SeedStaffMinorAsync();
+        var sms = new FakeSms();
+        var manager = Service("manager", new MemoryStore(), sms: sms);
+        var send = StaffSend(false, true); send.GuardianEmail = null;
+        Assert.True((await manager.SendGuardianLinkAsync("employee", send)).Success);
+        var token = System.Text.RegularExpressions.Regex.Match(sms.Sent[0].Body, "#token=([A-Za-z0-9_-]+)").Groups[1].Value;
+        Assert.True((await manager.SendGuardianCodeAsync(token)).Success);
+        var code = System.Text.RegularExpressions.Regex.Match(sms.Sent[1].Body, @"code is (\d{6})\.").Groups[1].Value;
+        var session = (await manager.VerifyGuardianCodeAsync(token, code)).Data!;
+        var sign = SignDto(1);
+        sign.Amendments = new()
+        {
+            SchoolCalendar = new EmployeeMinorSchoolCalendarDto { SchoolProvider = "Example High School" },
+            Contacts = [new() { FullName = "Aunt", Phone = "0400 333 444" }],
+        };
+
+        var signed = await manager.SignGuardianAsync(token, sign, session);
+
+        Assert.True(signed.Success, signed.Message);
+        Assert.Equal("pending_hr_review", signed.Data!.Status);
+    }
+
+    [Fact]
+    public async Task 退回后门店重新发送_新建版本并复制上一版资料与备用联系人()
+    {
+        await SeedStaffMinorAsync();
+        var manager = Service("manager", new MemoryStore());
+        Assert.True((await manager.SendGuardianLinkAsync("employee", StaffSend(true, false))).Success);
+        var token = _mail.LastSigningUrl!.Split("#token=")[1];
+        var sign = SignDto(1);
+        sign.Amendments = new()
+        {
+            SchoolCalendar = new EmployeeMinorSchoolCalendarDto { SchoolProvider = "Example High School" },
+            Contacts = [new() { FullName = "Aunt", Phone = "0400 333 444" }],
+        };
+        Assert.True((await manager.SignGuardianAsync(token, sign, await VerifyAsync(manager, token))).Success);
+        var first = await _db.Queryable<EmployeeMinorCompliance>().SingleAsync(x => x.UserGUID == "employee");
+        Assert.True((await manager.ReviewAsync(first.Id, new() { Version = 1, Comment = "Confirm school dates", ReturnFields = ["schoolCalendar"] }, false)).Success);
+
+        var item = (await manager.GetStaffComplianceAsync("employee")).Data!.Item!;
+        Assert.Equal("returned", item.Stage);
+        Assert.Equal("Confirm school dates", item.ReviewComment);
+        var resend = await manager.SendGuardianLinkAsync("employee", StaffSend(true, false, item.Version, item.Revision));
+
+        Assert.True(resend.Success, resend.Message);
+        Assert.Equal(2, resend.Data!.Item.Version);
+        var v2 = await _db.Queryable<EmployeeMinorCompliance>().SingleAsync(x => x.UserGUID == "employee" && x.Version == 2);
+        Assert.Contains("Example High School", v2.SchoolCalendarJson);
+        Assert.Equal("Aunt", Assert.Single(await _db.Queryable<EmployeeMinorComplianceContact>().Where(x => x.ComplianceId == v2.Id).ToListAsync()).FullName);
+        var v1 = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(first.Id);
+        Assert.Equal("returned", v1.Status);
+        Assert.Equal(first.DocumentObjectKey, v1.DocumentObjectKey);
+    }
+
     private EmployeeMinorComplianceGuardianSignDto SignDto(int version) => new() { Version = version, SignedName = "Parent", SignatureData = EmployeeMinorComplianceDocumentTests.Signature(), ConfirmRelationship = true, ConfirmConsent = true, ConfirmBackupContact = true, ConsentScope = EmployeeMinorComplianceService.ServerConsentScope };
     private static EmployeeMinorComplianceUpsertDto Draft()
     {
@@ -655,7 +911,7 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         public string? LastCode { get; private set; }
         public int CodesSent { get; private set; }
         public int LinksSent { get; private set; }
-        public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, bool verificationCodeBySms = false, CancellationToken cancellationToken = default)
         {
             if (Fail) return Task.FromResult(ApiResponse<bool>.Error("smtp down", "GUARDIAN_EMAIL_SEND_FAILED"));
             LastTo = toEmail; LastSigningUrl = signingUrl; LinksSent++;

@@ -54,10 +54,8 @@
   },
   "form": {
     "loadFailed": "Unable to load information",
-    "intro": "Complete the CE1 / NSW employer consent details. Drafts can be saved incomplete; the parent's phone and email are required before signing.",
-    "requestFrom": "{{name}} has asked you to complete your minor employment details",
-    "requestFromManager": "Your manager has asked you to complete your minor employment details",
-    "requestHint": "Once complete, send the signing email to the guardian. After they sign, submit to HR for review; this to-do completes automatically.",
+    "readOnlyNotice": "Your manager or HR sends this form to your parent or guardian to complete and sign. You don't need to do anything. This page only shows the details and review progress.",
+    "noRecord": "There are no under-18 employment details for you yet. Once your manager or HR sends the signing link, what your guardian fills in will appear here.",
     "statusLine": "Status: {{status}} · Version {{version}}",
     "refreshStatus": "Refresh status",
     "reviewComment": "HR comment: {{comment}}",
@@ -168,17 +166,6 @@
       "latestTransport": "Latest available transport time",
       "latestWorkEnd": "Latest time you can work until"
     },
-    "actions": {
-      "saveDraft": "Save draft",
-      "sendEmail": "Email signing request to guardian",
-      "resendEmail": "Resend signing email (old link will be voided)",
-      "sendSms": "Text signing link to guardian",
-      "resendSms": "Resend signing text (old link will be voided)",
-      "shareLink": "Guardian not receiving the email? Share a link instead",
-      "shareLinkButton": "Share signing link",
-      "submit": "Submit to HR",
-      "saveFirst": "Save the new version first"
-    },
     "amended": {
       "title": "The guardian changed the following when signing: {{fields}}",
       "note": "The details below have been updated with the guardian's changes. You do not need to fill them in again."
@@ -186,32 +173,15 @@
     "awaiting": {
       "title": "Waiting for guardian signature",
       "emailSent": "The signing email has been sent to the guardian's email address.",
-      "emailFailed": "The signing email could not be sent. Share the link instead or resend it.",
-      "linkGenerated": "Link created. Send it to the guardian.",
+      "emailFailed": "The signing email could not be sent. Your manager or HR will resend it.",
+      "linkGenerated": "A signing link has been created. Waiting for the guardian to open it.",
       "verified": "The guardian opened the link and verified with the email code. Waiting for their signature.",
       "notVerified": "After opening the link, the guardian must enter the code sent to their email to view and sign.",
-      "expired": "The link has expired. Resend it.",
+      "expired": "The link has expired. Your manager or HR will resend it.",
       "smsSent": "The signing link has been texted to the guardian's mobile.",
-      "smsFailed": "The signing text could not be sent. Share the link instead or resend it.",
+      "smsFailed": "The signing text could not be sent. Your manager or HR will resend it.",
       "verifiedSms": "The guardian opened the link and verified with the text-message code. Waiting for their signature.",
       "notVerifiedSms": "After opening the link, the guardian must enter the code texted to their mobile to view and sign."
-    },
-    "invite": {
-      "emailSent": "The signing email was sent to {{email}}. Ask the guardian to check their inbox (it may be in spam); after opening the link they will receive a second email with a verification code.",
-      "guardianEmail": "the guardian's email",
-      "emailFailed": "Couldn't send the email: {{error}}. You can forward the link below to the guardian.",
-      "linkNote": "The guardian must still enter the code sent to their email after opening it; only the guardian can complete the signature.",
-      "smsSent": "The signing link was texted to {{phone}}. After opening it the guardian will receive a second text with a verification code.",
-      "guardianPhone": "the guardian's mobile",
-      "smsFailed": "Couldn't send the text: {{error}}. You can forward the link below to the guardian.",
-      "linkNoteSms": "The guardian must still enter the code texted to their mobile after opening it; only the guardian can complete the signature."
-    },
-    "errors": {
-      "server": "The server could not complete the request. Refresh and try again.",
-      "saveFailed": "Save failed: {{message}}",
-      "inviteFailed": "Failed to start signing: {{message}}",
-      "submitFailed": "Submit failed: {{message}}",
-      "inviteRequired": "The parent's phone, email and one complete backup contact are required before signing."
     }
   },
   "review": {

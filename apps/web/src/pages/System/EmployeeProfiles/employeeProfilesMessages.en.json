@@ -1,6 +1,7 @@
 {
   "system": {
     "employeeProfiles": {
+      "minorTab": "Minor employment",
       "totalCount": "{{count}} employees",
       "pendingEntry": "{{count}} sensitive change request(s) pending review",
       "maskedHint": "Bank and super account numbers are masked; open Edit to view the full values",

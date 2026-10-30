@@ -676,7 +676,8 @@ namespace BlazorApp.Api.Services.React
             var todayDto = new AttendanceTodayDto
             {
                 WorkDate = today,
-                MinorCompliance = minorCompliance,
+                // 未成年用工提醒只给主管（排班格与提醒待办），员工本人的今日打卡不再下发；旧版 App 也就不再显示横幅。
+                MinorCompliance = null,
                 Schedules = scheduleDtos,
                 Punches = requestedStorePunchDtos,
                 Holidays = holidays.Select(ToDto).ToList(),
@@ -1257,10 +1258,11 @@ namespace BlazorApp.Api.Services.React
             }
             var resultDto = ToDto(punch, employeeName, storeName, serverNow);
             resultDto.MealClaim = mealClaim == null ? null : ToDto(mealClaim);
-            resultDto.MinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
-            if (resultDto.MinorCompliance != null)
+            // 打卡后照常评估并写入主管提醒待办；打卡结果是给员工本人看的，不再带未成年用工提醒。
+            var punchMinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
+            if (punchMinorCompliance != null)
             {
-                await RecordMinorEmploymentEvaluationAsync(userGuid, punch.StoreCode, punch.ScheduleGuid, "punch_recorded", resultDto.MinorCompliance);
+                await RecordMinorEmploymentEvaluationAsync(userGuid, punch.StoreCode, punch.ScheduleGuid, "punch_recorded", punchMinorCompliance);
             }
             if (schedule != null)
             {

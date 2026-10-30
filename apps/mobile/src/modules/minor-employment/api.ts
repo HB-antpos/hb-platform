@@ -1,56 +1,15 @@
 import { apiClient } from "@/shared/api/client";
-import {
-  mapCandidate,
-  mapInviteResult,
-  mapProfile,
-  mapRequest,
-  mapSummary,
-  toPayload,
-} from "./contract";
-import type {
-  MinorEmploymentDraft,
-  MinorEmploymentReviewDetail,
-  MinorInviteChannel,
-  MinorReturnField,
-} from "./types";
+import { mapCandidate, mapProfile, mapSummary } from "./contract";
+import type { MinorEmploymentReviewDetail, MinorReturnField } from "./types";
 const BASE = "/minor-employment";
+/**
+ * 员工本人只读：保存草稿 / 邀请监护人 / 提交 / 「我的填写请求」已由后端关闭（MINOR_GUARDIAN_INVITE_BY_STAFF_ONLY），
+ * 客户端不再调用；给家长发签字链接改走 staff-api.ts（店长 / HR）。
+ */
 export const minorEmploymentApi = {
   async getMine() {
     const r = await apiClient.get(`${BASE}/me`);
     return r.data == null ? null : mapProfile(r.data);
-  },
-  async saveDraft(
-    d: MinorEmploymentDraft & { version?: number; revision?: number },
-  ) {
-    return mapProfile((await apiClient.put(`${BASE}/me`, toPayload(d))).data);
-  },
-  /**
-   * 发起监护人签署。channel=email（默认）由后端直接发邮件到监护人邮箱（不回传链接）；
-   * sms 由后端短信发到监护人手机（需澳洲手机号，验证码也走短信）；
-   * share 是备用方式，只返回链接供员工转发，监护人打开后仍须验证码。
-   */
-  async inviteParent(
-    version: number,
-    revision?: number,
-    channel: MinorInviteChannel = "email",
-  ) {
-    return mapInviteResult(
-      (
-        await apiClient.post(`${BASE}/me/guardian-invite`, {
-          version,
-          revision: revision == null ? undefined : Number(revision),
-          // 带回家给监护人处理，链接给 72 小时。
-          expiryMinutes: 4320,
-          deliverByEmail: channel === "email",
-          deliverBySms: channel === "sms",
-        })
-      ).data,
-    );
-  },
-  /** 店长发给我的未完成填写请求。 */
-  async getMyRequests() {
-    const data = (await apiClient.get(`${BASE}/me/requests`)).data;
-    return Array.isArray(data) ? data.map(mapRequest) : [];
   },
   /** 店长：可管理门店里未满 18 岁的员工及其档案状态。 */
   async getManagerCandidates(storeCode?: string) {
@@ -60,30 +19,6 @@ export const minorEmploymentApi = {
       })
     ).data;
     return Array.isArray(data) ? data.map(mapCandidate) : [];
-  },
-  async createRequest(userGUID: string, note?: string) {
-    return mapRequest(
-      (
-        await apiClient.post(`${BASE}/manager/requests`, {
-          userGUID,
-          note: note?.trim() || null,
-        })
-      ).data,
-    );
-  },
-  async cancelRequest(id: number) {
-    return mapRequest(
-      (await apiClient.post(`${BASE}/manager/requests/${id}/cancel`)).data,
-    );
-  },
-  async submit(version: number) {
-    return mapProfile(
-      (
-        await apiClient.post(`${BASE}/me/submit`, undefined, {
-          params: { version },
-        })
-      ).data,
-    );
   },
   async getReviews() {
     const r = (

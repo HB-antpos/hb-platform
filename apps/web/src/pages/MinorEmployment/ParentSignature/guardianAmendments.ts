@@ -3,6 +3,7 @@
 
 type Raw = Record<string, unknown>
 
+// 中文分区名只给 HR 审核页（System/MinorEmploymentReview）用；家长页用 guardianSections.ts 的英文标签。
 export const AMENDABLE_SECTIONS = {
   childDetails: '孩子资料',
   guardianDetails: '监护人资料',
@@ -15,7 +16,7 @@ export const AMENDABLE_SECTIONS = {
 export type AmendableSection = keyof typeof AMENDABLE_SECTIONS
 
 export const WEEK_DAY_KEYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
-export const WEEK_DAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const
+// 家长页的星期显示用 guardianSections.ts 的英文 WEEK_DAY_SHORT_EN。
 // 上学时间只让监护人核对周一到周五；周末等其他记录原样保留。
 const SCHOOL_DAYS = [1, 2, 3, 4, 5]
 
@@ -35,7 +36,8 @@ export interface GuardianReviewValues {
     provider?: string; contactName?: string; contactPosition?: string; contactPhone?: string; contactMobile?: string; contactEmail?: string
     weekly: WeeklyValue[]; holidays: DateRangeValue[]; pupilFreeDays: DateRangeValue[]
   }
-  otherWork: { hasOtherWork: boolean; hoursUnknown: boolean; employers: EmployerValue[] }
+  // hasOtherWork 为 null 表示还没回答（门店新建的草稿没有其他工作资料），家长选了「有 / 没有」才算填写。
+  otherWork: { hasOtherWork: boolean | null; hoursUnknown: boolean; employers: EmployerValue[] }
   commute: {
     afterSchoolToStoreMinutes?: number | null; homewardMinutes?: number | null; transportMode?: string; pickupPerson?: string
     latestTransportLocalTime?: string; latestWorkEndLocalTime?: string
@@ -84,7 +86,7 @@ export function toReviewValues(snapshot: Raw): GuardianReviewValues {
       pupilFreeDays: ranges(get(school, 'pupilFreeDays')),
     },
     otherWork: {
-      hasOtherWork: get(work, 'hasOtherWork') === true,
+      hasOtherWork: bool(get(work, 'hasOtherWork')),
       hoursUnknown: get(work, 'hoursUnknown') === true,
       employers: list(get(work, 'employers')).map((x) => {
         const hoursRaw = record(get(x, 'weeklyHours'))
@@ -179,9 +181,9 @@ export function toAmendments(initial: GuardianReviewValues, current: GuardianRev
     }
   }
   if (sections.includes('otherWork')) out.otherWork = {
-    hasOtherWork: current.otherWork.hasOtherWork,
+    hasOtherWork: current.otherWork.hasOtherWork === true,
     hoursUnknown: current.otherWork.hoursUnknown,
-    employers: current.otherWork.hasOtherWork ? current.otherWork.employers.map((x) => ({
+    employers: current.otherWork.hasOtherWork === true ? current.otherWork.employers.map((x) => ({
       companyName: clean(x.companyName), tradingName: clean(x.tradingName), address: clean(x.address), postcode: clean(x.postcode),
       phone: clean(x.phone), email: clean(x.email),
       weeklyHours: Object.fromEntries(Object.entries(x.hours ?? {}).filter(([, value]) => typeof value === 'number' && value > 0)),

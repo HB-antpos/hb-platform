@@ -28,6 +28,54 @@
       "fullNameTooLong": "The full name can be at most {{max}} characters"
     }
   },
+  "newStaff": {
+    "phoneHint": "Australian mobile starting with 04",
+    "birthday": "Date of birth",
+    "birthdayPlaceholder": "Select a date",
+    "birthdayHint": "Used to check if they're under 18. Only store managers and HR can see it.",
+    "age": "{{age}} yrs",
+    "minorAge": "{{age}} yrs · Under 18",
+    "guardian": {
+      "title": "Guardian",
+      "description": "Required for staff under 18. After creating the account, you can send the parent an English signing link (email + SMS) from the staff details.",
+      "name": "Guardian name",
+      "relationship": "Relationship",
+      "phone": "Guardian mobile",
+      "phoneHint": "Starts with 04. Used for the signing SMS and verification code.",
+      "email": "Guardian email",
+      "emailPlaceholder": "Parent's email"
+    },
+    "relationships": {
+      "Mother": "Mother",
+      "Father": "Father",
+      "Legal guardian": "Legal guardian",
+      "Other": "Other"
+    },
+    "errors": {
+      "phoneRequired": "Phone is required",
+      "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)",
+      "birthdayRequired": "Select a date of birth",
+      "birthdayInvalid": "Date of birth can't be in the future or before 1940",
+      "guardianNameRequired": "Guardian name is required",
+      "guardianRelationshipRequired": "Select a relationship",
+      "guardianPhoneRequired": "Guardian mobile is required",
+      "guardianPhoneInvalid": "Guardian mobile must be an Australian mobile starting with 04",
+      "guardianPhoneSame": "Can't be the same as the staff member's phone",
+      "guardianEmailRequired": "Guardian email is required",
+      "guardianEmailInvalid": "Enter a valid email address",
+      "guardianEmailSame": "Can't be the same as the staff member's email"
+    },
+    "serverErrors": {
+      "birthdayRequired": "Date of birth is required",
+      "birthdayInvalid": "Invalid date of birth: it can't be in the future or before 1940",
+      "phoneRequired": "Enter a valid phone number",
+      "emailRequired": "Email is required",
+      "guardianRequired": "This staff member is under 18. Enter the guardian's name, relationship, mobile and email.",
+      "guardianPhoneInvalid": "Guardian mobile must be an Australian mobile starting with 04",
+      "guardianEmailInvalid": "Guardian email is not valid",
+      "guardianDuplicate": "The guardian's mobile and email can't be the same as the staff member's"
+    }
+  },
   "discard": {
     "title": "Discard changes?",
     "message": "You have unsaved changes that will be lost if you leave.",
