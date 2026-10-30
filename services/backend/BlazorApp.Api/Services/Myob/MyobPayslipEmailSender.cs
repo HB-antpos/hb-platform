@@ -28,7 +28,7 @@ public interface IMyobPayslipEmailSender
 
 /// <summary>
 /// 工资单邮件：复用发票邮箱后台配置的公司 SMTP 账号（与监护人邮件同一做法，不另起一套发件配置）。
-/// 正文中英双语，只说明这是哪一期、附件是 PDF；<b>不写任何金额</b>。日志只记收件域名，不记完整邮箱与附言。
+/// 正文只有英文，只说明这是哪一期、附件是 PDF；<b>不写任何金额</b>。日志只记收件域名，不记完整邮箱与附言。
 /// </summary>
 internal sealed class MyobPayslipEmailSender : IMyobPayslipEmailSender
 {
@@ -100,25 +100,22 @@ internal sealed class MyobPayslipEmailSender : IMyobPayslipEmailSender
         return string.IsNullOrEmpty(first) ? string.Empty : char.ToUpperInvariant(first[0]) + first[1..].ToLowerInvariant();
     }
 
-    private static string BuildText(MyobPayslipEmail e)
+    internal static string BuildText(MyobPayslipEmail e)
     {
         var name = FirstName(e.EmployeeName);
         var hello = name.Length == 0 ? "Hi," : $"Hi {name},";
-        var zhHello = name.Length == 0 ? "你好：" : $"{name} 你好：";
-        var note = string.IsNullOrWhiteSpace(e.Note) ? string.Empty : $"\nMessage from the sender / 发送人留言：\n{e.Note.Trim()}\n";
+        var note = string.IsNullOrWhiteSpace(e.Note) ? string.Empty : $"\nMessage from the sender:\n{e.Note.Trim()}\n";
         return
             $"{hello}\n\n" +
             $"Your payslip for the pay period {e.PeriodText} (payment date {e.PaymentDateText}) from {e.CompanyName} is attached as a PDF.\n" +
             "If something looks wrong, please talk to your store manager. Please do not forward this email.\n" +
-            note +
-            $"\n{zhHello}\n附件是 {e.CompanyName} 在 {e.PeriodText} 工资周期（发薪日 {e.PaymentDateText}）的工资单 PDF。如有疑问请联系店长，请勿转发本邮件。\n";
+            note;
     }
 
-    private static string BuildHtml(MyobPayslipEmail e)
+    internal static string BuildHtml(MyobPayslipEmail e)
     {
         var name = FirstName(e.EmployeeName);
         var hello = name.Length == 0 ? "Hi," : $"Hi {Encode(name)},";
-        var zhHello = name.Length == 0 ? "你好：" : $"{Encode(name)} 你好：";
         var note = string.IsNullOrWhiteSpace(e.Note)
             ? string.Empty
             : $"<p style=\"padding:8px 12px;background:#f5f6f8;border-radius:6px\">{Encode(e.Note.Trim()).Replace("\n", "<br/>")}</p>";
@@ -126,8 +123,7 @@ internal sealed class MyobPayslipEmailSender : IMyobPayslipEmailSender
             $"<p>{hello}</p>" +
             $"<p>Your payslip for the pay period <b>{Encode(e.PeriodText)}</b> (payment date {Encode(e.PaymentDateText)}) from <b>{Encode(e.CompanyName)}</b> is attached as a PDF.</p>" +
             "<p style=\"color:#667085\">If something looks wrong, please talk to your store manager. Please do not forward this email.</p>" +
-            note +
-            $"<hr/><p>{zhHello}</p><p>附件是 {Encode(e.CompanyName)} 在 {Encode(e.PeriodText)} 工资周期（发薪日 {Encode(e.PaymentDateText)}）的工资单 PDF。如有疑问请联系店长，请勿转发本邮件。</p>";
+            note;
     }
 
     private static string Encode(string value) => WebUtility.HtmlEncode(value);

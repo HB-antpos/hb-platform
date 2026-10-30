@@ -125,6 +125,10 @@ export interface ParentSignatureDocument {
 /** 监护人邮箱验证会话：验证前只返回打码邮箱与验证码发送节奏。 */
 export interface GuardianSession {
   maskedGuardianEmail: string
+  /** 验证码发到哪里：email（默认）或 sms；sms 时页面提示手机号而不是邮箱。 */
+  codeChannel?: 'email' | 'sms'
+  /** 打码后的监护人手机号，只在 codeChannel 为 sms 时有值。 */
+  maskedGuardianPhone?: string
   emailVerified: boolean
   codeSentAt?: string
   codeExpiresAt?: string

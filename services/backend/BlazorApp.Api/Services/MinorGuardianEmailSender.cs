@@ -26,7 +26,8 @@ public interface IMinorGuardianEmailSender
 
 /// <summary>
 /// 监护人邮件：复用发票邮箱后台配置的公司 SMTP 账号（不另起一套发件配置）。
-/// 正文中英双语，只放签署链接或验证码，不放孩子的学校、生日等资料。
+/// 正文只有英文，只放签署链接或验证码，不放孩子的学校、生日等资料。
+/// 正文拼装在 internal 的 Build* 纯函数里，测试会断言它们不含中文字符。
 /// </summary>
 public sealed class MinorGuardianEmailSender : IMinorGuardianEmailSender
 {
@@ -41,39 +42,45 @@ public sealed class MinorGuardianEmailSender : IMinorGuardianEmailSender
 
     public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
     {
-        var expires = FormatSydney(expiresAtUtc);
-        var subject = $"Parent/guardian consent for {childName} – Hot Bargain / 未成年员工监护人同意书";
-        var text =
-            $"Dear {guardianName},\n\n" +
-            $"{childName} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.\n\n" +
-            $"Open this link to review and sign (valid until {expires}, Sydney time):\n{signingUrl}\n\n" +
-            "For your security, a one-time verification code will be sent to this email address after you open the link.\n" +
-            "If you did not expect this email, please ignore it or contact the store manager.\n\n" +
-            $"{guardianName} 您好：\n{childName} 在 Hot Bargain 工作（或即将入职）。按规定需要家长/监护人核对并签署未成年员工同意书。\n" +
-            $"请在 {expires}（悉尼时间）前打开上面的链接，打开后会向本邮箱发送一次性验证码。\n";
-        var html =
-            $"<p>Dear {Encode(guardianName)},</p>" +
-            $"<p>{Encode(childName)} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.</p>" +
-            $"<p><a href=\"{Encode(signingUrl)}\">Review and sign the consent form</a><br/>Valid until {Encode(expires)} (Sydney time).</p>" +
-            "<p>For your security, a one-time verification code will be sent to this email address after you open the link. If you did not expect this email, please ignore it or contact the store manager.</p>" +
-            $"<hr/><p>{Encode(guardianName)} 您好：</p><p>{Encode(childName)} 在 Hot Bargain 工作（或即将入职）。按规定需要家长/监护人核对并签署未成年员工同意书。请在 {Encode(expires)}（悉尼时间）前点击上面的链接，打开后会向本邮箱发送一次性验证码。</p>";
-        return SendAsync(toEmail, subject, text, html, "signing-link", cancellationToken);
+        var content = BuildSigningLink(guardianName, childName, signingUrl, FormatSydney(expiresAtUtc));
+        return SendAsync(toEmail, content.Subject, content.Text, content.Html, "signing-link", cancellationToken);
     }
 
     public Task<ApiResponse<bool>> SendVerificationCodeAsync(string toEmail, string guardianName, string code, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
     {
         var minutes = Math.Max(1, (int)Math.Round((expiresAtUtc - DateTime.UtcNow).TotalMinutes));
-        var subject = $"Your verification code: {code} / 验证码";
+        var content = BuildVerificationCode(guardianName, code, minutes);
+        return SendAsync(toEmail, content.Subject, content.Text, content.Html, "verification-code", cancellationToken);
+    }
+
+    internal static EmailContent BuildSigningLink(string guardianName, string childName, string signingUrl, string expiresText)
+    {
+        var subject = $"Parent/guardian consent for {childName} – Hot Bargain";
+        var text =
+            $"Dear {guardianName},\n\n" +
+            $"{childName} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.\n\n" +
+            $"Open this link to review and sign (valid until {expiresText}, Sydney time):\n{signingUrl}\n\n" +
+            "For your security, a one-time verification code will be sent to this email address after you open the link.\n" +
+            "If you did not expect this email, please ignore it or contact the store manager.\n";
+        var html =
+            $"<p>Dear {Encode(guardianName)},</p>" +
+            $"<p>{Encode(childName)} works (or will work) at Hot Bargain. Before they can be rostered, we need a parent or guardian to review and sign the minor employment consent form.</p>" +
+            $"<p><a href=\"{Encode(signingUrl)}\">Review and sign the consent form</a><br/>Valid until {Encode(expiresText)} (Sydney time).</p>" +
+            "<p>For your security, a one-time verification code will be sent to this email address after you open the link. If you did not expect this email, please ignore it or contact the store manager.</p>";
+        return new EmailContent(subject, text, html);
+    }
+
+    internal static EmailContent BuildVerificationCode(string guardianName, string code, int minutes)
+    {
+        var subject = $"Your verification code: {code}";
         var text =
             $"Dear {guardianName},\n\nYour verification code for the Hot Bargain consent form is: {code}\n" +
-            $"It expires in {minutes} minutes. Do not share this code with anyone, including the employee.\n\n" +
-            $"您的验证码是 {code}，{minutes} 分钟内有效。请勿把验证码告诉任何人（包括员工本人）。\n";
+            $"It expires in {minutes} minutes. Do not share this code with anyone, including the employee.\n";
         var html =
             $"<p>Dear {Encode(guardianName)},</p><p>Your verification code for the Hot Bargain consent form is:</p>" +
             $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
-            $"<p>It expires in {minutes} minutes. Do not share this code with anyone, including the employee.</p>" +
-            $"<hr/><p>您的验证码是 <b>{Encode(code)}</b>，{minutes} 分钟内有效。请勿把验证码告诉任何人（包括员工本人）。</p>";
-        return SendAsync(toEmail, subject, text, html, "verification-code", cancellationToken);
+            $"<p>It expires in {minutes} minutes. Do not share this code with anyone, including the employee.</p>";
+        return new EmailContent(subject, text, html);
     }
 
     private async Task<ApiResponse<bool>> SendAsync(string toEmail, string subject, string text, string html, string kind, CancellationToken cancellationToken)

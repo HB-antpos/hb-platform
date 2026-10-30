@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Sms;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -191,6 +192,165 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         Assert.False(share.Data!.EmailSent);
         Assert.Contains("#token=", share.Data.SigningUrl);
         Assert.Equal(linksBefore, _mail.LinksSent);
+    }
+
+    private static EmployeeMinorComplianceUpsertDto DraftWithGuardianPhone(string phone)
+    {
+        var draft = Draft();
+        draft.GuardianPhone = phone;
+        return draft;
+    }
+
+    [Fact]
+    public async Task 短信邀请_链接和验证码都短信发到监护人手机_不回传链接_一封邮件都不发()
+    {
+        await SeedEmploymentAsync();
+        var sms = new FakeSms();
+        var service = Service("employee", new MemoryStore(), sms: sms);
+        var saved = await service.UpsertSelfAsync(DraftWithGuardianPhone("0412 345 678"));
+
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision, DeliverBySms = true });
+
+        Assert.True(invite.Success, invite.Message);
+        Assert.True(invite.Data!.SmsSent);
+        Assert.False(invite.Data.EmailSent);
+        Assert.Equal("sms", invite.Data.DeliveryChannel);
+        Assert.Equal("+614*****678", invite.Data.MaskedGuardianPhone);
+        Assert.Equal(string.Empty, invite.Data.SigningUrl);
+        Assert.Equal(0, _mail.LinksSent);
+        var link = Assert.Single(sms.Sent);
+        Assert.Equal(SmsPurposes.GuardianSigningLink, link.Purpose);
+        Assert.Equal("0412 345 678", link.ToPhone);
+        Assert.True(SmsMessages.IsGsm7Safe(link.Body), link.Body);
+        Assert.Contains("https://hotbargain.vip/minor-employment/sign#token=", link.Body);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id);
+        Assert.Equal("sms", stored.GuardianInviteChannel);
+        Assert.NotNull(stored.GuardianInviteEmailSentAtUtc);
+
+        // 监护人打开链接后，验证码同样走短信；会话告诉页面该提示手机号而不是邮箱。
+        var token = System.Text.RegularExpressions.Regex.Match(link.Body, "#token=([A-Za-z0-9_-]+)").Groups[1].Value;
+        var codeSent = await service.SendGuardianCodeAsync(token);
+        Assert.True(codeSent.Success, codeSent.Message);
+        Assert.Equal("sms", codeSent.Data!.CodeChannel);
+        Assert.Equal("+614*****678", codeSent.Data.MaskedGuardianPhone);
+        Assert.Equal(0, _mail.CodesSent);
+        var codeSms = sms.Sent[1];
+        Assert.Equal(SmsPurposes.GuardianVerificationCode, codeSms.Purpose);
+        Assert.Equal("0412 345 678", codeSms.ToPhone);
+        Assert.Contains("including the employee", codeSms.Body);
+        var code = System.Text.RegularExpressions.Regex.Match(codeSms.Body, @"code is (\d{6})\.").Groups[1].Value;
+        Assert.Equal(6, code.Length);
+        var verified = await service.VerifyGuardianCodeAsync(token, code);
+        Assert.True(verified.Success, verified.Message);
+    }
+
+    [Fact]
+    public async Task 短信服务未开启_拒绝短信邀请且不创建邀请()
+    {
+        await SeedEmploymentAsync();
+        var sms = new FakeSms { Available = false };
+        var service = Service("employee", new MemoryStore(), sms: sms);
+        var saved = await service.UpsertSelfAsync(DraftWithGuardianPhone("0412 345 678"));
+
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision, DeliverBySms = true });
+
+        Assert.False(invite.Success);
+        Assert.Equal(EmployeeMinorComplianceService.GuardianSmsNotConfiguredCode, invite.ErrorCode);
+        Assert.Empty(sms.Sent);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id);
+        Assert.Equal("draft", stored.Status);
+        Assert.Null(stored.GuardianTokenHash);
+    }
+
+    [Fact]
+    public async Task 没有注入短信发送器_同样拒绝短信邀请()
+    {
+        await SeedEmploymentAsync();
+        var service = Service("employee", new MemoryStore());
+        var saved = await service.UpsertSelfAsync(DraftWithGuardianPhone("0412 345 678"));
+
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision, DeliverBySms = true });
+
+        Assert.Equal(EmployeeMinorComplianceService.GuardianSmsNotConfiguredCode, invite.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("02 9876 5432")] // 座机：收不到短信
+    [InlineData("+44 7911 123456")] // 非澳洲号码
+    public async Task 监护人电话不是澳洲手机号_拒绝短信邀请_邮件邀请不受影响(string phone)
+    {
+        await SeedEmploymentAsync();
+        var sms = new FakeSms();
+        var service = Service("employee", new MemoryStore(), sms: sms);
+        var saved = await service.UpsertSelfAsync(DraftWithGuardianPhone(phone));
+
+        var bySms = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision, DeliverBySms = true });
+        Assert.Equal(EmployeeMinorComplianceService.GuardianSmsPhoneInvalidCode, bySms.ErrorCode);
+        Assert.Empty(sms.Sent);
+        Assert.Null((await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id)).GuardianTokenHash);
+
+        // 同一份草稿改用邮件仍可发起：座机号只影响短信渠道。
+        var byEmail = await service.InviteGuardianAsync(new() { Version = saved.Data.Version, Revision = saved.Data.Revision });
+        Assert.True(byEmail.Success, byEmail.Message);
+        Assert.True(byEmail.Data!.EmailSent);
+    }
+
+    [Fact]
+    public async Task 短信发送失败时邀请仍有效并回传链接供转发_验证码仍走短信()
+    {
+        await SeedEmploymentAsync();
+        var sms = new FakeSms { Fail = true };
+        var service = Service("employee", new MemoryStore(), sms: sms);
+        var saved = await service.UpsertSelfAsync(DraftWithGuardianPhone("0412 345 678"));
+
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision, DeliverBySms = true });
+
+        Assert.True(invite.Success, invite.Message);
+        Assert.False(invite.Data!.SmsSent);
+        Assert.NotNull(invite.Data.SmsError);
+        Assert.Contains("#token=", invite.Data.SigningUrl);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id);
+        Assert.Equal("awaiting_guardian_signature", stored.Status);
+        Assert.Equal("sms", stored.GuardianInviteChannel);
+        Assert.Null(stored.GuardianInviteEmailSentAtUtc);
+
+        // 员工转发链接后，监护人打开要验证码：验证码走短信，不会落到邮件，员工拿到链接也收不到码。
+        sms.Fail = false;
+        var token = System.Text.RegularExpressions.Regex.Match(invite.Data.SigningUrl, "#token=([A-Za-z0-9_-]+)").Groups[1].Value;
+        Assert.True((await service.SendGuardianCodeAsync(token)).Success);
+        Assert.Equal(0, _mail.CodesSent);
+        Assert.Equal(SmsPurposes.GuardianVerificationCode, Assert.Single(sms.Sent).Purpose);
+    }
+
+    [Fact]
+    public async Task 短信渠道验证码发送被拒_返回短信错误码_不改用邮件()
+    {
+        var row = await SeedAsync("employee", 1, "sms-code-token");
+        await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => new EmployeeMinorCompliance { GuardianInviteChannel = "sms", GuardianPhone = "0412 345 678" }).Where(x => x.Id == row.Id).ExecuteCommandAsync();
+        var sms = new FakeSms { Fail = true };
+        var service = Service("employee", new MemoryStore(), sms: sms);
+
+        var sent = await service.SendGuardianCodeAsync("sms-code-token");
+
+        Assert.False(sent.Success);
+        Assert.Equal(SmsErrorCodes.SendFailed, sent.ErrorCode);
+        Assert.Equal(0, _mail.CodesSent);
+        // 失败时 Details 仍带会话状态，页面据此知道这次验证码本该发到手机。
+        var details = Assert.IsType<EmployeeMinorComplianceGuardianSessionDto>(sent.Details);
+        Assert.Equal("sms", details.CodeChannel);
+    }
+
+    [Fact]
+    public async Task 邮件渠道的会话_验证码渠道为email_不带手机号()
+    {
+        await SeedAsync("employee", 1, "email-channel-token");
+        var service = Service("employee", new MemoryStore());
+
+        var session = await service.GetGuardianSessionAsync("email-channel-token");
+
+        Assert.Equal("email", session.Data!.CodeChannel);
+        Assert.Null(session.Data.MaskedGuardianPhone);
+        Assert.Equal("p***@example.test", session.Data.MaskedGuardianEmail);
     }
 
     [Fact]
@@ -459,14 +619,14 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         await _db.Insertable(new UserStore { UserGUID = "employee", StoreGUID = "store-01", IsPrimary = true }).ExecuteCommandAsync();
         await _db.Insertable(new EmployeeProfile { UserGUID = "employee", Birthday = new DateTime(2012, 1, 1) }).ExecuteCommandAsync();
     }
-    private EmployeeMinorComplianceService Service(string actor, IEmployeeMinorDocumentStore? storage, CurrentUserManageableStoreScope? scopeValue = null, IMinorGuardianEmailSender? mail = null)
+    private EmployeeMinorComplianceService Service(string actor, IEmployeeMinorDocumentStore? storage, CurrentUserManageableStoreScope? scopeValue = null, IMinorGuardianEmailSender? mail = null, ISmsSender? sms = null)
     {
         var context = (SqlSugarContext)RuntimeHelpers.GetUninitializedObject(typeof(SqlSugarContext));
         typeof(SqlSugarContext).GetField("_db", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(context, _db);
         var current = Mock.Of<ICurrentUserService>(x => x.GetCurrentUserGuid() == actor && x.GetCurrentUsername() == actor);
         var scope = new Mock<ICurrentUserManageableStoreScopeService>();
         scope.Setup(x => x.GetScopeAsync()).ReturnsAsync(scopeValue ?? new CurrentUserManageableStoreScope { IsAllowed = true, IsAdmin = true, IsAuthenticated = true });
-        return new(context, current, NullLogger<EmployeeMinorComplianceService>.Instance, scope.Object, storage, mail ?? _mail);
+        return new(context, current, NullLogger<EmployeeMinorComplianceService>.Instance, scope.Object, storage, mail ?? _mail, smsSender: sms);
     }
 
     /// <summary>走完监护人邮箱验证：发验证码 → 从假邮箱取码 → 校验，返回会话密钥。</summary>
@@ -505,6 +665,20 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         {
             if (Fail) return Task.FromResult(ApiResponse<bool>.Error("smtp down", "GUARDIAN_EMAIL_SEND_FAILED"));
             LastTo = toEmail; LastCode = code; CodesSent++;
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+    }
+
+    private sealed class FakeSms : ISmsSender
+    {
+        public bool Available { get; set; } = true;
+        public bool Fail { get; set; }
+        public List<SmsRequest> Sent { get; } = new();
+        public bool IsAvailable => Available;
+        public Task<ApiResponse<bool>> SendAsync(SmsRequest request, CancellationToken cancellationToken = default)
+        {
+            if (Fail) return Task.FromResult(ApiResponse<bool>.Error("sms down", SmsErrorCodes.SendFailed));
+            Sent.Add(request);
             return Task.FromResult(ApiResponse<bool>.OK(true));
         }
     }

@@ -25,6 +25,7 @@ import {
   type MinorContact,
   type MinorEmploymentDraft,
   type MinorGuardianInviteResult,
+  type MinorInviteChannel,
   type MinorOtherEmployer,
 } from "./types";
 const days = [
@@ -111,7 +112,7 @@ export function MinorEmploymentScreen() {
   });
   // 发起签署：先保存草稿（等待签署中再发起会生成新版本、旧链接作废），再由后端发邮件或返回转发链接。
   const invite = useMutation({
-    mutationFn: async (deliverByEmail: boolean) => {
+    mutationFn: async (channel: MinorInviteChannel) => {
       const saved = await minorEmploymentApi.saveDraft({
         ...draft,
         version: query.data?.version,
@@ -123,7 +124,7 @@ export function MinorEmploymentScreen() {
       return minorEmploymentApi.inviteParent(
         saved.version,
         saved.revision,
-        deliverByEmail,
+        channel,
       );
     },
     onSuccess: async (x) => {
@@ -138,7 +139,7 @@ export function MinorEmploymentScreen() {
             : `https://${host}${raw.startsWith("/") ? raw : `/${raw}`}`,
         );
       } else {
-        // 邮件已直达监护人，员工手机上不保留链接。
+        // 邮件 / 短信已直达监护人，员工手机上不保留链接。
         setLink("");
       }
       await qc.invalidateQueries({ queryKey: key });
@@ -988,12 +989,20 @@ export function MinorEmploymentScreen() {
                 ? query.data.guardianInviteEmailSentAt
                   ? t("form.awaiting.emailSent")
                   : t("form.awaiting.emailFailed")
-                : t("form.awaiting.linkGenerated")}
+                : query.data.guardianInviteChannel === "sms"
+                  ? query.data.guardianInviteEmailSentAt
+                    ? t("form.awaiting.smsSent")
+                    : t("form.awaiting.smsFailed")
+                  : t("form.awaiting.linkGenerated")}
             </Text>
             <Text style={styles.muted}>
-              {query.data.guardianEmailVerifiedAt
-                ? t("form.awaiting.verified")
-                : t("form.awaiting.notVerified")}
+              {query.data.guardianInviteChannel === "sms"
+                ? query.data.guardianEmailVerifiedAt
+                  ? t("form.awaiting.verifiedSms")
+                  : t("form.awaiting.notVerifiedSms")
+                : query.data.guardianEmailVerifiedAt
+                  ? t("form.awaiting.verified")
+                  : t("form.awaiting.notVerified")}
             </Text>
             {!query.data.guardianLinkActive ? (
               <HelperText type="error">{t("form.awaiting.expired")}</HelperText>
@@ -1012,9 +1021,9 @@ export function MinorEmploymentScreen() {
               icon="email-fast-outline"
               onPress={() => {
                 if (!validateBeforeInvite()) return;
-                invite.mutate(true);
+                invite.mutate("email");
               }}
-              loading={invite.isPending && invite.variables === true}
+              loading={invite.isPending && invite.variables === "email"}
               disabled={invite.isPending || save.isPending}
             >
               {query.data?.status === "AwaitingParentSignature"
@@ -1022,13 +1031,27 @@ export function MinorEmploymentScreen() {
                 : t("form.actions.sendEmail")}
             </Button>
             <Button
+              mode="outlined"
+              icon="message-text-outline"
+              onPress={() => {
+                if (!validateBeforeInvite()) return;
+                invite.mutate("sms");
+              }}
+              loading={invite.isPending && invite.variables === "sms"}
+              disabled={invite.isPending || save.isPending}
+            >
+              {query.data?.status === "AwaitingParentSignature"
+                ? t("form.actions.resendSms")
+                : t("form.actions.sendSms")}
+            </Button>
+            <Button
               mode="text"
               icon="share-variant"
               onPress={() => {
                 if (!validateBeforeInvite()) return;
-                invite.mutate(false);
+                invite.mutate("share");
               }}
-              loading={invite.isPending && invite.variables === false}
+              loading={invite.isPending && invite.variables === "share"}
               disabled={invite.isPending || save.isPending}
             >
               {t("form.actions.shareLink")}
@@ -1051,10 +1074,28 @@ export function MinorEmploymentScreen() {
                 })}
               </HelperText>
             ) : null}
+            {inviteResult?.smsSent ? (
+              <HelperText type="info">
+                {t("form.invite.smsSent", {
+                  phone:
+                    inviteResult.maskedGuardianPhone ??
+                    t("form.invite.guardianPhone"),
+                })}
+              </HelperText>
+            ) : null}
+            {inviteResult && !inviteResult.smsSent && inviteResult.smsError ? (
+              <HelperText type="error">
+                {t("form.invite.smsFailed", { error: inviteResult.smsError })}
+              </HelperText>
+            ) : null}
             {link ? (
               <>
                 <Text selectable>{link}</Text>
-                <Text style={styles.muted}>{t("form.invite.linkNote")}</Text>
+                <Text style={styles.muted}>
+                  {inviteResult?.deliveryChannel === "sms"
+                    ? t("form.invite.linkNoteSms")
+                    : t("form.invite.linkNote")}
+                </Text>
                 <Button
                   icon="share-variant"
                   onPress={() => void Share.share({ message: link })}

@@ -501,6 +501,8 @@
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
+    <Compile Include="EnglishOnlyEmailTemplatesTests.cs" />
+    <Compile Include="SmsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

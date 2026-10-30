@@ -292,9 +292,11 @@ export function mapSummary(payload: unknown) {
   };
 }
 
-function inviteChannel(x: unknown): "email" | "share" | undefined {
+function inviteChannel(x: unknown): "email" | "sms" | "share" | undefined {
   const value = String(x ?? "").toLowerCase();
-  return value === "email" || value === "share" ? value : undefined;
+  return value === "email" || value === "sms" || value === "share"
+    ? value
+    : undefined;
 }
 
 export function mapInviteResult(x: unknown): MinorGuardianInviteResult {
@@ -306,6 +308,9 @@ export function mapInviteResult(x: unknown): MinorGuardianInviteResult {
     emailSent: get(v, "emailSent") === true,
     maskedGuardianEmail: str(get(v, "maskedGuardianEmail")) || undefined,
     emailError: str(get(v, "emailError")) || undefined,
+    smsSent: get(v, "smsSent") === true,
+    maskedGuardianPhone: str(get(v, "maskedGuardianPhone")) || undefined,
+    smsError: str(get(v, "smsError")) || undefined,
     signingUrl: str(get(v, "signingUrl")) || undefined,
     expiresAt: str(get(v, "expiresAtUtc")) || undefined,
   };

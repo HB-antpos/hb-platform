@@ -27,6 +27,10 @@ assert(JSON.stringify(buildGuardianSignRequest('opaque-token', { revision: 7, ve
 const guardianSession = mapGuardianSession({ MaskedGuardianEmail: 'p***@example.test', EmailVerified: false, CodeSentAtUtc: '2026-10-04T01:00:00Z', ResendAvailableAtUtc: '2026-10-04T01:01:00Z', RemainingSends: 4 })
 assert(guardianSession.maskedGuardianEmail === 'p***@example.test' && !guardianSession.emailVerified, 'session must expose only the masked email before verification')
 assert(guardianSession.remainingSends === 4 && guardianSession.resendAvailableAt === '2026-10-04T01:01:00Z', 'resend pacing must be mapped')
+assert(guardianSession.codeChannel === 'email' && guardianSession.maskedGuardianPhone === undefined, 'email sessions must default to the email channel without a phone')
+const smsSession = mapGuardianSession({ MaskedGuardianEmail: 'p***@example.test', CodeChannel: 'sms', MaskedGuardianPhone: '+614*****678', EmailVerified: false, RemainingSends: 5 })
+assert(smsSession.codeChannel === 'sms' && smsSession.maskedGuardianPhone === '+614*****678', 'sms sessions must expose the channel and only the masked phone')
+assert(mapGuardianSession({ codeChannel: 'SMS', maskedGuardianPhone: '+614*****678' }).codeChannel === 'sms', 'channel must be matched case-insensitively and camelCase keys accepted')
 assert(guardianErrorCode(new RequestError('GUARDIAN_EMAIL_NOT_VERIFIED: 请先验证', 200, { success: false, errorCode: 'GUARDIAN_EMAIL_NOT_VERIFIED' })) === 'GUARDIAN_EMAIL_NOT_VERIFIED', 'business error code must be readable from the request error')
 assert(guardianErrorCode(new Error('network')) === undefined, 'non-request errors have no business code')
 // 监护人现场修改：签署请求带 amendments；HR 详情能读到修改过的分区。

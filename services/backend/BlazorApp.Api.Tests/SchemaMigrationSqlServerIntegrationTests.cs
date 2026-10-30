@@ -4170,6 +4170,55 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 短信发送记录表_新表_可重复执行_识别列漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54410。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54410, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 重复执行不报错、不丢已写入的行。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SmsSendLog (Id, Purpose, PhoneHash, PhoneMask, Segments, Status, CreatedAtUtc)
+            VALUES (N'log-1', N'GuardianVerificationCode', N'hash', N'x', 1, N'Sent', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SmsSendLog"));
+
+        // 列宽漂移 → 54411。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SmsSendLog ALTER COLUMN PhoneMask nvarchar(10) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54411, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SmsSendLog ALTER COLUMN PhoneMask nvarchar(20) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 号码索引缺失 → 54413；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_SmsSendLog_Phone ON dbo.SmsSendLog;");
+        var noPhoneIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54413, noPhoneIndex.Number);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 时间索引缺失 → 54414；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_SmsSendLog_Created ON dbo.SmsSendLog;");
+        var noCreatedIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54414, noCreatedIndex.Number);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SmsSendLog"));
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

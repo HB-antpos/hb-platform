@@ -172,6 +172,8 @@
       "saveDraft": "Save draft",
       "sendEmail": "Email signing request to guardian",
       "resendEmail": "Resend signing email (old link will be voided)",
+      "sendSms": "Text signing link to guardian",
+      "resendSms": "Resend signing text (old link will be voided)",
       "shareLink": "Guardian not receiving the email? Share a link instead",
       "shareLinkButton": "Share signing link",
       "submit": "Submit to HR",
@@ -188,13 +190,21 @@
       "linkGenerated": "Link created. Send it to the guardian.",
       "verified": "The guardian opened the link and verified with the email code. Waiting for their signature.",
       "notVerified": "After opening the link, the guardian must enter the code sent to their email to view and sign.",
-      "expired": "The link has expired. Resend it."
+      "expired": "The link has expired. Resend it.",
+      "smsSent": "The signing link has been texted to the guardian's mobile.",
+      "smsFailed": "The signing text could not be sent. Share the link instead or resend it.",
+      "verifiedSms": "The guardian opened the link and verified with the text-message code. Waiting for their signature.",
+      "notVerifiedSms": "After opening the link, the guardian must enter the code texted to their mobile to view and sign."
     },
     "invite": {
       "emailSent": "The signing email was sent to {{email}}. Ask the guardian to check their inbox (it may be in spam); after opening the link they will receive a second email with a verification code.",
       "guardianEmail": "the guardian's email",
       "emailFailed": "Couldn't send the email: {{error}}. You can forward the link below to the guardian.",
-      "linkNote": "The guardian must still enter the code sent to their email after opening it; only the guardian can complete the signature."
+      "linkNote": "The guardian must still enter the code sent to their email after opening it; only the guardian can complete the signature.",
+      "smsSent": "The signing link was texted to {{phone}}. After opening it the guardian will receive a second text with a verification code.",
+      "guardianPhone": "the guardian's mobile",
+      "smsFailed": "Couldn't send the text: {{error}}. You can forward the link below to the guardian.",
+      "linkNoteSms": "The guardian must still enter the code texted to their mobile after opening it; only the guardian can complete the signature."
     },
     "errors": {
       "server": "The server could not complete the request. Refresh and try again.",

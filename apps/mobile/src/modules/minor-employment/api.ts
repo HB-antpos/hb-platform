@@ -10,6 +10,7 @@ import {
 import type {
   MinorEmploymentDraft,
   MinorEmploymentReviewDetail,
+  MinorInviteChannel,
   MinorReturnField,
 } from "./types";
 const BASE = "/minor-employment";
@@ -24,13 +25,14 @@ export const minorEmploymentApi = {
     return mapProfile((await apiClient.put(`${BASE}/me`, toPayload(d))).data);
   },
   /**
-   * 发起监护人签署。默认由后端直接发邮件到监护人邮箱（不回传链接）；
-   * deliverByEmail=false 是备用方式，只返回链接供员工转发，监护人打开后仍须邮箱验证码。
+   * 发起监护人签署。channel=email（默认）由后端直接发邮件到监护人邮箱（不回传链接）；
+   * sms 由后端短信发到监护人手机（需澳洲手机号，验证码也走短信）；
+   * share 是备用方式，只返回链接供员工转发，监护人打开后仍须验证码。
    */
   async inviteParent(
     version: number,
     revision?: number,
-    deliverByEmail = true,
+    channel: MinorInviteChannel = "email",
   ) {
     return mapInviteResult(
       (
@@ -39,7 +41,8 @@ export const minorEmploymentApi = {
           revision: revision == null ? undefined : Number(revision),
           // 带回家给监护人处理，链接给 72 小时。
           expiryMinutes: 4320,
-          deliverByEmail,
+          deliverByEmail: channel === "email",
+          deliverBySms: channel === "sms",
         })
       ).data,
     );

@@ -236,6 +236,11 @@ public sealed class EmployeeMinorComplianceInviteDto
     public int ExpiryMinutes { get; set; } = 60 * 24;
     /// <summary>默认由后端直接把签署链接发到监护人邮箱；false 时只返回链接供员工转发（备用方式）。</summary>
     public bool DeliverByEmail { get; set; } = true;
+    /// <summary>
+    /// true 时改为把签署链接短信发到监护人手机（需澳洲手机号且短信服务已开启），优先于 <see cref="DeliverByEmail"/>。
+    /// 选短信后验证码也走短信；旧客户端不传此字段，行为不变。
+    /// </summary>
+    public bool DeliverBySms { get; set; }
 }
 
 public sealed class EmployeeMinorComplianceInviteResultDto
@@ -251,6 +256,11 @@ public sealed class EmployeeMinorComplianceInviteResultDto
     public string? MaskedGuardianEmail { get; set; }
     /// <summary>邮件发送失败原因；失败时链接仍有效，员工可改用转发。</summary>
     public string? EmailError { get; set; }
+    public bool SmsSent { get; set; }
+    /// <summary>打码后的监护人手机号，例如 +614*****678；只在短信渠道返回，用于提示员工发到了哪里。</summary>
+    public string? MaskedGuardianPhone { get; set; }
+    /// <summary>短信发送失败原因；失败时链接仍有效，员工可改用转发。</summary>
+    public string? SmsError { get; set; }
 }
 
 public sealed class EmployeeMinorComplianceDocumentDto
@@ -288,6 +298,10 @@ public sealed class EmployeeMinorComplianceAuditDto
 public sealed class EmployeeMinorComplianceGuardianSessionDto
 {
     public string MaskedGuardianEmail { get; set; } = string.Empty;
+    /// <summary>验证码发到哪里：email（默认）或 sms。sms 时页面应提示手机号而不是邮箱。</summary>
+    public string CodeChannel { get; set; } = "email";
+    /// <summary>打码后的监护人手机号；只在 <see cref="CodeChannel"/> 为 sms 时有值。</summary>
+    public string? MaskedGuardianPhone { get; set; }
     public bool EmailVerified { get; set; }
     public DateTime LinkExpiresAtUtc { get; set; }
     public DateTime? CodeSentAtUtc { get; set; }

@@ -1,4 +1,4 @@
-import { MailOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { MailOutlined, MessageOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Input, Layout, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
@@ -37,6 +37,9 @@ export default function GuardianEmailVerification({
   const resendAt = state.resendAvailableAt ? Date.parse(state.resendAvailableAt) : 0
   const cooldown = Math.max(0, Math.ceil((resendAt - now) / 1000))
   const codeSent = Boolean(state.codeSentAt)
+  // 短信渠道的邀请：验证码发到监护人手机，页面提示手机号；其余仍提示邮箱。
+  const bySms = state.codeChannel === 'sms' && Boolean(state.maskedGuardianPhone)
+  const target = bySms ? state.maskedGuardianPhone : state.maskedGuardianEmail
 
   const send = async () => {
     setSending(true)
@@ -44,7 +47,8 @@ export default function GuardianEmailVerification({
     try {
       const next = await sendGuardianCode(token)
       setState(next)
-      setNotice({ type: 'success', text: `验证码已发送到 ${next.maskedGuardianEmail} / Code sent` })
+      const nextTarget = next.codeChannel === 'sms' && next.maskedGuardianPhone ? next.maskedGuardianPhone : next.maskedGuardianEmail
+      setNotice({ type: 'success', text: `验证码已发送到 ${nextTarget} / Code sent` })
     } catch (error) {
       setNotice({ type: 'error', text: readable(error, '验证码发送失败，请稍后重试') })
     } finally {
@@ -78,13 +82,13 @@ export default function GuardianEmailVerification({
               <SafetyCertificateOutlined /> 验证监护人身份
             </Typography.Title>
             <Typography.Paragraph style={{ margin: 0 }}>
-              为确认是家长 / 监护人本人签署，我们会向 <Typography.Text strong>{state.maskedGuardianEmail}</Typography.Text> 发送 6 位验证码。
+              为确认是家长 / 监护人本人签署，我们会向 <Typography.Text strong>{target}</Typography.Text> 发送 6 位验证码{bySms ? '（短信）' : ''}。
             </Typography.Paragraph>
             <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-              To confirm you are the parent or guardian, we will email a 6-digit code to {state.maskedGuardianEmail}.
+              To confirm you are the parent or guardian, we will {bySms ? 'text' : 'email'} a 6-digit code to {target}.
             </Typography.Paragraph>
             <Button
-              icon={<MailOutlined />}
+              icon={bySms ? <MessageOutlined /> : <MailOutlined />}
               block
               type={codeSent ? 'default' : 'primary'}
               loading={sending}
@@ -116,10 +120,10 @@ export default function GuardianEmailVerification({
             ) : null}
             {notice ? <Alert type={notice.type} showIcon message={notice.text} /> : null}
             {state.remainingSends <= 0 ? (
-              <Alert type="warning" showIcon message="验证码发送次数已用完，请联系员工重新发送签署邮件。" />
+              <Alert type="warning" showIcon message={`验证码发送次数已用完，请联系员工重新发送签署${bySms ? '短信' : '邮件'}。`} />
             ) : null}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              验证码 10 分钟内有效，请勿告诉任何人（包括员工本人）。没收到请检查垃圾邮件。
+              验证码 10 分钟内有效，请勿告诉任何人（包括员工本人）。{bySms ? '没收到请确认手机信号并稍后重发。' : '没收到请检查垃圾邮件。'}
             </Typography.Text>
           </Space>
         </Card>
