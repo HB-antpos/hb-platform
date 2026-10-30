@@ -391,7 +391,9 @@ public sealed partial class SquareDirectGateway : ISquareDirectGateway
                 },
                 device_options = new
                 {
-                    device_id = deviceId
+                    device_id = deviceId,
+                    // 与 POS API 一致：付款完成后跳过终端收据屏，避免终端停在收据选项而挡住下一笔收款。
+                    skip_receipt_screen = true
                 },
                 location_id = request.LocationId,
                 reference_id = request.ReferenceId,

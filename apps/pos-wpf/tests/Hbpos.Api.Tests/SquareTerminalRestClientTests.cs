@@ -139,7 +139,10 @@ public sealed class SquareTerminalRestClientTests
         using var document = JsonDocument.Parse(handler.LastBody!);
         Assert.Equal("idem-001", document.RootElement.GetProperty("idempotency_key").GetString());
         var checkout = document.RootElement.GetProperty("checkout");
-        Assert.Equal("device-001", checkout.GetProperty("device_options").GetProperty("device_id").GetString());
+        var deviceOptions = checkout.GetProperty("device_options");
+        Assert.Equal("device-001", deviceOptions.GetProperty("device_id").GetString());
+        // 付款完成后必须让终端跳过收据屏，否则终端停在收据选项会挡住下一笔收款（dismiss 对已完成结账无效）。
+        Assert.True(deviceOptions.GetProperty("skip_receipt_screen").GetBoolean());
         Assert.Equal("location-001", checkout.GetProperty("location_id").GetString());
         Assert.Equal("reference-001", checkout.GetProperty("reference_id").GetString());
         Assert.Equal("front counter", checkout.GetProperty("note").GetString());
