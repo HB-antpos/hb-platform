@@ -54,9 +54,9 @@ public sealed class ReceiptReturnsViewModelTests
     [Fact]
     public async Task OrderSummaryText_shows_order_no_sold_time_and_cashier_in_both_cultures()
     {
-        // 资源格式串的占位符语义必须与代码传参一致：{0}=单号前 8 位、{1}=本地售出时间、{2}=收银员。
+        // 资源格式串的占位符语义必须与代码传参一致：{0}=小票单号（GUID 末 8 位，与小票条码同口径）、{1}=本地售出时间、{2}=收银员。
         // 曾因资源写成「{1} 件 退款 {2:C2}」而显示成「订单 AB12CD34  2026-10-09 17:30 件  退款 Lucy」。
-        var orderGuid = Guid.Parse("ab12cd34-0000-0000-0000-000000000001");
+        var orderGuid = Guid.Parse("00000000-0000-0000-0000-0000ab12cd34");
         var soldAt = new DateTimeOffset(2026, 10, 9, 7, 30, 0, TimeSpan.Zero);
         var soldAtText = soldAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         var localization = new LocalizationService();

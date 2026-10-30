@@ -900,6 +900,7 @@
   <data name="returns.status.productNotFound" xml:space="preserve"><value>Product was not found in the local catalog.</value></data>
   <data name="returns.status.addedNoReceipt" xml:space="preserve"><value>Added {0} for no-receipt return.</value></data>
   <data name="returns.status.orderNotFound" xml:space="preserve"><value>Order was not found.</value></data>
+  <data name="returns.status.orderAmbiguous" xml:space="preserve"><value>Multiple orders match. Please scan the QR code on the receipt.</value></data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve"><value>Loaded local order; online order history is not available.</value></data>
   <data name="returns.status.cardRefundDisabledStale" xml:space="preserve"><value>Refund to the original card is disabled until the order's return records can be loaded online.</value></data>
   <data name="returns.status.addedReceiptLine" xml:space="preserve"><value>Added {0} to refund cart.</value></data>

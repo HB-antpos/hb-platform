@@ -88,7 +88,16 @@ public sealed record ReceiptPrintElement(
     ReceiptPrintElementKind Kind,
     string Text,
     ReceiptPrintAlignment Alignment = ReceiptPrintAlignment.Left,
-    bool IsEmphasized = false);
+    bool IsEmphasized = false,
+    // 中文注释：仅 Barcode 元素使用。默认 2 点宽、100 点高（退款代金券、余额凭证沿用旧值）；
+    // 小票单号条码用 3 点宽、80 点高，扫码枪读取更稳。位图降级时同样以此为期望模块宽。
+    int BarcodeModuleWidth = ReceiptPrintElement.DefaultBarcodeModuleWidth,
+    int BarcodeHeight = ReceiptPrintElement.DefaultBarcodeHeight)
+{
+    public const int DefaultBarcodeModuleWidth = 2;
+
+    public const int DefaultBarcodeHeight = 100;
+}
 
 public sealed record ReceiptPreviewRow(
     ReceiptPreviewRowKind Kind,
@@ -741,6 +750,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
 {
     private const int LineWidth = 42;
     private const int AddressLineWidth = 35;
+    private const int OrderBarcodeModuleWidth = 3;
+    private const int OrderBarcodeHeight = 80;
 
     public ReceiptPrintDocument Build(
         ReceiptDetails receipt,
@@ -801,10 +812,22 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             builder.Blank();
         }
 
-        var displayOrderId = string.IsNullOrWhiteSpace(receipt.OrderDisplay)
-            ? orderId
-            : receipt.OrderDisplay.Trim();
-        builder.Text($"Order: {displayOrderId}");
+        // 中文注释：普通销售/退款单（没有 OrderDisplay）用居中一维条码代替整串 GUID 文本：内容是 GUID 末 8 位（与后端 ShortOrderNo 同口径），
+        // 3 点模块宽、80 点高，条码下方由打印机印出可读 8 位单号；二维码仍编码完整 GUID，退货可扫它精确定位。
+        // 分期单的编号来自 InstallmentNumber（OrderDisplay 有值），保持「Order: 编号」文本行与底部条码不变。
+        var usesOrderBarcode = string.IsNullOrWhiteSpace(receipt.OrderDisplay);
+        if (usesOrderBarcode)
+        {
+            builder.Barcode(
+                ReceiptOrderShortCode.Create(receipt.OrderGuid),
+                OrderBarcodeModuleWidth,
+                OrderBarcodeHeight);
+        }
+        else
+        {
+            builder.Text($"Order: {receipt.OrderDisplay!.Trim()}");
+        }
+
         builder.Text($"Date: {receipt.SoldAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         // 中文注释：小票不再印员工全名，统一显示「昵称 + 姓首字母」；历史订单只有全名时按本机已知员工换算，查不到才印原文。
         builder.Text($"Cashier: {ReceiptStaffDirectory.Shared.ResolveDisplayName(receipt.CashierName)}");
@@ -914,7 +937,12 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         }
 
         builder.Separator();
-        builder.Barcode(orderId);
+        if (!usesOrderBarcode)
+        {
+            // 中文注释：分期单底部条码沿用完整 GUID；普通单的条码已移到顶部，这里不再重复印。
+            builder.Barcode(orderId);
+        }
+
         builder.QrCode(orderId);
         builder.Text($"Print Time: {printedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         builder.Text($"Device: {receipt.DeviceCode}");
@@ -1252,9 +1280,17 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             _previewRows.Add(new ReceiptPreviewRow(ReceiptPreviewRowKind.Separator, text));
         }
 
-        public void Barcode(string text)
+        public void Barcode(
+            string text,
+            int moduleWidth = ReceiptPrintElement.DefaultBarcodeModuleWidth,
+            int height = ReceiptPrintElement.DefaultBarcodeHeight)
         {
-            _elements.Add(new ReceiptPrintElement(ReceiptPrintElementKind.Barcode, text, ReceiptPrintAlignment.Center));
+            _elements.Add(new ReceiptPrintElement(
+                ReceiptPrintElementKind.Barcode,
+                text,
+                ReceiptPrintAlignment.Center,
+                BarcodeModuleWidth: moduleWidth,
+                BarcodeHeight: height));
             _previewRows.Add(new ReceiptPreviewRow(ReceiptPreviewRowKind.Barcode, $"BARCODE {text}", ReceiptPrintAlignment.Center));
         }
 
@@ -1761,11 +1797,17 @@ public sealed class NoopReceiptPrintService(ILocalizationService? localization =
     }
 }
 
-public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = null) : IReceiptPrinterDriver, IDisposable
+public sealed class XpReceiptPrinterDriver(
+    ILocalizationService? localization = null,
+    IReceiptBitmapSink? bitmapSink = null) : IReceiptPrinterDriver, IDisposable
 {
     private const int CashDrawerPinMode = 0;
     private const int CashDrawerOnTime = 25;
     private const int CashDrawerOffTime = 250;
+
+    // 中文注释：位图输出口默认「不可用」——printer.sdk.dll 的 PrintImage 等函数签名未经验证，不能贸然调用，
+    // 原生条码失败时直接降级为文字单号；将来有 SDK 文档并真机验证后，注入真实实现即可启用位图这一级。
+    private readonly IReceiptBitmapSink _bitmapSink = bitmapSink ?? UnavailableReceiptBitmapSink.Instance;
 
     private readonly SemaphoreSlim _printerLock = new(1, 1);
     private bool _disposed;
@@ -1876,13 +1918,12 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
                 {
                     case ReceiptPrintElementKind.Barcode:
                         trace.Stage = PrinterStages.Barcode;
-                        var barcodeResult = GetSdkFailure(
-                            trace,
-                            PrintBarCode(printer, 8, element.Text, 2, 100, (int)ReceiptPrintAlignment.Center, 2),
-                            T("receipt.printer.barcodeFailed", "Printer barcode could not be printed."));
-                        if (barcodeResult is not null)
+                        // 中文注释：条码指令失败不再让整张小票中止——依次降级为位图条码、只印可读单号；
+                        // 只有连文字行也打不出来（打印机本身故障）才中止。
+                        var barcodeFailure = PrintBarcodeWithFallback(printer, element, trace);
+                        if (barcodeFailure is not null)
                         {
-                            return barcodeResult;
+                            return barcodeFailure;
                         }
 
                         break;
@@ -1934,6 +1975,53 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
 
             ReleasePrinter(printer);
         }
+    }
+
+    /// <summary>
+    /// 打印一个条码元素并按「原生 → 位图 → 文字」降级。返回 null 表示这个元素已妥善处理（含降级成功），
+    /// 非 null 表示连文字行都失败，调用方应中止整张小票。
+    /// </summary>
+    private ReceiptPrinterDriverResult? PrintBarcodeWithFallback(IntPtr printer, ReceiptPrintElement element, PrinterCallTrace trace)
+    {
+        ReceiptPrinterDriverResult? textFailure = null;
+        var nativeSdkResult = 0;
+        var outcome = ReceiptBarcodeFallback.Print(
+            nativePrint: () =>
+            {
+                nativeSdkResult = PrintBarCode(
+                    printer,
+                    8,
+                    element.Text,
+                    element.BarcodeModuleWidth,
+                    element.BarcodeHeight,
+                    (int)ReceiptPrintAlignment.Center,
+                    2);
+                return nativeSdkResult == 0;
+            },
+            bitmapPrint: () =>
+                ReceiptBarcodeBitmapRenderer.TryRender(
+                    element.Text,
+                    element.BarcodeHeight,
+                    element.BarcodeModuleWidth,
+                    out var bitmap) &&
+                _bitmapSink.TryPrint(bitmap),
+            textPrint: () =>
+            {
+                // 位图没有 HRI、原生失败后也不会有，所以这里补印的可读单号居中、常规字号。
+                trace.Stage = PrinterStages.Text;
+                textFailure = GetSdkFailure(
+                    trace,
+                    PrintText(printer, element.Text + "\r\n", (int)ReceiptPrintAlignment.Center, 0),
+                    T("receipt.printer.textFailed", "Printer text could not be printed."));
+                return textFailure is null;
+            },
+            onDegraded: degraded => PrinterLinkLogState.RecordBarcodeDegraded(
+                trace,
+                degraded == ReceiptBarcodeOutcome.Bitmap ? "bitmap" : "text-only",
+                nativeSdkResult,
+                element.Text.Length));
+
+        return outcome == ReceiptBarcodeOutcome.Failed ? textFailure : null;
     }
 
     private ReceiptPrinterDriverResult OpenCashDrawerCore(ReceiptPrinterSettings settings, PrinterCallTrace trace)

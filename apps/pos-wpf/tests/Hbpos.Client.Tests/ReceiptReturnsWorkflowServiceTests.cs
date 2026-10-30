@@ -514,6 +514,178 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         Assert.Equal("Multiple OPENITEM records were found in the local catalog.", duplicate.StatusMessage);
     }
 
+    // ---- 小票单号条码（GUID 末 8 位）扫码查单 ----
+
+    private const string AmbiguousStatus = "Multiple orders match. Please scan the QR code on the receipt.";
+
+    // 7e4c91d2-…-5c8d6e0f13ab 的小票单号是 6E0F13AB。
+    private static readonly Guid ShortCodeOrderGuid = Guid.Parse("7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab");
+
+    private static RemoteOrderHistorySummary RemoteSummary(Guid orderGuid)
+    {
+        return new RemoteOrderHistorySummary(orderGuid, "S001", "POS-01", "Alice", DateTimeOffset.UtcNow, 20m, 0m, 20m, 1, "Cash", "Completed");
+    }
+
+    [Theory]
+    [InlineData("6E0F13AB")]
+    [InlineData("6e0f13ab")]
+    [InlineData("  6E0F13AB  ")]
+    public async Task LookupOrderAsync_ShortCodeOnlyAcceptsOrderWhoseGuidEndsWithIt(string scanned)
+    {
+        var lineGuid = Guid.NewGuid();
+        // 服务端是子串匹配，会带回「GUID 里碰巧含有这 8 位」的噪音订单；只有末 8 位相等的才算。
+        var noiseContains = Guid.Parse("6e0f13ab-0000-0000-0000-000000000000");
+        var noiseOther = Guid.NewGuid();
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            QueryResult = new RemoteOrderHistoryResult(
+                [RemoteSummary(noiseContains), RemoteSummary(ShortCodeOrderGuid), RemoteSummary(noiseOther)]),
+            ReturnContext = new OrderReturnContextDto(CreateRemoteOrder(ShortCodeOrderGuid, lineGuid, 1m, 10m), [])
+        };
+        var service = CreateService(remote);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), scanned);
+
+        Assert.NotNull(result.Order);
+        Assert.Equal(ShortCodeOrderGuid, result.Order.OrderGuid);
+        Assert.True(result.IsRemote);
+        // 只查一次候选（规范化后的大写短码、多取一批），命中唯一订单后直接取退货上下文。
+        var query = Assert.Single(remote.Queries);
+        Assert.Equal("6E0F13AB", query.Keyword);
+        Assert.Equal("S001", query.StoreCode);
+        Assert.Equal(20, query.Take);
+        Assert.Equal(1, remote.ReturnContextCallCount);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_ShortCodeMatchingSeveralOrdersAsksForTheQrCodeInsteadOfGuessing()
+    {
+        var other = Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab");
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            QueryResult = new RemoteOrderHistoryResult([RemoteSummary(ShortCodeOrderGuid), RemoteSummary(other)]),
+            ReturnContext = new OrderReturnContextDto(CreateRemoteOrder(ShortCodeOrderGuid, Guid.NewGuid(), 1m, 10m), [])
+        };
+        var service = CreateService(remote);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), "6E0F13AB");
+
+        Assert.Null(result.Order);
+        Assert.Equal(AmbiguousStatus, result.StatusMessage);
+        Assert.False(result.IsRemote);
+        // 绝不能猜一条去取退货上下文，也不能落回关键字路径再取第一条。
+        Assert.Equal(0, remote.ReturnContextCallCount);
+        Assert.Single(remote.Queries);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_ShortCodeAmbiguousMessageIsLocalized()
+    {
+        var other = Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab");
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            QueryResult = new RemoteOrderHistoryResult([RemoteSummary(ShortCodeOrderGuid), RemoteSummary(other)])
+        };
+        var service = CreateService(remote, localization: CreateLocalization("zh-CN"));
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), "6E0F13AB");
+
+        Assert.Equal("多条订单匹配，请扫小票上的二维码。", result.StatusMessage);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_ShortCodeWithNoMatchingOrderFallsBackToTheOriginalKeywordPath()
+    {
+        // 候选里没有末 8 位相等的订单：走原有「关键字取第 1 条」路径，行为与改动前一致。
+        var fallbackGuid = Guid.NewGuid();
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            QueryResult = new RemoteOrderHistoryResult([RemoteSummary(fallbackGuid)]),
+            ReturnContext = new OrderReturnContextDto(CreateRemoteOrder(fallbackGuid, Guid.NewGuid(), 1m, 10m), [])
+        };
+        var service = CreateService(remote);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), "6E0F13AB");
+
+        Assert.Equal(fallbackGuid, result.Order?.OrderGuid);
+        Assert.Equal(2, remote.Queries.Count);
+        Assert.Equal(20, remote.Queries[0].Take);
+        Assert.Equal(1, remote.Queries[1].Take);
+        Assert.Equal("6E0F13AB", remote.Queries[1].Keyword);
+    }
+
+    [Theory]
+    [InlineData("ORDER-001")]   // 普通关键字
+    [InlineData("6E0F13A")]     // 7 位
+    [InlineData("6E0F13ABC")]   // 9 位
+    [InlineData("6E0F13AG")]    // 非十六进制
+    public async Task LookupOrderAsync_NonShortCodeKeywordsKeepTheSingleResultQuery(string keyword)
+    {
+        var orderGuid = Guid.NewGuid();
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            QueryResult = new RemoteOrderHistoryResult([RemoteSummary(orderGuid)]),
+            ReturnContext = new OrderReturnContextDto(CreateRemoteOrder(orderGuid, Guid.NewGuid(), 1m, 10m), [])
+        };
+        var service = CreateService(remote);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), keyword);
+
+        Assert.Equal(orderGuid, result.Order?.OrderGuid);
+        var query = Assert.Single(remote.Queries);
+        Assert.Equal(1, query.Take);
+        Assert.Equal(keyword, query.Keyword);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_LocalShortCodeFindsTheOrderByGuidSuffix()
+    {
+        var order = CreateLocalOrder(ShortCodeOrderGuid);
+        var noise = CreateLocalOrder(Guid.Parse("6e0f13ab-0000-0000-0000-000000000000"));
+        var service = CreateService(localRepository: new FakeLocalOrderRepository([noise, order]));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "6e0f13ab");
+
+        Assert.Equal(ShortCodeOrderGuid, result.Order?.OrderGuid);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_LocalShortCodeCollisionAsksForTheQrCode()
+    {
+        var first = CreateLocalOrder(ShortCodeOrderGuid);
+        var second = CreateLocalOrder(Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab"));
+        var service = CreateService(localRepository: new FakeLocalOrderRepository([first, second]));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "6E0F13AB");
+
+        Assert.Null(result.Order);
+        Assert.Equal(AmbiguousStatus, result.StatusMessage);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_LocalShortCodeCollisionAcrossStoresPrefersTheCurrentStore()
+    {
+        var mine = CreateLocalOrder(ShortCodeOrderGuid);
+        var otherStore = CreateLocalOrder(Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab")) with { StoreCode = "S002" };
+        var service = CreateService(localRepository: new FakeLocalOrderRepository([mine, otherStore]));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "6E0F13AB");
+
+        Assert.Equal(ShortCodeOrderGuid, result.Order?.OrderGuid);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_ShortCodeOnlineRemoteFailureFallsBackToLocalSuffixMatch()
+    {
+        var order = CreateLocalOrder(ShortCodeOrderGuid);
+        var service = CreateService(new ThrowingRemoteOrderHistoryService(), new FakeLocalOrderRepository([order]));
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), "6E0F13AB");
+
+        Assert.Equal(ShortCodeOrderGuid, result.Order?.OrderGuid);
+        Assert.True(result.ReturnRecordsMayBeStale);
+    }
+
     private static ReceiptReturnsWorkflowService CreateService(
         IRemoteOrderHistoryService? remote = null,
         FakeLocalOrderRepository? localRepository = null,
@@ -757,6 +929,8 @@ public sealed class ReceiptReturnsWorkflowServiceTests
 
         public int QueryCallCount { get; private set; }
 
+        public List<RemoteOrderHistoryQuery> Queries { get; } = [];
+
         public int ReturnContextCallCount { get; private set; }
 
         public CancellationToken LastReturnContextCancellationToken { get; private set; }
@@ -764,6 +938,7 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         public Task<RemoteOrderHistoryResult> QueryAsync(RemoteOrderHistoryQuery query, CancellationToken cancellationToken = default)
         {
             QueryCallCount++;
+            Queries.Add(query);
             return Task.FromResult(QueryResult);
         }
 

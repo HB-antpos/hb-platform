@@ -2609,6 +2609,9 @@
   <data name="returns.status.orderNotFound" xml:space="preserve">
     <value>未找到订单。</value>
   </data>
+  <data name="returns.status.orderAmbiguous" xml:space="preserve">
+    <value>多条订单匹配，请扫小票上的二维码。</value>
+  </data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve">
     <value>已加载本地订单；线上订单历史不可用。</value>
   </data>
