@@ -1020,6 +1020,134 @@ public sealed class TransactionHistoryViewModelTests
     }
 
     [Fact]
+    public async Task Online_history_pages_forward_and_back_using_skip_and_one_extra_row_probe()
+    {
+        // 共 120 单：第 1 页 50、第 2 页 50、第 3 页 20。
+        var all = Enumerable.Range(0, 120)
+            .Select(index => new RemoteOrderHistorySummary(
+                Guid.NewGuid(), "S001", "POS-01", "Alice", DateTimeOffset.Now.AddMinutes(-index),
+                10m, 0m, 10m, 1, "Cash", "Synced"))
+            .ToList();
+        var remoteOrders = new CapturingRemoteOrderHistoryService
+        {
+            QueryHandler = (query, _) => Task.FromResult(new RemoteOrderHistoryResult(
+                all.Skip(query.Skip).Take(query.Take).ToList()))
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            remoteOrders,
+            CreateSession());
+        viewModel.IsOnlineSourceSelected = true;
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(TransactionHistoryViewModel.PageSize, viewModel.Orders.Count);
+        Assert.Equal(0, remoteOrders.LastQuery?.Skip);
+        Assert.Equal(TransactionHistoryViewModel.PageSize + 1, remoteOrders.LastQuery?.Take);
+        Assert.Equal(1, viewModel.CurrentPage);
+        Assert.False(viewModel.HasPreviousPage);
+        Assert.True(viewModel.HasNextPage);
+        Assert.True(viewModel.IsPagerVisible);
+
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+        Assert.Equal(2, viewModel.CurrentPage);
+        Assert.Equal(TransactionHistoryViewModel.PageSize, remoteOrders.LastQuery?.Skip);
+        Assert.Equal(all[50].OrderGuid, viewModel.Orders[0].OrderGuid);
+        Assert.True(viewModel.HasPreviousPage);
+        Assert.True(viewModel.HasNextPage);
+
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+        Assert.Equal(3, viewModel.CurrentPage);
+        Assert.Equal(20, viewModel.Orders.Count);
+        Assert.False(viewModel.HasNextPage);
+        Assert.False(viewModel.NextPageCommand.CanExecute(null));
+
+        await viewModel.PreviousPageCommand.ExecuteAsync(null);
+        Assert.Equal(2, viewModel.CurrentPage);
+        Assert.Equal(all[50].OrderGuid, viewModel.Orders[0].OrderGuid);
+    }
+
+    [Fact]
+    public async Task Reloading_with_new_filters_returns_to_first_page()
+    {
+        var all = Enumerable.Range(0, 80)
+            .Select(index => new RemoteOrderHistorySummary(
+                Guid.NewGuid(), "S001", "POS-01", "Alice", DateTimeOffset.Now.AddMinutes(-index),
+                10m, 0m, 10m, 1, "Cash", "Synced"))
+            .ToList();
+        var remoteOrders = new CapturingRemoteOrderHistoryService
+        {
+            QueryHandler = (query, _) => Task.FromResult(new RemoteOrderHistoryResult(
+                all.Skip(query.Skip).Take(query.Take).ToList()))
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            remoteOrders,
+            CreateSession());
+        viewModel.IsOnlineSourceSelected = true;
+        await viewModel.LoadAsync();
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+        Assert.Equal(2, viewModel.CurrentPage);
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(1, viewModel.CurrentPage);
+        Assert.Equal(0, remoteOrders.LastQuery?.Skip);
+        Assert.False(viewModel.HasPreviousPage);
+    }
+
+    [Fact]
+    public async Task Local_history_pages_and_shows_suspended_orders_only_on_first_page()
+    {
+        var localOrders = Enumerable.Range(0, 60)
+            .Select(index => new LocalOrderSummary(
+                Guid.NewGuid(), "S001", "POS-01", "Alice", DateTimeOffset.Now.AddMinutes(-index),
+                10m, 0m, 10m, "Synced", 1, "Cash"))
+            .ToList();
+        var receiptQuery = new CapturingReceiptQueryService
+        {
+            QueryHandler = (query, _) => Task.FromResult<IReadOnlyList<LocalOrderSummary>>(
+                localOrders.Skip(query.Skip).Take(TransactionHistoryViewModel.PageSize + 1).ToList())
+        };
+        var suspendedOrders = new CapturingSuspendedOrderService();
+        var viewModel = new TransactionHistoryViewModel(
+            receiptQuery,
+            suspendedOrders,
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession());
+
+        await viewModel.LoadAsync();
+        Assert.True(viewModel.HasNextPage);
+        Assert.Equal(0, receiptQuery.LastQuery?.Skip);
+        var firstPageSuspendedCalls = suspendedOrders.CallCount;
+        Assert.Equal(1, firstPageSuspendedCalls);
+
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+
+        Assert.Equal(TransactionHistoryViewModel.PageSize, receiptQuery.LastQuery?.Skip);
+        Assert.Equal(10, viewModel.Orders.Count);
+        Assert.False(viewModel.HasNextPage);
+        Assert.Equal(firstPageSuspendedCalls, suspendedOrders.CallCount);
+    }
+
+    [Fact]
+    public void Installment_source_hides_pager()
+    {
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession());
+
+        viewModel.IsInstallmentSourceSelected = true;
+
+        Assert.False(viewModel.IsPagerVisible);
+        Assert.False(viewModel.NextPageCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task LoadAsync_handles_remote_timeout_without_throwing()
     {
         const string timeoutMessage = "The request timed out.";
@@ -4677,6 +4805,8 @@ public sealed class TransactionHistoryViewModelTests
 
         public string? LastDeviceCode { get; private set; }
 
+        public int CallCount { get; private set; }
+
         public Guid? RecalledOrderGuid { get; private set; }
 
         public bool ThrowOnGetPendingOrders { get; set; }
@@ -4698,6 +4828,7 @@ public sealed class TransactionHistoryViewModelTests
             CancellationToken cancellationToken = default)
         {
             LastDeviceCode = deviceCode;
+            CallCount++;
             if (ThrowOnGetPendingOrders)
             {
                 throw new InvalidOperationException("simulated held local load failure");

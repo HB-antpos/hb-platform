@@ -88,8 +88,12 @@ public sealed class SqlSugarOrderHistoryRepository(
         }
 
         var take = Math.Clamp(request.Take, 1, 200);
+        var skip = Math.Max(request.Skip, 0);
+        // 翻页要求排序稳定：同一时间的订单用 OrderGuid 兜底，避免跨页重复或漏单。
         var orders = await query
             .OrderByDescending(x => x.OrderTime)
+            .OrderBy(x => x.OrderGuid)
+            .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
         var orderGuids = orders.Select(x => x.OrderGuid).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();

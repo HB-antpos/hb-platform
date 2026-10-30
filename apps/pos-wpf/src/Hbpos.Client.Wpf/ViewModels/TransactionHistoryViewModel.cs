@@ -161,6 +161,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     public const string PageId = "TransactionHistory";
 
     private const int ReuploadBatchSize = 500;
+
+    /// <summary>本机与在线历史每页条数。</summary>
+    internal const int PageSize = 50;
     private static readonly TimeSpan HeldAutoRefreshInterval = TimeSpan.FromSeconds(10);
 
     private readonly IReceiptQueryService? _receiptQueryService;
@@ -201,6 +204,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private int _activeConfirmationDialogCount;
     private int _scannerLoadCommandInvocationCount;
     private bool _isScreenVisible;
+    private int _pageIndex;
+    private bool _hasNextPage;
     private CancellationTokenSource? _heldLoadCancellation;
     private CancellationTokenSource? _heldRemoteLoadCancellation;
     private Task<IReadOnlyList<SharedHeldOrderListItemDto>>? _heldRemoteRequestTask;
@@ -439,6 +444,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         ReuploadSelectedCommand = new AsyncRelayCommand(ReuploadSelectedAsync, CanStartReupload);
         ReuploadDateRangeCommand = new AsyncRelayCommand(ReuploadDateRangeAsync, CanReuploadDateRange);
         ApplyQuickDateRangeCommand = new AsyncRelayCommand<string>(ApplyQuickDateRangeAsync);
+        PreviousPageCommand = new AsyncRelayCommand(() => GoToPageAsync(_pageIndex - 1), () => HasPreviousPage);
+        NextPageCommand = new AsyncRelayCommand(() => GoToPageAsync(_pageIndex + 1), () => HasNextPage);
         DeleteHeldOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(DeleteHeldOrderAsync, CanDeleteHeldOrder);
         ShareHeldOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(ShareHeldOrderAsync, CanShareHeldOrder);
         ForceReleaseHeldOrderCommand = new RelayCommand<HistoryOrderListItem>(RequestForceRelease, CanForceReleaseOrder);
@@ -625,6 +632,68 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
 
     /// <summary>筛选栏快捷日期范围（参数见 QuickDateRange* 常量），设好起止日期后立即按当前筛选查询。</summary>
     public IAsyncRelayCommand<string> ApplyQuickDateRangeCommand { get; }
+
+    public IAsyncRelayCommand PreviousPageCommand { get; }
+
+    public IAsyncRelayCommand NextPageCommand { get; }
+
+    /// <summary>仅本机与在线来源分页；分期、挂单沿用单页展示。</summary>
+    public bool IsPagerVisible =>
+        SelectedSource is TransactionHistorySource.LocalOrders or TransactionHistorySource.RemoteOrders;
+
+    public int CurrentPage => _pageIndex + 1;
+
+    public bool HasPreviousPage => _pageIndex > 0;
+
+    public bool HasNextPage => _hasNextPage;
+
+    public string PageLabel => string.Format(
+        CurrentDisplayCulture,
+        TOrFallback("history.pager.page", "Page {0}"),
+        CurrentPage);
+
+    private void SetPageIndex(int pageIndex)
+    {
+        if (_pageIndex == pageIndex)
+        {
+            return;
+        }
+
+        _pageIndex = pageIndex;
+        NotifyPagerChanged();
+    }
+
+    private void SetHasNextPage(bool hasNextPage)
+    {
+        if (_hasNextPage == hasNextPage)
+        {
+            return;
+        }
+
+        _hasNextPage = hasNextPage;
+        NotifyPagerChanged();
+    }
+
+    private void NotifyPagerChanged()
+    {
+        OnPropertyChanged(nameof(CurrentPage));
+        OnPropertyChanged(nameof(HasPreviousPage));
+        OnPropertyChanged(nameof(HasNextPage));
+        OnPropertyChanged(nameof(PageLabel));
+        PreviousPageCommand?.NotifyCanExecuteChanged();
+        NextPageCommand?.NotifyCanExecuteChanged();
+    }
+
+    private async Task GoToPageAsync(int pageIndex)
+    {
+        if (pageIndex < 0 || !IsPagerVisible)
+        {
+            return;
+        }
+
+        SetPageIndex(pageIndex);
+        await LoadPageAsync(CancellationToken.None);
+    }
 
     public IRelayCommand ReturnToPosCommand { get; }
 
@@ -911,7 +980,14 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     public XmlLanguage CurrentUiLanguage =>
         XmlLanguage.GetLanguage(CurrentDisplayCulture.IetfLanguageTag);
 
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <summary>筛选条件、来源或日期变化后的查询：一律回到第一页。</summary>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        SetPageIndex(0);
+        return LoadPageAsync(cancellationToken);
+    }
+
+    private async Task LoadPageAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _activeQueryCount);
         try
@@ -938,6 +1014,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 return;
             }
 
+            // 非分页来源（分期）没有下一页；分页来源由各自的加载方法回填。
+            SetHasNextPage(false);
             var orders = SelectedSource switch
             {
                 TransactionHistorySource.RemoteOrders => await LoadRemoteOrdersAsync(cancellationToken),
@@ -1048,6 +1126,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
 
         OnPropertyChanged(nameof(SelectedSource));
+        OnPropertyChanged(nameof(IsPagerVisible));
         OnPropertyChanged(nameof(IsRecallVisible));
         OnPropertyChanged(nameof(IsReprintVisible));
         OnPropertyChanged(nameof(IsLocalSourceSelected));
@@ -1265,7 +1344,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private async Task<IReadOnlyList<HistoryOrderListItem>> LoadLocalAndSuspendedOrdersAsync(CancellationToken cancellationToken)
     {
         var localOrdersTask = LoadLocalOrdersAsync(cancellationToken);
-        var suspendedOrdersTask = LoadSuspendedOrdersAsync(cancellationToken);
+        // 待取回的挂单数量很少且不参与翻页，只在第一页并入，避免每页重复出现。
+        var suspendedOrdersTask = _pageIndex == 0
+            ? LoadSuspendedOrdersAsync(cancellationToken)
+            : Task.FromResult<IReadOnlyList<HistoryOrderListItem>>([]);
         await Task.WhenAll(localOrdersTask, suspendedOrdersTask);
 
         return localOrdersTask.Result
@@ -1285,9 +1367,13 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             ParseDateFrom(DateFrom),
             ParseDateTo(DateTo),
             SelectedTerminalDeviceCode,
-            NormalizeKeyword(SearchText));
-        var orders = await _receiptQueryService.GetRecentOrdersAsync(query, 100, cancellationToken);
+            NormalizeKeyword(SearchText),
+            _pageIndex * PageSize);
+        // 多取一条只用来判断是否还有下一页，不显示。
+        var orders = await _receiptQueryService.GetRecentOrdersAsync(query, PageSize + 1, cancellationToken);
+        SetHasNextPage(orders.Count > PageSize);
         return orders
+            .Take(PageSize)
             .Select(order => new HistoryOrderListItem(
                 order.OrderGuid,
                 TransactionHistorySource.LocalOrders,
@@ -2133,9 +2219,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 ParseDateTo(DateTo),
                 SelectedTerminalDeviceCode,
                 NormalizeKeyword(SearchText),
-                100),
+                PageSize + 1,
+                _pageIndex * PageSize),
             cancellationToken);
-        return result.Orders.Select(order => new HistoryOrderListItem(
+        SetHasNextPage(result.Orders.Count > PageSize);
+        return result.Orders.Take(PageSize).Select(order => new HistoryOrderListItem(
             order.OrderGuid,
             TransactionHistorySource.RemoteOrders,
             order.StoreCode,
@@ -4395,6 +4483,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         RefreshTerminalOptions(SelectedTerminalOption?.DeviceCode is null);
         LocalizeSuspendedRows();
         OnPropertyChanged(nameof(CurrentUiLanguage));
+        OnPropertyChanged(nameof(PageLabel));
         OnPropertyChanged(nameof(TitleText));
         OnPropertyChanged(nameof(SearchHintText));
         OnPropertyChanged(nameof(ReceiptPreviewLabel));

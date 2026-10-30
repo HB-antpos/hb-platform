@@ -1659,6 +1659,15 @@
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>Last 7 days</value>
   </data>
+  <data name="history.pager.previous" xml:space="preserve">
+    <value>Previous</value>
+  </data>
+  <data name="history.pager.next" xml:space="preserve">
+    <value>Next</value>
+  </data>
+  <data name="history.pager.page" xml:space="preserve">
+    <value>Page {0}</value>
+  </data>
   <data name="cardRecovery.v2.channelAll" xml:space="preserve"><value>All</value></data>
   <data name="cardRecovery.v2.typeAll" xml:space="preserve"><value>All</value></data>
   <data name="cardRecovery.v2.typeSale" xml:space="preserve"><value>Sale</value></data>
