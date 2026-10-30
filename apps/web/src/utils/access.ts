@@ -135,6 +135,7 @@ function createEmptyAccess(): AccessControl {
     canManageFaceCameras: false,
     canManageMyobConnections: false,
     canBindMyobEmployees: false,
+    canPushMyobTimesheet: false,
     canAccessMyob: false,
     canViewMyobPayslips: false,
     canViewAllMyobPayslips: false,
@@ -406,6 +407,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
   const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
   const canBindMyobEmployees = isAdmin || hasPermission(P.Myob.EmployeeBind)
+  // 推送到 MYOB 只认独立权限码：店长有「编辑工资」能看预览，但不能因此写 MYOB；Admin 角色放行。
+  const canPushMyobTimesheet = isAdmin || hasPermission(P.Myob.TimesheetPush)
   // MYOB 对接页入口：三个页签各有独立权限（连接与映射 / 员工绑定 / 发薪公司 = 编辑工资），任一即可进入，页内只显示有权限的页签。
   const canAccessMyob = canManageMyobConnections || canBindMyobEmployees || canEditAttendancePayroll
   // 工资单只认两个独立权限码（含薪资等敏感信息）：编辑工资 / 员工绑定 / 连接管理都不连带；Admin 角色放行。
@@ -571,6 +574,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageFaceCameras,
     canManageMyobConnections,
     canBindMyobEmployees,
+    canPushMyobTimesheet,
     canAccessMyob,
     canViewMyobPayslips,
     canViewAllMyobPayslips,

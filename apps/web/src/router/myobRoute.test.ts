@@ -80,6 +80,8 @@ assertEqual(P.Myob.ConnectionManage, MYOB_CODE, '权限码与后端一致')
 assertEqual(P.Myob.EmployeeBind, MYOB_BIND_CODE, '员工绑定权限码与后端一致')
 assertEqual(getAccessKeyPermissionCodes('canManageMyobConnections').join(','), MYOB_CODE, '连接与映射页签只映射到 Myob.Connection.Manage')
 assertEqual(getAccessKeyPermissionCodes('canBindMyobEmployees').join(','), MYOB_BIND_CODE, '员工绑定页签只映射到 Myob.Employee.Bind')
+assertEqual(P.Myob.TimesheetPush, 'Myob.Timesheet.Push', '推送权限码与后端一致')
+assertEqual(getAccessKeyPermissionCodes('canPushMyobTimesheet').join(','), 'Myob.Timesheet.Push', '推送只映射到 Myob.Timesheet.Push，不连带编辑工资')
 assertEqual(
   getAccessKeyPermissionCodes('canAccessMyob').join(','),
   [MYOB_CODE, MYOB_BIND_CODE, PAYROLL_EDIT_CODE].join(','),

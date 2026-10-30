@@ -15,19 +15,26 @@ import type {
 
 // ───────────────────────── 工资类别映射 ─────────────────────────
 
-/** 全部 7 个类别键，顺序即页面行的顺序（与后端 MyobPayCategoryKeys.All 一致）。 */
+/** 全部 9 个类别键，顺序即页面行的顺序（与后端 MyobPayCategoryKeys.All 一致）。 */
 export const PAY_CATEGORY_KEYS: readonly MyobPayCategoryKey[] = [
   'weekday',
   'saturday',
   'sunday',
   'saturdayCasual',
   'sundayCasual',
+  'publicHoliday',
+  'publicHolidayCasual',
   'personalLeave',
   'holidayLeave',
 ]
 
-/** 可选项：临时工（Casual）的周六 / 周日。公司里没有临时工周末工时就不用设；有了又没设，预览会拦截该员工。 */
-export const PAY_CATEGORY_OPTIONAL_KEYS: readonly MyobPayCategoryKey[] = ['saturdayCasual', 'sundayCasual']
+/** 可选项：临时工（Casual）的周六 / 周日，以及公共假期（全职兼职、临时工各一项）。公司里没有对应工时就不用设；有了又没设，预览会拦截该员工。 */
+export const PAY_CATEGORY_OPTIONAL_KEYS: readonly MyobPayCategoryKey[] = [
+  'saturdayCasual',
+  'sundayCasual',
+  'publicHoliday',
+  'publicHolidayCasual',
+]
 
 export function isOptionalPayCategory(key: MyobPayCategoryKey): boolean {
   return PAY_CATEGORY_OPTIONAL_KEYS.includes(key)
@@ -44,6 +51,8 @@ const PAY_CATEGORY_FIELDS: Readonly<Record<MyobPayCategoryKey, keyof MyobPayCate
   sunday: 'sundayUid',
   saturdayCasual: 'saturdayCasualUid',
   sundayCasual: 'sundayCasualUid',
+  publicHoliday: 'publicHolidayUid',
+  publicHolidayCasual: 'publicHolidayCasualUid',
   personalLeave: 'personalLeaveUid',
   holidayLeave: 'holidayLeaveUid',
 }
@@ -66,6 +75,8 @@ export const PAY_CATEGORY_ROWS: readonly PayCategoryRowMeta[] = [
   { key: 'sunday', optional: false, labelKey: 'myob.payCategories.rows.sunday.label', subKey: 'myob.payCategories.rows.sunday.sub', noteKey: 'myob.payCategories.rows.sunday.note' },
   { key: 'saturdayCasual', optional: true, labelKey: 'myob.payCategories.rows.saturdayCasual.label', subKey: 'myob.payCategories.rows.saturdayCasual.sub', noteKey: 'myob.payCategories.rows.saturdayCasual.note' },
   { key: 'sundayCasual', optional: true, labelKey: 'myob.payCategories.rows.sundayCasual.label', subKey: 'myob.payCategories.rows.sundayCasual.sub', noteKey: 'myob.payCategories.rows.sundayCasual.note' },
+  { key: 'publicHoliday', optional: true, labelKey: 'myob.payCategories.rows.publicHoliday.label', subKey: 'myob.payCategories.rows.publicHoliday.sub', noteKey: 'myob.payCategories.rows.publicHoliday.note' },
+  { key: 'publicHolidayCasual', optional: true, labelKey: 'myob.payCategories.rows.publicHolidayCasual.label', subKey: 'myob.payCategories.rows.publicHolidayCasual.sub', noteKey: 'myob.payCategories.rows.publicHolidayCasual.note' },
   { key: 'personalLeave', optional: false, labelKey: 'myob.payCategories.rows.personalLeave.label', subKey: 'myob.payCategories.rows.personalLeave.sub', noteKey: 'myob.payCategories.rows.personalLeave.note' },
   { key: 'holidayLeave', optional: false, labelKey: 'myob.payCategories.rows.holidayLeave.label', subKey: 'myob.payCategories.rows.holidayLeave.sub', noteKey: 'myob.payCategories.rows.holidayLeave.note' },
 ]
@@ -206,7 +217,7 @@ export function getPayCategorySaveState(data: MyobPayCategories, edits: PayCateg
   return { remaining, changed, canSave: remaining === 0 && changed }
 }
 
-/** 保存请求体；5 项必填没选齐返回 null（调用方不应发请求）；临时工两项可以为 null（没设 / 清空）。 */
+/** 保存请求体；5 项必填没选齐返回 null（调用方不应发请求）；临时工周末与公共假期四项可以为 null（没设 / 清空）。 */
 export function buildPayCategoryMappingRequest(
   data: MyobPayCategories,
   edits: PayCategoryEdits,
@@ -221,6 +232,8 @@ export function buildPayCategoryMappingRequest(
     sundayUid: values.sunday,
     saturdayCasualUid: values.saturdayCasual,
     sundayCasualUid: values.sundayCasual,
+    publicHolidayUid: values.publicHoliday,
+    publicHolidayCasualUid: values.publicHolidayCasual,
     personalLeaveUid: values.personalLeave,
     holidayLeaveUid: values.holidayLeave,
   }
@@ -710,6 +723,8 @@ export const PUSHED_LABEL_KEYS: Readonly<Record<string, string>> = {
   sunday: 'myob.push.drawer.pushedRows.sunday',
   saturdayCasual: 'myob.push.drawer.pushedRows.saturdayCasual',
   sundayCasual: 'myob.push.drawer.pushedRows.sundayCasual',
+  publicHoliday: 'myob.push.drawer.pushedRows.publicHoliday',
+  publicHolidayCasual: 'myob.push.drawer.pushedRows.publicHolidayCasual',
   personalLeave: 'myob.push.drawer.pushedRows.personalLeave',
   holidayLeave: 'myob.push.drawer.pushedRows.holidayLeave',
 }
@@ -850,6 +865,7 @@ export function buildPreviewCsv(preview: MyobTimesheetPreview, tx: CsvText): str
     tx('myob.push.csv.weekday'),
     tx('myob.push.csv.saturday'),
     tx('myob.push.csv.sunday'),
+    tx('myob.push.csv.publicHoliday'),
     tx('myob.push.csv.personalLeave'),
     tx('myob.push.csv.holidayLeave'),
     tx('myob.push.csv.pushedTotal'),
@@ -874,6 +890,7 @@ export function buildPreviewCsv(preview: MyobTimesheetPreview, tx: CsvText): str
       formatHours(row.pushed.weekday),
       formatHours(row.pushed.saturday),
       formatHours(row.pushed.sunday),
+      formatHours(row.pushed.publicHoliday),
       formatHours(row.pushed.personalLeave),
       formatHours(row.pushed.holidayLeave),
       formatHours(row.pushedTotal),

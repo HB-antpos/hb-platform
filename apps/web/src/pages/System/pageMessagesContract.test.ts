@@ -186,6 +186,9 @@ const pages = [
       'src/pages/PosAdmin/Myob/PayCategoryMappingCard.tsx',
       'src/pages/PosAdmin/Myob/PushPreviewTab.tsx',
       'src/pages/PosAdmin/Myob/PushDetailDrawer.tsx',
+      'src/pages/PosAdmin/Myob/myobPushLogic.ts',
+      'src/pages/PosAdmin/Myob/PushConfirmModal.tsx',
+      'src/pages/PosAdmin/Myob/PushBatchesDrawer.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',

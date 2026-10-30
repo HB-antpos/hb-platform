@@ -4132,6 +4132,44 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资类别映射_公共假期两列_旧表加列_可重复执行_保留既有映射_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54355。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54355, noTable.Number);
+
+        // 旧表（20261027.004）已有一行映射，加列后映射原样保留，新列为 NULL。
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayCategoryMapping (ConnectionGuid, WeekdayUid, SaturdayUid, UpdatedAt)
+            VALUES (N'c-1', N'cat-weekday', N'cat-sat', SYSUTCDATETIME());
+            """);
+        var lacksColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54356, lacksColumns.Number);
+
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE SaturdayUid = N'cat-sat' AND PublicHolidayUid IS NULL AND PublicHolidayCasualUid IS NULL"));
+
+        // 重复执行不报错、不影响已写入的新列值。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.MyobPayCategoryMapping SET PublicHolidayUid = N'cat-ph' WHERE ConnectionGuid = N'c-1';");
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE PublicHolidayUid = N'cat-ph'"));
+
+        // 列宽漂移 → 54356。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping ALTER COLUMN PublicHolidayCasualUid nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54356, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -4274,6 +4312,72 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var width = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
         Assert.Equal(54392, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOBTimesheet推送_建表与权限码_可重复执行_Running过滤唯一索引拦并发_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54400, missing.Number);
+
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+
+        // Apply 两次幂等；权限码只插入一行。
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Myob.Timesheet.Push' AND IsDeleted = 0"));
+
+        // 并发保险：同一 (公司文件, 周期) 第二个 Running 插入失败（2601 唯一索引冲突），不同周期 / 非 Running 不受影响。
+        const string insert = """
+            INSERT dbo.MyobTimesheetPush (PushGuid, BatchGuid, ConnectionGuid, PeriodStart, Weeks, UserGuid, MyobEmployeeUid, Status, PushedMinutes, StartedAt)
+            VALUES (N'{0}', N'b-1', N'c-1', '{1}', 1, N'{2}', N'uid-{2}', N'{3}', 0, SYSUTCDATETIME());
+            """;
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-1", "2026-10-26", "u1", "Running"));
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, string.Format(insert, "p-2", "2026-10-26", "u2", "Running")));
+        Assert.Equal(2601, duplicate.Number);
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-3", "2026-11-02", "u2", "Running"));
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-4", "2026-10-26", "u2", "Pushed"));
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-5", "2026-10-26", "u3", "Failed"));
+        Assert.Equal(4, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobTimesheetPush")); // p-2 没进去
+
+        // 漂移：列宽 → 54401；Running 索引被删 → 54405；批次索引被删 → 54404；最近一次索引被删 → 54403。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobTimesheetPush ALTER COLUMN ErrorCode nvarchar(40) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54401, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobTimesheetPush ALTER COLUMN ErrorCode nvarchar(80) NULL;");
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush;");
+        var noRunning = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54405, noRunning.Number);
+        // 不带过滤条件的同名唯一索引也不接受。
+        await ExecuteNonQueryAsync(main, "CREATE UNIQUE INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush (ConnectionGuid, PeriodStart, UserGuid);");
+        var wrongShape = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54405, wrongShape.Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush;");
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql); // 只补缺的索引
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobTimesheetPush_Batch ON dbo.MyobTimesheetPush;");
+        Assert.Equal(54404, (await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql))).Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobTimesheetPush_Latest ON dbo.MyobTimesheetPush;");
+        Assert.Equal(54403, (await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql))).Number);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
     }
 
     [SchemaMigrationSqlServerFact]

@@ -495,9 +495,10 @@
     <Compile Include="MyobEmployeeBindingTests.cs" />
     <Compile Include="MyobEmployeeSyncTests.cs" />
     <Compile Include="MyobPayrollAdviceTests.cs" />
-    <Compile Include="MyobWriteProbeTests.cs" />
+    <Compile Include="MyobWageProbeTests.cs" />
     <Compile Include="MyobPayslipTests.cs" />
     <Compile Include="MyobTimesheetTests.cs" />
+    <Compile Include="MyobTimesheetPushTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
