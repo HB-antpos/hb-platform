@@ -6,10 +6,14 @@ import type {
   AppDeviceStatusListResult,
   AppDeviceStatusQuery,
   AppDeviceStatusSummary,
+  AppVersionDistribution,
+  AppVersionState,
   DeviceManagementDevice,
   DeviceManagementListResult,
   DeviceManagementPagination,
   DeviceManagementQuery,
+  DeviceVersionState,
+  DeviceVersionSummary,
 } from "@/modules/device-management/types";
 
 async function getApiClient() {
@@ -87,6 +91,15 @@ function unwrapListPayload(payload: unknown): Record<string, unknown> {
   return data ?? root;
 }
 
+const DEVICE_VERSION_STATES: readonly DeviceVersionState[] = ["latest", "behind", "ahead", "notTargeted", "unreported"];
+const APP_VERSION_STATES: readonly AppVersionState[] = ["latest", "behind", "unreported"];
+
+/** 后端状态串只认已知取值，未知值丢弃（界面按「无状态」显示），避免新版后端值污染界面。 */
+function asEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  const text = asString(value);
+  return text ? allowed.find((item) => item.toLowerCase() === text.toLowerCase()) : undefined;
+}
+
 function normalizeDevice(raw: unknown): DeviceManagementDevice | null {
   const record = asRecord(raw);
   if (!record) {
@@ -114,6 +127,8 @@ function normalizeDevice(raw: unknown): DeviceManagementDevice | null {
     storeName: asString(pick(record, "storeName", "StoreName")),
     status: normalizeDeviceStatus(pick(record, "status", "Status")),
     appVersion: asString(pick(record, "appVersion", "AppVersion")),
+    targetAppVersion: asString(pick(record, "targetAppVersion", "TargetAppVersion")),
+    versionState: asEnum(pick(record, "versionState", "VersionState"), DEVICE_VERSION_STATES),
     platform: asString(pick(record, "platform", "Platform")),
     lastSeenAt: asString(pick(record, "lastSeenAt", "LastSeenAt", "lastOnlineAt", "LastOnlineAt")),
     createdAt: asString(pick(record, "createdAt", "CreatedAt")),
@@ -160,15 +175,35 @@ export function normalizeDeviceManagementListResponse(payload: unknown): DeviceM
   };
 }
 
-export function buildListParams(query: DeviceManagementQuery) {
+/** 版本多选合并成逗号串：去空白、去重、保持顺序；空数组不传，后端按「不过滤」处理。 */
+export function joinVersionList(versions?: readonly string[] | null) {
+  const unique = Array.from(new Set((versions ?? []).map((item) => item.trim()).filter(Boolean)));
+  return unique.length > 0 ? unique.join(",") : undefined;
+}
+
+function stateParam<T extends string>(value?: T | "all" | null) {
+  // all 只存在于前端 UI，不能传给后端的状态枚举。
+  return value && value !== "all" ? value : undefined;
+}
+
+/** 设备注册列表与版本汇总共用的筛选条件（不含分页和版本条件）。 */
+function buildRegistrationScopeParams(query: DeviceManagementQuery) {
   return {
-    page: query.pageNumber,
-    pageSize: query.pageSize,
     keyword: query.keyword?.trim() || undefined,
     storeCode: query.storeCode || undefined,
     status: query.status ?? undefined,
     deviceSystem: query.deviceSystem?.trim() || undefined,
     deviceType: query.deviceType?.trim() || undefined,
+  };
+}
+
+export function buildListParams(query: DeviceManagementQuery) {
+  return {
+    page: query.pageNumber,
+    pageSize: query.pageSize,
+    ...buildRegistrationScopeParams(query),
+    appVersions: joinVersionList(query.appVersions),
+    versionState: stateParam(query.versionState),
   };
 }
 
@@ -178,6 +213,48 @@ export async function fetchDeviceManagementDevices(
   const apiClient = await getApiClient();
   const response = await apiClient.get("/mobile/device-management/paged", { params: buildListParams(query) });
   return normalizeDeviceManagementListResponse(response.data);
+}
+
+export function normalizeDeviceVersionSummary(payload: unknown): DeviceVersionSummary {
+  const record = unwrapListPayload(payload);
+  const itemsPayload = pick(record, "items", "Items");
+  const states = asRecord(pick(record, "states", "States")) ?? {};
+  const count = (key: string) => asNumber(pick(states, key, key[0].toUpperCase() + key.slice(1)), 0);
+
+  return {
+    targetVersion: asString(pick(record, "targetVersion", "TargetVersion")),
+    targetScope: asString(pick(record, "targetScope", "TargetScope")),
+    total: asNumber(pick(record, "total", "Total"), 0),
+    items: Array.isArray(itemsPayload)
+      ? itemsPayload.flatMap((raw) => {
+          const item = asRecord(raw);
+          return item
+            ? [{
+                appVersion: asString(pick(item, "appVersion", "AppVersion")) ?? null,
+                total: asNumber(pick(item, "total", "Total"), 0),
+              }]
+            : [];
+        })
+      : [],
+    states: {
+      latest: count("latest"),
+      behind: count("behind"),
+      ahead: count("ahead"),
+      notTargeted: count("notTargeted"),
+      unreported: count("unreported"),
+      notApplicable: count("notApplicable"),
+    },
+  };
+}
+
+export async function fetchDeviceVersionSummary(
+  query: Omit<DeviceManagementQuery, "pageNumber" | "pageSize" | "appVersions" | "versionState"> = {}
+): Promise<DeviceVersionSummary> {
+  const apiClient = await getApiClient();
+  const response = await apiClient.get("/mobile/device-management/version-summary", {
+    params: buildRegistrationScopeParams(query),
+  });
+  return normalizeDeviceVersionSummary(response.data);
 }
 
 async function postDeviceAction(id: string | number, action: "activate" | "disable" | "lock") {
@@ -233,6 +310,9 @@ function normalizeAppDeviceStatus(raw: unknown): AppDeviceStatus | null {
     lastSeenUsername: asString(pick(record, "lastSeenUsername", "LastSeenUsername")),
     lastSeenUserFullName: asString(pick(record, "lastSeenUserFullName", "LastSeenUserFullName")),
     registeredDeviceId: asOptionalNumber(pick(record, "registeredDeviceId", "RegisteredDeviceId")),
+    latestAppVersion: asString(pick(record, "latestAppVersion", "LatestAppVersion")),
+    latestAppBuildVersion: asString(pick(record, "latestAppBuildVersion", "LatestAppBuildVersion")),
+    versionState: asEnum(pick(record, "versionState", "VersionState"), APP_VERSION_STATES),
   };
 }
 
@@ -263,14 +343,37 @@ export function normalizeAppDeviceStatusSummary(payload: unknown): AppDeviceStat
   };
 }
 
+/** App 列表、汇总、版本分布共用的范围条件；版本分布只能用其中的分店 / 系统 / 关键词。 */
+function buildAppDeviceScopeParams(query: AppDeviceStatusQuery) {
+  return {
+    keyword: query.keyword?.trim() || undefined,
+    storeCode: query.storeCode || undefined,
+    deviceSystem: query.deviceSystem?.trim() || undefined,
+  };
+}
+
+function buildAppVersionParams(query: AppDeviceStatusQuery) {
+  // 只在有值时才带键：没有版本条件时请求参数与改动前完全一致。
+  const params: { appVersion?: string; appBuildVersion?: string; versionState?: AppVersionState } = {};
+  const appVersion = query.appVersion?.trim();
+  if (appVersion) {
+    params.appVersion = appVersion;
+    // 构建号只有和版本号一起才有意义，单独传没有对应的版本行。
+    const appBuildVersion = query.appBuildVersion?.trim();
+    if (appBuildVersion) params.appBuildVersion = appBuildVersion;
+  }
+  const versionState = stateParam(query.versionState);
+  if (versionState) params.versionState = versionState;
+  return params;
+}
+
 export function buildAppDeviceStatusListParams(query: AppDeviceStatusQuery = {}) {
   return {
     page: query.pageNumber,
     pageSize: query.pageSize,
-    keyword: query.keyword?.trim() || undefined,
-    storeCode: query.storeCode || undefined,
-    deviceSystem: query.deviceSystem?.trim() || undefined,
+    ...buildAppDeviceScopeParams(query),
     onlineState: query.onlineState && query.onlineState !== "all" ? query.onlineState : undefined,
+    ...buildAppVersionParams(query),
   };
 }
 
@@ -289,13 +392,43 @@ export async function fetchAppDeviceStatusSummary(
 ): Promise<AppDeviceStatusSummary> {
   const apiClient = await getApiClient();
   const response = await apiClient.get("/mobile/app-device-status/summary", {
-    params: {
-      keyword: query.keyword?.trim() || undefined,
-      storeCode: query.storeCode || undefined,
-      deviceSystem: query.deviceSystem?.trim() || undefined,
-    },
+    // 汇总条要和下方列表同一口径，所以带上版本条件（在线状态 / 分页除外）。
+    params: { ...buildAppDeviceScopeParams(query), ...buildAppVersionParams(query) },
   });
   return normalizeAppDeviceStatusSummary(response.data);
+}
+
+export function normalizeAppVersionDistribution(payload: unknown): AppVersionDistribution {
+  const record = unwrapListPayload(payload);
+  const itemsPayload = pick(record, "items", "Items");
+  return {
+    total: asNumber(pick(record, "total", "Total"), 0),
+    items: Array.isArray(itemsPayload)
+      ? itemsPayload.flatMap((raw) => {
+          const item = asRecord(raw);
+          return item
+            ? [{
+                deviceSystem: asString(pick(item, "deviceSystem", "DeviceSystem")),
+                appVersion: asString(pick(item, "appVersion", "AppVersion")),
+                appBuildVersion: asString(pick(item, "appBuildVersion", "AppBuildVersion")),
+                total: asNumber(pick(item, "total", "Total"), 0),
+                online: asNumber(pick(item, "online", "Online"), 0),
+              }]
+            : [];
+        })
+      : [],
+  };
+}
+
+/** 按系统 + 版本 + 构建号统计设备数；只受分店 / 系统 / 关键词约束，点选版本后其余版本仍可切换。 */
+export async function fetchAppVersionDistribution(
+  query: Pick<AppDeviceStatusQuery, "keyword" | "storeCode" | "deviceSystem"> = {}
+): Promise<AppVersionDistribution> {
+  const apiClient = await getApiClient();
+  const response = await apiClient.get("/mobile/app-device-status/version-distribution", {
+    params: buildAppDeviceScopeParams(query),
+  });
+  return normalizeAppVersionDistribution(response.data);
 }
 
 export async function sendAppDeviceHeartbeat(

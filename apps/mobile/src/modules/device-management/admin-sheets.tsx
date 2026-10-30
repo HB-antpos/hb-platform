@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import QRCode from "react-native-qrcode-svg";
-import { Button, Chip, HelperText, SegmentedButtons, Switch, Text, TextInput } from "react-native-paper";
+import { Button, Chip, HelperText, IconButton, SegmentedButtons, Switch, Text, TextInput } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import {
@@ -42,6 +42,7 @@ import { HB_COLORS } from "@/shared/theme/tokens";
 import { sortStoresByName } from "@/shared/utils/name-sort";
 import { RequestGenerationGate, activationCreateGate, emergencyCreateGate } from "@/modules/device-management/request-generation-gate";
 import { isResultUnknownCreateError } from "@/modules/device-management/create-outcome";
+import { getGrantLifetime, splitRemainingMinutes } from "@/modules/device-management/activation-presentation";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 type ActivationKind = "POS" | "Mobile";
@@ -275,6 +276,8 @@ export function ActivationCodePanel({
   const [stores, setStores] = useState<ManageableStore[]>([]);
   // 分店筛选弹窗与开通分店芯片统一按分店名字排序（接口原序不保证）。
   const sortedStores = useMemo(() => sortStoresByName(stores, language), [stores, language]);
+  const [statusCounts, setStatusCounts] = useState<Partial<Record<DeviceActivationStatus, number>>>({});
+  const [expandedGrantIds, setExpandedGrantIds] = useState<string[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [storesError, setStoresError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -300,6 +303,7 @@ export function ActivationCodePanel({
   const createContextKey = JSON.stringify([userGuid, kind]);
   const loadGate = useRef(new RequestGenerationGate());
   const storesGate = useRef(new RequestGenerationGate());
+  const countsGate = useRef(new RequestGenerationGate());
   const mutationGate = useRef(new RequestGenerationGate());
   const createInFlight = useRef(false);
 
@@ -348,6 +352,24 @@ export function ActivationCodePanel({
     }
   }, [canManageMobile, canManagePos, kind, language, t]);
 
+  // 状态格上的数量：每个状态各取一条记录只为拿 total，范围跟随分店和系统条件，与当前选中的状态无关。
+  const loadCounts = useCallback(async () => {
+    const generation = countsGate.current.begin();
+    const requestKind = kind;
+    if (!(kind === "POS" ? canManagePos : canManageMobile)) { setStatusCounts({}); return; }
+    try {
+      const statuses = ["Available", "Consumed", "Expired", "Revoked"] as const;
+      const fetchPage = kind === "POS" ? getPosActivationGrants : getMobileActivationGrants;
+      const results = await Promise.all(
+        statuses.map((status) => fetchPage({ page: 1, pageSize: 1, storeCode: listQuery.storeCode, deviceSystem: listQuery.deviceSystem, status }))
+      );
+      if (!countsGate.current.isCurrent(generation) || requestKind !== kind) return;
+      setStatusCounts(Object.fromEntries(statuses.map((status, index) => [status, results[index].total])));
+    } catch {
+      if (countsGate.current.isCurrent(generation)) setStatusCounts({});
+    }
+  }, [canManageMobile, canManagePos, kind, listQuery.deviceSystem, listQuery.storeCode]);
+
   useEffect(() => {
     setKind((current) => {
       if (current === "POS" && !canManagePos && canManageMobile) return "Mobile";
@@ -372,6 +394,12 @@ export function ActivationCodePanel({
     void loadStores();
     return () => { gate.invalidate(); };
   }, [loadStores, userGuid]);
+  // grants 变化（创建、撤销、翻页后的重新读取）时顺带刷新数量。
+  useEffect(() => {
+    const gate = countsGate.current;
+    void loadCounts();
+    return () => { gate.invalidate(); };
+  }, [grants, loadCounts, userGuid]);
   useEffect(() => { setCreateOutcomeUnknown(!activationCreateGate.canSubmit(createContextKey)); }, [canManageMobile, canManagePos, createContextKey]);
   useEffect(() => {
     // 新门店必须重新选择账号，不能在名单加载期间沿用上一门店的目标。
@@ -446,36 +474,61 @@ export function ActivationCodePanel({
     finally { if (mutationGate.current.isCurrent(mutationGeneration)) { createInFlight.current = false; setSaving(false); } }
   };
   const eligibleSystems = kind === "Mobile" ? ["Android", "iOS"] : ["Windows", "iPadOS", "Android", "iOS"];
+  const now = new Date();
   return <View style={styles.activationPanel}>
-    <SegmentedButtons value={kind} onValueChange={(value) => setKind(value as ActivationKind)} buttons={[{ value: "POS", label: t("deviceManagement:activation.pos"), disabled: !canManagePos }, { value: "Mobile", label: t("deviceManagement:activation.mobile"), disabled: !canManageMobile }]} />
+    <View style={styles.kindRow}>
+      <SegmentedButtons style={styles.grow} density="small" value={kind} onValueChange={(value) => setKind(value as ActivationKind)} buttons={[{ value: "POS", label: t("deviceManagement:activation.pos"), disabled: !canManagePos }, { value: "Mobile", label: t("deviceManagement:activation.mobile"), disabled: !canManageMobile }]} />
+      <IconButton mode="outlined" icon="refresh" size={20} loading={loading} disabled={loading} accessibilityLabel={t("deviceManagement:activation.refresh")} onPress={() => void load()} style={styles.refreshIcon} />
+    </View>
     <ScrollView style={styles.activationList} contentContainerStyle={styles.activationListContent} keyboardShouldPersistTaps="handled">
-    <View style={BUSINESS_UI.section}><View style={BUSINESS_UI.sectionContent}>
-      <Button mode="outlined" icon="store-outline" onPress={() => { setStoreSearch(""); setStoreFilterVisible(true); }}>{listQuery.storeCode ? `${listQuery.storeCode} · ${stores.find((store) => store.storeCode === listQuery.storeCode)?.storeName ?? ""}` : t("deviceManagement:activation.allStores")}</Button>
-      <Text variant="labelLarge">{t("deviceManagement:activation.system")}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-        <Chip selected={!listQuery.deviceSystem} onPress={() => setListQuery((current) => ({ ...current, page: 1, deviceSystem: undefined }))}>{t("deviceManagement:activation.allSystems")}</Chip>
-        {eligibleSystems.map((value) => <Chip key={value} selected={listQuery.deviceSystem === value} onPress={() => setListQuery((current) => ({ ...current, page: 1, deviceSystem: value as DeviceActivationSystem }))}>{value}</Chip>)}
-      </ScrollView>
-      <Text variant="labelLarge">{t("deviceManagement:fields.status")}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-        <Chip selected={!listQuery.status} onPress={() => setListQuery((current) => ({ ...current, page: 1, status: undefined }))}>{t("deviceManagement:activation.allStatuses")}</Chip>
-        {(["Available", "Consumed", "Expired", "Revoked"] as const).map((value) => <Chip key={value} selected={listQuery.status === value} onPress={() => setListQuery((current) => ({ ...current, page: 1, status: value }))}>{t(`deviceManagement:activation.statuses.${value}`)}</Chip>)}
-      </ScrollView>
-      <Button icon="refresh" loading={loading} disabled={loading} onPress={() => void load()}>{t("deviceManagement:activation.refresh")}</Button>
-    </View></View>
+    <View style={styles.statusTiles}>
+      {(["Available", "Consumed", "Expired", "Revoked"] as const).map((value) => {
+        const selected = listQuery.status === value;
+        return <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setListQuery((current) => ({ ...current, page: 1, status: selected ? undefined : value }))} style={[styles.statusTile, selected && styles.statusTileSelected]}>
+          <Text style={[styles.statusTileLabel, selected && styles.statusTileTextSelected]}>{t(`deviceManagement:activation.statuses.${value}`)}</Text>
+          <Text style={[styles.statusTileCount, selected && styles.statusTileTextSelected]}>{statusCounts[value] ?? "–"}</Text>
+        </Pressable>;
+      })}
+    </View>
+    <Button mode="outlined" icon="store-outline" style={styles.storeButton} contentStyle={styles.storeButtonContent} onPress={() => { setStoreSearch(""); setStoreFilterVisible(true); }}>{listQuery.storeCode ? `${listQuery.storeCode} · ${stores.find((store) => store.storeCode === listQuery.storeCode)?.storeName ?? ""}` : t("deviceManagement:activation.allStores")}</Button>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+      <Chip selected={!listQuery.deviceSystem} onPress={() => setListQuery((current) => ({ ...current, page: 1, deviceSystem: undefined }))}>{t("deviceManagement:activation.allSystems")}</Chip>
+      {eligibleSystems.map((value) => <Chip key={value} selected={listQuery.deviceSystem === value} onPress={() => setListQuery((current) => ({ ...current, page: 1, deviceSystem: value as DeviceActivationSystem }))}>{value}</Chip>)}
+    </ScrollView>
     {storesError ? <View><HelperText type="error" visible>{storesError}</HelperText><Button onPress={() => void loadStores()}>{t("deviceManagement:activation.retryStores")}</Button></View> : null}
-    <Button mode="contained" icon="plus" loading={storesLoading} disabled={storesLoading || !stores.length} onPress={openCreate}>{t("deviceManagement:activation.create")}</Button>
-    {loading ? <Text>{t("deviceManagement:messages.loading")}</Text> : listError ? <View><HelperText type="error" visible>{listError}</HelperText><Button onPress={() => void load()}>{t("deviceManagement:activation.retry")}</Button></View> : grants.length === 0 ? <Text style={BUSINESS_UI.subtitle}>{t("deviceManagement:activation.empty")}</Text> : grants.map((grant) => <View key={grant.grantId} style={BUSINESS_UI.section}><View style={BUSINESS_UI.sectionContent}>
-      <View style={BUSINESS_UI.headerRow}><View style={styles.grow}><Text variant="titleSmall">{grant.deviceSystem} · {grant.storeCode} {grant.storeName || ""}</Text><Text variant="bodySmall" style={BUSINESS_UI.fieldLabel}>{t(kind === "Mobile" ? "deviceManagement:activation.mobile" : "deviceManagement:activation.pos")}</Text></View><GrantStatusChip status={grant.status} t={t} /></View>
-      {kind === "Mobile" ? <KeyValue label={t("deviceManagement:activation.account")} value={[grant.targetFullName, grant.targetUsername].filter(Boolean).join(" · ")} /> : null}
-      <KeyValue label={t("deviceManagement:fields.expiresAt")} value={formatDateTime(grant.expiresAtUtc, language)} />
-      <KeyValue label={t("deviceManagement:fields.createdAudit")} value={`${grant.createdBy || "–"} · ${formatDateTime(grant.createdAtUtc, language)}`} />
-      <KeyValue label={t("deviceManagement:fields.usedBy")} value={grant.consumedDeviceCode || grant.consumedHardwareId || t("deviceManagement:activation.notUsed")} />
-      <KeyValue label={t("deviceManagement:activation.consumedAt")} value={formatDateTime(grant.consumedAtUtc, language)} />
-      <KeyValue label={t("deviceManagement:activation.consumptionKind")} value={grant.consumptionKind || "–"} />
-      <KeyValue label={t("deviceManagement:fields.reason")} value={grant.reason} />
-      {grant.status === "Available" || grant.status === "Expired" ? <Button mode="outlined" textColor={HB_COLORS.danger} onPress={() => { setRevokeGrant(grant); setRevokeReason(""); setSheetMessage(""); }}>{t("deviceManagement:actions.revoke")}</Button> : null}
-    </View></View>)}
+    <Button mode="contained" icon="plus" contentStyle={styles.createButtonContent} loading={storesLoading} disabled={storesLoading || !stores.length} onPress={openCreate}>{t("deviceManagement:activation.create")}</Button>
+    {loading ? <Text>{t("deviceManagement:messages.loading")}</Text> : listError ? <View><HelperText type="error" visible>{listError}</HelperText><Button onPress={() => void load()}>{t("deviceManagement:activation.retry")}</Button></View> : grants.length === 0 ? <Text style={BUSINESS_UI.subtitle}>{t("deviceManagement:activation.empty")}</Text> : grants.map((grant) => {
+      const lifetime = grant.status === "Available" ? getGrantLifetime(grant.createdAtUtc, grant.expiresAtUtc, now) : null;
+      const remaining = lifetime ? splitRemainingMinutes(lifetime.remainingMinutes) : null;
+      const expanded = expandedGrantIds.includes(grant.grantId);
+      return <View key={grant.grantId} style={styles.grantCard}>
+        <View style={BUSINESS_UI.headerRow}><View style={styles.grow}><Text variant="titleSmall">{grant.deviceSystem} · {grant.storeCode} {grant.storeName || ""}</Text><Text variant="bodySmall" style={BUSINESS_UI.fieldLabel}>{[t(kind === "Mobile" ? "deviceManagement:activation.mobile" : "deviceManagement:activation.pos"), grant.consumptionKind ? t(`deviceManagement:activation.consumptionKinds.${grant.consumptionKind}`) : null].filter(Boolean).join(" · ")}</Text></View><GrantStatusChip status={grant.status} t={t} /></View>
+        {lifetime && remaining ? <View style={styles.lifetime}>
+          <View style={styles.lifetimeRow}>
+            <Text style={styles.lifetimeText}>{t("deviceManagement:activation.validUntil", { value: formatDateTime(grant.expiresAtUtc, language) })}</Text>
+            <Text style={[styles.lifetimeText, styles.lifetimeRemaining]}>{remaining.hours > 0 ? t("deviceManagement:activation.remainingHours", { hours: remaining.hours, minutes: remaining.minutes }) : t("deviceManagement:activation.remainingMinutes", { minutes: remaining.minutes })}</Text>
+          </View>
+          <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.round(lifetime.fraction * 100)}%` }]} /></View>
+        </View> : null}
+        <View style={styles.detailGrid}>
+          <KeyValue label={t("deviceManagement:activation.createdBy")} value={`${grant.createdBy || "–"} · ${formatDateTime(grant.createdAtUtc, language)}`} />
+          {grant.status === "Consumed" ? <KeyValue label={t("deviceManagement:fields.usedBy")} value={grant.consumedDeviceCode || grant.consumedHardwareId || t("deviceManagement:activation.notUsed")} /> : <KeyValue label={t("deviceManagement:fields.reason")} value={grant.reason} />}
+        </View>
+        {expanded ? <View style={styles.detailGrid}>
+          {kind === "Mobile" ? <KeyValue label={t("deviceManagement:activation.account")} value={[grant.targetFullName, grant.targetUsername].filter(Boolean).join(" · ")} /> : null}
+          <KeyValue label={t("deviceManagement:fields.expiresAt")} value={formatDateTime(grant.expiresAtUtc, language)} />
+          {grant.status === "Consumed" ? <KeyValue label={t("deviceManagement:fields.reason")} value={grant.reason} /> : <KeyValue label={t("deviceManagement:fields.usedBy")} value={grant.consumedDeviceCode || grant.consumedHardwareId || t("deviceManagement:activation.notUsed")} />}
+          <KeyValue label={t("deviceManagement:activation.consumedAt")} value={formatDateTime(grant.consumedAtUtc, language)} />
+          <KeyValue label={t("deviceManagement:activation.consumptionKind")} value={grant.consumptionKind ? t(`deviceManagement:activation.consumptionKinds.${grant.consumptionKind}`) : "–"} />
+        </View> : null}
+        <View style={styles.grantFooter}>
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded }} hitSlop={8} onPress={() => setExpandedGrantIds((current) => current.includes(grant.grantId) ? current.filter((id) => id !== grant.grantId) : [...current, grant.grantId])} style={styles.grantToggle}>
+            <Text style={styles.grantToggleText}>{expanded ? "▲" : "▼"}  {t("deviceManagement:activation.reasonAndAudit")}</Text>
+          </Pressable>
+          {grant.status === "Available" || grant.status === "Expired" ? <Button mode="outlined" compact textColor={HB_COLORS.danger} onPress={() => { setRevokeGrant(grant); setRevokeReason(""); setSheetMessage(""); }}>{t("deviceManagement:actions.revoke")}</Button> : null}
+        </View>
+      </View>;
+    })}
     </ScrollView>
     <View style={styles.pagination}>
       <Text variant="bodySmall">{t("deviceManagement:activation.pageSummary", { page: listQuery.page, pages: totalPages, total })}</Text>
@@ -622,6 +675,27 @@ const styles = StyleSheet.create({
   activationList: { flex: 1 },
   activationListContent: { gap: 12, paddingBottom: 16 },
   filterChips: { gap: 8 },
+  kindRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  refreshIcon: { margin: 0, borderColor: HB_COLORS.outline },
+  statusTiles: { flexDirection: "row", gap: 8 },
+  statusTile: { flex: 1, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: HB_COLORS.outlineMuted, backgroundColor: HB_COLORS.white },
+  statusTileSelected: { backgroundColor: "#EAF2FF", borderColor: "#84ADFF" },
+  statusTileLabel: { fontSize: 11, lineHeight: 16, color: HB_COLORS.textSecondary },
+  statusTileCount: { fontSize: 20, lineHeight: 26, fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
+  statusTileTextSelected: { color: HB_COLORS.action },
+  storeButton: { borderRadius: 10 },
+  storeButtonContent: { minHeight: 44, justifyContent: "flex-start" },
+  createButtonContent: { minHeight: 48 },
+  grantCard: { backgroundColor: HB_COLORS.white, borderWidth: 1, borderColor: HB_COLORS.outlineMuted, borderRadius: 12, padding: 14, gap: 10 },
+  lifetime: { gap: 6 },
+  lifetimeRow: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  lifetimeText: { fontSize: 12, lineHeight: 18, color: HB_COLORS.textSecondary },
+  lifetimeRemaining: { color: HB_COLORS.action, fontWeight: "700" },
+  progressTrack: { height: 6, borderRadius: 3, backgroundColor: HB_COLORS.outlineMuted, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: HB_COLORS.brand },
+  grantFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted },
+  grantToggle: { minHeight: 44, justifyContent: "center" },
+  grantToggleText: { fontSize: 13, color: HB_COLORS.textSecondary },
   pagination: { alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outline, paddingTop: 8 },
   grow: { flex: 1, minWidth: 0 },
   detailGrid: { gap: 10 },

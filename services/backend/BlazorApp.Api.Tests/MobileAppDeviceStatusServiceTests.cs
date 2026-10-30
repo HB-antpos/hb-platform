@@ -360,6 +360,88 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
         );
     }
 
+    /// <summary>安卓 1.0.12(76) 与 iOS 1.0.11(64) 各是自己系统的最新；版本号按数值比较（1.0.10 新于 1.0.9）。</summary>
+    private async Task SeedVersionStatesAsync()
+    {
+        await InsertStatusAsync("a-latest", "Android", "android", _now, "1.0.12", "76");
+        await InsertStatusAsync("a-old-version", "Android", "android", _now.AddMinutes(-1), "1.0.9", "74");
+        await InsertStatusAsync("a-old-build", "Android", "android", _now.AddMinutes(-2), "1.0.12", "70");
+        await InsertStatusAsync("a-none", "Android", "android", _now.AddMinutes(-3));
+        await InsertStatusAsync("i-latest", "iOS", "ios", _now.AddMinutes(-4), "1.0.11", "64");
+        await InsertStatusAsync("i-old", "iOS", "ios", _now.AddMinutes(-5), "1.0.10", "62");
+    }
+
+    [Fact]
+    public async Task GetPaged_带出该系统最新原生版本和版本状态_各系统互不影响()
+    {
+        await SeedVersionStatesAsync();
+
+        var response = await CreateService().GetPagedAsync(new MobileAppDeviceStatusQueryDto());
+
+        var byHardware = response.Data!.Items.ToDictionary(item => item.HardwareId);
+        Assert.Equal("latest", byHardware["a-latest"].VersionState);
+        Assert.Equal("behind", byHardware["a-old-version"].VersionState);
+        // 版本号相同但构建号更低，同样算落后。
+        Assert.Equal("behind", byHardware["a-old-build"].VersionState);
+        Assert.Equal("unreported", byHardware["a-none"].VersionState);
+        Assert.Equal("latest", byHardware["i-latest"].VersionState);
+        Assert.Equal("behind", byHardware["i-old"].VersionState);
+        Assert.Equal(("1.0.12", "76"), (byHardware["a-old-version"].LatestAppVersion, byHardware["a-old-version"].LatestAppBuildVersion));
+        Assert.Equal(("1.0.11", "64"), (byHardware["i-old"].LatestAppVersion, byHardware["i-old"].LatestAppBuildVersion));
+    }
+
+    [Fact]
+    public async Task GetPaged_按版本状态筛选_总数与分页一致()
+    {
+        await SeedVersionStatesAsync();
+        var service = CreateService();
+
+        var firstPage = await service.GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto { VersionState = "behind", Page = 1, PageSize = 2 });
+        var secondPage = await service.GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto { VersionState = "BEHIND", Page = 2, PageSize = 2 });
+        var unreported = await service.GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto { VersionState = "unreported" });
+        var unknownIgnored = await service.GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto { VersionState = "nonsense" });
+
+        Assert.Equal(3, firstPage.Data!.Total);
+        Assert.Equal(new[] { "a-old-version", "a-old-build" }, firstPage.Data.Items.Select(i => i.HardwareId));
+        Assert.Equal(new[] { "i-old" }, secondPage.Data!.Items.Select(i => i.HardwareId));
+        Assert.Equal(new[] { "a-none" }, unreported.Data!.Items.Select(i => i.HardwareId));
+        // 未知取值按「不筛选」处理，不能把列表筛空。
+        Assert.Equal(6, unknownIgnored.Data!.Total);
+    }
+
+    [Fact]
+    public async Task GetPaged_版本状态可与系统和精确版本叠加()
+    {
+        await SeedVersionStatesAsync();
+
+        var response = await CreateService().GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto
+            {
+                DeviceSystem = "Android",
+                VersionState = "behind",
+                AppVersion = "1.0.12",
+            });
+
+        Assert.Equal(new[] { "a-old-build" }, response.Data!.Items.Select(i => i.HardwareId));
+    }
+
+    [Fact]
+    public async Task GetSummary_按版本状态筛选_与列表同口径()
+    {
+        await SeedVersionStatesAsync();
+
+        var response = await CreateService().GetSummaryAsync(
+            new MobileAppDeviceStatusQueryDto { VersionState = "behind" });
+
+        Assert.Equal(3, response.Data!.Total);
+        Assert.Equal(2, response.Data.Android);
+        Assert.Equal(1, response.Data.Ios);
+    }
+
     [Fact]
     public async Task Heartbeat_无Bearer且无有效设备会话_返回401()
     {

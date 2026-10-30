@@ -420,6 +420,8 @@
     <Compile Include="MobileAppBuildCosChecksumSqlServerTests.cs" />
     <Compile Include="MobileAppBuildAppKeyIsolationTests.cs" />
     <Compile Include="MobileAppDeviceStatusServiceTests.cs" />
+    <Compile Include="DeviceVersionStateResolverTests.cs" />
+    <Compile Include="DeviceVersionFilterTests.cs" />
     <Compile Include="AppOtaReleaseSqlParameterTests.cs" />
     <Compile Include="AppUpdatePolicyServiceTests.cs" />
     <Compile Include="MobileAndroidNativeUpdatePolicyServiceTests.cs" />

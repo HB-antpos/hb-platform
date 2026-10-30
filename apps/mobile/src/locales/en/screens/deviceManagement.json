@@ -12,14 +12,15 @@
     "edit": "Edit",
     "exportQr": "Export QR code",
     "lock": "Lock",
+    "more": "More",
     "refresh": "Refresh",
     "revoke": "Revoke",
     "save": "Save"
   },
   "views": {
-    "registered": "Registrations",
+    "registered": "Registered",
     "appUsage": "App usage",
-    "activation": "Activation codes"
+    "activation": "Codes"
   },
   "appUsage": {
     "subtitle": "{{count}} app devices",
@@ -39,10 +40,79 @@
     },
     "summary": {
       "total": "Total",
+      "offline": "Offline",
       "online": "Online",
       "android": "Android",
       "ios": "iOS"
     }
+  },
+  "card": {
+    "details": "Details",
+    "currentVersion": "Current version",
+    "cashier": "Current cashier",
+    "transaction": "Transactions",
+    "updatedAt": "Updated",
+    "createdAt": "Created",
+    "appVersion": "App version",
+    "runtimeChannel": "Runtime / channel",
+    "updateId": "Update ID",
+    "updateSource": "Update source",
+    "lastSeenAt": "Last seen",
+    "actionsSubtitle": "Choose an action for this device",
+    "currentStatus": "Current"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutes": "{{n}} min ago",
+    "hours": "{{n}} h ago",
+    "days": "{{n}} d ago"
+  },
+  "distribution": {
+    "title_one": "Versions · {{count}} device",
+    "title_other": "Versions · {{count}} devices",
+    "target": "Policy {{version}}",
+    "noPolicy": "No update policy",
+    "barLabel": "Devices per version",
+    "others": "{{count}} more on other versions",
+    "appTitle": "App versions",
+    "unknownSystem": "Unknown system"
+  },
+  "versionState": {
+    "latest": "On policy version",
+    "behind": "Update → {{target}}",
+    "behindHint": "Below policy version",
+    "ahead": "Above policy version",
+    "notTargeted": "Not in rollout",
+    "unreported": "Version not reported",
+    "unreportedHint": "Older client, no version",
+    "targetHint": "Policy {{target}}",
+    "appLatest": "Latest native build",
+    "appBehind": "Native build behind",
+    "appLatestHint": "Latest {{latest}}"
+  },
+  "versionFilter": {
+    "all": "All",
+    "clientTitle": "Client version",
+    "appTitle": "App version",
+    "newTag": "New",
+    "specific": "Specific versions (multi-select)",
+    "moreVersions": "More versions ›",
+    "latest": "On policy version",
+    "behind": "Needs update",
+    "ahead": "Above policy",
+    "notTargeted": "Not in rollout",
+    "unreported": "Not reported",
+    "appAll": "All",
+    "appLatest": "Latest native build",
+    "appBehind": "Native build behind",
+    "versionsSelected_one": "{{count}} version",
+    "versionsSelected_other": "{{count}} versions",
+    "pickerTitle": "Select versions",
+    "pickerSearch": "Search version, e.g. 1.0.9",
+    "pickerConfirm": "Done · {{versions}} selected",
+    "targetTag": "Policy version",
+    "deviceCount_one": "{{count}} device",
+    "deviceCount_other": "{{count}} devices"
   },
   "currentStore": {
     "retryStores": "Retry store list",
@@ -69,6 +139,7 @@
     "transactionValue": "Transactions: {{value}}",
     "transactionAllowed": "Allowed",
     "transactionBlocked": "Blocked",
+    "remark": "Remark",
     "remarkValue": "Note: {{value}}",
     "noStore": "No store assigned",
     "storeValue": "Store: {{value}}",
@@ -89,6 +160,10 @@
     "currentApp": "{{store}} · {{system}} · {{online}}",
     "current": "{{store}} · {{status}} · {{system}} · {{type}}",
     "disabled": "Disabled",
+    "onlineTitle": "Online status",
+    "remove": "Remove filter",
+    "viewResults_one": "View {{count}} device",
+    "viewResults_other": "View {{count}} devices",
     "keyword": "Keyword",
     "locked": "Locked",
     "pendingConfirmation": "Pending",
@@ -159,6 +234,13 @@
     "remark": "Note"
   },
   "activation": {
+    "subtitle": "Device activation codes",
+    "validUntil": "Valid until {{value}}",
+    "remainingHours": "{{hours}} h {{minutes}} min left",
+    "remainingMinutes": "{{minutes}} min left",
+    "createdBy": "Created",
+    "reasonAndAudit": "Reason & audit",
+    "consumptionKinds": { "Initial": "First activation", "Rebind": "Rebind" },
     "pos": "POS codes",
     "mobile": "Mobile codes",
     "create": "Create device activation code",
