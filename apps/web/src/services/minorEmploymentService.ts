@@ -235,6 +235,8 @@ export async function verifyGuardianCode(token: string, code: string) {
 export function mapGuardianSession(raw: Raw): GuardianSession {
   return {
     maskedGuardianEmail: text(raw.maskedGuardianEmail ?? raw.MaskedGuardianEmail) ?? '',
+    codeChannel: String(raw.codeChannel ?? raw.CodeChannel ?? '').toLowerCase() === 'sms' ? 'sms' : 'email',
+    maskedGuardianPhone: text(raw.maskedGuardianPhone ?? raw.MaskedGuardianPhone),
     emailVerified: (raw.emailVerified ?? raw.EmailVerified) === true,
     codeSentAt: text(raw.codeSentAtUtc ?? raw.CodeSentAtUtc),
     codeExpiresAt: text(raw.codeExpiresAtUtc ?? raw.CodeExpiresAtUtc),

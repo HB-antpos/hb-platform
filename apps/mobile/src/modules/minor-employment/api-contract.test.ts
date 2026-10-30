@@ -122,6 +122,32 @@ const failed = mapInviteResult({
 assert.equal(failed.emailSent, false);
 assert.equal(failed.emailError, "邮件发送失败");
 assert.ok(failed.signingUrl?.includes("#token="));
+// 短信直发：不回传链接，只带打码手机号；失败：带回链接与原因，验证码仍走短信。
+const texted = mapInviteResult({
+  DeliveryChannel: "sms",
+  SmsSent: true,
+  MaskedGuardianPhone: "+614*****678",
+  SigningUrl: "",
+});
+assert.equal(texted.deliveryChannel, "sms");
+assert.equal(texted.smsSent, true);
+assert.equal(texted.emailSent, false);
+assert.equal(texted.signingUrl, undefined);
+assert.equal(texted.maskedGuardianPhone, "+614*****678");
+const textFailed = mapInviteResult({
+  deliveryChannel: "sms",
+  smsSent: false,
+  smsError: "Text failed",
+  signingUrl: "https://hotbargain.vip/minor-employment/sign#token=abc",
+});
+assert.equal(textFailed.smsSent, false);
+assert.equal(textFailed.smsError, "Text failed");
+assert.ok(textFailed.signingUrl?.includes("#token="));
+assert.equal(mapInviteResult({}).smsSent, false);
+assert.equal(
+  mapProfile({ ...fixture, GuardianInviteChannel: "SMS" }).guardianInviteChannel,
+  "sms",
+);
 const candidate = mapCandidate({
   UserGUID: "u1",
   EmployeeName: "Teen",

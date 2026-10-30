@@ -126,8 +126,8 @@ export interface MinorEmploymentProfile extends MinorEmploymentDraft {
   formType?: string;
   parentSignedAt?: string;
   parentSignatureName?: string;
-  /** 签署链接送达方式：email＝后端直发监护人邮箱，share＝员工转发。 */
-  guardianInviteChannel?: "email" | "share";
+  /** 签署链接送达方式：email＝后端直发监护人邮箱，sms＝后端短信发到监护人手机，share＝员工转发。 */
+  guardianInviteChannel?: MinorInviteChannel;
   guardianInviteEmailSentAt?: string;
   /** 监护人用邮箱验证码核验身份的时间。 */
   guardianEmailVerifiedAt?: string;
@@ -249,14 +249,21 @@ export const emptyDraft = (): MinorEmploymentDraft => ({
   },
 });
 
-/** 发起签署的结果：邮件直发成功时不回传链接，失败或选择转发时才有 signingUrl。 */
+/** 签署链接送达方式：email＝邮件直发，sms＝短信直发（验证码也走短信），share＝员工转发。 */
+export type MinorInviteChannel = "email" | "sms" | "share";
+
+/** 发起签署的结果：邮件 / 短信直发成功时不回传链接，失败或选择转发时才有 signingUrl。 */
 export interface MinorGuardianInviteResult {
   version: number;
   revision?: number;
-  deliveryChannel: "email" | "share";
+  deliveryChannel: MinorInviteChannel;
   emailSent: boolean;
   maskedGuardianEmail?: string;
   emailError?: string;
+  smsSent: boolean;
+  /** 打码后的监护人手机号，只在短信渠道有值。 */
+  maskedGuardianPhone?: string;
+  smsError?: string;
   signingUrl?: string;
   expiresAt?: string;
 }

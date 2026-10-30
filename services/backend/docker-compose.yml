@@ -52,6 +52,18 @@ services:
       # 本 compose 没有 env_file：不在这里映射，服务器 .env 里写了也传不进容器。开 / 关只需改 .env 并重建容器，不需要发版。
       - Myob__TimesheetPushEnabled=${MYOB_TIMESHEET_PUSH_ENABLED:-false}
       - Myob__TimesheetPushConnectionGuids=${MYOB_TIMESHEET_PUSH_CONNECTION_GUIDS:-}
+      # 短信通道（ClickSend）：总闸默认关；用户名、API Key、发件方与记录哈希密钥只从服务器 .env 注入，禁止写入仓库。
+      # 任一必填项为空时 SmsOptions.IsAvailable=false，发送一律被拒（SMS_DISABLED），不影响邮件等其他功能。
+      # 本 compose 没有 env_file：不在这里映射，服务器 .env 里写了也传不进容器。开 / 关只需改 .env 并重建容器，不需要发版。
+      # SMS_FROM 是字母 sender ID（最长 11 位，澳洲需先在服务商处登记）或 E.164 号码；SMS_LOG_HASH_KEY 任意足够长的随机串。
+      - Sms__Enabled=${SMS_ENABLED:-false}
+      - Sms__Username=${SMS_CLICKSEND_USERNAME:-}
+      - Sms__ApiKey=${SMS_CLICKSEND_API_KEY:-}
+      - Sms__From=${SMS_FROM:-}
+      - Sms__LogHashKey=${SMS_LOG_HASH_KEY:-}
+      - Sms__PerPhoneHourLimit=${SMS_PER_PHONE_HOUR_LIMIT:-5}
+      - Sms__PerPhoneDayLimit=${SMS_PER_PHONE_DAY_LIMIT:-10}
+      - Sms__GlobalDayLimit=${SMS_GLOBAL_DAY_LIMIT:-300}
       # 远程维护仅在迁移、安装包校验与客户端验收准备好后启用；秘密只从服务器注入。
       - RemoteMaintenance__Enabled=${REMOTE_MAINTENANCE_ENABLED:-false}
       # 下发给已安装/新装 RustDesk 的服务器地址：这是 WPF 启动对账的唯一开关。

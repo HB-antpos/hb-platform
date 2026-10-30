@@ -840,8 +840,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     private static string PeriodText(MyobPayrollAdviceRecord slip) =>
         $"{MyobPayslipPresentation.Date(slip.PeriodStart)} to {MyobPayslipPresentation.Date(slip.PeriodEnd)}";
 
-    private static string EmailSubject(MyobPayrollAdviceRecord slip) =>
-        $"Your payslip – pay period {PeriodText(slip)} / 工资单";
+    internal static string EmailSubject(MyobPayrollAdviceRecord slip) =>
+        $"Your payslip – pay period {PeriodText(slip)}";
 
     public async Task<ApiResponse<MyobPayslipPdfFile>> DownloadPdfAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken)
     {
