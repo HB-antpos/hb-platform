@@ -4286,6 +4286,7 @@ export interface paths {
                     soldTo?: string;
                     keyword?: string;
                     take?: number;
+                    skip?: number;
                 };
                 header?: never;
                 path?: never;
