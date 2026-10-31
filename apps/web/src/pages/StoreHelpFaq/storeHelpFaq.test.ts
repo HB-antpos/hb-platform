@@ -88,7 +88,7 @@ for (const tab of tabs) {
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
 // 快照当前的题数（防止快照被误截断）；刷新快照后同步更新这两个数字
 assert.equal(countQuestions('pos'), 28)
-assert.equal(countQuestions('mobile'), 17)
+assert.equal(countQuestions('mobile'), 19)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
@@ -106,13 +106,13 @@ assert.equal(posNumbering.get('app-update'), 26)
 assert.equal(posNumbering.get('remote-assist'), 27)
 assert.equal(posNumbering.get('pda-product-sync'), 28)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
-assert.equal(mobileNumbering.get('revenue-report'), 5)
-assert.equal(mobileNumbering.get('product-report'), 6)
-assert.equal(mobileNumbering.get('supplier-invoices'), 10)
-assert.equal(mobileNumbering.get('promotions-manage'), 12)
-assert.equal(mobileNumbering.get('promotion-not-applied'), 13)
-assert.equal(mobileNumbering.get('floating-button'), 16)
-assert.equal(mobileNumbering.get('app-download'), 17)
+assert.equal(mobileNumbering.get('revenue-report'), 6)
+assert.equal(mobileNumbering.get('product-report'), 7)
+assert.equal(mobileNumbering.get('supplier-invoices'), 12)
+assert.equal(mobileNumbering.get('promotions-manage'), 14)
+assert.equal(mobileNumbering.get('promotion-not-applied'), 15)
+assert.equal(mobileNumbering.get('floating-button'), 18)
+assert.equal(mobileNumbering.get('app-download'), 19)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))
@@ -148,6 +148,13 @@ const reportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '营�
 assert.ok(reportHits.includes('revenue-report'))
 const productReportHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'product report', 'en').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(productReportHits.includes('product-report'))
+// 本次新增 / 改写的条目：中英关键词都能搜到
+const onlineReceiptHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'online receipt', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(onlineReceiptHits.includes('online-receipt'))
+const guardianLinkHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '家长签字', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(guardianLinkHits.includes('minor-guardian-link'))
+const candyThemeHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '糖果紫', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(candyThemeHits.includes('color-theme'))
 const scannerHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '扫码枪灵敏度', 'zh').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(scannerHits.includes('scanner-double-scan'))
 const scannerEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'scanner sensitivity', 'en').flatMap((group) => group.questions.map((question) => question.id))

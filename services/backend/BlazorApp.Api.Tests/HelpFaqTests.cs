@@ -68,13 +68,13 @@ public sealed class HelpFaqTests : IDisposable
         Assert.Equal(11, plan.Groups.Count);
         Assert.Equal(6, plan.Groups.Count(g => g.Tab == HelpFaqTabs.Pos));
         Assert.Equal(5, plan.Groups.Count(g => g.Tab == HelpFaqTabs.Mobile));
-        Assert.Equal(45, plan.Questions.Count);
+        Assert.Equal(47, plan.Questions.Count);
 
         var groupGuids = plan.Groups.Select(g => g.GroupGUID).ToHashSet();
         Assert.Equal(11, groupGuids.Count);
-        Assert.Equal(45, plan.Questions.Select(q => q.QuestionGUID).Distinct().Count());
+        Assert.Equal(47, plan.Questions.Select(q => q.QuestionGUID).Distinct().Count());
         // Code 即锚点：全局唯一。
-        Assert.Equal(45, plan.Questions.Select(q => q.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(47, plan.Questions.Select(q => q.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
         foreach (var group in plan.Groups)
         {
