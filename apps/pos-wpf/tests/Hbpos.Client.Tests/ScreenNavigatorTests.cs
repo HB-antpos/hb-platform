@@ -204,7 +204,7 @@ public sealed class ScreenNavigatorTests : IDisposable
     }
 
     [Fact]
-    public async Task Suspend_success_reports_first_eight_upper_case_characters_of_order_id()
+    public async Task Suspend_success_reports_the_last_eight_upper_case_characters_of_order_id()
     {
         var orderGuid = Guid.Parse("abcdef12-3456-7890-abcd-ef1234567890");
         var service = new FakeSuspendedOrderService { Result = orderGuid };
@@ -214,7 +214,7 @@ public sealed class ScreenNavigatorTests : IDisposable
 
         await navigator.SuspendCurrentOrderAsync();
 
-        Assert.Equal(new[] { "Saved #ABCDEF12" }, _statusMessages);
+        Assert.Equal(new[] { "Saved #34567890" }, _statusMessages);
         Assert.Equal("C009", Assert.Single(service.SuspendedSessions).CashierId);
         Assert.Empty(_screens);
     }

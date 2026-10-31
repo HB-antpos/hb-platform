@@ -221,7 +221,7 @@ public sealed record ReceiptDetails(
     VoucherBalanceReceipt? VoucherBalance = null,
     ReceiptTerms? Terms = null)
 {
-    public string TransactionIdDisplay => $"#{OrderGuid.ToString("N")[..10].ToUpperInvariant()}";
+    public string TransactionIdDisplay => $"#{ReceiptOrderShortCode.Create(OrderGuid)}";
 
     public string SoldAtDisplay => SoldAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm");
 }
