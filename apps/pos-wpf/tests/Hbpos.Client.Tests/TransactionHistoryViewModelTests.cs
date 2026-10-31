@@ -1435,9 +1435,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.DoesNotContain(
             viewModel.ReceiptPreviewRows,
             row => row.Text.Equals("*** Paid ***", StringComparison.Ordinal));
-        Assert.Equal(
-            suspendedOrderGuid.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsQrCode);
         Assert.True(viewModel.SelectedOrder?.CanViewOrderDetails);
         var detailLine = Assert.Single(viewModel.OrderDetailLinesForTests);
         Assert.Equal("SKU-HOLD", detailLine.ProductCode);
@@ -1581,9 +1579,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.False(viewModel.RecallSelectedCommand.CanExecute(null));
         Assert.True(viewModel.ReprintCommand.CanExecute(null));
         Assert.Same(remoteReceipt, viewModel.SelectedReceipt);
-        Assert.Equal(
-            orderGuid.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsQrCode);
 
         var selectedOrder = Assert.Single(viewModel.Orders);
         Assert.False(viewModel.IsReceiptPreviewOpen);
@@ -1810,9 +1806,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal(secondOrderGuid, viewModel.SelectedOrder?.OrderGuid);
         Assert.Same(secondReceipt, viewModel.SelectedReceipt);
         Assert.True(viewModel.IsReprintVisible);
-        Assert.Equal(
-            secondOrderGuid.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsQrCode);
         Assert.Equal("Second Item", Assert.Single(viewModel.OrderDetailLinesForTests).DisplayName);
     }
 
@@ -2135,9 +2129,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.True(viewModel.IsReprintVisible);
         Assert.True(viewModel.ReprintCommand.CanExecute(null));
         Assert.Contains(viewModel.ReceiptPreviewRows, row => row.Text.Contains("===== TAX INVOICE =====", StringComparison.Ordinal));
-        Assert.Equal(
-            orderGuid.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsQrCode);
 
         viewModel.ReprintCommand.Execute(null);
 
@@ -2448,9 +2440,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal("P001", detailLine.ProductCode);
         Assert.Equal("ITEM-INSTALLMENT", detailLine.ItemNumber);
         Assert.Equal("930001", detailLine.LookupCode);
-        Assert.Equal(
-            order.OrderId.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, preview => preview.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, preview => preview.IsQrCode);
 
         // 付款记录时间线：首付 + 末尾虚线"待付"节点；进度 = 已付 /（已付 + 未付）。
         Assert.Equal(2, viewModel.OrderDetailPaymentsForTests.Count);
@@ -2893,9 +2883,7 @@ public sealed class TransactionHistoryViewModelTests
         Assert.True(viewModel.ConfirmInstallmentPickupCommand.CanExecute(row));
         Assert.Contains(viewModel.ReceiptPreviewRows, preview => preview.Text.Contains("TAX INVOICE", StringComparison.Ordinal));
         Assert.DoesNotContain(viewModel.ReceiptPreviewRows, preview => preview.Text.Contains("===== INSTALLMENT =====", StringComparison.Ordinal));
-        Assert.Equal(
-            order.OrderId.ToString("D"),
-            Assert.Single(viewModel.ReceiptPreviewRows, preview => preview.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, preview => preview.IsQrCode);
 
         await viewModel.ConfirmInstallmentPickupCommand.ExecuteAsync(row);
 
