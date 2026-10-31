@@ -81,6 +81,8 @@ namespace BlazorApp.Api.Mappings
                 )
                 // 远程版本来自远程维护表，由控制器按页批量补齐。
                 .ForMember(dest => dest.RustDeskClientVersion, opt => opt.Ignore())
+                // 分店名称来自分店表，由控制器按页批量补齐。
+                .ForMember(dest => dest.StoreName, opt => opt.Ignore())
                 // 目标版本与版本状态依赖 WPF 更新策略，由控制器统一计算。
                 .ForMember(dest => dest.TargetAppVersion, opt => opt.Ignore())
                 .ForMember(dest => dest.VersionState, opt => opt.Ignore());

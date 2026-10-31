@@ -124,6 +124,8 @@ export interface AppDeviceStatus {
   deviceSystem?: string;
   platform?: string;
   storeCode?: string;
+  /** 后端按分店代码回填；旧版后端没有此字段，由页面用已加载的分店列表兜底。 */
+  storeName?: string;
   appVersion?: string;
   appBuildVersion?: string;
   runtimeVersion?: string;

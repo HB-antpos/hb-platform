@@ -89,6 +89,9 @@ namespace BlazorApp.Shared.DTOs
 
         public string? StoreCode { get; set; }
 
+        /// <summary>分店名称（列表按本页分店代码批量回填；心跳回执里为空）。</summary>
+        public string? StoreName { get; set; }
+
         public string? AppVersion { get; set; }
 
         public string? AppBuildVersion { get; set; }

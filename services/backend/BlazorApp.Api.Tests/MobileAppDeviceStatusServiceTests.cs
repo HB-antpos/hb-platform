@@ -42,7 +42,7 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
             }
         );
 
-        _db.CodeFirst.InitTables<MobileAppDeviceStatus, User>();
+        _db.CodeFirst.InitTables<MobileAppDeviceStatus, User, Store>();
         _db.Ado.ExecuteCommand(
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_MobileAppDeviceStatus_HardwareId ON MobileAppDeviceStatus(HardwareId)"
         );
@@ -388,6 +388,29 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
         Assert.Equal("behind", byHardware["i-old"].VersionState);
         Assert.Equal(("1.0.12", "76"), (byHardware["a-old-version"].LatestAppVersion, byHardware["a-old-version"].LatestAppBuildVersion));
         Assert.Equal(("1.0.11", "64"), (byHardware["i-old"].LatestAppVersion, byHardware["i-old"].LatestAppBuildVersion));
+    }
+
+    [Fact]
+    public async Task GetPaged_按分店代码回填分店名称_已删除或查不到的留空()
+    {
+        await _db.Insertable(new List<Store>
+        {
+            new() { StoreCode = "1023", StoreName = "Oran Park" },
+            new() { StoreCode = "1099", StoreName = "Closed Store", IsDeleted = true },
+        }).ExecuteCommandAsync();
+        await InsertStatusAsync("with-store", "Android", "android", _now, storeCode: "1023");
+        await InsertStatusAsync("deleted-store", "Android", "android", _now.AddMinutes(-1), storeCode: "1099");
+        await InsertStatusAsync("unknown-store", "Android", "android", _now.AddMinutes(-2), storeCode: "9999");
+        await InsertStatusAsync("no-store", "Android", "android", _now.AddMinutes(-3));
+
+        var response = await CreateService().GetPagedAsync(new MobileAppDeviceStatusQueryDto());
+
+        var byHardware = response.Data!.Items.ToDictionary(item => item.HardwareId);
+        Assert.Equal("Oran Park", byHardware["with-store"].StoreName);
+        Assert.Equal("1023", byHardware["with-store"].StoreCode);
+        Assert.Null(byHardware["deleted-store"].StoreName);
+        Assert.Null(byHardware["unknown-store"].StoreName);
+        Assert.Null(byHardware["no-store"].StoreName);
     }
 
     [Fact]

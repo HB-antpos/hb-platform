@@ -35,6 +35,7 @@ import {
 import { DEVICE_STATUS } from "@/modules/device-management/status";
 import { ActivationCodePanel, DeviceEditSheet, EmergencyLoginSheet } from "@/modules/device-management/admin-sheets";
 import { isDeviceRegistrationId } from "@/modules/device-management/admin-types";
+import { buildStoreNameLookup, formatDeviceStoreLabel } from "@/modules/device-management/store-label";
 import { PERMISSIONS } from "@/shared/utils/access";
 import type {
   AppDeviceOnlineState,
@@ -177,6 +178,8 @@ function DeviceManagementAdminContent({
   t: ReturnType<typeof useAppTranslation>["t"];
 }) {
   const { stores, isLoading: storesLoading } = useStores();
+  // 后端（旧版）没回填分店名称时，用已加载的分店列表把代码翻成名称。
+  const storeNameLookup = useMemo(() => buildStoreNameLookup(stores), [stores]);
   const [selectedViewMode, setViewMode] = useState<DeviceManagementViewMode>(canViewLegacyDeviceRegistration ? "registered" : "activation");
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [versionPickerVisible, setVersionPickerVisible] = useState(false);
@@ -533,6 +536,7 @@ function DeviceManagementAdminContent({
       <RegisteredDeviceCard
         item={item}
         title={getDeviceTitle(item, t("fields.unnamedDevice"))}
+        storeLabel={formatDeviceStoreLabel(item, storeNameLookup, t("fields.noStore"))}
         t={t}
         language={language}
         canManage={canManageDeviceRegistration}
@@ -542,14 +546,20 @@ function DeviceManagementAdminContent({
         onMore={() => setActionDevice(item)}
       />
     ),
-    [busyDeviceKey, canManageDeviceRegistration, language, t]
+    [busyDeviceKey, canManageDeviceRegistration, language, storeNameLookup, t]
   );
 
   const renderAppDeviceCard = useCallback(
     ({ item }: { item: AppDeviceStatus }) => (
-      <AppDeviceCard item={item} title={getAppDeviceTitle(item, t("fields.unnamedDevice"))} t={t} language={language} />
+      <AppDeviceCard
+        item={item}
+        title={getAppDeviceTitle(item, t("fields.unnamedDevice"))}
+        storeLabel={formatDeviceStoreLabel(item, storeNameLookup, t("fields.noStore"))}
+        t={t}
+        language={language}
+      />
     ),
-    [language, t]
+    [language, storeNameLookup, t]
   );
 
   const isAppUsageView = viewMode === "appUsage";
