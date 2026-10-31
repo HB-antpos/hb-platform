@@ -2610,7 +2610,13 @@
     <value>未找到订单。</value>
   </data>
   <data name="returns.status.orderAmbiguous" xml:space="preserve">
-    <value>多条订单匹配，请扫小票上的二维码。</value>
+    <value>多张订单是同一个单号，请按小票上的日期和金额选择。</value>
+  </data>
+  <data name="returns.candidates.title" xml:space="preserve">
+    <value>多张订单是同一个单号</value>
+  </data>
+  <data name="returns.candidates.subtitle" xml:space="preserve">
+    <value>请核对客人小票上的日期、时间和总额，选择对应的订单。</value>
   </data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve">
     <value>已加载本地订单；线上订单历史不可用。</value>

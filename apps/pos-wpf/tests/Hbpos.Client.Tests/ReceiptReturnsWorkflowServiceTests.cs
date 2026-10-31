@@ -516,7 +516,7 @@ public sealed class ReceiptReturnsWorkflowServiceTests
 
     // ---- 小票单号条码（GUID 末 8 位）扫码查单 ----
 
-    private const string AmbiguousStatus = "Multiple orders match. Please scan the QR code on the receipt.";
+    private const string AmbiguousStatus = "Several orders share this number. Pick the one that matches the date and amount on the receipt.";
 
     // 7e4c91d2-…-5c8d6e0f13ab 的小票单号是 6E0F13AB。
     private static readonly Guid ShortCodeOrderGuid = Guid.Parse("7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab");
@@ -558,7 +558,7 @@ public sealed class ReceiptReturnsWorkflowServiceTests
     }
 
     [Fact]
-    public async Task LookupOrderAsync_ShortCodeMatchingSeveralOrdersAsksForTheQrCodeInsteadOfGuessing()
+    public async Task LookupOrderAsync_ShortCodeMatchingSeveralOrdersListsCandidatesInsteadOfGuessing()
     {
         var other = Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab");
         var remote = new FakeRemoteOrderHistoryService
@@ -573,6 +573,11 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         Assert.Null(result.Order);
         Assert.Equal(AmbiguousStatus, result.StatusMessage);
         Assert.False(result.IsRemote);
+        // 候选单交给收银员对照小票挑选，两张都要列出来。
+        Assert.NotNull(result.Candidates);
+        Assert.Equal(
+            new[] { ShortCodeOrderGuid, other }.OrderBy(guid => guid),
+            result.Candidates!.Select(candidate => candidate.OrderGuid).OrderBy(guid => guid));
         // 绝不能猜一条去取退货上下文，也不能落回关键字路径再取第一条。
         Assert.Equal(0, remote.ReturnContextCallCount);
         Assert.Single(remote.Queries);
@@ -590,7 +595,7 @@ public sealed class ReceiptReturnsWorkflowServiceTests
 
         var result = await service.LookupOrderAsync(CreateOnlineSession(), "6E0F13AB");
 
-        Assert.Equal("多条订单匹配，请扫小票上的二维码。", result.StatusMessage);
+        Assert.Equal("多张订单是同一个单号，请按小票上的日期和金额选择。", result.StatusMessage);
     }
 
     [Fact]
@@ -650,16 +655,19 @@ public sealed class ReceiptReturnsWorkflowServiceTests
     }
 
     [Fact]
-    public async Task LookupOrderAsync_LocalShortCodeCollisionAsksForTheQrCode()
+    public async Task LookupOrderAsync_LocalShortCodeCollisionListsCandidatesNewestFirst()
     {
         var first = CreateLocalOrder(ShortCodeOrderGuid);
-        var second = CreateLocalOrder(Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab"));
+        var second = CreateLocalOrder(Guid.Parse("ffffffff-0000-0000-0000-5c8d6e0f13ab")) with { SoldAt = first.SoldAt.AddDays(1) };
         var service = CreateService(localRepository: new FakeLocalOrderRepository([first, second]));
 
         var result = await service.LookupOrderAsync(CreateOfflineSession(), "6E0F13AB");
 
         Assert.Null(result.Order);
         Assert.Equal(AmbiguousStatus, result.StatusMessage);
+        Assert.Equal(
+            new[] { second.OrderGuid, first.OrderGuid },
+            result.Candidates!.Select(candidate => candidate.OrderGuid));
     }
 
     [Fact]

@@ -35,11 +35,25 @@ public interface IReceiptReturnsWorkflowService
         IReadOnlyList<OrderReturnPaymentCapacityDto>? paymentCapacities = null);
 }
 
+/// <summary>
+/// 查单结果。8 位单号命中多张订单时 <see cref="Order"/> 为空、<see cref="Candidates"/> 列出候选单，
+/// 由收银员对照小票上的日期和金额点选，再按完整 GUID 重新查单——绝不替收银员猜。
+/// </summary>
 public sealed record ReceiptReturnLookupResult(
     ReceiptReturnOrder? Order,
     bool IsRemote,
     bool ReturnRecordsMayBeStale,
-    string StatusMessage);
+    string StatusMessage,
+    IReadOnlyList<ReceiptReturnOrderCandidate>? Candidates = null);
+
+/// <summary>8 位单号撞号时给收银员挑选的候选订单（只含核对小票所需的摘要）。</summary>
+public sealed record ReceiptReturnOrderCandidate(
+    Guid OrderGuid,
+    string StoreCode,
+    string DeviceCode,
+    string CashierName,
+    DateTimeOffset SoldAt,
+    decimal ActualAmount);
 
 public sealed record ReceiptReturnProductLookupResult(
     SellableItemDto? Item,
@@ -142,7 +156,7 @@ public sealed class ReceiptReturnsWorkflowService(
                 var remoteResolution = await ResolveRemoteOrderGuidAsync(session, query, remoteCancellationToken);
                 if (remoteResolution.IsAmbiguous)
                 {
-                    var ambiguous = CreateAmbiguousShortCodeResult();
+                    var ambiguous = CreateAmbiguousShortCodeResult(remoteResolution.Candidates!);
                     LogLookupCompleted(ambiguous, queryType, query.Length, stopwatch.ElapsedMilliseconds);
                     return ambiguous;
                 }
@@ -361,8 +375,11 @@ public sealed class ReceiptReturnsWorkflowService(
         return added;
     }
 
-    /// <summary>订单解析结果：要么得到唯一订单（或没找到），要么 8 位短码命中多条订单（IsAmbiguous）。</summary>
-    private readonly record struct OrderResolution(Guid? OrderGuid, bool IsAmbiguous = false);
+    /// <summary>订单解析结果：要么得到唯一订单（或没找到），要么 8 位短码命中多条订单（Candidates 非空）。</summary>
+    private readonly record struct OrderResolution(Guid? OrderGuid, IReadOnlyList<ReceiptReturnOrderCandidate>? Candidates = null)
+    {
+        public bool IsAmbiguous => Candidates is { Count: > 1 };
+    }
 
     private async Task<OrderResolution> ResolveRemoteOrderGuidAsync(
         PosSessionState session,
@@ -394,19 +411,24 @@ public sealed class ReceiptReturnsWorkflowService(
                     Take: ShortCodeCandidateTake),
                 cancellationToken);
             var matched = candidates.Orders
-                .Select(order => order.OrderGuid)
-                .Where(guid => ReceiptOrderShortCode.Matches(guid, shortCode))
-                .Distinct()
+                .Where(order => ReceiptOrderShortCode.Matches(order.OrderGuid, shortCode))
+                .DistinctBy(order => order.OrderGuid)
                 .ToList();
             if (matched.Count == 1)
             {
-                return new OrderResolution(matched[0]);
+                return new OrderResolution(matched[0].OrderGuid);
             }
 
             if (matched.Count > 1)
             {
-                // 末 8 位撞车极少见，但一旦撞了绝不能猜——退错订单会退错钱；让收银员改扫二维码（完整 GUID）。
-                return new OrderResolution(null, IsAmbiguous: true);
+                // 末 8 位撞车极少见，但一旦撞了绝不能猜——退错订单会退错钱；列出候选单让收银员对照小票点选。
+                return new OrderResolution(null, SortCandidates(matched.Select(order => new ReceiptReturnOrderCandidate(
+                    order.OrderGuid,
+                    order.StoreCode,
+                    order.DeviceCode,
+                    order.CashierName,
+                    order.SoldAt,
+                    order.ActualAmount))));
             }
 
             // 0 条命中：落回下面原有的关键字路径，行为与改动前一致。
@@ -424,14 +446,19 @@ public sealed class ReceiptReturnsWorkflowService(
         return new OrderResolution(result.Orders.FirstOrDefault()?.OrderGuid);
     }
 
-    private ReceiptReturnLookupResult CreateAmbiguousShortCodeResult()
+    private ReceiptReturnLookupResult CreateAmbiguousShortCodeResult(IReadOnlyList<ReceiptReturnOrderCandidate> candidates)
     {
         return new ReceiptReturnLookupResult(
             null,
             false,
             false,
-            T("returns.status.orderAmbiguous", "Multiple orders match. Please scan the QR code on the receipt."));
+            T("returns.status.orderAmbiguous", "Several orders share this number. Pick the one that matches the date and amount on the receipt."),
+            candidates);
     }
+
+    // 中文注释：最近的订单排前面——拿小票来退货的通常是近期订单。
+    private static IReadOnlyList<ReceiptReturnOrderCandidate> SortCandidates(IEnumerable<ReceiptReturnOrderCandidate> candidates) =>
+        candidates.OrderByDescending(candidate => candidate.SoldAt).ToList();
 
     private async Task<ReceiptReturnLookupResult> LookupLocalOrderAsync(
         PosSessionState session,
@@ -462,7 +489,13 @@ public sealed class ReceiptReturnsWorkflowService(
             var pool = sameStore.Count > 0 ? sameStore : candidates;
             if (pool.Count > 1)
             {
-                return CreateAmbiguousShortCodeResult();
+                return CreateAmbiguousShortCodeResult(SortCandidates(pool.Select(summary => new ReceiptReturnOrderCandidate(
+                    summary.OrderGuid,
+                    summary.StoreCode,
+                    summary.DeviceCode,
+                    summary.CashierName,
+                    summary.SoldAt,
+                    summary.ActualAmount))));
             }
 
             if (pool.Count == 1)
