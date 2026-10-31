@@ -1988,10 +1988,18 @@ public sealed class XpReceiptPrinterDriver(
         var outcome = ReceiptBarcodeFallback.Print(
             nativePrint: () =>
             {
+                // 中文注释：bcType=8 在 XP-80C 上返回成功却不出条纹，Code 128 必须用 73 + {B 前缀（见 ReceiptNativeBarcode）；
+                // 内容不能编码（空 / 非 ASCII）或在纸上放不下（放不下时打印机整条丢弃且仍返回成功）时直接判失败，
+                // 走位图 / 文字降级，不发会静默丢条码的指令。
+                if (!ReceiptNativeBarcode.TryCreateCode128Data(element.Text, element.BarcodeModuleWidth, out var barcodeData))
+                {
+                    return false;
+                }
+
                 nativeSdkResult = PrintBarCode(
                     printer,
-                    8,
-                    element.Text,
+                    ReceiptNativeBarcode.Code128BarcodeType,
+                    barcodeData,
                     element.BarcodeModuleWidth,
                     element.BarcodeHeight,
                     (int)ReceiptPrintAlignment.Center,
