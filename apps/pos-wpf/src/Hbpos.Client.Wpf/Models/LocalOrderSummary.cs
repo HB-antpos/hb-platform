@@ -18,7 +18,8 @@ public sealed record LocalOrderSummary(
     int LineCount,
     string PaymentSummary)
 {
-    public string ShortOrderId => OrderGuid.ToString("N")[..8].ToUpperInvariant();
+    // 中文注释：订单短码统一取 GUID 末 8 位（与小票条码、后端 ShortOrderNo 同口径），不要再用开头几位。
+    public string ShortOrderId => ReceiptOrderShortCode.Create(OrderGuid);
 
     public string SoldAtDisplay => SoldAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm");
 

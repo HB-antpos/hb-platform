@@ -451,7 +451,7 @@ internal sealed class ScreenNavigator
             var suspended = await _suspendedOrderService.SuspendCurrentOrderAsync(Session);
             PosTerminal?.RefreshCart();
             CashPayment?.RefreshCart();
-            _setStatusMessage(string.Format(_localization.CurrentCulture, _localization.T("main.suspendedSaved"), suspended.SuspendedOrderGuid.ToString("N")[..8].ToUpperInvariant()));
+            _setStatusMessage(string.Format(_localization.CurrentCulture, _localization.T("main.suspendedSaved"), ReceiptOrderShortCode.Create(suspended.SuspendedOrderGuid)));
         }
         catch (Exception ex)
         {

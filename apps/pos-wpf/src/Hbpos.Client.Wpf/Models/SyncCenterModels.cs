@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Hbpos.Client.Wpf.Services;
 using System.Globalization;
 
 namespace Hbpos.Client.Wpf.Models;
@@ -32,7 +33,10 @@ public sealed record SyncQueueListItem(
         (Status.Equals("Pending", StringComparison.OrdinalIgnoreCase) ||
          Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
 
-    public string ShortEntityId => EntityId.ToString("N")[..10].ToUpperInvariant();
+    // 中文注释：订单行显示订单短码（GUID 末 8 位，与历史页、小票一致）；结算等其它实体没有订单短码，仍显示前 10 位。
+    public string ShortEntityId => EntityType.Equals("Order", StringComparison.OrdinalIgnoreCase)
+        ? ReceiptOrderShortCode.Create(EntityId)
+        : EntityId.ToString("N")[..10].ToUpperInvariant();
 
     public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 

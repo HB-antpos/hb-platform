@@ -114,7 +114,7 @@ public sealed record HistoryOrderListItem(
 
     public bool CanViewOrderDetails => !IsHeldOrder || IsSuspendedOrder;
 
-    public string ShortOrderId => OrderGuid.ToString("N")[..8].ToUpperInvariant();
+    public string ShortOrderId => ReceiptOrderShortCode.Create(OrderGuid);
 
     public string DisplayOrderId => InstallmentOrder?.OrderNumber ?? ShortOrderId;
 

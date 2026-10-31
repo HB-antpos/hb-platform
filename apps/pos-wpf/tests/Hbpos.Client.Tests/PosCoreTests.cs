@@ -598,7 +598,7 @@ public sealed class PosCoreTests
                 firstLookupCode: "930201",
                 firstItemNumber: "ITEM-201");
             var nonMatchingDate = CreateLocalOrder(
-                orderGuid: Guid.Parse("99999999-8888-7777-6666-555555555555"),
+                orderGuid: Guid.Parse("99999999-8888-7777-6666-aaaaaaaaaaaa"),
                 deviceCode: "POS-01",
                 soldAt: start.AddDays(-2),
                 firstLookupCode: "930301",
@@ -619,8 +619,12 @@ public sealed class PosCoreTests
                 new LocalOrderHistoryQuery(Keyword: matchingOrder.OrderGuid.ToString("N")[..8]));
             var byLookupCode = await orders.GetRecentOrdersAsync(
                 new LocalOrderHistoryQuery(Keyword: "930101"));
+            // 订单短码（小票条码、历史页显示的）是 GUID 末 8 位，输入它也要能查到。
+            var byLastEight = await orders.GetRecentOrdersAsync(
+                new LocalOrderHistoryQuery(Keyword: ReceiptOrderShortCode.Create(matchingOrder.OrderGuid).ToLowerInvariant()));
 
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(filtered).OrderGuid);
+            Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byLastEight).OrderGuid);
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byShortOrderId).OrderGuid);
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byLookupCode).OrderGuid);
         }
