@@ -943,7 +943,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             builder.Barcode(orderId);
         }
 
-        builder.QrCode(orderId);
+        // 中文注释：订单小票不再印二维码（2026-10-31 产品决定）；退货查单改扫顶部的 8 位单号条码，
+        // 退款代金券 / 余额凭证上的二维码是顾客要扫的券码，不受影响。
         builder.Text($"Print Time: {printedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         builder.Text($"Device: {receipt.DeviceCode}");
         builder.Blank();
@@ -974,7 +975,6 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         builder.Text($"Order: {displayOrderId}");
         builder.Text($"Print Time: {printedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         builder.Barcode(refundVoucher.VoucherCode);
-        builder.QrCode(refundVoucher.VoucherCode);
         // 中文注释：使用说明放在条码下方，顾客拿券时能直接看到；退款券绑定发券门店且可分次使用（服务端强制）。
         // 正文先套用本机设置里总部下发的定制使用说明（未定制＝上面的默认英文稿）。
         AppendTerms(builder, ReceiptTermsText.ApplyCustomBody(VoucherReceiptTerms.RefundVoucher, settings));
@@ -1049,7 +1049,6 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         }
         builder.Text($"Print Time: {printedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         builder.Barcode(voucherCode);
-        builder.QrCode(voucherCode);
         builder.Blank();
 
         return builder.Build();

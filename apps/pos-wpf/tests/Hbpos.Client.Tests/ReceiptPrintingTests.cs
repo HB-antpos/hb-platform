@@ -338,7 +338,7 @@ public sealed class ReceiptPrintingTests
     private static readonly string[] DefaultVoucherTermLines =
     [
         "Use at the issuing store only.",
-        "Pay with it at checkout by scanning the barcode or QR code.",
+        "Pay with it at checkout by scanning the barcode.",
         "Can be used across several purchases until the balance is $0.00.",
         "Not redeemable for cash."
     ];
@@ -502,11 +502,11 @@ public sealed class ReceiptPrintingTests
             ["Valid at any store.", "No cash back.", "Show this slip at checkout."],
             TermBodyLines(document, "VOUCHER TERMS"));
         Assert.DoesNotContain("Use at the issuing store only.", document.PlainText, StringComparison.Ordinal);
-        // 位置不变：使用说明仍在条码 / 二维码之后。
+        // 位置不变：使用说明仍在条码之后。
         var elements = document.Elements;
-        var qrAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "VOUCHER TERMS");
-        Assert.True(qrAt >= 0 && qrAt < termsAt);
+        Assert.True(barcodeAt >= 0 && barcodeAt < termsAt);
     }
 
     [Theory]
@@ -627,9 +627,8 @@ public sealed class ReceiptPrintingTests
         // 普通单的一维条码内容是 GUID 末 8 位（不再是完整 GUID），二维码仍编码完整 GUID。
         Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == "55555555");
         Assert.DoesNotContain(document.Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == orderGuid.ToString());
-        Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode && element.Text == orderGuid.ToString());
-        var qrPreview = Assert.Single(document.PreviewRows, row => row.IsQrCode);
-        Assert.Equal(orderGuid.ToString("D"), qrPreview.QrCodeValue);
+        Assert.DoesNotContain(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        Assert.DoesNotContain(document.PreviewRows, row => row.IsQrCode);
     }
 
     [Fact]
@@ -656,14 +655,12 @@ public sealed class ReceiptPrintingTests
         Assert.DoesNotContain(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text.StartsWith("Order:", StringComparison.Ordinal));
         Assert.DoesNotContain(orderGuid.ToString(), document.PlainText, StringComparison.OrdinalIgnoreCase);
 
-        // 底部不再有重复条码；二维码仍编码完整 GUID，且 Print Time / Device / Thank you 保持不动。
-        var qr = Assert.Single(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
-        Assert.Equal(orderGuid.ToString(), qr.Text);
-        var qrAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
-        Assert.True(barcodeAt < qrAt);
-        Assert.Equal(ReceiptPrintElementKind.Separator, elements[qrAt - 1].Kind);
-        Assert.StartsWith("Print Time: ", elements[qrAt + 1].Text, StringComparison.Ordinal);
-        Assert.Equal("Device: POS-01", elements[qrAt + 2].Text);
+        // 底部不再有重复条码，也不再印二维码；Print Time / Device / Thank you 保持不动。
+        Assert.DoesNotContain(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        var printTimeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text.StartsWith("Print Time: ", StringComparison.Ordinal));
+        Assert.True(barcodeAt < printTimeAt);
+        Assert.Equal(ReceiptPrintElementKind.Separator, elements[printTimeAt - 1].Kind);
+        Assert.Equal("Device: POS-01", elements[printTimeAt + 1].Text);
         Assert.Contains(elements, element => element.Text == "Thank you for your purchase!");
 
         var barcodePreview = Assert.Single(document.PreviewRows, row => row.IsBarcode);
@@ -700,7 +697,7 @@ public sealed class ReceiptPrintingTests
         Assert.Equal(receipt.OrderGuid.ToString(), barcode.Text);
         Assert.Equal(ReceiptPrintElement.DefaultBarcodeModuleWidth, barcode.BarcodeModuleWidth);
         Assert.Equal(ReceiptPrintElement.DefaultBarcodeHeight, barcode.BarcodeHeight);
-        Assert.Equal(receipt.OrderGuid.ToString(), Assert.Single(elements, element => element.Kind == ReceiptPrintElementKind.QrCode).Text);
+        Assert.DoesNotContain(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
     }
 
     [Fact]
@@ -837,9 +834,9 @@ public sealed class ReceiptPrintingTests
         Assert.DoesNotContain("Payment:", document.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("APPROVED CARD RECEIPT", document.PlainText, StringComparison.Ordinal);
         Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == "VC200");
-        Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode && element.Text == "VC200");
+        Assert.DoesNotContain(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
         Assert.Contains(document.PreviewRows, row => row.Text == "Voucher: VC200");
-        Assert.Equal("VC200", Assert.Single(document.PreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(document.PreviewRows, row => row.IsQrCode);
     }
 
     [Fact]
@@ -891,8 +888,8 @@ public sealed class ReceiptPrintingTests
         // 退款代金券的条码编码的是券码，仍用旧的 2 点宽 / 100 点高，不受单号条码改动影响。
         Assert.Equal(ReceiptPrintElement.DefaultBarcodeModuleWidth, voucherBarcode.BarcodeModuleWidth);
         Assert.Equal(ReceiptPrintElement.DefaultBarcodeHeight, voucherBarcode.BarcodeHeight);
-        Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode && element.Text == "RF123");
-        Assert.Equal("RF123", Assert.Single(document.PreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(document.Elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        Assert.DoesNotContain(document.PreviewRows, row => row.IsQrCode);
     }
 
     [Fact]
@@ -979,18 +976,18 @@ public sealed class ReceiptPrintingTests
         var amountAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Amount: $8.00");
         var expiryAt = IndexOfElement(elements, element =>
             element.Kind == ReceiptPrintElementKind.Text && element.Text == $"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}");
-        var qrAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "VOUCHER TERMS");
-        // 到期日紧跟金额行；使用说明在条码和二维码之后，位置用元素序列判断（PlainText 不含条码文本）。
+        // 到期日紧跟金额行；使用说明在条码之后，位置用元素序列判断（PlainText 不含条码文本）。
         Assert.True(amountAt >= 0);
         Assert.Equal(amountAt + 1, expiryAt);
-        Assert.True(qrAt >= 0 && qrAt < termsAt, "使用说明必须在条码/二维码之后");
+        Assert.True(barcodeAt >= 0 && barcodeAt < termsAt, "使用说明必须在条码之后");
         Assert.True(elements[expiryAt].IsEmphasized);
 
         // 条款句子较长会按纸宽自动换行，所以按折叠空白后的整句断言。
         var collapsed = System.Text.RegularExpressions.Regex.Replace(document.PlainText, @"\s+", " ");
         Assert.Contains("Use at the issuing store only.", collapsed, StringComparison.Ordinal);
-        Assert.Contains("Pay with it at checkout by scanning the barcode or QR code.", collapsed, StringComparison.Ordinal);
+        Assert.Contains("Pay with it at checkout by scanning the barcode.", collapsed, StringComparison.Ordinal);
         Assert.Contains("Can be used across several purchases until the balance is $0.00.", collapsed, StringComparison.Ordinal);
         Assert.Contains("Not redeemable for cash.", collapsed, StringComparison.Ordinal);
         // 使用说明块里每一行都不超过 42 字符纸宽。

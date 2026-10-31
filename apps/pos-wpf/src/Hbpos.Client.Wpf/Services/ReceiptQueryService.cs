@@ -166,7 +166,7 @@ internal static class VoucherReceiptTerms
         "VOUCHER TERMS",
         [
             "Use at the issuing store only.",
-            "Pay with it at checkout by scanning the barcode or QR code.",
+            "Pay with it at checkout by scanning the barcode.",
             "Can be used across several purchases until the balance is $0.00.",
             "Not redeemable for cash."
         ],
