@@ -212,12 +212,21 @@ assert.deepEqual(
 );
 
 assert.deepEqual(getRevenueDateBounds(new Date(2026, 6, 11)), {
-  minDate: "2025-07-11",
+  minDate: "2025-01-11",
   maxDate: "2026-07-11",
 });
 assert.deepEqual(getRevenueDateBounds(new Date(2024, 1, 29)), {
-  minDate: "2023-02-28",
+  minDate: "2022-08-29",
   maxDate: "2024-02-29",
+});
+// 18 个月前那个月没有同一天：取月末（平年 2 月 28 日、闰年 2 月 29 日）。
+assert.deepEqual(getRevenueDateBounds(new Date(2026, 7, 31)), {
+  minDate: "2025-02-28",
+  maxDate: "2026-08-31",
+});
+assert.deepEqual(getRevenueDateBounds(new Date(2029, 7, 31)), {
+  minDate: "2028-02-29",
+  maxDate: "2029-08-31",
 });
 assert.deepEqual(getRevenuePeriodForDate("week", "2026-07-08"), {
   mode: "week",
@@ -239,10 +248,15 @@ assert.equal(
   false,
 );
 assert.deepEqual(refreshRevenueDateSelection("2026-07-10", new Date(2026, 6, 12)), {
-  bounds: { minDate: "2025-07-12", maxDate: "2026-07-12" },
+  bounds: { minDate: "2025-01-12", maxDate: "2026-07-12" },
   selectedDate: "2026-07-10",
 });
+// 一年前的日期现在仍在范围内，不再被收回。
 assert.deepEqual(refreshRevenueDateSelection("2025-07-11", new Date(2026, 6, 12)), {
-  bounds: { minDate: "2025-07-12", maxDate: "2026-07-12" },
-  selectedDate: "2025-07-12",
+  bounds: { minDate: "2025-01-12", maxDate: "2026-07-12" },
+  selectedDate: "2025-07-11",
+});
+assert.deepEqual(refreshRevenueDateSelection("2025-01-11", new Date(2026, 6, 12)), {
+  bounds: { minDate: "2025-01-12", maxDate: "2026-07-12" },
+  selectedDate: "2025-01-12",
 });
