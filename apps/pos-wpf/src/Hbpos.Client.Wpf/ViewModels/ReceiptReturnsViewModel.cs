@@ -122,6 +122,8 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         OpenItemKeyboardInputCommand = new RelayCommand<string>(AppendOpenItemKeyboardInput);
         BackCommand = new RelayCommand(Back);
         ClearCommand = new RelayCommand(ClearSelection);
+        SelectOrderCandidateCommand = new AsyncRelayCommand<ReceiptReturnOrderCandidateViewModel>(SelectOrderCandidateAsync, _ => !IsBusy);
+        CancelOrderCandidatesCommand = new RelayCommand(CancelOrderCandidates);
 
         _rawScannerService?.Subscribe(PageId, OnRawBarcodeScanned);
         StatusMessage = T("returns.status.default", DefaultStatusMessage);
@@ -133,6 +135,15 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
     public ObservableCollection<ReceiptReturnOrderLineViewModel> OrderLines { get; } = [];
 
     public ObservableCollection<PendingReturnLineViewModel> PendingLines { get; } = [];
+
+    /// <summary>8 位单号撞号时的候选订单；非空时显示选择弹窗。</summary>
+    public ObservableCollection<ReceiptReturnOrderCandidateViewModel> OrderCandidates { get; } = [];
+
+    public bool IsOrderCandidateDialogOpen => OrderCandidates.Count > 0;
+
+    public IRelayCommand<ReceiptReturnOrderCandidateViewModel> SelectOrderCandidateCommand { get; }
+
+    public IRelayCommand CancelOrderCandidatesCommand { get; }
 
     public IAsyncRelayCommand LookupCommand { get; }
 
@@ -357,6 +368,7 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         PendingLines.Clear();
         ReturnRecordsMayBeStale = result.ReturnRecordsMayBeStale;
         StatusMessage = result.StatusMessage;
+        SetOrderCandidates(result.Candidates);
 
         if (result.Order is null)
         {
@@ -799,11 +811,60 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         OrderLines.Clear();
         PendingLines.Clear();
         ResetOpenItemDialog();
+        SetOrderCandidates(null);
         _currentOrder = null;
         ReturnRecordsMayBeStale = false;
         OrderSummaryText = T("returns.orderSummary.none", DefaultOrderSummaryText);
         OnPendingLinesChanged();
         RefreshCommandStates();
+    }
+
+    private void SetOrderCandidates(IReadOnlyList<ReceiptReturnOrderCandidate>? candidates)
+    {
+        OrderCandidates.Clear();
+        foreach (var candidate in candidates ?? [])
+        {
+            OrderCandidates.Add(new ReceiptReturnOrderCandidateViewModel(candidate));
+        }
+
+        OnPropertyChanged(nameof(IsOrderCandidateDialogOpen));
+    }
+
+    private void CancelOrderCandidates()
+    {
+        SetOrderCandidates(null);
+        StatusMessage = T("returns.status.default", DefaultStatusMessage);
+    }
+
+    /// <summary>收银员对照小票选中一张候选单：按完整 GUID 重新查单，走与扫码完全相同的退货上下文加载。</summary>
+    private async Task SelectOrderCandidateAsync(ReceiptReturnOrderCandidateViewModel? candidate)
+    {
+        if (candidate is null || IsBusy)
+        {
+            return;
+        }
+
+        SetOrderCandidates(null);
+        IsBusy = true;
+        try
+        {
+            StatusMessage = T("returns.status.searching", "Searching for order...");
+            var result = await _workflowService.LookupOrderAsync(
+                Session,
+                candidate.OrderGuid.ToString("D", CultureInfo.InvariantCulture));
+            ApplyOrderLookupResult(result);
+        }
+        catch (Exception ex)
+        {
+            ClearSelection();
+            StatusMessage = T("returns.status.lookupUnexpectedError", "Order lookup failed. Please retry.");
+            ConsoleLog.Write("ReceiptReturns", $"candidate lookup failed error={ex.GetType().Name}");
+        }
+        finally
+        {
+            IsBusy = false;
+            RefreshCommandStates();
+        }
     }
 
     private void OnPendingLinesChanged()
@@ -820,6 +881,7 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         ConfirmToCartCommand.NotifyCanExecuteChanged();
         OpenNoReceiptOpenItemDialogCommand.NotifyCanExecuteChanged();
         ConfirmNoReceiptOpenItemCommand.NotifyCanExecuteChanged();
+        SelectOrderCandidateCommand.NotifyCanExecuteChanged();
     }
 
     private void CancelNoReceiptLookup()
@@ -1064,4 +1126,23 @@ public sealed partial class PendingReturnLineViewModel : ObservableObject
             OriginalOrderGuid,
             OriginalOrderLineGuid);
     }
+}
+
+/// <summary>撞号候选单的一行：只显示收银员核对小票需要的信息（时间、金额、收银员、收银机）。</summary>
+public sealed class ReceiptReturnOrderCandidateViewModel(ReceiptReturnOrderCandidate candidate)
+{
+    public Guid OrderGuid => candidate.OrderGuid;
+
+    public string ShortCode => ReceiptOrderShortCode.Create(candidate.OrderGuid);
+
+    public string SoldAtText => candidate.SoldAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+    // 中文注释：金额固定按 $ 显示，不随界面语言变成其它货币符号（与付款成功页一致）。
+    public string AmountText => candidate.ActualAmount < 0m
+        ? string.Create(CultureInfo.InvariantCulture, $"-${-candidate.ActualAmount:0.00}")
+        : string.Create(CultureInfo.InvariantCulture, $"${candidate.ActualAmount:0.00}");
+
+    public string CashierName => candidate.CashierName;
+
+    public string DeviceCode => candidate.DeviceCode;
 }
