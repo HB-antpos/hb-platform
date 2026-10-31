@@ -3329,7 +3329,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             NullLogger<HelpFaqPublicService>.Instance);
         var snapshot = await service.GetPublishedAsync();
         Assert.Equal(28, snapshot.Data.Tabs.Pos.Sum(g => g.Questions.Count));
-        Assert.Equal(17, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
+        Assert.Equal(19, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(snapshot.Data), StringComparison.Ordinal);
 
         // Code 全局唯一：重复锚点必须被数据库拒绝。
