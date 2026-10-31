@@ -142,6 +142,8 @@ namespace BlazorApp.Api.Controllers
                     deviceDtos = matched.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToList();
                 }
 
+                await PopulateStoreNamesAsync(deviceDtos);
+
                 // 远程版本：只为本页设备批量取 RustDesk 客户端版本号，不带任何远程维护凭据。
                 string? rustDeskLatestVersion = null;
                 if (_remoteMaintenanceService != null && deviceDtos.Count > 0)
@@ -422,6 +424,49 @@ namespace BlazorApp.Api.Controllers
             {
                 _logger.LogError(ex, "根据硬件识别码获取设备信息失败: {HardwareId}", hardwareId);
                 return StatusCode(500, new { success = false, message = "获取设备信息失败" });
+            }
+        }
+
+        /// <summary>
+        /// 为本页设备批量回填分店名称：一次读全部未删除分店（几十行），不逐台查询。
+        /// 读取失败只记日志，列表照常返回分店代码，不能因为名称拖垮设备列表。
+        /// </summary>
+        private async Task PopulateStoreNamesAsync(List<DeviceListItemDto> deviceDtos)
+        {
+            if (!deviceDtos.Any(dto => !string.IsNullOrWhiteSpace(dto.StoreCode)))
+            {
+                return;
+            }
+
+            try
+            {
+                var storesResult = await _storeService.GetAllStoresByNameAsync();
+                if (storesResult?.Success != true || storesResult.Data == null)
+                {
+                    return;
+                }
+
+                var storeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var store in storesResult.Data)
+                {
+                    if (!string.IsNullOrWhiteSpace(store.StoreCode) && !string.IsNullOrWhiteSpace(store.StoreName))
+                    {
+                        storeNames.TryAdd(store.StoreCode.Trim(), store.StoreName);
+                    }
+                }
+
+                foreach (var dto in deviceDtos)
+                {
+                    if (!string.IsNullOrWhiteSpace(dto.StoreCode)
+                        && storeNames.TryGetValue(dto.StoreCode.Trim(), out var storeName))
+                    {
+                        dto.StoreName = storeName;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "回填设备列表分店名称失败");
             }
         }
 

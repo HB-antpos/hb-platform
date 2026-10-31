@@ -50,6 +50,16 @@ function ExpandToggle({ expanded, onPress, t }: { expanded: boolean; onPress: ()
   );
 }
 
+/** 标题下的分店行：带门店图标，名称过长时单行截断。 */
+function StoreLine({ label }: { label: string }) {
+  return (
+    <View style={styles.storeLine}>
+      <Icon source="store-outline" size={14} color={HB_COLORS.textSecondary} />
+      <Text style={styles.subtitle} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
 function DetailList({ rows }: { rows: { label: string; value: string | null | undefined }[] }) {
   const visible = rows.filter((row) => row.value);
   if (visible.length === 0) return null;
@@ -68,6 +78,8 @@ function DetailList({ rows }: { rows: { label: string; value: string | null | un
 export interface RegisteredDeviceCardProps {
   item: DeviceManagementDevice;
   title: string;
+  /** 分店名称 · 代码，由页面统一算好（含本地分店列表兜底）。 */
+  storeLabel: string;
   t: Translate;
   language: string;
   canManage: boolean;
@@ -80,6 +92,7 @@ export interface RegisteredDeviceCardProps {
 export const RegisteredDeviceCard = memo(function RegisteredDeviceCard({
   item,
   title,
+  storeLabel,
   t,
   language,
   canManage,
@@ -90,8 +103,6 @@ export const RegisteredDeviceCard = memo(function RegisteredDeviceCard({
 }: RegisteredDeviceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const statusKey = getDeviceStatusKey(item.status);
-  const storeName = item.storeName || item.storeCode || t("deviceManagement:fields.noStore");
-  const storeLine = item.storeName && item.storeCode ? `${item.storeName} · ${item.storeCode}` : storeName;
   const system = [item.deviceSystem || item.platform, item.deviceType].filter(Boolean).join(" · ");
   const age = formatAgeText(item.lastHeartbeatAt, t);
   const onlineText = item.isOnline ? t("deviceManagement:appUsage.online") : t("deviceManagement:appUsage.offline");
@@ -103,7 +114,7 @@ export const RegisteredDeviceCard = memo(function RegisteredDeviceCard({
       <View style={styles.header}>
         <View style={styles.titleWrap}>
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>{storeLine}</Text>
+          <StoreLine label={storeLabel} />
         </View>
         <StatusTag tone={STATUS_TONES[statusKey]} label={t(`deviceManagement:statuses.${statusKey}`)} />
       </View>
@@ -171,13 +182,14 @@ export const RegisteredDeviceCard = memo(function RegisteredDeviceCard({
 export interface AppDeviceCardProps {
   item: AppDeviceStatus;
   title: string;
+  /** 分店名称 · 代码，由页面统一算好（含本地分店列表兜底）。 */
+  storeLabel: string;
   t: Translate;
   language: string;
 }
 
-export const AppDeviceCard = memo(function AppDeviceCard({ item, title, t, language }: AppDeviceCardProps) {
+export const AppDeviceCard = memo(function AppDeviceCard({ item, title, storeLabel, t, language }: AppDeviceCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const storeName = item.storeCode || t("deviceManagement:fields.noStore");
   const system = item.deviceSystem || item.platform || t("common:na");
   const user = item.lastSeenUserFullName || item.lastSeenUsername || t("deviceManagement:appUsage.noRecentUser");
   const age = formatAgeText(item.lastSeenAtUtc, t);
@@ -189,8 +201,9 @@ export const AppDeviceCard = memo(function AppDeviceCard({ item, title, t, langu
       <View style={styles.header}>
         <View style={styles.titleWrap}>
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <StoreLine label={storeLabel} />
           <View style={styles.metaLine}>
-            <Text style={styles.subtitle} numberOfLines={1}>{`${storeName} · ${system}`}</Text>
+            <Text style={styles.subtitle} numberOfLines={1}>{system}</Text>
             <Text style={styles.metaDivider}>|</Text>
             <Icon source="account-outline" size={14} color={HB_COLORS.textSecondary} />
             <Text style={[styles.subtitle, styles.userText]} numberOfLines={1}>{user}</Text>
@@ -248,6 +261,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, lineHeight: 22, fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
   subtitle: { fontSize: 12, lineHeight: 18, color: HB_COLORS.textSecondary, flexShrink: 1 },
   userText: { flexShrink: 1 },
+  storeLine: { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 },
   metaLine: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
   metaText: { fontSize: 12, lineHeight: 18, color: HB_COLORS.textSecondary },
   metaDivider: { fontSize: 12, color: HB_COLORS.outline },

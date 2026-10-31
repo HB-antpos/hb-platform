@@ -297,6 +297,7 @@ function normalizeAppDeviceStatus(raw: unknown): AppDeviceStatus | null {
     deviceSystem: asString(pick(record, "deviceSystem", "DeviceSystem")),
     platform: asString(pick(record, "platform", "Platform")),
     storeCode: asString(pick(record, "storeCode", "StoreCode")),
+    storeName: asString(pick(record, "storeName", "StoreName")),
     appVersion: asString(pick(record, "appVersion", "AppVersion")),
     appBuildVersion: asString(pick(record, "appBuildVersion", "AppBuildVersion")),
     runtimeVersion: asString(pick(record, "runtimeVersion", "RuntimeVersion")),

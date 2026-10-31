@@ -130,6 +130,11 @@ namespace BlazorApp.Shared.DTOs
         public string? StoreCode { get; set; }
 
         /// <summary>
+        /// 分店名称（只在分页列表里按本页分店代码批量回填；分店已删除或查不到时为空）
+        /// </summary>
+        public string? StoreName { get; set; }
+
+        /// <summary>
         /// 设备状态
         /// </summary>
         public int Status { get; set; }

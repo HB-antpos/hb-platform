@@ -101,6 +101,35 @@ public sealed class DeviceVersionFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDevicesPaged_按分店代码批量回填分店名称_查不到或读取失败只留空()
+    {
+        ReturnPage(Device(1, "BRI", "1.0.96"), Device(2, "bri ", "1.0.96"), Device(3, "ZZZ", "1.0.96"));
+        var storeService = new Mock<IStoreService>();
+        storeService
+            .Setup(x => x.GetAllStoresByNameAsync())
+            .ReturnsAsync(ApiResponse<List<StoreDto>>.OK(new List<StoreDto>
+            {
+                new() { StoreCode = "BRI", StoreName = "Brisbane" },
+                new() { StoreCode = "SYD", StoreName = "Sydney" },
+            }));
+
+        var devices = ReadData(await CreateController(storeService: storeService.Object).GetDevicesPaged()).Devices;
+
+        Assert.Equal("Brisbane", devices.Single(d => d.Id == 1).StoreName);
+        // 分店代码大小写、首尾空格不一致也能对上。
+        Assert.Equal("Brisbane", devices.Single(d => d.Id == 2).StoreName);
+        Assert.Null(devices.Single(d => d.Id == 3).StoreName);
+        // 整页只读一次分店表，不逐台查询。
+        storeService.Verify(x => x.GetAllStoresByNameAsync(), Times.Once);
+
+        var failing = new Mock<IStoreService>();
+        failing.Setup(x => x.GetAllStoresByNameAsync()).ThrowsAsync(new InvalidOperationException("db down"));
+        var fallback = ReadData(await CreateController(storeService: failing.Object).GetDevicesPaged());
+        Assert.Equal(3, fallback.Devices.Count);
+        Assert.All(fallback.Devices, d => Assert.Null(d.StoreName));
+    }
+
+    [Fact]
     public async Task GetDevicesPaged_按版本状态筛选_总数和分页一致()
     {
         await SeedStoreAsync("guid-bri", "BRI");
@@ -203,13 +232,15 @@ public sealed class DeviceVersionFilterTests : IDisposable
             .Setup(x => x.GetDevicesPagedAsync(1, 5000, null, null, null, null, null))
             .ReturnsAsync((devices.ToList(), devices.Length));
 
-    private DeviceRegistrationController CreateController(bool withReleaseService = true) =>
+    private DeviceRegistrationController CreateController(
+        bool withReleaseService = true,
+        IStoreService? storeService = null) =>
         new(
             _deviceService.Object,
             Mock.Of<ILogger<DeviceRegistrationController>>(),
             new MapperConfiguration(cfg => cfg.AddProfile<DeviceMappingProfile>(), NullLoggerFactory.Instance)
                 .CreateMapper(),
-            Mock.Of<IStoreService>(),
+            storeService ?? Mock.Of<IStoreService>(),
             wpfAppReleaseService: withReleaseService ? _releaseService : null);
 
     private sealed record PagedData(List<DeviceListItemDto> Devices, int Total, int TotalPages);

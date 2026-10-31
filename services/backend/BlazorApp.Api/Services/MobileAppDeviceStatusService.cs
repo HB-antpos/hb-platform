@@ -134,10 +134,13 @@ namespace BlazorApp.Api.Services
                 items = matched.Skip((page - 1) * pageSize).Take(pageSize).ToList();
             }
 
+            var dtos = items.Select(item => MapToDto(item, threshold, latestBySystem)).ToList();
+            await PopulateStoreNamesAsync(dtos);
+
             return ApiResponse<PagedResult<MobileAppDeviceStatusDto>>.OK(
                 new PagedResult<MobileAppDeviceStatusDto>
                 {
-                    Items = items.Select(item => MapToDto(item, threshold, latestBySystem)).ToList(),
+                    Items = dtos,
                     Total = total,
                     Page = page,
                     PageSize = pageSize,
@@ -432,6 +435,53 @@ namespace BlazorApp.Api.Services
                 "unreported" => "unreported",
                 _ => null,
             };
+        }
+
+        /// <summary>
+        /// 按本页设备的分店代码一次查出分店名称；查不到（分店已删除或代码无效）就留空，
+        /// 查询失败只记日志，列表照常返回分店代码。
+        /// </summary>
+        private async Task PopulateStoreNamesAsync(List<MobileAppDeviceStatusDto> dtos)
+        {
+            var codes = dtos
+                .Select(dto => dto.StoreCode?.Trim())
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (codes.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var stores = await _db.Queryable<BlazorApp.Shared.Models.Store>()
+                    .Where(store => !store.IsDeleted && codes.Contains(store.StoreCode))
+                    .Select(store => new { store.StoreCode, store.StoreName })
+                    .ToListAsync();
+                var storeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var store in stores)
+                {
+                    if (!string.IsNullOrWhiteSpace(store.StoreName))
+                    {
+                        storeNames.TryAdd(store.StoreCode.Trim(), store.StoreName);
+                    }
+                }
+
+                foreach (var dto in dtos)
+                {
+                    if (!string.IsNullOrWhiteSpace(dto.StoreCode)
+                        && storeNames.TryGetValue(dto.StoreCode.Trim(), out var storeName))
+                    {
+                        dto.StoreName = storeName;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "回填 App 设备列表分店名称失败");
+            }
         }
 
         private static MobileAppDeviceStatusDto MapToDto(
