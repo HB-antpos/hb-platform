@@ -1408,10 +1408,39 @@ export class SalesPresenter {
         ))
     ) {
       this.patchState({ cart });
-      this.revealLine(cart.lines[cart.lines.length - 1]!.lineId);
+      this.revealLine(
+        this.findLineBelowRemovedSelection(previousCart, cart) ??
+          cart.lines[cart.lines.length - 1]!.lineId,
+      );
       return;
     }
     this.patchState({ cart });
+  }
+
+  // 删掉选中行后选中屏幕上它下面那一行。手持端列表倒序显示（最新在上），
+  // 屏幕上的下一行是更早加入的行；删的是最底行时选中新的最底行，即最早加入的行。
+  // 整车替换没有保留原有行时交回默认的最新行选择。
+  private findLineBelowRemovedSelection(
+    previousCart: CartSnapshot,
+    cart: CartSnapshot,
+  ): string | null {
+    const removedIndex = previousCart.lines.findIndex(
+      (line) => line.lineId === this.state.selectedLineId,
+    );
+    if (removedIndex < 0) {
+      return null;
+    }
+    const remainingLineIds = new Set(cart.lines.map((line) => line.lineId));
+    const lineBelow = previousCart.lines
+      .slice(0, removedIndex)
+      .reverse()
+      .find((line) => remainingLineIds.has(line.lineId));
+    if (lineBelow) {
+      return lineBelow.lineId;
+    }
+    return previousCart.lines.some((line) => remainingLineIds.has(line.lineId))
+      ? cart.lines[0]!.lineId
+      : null;
   }
 
   private revealLine(lineId: string | null): void {
