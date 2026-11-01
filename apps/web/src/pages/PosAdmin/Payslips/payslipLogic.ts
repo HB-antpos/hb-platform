@@ -3,15 +3,18 @@ import type { MyobPayslipCompanyStatus, MyobPayslipFlatLine, MyobPayslipRow } fr
 // 工资单页的纯逻辑：日期预设（澳洲财年）、金额 / 工时 / 周期格式化、错误归类、分店下拉。
 // 所有函数都是纯函数（today 由调用方传入），便于单测。
 
-export type PayslipPresetKey = 'last2Weeks' | 'last3Months' | 'thisFinancialYear' | 'lastFinancialYear'
+export type PayslipPresetKey = 'lastWeek' | 'last2Weeks' | 'last3Months' | 'thisFinancialYear' | 'lastFinancialYear'
 
-export const PAYSLIP_PRESETS: readonly PayslipPresetKey[] = ['last2Weeks', 'last3Months', 'thisFinancialYear', 'lastFinancialYear']
+export const PAYSLIP_PRESETS: readonly PayslipPresetKey[] = ['lastWeek', 'last2Weeks', 'last3Months', 'thisFinancialYear', 'lastFinancialYear']
 
 /** 后端单次区间上限：含首尾 731 天（24 个月）。前端用同一个数提前拦截，避免白发一次请求。 */
 export const PAYSLIP_MAX_RANGE_DAYS = 731
 
-/** 默认预设：与后端默认（最近 90 天）一致。 */
-export const PAYSLIP_DEFAULT_PRESET: PayslipPresetKey = 'last3Months'
+/**
+ * 默认预设：最近一周。周薪员工打开页面就能看到最新一期；双周薪的点「最近两周」即可。
+ * 前端每次请求都显式带 from / to，所以这里与后端缺省（最近 90 天）不同也没关系。
+ */
+export const PAYSLIP_DEFAULT_PRESET: PayslipPresetKey = 'lastWeek'
 
 /** 悉尼「今天」（yyyy-MM-dd）：门店与 MYOB 工资单都按澳洲日期算，不用浏览器本地时区。 */
 export function sydneyToday(now: Date = new Date()): string {
@@ -40,12 +43,15 @@ export function inclusiveDays(from: string, to: string): number {
 
 /**
  * 预设对应的支付日期区间（含首尾）。
+ * - lastWeek：今天往前 7 天（同一个星期几到今天，周薪至少能覆盖最新一期）；
  * - last2Weeks：今天往前 14 天（原设计稿的「最近一个周期」：MYOB 有周薪 / 双周薪，无法统一成一个周期，所以按两周取，足够覆盖一个双周期）；
  * - last3Months：今天往前 90 天；
  * - thisFinancialYear / lastFinancialYear：澳洲财年 7 月 1 日 ~ 次年 6 月 30 日（本财年截止到今天）。
  */
 export function resolvePayslipPreset(preset: PayslipPresetKey, today: string): { from: string; to: string } {
   switch (preset) {
+    case 'lastWeek':
+      return { from: addDays(today, -7), to: today }
     case 'last2Weeks':
       return { from: addDays(today, -14), to: today }
     case 'last3Months':
