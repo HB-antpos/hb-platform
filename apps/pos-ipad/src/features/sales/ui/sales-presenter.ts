@@ -1410,10 +1410,32 @@ export class SalesPresenter {
         ))
     ) {
       this.patchState({ cart });
-      this.revealLine(cart.lines[cart.lines.length - 1]!.lineId);
+      this.revealLine(
+        this.findLineBelowRemovedSelection(previousCart, cart) ??
+          cart.lines[cart.lines.length - 1]!.lineId,
+      );
       return;
     }
     this.patchState({ cart });
+  }
+
+  // 删掉选中行后选中屏幕上它下面那一行（列表按加入顺序显示）；删的是末行时交回默认的末行选择。
+  private findLineBelowRemovedSelection(
+    previousCart: CartSnapshot,
+    cart: CartSnapshot,
+  ): string | null {
+    const removedIndex = previousCart.lines.findIndex(
+      (line) => line.lineId === this.state.selectedLineId,
+    );
+    if (removedIndex < 0) {
+      return null;
+    }
+    const remainingLineIds = new Set(cart.lines.map((line) => line.lineId));
+    return (
+      previousCart.lines
+        .slice(removedIndex + 1)
+        .find((line) => remainingLineIds.has(line.lineId))?.lineId ?? null
+    );
   }
 
   private revealLine(lineId: string | null): void {
