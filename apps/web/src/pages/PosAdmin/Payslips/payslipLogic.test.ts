@@ -31,8 +31,10 @@ import {
 
 // ───────────────────────── 日期预设 ─────────────────────────
 
-// 默认预设与后端默认（最近 90 天）一致。
-assert.equal(PAYSLIP_DEFAULT_PRESET, 'last3Months')
+// 默认预设：最近一周（今天往前 7 天，含首尾 8 天）；前端请求总是显式带区间，不依赖后端缺省的 90 天。
+assert.equal(PAYSLIP_DEFAULT_PRESET, 'lastWeek')
+assert.deepEqual(resolvePayslipPreset('lastWeek', '2026-11-02'), { from: '2026-10-26', to: '2026-11-02' })
+assert.deepEqual(resolvePayslipPreset('lastWeek', '2026-10-29'), { from: '2026-10-22', to: '2026-10-29' })
 assert.deepEqual(resolvePayslipPreset('last3Months', '2026-10-29'), { from: '2026-07-31', to: '2026-10-29' })
 assert.deepEqual(resolvePayslipPreset('last2Weeks', '2026-10-29'), { from: '2026-10-15', to: '2026-10-29' })
 
@@ -47,7 +49,7 @@ assert.deepEqual(resolvePayslipPreset('lastFinancialYear', '2026-07-01'), { from
 
 // 所有预设都不超过后端单次区间上限。
 for (const today of ['2026-01-01', '2026-06-30', '2026-07-01', '2026-10-29', '2026-12-31']) {
-  for (const preset of ['last2Weeks', 'last3Months', 'thisFinancialYear', 'lastFinancialYear'] as const) {
+  for (const preset of ['lastWeek', 'last2Weeks', 'last3Months', 'thisFinancialYear', 'lastFinancialYear'] as const) {
     const range = resolvePayslipPreset(preset, today)
     assert.equal(validatePayslipRange(range.from, range.to), 'ok', `${preset} @ ${today}`)
   }
@@ -55,6 +57,9 @@ for (const today of ['2026-01-01', '2026-06-30', '2026-07-01', '2026-10-29', '20
 
 // 预设高亮：恰好等于预设才高亮，自定义区间不高亮。
 assert.equal(matchPayslipPreset('2026-07-31', '2026-10-29', '2026-10-29'), 'last3Months')
+assert.equal(matchPayslipPreset('2026-10-26', '2026-11-02', '2026-11-02'), 'lastWeek')
+// 一周与两周不会互相误高亮。
+assert.equal(matchPayslipPreset('2026-10-19', '2026-11-02', '2026-11-02'), 'last2Weeks')
 assert.equal(matchPayslipPreset('2026-07-30', '2026-10-29', '2026-10-29'), null)
 
 // 日期运算跨月 / 闰年。

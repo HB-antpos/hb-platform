@@ -19,6 +19,7 @@
       "search": "搜索员工姓名 / MYOB 编号",
       "presetAria": "快速选择支付日期区间",
       "presets": {
+        "lastWeek": "最近一周",
         "last2Weeks": "最近两周",
         "last3Months": "近 3 个月",
         "thisFinancialYear": "本财年",

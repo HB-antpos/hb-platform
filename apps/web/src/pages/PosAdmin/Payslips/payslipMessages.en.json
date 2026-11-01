@@ -19,6 +19,7 @@
       "search": "Search employee name / MYOB ID",
       "presetAria": "Quick payment date ranges",
       "presets": {
+        "lastWeek": "Last week",
         "last2Weeks": "Last 2 weeks",
         "last3Months": "Last 3 months",
         "thisFinancialYear": "This financial year",

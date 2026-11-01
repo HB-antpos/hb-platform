@@ -86,6 +86,8 @@ function companyKindMessageKey(kind: PayslipErrorKind) {
 
 function presetLabelKey(preset: PayslipPresetKey) {
   switch (preset) {
+    case 'lastWeek':
+      return 'payslips.filters.presets.lastWeek'
     case 'last2Weeks':
       return 'payslips.filters.presets.last2Weeks'
     case 'last3Months':
