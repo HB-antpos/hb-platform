@@ -648,6 +648,89 @@ public sealed class ProductStoreRecordsTests : IDisposable
         Assert.Null(deleted.Data?.DomesticSupplierName);
     }
 
+    [Theory]
+    [InlineData(null)] // 快路径：Product 单表计数、排序、取页
+    [InlineData("storerecordcount")] // 分页前预聚合路径
+    public async Task GetPagedListAsync_默认排除已软删商品且总数与分页一致(string? sortBy)
+    {
+        // 已删商品更新时间最新、且带一条分店记录：未排除时两种排序下都会排在第一页最前。
+        await SeedProductAsync("P-LIVE-1", "L001", updatedAt: new DateTime(2026, 1, 2));
+        await SeedProductAsync("P-LIVE-2", "L002", updatedAt: new DateTime(2026, 1, 1));
+        await SeedProductAsync(
+            "P-SOFT-DELETED",
+            "D001",
+            updatedAt: new DateTime(2026, 1, 3),
+            isDeleted: true
+        );
+        await SeedStoreRetailPriceAsync("price-soft-deleted", "P-SOFT-DELETED", "S01", false);
+
+        var pages = new List<PagedListReactDto<ProductDto>>();
+        for (var pageNumber = 1; pageNumber <= 3; pageNumber++)
+        {
+            pages.Add(await CreateService().GetPagedListAsync(new ProductReactFilterDto
+            {
+                PageNumber = pageNumber,
+                PageSize = 1,
+                SortBy = sortBy,
+                SortOrder = "desc",
+            }));
+        }
+
+        Assert.All(pages, page => Assert.Equal(2, page.Total));
+        Assert.Equal(
+            new[] { "P-LIVE-1", "P-LIVE-2" },
+            pages.SelectMany(page => page.Items).Select(item => item.ProductCode).ToArray()
+        );
+        Assert.Empty(pages[2].Items);
+    }
+
+    [Fact]
+    public async Task GetPagedListAsync_关键词与禁用状态筛选都不返回已软删商品()
+    {
+        await SeedProductAsync("P-LANTERN-LIVE", "K001", productName: "Lantern Live", isActive: false);
+        await SeedProductAsync(
+            "P-LANTERN-DELETED",
+            "K002",
+            productName: "Lantern Deleted",
+            isActive: false,
+            isDeleted: true
+        );
+
+        var bySearch = await CreateService().GetPagedListAsync(new ProductReactFilterDto
+        {
+            PageNumber = 1,
+            PageSize = 20,
+            Search = "lantern",
+        });
+        Assert.Equal(1, bySearch.Total);
+        Assert.Equal(new[] { "P-LANTERN-LIVE" }, bySearch.Items.Select(item => item.ProductCode).ToArray());
+
+        // 软删商品多为停用状态，按「禁用」筛选时最容易被误列出来。
+        var byInactive = await CreateService().GetPagedListAsync(new ProductReactFilterDto
+        {
+            PageNumber = 1,
+            PageSize = 20,
+            IsActive = false,
+        });
+        Assert.Equal(1, byInactive.Total);
+        Assert.Equal(new[] { "P-LANTERN-LIVE" }, byInactive.Items.Select(item => item.ProductCode).ToArray());
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_已软删商品返回商品已删除且与不存在区分()
+    {
+        await SeedProductAsync("P-DETAIL-SOFT-DELETED", "D003", isDeleted: true);
+
+        var deleted = await CreateService().GetByIdAsync("P-DETAIL-SOFT-DELETED");
+        Assert.False(deleted.Success);
+        Assert.Equal("商品已删除", deleted.Message);
+        Assert.Null(deleted.Data);
+
+        var missing = await CreateService().GetByIdAsync("P-DETAIL-NOT-EXISTS");
+        Assert.False(missing.Success);
+        Assert.Equal("商品不存在", missing.Message);
+    }
+
     [Fact]
     public async Task GetPagedListAsync_国内供应商多选过滤只返回映射命中商品()
     {
@@ -2047,7 +2130,8 @@ public sealed class ProductStoreRecordsTests : IDisposable
         string? categoryGuid = null,
         string? warehouseCategoryGuid = null,
         DateTime? createdAt = null,
-        DateTime? updatedAt = null)
+        DateTime? updatedAt = null,
+        bool isDeleted = false)
     {
         var now = DateTime.UtcNow;
         await _localDb.Insertable(new Product
@@ -2067,7 +2151,7 @@ public sealed class ProductStoreRecordsTests : IDisposable
             IsActive = isActive,
             CreatedAt = createdAt ?? now,
             UpdatedAt = updatedAt ?? now,
-            IsDeleted = false,
+            IsDeleted = isDeleted,
         }).ExecuteCommandAsync();
     }
 
