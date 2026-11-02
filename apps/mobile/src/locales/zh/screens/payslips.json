@@ -19,6 +19,7 @@
       "pickerTitle": "选择分店"
     },
     "preset": {
+      "oneWeek": "最近一周",
       "twoWeeks": "最近两周",
       "threeMonths": "近 3 个月",
       "fiscalYear": "本财年",

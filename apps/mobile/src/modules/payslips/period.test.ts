@@ -9,7 +9,8 @@ import {
   resolvePreset,
 } from "./period";
 
-assert.equal(DEFAULT_PAYSLIP_PRESET, "threeMonths");
+// 默认预设：最近一周（与 Web 一致）。
+assert.equal(DEFAULT_PAYSLIP_PRESET, "oneWeek");
 
 // 日期加减：跨月 / 跨年 / 闰年
 assert.equal(addDays("2026-10-29", -13), "2026-10-16");
@@ -29,13 +30,16 @@ assert.equal(fiscalYearStart("2026-07-01"), "2026-07-01");
 assert.equal(fiscalYearStart("2026-06-30"), "2025-07-01");
 assert.equal(fiscalYearStart("2026-01-15"), "2025-07-01");
 
-// 预设：最近两周 = 14 天含今天；近 3 个月 = 90 天含今天；本财年 = 财年首日至今天
+// 预设：最近一周 = 今天往前 7 天（含上周同一个星期几）；最近两周 = 14 天含今天；近 3 个月 = 90 天含今天；本财年 = 财年首日至今天
+assert.deepEqual(resolvePreset("oneWeek", "2026-11-02"), { from: "2026-10-26", to: "2026-11-02" });
+assert.deepEqual(resolvePreset("oneWeek", "2026-10-29"), { from: "2026-10-22", to: "2026-10-29" });
 assert.deepEqual(resolvePreset("twoWeeks", "2026-10-29"), { from: "2026-10-16", to: "2026-10-29" });
 assert.deepEqual(resolvePreset("threeMonths", "2026-10-29"), { from: "2026-08-01", to: "2026-10-29" });
 assert.deepEqual(resolvePreset("fiscalYear", "2026-10-29"), { from: "2026-07-01", to: "2026-10-29" });
 assert.deepEqual(resolvePreset("custom", "2026-10-29", { from: "2026-09-01", to: "2026-09-30" }), { from: "2026-09-01", to: "2026-09-30" });
-// 自定义没有区间时退回默认预设
-assert.deepEqual(resolvePreset("custom", "2026-10-29"), resolvePreset("threeMonths", "2026-10-29"));
+// 自定义没有区间时退回默认预设（最近一周）
+assert.deepEqual(resolvePreset("custom", "2026-10-29"), resolvePreset("oneWeek", "2026-10-29"));
+assert.deepEqual(resolvePreset("custom", "2026-10-29"), { from: "2026-10-22", to: "2026-10-29" });
 
 // 自定义区间：起止颠倒自动对调，缺失 / 非法返回 null
 assert.deepEqual(normalizeCustomRange("2026-09-30", "2026-09-01"), { from: "2026-09-01", to: "2026-09-30" });

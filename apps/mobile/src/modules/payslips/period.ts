@@ -1,16 +1,16 @@
-// 工资单列表的日期口径：按「支付日期」筛选，预设为最近两周 / 近 3 个月（90 天，与后端默认一致）/ 本财年。
+// 工资单列表的日期口径：按「支付日期」筛选，预设为最近一周 / 最近两周 / 近 3 个月（90 天，与后端默认一致）/ 本财年。
 // 澳洲财年 7/1 至次年 6/30。全部用 yyyy-MM-dd 字符串 + UTC 日历运算，不受设备时区与夏令时影响。
 
-export type PayslipPreset = "twoWeeks" | "threeMonths" | "fiscalYear" | "custom";
+export type PayslipPreset = "oneWeek" | "twoWeeks" | "threeMonths" | "fiscalYear" | "custom";
 
 export interface PayslipDateRange {
   from: string;
   to: string;
 }
 
-/** 默认预设：近 3 个月（最近 90 天），与 Web 工资单页默认窗口一致。 */
-export const DEFAULT_PAYSLIP_PRESET: PayslipPreset = "threeMonths";
-export const PAYSLIP_PRESETS: readonly PayslipPreset[] = ["twoWeeks", "threeMonths", "fiscalYear", "custom"];
+/** 默认预设：最近一周，与 Web 工资单页默认窗口一致；双周薪的点「最近两周」。 */
+export const DEFAULT_PAYSLIP_PRESET: PayslipPreset = "oneWeek";
+export const PAYSLIP_PRESETS: readonly PayslipPreset[] = ["oneWeek", "twoWeeks", "threeMonths", "fiscalYear", "custom"];
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -59,6 +59,9 @@ export function normalizeCustomRange(from?: string | null, to?: string | null): 
 /** 预设 → 具体起止日（含首尾）。custom 取传入的自定义区间，缺失时退回默认预设。 */
 export function resolvePreset(preset: PayslipPreset, today: string, custom?: PayslipDateRange | null): PayslipDateRange {
   switch (preset) {
+    case "oneWeek":
+      // 今天往前 7 天（含首尾 8 天）：把上周同一个星期几也包进来，发薪日当天工资还没跑完时周薪员工仍能看到上一期。
+      return { from: addDays(today, -7), to: today };
     case "twoWeeks":
       return { from: addDays(today, -13), to: today };
     case "fiscalYear":
