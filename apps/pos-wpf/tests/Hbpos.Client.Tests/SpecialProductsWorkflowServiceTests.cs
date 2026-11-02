@@ -181,6 +181,7 @@ public sealed class SpecialProductsWorkflowServiceTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1.5)]
+    [InlineData(9999.01)]
     [InlineData(100000)]
     [InlineData(5.999)]
     public async Task UpdateSpecialProductPriceAsync_rejects_invalid_price_before_calling_the_service(double price)
@@ -196,10 +197,11 @@ public sealed class SpecialProductsWorkflowServiceTests
 
     [Theory]
     [InlineData(0.01, true)]
-    [InlineData(99999.99, true)]
+    [InlineData(9999, true)]
     [InlineData(12.5, true)]
     [InlineData(0, false)]
-    [InlineData(99999.995, false)]
+    [InlineData(9999.01, false)]
+    [InlineData(99999.99, false)]
     [InlineData(0.001, false)]
     public void SpecialProductPriceRules_accepts_only_positive_two_decimal_prices_up_to_the_maximum(double price, bool valid)
     {

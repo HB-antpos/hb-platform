@@ -1508,6 +1508,9 @@
   <data name="pos.status.discountPercentOutOfRange" xml:space="preserve">
     <value>折扣百分比必须在 0 到 100 之间。</value>
   </data>
+  <data name="pos.status.unitPriceTooHigh" xml:space="preserve">
+    <value>价格不能超过 {0}。</value>
+  </data>
   <data name="pos.status.lineQuantityUpdated" xml:space="preserve">
     <value>数量已更新。</value>
   </data>
@@ -1788,7 +1791,7 @@
     <value>退格</value>
   </data>
   <data name="specialProducts.priceEditor.invalid" xml:space="preserve">
-    <value>请输入大于 0 且不超过 99999.99 的价格，最多两位小数。</value>
+    <value>请输入大于 0 且不超过 9999 的价格，最多两位小数。</value>
   </data>
   <data name="specialProducts.priceEditor.same" xml:space="preserve">
     <value>新价格与当前价格相同。</value>
