@@ -175,7 +175,7 @@ public sealed class WholeOrderOneShotSwitchTests
         using var harness = new Harness(onHoldOrderAsync: () =>
         {
             held = true;
-            return Task.CompletedTask;
+            return Task.FromResult<Guid?>(null);
         });
         harness.ViewModel.IsWholeOrderOperation = true;
 
@@ -260,7 +260,7 @@ public sealed class WholeOrderOneShotSwitchTests
     {
         public Harness(
             bool approveAuthorization = true,
-            Func<Task>? onHoldOrderAsync = null,
+            Func<Task<Guid?>>? onHoldOrderAsync = null,
             Func<Task>? onRecallOrderAsync = null,
             Func<Task>? onLockCashierAsync = null)
         {
