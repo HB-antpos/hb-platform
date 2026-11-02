@@ -122,7 +122,8 @@ public sealed class AppUpdateCoordinator(
     AppUpdateState state,
     IApplicationExitService exitService,
     IAppUpdateChannelProvider channelProvider,
-    Func<TimeSpan, CancellationToken, Task>? delayAsync = null) : IAppUpdateCoordinator, IDisposable
+    Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+    AppUpdatePostponeOptions? postponeOptions = null) : IAppUpdateCoordinator, IDisposable
 {
     public const string UnattendedInstallerNotSilentErrorCode = "UNATTENDED_INSTALLER_NOT_SILENT";
     public const string UnattendedActiveTransactionErrorCode = "UNATTENDED_ACTIVE_TRANSACTION";
@@ -136,7 +137,21 @@ public sealed class AppUpdateCoordinator(
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync =
         delayAsync ?? ((delay, cancellationToken) => Task.Delay(delay, cancellationToken));
+    private readonly AppUpdatePostponeOptions _postponeOptions = postponeOptions ?? AppUpdatePostponeOptions.Default;
     private CancellationTokenSource? _transactionWatch;
+    // 中文注释：本次运行内同一目标版本已推迟的次数；重启后由启动闸门直接要求安装，不会被绕过。
+    private string? _postponeTargetVersion;
+    private int _postponeCount;
+
+    // 中文注释：强更从哪里进入决定能否推迟、何时弹遮罩：启动闸门不可推迟；手动检查按收银员意愿立即提示；
+    // 启动后台下载等自动流程只在收银主页空闲时弹遮罩；每小时后台检查只显示底部提示条。
+    private enum ForceUpdateEntry
+    {
+        StartupGate,
+        Manual,
+        Automatic,
+        Background
+    }
 
     internal Task DeferredStartupDownloadTask { get; private set; } = Task.CompletedTask;
 
@@ -162,7 +177,7 @@ public sealed class AppUpdateCoordinator(
             if (await downloadService.TryGetVerifiedCachedInstallerAsync(update!, cancellationToken) is not null)
             {
                 // 中文注释：安装包已在本地（后台检查或上次启动下好的）时和以前一样在启动闸门里处理：强更直接阻断、可选更新弹确认框。
-                return await HandleUpdateAsync(update!, manual: false, background: false, cancellationToken);
+                return await HandleUpdateAsync(update!, manual: false, background: false, cancellationToken, startupGate: true);
             }
 
             // 中文注释：安装包还没下载时不让启动等下载：先放行收银，下载在启动后继续；闸门信号量交给后台下载持有，避免与手动/定时检查重叠。
@@ -344,11 +359,22 @@ public sealed class AppUpdateCoordinator(
         AppUpdateCheckResponse update,
         bool manual,
         bool background,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool startupGate = false)
     {
-        return update.ForceUpdate
-            ? HandleForceUpdateAsync(update, manual, background, cancellationToken)
-            : HandleOptionalUpdateAsync(update, manual, background, cancellationToken);
+        if (!update.ForceUpdate)
+        {
+            return HandleOptionalUpdateAsync(update, manual, background, cancellationToken);
+        }
+
+        var entry = startupGate
+            ? ForceUpdateEntry.StartupGate
+            : manual
+                ? ForceUpdateEntry.Manual
+                : background
+                    ? ForceUpdateEntry.Background
+                    : ForceUpdateEntry.Automatic;
+        return HandleForceUpdateAsync(update, entry, cancellationToken);
     }
 
     // 中文注释：只负责查询更新中心；失败、无更新时直接给出最终结果，有可用更新时返回更新合同交给后续下载/提示流程。
@@ -560,8 +586,9 @@ public sealed class AppUpdateCoordinator(
         Func<Task<ProcessLaunchResult>> installAsync = InstallOptionalAsync;
         if (background)
         {
-            // 中文注释：后台检查随时可能落在扫码或结算中，不弹模态确认框，只显示右下角可关闭的就绪提示，由收银员空闲时点击安装。
+            // 中文注释：后台检查随时可能落在扫码或结算中，不弹模态确认框，只显示底部状态栏可关闭的就绪提示，由收银员空闲时点击安装。
             state.ShowOptionalUpdateReady(update, installerPath, installAsync);
+            ConsoleLog.Write("AppUpdate", $"optional update notice shown target={update.TargetVersion}");
             return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.OptionalReady);
         }
 
@@ -593,18 +620,16 @@ public sealed class AppUpdateCoordinator(
 
     private async Task<AppUpdateCoordinatorResult> HandleForceUpdateAsync(
         AppUpdateCheckResponse update,
-        bool manual,
-        bool background,
+        ForceUpdateEntry entry,
         CancellationToken cancellationToken)
     {
         // 中文注释：强制更新也先后台下载，只有安装包就绪后才进入阻断或待安装状态。
-        return await DownloadForceUpdateAsync(update, manual, background, cancellationToken);
+        return await DownloadForceUpdateAsync(update, entry, cancellationToken);
     }
 
     private async Task<AppUpdateCoordinatorResult> DownloadForceUpdateAsync(
         AppUpdateCheckResponse update,
-        bool manual,
-        bool background,
+        ForceUpdateEntry entry,
         CancellationToken cancellationToken)
     {
         // 中文注释：下载阶段保持非阻断，让用户能继续完成或取消当前交易。
@@ -615,7 +640,7 @@ public sealed class AppUpdateCoordinator(
         {
             // 中文注释：没有安装包就不能出现任何更新提示；收银照常，下次启动或设置页手动检查时再下载。
             state.ClearForceUpdateDownload();
-            if (manual)
+            if (entry == ForceUpdateEntry.Manual)
             {
                 state.SetStatus("settings.status.appUpdateDownloadFailed", download.ErrorMessage ?? string.Empty);
             }
@@ -627,8 +652,27 @@ public sealed class AppUpdateCoordinator(
 
         state.ApplyVersionCheck(update);
         string installerPath = download.FilePath;
+        // 中文注释：启动闸门要保证旧版本不进入收银；回退说明当前版本有问题。这两种不允许推迟。
+        var postponeAllowed = entry != ForceUpdateEntry.StartupGate && !update.IsRollback && _postponeOptions.IsEnabled;
+        // 中文注释：每小时后台检查发现的强更只显示底部提示条；其他入口（或收银员点过安装、推迟过遮罩）在空闲时升级为遮罩。
+        var escalating = entry != ForceUpdateEntry.Background;
 
-        void ShowPendingUntilTransactionEnds(string statusKey, object[] statusArgs)
+        void OfferPostpone()
+        {
+            state.SetForceUpdatePostpone(
+                PostponeAsync,
+                postponeAllowed ? RemainingPostpones(update.TargetVersion) : 0,
+                _postponeOptions.Interval);
+        }
+
+        void LogNotice(string kind, string? statusKey)
+        {
+            ConsoleLog.Write(
+                "AppUpdate",
+                $"force update notice shown kind={kind} entry={entry} target={update.TargetVersion} statusKey={statusKey ?? "<null>"} postponesLeft={(postponeAllowed ? RemainingPostpones(update.TargetVersion) : 0)}");
+        }
+
+        void ShowPending(string statusKey, object[] statusArgs)
         {
             state.ShowForceUpdatePendingInstall(
                 update,
@@ -636,20 +680,45 @@ public sealed class AppUpdateCoordinator(
                 ResumeForceInstallAsync,
                 statusKey,
                 statusArgs);
-            WatchForTransactionEnd(() => Task.FromResult(TryEscalatePendingForceUpdate()));
+            OfferPostpone();
+        }
+
+        void ShowPendingUntilTransactionEnds(string statusKey, object[] statusArgs)
+        {
+            escalating = true;
+            ShowPending(statusKey, statusArgs);
+            LogNotice("pending", statusKey);
+            WatchForTransactionEnd(() => Task.FromResult(TryEscalatePendingForceUpdate()), interruptOnly: true);
+        }
+
+        bool IsCurrentPendingInstall()
+        {
+            return state.IsForceUpdatePendingInstall &&
+                string.Equals(state.InstallerPath, installerPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        bool TryShowReady(bool interruptOnly, out string statusKey, out object[] statusArgs)
+        {
+            if (!TryShowForceUpdateReady(update, installerPath, LaunchInstallerAsync, interruptOnly, out statusKey, out statusArgs))
+            {
+                return false;
+            }
+
+            OfferPostpone();
+            LogNotice("overlay", state.StatusKey);
+            return true;
         }
 
         bool TryEscalatePendingForceUpdate()
         {
-            if (!state.IsForceUpdatePendingInstall ||
-                !string.Equals(state.InstallerPath, installerPath, StringComparison.OrdinalIgnoreCase))
+            if (!IsCurrentPendingInstall())
             {
                 // 中文注释：待安装状态已被安装、调试跳过或新一轮检查替换，本次自动续装作废。
                 return true;
             }
 
-            // 中文注释：交易结束后只切到强更阻断遮罩，由收银员点“安装更新”再关闭程序，避免小票打印等收尾被打断。
-            return TryShowForceUpdateReady(update, installerPath, LaunchInstallerAsync, out _, out _);
+            // 中文注释：交易结束、回到收银主页空闲后只切到强更阻断遮罩，由收银员点“安装更新”再关闭程序，避免小票打印等收尾被打断。
+            return TryShowReady(interruptOnly: true, out _, out _);
         }
 
         async Task<ProcessLaunchResult> LaunchInstallerAsync()
@@ -667,6 +736,9 @@ public sealed class AppUpdateCoordinator(
                     launchResult.ErrorMessage ?? LocalizationResourceProvider.Instance["appUpdate.force.downloadFailedDefault"],
                     ResumeForceInstallAsync,
                     exitService.Exit);
+                // 中文注释：运行中安装器起不来时错误遮罩同样会挡住整个收银界面，也要能推迟。
+                OfferPostpone();
+                LogNotice("error", state.StatusKey);
             }
 
             return launchResult;
@@ -674,7 +746,8 @@ public sealed class AppUpdateCoordinator(
 
         async Task<ProcessLaunchResult> ResumeForceInstallAsync()
         {
-            if (!TryShowForceUpdateReady(update, installerPath, LaunchInstallerAsync, out var statusKey, out var statusArgs))
+            // 中文注释：收银员主动点安装时按能否安装判断，不要求停在收银主页。
+            if (!TryShowReady(interruptOnly: false, out var statusKey, out var statusArgs))
             {
                 ShowPendingUntilTransactionEnds(statusKey, statusArgs);
                 return ProcessLaunchResult.Fail(null, statusKey, statusArgs);
@@ -683,24 +756,62 @@ public sealed class AppUpdateCoordinator(
             return await LaunchInstallerAsync();
         }
 
-        if (background)
+        Task PostponeAsync()
+        {
+            if (!postponeAllowed ||
+                !state.IsForceUpdateRequired ||
+                state.IsDownloading ||
+                RemainingPostpones(update.TargetVersion) <= 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            var fromOverlay = state.IsForceUpdateBlocking;
+            var used = RecordPostpone(update.TargetVersion);
+            // 中文注释：遮罩推迟后收起为底部提示条，收银员随时可以自己点安装；提示条推迟则整条先收起。
+            ShowPending(BackgroundForcePendingStatusKey, [update.TargetVersion]);
+            if (!fromOverlay)
+            {
+                state.HideForceUpdateNotice();
+            }
+
+            var escalateAfterPostpone = escalating || fromOverlay;
+            escalating = escalateAfterPostpone;
+            ConsoleLog.Write(
+                "AppUpdate",
+                $"force update postponed source={(fromOverlay ? "overlay" : "notice")} target={update.TargetVersion} count={used}/{_postponeOptions.MaxCount} minutes={(int)_postponeOptions.Interval.TotalMinutes} escalate={escalateAfterPostpone}");
+            WatchForTransactionEnd(
+                () => Task.FromResult(!escalateAfterPostpone || TryEscalatePendingForceUpdate()),
+                interruptOnly: true,
+                initialDelay: _postponeOptions.Interval,
+                afterInitialDelay: () =>
+                {
+                    if (IsCurrentPendingInstall())
+                    {
+                        // 中文注释：推迟到点先把底部提示条放回来；需要升级为遮罩的再等收银主页空闲。
+                        state.ShowForceUpdateNoticeAgain();
+                        ConsoleLog.Write("AppUpdate", $"force update postpone expired target={update.TargetVersion} escalate={escalateAfterPostpone}");
+                    }
+                },
+                requireSafe: escalateAfterPostpone);
+            return Task.CompletedTask;
+        }
+
+        if (entry == ForceUpdateEntry.Background)
         {
             // 中文注释：后台检查的时机不可控，安全守卫只认购物车和付款页，覆盖不到交班、退货等其他进行中的操作，
-            // 所以这里不直接弹阻断遮罩，只显示右下角待安装提示；收银员点击后再过安全守卫，下次启动仍由启动闸门强制安装。
+            // 所以这里不直接弹阻断遮罩，只显示底部状态栏的待安装提示条；收银员点击后再过安全守卫，下次启动仍由启动闸门强制安装。
             object[] backgroundStatusArgs = [update.TargetVersion];
-            state.ShowForceUpdatePendingInstall(
-                update,
-                installerPath,
-                ResumeForceInstallAsync,
-                BackgroundForcePendingStatusKey,
-                backgroundStatusArgs);
+            ShowPending(BackgroundForcePendingStatusKey, backgroundStatusArgs);
+            LogNotice("pending", BackgroundForcePendingStatusKey);
             return new AppUpdateCoordinatorResult(
                 AppUpdateCoordinatorStatus.ForcePendingInstall,
                 BackgroundForcePendingStatusKey,
                 backgroundStatusArgs);
         }
 
-        if (!TryShowForceUpdateReady(update, installerPath, LaunchInstallerAsync, out var blockedStatusKey, out var blockedStatusArgs))
+        // 中文注释：启动闸门与手动检查当场提示；启动后的后台下载等自动流程只在收银主页空闲时才弹遮罩。
+        if (!TryShowReady(entry == ForceUpdateEntry.Automatic, out var blockedStatusKey, out var blockedStatusArgs))
         {
             ShowPendingUntilTransactionEnds(blockedStatusKey, blockedStatusArgs);
             return new AppUpdateCoordinatorResult(
@@ -712,14 +823,41 @@ public sealed class AppUpdateCoordinator(
         return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.ForceReady);
     }
 
+    private int RemainingPostpones(string? targetVersion)
+    {
+        var used = string.Equals(
+            _postponeTargetVersion,
+            AppVersionProvider.NormalizeVersionText(targetVersion),
+            StringComparison.OrdinalIgnoreCase)
+            ? _postponeCount
+            : 0;
+        return Math.Max(_postponeOptions.MaxCount - used, 0);
+    }
+
+    private int RecordPostpone(string? targetVersion)
+    {
+        var normalized = AppVersionProvider.NormalizeVersionText(targetVersion);
+        if (!string.Equals(_postponeTargetVersion, normalized, StringComparison.OrdinalIgnoreCase))
+        {
+            _postponeTargetVersion = normalized;
+            _postponeCount = 0;
+        }
+
+        return ++_postponeCount;
+    }
+
     private bool TryShowForceUpdateReady(
         AppUpdateCheckResponse update,
         string installerPath,
         Func<Task<ProcessLaunchResult>> installAsync,
+        bool interruptOnly,
         out string statusKey,
         out object[] statusArgs)
     {
-        if (!installSafetyGuard.CanInstallUpdate(out statusKey, out statusArgs))
+        var canShow = interruptOnly
+            ? installSafetyGuard.CanInterruptForUpdatePrompt(out statusKey, out statusArgs)
+            : installSafetyGuard.CanInstallUpdate(out statusKey, out statusArgs);
+        if (!canShow)
         {
             return false;
         }
@@ -733,26 +871,57 @@ public sealed class AppUpdateCoordinator(
         return true;
     }
 
-    // 中文注释：只保留一个交易结束监视；新的延后安装会替换旧的。调用方都在 UI 线程，循环也在 UI 同步上下文里恢复。
-    private void WatchForTransactionEnd(Func<Task<bool>> onSafeToInstall)
+    // 中文注释：只保留一个交易结束监视；新的延后安装或推迟会替换旧的。调用方都在 UI 线程，循环也在 UI 同步上下文里恢复。
+    // interruptOnly：自动弹遮罩，按“收银主页空闲”判断；initialDelay：推迟时先等满间隔再开始观察。
+    private void WatchForTransactionEnd(
+        Func<Task<bool>> onSafeToInstall,
+        bool interruptOnly = false,
+        TimeSpan? initialDelay = null,
+        Action? afterInitialDelay = null,
+        bool requireSafe = true)
     {
         _transactionWatch?.Cancel();
         var watch = new CancellationTokenSource();
         _transactionWatch = watch;
-        TransactionWatchTask = RunTransactionWatchAsync(onSafeToInstall, watch);
+        TransactionWatchTask = RunTransactionWatchAsync(
+            onSafeToInstall,
+            watch,
+            interruptOnly,
+            initialDelay,
+            afterInitialDelay,
+            requireSafe);
     }
 
     private async Task RunTransactionWatchAsync(
         Func<Task<bool>> onSafeToInstall,
-        CancellationTokenSource watch)
+        CancellationTokenSource watch,
+        bool interruptOnly,
+        TimeSpan? initialDelay,
+        Action? afterInitialDelay,
+        bool requireSafe)
     {
         var safeObservations = 0;
         try
         {
+            if (initialDelay is { } delay && delay > TimeSpan.Zero)
+            {
+                await _delayAsync(delay, watch.Token);
+                afterInitialDelay?.Invoke();
+            }
+
+            if (!requireSafe)
+            {
+                await onSafeToInstall();
+                return;
+            }
+
             while (true)
             {
                 await _delayAsync(TransactionWatchInterval, watch.Token);
-                if (!installSafetyGuard.CanInstallUpdate(out _, out _))
+                var isSafe = interruptOnly
+                    ? installSafetyGuard.CanInterruptForUpdatePrompt(out _, out _)
+                    : installSafetyGuard.CanInstallUpdate(out _, out _);
+                if (!isSafe)
                 {
                     safeObservations = 0;
                     continue;
@@ -848,9 +1017,10 @@ public sealed class AppUpdateCoordinator(
             return "appUpdate.force.rollbackReady";
         }
 
-        return string.IsNullOrWhiteSpace(update.MinimumSupportedVersion)
-            ? "appUpdate.force.ready"
-            : "appUpdate.force.minimumRequired";
+        // 中文注释：后台填了最低支持版本不代表本机低于它；只有确实低于时才说“低于最低支持版本”，否则是勾选了强制更新。
+        return IsBelowMinimumSupportedVersion(update)
+            ? "appUpdate.force.minimumRequired"
+            : "appUpdate.force.ready";
     }
 
     private static object[] ResolveForceReadyStatusArgs(AppUpdateCheckResponse update)
@@ -860,9 +1030,35 @@ public sealed class AppUpdateCoordinator(
             return [update.TargetVersion];
         }
 
-        return string.IsNullOrWhiteSpace(update.MinimumSupportedVersion)
-            ? []
-            : [update.MinimumSupportedVersion];
+        return IsBelowMinimumSupportedVersion(update)
+            ? [update.MinimumSupportedVersion!]
+            : [];
+    }
+
+    internal static bool IsBelowMinimumSupportedVersion(AppUpdateCheckResponse update)
+    {
+        return TryParseComparableVersion(update.CurrentVersion, out var current) &&
+            TryParseComparableVersion(update.MinimumSupportedVersion, out var minimum) &&
+            current < minimum;
+    }
+
+    private static bool TryParseComparableVersion(string? value, out Version version)
+    {
+        var normalized = AppVersionProvider.NormalizeVersionText(value).TrimStart('v', 'V');
+        var prereleaseIndex = normalized.IndexOf('-', StringComparison.Ordinal);
+        if (prereleaseIndex >= 0)
+        {
+            normalized = normalized[..prereleaseIndex];
+        }
+
+        if (Version.TryParse(normalized, out var parsed))
+        {
+            version = parsed;
+            return true;
+        }
+
+        version = new Version(0, 0);
+        return false;
     }
 
     private sealed class AppUpdateProgressSink(Action<AppUpdateDownloadProgress> report) : IProgress<AppUpdateDownloadProgress>

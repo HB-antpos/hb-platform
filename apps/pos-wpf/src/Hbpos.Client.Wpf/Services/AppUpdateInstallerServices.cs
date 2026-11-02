@@ -56,6 +56,11 @@ public sealed class ProcessLauncher : IProcessLauncher
 public interface IAppUpdateInstallSafetyGuard
 {
     bool CanInstallUpdate(out string statusKey, out object[] args);
+
+    // 中文注释：没人点安装时自动弹强更遮罩的门槛，比能否安装更严：只在收银主页空闲时打断。
+    // 收银员主动点安装、启动闸门仍只看 CanInstallUpdate。
+    bool CanInterruptForUpdatePrompt(out string statusKey, out object[] args) =>
+        CanInstallUpdate(out statusKey, out args);
 }
 
 public sealed class AllowInstallSafetyGuard : IAppUpdateInstallSafetyGuard
@@ -96,6 +101,27 @@ public sealed class ShellAppUpdateInstallSafetyGuard(
 
         statusKey = string.Empty;
         args = [];
+        return true;
+    }
+
+    public bool CanInterruptForUpdatePrompt(out string statusKey, out object[] args)
+    {
+        if (!CanInstallUpdate(out statusKey, out args))
+        {
+            return false;
+        }
+
+        // 中文注释：安全守卫只认购物车和付款页，退货、日结、交班等页面也算空闲；
+        // 自动弹遮罩只在收银主页、没有确认框或授权框时进行，避免把正在办的操作整页挡住。
+        if (!mainViewModel.IsPosTerminalScreenActive ||
+            mainViewModel.ConfirmationDialog.IsOpen ||
+            mainViewModel.OperationAuthorization?.IsPromptOpen == true)
+        {
+            statusKey = "appUpdate.install.waitingForIdle";
+            args = [];
+            return false;
+        }
+
         return true;
     }
 }

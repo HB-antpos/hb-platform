@@ -467,6 +467,8 @@ public static class ServiceRegistration
             AppUpdateProgressWindowOptions.CreateDefault()));
         services.AddSingleton<IAppUpdateInstallerLauncher, AppUpdateInstallerLauncher>();
         services.AddSingleton<IAppUpdatePromptService, WpfAppUpdatePromptService>();
+        services.AddSingleton(sp => AppUpdatePostponeOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<IAppUpdateCoordinator, AppUpdateCoordinator>();
         services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));

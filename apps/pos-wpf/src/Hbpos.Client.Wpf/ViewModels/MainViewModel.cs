@@ -662,6 +662,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ResolveCardPaymentCommand = _cardRecoveryPresenter.ResolveCardPaymentCommand;
 
         _cart.CartChanged += OnCartChanged;
+        AppUpdate.IsTransactionInProgress = !_cart.IsEmpty;
         _localization.CultureChanged += OnCultureChanged;
         _customerDisplayOrchestrator.Closed += OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested += OnCustomerDisplayFullscreenRequested;
@@ -2994,6 +2995,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         _screenNavigator.RefreshCartRelatedState();
         _screenNavigator.LoadCustomerDisplayFromCart();
+        // 中文注释：底部更新提示条据此决定给“安装更新”按钮还是“交易完成后可安装”。
+        AppUpdate.IsTransactionInProgress = !_cart.IsEmpty;
     }
 
     private Task<bool> RecoverCardPaymentAttemptAsync(bool navigateToPaymentOnDraft) =>

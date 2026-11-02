@@ -1076,6 +1076,15 @@
                     </Grid>
                 </Border>
 
+                <!-- 更新提示条放在状态栏里，只盖住状态栏中间的信息，不会挡住任何页面上的操作按钮。 -->
+                <controls:AppUpdateNoticeBar x:Name="UpdateNoticeBar"
+                                             Grid.Column="1"
+                                             Grid.ColumnSpan="5"
+                                             Margin="14,0,8,0"
+                                             Panel.ZIndex="6"
+                                             DataContext="{Binding AppUpdate}"
+                                             Visibility="{Binding IsUpdateNoticeVisible, Converter={StaticResource BoolToVis}}" />
+
                 <Button Grid.Column="6"
                         Command="{Binding ToggleSyncCenterCommand}"
                         Height="32"
@@ -2668,133 +2677,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="1"
-                Panel.ZIndex="95"
-                Width="540"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Bottom"
-                Margin="0,0,20,20"
-                Padding="16"
-                Background="{DynamicResource PosSurfaceBrush}"
-                BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Visibility="{Binding AppUpdate.IsOptionalUpdateReady, Converter={StaticResource BoolToVis}}">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.16" />
-            </Border.Effect>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <materialDesign:PackIcon Kind="Update"
-                                         Width="24"
-                                         Height="24"
-                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                         Margin="0,0,12,0" />
-                <StackPanel Grid.Column="1">
-                    <TextBlock Text="{loc:Loc appUpdate.optional.title}"
-                               FontSize="14"
-                               FontWeight="Black"
-                               Foreground="{DynamicResource PosTextBrush}" />
-                    <TextBlock Text="{Binding AppUpdate.StatusMessage}"
-                               FontSize="12"
-                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                               TextWrapping="Wrap"
-                               Margin="0,4,0,0" />
-                </StackPanel>
-                <Button Grid.Column="2"
-                        Command="{Binding AppUpdate.InstallUpdateCommand}"
-                        services:ButtonFeedback.Cue="VersionNotice"
-                        Style="{StaticResource PosSecondaryButtonStyle}"
-                        MinWidth="112"
-                        Height="36"
-                        Margin="12,0,0,0">
-                    <StackPanel Orientation="Horizontal">
-                        <materialDesign:PackIcon Kind="Update" Width="16" Height="16" Margin="0,0,6,0" />
-                        <TextBlock Text="{loc:Loc appUpdate.force.action}" FontWeight="Bold" />
-                    </StackPanel>
-                </Button>
-                <Button Grid.Column="3"
-                        Command="{Binding AppUpdate.DismissOptionalUpdateCommand}"
-                        Style="{StaticResource TitleBarButtonStyle}"
-                        ToolTip="{loc:Loc shell.window.close}"
-                        Margin="12,0,0,0">
-                    <materialDesign:PackIcon Kind="Close" Width="18" Height="18" />
-                </Button>
-            </Grid>
-        </Border>
-
-        <Border Grid.Row="1"
-                Panel.ZIndex="96"
-                Width="560"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Bottom"
-                Margin="0,0,20,20"
-                Padding="18"
-                Background="{DynamicResource PosSurfaceBrush}"
-                BorderBrush="{DynamicResource PosWarningBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Visibility="{Binding AppUpdate.IsForceUpdatePendingInstall, Converter={StaticResource BoolToVis}}">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.16" />
-            </Border.Effect>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Border Width="36"
-                        Height="36"
-                        Background="{DynamicResource PosWarningSoftBrush}"
-                        CornerRadius="10"
-                        Margin="0,0,12,0">
-                    <materialDesign:PackIcon Kind="AlertCircleOutline"
-                                             Width="20"
-                                             Height="20"
-                                             Foreground="{DynamicResource PosWarningTextBrush}"
-                                             HorizontalAlignment="Center"
-                                             VerticalAlignment="Center" />
-                </Border>
-                <StackPanel Grid.Column="1">
-                    <TextBlock Text="{loc:Loc appUpdate.force.title}"
-                               FontSize="14"
-                               FontWeight="Black"
-                               Foreground="{DynamicResource PosTextBrush}" />
-                    <TextBlock Text="{Binding AppUpdate.StatusMessage}"
-                               FontSize="12"
-                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                               TextWrapping="Wrap"
-                               Margin="0,4,0,0" />
-                </StackPanel>
-                <Button Grid.Column="2"
-                        Command="{Binding AppUpdate.InstallUpdateCommand}"
-                        services:ButtonFeedback.Cue="VersionNotice"
-                        Style="{StaticResource PosSecondaryButtonStyle}"
-                        MinWidth="118"
-                        Height="36"
-                        Margin="12,0,0,0">
-                    <StackPanel Orientation="Horizontal">
-                        <materialDesign:PackIcon Kind="Update" Width="16" Height="16" Margin="0,0,6,0" />
-                        <TextBlock Text="{loc:Loc appUpdate.force.action}" FontWeight="Bold" />
-                    </StackPanel>
-                </Button>
-                <Button Grid.Column="3"
-                        Command="{Binding AppUpdate.DismissForceUpdateForDebugCommand}"
-                        Style="{StaticResource TitleBarButtonStyle}"
-                        ToolTip="{loc:Loc appUpdate.force.dismissDebug}"
-                        Margin="10,0,0,0"
-                        Visibility="{Binding AppUpdate.CanDismissForceUpdateForDebug, Converter={StaticResource BoolToVis}}">
-                    <materialDesign:PackIcon Kind="Close" Width="18" Height="18" />
-                </Button>
-            </Grid>
-        </Border>
+        <!-- 更新提示条已移到底部状态栏（AppUpdateNoticeBar），不再浮在页面内容区右下角，避免挡住付款页“确认收款”等按钮。 -->
 
         <!-- 日结后重启提示浮层：提示 / 倒计时 / 阻止 / 失败四种状态，DataContext 在构造函数里设为 WpfRestartPromptService。 -->
         <controls:RestartPromptOverlay x:Name="RestartPromptOverlay"
@@ -2915,10 +2798,11 @@
             </Border>
         </Grid>
 
-        <!-- 强制更新全局遮罩：Release 只允许继续更新；Debug 提供显式跳过入口。 -->
+        <!-- 强制更新全局遮罩：启动闸门只允许继续更新；运行中弹出时可“稍后安装”（有次数上限）；Debug 提供显式跳过入口。 -->
         <Border Grid.RowSpan="3"
                 Panel.ZIndex="100"
                 Background="#99000000"
+                AutomationProperties.AutomationId="ForceUpdateOverlay"
                 Visibility="{Binding AppUpdate.IsForceUpdateBlocking, Converter={StaticResource BoolToVis}}">
             <Border Width="560"
                     Padding="26"
@@ -2931,6 +2815,7 @@
                 </Border.Effect>
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -2978,7 +2863,16 @@
                                MaxHeight="110"
                                Margin="0,0,0,18" />
 
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Grid.Row="3"
+                               Text="{Binding AppUpdate.ForcePostponeHint}"
+                               FontSize="12"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap"
+                               HorizontalAlignment="Right"
+                               Margin="0,0,0,10"
+                               Visibility="{Binding AppUpdate.CanPostponeForceUpdate, Converter={StaticResource BoolToVis}}" />
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Command="{Binding AppUpdate.DismissForceUpdateForDebugCommand}"
                                 MinWidth="148"
                                 Height="44"
@@ -2988,6 +2882,18 @@
                             <StackPanel Orientation="Horizontal">
                                 <materialDesign:PackIcon Kind="CloseCircleOutline" Width="18" Height="18" Margin="0,0,8,0" />
                                 <TextBlock Text="{loc:Loc appUpdate.force.dismissDebug}" FontWeight="Bold" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding AppUpdate.PostponeForceUpdateCommand}"
+                                AutomationProperties.AutomationId="ForceUpdatePostponeButton"
+                                MinWidth="120"
+                                Height="44"
+                                Margin="0,0,10,0"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                Visibility="{Binding AppUpdate.CanPostponeForceUpdate, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="ClockOutline" Width="18" Height="18" Margin="0,0,8,0" />
+                                <TextBlock Text="{loc:Loc appUpdate.force.postpone}" FontWeight="Bold" />
                             </StackPanel>
                         </Button>
                         <Button Command="{Binding AppUpdate.RetryForceUpdateCommand}"
