@@ -365,12 +365,14 @@ jobs:
           java-version: 17
       # setup-java 的 gradle 缓存 key 在 expo prebuild 之前按 **/*.gradle* 哈希，此时 android 目录还不存在：
       # key 恒定、命中后不再回存，内容冻结在首次保存（实测 1001 个 Gradle 任务 839 个重新执行）。
-      # setup-gradle 按 Gradle User Home 的实际内容分条目缓存，job 结束时回存有变化的条目；
-      # 合并队列分支一次性使用，只读不回存，避免每次入队都上传约 1.7 GB。
+      # setup-gradle 按 Gradle User Home 的实际内容分条目缓存（依赖 + transforms + build cache 约 1.9 GB）。
+      # 只在 main（weekly 定时与 workflow_dispatch）回存：PR 分支各自回存时两个分支加 main 就把仓库 10 GB
+      # 缓存配额撑满（11-03 实测 10.15 GB），会挤掉 WPF NuGet 与 npm 缓存；PR 与合并队列分支只读 main 的缓存。
+      # pos-handheld 原生依赖变化合入 main 后，用 `gh workflow run pr-ci.yml --ref main -f profile=pr -f component=pos-handheld` 预热。
       - if: matrix.component != 'noop'
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
         with:
-          cache-read-only: ${{ github.event_name == 'merge_group' }}
+          cache-read-only: ${{ github.ref_name != 'main' }}
       - name: 构建并测试 Android 原生模块
         shell: bash
         run: |
