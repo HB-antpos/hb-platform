@@ -313,8 +313,9 @@ const ATTENDANCE_PAYROLL_NAV_GROUP: NavGroupDefinition = {
     // 工资单（MYOB 历史工资单，只读）：Myob.Payslip.ViewManagedStore / ViewAllStores 任一；含薪资等敏感信息，不保活（离开页签即丢掉内存里的工资数据）。
     { path: '/pos-admin/payslips', title: 'menu.payslips', accessKey: 'canViewMyobPayslips', keepAlive: false, element: <PosAdminPayslipsPage /> },
     // MYOB 对接：连接与映射（Myob.Connection.Manage）/ 员工绑定（Myob.Employee.Bind）/ 发薪公司（Attendance.Payroll.Edit），三者任一可进入，页内按各自权限显示页签。
-    // 不保活：授权完成后后端重定向回 /pos-admin/myob?myob=connected|error，页面必须按新进入重新加载并读取参数。
-    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob', keepAlive: false, element: <PosAdminMyobPage /> },
+    // 保活：切到别的顶部页签再回来，保留所选子页签、公司与视图。授权是整页跳到 MYOB 再整页回到 /pos-admin/myob?myob=…，
+    // 回来时整个应用重新加载、缓存本来就是空的，不影响读取回跳参数（页面在后台时不处理回跳，见 MyobPage）。
+    { path: '/pos-admin/myob', title: 'menu.myob', accessKey: 'canAccessMyob', keepAlive: true, element: <PosAdminMyobPage /> },
   ],
 }
 

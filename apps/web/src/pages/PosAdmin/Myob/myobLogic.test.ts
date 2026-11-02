@@ -17,6 +17,7 @@ import {
   isValidAbnInput,
   normalizeAbnInput,
   parseMyobCallback,
+  parseMyobCallbackAt,
   setMappingDraft,
   splitConnections,
   stripMyobCallbackParams,
@@ -102,6 +103,11 @@ assert.deepEqual(parseMyobCallback('?myob=error'), { kind: 'error', code: '' })
 assert.equal(parseMyobCallback(''), null)
 assert.equal(parseMyobCallback('?myob=weird'), null)
 assert.equal(parseMyobCallback('?other=1'), null)
+// 页面保活后在后台仍挂着：地址不属于 MYOB 对接页时不认回跳参数
+assert.deepEqual(parseMyobCallbackAt('/pos-admin/myob', '?myob=connected'), { kind: 'connected', connectionGuid: null })
+assert.deepEqual(parseMyobCallbackAt('/pos-admin/myob/', '?myob=error&code=X'), { kind: 'error', code: 'X' }, '容忍末尾斜杠')
+assert.equal(parseMyobCallbackAt('/system/users', '?myob=connected'), null, '别的页面带同名参数也不处理')
+assert.equal(parseMyobCallbackAt('/pos-admin/attendance-payroll', ''), null)
 assert.equal(stripMyobCallbackParams('?myob=connected&connection=abc'), '')
 assert.equal(stripMyobCallbackParams('?myob=error&code=MYOB_X&keep=1'), '?keep=1', '保留无关参数')
 assert.equal(stripMyobCallbackParams(''), '')
