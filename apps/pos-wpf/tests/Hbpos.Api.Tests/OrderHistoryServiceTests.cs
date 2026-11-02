@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.POSM;
 using Hbpos.Api.Data;
 using Hbpos.Api.Services;
@@ -138,7 +139,7 @@ public sealed class OrderHistoryServiceTests
     [InlineData("_", "X")]
     [InlineData("%", "X")]
     [InlineData("[", "X")]
-    public async Task QueryAsync_item_number_suffix_treats_sql_wildcards_as_literals(
+    public async Task QueryAsync_item_number_treats_sql_wildcards_as_literals(
         string itemNumber,
         string wildcardEquivalent)
     {
@@ -150,12 +151,18 @@ public sealed class OrderHistoryServiceTests
             .Select(order => order.OrderGuid)
             .FirstAsync();
 
+        // 货号现在经商品主档精确解析：两个商品的货号分别是关键字和它的「通配符等价物」，各卖在不同订单里。
+        await database.DbContext.PosmDb.Insertable(new[]
+        {
+            new Product { UUID = Guid.NewGuid().ToString("D"), ProductCode = "WILD-A", ProductName = "A", ItemNumber = itemNumber },
+            new Product { UUID = Guid.NewGuid().ToString("D"), ProductCode = "WILD-B", ProductName = "B", ItemNumber = wildcardEquivalent }
+        }).ExecuteCommandAsync();
         await database.DbContext.PosmDb.Updateable<SalesOrderDetail>()
-            .SetColumns(line => line.Remark == $"priceSource=1;itemNo={itemNumber}")
+            .SetColumns(line => line.ProductCode == "WILD-A")
             .Where(line => line.OrderGuid == targetOrderGuid)
             .ExecuteCommandAsync();
         await database.DbContext.PosmDb.Updateable<SalesOrderDetail>()
-            .SetColumns(line => line.Remark == $"priceSource=1;itemNo={wildcardEquivalent}")
+            .SetColumns(line => line.ProductCode == "WILD-B")
             .Where(line => line.OrderGuid == otherOrderGuid)
             .ExecuteCommandAsync();
 
@@ -172,65 +179,60 @@ public sealed class OrderHistoryServiceTests
 
         var order = Assert.Single(response.Orders);
         Assert.Equal(OrderHistorySqliteFixture.TargetOrderGuid, order.OrderGuid);
-        var select = Assert.Single(statements, statement =>
-            statement.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
-            statement.Contains("FROM `sales_order`", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("INSTR", select, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("`Remark` like", select, StringComparison.OrdinalIgnoreCase);
+        // 通配符只会出现在等值比较的参数里，任何一条语句都不能用 LIKE。
+        Assert.DoesNotContain(statements, statement => statement.Contains(" like ", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
-    [InlineData("jmq02")]
-    [InlineData("-")]
-    public void Sql_server_keyword_filter_does_not_emit_boolean_predicate_parameter(string keyword)
+    [InlineData("db596f11", 1)]
+    [InlineData("DB59-6F11", 2)]
+    public void Sql_server_order_guid_probe_selects_only_order_guid_without_boolean_parameter(
+        string keyword,
+        int expectedCharIndexCount)
     {
-        using var db = new SqlSugarClient(new ConnectionConfig
-        {
-            ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=hbpos-sql-preview;Trusted_Connection=True;",
-            DbType = DbType.SqlServer,
-            InitKeyType = InitKeyType.Attribute,
-            IsAutoCloseConnection = true
-        });
-        var sql = SqlSugarOrderHistoryRepository.ApplyKeywordFilter(
-                db.Queryable<SalesOrder>(),
-                keyword)
+        using var db = CreateSqlServerPreviewClient();
+
+        var sql = SqlSugarOrderHistoryRepository
+            .BuildOrderGuidProbeQuery(db.Queryable<SalesOrder>(), "1004", keyword)
             .ToSql();
 
-        Assert.Contains("CHARINDEX", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("EXISTS", sql.Key, StringComparison.OrdinalIgnoreCase);
+        // 带连字符的关键字要多比一次「去连字符」的形式；不带连字符的只比一次。
+        Assert.Equal(expectedCharIndexCount, CountOccurrences(sql.Key, "CHARINDEX"));
+        Assert.Contains("BranchCode", sql.Key, StringComparison.OrdinalIgnoreCase);
+        // 不能带 ORDER BY：生产实测带上 OrderTime 排序会让优化器改扫覆盖全部分店的 IX_sales_order_OrderTime（5.5 万页）。
+        Assert.DoesNotContain("ORDER BY", sql.Key, StringComparison.OrdinalIgnoreCase);
+        // 选择列表里出现 Remark / CashierName 等非覆盖索引列，优化器就会改走整表聚集索引扫描。
+        Assert.DoesNotContain("CashierName", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Remark", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("EXISTS", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sales_order_detail", sql.Key, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(sql.Value, parameter => parameter.Value is bool);
         Assert.DoesNotContain(sql.Value, parameter => Equals(parameter.Value, string.Empty));
+        // 库里的订单号全是小写：关键字转小写后比较。
+        Assert.Contains(sql.Value, parameter => Equals(parameter.Value, keyword.ToLowerInvariant()));
     }
 
-    [Fact]
-    public void Sql_server_item_number_suffix_uses_parameterized_charindex_instead_of_like()
+    [Theory]
+    [InlineData("db596f11", true)]
+    [InlineData("DB59-6F11", true)]
+    [InlineData("930000000001", true)]
+    [InlineData("-", false)]
+    [InlineData("--", false)]
+    [InlineData("ITEM-TARGET", false)]
+    [InlineData("12 34", false)]
+    [InlineData("123", false)]
+    [InlineData("a-b-c", false)]
+    [InlineData("12-34", true)]
+    [InlineData("6F11", true)]
+    [InlineData("9311192735139", false)]
+    [InlineData("930000000001", true)]
+    [InlineData("6a3c4dfd-ab7b-4d95-84db-024edb596f11", true)]
+    [InlineData("6a3c4dfd-ab7b-4d95-84db-024edb596f11-0", false)]
+    public void Order_guid_fragment_needs_hex_digits_and_hyphens_within_guid_bounds(
+        string keyword,
+        bool expected)
     {
-        using var db = new SqlSugarClient(new ConnectionConfig
-        {
-            ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=hbpos-sql-preview;Trusted_Connection=True;",
-            DbType = DbType.SqlServer,
-            InitKeyType = InitKeyType.Attribute,
-            IsAutoCloseConnection = true
-        });
-        const string keyword = "ITEM_1%[";
-        var itemNumberMarker = $"itemNo={keyword}";
-        var itemNumberSuffix = $";{itemNumberMarker}";
-
-        var sql = db.Queryable<SalesOrder>()
-            .Where(order =>
-                (order.OrderGuid != null && SqlFunc.CharIndexNew(order.OrderGuid, keyword) > 0)
-                || SqlFunc.Subqueryable<SalesOrderDetail>()
-                    .Where(line => line.OrderGuid == order.OrderGuid
-                        && line.Remark != null
-                        && (line.Remark == itemNumberMarker
-                            || SqlFunc.CharIndexNew(line.Remark, itemNumberSuffix)
-                                == SqlFunc.Length(line.Remark) - itemNumberSuffix.Length + 1))
-                    .Any())
-            .ToSql();
-
-        Assert.Contains("CHARINDEX", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(" LIKE ", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(sql.Value, parameter => Equals(parameter.Value, itemNumberSuffix));
+        Assert.Equal(expected, SqlSugarOrderHistoryRepository.IsOrderGuidFragment(keyword));
     }
 
     [Theory]
@@ -300,12 +302,153 @@ public sealed class OrderHistoryServiceTests
     }
 
     [Fact]
-    public async Task QueryAsync_eight_hex_keyword_without_order_guid_match_falls_back_to_barcode_search()
+    public async Task QueryAsync_eight_hex_keyword_without_order_guid_match_resolves_product_through_master_barcode()
     {
         using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
         var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
-        // 8 位纯数字同样是合法十六进制（EAN-8 条码）：订单号里没有它时，必须退回完整关键字过滤。
+        // 8 位纯数字同样是合法十六进制（EAN-8 条码）：订单号里没有它时，要经商品主档解析出商品，再按商品找订单。
         var orderGuid = "11111111-2222-4333-8444-555555555555";
+        await InsertProductAsync(database, "EAN8-ITEM", barcode: "12345678");
+        await InsertOrderWithLineAsync(database, orderGuid, "EAN8-ITEM", barcode: "12345678");
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "12345678", Take: 20),
+            CancellationToken.None);
+
+        var order = Assert.Single(response.Orders);
+        Assert.Equal(Guid.Parse(orderGuid), order.OrderGuid);
+    }
+
+    [Fact]
+    public async Task QueryAsync_barcode_variant_missing_from_master_is_not_matched_by_design()
+    {
+        // 用户确认接受的取舍：明细里记着带前导零的写法，主档里只有规范写法。按规范写法能搜到，按变体写法搜不到。
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var orderGuid = "22222222-3333-4444-8555-666666666666";
+        await InsertProductAsync(database, "VARIANT-ITEM", barcode: "99887766");
+        await InsertOrderWithLineAsync(database, orderGuid, "VARIANT-ITEM", barcode: "0099887766");
+
+        var byCanonical = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "99887766", Take: 20),
+            CancellationToken.None);
+        var byVariant = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "0099887766", Take: 20),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Parse(orderGuid), Assert.Single(byCanonical.Orders).OrderGuid);
+        Assert.Empty(byVariant.Orders);
+    }
+
+    [Fact]
+    public async Task QueryAsync_temporary_product_missing_from_master_is_matched_by_full_product_code()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var orderGuid = "33333333-4444-4555-8666-777777777777";
+        // POS 临时商品不在主档里，仍可按完整商品编码搜到。
+        await InsertOrderWithLineAsync(database, orderGuid, "TEMP-OPEN-1", barcode: "TEMP-OPEN-1");
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "TEMP-OPEN-1", Take: 20),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Parse(orderGuid), Assert.Single(response.Orders).OrderGuid);
+    }
+
+    [Fact]
+    public async Task QueryAsync_unknown_keyword_returns_empty_without_order_guid_scan_or_exists_subquery()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 100);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var statements = database.CaptureSql();
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "NOT-A-PRODUCT", Take: 20),
+            CancellationToken.None);
+
+        Assert.Empty(response.Orders);
+        // 含非十六进制字符的关键字不可能出现在订单号里：不做订单号扫描（SQLite 里 CHARINDEX 会翻成 INSTR）。
+        Assert.DoesNotContain(statements, statement => statement.Contains("INSTR", StringComparison.OrdinalIgnoreCase));
+        // 查无此商品：只读一次商品编码索引，不能出现逐单探明细的 EXISTS 子查询——它是 39 秒整表扫描的来源。
+        Assert.DoesNotContain(statements, statement => statement.Contains("EXISTS", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task QueryAsync_short_numeric_keyword_is_not_scanned_as_order_guid_fragment()
+    {
+        // 3 位数字是合法十六进制，但太短，会命中成百上千个订单号：不按订单号搜，只按商品编码精确匹配。
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 100);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var statements = database.CaptureSql();
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "000", Take: 20),
+            CancellationToken.None);
+
+        Assert.Empty(response.Orders);
+        Assert.DoesNotContain(statements, statement => statement.Contains("INSTR", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("x'); DROP TABLE sales_order;--")]
+    [InlineData("a'b")]
+    [InlineData("back\\slash'")]
+    public async Task QueryAsync_keyword_with_sql_metacharacters_is_treated_as_data(string keyword)
+    {
+        // 商品编码 IN 列表由 SqlSugar 内联成字符串字面量：单引号必须被转义，恶意关键字不能逃出字面量。
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: keyword, Take: 20),
+            CancellationToken.None);
+
+        Assert.Empty(response.Orders);
+        // 表还在、数据还在：后续正常查询照常返回目标订单。
+        var targetByCode = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "SKU-TARGET", Take: 20),
+            CancellationToken.None);
+        Assert.Equal(OrderHistorySqliteFixture.TargetOrderGuid, Assert.Single(targetByCode.Orders).OrderGuid);
+    }
+
+    [Fact]
+    public async Task QueryAsync_hot_product_falls_back_to_exists_and_returns_newest_orders_first()
+    {
+        // 明细行数超过冷门上限（1000）的商品，按订单号 IN 会超出参数上限，改用 EXISTS。
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 1_100);
+        await database.DbContext.PosmDb.Ado.ExecuteCommandAsync(
+            "UPDATE sales_order_detail SET ProductCode = 'HOT-1' WHERE ProductCode LIKE 'P-%'");
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var statements = database.CaptureSql();
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "HOT-1", Take: 5),
+            CancellationToken.None);
+
+        Assert.Equal(5, response.Orders.Count);
+        // fixture 里订单 i 的下单时间 = 基准 - i 秒，目标订单卖的不是 HOT-1；最新的 HOT-1 订单是 1 号。
+        Assert.Equal(Guid.Parse("00000000-0000-0000-0000-000000000001"), response.Orders[0].OrderGuid);
+        Assert.Contains(statements, statement => statement.Contains("EXISTS", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task InsertProductAsync(OrderHistorySqliteFixture database, string productCode, string barcode)
+    {
+        await database.DbContext.PosmDb.Insertable(new Product
+        {
+            UUID = Guid.NewGuid().ToString("D"),
+            ProductCode = productCode,
+            ProductName = productCode,
+            Barcode = barcode
+        }).ExecuteCommandAsync();
+    }
+
+    private static async Task InsertOrderWithLineAsync(
+        OrderHistorySqliteFixture database,
+        string orderGuid,
+        string productCode,
+        string barcode)
+    {
         await database.DbContext.PosmDb.Insertable(new SalesOrder
         {
             OrderGuid = orderGuid,
@@ -322,47 +465,35 @@ public sealed class OrderHistoryServiceTests
         {
             OrderDetailGuid = Guid.NewGuid().ToString("D"),
             OrderGuid = orderGuid,
-            ProductCode = "EAN8-ITEM",
-            ProductName = "Gum",
-            Barcode = "12345678",
+            ProductCode = productCode,
+            ProductName = productCode,
+            Barcode = barcode,
             Quantity = 1,
             Price = 5m,
             ActualAmount = 5m
         }).ExecuteCommandAsync();
-
-        var response = await repository.QueryAsync(
-            new OrderHistoryQueryRequest("S001", Keyword: "12345678", Take: 20),
-            CancellationToken.None);
-
-        var order = Assert.Single(response.Orders);
-        Assert.Equal(Guid.Parse(orderGuid), order.OrderGuid);
     }
 
-    [Fact]
-    public void Sql_server_short_code_probe_selects_only_order_guid_without_detail_subquery()
+    private static SqlSugarClient CreateSqlServerPreviewClient() => new(new ConnectionConfig
     {
-        using var db = new SqlSugarClient(new ConnectionConfig
+        ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=hbpos-sql-preview;Trusted_Connection=True;",
+        DbType = DbType.SqlServer,
+        InitKeyType = InitKeyType.Attribute,
+        IsAutoCloseConnection = true
+    });
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.OrdinalIgnoreCase);
+             index >= 0;
+             index = text.IndexOf(value, index + value.Length, StringComparison.OrdinalIgnoreCase))
         {
-            ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=hbpos-sql-preview;Trusted_Connection=True;",
-            DbType = DbType.SqlServer,
-            InitKeyType = InitKeyType.Attribute,
-            IsAutoCloseConnection = true
-        });
+            count++;
+        }
 
-        var sql = SqlSugarOrderHistoryRepository
-            .BuildShortCodeOrderGuidQuery(db.Queryable<SalesOrder>(), "1004", "db596f11")
-            .ToSql();
-
-        Assert.Contains("CHARINDEX", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("BranchCode", sql.Key, StringComparison.OrdinalIgnoreCase);
-        // 选择列表里出现 Remark / CashierName 等非覆盖索引列，优化器就会改走整表聚集索引扫描。
-        Assert.DoesNotContain("CashierName", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Remark", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("EXISTS", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("sales_order_detail", sql.Key, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(sql.Value, parameter => Equals(parameter.Value, "db596f11"));
+        return count;
     }
-
     private static async Task AssertFastLookupAsync(
         SqlSugarOrderHistoryRepository repository,
         OrderHistorySqliteFixture database,
@@ -390,8 +521,15 @@ public sealed class OrderHistoryServiceTests
         var selects = statements
             .Where(statement => statement.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
             .ToList();
-        Assert.Equal(2, selects.Count);
-        Assert.Contains("EXISTS", selects[0], StringComparison.OrdinalIgnoreCase);
+        // 冷门商品：读商品主档、读一次明细 ProductCode 探针、再按订单号 IN 取行。
+        // 明细表只被探针读一次，且不带条码 / 备注文本条件，也没有逐单探明细的 EXISTS。
+        var detailSelect = Assert.Single(
+            selects,
+            statement => statement.Contains("sales_order_detail", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("ProductCode", detailSelect, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Barcode", detailSelect, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Remark", detailSelect, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(selects, statement => statement.Contains("EXISTS", StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed class OrderHistorySqliteFixture : IDisposable
@@ -410,7 +548,8 @@ public sealed class OrderHistoryServiceTests
                 InitKeyType = InitKeyType.Attribute,
                 IsAutoCloseConnection = true
             });
-            client.CodeFirst.InitTables<SalesOrder, SalesOrderDetail, PaymentDetail>();
+            // 商品主档在生产里是 HBweb 库的 Product 表；测试里 MainDb 与 PosmDb 指向同一个 SQLite，表建在一起。
+            client.CodeFirst.InitTables<SalesOrder, SalesOrderDetail, PaymentDetail, Product>();
             DbContext = CreateDbContext(client);
         }
 
@@ -518,6 +657,16 @@ public sealed class OrderHistoryServiceTests
             {
                 await client.Insertable(batch).ExecuteCommandAsync();
             }
+
+            // 目标商品在主档里的编码、货号、条码，与上面明细里的 SKU-TARGET / ITEM-TARGET / 930000000001 一一对应。
+            await client.Insertable(new Product
+            {
+                UUID = Guid.NewGuid().ToString("D"),
+                ProductCode = "SKU-TARGET",
+                ProductName = "Tea",
+                ItemNumber = "ITEM-TARGET",
+                Barcode = "930000000001"
+            }).ExecuteCommandAsync();
 
             await client.Ado.ExecuteCommandAsync(
                 "CREATE INDEX IX_Test_SalesOrder_Scope ON sales_order(BranchCode, OrderTime DESC);");
