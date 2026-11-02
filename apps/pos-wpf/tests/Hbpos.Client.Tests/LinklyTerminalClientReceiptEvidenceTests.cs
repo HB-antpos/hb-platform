@@ -7,7 +7,9 @@ namespace Hbpos.Client.Tests;
 /// <summary>
 /// 2026-10-22 1002 店事故回归：刷卡机已打出 APPROVED 00 的顾客小票，最终响应却回 PF「PINpad Offline」、
 /// TxnRef 为空、金额 0。凭与本笔一致的小票证据必须判为已批准并落库证据；证据不匹配或没有小票时维持原规则。
+/// 真实 LinklyTerminalClient 会写 LinklyLocal 日志，因此与其他全局日志用例串行。
 /// </summary>
+[Collection(GlobalLoggingTestCollection.Name)]
 public sealed class LinklyTerminalClientReceiptEvidenceTests
 {
     private const string TxnRef = LinklyLocalReceiptApprovalEvidenceTests.TxnRef;
