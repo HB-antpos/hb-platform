@@ -497,6 +497,7 @@
     <Compile Include="MainApiEntryUsageTests.cs" />
     <Compile Include="MyobConnectionTests.cs" />
     <Compile Include="MyobEmployeeBindingTests.cs" />
+    <Compile Include="MyobEmployeeCreateTests.cs" />
     <Compile Include="MyobEmployeeSyncTests.cs" />
     <Compile Include="MyobPayrollAdviceTests.cs" />
     <Compile Include="MyobWageProbeTests.cs" />

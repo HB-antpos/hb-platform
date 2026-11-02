@@ -178,6 +178,9 @@ const pages = [
       'src/pages/PosAdmin/Myob/BindingListView.tsx',
       'src/pages/PosAdmin/Myob/BindingDrawer.tsx',
       'src/pages/PosAdmin/Myob/MissingPanels.tsx',
+      // 我方建档（MYOB 有、我方没有）
+      'src/pages/PosAdmin/Myob/CreateFromMyobDrawer.tsx',
+      'src/pages/PosAdmin/Myob/myobCreateLogic.ts',
       'src/pages/PosAdmin/Myob/MyobBadges.tsx',
       'src/pages/PosAdmin/Myob/PayrollEmployersTab.tsx',
       'src/pages/PosAdmin/Myob/PayrollEmployerDrawer.tsx',

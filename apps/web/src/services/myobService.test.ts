@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import {
   applyMyobEmployeeSync,
+  createMyobEmployeeFromCard,
   getMyobCompanies,
+  getMyobCreateDraft,
   getMyobPayCategories,
   getMyobSyncBatches,
   getMyobSyncFieldStats,
@@ -9,6 +11,8 @@ import {
   normalizeMyobCompanies,
   normalizeMyobConnection,
   normalizeMyobConnections,
+  normalizeMyobCreateDraft,
+  normalizeMyobCreateResult,
   normalizeMyobPayCategories,
   normalizeMyobPreviewRow,
   normalizeMyobPreviewStatus,
@@ -530,6 +534,85 @@ try {
   await assert.rejects(getMyobSyncFieldStats({ connectionGuid: 'c1' }), /no edit/)
 } finally {
   globalThis.fetch = originalFetch3
+}
+
+// ── 我方建档：草稿 / 结果归一化（契约 MyobEmployeeCreateDtos.cs）──
+const draft = normalizeMyobCreateDraft({
+  connectionGuid: 'c1',
+  connectionName: 'HOT BARGAIN ORION PTY LTD',
+  card: { uid: 'card-1', name: 'ERIN CHUNG', isActive: true, employmentStatus: 'Casual' },
+  username: 'erinchung',
+  givenName: 'ERIN',
+  familyName: 'CHUNG',
+  email: 'erin@example.com',
+  myobPhone: '+61412345678',
+  phone: '0412 345 678',
+  birthday: '2010-02-23',
+  age: 16,
+  isMinor: true,
+  employmentType: 'Temporary',
+  stores: [{ storeCode: '1013', storeName: 'Orion', mappedToThisCompany: true }, { storeCode: '', storeName: 'x' }],
+  suggestedStoreCode: '1013',
+  warnings: [{ code: 'EMAIL_IN_USE', message: 'm', userGuid: 'u1', userName: 'Erin' }, { message: 'no code' }],
+})
+assert.equal(draft.card.uid, 'card-1')
+assert.equal(draft.age, 16)
+assert.equal(draft.isMinor, true)
+assert.equal(draft.employmentType, 'Temporary')
+assert.deepEqual(draft.stores, [{ storeCode: '1013', storeName: 'Orion', mappedToThisCompany: true }], '没有分店代码的选项丢弃')
+assert.deepEqual(draft.warnings, [{ code: 'EMAIL_IN_USE', message: 'm', userGuid: 'u1', userName: 'Erin', userDeleted: false }], '没有提醒码的丢弃')
+const sparseDraft = normalizeMyobCreateDraft({ employmentType: 'Casual', age: null })
+assert.equal(sparseDraft.employmentType, null, '不认识的用工类型 → null（必须人工选）')
+assert.equal(sparseDraft.age, null)
+assert.equal(sparseDraft.email, null)
+assert.deepEqual(sparseDraft.warnings, [])
+assert.deepEqual(normalizeMyobCreateResult({ userGuid: 'u9', username: 'erin', storeCode: '1013', bound: false, bindError: 'x' }), {
+  userGuid: 'u9',
+  username: 'erin',
+  storeCode: '1013',
+  bound: false,
+  bindError: 'x',
+  passwordSetupEmailTo: null,
+  passwordSetupEmailError: null,
+})
+
+const originalFetch4 = globalThis.fetch
+const createCalls: Array<{ url: string; method: string; body: unknown }> = []
+let createBody: unknown = null
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  createCalls.push({ url: String(input), method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : null })
+  return new Response(JSON.stringify(createBody), { status: 200, headers: { 'content-type': 'application/json' } })
+}) as typeof fetch
+try {
+  createBody = { success: true, data: { connectionGuid: 'c1', card: { uid: 'card 1' } } }
+  await getMyobCreateDraft('c1', 'card 1')
+  assert.equal(createCalls[0].method, 'GET')
+  assert.ok(createCalls[0].url.includes('/api/react/v1/myob/employee-create/draft?'), createCalls[0].url)
+  assert.ok(createCalls[0].url.includes('myobEmployeeUid=card+1') || createCalls[0].url.includes('myobEmployeeUid=card%201'), createCalls[0].url)
+
+  createBody = { success: true, data: { userGuid: 'u9', username: 'erin', storeCode: '1013', bound: true } }
+  const createRequest = {
+    connectionGuid: 'c1',
+    myobEmployeeUid: 'card-1',
+    username: 'erin',
+    givenName: 'Erin',
+    familyName: 'Chung',
+    email: 'erin@example.com',
+    phone: '0412 345 678',
+    birthday: '2004-12-05',
+    storeCode: '1013',
+    employmentType: 'FullTime' as const,
+    sendPasswordSetupEmail: true,
+  }
+  assert.equal((await createMyobEmployeeFromCard(createRequest)).bound, true)
+  assert.equal(createCalls[1].method, 'POST')
+  assert.ok(createCalls[1].url.endsWith('/api/react/v1/myob/employee-create'), createCalls[1].url)
+  assert.deepEqual(createCalls[1].body, createRequest)
+
+  createBody = { success: false, message: 'USERNAME_EXISTS: 用户名已存在' }
+  await assert.rejects(createMyobEmployeeFromCard(createRequest), /用户名已存在/)
+} finally {
+  globalThis.fetch = originalFetch4
 }
 
 console.log('myobService.test: ok')

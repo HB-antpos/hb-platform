@@ -60,7 +60,8 @@ public static class NewStaffProfileRules
         catch (TimeZoneNotFoundException) { return DateTime.UtcNow.Date; }
     }
 
-    private static int AgeOn(DateTime birthday, DateTime day)
+    // MYOB「我方建档」草稿也用它判断是否未满 18 岁，保证与建档时的必填校验同一口径。
+    internal static int AgeOn(DateTime birthday, DateTime day)
     {
         var age = day.Year - birthday.Year;
         if (birthday.Date > day.AddYears(-age)) age--;

@@ -849,6 +849,121 @@
         }
       }
     },
+    "create": {
+      "title": "我方建档 · {{name}}",
+      "subtitle": "按 {{company}} 里的 MYOB 员工卡预填，核对后建我方账号并绑定这张卡；不会改动 MYOB",
+      "close": "关闭",
+      "steps": {
+        "fill": "填写资料",
+        "review": "人工核对",
+        "done": "完成"
+      },
+      "loadFailed": "读取 MYOB 资料失败",
+      "retry": "重试",
+      "myobValue": "MYOB：{{value}}",
+      "sections": {
+        "basic": "基本资料",
+        "employment": "用工与分店",
+        "login": "登录与初始密码"
+      },
+      "fields": {
+        "givenName": "名",
+        "familyName": "姓",
+        "username": "用户名",
+        "email": "邮箱",
+        "phone": "电话",
+        "birthday": "生日",
+        "employmentType": "用工类型",
+        "store": "上班分店",
+        "guardianName": "监护人姓名",
+        "guardianRelationship": "监护人关系",
+        "guardianPhone": "监护人手机",
+        "guardianEmail": "监护人邮箱",
+        "password": "初始密码"
+      },
+      "employmentTypes": {
+        "FullTime": "全职",
+        "PartTime": "兼职",
+        "Temporary": "临时工"
+      },
+      "hints": {
+        "username": "系统按姓名建议并已查重，可以改",
+        "employmentMapped": "MYOB：{{status}} → {{type}}",
+        "employmentUnmapped": "MYOB：{{status}}，对应不上我方类型，请人工选择",
+        "store": "默认按「分店 → 发薪公司」映射预选；建档时只加入这一家分店，其他分店之后可在人员管理里再加"
+      },
+      "storePlaceholder": "选择分店",
+      "storeMapped": "本公司",
+      "rules": {
+        "givenName": "请输入名",
+        "familyName": "请输入姓",
+        "username": "请输入用户名",
+        "usernameLength": "用户名长度必须在 3–50 个字符之间",
+        "email": "请输入邮箱",
+        "emailInvalid": "邮箱格式不正确",
+        "phone": "请输入电话",
+        "phoneInvalid": "电话格式无效（8–15 位数字）",
+        "employmentType": "请选择用工类型",
+        "store": "请选择上班分店",
+        "password": "请输入初始密码",
+        "passwordLength": "密码长度必须在 6–100 个字符之间"
+      },
+      "password": {
+        "email": "系统生成初始密码，发到员工邮箱（推荐）",
+        "manual": "我来设置初始密码",
+        "emailShort": "系统生成并发到员工邮箱",
+        "manualShort": "人工设置（不显示）",
+        "note": "两种方式员工首次登录都必须先改成自己的密码；账号角色固定为门店员工（StoreStaff）"
+      },
+      "warnings": {
+        "emailInUse": "这个邮箱已属于我方账号 {{name}}，多半是同一个人，建议直接把这张卡绑定给他/她",
+        "emailInUseDeleted": "这个邮箱被已删除的账号 {{name}} 占用，需要换一个邮箱才能建档",
+        "phoneInUse": "这个电话已出现在我方员工 {{name}} 的资料里，请确认不是同一个人",
+        "cardInactive": "MYOB 里这张员工卡已停用，可能已经离职，确认要建档再继续",
+        "noMappedStore": "你能选的分店里没有映射到这家公司的；建档后这名员工不会出现在这家公司的名单里，需另在「发薪公司」里指定",
+        "missingFields": "MYOB 里缺少部分资料（邮箱 / 电话 / 生日 / 用工类型），请人工补上"
+      },
+      "bindExisting": {
+        "button": "改为绑定给 {{name}}",
+        "confirmTitle": "把 MYOB 员工卡 {{card}} 直接绑定给我方账号 {{name}}？",
+        "ok": "绑定"
+      },
+      "fillNote": "带 MYOB 原值提示的字段已按 MYOB 预填，改动会在下一步标出",
+      "next": "下一步：人工核对",
+      "back": "上一步",
+      "confirm": "确认建档并绑定",
+      "submitFailed": "建档失败",
+      "review": {
+        "summary": "将新建账号 {{username}}（门店员工，{{store}}），并绑定到 MYOB 员工卡 {{card}}（{{company}}）",
+        "edited": "其中 {{count}} 项与 MYOB 不同，已用橙色标出，请重点核对",
+        "noEdits": "与 MYOB 一致的字段标为「MYOB」，人工补填的标为「人工填写」",
+        "ack": "我已逐项核对以上资料",
+        "columns": {
+          "field": "字段",
+          "myob": "MYOB 原值",
+          "value": "将写入我方",
+          "source": "来源"
+        },
+        "source": {
+          "myob": "MYOB",
+          "edited": "人工修改",
+          "filled": "人工填写",
+          "system": "系统建议"
+        }
+      },
+      "done": {
+        "boundTitle": "已建档并绑定 MYOB 员工卡",
+        "unboundTitle": "账号已建好，但没有绑上 MYOB 员工卡",
+        "subtitle": "账号 {{username}} · {{store}} · MYOB 员工卡 {{card}}",
+        "bindFailed": "绑定失败",
+        "bindFailedHint": "原因：{{reason}}。请在绑定列表里找到这名员工手动绑定。",
+        "emailSent": "初始密码已发到 {{email}}，员工首次登录需修改密码",
+        "emailFailed": "初始密码邮件没有发出去：{{reason}}。可在手机「人员管理」里给员工重发。",
+        "manualPassword": "请把你设置的初始密码告诉员工；员工首次登录需修改密码。",
+        "syncTip": "住址、性别、退休金、银行等资料，可在绑定列表里对这名员工使用「从 MYOB 同步资料」（可预览、7 天内可撤销）。",
+        "close": "完成"
+      }
+    },
     "sync": {
       "entry": {
         "button": "从 MYOB 同步资料",

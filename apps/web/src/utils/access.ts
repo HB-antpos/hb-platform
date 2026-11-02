@@ -135,6 +135,7 @@ function createEmptyAccess(): AccessControl {
     canManageFaceCameras: false,
     canManageMyobConnections: false,
     canBindMyobEmployees: false,
+    canCreateMyobOurSide: false,
     canPushMyobTimesheet: false,
     canAccessMyob: false,
     canViewMyobPayslips: false,
@@ -407,6 +408,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
   const canManageMyobConnections = isAdmin || hasPermission(P.Myob.ConnectionManage)
   const canBindMyobEmployees = isAdmin || hasPermission(P.Myob.EmployeeBind)
+  // 「对方没有」里的「我方建档」：后端同时要求员工绑定与建门店员工（Users.Create 隐含 Users.CreateStoreStaff，前端没有这层映射，两个码都认）。
+  const canCreateMyobOurSide =
+    canBindMyobEmployees && (isAdmin || hasPermission(P.Users.CreateStoreStaff) || hasPermission(P.Users.Create))
   // 推送到 MYOB 只认独立权限码：店长有「编辑工资」能看预览，但不能因此写 MYOB；Admin 角色放行。
   const canPushMyobTimesheet = isAdmin || hasPermission(P.Myob.TimesheetPush)
   // MYOB 对接页入口：三个页签各有独立权限（连接与映射 / 员工绑定 / 发薪公司 = 编辑工资），任一即可进入，页内只显示有权限的页签。
@@ -574,6 +578,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageFaceCameras,
     canManageMyobConnections,
     canBindMyobEmployees,
+    canCreateMyobOurSide,
     canPushMyobTimesheet,
     canAccessMyob,
     canViewMyobPayslips,
