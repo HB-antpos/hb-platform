@@ -27,11 +27,11 @@ public enum RemoteMaintenanceReconcileResult
     NotApplicable,
     /// <summary>本机配置与中心期望一致，无需任何操作。</summary>
     UpToDate,
-    /// <summary>已提权把 RustDesk 切换到中心期望的服务器。</summary>
+    /// <summary>已通过免 UAC 代理或提权 helper 把 RustDesk 切换到中心期望的服务器。</summary>
     Reconciled,
     /// <summary>暂不处理：正在安装、中心不可达、自动重试次数已用完等，之后会再试或由手动触发。</summary>
     Deferred,
-    /// <summary>需要对账但未完成：UAC 被拒、等待超时或 helper 失败。设备仍在旧服务器，可手动修复。</summary>
+    /// <summary>需要对账但未完成：代理未受理、UAC 被拒、等待超时或 helper 失败。设备仍在旧服务器，可手动修复。</summary>
     Failed,
     /// <summary>中心给出的配置不在公司白名单或要求更换公钥，设备端拒绝执行；需要运维修正中心配置。</summary>
     Rejected
@@ -65,9 +65,12 @@ public sealed class RemoteMaintenanceService(
     IRemoteMaintenanceInstaller installer,
     IRemoteMaintenanceUacHelperLauncher uacHelperLauncher,
     RemoteMaintenanceJournal journal,
-    IRemoteMaintenanceSecretProtector secretProtector) : IRemoteMaintenanceService, IRemoteMaintenanceReconciler
+    IRemoteMaintenanceSecretProtector secretProtector,
+    // 免 UAC 代理（SYSTEM 计划任务）；为 null 或任务未注册时对账退回 UAC helper。
+    IRemoteMaintenanceAgentClient? agentClient = null) : IRemoteMaintenanceService, IRemoteMaintenanceReconciler
 {
     // 自动对账连续失败达到该次数后不再自动弹 UAC，用户可在设置页点“修复”手动触发。
+    // 走免 UAC 代理时不弹窗，不受此上限约束。
     internal const int MaxAutomaticReconcileFailures = 5;
 
     // 提权 helper 的最长等待：UAC 无人理会时不能一直占着操作闸门（安装/修复也共用它）。
@@ -475,13 +478,14 @@ public sealed class RemoteMaintenanceService(
             return RemoteMaintenanceReconcileResult.UpToDate;
         }
 
-        // 确实需要提权才检查自动重试上限：达到上限后不再自动弹 UAC，手动修复仍可再试。
-        if (!manual && state.ReconcileFailureCount >= MaxAutomaticReconcileFailures)
+        // 代理可用就不弹窗，不需要自动重试上限；只有要退回 UAC 时才检查：达到上限后不再自动弹 UAC，手动修复仍可再试。
+        var useAgent = agentClient?.IsAvailable(_helperPath) == true;
+        if (!useAgent && !manual && state.ReconcileFailureCount >= MaxAutomaticReconcileFailures)
         {
             return RemoteMaintenanceReconcileResult.Deferred;
         }
 
-        // PendingConfig 只是“请求”，真正是否应用由提权 helper 再次校验后决定。
+        // PendingConfig 只是“请求”，真正是否应用由提权侧再次校验后决定（UAC helper 从 journal 读取它）。
         await journal.WriteAsync(state with { PendingConfig = desired, UpdatedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
         var failureReason = "helper-failed";
         var helperCode = -1;
@@ -489,7 +493,11 @@ public sealed class RemoteMaintenanceService(
         helperTimeout.CancelAfter(ReconcileHelperTimeout);
         try
         {
-            helperCode = await uacHelperLauncher.RunAsync(_helperPath, _journalPath, state.OperationId, "reconcile", helperTimeout.Token);
+            helperCode = useAgent
+                // 代理只接收目标服务器，不读写本 journal；成功后由下面这里更新 journal。
+                ? await agentClient!.ReconcileAsync(_helperPath, desired, helperTimeout.Token)
+                : await uacHelperLauncher.RunAsync(_helperPath, _journalPath, state.OperationId, "reconcile", helperTimeout.Token);
+            if (helperCode == RemoteMaintenanceAgentClient.NotRespondingExitCode) failureReason = "agent-not-responding";
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -510,7 +518,12 @@ public sealed class RemoteMaintenanceService(
 
         if (helperCode == 0)
         {
-            LogReconcile(state.OperationId, $"reconcile applied idServer={desired.IdServer}", warning: false);
+            // UAC helper 已自行把 PendingConfig 并入 Config；代理不碰 journal，由这里补写。两条路径写入同样内容，重复写无害。
+            var applied = await journal.ReadAsync(CancellationToken.None) ?? state;
+            await journal.WriteAsync(
+                applied with { Config = desired, PendingConfig = null, ReconcileFailureCount = 0, UpdatedAtUtc = DateTimeOffset.UtcNow },
+                CancellationToken.None);
+            LogReconcile(state.OperationId, $"reconcile applied via={(useAgent ? "agent" : "uac")} idServer={desired.IdServer}", warning: false);
             return RemoteMaintenanceReconcileResult.Reconciled;
         }
 
@@ -521,7 +534,7 @@ public sealed class RemoteMaintenanceService(
             CancellationToken.None);
         LogReconcile(
             state.OperationId,
-            $"reconcile failed reason={failureReason} exitCode={helperCode} failures={latest.ReconcileFailureCount + 1}",
+            $"reconcile failed via={(useAgent ? "agent" : "uac")} reason={failureReason} exitCode={helperCode} failures={latest.ReconcileFailureCount + 1}",
             warning: failureReason != "uac-declined");
         return RemoteMaintenanceReconcileResult.Failed;
     }

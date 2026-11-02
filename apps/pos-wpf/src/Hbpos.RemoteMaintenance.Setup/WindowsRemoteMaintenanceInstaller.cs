@@ -186,7 +186,7 @@ public sealed class WindowsRemoteMaintenanceServiceControl(IRemoteMaintenanceCom
     }
 }
 
-/// <summary>只允许公司服务器和官方固定版本；提权时重新校验，绝不执行 journal 指定的任意文件。</summary>
+/// <summary>只允许公司服务器和白名单内的 RustDesk 安装包；提权时重新校验，绝不执行 journal 指定的任意文件。</summary>
 public sealed class WindowsRemoteMaintenanceInstaller(
     IRemoteMaintenanceCommandRunner commandRunner,
     IRemoteMaintenanceServiceControl serviceControl,
@@ -194,8 +194,22 @@ public sealed class WindowsRemoteMaintenanceInstaller(
 {
     internal const string StatusServiceName = "HBPOSRemoteStatus";
     private const string RustDeskServiceName = "RustDesk";
-    internal const string TrustedRustDeskSha256 = "eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274";
-    private const long TrustedRustDeskSize = 24472432;
+
+    /// <summary>
+    /// 允许安装的 RustDesk 安装包：SHA256（小写十六进制）→ 版本标签与字节数，随 WPF 发布。
+    /// 中心 manifest 决定“装哪一个”，这里决定“允许装哪些”，任何一方单独被改都装不上包。
+    /// 新版本（含公司定制构建）必须先在测试店完整验收，再把哈希加进来发版。
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, (string Version, long Size)> TrustedRustDeskBuilds =
+        new Dictionary<string, (string Version, long Size)>(StringComparer.Ordinal)
+        {
+            // RustDesk 官方 1.4.9 x86_64。
+            ["eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"] = ("1.4.9", 24472432)
+        };
+
+    // RustDesk 服务配置里的“自动更新”开关；设备上的 RustDesk 版本只由我们发布控制，安装与对账都把它写成 N 并读回。
+    // 不放进 ManagedOptions：那三项是“这是公司接管的 RustDesk”的证据，老设备没有这一项，放进去会被误判为未接管。
+    internal const string AutoUpdateOption = "allow-auto-update";
     private static string ProgramRoot => Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
     private static string StatusProgramDirectory => Path.Combine(ProgramRoot, "HBPOS", "RemoteStatus");
     private static string InstalledRustDesk => Path.Combine(ProgramRoot, "RustDesk", "rustdesk.exe");
@@ -215,6 +229,10 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         if (request.Prepare.OperationId == Guid.Empty || request.Prepare.DeviceId == Guid.Empty ||
             request.Password.Length is < 12 or > 128 || request.Password.Any(char.IsControl))
             throw new InvalidDataException("远程维护安装参数无效。");
+        // 中心指定的安装包必须在白名单内；查不到就在触碰本机任何东西之前拒绝。
+        var trustedSha256 = request.Prepare.ArtifactManifest.RustDesk.Sha256.Trim().ToLowerInvariant();
+        if (!TrustedRustDeskBuilds.TryGetValue(trustedSha256, out var trustedBuild))
+            throw new InvalidDataException("RustDesk 安装包不在允许列表内。");
         // 先确认随 WPF 发布的 Agent 位于 Program Files；禁止从下载 ZIP/用户 journal 提权复制程序。
         var statusSource = ResolveTrustedStatusAgentPath();
         await EnsureNoForeignRustDeskConfigAsync(request.Prepare.Config, cancellationToken);
@@ -230,12 +248,12 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             await using (var source = new FileStream(request.RustDeskArtifactPath, FileMode.Open, FileAccess.Read, FileShare.Read))
             await using (var target = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                if (source.Length != TrustedRustDeskSize) throw new InvalidDataException("RustDesk 文件大小错误。");
+                if (source.Length != trustedBuild.Size) throw new InvalidDataException("RustDesk 文件大小错误。");
                 await source.CopyToAsync(target, cancellationToken);
             }
             await using (var check = File.OpenRead(staged))
-                if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(check, cancellationToken)), TrustedRustDeskSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("RustDesk 官方文件哈希错误。");
+                if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(check, cancellationToken)), trustedSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("RustDesk 安装包哈希错误。");
             // 外部配置预检查在此之前完成；从实际触发 RustDesk 安装起才允许外层清理该服务。
             if (progressWriter is not null)
                 await progressWriter(new(true, false, string.Empty, request.ClientVersion, request.DataDirectory));
@@ -333,9 +351,14 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             foreach (var option in ManagedOptions)
                 if (await commandRunner.RunAsync(executable, "--option " + Q(option.Key) + " " + Q(option.Value), cancellationToken) != 0)
                     throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+        // 安装与对账都关掉 RustDesk 自带的自动更新：它会在无连接时自行下载安装新版，绕过我们的白名单。
+        // 这不是无人值守选项，对账模式写它不违背“只换服务器、不动密码与认证方式”的约束。
+        if (await commandRunner.RunAsync(executable, "--option " + Q(AutoUpdateOption) + " " + Q("N"), cancellationToken) != 0)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
         var expected = new List<(string Key, string Value)>
         {
-            ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey)
+            ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey),
+            (AutoUpdateOption, "N")
         };
         expected.AddRange(ManagedOptions);
         foreach (var option in expected)

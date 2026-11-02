@@ -88,11 +88,25 @@ public sealed class RemoteMaintenanceReconcileTests
         await rig.Installer.ReconcileServerAsync(Dedicated);
 
         Assert.DoesNotContain(rig.RustDesk.Commands, x => x.StartsWith("--password "));
-        Assert.DoesNotContain(rig.RustDesk.Commands, x => Regex.IsMatch(x, "^--option \"[^\"]*\" \"[^\"]*\"$"));
+        // 唯一允许的两参数写入是关自动更新，它不是无人值守选项。
+        Assert.DoesNotContain(rig.RustDesk.Commands, x => Regex.IsMatch(x, "^--option \"[^\"]*\" \"[^\"]*\"$") &&
+            !x.StartsWith("--option \"allow-auto-update\" ", StringComparison.Ordinal));
         // 受管选项原样保留。
         Assert.Equal("use-permanent-password", rig.RustDesk.Options["verification-method"]);
         Assert.Equal("password", rig.RustDesk.Options["approve-mode"]);
         Assert.Equal("N", rig.RustDesk.Options["allow-only-conn-window-open"]);
+    }
+
+    [Fact]
+    public async Task 对账同时关掉RustDesk自带的自动更新并读回()
+    {
+        using var rig = new Rig(Legacy);
+        rig.RustDesk.Options["allow-auto-update"] = "Y";
+
+        await rig.Installer.ReconcileServerAsync(Dedicated);
+
+        Assert.Equal("N", rig.RustDesk.Options["allow-auto-update"]);
+        Assert.Contains("--option \"allow-auto-update\"", rig.RustDesk.Commands);
     }
 
     [Fact]
