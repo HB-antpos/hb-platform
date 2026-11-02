@@ -385,7 +385,10 @@ namespace BlazorApp.Api.Services.React
         {
             try
             {
-                var q = _db.Queryable<Product>();
+                // 关键位置：已软删商品（如重复档案合并后停用的那条）不再出现在后台商品列表，
+                // 否则会显示成「禁用」被误当成仍存在的商品去编辑。条件加在起点，
+                // 快路径与分页前预聚合两条路径的计数、排序、取页都继承它，总数与分页保持一致。
+                var q = _db.Queryable<Product>().Where(p => p.IsDeleted == false);
 
                 // 应用过滤条件
                 if (!string.IsNullOrWhiteSpace(query.Search))
@@ -1308,6 +1311,13 @@ namespace BlazorApp.Api.Services.React
                 if (product == null)
                 {
                     return new ApiResponse<ProductDto> { Success = false, Message = "商品不存在" };
+                }
+
+                // 与列表口径一致：已软删商品不返回详情。ProductCode 有全量唯一索引，
+                // 已删档案不会与存活商品同码，因此按码命中即可判定，给出明确提示而非「不存在」。
+                if (product.IsDeleted)
+                {
+                    return new ApiResponse<ProductDto> { Success = false, Message = "商品已删除" };
                 }
 
                 var domesticSupplier = await _db.Queryable<DomesticProduct>()
