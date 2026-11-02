@@ -58,6 +58,10 @@ export interface PayslipListResult {
   netTotal: number;
   unassignedCount: number;
   canViewAllStores: boolean;
+  /** 仅本人口径（没有任何查看权限的登录账号）：列表页隐藏公司 / 分店 / 搜索筛选。 */
+  selfOnly: boolean;
+  /** 仅本人且没有绑定过 MYOB 员工卡：显示「还没绑定、暂时看不了工资单」的提示。 */
+  selfUnbound: boolean;
   fetchedAt: string | null;
 }
 

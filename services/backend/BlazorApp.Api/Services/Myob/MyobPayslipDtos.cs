@@ -124,6 +124,12 @@ public sealed class MyobPayslipListDto
     /// <summary>当前账号是否具备「全部分店」口径（前端据此决定是否显示「未绑定 / 无法确定」入口）。</summary>
     public bool CanViewAllStores { get; set; }
 
+    /// <summary>当前账号是「仅本人」口径（没有任何查看权限的登录账号，只看绑定到自己的工资单）；前端据此隐藏公司 / 分店 / 搜索等筛选。</summary>
+    public bool SelfOnly { get; set; }
+
+    /// <summary>仅本人口径且本人没有绑定过任何 MYOB 员工卡（含历史绑定）：前端给「还没绑定、暂时看不了工资单」的友好提示。</summary>
+    public bool SelfUnbound { get; set; }
+
     /// <summary>数据读取时间（UTC，ISO 8601）；命中缓存时为首次读取时间。</summary>
     public string FetchedAt { get; set; } = string.Empty;
 }

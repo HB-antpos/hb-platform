@@ -56,11 +56,16 @@ assert.match(emailSheet, /catch \(error\) \{\s*if \(mounted\.current\) setErrorT
 assert.match(emailSheet, /onSent\(/);
 assert.match(emailSheet, /dismissable=\{!busy\}/);
 
-// 6) 入口守卫：登录、非审核壳、两个查看权限任一；先过守卫再渲染内容
+// 6) 入口守卫：登录、非审核壳即可进（没有权限的员工只看本人）；能否看他人由 canViewOthersPayslips 决定，
+//    仅本人时列表页隐藏公司 / 分店 / 搜索，未绑定 MYOB 员工卡时给友好提示；先过守卫再渲染内容
 assert.match(listScreen, /if \(blocked\) return <PayslipMessage/);
 assert.match(detailScreen, /if \(blocked\) return <PayslipMessage/);
 assert.match(read("use-payslip-guard.ts"), /iosReviewOfflineGuardActive/);
+assert.match(read("access.ts"), /return isAuthenticated && !isReview;/);
 assert.match(read("access.ts"), /ViewManagedStore\) \|\| hasPermission\(PERMISSIONS\.Myob\.Payslip\.ViewAllStores/);
+assert.match(listScreen, /canViewOthersPayslips\(isAdmin, hasPermission\)/);
+assert.match(listScreen, /selfUnbound \? "unbound" : "empty"/);
+assert.match(listScreen, /\{selfOnly \? null : \(/);
 
 // 7) 不打印工资数据：生产代码没有 console.log / info / debug（pdf-core 仅允许一条 warn，且不含数据）
 for (const name of productionFiles) {

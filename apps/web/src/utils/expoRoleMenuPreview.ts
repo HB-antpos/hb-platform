@@ -461,10 +461,11 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'payslips',
     titleKey: 'tabs.payslips',
     icon: 'receipt-text-outline',
-    // 与后端 FullAppMenu 一致：手机端「工资单」与 Web 工资单页签同口径，管辖分店 / 全部分店查看权限任一即可见；
-    // 下载 PDF / 邮件发送另有独立权限（Myob.Payslip.Download / Email），不决定入口是否可见。
-    permissionCodes: [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores],
+    // 与后端 FullAppMenu 一致：手机端「工资单」对任何登录账号可见（没有查看权限的员工只看绑定到自己的工资单），是固定入口；
+    // 管辖分店 / 全部分店查看权限只决定能否看他人，下载 PDF / 邮件发送另有独立权限，都不决定入口是否可见。
+    permissionCodes: [],
     order: 56,
+    fixed: true,
     ...ROUTE_LABELS.payslips,
   },
   {

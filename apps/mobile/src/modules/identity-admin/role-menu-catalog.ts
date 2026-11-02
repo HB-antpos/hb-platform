@@ -96,8 +96,9 @@ const MOBILE_MENU: MenuSource[] = ([
   ]],
   // 与后端 FullAppMenu 的 attendance-hours 一致：只认 Attendance.Punch.ViewManagedStore。
   ["attendance-hours", "Staff hours", "工时统计", ["Attendance.Punch.ViewManagedStore"]],
-  // 与后端 FullAppMenu 的 payslips 一致：管辖分店 / 全部分店两个查看权限任一即可见（下载、邮件权限只决定页面里的按钮，不决定入口）。
-  ["payslips", "Payslips", "工资单", ["Myob.Payslip.ViewManagedStore", "Myob.Payslip.ViewAllStores"]],
+  // 与后端 FullAppMenu 的 payslips 一致：任何登录账号可见（没有查看权限的员工只看绑定到自己的工资单），不能在角色里取消；
+  // 管辖分店 / 全部分店查看权限只决定能否看他人，下载、邮件权限只决定页面里的按钮。
+  ["payslips", "Payslips", "工资单", [], { fixed: true }],
   ["seasonal-cards", "Seasonal cards", "节庆卡", ["SeasonalCards.Remaining.ViewManagedStore", "SeasonalCards.Remaining.SubmitManagedStore"]],
   // 「人员管理」(users) 是合并后的移动端入口（人员 / 角色 / 权限三个页签），菜单权限仍只认 Users.ViewStoreStaff
   // （Users.View 持有者经后端别名自动满足）。后端 FullAppMenu 仍下发 user-admin / roles / permissions 三项（旧版 App 在用），

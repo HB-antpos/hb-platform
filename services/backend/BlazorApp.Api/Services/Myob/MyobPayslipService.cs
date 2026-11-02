@@ -14,7 +14,7 @@ namespace BlazorApp.Api.Services.Myob;
 
 public interface IMyobPayslipService
 {
-    /// <summary>当前账号可见的公司文件（只列状态 Active 的连接；仅「管辖分店」口径时只列与自己管辖分店有关的公司）。</summary>
+    /// <summary>当前账号可见的公司文件（只列状态 Active 的连接；非「全部」口径时只列与自己管辖分店有关、或本人绑定过员工卡的公司）。</summary>
     Task<ApiResponse<List<MyobPayslipCompanyDto>>> GetCompaniesAsync(CancellationToken cancellationToken);
 
     Task<ApiResponse<MyobPayslipListDto>> ListAsync(MyobPayslipQuery query, CancellationToken cancellationToken);
@@ -130,8 +130,12 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     private sealed record AccessResult(MyobPayslipAccess? Access, string UserGuid, string Message);
 
     /// <summary>
-    /// 权限口径：有 ViewAllStores → 全部；否则有 ViewManagedStore → 按 ICurrentUserManageableStoreScopeService 的管辖分店
-    /// （管理员 / 仓库经理在该服务里不限分店，沿用其口径）；都没有 → 拒绝。每个接口都重新判断，不靠前端隐藏。
+    /// 权限口径（每个接口都重新判断，不靠前端隐藏）：
+    /// - 有 ViewAllStores → 全部；
+    /// - 否则有 ViewManagedStore → 按 ICurrentUserManageableStoreScopeService 的管辖分店（管理员 / 仓库经理在该服务里不限分店，沿用其口径），
+    ///   同时总能看到绑定到自己的工资单；
+    /// - 都没有（或有 ViewManagedStore 但范围服务不给任何分店）→ 仅本人：只能看绑定到自己账号的工资单。
+    /// 只有未登录才拒绝。
     /// </summary>
     private async Task<AccessResult> ResolveAccessAsync()
     {
@@ -148,7 +152,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
 
         if (!await _permissions.HasAsync(scope.UserGuid, Permissions.Myob.Payslip.ViewManagedStore))
         {
-            return new AccessResult(null, scope.UserGuid, "你没有查看工资单的权限");
+            // 没有任何查看权限的登录账号（普通员工）：只看本人。
+            return new AccessResult(MyobPayslipAccess.Self(scope.UserGuid), scope.UserGuid, string.Empty);
         }
 
         if (scope.IsAdmin)
@@ -157,8 +162,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         }
 
         return scope.IsAllowed
-            ? new AccessResult(MyobPayslipAccess.Stores(scope.StoreCodes), scope.UserGuid, string.Empty)
-            : new AccessResult(null, scope.UserGuid, string.IsNullOrWhiteSpace(scope.Message) ? "你没有查看工资单的权限" : scope.Message);
+            ? new AccessResult(MyobPayslipAccess.Stores(scope.StoreCodes, scope.UserGuid), scope.UserGuid, string.Empty)
+            : new AccessResult(MyobPayslipAccess.Self(scope.UserGuid), scope.UserGuid, string.Empty);
     }
 
     // ───────────────────────── 公司文件 ─────────────────────────
@@ -178,10 +183,12 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     }
 
     /// <summary>
-    /// 可见的公司文件：状态 Active 的连接。仅「管辖分店」口径时，只保留与管辖分店有关的公司（分店映射，或员工覆盖指定了该公司）。
-    /// requestedGuid 非空时再取交集。
+    /// 可见的公司文件：状态 Active 的连接。非「全部」口径时，只保留与管辖分店有关的公司（分店映射，或员工覆盖指定了该公司），
+    /// 以及本人绑定过员工卡的公司（含已解绑的历史绑定；仅本人口径的员工靠这个看到自己的工资单）。requestedGuid 非空时再取交集。
+    /// selfLinks 可由调用方预先取好，避免重复查询。
     /// </summary>
-    private async Task<List<MyobConnection>> LoadVisibleConnectionsAsync(MyobPayslipAccess access, string? requestedGuid)
+    private async Task<List<MyobConnection>> LoadVisibleConnectionsAsync(
+        MyobPayslipAccess access, string? requestedGuid, IReadOnlyList<EmployeeMyobLink>? selfLinks = null)
     {
         var connections = await _db.Queryable<MyobConnection>()
             .Where(item => item.Status == MyobConnectionStatuses.Active)
@@ -190,17 +197,27 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         if (!access.All)
         {
             var scoped = access.StoreCodes.ToList();
-            var related = (await _db.Queryable<MyobStoreMapping>().ToListAsync())
-                .Where(mapping => access.StoreCodes.Contains(mapping.StoreCode))
-                .Select(mapping => mapping.ConnectionGuid)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (scoped.Count > 0)
             {
+                foreach (var mapping in (await _db.Queryable<MyobStoreMapping>().ToListAsync()).Where(mapping => access.StoreCodes.Contains(mapping.StoreCode)))
+                {
+                    related.Add(mapping.ConnectionGuid);
+                }
+
                 foreach (var row in await _db.Queryable<EmployeePayrollEmployer>()
                              .Where(item => scoped.Contains(item.StoreCode) && item.ConnectionGuid != null)
                              .ToListAsync())
                 {
                     related.Add(row.ConnectionGuid!);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(access.SelfUserGuid))
+            {
+                foreach (var link in selfLinks ?? await LoadSelfLinksAsync(access.SelfUserGuid))
+                {
+                    related.Add(link.ConnectionGuid);
                 }
             }
 
@@ -216,6 +233,10 @@ internal sealed class MyobPayslipService : IMyobPayslipService
 
         return connections.OrderBy(connection => connection.BusinessName, StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    /// <summary>本人的 MYOB 员工卡绑定（含已解除的历史绑定：解绑后历史工资单仍要能看）。</summary>
+    private async Task<List<EmployeeMyobLink>> LoadSelfLinksAsync(string userGuid) =>
+        await _db.Queryable<EmployeeMyobLink>().Where(link => link.UserGuid == userGuid).ToListAsync();
 
     // ───────────────────────── 列表 ─────────────────────────
 
@@ -244,7 +265,9 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             return ApiResponse<MyobPayslipListDto>.Error("你没有查看未归属工资单的权限", MyobPayslipErrorCodes.Forbidden);
         }
 
-        var connections = await LoadVisibleConnectionsAsync(access.Access, query.ConnectionGuid);
+        // 仅本人口径：先取本人的员工卡绑定（含历史）。一张都没有就只剩空列表 + SelfUnbound 标记（前端给友好提示），不会请求 MYOB。
+        var selfLinks = access.Access.SelfOnly ? await LoadSelfLinksAsync(access.Access.SelfUserGuid!) : null;
+        var connections = await LoadVisibleConnectionsAsync(access.Access, query.ConnectionGuid, selfLinks);
         var statuses = new List<MyobPayslipCompanyStatusDto>();
         var items = new List<AdviceItem>();
         DateTime? oldestFetch = null;
@@ -270,7 +293,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         }
 
         var placed = await PlaceAsync(items, cancellationToken);
-        var visible = placed.Where(entry => MyobPayslipMatcher.IsVisible(access.Access, entry.Link is not null, entry.Placement)).ToList();
+        var visible = placed.Where(entry => MyobPayslipMatcher.IsVisible(access.Access, entry.Link?.UserGuid, entry.Placement)).ToList();
 
         var unassigned = access.Access.All
             ? visible.Count(entry => MyobPayslipMatcher.IsUnassigned(entry.PlacementKind))
@@ -313,6 +336,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             NetTotal = rows.Sum(row => row.NetPay ?? 0m),
             UnassignedCount = unassigned,
             CanViewAllStores = access.Access.All,
+            SelfOnly = access.Access.SelfOnly,
+            SelfUnbound = selfLinks is { Count: 0 },
             FetchedAt = (oldestFetch ?? _time.GetUtcNow().UtcDateTime).ToString("O", CultureInfo.InvariantCulture),
         });
     }
@@ -659,7 +684,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         }
 
         var placed = (await PlaceAsync([new AdviceItem(connection.ConnectionGuid, connection.BusinessName, chosen)], cancellationToken)).FirstOrDefault();
-        if (placed is null || !MyobPayslipMatcher.IsVisible(access.Access, placed.Link is not null, placed.Placement))
+        if (placed is null || !MyobPayslipMatcher.IsVisible(access.Access, placed.Link?.UserGuid, placed.Placement))
         {
             return NotFoundOutcome();
         }

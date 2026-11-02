@@ -193,19 +193,15 @@ assertArrayEqual(
   'Web 权限预览的门店业务分组应包含商品进销和节日贺卡',
 )
 
-// 手机端工资单：管辖分店 / 全部分店查看权限任一可见；仅有下载或邮件权限（没有查看权限）不显示入口。
-for (const code of [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores]) {
+// 手机端工资单：任何登录账号可见（没有查看权限的员工只看绑定到自己的工资单），是固定入口；查看 / 下载 / 邮件权限都不影响入口显示。
+const payslipsRoute = buildPreview([]).allRoutes.find((route) => route.routeName === 'payslips')
+assertEqual(payslipsRoute?.visible, true, '没有任何权限也应显示工资单入口')
+assertEqual(payslipsRoute?.fixed, true, '工资单入口应标记为固定入口')
+for (const code of [P.Myob.PayslipViewManagedStore, P.Myob.PayslipViewAllStores, P.Myob.PayslipDownload, P.Myob.PayslipEmail]) {
   assertEqual(
     buildPreview([code]).allRoutes.find((route) => route.routeName === 'payslips')?.visible,
     true,
-    `拥有 ${code} 时应显示工资单入口`,
-  )
-}
-for (const code of [P.Myob.PayslipDownload, P.Myob.PayslipEmail]) {
-  assertEqual(
-    buildPreview([code]).allRoutes.find((route) => route.routeName === 'payslips')?.visible,
-    false,
-    `仅有 ${code} 时不应显示工资单入口`,
+    `拥有 ${code} 时也应显示工资单入口`,
   )
 }
 

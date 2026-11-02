@@ -158,6 +158,13 @@ public sealed class MyobPayslipTests : IDisposable
         };
     }
 
+    /// <summary>普通员工：已登录、没有任何工资单权限、不是店长 / 管理员（范围服务返回 IsAllowed=false）。</summary>
+    private void AsEmployee(string userGuid) =>
+        _scope.Scope = new CurrentUserManageableStoreScope
+        {
+            IsAuthenticated = true, IsAllowed = false, UserGuid = userGuid, Message = "当前账号没有店员管理权限",
+        };
+
     // ───────────────────────── 归类规则（纯函数） ─────────────────────────
 
     private static EmployeePayrollEmployer Override(string store, string? connection, string from) =>
@@ -253,21 +260,35 @@ public sealed class MyobPayslipTests : IDisposable
     }
 
     [Fact]
-    public void 可见性_全部分店什么都看得到_管辖分店只看已绑定且有交集的()
+    public void 可见性_全部分店什么都看得到_管辖分店只看已绑定且有交集的_本人绑定的不看分店归属()
     {
         var attendance = new MyobPayslipPlacement(MyobPayslipPlacements.Attendance, ["1002", "1005"]);
         var unknown = new MyobPayslipPlacement(MyobPayslipPlacements.Unknown, []);
         var unbound = new MyobPayslipPlacement(MyobPayslipPlacements.Unbound, []);
 
-        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Everything, false, unbound));
-        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Everything, true, unknown));
+        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Everything, null, unbound));
+        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Everything, "u-tom", unknown));
 
-        var manager = MyobPayslipAccess.Stores(["1005"]);
-        Assert.True(MyobPayslipMatcher.IsVisible(manager, true, attendance)); // 有交集：整张都能看
-        Assert.False(MyobPayslipMatcher.IsVisible(manager, false, attendance)); // 未绑定：不可见
-        Assert.False(MyobPayslipMatcher.IsVisible(manager, true, unknown));
-        Assert.False(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Stores(["1003"]), true, attendance));
-        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Stores(["1002"]), true, attendance));
+        var manager = MyobPayslipAccess.Stores(["1005"], "u-mgr");
+        Assert.True(MyobPayslipMatcher.IsVisible(manager, "u-tom", attendance)); // 有交集：整张都能看
+        Assert.False(MyobPayslipMatcher.IsVisible(manager, null, attendance)); // 未绑定：不可见
+        Assert.False(MyobPayslipMatcher.IsVisible(manager, "u-tom", unknown));
+        Assert.False(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Stores(["1003"]), "u-tom", attendance));
+        Assert.True(MyobPayslipMatcher.IsVisible(MyobPayslipAccess.Stores(["1002"]), "u-tom", attendance));
+        // 店长本人的工资单：归到非管辖分店、甚至无法确定分店，也能看（GUID 比较不分大小写）。
+        Assert.True(MyobPayslipMatcher.IsVisible(manager, "u-mgr", new MyobPayslipPlacement(MyobPayslipPlacements.Attendance, ["1003"])));
+        Assert.True(MyobPayslipMatcher.IsVisible(manager, "U-MGR", unknown));
+        Assert.False(manager.SelfOnly);
+        Assert.False(MyobPayslipAccess.Everything.SelfOnly);
+
+        // 仅本人（没有任何查看权限的普通员工）：只看绑定到自己的；别人的、未绑定的都不可见。
+        var self = MyobPayslipAccess.Self("u-jane");
+        Assert.True(self.SelfOnly);
+        Assert.True(MyobPayslipMatcher.IsVisible(self, "u-jane", attendance));
+        Assert.True(MyobPayslipMatcher.IsVisible(self, "u-jane", unknown));
+        Assert.False(MyobPayslipMatcher.IsVisible(self, "u-tom", attendance));
+        Assert.False(MyobPayslipMatcher.IsVisible(self, null, unbound));
+
         Assert.True(MyobPayslipMatcher.IsUnassigned(MyobPayslipPlacements.Unbound));
         Assert.True(MyobPayslipMatcher.IsUnassigned(MyobPayslipPlacements.Unknown));
         Assert.False(MyobPayslipMatcher.IsUnassigned(MyobPayslipPlacements.Inferred));
@@ -483,18 +504,80 @@ public sealed class MyobPayslipTests : IDisposable
     // ───────────────────────── 权限范围 ─────────────────────────
 
     [Fact]
-    public async Task 权限_没有任何新权限码_拒绝_不请求MYOB()
+    public async Task 权限_没有任何查看权限_仅本人_只看绑定到自己的工资单_他人明细视为不存在()
     {
         GivenSlips();
-        var response = await Service().ListAsync(Q(), CancellationToken.None);
-        Assert.False(response.Success);
-        Assert.Equal(MyobPayslipErrorCodes.Forbidden, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AsEmployee("u-jane");
 
-        var companies = await Service().GetCompaniesAsync(CancellationToken.None);
-        Assert.Equal(MyobPayslipErrorCodes.Forbidden, companies.ErrorCode);
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.True(list.SelfOnly);
+        Assert.False(list.SelfUnbound);
+        Assert.False(list.CanViewAllStores);
+        Assert.Equal(0, list.UnassignedCount);
+        // Jane 在两家公司各有一张卡，两张都看得到；Tom / 未绑定 / 忽略名单的都看不到。
+        Assert.Equal([CardJane, CardJaneAus], list.Rows.Select(row => row.EmployeeUid).OrderBy(uid => uid).ToArray());
+        Assert.All(list.Rows, row => Assert.Equal("u-jane", row.UserGuid));
+        // 只读取本人绑定过的公司文件（这里两家都有）。
+        Assert.Equal([Aus, Inv], list.Companies.Select(status => status.ConnectionGuid).OrderBy(guid => guid).ToArray());
+        Assert.Equal([Aus, Inv], (await Service().GetCompaniesAsync(CancellationToken.None)).Data!.Select(company => company.ConnectionGuid).OrderBy(guid => guid).ToArray());
+
+        // 自己的明细能开；别人的、未绑定的统一 NotFound（不暴露是否存在）。
+        var mine = await Service().GetDetailAsync(new MyobPayslipDetailRequest { ConnectionGuid = Inv, EmployeeUid = CardJane, PaymentDate = "2026-10-23" }, CancellationToken.None);
+        Assert.True(mine.Success);
+        Assert.Equal("u-jane", mine.Data!.UserGuid);
+        var tom = await Service().GetDetailAsync(new MyobPayslipDetailRequest { ConnectionGuid = Inv, EmployeeUid = CardTom, PaymentDate = "2026-10-23" }, CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, tom.ErrorCode);
+        var stranger = await Service().GetDetailAsync(new MyobPayslipDetailRequest { ConnectionGuid = Inv, EmployeeUid = CardStranger, PaymentDate = "2026-10-23" }, CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, stranger.ErrorCode);
+
+        // 仅本人没有分店范围：按分店筛选、只看未归属都拒绝。
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, (await Service().ListAsync(Q("1002"), CancellationToken.None)).ErrorCode);
+        Assert.Equal(MyobPayslipErrorCodes.Forbidden, (await Service().ListAsync(Q(unassigned: true), CancellationToken.None)).ErrorCode);
+    }
+
+    [Fact]
+    public async Task 权限_仅本人且没有绑定过MYOB员工卡_空列表并标记未绑定_不请求MYOB()
+    {
+        GivenSlips();
+        AsEmployee("u-nobody");
+
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.True(list.SelfOnly);
+        Assert.True(list.SelfUnbound);
+        Assert.Empty(list.Rows);
+        Assert.Empty(list.Companies);
+        Assert.Empty((await Service().GetCompaniesAsync(CancellationToken.None)).Data!);
         var detail = await Service().GetDetailAsync(new MyobPayslipDetailRequest { ConnectionGuid = Inv, EmployeeUid = CardJane, PaymentDate = "2026-10-23" }, CancellationToken.None);
-        Assert.Equal(MyobPayslipErrorCodes.Forbidden, detail.ErrorCode);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, detail.ErrorCode);
+        Assert.Equal(0, _api.Calls);
+    }
+
+    [Fact]
+    public async Task 权限_仅本人_已解绑的历史绑定仍能看到历史工资单()
+    {
+        GivenSlips();
+        Bind("u-ex", Inv, CardStranger, unboundAt: Now.AddDays(-1));
+        AsEmployee("u-ex");
+
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.False(list.SelfUnbound);
+        Assert.Equal([CardStranger], list.Rows.Select(row => row.EmployeeUid).ToArray());
+    }
+
+    [Fact]
+    public async Task 权限_店长本人的工资单归到非管辖分店也能看到_公司列表随之包含该公司()
+    {
+        GivenSlips();
+        const string cardMgr = "bbbbbbbb-0000-0000-0000-000000000002";
+        _api.Slips[Aus] = [.. _api.Slips[Aus], Slip(cardMgr, "Mia Manager", "2026-10-23")];
+        Bind("u-mgr", Aus, cardMgr);
+        _source.Pairs.Add(("u-mgr", "1003")); // 店长本人在 Bankstown（Australian 发薪）打卡，不在其管辖的 Newcastle
+        AsManager("1005");
+
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.False(list.SelfOnly);
+        Assert.Equal([CardTom, cardMgr], list.Rows.Select(row => row.EmployeeUid).OrderBy(uid => uid).ToArray());
+        Assert.Equal([Aus, Inv], list.Companies.Select(status => status.ConnectionGuid).OrderBy(guid => guid).ToArray());
     }
 
     [Fact]
@@ -509,13 +592,14 @@ public sealed class MyobPayslipTests : IDisposable
     }
 
     [Fact]
-    public async Task 权限_店长有管辖分店权限但管理范围不允许_拒绝并带范围服务的提示()
+    public async Task 权限_有管辖分店权限但范围服务不给任何分店_退回仅本人()
     {
+        GivenSlips();
         _permissions.Granted.Add(Permissions.Myob.Payslip.ViewManagedStore);
-        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = false, UserGuid = "u-mgr", Message = "当前账号没有店员管理权限" };
-        var response = await Service().ListAsync(Q(), CancellationToken.None);
-        Assert.Equal(MyobPayslipErrorCodes.Forbidden, response.ErrorCode);
-        Assert.Equal("当前账号没有店员管理权限", response.Message);
+        _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = false, UserGuid = "u-tom", Message = "当前账号没有店员管理权限" };
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.True(list.SelfOnly);
+        Assert.Equal([CardTom], list.Rows.Select(row => row.EmployeeUid).ToArray());
     }
 
     [Fact]
@@ -819,13 +903,14 @@ public sealed class MyobPayslipTests : IDisposable
     }
 
     [Fact]
-    public async Task 工时_权限与明细一致_无权限403_店长看管辖外员工404_管辖内可看()
+    public async Task 工时_权限与明细一致_无权限只能看本人则他人404_店长看管辖外员工404_管辖内可看()
     {
         GivenSlips();
         _source.Hours[("1005", "u-tom")] = (480, 0m, 0m, 0m);
 
+        AsEmployee("u-jane"); // 没有任何查看权限：别人的工资单一律视为不存在
         var denied = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
-        Assert.Equal(MyobPayslipErrorCodes.Forbidden, denied.ErrorCode);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, denied.ErrorCode);
 
         AsManager("1002"); // 只管 Wallsend：Tom 在 Newcastle，不在管辖内
         var outOfScope = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
