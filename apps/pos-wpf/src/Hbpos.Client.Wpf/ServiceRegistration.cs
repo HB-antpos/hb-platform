@@ -442,6 +442,8 @@ public static class ServiceRegistration
         services.AddSingleton<ISpecialProductService, SpecialProductService>();
         services.AddSingleton<IShellCultureService, ShellCultureService>();
         services.AddSingleton<ICatalogSyncStatusService, CatalogSyncStatusService>();
+        services.AddSingleton(sp => CatalogAutoSyncOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<IShellCatalogService, ShellCatalogService>();
         services.AddSingleton<IMainShellStartupService, MainShellStartupService>();
         services.AddSingleton<IShellSyncCenterService, ShellSyncCenterService>();
@@ -834,6 +836,7 @@ public static class ServiceRegistration
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
             viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
+            viewModel.ConfigureCatalogAutoSync(sp.GetRequiredService<CatalogAutoSyncOptions>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

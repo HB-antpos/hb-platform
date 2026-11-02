@@ -9267,7 +9267,8 @@ public sealed class MainViewModelScannerTests
             string storeCode,
             CancellationToken cancellationToken = default,
             IProgress<CatalogSyncProgress>? progress = null,
-            bool forceFullDownload = false)
+            bool forceFullDownload = false,
+            bool allowFullDownload = true)
         {
             FullSyncCallCount++;
             return FullSyncException is null

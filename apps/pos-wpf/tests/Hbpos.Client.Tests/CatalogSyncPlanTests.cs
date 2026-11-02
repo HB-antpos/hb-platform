@@ -233,6 +233,103 @@ public sealed class CatalogSyncPlanTests
         Assert.Equal(0, repository.ComparePageRequestCount);
     }
 
+    // ---------- 运行中白天的自动同步：不允许全量 ----------
+
+    [Fact]
+    public async Task Auto_sync_without_full_download_defers_a_full_plan_and_leaves_the_local_catalog_untouched()
+    {
+        var repository = new VersionedCatalogRepository { CatalogVersion = "catalog-v1:expired" };
+        repository.Seed(Lookup("P-OLD", "OLD", 1m).ToSellableItemDto());
+        var api = new PlanCatalogApiClient();
+        api.Plans.Enqueue(Plan(CatalogSyncModes.Full, baseVersion: "catalog-v1:expired", target: "catalog-v1:b", total: 351077, lease: "lease-full"));
+        var progress = new List<CatalogSyncProgress>();
+
+        var deferred = await Assert.ThrowsAsync<CatalogFullDownloadDeferredException>(
+            () => new LocalCatalogSyncService(repository, api).FullSyncAsync(
+                Store,
+                progress: new CapturingProgress(progress),
+                allowFullDownload: false));
+
+        Assert.Equal("plan-full", deferred.Reason);
+        Assert.Equal([(Store, "catalog-v1:expired")], api.PlanRequests);
+        Assert.Empty(api.PinnedPageRequests);
+        Assert.Null(repository.CommittedStamp);
+        Assert.Equal("catalog-v1:expired", repository.CatalogVersion);
+        Assert.Equal(["OLD"], repository.Items.Select(item => item.LookupCode));
+        // 中文注释：推迟不是失败：不上报失败进度，也不去拉附属数据。
+        Assert.DoesNotContain(progress, report => report.Stage == CatalogSyncProgressStage.Failed);
+        Assert.Equal(0, api.CodeConflictRequestCount);
+    }
+
+    [Theory]
+    [InlineData("incomplete")]
+    [InlineData("snapshot-expired")]
+    [InlineData("local-version-changed")]
+    public async Task Auto_sync_without_full_download_defers_instead_of_falling_back_from_a_broken_delta(string failure)
+    {
+        var repository = new VersionedCatalogRepository { CatalogVersion = "catalog-v1:a" };
+        repository.Seed(Lookup("P-OLD", "OLD", 1m).ToSellableItemDto());
+        var api = new PlanCatalogApiClient();
+        api.Plans.Enqueue(Plan(CatalogSyncModes.Delta, "catalog-v1:a", "catalog-v1:b", total: 2, lease: "lease-delta", deltaOperations: 2));
+        switch (failure)
+        {
+            case "incomplete":
+                api.DeltaPages.Enqueue(DeltaPage("catalog-v1:a", "catalog-v1:b", [Lookup("P-A", "A", 1m)], []));
+                break;
+            case "snapshot-expired":
+                api.DeltaException = new CatalogApiException("expired", HttpStatusCode.Conflict, "CATALOG_SNAPSHOT_EXPIRED");
+                break;
+            case "local-version-changed":
+                api.DeltaPages.Enqueue(DeltaPage("catalog-v1:a", "catalog-v1:b", [Lookup("P-A", "A", 1m)], [Deleted("OLD")]));
+                repository.DeltaApplyException = new LocalCatalogVersionConflictException("base changed");
+                break;
+        }
+
+        var deferred = await Assert.ThrowsAsync<CatalogFullDownloadDeferredException>(
+            () => new LocalCatalogSyncService(repository, api).FullSyncAsync(Store, allowFullDownload: false));
+
+        Assert.Equal("delta-fallback", deferred.Reason);
+        // 中文注释：不再去要全量计划，也不下载任何全量页。
+        Assert.Equal([(Store, "catalog-v1:a")], api.PlanRequests);
+        Assert.Empty(api.PinnedPageRequests);
+        Assert.Null(repository.CommittedStamp);
+        Assert.Equal("catalog-v1:a", repository.CatalogVersion);
+        Assert.Equal(["OLD"], repository.Items.Select(item => item.LookupCode));
+    }
+
+    [Fact]
+    public async Task Auto_sync_without_full_download_still_applies_a_delta_plan()
+    {
+        var repository = new VersionedCatalogRepository { CatalogVersion = "catalog-v1:a" };
+        var api = new PlanCatalogApiClient();
+        api.Plans.Enqueue(Plan(CatalogSyncModes.Delta, "catalog-v1:a", "catalog-v1:b", total: 351077, lease: "lease-1", deltaOperations: 2));
+        api.DeltaPages.Enqueue(DeltaPage("catalog-v1:a", "catalog-v1:b", [Lookup("P-NEW", "9300000000001", 4.5m)], [Deleted("OLD-CODE")]));
+
+        var result = await new LocalCatalogSyncService(repository, api).FullSyncAsync(Store, allowFullDownload: false);
+
+        Assert.Equal(CatalogSyncModes.Delta, result.SyncMode);
+        Assert.Equal(["OLD-CODE"], Assert.Single(repository.DeltaApplyCalls).Deletes);
+        Assert.Equal("catalog-v1:b", repository.CatalogVersion);
+    }
+
+    [Fact]
+    public async Task Auto_sync_without_full_download_defers_the_legacy_compare_flow_and_keeps_the_version()
+    {
+        var repository = new VersionedCatalogRepository { CatalogVersion = "catalog-v1:stale" };
+        var api = new PlanCatalogApiClient
+        {
+            PlanException = new CatalogApiException("Catalog API request failed with HTTP 404.", HttpStatusCode.NotFound)
+        };
+
+        var deferred = await Assert.ThrowsAsync<CatalogFullDownloadDeferredException>(
+            () => new LocalCatalogSyncService(repository, api).FullSyncAsync(Store, allowFullDownload: false));
+
+        Assert.Equal("legacy-protocol", deferred.Reason);
+        Assert.Equal(0, repository.ComparePageRequestCount);
+        Assert.Equal(0, api.CompareRequestCount);
+        Assert.Equal("catalog-v1:stale", repository.CatalogVersion);
+    }
+
     private static CatalogSyncPlanResponse Plan(
         string mode,
         string? baseVersion,
