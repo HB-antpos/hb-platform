@@ -1257,6 +1257,58 @@ public sealed class CatalogIndexCacheTests
     }
 
     [Fact]
+    public void Store_prune_deletes_expired_unkept_files_but_keeps_latest_kept_and_unexpired()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new GzipCatalogSnapshotStore(directory.Path, maxSnapshotsPerStore: 8);
+        var now = GeneratedAt.AddDays(10);
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt, GeneratedAt.AddHours(2), "v-expired", []));
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt.AddMinutes(1), GeneratedAt.AddHours(2), "v-leased", []));
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt.AddMinutes(2), now.AddHours(1), "v-fresh", []));
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt.AddMinutes(3), GeneratedAt.AddHours(2), "v-latest", []));
+        // 手工放一个 manifest 不引用的孤儿正文。
+        var orphan = Path.Combine(directory.Path, "snapshots", "orphan", "x.json.gz");
+        Directory.CreateDirectory(Path.GetDirectoryName(orphan)!);
+        File.WriteAllBytes(orphan, [1, 2, 3]);
+        // 中断写入遗留的旧 .tmp 要删；刚写的 .tmp 可能正在写，必须保留。
+        var staleTemp = orphan + ".abc.tmp";
+        var freshTemp = orphan + ".def.tmp";
+        File.WriteAllBytes(staleTemp, [1]);
+        File.WriteAllBytes(freshTemp, [1]);
+        File.SetLastWriteTimeUtc(staleTemp, DateTime.UtcNow.AddHours(-2));
+
+        var removed = store.PruneExpired(now, descriptor => descriptor.CatalogVersion == "v-leased");
+
+        Assert.Equal(1, removed);
+        Assert.Equal(
+            new[] { "v-fresh", "v-latest", "v-leased" },
+            store.LoadDescriptors(now).Select(d => d.CatalogVersion).OrderBy(v => v, StringComparer.Ordinal));
+        Assert.False(File.Exists(orphan));
+        Assert.False(File.Exists(staleTemp));
+        Assert.True(File.Exists(freshTemp));
+        Assert.Equal(3, Directory.GetFiles(Path.Combine(directory.Path, "snapshots"), "*.json.gz", SearchOption.AllDirectories).Length);
+    }
+
+    [Fact]
+    public async Task Restart_reclaims_expired_non_latest_snapshot_files_from_disk()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new GzipCatalogSnapshotStore(directory.Path, maxSnapshotsPerStore: 8);
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt, GeneratedAt.AddHours(2), "catalog-v1:old", []));
+        store.Save(new CatalogPersistedSnapshot("S01", null, GeneratedAt.AddMinutes(5), GeneratedAt.AddHours(2), "catalog-v1:current", []));
+        var clock = new MutableTimeProvider(GeneratedAt.AddDays(3));
+
+        var cache = new CatalogIndexCache(clock, TimeSpan.FromMinutes(20), TimeSpan.FromHours(2),
+            maxSnapshotsPerStore: 8, store, new RecordingRefreshScheduler(),
+            softItemCapacity: 100, hardItemCapacity: 100);
+        await cache.LastDiskPruneTask!;
+
+        Assert.Equal(new[] { "catalog-v1:current" },
+            store.LoadDescriptors(clock.GetUtcNow()).Select(d => d.CatalogVersion));
+        Assert.Single(Directory.GetFiles(Path.Combine(directory.Path, "snapshots"), "*.json.gz", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task Reading_older_version_does_not_replace_newer_disk_lkg()
     {
         using var directory = new TemporaryDirectory();

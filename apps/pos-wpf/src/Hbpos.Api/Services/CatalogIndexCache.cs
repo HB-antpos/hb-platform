@@ -103,6 +103,10 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
     private readonly ICatalogSnapshotStore? _snapshotStore;
     private readonly ICatalogBackgroundRefreshScheduler? _backgroundRefreshScheduler;
     private readonly CatalogDownloadLeaseRegistry _downloadLeases;
+    private int _diskPruneRunning;
+    private long _diskPruneRequestedAtTicks;
+    // 仅供测试等待后台磁盘清理完成。
+    internal Task? LastDiskPruneTask { get; private set; }
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IHostApplicationLifetime? _applicationLifetime;
     private long _snapshotSequence;
@@ -1458,6 +1462,8 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 }
 
                 PruneExpiredSnapshots(now);
+                // 启动必跑一轮磁盘清理：回收上次进程遗留的过期快照与孤儿正文。
+                ScheduleDiskPrune(now);
             }
 
             Log($"snapshot restore count={restored.Count}");
@@ -1539,6 +1545,7 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                     group => group.MaxBy(pair => pair.Sequence).Key,
                     StringComparer.OrdinalIgnoreCase);
 
+            var prunedPersisted = false;
             foreach (var (key, snapshot) in _snapshots.ToArray())
             {
                 if (!ShouldPrune(key, snapshot.ExpiresAt))
@@ -1548,6 +1555,7 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
 
                 _snapshots.Remove(key);
                 _lazySnapshotDescriptors.Remove(key);
+                prunedPersisted |= snapshot.IsPersisted;
             }
 
             foreach (var (key, lazySnapshot) in _lazySnapshotDescriptors.ToArray())
@@ -1556,7 +1564,14 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 {
                     _lazySnapshotDescriptors.Remove(key);
                     _lazyLoadBusyUntil.Remove(key);
+                    prunedPersisted = true;
                 }
+            }
+
+            // 以前这里只删内存索引，磁盘 manifest 与正文永远留着（生产曾积压 145 份过期快照约 5.3G）。
+            if (prunedPersisted)
+            {
+                ScheduleDiskPrune(now);
             }
 
             bool ShouldPrune(CatalogSnapshotCacheKey key, DateTimeOffset expiresAt) =>
@@ -1564,6 +1579,65 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 expiresAt <= now &&
                 (!latestByStore.TryGetValue(key.StoreCode, out var latest) || !latest.Equals(key)) &&
                 !_downloadLeases.IsVersionLeased(key.StoreCode, key.CatalogVersion);
+        }
+    }
+
+    /// <summary>
+    /// 后台同步删除磁盘上已被内存淘汰的过期快照。不能在 _snapshotGate 内做：仓库锁可能正被
+    /// 数十 MB 的 Save 占用。单飞：已有一轮在跑时只标记待补跑，避免请求高峰排队大量磁盘任务。
+    /// </summary>
+    private void ScheduleDiskPrune(DateTimeOffset now)
+    {
+        if (_snapshotStore is null)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _diskPruneRequestedAtTicks, now.UtcTicks);
+        if (Interlocked.Exchange(ref _diskPruneRunning, 1) == 1)
+        {
+            return;
+        }
+
+        LastDiskPruneTask = Task.Run(RunDiskPruneLoop);
+    }
+
+    private void RunDiskPruneLoop()
+    {
+        while (true)
+        {
+            var requestedTicks = Interlocked.Read(ref _diskPruneRequestedAtTicks);
+            var requestedAt = new DateTimeOffset(requestedTicks, TimeSpan.Zero);
+            try
+            {
+                // 保留判定在执行时现取：仍驻留、仍是磁盘描述或被下载租约（增量基准）引用的版本一律保留。
+                _snapshotStore!.PruneExpired(requestedAt, descriptor =>
+                {
+                    var key = new CatalogSnapshotCacheKey(
+                        NormalizeStoreCode(descriptor.StoreCode),
+                        descriptor.Since,
+                        descriptor.CatalogVersion.Trim());
+                    lock (_snapshotGate)
+                    {
+                        return _snapshots.ContainsKey(key) ||
+                               _lazySnapshotDescriptors.ContainsKey(key) ||
+                               _pendingSnapshots.ContainsKey(key) ||
+                               _downloadLeases.IsVersionLeased(key.StoreCode, key.CatalogVersion);
+                    }
+                });
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+            {
+                Log($"snapshot disk prune failed error={exception.GetType().Name}");
+            }
+
+            Volatile.Write(ref _diskPruneRunning, 0);
+            // 运行期间又有新请求时补跑一轮；抢不到运行权说明别的线程已接手。
+            if (Interlocked.Read(ref _diskPruneRequestedAtTicks) == requestedTicks ||
+                Interlocked.Exchange(ref _diskPruneRunning, 1) == 1)
+            {
+                return;
+            }
         }
     }
 
