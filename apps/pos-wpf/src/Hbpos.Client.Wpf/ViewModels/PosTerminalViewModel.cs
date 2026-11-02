@@ -521,6 +521,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         Matches.ReplaceWith(items.Take(8));
     }
 
+    /// <summary>后台目录同步完成后调用：只重跑当前打开的非空搜索，与手动同步一致，不替换收银员正在看的结果。</summary>
+    public void RefreshOpenSearchMatches()
+    {
+        RefreshMatches(requireOpenNonEmptySearch: true);
+    }
+
     public void RefreshCart()
     {
         RefreshCartCore("manual-refresh");

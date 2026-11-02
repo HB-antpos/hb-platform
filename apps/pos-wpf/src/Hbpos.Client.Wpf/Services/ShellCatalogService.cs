@@ -23,6 +23,18 @@ public interface IShellCatalogService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 收银端运行中的定时自动同步：增量同步并重载扫码索引，不上报下载进度。
+    /// allowFullDownload=false 时服务端要求全量就抛 <see cref="CatalogFullDownloadDeferredException"/>，本地目录与内存索引都不变。
+    /// </summary>
+    Task<IReadOnlyList<SellableItemDto>> SyncCatalogInBackgroundAsync(
+        string storeCode,
+        bool allowFullDownload,
+        CancellationToken cancellationToken = default)
+    {
+        return SyncCatalogAndReloadAsync(storeCode, forceFullDownload: false, progress: null, cancellationToken);
+    }
+
+    /// <summary>
     /// 轻量刷新本店促销规则（不碰商品目录），供收银端定时调用。规则有变化并已应用到购物车时返回 true；
     /// 目录同步进行中、规则无变化或不支持时返回 false（目录同步自己会刷新促销）。
     /// </summary>
@@ -100,15 +112,7 @@ public sealed class ShellCatalogService(
         }
 
         // 中文注释：与目录同步一致，在调用方上下文（UI 线程）上应用，因为规则变化会触发购物车事件。
-        // 规则没变就不应用：SetAutomaticPromotionRules 每次都会通知购物车刷新，每分钟一次会无谓打扰收银。
-        var signature = ComputePromotionRulesSignature(rules);
-        if (string.Equals(signature, _appliedPromotionRulesSignature, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        ApplyPromotionRules(rules);
-        return true;
+        return ApplyPromotionRulesIfChanged(rules);
     }
 
     public async Task<IReadOnlyList<SellableItemDto>> SyncCatalogAndReloadAsync(
@@ -122,7 +126,16 @@ public sealed class ShellCatalogService(
             return await ResetCatalogAndReloadAsync(storeCode, progress, cancellationToken);
         }
 
-        return await SyncCatalogAndReloadCoreAsync(storeCode, progress, cancellationToken);
+        return await SyncCatalogAndReloadCoreAsync(storeCode, allowFullDownload: true, progress, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<SellableItemDto>> SyncCatalogInBackgroundAsync(
+        string storeCode,
+        bool allowFullDownload,
+        CancellationToken cancellationToken = default)
+    {
+        // 中文注释：与手动同步共用同一把同步锁与重置抢占规则，只是不报进度、可禁止全量。
+        return SyncCatalogAndReloadCoreAsync(storeCode, allowFullDownload, progress: null, cancellationToken);
     }
 
     private async Task<IReadOnlyList<SellableItemDto>> ResetCatalogAndReloadAsync(
@@ -146,6 +159,7 @@ public sealed class ShellCatalogService(
                 return await RunSyncAndReloadOnBackgroundAsync(
                     storeCode,
                     forceFullDownload: true,
+                    allowFullDownload: true,
                     progress,
                     cancellationToken);
             }
@@ -165,6 +179,7 @@ public sealed class ShellCatalogService(
 
     private async Task<IReadOnlyList<SellableItemDto>> SyncCatalogAndReloadCoreAsync(
         string storeCode,
+        bool allowFullDownload,
         IProgress<CatalogSyncProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -195,6 +210,7 @@ public sealed class ShellCatalogService(
             return await RunSyncAndReloadOnBackgroundAsync(
                 storeCode,
                 forceFullDownload: false,
+                allowFullDownload,
                 progress,
                 regularSyncCts.Token);
         }
@@ -215,6 +231,7 @@ public sealed class ShellCatalogService(
     private async Task<IReadOnlyList<SellableItemDto>> RunSyncAndReloadOnBackgroundAsync(
         string storeCode,
         bool forceFullDownload,
+        bool allowFullDownload,
         IProgress<CatalogSyncProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -232,7 +249,12 @@ public sealed class ShellCatalogService(
                 Interlocked.Increment(ref _activeSyncCount);
                 try
                 {
-                    var syncResult = await catalogSync.FullSyncAsync(storeCode, cancellationToken, syncProgress, forceFullDownload)
+                    var syncResult = await catalogSync.FullSyncAsync(
+                            storeCode,
+                            cancellationToken,
+                            syncProgress,
+                            forceFullDownload,
+                            allowFullDownload)
                         .ConfigureAwait(false);
                     if (syncResult is { CatalogChanged: false, CodeConflictsChanged: false } &&
                         TryGetLoadedCatalog(storeCode, out var loadedItems))
@@ -257,6 +279,12 @@ public sealed class ShellCatalogService(
             catalogSyncStatus?.MarkCanceled(storeCode);
             throw;
         }
+        catch (CatalogFullDownloadDeferredException)
+        {
+            // 中文注释：推迟全量没有写库，也不算失败，设置页不能显示“上次同步失败”。
+            catalogSyncStatus?.MarkCanceled(storeCode);
+            throw;
+        }
         catch (Exception ex)
         {
             catalogSyncStatus?.MarkFailed(storeCode, ex.Message);
@@ -264,7 +292,7 @@ public sealed class ShellCatalogService(
         }
 
         var markSucceeded = catalogSyncStatus?.MarkSucceededAsync(storeCode) ?? Task.CompletedTask;
-        ApplyPromotionRules(result.PromotionRules);
+        ApplyPromotionRulesIfChanged(result.PromotionRules);
         await markSucceeded;
         return result.Items;
     }
@@ -329,6 +357,22 @@ public sealed class ShellCatalogService(
         // 满减规则会触发购物车事件，必须回到调用方上下文后再应用，避免后台线程更新 WPF 绑定集合。
         cart.SetAutomaticPromotionRules(promotionRules);
         _appliedPromotionRulesSignature = ComputePromotionRulesSignature(promotionRules);
+    }
+
+    /// <summary>
+    /// 规则没变就不应用：SetAutomaticPromotionRules 每次都会通知购物车与客显刷新，
+    /// 每分钟的促销刷新、每 30 分钟的目录自动同步都会无谓打扰收银。
+    /// </summary>
+    private bool ApplyPromotionRulesIfChanged(IReadOnlyList<CatalogPromotionRuleDto> promotionRules)
+    {
+        var signature = ComputePromotionRulesSignature(promotionRules);
+        if (string.Equals(signature, _appliedPromotionRulesSignature, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ApplyPromotionRules(promotionRules);
+        return true;
     }
 
     /// <summary>规则内容指纹：DTO 里的商品列表按引用比较，不能直接用 record 相等，改用 JSON 序列化后比较。</summary>
