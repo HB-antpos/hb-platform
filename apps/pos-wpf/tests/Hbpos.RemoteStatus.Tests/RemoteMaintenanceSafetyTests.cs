@@ -19,9 +19,21 @@ public sealed class RemoteMaintenanceSafetyTests
         Assert.Contains("--option \"custom-rendezvous-server\"", runner.Commands);
         Assert.Contains("--option \"relay-server\"", runner.Commands);
         Assert.Contains("--option \"key\"", runner.Commands);
-        // 安装时关掉 RustDesk 自带的自动更新并读回。
+        // 安装时尽力关掉 RustDesk 自带的自动更新。
         Assert.Contains("--option \"allow-auto-update\" \"N\"", runner.Commands);
-        Assert.Contains("--option \"allow-auto-update\"", runner.Commands);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task 关自动更新失败不影响安装配置(bool throwOnWrite)
+    {
+        // 自动更新开关与远程连接无关：写入返回非零或抛异常都只能跳过，不能让安装失败或对账回滚。
+        var runner = new CliRunner(Config, autoUpdateFailure: throwOnWrite ? "throw" : "exit");
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, null!);
+
+        await installer.ConfigureRustDeskAsync("unused.exe", Config, "test-password-only", CancellationToken.None);
+        await installer.ConfigureRustDeskAsync("unused.exe", Config, null, CancellationToken.None);
     }
 
     [Fact]
@@ -186,12 +198,17 @@ public sealed class RemoteMaintenanceSafetyTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });
         }
     }
-    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true, int passwordFailuresBeforeAck = 0) : IRemoteMaintenanceCommandRunner
+    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true, int passwordFailuresBeforeAck = 0, string? autoUpdateFailure = null) : IRemoteMaintenanceCommandRunner
     {
         private int _passwordAttempts;
         public List<string> Commands { get; } = [];
         public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
-        { Commands.Add(arguments); return Task.FromResult(0); }
+        {
+            Commands.Add(arguments);
+            if (arguments.StartsWith("--option \"allow-auto-update\"", StringComparison.Ordinal) && autoUpdateFailure is not null)
+                return autoUpdateFailure == "throw" ? throw new InvalidOperationException("ipc") : Task.FromResult(1);
+            return Task.FromResult(0);
+        }
         public Task<RemoteMaintenanceCommandResult> RunWithOutputAsync(string fileName, string arguments, CancellationToken cancellationToken)
         {
             Commands.Add(arguments);
