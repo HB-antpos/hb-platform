@@ -137,6 +137,46 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Update_prompt_guard_interrupts_only_on_idle_sales_screen_and_notice_tracks_cart()
+    {
+        var cart = new PosCartService();
+        var authorization = new FakeOperationAuthorizationService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cart: cart,
+            operationAuthorizationService: authorization);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var guard = new ShellAppUpdateInstallSafetyGuard(cart, viewModel);
+
+        Assert.True(viewModel.IsPosTerminalScreenActive);
+        Assert.True(guard.CanInterruptForUpdatePrompt(out _, out _));
+        Assert.False(viewModel.AppUpdate.IsTransactionInProgress);
+
+        // 中文注释：退货页购物车为空时可以安装，但自动弹出的强更遮罩要等回到收银主页，不能挡住正在办的退货。
+        viewModel.ShowReturnsCommand.Execute(null);
+        Assert.True(guard.CanInstallUpdate(out _, out _));
+        Assert.False(guard.CanInterruptForUpdatePrompt(out var statusKey, out _));
+        Assert.Equal("appUpdate.install.waitingForIdle", statusKey);
+
+        viewModel.ShowPosCommand.Execute(null);
+        authorization.Open();
+        Assert.False(guard.CanInterruptForUpdatePrompt(out _, out _));
+        authorization.Cancel();
+        Assert.True(guard.CanInterruptForUpdatePrompt(out _, out _));
+
+        // 中文注释：购物车有商品时底部提示条不给安装按钮，安装与弹遮罩都要等交易结束。
+        cart.AddItem(CreateItem("1042", "SKU-UPDATE", "930000000123"));
+        Assert.True(viewModel.AppUpdate.IsTransactionInProgress);
+        Assert.False(viewModel.AppUpdate.CanInstallFromNotice);
+        Assert.False(guard.CanInterruptForUpdatePrompt(out statusKey, out _));
+        Assert.Equal("appUpdate.install.activeTransaction", statusKey);
+
+        cart.Clear();
+        Assert.False(viewModel.AppUpdate.IsTransactionInProgress);
+        Assert.True(viewModel.AppUpdate.CanInstallFromNotice);
+    }
+
+    [Fact]
     public async Task Api_server_switch_freezes_scanner_and_common_navigation()
     {
         var scanner = new FakeRawScannerService();

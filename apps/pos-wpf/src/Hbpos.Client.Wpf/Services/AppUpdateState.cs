@@ -10,6 +10,7 @@ public sealed partial class AppUpdateState : ObservableObject
     private Func<Task<ProcessLaunchResult>>? _installAsync;
     private Func<Task>? _retryAsync;
     private Action? _exitApplication;
+    private Func<Task>? _postponeAsync;
     private string? _declinedOptionalTargetVersion;
 #if DEBUG
     private Func<Task>? _continueStartupAfterDebugDismissAsync;
@@ -24,6 +25,7 @@ public sealed partial class AppUpdateState : ObservableObject
             () => CanDismissForceUpdateForDebug);
         RetryForceUpdateCommand = new AsyncRelayCommand(RetryForceUpdateAsync, CanRetryForceUpdate);
         ExitApplicationCommand = new RelayCommand(ExitApplication, CanExitApplication);
+        PostponeForceUpdateCommand = new AsyncRelayCommand(PostponeForceUpdateAsync, () => CanPostponeForceUpdate);
     }
 
     [ObservableProperty]
@@ -34,7 +36,21 @@ public sealed partial class AppUpdateState : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsForceUpdateBlocking))]
     [NotifyPropertyChangedFor(nameof(CanDismissForceUpdateForDebug))]
+    [NotifyPropertyChangedFor(nameof(IsUpdateNoticeVisible))]
     private bool _isForceUpdatePendingInstall;
+
+    // 中文注释：收银员在底部提示条点了“稍后”，提示条先收起，到点由 coordinator 重新显示。
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsUpdateNoticeVisible))]
+    private bool _isForceUpdateNoticeHidden;
+
+    // 中文注释：购物车有商品（含付款页）时安装一定会被安全守卫拒绝，底部提示条改为“交易完成后可安装”，不再给安装按钮。
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanInstallFromNotice))]
+    private bool _isTransactionInProgress;
+
+    [ObservableProperty]
+    private string _forcePostponeHint = string.Empty;
 
     [ObservableProperty]
     private bool _isForceUpdateError;
@@ -62,6 +78,7 @@ public sealed partial class AppUpdateState : ObservableObject
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsUpdateNoticeVisible))]
     private bool _isOptionalUpdateReady;
 
     [ObservableProperty]
@@ -93,6 +110,16 @@ public sealed partial class AppUpdateState : ObservableObject
 
     public bool IsInstallerReady => !string.IsNullOrWhiteSpace(InstallerPath);
 
+    // 中文注释：底部状态栏的更新提示条；放在页面内容区之外，任何页面的按钮都不会被它挡住。
+    public bool IsUpdateNoticeVisible =>
+        IsOptionalUpdateReady || (IsForceUpdatePendingInstall && !IsForceUpdateNoticeHidden);
+
+    public bool CanInstallFromNotice => !IsTransactionInProgress;
+
+    // 中文注释：启动闸门、回退版本、推迟次数用完时 coordinator 不提供推迟入口；运行中安装器起不来的错误遮罩也可推迟。
+    public bool CanPostponeForceUpdate =>
+        IsForceUpdateRequired && !IsDownloading && _postponeAsync is not null;
+
     // 中文注释：已有下载中、强更（含待安装与错误态）时后台检查不能介入，避免覆盖当前更新提示。
     public bool IsUpdateFlowActive => IsDownloading || IsForceUpdateRequired;
 
@@ -123,6 +150,8 @@ public sealed partial class AppUpdateState : ObservableObject
     public IAsyncRelayCommand RetryForceUpdateCommand { get; }
 
     public IRelayCommand ExitApplicationCommand { get; }
+
+    public IAsyncRelayCommand PostponeForceUpdateCommand { get; }
 
     public void InitializeCurrentVersion(string currentVersion)
     {
@@ -194,6 +223,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         // 中文注释：新安装包下载完成前底部不能出现目标版本号。
         ClearVersionCheckResult();
         ClearDownloadProgress();
@@ -219,6 +249,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = installAsync;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         SetStatus(statusKey, statusArgs);
         NotifyCommandStates();
     }
@@ -241,6 +272,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = installAsync;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         ClearDownloadProgress();
         SetStatus(statusKey, statusArgs);
         NotifyCommandStates();
@@ -263,6 +295,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = retryAsync;
         _exitApplication = exitApplication;
+        ResetForceUpdatePostpone();
         ClearDownloadProgress();
         SetStatus("appUpdate.force.downloadFailed", message);
         NotifyCommandStates();
@@ -282,6 +315,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         ClearVersionCheckResult();
         ClearDownloadProgress();
         StatusKey = string.Empty;
@@ -306,8 +340,36 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = installAsync;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         SetStatus("appUpdate.optional.ready");
         NotifyCommandStates();
+    }
+
+    // 中文注释：coordinator 在每次显示强更遮罩或待安装提示后给出推迟入口；remainingCount 为 0 时不提供。
+    public void SetForceUpdatePostpone(Func<Task>? postponeAsync, int remainingCount, TimeSpan interval)
+    {
+        _postponeAsync = remainingCount > 0 ? postponeAsync : null;
+        ForcePostponeHint = _postponeAsync is null
+            ? string.Empty
+            : FormatStatus(
+                "appUpdate.force.postponeHint",
+                (int)Math.Round(interval.TotalMinutes),
+                remainingCount);
+        NotifyCommandStates();
+    }
+
+    // 中文注释：底部提示条点“稍后”后先收起；强更仍处于待安装状态，后台检查与重启安全判断不受影响。
+    public void HideForceUpdateNotice()
+    {
+        if (IsForceUpdatePendingInstall)
+        {
+            IsForceUpdateNoticeHidden = true;
+        }
+    }
+
+    public void ShowForceUpdateNoticeAgain()
+    {
+        IsForceUpdateNoticeHidden = false;
     }
 
     public void UpdateDownloadProgress(AppUpdateDownloadProgress progress)
@@ -361,7 +423,12 @@ public sealed partial class AppUpdateState : ObservableObject
     {
         if (_installAsync is not null)
         {
+            var isForceUpdate = IsForceUpdateRequired;
             var result = await _installAsync();
+            // 中文注释：安装被交易挡住或失败时记一笔，门店反馈“点了没反应”时能在日志里对上。
+            ConsoleLog.Write(
+                "AppUpdate",
+                $"app update install clicked force={isForceUpdate} target={TargetVersion ?? "<null>"} success={result.Success} statusKey={result.StatusKey ?? "<null>"}");
             // 中文注释：可选更新首次自动拉起失败后会保留重试入口；一旦用户重试成功，需要在这里统一清掉入口状态。
             if (result.Success && !IsForceUpdateRequired)
             {
@@ -389,6 +456,11 @@ public sealed partial class AppUpdateState : ObservableObject
         if (IsForceUpdateRequired)
         {
             return;
+        }
+
+        if (IsOptionalUpdateReady)
+        {
+            ConsoleLog.Write("AppUpdate", $"optional update notice dismissed target={TargetVersion ?? "<null>"}");
         }
 
         MarkOptionalUpdateDeclined(TargetVersion);
@@ -426,6 +498,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = null;
         _exitApplication = null;
+        ResetForceUpdatePostpone();
         ClearVersionCheckResult();
         ClearDownloadProgress();
         StatusKey = string.Empty;
@@ -465,6 +538,21 @@ public sealed partial class AppUpdateState : ObservableObject
         return IsForceUpdateError && !IsDownloading && _exitApplication is not null;
     }
 
+    private async Task PostponeForceUpdateAsync()
+    {
+        if (CanPostponeForceUpdate)
+        {
+            await _postponeAsync!();
+        }
+    }
+
+    private void ResetForceUpdatePostpone()
+    {
+        _postponeAsync = null;
+        IsForceUpdateNoticeHidden = false;
+        ForcePostponeHint = string.Empty;
+    }
+
     private void ClearDownloadProgress()
     {
         HasDownloadProgress = false;
@@ -474,10 +562,12 @@ public sealed partial class AppUpdateState : ObservableObject
 
     private void NotifyCommandStates()
     {
+        OnPropertyChanged(nameof(CanPostponeForceUpdate));
         InstallUpdateCommand.NotifyCanExecuteChanged();
         DismissForceUpdateForDebugCommand.NotifyCanExecuteChanged();
         RetryForceUpdateCommand.NotifyCanExecuteChanged();
         ExitApplicationCommand.NotifyCanExecuteChanged();
+        PostponeForceUpdateCommand.NotifyCanExecuteChanged();
     }
 
     private static string FormatStatus(string statusKey, params object[] args)

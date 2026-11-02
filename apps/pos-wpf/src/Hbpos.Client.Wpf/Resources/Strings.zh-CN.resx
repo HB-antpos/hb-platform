@@ -3433,6 +3433,14 @@
   <data name="appUpdate.force.exit" xml:space="preserve"><value>退出</value></data>
   <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易尚未完成，交易结束后将自动继续安装更新。</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>无法启动更新安装器。{0}</value></data>
+  <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>回到收银主页且空闲时会再提示安装。</value></data>
+  <data name="appUpdate.force.postpone" xml:space="preserve"><value>稍后安装</value></data>
+  <data name="appUpdate.force.postponeHint" xml:space="preserve"><value>{0} 分钟后再提醒，还可推迟 {1} 次</value></data>
+  <data name="appUpdate.notice.forceTitle" xml:space="preserve"><value>必须更新</value></data>
+  <data name="appUpdate.notice.optionalTitle" xml:space="preserve"><value>新版本</value></data>
+  <data name="appUpdate.notice.ready" xml:space="preserve"><value>已下载，收银台空闲时可安装</value></data>
+  <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>当前交易完成后可安装</value></data>
+  <data name="appUpdate.notice.later" xml:space="preserve"><value>稍后</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>需要操作授权</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>当前收银员没有执行此操作的权限。</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>当前操作</value></data>

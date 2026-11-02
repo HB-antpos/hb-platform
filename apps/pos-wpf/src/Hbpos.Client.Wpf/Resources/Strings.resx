@@ -1305,6 +1305,14 @@
   <data name="appUpdate.force.exit" xml:space="preserve"><value>Exit</value></data>
   <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>A transaction is in progress. The update will continue automatically when it ends.</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>Could not start the update installer. {0}</value></data>
+  <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>You'll be asked to install when the sales screen is free.</value></data>
+  <data name="appUpdate.force.postpone" xml:space="preserve"><value>Install later</value></data>
+  <data name="appUpdate.force.postponeHint" xml:space="preserve"><value>Reminds you again in {0} min. {1} postpones left.</value></data>
+  <data name="appUpdate.notice.forceTitle" xml:space="preserve"><value>Update required</value></data>
+  <data name="appUpdate.notice.optionalTitle" xml:space="preserve"><value>New version</value></data>
+  <data name="appUpdate.notice.ready" xml:space="preserve"><value>Downloaded. Install when the till is free.</value></data>
+  <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>Install after the current sale.</value></data>
+  <data name="appUpdate.notice.later" xml:space="preserve"><value>Later</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>Approval required</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>The current cashier cannot perform this operation.</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>CURRENT OPERATION</value></data>
