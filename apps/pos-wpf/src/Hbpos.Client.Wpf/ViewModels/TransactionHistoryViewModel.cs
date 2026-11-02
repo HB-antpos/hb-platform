@@ -2799,6 +2799,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
 
         var correlation = OperationAuditEvents.CreateCorrelation();
+        // 删除前（仍是 Pending）读出挂单内容：ORDER_CANCEL 审计要能看出删掉了哪些商品、多少钱。
+        var heldOrderAuditSnapshot = await CaptureHeldOrderForAuditAsync(candidate.OrderGuid);
         var deleteStaged = false;
         try
         {
@@ -2845,15 +2847,33 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 throw new InvalidOperationException(T("history.held.deleteFailed"));
             }
 
-            OperationAuditEvents.RecordAction(
-                _operationAuditLogger,
-                OperationAuditTypes.OrderCancel,
-                "Succeeded",
-                Session,
-                reasonCode: "SHARED_HELD_ORDER",
-                orderGuid: candidate.OrderGuid.ToString("D"),
-                correlationId: correlation.CorrelationId,
-                traceId: correlation.TraceId);
+            if (heldOrderAuditSnapshot is not null)
+            {
+                // 与挂单（ORDER_HOLD）同一口径：改前是整张挂单，改后为空，金额变化即删掉的实收。
+                OperationAuditEvents.RecordCartChange(
+                    _operationAuditLogger,
+                    OperationAuditTypes.OrderCancel,
+                    Session,
+                    heldOrderAuditSnapshot,
+                    new OperationAuditCartSnapshot(0m, 0m, 0m, []),
+                    reasonCode: "SHARED_HELD_ORDER",
+                    orderGuid: candidate.OrderGuid.ToString("D"),
+                    correlationId: correlation.CorrelationId,
+                    traceId: correlation.TraceId);
+            }
+            else
+            {
+                // 读不到挂单内容时退回只记 Guid，不编造金额。
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.OrderCancel,
+                    "Succeeded",
+                    Session,
+                    reasonCode: "SHARED_HELD_ORDER",
+                    orderGuid: candidate.OrderGuid.ToString("D"),
+                    correlationId: correlation.CorrelationId,
+                    traceId: correlation.TraceId);
+            }
             await LoadAsync();
             StatusMessage = T("history.held.deleted");
         }
@@ -2866,11 +2886,13 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 $"error={ex.GetType().Name} message={ex.Message}",
                 candidate?.OrderGuid.ToString("D"),
                 ex);
+            // 删除没成功，挂单原样还在：附上整单内容但金额变化为 0。
             OperationAuditEvents.RecordAction(
                 _operationAuditLogger,
                 OperationAuditTypes.OrderCancel,
                 "Failed",
                 Session,
+                heldOrderAuditSnapshot,
                 reasonCode: "SHARED_HELD_ORDER",
                 safeMessage: ex.GetType().Name,
                 orderGuid: candidate?.OrderGuid.ToString("D"),
@@ -2882,6 +2904,32 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 await LoadAsync();
             }
             StatusMessage = failureMessage;
+        }
+    }
+
+    /// <summary>
+    /// 读本机挂单生成审计快照。审计是旁路能力：服务缺失、记录不在或读库异常都只返回 null，
+    /// 不能挡住删除本身。
+    /// </summary>
+    private async Task<OperationAuditCartSnapshot?> CaptureHeldOrderForAuditAsync(Guid orderGuid)
+    {
+        if (_suspendedOrderService is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var order = await _suspendedOrderService.GetOrderAsync(orderGuid, CancellationToken.None);
+            return order is null ? null : OperationAuditEvents.CaptureSuspendedOrder(order);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogHistoryWarning(
+                $"held order audit snapshot failed orderGuid={orderGuid:D} error={ex.GetType().Name}",
+                orderGuid.ToString("D"),
+                ex);
+            return null;
         }
     }
 

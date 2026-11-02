@@ -6,7 +6,8 @@ internal sealed record PosTerminalActions(
     Action? OpenPayment,
     Action? OpenReturns,
     Func<Task>? OpenSpecialProductsAsync,
-    Func<Task>? HoldOrderAsync,
+    // 返回落库的挂单 Guid（失败或未落库为 null），供 ORDER_HOLD 审计写入 OrderGuid。
+    Func<Task<Guid?>>? HoldOrderAsync,
     Func<Task>? RecallOrderAsync,
     Func<Task>? OpenHistoryAsync,
     Func<Task>? OpenDailyCloseAsync,
@@ -29,7 +30,7 @@ internal sealed record PosTerminalActions(
         Action? onOpenPayment,
         Action? onOpenReturns,
         Func<Task>? onOpenSpecialProductsAsync,
-        Func<Task>? onHoldOrderAsync,
+        Func<Task<Guid?>>? onHoldOrderAsync,
         Func<Task>? onRecallOrderAsync,
         Func<Task>? onOpenHistoryAsync,
         Func<Task>? onOpenDailyCloseAsync,

@@ -307,7 +307,7 @@ public sealed class PendingScanChoiceViewModelTests
             onHoldOrderAsync: () =>
             {
                 holdCalls++;
-                return Task.CompletedTask;
+                return Task.FromResult<Guid?>(null);
             },
             timeProvider: time);
         scanner.SetActivePage(PosTerminalViewModel.PageId);

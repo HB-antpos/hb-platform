@@ -130,7 +130,7 @@ internal sealed class TerminalHarness : IDisposable
             userFeedbackService: Feedback,
             workflowService: workflow,
             operationAuditLogger: Audit,
-            onHoldOrderAsync: () => Task.CompletedTask,
+            onHoldOrderAsync: () => Task.FromResult<Guid?>(null),
             onRecallOrderAsync: () => Task.CompletedTask,
             onOpenReturns: () => { },
             timeProvider: viewModelTimeProvider);

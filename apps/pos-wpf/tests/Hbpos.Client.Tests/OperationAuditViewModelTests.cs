@@ -167,6 +167,7 @@ public sealed class OperationAuditViewModelTests
         var cart = new PosCartService();
         var item = CreateItem("SKU-ACTION", "Action Tea", "9300002", 6m);
         cart.AddItem(item);
+        var holdGuid = Guid.Parse("6f1c2d3e-4b5a-4c6d-8e7f-90a1b2c3d4e5");
         var viewModel = new PosTerminalViewModel(
             new LocalSellableItemIndex(),
             cart,
@@ -175,7 +176,7 @@ public sealed class OperationAuditViewModelTests
             onHoldOrderAsync: () =>
             {
                 cart.Clear();
-                return Task.CompletedTask;
+                return Task.FromResult<Guid?>(holdGuid);
             },
             onRecallOrderAsync: () => Task.CompletedTask,
             onPrintLastReceiptAsync: () => Task.FromResult(new ReceiptPrintResult(false, "printer offline")),
@@ -196,6 +197,8 @@ public sealed class OperationAuditViewModelTests
                 Assert.Equal(6m, auditEvent.BeforeActual);
                 Assert.Equal(0m, auditEvent.AfterActual);
                 Assert.Equal(-6m, auditEvent.AmountDelta);
+                // 挂单 Guid 要写进 OrderGuid，后台才能把挂单与之后的取单、删除串起来。
+                Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
             },
             auditEvent =>
             {
