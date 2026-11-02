@@ -19,6 +19,7 @@
       "pickerTitle": "Select store"
     },
     "preset": {
+      "oneWeek": "Last week",
       "twoWeeks": "Last 2 weeks",
       "threeMonths": "Last 3 months",
       "fiscalYear": "This fiscal year",
