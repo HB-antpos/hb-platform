@@ -136,6 +136,91 @@ public sealed class OperationAuditIngestServiceTests
     }
 
     [Fact]
+    public async Task IngestAsync_nulls_values_beyond_POSM_decimal_precision_and_keeps_original_values_in_properties()
+    {
+        // 复现 2026-10-31 / 11-02 1014 店开价商品单价 1 亿、10 亿：生产 decimal(10,2) 报 8115，整批 500 后无限重传。
+        // SQLite 不校验 decimal 精度，这里锁定的是服务端映射：越界列置空、原值留痕、同批后续事件照常入库。
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        var overflowing = request.Events[0];
+        overflowing.OperationType = "CART_ITEM_ADD";
+        overflowing.Properties = new Dictionary<string, string?> { ["source"] = "open-item" };
+        overflowing.PaymentAmount = SqlSugarOperationAuditIngestService.MaximumMoneyMagnitude;
+        overflowing.BeforeGross = 0m;
+        overflowing.AfterGross = 100_000_000m;
+        // 四舍五入到两位后才进位到 1 亿，也必须判为越界。
+        overflowing.BeforeDiscount = 99_999_999.995m;
+        overflowing.AfterDiscount = 99_999_999.994m;
+        overflowing.BeforeActual = 0m;
+        overflowing.AfterActual = 100_000_000m;
+        overflowing.AmountDelta = 100_000_000m;
+        var overflowingItem = overflowing.Items![0];
+        overflowingItem.AfterQuantity = 10_000_000m;
+        overflowingItem.QuantityDelta = SqlSugarOperationAuditIngestService.MaximumQuantityMagnitude;
+        overflowingItem.AfterUnitPrice = 1_000_006_767m;
+        overflowingItem.ActualAmountDelta = -100_000_000m;
+        var normal = CreateRequest().Events[0];
+        request.Events.Add(normal);
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(2, result.AcceptedCount);
+        Assert.Equal(["accepted", "accepted"], result.Results.Select(item => item.Status).ToArray());
+
+        var parent = await fixture.PosmDb.Queryable<PosOperationAudit>()
+            .FirstAsync(x => x.EventId == overflowing.EventId);
+        Assert.Equal(99_999_999.99m, parent.PaymentAmount);
+        Assert.Equal(0m, parent.BeforeGross);
+        Assert.Null(parent.AfterGross);
+        Assert.Null(parent.BeforeDiscount);
+        Assert.Equal(99_999_999.99m, parent.AfterDiscount);
+        Assert.Null(parent.AfterActual);
+        Assert.Null(parent.AmountDelta);
+        var properties = JsonSerializer.Deserialize<Dictionary<string, string>>(parent.PropertiesJson!)!;
+        Assert.Equal("open-item", properties["source"]);
+        Assert.Equal(
+            "afterGross=100000000;beforeDiscount=100000000.00;afterActual=100000000;amountDelta=100000000;" +
+            "items[0].afterQuantity=10000000;items[0].afterUnitPrice=1000006767;items[0].actualAmountDelta=-100000000",
+            properties[SqlSugarOperationAuditIngestService.OutOfRangeValuesPropertyKey]);
+
+        var item = await fixture.PosmDb.Queryable<PosOperationAuditItem>()
+            .FirstAsync(x => x.EventId == overflowing.EventId);
+        Assert.Equal(1m, item.BeforeQuantity);
+        Assert.Null(item.AfterQuantity);
+        Assert.Equal(9_999_999.999m, item.QuantityDelta);
+        Assert.Equal(10m, item.BeforeUnitPrice);
+        Assert.Null(item.AfterUnitPrice);
+        Assert.Null(item.ActualAmountDelta);
+
+        var normalParent = await fixture.PosmDb.Queryable<PosOperationAudit>()
+            .FirstAsync(x => x.EventId == normal.EventId);
+        Assert.Equal(19.95m, normalParent.AfterActual);
+        Assert.Null(normalParent.PropertiesJson);
+    }
+
+    [Fact]
+    public async Task IngestAsync_ignores_client_supplied_out_of_range_annotation()
+    {
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].Properties = new Dictionary<string, string?>
+        {
+            [SqlSugarOperationAuditIngestService.OutOfRangeValuesPropertyKey] = "afterGross=1"
+        };
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var parent = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Null(parent.PropertiesJson);
+        Assert.Equal(19.95m, parent.AfterActual);
+    }
+
+    [Fact]
     public async Task IngestAsync_accepts_permission_override_and_persists_only_approved_properties()
     {
         await using var fixture = OperationAuditFixture.Create();

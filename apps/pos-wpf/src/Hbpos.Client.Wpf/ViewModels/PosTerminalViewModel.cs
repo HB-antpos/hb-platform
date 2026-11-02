@@ -2665,6 +2665,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos.status.selectCartLine" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountAmountTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountPercentOutOfRange" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.unitPriceTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.quantityMustBePositive" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             // 退货行的折扣 / 数量 / 价格被拒绝：沿用其它校验失败的错误态与错误音，不新增音效。
             "pos.status.returnLineDiscountBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),

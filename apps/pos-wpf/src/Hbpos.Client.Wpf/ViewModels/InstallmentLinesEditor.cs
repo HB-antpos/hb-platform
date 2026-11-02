@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Installments;
 
@@ -36,7 +37,8 @@ public enum InstallmentLinesEditorIssue
 public sealed class InstallmentLinesEditor : ObservableObject
 {
     public const decimal MaxQuantity = 99999m;
-    public const decimal MaxUnitPrice = 1_000_000m;
+    // 与收银端其他手工价格输入同一上限（9999 以内）；服务端 InstallmentAmendRules 不设上限，客户端更严不会出现界面过、服务端拒。
+    public const decimal MaxUnitPrice = PosPriceInputRules.MaxUnitPrice;
 
     private readonly int _originalLineCount;
     private decimal _newTotal;
