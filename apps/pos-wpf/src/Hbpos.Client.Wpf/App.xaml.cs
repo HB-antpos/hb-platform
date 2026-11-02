@@ -606,11 +606,24 @@ public partial class App : Application
     /// <summary>
     /// 等收银员登录后对账受管 RustDesk 的服务器（中心切换到专用域名后，已安装设备自动改过去）。
     /// 时机判断见 <see cref="RemoteMaintenanceReconcileScheduler"/>；全程静默失败，永远不影响收银主流程。
+    /// 对账前先关掉 RustDesk 的“版本更新”横幅，它只改当前用户的本地配置，不需要登录票据。
     /// </summary>
     private static void ScheduleRemoteMaintenanceReconcile(IHost host)
     {
         _ = Task.Run(async () =>
         {
+            try
+            {
+                if (await host.Services.GetRequiredService<RustDeskUpdatePromptSuppressor>().ApplyAsync())
+                {
+                    ConsoleLog.Write("RemoteMaintenance", "rustdesk update prompt disabled");
+                }
+            }
+            catch (Exception ex)
+            {
+                ConsoleLog.WriteWarning("RemoteMaintenance", $"rustdesk update prompt suppression skipped error={ex.GetType().Name}", exception: ex);
+            }
+
             try
             {
                 var scheduler = new RemoteMaintenanceReconcileScheduler(

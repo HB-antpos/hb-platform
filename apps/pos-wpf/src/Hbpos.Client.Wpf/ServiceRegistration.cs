@@ -114,6 +114,12 @@ public static class ServiceRegistration
         services.AddSingleton<IRemoteMaintenanceCommandRunner, WindowsRemoteMaintenanceCommandRunner>();
         services.AddSingleton<IRemoteMaintenanceServiceControl, WindowsRemoteMaintenanceServiceControl>();
         services.AddSingleton<IRemoteMaintenanceUacHelperLauncher, WindowsRemoteMaintenanceUacHelperLauncher>();
+        // 免 UAC 代理：安装包注册了 SYSTEM 计划任务时，启动对账改由它执行，不再弹 UAC。
+        services.AddSingleton<IRemoteMaintenanceAgentTaskScheduler, WindowsRemoteMaintenanceAgentTaskScheduler>();
+        services.AddSingleton<IRemoteMaintenanceAgentClient>(sp => new RemoteMaintenanceAgentClient(
+            sp.GetRequiredService<IRemoteMaintenanceAgentTaskScheduler>()));
+        services.AddSingleton<RustDeskUpdatePromptSuppressor>(sp => new RustDeskUpdatePromptSuppressor(
+            sp.GetRequiredService<RemoteMaintenanceJournal>()));
         services.AddSingleton<IRemoteMaintenanceInstaller, WindowsRemoteMaintenanceInstaller>();
         services.AddSingleton<IRemoteMaintenanceArtifactDownloader, RemoteMaintenanceArtifactDownloader>();
         // 同一个实例同时提供安装服务与启动对账，二者共用操作闸门，避免对账与手动安装并发改 journal。

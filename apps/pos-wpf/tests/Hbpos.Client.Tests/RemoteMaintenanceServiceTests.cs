@@ -577,6 +577,81 @@ public sealed class RemoteMaintenanceServiceTests
     }
 
     [Fact]
+    public async Task Reconcile_goes_through_the_agent_without_uac_when_the_task_is_registered()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, result);
+        Assert.Empty(fixture.Launcher.Stages);
+        Assert.Equal(new[] { DedicatedServer }, fixture.Agent.Requests);
+        // 代理不碰 journal，由服务在成功后补写。
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(DedicatedServer, journal!.Config);
+        Assert.Null(journal.PendingConfig);
+        Assert.Equal(0, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_agent_failure_keeps_the_old_config_and_never_falls_back_to_uac()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Agent.ExitCode = RemoteMaintenanceAgentClient.NotRespondingExitCode;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Failed, await fixture.Service.ReconcileAsync());
+
+        // 代理已注册却没受理时宁可下次再试，也不在收银时段弹 UAC。
+        Assert.Empty(fixture.Launcher.Stages);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(LegacyServer, journal!.Config);
+        Assert.Equal(1, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_through_the_agent_ignores_the_uac_retry_cap()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        var state = await WriteCommittedAsync(fixture, LegacyServer);
+        await fixture.WriteStateAsync(state with { ReconcileFailureCount = RemoteMaintenanceService.MaxAutomaticReconcileFailures });
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+        Assert.Single(fixture.Agent.Requests);
+    }
+
+    [Fact]
+    public async Task Reconcile_falls_back_to_uac_when_the_agent_task_is_missing()
+    {
+        using var fixture = new Fixture(agentAvailable: false);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+
+        Assert.Empty(fixture.Agent.Requests);
+        Assert.Equal(new[] { "reconcile" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Manual_repair_reconciles_through_the_agent_and_only_configure_still_uses_uac()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(fixture.Agent.Requests);
+        Assert.Equal(new[] { "configure" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
     public async Task Reconcile_failure_from_the_helper_keeps_the_old_config_and_retries_next_start()
     {
         using var fixture = new Fixture();
@@ -770,7 +845,7 @@ public sealed class RemoteMaintenanceServiceTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "hbpos-remote-test-" + Guid.NewGuid().ToString("N"));
         private readonly PrefixProtector _protector = new();
         private readonly RemoteMaintenanceJournal _journal;
-        public Fixture(bool cancelInstall = false, TimeSpan? reconcileHelperTimeout = null)
+        public Fixture(bool cancelInstall = false, TimeSpan? reconcileHelperTimeout = null, bool agentAvailable = false)
         {
             Directory.CreateDirectory(_root);
             _journal = new RemoteMaintenanceJournal(Path.Combine(_root, "journal.json"), _protector);
@@ -779,12 +854,14 @@ public sealed class RemoteMaintenanceServiceTests
             Launcher = new FakeLauncher(_journal);
             Launcher.CancelInstall = cancelInstall;
             Installer = new FakeInstaller();
-            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector)
+            Agent = new FakeAgentClient { Available = agentAvailable };
+            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector, Agent)
             {
                 ReconcileHelperTimeout = reconcileHelperTimeout ?? TimeSpan.FromMinutes(5)
             };
         }
 
+        public FakeAgentClient Agent { get; }
         public FakeApi Api { get; }
         public FakeDownloader Downloader { get; }
         public FakeLauncher Launcher { get; }
@@ -892,6 +969,21 @@ public sealed class RemoteMaintenanceServiceTests
             // 默认 null：保持原有用例“状态服务状态未知 → 手动修复照常 configure”的行为。
             public string? StatusAgentStatus { get; set; }
             public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", ServiceStatus, StatusAgentStatus: StatusAgentStatus));
+        }
+
+        /// <summary>免 UAC 代理替身：只记录收到的目标服务器，不碰 journal（与真实代理一致）。</summary>
+        public sealed class FakeAgentClient : IRemoteMaintenanceAgentClient
+        {
+            public bool Available { get; set; }
+            public int ExitCode { get; set; }
+            public List<RemoteMaintenanceConfig> Requests { get; } = [];
+            public bool IsAvailable(string helperPath) => Available;
+
+            public Task<int> ReconcileAsync(string helperPath, RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default)
+            {
+                Requests.Add(desired);
+                return Task.FromResult(ExitCode);
+            }
         }
 
         public sealed class FakeLauncher(RemoteMaintenanceJournal journal) : IRemoteMaintenanceUacHelperLauncher
