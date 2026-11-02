@@ -584,7 +584,7 @@ test('Android runner 按 profile 执行：PR 只编译与单元测试，weekly �
   assert.match(invalid.result.stderr, /未知 CI profile/)
 })
 
-function runNodeMobile({ failingScript = null, sleepSeconds = 0 } = {}) {
+function runNodeMobile({ failingScript = null, sleepSeconds = 0, buildSleepSeconds = 0 } = {}) {
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'hb-node-mobile-'))
   const fakeBin = join(temporaryRoot, 'bin')
   const commandLogPath = join(temporaryRoot, 'commands.log')
@@ -599,7 +599,7 @@ function runNodeMobile({ failingScript = null, sleepSeconds = 0 } = {}) {
       '  if [[ "$previous" == "run" ]]; then script="$argument"; fi',
       '  previous="$argument"',
       'done',
-      'if [[ -n "$script" && "${FAKE_SLEEP_SECONDS:-0}" != "0" ]]; then sleep "$FAKE_SLEEP_SECONDS"; fi',
+      'if [[ "$script" == "build:ci" ]]; then sleep "${FAKE_BUILD_SLEEP_SECONDS:-0}"; elif [[ -n "$script" ]]; then sleep "${FAKE_SLEEP_SECONDS:-0}"; fi',
       'echo "fake npm: $*"',
       'if [[ -n "$script" && "$script" == "${FAKE_FAILING_SCRIPT:-}" ]]; then echo "模拟 $script 失败" >&2; exit 3; fi',
       'exit 0',
@@ -617,6 +617,7 @@ function runNodeMobile({ failingScript = null, sleepSeconds = 0 } = {}) {
         FAKE_COMMAND_LOG: commandLogPath,
         FAKE_FAILING_SCRIPT: failingScript ?? '',
         FAKE_SLEEP_SECONDS: String(sleepSeconds),
+        FAKE_BUILD_SLEEP_SECONDS: String(buildSleepSeconds),
         PATH: `${fakeBin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
         RUNNER_TEMP: join(temporaryRoot, 'runner-temp'),
       },
@@ -630,29 +631,31 @@ function runNodeMobile({ failingScript = null, sleepSeconds = 0 } = {}) {
   return { commands, result }
 }
 
-test('Mobile Node lane 并行执行 typecheck/lint/test:ci/build:ci，任一失败整体失败且日志按顺序回放', () => {
+test('Mobile Node lane 把 typecheck→lint→test:ci 一路与 build:ci 一路并行，任一失败整体失败且日志按顺序回放', () => {
   const runner = readFileSync(nodeRunnerPath, 'utf8')
   const mobileCase = runner.slice(runner.indexOf('  mobile)'), runner.indexOf('  pos-ipad)'))
-  assert.match(mobileCase, /run_parallel \\\n\s+'typecheck=npm --prefix apps\/mobile run typecheck' \\\n\s+'lint=npm --prefix apps\/mobile run lint' \\\n\s+'test-ci=npm --prefix apps\/mobile run test:ci' \\\n\s+'build-ci=EXPO_NO_TELEMETRY=1 npm --prefix apps\/mobile run build:ci'/)
+  // 4 路全并行实测在 4 核 runner 上互相争抢（tsc 34 秒拖到 152 秒），三项检查必须串成一路。
+  assert.match(mobileCase, /run_parallel \\\n\s+'checks=npm --prefix apps\/mobile run typecheck && npm --prefix apps\/mobile run lint && npm --prefix apps\/mobile run test:ci' \\\n\s+'build-ci=EXPO_NO_TELEMETRY=1 npm --prefix apps\/mobile run build:ci'/)
   assert.ok(mobileCase.indexOf('npm --prefix apps/mobile ci --no-audit --no-fund') < mobileCase.indexOf('run_parallel'), '依赖安装必须先于并行检查')
 
-  // 四项各休眠 2 秒：串行要 8 秒以上，并行应明显短于 6 秒。
+  // 三项检查各休眠 0.5 秒（串行 1.5 秒）、build:ci 休眠 2 秒：全串行要 3.5 秒以上，两路并行应在 3.3 秒内。
   const started = Date.now()
-  const success = runNodeMobile({ sleepSeconds: 2 })
+  const success = runNodeMobile({ sleepSeconds: 0.5, buildSleepSeconds: 2 })
   const elapsedSeconds = (Date.now() - started) / 1000
   assert.equal(success.result.status, 0, `${success.result.stdout}\n${success.result.stderr}`)
-  assert.ok(elapsedSeconds < 6, `四项检查应并行执行，实际耗时 ${elapsedSeconds.toFixed(1)}s`)
-  for (const script of ['typecheck', 'lint', 'test:ci', 'build:ci']) {
-    assert.match(success.commands, new RegExp(`npm --prefix apps/mobile run ${script.replaceAll(':', '\\:')}`))
-  }
+  assert.ok(elapsedSeconds < 3.3, `检查与打包应并行执行，实际耗时 ${elapsedSeconds.toFixed(1)}s`)
+  const runScripts = [...success.commands.matchAll(/npm --prefix apps\/mobile run (\S+)/g)].map((match) => match[1])
+  assert.deepEqual(runScripts.filter((script) => script !== 'build:ci'), ['typecheck', 'lint', 'test:ci'], '三项检查必须按顺序串行')
+  assert.ok(runScripts.includes('build:ci'))
   const groups = [...success.result.stdout.matchAll(/^::group::(\S+) \(exit=0\)$/gm)].map((match) => match[1])
-  assert.deepEqual(groups, ['typecheck', 'lint', 'test-ci', 'build-ci'])
+  assert.deepEqual(groups, ['checks', 'build-ci'])
 
   const failure = runNodeMobile({ failingScript: 'lint' })
   assert.notEqual(failure.result.status, 0)
-  assert.match(failure.result.stderr, /并行检查失败: lint \(exit=3\)/)
-  assert.match(failure.result.stdout, /::group::lint \(exit=3\)[\s\S]*模拟 lint 失败/)
-  // 失败的检查不阻止其余检查跑完并回放日志。
+  assert.match(failure.result.stderr, /并行检查失败: checks \(exit=3\)/)
+  assert.match(failure.result.stdout, /::group::checks \(exit=3\)[\s\S]*模拟 lint 失败/)
+  // 一路里 lint 失败后不再跑 test:ci；另一路 build:ci 仍跑完并回放日志。
+  assert.doesNotMatch(failure.commands, /npm --prefix apps\/mobile run test:ci/)
   assert.match(failure.result.stdout, /::group::build-ci \(exit=0\)/)
   assert.match(failure.commands, /npm --prefix apps\/mobile run build:ci/)
 })

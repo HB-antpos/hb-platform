@@ -54,12 +54,11 @@ case "$component" in
     ;;
   mobile)
     npm --prefix apps/mobile ci --no-audit --no-fund
-    # typecheck / lint / test:ci 与两次 expo export 互不读写对方产物（tsc --noEmit、eslint 无缓存、测试不读 dist），
-    # 串行约 5 分钟，改为并行后以 build:ci 的约 2 分钟为界。
+    # typecheck / lint / test:ci 与两次 expo export 互不读写对方产物（tsc --noEmit、eslint 无缓存、测试不读 dist）。
+    # 三项检查串行约 165 秒、Metro 打包约 115 秒，改成两路并行；4 路全并行实测会在 4 核 runner 上互相争抢
+    # （tsc 34 秒拖到 152 秒、打包拖到 236 秒），反而只比串行省 40 多秒。
     run_parallel \
-      'typecheck=npm --prefix apps/mobile run typecheck' \
-      'lint=npm --prefix apps/mobile run lint' \
-      'test-ci=npm --prefix apps/mobile run test:ci' \
+      'checks=npm --prefix apps/mobile run typecheck && npm --prefix apps/mobile run lint && npm --prefix apps/mobile run test:ci' \
       'build-ci=EXPO_NO_TELEMETRY=1 npm --prefix apps/mobile run build:ci'
     ;;
   pos-ipad)
