@@ -502,11 +502,11 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.doesNotMatch(gradleTaskArray, /lintDebug/, 'lint 只能在 weekly 分支追加')
 
   // setup-java 的 gradle 缓存 key 在 prebuild 前按不存在的 android 目录哈希、命中后不回存；
-  // 改用 setup-gradle（node24、固定 SHA）按实际内容缓存，只有合并队列的一次性分支只读。
+  // 改用 setup-gradle（node24、固定 SHA）按实际内容缓存，只在 main 回存：PR 分支各自回存会撑满 10 GB 配额。
   assert.doesNotMatch(android, /cache:\s*gradle/)
   assert.match(
     android,
-    /uses: gradle\/actions\/setup-gradle@[0-9a-f]{40}\n\s+with:\n\s+cache-read-only: \$\{\{ github\.event_name == 'merge_group' \}\}/,
+    /uses: gradle\/actions\/setup-gradle@[0-9a-f]{40}\n\s+with:\n\s+cache-read-only: \$\{\{ github\.ref_name != 'main' \}\}/,
   )
   assert.ok(
     android.indexOf('actions/setup-java@') < android.indexOf('gradle/actions/setup-gradle@'),
