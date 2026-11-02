@@ -62,8 +62,14 @@ import {
 import { formatWholeMoney } from "@/modules/reports/format";
 import {
   getCashierEnabledStoreCodes,
-  getCashierScopedBranchCodes,
+  getCashierScopedBranchSelection,
 } from "@/modules/reports/cashier-enabled-store-scope";
+import {
+  getStoreSelectionLabel,
+  isSameStoreSelection,
+  normalizeStoreSelection,
+  toggleStoreSelection,
+} from "@/modules/reports/store-selection";
 import { GrowthPill, REPORT_UI } from "@/modules/reports/report-card-parts";
 import { REPORT_QUERY_OPTIONS } from "@/modules/reports/report-config";
 import {
@@ -155,6 +161,8 @@ const MAIN_REPORT_CACHE_VERSION_REFETCH_LIMIT = 2;
 // 吸顶联动条在主 ScrollView 直接子元素中的位置：（标题 +）澳洲/中国分段 → 日期卡 → 联动条。
 // ScrollView 用 Children.toArray 计数，null 子元素会被丢掉，所以前两个子元素必须始终存在。
 const LINKED_FILTER_BAR_INDEX = 2;
+// 「全部分店」的稳定空引用，避免过渡期间每次渲染都让依赖它的 useMemo 重算。
+const EMPTY_BRANCH_CODES: readonly string[] = [];
 
 type SupplierMetricSortRow = Pick<
   SupplierReportRow,
@@ -340,7 +348,8 @@ export function ProductReportScreen({
   const [range, setRange] = useState(() => getDefaultProductReportRange());
   const [draftStartDate, setDraftStartDate] = useState(range.startDate);
   const [draftEndDate, setDraftEndDate] = useState(range.endDate);
-  const [selectedStoreCode, setSelectedStoreCode] = useState<string | undefined>();
+  // 所选分店（多选）；空数组代表全部分店。
+  const [selectedStoreCodes, setSelectedStoreCodes] = useState<string[]>([]);
   const [isStoreModalVisible, setStoreModalVisible] = useState(false);
   const [selectedSupplierCode, setSelectedSupplierCode] = useState<string | null>(null);
   const [supplierPage, setSupplierPage] = useState(1);
@@ -384,8 +393,8 @@ export function ProductReportScreen({
   const cashierStoreScopeVersion = storeOptionsQuery.dataUpdatedAt;
   const reportScopeValid = isReportScopeValid(accountIdentity, storeOptionsQuery, cashierEnabledStoreCodes);
   const branchCodes = useMemo(
-    () => getCashierScopedBranchCodes(cashierEnabledStoreCodes, selectedStoreCode),
-    [cashierEnabledStoreCodes, selectedStoreCode],
+    () => getCashierScopedBranchSelection(cashierEnabledStoreCodes, selectedStoreCodes),
+    [cashierEnabledStoreCodes, selectedStoreCodes],
   );
 
   // 权限范围重验期间仍可展示同条件的完整快照；重验失败会同步关闭显示门槛。
@@ -444,17 +453,22 @@ export function ProductReportScreen({
     if (
       storeOptionsQuery.isFetching
       || !storeOptionsQuery.isSuccess
-      || !selectedStoreCode
-      || branchCodes.length > 0
+      || selectedStoreCodes.length === 0
     ) return;
-    // 门店在刷新期间被停用时，先阻断旧范围请求，再清空与旧选择相关的局部状态。
-    setSelectedStoreCode(undefined);
+    if (branchCodes.length > 0) {
+      // 多选里只有部分分店在刷新期间被停用：剔除失效的分店，其余选择保留（查询范围已只含有效分店）。
+      const normalizedSelection = normalizeStoreSelection(selectedStoreCodes, cashierEnabledStoreCodes);
+      if (!isSameStoreSelection(normalizedSelection, selectedStoreCodes)) setSelectedStoreCodes(normalizedSelection);
+      return;
+    }
+    // 所选分店在刷新期间全部被停用：先阻断旧范围请求，再清空与旧选择相关的局部状态。
+    setSelectedStoreCodes([]);
     setSelectedSupplierCode(null);
     setSupplierPage(1);
     setProductPage(1);
     setDrilldown(null);
     setSheetSupplier(null);
-  }, [branchCodes.length, selectedStoreCode, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess]);
+  }, [branchCodes.length, cashierEnabledStoreCodes, selectedStoreCodes, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess]);
 
   useEffect(() => {
     if (storeOptionsQuery.isFetching) {
@@ -1020,7 +1034,7 @@ export function ProductReportScreen({
           compareStartDate: snapshotQueryParams.compareStartDate,
           compareEndDate: snapshotQueryParams.compareEndDate,
           compareMode: snapshotQueryParams.compareMode,
-          branchCode: selectedStoreCode ?? null,
+          branchCodes: selectedStoreCodes,
           supplierCode: selectedSupplierCode,
           productSearch,
           productPage,
@@ -1028,7 +1042,7 @@ export function ProductReportScreen({
           productSort: productSortKey,
         }
       : null,
-    [kind, linkedScopeKey, productPage, productPageSize, productSearch, productSortKey, selectedStoreCode, selectedSupplierCode, snapshotQueryParams],
+    [kind, linkedScopeKey, productPage, productPageSize, productSearch, productSortKey, selectedStoreCodes, selectedSupplierCode, snapshotQueryParams],
   );
   // 联动点选或明细翻页后，新条件的数据到齐前沿用最近一次完整展示的结果：
   // 只有依赖变化的区块变淡并显示「更新中」，其余区块保持可读可点，避免整页闪成加载态或空表。
@@ -1082,10 +1096,10 @@ export function ProductReportScreen({
   const supplierCompareSubtotal = supplierRows.reduce((sum, row) => sum + row.compareRevenue, 0);
   // 总营业额固定按全部授权分店取数：汇总卡按当前所选分店即时切片；
   // 供应商表的「占总营业」分母则跟随表里数据所属的分店，过渡期间两者可能暂时不同。
-  const summaryRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, selectedStoreCode);
-  const supplierScopeBranchCode = displayedContext?.branchCode ?? null;
-  const supplierScopeRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, supplierScopeBranchCode);
-  const selectedSupplierMissing = Boolean(selectedSupplierCode && selectedStoreCode)
+  const summaryRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, selectedStoreCodes);
+  const supplierScopeBranchCodes = displayedContext?.branchCodes ?? EMPTY_BRANCH_CODES;
+  const supplierScopeRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, supplierScopeBranchCodes);
+  const selectedSupplierMissing = Boolean(selectedSupplierCode && selectedStoreCodes.length > 0)
     && displayedMainReport !== undefined
     && !linkedStaleness.supplierTable
     && !supplierRows.some((row) => isSameLinkedCode(row.supplierCode, selectedSupplierCode));
@@ -1244,19 +1258,19 @@ export function ProductReportScreen({
   // 供应商表的「占中国货」分母按表里数据所属的分店切片。
   const chinaGoodsSummary = useMemo(
     () => summarizeChinaGoods(
-      filterRowsByBranch(chinaBranchTotalRows, selectedStoreCode),
+      filterRowsByBranch(chinaBranchTotalRows, selectedStoreCodes),
       summaryRevenue.revenue,
       summaryRevenue.compareRevenue,
     ),
-    [chinaBranchTotalRows, selectedStoreCode, summaryRevenue.compareRevenue, summaryRevenue.revenue],
+    [chinaBranchTotalRows, selectedStoreCodes, summaryRevenue.compareRevenue, summaryRevenue.revenue],
   );
   const supplierScopeChinaGoods = useMemo(
     () => summarizeChinaGoods(
-      filterRowsByBranch(chinaBranchTotalRows, supplierScopeBranchCode),
+      filterRowsByBranch(chinaBranchTotalRows, supplierScopeBranchCodes),
       supplierScopeRevenue.revenue,
       supplierScopeRevenue.compareRevenue,
     ),
-    [chinaBranchTotalRows, supplierScopeBranchCode, supplierScopeRevenue.compareRevenue, supplierScopeRevenue.revenue],
+    [chinaBranchTotalRows, supplierScopeBranchCodes, supplierScopeRevenue.compareRevenue, supplierScopeRevenue.revenue],
   );
   // 分店表只随供应商变化：选了供应商就改用该供应商在各分店的销售作分子，分母仍是分店营业额。
   const branchTableSupplierCode = isChinaKind ? displayedContext?.supplierCode ?? null : null;
@@ -1532,17 +1546,18 @@ export function ProductReportScreen({
     setProductSort(getDefaultProductSort(next));
   };
 
-  const applyStore = (storeCode?: string) => {
-    setSelectedStoreCode(storeCode);
+  const applyStore = (storeCodes: readonly string[]) => {
+    // 选满全部启用分店等同于「全部分店」，收敛成空数组，查询范围与显示都与不选一致。
+    setSelectedStoreCodes(normalizeStoreSelection(storeCodes, cashierEnabledStoreCodes));
     setStoreModalVisible(false);
     // 三表联动：换分店保留已选供应商，供应商表与明细按新分店重取（交集为空时由提示条说明）。
     setSupplierPage(1);
     setProductPage(1);
   };
 
-  // 分店表整行点按：选中分店，再点同一行取消。
+  // 分店表整行点按：加入所选分店，再点同一行移出（分店可多选）。
   const toggleLinkedBranch = (branchCode: string) => {
-    applyStore(isSameLinkedCode(selectedStoreCode, branchCode) ? undefined : branchCode);
+    applyStore(toggleStoreSelection(selectedStoreCodes, branchCode));
   };
 
   // 供应商名称点按：选中供应商，再点同一行取消；明细回到第 1 页。
@@ -1557,7 +1572,7 @@ export function ProductReportScreen({
   };
 
   const clearLinkedSelection = () => {
-    applyStore(undefined);
+    applyStore([]);
     clearLinkedSupplier();
   };
 
@@ -1626,7 +1641,13 @@ export function ProductReportScreen({
     (productQuery.isRefetching && !productQuery.isPlaceholderData) ||
     (isChinaKind && chinaBranchTotalsQuery.isRefetching) ||
     (hasChinaSupplierBranches && chinaSupplierBranchesQuery.isRefetching);
-  const selectedBranchName = getStoreLabel(selectedStoreCode);
+  // 分店选择集的标签：选一家显示店名，选多家显示「已选 N 家分店」，未选为「全部分店」。
+  const getBranchSelectionLabel = (codes: readonly string[]) => getStoreSelectionLabel(codes, getStoreLabel, {
+    all: t("productReport.filters.allStores"),
+    multiple: (count) => t("productReport.filters.selectedStores", { count }),
+  });
+  // 联动条的分店标签：未选分店时不显示。
+  const selectedBranchName = selectedStoreCodes.length > 0 ? getBranchSelectionLabel(selectedStoreCodes) : null;
   // 锚点行数：分店与明细取表里实际显示的数据，正在按新条件重取的区块显示省略号。
   const linkedAnchors: LinkedAnchor[] = [
     ...(isChinaKind
@@ -1847,7 +1868,7 @@ export function ProductReportScreen({
           }
           anchors={linkedAnchors}
           onOpenBranchPicker={() => setStoreModalVisible(true)}
-          onClearBranch={() => applyStore(undefined)}
+          onClearBranch={() => applyStore([])}
           onPressSupplier={() => scrollToLinkedSection("suppliers")}
           onClearSupplier={clearLinkedSupplier}
           onClearAll={clearLinkedSelection}
@@ -1920,7 +1941,7 @@ export function ProductReportScreen({
                 <ChinaGoodsSummaryCard summary={chinaGoodsSummary} />
                 <ChinaBranchShareSection
                   rows={chinaBranchShareRows}
-                  selectedBranchCode={selectedStoreCode ?? null}
+                  selectedBranchCodes={selectedStoreCodes}
                   onSelectBranch={toggleLinkedBranch}
                   supplierName={getSupplierLabel(branchTableSupplierCode)}
                   updating={linkedStaleness.branchTable}
@@ -1949,8 +1970,8 @@ export function ProductReportScreen({
             <View style={styles.reportSection} onLayout={recordSectionOffset("suppliers")}>
               <SupplierSectionHeader
                 title={t("productReport.sections.suppliers")}
-                badges={displayedContext?.branchCode ? (
-                  <ScopePill tone="branch" label={t("productReport.linked.branchScope", { branch: getStoreLabel(displayedContext.branchCode) })} />
+                badges={displayedContext?.branchCodes.length ? (
+                  <ScopePill tone="branch" label={t("productReport.linked.branchScope", { branch: getBranchSelectionLabel(displayedContext.branchCodes) })} />
                 ) : null}
                 updating={linkedStaleness.supplierTable}
                 page={supplierPage}
@@ -2023,10 +2044,10 @@ export function ProductReportScreen({
               <SectionHeader
                 title={t("productReport.sections.products")}
                 hint={t("productReport.chinaGoods.productHint")}
-                badges={displayedContext?.branchCode || displayedContext?.supplierCode ? (
+                badges={displayedContext?.branchCodes.length || displayedContext?.supplierCode ? (
                   <>
-                    {displayedContext.branchCode ? (
-                      <ScopePill tone="branch" label={getStoreLabel(displayedContext.branchCode) ?? ""} />
+                    {displayedContext.branchCodes.length ? (
+                      <ScopePill tone="branch" label={getBranchSelectionLabel(displayedContext.branchCodes)} />
                     ) : null}
                     {displayedContext.supplierCode ? (
                       <ScopePill tone="supplier" label={getSupplierLabel(displayedContext.supplierCode) ?? ""} />
@@ -2081,7 +2102,7 @@ export function ProductReportScreen({
                     {productRows.length === 0 ? (
                       displayedContext?.productSearch ? (
                         <EmptyState label={t("productReport.states.emptyProductSearch")} />
-                      ) : displayedContext?.branchCode || displayedContext?.supplierCode ? (
+                      ) : displayedContext?.branchCodes.length || displayedContext?.supplierCode ? (
                         // 分店与供应商的交集没有销售：说明是筛选组合为空，并给出清除入口。
                         <EmptyState
                           label={t("productReport.linked.emptyFiltered")}
@@ -2132,7 +2153,7 @@ export function ProductReportScreen({
         )}
       </ScrollView>
 
-      {/* 与其他页面统一：共用分店选择抽屉（标题 + 单选行 + 取消），列表限高可滚动，按分店名排序。 */}
+      {/* 与其他页面统一：共用分店选择抽屉（多选模式：复选框 + 取消 / 确认），列表限高可滚动，按分店名排序。 */}
       <StorePickerModal
         presentation="sheet"
         visible={
@@ -2141,13 +2162,17 @@ export function ProductReportScreen({
           && !storeOptionsQuery.isFetching
         }
         stores={pickerStores}
-        selectedStoreCode={selectedStoreCode}
         title={t("labels.selectStore")}
         cancelLabel={t("actions.cancel")}
         includeAllOption
         allLabel={t("productReport.filters.allStores")}
         onDismiss={() => setStoreModalVisible(false)}
-        onSelectStore={(store) => applyStore(store?.storeCode)}
+        multiple={{
+          selectedStoreCodes,
+          confirmLabel: t("actions.confirm"),
+          selectedCountLabel: (count) => t("productReport.filters.selectedStores", { count }),
+          onApply: applyStore,
+        }}
       />
       {sheetSupplier ? (
         <SupplierDetailSheet
