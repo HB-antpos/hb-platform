@@ -6,7 +6,7 @@ param(
   [ValidateSet(
     'all',
     'noop',
-    'client-a-b-d-h',
+    'client-a-b-d-h-t-z',
     'client-c-card',
     'client-c-other',
     'client-i-k-m-n',
@@ -14,8 +14,8 @@ param(
     'client-l-other',
     'client-o-r',
     'client-s-shared',
+    'client-s-settings-device-viewport',
     'client-s-other',
-    'client-t-z',
     'ui')]
   [string]$Shard = 'all'
 )
@@ -120,16 +120,25 @@ $testFilter = if ($Profile -eq 'weekly') {
   'Category!=Performance&Category!=LiveE2e'
 }
 
-dotnet restore apps/pos-wpf/hbpos_win.slnx
-dotnet build apps/pos-wpf/hbpos_win.slnx --configuration Release --no-restore
-
 $clientTestsProject = 'apps/pos-wpf/tests/Hbpos.Client.Tests/Hbpos.Client.Tests.csproj'
 $clientTestNamespace = 'Hbpos.Client.Tests.'
+
+# client 分片只构建测试项目及其引用（Client.Wpf、Updater、RemoteMaintenance.Setup、Contracts、BlazorApp.Shared），
+# 不再编译 Hbpos.Api / Hbpos.Api.Tests / RemoteStatus（POS API 已在 Linux lane 构建并测试）。
+# ui 分片与本机 all 仍构建整个 slnx：保住全解决方案编译门禁，并为 RemoteStatus 测试与分片完整性校验提供产物。
+if ($Shard -eq 'all' -or $Shard -eq 'ui') {
+  dotnet restore apps/pos-wpf/hbpos_win.slnx
+  dotnet build apps/pos-wpf/hbpos_win.slnx --configuration Release --no-restore
+} else {
+  dotnet restore $clientTestsProject
+  dotnet build $clientTestsProject --configuration Release --no-restore
+}
 
 # 分片按类名前缀划分：命中任一 Include 且不命中任何 Exclude。同一份定义既生成 dotnet test
 # 过滤表达式，也用于完整性校验，保证两者不会各自漂移。
 $clientShards = [ordered]@{
-  'client-a-b-d-h' = @{ Include = @('A', 'B', 'D', 'E', 'F', 'G', 'H'); Exclude = @() }
+  # T-Z 用例累计不到 20 秒，并入 A-H 省一台 runner。
+  'client-a-b-d-h-t-z' = @{ Include = @('A', 'B', 'D', 'E', 'F', 'G', 'H', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'); Exclude = @() }
   'client-c-card' = @{ Include = @('Card'); Exclude = @() }
   'client-c-other' = @{ Include = @('C'); Exclude = @('Card') }
   'client-i-k-m-n' = @{ Include = @('I', 'J', 'K', 'M', 'N'); Exclude = @() }
@@ -137,8 +146,10 @@ $clientShards = [ordered]@{
   'client-l-other' = @{ Include = @('L'); Exclude = @('Linkly') }
   'client-o-r' = @{ Include = @('O', 'P', 'Q', 'R'); Exclude = @() }
   'client-s-shared' = @{ Include = @('Shared'); Exclude = @() }
-  'client-s-other' = @{ Include = @('S'); Exclude = @('Shared') }
-  'client-t-z' = @{ Include = @('T', 'U', 'V', 'W', 'X', 'Y', 'Z'); Exclude = @() }
+  # SettingsFirstScreenReceiptDevice*/SettingsFirstScreenViewport* 同属串行的 WpfViewLifecycleTestCollection，
+  # 两组合计约 200 秒且无法并行，单独成片让 client-s-other 回到与其他分片相近的墙钟。
+  'client-s-settings-device-viewport' = @{ Include = @('SettingsFirstScreenReceiptDevice', 'SettingsFirstScreenViewport'); Exclude = @() }
+  'client-s-other' = @{ Include = @('S'); Exclude = @('Shared', 'SettingsFirstScreenReceiptDevice', 'SettingsFirstScreenViewport') }
 }
 
 function Get-ClientShardFilter {

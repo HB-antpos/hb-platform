@@ -241,15 +241,54 @@ jobs:
     timeout-minutes: ${{ matrix.timeout }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - if: matrix.component != 'noop'
+      - name: 检测预装 .NET SDK 与 .NET 8 运行时
+        id: sdk
+        if: matrix.component != 'noop'
+        shell: pwsh
+        run: |
+          # global.json 允许 9.0.314 按 latestPatch 前滚；windows-2025 镜像预装的 9.0.3xx SDK 与 .NET 8 运行时
+          # 齐全时直接复用，省掉每个分片约 1 分钟的两套 SDK 下载；缺任一项才交给 setup-dotnet 安装。
+          $install = 'true'
+          try {
+            $sdk = & dotnet --version 2>$null
+            $sdkExit = $LASTEXITCODE
+            $runtimes = @(& dotnet --list-runtimes 2>$null)
+            $missing = @('Microsoft.NETCore.App', 'Microsoft.WindowsDesktop.App', 'Microsoft.AspNetCore.App') |
+              Where-Object { $name = $_; -not ($runtimes | Where-Object { $_ -like "$name 8.*" }) }
+            if ($sdkExit -eq 0 -and "$sdk" -match '^9\.0\.3\d\d$' -and -not $missing) {
+              $install = 'false'
+            }
+          } catch {
+            $install = 'true'
+          }
+          "install=$install" >> $env:GITHUB_OUTPUT
+          Write-Host "预装 SDK=$sdk 缺失的 .NET 8 运行时=[$($missing -join ', ')] 需要安装=$install"
+      - if: matrix.component != 'noop' && steps.sdk.outputs.install == 'true'
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: |
             8.0.x
             9.0.314
+      - name: 恢复 NuGet 包缓存
+        id: nuget_cache
+        if: matrix.component != 'noop'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.nuget/packages
+          # 任一 csproj 或 SDK 固定版本变化就换 key；前缀兜底命中旧缓存时 restore 只补差量。
+          key: nuget-pos-wpf-${{ runner.os }}-${{ hashFiles('apps/pos-wpf/**/*.csproj', 'services/backend/BlazorApp.Shared/BlazorApp.Shared.csproj', 'global.json') }}
+          restore-keys: |
+            nuget-pos-wpf-${{ runner.os }}-
       - name: 构建并测试 WPF
         shell: pwsh
         run: ./scripts/ci/run-windows-component.ps1 -Component '${{ matrix.component }}' -Profile '${{ needs.plan.outputs.profile }}' -Shard '${{ matrix.shard || 'noop' }}'
+      - name: 保存 NuGet 包缓存
+        # 只由 ui 分片回存，避免未命中时 11 个分片各自上传同一份包；前缀命中（cache-hit 为 false）也回存以刷新 key。
+        if: ${{ !cancelled() && matrix.shard == 'ui' && steps.nuget_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.nuget/packages
+          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
       - name: 上传 WPF 测试结果
         if: always() && matrix.component != 'noop'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
