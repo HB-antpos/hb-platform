@@ -141,6 +141,13 @@ for (const [code, label] of [[MYOB_BIND_CODE, '员工绑定'], [PAYROLL_EDIT_COD
 }
 assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE])).canBindMyobEmployees, true, '员工绑定页签权限')
 assertEqual(buildAccess(createCurrentUser([PAYROLL_EDIT_CODE])).canBindMyobEmployees, false, '编辑工资不连带员工绑定')
+// 「我方建档」：员工绑定 + 建门店员工（Users.CreateStoreStaff 或 Users.Create）两者都要，与后端两个策略一致
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE])).canCreateMyobOurSide, false, '只有员工绑定不能建档')
+assertEqual(buildAccess(createCurrentUser([P.Users.Create])).canCreateMyobOurSide, false, '只有建用户不能建档（进不了员工绑定）')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.CreateStoreStaff])).canCreateMyobOurSide, true, '绑定 + 建门店员工可以建档')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.Create])).canCreateMyobOurSide, true, 'Users.Create 隐含建门店员工')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.ViewWebConsole])).canCreateMyobOurSide, false, '只能看用户管理页不算能建档')
+assertEqual(buildAccess(createCurrentUser([], ['Admin'])).canCreateMyobOurSide, true, '管理员可以建档')
 
 // 其余考勤、系统、设备类权限仍不能打开它
 for (const code of [

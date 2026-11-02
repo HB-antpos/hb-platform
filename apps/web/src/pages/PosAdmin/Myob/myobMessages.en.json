@@ -849,6 +849,121 @@
         }
       }
     },
+    "create": {
+      "title": "Set up on our side · {{name}}",
+      "subtitle": "Prefilled from the MYOB employee card in {{company}}. After review we create the account and bind this card. MYOB is not changed.",
+      "close": "Close",
+      "steps": {
+        "fill": "Fill in",
+        "review": "Review",
+        "done": "Done"
+      },
+      "loadFailed": "Failed to load MYOB details",
+      "retry": "Retry",
+      "myobValue": "MYOB: {{value}}",
+      "sections": {
+        "basic": "Basic details",
+        "employment": "Employment and store",
+        "login": "Login and initial password"
+      },
+      "fields": {
+        "givenName": "Given name",
+        "familyName": "Family name",
+        "username": "Username",
+        "email": "Email",
+        "phone": "Phone",
+        "birthday": "Date of birth",
+        "employmentType": "Employment type",
+        "store": "Work store",
+        "guardianName": "Guardian name",
+        "guardianRelationship": "Guardian relationship",
+        "guardianPhone": "Guardian mobile",
+        "guardianEmail": "Guardian email",
+        "password": "Initial password"
+      },
+      "employmentTypes": {
+        "FullTime": "Full-time",
+        "PartTime": "Part-time",
+        "Temporary": "Casual"
+      },
+      "hints": {
+        "username": "Suggested from the name and checked for duplicates. You can change it.",
+        "employmentMapped": "MYOB: {{status}} → {{type}}",
+        "employmentUnmapped": "MYOB: {{status}} has no matching type. Please choose one.",
+        "store": "Preselected from the store → payroll company mapping. The account joins only this store; add other stores later in Staff."
+      },
+      "storePlaceholder": "Choose a store",
+      "storeMapped": "This company",
+      "rules": {
+        "givenName": "Enter the given name",
+        "familyName": "Enter the family name",
+        "username": "Enter a username",
+        "usernameLength": "Username must be 3–50 characters",
+        "email": "Enter an email",
+        "emailInvalid": "Invalid email",
+        "phone": "Enter a phone number",
+        "phoneInvalid": "Invalid phone number (8–15 digits)",
+        "employmentType": "Choose an employment type",
+        "store": "Choose a work store",
+        "password": "Enter an initial password",
+        "passwordLength": "Password must be 6–100 characters"
+      },
+      "password": {
+        "email": "Generate an initial password and email it to the employee (recommended)",
+        "manual": "I will set the initial password",
+        "emailShort": "Generated and emailed to the employee",
+        "manualShort": "Set manually (hidden)",
+        "note": "Either way, the employee must change the password at first login. The account role is Store staff (StoreStaff)."
+      },
+      "warnings": {
+        "emailInUse": "This email already belongs to our account {{name}}. It is probably the same person; consider binding this card to that account instead.",
+        "emailInUseDeleted": "This email is taken by the deleted account {{name}}. Use a different email to continue.",
+        "phoneInUse": "This phone number is already in the profile of {{name}}. Make sure it is not the same person.",
+        "cardInactive": "This employee card is inactive in MYOB; the person may have left. Continue only if you are sure.",
+        "noMappedStore": "None of the stores you can choose is mapped to this company. The employee will not appear in this company's list unless you set the payroll company.",
+        "missingFields": "Some details are missing in MYOB (email / phone / date of birth / employment type). Please fill them in."
+      },
+      "bindExisting": {
+        "button": "Bind to {{name}} instead",
+        "confirmTitle": "Bind MYOB employee card {{card}} to our account {{name}}?",
+        "ok": "Bind"
+      },
+      "fillNote": "Fields with a MYOB hint are prefilled from MYOB; changes are highlighted in the next step.",
+      "next": "Next: review",
+      "back": "Back",
+      "confirm": "Create and bind",
+      "submitFailed": "Failed to create the account",
+      "review": {
+        "summary": "Create account {{username}} (Store staff, {{store}}) and bind it to MYOB employee card {{card}} ({{company}}).",
+        "edited": "{{count}} field(s) differ from MYOB and are highlighted in orange. Please check them carefully.",
+        "noEdits": "Fields matching MYOB are tagged \"MYOB\"; fields you filled in are tagged \"Filled in\".",
+        "ack": "I have checked every field above",
+        "columns": {
+          "field": "Field",
+          "myob": "In MYOB",
+          "value": "Will be saved",
+          "source": "Source"
+        },
+        "source": {
+          "myob": "MYOB",
+          "edited": "Edited",
+          "filled": "Filled in",
+          "system": "Suggested"
+        }
+      },
+      "done": {
+        "boundTitle": "Account created and bound to the MYOB card",
+        "unboundTitle": "Account created, but not bound to the MYOB card",
+        "subtitle": "Account {{username}} · {{store}} · MYOB card {{card}}",
+        "bindFailed": "Binding failed",
+        "bindFailedHint": "Reason: {{reason}}. Find this employee in the binding list and bind manually.",
+        "emailSent": "Initial password sent to {{email}}. The employee must change it at first login.",
+        "emailFailed": "The initial password email was not sent: {{reason}}. You can resend it from Staff in the mobile app.",
+        "manualPassword": "Give the initial password to the employee. They must change it at first login.",
+        "syncTip": "Address, gender, super and bank details can be synced with \"Sync from MYOB\" on this employee in the binding list (preview first, undo within 7 days).",
+        "close": "Done"
+      }
+    },
     "sync": {
       "entry": {
         "button": "Sync profiles from MYOB",

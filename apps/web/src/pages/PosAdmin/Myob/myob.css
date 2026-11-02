@@ -1630,3 +1630,45 @@
 .myob-push-batches-sub {
   margin-bottom: 12px;
 }
+
+/* ───────────── 我方建档抽屉（MYOB 有、我方没有） ───────────── */
+
+.myob-create-section {
+  margin: 4px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 基本资料两列；窄屏单列 */
+.myob-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.myob-create-password-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.myob-create-store-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.myob-create-myob-value {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+}
+
+/* 核对页：与 MYOB 不同的行（人工修改）整行浅橙底 */
+.myob-create-row-edited > td {
+  background: var(--ant-color-warning-bg, #fffbe6) !important;
+}
+
+@media (max-width: 640px) {
+  .myob-create-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

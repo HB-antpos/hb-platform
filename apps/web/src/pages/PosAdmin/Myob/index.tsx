@@ -300,7 +300,7 @@ export default function MyobPage() {
                 onReloadCompanies={() => void loadCompanies()}
                 focusRequest={focusRequest}
                 onCountsChange={setBindingCounts}
-                canCreateOurSide={access.canReadUserConsole}
+                canCreateOurSide={access.canCreateMyobOurSide}
               />
             </Suspense>
           ),

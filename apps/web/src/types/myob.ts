@@ -213,6 +213,98 @@ export interface MyobIgnoreEmployeeRequest {
   ignored: boolean
 }
 
+// ───────────── 我方建档（MYOB 有、我方没有） ─────────────
+// 契约：MyobEmployeeCreateDtos.cs；权限 Myob.Employee.Bind 且 Users.CreateStoreStaff（Users.Create 隐含）。
+
+/** 我方用工类型（与员工资料 EmployeeType 同名）。 */
+export type MyobEmploymentType = 'FullTime' | 'PartTime' | 'Temporary'
+
+export interface MyobCreateStoreOption {
+  storeCode: string
+  storeName: string
+  /** 该分店映射到当前公司文件（默认由这家公司发薪）。 */
+  mappedToThisCompany: boolean
+}
+
+/** 已知提醒码；未知码原样保留，界面退回显示后端文案。 */
+export type MyobCreateWarningCode = 'EMAIL_IN_USE' | 'PHONE_IN_USE' | 'CARD_INACTIVE' | 'NO_MAPPED_STORE' | 'MISSING_FIELDS'
+
+export interface MyobCreateWarning {
+  code: string
+  /** 后端中文说明（未知码时直接显示）。 */
+  message: string
+  /** 邮箱 / 电话被占用时的占用者。 */
+  userGuid: string | null
+  userName: string | null
+  /** 占用者账号已删除（不能改为绑定它，只能换邮箱）。 */
+  userDeleted: boolean
+}
+
+export interface MyobCreateDraft {
+  connectionGuid: string
+  connectionName: string
+  card: MyobEmployeeCard
+  /** 建议用户名（已查重）。 */
+  username: string
+  givenName: string
+  familyName: string
+  email: string | null
+  /** MYOB 里的原始电话（完整号码，只在草稿接口返回）。 */
+  myobPhone: string | null
+  /** 规范化后的电话（澳洲手机为「0412 345 678」）。 */
+  phone: string | null
+  /** yyyy-MM-dd。 */
+  birthday: string | null
+  age: number | null
+  isMinor: boolean
+  /** 按 MYOB EmploymentStatus 对应；对应不上为 null，必须人工选。 */
+  employmentType: MyobEmploymentType | null
+  stores: MyobCreateStoreOption[]
+  /** 能选的分店里恰好一家映射到这家公司时预选它。 */
+  suggestedStoreCode: string | null
+  warnings: MyobCreateWarning[]
+}
+
+export interface MyobCreateGuardian {
+  name: string
+  /** 英文值：Mother / Father / Legal guardian / Other。 */
+  relationship: string
+  phone: string
+  email: string
+}
+
+export interface MyobCreateFromMyobRequest {
+  connectionGuid: string
+  myobEmployeeUid: string
+  username: string
+  givenName: string
+  familyName: string
+  email: string
+  phone: string
+  /** yyyy-MM-dd。 */
+  birthday: string
+  /** 只在未满 18 岁时提交。 */
+  guardian?: MyobCreateGuardian
+  storeCode: string
+  /** 空串 = 没选（后端会拒绝，不会默认成临时工）。 */
+  employmentType: MyobEmploymentType | ''
+  /** true = 系统生成初始密码发到员工邮箱；false = 使用 password。两种方式首次登录都要先改密。 */
+  sendPasswordSetupEmail: boolean
+  password?: string
+}
+
+export interface MyobCreateFromMyobResult {
+  userGuid: string
+  username: string
+  storeCode: string
+  /** false：账号已建好但没绑上卡，需要到绑定列表手动绑定。 */
+  bound: boolean
+  bindError: string | null
+  /** 初始密码邮件已发往的邮箱（脱敏）。 */
+  passwordSetupEmailTo: string | null
+  passwordSetupEmailError: string | null
+}
+
 // ───────────── 发薪公司 ─────────────
 
 export interface MyobPayrollCompanyOption {

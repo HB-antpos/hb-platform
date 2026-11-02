@@ -16,6 +16,7 @@ import type {
   MyobConfirmBindingItem,
   MyobConfirmBindingsResult,
   MyobCompanyOption,
+  MyobEmployeeCard,
   MyobOnlyInMyob,
   MyobOnlyInOurs,
   MyobTypeIssue,
@@ -23,6 +24,7 @@ import type {
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import BindingDrawer from './BindingDrawer'
 import BindingListView from './BindingListView'
+import CreateFromMyobDrawer from './CreateFromMyobDrawer'
 import MyobSyncDrawer from './MyobSyncDrawer'
 import { MissingPanel, TypeIssuesPanel } from './MissingPanels'
 import {
@@ -51,8 +53,14 @@ interface EmployeeBindingTabProps {
   focusRequest: { connectionGuid: string; seq: number } | null
   /** 把待处理计数回传给页签角标（null = 还没有数据）。 */
   onCountsChange: (counts: MyobBindingCounts | null) => void
-  /** 有「用户管理」访问权限才显示「我方建档」。 */
+  /** 员工绑定 + 建门店员工权限（Users.CreateStoreStaff / Users.Create）才显示「我方建档」。 */
   canCreateOurSide: boolean
+}
+
+/** 「我方建档」抽屉的入口参数；seq 每次打开递增，作为抽屉的 key 让表单重新开始。 */
+interface CreateTarget {
+  seq: number
+  card: MyobEmployeeCard
 }
 
 interface DrawerState {
@@ -109,6 +117,10 @@ export default function EmployeeBindingTab({
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncCanWrite, setSyncCanWrite] = useState<boolean | null>(null)
   const syncSeq = useRef(0)
+  // 我方建档：「MYOB 有、我方没有」里点的那张卡
+  const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const createSeq = useRef(0)
 
   // 去绑定：外部指定公司时切换选中
   useEffect(() => {
@@ -368,8 +380,27 @@ export default function EmployeeBindingTab({
       failureMessage: t('myob.connections.copyFailed'),
     })
 
-  // 「我方建档」：在新标签打开用户管理页（现有路由 /system/users），不带任何个人资料到 URL
-  const handleCreateOurSide = () => window.open('/system/users', '_blank', 'noopener,noreferrer')
+  // 「我方建档」：在本页抽屉里按 MYOB 资料预填、人工核对后建档并绑定，不再跳去用户管理页
+  const handleCreateOurSide = (item: MyobOnlyInMyob) => {
+    createSeq.current += 1
+    setCreateTarget({ seq: createSeq.current, card: item.card })
+    setCreateOpen(true)
+  }
+
+  // 建档后这个人从「对方没有」移到绑定列表：静默重新加载
+  const handleCreated = useCallback(() => void load(false), [load])
+
+  // 抽屉里「改为绑定该账号」：邮箱已属于我方在职账号，直接把这张卡人工绑定给他
+  const handleBindExisting = async (userGuid: string, userName: string) => {
+    if (!createTarget) {
+      return false
+    }
+    const result = await runConfirm(
+      [{ userGuid, myobEmployeeUid: createTarget.card.uid, manual: true }],
+      t('myob.employees.actions.confirmed', { name: userName }),
+    )
+    return result !== null && result.failed.length === 0 && result.confirmed > 0
+  }
 
   // ───────────────────────── 渲染 ─────────────────────────
 
@@ -592,6 +623,19 @@ export default function EmployeeBindingTab({
           onClose={() => setSyncOpen(false)}
           onCanWriteChange={handleSyncCanWrite}
           onChanged={handleSyncChanged}
+        />
+      ) : null}
+
+      {selectedGuid && createTarget ? (
+        <CreateFromMyobDrawer
+          key={`${selectedGuid}:${createTarget.seq}`}
+          open={createOpen}
+          connectionGuid={selectedGuid}
+          connectionName={connectionName}
+          card={createTarget.card}
+          onClose={() => setCreateOpen(false)}
+          onCreated={handleCreated}
+          onBindExisting={handleBindExisting}
         />
       ) : null}
     </div>

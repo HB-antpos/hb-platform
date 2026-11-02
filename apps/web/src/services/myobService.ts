@@ -11,7 +11,13 @@ import type {
   MyobConnection,
   MyobCompanyOption,
   MyobConnectionStatus,
+  MyobCreateDraft,
+  MyobCreateFromMyobRequest,
+  MyobCreateFromMyobResult,
+  MyobCreateStoreOption,
+  MyobCreateWarning,
   MyobEmployeeCard,
+  MyobEmploymentType,
   MyobIgnoreEmployeeRequest,
   MyobLink,
   MyobMatchBasis,
@@ -488,6 +494,84 @@ export async function unbindMyobEmployee(linkGuid: string): Promise<void> {
 export async function ignoreMyobEmployee(payload: MyobIgnoreEmployeeRequest): Promise<void> {
   const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/employee-bindings/ignore`, payload)
   unwrapApiData(response)
+}
+
+// ───────────────────────── 我方建档（MYOB 有、我方没有） ─────────────────────────
+
+const EMPLOYMENT_TYPES: readonly MyobEmploymentType[] = ['FullTime', 'PartTime', 'Temporary']
+
+function normalizeEmploymentType(value: unknown): MyobEmploymentType | null {
+  return EMPLOYMENT_TYPES.find((type) => type === value) ?? null
+}
+
+function normalizeCreateStore(raw: unknown): MyobCreateStoreOption | null {
+  const item = record(raw)
+  const storeCode = text(item.storeCode)
+  return storeCode ? { storeCode, storeName: text(item.storeName), mappedToThisCompany: bool(item.mappedToThisCompany) } : null
+}
+
+function normalizeCreateWarning(raw: unknown): MyobCreateWarning | null {
+  const item = record(raw)
+  const code = text(item.code)
+  return code
+    ? {
+        code,
+        message: text(item.message),
+        userGuid: nullableText(item.userGuid),
+        userName: nullableText(item.userName),
+        userDeleted: bool(item.userDeleted),
+      }
+    : null
+}
+
+export function normalizeMyobCreateDraft(payload: unknown): MyobCreateDraft {
+  const data = record(payload)
+  const age = data.age === null || data.age === undefined ? null : int(data.age)
+  return {
+    connectionGuid: text(data.connectionGuid),
+    connectionName: text(data.connectionName),
+    card: normalizeCard(data.card),
+    username: text(data.username),
+    givenName: text(data.givenName),
+    familyName: text(data.familyName),
+    email: nullableText(data.email),
+    myobPhone: nullableText(data.myobPhone),
+    phone: nullableText(data.phone),
+    birthday: nullableText(data.birthday),
+    age,
+    isMinor: bool(data.isMinor),
+    employmentType: normalizeEmploymentType(data.employmentType),
+    stores: list(data.stores, normalizeCreateStore),
+    suggestedStoreCode: nullableText(data.suggestedStoreCode),
+    warnings: list(data.warnings, normalizeCreateWarning),
+  }
+}
+
+export function normalizeMyobCreateResult(payload: unknown): MyobCreateFromMyobResult {
+  const data = record(payload)
+  return {
+    userGuid: text(data.userGuid),
+    username: text(data.username),
+    storeCode: text(data.storeCode),
+    bound: bool(data.bound),
+    bindError: nullableText(data.bindError),
+    passwordSetupEmailTo: nullableText(data.passwordSetupEmailTo),
+    passwordSetupEmailError: nullableText(data.passwordSetupEmailError),
+  }
+}
+
+/** 按 MYOB 员工卡预填我方员工资料（只读）；含 MYOB 完整电话，只给同时有建员工权限的人。 */
+export async function getMyobCreateDraft(connectionGuid: string, myobEmployeeUid: string): Promise<MyobCreateDraft> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/employee-create/draft`, {
+    params: { connectionGuid, myobEmployeeUid },
+  })
+  return normalizeMyobCreateDraft(unwrapApiData(response))
+}
+
+/** 人工核对后建我方账号并绑定这张卡；账号建好但绑定失败时 bound = false（不抛错）。 */
+export async function createMyobEmployeeFromCard(payload: MyobCreateFromMyobRequest): Promise<MyobCreateFromMyobResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/employee-create`, payload)
+  return normalizeMyobCreateResult(unwrapApiData(response))
 }
 
 // ───────────────────────── 阶段 1：发薪公司 ─────────────────────────
