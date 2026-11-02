@@ -322,6 +322,7 @@
     "filters": {
       "store": "分店",
       "allStores": "全部分店",
+      "selectedStores": "已选 {{count}} 家分店",
       "startDate": "开始日期",
       "endDate": "结束日期",
       "productSearch": "货号或条码"

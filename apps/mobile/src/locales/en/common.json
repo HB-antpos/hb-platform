@@ -322,6 +322,7 @@
     "filters": {
       "store": "Store",
       "allStores": "All stores",
+      "selectedStores": "{{count}} stores selected",
       "startDate": "Start date",
       "endDate": "End date",
       "productSearch": "Item no. or barcode"

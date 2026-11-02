@@ -106,6 +106,13 @@ import {
   getCashierEnabledStoreCodes,
   getCashierScopedBranchCodes,
 } from "@/modules/reports/cashier-enabled-store-scope";
+import {
+  getStoreSelectionLabel,
+  isSameStoreSelection,
+  isStoreSelected,
+  normalizeStoreSelection,
+  toggleStoreSelection,
+} from "@/modules/reports/store-selection";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
 
@@ -577,7 +584,9 @@ export function RevenueReportScreen({
   const [mode, setMode] = useState<RevenuePeriodMode>("day");
   const [period, setPeriod] = useState(() => getDefaultRevenuePeriod("day"));
   const [selectedDate, setSelectedDate] = useState(() => getDefaultRevenuePeriod("day").startDate);
-  const [selectedBranchCode, setSelectedBranchCode] = useState<string | null>(null);
+  // 所选分店（多选）；空数组代表全部分店。分店选择器里先改草稿，按「确认」才写回。
+  const [selectedBranchCodes, setSelectedBranchCodes] = useState<string[]>([]);
+  const [branchPickerDraft, setBranchPickerDraft] = useState<string[]>([]);
   const [branchPickerVisible, setBranchPickerVisible] = useState(false);
   const [branchPickerSearch, setBranchPickerSearch] = useState("");
   const [branchSearchVisible, setBranchSearchVisible] = useState(false);
@@ -756,11 +765,10 @@ export function RevenueReportScreen({
     }
     if (!cashierStoreOptionsQuery.isSuccess) return;
 
-    if (
-      selectedBranchCode
-      && getCashierScopedBranchCodes(cashierEnabledStoreCodes, selectedBranchCode).length === 0
-    ) {
-      setSelectedBranchCode(null);
+    if (selectedBranchCodes.length > 0) {
+      // 白名单刷新后剔除已停用的分店；全部失效时回到全部分店，不保留旧范围。
+      const validSelection = normalizeStoreSelection(selectedBranchCodes, cashierEnabledStoreCodes);
+      if (!isSameStoreSelection(validSelection, selectedBranchCodes)) setSelectedBranchCodes(validSelection);
     }
     if (
       drilldown
@@ -780,7 +788,7 @@ export function RevenueReportScreen({
     cashierStoreOptionsQuery.isFetching,
     cashierStoreOptionsQuery.isSuccess,
     drilldown,
-    selectedBranchCode,
+    selectedBranchCodes,
   ]);
 
   const completeRevenueLoad = useCallback(() => {
@@ -1021,11 +1029,11 @@ export function RevenueReportScreen({
   const cutoffClock = useMemo(
     () => resolveCutoffClock({
       branchCodes: cashierEnabledStoreCodes,
-      referenceBranchCodes: selectedBranchCode ? [selectedBranchCode] : cashierEnabledStoreCodes,
+      referenceBranchCodes: selectedBranchCodes.length > 0 ? selectedBranchCodes : cashierEnabledStoreCodes,
       timeZoneByBranch: storeTimeZoneByBranch,
       atUtc: getCutoffClockAnchorUtc(period.startDate),
     }),
-    [cashierEnabledStoreCodes, period.startDate, selectedBranchCode, storeTimeZoneByBranch],
+    [cashierEnabledStoreCodes, period.startDate, selectedBranchCodes, storeTimeZoneByBranch],
   );
   const cumulativeClockRows = useMemo(
     () => (cumulativeRows ? shiftBranchHourlyRows(cumulativeRows, cutoffClock) : null),
@@ -1037,11 +1045,11 @@ export function RevenueReportScreen({
   );
   const cumulativeScopeSeries = useMemo(
     () => cumulativeClockRows
-      ? buildHourlySeries(selectedBranchCode
-          ? cumulativeClockRows.filter((row) => row.branchCode === selectedBranchCode)
+      ? buildHourlySeries(selectedBranchCodes.length > 0
+          ? cumulativeClockRows.filter((row) => isStoreSelected(selectedBranchCodes, row.branchCode))
           : cumulativeClockRows)
       : null,
-    [cumulativeClockRows, selectedBranchCode],
+    [cumulativeClockRows, selectedBranchCodes],
   );
   const cumulativeCutoff = useMemo(
     () => mode === "day"
@@ -1194,9 +1202,14 @@ export function RevenueReportScreen({
   const summaryPollingExhausted = summaryPending && Boolean(summaryQuery.data?.pollingExhausted);
   // 本期已出、同期仍在补算：排行照常显示，状态栏提示并保留手动重试入口。
   const summaryComparePending = rows.some((row) => row.compareUnavailable);
-  const selectedBranch = useMemo(
-    () => rows.find((row) => row.branchCode === selectedBranchCode) ?? null,
-    [rows, selectedBranchCode],
+  // 分店筛选按钮与累计卡片的范围标签：全部分店 / 单店名 / 已选 N 家分店。
+  const branchScopeLabel = getStoreSelectionLabel(
+    selectedBranchCodes,
+    (code) => rows.find((row) => row.branchCode === code)?.branchName,
+    {
+      all: t("productReport.filters.allStores"),
+      multiple: (count) => t("productReport.filters.selectedStores", { count }),
+    },
   );
   const branchPickerRows = useMemo(() => {
     const search = branchPickerSearch.trim().toLocaleLowerCase();
@@ -1210,10 +1223,10 @@ export function RevenueReportScreen({
     );
   }, [branchPickerSearch, rows]);
   const scopedRows = useMemo(
-    () => selectedBranchCode
-      ? rows.filter((row) => row.branchCode === selectedBranchCode)
+    () => selectedBranchCodes.length > 0
+      ? rows.filter((row) => isStoreSelected(selectedBranchCodes, row.branchCode))
       : rows,
-    [rows, selectedBranchCode],
+    [rows, selectedBranchCodes],
   );
   const visibleRows = useMemo(() => {
     const search = branchSearch.trim().toLocaleLowerCase();
@@ -1561,14 +1574,17 @@ export function RevenueReportScreen({
                     || cashierStoreOptionsQuery.isFetching
                     || cashierStoreScopeEmpty
                   }
-                  onPress={() => setBranchPickerVisible(true)}
+                  onPress={() => {
+                    setBranchPickerDraft(selectedBranchCodes);
+                    setBranchPickerVisible(true);
+                  }}
                 >
                   <View style={styles.branchFilterTextBlock}>
                     <Text variant="labelSmall" style={styles.muted} numberOfLines={1}>
                       {t("productReport.filters.store")}
                     </Text>
                     <Text variant="bodySmall" style={styles.strongText} numberOfLines={1}>
-                      {selectedBranch?.branchName || selectedBranchCode || t("productReport.filters.allStores")}
+                      {branchScopeLabel}
                     </Text>
                   </View>
                   <Text style={styles.branchFilterChevron}>⌄</Text>
@@ -1648,7 +1664,7 @@ export function RevenueReportScreen({
 
             {mode === "day" && summaryQueryEnabled ? (
               <CumulativeRevenueCard
-                scopeLabel={selectedBranch?.branchName || selectedBranchCode || t("productReport.filters.allStores")}
+                scopeLabel={branchScopeLabel}
                 compareDate={queryParams.compareStartDate}
                 series={cumulativeScopeSeries}
                 cutoff={cumulativeCutoff}
@@ -1964,14 +1980,10 @@ export function RevenueReportScreen({
           />
 
           <Pressable
-            style={[styles.branchPickerRow, selectedBranchCode === null ? styles.branchPickerRowSelected : null]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: selectedBranchCode === null }}
-            onPress={() => {
-              setSelectedBranchCode(null);
-              setBranchPickerSearch("");
-              setBranchPickerVisible(false);
-            }}
+            style={[styles.branchPickerRow, branchPickerDraft.length === 0 ? styles.branchPickerRowSelected : null]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: branchPickerDraft.length === 0 }}
+            onPress={() => setBranchPickerDraft([])}
           >
             <View style={styles.detailRankColumn}>
               <TableText style={styles.rankText}>—</TableText>
@@ -1979,27 +1991,23 @@ export function RevenueReportScreen({
             <Text variant="bodyMedium" style={[styles.branchPickerName, styles.strongText]} numberOfLines={1}>
               {t("productReport.filters.allStores")}
             </Text>
-            <Text style={styles.branchPickerCheck}>{selectedBranchCode === null ? "✓" : ""}</Text>
+            <BranchPickerCheckbox checked={branchPickerDraft.length === 0} />
           </Pressable>
 
           <FlatList
             data={branchPickerRows}
             keyExtractor={(row) => row.id}
             renderItem={({ item, index }) => {
-              const selected = item.branchCode === selectedBranchCode;
+              const selected = isStoreSelected(branchPickerDraft, item.branchCode);
               return (
                 <Pressable
                   style={[styles.branchPickerRow, selected ? styles.branchPickerRowSelected : null]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
                   accessibilityLabel={t("reports.actions.selectBranchNamed", {
                     branch: item.branchName || item.branchCode,
                   })}
-                  onPress={() => {
-                    setSelectedBranchCode(item.branchCode);
-                    setBranchPickerSearch("");
-                    setBranchPickerVisible(false);
-                  }}
+                  onPress={() => setBranchPickerDraft((current) => toggleStoreSelection(current, item.branchCode))}
                 >
                   <View style={styles.detailRankColumn}>
                     <TableText style={styles.rankText}>{formatOrdinal(index)}</TableText>
@@ -2009,7 +2017,7 @@ export function RevenueReportScreen({
                     <TableText style={styles.muted}>{item.branchCode}</TableText>
                   </View>
                   <TableText numeric style={styles.muted}>{formatWholeMoney(item.revenue)}</TableText>
-                  <Text style={styles.branchPickerCheck}>{selected ? "✓" : ""}</Text>
+                  <BranchPickerCheckbox checked={selected} />
                 </Pressable>
               );
             }}
@@ -2019,9 +2027,50 @@ export function RevenueReportScreen({
             bounces={false}
             style={styles.branchPickerList}
           />
+
+          <View style={styles.branchPickerFooter}>
+            <Text variant="bodySmall" style={styles.muted} numberOfLines={1}>
+              {branchPickerDraft.length === 0
+                ? t("productReport.filters.allStores")
+                : t("productReport.filters.selectedStores", { count: branchPickerDraft.length })}
+            </Text>
+            <View style={styles.branchPickerActions}>
+              <Button
+                mode="outlined"
+                style={styles.branchPickerActionButton}
+                contentStyle={styles.branchPickerActionContent}
+                onPress={() => setBranchPickerVisible(false)}
+              >
+                {t("actions.cancel")}
+              </Button>
+              <Button
+                mode="contained"
+                style={[styles.branchPickerActionButton, styles.branchPickerActionPrimary]}
+                contentStyle={styles.branchPickerActionContent}
+                onPress={() => {
+                  // 选满全部分店等同于「全部分店」，收敛成空数组。
+                  setSelectedBranchCodes(normalizeStoreSelection(branchPickerDraft, cashierEnabledStoreCodes));
+                  setBranchPickerSearch("");
+                  setBranchPickerVisible(false);
+                }}
+              >
+                {t("actions.confirm")}
+              </Button>
+            </View>
+          </View>
         </Modal>
       </Portal>
     </View>
+  );
+}
+
+function BranchPickerCheckbox({ checked }: { checked: boolean }) {
+  return (
+    <Icon
+      source={checked ? "checkbox-marked" : "checkbox-blank-outline"}
+      size={22}
+      color={checked ? "#2563EB" : "#CBD5E1"}
+    />
   );
 }
 
@@ -2639,12 +2688,24 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  branchPickerCheck: {
-    width: 20,
-    color: "#2563EB",
-    fontSize: 18,
-    fontWeight: "700",
-    textAlign: "right",
+  branchPickerFooter: {
+    gap: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+  branchPickerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  branchPickerActionButton: {
+    flex: 1,
+  },
+  branchPickerActionPrimary: {
+    flex: 2,
+  },
+  branchPickerActionContent: {
+    minHeight: 44,
   },
   rankingCutoffRow: {
     flexDirection: "row",
