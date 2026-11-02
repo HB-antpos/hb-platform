@@ -132,11 +132,65 @@ test('共享 fixture 与浏览器扩展契约文件触发所有消费者', () =>
 })
 
 test('CI 基础文件触发全量，纯文档不分配组件', () => {
-  assert.deepEqual(
-    selectedFor(['.github/workflows/ci.yml']),
-    [...ALL_COMPONENTS].sort(),
-  )
+  for (const path of [
+    '.github/workflows/ci.yml',
+    'scripts/ci/plan.mjs',
+    'scripts/test-all.sh',
+    '.node-version',
+    'global.json',
+    'services/backend/global.json',
+  ]) {
+    assert.deepEqual(selectedFor([path]), [...ALL_COMPONENTS].sort(), path)
+  }
   assert.deepEqual(selectedFor(['docs/ci.md', 'README.md']), [])
+})
+
+test('AGENTS.md 只是仓库根目录标记，没有测试读取内容，按文档处理', () => {
+  assert.deepEqual(selectedFor(['AGENTS.md']), [])
+  assert.deepEqual(selectedFor(['AGENTS.md', 'apps/web/src/App.tsx']), ['web'])
+})
+
+test('会话工作区、技能目录与本地产物目录不分配组件也不触发全量', () => {
+  for (const path of [
+    '.claude/skills/gitnexus/gitnexus-guide/SKILL.md',
+    '.claude/launch.json',
+    '.superpowers/sdd/report.json',
+    'tmp/pdfs/invoice.pdf',
+    'tmp/device-registration-tests/service.mjs',
+    'output/pdf/report.pdf',
+    'outputs/batch/result.csv',
+  ]) {
+    assert.deepEqual(selectedFor([path]), [], path)
+    assert.deepEqual(selectedFor([path, 'apps/mobile/src/App.tsx']), ['mobile'], path)
+  }
+})
+
+test('运维脚本只由 plan job 自测，不选任何组件且不污染同 PR 的其他路径', () => {
+  assert.deepEqual(selectedFor(['scripts/ops/rustdesk/rollback.py']), [])
+  assert.deepEqual(selectedFor(['scripts/ops/daily-close-audit-backfill/backfill.py', 'scripts/ops/new-tool/run.sh']), [])
+  assert.deepEqual(
+    selectedFor(['scripts/ops/rustdesk/rollback.py', 'services/backend/BlazorApp.Api/Program.cs']),
+    ['backend'],
+  )
+})
+
+test('跨端夹具按实际读取方选组件，不再 fail-safe 到全量', () => {
+  assert.deepEqual(
+    selectedFor(['test-fixtures/linkly-attempt-txnref/vectors.json']),
+    ['pos-contract', 'pos-handheld', 'pos-ipad', 'pos-wpf'],
+  )
+  assert.deepEqual(
+    selectedFor(['test-fixtures/new-contract/example.json']),
+    ['pos-contract', 'pos-handheld', 'pos-ipad', 'pos-wpf'],
+  )
+})
+
+test('质量预算只选质量 lane，Web 包体预算只选 web', () => {
+  assert.deepEqual(
+    selectedFor(['quality-baseline-budget.json']),
+    ['backend', 'pos-contract', 'pos-handheld', 'pos-ipad', 'web'],
+  )
+  assert.deepEqual(selectedFor(['web-bundle-budget.json']), ['web'])
 })
 
 test('未知非文档路径 fail-safe 到全量', () => {
