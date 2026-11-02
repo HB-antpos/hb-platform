@@ -4,6 +4,7 @@ import {
   createRemoteMaintenanceRequestGate,
   getRemoteOnlineStatusColor,
   getRemoteServiceStatusColor,
+  getRustDeskVersionDisplay,
 } from './remoteMaintenanceLogic'
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
@@ -98,3 +99,27 @@ hiddenScheduler.handleVisibilityChange()
 await Promise.resolve()
 assertEqual(hiddenTimers.size, 1, 'becoming visible should refresh then schedule a timer')
 hiddenScheduler.dispose()
+
+// 「客户端版本」列：实际版本优先、读不到时退回登记版本，只有偏离和缺失才标红。
+assertDeepEqual(
+  getRustDeskVersionDisplay({ clientVersion: '1.4.9', observedRustDeskVersion: '1.5.0', rustDeskVersionStatus: 'drift' }),
+  { version: '1.5.0', tagKey: 'drift' },
+  'drifted devices should show the observed version with a drift tag',
+)
+assertDeepEqual(
+  getRustDeskVersionDisplay({ clientVersion: '1.4.9', observedRustDeskVersion: '', rustDeskVersionStatus: 'missing' }),
+  { version: '1.4.9', tagKey: 'missing' },
+  'missing executables should fall back to the registered version with a missing tag',
+)
+assertDeepEqual(
+  getRustDeskVersionDisplay({ clientVersion: '1.4.9', observedRustDeskVersion: '1.4.9', rustDeskVersionStatus: 'match' }),
+  { version: '1.4.9', tagKey: null },
+  'matching versions should not be tagged',
+)
+assertDeepEqual(
+  getRustDeskVersionDisplay({ clientVersion: '', observedRustDeskVersion: null, rustDeskVersionStatus: 'unknown' }),
+  { version: '--', tagKey: null },
+  'unknown versions should show a placeholder without a tag',
+)
+
+console.log('remoteMaintenanceLogic version display: ok')

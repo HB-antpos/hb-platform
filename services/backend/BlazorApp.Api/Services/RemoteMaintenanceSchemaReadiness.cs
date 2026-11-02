@@ -13,6 +13,7 @@ public sealed class RemoteMaintenanceSchemaReadiness(SqlSugarContext context, IL
           AND COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'LastAcceptedSequence') IS NOT NULL
           AND COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'LastAcceptedAtUtc') IS NOT NULL
           AND COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'LastOperationId') IS NOT NULL
+          AND COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'ObservedRustDeskVersion') IS NOT NULL
           AND EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.HBweb_RemoteMaintenanceDevice') AND name = N'UX_HBweb_RemoteMaintenanceDevice_DeviceRegistrationId')
           THEN 1 ELSE 0 END;
         """;

@@ -8,6 +8,9 @@ export type RemoteServiceStatus =
   | 'stopping'
   | 'checkFailed'
 
+/** 设备上实际的 RustDesk 版本与中心下发版本的比对：一致 / 偏离 / 程序文件缺失 / 无法判断。 */
+export type RemoteRustDeskVersionStatus = 'match' | 'drift' | 'missing' | 'unknown'
+
 export interface RemoteMaintenanceDevice {
   id: string
   deviceRegistrationId: string
@@ -16,6 +19,9 @@ export interface RemoteMaintenanceDevice {
   computerName: string
   rustdeskId: string
   clientVersion: string
+  /** 心跳观察到的实际版本；null＝尚未上报，空串＝服务在但程序文件读不到 */
+  observedRustDeskVersion: string | null
+  rustDeskVersionStatus: RemoteRustDeskVersionStatus
   agentVersion: string
   onlineStatus: RemoteOnlineStatus
   serviceStatus: RemoteServiceStatus

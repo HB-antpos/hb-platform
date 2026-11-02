@@ -27,6 +27,23 @@ assertEqual(device.isStale, true, 'stale marker should be preserved')
 const unknown = normalizeRemoteMaintenanceDevice({ onlineStatus: 'unexpected', serviceStatus: 'unexpected' })
 assertEqual(unknown.onlineStatus, 'never', 'unknown online values must fail closed to never')
 assertEqual(unknown.serviceStatus, 'checkFailed', 'unknown service values must fail closed to checkFailed')
+// 旧版后端不返回实际版本：不报偏离也不报缺失。
+assertEqual(unknown.observedRustDeskVersion, null, 'missing observed version should stay null')
+assertEqual(unknown.rustDeskVersionStatus, 'unknown', 'missing version status should be unknown')
+
+const drifted = normalizeRemoteMaintenanceDevice({ observedRustDeskVersion: ' 1.5.0 ', rustDeskVersionStatus: 'drift' })
+assertEqual(drifted.observedRustDeskVersion, '1.5.0', 'observed version should be trimmed')
+assertEqual(drifted.rustDeskVersionStatus, 'drift', 'drift status should be preserved')
+
+const missingExecutable = normalizeRemoteMaintenanceDevice({ observedRustDeskVersion: '', rustDeskVersionStatus: 'missing' })
+// 空串表示程序文件读不到，不能被当成“没上报”。
+assertEqual(missingExecutable.observedRustDeskVersion, '', 'empty observed version must stay an empty string')
+assertEqual(missingExecutable.rustDeskVersionStatus, 'missing', 'missing status should be preserved')
+assertEqual(
+  normalizeRemoteMaintenanceDevice({ rustDeskVersionStatus: 'whatever' }).rustDeskVersionStatus,
+  'unknown',
+  'unexpected version status must fail closed to unknown',
+)
 
 const page = normalizeRemoteMaintenanceDevicePage({
   items: [{ id: '1', deviceRegistrationId: 1 }],

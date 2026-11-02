@@ -1,4 +1,9 @@
-import type { RemoteMaintenanceDeviceQuery, RemoteOnlineStatus, RemoteServiceStatus } from '../../../types/remoteMaintenance'
+import type {
+  RemoteMaintenanceDevice,
+  RemoteMaintenanceDeviceQuery,
+  RemoteOnlineStatus,
+  RemoteServiceStatus,
+} from '../../../types/remoteMaintenance'
 
 export function createRemoteMaintenanceRequestGate() {
   let sequence = 0
@@ -114,6 +119,18 @@ export function getRemoteServiceStatusColor(status: RemoteServiceStatus) {
     default:
       return 'default'
   }
+}
+
+/**
+ * 「客户端版本」列显示的版本：优先心跳观察到的实际版本，还没上报或读不到时退回登记版本；
+ * 只有偏离和程序缺失两种情况才给标签（一致 / 无法判断不加标签，避免整列都是标签）。
+ */
+export function getRustDeskVersionDisplay(device: Pick<RemoteMaintenanceDevice, 'clientVersion' | 'observedRustDeskVersion' | 'rustDeskVersionStatus'>) {
+  const version = device.observedRustDeskVersion || device.clientVersion || '--'
+  const tagKey = device.rustDeskVersionStatus === 'drift' || device.rustDeskVersionStatus === 'missing'
+    ? device.rustDeskVersionStatus
+    : null
+  return { version, tagKey }
 }
 
 export function formatRemoteMaintenanceDateTime(value: string | null) {

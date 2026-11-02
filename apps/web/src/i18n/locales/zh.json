@@ -4899,6 +4899,10 @@
       "lastSeen": "最近上报",
       "registeredAt": "注册时间",
       "stale": "数据较旧",
+      "rustDeskVersionStatuses": {
+        "drift": "版本偏离",
+        "missing": "程序文件缺失"
+      },
       "lastReportedStatus": "离线，显示上次上报",
       "serverTime": "服务器时间",
       "keywordPlaceholder": "搜索门店 / 设备 / 计算机",

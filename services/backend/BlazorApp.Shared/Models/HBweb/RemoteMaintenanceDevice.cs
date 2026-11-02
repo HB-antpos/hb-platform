@@ -33,6 +33,14 @@ public sealed class RemoteMaintenanceDevice
     [SugarColumn(Length = 80, IsNullable = true)]
     public string? AgentVersion { get; set; }
 
+    /// <summary>
+    /// 状态服务心跳最近一次读到的本机 rustdesk.exe 版本（与 commit 登记的 <see cref="ClientVersion"/> 分开存，后者不被心跳覆盖）。
+    /// NULL＝还没收到带这一项的心跳；空串＝RustDesk 服务还在但程序文件读不到（被删或被杀毒隔离）。
+    /// 列由 --schema=remote-maintenance 补齐，须先于本版本主 API 上线。
+    /// </summary>
+    [SugarColumn(Length = 80, IsNullable = true)]
+    public string? ObservedRustDeskVersion { get; set; }
+
     [SugarColumn(Length = 20, IsNullable = false)]
     public string ServiceStatus { get; set; } = "notInstalled";
 
