@@ -1,4 +1,5 @@
 import type { ProductReportTotalRevenue, SupplierReportKind } from "@/modules/product-report/api";
+import { isSameStoreSelection, isStoreSelected } from "@/modules/reports/store-selection";
 
 /**
  * 商品报告主报表的展示条件。三表联动时，同一份报告（账号、授权分店、页签、日期都相同）内
@@ -13,7 +14,8 @@ export interface ProductReportDisplayContext {
   compareStartDate: string;
   compareEndDate: string;
   compareMode: string;
-  branchCode: string | null;
+  /** 所选分店（多选）；空数组代表全部分店。 */
+  branchCodes: readonly string[];
   supplierCode: string | null;
   productSearch: string;
   productPage: number;
@@ -59,7 +61,7 @@ export function getLinkedTransitionStaleness(
     || displayed.compareMode !== requested.compareMode
   ) return null;
 
-  const branchChanged = !isSameLinkedCode(displayed.branchCode, requested.branchCode);
+  const branchChanged = !isSameStoreSelection(displayed.branchCodes, requested.branchCodes);
   const supplierChanged = !isSameLinkedCode(displayed.supplierCode, requested.supplierCode);
   return {
     branchTable: requested.kind === "china" && supplierChanged,
@@ -73,26 +75,26 @@ export function getLinkedTransitionStaleness(
   };
 }
 
-/** 按所选分店筛出分店行；未选分店时返回全部。 */
+/** 按所选分店（可多选）筛出分店行；未选分店时返回全部。 */
 export function filterRowsByBranch<T extends { branchCode: string }>(
   rows: readonly T[],
-  branchCode: string | null | undefined,
+  branchCodes: readonly string[],
 ): T[] {
-  if (!branchCode) return [...rows];
-  return rows.filter((row) => isSameLinkedCode(row.branchCode, branchCode));
+  if (branchCodes.length === 0) return [...rows];
+  return rows.filter((row) => isStoreSelected(branchCodes, row.branchCode));
 }
 
 /**
- * 占比分母：未选分店时用接口给出的全部分店营业额；选了分店则从分店明细里切出该店，
- * 与之前「顶部单店筛选后重新请求」得到的数字一致，但切换分店不必再请求一次。
+ * 占比分母：未选分店时用接口给出的全部分店营业额；选了分店则从分店明细里切出所选各店再求和，
+ * 与「按所选分店重新请求」得到的数字一致，但切换分店不必再请求一次。
  */
 export function getScopedRevenue(
   totalRevenue: Pick<ProductReportTotalRevenue, "revenue" | "compareRevenue" | "branches"> | undefined,
-  branchCode: string | null | undefined,
+  branchCodes: readonly string[],
 ): { revenue: number; compareRevenue: number } {
   if (!totalRevenue) return { revenue: 0, compareRevenue: 0 };
-  if (!branchCode) return { revenue: totalRevenue.revenue, compareRevenue: totalRevenue.compareRevenue };
-  return filterRowsByBranch(totalRevenue.branches, branchCode).reduce(
+  if (branchCodes.length === 0) return { revenue: totalRevenue.revenue, compareRevenue: totalRevenue.compareRevenue };
+  return filterRowsByBranch(totalRevenue.branches, branchCodes).reduce(
     (sum, branch) => ({
       revenue: sum.revenue + branch.revenue,
       compareRevenue: sum.compareRevenue + branch.compareRevenue,
@@ -102,7 +104,7 @@ export function getScopedRevenue(
 }
 
 /**
- * 折叠时只展示前 limit 行；已选行不在其中时附在末尾，保证选中的分店始终看得见。
+ * 折叠时只展示前 limit 行；不在其中的已选行（分店可多选）按原顺序附在末尾，保证选中的分店始终看得见。
  * appendedSelected 为 true 时，调用方在附加行前放一条分隔说明。
  */
 export function getCollapsedRowsWithSelection<T>(
@@ -111,9 +113,10 @@ export function getCollapsedRowsWithSelection<T>(
   isSelected: (row: T) => boolean,
 ): { rows: T[]; appendedSelected: boolean } {
   const head = rows.slice(0, Math.max(0, limit));
-  if (head.some(isSelected)) return { rows: head, appendedSelected: false };
-  const selected = rows.slice(head.length).find(isSelected);
-  return selected ? { rows: [...head, selected], appendedSelected: true } : { rows: head, appendedSelected: false };
+  const selectedTail = rows.slice(head.length).filter(isSelected);
+  return selectedTail.length > 0
+    ? { rows: [...head, ...selectedTail], appendedSelected: true }
+    : { rows: head, appendedSelected: false };
 }
 
 /** 返回第一条满足条件的行所在页（从 1 开始）；找不到时返回 null。 */

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Modal as NativeModal,
   Pressable,
@@ -7,13 +7,25 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { Button, Modal, Portal, RadioButton, Text } from "react-native-paper";
+import { Button, Icon, Modal, Portal, RadioButton, Text } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import { sortStoresByName } from "@/shared/utils/name-sort";
 import type { Store } from "@/modules/shop/types";
 
-interface StorePickerModalProps {
+/**
+ * 多选模式：行前显示复选框，点选只改草稿，按确认按钮才一次性回传；中途关闭不改变原选择。
+ * 空数组代表「全部」（需同时开启 includeAllOption 才有对应的一行）。
+ */
+export interface StorePickerMultipleOptions {
+  selectedStoreCodes: readonly string[];
+  confirmLabel: string;
+  /** 草稿已选家数的提示，如「已选 3 家分店」；未选时显示 allLabel。 */
+  selectedCountLabel: (count: number) => string;
+  onApply: (storeCodes: string[]) => void;
+}
+
+interface StorePickerModalBaseProps {
   presentation?: "dialog" | "sheet";
   /**
    * 默认通过 Paper Portal 渲染在应用根部；当调用方本身位于原生 Modal（如 BusinessSheet）内时，
@@ -30,8 +42,12 @@ interface StorePickerModalProps {
   renderAllLabel?: (label: string) => ReactNode;
   renderStoreLabel?: (store: Store) => ReactNode;
   onDismiss: () => void;
-  onSelectStore: (store: Store | null) => void | Promise<void>;
 }
+
+type StorePickerModalProps = StorePickerModalBaseProps & (
+  | { multiple?: undefined; onSelectStore: (store: Store | null) => void | Promise<void> }
+  | { multiple: StorePickerMultipleOptions; onSelectStore?: undefined }
+);
 
 export function StorePickerModal({
   presentation = "dialog",
@@ -47,6 +63,7 @@ export function StorePickerModal({
   renderStoreLabel,
   onDismiss,
   onSelectStore,
+  multiple,
 }: StorePickerModalProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -56,6 +73,17 @@ export function StorePickerModal({
   const rowCount = sortedStores.length + (includeAllOption ? 1 : 0);
   const maxListHeight = Math.max(160, Math.min(480, height * 0.58));
   const listHeight = Math.min(rowCount * 48, maxListHeight);
+  // 多选草稿：每次打开时从调用方的已选值重新开始（渲染期同步，避免打开瞬间闪一下旧草稿）。
+  const [draftCodes, setDraftCodes] = useState<string[]>([]);
+  const [draftOpen, setDraftOpen] = useState(false);
+  if (visible !== draftOpen) {
+    setDraftOpen(visible);
+    if (visible && multiple) setDraftCodes([...multiple.selectedStoreCodes]);
+  }
+  const draftSet = useMemo(() => new Set(draftCodes), [draftCodes]);
+  const toggleDraft = (storeCode: string) => setDraftCodes((current) => (
+    current.includes(storeCode) ? current.filter((code) => code !== storeCode) : [...current, storeCode]
+  ));
 
   const content = (
       <Modal
@@ -78,27 +106,72 @@ export function StorePickerModal({
           overScrollMode="never"
           showsVerticalScrollIndicator
         >
-          {includeAllOption ? (
-            <PickerRow
-              label={allLabel ?? title}
-              content={renderAllLabel?.(allLabel ?? title)}
-              selected={!selectedStoreCode}
-              onPress={() => void onSelectStore(null)}
-            />
-          ) : null}
-          {sortedStores.map((store) => (
-            <PickerRow
-              key={store.storeCode}
-              label={store.storeName || store.storeCode}
-              content={renderStoreLabel?.(store)}
-              selected={store.storeCode === selectedStoreCode}
-              onPress={() => void onSelectStore(store)}
-            />
-          ))}
+          {multiple ? (
+            <>
+              {includeAllOption ? (
+                <MultiPickerRow
+                  label={allLabel ?? title}
+                  content={renderAllLabel?.(allLabel ?? title)}
+                  checked={draftCodes.length === 0}
+                  onPress={() => setDraftCodes([])}
+                />
+              ) : null}
+              {sortedStores.map((store) => (
+                <MultiPickerRow
+                  key={store.storeCode}
+                  label={store.storeName || store.storeCode}
+                  content={renderStoreLabel?.(store)}
+                  checked={draftSet.has(store.storeCode)}
+                  onPress={() => toggleDraft(store.storeCode)}
+                />
+              ))}
+            </>
+          ) : (
+            <>
+              {includeAllOption ? (
+                <PickerRow
+                  label={allLabel ?? title}
+                  content={renderAllLabel?.(allLabel ?? title)}
+                  selected={!selectedStoreCode}
+                  onPress={() => void onSelectStore?.(null)}
+                />
+              ) : null}
+              {sortedStores.map((store) => (
+                <PickerRow
+                  key={store.storeCode}
+                  label={store.storeName || store.storeCode}
+                  content={renderStoreLabel?.(store)}
+                  selected={store.storeCode === selectedStoreCode}
+                  onPress={() => void onSelectStore?.(store)}
+                />
+              ))}
+            </>
+          )}
         </ScrollView>
-        <View style={styles.actions}>
-          <Button contentStyle={isSheet ? { minHeight: 44 } : undefined} onPress={onDismiss}>{cancelLabel}</Button>
-        </View>
+        {multiple ? (
+          <View style={styles.multiFooter}>
+            <Text variant="bodySmall" style={styles.multiSummary} numberOfLines={1}>
+              {draftCodes.length === 0 ? (allLabel ?? title) : multiple.selectedCountLabel(draftCodes.length)}
+            </Text>
+            <View style={styles.multiActions}>
+              <Button mode="outlined" style={styles.multiButton} contentStyle={{ minHeight: 44 }} onPress={onDismiss}>
+                {cancelLabel}
+              </Button>
+              <Button
+                mode="contained"
+                style={[styles.multiButton, styles.multiPrimary]}
+                contentStyle={{ minHeight: 44 }}
+                onPress={() => multiple.onApply(draftCodes)}
+              >
+                {multiple.confirmLabel}
+              </Button>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.actions}>
+            <Button contentStyle={isSheet ? { minHeight: 44 } : undefined} onPress={onDismiss}>{cancelLabel}</Button>
+          </View>
+        )}
       </Modal>
   );
 
@@ -162,6 +235,37 @@ function PickerRow({
   );
 }
 
+function MultiPickerRow({
+  label,
+  content,
+  checked,
+  onPress,
+}: {
+  label: string;
+  content?: ReactNode;
+  checked: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.multiItem, pressed ? styles.multiItemPressed : null]}
+    >
+      <Icon
+        source={checked ? "checkbox-marked" : "checkbox-blank-outline"}
+        size={22}
+        color={checked ? HB_COLORS.brand : HB_COLORS.outline}
+      />
+      <View style={styles.itemButton}>
+        {content ?? <Text variant="bodyLarge" numberOfLines={1}>{label}</Text>}
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   sheetOverlay: { justifyContent: "flex-end" },
   sheet: { width: "100%", maxWidth: 680, borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingHorizontal: 16, paddingTop: 10 },
@@ -188,6 +292,34 @@ const styles = StyleSheet.create({
   itemButton: {
     flex: 1,
     minWidth: 0,
+  },
+  multiItem: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 48,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  multiItemPressed: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+  },
+  multiFooter: {
+    gap: 8,
+    marginTop: 8,
+  },
+  multiSummary: {
+    color: HB_COLORS.textSecondary,
+  },
+  multiActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  multiButton: {
+    flex: 1,
+  },
+  multiPrimary: {
+    flex: 2,
   },
   itemButtonContent: {
     justifyContent: "flex-start",

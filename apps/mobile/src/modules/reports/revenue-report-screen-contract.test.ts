@@ -302,6 +302,23 @@ assert.match(screenSource, /formatOrdinal\(rowIndex\)/, "分店排行必须显�
 assert.match(source.slice(modalStart), /<Modal[\s\S]*?<FlatList[\s\S]*?renderDetailRow/, "分时或每日明细必须在下一层可滚动抽屉中显示");
 assert.match(source.slice(modalStart), /data=\{branchPickerRows\}[\s\S]*?initialNumToRender=\{14\}/, "分店选择器必须连续滚动全部分店而不分页");
 assert.match(source.slice(modalStart), /branchPickerSearch[\s\S]*?searchBranchPlaceholder/, "分店选择抽屉必须支持从 25 到 30 家中快速搜索");
+// 分店多选：打开时从已选值建草稿，行点选只改草稿，「确认」才写回并收敛到白名单；汇总与累计卡按所选各店过滤。
+assert.match(screenSource, /setBranchPickerDraft\(selectedBranchCodes\);[\s\S]*?setBranchPickerVisible\(true\)/, "打开分店选择器必须从当前所选分店建草稿");
+assert.match(
+  source.slice(modalStart),
+  /setBranchPickerDraft\(\(current\) => toggleStoreSelection\(current, item\.branchCode\)\)/,
+  "分店行点选只在草稿里加入或移出，不得直接改报表范围",
+);
+assert.match(
+  source.slice(modalStart),
+  /setSelectedBranchCodes\(normalizeStoreSelection\(branchPickerDraft, cashierEnabledStoreCodes\)\)/,
+  "确认时写回草稿并收敛到收银启用白名单（选满即全部分店）",
+);
+assert.match(
+  source,
+  /const scopedRows = useMemo\([\s\S]*?isStoreSelected\(selectedBranchCodes, row\.branchCode\)/,
+  "汇总与排行必须按所选的多家分店过滤",
+);
 assert.match(source, /numberOfLines=\{2\}[\s\S]*?getWeekdayLabel/, "每日明细必须完整显示日期与星期");
 assert.match(source, /rankCard:\s*\{[\s\S]*?minHeight: 64/, "排行卡片行高不得低于 64，且远大于 44px 触控下限");
 

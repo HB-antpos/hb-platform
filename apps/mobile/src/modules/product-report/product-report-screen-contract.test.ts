@@ -19,8 +19,8 @@ assert.match(
 );
 assert.match(
   source,
-  /getCashierScopedBranchCodes\(cashierEnabledStoreCodes, selectedStoreCode\)/,
-  "商品报告的单店筛选必须受收银启用白名单约束",
+  /getCashierScopedBranchSelection\(cashierEnabledStoreCodes, selectedStoreCodes\)/,
+  "商品报告的分店多选必须受收银启用白名单约束",
 );
 assert.equal(
   (source.match(/buildProductReportDateQuery\(activeRange, cashierEnabledStoreCodes\)/g) ?? []).length,
@@ -94,8 +94,8 @@ assert.match(
 );
 assert.match(
   source,
-  /storeOptionsQuery\.isFetching[\s\S]*?!storeOptionsQuery\.isSuccess[\s\S]*?!selectedStoreCode[\s\S]*?branchCodes\.length > 0[\s\S]*?setSelectedStoreCode\(undefined\)[\s\S]*?setDrilldown\(null\)/,
-  "已停用的陈旧单店选择必须先阻断请求，再清除选择和下钻",
+  /storeOptionsQuery\.isFetching[\s\S]*?!storeOptionsQuery\.isSuccess[\s\S]*?selectedStoreCodes\.length === 0[\s\S]*?branchCodes\.length > 0[\s\S]*?normalizeStoreSelection\(selectedStoreCodes, cashierEnabledStoreCodes\)[\s\S]*?setSelectedStoreCodes\(\[\]\)[\s\S]*?setDrilldown\(null\)/,
+  "多选里部分分店失效时只剔除失效分店；全部失效时必须先阻断请求，再清除选择和下钻",
 );
 assert.equal(
   (source.match(/void storeOptionsQuery\.refetch\(\);/g) ?? []).length >= 3,
@@ -121,7 +121,26 @@ assert.match(pickerSource, /allLabel=\{t\("productReport\.filters\.allStores"\)\
 assert.match(pickerSource, /title=\{t\("labels\.selectStore"\)/, "弹层必须有「选择门店」标题");
 assert.match(pickerSource, /cancelLabel=\{t\("actions\.cancel"\)\}/, "弹层必须有取消按钮");
 assert.match(pickerSource, /stores=\{pickerStores\}/);
-assert.match(pickerSource, /onSelectStore=\{\(store\) => applyStore\(store\?\.storeCode\)\}/, "选中门店与「全部分店」都走 applyStore");
+assert.match(
+  pickerSource,
+  /multiple=\{\{[\s\S]*?selectedStoreCodes,[\s\S]*?confirmLabel: t\("actions\.confirm"\)[\s\S]*?onApply: applyStore/,
+  "分店多选：「全部分店」与所选分店都经确认后走 applyStore",
+);
+assert.doesNotMatch(pickerSource, /onSelectStore=/, "多选模式不得再走单选回调");
+assert.match(
+  source,
+  /const applyStore = \(storeCodes: readonly string\[\]\) => \{[\s\S]*?normalizeStoreSelection\(storeCodes, cashierEnabledStoreCodes\)/,
+  "写回所选分店前必须收敛到白名单（选满即全部分店）",
+);
+assert.match(
+  source,
+  /toggleLinkedBranch = \(branchCode: string\) => \{[\s\S]*?toggleStoreSelection\(selectedStoreCodes, branchCode\)/,
+  "分店表整行点按在所选分店里加入或移出",
+);
+// 共用弹窗的多选模式：点选只改草稿，确认才回传；不传 multiple 时仍是原来的单选行为。
+assert.match(sharedPickerSource, /if \(visible && multiple\) setDraftCodes\(\[\.\.\.multiple\.selectedStoreCodes\]\)/, "每次打开从已选值重建草稿");
+assert.match(sharedPickerSource, /onPress=\{\(\) => multiple\.onApply\(draftCodes\)\}/, "只有确认按钮回传草稿");
+assert.match(sharedPickerSource, /onPress=\{\(\) => void onSelectStore\?\.\(store\)\}/, "单选模式保持点选即回传");
 // 排序、限高滚动由共用组件负责：分店按名字排序，列表限高可滚动。
 assert.match(sharedPickerSource, /sortStoresByName\(stores\)/, "分店选项必须按分店名字排序");
 assert.match(sharedPickerSource, /<ScrollView[\s\S]*?nestedScrollEnabled[\s\S]*?showsVerticalScrollIndicator/);
@@ -735,8 +754,8 @@ assert.match(
 // ===== 中国页签三表联动（2026-09-29）=====
 assert.match(
   source,
-  /<ChinaBranchShareSection[\s\S]*?selectedBranchCode=\{selectedStoreCode \?\? null\}[\s\S]*?onSelectBranch=\{toggleLinkedBranch\}[\s\S]*?supplierName=\{getSupplierLabel\(branchTableSupplierCode\)\}[\s\S]*?updating=\{linkedStaleness\.branchTable\}/,
-  "分店表点行选中分店（与顶部分店选择共用状态），选中供应商时显示该供应商在各分店的销售，重取期间标记更新中",
+  /<ChinaBranchShareSection[\s\S]*?selectedBranchCodes=\{selectedStoreCodes\}[\s\S]*?onSelectBranch=\{toggleLinkedBranch\}[\s\S]*?supplierName=\{getSupplierLabel\(branchTableSupplierCode\)\}[\s\S]*?updating=\{linkedStaleness\.branchTable\}/,
+  "分店表点行加入或移出所选分店（与顶部分店多选共用状态），选中供应商时显示该供应商在各分店的销售，重取期间标记更新中",
 );
 assert.match(
   source,
@@ -760,7 +779,7 @@ assert.match(
 );
 assert.match(
   source,
-  /summarizeChinaGoods\(\s*filterRowsByBranch\(chinaBranchTotalRows, selectedStoreCode\),\s*summaryRevenue\.revenue,/,
+  /summarizeChinaGoods\(\s*filterRowsByBranch\(chinaBranchTotalRows, selectedStoreCodes\),\s*summaryRevenue\.revenue,/,
   "汇总卡只跟随所选分店（前端切片），不随供应商变化",
 );
 const applyStoreStart = source.indexOf("const applyStore = ");

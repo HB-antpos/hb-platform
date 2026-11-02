@@ -18,7 +18,7 @@ const base: ProductReportDisplayContext = {
   compareStartDate: "2025-09-01",
   compareEndDate: "2025-09-29",
   compareMode: "ByDate",
-  branchCode: null,
+  branchCodes: [],
   supplierCode: null,
   productSearch: "",
   productPage: 1,
@@ -28,7 +28,7 @@ const base: ProductReportDisplayContext = {
 const next = (patch: Partial<ProductReportDisplayContext>) => ({ ...base, ...patch });
 
 assert.deepEqual(
-  getLinkedTransitionStaleness(base, next({ branchCode: "1001" })),
+  getLinkedTransitionStaleness(base, next({ branchCodes: ["1001"] })),
   { branchTable: false, supplierTable: true, productTable: true },
   "选分店：分店表不变（只高亮），供应商表与明细重取",
 );
@@ -43,9 +43,9 @@ assert.deepEqual(
   "澳洲页签没有分店表，选供应商只影响明细",
 );
 assert.deepEqual(
-  getLinkedTransitionStaleness(next({ branchCode: "1001", supplierCode: "CN01" }), next({ branchCode: "1002", supplierCode: "CN01" })),
+  getLinkedTransitionStaleness(next({ branchCodes: ["1001"], supplierCode: "CN01" }), next({ branchCodes: ["1001", "1002"], supplierCode: "CN01" })),
   { branchTable: false, supplierTable: true, productTable: true },
-  "已选供应商时换分店：分店表数据不变",
+  "已选供应商时增减分店：分店表数据不变",
 );
 assert.deepEqual(
   getLinkedTransitionStaleness(base, next({ productPage: 2 })),
@@ -62,9 +62,9 @@ assert.deepEqual(
   { branchTable: false, supplierTable: false, productTable: true },
 );
 assert.deepEqual(
-  getLinkedTransitionStaleness(next({ branchCode: "1001" }), next({ branchCode: " 1001 " })),
+  getLinkedTransitionStaleness(next({ branchCodes: ["1001", "ab02"] }), next({ branchCodes: [" AB02 ", "1001"] })),
   FRESH_LINKED_SECTIONS,
-  "代码只差大小写或空白时视为同一选择",
+  "同一组分店只差顺序、大小写或空白时视为同一选择",
 );
 assert.equal(getLinkedTransitionStaleness(base, next({ kind: "australia" })), null, "切页签不是同一份报告，走整页加载");
 assert.equal(getLinkedTransitionStaleness(base, next({ endDate: "2026-09-28" })), null, "改日期不能沿用旧结果");
@@ -83,15 +83,17 @@ const branches = [
   { branchCode: "1001", branchName: "A", revenue: 100, compareRevenue: 80 },
   { branchCode: "1002", branchName: "B", revenue: 50, compareRevenue: 70 },
 ];
-assert.deepEqual(filterRowsByBranch(branches, null), branches, "未选分店时返回全部");
-assert.deepEqual(filterRowsByBranch(branches, "1002").map((row) => row.branchName), ["B"]);
-assert.deepEqual(filterRowsByBranch(branches, "9999"), [], "白名单外的分店切不出任何行");
+assert.deepEqual(filterRowsByBranch(branches, []), branches, "未选分店时返回全部");
+assert.deepEqual(filterRowsByBranch(branches, ["1002"]).map((row) => row.branchName), ["B"]);
+assert.deepEqual(filterRowsByBranch(branches, ["1002", "1001"]).map((row) => row.branchName), ["A", "B"], "多选保留原行顺序");
+assert.deepEqual(filterRowsByBranch(branches, ["9999"]), [], "白名单外的分店切不出任何行");
 
 const totalRevenue = { revenue: 160, compareRevenue: 150, branches };
-assert.deepEqual(getScopedRevenue(totalRevenue, null), { revenue: 160, compareRevenue: 150 }, "未选分店沿用接口总额");
-assert.deepEqual(getScopedRevenue(totalRevenue, "1001"), { revenue: 100, compareRevenue: 80 }, "选分店时从分店明细切片");
-assert.deepEqual(getScopedRevenue(totalRevenue, "9999"), { revenue: 0, compareRevenue: 0 });
-assert.deepEqual(getScopedRevenue(undefined, "1001"), { revenue: 0, compareRevenue: 0 });
+assert.deepEqual(getScopedRevenue(totalRevenue, []), { revenue: 160, compareRevenue: 150 }, "未选分店沿用接口总额");
+assert.deepEqual(getScopedRevenue(totalRevenue, ["1001"]), { revenue: 100, compareRevenue: 80 }, "选分店时从分店明细切片");
+assert.deepEqual(getScopedRevenue(totalRevenue, ["1001", "1002"]), { revenue: 150, compareRevenue: 150 }, "多选时所选各店求和");
+assert.deepEqual(getScopedRevenue(totalRevenue, ["9999"]), { revenue: 0, compareRevenue: 0 });
+assert.deepEqual(getScopedRevenue(undefined, ["1001"]), { revenue: 0, compareRevenue: 0 });
 
 const letters = ["a", "b", "c", "d", "e"];
 assert.deepEqual(
@@ -103,6 +105,11 @@ assert.deepEqual(
   getCollapsedRowsWithSelection(letters, 3, (row) => row === "e"),
   { rows: ["a", "b", "c", "e"], appendedSelected: true },
   "选中行不在前几名时附在折叠列表末尾",
+);
+assert.deepEqual(
+  getCollapsedRowsWithSelection(letters, 3, (row) => row === "a" || row === "e" || row === "d"),
+  { rows: ["a", "b", "c", "d", "e"], appendedSelected: true },
+  "多选时前几名之外的已选行全部按原顺序附在末尾",
 );
 assert.deepEqual(
   getCollapsedRowsWithSelection(letters, 3, () => false),
