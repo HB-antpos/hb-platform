@@ -24,7 +24,7 @@ import {
 import {
   extractMyobError,
   getMyobErrorMessageKey,
-  parseMyobCallback,
+  parseMyobCallbackAt,
   stripMyobCallbackParams,
   upsertConnection,
 } from './myobLogic'
@@ -63,7 +63,7 @@ export default function MyobPage() {
   )
   // 授权回跳（?myob=）要落在「连接与映射」，其余按第一个可见页签
   const [requestedTab, setRequestedTab] = useState<MyobTabKey | null>(() =>
-    parseMyobCallback(location.search) ? 'connections' : null,
+    parseMyobCallbackAt(location.pathname, location.search) ? 'connections' : null,
   )
   const activeTab = resolveActiveMyobTab(requestedTab, visibleTabs)
   const [bindingCounts, setBindingCounts] = useState<MyobBindingCounts | null>(null)
@@ -174,12 +174,13 @@ export default function MyobPage() {
 
   // 授权完成后后端会把浏览器重定向回本页并带上 ?myob=connected / error；
   // 读取一次、提示结果，然后用 replace 清掉参数，刷新或返回时不会重复提示。
+  // 页面保活：切到别的页签后本组件仍挂着，只认 MYOB 对接页自己的地址。
   const handledCallback = useRef(false)
   useEffect(() => {
     if (handledCallback.current) {
       return
     }
-    const result = parseMyobCallback(location.search)
+    const result = parseMyobCallbackAt(location.pathname, location.search)
     if (!result) {
       return
     }

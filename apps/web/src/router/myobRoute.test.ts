@@ -41,14 +41,14 @@ const MYOB_CODE = 'Myob.Connection.Manage'
 const MYOB_BIND_CODE = 'Myob.Employee.Bind'
 const PAYROLL_EDIT_CODE = 'Attendance.Payroll.Edit'
 
-// 路由登记：作为「工时与工资」合并页的标签；懒加载、不保活（授权回跳带 ?myob= 参数，必须按新进入加载）、全局菜单键与独立访问键
+// 路由登记：作为「工时与工资」合并页的标签；懒加载、保活（切走再回来保留子页签 / 公司 / 视图；授权回跳是整页重新加载，不受保活影响）、全局菜单键与独立访问键
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 const routeStart = routeSource.indexOf(`path: '${MYOB_PATH}'`)
 assertEqual(routeStart >= 0, true, '必须登记 MYOB 对接路由')
 const routeBlock = routeSource.slice(routeStart, routeSource.indexOf('element:', routeStart) + 40)
 assertEqual(routeSource.includes("const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))"), true, '页面必须懒加载，不进首屏包')
 assertEqual(routeBlock.includes("title: 'menu.myob'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes('keepAlive: false'), true, '路由不能 keepAlive')
+assertEqual(routeBlock.includes('keepAlive: true'), true, '路由保活：切到别的页签再回来不重新加载')
 assertEqual(routeBlock.includes("accessKey: 'canAccessMyob'"), true, '路由使用「三者任一」访问键')
 assertEqual(routeBlock.includes('element: <PosAdminMyobPage />'), true, '路由必须渲染 MYOB 对接页')
 assertEqual(
