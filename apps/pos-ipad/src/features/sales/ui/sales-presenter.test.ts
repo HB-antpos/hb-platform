@@ -1251,6 +1251,83 @@ test("OPENITEM 只接受正整数分币，并透传给独立商品工作流", as
   presenter.destroy();
 });
 
+test("OPENITEM 单价上限 9999（含）：超限拒绝并提示，不进工作流", async () => {
+  const openItemCalls: number[] = [];
+  const feedback: SalesFeedbackEvent[] = [];
+  const { presenter } = createPresenter({
+    workflow: {
+      ...createWorkflow(async () => ({
+        completed: true,
+        canClearCart: true,
+        orderGuid: "order-open-item-limit",
+        cashDueCents: 995,
+        changeCents: 5,
+        postCommit: { drawerDisposition: "queued" },
+      })),
+      async addOpenItem(unitPriceCents) {
+        openItemCalls.push(unitPriceCents);
+      },
+    },
+  });
+  const unsubscribe = presenter.subscribeFeedback((event) => {
+    feedback.push(event);
+  });
+
+  // 键盘输入按收银页同一解析函数换算成分币：9999 与 9999.00 都等于上限，允许加入。
+  for (const accepted of ["9999", "9999.00"]) {
+    assert.equal(await presenter.addOpenItem(parseCashInput(accepted)!), true);
+    assert.equal(presenter.getState().errorCode, null);
+  }
+  for (const rejected of ["9999.01", "10000", "100000000"]) {
+    assert.equal(await presenter.addOpenItem(parseCashInput(rejected)!), false);
+    assert.equal(presenter.getState().errorCode, "price-too-high");
+  }
+  assert.deepEqual(openItemCalls, [999_900, 999_900]);
+  assert.deepEqual(
+    feedback.filter((event) => event.kind === "failed-blocked").length,
+    3,
+  );
+
+  unsubscribe();
+  presenter.destroy();
+});
+
+test("改价单价上限 9999（含）：超限拒绝并提示，原行不受影响", async () => {
+  // 购物车里已有一行单价 12,410 的历史高价行：只拦新输入，不回头校验已有行。
+  const cart = new MemoryCartPort(saleCart(1_241_000));
+  const { presenter } = createPresenter({ cart });
+
+  assert.equal(await presenter.setLineQuantity("line-1", 2), true);
+  for (const accepted of ["9999", "9999.00"]) {
+    assert.equal(
+      await presenter.setLineUnitPriceCents(
+        "line-1",
+        parseCashInput(accepted)!,
+      ),
+      true,
+    );
+    assert.equal(presenter.getState().errorCode, null);
+  }
+  for (const rejected of ["9999.01", "10000", "100000000"]) {
+    assert.equal(
+      await presenter.setLineUnitPriceCents(
+        "line-1",
+        parseCashInput(rejected)!,
+      ),
+      false,
+    );
+    assert.equal(presenter.getState().errorCode, "price-too-high");
+  }
+
+  assert.deepEqual(cart.mutations, [
+    { operation: "line-quantity", lineId: "line-1", value: 2 },
+    { operation: "line-price", lineId: "line-1", value: 999_900 },
+    { operation: "line-price", lineId: "line-1", value: 999_900 },
+  ]);
+
+  presenter.destroy();
+});
+
 test("OPENITEM 被终端取单恢复锁阻止时返回可操作的专用错误", async () => {
   const recoveryError = Object.assign(
     new Error("Terminal recall recovery must be resolved before editing the cart."),

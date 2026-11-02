@@ -197,7 +197,8 @@
             "apps/pos-wpf/src/Hbpos.Client.Wpf/ViewModels/PosTerminalViewModel.cs"
           ],
           "acceptance": [
-            "OPENITEM 保留名称、数量、输入价格和同步行类型。"
+            "OPENITEM 保留名称、数量、输入价格和同步行类型。",
+            "手工输入单价上限 9999（含），超出拒绝并提示，购物车不变（对齐 WPF PosPriceInputRules）。"
           ]
         },
         {
@@ -216,7 +217,8 @@
             "apps/pos-wpf/src/Hbpos.Client.Wpf/ViewModels/PosTerminalViewModel.cs"
           ],
           "acceptance": [
-            "使用整数分币重新计算行小计、折扣和整单金额。"
+            "使用整数分币重新计算行小计、折扣和整单金额。",
+            "改价单价上限 9999（含），超出拒绝并提示，原行不变（对齐 WPF PosPriceInputRules）。"
           ]
         },
         {
