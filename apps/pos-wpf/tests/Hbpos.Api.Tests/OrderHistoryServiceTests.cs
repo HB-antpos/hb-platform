@@ -432,6 +432,88 @@ public sealed class OrderHistoryServiceTests
         Assert.Contains(statements, statement => statement.Contains("EXISTS", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Sql_server_order_guid_probe_carries_the_query_date_range()
+    {
+        using var db = CreateSqlServerPreviewClient();
+
+        var sql = SqlSugarOrderHistoryRepository
+            .BuildOrderGuidProbeQuery(
+                db.Queryable<SalesOrder>(),
+                "1004",
+                "db596f11",
+                new DateTime(2025, 11, 2),
+                new DateTime(2026, 11, 2, 23, 59, 59))
+            .ToSql();
+
+        // 最早 1 年的下限也要落到探针上，候选里不会冒出窗口外的旧订单号；OrderTime 是覆盖索引的包含列，不加读页数。
+        Assert.Equal(2, CountOccurrences(sql.Key, "[OrderTime]"));
+        Assert.DoesNotContain("ORDER BY", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(sql.Value, parameter => Equals(parameter.Value, new DateTime(2025, 11, 2)));
+    }
+
+    [Theory]
+    [InlineData(DbType.SqlServer, "2026-10-03", "2026-11-02 23:59:59", true)]
+    [InlineData(DbType.SqlServer, "2025-11-02", "2026-11-02 23:59:59", false)] // 按单号定位的 1 年窗口：扫时间索引反而更多
+    [InlineData(DbType.SqlServer, "2026-10-03", null, false)]
+    [InlineData(DbType.SqlServer, null, "2026-11-02 23:59:59", false)]
+    [InlineData(DbType.Sqlite, "2026-10-03", "2026-11-02 23:59:59", false)]    // 表提示是 SQL Server 语法
+    public void Order_time_index_hint_only_for_sql_server_windows_up_to_one_month(
+        DbType dbType,
+        string? from,
+        string? to,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SqlSugarOrderHistoryRepository.ShouldHintOrderTimeIndex(
+                dbType,
+                from is null ? null : DateTime.Parse(from),
+                to is null ? null : DateTime.Parse(to)));
+    }
+
+    [Fact]
+    public void Sql_server_order_time_index_hint_lands_on_the_outer_order_table()
+    {
+        using var db = CreateSqlServerPreviewClient();
+        var codes = new List<string> { "G006243" };
+
+        var sql = db.Queryable<SalesOrder>()
+            .Where(x => x.BranchCode == "1011")
+            .Where(x => SqlFunc.Subqueryable<SalesOrderDetail>()
+                .Where(line => line.OrderGuid == x.OrderGuid && codes.Contains(line.ProductCode!))
+                .Any())
+            .With(SqlSugarOrderHistoryRepository.OrderTimeIndexHint)
+            .ToSql();
+
+        // 提示必须挂在外层 sales_order 上；挂到明细子查询或位置错了都会让 SQL Server 报错或用错索引。
+        Assert.Contains("[sales_order] [x] WITH(INDEX(IX_sales_order_OrderTime))", sql.Key, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(sql.Key, "IX_sales_order_OrderTime"));
+    }
+
+    [Fact]
+    public async Task QueryAsync_hot_product_within_a_date_window_still_returns_newest_orders_first()
+    {
+        // 带日期窗口时（交易历史页按商品搜）热门商品路径在 SQLite 上不加表提示，结果仍按时间倒序且受窗口约束。
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 1_100);
+        await database.DbContext.PosmDb.Ado.ExecuteCommandAsync(
+            "UPDATE sales_order_detail SET ProductCode = 'HOT-1' WHERE ProductCode LIKE 'P-%'");
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest(
+                "S001",
+                // fixture 的订单墙钟时间在 2026-08-25 09:41~10:00；按悉尼时区换算后窗口要覆盖到这段。
+                SoldFrom: DateTimeOffset.Parse("2026-08-24T00:00:00Z"),
+                SoldTo: DateTimeOffset.Parse("2026-08-25T23:59:59Z"),
+                Keyword: "HOT-1",
+                Take: 3),
+            CancellationToken.None);
+
+        Assert.Equal(3, response.Orders.Count);
+        Assert.Equal(Guid.Parse("00000000-0000-0000-0000-000000000001"), response.Orders[0].OrderGuid);
+    }
+
     private static async Task InsertProductAsync(OrderHistorySqliteFixture database, string productCode, string barcode)
     {
         await database.DbContext.PosmDb.Insertable(new Product

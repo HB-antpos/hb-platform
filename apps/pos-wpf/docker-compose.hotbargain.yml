@@ -56,6 +56,9 @@ services:
       - RemoteMaintenance__CenterBaseUrl=https://hotbargain.vip/
       - RemoteMaintenance__InterApiKey=${REMOTE_MAINTENANCE_INTER_API_KEY:-}
       - CashierAuthorization__Mode=${HBPOS_CASHIER_AUTHORIZATION_MODE:-Audit}
+      # 收银端订单查询时间窗口：最早 N 个月、按区间浏览 / 按商品搜跨度 M 个月；设为 0 关闭该项（不重建镜像即可调整）。
+      - OrderQueryWindow__EarliestMonths=${HBPOS_ORDER_QUERY_EARLIEST_MONTHS:-12}
+      - OrderQueryWindow__MaxSpanMonths=${HBPOS_ORDER_QUERY_MAX_SPAN_MONTHS:-1}
       # App Review 默认关闭；仅在审核窗口从服务器 .env 注入专用门店、UTC 到期时间和开通码 SHA-256。
       - PosIpadAppReview__Enabled=${HBPOS_IPAD_APP_REVIEW_ENABLED:-false}
       - PosIpadAppReview__StoreCode=${HBPOS_IPAD_APP_REVIEW_STORE_CODE:-}

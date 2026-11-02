@@ -16,6 +16,7 @@ public sealed class OrdersController(
     IOrderSyncService orderSyncService,
     IOrderHistoryService orderHistoryService,
     IOrderReturnService orderReturnService,
+    IOrderQueryWindowService orderQueryWindowService,
     ILogger<OrdersController>? logger = null) : ControllerBase
 {
     [Authorize(Policy = CashierAuthorizationPolicies.OrderSync)]
@@ -138,9 +139,23 @@ public sealed class OrdersController(
             return DeviceAuthorizationExtensions.DeviceScopeForbidden<OrderHistoryQueryResponse>("Device is not authorized for this store.");
         }
 
-        var response = await orderHistoryService.QueryAsync(
+        // 时间窗口是权威校验：最早 1 年、按区间浏览 / 按商品搜跨度 1 个月内；没带日期的按规则补默认区间，不拒绝。
+        var window = await orderQueryWindowService.ResolveHistoryWindowAsync(
             new OrderHistoryQueryRequest(storeCode, deviceCode, soldFrom, soldTo, keyword, take <= 0 ? 100 : take, Math.Max(skip, 0)),
             cancellationToken);
+        if (window.IsRejected)
+        {
+            logger?.LogInformation(
+                "Order history query rejected code={Code} store={StoreCode} soldFrom={SoldFrom} soldTo={SoldTo} hasKeyword={HasKeyword}",
+                window.ErrorCode,
+                storeCode,
+                soldFrom,
+                soldTo,
+                !string.IsNullOrWhiteSpace(keyword));
+            return BadRequest(ApiResult<OrderHistoryQueryResponse>.Fail(window.ErrorCode!, window.ErrorMessage!));
+        }
+
+        var response = await orderHistoryService.QueryAsync(window.Request!, cancellationToken);
         return Ok(ApiResult<OrderHistoryQueryResponse>.Ok(response));
     }
 
@@ -179,6 +194,22 @@ public sealed class OrdersController(
         if (!this.IsDeviceScopeAllowed(context.Order.StoreCode))
         {
             return DeviceAuthorizationExtensions.DeviceScopeForbidden<OrderReturnContextDto?>("Device is not authorized for this store.");
+        }
+
+        // 扫完整订单号会跳过订单搜索直接加载原单，所以退货的最早日期要在这里再拦一次。
+        var tooOldMessage = await orderQueryWindowService.CheckReturnWindowAsync(
+            context.Order.StoreCode,
+            context.Order.SoldAt,
+            cancellationToken);
+        if (tooOldMessage is not null)
+        {
+            logger?.LogInformation(
+                "Order return context rejected code={Code} orderGuid={OrderGuid} store={StoreCode} soldAt={SoldAt}",
+                OrderQueryWindowRules.ErrorTooOldForReturn,
+                orderGuid,
+                context.Order.StoreCode,
+                context.Order.SoldAt);
+            return BadRequest(ApiResult<OrderReturnContextDto?>.Fail(OrderQueryWindowRules.ErrorTooOldForReturn, tooOldMessage));
         }
 
         return Ok(ApiResult<OrderReturnContextDto?>.Ok(context));
