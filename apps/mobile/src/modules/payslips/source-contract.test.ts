@@ -48,6 +48,9 @@ assert.match(detailScreen, /detail\.canDownloadPdf \? <ViewPdfRow/);
 assert.match(detailScreen, /detail\.canDownloadPdf \? \(\s*<Button/);
 assert.match(detailScreen, /detail\.canSendEmail \? \(\s*<Button/);
 assert.match(detailScreen, /detail\.canSendEmail \? \(\s*<PayslipEmailSheet/);
+// 分店归属与我方考勤工时只对管理员渲染（非管理员看不到，也不会请求工时）
+assert.match(detailScreen, /useAuthStore\(\(state\) => state\.access\.isAdmin\)/);
+assert.match(detailScreen, /isAdmin \? <PlacementCard/);
 assert.match(detailScreen, /showBar = Boolean\(detail && \(detail\.canDownloadPdf \|\| detail\.canSendEmail\)\)/);
 
 // 5) 邮件：改收件人必须勾选核对（发送按钮由 canSubmitEmail 控制）；失败时弹层不关闭，保留内容；成功才回调父页面
