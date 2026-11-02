@@ -66,6 +66,12 @@ public interface ICatalogSnapshotStore
         DateTimeOffset? since,
         string catalogVersion,
         DateTimeOffset expiresAt);
+
+    /// <summary>
+    /// 删除已过期、且调用方不再保留的磁盘快照（manifest 条目与正文），并清理 manifest 不引用的孤儿正文。
+    /// 默认空实现：内存或测试仓库没有磁盘积压。返回删除的条目数。
+    /// </summary>
+    int PruneExpired(DateTimeOffset now, Func<CatalogSnapshotDescriptor, bool> shouldKeep) => 0;
 }
 
 /// <summary>
@@ -77,6 +83,7 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
 {
     private const string ManifestFileName = "manifest.json";
     private const string Codec = "gzip";
+    private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(1);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _rootPath;
     private readonly int _maxSnapshotsPerStore;
@@ -269,6 +276,54 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
     }
 
     private string ManifestPath => Path.Combine(_rootPath, ManifestFileName);
+
+    public int PruneExpired(DateTimeOffset now, Func<CatalogSnapshotDescriptor, bool> shouldKeep)
+    {
+        ArgumentNullException.ThrowIfNull(shouldKeep);
+        lock (_gate)
+        {
+            var manifest = ReadManifest(failClosedOnInvalid: true);
+            var manifestSnapshots = manifest.Snapshots!;
+            // 每店最新一份（按 GeneratedAt）是 LKG，即使过期也保留，与内存侧 PruneExpiredSnapshots 口径一致。
+            var latestPerStore = manifestSnapshots
+                .GroupBy(entry => entry.StoreCode, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(entry => entry.GeneratedAt)
+                    .ThenByDescending(entry => entry.CatalogVersion, StringComparer.Ordinal)
+                    .First())
+                .ToHashSet();
+            // 双重条件：manifest 自己记录的过期时间已到（续期/新写入的条目过期时间在未来，天然不会误删），
+            // 且调用方（目录缓存）确认已不再保留、也没有下载租约引用。
+            var removed = manifestSnapshots
+                .Where(entry => entry.ExpiresAt <= now)
+                .Where(entry => !latestPerStore.Contains(entry))
+                .Where(entry => !shouldKeep(ToDescriptor(entry)))
+                .ToArray();
+            if (removed.Length > 0)
+            {
+                foreach (var entry in removed)
+                {
+                    manifestSnapshots.Remove(entry);
+                }
+
+                // 先发布 manifest 再删正文：中途失败最多留下孤儿正文，下次清理会回收，不会出现 manifest 指向缺失文件。
+                WriteManifest(manifest);
+                foreach (var entry in removed)
+                {
+                    TryDelete(ResolveRelativePath(entry.FileName));
+                }
+            }
+
+            CleanupUnreferencedSnapshotBodies(manifest);
+            ForgetUnreferencedVerifiedBodies(manifest);
+            if (removed.Length > 0)
+            {
+                Log($"snapshot prune removed={removed.Length} remaining={manifestSnapshots.Count}");
+            }
+
+            return removed.Length;
+        }
+    }
 
     /// <summary>
     /// 确认正文仍与 manifest 记录的哈希一致。内容未变的续期每次都对数百 MB 的 gzip 文件重算 SHA-256 是纯浪费：
@@ -624,6 +679,20 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
                 if (!referencedPaths.Contains(path))
                 {
                     // 仅扫描最终 gzip 名称；写入中的 .tmp 文件不会落入清理范围。
+                    TryDelete(path);
+                }
+            }
+
+            // 写入中途进程被杀（如部署换容器）会留下 *.json.gz.<guid>.tmp，生产曾积压 13 个约 431MB。
+            // 正在写的临时文件修改时间是刚才，按 1 小时宽限期区分，绝不碰进行中的写入。
+            var staleBefore = DateTime.UtcNow - StaleTemporaryFileAge;
+            foreach (var path in Directory.EnumerateFiles(
+                         snapshotsPath,
+                         "*.json.gz.*.tmp",
+                         SearchOption.AllDirectories))
+            {
+                if (File.GetLastWriteTimeUtc(path) < staleBefore)
+                {
                     TryDelete(path);
                 }
             }
