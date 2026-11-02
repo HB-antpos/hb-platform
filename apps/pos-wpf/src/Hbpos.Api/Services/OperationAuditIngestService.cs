@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using BlazorApp.Shared.DTOs;
@@ -19,8 +20,16 @@ public interface IOperationAuditIngestService
 
 public sealed class SqlSugarOperationAuditIngestService(
     HbposSqlSugarContext dbContext,
-    TimeProvider? timeProvider = null) : IOperationAuditIngestService
+    TimeProvider? timeProvider = null,
+    ILogger<SqlSugarOperationAuditIngestService>? logger = null) : IOperationAuditIngestService
 {
+    // POSM 表金额列为 decimal(10,2)、数量列为 decimal(10,3)，绝对值超过下面的上限插入时 SQL Server 报 8115 算术溢出。
+    internal const decimal MaximumMoneyMagnitude = 99_999_999.99m;
+    internal const decimal MaximumQuantityMagnitude = 9_999_999.999m;
+
+    // 服务端写入的越界原值注记键；不在客户端属性白名单内，客户端无法伪造。
+    internal const string OutOfRangeValuesPropertyKey = "outOfRangeValues";
+
     private static readonly HashSet<string> AllowedOutcomes = new(StringComparer.OrdinalIgnoreCase)
     {
         "Succeeded", "Denied", "Failed"
@@ -145,15 +154,30 @@ public sealed class SqlSugarOperationAuditIngestService(
                 return "duplicate";
             }
 
+            var outOfRangeValues = new List<string>();
             var parent = MapParent(
                 auditEvent,
                 storeCode,
                 deviceCode,
                 deviceSystem,
-                clock.GetUtcNow().UtcDateTime);
+                clock.GetUtcNow().UtcDateTime,
+                outOfRangeValues);
             var items = (auditEvent.Items ?? [])
-                .Select((item, index) => MapItem(auditEvent.EventId, index, item))
+                .Select((item, index) => MapItem(auditEvent.EventId, index, item, outOfRangeValues))
                 .ToList();
+            // 主表与明细都映射完后再写属性：越界字段已置空，原值统一留在注记里，整条审计照常入库，
+            // 否则 8115 会让整批 500、客户端按 30 分钟退避无限重传（2026-10-31 1014 店开价商品 1 亿即此情形）。
+            parent.PropertiesJson = SerializeAllowedProperties(auditEvent.Properties, outOfRangeValues);
+            if (outOfRangeValues.Count > 0)
+            {
+                logger?.LogWarning(
+                    "Operation audit values out of column range store={StoreCode} device={DeviceCode} eventId={EventId} operationType={OperationType} values={OutOfRangeValues}",
+                    parent.StoreCode,
+                    parent.DeviceCode,
+                    parent.EventId,
+                    parent.OperationType,
+                    string.Join(";", outOfRangeValues));
+            }
 
             await db.Insertable(parent).ExecuteCommandAsync(cancellationToken);
             if (items.Count > 0)
@@ -229,7 +253,8 @@ public sealed class SqlSugarOperationAuditIngestService(
         string storeCode,
         string deviceCode,
         string? deviceSystem,
-        DateTime receivedAtUtc)
+        DateTime receivedAtUtc,
+        List<string> outOfRangeValues)
     {
         var items = source.Items ?? [];
         return new PosOperationAudit
@@ -261,22 +286,26 @@ public sealed class SqlSugarOperationAuditIngestService(
             ReasonCode = CleanStructured(source.ReasonCode, 64),
             SafeMessage = CleanFreeText(source.SafeMessage, 1000),
             CurrencyCode = NormalizeCurrency(source.CurrencyCode),
-            PaymentAmount = RoundMoney(source.PaymentAmount),
-            BeforeGross = RoundMoney(source.BeforeGross),
-            AfterGross = RoundMoney(source.AfterGross),
-            BeforeDiscount = RoundMoney(source.BeforeDiscount),
-            AfterDiscount = RoundMoney(source.AfterDiscount),
-            BeforeActual = RoundMoney(source.BeforeActual),
-            AfterActual = RoundMoney(source.AfterActual),
-            AmountDelta = RoundMoney(source.AmountDelta),
+            PaymentAmount = FitMoney(source.PaymentAmount, "paymentAmount", outOfRangeValues),
+            BeforeGross = FitMoney(source.BeforeGross, "beforeGross", outOfRangeValues),
+            AfterGross = FitMoney(source.AfterGross, "afterGross", outOfRangeValues),
+            BeforeDiscount = FitMoney(source.BeforeDiscount, "beforeDiscount", outOfRangeValues),
+            AfterDiscount = FitMoney(source.AfterDiscount, "afterDiscount", outOfRangeValues),
+            BeforeActual = FitMoney(source.BeforeActual, "beforeActual", outOfRangeValues),
+            AfterActual = FitMoney(source.AfterActual, "afterActual", outOfRangeValues),
+            AmountDelta = FitMoney(source.AmountDelta, "amountDelta", outOfRangeValues),
             ProductCount = items.Count,
-            PrimaryProduct = CleanStructured(items.FirstOrDefault()?.DisplayName ?? items.FirstOrDefault()?.ProductCode, 255),
-            PropertiesJson = SerializeAllowedProperties(source.Properties)
+            PrimaryProduct = CleanStructured(items.FirstOrDefault()?.DisplayName ?? items.FirstOrDefault()?.ProductCode, 255)
         };
     }
 
-    private static PosOperationAuditItem MapItem(Guid eventId, int index, OperationAuditItemDto source)
+    private static PosOperationAuditItem MapItem(
+        Guid eventId,
+        int index,
+        OperationAuditItemDto source,
+        List<string> outOfRangeValues)
     {
+        var prefix = $"items[{index}].";
         return new PosOperationAuditItem
         {
             EventId = eventId,
@@ -287,21 +316,21 @@ public sealed class SqlSugarOperationAuditIngestService(
             LookupCode = CleanStructured(source.LookupCode, 100),
             DisplayName = CleanStructured(source.DisplayName, 255),
             LineKind = CleanStructured(source.LineKind, 32),
-            BeforeQuantity = RoundQuantity(source.BeforeQuantity),
-            AfterQuantity = RoundQuantity(source.AfterQuantity),
-            QuantityDelta = RoundQuantity(source.QuantityDelta),
-            BeforeUnitPrice = RoundMoney(source.BeforeUnitPrice),
-            AfterUnitPrice = RoundMoney(source.AfterUnitPrice),
-            UnitPriceDelta = RoundMoney(source.UnitPriceDelta),
-            BeforeDiscountAmount = RoundMoney(source.BeforeDiscountAmount),
-            AfterDiscountAmount = RoundMoney(source.AfterDiscountAmount),
-            DiscountAmountDelta = RoundMoney(source.DiscountAmountDelta),
-            BeforeGrossAmount = RoundMoney(source.BeforeGrossAmount),
-            AfterGrossAmount = RoundMoney(source.AfterGrossAmount),
-            GrossAmountDelta = RoundMoney(source.GrossAmountDelta),
-            BeforeActualAmount = RoundMoney(source.BeforeActualAmount),
-            AfterActualAmount = RoundMoney(source.AfterActualAmount),
-            ActualAmountDelta = RoundMoney(source.ActualAmountDelta)
+            BeforeQuantity = FitQuantity(source.BeforeQuantity, prefix + "beforeQuantity", outOfRangeValues),
+            AfterQuantity = FitQuantity(source.AfterQuantity, prefix + "afterQuantity", outOfRangeValues),
+            QuantityDelta = FitQuantity(source.QuantityDelta, prefix + "quantityDelta", outOfRangeValues),
+            BeforeUnitPrice = FitMoney(source.BeforeUnitPrice, prefix + "beforeUnitPrice", outOfRangeValues),
+            AfterUnitPrice = FitMoney(source.AfterUnitPrice, prefix + "afterUnitPrice", outOfRangeValues),
+            UnitPriceDelta = FitMoney(source.UnitPriceDelta, prefix + "unitPriceDelta", outOfRangeValues),
+            BeforeDiscountAmount = FitMoney(source.BeforeDiscountAmount, prefix + "beforeDiscountAmount", outOfRangeValues),
+            AfterDiscountAmount = FitMoney(source.AfterDiscountAmount, prefix + "afterDiscountAmount", outOfRangeValues),
+            DiscountAmountDelta = FitMoney(source.DiscountAmountDelta, prefix + "discountAmountDelta", outOfRangeValues),
+            BeforeGrossAmount = FitMoney(source.BeforeGrossAmount, prefix + "beforeGrossAmount", outOfRangeValues),
+            AfterGrossAmount = FitMoney(source.AfterGrossAmount, prefix + "afterGrossAmount", outOfRangeValues),
+            GrossAmountDelta = FitMoney(source.GrossAmountDelta, prefix + "grossAmountDelta", outOfRangeValues),
+            BeforeActualAmount = FitMoney(source.BeforeActualAmount, prefix + "beforeActualAmount", outOfRangeValues),
+            AfterActualAmount = FitMoney(source.AfterActualAmount, prefix + "afterActualAmount", outOfRangeValues),
+            ActualAmountDelta = FitMoney(source.ActualAmountDelta, prefix + "actualAmountDelta", outOfRangeValues)
         };
     }
 
@@ -368,6 +397,28 @@ public sealed class SqlSugarOperationAuditIngestService(
     private static decimal? RoundQuantity(decimal? value) =>
         value is null ? null : decimal.Round(value.Value, 3, MidpointRounding.AwayFromZero);
 
+    private static decimal? FitMoney(decimal? value, string fieldName, List<string> outOfRangeValues) =>
+        FitColumnRange(RoundMoney(value), MaximumMoneyMagnitude, fieldName, outOfRangeValues);
+
+    private static decimal? FitQuantity(decimal? value, string fieldName, List<string> outOfRangeValues) =>
+        FitColumnRange(RoundQuantity(value), MaximumQuantityMagnitude, fieldName, outOfRangeValues);
+
+    private static decimal? FitColumnRange(
+        decimal? rounded,
+        decimal maximumMagnitude,
+        string fieldName,
+        List<string> outOfRangeValues)
+    {
+        if (rounded is null || Math.Abs(rounded.Value) <= maximumMagnitude)
+        {
+            return rounded;
+        }
+
+        // 超出列精度时置空并记下原值，不夹到上限：夹成 99,999,999.99 会把明显的误输入伪装成看似合法的金额。
+        outOfRangeValues.Add($"{fieldName}={rounded.Value.ToString(CultureInfo.InvariantCulture)}");
+        return null;
+    }
+
     private static string CleanRequiredStructured(string value, int maxLength) =>
         CleanStructured(value, maxLength) ?? string.Empty;
 
@@ -396,15 +447,23 @@ public sealed class SqlSugarOperationAuditIngestService(
         return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength];
     }
 
-    private static string? SerializeAllowedProperties(IReadOnlyDictionary<string, string?>? properties)
+    private static string? SerializeAllowedProperties(
+        IReadOnlyDictionary<string, string?>? properties,
+        IReadOnlyList<string> outOfRangeValues)
     {
-        if (properties is null || properties.Count == 0)
+        if ((properties is null || properties.Count == 0) && outOfRangeValues.Count == 0)
         {
             return null;
         }
 
         var safe = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in properties.Take(20))
+        if (outOfRangeValues.Count > 0)
+        {
+            // 服务端注记先占位（最长 256 字符），客户端属性再在 4000 字符上限内依次填充，保证越界原值不被挤掉。
+            safe[OutOfRangeValuesPropertyKey] = CleanFreeText(string.Join(";", outOfRangeValues), 256);
+        }
+
+        foreach (var pair in (properties ?? new Dictionary<string, string?>()).Take(20))
         {
             if (!AllowedPropertyKeys.Contains(pair.Key))
             {

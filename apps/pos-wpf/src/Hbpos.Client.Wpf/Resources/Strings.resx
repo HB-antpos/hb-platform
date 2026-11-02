@@ -187,6 +187,7 @@
   <data name="pos.status.quantityMustBePositive" xml:space="preserve"><value>Quantity must be greater than 0.</value></data>
   <data name="pos.status.discountAmountTooHigh" xml:space="preserve"><value>Discount amount cannot exceed the current total.</value></data>
   <data name="pos.status.discountPercentOutOfRange" xml:space="preserve"><value>Discount percent must be between 0 and 100.</value></data>
+  <data name="pos.status.unitPriceTooHigh" xml:space="preserve"><value>Price cannot exceed {0}.</value></data>
   <data name="pos.status.lineQuantityUpdated" xml:space="preserve"><value>Quantity updated.</value></data>
   <data name="pos.status.linePriceUpdated" xml:space="preserve"><value>Price updated.</value></data>
   <data name="pos.status.lineDiscountUpdated" xml:space="preserve"><value>Line discount updated.</value></data>
@@ -625,7 +626,7 @@
   <data name="specialProducts.priceEditor.save" xml:space="preserve"><value>Save</value></data>
   <data name="specialProducts.priceEditor.clear" xml:space="preserve"><value>Clear</value></data>
   <data name="specialProducts.priceEditor.backspace" xml:space="preserve"><value>Backspace</value></data>
-  <data name="specialProducts.priceEditor.invalid" xml:space="preserve"><value>Enter a price above 0 and up to 99999.99, with at most two decimals.</value></data>
+  <data name="specialProducts.priceEditor.invalid" xml:space="preserve"><value>Enter a price above 0 and up to 9999, with at most two decimals.</value></data>
   <data name="specialProducts.priceEditor.same" xml:space="preserve"><value>The new price equals the current price.</value></data>
   <data name="specialProducts.status.priceOnlineRequired" xml:space="preserve"><value>Go online to change the retail price.</value></data>
   <data name="specialProducts.status.priceUpdated" xml:space="preserve"><value>Retail price of {0} changed to {1}.</value></data>

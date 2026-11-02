@@ -132,6 +132,7 @@ public sealed class InstallmentLinesEditorTests
     [InlineData("-3")]
     [InlineData("abc")]
     [InlineData("")]
+    [InlineData("9999.01")]
     [InlineData("1000001")]
     public void Invalid_unit_price_text_flags_the_row(string text)
     {
