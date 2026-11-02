@@ -419,12 +419,15 @@ internal sealed class MainChildViewModelFactory
     }
 
     /// <summary>
-    /// 日结后重启提示的协调器提供者。用委托延迟解析：协调器依赖 MainViewModel，而 MainViewModel 在构造时就创建本工厂，
+    /// 日结后凌晨重启的协调器提供者。用委托延迟解析：协调器依赖 MainViewModel，而 MainViewModel 在构造时就创建本工厂，
     /// 直接注入会形成循环依赖，所以由 ServiceRegistration 在 MainViewModel 构造完成后再配置。
     /// </summary>
     public Func<IPostDailyCloseRestartCoordinator?>? RestartCoordinatorProvider { get; set; }
 
-    /// <summary>设置页「日结后提醒重启」开关的存储；同样在 MainViewModel 构造完成后配置。</summary>
+    /// <summary>日结保存成功后请主界面自动登出收银员（参数为排定的凌晨重启时间），返回登出前的等待时间；由 MainViewModel 配置。</summary>
+    public Func<DateTimeOffset?, TimeSpan?>? RequestAutoLogoutAfterDailyClose { get; set; }
+
+    /// <summary>设置页「日结后凌晨自动重启」开关的存储；同样在 MainViewModel 构造完成后配置。</summary>
     public ISystemRestartSettingsStore? SystemRestartSettingsStore { get; set; }
 
     /// <summary>设置页「扫码枪灵敏度」的存储；同样在 MainViewModel 构造完成后配置。</summary>
@@ -447,7 +450,8 @@ internal sealed class MainChildViewModelFactory
             _operationAuthorizationService,
             _linklySettlementService,
             confirmLinklySettlementAsync,
-            RestartCoordinatorProvider);
+            RestartCoordinatorProvider,
+            RequestAutoLogoutAfterDailyClose);
     }
 
     public SettingsViewModel CreateSettingsViewModel(

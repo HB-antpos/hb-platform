@@ -2142,6 +2142,83 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Pos_terminal_remove_selected_middle_line_selects_next_line()
+    {
+        var (viewModel, _) = await CreateThreeLineCartAsync();
+        var (apples, bananas, cherries) = (viewModel.CartLines[0], viewModel.CartLines[1], viewModel.CartLines[2]);
+        viewModel.SelectedCartLine = bananas;
+
+        await Assert.IsAssignableFrom<IAsyncRelayCommand>(viewModel.RemoveLineCommand).ExecuteAsync(bananas);
+
+        Assert.Equal([apples, cherries], viewModel.CartLines);
+        Assert.Same(cherries, viewModel.SelectedCartLine);
+    }
+
+    [Fact]
+    public async Task Pos_terminal_remove_selected_last_line_selects_new_last_line()
+    {
+        var (viewModel, _) = await CreateThreeLineCartAsync();
+        var (bananas, cherries) = (viewModel.CartLines[1], viewModel.CartLines[2]);
+        viewModel.SelectedCartLine = cherries;
+
+        await Assert.IsAssignableFrom<IAsyncRelayCommand>(viewModel.RemoveLineCommand).ExecuteAsync(cherries);
+
+        Assert.Equal(2, viewModel.CartLines.Count);
+        Assert.Same(bananas, viewModel.SelectedCartLine);
+    }
+
+    [Fact]
+    public async Task Pos_terminal_remove_unselected_line_keeps_current_selection()
+    {
+        var (viewModel, _) = await CreateThreeLineCartAsync();
+        var (apples, cherries) = (viewModel.CartLines[0], viewModel.CartLines[2]);
+        viewModel.SelectedCartLine = apples;
+
+        await Assert.IsAssignableFrom<IAsyncRelayCommand>(viewModel.RemoveLineCommand).ExecuteAsync(cherries);
+
+        Assert.Same(apples, viewModel.SelectedCartLine);
+    }
+
+    [Fact]
+    public async Task Pos_terminal_clear_cart_leaves_no_selection()
+    {
+        var (viewModel, cart) = await CreateThreeLineCartAsync();
+        viewModel.SelectedCartLine = viewModel.CartLines[1];
+
+        cart.Clear();
+        viewModel.RefreshCart();
+
+        Assert.Empty(viewModel.CartLines);
+        Assert.Null(viewModel.SelectedCartLine);
+    }
+
+    private static async Task<(PosTerminalViewModel ViewModel, PosCartService Cart)> CreateThreeLineCartAsync()
+    {
+        var cart = new PosCartService();
+        var index = new LocalSellableItemIndex();
+        index.ReplaceAll(
+        [
+            CreateItem("SKU-111", "Apples", "930111", PriceSourceKind.StoreRetailPrice, 2m),
+            CreateItem("SKU-112", "Bananas", "930112", PriceSourceKind.StoreRetailPrice, 3m),
+            CreateItem("SKU-113", "Cherries", "930113", PriceSourceKind.StoreRetailPrice, 4m)
+        ]);
+        var viewModel = new PosTerminalViewModel(
+            index,
+            cart,
+            Session,
+            onOpenPayment: null);
+
+        foreach (var code in new[] { "930111", "930112", "930113" })
+        {
+            viewModel.ScanText = code;
+            await ExecuteManualScanAsync(viewModel);
+        }
+
+        Assert.Equal(["Apples", "Bananas", "Cherries"], viewModel.CartLines.Select(line => line.DisplayName));
+        return (viewModel, cart);
+    }
+
+    [Fact]
     public async Task Pos_terminal_line_quantity_commands_update_totals_selection_and_counts()
     {
         var cart = new PosCartService();

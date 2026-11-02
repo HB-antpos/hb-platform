@@ -93,7 +93,7 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
             finally
             {
                 // 共享测试 Application 的其他用例依赖默认色板。
-                applier.Apply(PosColorTheme.Default);
+                applier.Apply(PosColorTheme.Blue);
             }
         });
 
@@ -157,7 +157,7 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
             }
             finally
             {
-                applier.Apply(PosColorTheme.Default);
+                applier.Apply(PosColorTheme.Blue);
             }
         });
 

@@ -123,5 +123,25 @@
     "all": "全部退款",
     "partial": "部分退款",
     "full": "整单退款"
+  },
+  "receipt": {
+    "tab": "小票",
+    "tabItems": "商品明细",
+    "loading": "正在加载小票",
+    "loadFailed": "小票加载失败",
+    "unsupported": "该订单状态暂不支持在线小票",
+    "openQr": "在线二维码",
+    "sendToCustomer": "发送给客人",
+    "qrTitle": "在线小票",
+    "qrHint": "客人扫码即可查看，无需登录",
+    "creating": "正在生成链接…",
+    "createFailed": "生成链接失败，请重试",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "shareFailed": "分享失败，请改用复制链接",
+    "regenerate": "重新生成",
+    "regenerateConfirm": "重新生成后旧链接立即失效，确定吗？",
+    "regenerated": "已重新生成，旧链接已失效",
+    "meta": "有效至 {{date}} · 已打开 {{count}} 次"
   }
 }

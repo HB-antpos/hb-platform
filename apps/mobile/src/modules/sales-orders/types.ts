@@ -133,3 +133,35 @@ export interface SalesOrderRangeValidation {
 }
 
 export type SalesOrderRangePreset = 1 | 7 | 30;
+
+/**
+ * 在线小票：后端已按收银机 42 列规则把整张小票排成逐行内容，移动端只按行绘制。
+ * kind：text 文本行、separator 分隔线、blank 空行、barcode Code128（text 为条码内容）、qr 二维码（text 为内容）。
+ */
+export interface SalesOrderReceiptLine {
+  kind: "text" | "separator" | "blank" | "barcode" | "qr";
+  text: string;
+  align: "left" | "center";
+  bold: boolean;
+}
+
+export interface SalesOrderReceiptDocument {
+  orderGuid: string;
+  /** 订单 GUID 去横杠后末 8 位大写。 */
+  shortCode: string;
+  /** 只用于纸外状态着色，纸面文字保持黑白。 */
+  statusKind: "paid" | "refund";
+  lines: SalesOrderReceiptLine[];
+}
+
+export interface SalesOrderReceiptLink {
+  url: string;
+  expiresAtUtc: string;
+  createdAtUtc: string;
+  openCount: number;
+}
+
+export interface SalesOrderReceiptView {
+  document: SalesOrderReceiptDocument;
+  link: SalesOrderReceiptLink | null;
+}

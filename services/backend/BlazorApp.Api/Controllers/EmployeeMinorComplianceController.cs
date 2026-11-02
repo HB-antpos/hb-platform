@@ -22,13 +22,19 @@ public sealed class EmployeeMinorComplianceController : ControllerBase
     [Authorize(Policy = Permissions.EmployeeProfiles.View)]
     public Task<ApiResponse<EmployeeMinorComplianceDto?>> GetSelf() => _service.GetSelfAsync();
 
+    // 员工本人不再填写、不再邀请监护人：改由店长 / HR 发送链接，家长在签署页补全资料并签字。
+    // 旧版 App 仍可能调用这两个接口，直接返回说明，不改动任何数据。
     [HttpPut("me")]
     [Authorize(Policy = Permissions.EmployeeProfiles.Edit)]
-    public Task<ApiResponse<EmployeeMinorComplianceDto>> Upsert([FromBody] EmployeeMinorComplianceUpsertDto dto) => _service.UpsertSelfAsync(dto);
+    public ApiResponse<EmployeeMinorComplianceDto> Upsert([FromBody] EmployeeMinorComplianceUpsertDto dto) =>
+        ApiResponse<EmployeeMinorComplianceDto>.Error(StaffOnlyMessage, EmployeeMinorComplianceService.StaffInviteOnlyCode);
 
     [HttpPost("me/guardian-invite")]
     [Authorize(Policy = Permissions.EmployeeProfiles.Edit)]
-    public Task<ApiResponse<EmployeeMinorComplianceInviteResultDto>> Invite([FromBody] EmployeeMinorComplianceInviteDto dto) => _service.InviteGuardianAsync(dto);
+    public ApiResponse<EmployeeMinorComplianceInviteResultDto> Invite([FromBody] EmployeeMinorComplianceInviteDto dto) =>
+        ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error(StaffOnlyMessage, EmployeeMinorComplianceService.StaffInviteOnlyCode);
+
+    private const string StaffOnlyMessage = "未成年用工资料改由店长或 HR 发送链接给家长填写并签字，员工本人无需操作";
 
     [HttpPost("me/submit")]
     [Authorize(Policy = Permissions.EmployeeProfiles.Edit)]
@@ -38,10 +44,10 @@ public sealed class EmployeeMinorComplianceController : ControllerBase
     [Authorize(Policy = Permissions.EmployeeProfiles.View)]
     public Task<ApiResponse<List<EmployeeMinorComplianceHistoryItemDto>>> SelfHistory() => _service.GetSelfHistoryAsync();
 
-    /// <summary>员工本人未完成的店长填写请求。</summary>
+    /// <summary>员工本人不再需要填写：旧版 App 的「店长请你填写」待办一律返回空。</summary>
     [HttpGet("me/requests")]
     [Authorize(Policy = Permissions.EmployeeProfiles.View)]
-    public Task<ApiResponse<List<EmployeeMinorComplianceRequestDto>>> SelfRequests() => _service.GetSelfRequestsAsync();
+    public ApiResponse<List<EmployeeMinorComplianceRequestDto>> SelfRequests() => ApiResponse<List<EmployeeMinorComplianceRequestDto>>.OK(new());
 
     // 店长端：沿用排班提醒待办的权限口径（查看门店排班 / 编辑可管理门店排班），门店范围由服务按可管理门店校验。
     [HttpGet("manager/candidates")]
@@ -55,6 +61,24 @@ public sealed class EmployeeMinorComplianceController : ControllerBase
     [HttpPost("manager/requests/{id:int}/cancel")]
     [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
     public Task<ApiResponse<EmployeeMinorComplianceRequestDto>> CancelRequest(int id) => _service.CancelRequestAsync(id);
+
+    // 店长 / HR 发送家长签字链接：手机「人员管理」与 Web「员工个人信息维护」共用，沿用店长端排班权限口径，门店范围由服务校验。
+    [HttpGet("staff")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.ViewStore)]
+    public Task<ApiResponse<EmployeeMinorStaffComplianceListDto>> StaffList([FromQuery] string? storeCode, [FromQuery] string? stateCode, [FromQuery] string? keyword, [FromQuery] bool needsActionOnly = false)
+        => _service.GetStaffComplianceListAsync(storeCode, stateCode, keyword, needsActionOnly);
+
+    [HttpGet("staff/{userGuid}")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.ViewStore)]
+    public Task<ApiResponse<EmployeeMinorStaffComplianceDetailDto>> StaffDetail(string userGuid) => _service.GetStaffComplianceAsync(userGuid);
+
+    [HttpPost("staff/{userGuid}/guardian-link")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+    public Task<ApiResponse<EmployeeMinorGuardianLinkSendResultDto>> SendGuardianLink(string userGuid, [FromBody] EmployeeMinorGuardianLinkSendDto dto) => _service.SendGuardianLinkAsync(userGuid, dto);
+
+    [HttpPost("staff/{userGuid}/guardian-link/revoke")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+    public Task<ApiResponse<EmployeeMinorStaffComplianceDto>> RevokeGuardianLink(string userGuid, [FromBody] EmployeeMinorGuardianLinkRevokeDto dto) => _service.RevokeGuardianLinkAsync(userGuid, dto);
 
     [HttpPost("guardian/session")]
     [AllowAnonymous]

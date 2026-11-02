@@ -50,7 +50,7 @@ public sealed class MyobTimesheetTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(MyobConnection), typeof(MyobStoreMapping), typeof(EmployeeMyobLink), typeof(EmployeePayrollEmployer),
             typeof(MyobPayCategoryMapping), typeof(Store), typeof(User), typeof(UserStore), typeof(EmployeeProfile),
-            typeof(EmployeeMinorCompliance));
+            typeof(EmployeeMinorCompliance), typeof(MyobTimesheetPush));
     }
 
     public void Dispose()
@@ -74,7 +74,7 @@ public sealed class MyobTimesheetTests : IDisposable
         plan.Pushed.Where(line => line.CategoryKey == category).Sum(line => line.Minutes);
 
     [Fact]
-    public void 规划_全转账_全部推送_类别映射正确_公假和带薪公假归平日_折现不推送()
+    public void 规划_全转账_全部推送_类别映射正确_公假和带薪公假归公共假期_折现不推送()
     {
         var items = new[]
         {
@@ -90,7 +90,9 @@ public sealed class MyobTimesheetTests : IDisposable
         var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeTransfer, 0m, 1, items).Companies[Inv];
 
         Assert.Equal(items.Sum(item => item.Minutes), plan.CapacityMinutes);
-        Assert.Equal((int)Math.Round((8 + 8 + 7.6) * 60), Minutes(plan, MyobPayCategoryKeys.Weekday));
+        Assert.Equal(480, Minutes(plan, MyobPayCategoryKeys.Weekday)); // 平日只剩平日自己的 8h
+        Assert.Equal((int)Math.Round((8 + 7.6) * 60), Minutes(plan, MyobPayCategoryKeys.PublicHoliday)); // 公假上班 + 带薪公假
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.PublicHolidayCasual));
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Saturday));
         Assert.Equal(300, Minutes(plan, MyobPayCategoryKeys.Sunday));
         Assert.Equal(360, Minutes(plan, MyobPayCategoryKeys.PersonalLeave));
@@ -101,7 +103,7 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
-    public void 规划_临时工_周六周日走临时工专用类别_平日和假期类别不变_全职兼职不受影响()
+    public void 规划_临时工_周六周日和公共假期走临时工专用类别_平日和病假年假类别不变_全职兼职不受影响()
     {
         var items = new[]
         {
@@ -116,7 +118,9 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(300, Minutes(casual, MyobPayCategoryKeys.SundayCasual));
         Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Saturday));
         Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.Sunday));
-        Assert.Equal(720, Minutes(casual, MyobPayCategoryKeys.Weekday)); // 平日 8h + 公假上班 4h 仍是平日类别
+        Assert.Equal(480, Minutes(casual, MyobPayCategoryKeys.Weekday)); // 平日 8h 仍是平日类别
+        Assert.Equal(240, Minutes(casual, MyobPayCategoryKeys.PublicHolidayCasual)); // 公假上班 4h 走临时工公共假期
+        Assert.Equal(0, Minutes(casual, MyobPayCategoryKeys.PublicHoliday));
         Assert.Equal(casual.CapacityMinutes, casual.PushedMinutes);
 
         // 全职 / 兼职（默认）：周末仍走原来的类别，没有任何临时工类别的行。
@@ -130,6 +134,8 @@ public sealed class MyobTimesheetTests : IDisposable
             Assert.Equal(300, Minutes(regular, MyobPayCategoryKeys.Sunday));
             Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SaturdayCasual));
             Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.SundayCasual));
+            Assert.Equal(240, Minutes(regular, MyobPayCategoryKeys.PublicHoliday));
+            Assert.Equal(0, Minutes(regular, MyobPayCategoryKeys.PublicHolidayCasual));
         }
     }
 
@@ -242,7 +248,8 @@ public sealed class MyobTimesheetTests : IDisposable
         };
         // 额度 14h：带薪公假 4 → 病假 4 → 年假 4 → 折现 2（只进一半，占用额度不推送）
         var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 14m, 1, items).Companies[Inv];
-        Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Weekday));       // 只有带薪公假 4h；平日 / 公假上班一点都没进
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.Weekday));         // 平日一点都没进
+        Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.PublicHoliday)); // 只有带薪公假 4h；公假上班一点都没进
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.PersonalLeave));
         Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.HolidayLeave));
         Assert.Equal(120, plan.CashOutTransferMinutes);
@@ -369,6 +376,9 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("Personal Leave Pay", aus.Suggestions.PersonalLeaveUid);
         // 线上曾被建议成 Annual Leave Loading（附加津贴）——年假必须是休假期间的工资，不是 Loading / Unused。
         Assert.Equal("Annual Leave Pay", aus.Suggestions.HolidayLeaveUid);
+        // PUBLIC HOLIDAY (x2) / (x2.25) 两档并列：公共假期不猜，也不会被「年假」认走。
+        Assert.Null(aus.Suggestions.PublicHolidayUid);
+        Assert.Null(aus.Suggestions.PublicHolidayCasualUid);
 
         // Investment：周六 x1.2 / x1.25、周日 x1.4 / x1.5 都并列 → 都不猜；Back Pay 是 Salary 型，不会被当成平日。
         _api.Categories = RealCategories(australian: false);
@@ -458,6 +468,63 @@ public sealed class MyobTimesheetTests : IDisposable
         _api.Categories = StandardCategories().ToList();
         var missing = (await Categories().GetAsync(Inv, true, CancellationToken.None)).Data!;
         Assert.Equal([MyobPayCategoryKeys.SaturdayCasual, MyobPayCategoryKeys.SundayCasual], missing.MissingKeys);
+        Assert.True(missing.Complete);
+    }
+
+    [Fact]
+    public async Task 类别映射_公共假期两项可选_建议只认Public_Holiday且临时工另含Casual_年假不被认走_保存读回_不影响完整度()
+    {
+        await SeedConnectionsAsync();
+        await SaveCompleteMappingAsync();
+        // 名字是 Public Holiday Pay：不能被「年假」的 holiday pay 规则认走，年假仍是 Holiday Leave Pay。
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-ph", "Public Holiday Pay", "Hourly"),
+            new MyobWageCategoryRecord("cat-ph-c", "Public Holiday Pay Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var basic = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.True(basic.Complete);
+        Assert.Equal(5, basic.MappedCount); // 公共假期两项不计入必填
+        Assert.Null(basic.Mapping.PublicHolidayUid);
+        Assert.Equal("cat-ph", basic.Suggestions.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", basic.Suggestions.PublicHolidayCasualUid);
+
+        // 全新账套：没有设过年假时，年假也只会建议 Holiday Leave Pay，不会选到 Public Holiday Pay。
+        await _db.Deleteable<MyobPayCategoryMapping>().Where(item => item.ConnectionGuid == Inv).ExecuteCommandAsync();
+        var fresh = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("cat-holiday", fresh.Suggestions.HolidayLeaveUid);
+        Assert.Equal("cat-ph", fresh.Suggestions.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", fresh.Suggestions.PublicHolidayCasualUid);
+
+        // 设上公共假期两项：存取一致，必填计数仍是 5，已设置的项不再给建议。
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            PublicHolidayUid = "cat-ph", PublicHolidayCasualUid = "cat-ph-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var full = (await Categories().GetAsync(Inv, false, CancellationToken.None)).Data!;
+        Assert.Equal("cat-ph", full.Mapping.PublicHolidayUid);
+        Assert.Equal("cat-ph-c", full.Mapping.PublicHolidayCasualUid);
+        Assert.Equal(5, full.MappedCount);
+        Assert.True(full.Complete);
+        Assert.Null(full.Suggestions.PublicHolidayUid);
+
+        // 公共假期与平日选同一个类别：拒绝；不存在的类别：拒绝。
+        var duplicate = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", PublicHolidayUid = "cat-base",
+        }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryDuplicate, duplicate.ErrorCode);
+        var ghost = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto { PublicHolidayCasualUid = "cat-ghost" }, "admin-1", CancellationToken.None);
+        Assert.Equal(MyobTimesheetErrorCodes.CategoryNotFound, ghost.ErrorCode);
+
+        // 公共假期类别在 MYOB 里被删：标出缺失项，但必填项仍完整。
+        _api.Categories = StandardCategories().ToList();
+        var missing = (await Categories().GetAsync(Inv, true, CancellationToken.None)).Data!;
+        Assert.Equal([MyobPayCategoryKeys.PublicHoliday, MyobPayCategoryKeys.PublicHolidayCasual], missing.MissingKeys);
         Assert.True(missing.Complete);
     }
 
@@ -557,10 +624,11 @@ public sealed class MyobTimesheetTests : IDisposable
 
     // ───────────────────────── MYOB 客户端（工资类别 / Timesheet 状态） ─────────────────────────
 
-    private static MyobApiClient ClientFor(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+    private static MyobApiClient ClientFor(Func<HttpRequestMessage, HttpResponseMessage> respond, bool pushEnabled = false) =>
         new(new HttpClient(new StubHandler(respond)), Options.Create(new MyobOptions
         {
             ClientId = "client-key", ClientSecret = "s", RedirectUri = "https://x/cb", MinRequestIntervalMs = 0,
+            TimesheetPushEnabled = pushEnabled,
         }));
 
     private static HttpResponseMessage Json(string body, System.Net.HttpStatusCode status = System.Net.HttpStatusCode.OK) =>
@@ -831,6 +899,73 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
+    public async Task 预览_公共假期按员工类型走各自类别_汇总列合计_没映射时拦截_平日不再含公假()
+    {
+        await SeedConnectionsAsync();
+        // 只映射必填 5 项（公共假期两项没设）
+        await SaveCompleteMappingAsync();
+        await SeedStoreAsync("1014", "Kawana", Inv, locked: true,
+            // 公假上班 8h + 带薪公假 7.6h + 平日 8h
+            Emp("u-cas", "Cas", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-27", PayrollBucket.PublicHoliday, 8)],
+                holidayPay: [Leave("2026-10-28", 7.6)], employmentType: "Casual"),
+            Emp("u-ft", "Fran", Rate("Transfer"),
+                [Work("2026-10-26", PayrollBucket.Weekday, 8), Work("2026-10-27", PayrollBucket.PublicHoliday, 8)],
+                holidayPay: [Leave("2026-10-28", 7.6)], employmentType: "FullTime"),
+            // 没有任何公假工时：不受公共假期两项没设的影响
+            Emp("u-plain", "Plain", Rate("Transfer"), [Work("2026-10-26", PayrollBucket.Weekday, 8)], employmentType: "PartTime"));
+        foreach (var user in new[] { "u-cas", "u-ft", "u-plain" })
+        {
+            await SeedUserAsync(user, user, "1014");
+            await BindAsync(user);
+            _source.Pairs.Add((user, "1014"));
+        }
+
+        var dto = await PreviewInvAsync();
+        var cas = RowOf(dto, "u-cas");
+        Assert.Equal(MyobPreviewStatuses.Blocked, cas.Status);
+        Assert.Contains(cas.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.PublicHolidayCasual);
+        Assert.DoesNotContain(cas.Blockers, item => item.Ref == MyobPayCategoryKeys.PublicHoliday);
+        var ft = RowOf(dto, "u-ft");
+        Assert.Equal(MyobPreviewStatuses.Blocked, ft.Status);
+        Assert.Contains(ft.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.PublicHoliday);
+        Assert.DoesNotContain(ft.Blockers, item => item.Ref == MyobPayCategoryKeys.PublicHolidayCasual);
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(dto, "u-plain").Status);
+
+        // 汇总：平日只剩 8h，公共假期 = 公假上班 + 带薪公假。
+        Assert.Equal(8m, ft.Pushed.Weekday);
+        Assert.Equal(15.6m, ft.Pushed.PublicHoliday);
+        Assert.Equal(15.6m, cas.Pushed.PublicHoliday);
+        Assert.Equal(["publicHoliday", "weekday"], ft.Detail.Pushed.Select(item => item.Key).Order().ToArray());
+        Assert.Equal(["publicHolidayCasual", "weekday"], cas.Detail.Pushed.Select(item => item.Key).Order().ToArray());
+        Assert.Equal(23.6m, ft.PushedTotal);
+
+        // 必填项齐全 = 就绪卡完整，不因为公共假期两项没设而变成「不完整」。
+        Assert.Equal(5, dto.Readiness.CategoryMappedCount);
+        Assert.True(dto.Readiness.CategoryComplete);
+
+        // 补上公共假期两项映射：拦截消失，网格行带 MYOB 类别名。
+        _api.Categories = StandardCategories().Concat(
+        [
+            new MyobWageCategoryRecord("cat-ph", "Public Holiday", "Hourly"),
+            new MyobWageCategoryRecord("cat-ph-c", "Public Holiday Casual", "Hourly"),
+        ]).ToList();
+        _cache.Remove($"myob:wagecats:{Inv}");
+        var saved = await Categories().SaveAsync(Inv, new MyobPayCategoryMappingDto
+        {
+            WeekdayUid = "cat-base", SaturdayUid = "cat-sat", SundayUid = "cat-sun",
+            PublicHolidayUid = "cat-ph", PublicHolidayCasualUid = "cat-ph-c",
+            PersonalLeaveUid = "cat-personal", HolidayLeaveUid = "cat-holiday",
+        }, "admin-1", CancellationToken.None);
+        Assert.True(saved.Success, saved.Message);
+        var ready = await PreviewInvAsync();
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(ready, "u-cas").Status);
+        Assert.Equal(MyobPreviewStatuses.Ready, RowOf(ready, "u-ft").Status);
+        Assert.Equal("Public Holiday Casual", RowOf(ready, "u-cas").Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.PublicHolidayCasual).Label);
+        Assert.Equal("Public Holiday", RowOf(ready, "u-ft").Detail.Pushed.Single(item => item.Key == MyobPayCategoryKeys.PublicHoliday).Label);
+    }
+
+    [Fact]
     public async Task 预览_将推送网格带MYOB类别名_缓存里有才有_没有为空()
     {
         await SeedMainScenarioAsync();
@@ -989,14 +1124,14 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
-    public async Task 预览_提示项_年假折现_公假价不一致_生日换档_低于最低时薪()
+    public async Task 预览_提示项_年假折现_生日换档_低于最低时薪_公假价不再提示()
     {
         await SeedMainScenarioAsync();
         await SeedStoreAsync("1030", "Hints", Inv, locked: true,
             // 年假 7.6h + 折现 8h；全转账所以折现也「转账」但不推送
             Emp("u-yuki", "Yuki", Rate("Transfer"),
                 [Work("2026-10-26", PayrollBucket.Weekday, 8)], annual: [Leave("2026-10-27", 7.6)], cashOut: [Leave("2026-10-28", 8)]),
-            // 公假上班 + 公假价（60）与平日价（30）不一致
+            // 公假上班 + 公假价（60）与平日价（30）不一致：公假现在有自己的 MYOB 类别，不再提示「公假价与平日价不一致」
             Emp("u-hol", "Hol", Rate("Transfer", weekday: 30m, holiday: 60m),
                 [Work("2026-10-27", PayrollBucket.PublicHoliday, 8)]),
             // 未成年：生日 2026-10-20 满 17 岁，时薪记录 2026-07-01 生效（早于生日）→ 提示改时薪
@@ -1021,7 +1156,7 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(8m, RowOf(dto, "u-yuki").Pushed.Weekday);
         Assert.Equal(8m, RowOf(dto, "u-yuki").Detail.AnnualCashOutTransferHours); // 全转账：折现占用 8h 额度但不推送
         Assert.True(RowOf(dto, "u-yuki").Detail.CheckOk, RowOf(dto, "u-yuki").Detail.CheckMessage);
-        Assert.Equal([MyobHintCodes.PublicHolidayRateMismatch], CodesOf("u-hol"));
+        Assert.Empty(CodesOf("u-hol"));
         Assert.Contains(MyobHintCodes.BirthdayReview, CodesOf("u-teen"));
         Assert.Contains("2026-10-20", dto.Hints.Single(hint => hint.Code == MyobHintCodes.BirthdayReview).Message, StringComparison.Ordinal);
         Assert.Contains(MyobHintCodes.BelowMinimumRate, CodesOf("u-low"));
@@ -1065,7 +1200,12 @@ public sealed class MyobTimesheetTests : IDisposable
     {
         await SeedMainScenarioAsync();
         Assert.False((await PreviewInvAsync()).PushEnabled);
-        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        // 只开总闸、白名单为空：不放行任何公司文件。
+        var noList = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(noList.Data!.PushEnabled);
+
+        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Inv })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
         Assert.True(on.Data!.PushEnabled);
     }
 
@@ -1104,6 +1244,199 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal(24m, BlazorApp.Api.Services.React.AttendanceReactService.DistributeApproved(requested, 99m).Sum(item => item.Hours));
     }
 
+    // ───────────────────────── 推送状态（预览行的 push 字段） ─────────────────────────
+
+    private async Task<(MyobTimesheetComputation Data, string Hash)> ComputeMeiAsync()
+    {
+        var computed = await Preview().ComputeAsync(Inv, null, false, CancellationToken.None);
+        Assert.True(computed.Success, computed.Message);
+        var data = computed.Data!;
+        var (cells, unmapped) = MyobTimesheetPushRules.BuildPlannedCells(data.Plans["u-mei"], data.MappingByKey);
+        Assert.Empty(unmapped);
+        var hash = MyobTimesheetPushRules.ComputeRequestHash(Inv, data.Links["u-mei"].MyobEmployeeUid, data.Start, data.End, cells);
+        return (data, hash);
+    }
+
+    private async Task AddPushRecordAsync(MyobTimesheetComputation data, string user, string status, string? hash, int minutesAgo = 5)
+    {
+        await _db.Insertable(new MyobTimesheetPush
+        {
+            BatchGuid = "batch-" + status, ConnectionGuid = Inv, PeriodStart = data.Start, Weeks = data.Weeks, UserGuid = user,
+            MyobEmployeeUid = data.Links[user].MyobEmployeeUid, Status = status, RequestHash = hash, PushedMinutes = 2040,
+            StartedAt = Now.AddMinutes(-minutesAgo), FinishedAt = Now.AddMinutes(-minutesAgo),
+        }).ExecuteCommandAsync();
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_没记录是未推送_哈希一致是已推送_哈希变了是需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        Assert.Equal(MyobPushStates.NotPushed, RowOf(await PreviewInvAsync(), "u-mei").Push.State);
+
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash);
+        var pushed = RowOf(await PreviewInvAsync(), "u-mei").Push;
+        Assert.Equal(MyobPushStates.Pushed, pushed.State);
+        Assert.False(pushed.NeedsRepush);
+        Assert.Equal(MyobPushStatuses.Pushed, pushed.LastStatus);
+        Assert.Equal("batch-Pushed", pushed.LastBatchGuid);
+        Assert.NotNull(pushed.LastPushedAt);
+
+        // 之后规划变了（哈希不同）→ 需重新推送；其他员工不受影响。
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.UpToDate, "0000", minutesAgo: 1);
+        var dto = await PreviewInvAsync();
+        Assert.Equal(MyobPushStates.NeedsRepush, RowOf(dto, "u-mei").Push.State);
+        Assert.True(RowOf(dto, "u-mei").Push.NeedsRepush);
+        Assert.Equal(MyobPushStates.NotPushed, RowOf(dto, "u-sarah").Push.State);
+    }
+
+    [Theory]
+    [InlineData(MyobPushStatuses.SkippedProcessed, MyobPushStates.ProcessedSkipped)]
+    [InlineData(MyobPushStatuses.Failed, MyobPushStates.Failed)]
+    [InlineData(MyobPushStatuses.Mismatch, MyobPushStates.Mismatch)]
+    [InlineData(MyobPushStatuses.Undone, MyobPushStates.NotPushed)]
+    public async Task 预览_推送状态_取最近一条记录_跳过失败不一致已撤销各自对应(string lastStatus, string expectedState)
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", lastStatus, hash, minutesAgo: 1);
+
+        var push = RowOf(await PreviewInvAsync(), "u-mei").Push;
+
+        Assert.Equal(expectedState, push.State);
+        Assert.Equal(lastStatus, push.LastStatus);
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_Running不算最近结果_周期被解锁时已推送也算需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Running, hash, minutesAgo: 1);
+        Assert.Equal(MyobPushStates.Pushed, RowOf(await PreviewInvAsync(), "u-mei").Push.State);
+
+        // 1014 被解锁：MYOB 里还留着旧工时 → 需重新推送（同时该员工因未锁定被拦截）。
+        _source.Stores["1014"] = _source.Stores["1014"] with { IsLocked = false };
+        var unlocked = RowOf(await PreviewInvAsync(), "u-mei");
+        Assert.Contains(unlocked.Blockers, blocker => blocker.Code == MyobBlockerCodes.StoreNotLocked);
+        Assert.Equal(MyobPushStates.NeedsRepush, unlocked.Push.State);
+    }
+
+    [Fact]
+    public async Task 预览_推送状态_后来被跳过的重推不会盖住已推送_工时变了就显示需重新推送()
+    {
+        await SeedMainScenarioAsync();
+        var (data, hash) = await ComputeMeiAsync();
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.Pushed, hash, minutesAgo: 30);
+        await AddPushRecordAsync(data, "u-mei", MyobPushStatuses.SkippedHasEntries, "0000", minutesAgo: 1);
+
+        var push = RowOf(await PreviewInvAsync(), "u-mei").Push;
+
+        Assert.Equal(MyobPushStates.Pushed, push.State); // 取最近一条「反映 MYOB 现状」的记录
+        Assert.Equal(MyobPushStatuses.Pushed, push.LastStatus);
+    }
+
+    [Fact]
+    public async Task 预览_PushEnabled由总闸与灰度白名单共同决定()
+    {
+        await SeedMainScenarioAsync();
+        Assert.False((await Preview().PreviewAsync(Inv, null, false, CancellationToken.None)).Data!.PushEnabled);
+
+        // 只开总闸、白名单为空：不放行任何公司文件。
+        var noList = await Preview(new MyobOptions { TimesheetPushEnabled = true }).PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(noList.Data!.PushEnabled);
+
+        var on = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Inv })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.True(on.Data!.PushEnabled);
+
+        var listed = await Preview(new MyobOptions { TimesheetPushEnabled = true, TimesheetPushConnectionGuids = Aus })
+            .PreviewAsync(Inv, null, false, CancellationToken.None);
+        Assert.False(listed.Data!.PushEnabled);
+    }
+
+    // ───────────────────────── 客户端写入（PUT） ─────────────────────────
+
+    [Fact]
+    public async Task 客户端_PUT_请求体与地址符合实测形状_PascalCase_日期yyyyMMdd_空Lines可清空()
+    {
+        string? body = null;
+        string? method = null;
+        var handler = new StubHandler(request =>
+        {
+            method = request.Method.Method;
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json("", System.Net.HttpStatusCode.OK);
+        });
+        var client = new MyobApiClient(
+            new HttpClient(handler), Options.Create(new MyobOptions { ClientId = "k", MinRequestIntervalMs = 0, TimesheetPushEnabled = true }));
+
+        var result = await client.PutTimesheetAsync(
+            "biz", "token", "emp-1", Start, Start.AddDays(6),
+            [new MyobTimesheetPutLine("cat-1", [new MyobTimesheetPutEntry("2026-10-26", 7.5m)])], CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("PUT", method);
+        Assert.Contains("/biz/Payroll/Timesheet/emp-1?StartDate=2026-10-26&EndDate=2026-11-01", Assert.Single(handler.Urls), StringComparison.Ordinal);
+        Assert.Contains("\"Employee\":{\"UID\":\"emp-1\"}", body, StringComparison.Ordinal);
+        Assert.Contains("\"StartDate\":\"2026-10-26\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"EndDate\":\"2026-11-01\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"PayrollCategory\":{\"UID\":\"cat-1\"}", body, StringComparison.Ordinal);
+        Assert.Contains("\"Date\":\"2026-10-26\",\"Hours\":7.5", body, StringComparison.Ordinal);
+
+        await client.PutTimesheetAsync("biz", "token", "emp-1", Start, Start.AddDays(6), [], CancellationToken.None);
+        Assert.Contains("\"Lines\":[]", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task 客户端_PUT_总闸关闭时不发任何请求_双保险()
+    {
+        var handler = new StubHandler(_ => Json("", System.Net.HttpStatusCode.OK));
+        var client = new MyobApiClient(new HttpClient(handler), Options.Create(new MyobOptions { ClientId = "k", MinRequestIntervalMs = 0 }));
+
+        var result = await client.PutTimesheetAsync("biz", "token", "emp-1", Start, Start.AddDays(6), [], CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("PUSH_DISABLED", result.ErrorName);
+        Assert.Empty(handler.Urls);
+    }
+
+    [Fact]
+    public async Task 客户端_PUT_失败只取错误类型名和错误码_不回显响应体()
+    {
+        var client = ClientFor(_ => Json(
+            """{"Errors":[{"Name":"DateOutOfRange","ErrorCode":221,"Message":"secret-detail","AdditionalDetails":"secret"}]}""",
+            System.Net.HttpStatusCode.BadRequest), pushEnabled: true);
+
+        var result = await client.PutTimesheetAsync("b", "t", "e", Start, Start.AddDays(6), [], CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Equal("DateOutOfRange", result.ErrorName);
+        Assert.Equal("221", result.ErrorCode);
+        Assert.DoesNotContain("secret", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task 客户端_GET读回_解析类别UID与每天小时_日期原文带T000000_404和空体按没有记录()
+    {
+        var client = ClientFor(_ => Json(
+            """{"Employee":{"UID":"e"},"Lines":[{"PayrollCategory":{"UID":"cat-1"},"Entries":[{"Date":"2026-10-26T00:00:00","Hours":7.333000,"Processed":false},{"Date":"2026-10-27T00:00:00","Hours":0.000000,"Processed":true}]}]}"""));
+        var lines = await client.GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None);
+
+        var line = Assert.Single(lines);
+        Assert.Equal("cat-1", line.CategoryUid);
+        Assert.Equal(new MyobTimesheetEntryRecord("2026-10-26T00:00:00", 7.333m, false), line.Entries[0]);
+        Assert.True(line.Entries[1].Processed);
+
+        Assert.Empty(await ClientFor(_ => Json("{}", System.Net.HttpStatusCode.NotFound))
+            .GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None));
+        Assert.Empty(await ClientFor(_ => Json(""))
+            .GetTimesheetLinesAsync("b", "t", "e", Start, Start.AddDays(6), CancellationToken.None));
+    }
+
     // ───────────────────────── 控制器权限 ─────────────────────────
 
     [Fact]
@@ -1115,6 +1448,24 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("api/react/v1/myob/timesheet", typeof(MyobTimesheetController).GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()!.Template);
         Assert.Empty(typeof(MyobPayCategoryController).GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
         Assert.Empty(typeof(MyobTimesheetController).GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
+    }
+
+    [Fact]
+    public void 控制器权限_推送与撤销要求MyobTimesheetPush_不能沿用PayrollEdit_无匿名放行_路由与预览同前缀()
+    {
+        var type = typeof(MyobTimesheetPushController);
+        Assert.Equal(Permissions.Myob.Timesheet.Push, type.GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.NotEqual(Permissions.Attendance.Payroll.Edit, type.GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("api/react/v1/myob/timesheet", type.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()!.Template);
+        Assert.Empty(type.GetMethods().Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null));
+        // 四个动作各自的路由
+        var templates = type.GetMethods()
+            .Select(m => m.GetCustomAttribute<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>())
+            .Where(attribute => attribute is not null)
+            .Select(attribute => $"{attribute!.HttpMethods.Single()} {attribute.Template}")
+            .OrderBy(text => text, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["GET batches", "GET batches/{batchGuid}", "POST batches/{batchGuid}/undo", "POST push"], templates);
     }
 
     // ───────────────────────── 测试替身 ─────────────────────────

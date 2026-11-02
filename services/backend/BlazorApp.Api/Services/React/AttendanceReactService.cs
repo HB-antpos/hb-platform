@@ -676,7 +676,8 @@ namespace BlazorApp.Api.Services.React
             var todayDto = new AttendanceTodayDto
             {
                 WorkDate = today,
-                MinorCompliance = minorCompliance,
+                // 未成年用工提醒只给主管（排班格与提醒待办），员工本人的今日打卡不再下发；旧版 App 也就不再显示横幅。
+                MinorCompliance = null,
                 Schedules = scheduleDtos,
                 Punches = requestedStorePunchDtos,
                 Holidays = holidays.Select(ToDto).ToList(),
@@ -1028,6 +1029,10 @@ namespace BlazorApp.Api.Services.React
             {
                 return PayPeriodLocked<AttendancePunchDto>();
             }
+            // 关键逻辑：设置必须在开事务、拿员工锁之前取好。库里没有设置行时这里会触发“首次创建”，
+            // 放在事务外，后续事务内的 GetOrCreateSettingsModelAsync（分段上限、排班匹配等）只会读到已存在的行，
+            // 唯一冲突的重读也不会牵连打卡事务。设置是低频改动，提前到锁外读取可以接受。
+            var settings = await GetOrCreateSettingsModelAsync();
             var observedPunchCount = await _db.Queryable<AttendancePunch>().CountAsync(item =>
                 !item.IsDeleted
                 && item.UserGuid == userGuid
@@ -1054,7 +1059,6 @@ namespace BlazorApp.Api.Services.React
                         ToDto(existingTokenPunch, employeeName, storeName, serverNow),
                         "打卡已保存");
                 }
-            var settings = await GetOrCreateSettingsModelAsync();
             var scheduleSegmentLimit = await ResolveSegmentLimitAsync(userGuid, storeCode);
             var schedule = await FindScheduleForPunchAsync(
                 storeCode,
@@ -1254,10 +1258,11 @@ namespace BlazorApp.Api.Services.React
             }
             var resultDto = ToDto(punch, employeeName, storeName, serverNow);
             resultDto.MealClaim = mealClaim == null ? null : ToDto(mealClaim);
-            resultDto.MinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
-            if (resultDto.MinorCompliance != null)
+            // 打卡后照常评估并写入主管提醒待办；打卡结果是给员工本人看的，不再带未成年用工提醒。
+            var punchMinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
+            if (punchMinorCompliance != null)
             {
-                await RecordMinorEmploymentEvaluationAsync(userGuid, punch.StoreCode, punch.ScheduleGuid, "punch_recorded", resultDto.MinorCompliance);
+                await RecordMinorEmploymentEvaluationAsync(userGuid, punch.StoreCode, punch.ScheduleGuid, "punch_recorded", punchMinorCompliance);
             }
             if (schedule != null)
             {
@@ -4371,12 +4376,21 @@ namespace BlazorApp.Api.Services.React
                 _ => false,
             };
 
-        private async Task<AttendanceSettings> GetOrCreateSettingsModelAsync()
+        private Task<AttendanceSettings> GetOrCreateSettingsModelAsync() =>
+            GetOrCreateSettingsAsync(_db);
+
+        private static async Task<AttendanceSettings?> FindActiveSettingsAsync(ISqlSugarClient db)
         {
-            var settings = await _db.Queryable<AttendanceSettings>()
+            return await db.Queryable<AttendanceSettings>()
                 .Where(item => !item.IsDeleted)
                 .OrderBy(item => item.Id)
                 .FirstAsync();
+        }
+
+        // internal static：测试用多个独立连接并发调用它，验证真实 SQL Server 上“首次创建”只会留下一行。
+        internal static async Task<AttendanceSettings> GetOrCreateSettingsAsync(ISqlSugarClient db)
+        {
+            var settings = await FindActiveSettingsAsync(db);
             if (settings != null)
             {
                 return settings;
@@ -4397,8 +4411,27 @@ namespace BlazorApp.Api.Services.React
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "system",
             };
-            await _db.Insertable(settings).ExecuteCommandAsync();
-            return settings;
+            try
+            {
+                // 关键逻辑：用 ExecuteReturnIdentityAsync 回填自增 Id。ExecuteCommandAsync 不写回，
+                // Id 留 0 会让随后的 Updateable(settings)（如 UpdateSettingsAsync）匹配 0 行而静默丢失修改。
+                settings.Id = await db.Insertable(settings).ExecuteReturnIdentityAsync();
+                return settings;
+            }
+            catch (Exception exception) when (
+                AttendancePunchPersistenceException.IsUniqueConstraintViolation(exception))
+            {
+                // 关键逻辑：多个请求同时发现没有设置行时，数据库过滤唯一索引（迁移 20261030.004）只放行一条；
+                // 输掉竞争的请求在这里重读赢家那一行。必须在本方法内处理：调用方可能正处在打卡事务里，
+                // PunchAsync 外层的唯一冲突处理会把它误当成“重复扫码”。
+                var winner = await FindActiveSettingsAsync(db);
+                if (winner != null)
+                {
+                    return winner;
+                }
+
+                throw;
+            }
         }
 
         private async Task<StoreAccessResult> ResolveManagedStoreAccessAsync(string? requestedStoreCode)

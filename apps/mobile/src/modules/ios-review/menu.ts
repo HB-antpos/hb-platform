@@ -42,6 +42,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "traffic-stats",
   // 工时统计依赖真实排班打卡汇总，审核模式没有离线演示数据，不展示。
   "attendance-hours",
+  // 工资单是真实员工薪酬数据，审核模式没有离线演示数据，不展示。
+  "payslips",
   "workbench",
 ] as const;
 

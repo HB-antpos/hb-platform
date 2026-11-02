@@ -1220,6 +1220,14 @@ namespace BlazorApp.Api.Services
                     return ApiResponse<UserDto>.Error("不能分配非管辖分店", "STORE_SCOPE_DENIED");
                 }
 
+                if (dto.RequireNewStaffProfile)
+                {
+                    var profileRules = NewStaffProfileRules.Validate(dto.Birthday, dto.Phone, dto.Email, dto.Guardian, NewStaffProfileRules.SydneyToday());
+                    if (!profileRules.Ok)
+                    {
+                        return ApiResponse<UserDto>.Error(profileRules.Error!, profileRules.Code);
+                    }
+                }
                 // 用户名、邮箱都不能与已有账号重复（去首尾空白、忽略大小写，口径同库里唯一索引）
                 var usernameLower = (dto.Username ?? string.Empty).Trim().ToLowerInvariant();
                 var email = (dto.Email ?? string.Empty).Trim();
@@ -1294,6 +1302,28 @@ namespace BlazorApp.Api.Services
                             .ToList();
 
                         await db.Insertable(userStores).ExecuteCommandAsync();
+                    }
+
+                    // 新建员工带了生日 / 电话：写入员工资料；未满 18 岁时同一事务里预建未成年合规草稿（控制器已校验必填）。
+                    if (dto.Birthday.HasValue || !string.IsNullOrWhiteSpace(dto.Phone))
+                    {
+                        await db.Insertable(new EmployeeProfile
+                        {
+                            UserGUID = user.UserGUID,
+                            Phone = string.IsNullOrWhiteSpace(dto.Phone) ? null : dto.Phone.Trim(),
+                            Birthday = dto.Birthday?.Date,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow,
+                        }).ExecuteCommandAsync();
+                    }
+                    var newStaffRules = NewStaffProfileRules.Validate(dto.Birthday, dto.Phone, email, dto.Guardian, NewStaffProfileRules.SydneyToday());
+                    if (newStaffRules.Ok && newStaffRules.IsMinor)
+                    {
+                        var firstStoreGuid = dto.StoreGuids.FirstOrDefault();
+                        var draftStore = string.IsNullOrWhiteSpace(firstStoreGuid) ? null
+                            : await db.Queryable<Store>().Where(x => x.StoreGUID == firstStoreGuid && !x.IsDeleted).FirstAsync();
+                        await EmployeeMinorComplianceService.InsertDraftForNewStaffAsync(
+                            db, user, dto.Phone?.Trim(), dto.Birthday!.Value, draftStore, dto.Guardian!, null, "user-create");
                     }
 
                     await db.Ado.CommitTranAsync();

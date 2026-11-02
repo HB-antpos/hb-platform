@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <Compile Include="StoreDiscountRateTests.cs" />
+    <Compile Include="NewStaffProfileRulesTests.cs" />
+    <Compile Include="PosReceiptTests.cs" />
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
     <Compile Include="ProductImageDescriptionTests.cs" />
     <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
@@ -420,6 +422,8 @@
     <Compile Include="MobileAppBuildCosChecksumSqlServerTests.cs" />
     <Compile Include="MobileAppBuildAppKeyIsolationTests.cs" />
     <Compile Include="MobileAppDeviceStatusServiceTests.cs" />
+    <Compile Include="DeviceVersionStateResolverTests.cs" />
+    <Compile Include="DeviceVersionFilterTests.cs" />
     <Compile Include="AppOtaReleaseSqlParameterTests.cs" />
     <Compile Include="AppUpdatePolicyServiceTests.cs" />
     <Compile Include="MobileAndroidNativeUpdatePolicyServiceTests.cs" />
@@ -495,10 +499,15 @@
     <Compile Include="MyobEmployeeBindingTests.cs" />
     <Compile Include="MyobEmployeeSyncTests.cs" />
     <Compile Include="MyobPayrollAdviceTests.cs" />
+    <Compile Include="MyobWageProbeTests.cs" />
+    <Compile Include="MyobPayslipTests.cs" />
     <Compile Include="MyobTimesheetTests.cs" />
+    <Compile Include="MyobTimesheetPushTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
+    <Compile Include="EnglishOnlyEmailTemplatesTests.cs" />
+    <Compile Include="SmsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -35,11 +35,25 @@ public interface IReceiptReturnsWorkflowService
         IReadOnlyList<OrderReturnPaymentCapacityDto>? paymentCapacities = null);
 }
 
+/// <summary>
+/// 查单结果。8 位单号命中多张订单时 <see cref="Order"/> 为空、<see cref="Candidates"/> 列出候选单，
+/// 由收银员对照小票上的日期和金额点选，再按完整 GUID 重新查单——绝不替收银员猜。
+/// </summary>
 public sealed record ReceiptReturnLookupResult(
     ReceiptReturnOrder? Order,
     bool IsRemote,
     bool ReturnRecordsMayBeStale,
-    string StatusMessage);
+    string StatusMessage,
+    IReadOnlyList<ReceiptReturnOrderCandidate>? Candidates = null);
+
+/// <summary>8 位单号撞号时给收银员挑选的候选订单（只含核对小票所需的摘要）。</summary>
+public sealed record ReceiptReturnOrderCandidate(
+    Guid OrderGuid,
+    string StoreCode,
+    string DeviceCode,
+    string CashierName,
+    DateTimeOffset SoldAt,
+    decimal ActualAmount);
 
 public sealed record ReceiptReturnProductLookupResult(
     SellableItemDto? Item,
@@ -105,6 +119,8 @@ public sealed class ReceiptReturnsWorkflowService(
     IUiPriorityCoordinator? uiPriorityCoordinator = null) : IReceiptReturnsWorkflowService
 {
     private const string OpenItemLookupCode = "OPENITEM";
+    // 中文注释：8 位单号短码查单时多取的候选条数；够覆盖「子串碰巧命中其它订单」的噪音，又不至于拖慢 2 秒超时内的查询。
+    private const int ShortCodeCandidateTake = 20;
     internal static readonly TimeSpan RemoteLookupTimeout = TimeSpan.FromSeconds(2);
     private readonly IUiPriorityCoordinator _uiPriorityCoordinator = uiPriorityCoordinator ?? UiPriorityCoordinator.Noop;
 
@@ -122,7 +138,9 @@ public sealed class ReceiptReturnsWorkflowService(
         // 退货订单查询是收银员正在等待的前台操作；查询期间让目录同步在分页边界暂停，避免争抢同一 API/数据库。
         using var uiOperation = _uiPriorityCoordinator.BeginUiOperation("receipt-return-order-lookup");
         var stopwatch = Stopwatch.StartNew();
-        var queryType = TryParseOrderGuid(query, out _) ? "guid" : "keyword";
+        var queryType = TryParseOrderGuid(query, out _)
+            ? "guid"
+            : ReceiptOrderShortCode.TryNormalize(query, out _) ? "short-code" : "keyword";
         ConsoleLog.Write(
             "ReceiptReturns",
             $"lookup started store={session.StoreCode} online={session.IsOnline} " +
@@ -135,7 +153,15 @@ public sealed class ReceiptReturnsWorkflowService(
             var remoteCancellationToken = remoteLookupCancellation.Token;
             try
             {
-                var remoteOrderGuid = await ResolveRemoteOrderGuidAsync(session, query, remoteCancellationToken);
+                var remoteResolution = await ResolveRemoteOrderGuidAsync(session, query, remoteCancellationToken);
+                if (remoteResolution.IsAmbiguous)
+                {
+                    var ambiguous = CreateAmbiguousShortCodeResult(remoteResolution.Candidates!);
+                    LogLookupCompleted(ambiguous, queryType, query.Length, stopwatch.ElapsedMilliseconds);
+                    return ambiguous;
+                }
+
+                var remoteOrderGuid = remoteResolution.OrderGuid;
                 if (remoteOrderGuid is not null)
                 {
                     var context = await remoteOrderHistoryService.GetReturnContextAsync(remoteOrderGuid.Value, remoteCancellationToken);
@@ -349,19 +375,63 @@ public sealed class ReceiptReturnsWorkflowService(
         return added;
     }
 
-    private async Task<Guid?> ResolveRemoteOrderGuidAsync(
+    /// <summary>订单解析结果：要么得到唯一订单（或没找到），要么 8 位短码命中多条订单（Candidates 非空）。</summary>
+    private readonly record struct OrderResolution(Guid? OrderGuid, IReadOnlyList<ReceiptReturnOrderCandidate>? Candidates = null)
+    {
+        public bool IsAmbiguous => Candidates is { Count: > 1 };
+    }
+
+    private async Task<OrderResolution> ResolveRemoteOrderGuidAsync(
         PosSessionState session,
         string query,
         CancellationToken cancellationToken)
     {
         if (TryParseOrderGuid(query, out var orderGuid))
         {
-            return orderGuid;
+            return new OrderResolution(orderGuid);
         }
 
         if (remoteOrderHistoryService is null)
         {
-            return null;
+            return new OrderResolution(null);
+        }
+
+        // 中文注释：小票条码是订单 GUID 末 8 位。POS API 的关键字搜索本来就对 OrderGuid 做子串匹配且限定本店，
+        // 所以这里不改 API，只多取一批候选，在客户端按「GUID 末 8 位严格相等」过滤——
+        // 只认订单号，不让 8 位十六进制的商品条码/货号误命中订单。
+        if (ReceiptOrderShortCode.TryNormalize(query, out var shortCode))
+        {
+            var candidates = await remoteOrderHistoryService.QueryAsync(
+                new RemoteOrderHistoryQuery(
+                    session.StoreCode,
+                    SoldFrom: null,
+                    SoldTo: null,
+                    DeviceCode: null,
+                    Keyword: shortCode,
+                    Take: ShortCodeCandidateTake),
+                cancellationToken);
+            var matched = candidates.Orders
+                .Where(order => ReceiptOrderShortCode.Matches(order.OrderGuid, shortCode))
+                .DistinctBy(order => order.OrderGuid)
+                .ToList();
+            if (matched.Count == 1)
+            {
+                return new OrderResolution(matched[0].OrderGuid);
+            }
+
+            if (matched.Count > 1)
+            {
+                // 末 8 位撞车极少见，但一旦撞了绝不能猜——退错订单会退错钱；列出候选单让收银员对照小票点选。
+                return new OrderResolution(null, SortCandidates(matched.Select(order => new ReceiptReturnOrderCandidate(
+                    order.OrderGuid,
+                    order.StoreCode,
+                    order.DeviceCode,
+                    order.CashierName,
+                    order.SoldAt,
+                    order.ActualAmount))));
+            }
+
+            // 0 条命中：落回下面原有的关键字路径，行为与改动前一致。
         }
 
         var result = await remoteOrderHistoryService.QueryAsync(
@@ -373,8 +443,22 @@ public sealed class ReceiptReturnsWorkflowService(
                 Keyword: query,
                 Take: 1),
             cancellationToken);
-        return result.Orders.FirstOrDefault()?.OrderGuid;
+        return new OrderResolution(result.Orders.FirstOrDefault()?.OrderGuid);
     }
+
+    private ReceiptReturnLookupResult CreateAmbiguousShortCodeResult(IReadOnlyList<ReceiptReturnOrderCandidate> candidates)
+    {
+        return new ReceiptReturnLookupResult(
+            null,
+            false,
+            false,
+            T("returns.status.orderAmbiguous", "Several orders share this number. Pick the one that matches the date and amount on the receipt."),
+            candidates);
+    }
+
+    // 中文注释：最近的订单排前面——拿小票来退货的通常是近期订单。
+    private static IReadOnlyList<ReceiptReturnOrderCandidate> SortCandidates(IEnumerable<ReceiptReturnOrderCandidate> candidates) =>
+        candidates.OrderByDescending(candidate => candidate.SoldAt).ToList();
 
     private async Task<ReceiptReturnLookupResult> LookupLocalOrderAsync(
         PosSessionState session,
@@ -385,6 +469,39 @@ public sealed class ReceiptReturnsWorkflowService(
         if (TryParseOrderGuid(query, out var orderGuid))
         {
             order = await localOrderRepository.GetOrderAsync(orderGuid, cancellationToken);
+        }
+
+        if (order is null && ReceiptOrderShortCode.TryNormalize(query, out var shortCode))
+        {
+            // 中文注释：本地 LocalOrderRepository 的关键字也是 LIKE 子串匹配；与线上同样取一批候选后按末 8 位严格过滤。
+            // 优先本店；本店没有才看其它店（与下面原路径「本店优先、否则取第一条」的取舍一致）。
+            var candidates = (await receiptQueryService.GetRecentOrdersAsync(
+                    new LocalOrderHistoryQuery(
+                        DeviceCode: null,
+                        Keyword: shortCode),
+                    ShortCodeCandidateTake,
+                    cancellationToken))
+                .Where(summary => ReceiptOrderShortCode.Matches(summary.OrderGuid, shortCode))
+                .ToList();
+            var sameStore = candidates
+                .Where(summary => string.Equals(summary.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var pool = sameStore.Count > 0 ? sameStore : candidates;
+            if (pool.Count > 1)
+            {
+                return CreateAmbiguousShortCodeResult(SortCandidates(pool.Select(summary => new ReceiptReturnOrderCandidate(
+                    summary.OrderGuid,
+                    summary.StoreCode,
+                    summary.DeviceCode,
+                    summary.CashierName,
+                    summary.SoldAt,
+                    summary.ActualAmount))));
+            }
+
+            if (pool.Count == 1)
+            {
+                order = await localOrderRepository.GetOrderAsync(pool[0].OrderGuid, cancellationToken);
+            }
         }
 
         if (order is null)

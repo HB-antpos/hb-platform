@@ -7,14 +7,16 @@ namespace Hbpos.Client.Wpf.Services;
 /// <summary>收银主界面的配色主题；客显保持独立配色，不随主题切换。</summary>
 public enum PosColorTheme
 {
-    // Default 是改版前的原有配色，保留给已手动选过它的收银机；新装机默认用 Blue。
-    Default,
-    Paper,
     Graphite,
     Celadon,
     Blue,
     // 长者模式：高对比、大字、首页三区分色、内容区无描边；除色板外还会追加放大尺寸字典（见 WpfColorThemeApplier）。
-    Elder
+    Elder,
+    // 四套彩色主题：糖果紫 / 阳光橙只换色板（功能键白底彩色图标）；海洋青 / 彩虹分区的功能键每键一种底色（PosSidebarTile* 键）。
+    Candy,
+    Sunny,
+    Ocean,
+    Rainbow
 }
 
 public interface IColorThemeService
@@ -28,6 +30,9 @@ public interface IColorThemeService
 
     /// <summary>立即切换主题并保存为本机偏好。</summary>
     Task SelectAsync(PosColorTheme theme, CancellationToken cancellationToken = default);
+
+    /// <summary>只切换界面、不保存（首次选择窗里点卡片预览用）；确认后再调用 <see cref="SelectAsync"/>。</summary>
+    void Preview(PosColorTheme theme);
 }
 
 /// <summary>把主题落到界面资源上；与偏好读写分开，便于在没有 WPF 资源的环境下测试服务。</summary>
@@ -85,11 +90,38 @@ public sealed class ColorThemeService : IColorThemeService
         }
     }
 
+    public void Preview(PosColorTheme theme) => Apply(theme);
+
     internal static PosColorTheme Parse(string? value)
     {
+        // 已删除的旧主题：「经典」（Default）改由彩色的糖果紫接替，「暖纸」（Paper）回到默认蓝色。
+        if (string.Equals(value, "Default", StringComparison.OrdinalIgnoreCase))
+        {
+            return PosColorTheme.Candy;
+        }
+
         return Enum.TryParse<PosColorTheme>(value, ignoreCase: true, out var theme) && Enum.IsDefined(theme)
             ? theme
             : FallbackTheme;
+    }
+
+    /// <summary>只认枚举名（忽略大小写），用于员工偏好；数字、空值与未知名称都返回 false。</summary>
+    internal static bool TryParse(string? value, out PosColorTheme theme)
+    {
+        theme = FallbackTheme;
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || char.IsDigit(trimmed[0]) || trimmed[0] is '-' or '+')
+        {
+            return false;
+        }
+
+        if (!Enum.TryParse<PosColorTheme>(trimmed, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+        {
+            return false;
+        }
+
+        theme = parsed;
+        return true;
     }
 
     private void Apply(PosColorTheme theme)
@@ -200,7 +232,7 @@ public sealed class WpfColorThemeApplier : IColorThemeApplier
             _originalMaterialTheme ??= paletteHelper.GetTheme();
             if (palette[PaletteMaterialPrimaryKey] is not Color primary)
             {
-                // 默认主题恢复 MaterialDesign 原配置，保证与改造前完全一致。
+                // 色板未提供主色时恢复 MaterialDesign 原配置（现有色板都提供主色，这里只是兜底）。
                 paletteHelper.SetTheme(_originalMaterialTheme);
                 return;
             }

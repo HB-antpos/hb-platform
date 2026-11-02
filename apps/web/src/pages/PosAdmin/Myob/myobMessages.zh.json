@@ -420,8 +420,8 @@
       "rows": {
         "weekday": {
           "label": "平日",
-          "sub": "含公假上班、带薪公假",
-          "note": "公假上班、带薪公假也走这个类别（公假转账价须等于平日价）"
+          "sub": "不含公假",
+          "note": "只推送平日工时；公假上班、带薪公假走下面的「公共假期」类别"
         },
         "saturday": {
           "label": "周六",
@@ -442,6 +442,16 @@
           "label": "周日（临时工）",
           "sub": "Casual",
           "note": "临时工的周日用单独的 MYOB 类别；公司里没有临时工周日工时可以不设，有了没设则该员工不能推送"
+        },
+        "publicHoliday": {
+          "label": "公共假期",
+          "sub": "全职、兼职（含公假上班、带薪公假）",
+          "note": "公假上班与带薪公假都推送到这个类别，时薪倍数由 MYOB 类别决定；公司里没有公假工时可以不设，有了没设则该员工不能推送"
+        },
+        "publicHolidayCasual": {
+          "label": "公共假期（临时工）",
+          "sub": "Casual",
+          "note": "临时工的公假用单独的 MYOB 类别；公司里没有临时工公假工时可以不设，有了没设则该员工不能推送"
         },
         "personalLeave": {
           "label": "病假",
@@ -515,8 +525,8 @@
       "empty": "这个周期没有可推送的工时数据（该公司本期没有员工工时，或工时还没提交锁定）",
       "range": "{{name}} · 工资周期 {{range}}",
       "pushButton": "推送到 MYOB（{{count}} 人）",
-      "pushDisabledTip": "推送功能稍后开放",
-      "pushDisabledNote": "推送功能稍后开放",
+      "pushDisabledTip": "推送功能未开放（总闸关闭，或该公司文件不在灰度名单里）",
+      "pushDisabledNote": "推送功能尚未对这个公司文件开放",
       "export": "导出预览 CSV",
       "company": {
         "aria": "选择要预览的发薪公司",
@@ -529,10 +539,12 @@
         "weekday": "平日",
         "saturday": "周六",
         "sunday": "周日",
+        "publicHoliday": "公共假期",
         "personalLeave": "病假",
         "holidayLeave": "年假",
         "pushedTotal": "推送合计",
-        "status": "状态"
+        "status": "状态",
+        "pushState": "MYOB 推送"
       },
       "payMode": {
         "Transfer": "全转账",
@@ -675,6 +687,8 @@
           "sunday": "周日",
           "saturdayCasual": "周六（临时工）",
           "sundayCasual": "周日（临时工）",
+          "publicHoliday": "公共假期",
+          "publicHolidayCasual": "公共假期（临时工）",
           "personalLeave": "病假（Personal Leave Pay）",
           "holidayLeave": "年假（Holiday Leave Pay）"
         }
@@ -686,6 +700,7 @@
         "weekday": "平日",
         "saturday": "周六",
         "sunday": "周日",
+        "publicHoliday": "公共假期",
         "personalLeave": "病假",
         "holidayLeave": "年假",
         "pushedTotal": "推送合计",
@@ -693,6 +708,145 @@
         "status": "状态",
         "reason": "被拦截原因",
         "myobCard": "MYOB 员工卡"
+      },
+      "noPermissionTip": "推送需要「推送工时到 MYOB」权限，请联系管理员授权",
+      "selectAria": "选择 {{name}} 推送",
+      "selectAll": "全选可推送（{{count}}）",
+      "selectNone": "清空选择",
+      "pushState": {
+        "NotPushed": "未推送",
+        "Pushed": "已推送",
+        "NeedsRepush": "需重新推送",
+        "ProcessedSkipped": "已发薪跳过",
+        "Failed": "推送失败",
+        "Mismatch": "待核对",
+        "needsRepushTip": "MYOB 里还留着旧工时（工时变了，或周期被解锁），需要重新推送",
+        "processedTip": "MYOB 里已发薪，没有改动",
+        "failedTip": "上次推送失败，可以重试",
+        "mismatchTip": "上次写入后回读与预期不一致，请在 MYOB 里核对"
+      },
+      "run": {
+        "title": "推送到 MYOB",
+        "cancel": "取消",
+        "confirm": "确认推送 {{count}} 人",
+        "stop": "停止",
+        "stopping": "正在停止…",
+        "giveUp": "不再继续",
+        "continue": "继续推送剩余 {{count}} 人",
+        "openBatches": "查看推送记录",
+        "retryFailed": "重试失败的 {{count}} 人",
+        "overwriteRepush": "覆盖并重推 {{count}} 人…",
+        "close": "完成",
+        "lead": "将把 {{company}} {{range}} 的转账工时推送到 MYOB Timesheet：{{count}} 人，合计 {{hours}} 小时。",
+        "notice": "推送只写 Timesheet，不会发薪；发薪请在 MYOB 里 Process Payroll。已发薪的记录不会被改动。",
+        "notChecked": "还没有检查 MYOB 现状：MYOB 里已有未发薪工时的员工推送时会被跳过（不会覆盖）。想覆盖请先点页面上的「检查 MYOB 现状」。",
+        "overwriteAria": "需要确认覆盖的员工",
+        "overwriteTitle": "MYOB 里已有未发薪工时的 {{count}} 位员工",
+        "overwriteMore": "…等 {{count}} 人",
+        "overwriteCheck": "覆盖这 {{count}} 人在 MYOB 里已有的未发薪工时（推送前的内容会被保存，可在推送记录里撤销；Job / Notes 无法还原）",
+        "overwriteExcluded": "未勾选覆盖：这 {{count}} 人本次不推送。",
+        "hintsAcknowledged": "已勾选页面上的「我已知晓」提示项。",
+        "hintsNotAcknowledged": "选中的员工命中了提示项：请先在页面上勾选「我已知晓」再推送。",
+        "nobody": "没有可以推送的员工。",
+        "progress": "正在推送：已处理 {{done}} / {{total}} 人",
+        "keepOpen": "请不要关闭或刷新页面",
+        "stopHint": "点「停止」会在当前这一块处理完后停下；已写入 MYOB 的不会回滚，可以到推送记录里撤销。",
+        "pausedTitle": "推送中断：已处理 {{done}} 人，还有 {{pending}} 人没处理",
+        "fatalHint": "这个问题需要先解决才能继续（例如总闸、授权，或有人正在推送该周期）。已处理的结果不受影响。",
+        "pausedHint": "可以点「继续」从中断的位置接着推送，沿用同一个批次。",
+        "requestFailed": "请求没有完成，请检查网络后重试",
+        "doneStopped": "已停止：处理了 {{done}} 人，{{pending}} 人没有处理。",
+        "doneAll": "推送完成：共处理 {{count}} 人。",
+        "mismatchHint": "“待核对”的员工已写入 MYOB，但回读内容与预期不一致：请到 MYOB 的 Enter Timesheet 里核对，必要时在推送记录里撤销。",
+        "reminder": "推送只写 Timesheet；请财务在 MYOB 里打开 Process Payroll 核对工时后再发薪。",
+        "columns": {
+          "employee": "员工",
+          "status": "结果",
+          "detail": "说明"
+        },
+        "count": {
+          "pushed": "已推送 {{count}}",
+          "upToDate": "已是最新 {{count}}",
+          "skippedHasEntries": "有记录未覆盖 {{count}}",
+          "skippedProcessed": "已发薪跳过 {{count}}",
+          "blocked": "被拦截 {{count}}",
+          "failed": "失败 {{count}}",
+          "mismatch": "待核对 {{count}}"
+        },
+        "status": {
+          "Pushed": "已推送",
+          "UpToDate": "已是最新",
+          "SkippedProcessed": "已发薪跳过",
+          "SkippedHasEntries": "有记录未覆盖",
+          "Blocked": "被拦截",
+          "Failed": "失败",
+          "Mismatch": "待核对",
+          "Undone": "已撤销",
+          "UndoConflict": "内容被改过，未撤销",
+          "UndoBlockedProcessed": "已发薪，未撤销",
+          "UndoBlockedNewer": "有更新的推送，未撤销"
+        },
+        "code": {
+          "disabled": "推送功能未开放（总闸关闭，或该公司文件不在灰度名单里）",
+          "invalidRequest": "请求不合法，请刷新页面后重试",
+          "periodNotEnded": "这个工资周期还没有结束，不能推送",
+          "inProgress": "这个周期正在推送中，请稍后再试",
+          "batchNotFound": "找不到这个推送批次",
+          "notReady": "预览里没有这位员工，或没有要推送的转账工时，请刷新后再试",
+          "hintNotAcknowledged": "有提示项还没有勾选「已知晓」",
+          "authFailed": "MYOB 授权有问题，请到「连接与映射」重新授权后再试",
+          "recordFailed": "推送记录写入失败，没有写入 MYOB",
+          "readFailed": "读取 MYOB 现有工时失败，没有写入",
+          "readbackFailed": "写入后回读失败，请在 MYOB 里核对",
+          "readbackMismatch": "写入后回读与预期不一致，请在 MYOB 里核对",
+          "stale": "上一次推送被中断，MYOB 里的状态不确定，请核对",
+          "nothingToUndo": "这个批次没有可以撤销的写入",
+          "forbidden": "没有权限，或不在你管辖的分店范围内",
+          "invalidPeriod": "工资周期不正确",
+          "connectionInactive": "MYOB 连接不存在或未启用",
+          "categoryNotMapped": "要推送的工时里有还没映射 MYOB 工资类别的项目"
+        }
+      },
+      "batches": {
+        "title": "推送记录",
+        "open": "推送记录",
+        "reload": "刷新",
+        "subtitle": "{{name}} · {{range}}",
+        "undoNote": "撤销会把 MYOB 恢复为推送前的内容；已发薪的员工、内容被人改过的员工、有更新推送的员工不会被改动。",
+        "loadFailed": "读取推送记录失败",
+        "detailFailed": "读取批次明细失败",
+        "detailLoading": "正在读取…",
+        "empty": "这个周期还没有推送记录",
+        "total": "共 {{count}} 人",
+        "columns": {
+          "time": "时间",
+          "actor": "操作人",
+          "result": "结果",
+          "actions": "操作",
+          "hours": "小时"
+        },
+        "chip": {
+          "failed": "失败 {{count}}",
+          "mismatch": "待核对 {{count}}",
+          "pushed": "已推送 {{count}}",
+          "upToDate": "已是最新 {{count}}",
+          "skipped": "跳过 {{count}}",
+          "undone": "已撤销 {{count}}"
+        },
+        "undo": "撤销",
+        "undoConfirmTitle": "撤销这次推送？",
+        "undoConfirmContent": "将把 {{count}} 位员工的 MYOB 工时恢复为推送前的内容。",
+        "undoConfirmNote": "已发薪的员工、MYOB 里被人改过的员工，以及有更新推送的员工不会被改动；撤销后会逐个告诉你结果。",
+        "undoConfirmOk": "撤销",
+        "undoCancel": "先不撤销",
+        "undoFailed": "撤销失败",
+        "undoneAt": "已于 {{time}} 撤销",
+        "undoResult": {
+          "all": "已全部撤销（{{undone}} / {{total}}）",
+          "partial": "部分撤销（{{undone}} / {{total}}）",
+          "none": "没有撤销任何一位（0 / {{total}}）",
+          "ok": "知道了"
+        }
       }
     },
     "sync": {

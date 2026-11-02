@@ -1,3 +1,4 @@
+using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Orders;
 
@@ -83,7 +84,7 @@ public sealed record SuspendedOrderSummary(
     int LineCount,
     SuspendedOrderStatus Status)
 {
-    public string ShortOrderId => SuspendedOrderGuid.ToString("N")[..8].ToUpperInvariant();
+    public string ShortOrderId => ReceiptOrderShortCode.Create(SuspendedOrderGuid);
 
     public string SoldAtDisplay => SuspendedAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm");
 

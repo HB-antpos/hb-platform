@@ -150,6 +150,24 @@ public sealed class AppUpdateCoordinatorTests
 #endif
     }
 
+    [Fact]
+    public void Client_services_resolve_update_coordinator_and_both_schedulers_from_the_real_container()
+    {
+        var services = new ServiceCollection();
+        // 中文注释：正式程序里 IConfiguration 由 Host.CreateDefaultBuilder 提供，裸容器需要自己补上。
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddHbposClientServices(new AppStartupOptions([], true, null, null));
+
+        using var provider = services.BuildServiceProvider();
+
+        // 中文注释：MainWindow 在启动时从容器取这些对象，任何一个构造失败都会让收银端启动即崩，所以要真正解析一遍而不是只看注册。
+        Assert.NotNull(provider.GetRequiredService<IAppUpdateCoordinator>());
+        Assert.NotNull(provider.GetRequiredService<AppUpdateBackgroundCheckScheduler>());
+        Assert.IsType<WindowsAppUpdateElevationProbe>(provider.GetRequiredService<IAppUpdateElevationProbe>());
+        Assert.NotNull(provider.GetRequiredService<AppUpdateUnattendedInstallScheduler>());
+        Assert.IsType<AppUpdateCoordinator>(provider.GetRequiredService<IAppUpdateCoordinator>());
+    }
+
     [Theory]
     [InlineData("1.0.0", false, false, false)]
     [InlineData("1.1.0", true, false, true)]
@@ -766,7 +784,9 @@ public sealed class AppUpdateCoordinatorTests
 
     [Theory]
     [InlineData(true, null, "appUpdate.force.ready")]
-    [InlineData(true, "1.0.0", "appUpdate.force.minimumRequired")]
+    [InlineData(true, "1.0.5", "appUpdate.force.minimumRequired")]
+    // 中文注释：后台填了最低支持版本但本机并不低于它，是因为勾选了强制更新，不能说“低于最低支持版本”。
+    [InlineData(true, "1.0.0", "appUpdate.force.ready")]
     [InlineData(false, null, "appUpdate.force.rollbackReady")]
     public async Task CheckForUpdatesAsync_force_ready_uses_policy_specific_message(
         bool currentIsOlder,
@@ -1373,7 +1393,7 @@ public sealed class AppUpdateCoordinatorTests
         // 中文注释：白天被收银员拒绝过的版本，夜间照样安装。
         state.MarkOptionalUpdateDeclined("1.1.0");
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.Installed, result.Status);
         Assert.Equal(1, download.CallCount);
@@ -1382,6 +1402,66 @@ public sealed class AppUpdateCoordinatorTests
         Assert.False(prompt.OptionalPromptShown);
         Assert.False(state.IsForceUpdateBlocking);
         Assert.False(installer.CancellationToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_with_agent_ignores_release_arguments_but_never_allows_direct_install()
+    {
+        var installer = new ModeCapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false) with { InstallerArguments = "/SP-" },
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: true, directInstallAvailable: true);
+
+        // 中文注释：安装参数不是静默参数时不能直接运行安装器（会弹安装向导），但代理用固定的静默参数，照常安装。
+        Assert.Equal(AppUpdateCoordinatorStatus.Installed, result.Status);
+        Assert.Same(UnattendedInstallMode.AgentOnly, installer.Mode);
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    public async Task InstallUpdateUnattendedAsync_allows_direct_install_only_when_prompt_free_and_silent(
+        bool agentAvailable,
+        bool directInstallAvailable,
+        bool expectedAllowDirect)
+    {
+        var installer = new ModeCapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateSilentRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        await coordinator.InstallUpdateUnattendedAsync(agentAvailable, directInstallAvailable);
+
+        Assert.Equal(expectedAllowDirect, installer.Mode!.AllowDirectInstall);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_skips_without_any_prompt_free_install_path()
+    {
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var apiClient = new StaticUpdateApiClient(CreateSilentRelease(force: true));
+        var coordinator = CreateCoordinator(
+            apiClient,
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: false);
+
+        Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
+        Assert.Equal(AppUpdateCoordinator.UnattendedNoInstallPathErrorCode, result.ErrorCode);
+        Assert.Equal(0, apiClient.CallCount);
+        Assert.Equal(0, download.CallCount);
     }
 
     [Fact]
@@ -1396,7 +1476,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             new AppUpdateState());
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         // 中文注释：非静默参数会弹安装向导等人点，夜间不能拉起。
         Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
@@ -1418,7 +1498,7 @@ public sealed class AppUpdateCoordinatorTests
             new AppUpdateState(),
             guard: guard);
 
-        var result = await coordinator.InstallUpdateUnattendedAsync();
+        var result = await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
         Assert.Equal(AppUpdateCoordinator.UnattendedActiveTransactionErrorCode, result.ErrorCode);
@@ -1436,7 +1516,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             state);
 
-        var failed = await failing.InstallUpdateUnattendedAsync();
+        var failed = await failing.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true);
 
         Assert.Equal(AppUpdateCoordinatorStatus.InstallFailed, failed.Status);
         Assert.Equal("launch failed", Assert.Single(failed.StatusArgs));
@@ -1451,7 +1531,7 @@ public sealed class AppUpdateCoordinatorTests
             new CapturingPromptService(),
             new AppUpdateState());
 
-        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await latest.InstallUpdateUnattendedAsync()).Status);
+        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await latest.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true)).Status);
         Assert.Equal(0, download.CallCount);
     }
 
@@ -1472,7 +1552,7 @@ public sealed class AppUpdateCoordinatorTests
 
         Assert.Equal(
             AppUpdateCoordinatorStatus.AlreadyRunning,
-            (await coordinator.InstallUpdateUnattendedAsync()).Status);
+            (await coordinator.InstallUpdateUnattendedAsync(agentAvailable: false, directInstallAvailable: true)).Status);
 
         download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
         await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
@@ -1510,6 +1590,266 @@ public sealed class AppUpdateCoordinatorTests
         InstallerArguments = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
     };
 
+    [Fact]
+    public async Task Runtime_force_overlay_can_be_postponed_up_to_limit_and_returns_when_idle()
+    {
+        var state = new AppUpdateState();
+        var delays = new ControlledDelays();
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state,
+            delays: delays);
+
+        Assert.Equal(
+            AppUpdateCoordinatorStatus.DownloadDeferred,
+            (await coordinator.CheckForUpdatesAtStartupAsync()).Status);
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+        Assert.True(state.IsForceUpdateBlocking);
+
+        for (var round = 1; round <= AppUpdatePostponeOptions.DefaultMaxCount; round++)
+        {
+            Assert.True(state.CanPostponeForceUpdate);
+            Assert.False(string.IsNullOrWhiteSpace(state.ForcePostponeHint));
+            await state.PostponeForceUpdateCommand.ExecuteAsync(null);
+
+            // 中文注释：遮罩收起为底部提示条，收银员随时可以自己点安装；30 分钟后空闲时再弹。
+            Assert.False(state.IsForceUpdateBlocking);
+            Assert.True(state.IsForceUpdatePendingInstall);
+            Assert.True(state.IsUpdateNoticeVisible);
+            Assert.True(state.InstallUpdateCommand.CanExecute(null));
+            Assert.Equal(AppUpdatePostponeOptions.DefaultInterval, await delays.CurrentDelayAsync());
+
+            await delays.AdvanceAsync();
+            await delays.AdvanceAsync();
+            Assert.True(state.IsForceUpdatePendingInstall);
+
+            await delays.AdvanceLastAsync();
+            await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+            Assert.True(state.IsForceUpdateBlocking);
+        }
+
+        // 中文注释：同一版本推迟次数用完后只能安装。
+        Assert.False(state.CanPostponeForceUpdate);
+        Assert.False(state.PostponeForceUpdateCommand.CanExecute(null));
+        Assert.Equal(string.Empty, state.ForcePostponeHint);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task Startup_gate_force_overlay_cannot_be_postponed()
+    {
+        var state = new AppUpdateState();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(
+                AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"),
+                cachedInstallerPath: @"C:\Temp\hbpos.exe"),
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state);
+
+        var result = await coordinator.CheckForUpdatesAtStartupAsync();
+
+        // 中文注释：启动闸门保证旧版本不进入收银，不提供推迟。
+        Assert.Equal(AppUpdateCoordinatorStatus.ForceReady, result.Status);
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.False(state.CanPostponeForceUpdate);
+        Assert.False(state.PostponeForceUpdateCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Rollback_force_overlay_cannot_be_postponed()
+    {
+        var state = new AppUpdateState();
+        var release = CreateRelease(force: true) with
+        {
+            CurrentVersion = "1.2.0",
+            TargetVersion = "1.1.0",
+            IsRollback = true
+        };
+        var coordinator = CreateCoordinator(
+            release,
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state);
+
+        await coordinator.CheckForUpdatesAsync(manual: true);
+
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.False(state.CanPostponeForceUpdate);
+    }
+
+    [Fact]
+    public async Task Postpone_can_be_disabled_by_configuration()
+    {
+        var state = new AppUpdateState();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state,
+            postponeOptions: new AppUpdatePostponeOptions(TimeSpan.FromMinutes(30), 0));
+
+        await coordinator.CheckForUpdatesAsync(manual: true);
+
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.False(state.CanPostponeForceUpdate);
+    }
+
+    [Fact]
+    public async Task Background_force_notice_postpone_hides_notice_then_shows_it_again_without_overlay()
+    {
+        var state = new AppUpdateState();
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        Assert.True(state.IsUpdateNoticeVisible);
+        Assert.True(state.CanPostponeForceUpdate);
+
+        await state.PostponeForceUpdateCommand.ExecuteAsync(null);
+
+        Assert.False(state.IsUpdateNoticeVisible);
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.True(state.IsUpdateFlowActive);
+        Assert.Equal(AppUpdatePostponeOptions.DefaultInterval, await delays.CurrentDelayAsync());
+
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        // 中文注释：后台检查发现的强更推迟到点只把提示条放回来，不自动弹遮罩。
+        Assert.True(state.IsUpdateNoticeVisible);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.True(state.CanPostponeForceUpdate);
+    }
+
+    [Fact]
+    public async Task Automatic_force_overlay_waits_until_sales_screen_is_idle()
+    {
+        var state = new AppUpdateState();
+        var guard = new ScreenAwareSafetyGuard(canInstall: true, canInterrupt: false);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new GuardedInstallerLauncher(guard),
+            new CapturingPromptService(),
+            state,
+            guard: guard,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesAtStartupAsync();
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+
+        // 中文注释：启动后的后台下载完成时收银员停在退货等页面，只显示底部提示条，不弹遮罩挡住页面。
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.Equal("appUpdate.install.waitingForIdle", state.StatusKey);
+        Assert.True(state.IsUpdateNoticeVisible);
+
+        await delays.AdvanceAsync();
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        guard.CanInterrupt = true;
+        await delays.AdvanceAsync();
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        Assert.True(state.IsForceUpdateBlocking);
+    }
+
+    [Fact]
+    public async Task Manual_force_check_shows_overlay_even_off_the_sales_screen()
+    {
+        var state = new AppUpdateState();
+        var guard = new ScreenAwareSafetyGuard(canInstall: true, canInterrupt: false);
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new GuardedInstallerLauncher(guard),
+            new CapturingPromptService(),
+            state,
+            guard: guard);
+
+        var result = await coordinator.CheckForUpdatesAsync(manual: true);
+
+        // 中文注释：设置页手动检查是收银员自己要求的，当场提示，但运行中仍可推迟。
+        Assert.Equal(AppUpdateCoordinatorStatus.ForceReady, result.Status);
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.True(state.CanPostponeForceUpdate);
+    }
+
+    [Fact]
+    public async Task Runtime_install_failure_overlay_can_still_be_postponed()
+    {
+        var state = new AppUpdateState();
+        var installer = new SequenceInstallerLauncher(ProcessLaunchResult.Fail("installer did not start"));
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state);
+
+        await coordinator.CheckForUpdatesAsync(manual: true);
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        // 中文注释：安装器起不来时错误遮罩同样挡住整个收银界面，运行中也要能推迟。
+        Assert.True(state.IsForceUpdateError);
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.True(state.CanPostponeForceUpdate);
+
+        await state.PostponeForceUpdateCommand.ExecuteAsync(null);
+
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.False(state.IsForceUpdateError);
+        Assert.True(state.InstallUpdateCommand.CanExecute(null));
+    }
+
+    [Theory]
+    [InlineData(null, null, 30, 3)]
+    [InlineData("45", "5", 45, 5)]
+    [InlineData("1", "2", 5, 2)]
+    [InlineData("0", "0", 30, 0)]
+    [InlineData("abc", "-1", 30, 0)]
+    public void AppUpdatePostponeOptions_reads_interval_and_count(
+        string? minutes,
+        string? count,
+        int expectedMinutes,
+        int expectedCount)
+    {
+        var values = new Dictionary<string, string?>();
+        if (minutes is not null)
+        {
+            values[AppUpdatePostponeOptions.IntervalMinutesConfigurationKey] = minutes;
+        }
+
+        if (count is not null)
+        {
+            values[AppUpdatePostponeOptions.MaxCountConfigurationKey] = count;
+        }
+
+        var options = AppUpdatePostponeOptions.FromConfiguration(
+            new ConfigurationBuilder().AddInMemoryCollection(values).Build());
+
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), options.Interval);
+        Assert.Equal(expectedCount, options.MaxCount);
+        Assert.Equal(expectedCount > 0, options.IsEnabled);
+    }
+
     private static AppUpdateCoordinator CreateCoordinator(
         AppUpdateCheckResponse response,
         IAppUpdateDownloadService downloadService,
@@ -1519,7 +1859,8 @@ public sealed class AppUpdateCoordinatorTests
         IApplicationExitService? exitService = null,
         IAppUpdateChannelProvider? channelProvider = null,
         IAppUpdateInstallSafetyGuard? guard = null,
-        ControlledDelays? delays = null)
+        ControlledDelays? delays = null,
+        AppUpdatePostponeOptions? postponeOptions = null)
     {
         return CreateCoordinator(
             new StaticUpdateApiClient(response),
@@ -1530,7 +1871,8 @@ public sealed class AppUpdateCoordinatorTests
             exitService,
             channelProvider,
             guard,
-            delays);
+            delays,
+            postponeOptions);
     }
 
     private static AppUpdateCoordinator CreateCoordinator(
@@ -1542,7 +1884,8 @@ public sealed class AppUpdateCoordinatorTests
         IApplicationExitService? exitService = null,
         IAppUpdateChannelProvider? channelProvider = null,
         IAppUpdateInstallSafetyGuard? guard = null,
-        ControlledDelays? delays = null)
+        ControlledDelays? delays = null,
+        AppUpdatePostponeOptions? postponeOptions = null)
     {
         var versionProvider = new StaticVersionProvider("1.0.0");
         state.InitializeCurrentVersion(versionProvider.CurrentVersion);
@@ -1559,7 +1902,8 @@ public sealed class AppUpdateCoordinatorTests
             // 中文注释：默认让交易结束监视永不触发，只有显式传入可控等待的用例才推进监视循环。
             delays is null
                 ? (_, cancellationToken) => Task.Delay(Timeout.Infinite, cancellationToken)
-                : delays.DelayAsync);
+                : delays.DelayAsync,
+            postponeOptions);
     }
 
     private static AppUpdateCheckResponse CreateRelease(bool force) => new()
@@ -1686,6 +2030,27 @@ public sealed class AppUpdateCoordinatorTests
         }
     }
 
+    private sealed class ModeCapturingInstallerLauncher : IAppUpdateInstallerLauncher
+    {
+        public UnattendedInstallMode? Mode { get; private set; }
+
+        public Task<ProcessLaunchResult> LaunchAsync(
+            string installerPath,
+            AppUpdateCheckResponse update,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProcessLaunchResult.Succeeded());
+
+        public Task<ProcessLaunchResult> LaunchUnattendedAsync(
+            string installerPath,
+            AppUpdateCheckResponse update,
+            UnattendedInstallMode mode,
+            CancellationToken cancellationToken = default)
+        {
+            Mode = mode;
+            return Task.FromResult(ProcessLaunchResult.Succeeded());
+        }
+    }
+
     // 中文注释：与真实 AppUpdateInstallerLauncher 一样先过安全守卫，被交易挡住时返回 activeTransaction。
     private sealed class GuardedInstallerLauncher(IAppUpdateInstallSafetyGuard guard) : IAppUpdateInstallerLauncher
     {
@@ -1755,6 +2120,32 @@ public sealed class AppUpdateCoordinatorTests
             statusKey = CanInstall ? string.Empty : "appUpdate.install.activeTransaction";
             args = [];
             return CanInstall;
+        }
+    }
+
+    // 中文注释：能否安装与能否自动弹遮罩分开控制，模拟“购物车为空但停在退货等页面”的情况。
+    private sealed class ScreenAwareSafetyGuard(bool canInstall, bool canInterrupt) : IAppUpdateInstallSafetyGuard
+    {
+        public bool CanInstall { get; set; } = canInstall;
+
+        public bool CanInterrupt { get; set; } = canInterrupt;
+
+        public bool CanInstallUpdate(out string statusKey, out object[] args)
+        {
+            statusKey = CanInstall ? string.Empty : "appUpdate.install.activeTransaction";
+            args = [];
+            return CanInstall;
+        }
+
+        public bool CanInterruptForUpdatePrompt(out string statusKey, out object[] args)
+        {
+            if (!CanInstallUpdate(out statusKey, out args))
+            {
+                return false;
+            }
+
+            statusKey = CanInterrupt ? string.Empty : "appUpdate.install.waitingForIdle";
+            return CanInterrupt;
         }
     }
 

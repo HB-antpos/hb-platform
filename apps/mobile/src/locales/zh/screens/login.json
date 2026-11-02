@@ -4,7 +4,7 @@
     "toEnglish": "EN",
     "toChinese": "中"
   },
-  "username": "用户名",
+  "username": "用户名或邮箱",
   "password": "密码",
   "userMode": "用户登录",
   "rememberUsername": "记住用户名",
@@ -161,7 +161,7 @@
     "doneDescription": "请用新密码登录。其他设备上的登录已退出。",
     "backToLogin": "返回登录",
     "loginNameLabel": "你的登录名",
-    "loginNameHint": "老账号的登录名不是邮箱，登录时请填上面的登录名。",
+    "loginNameHint": "登录时可以填上面的登录名，也可以直接填邮箱。",
     "copy": "复制",
     "copied": "已复制",
     "backToLoginPrefilled": "去登录（已填好登录名）",

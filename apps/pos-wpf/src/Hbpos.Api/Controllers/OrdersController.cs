@@ -125,7 +125,8 @@ public sealed class OrdersController(
         [FromQuery] DateTimeOffset? soldTo,
         [FromQuery] string? keyword,
         [FromQuery] int take,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] int skip = 0)
     {
         if (string.IsNullOrWhiteSpace(storeCode))
         {
@@ -138,7 +139,7 @@ public sealed class OrdersController(
         }
 
         var response = await orderHistoryService.QueryAsync(
-            new OrderHistoryQueryRequest(storeCode, deviceCode, soldFrom, soldTo, keyword, take <= 0 ? 100 : take),
+            new OrderHistoryQueryRequest(storeCode, deviceCode, soldFrom, soldTo, keyword, take <= 0 ? 100 : take, Math.Max(skip, 0)),
             cancellationToken);
         return Ok(ApiResult<OrderHistoryQueryResponse>.Ok(response));
     }

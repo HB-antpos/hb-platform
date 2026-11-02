@@ -338,73 +338,85 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
-    public async Task SaveAndPrintCommand_prompts_restart_after_save_and_defers_return_until_prompt_finishes()
+    public async Task SaveAndPrintCommand_schedules_overnight_restart_and_auto_logout_before_returning_to_pos()
     {
         var order = new List<string>();
-        var coordinator = new RecordingRestartCoordinator(order);
+        DateTimeOffset restartAt = new DateTime(2026, 10, 30, 3, 0, 0, DateTimeKind.Local);
+        var coordinator = new RecordingRestartCoordinator(order) { RestartAt = restartAt };
+        DateTimeOffset? logoutRestartAt = null;
         var viewModel = new DailyCloseViewModel(
             new FakeDailyCloseService(),
             new FakeDailyClosePrintService(),
             CreateSession(),
             returnToPos: () => order.Add("return"),
-            restartCoordinatorProvider: () => coordinator);
+            restartCoordinatorProvider: () => coordinator,
+            requestAutoLogout: scheduled =>
+            {
+                order.Add("logout");
+                logoutRestartAt = scheduled;
+                return TimeSpan.FromSeconds(30);
+            });
         coordinator.Owner = viewModel;
-        await OpenNewDailyCloseDraftAsync(viewModel);
-        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
-        viewModel.KeypadInputCommand.Execute("1");
-        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+        await SaveOneTwentyAsync(viewModel);
 
-        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
-
-        // 先提示重启（此时日结页已不忙，安全检查不会被自己拦住），提示结束后才回收银台。
-        Assert.Equal(["prompt", "return"], order);
+        // 先排凌晨重启（此时日结页已不忙）、再安排自动登出，最后才回收银台；全程不弹任何重启提示。
+        Assert.Equal(["schedule", "logout", "return"], order);
         Assert.Equal(DateTime.Today, coordinator.BusinessDate);
-        Assert.False(coordinator.WasBusyDuringPrompt);
+        Assert.False(coordinator.WasBusyDuringSchedule);
+        Assert.Equal(restartAt, logoutRestartAt);
+        Assert.Equal(
+            "Daily close saved and sent to printer. This computer has been running for a long time and will restart automatically at 03:00. The cashier will be signed out automatically in 30 seconds.",
+            viewModel.StatusMessage);
     }
 
     [Fact]
-    public async Task SaveAndPrintCommand_goes_to_pos_when_restart_prompt_asks_for_it_even_if_print_failed()
+    public async Task SaveAndPrintCommand_requests_auto_logout_even_when_no_restart_is_needed()
     {
-        var returned = false;
-        var coordinator = new RecordingRestartCoordinator([]) { Outcome = RestartFlowOutcome.GoToPos };
+        DateTimeOffset? logoutRestartAt = DateTimeOffset.MaxValue;
+        var logoutCalls = 0;
         var viewModel = new DailyCloseViewModel(
             new FakeDailyCloseService(),
             new FakeDailyClosePrintService { PrintResult = new ReceiptPrintResult(false, "paper out") },
             CreateSession(),
-            returnToPos: () => returned = true,
-            restartCoordinatorProvider: () => coordinator);
-        await OpenNewDailyCloseDraftAsync(viewModel);
-        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
-        viewModel.KeypadInputCommand.Execute("1");
-        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+            restartCoordinatorProvider: () => new RecordingRestartCoordinator([]),
+            requestAutoLogout: scheduled =>
+            {
+                logoutCalls++;
+                logoutRestartAt = scheduled;
+                return TimeSpan.FromSeconds(30);
+            });
+        await SaveOneTwentyAsync(viewModel);
 
-        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
-
-        Assert.Equal(1, coordinator.Calls);
-        Assert.True(returned);
+        // 打印失败留在日结页：同样会自动登出，文案里不出现重启。
+        Assert.Equal(1, logoutCalls);
+        Assert.Null(logoutRestartAt);
+        Assert.DoesNotContain("restart", viewModel.StatusMessage);
+        Assert.EndsWith("The cashier will be signed out automatically in 30 seconds.", viewModel.StatusMessage);
     }
 
     [Fact]
-    public async Task SaveAndPrintCommand_does_not_prompt_restart_when_saving_fails()
+    public async Task SaveAndPrintCommand_does_not_schedule_restart_or_logout_when_saving_fails()
     {
         var coordinator = new RecordingRestartCoordinator([]);
+        var logoutCalls = 0;
         var viewModel = new DailyCloseViewModel(
             new FakeDailyCloseService { SaveException = new InvalidOperationException("db locked") },
             new FakeDailyClosePrintService(),
             CreateSession(),
-            restartCoordinatorProvider: () => coordinator);
-        await OpenNewDailyCloseDraftAsync(viewModel);
-        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
-        viewModel.KeypadInputCommand.Execute("1");
-        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
-
-        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+            restartCoordinatorProvider: () => coordinator,
+            requestAutoLogout: _ =>
+            {
+                logoutCalls++;
+                return TimeSpan.FromSeconds(30);
+            });
+        await SaveOneTwentyAsync(viewModel);
 
         Assert.Equal(0, coordinator.Calls);
+        Assert.Equal(0, logoutCalls);
     }
 
     [Fact]
-    public async Task SaveAndPrintCommand_survives_a_throwing_restart_coordinator()
+    public async Task SaveAndPrintCommand_survives_a_throwing_restart_coordinator_and_logout_request()
     {
         var returned = false;
         var viewModel = new DailyCloseViewModel(
@@ -412,16 +424,23 @@ public sealed class DailyCloseViewModelTests
             new FakeDailyClosePrintService(),
             CreateSession(),
             returnToPos: () => returned = true,
-            restartCoordinatorProvider: () => new RecordingRestartCoordinator([]) { Exception = new InvalidOperationException("boom") });
+            restartCoordinatorProvider: () => new RecordingRestartCoordinator([]) { Exception = new InvalidOperationException("boom") },
+            requestAutoLogout: _ => throw new InvalidOperationException("boom"));
+        await SaveOneTwentyAsync(viewModel);
+
+        // 凌晨重启与自动登出都是附加功能：它们出错不能影响日结与回收银台。
+        Assert.True(returned);
+        Assert.Equal("Daily close saved and sent to printer.", viewModel.StatusMessage);
+    }
+
+    private static async Task SaveOneTwentyAsync(DailyCloseViewModel viewModel)
+    {
         await OpenNewDailyCloseDraftAsync(viewModel);
         viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
         viewModel.KeypadInputCommand.Execute("1");
         viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
 
         await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
-
-        // 重启提示是附加功能：它出错不能影响日结与回收银台。
-        Assert.True(returned);
     }
 
     [Fact]
@@ -1599,7 +1618,7 @@ public sealed class DailyCloseViewModelTests
 
     private sealed class RecordingRestartCoordinator(List<string> order) : IPostDailyCloseRestartCoordinator
     {
-        public RestartFlowOutcome Outcome { get; init; } = RestartFlowOutcome.NotDue;
+        public DateTimeOffset? RestartAt { get; init; }
 
         public Exception? Exception { get; init; }
 
@@ -1607,23 +1626,28 @@ public sealed class DailyCloseViewModelTests
 
         public DateTime? BusinessDate { get; private set; }
 
-        public bool WasBusyDuringPrompt { get; private set; } = true;
+        public bool WasBusyDuringSchedule { get; private set; } = true;
 
         public DailyCloseViewModel? Owner { get; set; }
 
-        public Task<RestartFlowOutcome> RunAsync(
+        public Task<DateTimeOffset?> ScheduleAfterDailyCloseAsync(
             PosSessionState session,
             DateTime businessDate,
             CancellationToken cancellationToken = default)
         {
             Calls++;
             BusinessDate = businessDate;
-            WasBusyDuringPrompt = Owner?.IsBusy ?? true;
-            order.Add("prompt");
+            WasBusyDuringSchedule = Owner?.IsBusy ?? true;
+            order.Add("schedule");
             return Exception is not null
-                ? Task.FromException<RestartFlowOutcome>(Exception)
-                : Task.FromResult(Outcome);
+                ? Task.FromException<DateTimeOffset?>(Exception)
+                : Task.FromResult(RestartAt);
         }
+
+        public Task<RestartFlowOutcome> RunScheduledIfDueAsync(
+            PosSessionState session,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RestartFlowOutcome.NotDue);
 
         public Task<RestartFlowOutcome> RunTestAsync(
             PosSessionState session,

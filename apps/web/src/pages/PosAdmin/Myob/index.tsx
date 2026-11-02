@@ -339,6 +339,7 @@ export default function MyobPage() {
                 active={activeTab === 'push'}
                 canGoBind={access.canBindMyobEmployees}
                 canGoMapping={access.canManageMyobConnections}
+                canPush={access.canPushMyobTimesheet}
                 onGoBind={handleGoBind}
                 onGoMapping={handleGoMapping}
               />

@@ -1,0 +1,106 @@
+/* 小票纸面：与收银机 80mm 热敏纸打印对齐，42 列等宽；窗口再窄也不折行，保证金额列对齐。 */
+.posm-receipt-paper-wrap {
+  --posm-receipt-paper: #fff;
+  --posm-receipt-ink: #17181b;
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  filter: drop-shadow(0 8px 16px rgba(16, 24, 40, 0.13)) drop-shadow(0 1px 2px rgba(16, 24, 40, 0.14));
+}
+
+.posm-receipt-paper {
+  position: relative;
+  box-sizing: content-box;
+  width: 42ch;
+  padding: 20px 16px 12px;
+  background: var(--posm-receipt-paper);
+  color: var(--posm-receipt-ink);
+  font-family: 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+  /* 窄屏等比缩小而不是折行：42 列 ≈ 25.3 倍字号宽，再加左右各 16px 内边距与 12px 页边距；宽屏仍是 13px。 */
+  font-size: min(13px, calc((100vw - 56px) / 26));
+  line-height: 1.5;
+}
+
+/* 上下锯齿边：用 mask 裁出三角，阴影由外层 drop-shadow 跟着形状走。 */
+.posm-receipt-paper::before,
+.posm-receipt-paper::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: var(--posm-receipt-paper);
+}
+
+.posm-receipt-paper::before {
+  top: -7px;
+  -webkit-mask: conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+  mask: conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+}
+
+.posm-receipt-paper::after {
+  bottom: -7px;
+  -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+  mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+}
+
+.posm-receipt-row {
+  min-height: 1.5em;
+  white-space: pre;
+}
+
+.posm-receipt-row.is-center {
+  text-align: center;
+}
+
+.posm-receipt-row.is-bold {
+  font-weight: 700;
+}
+
+.posm-receipt-machine {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 4px;
+}
+
+.posm-receipt-barcode {
+  display: block;
+  color: #111;
+}
+
+/* 打印：只输出纸面本身，80mm 纸宽 72mm 可打印区，42 列 ≈ 每列 1.714mm。 */
+#posm-receipt-print-root {
+  display: none;
+}
+
+@media print {
+  body > *:not(#posm-receipt-print-root) {
+    display: none !important;
+  }
+
+  #posm-receipt-print-root {
+    display: block;
+  }
+
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  .posm-receipt-paper-wrap.is-print {
+    display: block;
+    filter: none;
+  }
+
+  .posm-receipt-paper-wrap.is-print .posm-receipt-paper {
+    margin: 0 4mm;
+    padding: 4mm 0;
+    font-size: 2.85mm;
+    color: #000;
+  }
+
+  .posm-receipt-paper-wrap.is-print .posm-receipt-paper::before,
+  .posm-receipt-paper-wrap.is-print .posm-receipt-paper::after {
+    display: none;
+  }
+}

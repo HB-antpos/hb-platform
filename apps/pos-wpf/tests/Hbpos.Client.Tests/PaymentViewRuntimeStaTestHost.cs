@@ -269,7 +269,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
             Source = new Uri(
-                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Blue.xaml",
                 UriKind.Absolute)
         });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary

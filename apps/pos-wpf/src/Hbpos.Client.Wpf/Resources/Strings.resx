@@ -410,20 +410,32 @@
   <data name="customerDisplay.window.swapRequiresOpen" xml:space="preserve"><value>Open the customer display before swapping screens.</value></data>
   <data name="customerDisplay.window.swapUnavailable" xml:space="preserve"><value>Could not detect the screens of the main window and customer display. Screens were not swapped.</value></data>
   <data name="shell.customerDisplayWindow" xml:space="preserve"><value>Customer display window</value></data>
+  <data name="shell.customerDisplayState.closed" xml:space="preserve"><value>Off</value></data>
+  <data name="shell.customerDisplayState.normal" xml:space="preserve"><value>Window</value></data>
+  <data name="shell.customerDisplayState.fullscreen" xml:space="preserve"><value>Fullscreen</value></data>
   <data name="shell.swapCustomerDisplayScreens" xml:space="preserve"><value>Swap screens with the customer display</value></data>
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
   <data name="shell.colorTheme.blue" xml:space="preserve"><value>Blue</value></data>
   <data name="shell.colorTheme.blue.hint" xml:space="preserve"><value>Crisp and clear (default)</value></data>
-  <data name="shell.colorTheme.default" xml:space="preserve"><value>Classic</value></data>
-  <data name="shell.colorTheme.default.hint" xml:space="preserve"><value>Original colors</value></data>
-  <data name="shell.colorTheme.paper" xml:space="preserve"><value>Paper</value></data>
-  <data name="shell.colorTheme.paper.hint" xml:space="preserve"><value>Bright daytime stores</value></data>
+  <data name="shell.colorTheme.candy" xml:space="preserve"><value>Candy</value></data>
+  <data name="shell.colorTheme.candy.hint" xml:space="preserve"><value>Vivid violet, colorful icons</value></data>
+  <data name="shell.colorTheme.sunny" xml:space="preserve"><value>Sunny</value></data>
+  <data name="shell.colorTheme.sunny.hint" xml:space="preserve"><value>Warm and bright, colorful icons</value></data>
+  <data name="shell.colorTheme.ocean" xml:space="preserve"><value>Ocean</value></data>
+  <data name="shell.colorTheme.ocean.hint" xml:space="preserve"><value>Fresh teal, multicolor keys</value></data>
+  <data name="shell.colorTheme.rainbow" xml:space="preserve"><value>Rainbow</value></data>
+  <data name="shell.colorTheme.rainbow.hint" xml:space="preserve"><value>Color-coded zones, multicolor keys</value></data>
   <data name="shell.colorTheme.graphite" xml:space="preserve"><value>Graphite</value></data>
   <data name="shell.colorTheme.graphite.hint" xml:space="preserve"><value>Evening shifts and dim light</value></data>
   <data name="shell.colorTheme.celadon" xml:space="preserve"><value>Celadon</value></data>
   <data name="shell.colorTheme.celadon.hint" xml:space="preserve"><value>Soft all-day comfort</value></data>
   <data name="shell.colorTheme.elder" xml:space="preserve"><value>Easy View</value></data>
   <data name="shell.colorTheme.elder.hint" xml:space="preserve"><value>Large text, clear zones, high contrast</value></data>
+  <data name="shell.colorThemeOnboarding.title" xml:space="preserve"><value>Welcome, {0}</value></data>
+  <data name="shell.colorThemeOnboarding.subtitle" xml:space="preserve"><value>First time here. Pick the color theme you like.</value></data>
+  <data name="shell.colorThemeOnboarding.hint" xml:space="preserve"><value>Tap a card to preview it on the whole screen. You can change it anytime from Color theme at the top right, and it follows you to every register.</value></data>
+  <data name="shell.colorThemeOnboarding.confirm" xml:space="preserve"><value>Start with {0}</value></data>
+  <data name="shell.colorThemeOnboarding.preselectedHint" xml:space="preserve"><value>Preselected: the theme last used on this register</value></data>
   <data name="shell.languageToggle" xml:space="preserve"><value>中 / EN</value></data>
   <data name="shell.language.saveFailedRestartMayRevert" xml:space="preserve"><value>Language changed for this session, but saving failed. It may revert after restart.</value></data>
   <data name="shell.cashierLogin.overlayTitle" xml:space="preserve"><value>Cashier login required</value></data>
@@ -448,6 +460,9 @@
   <data name="shell.cashierLogin.diagnose" xml:space="preserve"><value>Diagnose network</value></data>
   <data name="shell.cashierLogin.status.success" xml:space="preserve"><value>Cashier login successful.</value></data>
   <data name="shell.cashierLogin.status.locked" xml:space="preserve"><value>Signed out. Sign in again.</value></data>
+  <data name="shell.cashierLogin.status.autoLogoutPending" xml:space="preserve"><value>Daily close done. Signing out automatically in {0} seconds.</value></data>
+  <data name="shell.cashierLogin.status.autoLoggedOut" xml:space="preserve"><value>Daily close done. Signed out automatically.</value></data>
+  <data name="shell.cashierLogin.status.restartScheduled" xml:space="preserve"><value>The computer will restart automatically at {0}.</value></data>
   <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve"><value>To pay with a voucher, tap Voucher first, then scan the voucher code.</value></data>
   <data name="shell.scanner.status.unsupportedScreen" xml:space="preserve"><value>This page does not accept scans. Go back to the sales screen to scan.</value></data>
   <data name="shell.cashierLogin.status.sessionExpired" xml:space="preserve"><value>Cashier session expired. Sign in again.</value></data>
@@ -885,6 +900,9 @@
   <data name="returns.status.productNotFound" xml:space="preserve"><value>Product was not found in the local catalog.</value></data>
   <data name="returns.status.addedNoReceipt" xml:space="preserve"><value>Added {0} for no-receipt return.</value></data>
   <data name="returns.status.orderNotFound" xml:space="preserve"><value>Order was not found.</value></data>
+  <data name="returns.status.orderAmbiguous" xml:space="preserve"><value>Several orders share this number. Pick the one that matches the date and amount on the receipt.</value></data>
+  <data name="returns.candidates.title" xml:space="preserve"><value>Several orders share this number</value></data>
+  <data name="returns.candidates.subtitle" xml:space="preserve"><value>Check the date, time and total on the customer's receipt, then pick the matching order.</value></data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve"><value>Loaded local order; online order history is not available.</value></data>
   <data name="returns.status.cardRefundDisabledStale" xml:space="preserve"><value>Refund to the original card is disabled until the order's return records can be loaded online.</value></data>
   <data name="returns.status.addedReceiptLine" xml:space="preserve"><value>Added {0} to refund cart.</value></data>
@@ -927,6 +945,8 @@
   <data name="dailyClose.status.refreshed" xml:space="preserve"><value>Daily close summary refreshed.</value></data>
   <data name="dailyClose.status.saving" xml:space="preserve"><value>Saving and printing daily close...</value></data>
   <data name="dailyClose.status.savedPrinted" xml:space="preserve"><value>Daily close saved and receipt printed.</value></data>
+  <data name="dailyClose.status.restartScheduled" xml:space="preserve"><value>This computer has been running for a long time and will restart automatically at {0}.</value></data>
+  <data name="dailyClose.status.autoLogout" xml:space="preserve"><value>The cashier will be signed out automatically in {0} seconds.</value></data>
   <data name="dailyClose.status.savedPrintFailed" xml:space="preserve"><value>Daily close saved, but printing failed: {0}</value></data>
   <data name="dailyClose.status.historyLoading" xml:space="preserve"><value>Loading daily close history...</value></data>
   <data name="dailyClose.status.historyEmpty" xml:space="preserve"><value>No daily close history found for the selected date.</value></data>
@@ -1285,6 +1305,14 @@
   <data name="appUpdate.force.exit" xml:space="preserve"><value>Exit</value></data>
   <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>A transaction is in progress. The update will continue automatically when it ends.</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>Could not start the update installer. {0}</value></data>
+  <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>You'll be asked to install when the sales screen is free.</value></data>
+  <data name="appUpdate.force.postpone" xml:space="preserve"><value>Install later</value></data>
+  <data name="appUpdate.force.postponeHint" xml:space="preserve"><value>Reminds you again in {0} min. {1} postpones left.</value></data>
+  <data name="appUpdate.notice.forceTitle" xml:space="preserve"><value>Update required</value></data>
+  <data name="appUpdate.notice.optionalTitle" xml:space="preserve"><value>New version</value></data>
+  <data name="appUpdate.notice.ready" xml:space="preserve"><value>Downloaded. Install when the till is free.</value></data>
+  <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>Install after the current sale.</value></data>
+  <data name="appUpdate.notice.later" xml:space="preserve"><value>Later</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>Approval required</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>The current cashier cannot perform this operation.</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>CURRENT OPERATION</value></data>
@@ -1642,6 +1670,15 @@
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>Last 7 days</value>
   </data>
+  <data name="history.pager.previous" xml:space="preserve">
+    <value>Previous</value>
+  </data>
+  <data name="history.pager.next" xml:space="preserve">
+    <value>Next</value>
+  </data>
+  <data name="history.pager.page" xml:space="preserve">
+    <value>Page {0}</value>
+  </data>
   <data name="cardRecovery.v2.channelAll" xml:space="preserve"><value>All</value></data>
   <data name="cardRecovery.v2.typeAll" xml:space="preserve"><value>All</value></data>
   <data name="cardRecovery.v2.typeSale" xml:space="preserve"><value>Sale</value></data>
@@ -1751,10 +1788,10 @@
   <data name="restart.failed.detail" xml:space="preserve"><value>code={0} · uptime={1}
 Logged with reference {2}</value></data>
   <data name="restart.failed.ok" xml:space="preserve"><value>Got it</value></data>
-  <data name="settings.restartPrompt.title" xml:space="preserve"><value>Restart reminder</value></data>
-  <data name="settings.restartPrompt.description" xml:space="preserve"><value>After daily close, remind to restart this POS when it has been running for 7 days or more.</value></data>
-  <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Remind to restart after daily close</value></data>
-  <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>The POS only restarts after the cashier confirms and every safety check passes. Saved for this device only.</value></data>
+  <data name="settings.restartPrompt.title" xml:space="preserve"><value>Overnight restart</value></data>
+  <data name="settings.restartPrompt.description" xml:space="preserve"><value>If this POS has been running for 7 days or more, it restarts the computer automatically in the early morning (3:00 by default) after daily close.</value></data>
+  <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Restart overnight after daily close</value></data>
+  <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>Shows a 30-second countdown that can be cancelled, and skips the restart if a sale, payment or card task is unfinished. No admin prompt. Saved for this device only.</value></data>
   <data name="settings.scanner.title" xml:space="preserve"><value>Scanner sensitivity</value></data>
   <data name="settings.scanner.description" xml:space="preserve"><value>A second read of the same barcode within this time is ignored, so one scan never adds an item twice.</value></data>
   <data name="settings.scanner.help" xml:space="preserve"><value>Raise it if one scan adds an item twice; lower it if scanning two identical items quickly only adds one. Saved for this device only.</value></data>

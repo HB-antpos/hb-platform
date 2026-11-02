@@ -178,6 +178,22 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyMyobEmployeeSyncBatchAsync", runtimeMethods);
         Assert.Contains("ApplyMyobPayCategoryCasualAsync", runtimeMethods);
         Assert.Contains("VerifyMyobPayCategoryCasualAsync", runtimeMethods);
+        Assert.Contains("ApplyMyobPayslipAsync", runtimeMethods);
+        Assert.Contains("VerifyMyobPayslipAsync", runtimeMethods);
+        Assert.Contains("ApplyUserPreferenceAsync", runtimeMethods);
+        Assert.Contains("VerifyUserPreferenceAsync", runtimeMethods);
+        Assert.Contains("ApplyMyobPayslipExportAsync", runtimeMethods);
+        Assert.Contains("VerifyMyobPayslipExportAsync", runtimeMethods);
+        Assert.Contains("ApplyMyobTimesheetPushAsync", runtimeMethods);
+        Assert.Contains("VerifyMyobTimesheetPushAsync", runtimeMethods);
+        Assert.Contains("ApplyMyobPayCategoryPublicHolidayAsync", runtimeMethods);
+        Assert.Contains("VerifyMyobPayCategoryPublicHolidayAsync", runtimeMethods);
+        Assert.Contains("ApplySmsSendLogAsync", runtimeMethods);
+        Assert.Contains("VerifySmsSendLogAsync", runtimeMethods);
+        Assert.Contains("ApplyAttendanceSettingsSingleActiveAsync", runtimeMethods);
+        Assert.Contains("VerifyAttendanceSettingsSingleActiveAsync", runtimeMethods);
+        Assert.Contains("ApplyPosReceiptShareLinkAsync", runtimeMethods);
+        Assert.Contains("VerifyPosReceiptShareLinkAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -729,6 +745,38 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId
         );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.MyobPayslipMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.UserPreferenceMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.MyobPayslipExportMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.MyobTimesheetPushMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.SmsSendLogMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId
+        );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
             SchemaDatabase.Posm,
@@ -1223,6 +1271,14 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261027.004-myob-pay-category",
                 "Check:Main:20261029.001-myob-employee-sync-batch",
                 "Check:Main:20261029.002-myob-pay-category-casual",
+                "Check:Main:20261029.003-myob-payslip",
+                "Check:Main:20261029.004-user-preference",
+                "Check:Main:20261029.005-myob-payslip-export",
+                "Check:Main:20261030.001-myob-timesheet-push",
+                "Check:Main:20261030.002-myob-pay-category-public-holiday",
+                "Check:Main:20261030.003-sms-send-log",
+                "Check:Main:20261030.004-attendance-settings-single-active",
+                "Check:Main:20261030.005-pos-receipt-share-link",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1507,194 +1563,226 @@ public sealed class SchemaMigrationCoordinatorTests
         // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、敏感申请生日列与须改密标记表（10-04），未成年用工合规（10-04），然后是找回密码验证码表（10-04），然后是验证码表的新邮箱列（10-05），然后是 Mobile 安卓原生最低构建号策略表（10-05），然后是门店小票资料下发的两张新表（10-07），然后是考勤用餐休息的两张新表（10-07），然后是分店现金管理的六张新表（10-08），然后是门店小票资料「代金券使用说明 / 分期条款」两列（10-08）、贺卡填报供应商与批次三列（10-09）、客显广告版式三列（10-09），然后是通知平台的两张新表（10-12），然后是人脸抓拍接收的三张新表（10-13），然后是人脸比对的九张新表（10-14），然后是门店价格更新已通知记录表（10-15），然后是新品到店每日推送的两张新表（10-15），然后是班中定位批量上传的两列与过滤唯一索引（10-15），然后是门店分时客流报表表（10-16）与名单命中自动确认阈值列（10-16），然后是 App 系统推送的设备表与发件箱（10-17）、「不允许登录」标记表与价格变更任务页面设置表（10-17），最后是用户姓名拆分的四个新列（10-18）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^48].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^56].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^47].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^55].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^46].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^54].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^45].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^53].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^44].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^52].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^43].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^51].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^42].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^50].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeProfileSensitiveBirthdayMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^41].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^49].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^40].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^48].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^39].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^47].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^38].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^46].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeTargetEmailMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^37].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^45].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^36].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^44].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^35].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^43].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^34].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^42].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreCashManagementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^33].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^41].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreReceiptTermsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^32].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^40].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SeasonalCardSupplierBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^31].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^39].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AdvertisementOrientationMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^30].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^38].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AppNotificationMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^29].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^37].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceCaptureMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^28].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^36].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceMatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^27].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^35].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePriceUpdateNoticeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^26].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^34].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.ContainerNewProductNoticeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^25].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^33].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceLocationSampleBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^24].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^32].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceTrafficHourlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^23].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^31].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceUnwelcomeAutoConfirmMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^22].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^30].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AppPushMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^21].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^29].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserLoginRestrictionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^20].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^28].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePriceUpdateSettingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^19].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^27].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserNamePartsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^18].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^26].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderReturnFieldsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^17].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^25].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^16].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^24].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderHistoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^23].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderItemImageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^22].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderRevisionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^21].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePosApiEntryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^20].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.HelpFaqMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^19].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceReviewAutoClockOutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^18].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendancePayrollLeaveMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^17].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.RoleLevelMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^16].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.PosApiEntryUsageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MainApiEntryUsageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobConnectionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobEmployeeBindingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobEmployeeSyncBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.MyobPayslipMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.UserPreferenceMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.MyobPayslipExportMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.MyobTimesheetPushMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.SmsSendLogMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.Equal("20261007.001-store-receipt-profile-release", SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId);
@@ -1732,6 +1820,14 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Equal("20261027.004-myob-pay-category", SchemaMigrationCoordinator.MyobPayCategoryMigrationId);
         Assert.Equal("20261029.001-myob-employee-sync-batch", SchemaMigrationCoordinator.MyobEmployeeSyncBatchMigrationId);
         Assert.Equal("20261029.002-myob-pay-category-casual", SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId);
+        Assert.Equal("20261029.003-myob-payslip", SchemaMigrationCoordinator.MyobPayslipMigrationId);
+        Assert.Equal("20261029.004-user-preference", SchemaMigrationCoordinator.UserPreferenceMigrationId);
+        Assert.Equal("20261029.005-myob-payslip-export", SchemaMigrationCoordinator.MyobPayslipExportMigrationId);
+        Assert.Equal("20261030.001-myob-timesheet-push", SchemaMigrationCoordinator.MyobTimesheetPushMigrationId);
+        Assert.Equal("20261030.002-myob-pay-category-public-holiday", SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId);
+        Assert.Equal("20261030.003-sms-send-log", SchemaMigrationCoordinator.SmsSendLogMigrationId);
+        Assert.Equal("20261030.004-attendance-settings-single-active", SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId);
+        Assert.Equal("20261030.005-pos-receipt-share-link", SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId);
         Assert.Equal("20261024.004-pos-device-api-entry", SchemaMigrationCoordinator.PosDeviceApiEntryMigrationId);
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
         foreach (var migrationId in new[]
@@ -1784,6 +1880,14 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.MyobPayCategoryMigrationId,
             SchemaMigrationCoordinator.MyobEmployeeSyncBatchMigrationId,
             SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId,
+            SchemaMigrationCoordinator.MyobPayslipMigrationId,
+            SchemaMigrationCoordinator.UserPreferenceMigrationId,
+            SchemaMigrationCoordinator.MyobPayslipExportMigrationId,
+            SchemaMigrationCoordinator.MyobTimesheetPushMigrationId,
+            SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId,
+            SchemaMigrationCoordinator.SmsSendLogMigrationId,
+            SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId,
+            SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -2155,6 +2259,141 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.True(myobCasualApply >= 0
             && myobCasualApply < myobCasualVerify
             && myobCasualVerify < myobCasualRecord);
+        // MYOB 历史工资单查看记录表 + 两个权限码（10-29）：Apply → 列 / 主键 / 查询索引校验 → 登记。
+        var myobPayslipApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.MyobPayslipMigrationId}");
+        var myobPayslipVerify = runtime.Events.IndexOf("VerifyMyobPayslip", myobPayslipApply);
+        var myobPayslipRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.MyobPayslipMigrationId}");
+        Assert.True(myobPayslipApply >= 0
+            && myobPayslipApply < myobPayslipVerify
+            && myobPayslipVerify < myobPayslipRecord);
+        // 员工个人界面偏好表（10-29）：Apply → 列 / 主键签名校验 → 登记。
+        var userPreferenceApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.UserPreferenceMigrationId}");
+        var userPreferenceVerify = runtime.Events.IndexOf("VerifyUserPreference", userPreferenceApply);
+        var userPreferenceRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.UserPreferenceMigrationId}");
+        Assert.True(userPreferenceApply >= 0
+            && userPreferenceApply < userPreferenceVerify
+            && userPreferenceVerify < userPreferenceRecord);
+        // MYOB 工资单导出（10-29）：查看记录加 Action / Recipient 列 + 两个权限码：Apply → 列签名校验 → 登记。
+        var myobExportApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.MyobPayslipExportMigrationId}");
+        var myobExportVerify = runtime.Events.IndexOf("VerifyMyobPayslipExport", myobExportApply);
+        var myobExportRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.MyobPayslipExportMigrationId}");
+        Assert.True(myobExportApply >= 0
+            && myobExportApply < myobExportVerify
+            && myobExportVerify < myobExportRecord);
+        // MYOB 公共假期类别（10-30）：映射表加两个可空列：Apply → 列签名校验 → 登记。
+        var myobHolidayApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId}");
+        var myobHolidayVerify = runtime.Events.IndexOf("VerifyMyobPayCategoryPublicHoliday", myobHolidayApply);
+        var myobHolidayRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId}");
+        Assert.True(myobHolidayApply >= 0
+            && myobHolidayApply < myobHolidayVerify
+            && myobHolidayVerify < myobHolidayRecord);
+        // 短信发送记录表（10-30）：Apply → 列 / 主键 / 索引签名校验 → 登记。
+        var smsLogApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.SmsSendLogMigrationId}");
+        var smsLogVerify = runtime.Events.IndexOf("VerifySmsSendLog", smsLogApply);
+        var smsLogRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.SmsSendLogMigrationId}");
+        Assert.True(smsLogApply >= 0
+            && smsLogApply < smsLogVerify
+            && smsLogVerify < smsLogRecord);
+        // 考勤设置唯一约束（10-30）：Apply → 索引定义校验 → 登记。
+        var settingsGuardApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId}");
+        var settingsGuardVerify = runtime.Events.IndexOf("VerifyAttendanceSettingsSingleActive", settingsGuardApply);
+        var settingsGuardRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId}");
+        Assert.True(settingsGuardApply >= 0
+            && settingsGuardApply < settingsGuardVerify
+            && settingsGuardVerify < settingsGuardRecord);
+        // 在线小票分享链接表（10-30）：Apply → 列 / 主键 / 索引签名校验 → 登记。
+        var receiptLinkApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId}");
+        var receiptLinkVerify = runtime.Events.IndexOf("VerifyPosReceiptShareLink", receiptLinkApply);
+        var receiptLinkRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId}");
+        Assert.True(receiptLinkApply >= 0
+            && receiptLinkApply < receiptLinkVerify
+            && receiptLinkVerify < receiptLinkRecord);
+        // MYOB Timesheet 推送记录表（10-30）：Apply → 列 / 主键 / 索引签名校验 → 登记。
+        var timesheetPushApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.MyobTimesheetPushMigrationId}");
+        var timesheetPushVerify = runtime.Events.IndexOf("VerifyMyobTimesheetPush", timesheetPushApply);
+        var timesheetPushRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.MyobTimesheetPushMigrationId}");
+        Assert.True(timesheetPushApply >= 0
+            && timesheetPushApply < timesheetPushVerify
+            && timesheetPushVerify < timesheetPushRecord);
+    }
+
+    [Fact]
+    public void MyobTimesheetPushSchema_错误号自成一段_建表幂等_权限入库不授予角色_只在Main迁移链_不改既有表()
+    {
+        // 54400–54409 为 MYOB Timesheet 推送专用，不得与 54390–54392（工资单导出）冲突。
+        foreach (var code in new[] { "54400", "54401", "54402", "54403", "54404", "54405" })
+        {
+            Assert.Contains($"THROW {code}", MyobTimesheetPushSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("OBJECT_ID(N'dbo.MyobTimesheetPush', N'U') IS NULL", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        // 并发保险：同一 (公司文件, 周期) 最多一行 Running 的过滤唯一索引，建表与校验都要有。
+        Assert.Contains("CREATE UNIQUE NONCLUSTERED INDEX [UX_MyobTimesheetPush_Running]", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE [Status] = N'Running'", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("UX_MyobTimesheetPush_Running", MyobTimesheetPushSchema.VerifySql, StringComparison.Ordinal);
+        Assert.Contains("Myob.Timesheet.Push", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE NOT EXISTS", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("HbwebSysRolePermissions", MyobTimesheetPushSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", MyobTimesheetPushSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", MyobTimesheetPushSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", MyobTimesheetPushSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE", MyobTimesheetPushSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobTimesheetPushMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobTimesheetPushMigrationId
+        );
+    }
+
+    [Fact]
+    public void MyobPayslipExportSchema_错误号自成一段_加列与权限入库幂等_只在Main迁移链_不授予角色_不含工资内容列()
+    {
+        // 54390–54399 为 MYOB 工资单导出专用，不得与 54370–54373（工资单查看记录）、54380–54382（用户偏好）冲突。
+        foreach (var code in new[] { "54390", "54391", "54392" })
+        {
+            Assert.Contains($"THROW {code}", MyobPayslipExportSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("COL_LENGTH(N'dbo.MyobPayslipViewLog', N'Action') IS NULL", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("COL_LENGTH(N'dbo.MyobPayslipViewLog', N'Recipient') IS NULL", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("Myob.Payslip.Download", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("Myob.Payslip.Email", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE NOT EXISTS", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("HbwebSysRolePermissions", MyobPayslipExportSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", MyobPayslipExportSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", MyobPayslipExportSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", MyobPayslipExportSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayslipExportMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayslipExportMigrationId
+        );
     }
 
     [Fact]
@@ -2214,6 +2453,214 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.DoesNotContain(
             SchemaMigrationCoordinator.PosmMigrationSteps,
             step => step.MigrationId == SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId
+        );
+    }
+
+    [Fact]
+    public void MyobPayCategoryPublicHolidaySchema_只加两个可空列_幂等_只在Main迁移链_不动既有数据()
+    {
+        // 54355 / 54356 沿用工资类别映射段（54350–54359），不与 54350–54354 冲突。
+        foreach (var code in new[] { "54355", "54356" })
+        {
+            Assert.Contains($"THROW {code}", MyobPayCategoryPublicHolidaySchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        // 列不存在才加（可重复执行）；两列都可空，旧版主 API 不认识也能照常读写。
+        Assert.Contains("COL_LENGTH(N'dbo.MyobPayCategoryMapping', N'PublicHolidayUid') IS NULL", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("COL_LENGTH(N'dbo.MyobPayCategoryMapping', N'PublicHolidayCasualUid') IS NULL", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[PublicHolidayUid] nvarchar(50) NULL", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[PublicHolidayCasualUid] nvarchar(50) NULL", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HbwebSysPermissions", MyobPayCategoryPublicHolidaySchema.ApplySql, StringComparison.Ordinal);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId
+        );
+    }
+
+    [Fact]
+    public void SmsSendLogSchema_错误号自成一段_建表幂等_只在Main迁移链_不存号码明文和正文()
+    {
+        // 54410–54414 自成一段，与 MYOB Timesheet 推送的 54400–54405 不冲突。
+        foreach (var code in new[] { "54410", "54411", "54412", "54413", "54414" })
+        {
+            Assert.Contains($"THROW {code}", SmsSendLogSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        // 表和索引都是不存在才建（可重复执行）；只新建，不删不改既有数据。
+        Assert.Contains("OBJECT_ID(N'dbo.SmsSendLog', N'U') IS NULL", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IX_SmsSendLog_Phone", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IX_SmsSendLog_Created", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", SmsSendLogSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", SmsSendLogSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", SmsSendLogSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HbwebSysPermissions", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+
+        // 记录表里没有手机号明文与短信正文的列：只有哈希和打码号码。
+        Assert.Contains("[PhoneHash]", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[PhoneMask]", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Phone]", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Body]", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Message]", SmsSendLogSchema.ApplySql, StringComparison.Ordinal);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.SmsSendLogMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.SmsSendLogMigrationId
+        );
+    }
+
+    [Fact]
+    public void AttendanceSettingsSingleActiveSchema_错误号自成一段_只加索引_先查重不删数据_只在Main迁移链()
+    {
+        // 54420–54423 自成一段：Apply 内 54420/54421，Verify 内 54422/54423，互不混用。
+        foreach (var code in new[] { "54420", "54421" })
+        {
+            Assert.Contains($"THROW {code}", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", AttendanceSettingsSingleActiveSchema.VerifySql, StringComparison.Ordinal);
+        }
+        foreach (var code in new[] { "54422", "54423" })
+        {
+            Assert.Contains($"THROW {code}", AttendanceSettingsSingleActiveSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        // 索引不存在才建（可重复执行），建之前先查重；绝不删除、改写或合并任何设置行。
+        Assert.Contains("UX_AttendanceSettings_SingleActive", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("CREATE UNIQUE NONCLUSTERED INDEX", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE [IsDeleted] = 0", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("> 1", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT ", AttendanceSettingsSingleActiveSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId
+        );
+    }
+
+    [Fact]
+    public void PosReceiptShareLinkSchema_错误号自成一段_建表幂等_只在Main迁移链_不存令牌明文()
+    {
+        // 54430–54434 自成一段，与考勤设置的 54420–54423 不冲突。
+        foreach (var code in new[] { "54430", "54431", "54432", "54433", "54434" })
+        {
+            Assert.Contains($"THROW {code}", PosReceiptShareLinkSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        // 表和索引都是不存在才建（可重复执行）；只新建，不删不改既有数据。
+        Assert.Contains("OBJECT_ID(N'dbo.PosReceiptShareLink', N'U') IS NULL", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("UX_PosReceiptShareLink_TokenHash", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("CREATE UNIQUE NONCLUSTERED INDEX", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IX_PosReceiptShareLink_Order", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", PosReceiptShareLinkSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", PosReceiptShareLinkSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", PosReceiptShareLinkSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HbwebSysPermissions", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+
+        // 只有令牌哈希列和 DataProtection 密文列，没有令牌明文列。
+        Assert.Contains("[TokenHash]", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[TokenProtected]", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Token]", PosReceiptShareLinkSchema.ApplySql, StringComparison.Ordinal);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId
+        );
+    }
+
+    [Fact]
+    public void UserPreferenceSchema_错误号自成一段_建表幂等_只在Main迁移链_不动既有表()
+    {
+        foreach (var code in new[] { "54380", "54381", "54382" })
+        {
+            Assert.Contains($"THROW {code}", UserPreferenceSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("IF OBJECT_ID(N'dbo.UserPreference', N'U') IS NULL", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("PRIMARY KEY CLUSTERED ([UserGUID], [PreferenceKey])", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[UserGUID] nvarchar(50) NOT NULL", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[PreferenceKey] nvarchar(64) NOT NULL", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[PreferenceValue] nvarchar(200) NOT NULL", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("[UpdatedAtUtc] datetime2 NOT NULL", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        // 只新建表：不改既有表、不删改数据、不写权限表。
+        Assert.DoesNotContain("ALTER TABLE", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", UserPreferenceSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", UserPreferenceSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", UserPreferenceSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HbwebSysPermissions", UserPreferenceSchema.ApplySql, StringComparison.Ordinal);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.UserPreferenceMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.UserPreferenceMigrationId
+        );
+    }
+
+    [Fact]
+    public void MyobPayslipSchema_错误号自成一段_建表与权限入库幂等_只在Main迁移链_不授予角色_不含工资内容列()
+    {
+        // 54370–54379 为 MYOB 工资单专用，不得与 54350–54359（工资类别）、54360–54363（同步批次）冲突。
+        foreach (var code in new[] { "54370", "54371", "54372", "54373" })
+        {
+            Assert.Contains($"THROW {code}", MyobPayslipSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("OBJECT_ID(N'dbo.MyobPayslipViewLog', N'U') IS NULL", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IF NOT EXISTS (SELECT 1 FROM sys.indexes", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        // 两个新权限码幂等写入、默认不授予任何角色。
+        Assert.Contains("Myob.Payslip.ViewManagedStore", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("Myob.Payslip.ViewAllStores", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE NOT EXISTS", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("HbwebSysRolePermissions", MyobPayslipSchema.ApplySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP ", MyobPayslipSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", MyobPayslipSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", MyobPayslipSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        // 查看记录只允许这些列：不得出现金额、姓名等工资内容。
+        var createStart = MyobPayslipSchema.ApplySql.IndexOf("CREATE TABLE [dbo].[MyobPayslipViewLog]", StringComparison.Ordinal);
+        var createEnd = MyobPayslipSchema.ApplySql.IndexOf("CONSTRAINT [PK_MyobPayslipViewLog]", StringComparison.Ordinal);
+        Assert.True(createStart >= 0 && createEnd > createStart);
+        var createTable = MyobPayslipSchema.ApplySql[createStart..createEnd];
+        foreach (var banned in new[] { "Amount", "Gross", "Net", "Name", "Salary", "Bank" })
+        {
+            Assert.DoesNotContain($"[{banned}", createTable, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayslipMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.MyobPayslipMigrationId
         );
     }
 
@@ -3633,6 +4080,142 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyMyobPayCategoryCasual");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyMyobPayslipAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.MyobPayslipMigrationId,
+                cancellationToken
+            );
+            await VerifyMyobPayslipAsync(cancellationToken);
+        }
+
+        public Task VerifyMyobPayslipAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyMyobPayslip");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyUserPreferenceAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.UserPreferenceMigrationId,
+                cancellationToken
+            );
+            await VerifyUserPreferenceAsync(cancellationToken);
+        }
+
+        public Task VerifyUserPreferenceAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyUserPreference");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyMyobPayslipExportAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.MyobPayslipExportMigrationId,
+                cancellationToken
+            );
+            await VerifyMyobPayslipExportAsync(cancellationToken);
+        }
+
+        public Task VerifyMyobPayslipExportAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyMyobPayslipExport");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyMyobTimesheetPushAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.MyobTimesheetPushMigrationId,
+                cancellationToken
+            );
+            await VerifyMyobTimesheetPushAsync(cancellationToken);
+        }
+
+        public Task VerifyMyobTimesheetPushAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyMyobTimesheetPush");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId,
+                cancellationToken
+            );
+            await VerifyMyobPayCategoryPublicHolidayAsync(cancellationToken);
+        }
+
+        public Task VerifyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyMyobPayCategoryPublicHoliday");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplySmsSendLogAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.SmsSendLogMigrationId,
+                cancellationToken
+            );
+            await VerifySmsSendLogAsync(cancellationToken);
+        }
+
+        public Task VerifySmsSendLogAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifySmsSendLog");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId,
+                cancellationToken
+            );
+            await VerifyAttendanceSettingsSingleActiveAsync(cancellationToken);
+        }
+
+        public Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyAttendanceSettingsSingleActive");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId,
+                cancellationToken
+            );
+            await VerifyPosReceiptShareLinkAsync(cancellationToken);
+        }
+
+        public Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyPosReceiptShareLink");
             return Task.CompletedTask;
         }
 

@@ -3,6 +3,8 @@ import {
   normalizeSalesOrderBranchCatalog,
   normalizeSalesOrderDetail,
   normalizeSalesOrderListPage,
+  normalizeSalesOrderReceiptLink,
+  normalizeSalesOrderReceiptView,
 } from "./api-normalization";
 
 const basePage = {
@@ -91,5 +93,59 @@ assert.equal(detail.lines[0].productImage, null);
 assert.equal(detail.lines[0].itemNumber, null, "主档缺失时货号为空，由界面回退显示商品编码");
 assert.deepEqual(detail.payments, []);
 assert.throws(() => normalizeSalesOrderDetail({ success: true, data: { orderDetails: [] } }), /invalid/);
+
+// 在线小票：后端已排好版，空行的 text 与 align / bold 可能被 WhenWritingNull 省略，缺省按空串 / 左对齐 / 不加粗。
+const receiptView = normalizeSalesOrderReceiptView({
+  success: true,
+  data: {
+    document: {
+      orderGuid: "7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab",
+      shortCode: "6E0F13AB",
+      statusKind: "paid",
+      lines: [
+        { kind: "text", text: "HotBargain", align: "center", bold: true },
+        { kind: "blank" },
+        { kind: "barcode", text: "6E0F13AB", align: "center" },
+        { kind: "separator", text: "-".repeat(42) },
+      ],
+    },
+    link: null,
+  },
+});
+assert.equal(receiptView.link, null, "没有有效链接时为 null");
+assert.deepEqual(receiptView.document.lines[1], { kind: "blank", text: "", align: "left", bold: false });
+assert.deepEqual(receiptView.document.lines[2], { kind: "barcode", text: "6E0F13AB", align: "center", bold: false });
+assert.equal(receiptView.document.lines[0].bold, true);
+
+// link 字段整体缺省（旧后端 / WhenWritingNull）也按没有链接处理。
+assert.equal(
+  normalizeSalesOrderReceiptView({
+    success: true,
+    data: { document: { orderGuid: "O-1", shortCode: "", statusKind: "refund", lines: [] } },
+  }).link,
+  null,
+);
+
+const receiptLink = normalizeSalesOrderReceiptLink({
+  success: true,
+  data: {
+    url: "https://hotbargain.vip/r/7K2M9QXD4TBH",
+    expiresAtUtc: "2027-01-28T04:00:00Z",
+    createdAtUtc: "2026-10-30T04:00:00Z",
+    openCount: 2,
+  },
+});
+assert.equal(receiptLink.url, "https://hotbargain.vip/r/7K2M9QXD4TBH");
+assert.equal(receiptLink.openCount, 2);
+
+// 非法载荷必须抛错，不能把半截数据画成小票。
+assert.throws(() => normalizeSalesOrderReceiptView({ success: true, data: { document: { orderGuid: "", lines: [] } } }));
+assert.throws(() =>
+  normalizeSalesOrderReceiptView({
+    success: true,
+    data: { document: { orderGuid: "O-1", shortCode: "", statusKind: "paid", lines: [{ kind: "html", text: "x" }] } },
+  }),
+);
+assert.throws(() => normalizeSalesOrderReceiptLink({ success: true, data: { url: "", expiresAtUtc: "", createdAtUtc: "", openCount: 0 } }));
 
 console.log("sales-orders api-normalization tests passed");

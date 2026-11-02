@@ -16,6 +16,42 @@ public sealed class InnoInstallerScriptTests
     }
 
     [Fact]
+    public void Inno_script_registers_and_removes_update_agent_task_with_the_updater_commands()
+    {
+        var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");
+
+        // 中文注释：安装时注册、卸载时注销“HB POS Update Agent”计划任务；命令名必须与更新程序里的常量一致。
+        Assert.Contains($"Parameters: \"{Hbpos.Updater.UpdateAgent.RegisterOption}\"", script);
+        Assert.Contains($"Parameters: \"{Hbpos.Updater.UpdateAgent.UnregisterOption}\"", script);
+        Assert.Contains("[UninstallRun]", script);
+        Assert.Contains("RunOnceId: \"UnregisterUpdateAgentTask\"", script);
+        Assert.Contains("[UninstallDelete]", script);
+        Assert.Contains($"Name: \"{{app}}\\{Hbpos.Updater.UpdateAgentLayout.DirectoryName}\"", script);
+        Assert.Contains("Filename: \"{app}\\updater\\Hbpos.Updater.exe\"", script);
+        Assert.Equal(
+            Hbpos.Updater.UpdateAgentLayout.UpdaterDirectoryName + "\\" + Hbpos.Updater.UpdateAgentLayout.UpdaterExecutableName,
+            "updater\\Hbpos.Updater.exe");
+
+        // 中文注释：注册任务必须排在“启动收银端”之前，[Icons] 里也有同样的 Filename，所以以 Check 行定位启动项。
+        var registerIndex = script.IndexOf($"Parameters: \"{Hbpos.Updater.UpdateAgent.RegisterOption}\"", StringComparison.Ordinal);
+        var launchIndex = script.IndexOf("Check: not IsUpdateAgentInstall", StringComparison.Ordinal);
+        Assert.True(registerIndex > 0 && launchIndex > registerIndex, "Agent task registration must run before launching the app.");
+    }
+
+    [Fact]
+    public void Inno_script_skips_launching_the_app_only_for_system_agent_installs()
+    {
+        var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");
+
+        // 中文注释：SYSTEM 会话里打开收银端会开到看不见的服务会话；普通静默更新仍必须以原用户重新打开。
+        Assert.Contains("Flags: nowait runasoriginaluser; Check: not IsUpdateAgentInstall", script);
+        Assert.Contains("function IsUpdateAgentInstall: Boolean;", script);
+        Assert.Contains("ExpandConstant('{param:HBPOSAGENT|}') = '1'", script);
+        Assert.Contains("/HBPOSAGENT=1", Hbpos.Updater.UpdateAgent.FixedInstallerArguments);
+        Assert.DoesNotContain("skipifsilent", script.ToLowerInvariant());
+    }
+
+    [Fact]
     public void Inno_script_reports_install_progress_to_update_window()
     {
         var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");

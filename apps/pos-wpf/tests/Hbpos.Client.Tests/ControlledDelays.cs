@@ -25,6 +25,13 @@ internal sealed class ControlledDelays
         return await _requests.Reader.ReadAsync().AsTask().WaitAsync(WaitTimeout);
     }
 
+    // 中文注释：取得当前还没放行的等待时长，用来断言推迟间隔等具体等待；不会放行它。
+    public async Task<TimeSpan> CurrentDelayAsync()
+    {
+        _current ??= await NextAsync();
+        return _current.Delay;
+    }
+
     // 中文注释：放行当前等待，并等到循环发出下一个等待，保证循环在两次等待之间的工作已经执行完，测试再改条件不会与循环竞态。
     public async Task AdvanceAsync()
     {

@@ -696,6 +696,66 @@ namespace BlazorApp.Api.Tests
             Assert.DoesNotContain(sql.Value, parameter => parameter.Value is bool);
         }
 
+        // 回归：首次创建设置时 Insertable 不回填自增 Id（Id 留 0），随后的 Updateable 匹配 0 行，
+        // 管理员的第一次保存会返回“成功”却什么都没写进去。
+        [Fact]
+        public async Task UpdateSettingsAsync_WhenSettingsRowDoesNotExistYet_PersistsTheChange()
+        {
+            Assert.Equal(0, await _db.Queryable<AttendanceSettings>().CountAsync());
+            var admin = CreateService("admin-user", "admin", "Admin");
+
+            var updated = await admin.UpdateSettingsAsync(new UpdateAttendanceSettingsDto
+            {
+                LateGraceMinutes = 12,
+            });
+
+            Assert.True(updated.Success, updated.Message);
+            var row = Assert.Single(await _db.Queryable<AttendanceSettings>().ToListAsync());
+            Assert.True(row.Id > 0);
+            Assert.Equal(12, row.LateGraceMinutes);
+        }
+
+        // 并发首建的“输家”路径：另一个请求在本请求查完没有、准备插入之前先插入了一行。
+        // 数据库过滤唯一索引（生产由迁移 20261030.004 建，这里手工建同样的 SQLite 部分索引）拒绝第二行，
+        // 输家必须返回赢家那一行而不是抛错，也不能留下第二行。
+        [Fact]
+        public async Task GetOrCreateSettingsAsync_WhenAnotherRequestInsertsFirst_ReturnsTheWinnerRow()
+        {
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendanceSettings_SingleActive "
+                + "ON AttendanceSettings(IsDeleted) WHERE IsDeleted = 0");
+            var winnerInserted = false;
+            _db.Aop.OnLogExecuting = (sql, _) =>
+            {
+                if (winnerInserted
+                    || !sql.TrimStart().StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)
+                    || !sql.Contains("AttendanceSettings", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                // 在本连接真正执行 INSERT 之前，由另一个连接抢先提交赢家行。
+                winnerInserted = true;
+                using var other = new SqlSugarClient(new ConnectionConfig
+                {
+                    ConnectionString = _sqliteConnection.ConnectionString,
+                    DbType = DbType.Sqlite,
+                    IsAutoCloseConnection = true,
+                    InitKeyType = InitKeyType.Attribute,
+                });
+                other.Insertable(new AttendanceSettings { LateGraceMinutes = 9, CreatedBy = "winner" })
+                    .ExecuteCommand();
+            };
+
+            var result = await AttendanceReactService.GetOrCreateSettingsAsync(_db);
+
+            Assert.True(winnerInserted);
+            var row = Assert.Single(await _db.Queryable<AttendanceSettings>().ToListAsync());
+            Assert.Equal(row.Id, result.Id);
+            Assert.Equal(9, result.LateGraceMinutes);
+            Assert.Equal("winner", result.CreatedBy);
+        }
+
         [Fact]
         public async Task GetSchedulesAsync_WhenStoreManagerRequestsUnmanagedStore_ReturnsForbidden()
         {

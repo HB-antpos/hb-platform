@@ -273,7 +273,7 @@ public sealed class SquareDirectTests
         // 与 POS API SquareTerminalRestClient.CreateCheckoutAsync 的请求体逐字段一致（含 null 字段）：
         // 这是回落中转后同一幂等键仍命中同一笔结账的前提。
         Assert.Equal(
-            """{"idempotency_key":"idem-1","checkout":{"amount_money":{"amount":500,"currency":"AUD"},"device_options":{"device_id":"dev-1"},"location_id":"loc-1","reference_id":"POS1-20261021","note":"HBPOS S01 POS1","order_id":null}}""",
+            """{"idempotency_key":"idem-1","checkout":{"amount_money":{"amount":500,"currency":"AUD"},"device_options":{"device_id":"dev-1","skip_receipt_screen":true},"location_id":"loc-1","reference_id":"POS1-20261021","note":"HBPOS S01 POS1","order_id":null}}""",
             sent.Body);
 
         await harness.WaitForOriginAsync();

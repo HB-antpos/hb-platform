@@ -3124,6 +3124,12 @@ namespace BlazorApp.Api.Services
                     .Where((r, rp) => rp.PermissionCode == permissionCode && rp.IsDeleted == false)
                     .Select(r => new RoleDto
                     {
+                        // 移动端权限详情页按此字段显示「N 名成员」；漏算会让所有显式分配的角色都显示 0 名成员。
+                        // 口径与角色列表一致（UserRole 行数），并显式排除已软删除的分配记录。
+                        UserCount = SqlFunc
+                            .Subqueryable<UserRole>()
+                            .Where(ur => ur.RoleGUID == r.RoleGUID && ur.IsDeleted == false)
+                            .Count(),
                         RoleGUID = r.RoleGUID,
                         RoleName = r.RoleName,
                         Description = r.Description,

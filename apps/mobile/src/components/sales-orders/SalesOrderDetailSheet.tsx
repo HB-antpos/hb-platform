@@ -1,9 +1,12 @@
-import { ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Divider, Icon, Text } from "react-native-paper";
+import * as Clipboard from "expo-clipboard";
+import { useEffect, useState } from "react";
+import { Alert, ScrollView, Share, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Button, Divider, Icon, SegmentedButtons, Text } from "react-native-paper";
 import { ProductImageBox } from "@/components/seasonal-product-insights/ProductImageBox";
 import { QrCodePanel } from "@/components/ui/QrCodePanel";
 import { InsightSheet } from "@/components/warehouse-product-insights/InsightSheet";
 import type { InvoiceAction } from "@/modules/sales-orders/invoice";
+import { useSalesOrderReceipt } from "@/modules/sales-orders/use-sales-order-receipt";
 import {
   SALES_ORDER_REFUND_TYPE,
   resolveSalesOrderRefundTone,
@@ -17,6 +20,8 @@ import type {
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { productThumbnailUri } from "@/shared/utils/product-image";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { ReceiptPaper } from "./ReceiptPaper";
+import { ReceiptQrOverlay } from "./ReceiptQrOverlay";
 import { REFUND_TONES, SalesOrderRefundTag, SalesOrderStatusTag } from "./SalesOrderStatusTag";
 import { formatSalesOrderMoney, formatSalesOrderTime } from "./format";
 
@@ -56,6 +61,119 @@ export function SalesOrderDetailSheet({
   const matchedCodes = new Set(
     (summary?.matchedProducts ?? []).map((product: SalesOrderMatchedProduct) => product.productCode),
   );
+
+  // 页签：默认停在「小票」（与收银机打印一致的纸面），原商品明细保留为第二个页签。
+  const [tab, setTab] = useState<"receipt" | "items">("receipt");
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrFailed, setQrFailed] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const receipt = useSalesOrderReceipt(order?.orderGuid ?? "", visible);
+  const receiptLink = receipt.view?.link ?? null;
+
+  useEffect(() => {
+    // 关闭详情面板时一并收起二维码面板，下次打开不会残留。
+    if (!visible) setQrOpen(false);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  /** 首次打开才生成链接：没人点二维码的订单不会白白产生一条公开链接。 */
+  const ensureReceiptLink = async () => {
+    setQrBusy(true);
+    setQrFailed(false);
+    try {
+      return await receipt.ensureLink();
+    } catch {
+      setQrFailed(true);
+      return null;
+    } finally {
+      setQrBusy(false);
+    }
+  };
+
+  const openQr = () => {
+    setQrOpen(true);
+    if (!receiptLink) void ensureReceiptLink();
+  };
+
+  const copyLink = async () => {
+    if (!receiptLink) return;
+    await Clipboard.setStringAsync(receiptLink.url);
+    setNotice(t("receipt.copied"));
+  };
+
+  const shareLink = async () => {
+    const link = receiptLink ?? (await ensureReceiptLink());
+    if (!link) return;
+    try {
+      // iOS 同时给 url 才会按链接预览；Android 只认 message。
+      await Share.share({ message: link.url, url: link.url });
+    } catch {
+      setNotice(t("receipt.shareFailed"));
+    }
+  };
+
+  const confirmRegenerate = () => {
+    Alert.alert(t("receipt.regenerate"), t("receipt.regenerateConfirm"), [
+      { text: t("actions.close"), style: "cancel" },
+      {
+        text: t("receipt.regenerate"),
+        style: "destructive",
+        onPress: () => {
+          setQrBusy(true);
+          receipt
+            .regenerate()
+            .then(() => setNotice(t("receipt.regenerated")))
+            .catch(() => setQrFailed(true))
+            .finally(() => setQrBusy(false));
+        },
+      },
+    ]);
+  };
+
+  const receiptContent =
+    receipt.loading && !receipt.view ? (
+      <View style={styles.state}>
+        <ActivityIndicator color={HB_COLORS.brand} />
+        <Text style={styles.stateText}>{t("receipt.loading")}</Text>
+      </View>
+    ) : receipt.errorCode !== null ? (
+      <View style={styles.state}>
+        <Icon source="alert-circle-outline" size={32} color={HB_COLORS.outline} />
+        <Text style={styles.stateText}>
+          {receipt.errorCode === "RECEIPT_UNSUPPORTED" ? t("receipt.unsupported") : t("receipt.loadFailed")}
+        </Text>
+        {receipt.errorCode === "RECEIPT_UNSUPPORTED" ? null : (
+          <Button mode="outlined" compact onPress={() => void receipt.reload()}>
+            {t("actions.retry")}
+          </Button>
+        )}
+      </View>
+    ) : receipt.view ? (
+      <View style={styles.receiptCanvas}>
+        <ReceiptPaper document={receipt.view.document} />
+        <View style={styles.receiptActions}>
+          <Button mode="contained" icon="qrcode" style={styles.invoiceButton} onPress={openQr}>
+            {t("receipt.openQr")}
+          </Button>
+          <Button
+            mode="contained-tonal"
+            icon="export-variant"
+            style={styles.invoiceButton}
+            disabled={qrBusy}
+            onPress={() => void shareLink()}
+          >
+            {t("receipt.sendToCustomer")}
+          </Button>
+        </View>
+      </View>
+    ) : null;
+
   return (
     <InsightSheet
       visible={visible}
@@ -65,6 +183,7 @@ export function SalesOrderDetailSheet({
       onClose={onClose}
       heightRatio={0.92}
     >
+      <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         {order ? (
           <View style={styles.card}>
@@ -132,7 +251,17 @@ export function SalesOrderDetailSheet({
           <QrCodePanel label={t("detail.orderQr")} value={order.orderGuid} showValue={false} />
         ) : null}
 
-        {loading ? (
+        <SegmentedButtons
+          value={tab}
+          onValueChange={(value) => setTab(value as "receipt" | "items")}
+          density="small"
+          buttons={[
+            { value: "receipt", label: t("receipt.tab") },
+            { value: "items", label: t("receipt.tabItems") },
+          ]}
+        />
+
+        {tab === "receipt" ? receiptContent : loading ? (
           <View style={styles.state}>
             <ActivityIndicator color={HB_COLORS.brand} />
             <Text style={styles.stateText}>{t("detail.loading")}</Text>
@@ -229,6 +358,34 @@ export function SalesOrderDetailSheet({
           </>
         ) : null}
       </ScrollView>
+      {qrOpen ? (
+        <ReceiptQrOverlay
+          link={receiptLink}
+          busy={qrBusy}
+          failed={qrFailed}
+          notice={notice}
+          labels={{
+            title: t("receipt.qrTitle"),
+            hint: t("receipt.qrHint"),
+            creating: t("receipt.creating"),
+            createFailed: t("receipt.createFailed"),
+            retry: t("actions.retry"),
+            copy: t("receipt.copyLink"),
+            share: t("receipt.sendToCustomer"),
+            regenerate: t("receipt.regenerate"),
+            close: t("actions.close"),
+            meta: receiptLink
+              ? t("receipt.meta", { date: receiptLink.expiresAtUtc.slice(0, 10), count: receiptLink.openCount })
+              : "",
+          }}
+          onClose={() => setQrOpen(false)}
+          onCopy={() => void copyLink()}
+          onShare={() => void shareLink()}
+          onRegenerate={confirmRegenerate}
+          onRetry={() => void ensureReceiptLink()}
+        />
+      ) : null}
+      </View>
     </InsightSheet>
   );
 }
@@ -259,6 +416,15 @@ function Amount({
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
+  receiptCanvas: {
+    gap: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.sm,
+    paddingHorizontal: HB_SPACING.xs,
+    borderRadius: HB_RADIUS.surface,
+    backgroundColor: "#EEF1F5",
+  },
+  receiptActions: { flexDirection: "row", gap: HB_SPACING.xs },
   content: { padding: HB_SPACING.sm, gap: HB_SPACING.xs },
   card: {
     backgroundColor: HB_COLORS.surface,

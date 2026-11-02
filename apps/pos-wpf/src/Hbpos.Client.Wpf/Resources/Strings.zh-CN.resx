@@ -1152,6 +1152,15 @@
   <data name="shell.customerDisplayWindow" xml:space="preserve">
     <value>客显窗口</value>
   </data>
+  <data name="shell.customerDisplayState.closed" xml:space="preserve">
+    <value>已关闭</value>
+  </data>
+  <data name="shell.customerDisplayState.normal" xml:space="preserve">
+    <value>窗口</value>
+  </data>
+  <data name="shell.customerDisplayState.fullscreen" xml:space="preserve">
+    <value>全屏</value>
+  </data>
   <data name="shell.swapCustomerDisplayScreens" xml:space="preserve">
     <value>主窗口与客显互换屏幕</value>
   </data>
@@ -1164,17 +1173,29 @@
   <data name="shell.colorTheme.blue.hint" xml:space="preserve">
     <value>清爽专业（默认）</value>
   </data>
-  <data name="shell.colorTheme.default" xml:space="preserve">
-    <value>经典</value>
+  <data name="shell.colorTheme.candy" xml:space="preserve">
+    <value>糖果紫</value>
   </data>
-  <data name="shell.colorTheme.default.hint" xml:space="preserve">
-    <value>原有配色</value>
+  <data name="shell.colorTheme.candy.hint" xml:space="preserve">
+    <value>鲜艳紫色、彩色图标</value>
   </data>
-  <data name="shell.colorTheme.paper" xml:space="preserve">
-    <value>暖纸</value>
+  <data name="shell.colorTheme.sunny" xml:space="preserve">
+    <value>阳光橙</value>
   </data>
-  <data name="shell.colorTheme.paper.hint" xml:space="preserve">
-    <value>白天明亮门店</value>
+  <data name="shell.colorTheme.sunny.hint" xml:space="preserve">
+    <value>温暖明亮、彩色图标</value>
+  </data>
+  <data name="shell.colorTheme.ocean" xml:space="preserve">
+    <value>海洋青</value>
+  </data>
+  <data name="shell.colorTheme.ocean.hint" xml:space="preserve">
+    <value>清爽青绿、功能键多彩</value>
+  </data>
+  <data name="shell.colorTheme.rainbow" xml:space="preserve">
+    <value>彩虹分区</value>
+  </data>
+  <data name="shell.colorTheme.rainbow.hint" xml:space="preserve">
+    <value>三区分色、功能键多彩</value>
   </data>
   <data name="shell.colorTheme.graphite" xml:space="preserve">
     <value>石墨夜</value>
@@ -1193,6 +1214,21 @@
   </data>
   <data name="shell.colorTheme.elder.hint" xml:space="preserve">
     <value>大字、分区配色、高对比</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.title" xml:space="preserve">
+    <value>欢迎，{0}</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.subtitle" xml:space="preserve">
+    <value>第一次登录，选一套你习惯的界面配色</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.hint" xml:space="preserve">
+    <value>点卡片即可预览整屏效果；以后可在右上角「界面配色」随时更换，换哪台收银机都会跟着你</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.confirm" xml:space="preserve">
+    <value>使用「{0}」开始收银</value>
+  </data>
+  <data name="shell.colorThemeOnboarding.preselectedHint" xml:space="preserve">
+    <value>已预选本机上次使用的配色</value>
   </data>
   <data name="shell.languageToggle" xml:space="preserve">
     <value>中 / EN</value>
@@ -1265,6 +1301,15 @@
   </data>
   <data name="shell.cashierLogin.status.locked" xml:space="preserve">
     <value>已登出，请重新登录。</value>
+  </data>
+  <data name="shell.cashierLogin.status.autoLogoutPending" xml:space="preserve">
+    <value>日结已完成，{0} 秒后自动登出。</value>
+  </data>
+  <data name="shell.cashierLogin.status.autoLoggedOut" xml:space="preserve">
+    <value>日结已完成，已自动登出。</value>
+  </data>
+  <data name="shell.cashierLogin.status.restartScheduled" xml:space="preserve">
+    <value>电脑将于 {0} 自动重启。</value>
   </data>
   <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve">
     <value>如需用代金券付款，请先点「代金券」再扫券码。</value>
@@ -2564,6 +2609,15 @@
   <data name="returns.status.orderNotFound" xml:space="preserve">
     <value>未找到订单。</value>
   </data>
+  <data name="returns.status.orderAmbiguous" xml:space="preserve">
+    <value>多张订单是同一个单号，请按小票上的日期和金额选择。</value>
+  </data>
+  <data name="returns.candidates.title" xml:space="preserve">
+    <value>多张订单是同一个单号</value>
+  </data>
+  <data name="returns.candidates.subtitle" xml:space="preserve">
+    <value>请核对客人小票上的日期、时间和总额，选择对应的订单。</value>
+  </data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve">
     <value>已加载本地订单；线上订单历史不可用。</value>
   </data>
@@ -2681,6 +2735,12 @@
   </data>
   <data name="dailyClose.status.savedPrinted" xml:space="preserve">
     <value>日结已保存并打印。</value>
+  </data>
+  <data name="dailyClose.status.restartScheduled" xml:space="preserve">
+    <value>这台电脑已连续运行较长时间，将于 {0} 自动重启。</value>
+  </data>
+  <data name="dailyClose.status.autoLogout" xml:space="preserve">
+    <value>收银员将在 {0} 秒后自动登出。</value>
   </data>
   <data name="dailyClose.status.savedPrintFailed" xml:space="preserve">
     <value>日结已保存，但打印失败：{0}</value>
@@ -3373,6 +3433,14 @@
   <data name="appUpdate.force.exit" xml:space="preserve"><value>退出</value></data>
   <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易尚未完成，交易结束后将自动继续安装更新。</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>无法启动更新安装器。{0}</value></data>
+  <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>回到收银主页且空闲时会再提示安装。</value></data>
+  <data name="appUpdate.force.postpone" xml:space="preserve"><value>稍后安装</value></data>
+  <data name="appUpdate.force.postponeHint" xml:space="preserve"><value>{0} 分钟后再提醒，还可推迟 {1} 次</value></data>
+  <data name="appUpdate.notice.forceTitle" xml:space="preserve"><value>必须更新</value></data>
+  <data name="appUpdate.notice.optionalTitle" xml:space="preserve"><value>新版本</value></data>
+  <data name="appUpdate.notice.ready" xml:space="preserve"><value>已下载，收银台空闲时可安装</value></data>
+  <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>当前交易完成后可安装</value></data>
+  <data name="appUpdate.notice.later" xml:space="preserve"><value>稍后</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>需要操作授权</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>当前收银员没有执行此操作的权限。</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>当前操作</value></data>
@@ -3730,6 +3798,15 @@
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>近 7 天</value>
   </data>
+  <data name="history.pager.previous" xml:space="preserve">
+    <value>上一页</value>
+  </data>
+  <data name="history.pager.next" xml:space="preserve">
+    <value>下一页</value>
+  </data>
+  <data name="history.pager.page" xml:space="preserve">
+    <value>第 {0} 页</value>
+  </data>
   <data name="cardRecovery.v2.channelAll" xml:space="preserve">
     <value>全部</value>
   </data>
@@ -4056,16 +4133,16 @@
     <value>知道了</value>
   </data>
   <data name="settings.restartPrompt.title" xml:space="preserve">
-    <value>重启提醒</value>
+    <value>凌晨自动重启</value>
   </data>
   <data name="settings.restartPrompt.description" xml:space="preserve">
-    <value>日结完成后，如果这台收银机已连续运行 7 天以上，提醒重启。</value>
+    <value>日结完成后，如果这台收银机已连续运行 7 天以上，会在凌晨（默认 3:00）自动重启电脑。</value>
   </data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve">
-    <value>日结后提醒重启</value>
+    <value>日结后凌晨自动重启</value>
   </data>
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
-    <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
+    <value>重启前有 30 秒可取消的倒计时；有未完成的销售、付款或刷卡任务就不重启。不需要管理员权限、不弹 UAC，仅保存在本机。</value>
   </data>
   <data name="settings.scanner.title" xml:space="preserve">
     <value>扫码枪灵敏度</value>

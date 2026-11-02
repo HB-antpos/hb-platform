@@ -532,6 +532,114 @@ namespace BlazorApp.Api.Tests
             );
         }
 
+        [Theory]
+        [InlineData("zhang.san@example.com")]
+        [InlineData("  Zhang.San@Example.COM  ")]
+        public async Task LoginAsync_WhenLoginKeyIsEmail_AuthenticatesIgnoringCaseAndSpaces(string loginKey)
+        {
+            await CreateCurrentAuthSchemaAsync();
+            var userGuid = await InsertLoginUserAsync("zhangsan", "zhang.san@example.com", "Secret123");
+
+            var result = await CreateAuthService().LoginAsync(RawLogin(loginKey, "Secret123"));
+
+            Assert.True(result.Success);
+            Assert.Equal(userGuid, result.User?.UserGUID);
+            Assert.Equal("zhangsan", result.User?.Username);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenInputIsOneUsersNameAndAnotherUsersEmail_PrefersUsername()
+        {
+            await CreateCurrentAuthSchemaAsync();
+            // A 的用户名恰好等于 B 的邮箱：用户名优先，原本靠用户名登录的 A 不能被邮箱登录抢走。
+            var usernameOwner = await InsertLoginUserAsync("shared@example.com", "a@example.com", "PasswordA1");
+            await InsertLoginUserAsync("bob", "shared@example.com", "PasswordB1");
+            var service = CreateAuthService();
+
+            var asUsernameOwner = await service.LoginAsync(RawLogin("shared@example.com", "PasswordA1"));
+            var asEmailOwner = await service.LoginAsync(RawLogin("shared@example.com", "PasswordB1"));
+
+            Assert.True(asUsernameOwner.Success);
+            Assert.Equal(usernameOwner, asUsernameOwner.User?.UserGUID);
+            Assert.False(asEmailOwner.Success);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenEmailUnknownOrPasswordWrong_ReturnsSameMessageWithoutRevealingAccount()
+        {
+            await CreateCurrentAuthSchemaAsync();
+            await InsertLoginUserAsync("zhangsan", "zhang.san@example.com", "Secret123");
+            var service = CreateAuthService();
+
+            var unknownEmail = await service.LoginAsync(RawLogin("nobody@example.com", "Secret123"));
+            var wrongPassword = await service.LoginAsync(RawLogin("zhang.san@example.com", "WrongPass9"));
+
+            Assert.False(unknownEmail.Success);
+            Assert.False(wrongPassword.Success);
+            Assert.Equal(unknownEmail.Message, wrongPassword.Message);
+            Assert.Equal("用户名或密码错误", wrongPassword.Message);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenEmailBelongsToInactiveOrDeletedUser_Rejects()
+        {
+            await CreateCurrentAuthSchemaAsync();
+            await InsertLoginUserAsync("inactive", "inactive@example.com", "Secret123", isActive: false);
+            await InsertLoginUserAsync("removed", "removed@example.com", "Secret123", isDeleted: true);
+            var service = CreateAuthService();
+
+            Assert.False((await service.LoginAsync(RawLogin("inactive@example.com", "Secret123"))).Success);
+            Assert.False((await service.LoginAsync(RawLogin("removed@example.com", "Secret123"))).Success);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenLoginKeyIsBlank_RejectsWithoutMatchingBlankEmails()
+        {
+            await CreateCurrentAuthSchemaAsync();
+            await InsertLoginUserAsync("blankmail", string.Empty, "Secret123");
+
+            var result = await CreateAuthService().LoginAsync(RawLogin("   ", "Secret123"));
+
+            Assert.False(result.Success);
+        }
+
+        private AuthService CreateAuthService() =>
+            new AuthService(CreateSqlSugarContext(_db), CreateJwtConfiguration(), new HttpContextAccessor());
+
+        private static LoginRequest RawLogin(string loginKey, string password) =>
+            new LoginRequest
+            {
+                Username = loginKey,
+                Password = password,
+                PasswordFormat = PasswordHasher.PasswordFormatRaw,
+            };
+
+        private async Task<string> InsertLoginUserAsync(
+            string username,
+            string email,
+            string password,
+            bool isActive = true,
+            bool isDeleted = false
+        )
+        {
+            var userGuid = Guid.NewGuid().ToString();
+            await _db.Insertable(
+                new User
+                {
+                    UserGUID = userGuid,
+                    Username = username,
+                    Email = email,
+                    PasswordHash = PasswordHasher.HashPassword(password),
+                    FullName = username,
+                    IsActive = isActive,
+                    IsDeleted = isDeleted,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                }
+            ).ExecuteCommandAsync();
+            return userGuid;
+        }
+
         [Fact]
         public void GenerateJwtToken_WithLegacyLocalInvociePermission_AddsCanonicalLocalPurchaseClaim()
         {

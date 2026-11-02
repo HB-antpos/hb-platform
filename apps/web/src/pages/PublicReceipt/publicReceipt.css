@@ -1,0 +1,104 @@
+.public-receipt-page {
+  min-height: 100vh;
+  background: #f4f6f8;
+  color: #101828;
+  font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.public-receipt-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e4e7ec;
+  background: #fff;
+}
+
+.public-receipt-header strong {
+  font-size: 18px;
+  color: #1677ff;
+}
+
+.public-receipt-header span {
+  font-size: 12px;
+  color: #475467;
+}
+
+.public-receipt-summary {
+  padding: 16px 18px 4px;
+}
+
+.public-receipt-summary small {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.public-receipt-summary strong {
+  font-size: 30px;
+  letter-spacing: -0.5px;
+}
+
+.public-receipt-summary .is-paid small {
+  color: #067647;
+}
+
+.public-receipt-summary .is-refund small,
+.public-receipt-summary .is-refund strong {
+  color: #b42318;
+}
+
+.public-receipt-paper {
+  display: flex;
+  justify-content: center;
+  padding: 20px 12px 28px;
+}
+
+.public-receipt-note {
+  padding: 32px 16px;
+  text-align: center;
+  color: #475467;
+}
+
+.public-receipt-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  margin: 48px auto;
+  padding: 28px 22px;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.public-receipt-state span {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #475467;
+}
+
+.public-receipt-actions {
+  display: flex;
+  justify-content: center;
+  padding: 0 16px 36px;
+}
+
+.public-receipt-actions button,
+.public-receipt-state button {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 8px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media print {
+  .public-receipt-page {
+    display: none;
+  }
+}

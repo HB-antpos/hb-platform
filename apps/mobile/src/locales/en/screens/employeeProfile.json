@@ -196,8 +196,8 @@
   },
   "minorEmployment": {
     "title": "Minor employment compliance",
-    "description": "Keep school days, holidays, parent signature and commute details up to date.",
-    "open": "Fill in minor employment details"
+    "description": "See the guardian signature and review progress. Your manager or HR sends the form to your guardian; you don't need to do anything.",
+    "open": "View minor employment details"
   },
   "completeness": {
     "title": "Profile completeness",

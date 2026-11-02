@@ -1002,8 +1002,6 @@
   "minorCompliance": {
     "scheduleSavedWithWarnings": "排班已保存；保留 {{count}} 条未成年用工提醒",
     "reminderLink": "未成年用工提醒待办",
-    "warningTitle": "未成年用工提醒（{{count}}）",
-    "punchNotAffected": "提醒不影响本次打卡；主管可在提醒待办继续跟进。",
     "cellWarning": "未成年用工提醒"
   }
 }

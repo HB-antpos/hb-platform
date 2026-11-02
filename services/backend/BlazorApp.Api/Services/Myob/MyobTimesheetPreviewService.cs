@@ -17,6 +17,27 @@ public interface IMyobTimesheetPreviewService
 }
 
 /// <summary>
+/// 预览与推送共用的「规划」结果（方案第 4.2 节「预览看到什么就推什么」）：预览 DTO 之外，还带每个员工在本公司名下的分钟级计划、
+/// 员工卡绑定与类别映射。推送服务只信任这里算出来的数字，不信任客户端传来的任何工时。
+/// </summary>
+internal sealed record MyobTimesheetComputation(
+    MyobTimesheetPreviewDto Dto,
+    MyobConnection Connection,
+    DateTime Start,
+    DateTime End,
+    int Weeks,
+    DateTime Today,
+    IReadOnlyDictionary<string, MyobCompanyPlan> Plans,
+    IReadOnlyDictionary<string, EmployeeMyobLink> Links,
+    IReadOnlyDictionary<string, string?> MappingByKey);
+
+internal interface IMyobTimesheetPlanSource
+{
+    Task<ApiResponse<MyobTimesheetComputation>> ComputeAsync(
+        string connectionGuid, string? periodStart, bool checkMyob, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Timesheet 推送预览（方案第 8、11.1 节）：只读，不往 MYOB 写任何东西。
 /// 以「公司文件 × 工资周期」为单位，算出每个员工在该公司名下要推送的转账工时（按日、按 MYOB 类别），并列出拦截项与提示：
 /// - 发薪公司按「员工 × 上班分店」决定（分店映射 + 发薪公司覆盖），一个分店的工时整期归同一家公司；
@@ -25,7 +46,7 @@ public interface IMyobTimesheetPreviewService
 /// - 提示项（不阻止）：生日换档、低于最低时薪、公假价与平日价不一致、年假折现不推送。
 /// 数据全部来自工资表同一个快照构建器（<see cref="IAttendancePayrollPushSource"/>），口径与工资表一致。
 /// </summary>
-internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
+internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService, IMyobTimesheetPlanSource
 {
     private const int PeriodOptionCount = 6;
 
@@ -77,17 +98,29 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         bool checkMyob,
         CancellationToken cancellationToken)
     {
+        var computed = await ComputeAsync(connectionGuid, periodStart, checkMyob, cancellationToken);
+        return computed.Success && computed.Data is not null
+            ? ApiResponse<MyobTimesheetPreviewDto>.OK(computed.Data.Dto)
+            : ApiResponse<MyobTimesheetPreviewDto>.Error(computed.Message, computed.ErrorCode);
+    }
+
+    public async Task<ApiResponse<MyobTimesheetComputation>> ComputeAsync(
+        string connectionGuid,
+        string? periodStart,
+        bool checkMyob,
+        CancellationToken cancellationToken)
+    {
         var scope = await _scope.GetScopeAsync();
         if (!scope.IsAllowed)
         {
-            return ApiResponse<MyobTimesheetPreviewDto>.Error(scope.Message, MyobTimesheetErrorCodes.Forbidden);
+            return ApiResponse<MyobTimesheetComputation>.Error(scope.Message, MyobTimesheetErrorCodes.Forbidden);
         }
 
         var connection = await _db.Queryable<MyobConnection>()
             .FirstAsync(item => item.ConnectionGuid == connectionGuid && item.Status == MyobConnectionStatuses.Active);
         if (connection is null)
         {
-            return ApiResponse<MyobTimesheetPreviewDto>.Error("MYOB 连接不存在或未启用", MyobErrorCodes.ConnectionNotActive);
+            return ApiResponse<MyobTimesheetComputation>.Error("MYOB 连接不存在或未启用", MyobErrorCodes.ConnectionNotActive);
         }
 
         var settings = await _source.GetSettingsAsync();
@@ -101,7 +134,7 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             if (!DateTime.TryParseExact(periodStart.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
                 || AttendanceReactService.ResolvePayPeriodStart(parsed, weeks, settings.FortnightAnchorDate) != parsed.Date)
             {
-                return ApiResponse<MyobTimesheetPreviewDto>.Error(
+                return ApiResponse<MyobTimesheetComputation>.Error(
                     "工资周期起始日不正确，必须是某个周期的起始日", MyobTimesheetErrorCodes.InvalidPeriod);
             }
 
@@ -120,13 +153,13 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
                 .Select(index => currentStart.AddDays(-7 * weeks * index))
                 .Select(date => new MyobPreviewPeriodOptionDto { Start = Format(date), End = Format(date.AddDays(weeks * 7 - 1)) })
                 .ToList(),
-            PushEnabled = _options.TimesheetPushEnabled,
+            PushEnabled = MyobTimesheetPushGate.IsAllowed(_options, connection.ConnectionGuid),
         };
 
         var mapping = await _categories.GetSavedMappingAsync(connectionGuid);
         var mappingByKey = MyobPayCategoryService.ToDictionary(mapping);
         var categoryNames = _categories.GetCachedCategoryNames(connectionGuid);
-        // 完整度只看必填 5 项；临时工周末两项可选（真有临时工周末工时又没设，会在员工行上拦截）。
+        // 完整度只看必填 5 项；临时工周末与公共假期四项可选（真有对应工时又没设，会在员工行上拦截）。
         dto.Readiness.CategoryMappedCount = mappingByKey.Count(
             pair => pair.Value is not null && MyobPayCategoryKeys.Required.Contains(pair.Key));
         dto.Readiness.CategoryComplete = dto.Readiness.CategoryMappedCount == MyobPayCategoryKeys.Required.Length;
@@ -140,9 +173,11 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             .Select(pair => pair.UserGuid)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var plans = new Dictionary<string, MyobCompanyPlan>(StringComparer.OrdinalIgnoreCase);
         if (companyUsers.Count == 0)
         {
-            return ApiResponse<MyobTimesheetPreviewDto>.OK(dto);
+            return ApiResponse<MyobTimesheetComputation>.OK(new MyobTimesheetComputation(
+                dto, connection, start, end, weeks, today, plans, new Dictionary<string, EmployeeMyobLink>(), mappingByKey));
         }
 
         // ② 只加载这些员工本期有数据的分店（总部账号挂 40～50 个分店，但多数没有排班）
@@ -188,6 +223,11 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             }
 
             rows.Add(built.Row);
+            if (built.Plan is not null)
+            {
+                plans[userGuid] = built.Plan;
+            }
+
             hints.AddRange(built.Hints);
             foreach (var code in built.InvolvedStores)
             {
@@ -211,6 +251,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         {
             Finalize(row);
         }
+
+        await FillPushStatesAsync(connection, start, end, rows, plans, links, mappingByKey);
 
         // ⑤ 就绪卡：涉及分店的锁定情况
         foreach (var (code, data) in storeData.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -247,12 +289,112 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             BlockedCount = rows.Count(row => row.Status == MyobPreviewStatuses.Blocked),
             NoTransferCount = rows.Count(row => row.Status == MyobPreviewStatuses.NoTransfer),
         };
-        return ApiResponse<MyobTimesheetPreviewDto>.OK(dto);
+        return ApiResponse<MyobTimesheetComputation>.OK(new MyobTimesheetComputation(
+            dto, connection, start, end, weeks, today, plans, links, mappingByKey));
+    }
+
+    // ───────────────────────── 推送状态 ─────────────────────────
+
+    /// <summary>
+    /// 每行的「MYOB 状态」（方案 4.3）：取该员工在 (公司文件, 周期) 的最近一条推送记录，
+    /// 成功记录的请求哈希 = 现在规划出的哈希、且涉及分店仍是锁定状态 → 已推送；否则 → 需重新推送。
+    /// 读推送表失败（例如迁移还没执行）不影响预览本身，统一当作「未推送」。
+    /// </summary>
+    private async Task FillPushStatesAsync(
+        MyobConnection connection,
+        DateTime start,
+        DateTime end,
+        IReadOnlyList<MyobPreviewRowDto> rows,
+        IReadOnlyDictionary<string, MyobCompanyPlan> plans,
+        IReadOnlyDictionary<string, EmployeeMyobLink> links,
+        IReadOnlyDictionary<string, string?> mappingByKey)
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        List<MyobTimesheetPush> records;
+        try
+        {
+            records = await _db.Queryable<MyobTimesheetPush>()
+                .Where(item => item.ConnectionGuid == connection.ConnectionGuid && item.PeriodStart == start)
+                .ToListAsync();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        // 取最近一条「反映 MYOB 现状」的记录：Running 还没有结果；SkippedHasEntries 只是「没写」，不能盖住之前的成功推送
+        // （否则工时变了、重推被跳过后，界面会把 MYOB 里还留着的旧工时显示成「未推送」）。
+        var latest = records
+            .Where(item => item.Status != MyobPushStatuses.Running && item.Status != MyobPushStatuses.SkippedHasEntries)
+            .GroupBy(item => item.UserGuid, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.StartedAt).First(), StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            if (!latest.TryGetValue(row.UserGuid, out var record))
+            {
+                continue;
+            }
+
+            var push = row.Push;
+            push.LastStatus = record.Status;
+            push.LastBatchGuid = record.BatchGuid;
+            push.LastPushedAt = record.FinishedAt ?? record.StartedAt;
+            switch (record.Status)
+            {
+                case MyobPushStatuses.Pushed or MyobPushStatuses.UpToDate:
+                    {
+                        // 周期被解锁（有「未锁定」拦截）也算需重新推送：MYOB 里还留着旧工时。
+                        var unlocked = row.Blockers.Any(blocker => blocker.Code == MyobBlockerCodes.StoreNotLocked);
+                        var hash = CurrentHash(connection, start, end, row.UserGuid, plans, links, mappingByKey);
+                        push.NeedsRepush = unlocked || hash is null || !string.Equals(hash, record.RequestHash, StringComparison.Ordinal);
+                        push.State = push.NeedsRepush ? MyobPushStates.NeedsRepush : MyobPushStates.Pushed;
+                        break;
+                    }
+                case MyobPushStatuses.SkippedProcessed:
+                    push.State = MyobPushStates.ProcessedSkipped;
+                    break;
+                case MyobPushStatuses.Failed:
+                    push.State = MyobPushStates.Failed;
+                    break;
+                case MyobPushStatuses.Mismatch:
+                    push.State = MyobPushStates.Mismatch;
+                    break;
+                default:
+                    // Undone 等：MYOB 里没有我们的工时，按未推送显示，LastStatus 保留供界面提示。
+                    push.State = MyobPushStates.NotPushed;
+                    break;
+            }
+        }
+    }
+
+    private static string? CurrentHash(
+        MyobConnection connection,
+        DateTime start,
+        DateTime end,
+        string userGuid,
+        IReadOnlyDictionary<string, MyobCompanyPlan> plans,
+        IReadOnlyDictionary<string, EmployeeMyobLink> links,
+        IReadOnlyDictionary<string, string?> mappingByKey)
+    {
+        if (!plans.TryGetValue(userGuid, out var plan) || !links.TryGetValue(userGuid, out var link))
+        {
+            return null;
+        }
+
+        var (cells, unmapped) = MyobTimesheetPushRules.BuildPlannedCells(plan, mappingByKey);
+        return unmapped.Count > 0
+            ? null
+            : MyobTimesheetPushRules.ComputeRequestHash(connection.ConnectionGuid, link.MyobEmployeeUid, start, end, cells);
     }
 
     // ───────────────────────── 单个员工 ─────────────────────────
 
-    private sealed record BuiltRow(MyobPreviewRowDto Row, List<MyobPreviewHintDto> Hints, HashSet<string> InvolvedStores);
+    private sealed record BuiltRow(
+        MyobPreviewRowDto Row, List<MyobPreviewHintDto> Hints, HashSet<string> InvolvedStores, MyobCompanyPlan? Plan);
 
     private BuiltRow? BuildRow(
         string userGuid,
@@ -395,6 +537,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
                 SumMinutes(mine, MyobPayCategoryKeys.Saturday) + SumMinutes(mine, MyobPayCategoryKeys.SaturdayCasual));
             row.Pushed.Sunday = MyobTimesheetPlanner.Hours(
                 SumMinutes(mine, MyobPayCategoryKeys.Sunday) + SumMinutes(mine, MyobPayCategoryKeys.SundayCasual));
+            row.Pushed.PublicHoliday = MyobTimesheetPlanner.Hours(
+                SumMinutes(mine, MyobPayCategoryKeys.PublicHoliday) + SumMinutes(mine, MyobPayCategoryKeys.PublicHolidayCasual));
             row.Pushed.PersonalLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.PersonalLeave));
             row.Pushed.HolidayLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.HolidayLeave));
             row.PushedTotal = MyobTimesheetPlanner.Hours(pushedMinutes);
@@ -463,7 +607,7 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         // 提示项
         AddHints(hints, row, userGuid, name, rate, profile, end, mineItems, allWork, allLeave);
         row.HintCodes = hints.Select(hint => hint.Code).Distinct().ToList();
-        return new BuiltRow(row, hints, involved);
+        return new BuiltRow(row, hints, involved, mine);
     }
 
     private static void AddHints(
@@ -515,13 +659,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             }
         }
 
-        var hasHolidayHours = mineItems.Any(item => item.Kind is MyobWorkKind.PublicHolidayWork or MyobWorkKind.PublicHolidayPay);
-        if (hasHolidayHours && rate is not null && rate.PayMode != PayrollCalculator.PayModeCash
-            && rate.TransferPublicHolidayRate != rate.TransferWeekdayRate)
-        {
-            Add(MyobHintCodes.PublicHolidayRateMismatch,
-                $"{name} 本期有公假工时，但我方公假价与平日价不一致：公假按平日类别推送，请新建时薪记录对齐。");
-        }
+        // 公假工时现在有自己的 MYOB 类别（公共假期），公假价在 MYOB 里按该类别计，
+        // 不再「按平日类别推送」，所以「公假价与平日价不一致」的提示（PUBLIC_HOLIDAY_RATE_MISMATCH）不再产生；代码保留，旧数据与前端文案不受影响。
 
         if (row.CashOutHours > 0)
         {
@@ -712,6 +851,8 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         MyobPayCategoryKeys.Sunday => "周日",
         MyobPayCategoryKeys.SaturdayCasual => "周六（临时工）",
         MyobPayCategoryKeys.SundayCasual => "周日（临时工）",
+        MyobPayCategoryKeys.PublicHoliday => "公共假期",
+        MyobPayCategoryKeys.PublicHolidayCasual => "公共假期（临时工）",
         MyobPayCategoryKeys.PersonalLeave => "病假",
         _ => "年假",
     };

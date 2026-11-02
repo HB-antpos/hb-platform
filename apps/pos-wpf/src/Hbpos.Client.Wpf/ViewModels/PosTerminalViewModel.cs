@@ -579,6 +579,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private void SyncCartLines(IReadOnlyList<CartLine> sourceLines)
     {
+        // 删行前先记下选中状态：DataGrid 的双向绑定会在行移出集合时把选中项清空。
+        var selectedLineRemoved = SelectedCartLine is not null && !sourceLines.Contains(SelectedCartLine);
+        var keepsExistingLine = CartLines.Any(sourceLines.Contains);
+        var linesAfterSelected = selectedLineRemoved
+            ? CartLines.Skip(CartLines.IndexOf(SelectedCartLine!) + 1).ToList()
+            : [];
+
         for (var i = CartLines.Count - 1; i >= 0; i--)
         {
             if (!sourceLines.Contains(CartLines[i]))
@@ -601,9 +608,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             }
         }
 
-        if (SelectedCartLine is not null && !sourceLines.Contains(SelectedCartLine))
+        if (selectedLineRemoved)
         {
-            SelectedCartLine = null;
+            // 只删了部分行时选中被删行的下一行，删的是末行则选中新的末行；清空或整车替换（挂单、取单）仍不选中。
+            SelectedCartLine = keepsExistingLine
+                ? linesAfterSelected.FirstOrDefault(sourceLines.Contains) ?? CartLines.LastOrDefault()
+                : null;
         }
     }
 

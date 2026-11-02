@@ -55,6 +55,8 @@ import {
 import ManagedEmployeeProfileEditor from './ManagedEmployeeProfileEditor'
 import SensitiveChangeReviewPanel from './SensitiveChangeReviewPanel'
 import MinorEmploymentReviewPage from '../MinorEmploymentReview'
+import MinorGuardianLinkPanel from './MinorGuardianLinkPanel'
+import { getMinorStaffComplianceList } from '../../../services/minorEmploymentService'
 import {
   countChangedFormFields,
   getExpectedSensitiveRevision,
@@ -224,6 +226,9 @@ export default function SystemEmployeeProfilesPage() {
   const [editLoading, setEditLoading] = useState(false)
   const [editingProfile, setEditingProfile] = useState<EmployeeProfileDetailDto | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
+  // 「未成年用工合规」页签红点（未发送 / 链接过期 / 退回修改的人数）与「待审核」子页签（受控，供「去审核」跳转）。
+  const [minorNeedsActionCount, setMinorNeedsActionCount] = useState(0)
+  const [pendingSubTab, setPendingSubTab] = useState('sensitive')
   const [activeSection, setActiveSection] = useState<SectionKey>('basic')
   const [dirtyCount, setDirtyCount] = useState(0)
   const [form] = Form.useForm<EmployeeProfileFormValues>()
@@ -327,9 +332,25 @@ export default function SystemEmployeeProfilesPage() {
     }
   }
 
+  // 页签内容懒渲染，红点数字要在进入页签前就有：挂载时单独取一次（与「待审核」同一门禁）。
+  const loadMinorNeedsActionCount = async () => {
+    if (!canEditProfiles) {
+      return
+    }
+    try {
+      const result = await getMinorStaffComplianceList({ needsActionOnly: true })
+      if (mountedRef.current) {
+        setMinorNeedsActionCount(result.needsActionCount)
+      }
+    } catch {
+      // 红点只是辅助信息，失败不打扰主页面；进入页签后会重新加载并给出错误提示。
+    }
+  }
+
   useEffect(() => {
     void loadData({ page: 1, pageSize })
     void loadPendingCount()
+    void loadMinorNeedsActionCount()
     // 筛选下拉由后端按调用者范围裁剪（店长只有管理分店，且不含上级角色）。
     void getManagedEmployeeProfileFilterOptions()
       .then((options) => {
@@ -349,6 +370,14 @@ export default function SystemEmployeeProfilesPage() {
     setKeyword(keywordParam)
     void loadData({ keyword: keywordParam || undefined, page: 1, pageSize })
   }, [keywordParam])
+
+  // 支持 ?tab=minor 直接打开「未成年用工合规」页签（无权限时忽略）。
+  const tabParam = searchParams.get('tab')
+  useEffect(() => {
+    if (tabParam === 'minor' && canEditProfiles) {
+      setActiveTab('minor')
+    }
+  }, [tabParam, canEditProfiles])
 
   // 抽屉内的分区导航跟随滚动高亮：取「顶边已越过吸顶导航」的最后一个分区；滚到底时强制选中最后一个。
   useEffect(() => {
@@ -849,6 +878,26 @@ export default function SystemEmployeeProfilesPage() {
                 </>
               ),
             },
+            // 未成年用工合规：给未满 18 岁员工的家长发送签字链接；与「待审核」同一门禁（店长在手机「人员管理」里发送）。
+            ...(canEditProfiles ? [{
+              key: 'minor',
+              label: (
+                <Space size={6}>
+                  {t('system.employeeProfiles.minorTab')}
+                  <Badge count={minorNeedsActionCount} overflowCount={99} />
+                </Space>
+              ),
+              children: (
+                <MinorGuardianLinkPanel
+                  stores={filterOptions.stores}
+                  onNeedsActionCountChange={setMinorNeedsActionCount}
+                  onGoReview={() => {
+                    setPendingSubTab('minor-employment')
+                    setActiveTab('pending')
+                  }}
+                />
+              ),
+            }] : []),
             // 待审核标签读的是管理员专用接口，非管理员不显示（店长的敏感资料审核在手机端「档案审核」）。
             ...(canEditProfiles ? [{
               key: 'pending',
@@ -859,6 +908,8 @@ export default function SystemEmployeeProfilesPage() {
                 </Space>
               ),
               children: <Tabs
+                activeKey={pendingSubTab}
+                onChange={setPendingSubTab}
                 items={[
                   { key: 'sensitive', label: '敏感资料变更', children: <SensitiveChangeReviewPanel refreshPendingCount={loadPendingCount} /> },
                   { key: 'minor-employment', label: '未成年用工合规', children: <MinorEmploymentReviewPage /> },

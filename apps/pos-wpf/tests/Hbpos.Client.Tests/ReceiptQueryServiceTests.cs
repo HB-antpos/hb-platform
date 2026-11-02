@@ -31,7 +31,7 @@ public sealed class ReceiptQueryServiceTests
         Assert.Equal(order.ActualAmount, receipt.ActualAmount);
         Assert.Equal(order.TenderedAmount, receipt.TenderedAmount);
         Assert.Equal(order.ChangeAmount, receipt.ChangeAmount);
-        Assert.Equal("#" + order.OrderGuid.ToString("N")[..10].ToUpperInvariant(), receipt.TransactionIdDisplay);
+        Assert.Equal("#" + ReceiptOrderShortCode.Create(order.OrderGuid), receipt.TransactionIdDisplay);
         Assert.Equal(order.SoldAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm"), receipt.SoldAtDisplay);
         Assert.Equal(2, receipt.Lines.Count);
         Assert.Equal("SKU-401", receipt.Lines[0].ProductCode);

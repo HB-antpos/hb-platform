@@ -170,5 +170,129 @@
     "printerTitle": "标签打印机 · {{status}}",
     "changePrinter": "更换",
     "changeHint": "更换打印机会在弹层内完成，不会离开当前页面。"
+  },
+  "minor": {
+    "section": "未成年用工合规",
+    "rows": {
+      "form": "同意书",
+      "status": "状态",
+      "guardian": "监护人",
+      "contact": "联系方式",
+      "sent": "已发送",
+      "expires": "有效至",
+      "signed": "家长签字",
+      "reviewComment": "退回意见"
+    },
+    "forms": {
+      "QLD_CE1": "QLD CE1 儿童雇佣同意书",
+      "NSW_COMPANY_CONSENT": "NSW 公司未成年员工同意书",
+      "UNSUPPORTED_STATE": "无法确定门店所在州"
+    },
+    "stages": {
+      "not_sent": "未发送",
+      "awaiting_guardian": "待家长签字",
+      "link_expired": "链接已过期",
+      "pending_review": "待审核",
+      "returned": "退回修改",
+      "approved": "审核通过"
+    },
+    "notFilled": "未填写",
+    "guardianWithRelation": "{{name}}（{{relation}}）",
+    "sydneyTime": "{{time}}（悉尼时间）",
+    "channels": {
+      "email": "邮件",
+      "sms": "短信"
+    },
+    "relationships": {
+      "Mother": "母亲",
+      "Father": "父亲",
+      "Legal guardian": "法定监护人",
+      "Other": "其他"
+    },
+    "actions": {
+      "send": "发送家长签字链接",
+      "resend": "重新发送",
+      "revoke": "作废链接",
+      "copyLink": "复制链接"
+    },
+    "hints": {
+      "not_sent": "家长会收到英文邮件 / 短信，打开链接补全资料并手写签名，签完回到这里的「待审核」。",
+      "awaiting_guardian": "重新发送会作废旧链接；家长签完后状态变为「待审核」，在「员工资料审核」里审核。",
+      "link_expired": "链接已过期，可以重新发送；家长签完后状态变为「待审核」。",
+      "pending_review": "家长已签字，请在「员工资料审核」里审核。",
+      "returned": "已退回修改，可以在这里重新发送给家长，按退回意见修改后再签字。",
+      "approved": "已审核通过，无需再发送。"
+    },
+    "partial": {
+      "emailFailed": "邮件没发出去{{reason}}。",
+      "smsFailed": "短信没发出去{{reason}}。",
+      "reasonPrefix": "：{{reason}}",
+      "emailDelivered": "邮件已送达。",
+      "smsDelivered": "短信已送达。",
+      "linkStillValid": "链接仍然有效；也可以复制链接手动转给家长。"
+    },
+    "sheet": {
+      "title": "发送家长签字链接",
+      "subtitle": "{{name}} · {{age}} 岁 · {{state}} · 按门店所在州选同意书",
+      "guardianName": "监护人姓名",
+      "relationship": "关系",
+      "sendEmail": "发送邮件",
+      "sendSms": "发送短信",
+      "emailPlaceholder": "监护人邮箱",
+      "phone": "监护人电话",
+      "phonePlaceholder": "例如 0412 345 678",
+      "smsOn": "短信服务已开启",
+      "smsOff": "短信服务未开启",
+      "smsServiceOffHint": "短信服务未开启，只能用邮件发送。",
+      "smsNotMobileHint": "固定电话收不到短信，请填写 04 开头的澳洲手机号，或只用邮件发送。",
+      "expiry": "链接有效期",
+      "expiryDays_one": "{{count}} 天",
+      "expiryDays_other": "{{count}} 天",
+      "codeBoth": "两个都开时，家长任选一个打开都行；验证码发到手机短信。",
+      "codeSms": "验证码发到家长手机短信。",
+      "codeEmail": "验证码发到家长邮箱。",
+      "englishNote": "家长看到的邮件、短信、签署页全部是英文。",
+      "resendWarning": "重新发送会作废之前发出的链接，家长需要用新链接签字。",
+      "submit": "发送",
+      "cancel": "取消"
+    },
+    "validation": {
+      "nameRequired": "请填写监护人姓名",
+      "phoneRequired": "请填写监护人电话",
+      "phoneInvalid": "电话号码格式不对",
+      "emailRequired": "开启邮件发送时必须填写邮箱",
+      "emailInvalid": "邮箱格式不对",
+      "channelRequired": "请至少开启一种发送方式（邮件或短信）"
+    },
+    "messages": {
+      "sentBoth": "已发送到家长邮箱和手机",
+      "sentEmail": "已发送到家长邮箱",
+      "sentSms": "已发送到家长手机",
+      "partial": "部分发送失败，可以复制链接手动转给家长",
+      "noneSent": "邮件和短信都没发出去，可以复制链接手动转给家长",
+      "revoked": "链接已作废",
+      "linkCopied": "链接已复制",
+      "copyFailed": "复制失败，请长按链接手动复制"
+    },
+    "confirmRevoke": {
+      "title": "作废签字链接？",
+      "message": "作废后家长再打开旧链接会提示失效，状态回到「未发送」，之后可以重新发送。",
+      "confirm": "作废链接"
+    },
+    "errors": {
+      "channelRequired": "请至少开启一种发送方式（邮件或短信）。",
+      "contactRequired": "请填写监护人姓名和有效电话；开启邮件时还需填写有效邮箱。",
+      "smsNotConfigured": "短信服务未开启，请关闭短信开关改用邮件。",
+      "smsPhoneInvalid": "监护人电话不是澳洲手机号（04 开头），收不到短信。",
+      "versionConflict": "资料已被其他人更新，已刷新，请核对后重新操作。",
+      "invalidStatus": "当前状态不能执行这个操作，请刷新后重试。",
+      "dobRequired": "员工资料缺少出生日期，请先补充。",
+      "notMinor": "该员工已满 18 岁，无需家长签字。",
+      "forbidden": "你没有管理该员工所在门店的权限。",
+      "stateUnconfirmed": "无法确定员工所在门店属于 NSW 还是 QLD，请先补全门店地址或时区。",
+      "storeRequired": "没有找到员工的主门店，无法确定工作州。",
+      "sendFailed": "发送失败，请稍后重试。",
+      "revokeFailed": "作废失败，请稍后重试。"
+    }
   }
 }

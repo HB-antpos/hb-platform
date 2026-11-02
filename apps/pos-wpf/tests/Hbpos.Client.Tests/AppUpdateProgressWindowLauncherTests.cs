@@ -69,6 +69,121 @@ public sealed class AppUpdateProgressWindowLauncherTests : IDisposable
         Assert.Equal(Path.Combine(LogDirectory, "install-1.9.0-20260926-101500.log"), options.LogPath);
     }
 
+    [Theory]
+    [InlineData(null, false, false)]
+    [InlineData("any", true, false)]
+    [InlineData("agent-only", true, true)]
+    public async Task TryLaunchAsync_passes_release_contract_for_update_agent_and_unattended_mode(
+        string? mode,
+        bool expectedUnattended,
+        bool expectedAgentOnly)
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var launcher = CreateLauncher(processLauncher);
+
+        await launcher.TryLaunchAsync(
+            @"C:\Updates\Hbpos.Client.Wpf-1.9.0-x64.exe",
+            "/SP- /VERYSILENT",
+            new AppUpdateCheckResponse
+            {
+                TargetVersion = "1.9.0",
+                DownloadUrl = "https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/wpf-releases/production/1.9.0/setup.exe",
+                Sha256 = new string('a', 64),
+                FileSize = 2048
+            },
+            mode switch
+            {
+                "any" => UnattendedInstallMode.AnyInstaller,
+                "agent-only" => UnattendedInstallMode.AgentOnly,
+                _ => null
+            });
+
+        Assert.True(UpdaterOptions.TryParse(WindowsArgumentParser.Parse(processLauncher.Arguments!), out var options));
+        Assert.Equal("https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/wpf-releases/production/1.9.0/setup.exe", options!.DownloadUrl);
+        Assert.Equal(new string('a', 64), options.Sha256);
+        Assert.Equal(2048, options.FileSize);
+        Assert.Equal(expectedUnattended, options.Unattended);
+        Assert.Equal(expectedAgentOnly, options.AgentOnly);
+    }
+
+    [Fact]
+    public async Task Installer_launcher_unattended_entry_marks_update_window_unattended_and_attended_does_not()
+    {
+        var progressWindow = new RecordingProgressWindowLauncher();
+        var launcher = new AppUpdateInstallerLauncher(
+            new CapturingProcessLauncher(),
+            new NoopExitService(),
+            AllowInstallSafetyGuard.Instance,
+            progressWindow);
+        var update = new AppUpdateCheckResponse { InstallerType = "exe" };
+
+        await launcher.LaunchAsync(@"C:\Temp\hbpos.exe", update);
+        Assert.Null(progressWindow.LastMode);
+
+        await launcher.LaunchUnattendedAsync(@"C:\Temp\hbpos.exe", update, UnattendedInstallMode.AgentOnly);
+        Assert.Same(UnattendedInstallMode.AgentOnly, progressWindow.LastMode);
+    }
+
+    [Fact]
+    public async Task Agent_only_unattended_install_never_runs_the_installer_directly_when_update_window_is_unavailable()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var exitService = new CountingExitService();
+        var launcher = new AppUpdateInstallerLauncher(
+            processLauncher,
+            exitService,
+            AllowInstallSafetyGuard.Instance,
+            new NullProgressWindowLauncher());
+
+        var result = await launcher.LaunchUnattendedAsync(
+            @"C:\Temp\hbpos.exe",
+            new AppUpdateCheckResponse { InstallerType = "exe", InstallerArguments = "/VERYSILENT" },
+            UnattendedInstallMode.AgentOnly);
+
+        // 中文注释：直接运行安装器会弹 UAC，夜间无人点击；宁可失败让收银机继续用旧版，也不能卡到早上。
+        Assert.False(result.Success);
+        Assert.Null(processLauncher.FileName);
+        Assert.Equal(0, exitService.ExitCalls);
+    }
+
+    [Fact]
+    public async Task Agent_only_unattended_install_refuses_msi_packages()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var launcher = new AppUpdateInstallerLauncher(
+            processLauncher,
+            new CountingExitService(),
+            AllowInstallSafetyGuard.Instance,
+            new RecordingProgressWindowLauncher());
+
+        var result = await launcher.LaunchUnattendedAsync(
+            @"C:\Temp\hbpos.msi",
+            new AppUpdateCheckResponse { InstallerType = "msi" },
+            UnattendedInstallMode.AgentOnly);
+
+        Assert.False(result.Success);
+        Assert.Null(processLauncher.FileName);
+    }
+
+    [Fact]
+    public async Task Any_installer_unattended_mode_and_attended_mode_still_fall_back_to_direct_install()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var launcher = new AppUpdateInstallerLauncher(
+            processLauncher,
+            new CountingExitService(),
+            AllowInstallSafetyGuard.Instance,
+            new NullProgressWindowLauncher());
+        var update = new AppUpdateCheckResponse { InstallerType = "exe", InstallerArguments = "/VERYSILENT" };
+
+        Assert.True((await launcher.LaunchAsync(@"C:\Temp\hbpos.exe", update)).Success);
+        Assert.Equal(@"C:\Temp\hbpos.exe", processLauncher.FileName);
+
+        processLauncher.Reset();
+        Assert.True((await launcher.LaunchUnattendedAsync(@"C:\Temp\hbpos.exe", update, UnattendedInstallMode.AnyInstaller)).Success);
+        Assert.Equal(@"C:\Temp\hbpos.exe", processLauncher.FileName);
+    }
+
     [Fact]
     public async Task TryLaunchAsync_returns_null_when_install_has_no_updater()
     {
@@ -174,14 +289,45 @@ public sealed class AppUpdateProgressWindowLauncherTests : IDisposable
     {
         public string? InstallerPath { get; private set; }
 
+        public UnattendedInstallMode? LastMode { get; private set; }
+
         public Task<ProcessLaunchResult?> TryLaunchAsync(
             string installerPath,
             string installerArguments,
             AppUpdateCheckResponse update)
         {
             InstallerPath = installerPath;
+            LastMode = null;
             return Task.FromResult<ProcessLaunchResult?>(ProcessLaunchResult.Succeeded());
         }
+
+        public Task<ProcessLaunchResult?> TryLaunchAsync(
+            string installerPath,
+            string installerArguments,
+            AppUpdateCheckResponse update,
+            UnattendedInstallMode? unattended)
+        {
+            InstallerPath = installerPath;
+            LastMode = unattended;
+            return Task.FromResult<ProcessLaunchResult?>(ProcessLaunchResult.Succeeded());
+        }
+    }
+
+    // 中文注释：本机没有可用的更新窗口（例如安装目录里缺 updater 文件夹），启动器只能退回直接运行安装器。
+    private sealed class NullProgressWindowLauncher : IAppUpdateProgressWindowLauncher
+    {
+        public Task<ProcessLaunchResult?> TryLaunchAsync(
+            string installerPath,
+            string installerArguments,
+            AppUpdateCheckResponse update) =>
+            Task.FromResult<ProcessLaunchResult?>(null);
+    }
+
+    private sealed class CountingExitService : IApplicationExitService
+    {
+        public int ExitCalls { get; private set; }
+
+        public void Exit() => ExitCalls++;
     }
 
     private sealed class NoopExitService : IApplicationExitService
@@ -203,6 +349,12 @@ public sealed class AppUpdateProgressWindowLauncherTests : IDisposable
         public string? Arguments { get; private set; }
 
         public ProcessLaunchResult Result { get; init; } = ProcessLaunchResult.Succeeded();
+
+        public void Reset()
+        {
+            FileName = null;
+            Arguments = null;
+        }
 
         public Task<ProcessLaunchResult> StartAsync(string fileName, string arguments)
         {

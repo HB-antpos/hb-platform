@@ -1566,3 +1566,67 @@
     overflow: visible;
   }
 }
+
+/* ───────────── 阶段 2：推送弹窗 / 推送记录 ───────────── */
+
+.myob-run {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.myob-run-lead {
+  margin: 0;
+  color: var(--ant-color-text, #1f1f1f);
+  line-height: 1.6;
+}
+
+.myob-run-alert {
+  margin: 0;
+}
+
+/* 需要人确认覆盖的员工：用边框圈出来，和普通提示区分开 */
+.myob-run-overwrite {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-warning-border, #ffe58f);
+  border-radius: 6px;
+  background: var(--ant-color-warning-bg, #fffbe6);
+}
+
+.myob-run-excluded {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 13px;
+}
+
+.myob-run-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+}
+
+.myob-run-range {
+  margin-top: 2px;
+}
+
+.myob-push-select {
+  display: inline-flex;
+  align-items: center;
+}
+
+.myob-push-select .ant-btn-link {
+  padding-inline: 4px;
+}
+
+.myob-push-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.myob-push-batches-sub {
+  margin-bottom: 12px;
+}

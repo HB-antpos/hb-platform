@@ -118,7 +118,7 @@ public sealed partial class PaymentSuccessViewModel : ObservableObject
 
     public string TransactionIdDisplay => TransactionId is null
         ? "-"
-        : $"#{TransactionId.Value.ToString("N")[..10].ToUpperInvariant()}";
+        : $"#{ReceiptOrderShortCode.Create(TransactionId.Value)}";
 
     public string SoldAtDisplay => SoldAt?.ToLocalTime().ToString("MMM dd, yyyy HH:mm") ?? "-";
 

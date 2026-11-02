@@ -175,6 +175,8 @@ assert.deepEqual(payCategories.mapping, {
   sundayUid: null,
   saturdayCasualUid: null,
   sundayCasualUid: null,
+  publicHolidayUid: null,
+  publicHolidayCasualUid: null,
   personalLeaveUid: null,
   holidayLeaveUid: null,
 })
@@ -193,6 +195,19 @@ assert.equal(casualCategories.suggestions.sundayCasualUid, 'e')
 assert.deepEqual(casualCategories.missingKeys, ['saturdayCasual', 'sundayCasual'])
 assert.equal(casualCategories.mappedCount, 2, '缺 mappedCount 时只数必填项（weekday / saturday），临时工两项不计入')
 assert.equal(normalizeMyobPayCategories({ mapping: { weekdayUid: 'a' } }).mapping.saturdayCasualUid, null)
+
+// 公共假期两项：后端新字段原样读出；旧后端没有这两个字段时读成 null；没给 mappedCount 时不计入必填项数
+const holidayCategories = normalizeMyobPayCategories({
+  mapping: { weekdayUid: 'a', publicHolidayUid: 'p', publicHolidayCasualUid: 'q' },
+  suggestions: { publicHolidayCasualUid: 'r' },
+  missingKeys: ['publicHoliday', 'publicHolidayCasual', 'bogus'],
+})
+assert.equal(holidayCategories.mapping.publicHolidayUid, 'p')
+assert.equal(holidayCategories.mapping.publicHolidayCasualUid, 'q')
+assert.equal(holidayCategories.suggestions.publicHolidayCasualUid, 'r')
+assert.deepEqual(holidayCategories.missingKeys, ['publicHoliday', 'publicHolidayCasual'])
+assert.equal(holidayCategories.mappedCount, 1, '缺 mappedCount 时只数必填项（weekday），公共假期两项不计入')
+assert.equal(normalizeMyobPayCategories({ mapping: { weekdayUid: 'a' } }).mapping.publicHolidayUid, null)
 assert.equal(payCategories.updatedAt, null)
 
 // 空 / 异常响应不崩，给安全默认
@@ -352,6 +367,7 @@ try {
 
   const mapping = {
     weekdayUid: 'a', saturdayUid: 'b', sundayUid: 'c', saturdayCasualUid: 'f', sundayCasualUid: null,
+    publicHolidayUid: 'g', publicHolidayCasualUid: null,
     personalLeaveUid: 'd', holidayLeaveUid: 'e',
   }
   await saveMyobPayCategoryMapping('c 1/x', mapping)

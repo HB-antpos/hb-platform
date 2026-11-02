@@ -51,8 +51,72 @@ namespace BlazorApp.Api.Tests
                 typeof(UserLoginRestriction),
                 typeof(UserPasswordResetCode),
                 typeof(SysRolePermission),
-                typeof(SysUserPermission)
+                typeof(SysUserPermission),
+                typeof(EmployeeMinorCompliance),
+                typeof(EmployeeMinorComplianceAudit)
             );
+        }
+
+        [Fact]
+        public async Task CreateAsync_新建入口_先查门店范围再校验生日电话监护人()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+            CreateStoreUserDto Dto(string storeCode) => new()
+            {
+                Username = "need_profile", Email = "need_profile@example.com", Password = "Secret123",
+                FullName = "Need Profile", Phone = "0423111222", StoreCode = storeCode, Status = 1, RequireNewStaffProfile = true,
+            };
+
+            // 无权的分店：先报门店范围，不泄露字段校验。
+            var outOfScope = await service.CreateAsync(Dto("S002"), "manager-1");
+            Assert.Equal("FORBIDDEN", outOfScope.ErrorCode);
+            var noBirthday = await service.CreateAsync(Dto("S001"), "manager-1");
+            Assert.Equal(NewStaffProfileRules.BirthdayRequiredCode, noBirthday.ErrorCode);
+            var minorNoGuardian = Dto("S001"); minorNoGuardian.Birthday = DateTime.Today.AddYears(-15);
+            Assert.Equal(NewStaffProfileRules.GuardianRequiredCode, (await service.CreateAsync(minorNoGuardian, "manager-1")).ErrorCode);
+            Assert.False(await _db.Queryable<User>().AnyAsync(x => x.Username == "need_profile"));
+        }
+
+        [Fact]
+        public async Task CreateAsync_未成年员工_写入生日并预建带监护人的合规草稿_成年员工不建()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+            var minorBirthday = DateTime.Today.AddYears(-15);
+
+            var minor = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "teen_staff", Email = "teen@example.com", Password = "Secret123",
+                    GivenName = "Mia", FamilyName = "Nguyen", Phone = "0423111222", StoreCode = "S001", Status = 1,
+                    Birthday = minorBirthday,
+                    Guardian = new NewStaffGuardianDto { Name = "Linh Nguyen", Relationship = "Mother", Phone = "0412345678", Email = "linh@example.com" },
+                },
+                "manager-1"
+            );
+            var adult = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "adult_staff", Email = "adult@example.com", Password = "Secret123",
+                    FullName = "Adult Staff", Phone = "0423999888", StoreCode = "S001", Status = 1,
+                    Birthday = new DateTime(1995, 5, 5),
+                },
+                "manager-1"
+            );
+
+            Assert.True(minor.Success, minor.Message);
+            Assert.True(adult.Success, adult.Message);
+            var teenGuid = minor.Data!.UserGuid;
+            Assert.Equal(minorBirthday.Date, (await _db.Queryable<EmployeeProfile>().FirstAsync(x => x.UserGUID == teenGuid)).Birthday);
+            var draft = Assert.Single(await _db.Queryable<EmployeeMinorCompliance>().ToListAsync());
+            Assert.Equal(teenGuid, draft.UserGUID);
+            Assert.Equal("draft", draft.Status);
+            Assert.Equal("Linh Nguyen", draft.GuardianName);
+            Assert.Equal("Mother", draft.GuardianRelationship);
+            Assert.Equal("0412345678", draft.GuardianPhone);
+            Assert.Equal("linh@example.com", draft.GuardianEmail);
+            Assert.Contains("Mia", draft.FormDataJson);
         }
 
         [Fact]

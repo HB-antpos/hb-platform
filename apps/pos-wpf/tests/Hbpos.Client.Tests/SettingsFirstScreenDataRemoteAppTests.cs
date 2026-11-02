@@ -615,6 +615,14 @@ public sealed class SettingsFirstScreenDataRemoteAppTests(PaymentViewRuntimeStaT
             Task.FromResult<DateOnly?>(null);
 
         public Task MarkPromptedAsync(DateOnly businessDate, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<DateTimeOffset?> GetScheduledRestartAtAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateTimeOffset?>(null);
+
+        public Task SetScheduledRestartAtAsync(DateTimeOffset restartAt, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ClearScheduledRestartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeRemoteMaintenanceService : IRemoteMaintenanceService

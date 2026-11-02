@@ -1,6 +1,7 @@
 {
   "system": {
     "employeeProfiles": {
+      "minorTab": "未成年用工合规",
       "totalCount": "共 {{count}} 名员工",
       "pendingEntry": "{{count}} 条敏感资料待审核",
       "maskedHint": "银行 / 公积金账号已脱敏，完整值仅在编辑中查看",

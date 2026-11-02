@@ -144,6 +144,7 @@ public static class ServiceRegistration
         services.AddScoped<IDeviceRuntimeStatusSchemaSqlExecutor, SqlSugarDeviceRuntimeStatusSchemaSqlExecutor>();
         services.AddScoped<IDeviceRuntimeStatusSchemaInitializer, SqlSugarDeviceRuntimeStatusSchemaInitializer>();
         services.AddScoped<ICashierService, CashierService>();
+        services.AddScoped<ICashierPreferenceStore, SqlSugarCashierPreferenceStore>();
         services.AddScoped<CatalogService>();
         services.AddScoped<ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
         services.AddScoped<ICatalogIndexRefreshWorker>(sp => sp.GetRequiredService<CatalogService>());

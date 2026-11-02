@@ -166,7 +166,7 @@ internal static class VoucherReceiptTerms
         "VOUCHER TERMS",
         [
             "Use at the issuing store only.",
-            "Pay with it at checkout by scanning the barcode or QR code.",
+            "Pay with it at checkout by scanning the barcode.",
             "Can be used across several purchases until the balance is $0.00.",
             "Not redeemable for cash."
         ],
@@ -221,7 +221,7 @@ public sealed record ReceiptDetails(
     VoucherBalanceReceipt? VoucherBalance = null,
     ReceiptTerms? Terms = null)
 {
-    public string TransactionIdDisplay => $"#{OrderGuid.ToString("N")[..10].ToUpperInvariant()}";
+    public string TransactionIdDisplay => $"#{ReceiptOrderShortCode.Create(OrderGuid)}";
 
     public string SoldAtDisplay => SoldAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm");
 }

@@ -100,6 +100,18 @@ export interface StoreUserCreatePayload extends StoreUserMutationInput {
   requirePasswordChange?: boolean;
   /** 创建后给员工邮箱发设置密码验证码，店长不经手密码。 */
   sendPasswordSetupEmail?: boolean;
+  /** 生日 YYYY-MM-DD；「新增员工」入口后端必填（旧版 App 不传会被拒绝并提示更新）。 */
+  birthday?: string;
+  /** 监护人：只在生日未满 18 岁时带，后端用它预填未成年用工合规草稿。 */
+  guardian?: NewStaffGuardianPayload;
+}
+
+/** 新建员工时的监护人（relationship 提交英文值：Mother / Father / Legal guardian / Other）。 */
+export interface NewStaffGuardianPayload {
+  name: string;
+  relationship: string;
+  phone: string;
+  email: string;
 }
 
 export interface StoreUserStatusPayload {

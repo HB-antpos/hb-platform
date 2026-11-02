@@ -74,7 +74,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
         AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null,
         StartupProgressTracker? startupProgress = null,
-        WpfRestartPromptService? restartPrompt = null)
+        WpfRestartPromptService? restartPrompt = null,
+        ColorThemeOnboardingViewModel? colorThemeOnboarding = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -100,6 +101,15 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         else
         {
             ColorThemeSwitcher.DataContext = colorThemeSwitcher;
+        }
+        // 首次登录配色选择窗：未注册（例如测试里手工构造）时保持隐藏，不能继承主 VM 的 DataContext。
+        if (colorThemeOnboarding is null)
+        {
+            ColorThemeOnboardingOverlay.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ColorThemeOnboardingOverlay.DataContext = colorThemeOnboarding;
         }
         // 日结后重启提示浮层：未注册（例如测试里手工构造）时 DataContext 为空，浮层保持隐藏。
         RestartPromptOverlay.DataContext = restartPrompt;

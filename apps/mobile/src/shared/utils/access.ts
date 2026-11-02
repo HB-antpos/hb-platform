@@ -45,6 +45,16 @@ export const PERMISSIONS = {
     // 「抓拍与比对」结果与抓拍图（生物识别信息，每次查看服务端都写审计）。
     ImagesView: "FaceCapture.Images.View",
   },
+  // MYOB 工资单（管理者查看）：与 Web「工资单」同一组权限码；查看范围（管辖分店 / 全部分店）由服务端强制，
+  // 下载 PDF / 邮件发送另有独立权限，详情接口会回 canDownloadPdf / canSendEmail，客户端据此显示按钮。
+  Myob: {
+    Payslip: {
+      ViewManagedStore: "Myob.Payslip.ViewManagedStore",
+      ViewAllStores: "Myob.Payslip.ViewAllStores",
+      Download: "Myob.Payslip.Download",
+      Email: "Myob.Payslip.Email",
+    },
+  },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",

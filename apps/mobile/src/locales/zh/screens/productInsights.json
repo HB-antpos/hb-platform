@@ -34,43 +34,28 @@
     "itemNumber": "货号",
     "barcode": "条码",
     "supplier": "供应商",
-    "salesQuantity": "本店销量",
-    "salesAmount": "本店销售额",
-    "purchaseQuantity": "进货数量",
-    "purchaseDocuments": "进货单数",
     "orderedQuantity": "订货数量",
     "allocatedQuantity": "配货数量",
-    "salesDetail": "销售明细",
     "date": "日期",
     "documentNo": "单据号",
     "quantity": "数量",
     "outboundDate": "出库日期"
   },
   "units": {
-    "items": "件",
-    "documents": "单"
+    "items": "件"
   },
-  "range": "{{startDate}} 至 {{endDate}}",
   "generatedAt": "查询：{{value}}",
   "salesUpdatedAt": "销售统计更新时间：{{value}}",
   "salesUpdatedUnavailable": "销售统计更新时间暂不可用",
-  "purchaseScope": "按本地进货单统计",
-  "recordCount": "{{count}} 条",
-  "tabs": {
-    "sales": "销售明细",
-    "purchases": "进货明细",
-    "warehouseRecords": "订货 / 配货记录"
-  },
   "history": {
-    "noPurchases": "近 90 天无进货",
-    "lastPurchase": "历史记录：{{date}} · {{quantity}} 件 · {{documentNo}} · {{supplier}}。该记录不计入近 90 天进货合计。",
+    "noPurchases": "本区间无进货",
+    "lastPurchase": "历史记录：{{date}} · {{quantity}} 件 · {{documentNo}} · {{supplier}}。该记录不计入本区间进货合计。",
     "none": "暂无历史进货记录"
   },
   "warehouse": {
     "lastAllocation": "最近配货：{{date}} · {{quantity}} 件",
-    "noAllocation": "近 90 天暂无配货记录",
-    "dispatchedOn": "{{date}} 已出库",
-    "awaitingAllocation": "待配货"
+    "noAllocation": "本区间暂无配货记录",
+    "dispatchedOn": "{{date}} 已出库"
   },
   "states": {
     "initialTitle": "查询商品进销记录",
@@ -103,5 +88,121 @@
     "totalQuantity": "总销量",
     "totalAmount": "总销售额",
     "totalUnknown": "POS 分店销售汇总"
+  },
+  "source": {
+    "local": "本地进货",
+    "warehouse": "仓库商品"
+  },
+  "period": {
+    "days": "近 {{count}} 天",
+    "custom": "自定义周期",
+    "pickerTitle": "选择统计周期",
+    "reset": "恢复近 90 天",
+    "range_one": "{{startDate}} – {{endDate}}（{{count}} 天）",
+    "range_other": "{{startDate}} – {{endDate}}（{{count}} 天）"
+  },
+  "summary": {
+    "title": "进销汇总",
+    "scopeLocal": "按本地进货单 · 本店 POS 销售",
+    "scopeWarehouse": "按仓库出库 · 本店 POS 销售",
+    "inLocal": "进货",
+    "inWarehouse": "仓库配货",
+    "sales": "销售",
+    "inSubLocal_one": "{{count}} 张进货单",
+    "inSubLocal_other": "{{count}} 张进货单",
+    "inSubWarehouse": "订货 {{ordered}} · 待配 {{pending}}",
+    "salesSub_one": "{{amount}} · 动销 {{count}} 天",
+    "salesSub_other": "{{amount}} · 动销 {{count}} 天",
+    "sellThroughCaption": "售罄率 {{rate}}（{{sales}} / {{in}}）",
+    "sellThroughNone": "本区间无进货，无法计算售罄率",
+    "lastInDays_one": "上次进货 {{count}} 天前",
+    "lastInDays_other": "上次进货 {{count}} 天前",
+    "lastInToday": "今天到货",
+    "lastInNone": "暂无进货记录",
+    "lastInHistorical": "上次进货 {{date}}",
+    "lastAllocationDays": "上次配货 {{count}} 天前",
+    "lastAllocationToday": "今天配货出库",
+    "lastAllocationNone": "暂无配货记录",
+    "negative": "销量大于本区间进货：可能在卖区间开始前的存货。",
+    "pending_one": "有 {{quantity}} 件订货待配货（{{count}} 张订单，最早 {{date}} 下单）。",
+    "pending_other": "有 {{quantity}} 件订货待配货（{{count}} 张订单，最早 {{date}} 下单）。"
+  },
+  "kpi": {
+    "net": "进销差",
+    "dailyAverage": "日均销量",
+    "averagePrice": "平均售价",
+    "fulfillment": "配货满足率"
+  },
+  "trend": {
+    "weeklyTitle": "每周进销",
+    "bucketTitle": "每 {{count}} 天进销",
+    "buckets": "分段",
+    "cumulative": "累计",
+    "sales": "销量",
+    "inLocal": "进货到货（件）",
+    "inWarehouse": "配货出库（件）",
+    "cumulativeSales": "累计销量",
+    "cumulativeInLocal": "累计进货",
+    "cumulativeInWarehouse": "累计配货",
+    "accessibility": "进销趋势：区间累计进 {{in}} 件，累计销 {{sales}} 件"
+  },
+  "flow": {
+    "title": "进销流水",
+    "countLocal_one": "{{count}} 批进货 · {{days}} 个销售日",
+    "countLocal_other": "{{count}} 批进货 · {{days}} 个销售日",
+    "countWarehouse_one": "{{count}} 批配货 · {{days}} 个销售日",
+    "countWarehouse_other": "{{count}} 批配货 · {{days}} 个销售日",
+    "byBatch": "按进货批次",
+    "byBatchWarehouse": "按配货批次",
+    "byDate": "按日期",
+    "filter": {
+      "all": "全部",
+      "in": "只看进货",
+      "inWarehouse": "只看订货 / 配货",
+      "sales": "只看销售"
+    },
+    "latest": "最新批次",
+    "ongoing_one": "至今 {{count}} 天",
+    "ongoing_other": "至今 {{count}} 天",
+    "span_one": "{{start}} – {{end}} · {{count}} 天",
+    "span_other": "{{start}} – {{end}} · {{count}} 天",
+    "salesDays_one": "{{count}} 个销售日",
+    "salesDays_other": "{{count}} 个销售日",
+    "moreDocuments": " 等 {{count}} 张",
+    "batchSales": "本批销售 {{quantity}} 件 · {{amount}}",
+    "overHint": "本批期间销量超过本批进货，说明也在卖之前批次的余货。",
+    "overHintWarehouse": "本批期间销量超过本批配货，说明也在卖之前批次的余货。",
+    "beforeRange": "区间起点前",
+    "noInbound": "本区间无进货",
+    "noAllocation": "本区间无配货",
+    "expand_one": "展开 {{count}} 个销售日",
+    "expand_other": "展开 {{count}} 个销售日",
+    "collapse": "收起每日销售",
+    "posSales": "本店 POS 销售",
+    "warehouseOutbound": "仓库出库",
+    "orderTitle": "订货 {{documentNo}}",
+    "orderStatus": {
+      "submitted": "已提交，待配货",
+      "allocating": "配货中",
+      "completed": "已出库",
+      "unknown": "状态未知"
+    },
+    "allocated": "已配 {{value}}",
+    "monthIn": "进 {{value}}",
+    "monthOrder": "订 {{value}}",
+    "monthAllocation": "配 {{value}}",
+    "monthSales": "销 {{value}}"
+  },
+  "badge": {
+    "in": "进",
+    "allocation": "配",
+    "order": "订",
+    "sales": "销"
+  },
+  "sticky": {
+    "in": "进 {{value}}",
+    "sales": "销 {{value}}",
+    "sellThrough": "售罄 {{value}}",
+    "net": "差 {{value}}"
   }
 }

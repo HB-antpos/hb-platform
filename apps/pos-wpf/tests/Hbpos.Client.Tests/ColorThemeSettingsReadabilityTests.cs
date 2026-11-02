@@ -20,8 +20,10 @@ public sealed class ColorThemeSettingsReadabilityTests(PaymentViewRuntimeStaTest
     private const int Height = 1500;
 
     [Theory]
-    [InlineData(PosColorTheme.Default)]
-    [InlineData(PosColorTheme.Paper)]
+    [InlineData(PosColorTheme.Candy)]
+    [InlineData(PosColorTheme.Sunny)]
+    [InlineData(PosColorTheme.Ocean)]
+    [InlineData(PosColorTheme.Rainbow)]
     [InlineData(PosColorTheme.Graphite)]
     [InlineData(PosColorTheme.Celadon)]
     [InlineData(PosColorTheme.Elder)]
@@ -80,7 +82,7 @@ public sealed class ColorThemeSettingsReadabilityTests(PaymentViewRuntimeStaTest
         finally
         {
             // 共享测试 Application 的其他用例依赖默认色板。
-            applier.Apply(PosColorTheme.Default);
+            applier.Apply(PosColorTheme.Blue);
             view.DataContext = null;
             window.Content = null;
             window.Close();

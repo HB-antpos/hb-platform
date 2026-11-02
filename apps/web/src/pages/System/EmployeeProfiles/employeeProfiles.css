@@ -314,6 +314,40 @@
   background: #f0a020;
 }
 
+/* 非敏感资料编辑器（员工资料页与用户管理抽屉共用）：分店 / 角色放在浅灰条里，敏感资料收进只读卡片。 */
+.sys-emp-managed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+  margin-bottom: 4px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.sys-emp-managed-sensitive {
+  overflow: hidden;
+  margin-top: 8px;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+}
+
+.sys-emp-managed-sensitive-head {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid #eef0f3;
+  background: #fcfcfd;
+}
+
+.sys-emp-managed-sensitive-body {
+  padding: 14px 16px 2px;
+}
+
+.sys-emp-managed-footer {
+  margin-top: 16px;
+}
+
 @media (max-width: 720px) {
   .sys-emp-grid-2,
   .sys-emp-grid-3 {

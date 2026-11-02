@@ -176,6 +176,13 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
       access.hasPermission(P.Attendance.PayrollEdit),
   },
   {
+    // 工资单（「工时与工资」页面的页签）：只有 Myob.Payslip.* 之一的账号也要能进入后台；放在 MYOB 入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/pos-admin/payslips',
+    targetPrefixes: ['/pos-admin/payslips', '/pos-admin/payroll'],
+    canAccess: (access) =>
+      access.hasPermission(P.Myob.PayslipViewManagedStore) || access.hasPermission(P.Myob.PayslipViewAllStores),
+  },
+  {
     // 人脸比对：只有五个 FaceMatch.* 权限之一的账号也要能进入后台；放在摄像机管理之后，组合权限用户沿用原默认入口。
     defaultPath: '/system/face-match',
     targetPrefixes: ['/system/face-match', '/system/face-recognition'],

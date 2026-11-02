@@ -7,6 +7,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Api.Services.React;
+using BlazorApp.Api.Services.Sms;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Options;
@@ -18,12 +19,19 @@ namespace BlazorApp.Api.Services;
 /// 未成年用工档案、家长签署和 HR 审核的独立服务。
 /// 合规状态只产生提醒，不参与排班发布授权判断。
 /// </summary>
-public sealed class EmployeeMinorComplianceService
+public sealed partial class EmployeeMinorComplianceService
 {
     public const string ServerConsentScope = "I consent to the employer collecting and using this signed minor employment record for lawful employment administration, safety and roster risk reminders.";
     public const string VersionConflictCode = "MINOR_COMPLIANCE_VERSION_CONFLICT";
     public const string InvalidGuardianContactCode = "MINOR_COMPLIANCE_GUARDIAN_CONTACT_REQUIRED";
     public const string GuardianNotVerifiedCode = "GUARDIAN_EMAIL_NOT_VERIFIED";
+    public const string GuardianSmsNotConfiguredCode = "GUARDIAN_SMS_NOT_CONFIGURED";
+    public const string GuardianSmsPhoneInvalidCode = "GUARDIAN_SMS_PHONE_INVALID";
+    // 邀请渠道：email（后端把链接发到监护人邮箱）/ sms（发到监护人手机）/ share（员工自己转发链接）。
+    // 验证码跟着邀请渠道走：sms 渠道发到监护人手机，其余发到监护人邮箱。
+    internal const string GuardianChannelEmail = "email";
+    internal const string GuardianChannelSms = "sms";
+    internal const string GuardianChannelShare = "share";
     // 监护人邮箱验证码：10 分钟有效、同一链接最多发 5 次、两次间隔 60 秒、错 5 次作废需重发；验证后会话 2 小时。
     internal const int GuardianCodeTtlMinutes = 10;
     internal const int GuardianCodeMaxSends = 5;
@@ -38,10 +46,11 @@ public sealed class EmployeeMinorComplianceService
     private readonly ILogger<EmployeeMinorComplianceService> _logger;
     private readonly IEmployeeMinorDocumentStore? _storage;
     private readonly IMinorGuardianEmailSender? _emailSender;
+    private readonly ISmsSender? _smsSender;
     private readonly MinorEmploymentOptions _options;
 
-    public EmployeeMinorComplianceService(SqlSugarContext context, ICurrentUserService currentUser, ILogger<EmployeeMinorComplianceService> logger, ICurrentUserManageableStoreScopeService storeScope, IEmployeeMinorDocumentStore? storage = null, IMinorGuardianEmailSender? emailSender = null, IOptions<MinorEmploymentOptions>? options = null)
-    { _context = context; _currentUser = currentUser; _logger = logger; _storeScope = storeScope; _storage = storage; _emailSender = emailSender; _options = options?.Value ?? new MinorEmploymentOptions(); }
+    public EmployeeMinorComplianceService(SqlSugarContext context, ICurrentUserService currentUser, ILogger<EmployeeMinorComplianceService> logger, ICurrentUserManageableStoreScopeService storeScope, IEmployeeMinorDocumentStore? storage = null, IMinorGuardianEmailSender? emailSender = null, IOptions<MinorEmploymentOptions>? options = null, ISmsSender? smsSender = null)
+    { _context = context; _currentUser = currentUser; _logger = logger; _storeScope = storeScope; _storage = storage; _emailSender = emailSender; _smsSender = smsSender; _options = options?.Value ?? new MinorEmploymentOptions(); }
 
     public async Task<ApiResponse<EmployeeMinorComplianceDto?>> GetSelfAsync()
     {
@@ -121,12 +130,21 @@ public sealed class EmployeeMinorComplianceService
         var backupError = await ValidateBackupContactsAsync(row);
         if (backupError is not null) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error(backupError, "MINOR_COMPLIANCE_BACKUP_CONTACT_REQUIRED");
         if (row.Status != "draft") return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("请先保存新版本的草稿，再发起签字；已签版本保留原件", "INVALID_STATUS");
+        var channel = dto.DeliverBySms ? GuardianChannelSms : dto.DeliverByEmail ? GuardianChannelEmail : GuardianChannelShare;
+        if (channel == GuardianChannelSms)
+        {
+            // 先查短信能不能用，再创建邀请：否则会留下一个「验证码发不出去」的死状态（链接已生成，监护人却收不到码）。
+            if (_smsSender is null || !_smsSender.IsAvailable)
+                return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("短信服务未开启，暂不能通过短信发送，请改用邮件或转发链接", GuardianSmsNotConfiguredCode);
+            if (!AustralianPhoneNumber.TryNormalize(row.GuardianPhone, out _))
+                return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("监护人电话不是澳洲手机号（04 开头），收不到短信，请改用邮件或转发链接", GuardianSmsPhoneInvalidCode);
+        }
         var raw = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
         row.GuardianTokenHash = Hash(raw);
         row.GuardianTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(Math.Clamp(dto.ExpiryMinutes, 5, 60 * 24 * 7));
         row.GuardianTokenUsed = false;
         row.Status = "awaiting_guardian_signature";
-        row.GuardianInviteChannel = dto.DeliverByEmail ? "email" : "share";
+        row.GuardianInviteChannel = channel;
         row.GuardianInviteEmailSentAtUtc = null;
         ResetGuardianVerification(row);
         var inviteTransaction = await _context.Db.Ado.UseTranAsync(async () =>
@@ -141,16 +159,18 @@ public sealed class EmployeeMinorComplianceService
         {
             Id = row.Id, Version = row.Version, Revision = row.Revision, ExpiresAtUtc = row.GuardianTokenExpiresAtUtc.Value,
             DeliveryChannel = row.GuardianInviteChannel, MaskedGuardianEmail = MaskEmail(row.GuardianEmail),
+            MaskedGuardianPhone = channel == GuardianChannelSms ? MaskPhone(row.GuardianPhone) : null,
         };
-        if (!dto.DeliverByEmail)
+        if (channel == GuardianChannelShare)
         {
             // 备用方式：员工自己转发链接。监护人打开后仍须用发到监护人邮箱的验证码核验，员工拿到链接也无法代签。
             result.SigningUrl = signingUrl;
             return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result);
         }
+        if (channel == GuardianChannelSms) return await DeliverSigningLinkBySmsAsync(row, result, signingUrl);
         var send = _emailSender is null
             ? ApiResponse<bool>.Error("邮件服务未配置", "GUARDIAN_EMAIL_NOT_CONFIGURED")
-            : await _emailSender.SendSigningLinkAsync(row.GuardianEmail!, row.GuardianName, ChildDisplayName(row), signingUrl, row.GuardianTokenExpiresAtUtc.Value);
+            : await _emailSender.SendSigningLinkAsync(row.GuardianEmail!, row.GuardianName, ChildDisplayName(row), signingUrl, row.GuardianTokenExpiresAtUtc.Value, verificationCodeBySms: false);
         if (send.Success)
         {
             // 邮件已直达监护人，不再把链接回传到员工手机。
@@ -170,6 +190,54 @@ public sealed class EmployeeMinorComplianceService
         return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result, "邮件发送失败，可改为转发链接给监护人");
     }
 
+    /// <summary>
+    /// 短信渠道：把签署链接短信发到监护人手机。和邮件一样，发送失败不回滚邀请——链接照样有效，回传给员工转发，
+    /// 验证码仍会短信发到监护人手机，所以员工拿到链接也无法代签。
+    /// </summary>
+    private async Task<ApiResponse<EmployeeMinorComplianceInviteResultDto>> DeliverSigningLinkBySmsAsync(EmployeeMinorCompliance row, EmployeeMinorComplianceInviteResultDto result, string signingUrl)
+    {
+        var body = SmsMessages.GuardianSigningLink(ChildDisplayName(row), signingUrl, FormatSydneyWithZone(row.GuardianTokenExpiresAtUtc!.Value));
+        var send = await _smsSender!.SendAsync(new SmsRequest(SmsPurposes.GuardianSigningLink, row.GuardianPhone!, body, row.Id.ToString()));
+        if (send.Success)
+        {
+            // 复用「邀请已直达监护人」的发送时间列（列名带 Email，含义是邀请发送时间），链接不再回传到员工手机。
+            var sentAt = DateTime.UtcNow;
+            await _context.Db.Updateable<EmployeeMinorCompliance>()
+                .SetColumns(x => x.GuardianInviteEmailSentAtUtc == sentAt)
+                .Where(x => x.Id == row.Id && x.GuardianTokenHash == row.GuardianTokenHash)
+                .ExecuteCommandAsync();
+            await AuditAsync(row.Id, "guardian_invite_sms_sent", new { to = result.MaskedGuardianPhone });
+            result.SmsSent = true;
+            return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result, "签署链接已发送到监护人手机");
+        }
+        await AuditAsync(row.Id, "guardian_invite_sms_failed", new { send.ErrorCode });
+        result.SigningUrl = signingUrl;
+        result.SmsError = send.Message;
+        return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result, "短信发送失败，可改为转发链接给监护人");
+    }
+
+    private static bool IsSmsChannel(EmployeeMinorCompliance row) =>
+        string.Equals(row.GuardianInviteChannel, GuardianChannelSms, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>打码后的监护人手机号；不是澳洲手机号返回 null（那种号码本来也发不了短信）。</summary>
+    internal static string? MaskPhone(string? phone) =>
+        AustralianPhoneNumber.TryNormalize(phone, out var e164) ? AustralianPhoneNumber.Mask(e164) : null;
+
+    /// <summary>短信里的有效期：悉尼时间 dd/MM HH:mm，并带上时区文字；取不到悉尼时区就明说是 UTC，不写错标签。</summary>
+    private static string FormatSydneyWithZone(DateTime utc)
+    {
+        var value = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("Australia/Sydney");
+            return TimeZoneInfo.ConvertTimeFromUtc(value, zone).ToString("dd/MM HH:mm") + " Sydney time";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return value.ToString("dd/MM HH:mm") + " UTC";
+        }
+    }
+
     public async Task<ApiResponse<EmployeeMinorComplianceDto>> SignGuardianAsync(string token, EmployeeMinorComplianceGuardianSignDto dto, string? sessionKey = null, string? clientIp = null, string? userAgent = null)
     {
         var row = await _context.Db.Queryable<EmployeeMinorCompliance>()
@@ -184,9 +252,10 @@ public sealed class EmployeeMinorComplianceService
             amended = EmployeeMinorGuardianAmendments.Apply(row, currentContacts, dto.Amendments, JsonOptions);
             var calendarError = EmployeeMinorGuardianAmendments.ValidateSchoolCalendar(Parse<EmployeeMinorSchoolCalendarDto>(row.SchoolCalendarJson));
             if (calendarError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(calendarError, "MINOR_COMPLIANCE_SCHOOL_CALENDAR_INVALID");
-            var formError = ValidateFormCompleteness(row);
-            if (formError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
         }
+        // 店长 / HR 发送时只需要监护人联系方式，孩子与学校资料由家长在签署页补全，所以完整性放到签字这一步统一校验。
+        var formError = ValidateFormCompleteness(row);
+        if (formError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
         var effectiveContacts = amended?.Contacts ?? currentContacts;
         var contactError = ValidateGuardianContact(row);
         if (contactError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(contactError, InvalidGuardianContactCode);
@@ -206,7 +275,10 @@ public sealed class EmployeeMinorComplianceService
         row.GuardianSignedAtUtc = DateTime.UtcNow;
         row.GuardianSignatureHash = Hash($"{row.Id}:{row.Version}:{row.GuardianSignedName}:{dto.SignatureData}:{dto.ConsentScope}:{row.GuardianSignedAtUtc:O}");
         row.GuardianTokenUsed = true;
-        row.Status = "signed_pending_employee_submit";
+        // 家长签完直接进入 HR 审核，不再需要员工在 App 里点「提交」。
+        row.Status = "pending_hr_review";
+        row.SubmittedAtUtc = row.GuardianSignedAtUtc;
+        row.SubmittedBy = "guardian";
         var emailVerifiedAtUtc = row.GuardianEmailVerifiedAtUtc;
         row.GuardianSessionHash = null;
         row.GuardianSessionExpiresAtUtc = null;
@@ -252,6 +324,13 @@ public sealed class EmployeeMinorComplianceService
                 ip = Truncate(clientIp, 64),
                 userAgent = Truncate(userAgent, 200),
             });
+            await AuditAsync(row.Id, "submitted_for_hr_review", new { by = "guardian" });
+            // 店长发起的「请员工填写」请求随家长签字一并完成。
+            var completedAt = DateTime.UtcNow;
+            await _context.Db.Updateable<EmployeeMinorComplianceRequest>()
+                .SetColumns(x => new EmployeeMinorComplianceRequest { Status = EmployeeMinorComplianceRequest.StatusCompleted, CompletedAtUtc = completedAt, CompletedComplianceId = row.Id, UpdatedAt = completedAt })
+                .Where(x => x.UserGUID == row.UserGUID && x.Status == EmployeeMinorComplianceRequest.StatusOpen)
+                .ExecuteCommandAsync();
         });
         if (!signTransaction.IsSuccess)
         {
@@ -300,7 +379,16 @@ public sealed class EmployeeMinorComplianceService
             return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码发送次数已达上限，请联系员工重新发起签署", "GUARDIAN_CODE_SEND_LIMIT");
         if (row.GuardianOtpSentAtUtc.HasValue && row.GuardianOtpSentAtUtc.Value.AddSeconds(GuardianCodeResendSeconds) > now)
             return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码刚刚发送，请稍后再试", "GUARDIAN_CODE_COOLDOWN", MapSession(row, false));
-        if (_emailSender is null) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("邮件服务未配置，暂不能发送验证码", "GUARDIAN_EMAIL_NOT_CONFIGURED");
+        var useSms = IsSmsChannel(row);
+        if (useSms)
+        {
+            // 短信渠道的邀请：验证码也走短信，发给邀请时核对过的监护人手机号。
+            if (_smsSender is null || !_smsSender.IsAvailable)
+                return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("短信服务未开启，暂不能发送验证码", GuardianSmsNotConfiguredCode);
+            if (!AustralianPhoneNumber.TryNormalize(row.GuardianPhone, out _))
+                return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("监护人电话不是澳洲手机号，收不到短信，请联系员工重新发起签署", GuardianSmsPhoneInvalidCode);
+        }
+        else if (_emailSender is null) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("邮件服务未配置，暂不能发送验证码", "GUARDIAN_EMAIL_NOT_CONFIGURED");
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
         var expectedSends = row.GuardianOtpSendCount;
         row.GuardianOtpHash = CodeHash(row, code);
@@ -321,10 +409,13 @@ public sealed class EmployeeMinorComplianceService
             .Where(x => x.Id == row.Id && x.GuardianTokenHash == row.GuardianTokenHash && !x.GuardianTokenUsed && x.GuardianOtpSendCount == expectedSends)
             .ExecuteCommandAsync();
         if (affected != 1) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码状态已变化，请刷新后重试", "GUARDIAN_CODE_CONFLICT");
-        var send = await _emailSender.SendVerificationCodeAsync(row.GuardianEmail!, row.GuardianName, code, row.GuardianOtpExpiresAtUtc.Value);
-        await AuditAsync(row.Id, send.Success ? "guardian_code_sent" : "guardian_code_send_failed", new { to = MaskEmail(row.GuardianEmail), attempt = row.GuardianOtpSendCount });
-        if (!send.Success) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error(send.Message, send.ErrorCode ?? "GUARDIAN_EMAIL_SEND_FAILED", MapSession(row, false));
-        return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.OK(MapSession(row, false), $"验证码已发送到 {MaskEmail(row.GuardianEmail)}");
+        var send = useSms
+            ? await _smsSender!.SendAsync(new SmsRequest(SmsPurposes.GuardianVerificationCode, row.GuardianPhone!, SmsMessages.GuardianVerificationCode(code, GuardianCodeTtlMinutes), row.Id.ToString()))
+            : await _emailSender!.SendVerificationCodeAsync(row.GuardianEmail!, row.GuardianName, code, row.GuardianOtpExpiresAtUtc.Value);
+        var maskedTarget = useSms ? MaskPhone(row.GuardianPhone) : MaskEmail(row.GuardianEmail);
+        await AuditAsync(row.Id, send.Success ? "guardian_code_sent" : "guardian_code_send_failed", new { to = maskedTarget, channel = useSms ? GuardianChannelSms : GuardianChannelEmail, attempt = row.GuardianOtpSendCount });
+        if (!send.Success) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error(send.Message, send.ErrorCode ?? (useSms ? SmsErrorCodes.SendFailed : "GUARDIAN_EMAIL_SEND_FAILED"), MapSession(row, false));
+        return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.OK(MapSession(row, false), $"验证码已发送到 {maskedTarget}");
     }
 
     /// <summary>校验验证码；通过后签发一次性会话密钥（只存哈希），查看与签署都要带上。</summary>
@@ -500,10 +591,12 @@ public sealed class EmployeeMinorComplianceService
             .InnerJoin<Store>((us, st) => us.StoreGUID == st.StoreGUID)
             .InnerJoin<EmployeeProfile>((us, st, ep) => ep.UserGUID == us.UserGUID)
             .InnerJoin<User>((us, st, ep, u) => u.UserGUID == us.UserGUID)
-            .Where((us, st, ep, u) => us.IsPrimary && !us.IsDeleted && !st.IsDeleted && !ep.IsDeleted && !u.IsDeleted && u.IsActive
+            .Where((us, st, ep, u) => !us.IsDeleted && !st.IsDeleted && !ep.IsDeleted && !u.IsDeleted && u.IsActive
                 && storeCodes.Contains(st.StoreCode) && ep.Birthday != null && ep.Birthday > adultCutoff)
-            .Select((us, st, ep, u) => new { u.UserGUID, u.FullName, u.Username, st.StoreCode, ep.Birthday })
+            .Select((us, st, ep, u) => new { u.UserGUID, u.FullName, u.Username, st.StoreCode, ep.Birthday, us.IsPrimary, us.AssignedAt })
             .ToListAsync();
+        // 普通店员的关联是 IsPrimary=false；同一员工关联多家店时只保留一行（主分店优先，其次最早关联）。
+        rows = rows.GroupBy(x => x.UserGUID).Select(g => g.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.AssignedAt).First()).ToList();
         var userGuids = rows.Select(x => x.UserGUID).Distinct().ToArray();
         var compliances = userGuids.Length == 0 ? new List<EmployeeMinorCompliance>() : await _context.Db.Queryable<EmployeeMinorCompliance>()
             .Where(x => userGuids.Contains(x.UserGUID) && !x.IsDeleted).ToListAsync();
@@ -619,6 +712,8 @@ public sealed class EmployeeMinorComplianceService
     private static EmployeeMinorComplianceGuardianSessionDto MapSession(EmployeeMinorCompliance row, bool verified) => new()
     {
         MaskedGuardianEmail = MaskEmail(row.GuardianEmail) ?? string.Empty, EmailVerified = verified,
+        CodeChannel = IsSmsChannel(row) ? GuardianChannelSms : GuardianChannelEmail,
+        MaskedGuardianPhone = IsSmsChannel(row) ? MaskPhone(row.GuardianPhone) : null,
         LinkExpiresAtUtc = row.GuardianTokenExpiresAtUtc ?? DateTime.UtcNow, CodeSentAtUtc = row.GuardianOtpSentAtUtc,
         CodeExpiresAtUtc = row.GuardianOtpHash is null ? null : row.GuardianOtpExpiresAtUtc,
         ResendAvailableAtUtc = row.GuardianOtpSentAtUtc?.AddSeconds(GuardianCodeResendSeconds),
@@ -708,7 +803,9 @@ public sealed class EmployeeMinorComplianceService
         if (contacts.Any(x => string.IsNullOrWhiteSpace(x.FullName) || string.IsNullOrWhiteSpace(x.Phone) || !ValidPhone(x.Phone))) return "备用联系人必须填写有效电话";
         var guardianPhone = NormalizePhone(row.GuardianPhone);
         if (contacts.Any(x => NormalizePhone(x.Phone) == guardianPhone || (!string.IsNullOrWhiteSpace(x.Mobile) && NormalizePhone(x.Mobile) == guardianPhone)
-            || string.Equals(x.Email?.Trim(), row.GuardianEmail?.Trim(), StringComparison.OrdinalIgnoreCase))) return "备用联系人必须独立于家长联系人";
+            // 邮箱只在两边都填了时才比较：只发短信时监护人可以没有邮箱，空对空不算重复。
+            || (!string.IsNullOrWhiteSpace(x.Email) && !string.IsNullOrWhiteSpace(row.GuardianEmail)
+                && string.Equals(x.Email.Trim(), row.GuardianEmail.Trim(), StringComparison.OrdinalIgnoreCase)))) return "备用联系人必须独立于家长联系人";
         return null;
     }
     private static bool ValidPhone(string? value) => !string.IsNullOrWhiteSpace(value) && PhonePattern.IsMatch(value) && value.Count(char.IsDigit) is >= 8 and <= 15;
@@ -717,9 +814,23 @@ public sealed class EmployeeMinorComplianceService
         var digits = new string(value?.Where(char.IsDigit).ToArray() ?? Array.Empty<char>());
         return digits.StartsWith("61", StringComparison.Ordinal) && digits.Length == 11 ? "0" + digits[2..] : digits;
     }
-    private async Task<Store?> ResolveEmploymentStoreAsync(string userGuid) => await _context.Db.Queryable<UserStore>().InnerJoin<Store>((us, store) => us.StoreGUID == store.StoreGUID).Where((us, store) => us.UserGUID == userGuid && us.IsPrimary && !us.IsDeleted && !store.IsDeleted).Select((us, store) => store).FirstAsync();
+    /// <summary>
+    /// 员工的工作门店：有主分店（IsPrimary，系统里表示「可管理」）用主分店，否则用最早关联的分店。
+    /// 普通店员的分店关联都是 IsPrimary=false，只认主分店会把他们全部漏掉。
+    /// </summary>
+    private async Task<Store?> ResolveEmploymentStoreAsync(string userGuid) => await _context.Db.Queryable<UserStore>().InnerJoin<Store>((us, store) => us.StoreGUID == store.StoreGUID)
+        .Where((us, store) => us.UserGUID == userGuid && !us.IsDeleted && !store.IsDeleted)
+        .OrderBy((us, store) => us.IsPrimary, OrderByType.Desc).OrderBy((us, store) => us.AssignedAt).OrderBy((us, store) => us.CreatedAt)
+        .Select((us, store) => store).FirstAsync();
     private async Task<bool> CanAccessHrRowAsync(EmployeeMinorCompliance row) { var scope = await _storeScope.GetScopeAsync(); return scope.IsAuthenticated && scope.IsAllowed && (scope.IsAdmin || scope.StoreGuids.Contains(row.StoreGUID ?? string.Empty)); }
-    private string? ValidateGuardianContact(EmployeeMinorCompliance row) => string.IsNullOrWhiteSpace(row.GuardianName) ? "家长/监护人姓名为必填" : string.IsNullOrWhiteSpace(row.GuardianPhone) || !ValidPhone(row.GuardianPhone) ? "家长电话（手机或固定电话）为必填且格式无效" : string.IsNullOrWhiteSpace(row.GuardianEmail) || !new EmailAddressAttribute().IsValid(row.GuardianEmail) ? "家长邮箱为必填且格式无效" : null;
+    /// <summary>监护人姓名、电话必填；邮箱在验证码走邮件时必填，走短信时可以不填，但填了必须有效。</summary>
+    private static string? ValidateGuardianContact(EmployeeMinorCompliance row)
+    {
+        if (string.IsNullOrWhiteSpace(row.GuardianName)) return "家长/监护人姓名为必填";
+        if (string.IsNullOrWhiteSpace(row.GuardianPhone) || !ValidPhone(row.GuardianPhone)) return "家长电话（手机或固定电话）为必填且格式无效";
+        if (string.IsNullOrWhiteSpace(row.GuardianEmail)) return IsSmsChannel(row) ? null : "家长邮箱为必填且格式无效";
+        return new EmailAddressAttribute().IsValid(row.GuardianEmail) ? null : "家长邮箱为必填且格式无效";
+    }
     private async Task<EmployeeMinorComplianceDto> MapAsync(EmployeeMinorCompliance row)
     {
         var contacts = await _context.Db.Queryable<EmployeeMinorComplianceContact>()

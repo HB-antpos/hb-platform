@@ -197,7 +197,8 @@ public sealed record OrderHistoryQueryRequest(
     DateTimeOffset? SoldFrom = null,
     DateTimeOffset? SoldTo = null,
     string? Keyword = null,
-    int Take = 100);
+    int Take = 100,
+    int Skip = 0);
 
 public sealed record OrderHistoryQueryResponse(
     IReadOnlyList<OrderHistorySummaryDto> Orders);

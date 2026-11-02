@@ -530,8 +530,8 @@ public sealed class PosTerminalViewLayoutTests
                 "{Binding LockCashierCommand}",
                 "{Binding OpenDailyCloseCommand}",
                 "{Binding OpenCardRecoveryCenterCommand}",
-                "AttendanceQrLauncher_Click",
                 "{Binding OpenSettingsCommand}",
+                "AttendanceQrLauncher_Click",
                 "{Binding ExitApplicationCommand}",
             ],
             // Attendance QR 走代码后置的 Click 事件（没有 Command），其余按钮走 Command。
@@ -738,7 +738,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("{Binding HeldOrderBadgeText}", (string?)recallBadgeText.Attribute("Text"));
         Assert.Equal("{StaticResource PosSidebarBadgeTextStyle}", (string?)recallBadgeText.Attribute("Style"));
 
-        // Attendance QR：保留 x:Name / Click / 自动化名称；右上角胶囊角标显示剩余秒数；原状态说明文字改放 ToolTip。
+        // Attendance QR：保留 x:Name / Click / 自动化名称；二维码正中的小圆标显示剩余秒数；原状态说明文字改放 ToolTip。
         var launcher = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
             (string?)button.Attribute(x + "Name") == "AttendanceQrLauncher"));
         Assert.Equal("AttendanceQrLauncher_Click", (string?)launcher.Attribute("Click"));
@@ -751,12 +751,31 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Contains(launcher.Descendants(presentation + "TextBlock"), text =>
             (string?)text.Attribute("Text") == "{loc:Loc attendance.qr.title}"
             && (string?)text.Attribute("Style") == "{StaticResource PosSidebarActionLabelStyle}");
+        // 按钮里直接显示当前二维码：白底、整张图等比缩放、邻近采样（不模糊）；点击仍走 Click 打开放大弹窗，二维码本身不拦截点击。
+        var launcherCode = Assert.Single(launcher.Descendants(presentation + "Border").Where(border =>
+            (string?)border.Attribute(x + "Name") == "AttendanceQrLauncherCode"));
+        Assert.Equal("White", (string?)launcherCode.Attribute("Background"));
+        Assert.Equal("False", (string?)launcherCode.Attribute("IsHitTestVisible"));
+        var launcherImage = Assert.Single(launcherCode.Elements(presentation + "Image"));
+        Assert.Equal("{Binding AttendanceQrPanel.QrImage}", (string?)launcherImage.Attribute("Source"));
+        Assert.Equal("Uniform", (string?)launcherImage.Attribute("Stretch"));
+        Assert.Equal("NearestNeighbor", (string?)launcherImage.Attribute("RenderOptions.BitmapScalingMode"));
+        // 二维码还没生成时退回图标 + 标题占位，生成后折叠。
+        var placeholder = Assert.Single(launcher.Descendants(presentation + "StackPanel").Where(panel =>
+            (string?)panel.Attribute(x + "Name") == "AttendanceQrLauncherPlaceholder"));
+        Assert.Contains(placeholder.Descendants(), element =>
+            element.Name.LocalName == "DataTrigger"
+            && (string?)element.Attribute("Binding") == "{Binding AttendanceQrPanel.QrImage}");
         var secondsBadge = Assert.Single(launcher.Descendants(presentation + "Border").Where(border =>
             (string?)border.Attribute(x + "Name") == "AttendanceQrSecondsBadge"));
         Assert.Equal("{StaticResource PosSidebarBadgeStyle}", (string?)secondsBadge.Attribute("Style"));
+        // 秒数小圆标压在二维码正中，只显示数字；放大弹窗里的二维码不加遮挡。
+        Assert.Equal("Center", (string?)secondsBadge.Attribute("HorizontalAlignment"));
+        Assert.Equal("Center", (string?)secondsBadge.Attribute("VerticalAlignment"));
+        Assert.Equal("18", (string?)secondsBadge.Attribute("Height"));
         var secondsText = Assert.Single(secondsBadge.Elements(presentation + "TextBlock"));
         Assert.Equal(
-            "{Binding AttendanceQrPanel.SecondsRemaining, StringFormat={}{0}s}",
+            "{Binding AttendanceQrPanel.SecondsRemaining}",
             (string?)secondsText.Attribute("Text"));
         var toolTipRuns = Assert.Single(launcher.Elements(presentation + "Button.ToolTip"))
             .Descendants(presentation + "Run")

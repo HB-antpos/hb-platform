@@ -27,6 +27,9 @@ const filled: AdminCreateFormValues = {
   email: " grace.liu@hotbargain.com.au ",
   username: " grace.liu ",
   names: { familyName: "Liu", givenName: "Grace", middleName: "", nickname: "" },
+  phone: "0433 222 901",
+  birthday: "1990-11-05",
+  guardian: { name: "", relationship: "", phone: "", email: "" },
   enabled: true,
   password: "secret12",
   confirmPassword: "secret12",
@@ -49,7 +52,11 @@ assert.equal(defaultUsernameFromEmail(`${"a".repeat(51)}@x.com`), "", "超过 50
   assert.equal(errors.username, "username-required");
   assert.equal(errors.password, "required");
   assert.deepEqual(errors.names, { familyName: "required", givenName: "required" });
+  assert.equal(errors.phone, "required", "电话必填");
+  assert.equal(errors.birthday, "required", "生日必填");
+  assert.deepEqual(errors.guardian, {}, "没有生日时不出现监护人一节");
   assert.equal(hasAdminCreateErrors(errors), true);
+  assert.equal(hasAdminCreateErrors({ ...validateAdminCreateForm(filled, t), phone: "invalid" }), true, "电话错误也算有错");
 
   assert.equal(hasAdminCreateErrors(validateAdminCreateForm(filled, t)), false);
   assert.equal(validateAdminCreateForm({ ...filled, password: "12345", confirmPassword: "12345" }, t).password, "tooShort");
@@ -58,9 +65,28 @@ assert.equal(defaultUsernameFromEmail(`${"a".repeat(51)}@x.com`), "", "超过 50
   assert.equal(validateAdminCreateForm({ ...filled, email: "bad" }, t).email, "email-invalid");
 }
 
-// ── 第一步请求体：带角色与全部已选分店（普通关联）；不发电话；姓名有值才带 ──
+// ── 未成年（悉尼 2026-10-30 时 15 岁）：监护人四项必填，邮箱不能与本人相同 ──
+const today = new Date(2026, 9, 30);
 {
-  const input = buildAdminCreateInput(filled);
+  const minor: AdminCreateFormValues = { ...filled, birthday: "2011-03-02" };
+  const errors = validateAdminCreateForm(minor, t, today);
+  assert.deepEqual(errors.guardian, { name: "required", relationship: "required", phone: "required", email: "required" });
+  const sameEmail = validateAdminCreateForm(
+    { ...minor, guardian: { name: "Linh", relationship: "Mother", phone: "0412 345 678", email: "GRACE.LIU@hotbargain.com.au" } },
+    t,
+    today
+  );
+  assert.equal(sameEmail.guardian.email, "sameAsStaff");
+  const ok = { ...minor, guardian: { name: " Linh ", relationship: "Mother", phone: "0412 345 678", email: "linh@gmail.com" } };
+  assert.equal(hasAdminCreateErrors(validateAdminCreateForm(ok, t, today)), false);
+  assert.deepEqual(buildAdminCreateInput(ok, today).guardian, { name: "Linh", relationship: "Mother", phone: "0412 345 678", email: "linh@gmail.com" });
+  assert.equal(isAdminCreateFormDirty({ ...EMPTY_ADMIN_CREATE_FORM, birthday: "2011-03-02" }), true, "填了生日也算有改动");
+  assert.equal(isAdminCreateFormDirty({ ...EMPTY_ADMIN_CREATE_FORM, phone: "04" }), true, "填了电话也算有改动");
+}
+
+// ── 第一步请求体：带角色与全部已选分店（普通关联）；电话、生日必带；成年不带监护人；姓名有值才带 ──
+{
+  const input = buildAdminCreateInput(filled, today);
   assert.deepEqual(input, {
     username: "grace.liu",
     email: "grace.liu@hotbargain.com.au",
@@ -72,8 +98,10 @@ assert.equal(defaultUsernameFromEmail(`${"a".repeat(51)}@x.com`), "", "超过 50
     isActive: true,
     roleGuids: ["role-staff", "role-finance"],
     storeGuids: ["store-a", "store-b"],
+    phone: "0433 222 901",
+    birthday: "1990-11-05",
   });
-  assert.equal("phone" in input, false, "管理员创建接口不支持电话");
+  assert.equal("guardian" in input, false, "成年不带监护人");
 }
 
 // ── 分店摘要 ──

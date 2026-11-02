@@ -610,7 +610,7 @@
   <data name="settings.autosave.section.saving" xml:space="preserve"><value>Saving…</value></data>
   <data name="settings.autosave.section.failed" xml:space="preserve"><value>Not saved</value></data>
   <data name="settings.autosave.section.draft" xml:space="preserve"><value>Changed — not applied yet</value></data>
-  <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>Restart reminder after daily close</value></data>
+  <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>Overnight restart after daily close</value></data>
   <data name="settings.autosave.section.scanner" xml:space="preserve"><value>Scanner sensitivity</value></data>
   <data name="settings.autosave.section.paymentMethods" xml:space="preserve"><value>Payment methods</value></data>
   <data name="settings.autosave.section.square" xml:space="preserve"><value>Square</value></data>

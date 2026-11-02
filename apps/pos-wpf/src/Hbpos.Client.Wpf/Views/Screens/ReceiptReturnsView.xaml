@@ -535,5 +535,93 @@
                 </Grid>
             </Border>
         </Border>
+
+        <!-- 8 位单号撞号：列出候选订单，收银员对照小票上的日期、金额点选；不替收银员猜。 -->
+        <Border x:Name="OrderCandidateDialog"
+                Grid.RowSpan="3"
+                Panel.ZIndex="21"
+                Background="#66000000"
+                Visibility="{Binding IsOrderCandidateDialogOpen, Converter={StaticResource BoolToVis}}">
+            <Border Width="720"
+                    MaxHeight="640"
+                    Padding="24"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    CornerRadius="12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Margin="0,0,0,16">
+                        <TextBlock Text="{loc:Loc returns.candidates.title}"
+                                   FontSize="20"
+                                   FontWeight="Black" />
+                        <TextBlock Text="{loc:Loc returns.candidates.subtitle}"
+                                   Margin="0,6,0,0"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1"
+                                  Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="OrderCandidateList" ItemsSource="{Binding OrderCandidates}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Command="{Binding DataContext.SelectOrderCandidateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource PosSecondaryButtonStyle}"
+                                            HorizontalContentAlignment="Stretch"
+                                            MinHeight="64"
+                                            Margin="0,0,0,10"
+                                            Padding="16,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock FontSize="17" FontWeight="Bold">
+                                                    <Run Text="{Binding SoldAtText, Mode=OneWay}" />
+                                                    <Run Text="  #" />
+                                                    <Run Text="{Binding ShortCode, Mode=OneWay}" />
+                                                </TextBlock>
+                                                <TextBlock Margin="0,4,0,0"
+                                                           FontSize="13"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}">
+                                                    <Run Text="{Binding CashierName, Mode=OneWay}" />
+                                                    <Run Text="  ·  " />
+                                                    <Run Text="{Binding DeviceCode, Mode=OneWay}" />
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding AmountText}"
+                                                       FontSize="20"
+                                                       FontWeight="Black"
+                                                       VerticalAlignment="Center"
+                                                       Margin="16,0,0,0" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <Button Command="{Binding CancelOrderCandidatesCommand}"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                MinWidth="110"
+                                Height="44">
+                            <TextBlock Text="{loc:Loc Cancel}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Border>
     </Grid>
 </UserControl>

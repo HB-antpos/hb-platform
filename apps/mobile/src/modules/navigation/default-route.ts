@@ -31,6 +31,7 @@ export type AppTabPath =
   | "/(shell)/attendance-personal"
   | "/(shell)/attendance-management"
   | "/(shell)/attendance-hours"
+  | "/(shell)/payslips"
   | "/(shell)/product-query"
   | "/(shell)/product-insights"
   | "/(shell)/price-updates"
@@ -81,6 +82,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "attendance-personal": "/(shell)/attendance-personal",
   "attendance-management": "/(shell)/attendance-management",
   "attendance-hours": "/(shell)/attendance-hours",
+  payslips: "/(shell)/payslips",
   "product-query": "/(shell)/product-query",
   "product-insights": "/(shell)/product-insights",
   "price-updates": "/(shell)/price-updates",
@@ -124,6 +126,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   // 工时统计按账号的 Punch.ViewManagedStore 与管理分店授权，设备会话没有用户账号，设备模式不展示入口。
   "attendance-hours",
   "employee-profile-review",
+  // 工资单按账号的 Myob.Payslip.* 权限与管辖分店授权，设备会话没有用户账号，设备模式不展示入口。
+  "payslips",
   // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示合并入口（及旧三个入口）。
   "face-hub",
   "face-unwelcome",

@@ -43,7 +43,8 @@ public interface IAccountPasswordEmailSender
 
 /// <summary>
 /// 员工账号密码邮件：复用发票邮箱后台配置的公司 SMTP 账号（与监护人邮件同一套发件配置）。
-/// 正文中英双语，只放登录账号与验证码（新建员工时为一次性初始密码），不放其他个人资料。
+/// 正文只有英文，只放登录账号与验证码（新建员工时为一次性初始密码），不放其他个人资料。
+/// 正文拼装在 internal 的 Build* 纯函数里，测试会断言它们不含中文字符。
 /// </summary>
 public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
 {
@@ -69,35 +70,8 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     )
     {
-        var validFor = FormatValidity(expiresAtUtc);
-        var subject = invite
-            ? $"Set up your Hot Bargain app password: {code} / 设置 HB 登录密码"
-            : $"Reset your Hot Bargain app password: {code} / 重置 HB 登录密码";
-        var intro = invite
-            ? "An account has been created for you in the Hot Bargain staff app."
-            : "We received a request to reset the password of your Hot Bargain staff app account.";
-        var introZh = invite
-            ? "店长已为你开通 Hot Bargain 员工 App 账号。"
-            : "我们收到了重置你 Hot Bargain 员工 App 账号密码的请求。";
-        var text =
-            $"Hi {displayName},\n\n{intro}\n\n" +
-            $"Sign-in name: {loginName}\nVerification code: {code} (valid for {validFor})\n\n" +
-            "Open the HB app, tap \"Set up / forgot password\" on the sign-in screen, enter this email address and the code, then choose your own password.\n" +
-            "Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.\n\n" +
-            $"{displayName} 你好：\n{introZh}\n登录账号：{loginName}\n验证码：{code}（{FormatValidityZh(expiresAtUtc)}内有效）\n" +
-            "请打开 HB App，在登录页点「设置 / 忘记密码」，输入本邮箱和验证码，然后设置你自己的密码。\n" +
-            "请勿把验证码告诉任何人（包括店长）。如果这不是你本人的操作，忽略本邮件即可。\n";
-        var html =
-            $"<p>Hi {Encode(displayName)},</p><p>{Encode(intro)}</p>" +
-            $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
-            $"<p>Verification code (valid for {Encode(validFor)}):</p>" +
-            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
-            "<p>Open the HB app, tap <b>Set up / forgot password</b> on the sign-in screen, enter this email address and the code, then choose your own password.</p>" +
-            "<p>Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.</p>" +
-            $"<hr/><p>{Encode(displayName)} 你好：</p><p>{Encode(introZh)}</p>" +
-            $"<p>登录账号：<b>{Encode(loginName)}</b><br/>验证码：<b>{Encode(code)}</b>（{Encode(FormatValidityZh(expiresAtUtc))}内有效）</p>" +
-            "<p>请打开 HB App，在登录页点「设置 / 忘记密码」，输入本邮箱和验证码，然后设置你自己的密码。请勿把验证码告诉任何人（包括店长）。</p>";
-        return SendAsync(toEmail, subject, text, html, invite ? "password-invite" : "password-reset", cancellationToken);
+        var content = BuildPasswordCode(displayName, loginName, code, FormatValidity(expiresAtUtc), invite);
+        return SendAsync(toEmail, content, invite ? "password-invite" : "password-reset", cancellationToken);
     }
 
     public Task<ApiResponse<bool>> SendInitialPasswordAsync(
@@ -108,27 +82,9 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     )
     {
-        var subject = "Your Hot Bargain app account / 你的 HB 员工账号";
-        var text =
-            $"Hi {displayName},\n\nAn account has been created for you in the Hot Bargain staff app.\n\n" +
-            $"Sign-in name: {loginName}\nInitial password: {initialPassword}\n\n" +
-            "Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.\n" +
-            "Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.\n\n" +
-            $"{displayName} 你好：\n店长已为你开通 Hot Bargain 员工 App 账号。\n登录账号：{loginName}\n初始密码：{initialPassword}\n\n" +
-            "请用以上账号和初始密码登录 HB App，首次登录时需要先设置你自己的密码。\n" +
-            "请勿把密码告诉任何人（包括店长）。如果这不是你本人的操作，忽略本邮件即可。\n";
-        var html =
-            $"<p>Hi {Encode(displayName)},</p><p>An account has been created for you in the Hot Bargain staff app.</p>" +
-            $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
-            "<p>Initial password:</p>" +
-            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:2px;font-family:Consolas,monospace\">{Encode(initialPassword)}</p>" +
-            "<p>Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.</p>" +
-            "<p>Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.</p>" +
-            $"<hr/><p>{Encode(displayName)} 你好：</p><p>店长已为你开通 Hot Bargain 员工 App 账号。</p>" +
-            $"<p>登录账号：<b>{Encode(loginName)}</b><br/>初始密码：<b style=\"font-family:Consolas,monospace\">{Encode(initialPassword)}</b></p>" +
-            "<p>请用以上账号和初始密码登录 HB App，首次登录时需要先设置你自己的密码。请勿把密码告诉任何人（包括店长）。</p>";
         // 日志只记类型，SendAsync 不会输出正文，初始密码不会进入日志。
-        return SendAsync(toEmail, subject, text, html, "initial-password", cancellationToken);
+        var content = BuildInitialPassword(displayName, loginName, initialPassword);
+        return SendAsync(toEmail, content, "initial-password", cancellationToken);
     }
 
     public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
@@ -140,36 +96,78 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     )
     {
-        var validFor = FormatValidity(expiresAtUtc);
-        var validForZh = FormatValidityZh(expiresAtUtc);
-        var subject = $"Confirm your email for the Hot Bargain app: {code} / 验证 HB 账号邮箱";
+        var content = BuildEmailChangeCode(displayName, loginName, code, FormatValidity(expiresAtUtc));
+        return SendAsync(toEmail, content, "email-change", cancellationToken);
+    }
+
+    internal static EmailContent BuildPasswordCode(
+        string displayName,
+        string loginName,
+        string code,
+        string validFor,
+        bool invite
+    )
+    {
+        var subject = invite
+            ? $"Set up your Hot Bargain app password: {code}"
+            : $"Reset your Hot Bargain app password: {code}";
+        var intro = invite
+            ? "An account has been created for you in the Hot Bargain staff app."
+            : "We received a request to reset the password of your Hot Bargain staff app account.";
+        var text =
+            $"Hi {displayName},\n\n{intro}\n\n" +
+            $"Sign-in name: {loginName}\nVerification code: {code} (valid for {validFor})\n\n" +
+            "Open the HB app, tap \"Set up / forgot password\" on the sign-in screen, enter this email address and the code, then choose your own password.\n" +
+            "Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.\n";
+        var html =
+            $"<p>Hi {Encode(displayName)},</p><p>{Encode(intro)}</p>" +
+            $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
+            $"<p>Verification code (valid for {Encode(validFor)}):</p>" +
+            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
+            "<p>Open the HB app, tap <b>Set up / forgot password</b> on the sign-in screen, enter this email address and the code, then choose your own password.</p>" +
+            "<p>Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.</p>";
+        return new EmailContent(subject, text, html);
+    }
+
+    internal static EmailContent BuildInitialPassword(string displayName, string loginName, string initialPassword)
+    {
+        var subject = "Your Hot Bargain app account";
+        var text =
+            $"Hi {displayName},\n\nAn account has been created for you in the Hot Bargain staff app.\n\n" +
+            $"Sign-in name: {loginName}\nInitial password: {initialPassword}\n\n" +
+            "Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.\n" +
+            "Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.\n";
+        var html =
+            $"<p>Hi {Encode(displayName)},</p><p>An account has been created for you in the Hot Bargain staff app.</p>" +
+            $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
+            "<p>Initial password:</p>" +
+            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:2px;font-family:Consolas,monospace\">{Encode(initialPassword)}</p>" +
+            "<p>Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.</p>" +
+            "<p>Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.</p>";
+        return new EmailContent(subject, text, html);
+    }
+
+    internal static EmailContent BuildEmailChangeCode(string displayName, string loginName, string code, string validFor)
+    {
+        var subject = $"Confirm your email for the Hot Bargain app: {code}";
         var text =
             $"Hi {displayName},\n\n" +
             $"You asked to use this email address for your Hot Bargain staff app account ({loginName}).\n" +
             $"Verification code: {code} (valid for {validFor})\n\n" +
             "Enter this code in the HB app to finish. After that you can reset your password with this email on the sign-in screen.\n" +
-            "If you did not ask for this, ignore this email and your account will not change.\n\n" +
-            $"{displayName} 你好：\n你正在把本邮箱绑定到 Hot Bargain 员工 App 账号（登录名 {loginName}）。\n" +
-            $"验证码：{code}（{validForZh}内有效）\n" +
-            "请在 HB App 中输入验证码完成绑定。绑定后，忘记密码时可以在登录页用本邮箱找回。\n" +
-            "如果这不是你本人的操作，忽略本邮件即可，账号不会有任何变化。\n";
+            "If you did not ask for this, ignore this email and your account will not change.\n";
         var html =
             $"<p>Hi {Encode(displayName)},</p>" +
             $"<p>You asked to use this email address for your Hot Bargain staff app account (<b>{Encode(loginName)}</b>).</p>" +
             $"<p>Verification code (valid for {Encode(validFor)}):</p>" +
             $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
-            "<p>Enter this code in the HB app to finish. If you did not ask for this, ignore this email and your account will not change.</p>" +
-            $"<hr/><p>{Encode(displayName)} 你好：</p>" +
-            $"<p>你正在把本邮箱绑定到 Hot Bargain 员工 App 账号（登录名 <b>{Encode(loginName)}</b>）。</p>" +
-            $"<p>验证码：<b>{Encode(code)}</b>（{Encode(validForZh)}内有效）。请在 HB App 中输入验证码完成绑定。如果这不是你本人的操作，忽略本邮件即可。</p>";
-        return SendAsync(toEmail, subject, text, html, "email-change", cancellationToken);
+            "<p>Enter this code in the HB app to finish. After that you can reset your password with this email on the sign-in screen. If you did not ask for this, ignore this email and your account will not change.</p>";
+        return new EmailContent(subject, text, html);
     }
 
     private async Task<ApiResponse<bool>> SendAsync(
         string toEmail,
-        string subject,
-        string text,
-        string html,
+        EmailContent content,
         string kind,
         CancellationToken cancellationToken
     )
@@ -195,8 +193,8 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(options.FromName ?? options.FromEmail, options.FromEmail));
             message.To.Add(MailboxAddress.Parse(toEmail));
-            message.Subject = subject;
-            message.Body = new BodyBuilder { TextBody = text, HtmlBody = html }.ToMessageBody();
+            message.Subject = content.Subject;
+            message.Body = new BodyBuilder { TextBody = content.Text, HtmlBody = content.Html }.ToMessageBody();
 
             using var client = new SmtpClient { CheckCertificateRevocation = options.CheckCertificateRevocation };
             await client.ConnectAsync(
@@ -230,11 +228,5 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
     {
         var minutes = Math.Max(1, (int)Math.Round((expiresAtUtc - DateTime.UtcNow).TotalMinutes));
         return minutes >= 120 ? $"{(int)Math.Round(minutes / 60.0)} hours" : $"{minutes} minutes";
-    }
-
-    private static string FormatValidityZh(DateTime expiresAtUtc)
-    {
-        var minutes = Math.Max(1, (int)Math.Round((expiresAtUtc - DateTime.UtcNow).TotalMinutes));
-        return minutes >= 120 ? $"{(int)Math.Round(minutes / 60.0)} 小时" : $"{minutes} 分钟";
     }
 }

@@ -35,7 +35,8 @@ public sealed record RemoteOrderHistoryQuery(
     DateTimeOffset? SoldTo,
     string? DeviceCode,
     string? Keyword,
-    int Take);
+    int Take,
+    int Skip = 0);
 
 public sealed record RemoteOrderHistoryResult(IReadOnlyList<RemoteOrderHistorySummary> Orders);
 
@@ -64,7 +65,8 @@ public sealed class RemoteOrderHistoryService(IOrderHistoryApiClient apiClient) 
             query.SoldFrom,
             query.SoldTo,
             query.Keyword,
-            Math.Clamp(query.Take, 1, 200)), cancellationToken);
+            Math.Clamp(query.Take, 1, 200),
+            Math.Max(query.Skip, 0)), cancellationToken);
 
         return new RemoteOrderHistoryResult(response.Orders.Select(order => new RemoteOrderHistorySummary(
             order.OrderGuid,
@@ -169,8 +171,10 @@ public sealed class OrderHistoryApiClient(HttpClient httpClient) : IOrderHistory
             ("soldFrom", request.SoldFrom?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)),
             ("soldTo", request.SoldTo?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)),
             ("keyword", request.Keyword),
-            ("take", request.Take.ToString(CultureInfo.InvariantCulture)));
-            using var queryTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            ("take", request.Take.ToString(CultureInfo.InvariantCulture)),
+            // 第一页不带 skip，保持与旧请求完全一致。
+            ("skip", request.Skip > 0 ? request.Skip.ToString(CultureInfo.InvariantCulture) : null));
+        using var queryTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         queryTimeout.CancelAfter(QueryTimeout);
         var stopwatch = Stopwatch.StartNew();
         try

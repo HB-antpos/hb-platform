@@ -42,6 +42,7 @@ import faceMatchEn from "@/locales/en/screens/faceMatch.json";
 import trafficStatsEn from "@/locales/en/screens/trafficStats.json";
 import attendanceLeaveEn from "@/locales/en/screens/attendanceLeave.json";
 import attendanceHoursEn from "@/locales/en/screens/attendanceHours.json";
+import payslipsEn from "@/locales/en/screens/payslips.json";
 import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
@@ -95,6 +96,7 @@ import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
 import trafficStatsZh from "@/locales/zh/screens/trafficStats.json";
 import attendanceLeaveZh from "@/locales/zh/screens/attendanceLeave.json";
 import attendanceHoursZh from "@/locales/zh/screens/attendanceHours.json";
+import payslipsZh from "@/locales/zh/screens/payslips.json";
 import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
@@ -146,6 +148,7 @@ const resources = {
     trafficStats: trafficStatsZh,
     attendanceLeave: attendanceLeaveZh,
     attendanceHours: attendanceHoursZh,
+    payslips: payslipsZh,
     notifications: notificationsZh,
     push: pushZh,
     productQuery: productQueryZh,
@@ -203,6 +206,7 @@ const resources = {
     trafficStats: trafficStatsEn,
     attendanceLeave: attendanceLeaveEn,
     attendanceHours: attendanceHoursEn,
+    payslips: payslipsEn,
     notifications: notificationsEn,
     push: pushEn,
     productQuery: productQueryEn,

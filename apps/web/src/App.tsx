@@ -25,6 +25,8 @@ const BrowserExtensionPrivacyPage = lazy(() => import('./pages/BrowserExtensionP
 const HbSupplierOrderSupportPage = lazy(() => import('./pages/HbSupplierOrderSupport'))
 const MobilePrivacyPage = lazy(() => import('./pages/MobilePrivacy'))
 const MinorEmploymentParentSignaturePage = lazy(() => import('./pages/MinorEmployment/ParentSignature'))
+// 客人扫码打开的在线小票：独立代码块，不进首屏。
+const PublicReceiptPage = lazy(() => import('./pages/PublicReceipt'))
 const ShopBestSellersPage = lazy(() => import('./pages/ShopBestSellers'))
 const ShopComingSoonPage = lazy(() => import('./pages/ShopComingSoon'))
 const ShopSupplyWatchesPage = lazy(() => import('./pages/ShopSupplyWatches'))
@@ -101,6 +103,10 @@ function AppBootstrap() {
       <Route
         path="/minor-employment/guardian/:token"
         element={<RouteLoadBoundary resetKey="minor-employment-guardian"><MinorEmploymentParentSignaturePage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/r/:token"
+        element={<RouteLoadBoundary resetKey="public-receipt"><PublicReceiptPage /></RouteLoadBoundary>}
       />
       <Route
         path="/support/hb-supplier-order"

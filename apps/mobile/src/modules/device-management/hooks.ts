@@ -4,7 +4,9 @@ import {
   disableDevice,
   fetchAppDeviceStatuses,
   fetchAppDeviceStatusSummary,
+  fetchAppVersionDistribution,
   fetchDeviceManagementDevices,
+  fetchDeviceVersionSummary,
   lockDevice,
 } from "@/modules/device-management/api";
 import type {
@@ -49,6 +51,29 @@ export function useAppDeviceStatusSummary(
   });
 }
 
+/** 设备注册的版本汇总：筛选条件与列表一致，但不含版本条件，点选版本后其余版本仍可切换。 */
+export function useDeviceVersionSummary(
+  query: Omit<DeviceManagementQuery, "pageNumber" | "pageSize" | "appVersions" | "versionState"> = {},
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ["deviceVersionSummary", query] as const,
+    enabled,
+    queryFn: () => fetchDeviceVersionSummary(query),
+  });
+}
+
+export function useAppVersionDistribution(
+  query: Pick<AppDeviceStatusQuery, "keyword" | "storeCode" | "deviceSystem"> = {},
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ["appVersionDistribution", query] as const,
+    enabled,
+    queryFn: () => fetchAppVersionDistribution(query),
+  });
+}
+
 export function useDeviceManagementList(query: DeviceManagementQuery = {}, enabled = true) {
   return useQuery({
     queryKey: deviceManagementQueryKey(query),
@@ -69,7 +94,10 @@ export function useDeviceManagementList(query: DeviceManagementQuery = {}, enabl
 export function useDeviceManagementMutations(_query?: DeviceManagementQuery) {
   const queryClient = useQueryClient();
   const invalidateDeviceManagement = () =>
-    queryClient.invalidateQueries({ queryKey: ["deviceManagement"] });
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["deviceManagement"] }),
+      queryClient.invalidateQueries({ queryKey: ["deviceVersionSummary"] }),
+    ]);
 
   const activateMutation = useMutation({
     mutationFn: ({ id }: DeviceManagementActionPayload) => activateDevice(id),

@@ -5,6 +5,8 @@ import type {
   SalesOrderBranchCatalog,
   SalesOrderDetail,
   SalesOrderListPage,
+  SalesOrderReceiptLink,
+  SalesOrderReceiptView,
 } from "./types";
 
 const number = z.number().finite();
@@ -124,4 +126,43 @@ export function normalizeSalesOrderDetail(payload: unknown): SalesOrderDetail {
     lines: parsed.data.orderDetails,
     payments: parsed.data.paymentDetails,
   };
+}
+
+const receiptLineSchema = z.object({
+  kind: z.enum(["text", "separator", "blank", "barcode", "qr"]),
+  // 空行的 text 是空串，后端 WhenWritingNull 也可能省略。
+  text: text.nullish().transform((value) => value ?? ""),
+  align: z.enum(["left", "center"]).nullish().transform((value) => value ?? "left"),
+  bold: z.boolean().nullish().transform((value) => value ?? false),
+});
+
+const receiptLinkSchema = z.object({
+  url: text.min(1),
+  expiresAtUtc: text,
+  createdAtUtc: text,
+  openCount: z.number().int().nonnegative(),
+});
+
+const receiptViewSchema = z.object({
+  document: z.object({
+    orderGuid: text.min(1),
+    shortCode: text,
+    statusKind: z.enum(["paid", "refund"]),
+    lines: z.array(receiptLineSchema),
+  }),
+  link: receiptLinkSchema.nullish().transform((value) => value ?? null),
+});
+
+/** 员工端小票：完整纸面 + 当前有效链接（没有则为 null）。 */
+export function normalizeSalesOrderReceiptView(payload: unknown): SalesOrderReceiptView {
+  const parsed = receiptViewSchema.safeParse(unwrapApiEnvelope(payload));
+  if (!parsed.success) throw invalid("Sales order receipt payload is invalid");
+  return parsed.data;
+}
+
+/** 生成 / 重新生成链接后的响应。 */
+export function normalizeSalesOrderReceiptLink(payload: unknown): SalesOrderReceiptLink {
+  const parsed = receiptLinkSchema.safeParse(unwrapApiEnvelope(payload));
+  if (!parsed.success) throw invalid("Sales order receipt link payload is invalid");
+  return parsed.data;
 }

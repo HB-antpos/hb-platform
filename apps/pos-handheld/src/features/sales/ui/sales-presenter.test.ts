@@ -462,6 +462,52 @@ test("远程 miss 连续合并到既有尾行后仍选择目标行并递增定�
   presenter.destroy();
 });
 
+test("倒序列表中删除中间选中行选中屏幕上的下一行，删除最底行选中新的最底行", async () => {
+  // 手持端列表最新在上：屏幕顺序为 line-4、line-3、line-2、line-1。
+  const cart = new MemoryCartPort(
+    cartWithLines(["line-1", "line-2", "line-3", "line-4"]),
+  );
+  const { presenter } = createPresenter({ cart });
+
+  presenter.selectLine("line-3");
+  assert.equal(await presenter.removeLine("line-3"), true);
+  assert.equal(presenter.getState().selectedLineId, "line-2");
+  assert.equal(presenter.getState().revealLineId, "line-2");
+
+  assert.equal(await presenter.removeLine("line-4"), true);
+  assert.equal(presenter.getState().selectedLineId, "line-2");
+
+  presenter.selectLine("line-1");
+  assert.equal(await presenter.removeLine("line-1"), true);
+  assert.equal(presenter.getState().selectedLineId, "line-2");
+
+  assert.equal(await presenter.removeLine("line-2"), true);
+  assert.equal(presenter.getState().selectedLineId, null);
+  presenter.destroy();
+});
+
+test("倒序列表删除最底行时在多行中选中最早加入的行", async () => {
+  const cart = new MemoryCartPort(
+    cartWithLines(["line-1", "line-2", "line-3"]),
+  );
+  const { presenter } = createPresenter({ cart });
+
+  presenter.selectLine("line-1");
+  assert.equal(await presenter.removeLine("line-1"), true);
+  assert.equal(presenter.getState().selectedLineId, "line-2");
+  presenter.destroy();
+});
+
+test("整车替换后仍选中最新一行", () => {
+  const cart = new MemoryCartPort(cartWithLines(["line-old-1", "line-old-2"]));
+  const { presenter } = createPresenter({ cart });
+
+  presenter.selectLine("line-old-1");
+  cart.publish(cartWithLines(["line-new-1", "line-new-2"]));
+  assert.equal(presenter.getState().selectedLineId, "line-new-2");
+  presenter.destroy();
+});
+
 test("删除、清空与兼容合并会按结果迁移或取消选择", async () => {
   const cart = new MemoryCartPort(
     cartWithLines(["line-kept", "line-selected", "line-last"]),

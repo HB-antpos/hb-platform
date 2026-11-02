@@ -30,6 +30,11 @@ import {
   findProductInsightStore,
   isValidProductInsightRange,
 } from "./logic";
+import {
+  DEFAULT_PRODUCT_INSIGHT_PRESET,
+  resolvePeriodRange,
+  type ProductInsightPeriod,
+} from "./movement-summary";
 import { createProductInsightRequestGate } from "./request-gate";
 import type {
   ProductBranchSales,
@@ -229,6 +234,16 @@ function ProductInsightsContent({
   const [query, setQuery] = useState("");
   const [data, setData] = useState<StoreProductInsight | null>(null);
   const [loading, setLoading] = useState(false);
+  // 切换周期时保留当前内容，只在周期条上显示加载中，避免整页闪成空白。
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [period, setPeriod] = useState<ProductInsightPeriod>({
+    kind: "preset",
+    days: DEFAULT_PRODUCT_INSIGHT_PRESET,
+  });
+  // 门店「今天」：取自最近一次默认区间响应的结束日，用来推算 30 / 180 天。
+  const [anchorEndDate, setAnchorEndDate] = useState<string | null>(null);
+  const periodRef = useRef(period);
+  const anchorRef = useRef(anchorEndDate);
   const [error, setError] = useState<string | null>(null);
   const [emptyState, setEmptyState] = useState<"initial" | "not-found">(
     "initial",
@@ -271,13 +286,17 @@ function ProductInsightsContent({
   );
 
   const loadProduct = useCallback(
-    async (code: string) => {
+    async (code: string, options: { keepContent?: boolean } = {}) => {
       const lease = gate.begin();
+      const range = resolvePeriodRange(periodRef.current, anchorRef.current);
       retryProduct.current = code;
       onSelectedProductCode(code);
-      setData(null);
+      if (options.keepContent) setPeriodLoading(true);
+      else {
+        setData(null);
+        setLoading(true);
+      }
       setError(null);
-      setLoading(true);
       setCandidates([]);
       setBranchVisible(false);
       try {
@@ -285,15 +304,25 @@ function ProductInsightsContent({
           store.storeCode,
           code,
           lease.signal,
+          range,
         );
         if (!lease.isCurrent()) return;
+        if (!range) {
+          anchorRef.current = result.range.endDate;
+          setAnchorEndDate(result.range.endDate);
+        }
         setData(result);
         setQuery(result.product.itemNumber || result.product.barcode || code);
       } catch (cause) {
-        if (lease.isCurrent())
+        if (lease.isCurrent()) {
+          setData(null);
           setError(formatError(cause, "messages.loadFailed"));
+        }
       } finally {
-        if (lease.isCurrent()) setLoading(false);
+        if (lease.isCurrent()) {
+          setLoading(false);
+          setPeriodLoading(false);
+        }
       }
     },
     [formatError, gate, onSelectedProductCode, store.storeCode],
@@ -313,6 +342,7 @@ function ProductInsightsContent({
       setCandidates([]);
       setError(null);
       setLoading(true);
+      setPeriodLoading(false);
       setBranchVisible(false);
       setEmptyState("initial");
       try {
@@ -360,7 +390,7 @@ function ProductInsightsContent({
   }, [branchGate, gate, invalidateCamera]);
 
   const camera = useCameraScan({
-    disabled: !focused || !cameraVisible || loading,
+    disabled: !focused || !cameraVisible || loading || periodLoading,
     resetKey: `${store.storeCode}:${cameraGeneration}:${cameraVisible}`,
     singleScanUntilReset: true,
     onBarcode: async (barcode) => {
@@ -399,7 +429,8 @@ function ProductInsightsContent({
       !branchVisible &&
       !storePickerVisible &&
       !candidates.length &&
-      !loading,
+      !loading &&
+      !periodLoading,
     onScan: search,
   });
   useEffect(() => {
@@ -461,6 +492,7 @@ function ProductInsightsContent({
           setQuery(value);
           setData(null);
           setLoading(false);
+          setPeriodLoading(false);
           setError(null);
           setEmptyState("initial");
         }}
@@ -482,6 +514,15 @@ function ProductInsightsContent({
         onStorePress={onStorePress}
         data={data}
         loading={loading}
+        periodLoading={periodLoading}
+        period={period}
+        presetEndDate={anchorEndDate}
+        onPeriodChange={(next) => {
+          periodRef.current = next;
+          setPeriod(next);
+          if (retryProduct.current)
+            void loadProduct(retryProduct.current, { keepContent: true });
+        }}
         error={error}
         emptyState={emptyState}
         onRetry={() => {

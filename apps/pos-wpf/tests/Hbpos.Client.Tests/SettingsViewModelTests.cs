@@ -4522,6 +4522,14 @@ public sealed partial class SettingsViewModelTests
 
         public Task MarkPromptedAsync(DateOnly businessDate, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task<DateTimeOffset?> GetScheduledRestartAtAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateTimeOffset?>(null);
+
+        public Task SetScheduledRestartAtAsync(DateTimeOffset restartAt, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ClearScheduledRestartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeRestartCoordinator : IPostDailyCloseRestartCoordinator
@@ -4532,9 +4540,17 @@ public sealed partial class SettingsViewModelTests
 
         public PosSessionState? LastSession { get; private set; }
 
-        public Task<RestartFlowOutcome> RunAsync(
+        public Task<DateTimeOffset?> ScheduleAfterDailyCloseAsync(
             PosSessionState session,
             DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            RunCalls++;
+            return Task.FromResult<DateTimeOffset?>(null);
+        }
+
+        public Task<RestartFlowOutcome> RunScheduledIfDueAsync(
+            PosSessionState session,
             CancellationToken cancellationToken = default)
         {
             RunCalls++;

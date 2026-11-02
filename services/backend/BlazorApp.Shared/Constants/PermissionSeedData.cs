@@ -469,6 +469,14 @@ namespace BlazorApp.Shared.Constants
                 // MYOB 对接：默认不授予任何角色；入库由版本号迁移 20261027.002 幂等完成。
                 new(Permissions.Myob.Connection.Manage, "管理 MYOB 连接", "系统管理", "Web 页面 /pos-admin/myob - 连接 / 断开 MYOB 公司文件、维护分店与公司文件的映射"),
                 new(Permissions.Myob.Employee.Bind, "绑定 MYOB 员工", "系统管理", "Web 页面 /pos-admin/myob「员工绑定」页签 - 把我方员工与 MYOB 员工卡配对、解除绑定"),
+                // 历史工资单：默认不授予任何角色；入库由迁移 20261029.003-myob-payslip 幂等完成。
+                new(Permissions.Myob.Payslip.ViewManagedStore, "查看管辖分店员工工资单", "系统管理", "Web 页面 /pos-admin/myob「工资单」页签 - 查看管辖分店员工在 MYOB 里的历史工资单（只读）"),
+                new(Permissions.Myob.Payslip.ViewAllStores, "查看全部分店员工工资单", "系统管理", "Web 页面 /pos-admin/myob「工资单」页签 - 查看全部分店与公司文件的历史工资单，含未绑定员工（只读）"),
+                // 工资单导出：默认不授予任何角色；入库由迁移 20261029.005-myob-payslip-export 幂等完成。
+                new(Permissions.Myob.Payslip.Download, "下载工资单 PDF", "系统管理", "在 Web「工资单」明细与手机端工资单页下载 MYOB 默认样式的 PDF"),
+                new(Permissions.Myob.Payslip.Email, "邮件发送工资单 PDF", "系统管理", "把 MYOB 默认样式工资单 PDF 以邮件发给员工"),
+                // Timesheet 推送：默认不授予任何角色；入库由迁移 20261030.001-myob-timesheet-push 幂等完成。
+                new(Permissions.Myob.Timesheet.Push, "推送工时到 MYOB", "系统管理", "Web 页面 /pos-admin/myob「推送与对账」页签 - 把工资周期的转账工时推送到 MYOB Timesheet，并可按批次撤销（会写 MYOB 生产数据）"),
                 new(Permissions.System.ManageAppDownloads, "管理 App 下载", "系统管理", "系统管理 - 登记 OTA 更新和生成回撤命令"),
                 // 仅注册权限，不写入角色模板；由管理员按需授予，只读展示最新正式版安装链接。
                 new(Permissions.System.ViewMobileAppInstallLinks, "移动端查看 App 安装二维码", "系统管理", "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"),

@@ -598,7 +598,7 @@ public sealed class PosCoreTests
                 firstLookupCode: "930201",
                 firstItemNumber: "ITEM-201");
             var nonMatchingDate = CreateLocalOrder(
-                orderGuid: Guid.Parse("99999999-8888-7777-6666-555555555555"),
+                orderGuid: Guid.Parse("99999999-8888-7777-6666-aaaaaaaaaaaa"),
                 deviceCode: "POS-01",
                 soldAt: start.AddDays(-2),
                 firstLookupCode: "930301",
@@ -619,8 +619,12 @@ public sealed class PosCoreTests
                 new LocalOrderHistoryQuery(Keyword: matchingOrder.OrderGuid.ToString("N")[..8]));
             var byLookupCode = await orders.GetRecentOrdersAsync(
                 new LocalOrderHistoryQuery(Keyword: "930101"));
+            // 订单短码（小票条码、历史页显示的）是 GUID 末 8 位，输入它也要能查到。
+            var byLastEight = await orders.GetRecentOrdersAsync(
+                new LocalOrderHistoryQuery(Keyword: ReceiptOrderShortCode.Create(matchingOrder.OrderGuid).ToLowerInvariant()));
 
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(filtered).OrderGuid);
+            Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byLastEight).OrderGuid);
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byShortOrderId).OrderGuid);
             Assert.Equal(matchingOrder.OrderGuid, Assert.Single(byLookupCode).OrderGuid);
         }
@@ -773,8 +777,10 @@ public sealed class PosCoreTests
         viewModel.LoadFromOrder(order);
 
         Assert.Contains(viewModel.ReceiptPreviewRows, row => row.Text.Contains("===== TAX INVOICE =====", StringComparison.Ordinal));
-        Assert.Contains(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(order.OrderGuid.ToString(), StringComparison.Ordinal));
-        Assert.Equal(order.OrderGuid.ToString("D"), Assert.Single(viewModel.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        // 普通单的条码预览行是 GUID 末 8 位（与小票单号同口径），不再含整串 GUID；订单小票不再印二维码。
+        Assert.Contains(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(ReceiptOrderShortCode.Create(order.OrderGuid), StringComparison.Ordinal));
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsBarcode && row.Text.Contains(order.OrderGuid.ToString(), StringComparison.Ordinal));
+        Assert.DoesNotContain(viewModel.ReceiptPreviewRows, row => row.IsQrCode);
         Assert.Contains(viewModel.ReceiptPreviewRows, row => row.Text.Contains("GST", StringComparison.Ordinal));
     }
 

@@ -1913,6 +1913,35 @@ public sealed class RoleServicePermissionTests : IDisposable
     }
 
     [Fact]
+    public async Task GetPermissionRolesAsync_ReturnsMemberCountPerRole()
+    {
+        // 手机端权限详情页按 UserCount 显示「N 名成员」；此前该接口不赋值，所有角色都显示 0。
+        await InsertPermissionAsync(Permissions.Users.View);
+        await SeedUserWithRoleAsync("user-a1", "role-a", "StoreManager");
+        await InsertUserAsync("user-a2");
+        await InsertUserRoleAsync("user-a2", "role-a");
+        await InsertRoleAsync("role-b", "Buyer");
+        await SeedUserWithRoleAsync("user-c1", "role-c", "StoreStaff");
+        await InsertUserAsync("user-c2");
+        await InsertUserRoleAsync("user-c2", "role-c", isDeleted: true);
+        await SeedUserWithRoleAsync("user-d1", "role-d", "NotGranted");
+        await InsertRolePermissionAsync("role-a", Permissions.Users.View);
+        await InsertRolePermissionAsync("role-b", Permissions.Users.View);
+        await InsertRolePermissionAsync("role-c", Permissions.Users.View);
+
+        var result = await (await CreateAdminServiceAsync()).GetPermissionRolesAsync(Permissions.Users.View);
+
+        Assert.True(result.Success);
+        var counts = result.Data!.ToDictionary(item => item.RoleGUID, item => item.UserCount);
+        Assert.Equal(3, counts.Count);
+        Assert.Equal(2, counts["role-a"]);
+        Assert.Equal(0, counts["role-b"]);
+        // 已软删除的分配记录不算成员。
+        Assert.Equal(1, counts["role-c"]);
+        Assert.DoesNotContain("role-d", counts.Keys);
+    }
+
+    [Fact]
     public async Task AssignPermissionsToUserAsync_ReplacesOnlyDirectUserPermissions()
     {
         await SeedUserWithRoleAsync("user-1", "role-store", "StoreManager");
@@ -2400,6 +2429,17 @@ public sealed class RoleServicePermissionTests : IDisposable
             Email = $"{userGuid}@example.test",
             PasswordHash = "hash",
             IsActive = true,
+            IsDeleted = isDeleted,
+        }).ExecuteCommandAsync();
+    }
+
+    private async Task InsertUserRoleAsync(string userGuid, string roleGuid, bool isDeleted = false)
+    {
+        await _db.Insertable(new UserRole
+        {
+            UserRoleGUID = $"{userGuid}-{roleGuid}",
+            UserGUID = userGuid,
+            RoleGUID = roleGuid,
             IsDeleted = isDeleted,
         }).ExecuteCommandAsync();
     }

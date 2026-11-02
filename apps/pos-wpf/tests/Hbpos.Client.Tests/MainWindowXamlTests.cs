@@ -36,6 +36,44 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
+    public void Update_notices_live_in_the_status_bar_and_never_float_over_page_content()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace controls = "clr-namespace:Hbpos.Client.Wpf.Views.Controls";
+        var window = Assert.IsType<XElement>(document.Root);
+        var shellGrid = Assert.Single(window.Elements(presentation + "Grid"));
+
+        // 中文注释：1016 店的强更提示浮在内容区右下角，正好压住付款页“确认收款”；更新提示只能出现在状态栏或全屏遮罩里。
+        string[] noticeBindings = ["IsOptionalUpdateReady", "IsForceUpdatePendingInstall", "IsUpdateNoticeVisible"];
+        var floatingNotices = shellGrid.Elements()
+            .Where(element => (string?)element.Attribute("Grid.Row") == "1")
+            .Where(element => noticeBindings.Any(binding =>
+                ((string?)element.Attribute("Visibility"))?.Contains(binding, StringComparison.Ordinal) == true))
+            .ToArray();
+        Assert.Empty(floatingNotices);
+
+        var statusBar = Assert.Single(shellGrid.Elements(presentation + "Border")
+            .Where(border => (string?)border.Attribute("Grid.Row") == "2"));
+        var noticeBar = Assert.Single(statusBar.Descendants(controls + "AppUpdateNoticeBar"));
+        Assert.Equal("{Binding AppUpdate}", (string?)noticeBar.Attribute("DataContext"));
+        Assert.Contains("IsUpdateNoticeVisible", (string?)noticeBar.Attribute("Visibility"));
+
+        var forceOverlay = Assert.Single(shellGrid.Elements(presentation + "Border")
+            .Where(border => (string?)border.Attribute("AutomationProperties.AutomationId") == "ForceUpdateOverlay"));
+        Assert.Equal("3", (string?)forceOverlay.Attribute("Grid.RowSpan"));
+        var postpone = Assert.Single(forceOverlay.Descendants(presentation + "Button")
+            .Where(button => (string?)button.Attribute("Command") == "{Binding AppUpdate.PostponeForceUpdateCommand}"));
+        Assert.Contains("CanPostponeForceUpdate", (string?)postpone.Attribute("Visibility"));
+    }
+
+    [Fact]
     public void Main_window_defaults_to_maximized_and_centers_normal_mode()
     {
         var document = XDocument.Load(Path.Combine(

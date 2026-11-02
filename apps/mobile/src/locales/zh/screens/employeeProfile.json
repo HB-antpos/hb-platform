@@ -196,8 +196,8 @@
   },
   "minorEmployment": {
     "title": "未成年用工合规",
-    "description": "维护学校日、假期、家长签署和通勤提醒。",
-    "open": "填写未成年用工资料"
+    "description": "查看家长签字与审核进度；资料由店长或 HR 发送给家长填写，你无需操作。",
+    "open": "查看未成年用工资料"
   },
   "completeness": {
     "title": "资料完整度",

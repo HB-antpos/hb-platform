@@ -91,6 +91,12 @@ export interface IdentityCreateUserInput {
   isActive?: boolean;
   roleGuids?: string[];
   storeGuids?: string[];
+  /** 员工电话；手机「新增账号」入口后端必填。有值才发送。 */
+  phone?: string;
+  /** 生日 YYYY-MM-DD；手机「新增账号」入口后端必填。有值才发送。 */
+  birthday?: string;
+  /** 监护人：只在生日未满 18 岁时带（relationship 为英文值）。 */
+  guardian?: { name: string; relationship: string; phone: string; email: string };
 }
 
 export interface IdentityUpdateUserInput {

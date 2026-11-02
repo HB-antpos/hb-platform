@@ -15,6 +15,13 @@ public partial class App : Application
 
         // 更新窗口从临时目录运行，工作目录也切过去，避免占住收银程序的安装目录。
         TrySetWorkingDirectory(AppContext.BaseDirectory);
+        if (UpdateAgentEntryPoint.TryStart(e.Args, out var agentCommand))
+        {
+            // 注册/注销代理任务和 SYSTEM 代理本身都没有界面，执行完按退出码结束。
+            _ = RunAgentCommandAsync(agentCommand);
+            return;
+        }
+
         if (!UpdaterOptions.TryParse(e.Args, out var options) || options is null)
         {
             Shutdown(InvalidArgumentsExitCode);
@@ -44,6 +51,24 @@ public partial class App : Application
         window.Closed += (_, _) => Shutdown();
         window.Show();
         _ = session.RunAsync();
+    }
+
+    private async Task RunAgentCommandAsync(Func<Task<int>> command)
+    {
+        var exitCode = 1;
+        try
+        {
+            exitCode = await command();
+        }
+        catch (Exception)
+        {
+            // 无界面命令不能停在未处理异常上，统一以失败退出码结束。
+            exitCode = 1;
+        }
+        finally
+        {
+            Shutdown(exitCode);
+        }
     }
 
     private static void TrySetWorkingDirectory(string directory)

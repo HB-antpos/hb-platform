@@ -1102,8 +1102,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(46, menu.Count);
+        Assert.Equal(47, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "payslips");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
@@ -1527,6 +1528,34 @@ public class NavigationServiceTests
         Assert.DoesNotContain(
             _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Attendance.Approval.ReviewManagedStore))),
             entry => entry.RouteName == "attendance-hours");
+    }
+
+    [Fact]
+    public void BuildAppMenu_工资单入口任何登录账号可见_无需任何权限()
+    {
+        // 没有任何权限的普通员工也要能进（接口只给他看绑定到自己的工资单）；有查看 / 导出权限的照旧可见。
+        foreach (var claims in new Claim[][]
+                 {
+                     Array.Empty<Claim>(),
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.ViewManagedStore) },
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.ViewAllStores) },
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.Download) },
+                 })
+        {
+            var menu = _service.BuildAppMenu(CreateUser(claims));
+            var item = Assert.Single(menu, entry => entry.RouteName == "payslips");
+            Assert.Equal("tabs.payslips", item.TitleKey);
+            Assert.Equal("receipt-text-outline", item.Icon);
+        }
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_设备模式不含工资单()
+    {
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "payslips");
+        }
     }
 
     [Fact]

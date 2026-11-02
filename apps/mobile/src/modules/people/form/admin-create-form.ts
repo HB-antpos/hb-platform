@@ -7,8 +7,20 @@
  * 创建分两步：第一步建号并带上角色与分店（普通关联）；第二步（仅当有「管理」分店）再调关联分店接口写入管理标记，
  * 店长角色由后端按「管理」分店派生。第一步成功后账号已经存在，无法回滚，因此第二步失败时：
  * 不重复创建，只重试第二步，并明确告知用户是哪一步失败。
+ *
+ * 电话、生日必填；未满 18 岁时监护人四项必填（与后端 NewStaffProfileRules 一致，规则见 new-staff-profile.ts）。
  */
 import { buildCreateNameBody, isPersonNameEmpty } from "./person-form";
+import {
+  buildNewStaffProfileBody,
+  EMPTY_NEW_STAFF_GUARDIAN,
+  hasNewStaffProfileErrors,
+  isNewStaffProfileDirty,
+  sydneyToday,
+  validateNewStaffProfile,
+  type NewStaffGuardianInput,
+  type NewStaffProfileErrors,
+} from "./new-staff-profile";
 import type { UserAccessStoreAssignment } from "@/modules/users/access-management-types";
 import {
   hasPersonNameErrors,
@@ -27,6 +39,12 @@ export interface AdminCreateFormValues {
   email: string;
   username: string;
   names: PersonNameInput;
+  /** 必填；澳洲手机号（04 开头）。 */
+  phone: string;
+  /** 必填；YYYY-MM-DD，未选为空串。 */
+  birthday: string;
+  /** 只在生日未满 18 岁时显示与提交；改回成年后保留已填内容但不提交。 */
+  guardian: NewStaffGuardianInput;
   /** 立即启用：关闭则创建为停用账号。 */
   enabled: boolean;
   password: string;
@@ -40,6 +58,9 @@ export const EMPTY_ADMIN_CREATE_FORM: AdminCreateFormValues = {
   email: "",
   username: "",
   names: { familyName: "", givenName: "", middleName: "", nickname: "" },
+  phone: "",
+  birthday: "",
+  guardian: EMPTY_NEW_STAFF_GUARDIAN,
   enabled: true,
   password: "",
   confirmPassword: "",
@@ -58,6 +79,7 @@ export function isAdminCreateFormDirty(values: AdminCreateFormValues) {
     values.email.trim() !== ""
     || values.username.trim() !== ""
     || !isPersonNameEmpty(values.names)
+    || isNewStaffProfileDirty(values)
     || values.password !== ""
     || values.confirmPassword !== ""
     || values.roleGuids.length > 0
@@ -68,7 +90,7 @@ export function isAdminCreateFormDirty(values: AdminCreateFormValues) {
 
 export type AdminPasswordError = "required" | "tooShort" | "tooLong";
 
-export interface AdminCreateErrors {
+export interface AdminCreateErrors extends NewStaffProfileErrors {
   email?: string;
   username?: string;
   password?: AdminPasswordError;
@@ -78,15 +100,24 @@ export interface AdminCreateErrors {
 
 export function hasAdminCreateErrors(errors: AdminCreateErrors) {
   return Boolean(errors.email || errors.username || errors.password || errors.confirmPassword)
-    || hasPersonNameErrors(errors.names);
+    || hasPersonNameErrors(errors.names)
+    || hasNewStaffProfileErrors(errors);
 }
 
-/** 逐字段校验；邮箱 / 账号的文案通过 `t`（userManagement 的 messages.* 键）翻译，密码与姓名返回错误码由界面翻译。 */
-export function validateAdminCreateForm(values: AdminCreateFormValues, t: (key: string) => string): AdminCreateErrors {
+/**
+ * 逐字段校验；邮箱 / 账号的文案通过 `t`（userManagement 的 messages.* 键）翻译，
+ * 密码、姓名、电话、生日、监护人返回错误码由界面翻译。
+ */
+export function validateAdminCreateForm(
+  values: AdminCreateFormValues,
+  t: (key: string) => string,
+  today: Date = sydneyToday()
+): AdminCreateErrors {
   const errors: AdminCreateErrors = {
     email: validateNewStaffEmail(values.email, t) ?? undefined,
     username: validateUsername(values.username, t) ?? undefined,
     names: validatePersonNameFields(values.names, { requireNames: true }),
+    ...validateNewStaffProfile(values, values.email, today),
   };
   // 密码按原样校验（不去首尾空白），与提交给后端的值一致。
   if (!values.password) errors.password = "required";
@@ -96,8 +127,11 @@ export function validateAdminCreateForm(values: AdminCreateFormValues, t: (key: 
   return errors;
 }
 
-/** 第一步（建号）的请求体：带角色与全部已选分店（普通关联），姓名段有值才带，fullName 为合成值。 */
-export function buildAdminCreateInput(values: AdminCreateFormValues): IdentityCreateUserInput {
+/**
+ * 第一步（建号）的请求体：带角色与全部已选分店（普通关联），姓名段有值才带，fullName 为合成值。
+ * 电话、生日始终带；监护人只在未成年时带（按悉尼当天算年龄）。
+ */
+export function buildAdminCreateInput(values: AdminCreateFormValues, today: Date = sydneyToday()): IdentityCreateUserInput {
   return {
     username: values.username.trim(),
     email: values.email.trim(),
@@ -107,6 +141,7 @@ export function buildAdminCreateInput(values: AdminCreateFormValues): IdentityCr
     isActive: values.enabled,
     roleGuids: values.roleGuids,
     storeGuids: values.assignments.map((assignment) => assignment.storeGUID),
+    ...buildNewStaffProfileBody(values, today),
   };
 }
 

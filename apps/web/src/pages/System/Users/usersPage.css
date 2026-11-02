@@ -167,6 +167,8 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 常驻滚动条（Windows / 外接鼠标）时预留滚动条位置，内容变短时右边距和保存栏不横跳。 */
+  scrollbar-gutter: stable;
 }
 
 /*
@@ -189,11 +191,125 @@
   flex: 1 0 auto;
 }
 
+/* 页签外层包了 Spin 时，Spin 的两层容器也要沿用 flex 撑满，底部保存栏才能在内容较短时贴底。 */
+.users-ws-drawer-tabs .ant-tabs-tabpane-active > .ant-spin-nested-loading,
+.users-ws-drawer-tabs .ant-tabs-tabpane-active > .ant-spin-nested-loading > .ant-spin-container {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.users-ws-drawer-tabs .ant-spin-container > .users-ws-tab-body {
+  flex: 1 0 auto;
+}
+
+/* 所有页签的正文都套这一层：左右 24px，与页签栏、抽屉头对齐。 */
 .users-ws-tab-body {
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 20px 24px 24px;
+}
+
+/* 页签底部保存栏：贴抽屉底部，左右 24px，与正文同宽对齐。 */
+.users-ws-tab-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border-top: 1px solid #eef0f3;
+  background: #fff;
+}
+
+.users-ws-tab-footer-status {
+  flex: 1;
+  min-width: 0;
+  color: #667085;
+  font-size: 12.5px;
+}
+
+/* 功能权限：搜索 + 「只看已授权」一行；权限树装进卡片，分类右侧显示「已授权 / 总数」。 */
+.users-ws-perm-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.users-ws-perm-search {
+  width: min(280px, 100%);
+}
+
+.users-ws-perm-tree {
+  padding: 8px 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+}
+
+.users-ws-perm-tree .ant-tree-title {
+  display: block;
+}
+
+.users-ws-perm-category {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.users-ws-perm-count {
+  margin-left: auto;
+  color: #98a2b3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 移动端菜单：卡片正文去掉默认内边距，列表行自己留 12px 16px，分隔线贴满卡片宽。 */
+.users-ws-menu-list-card .ant-card-body {
+  padding: 0;
+}
+
+.users-ws-menu-row.ant-list-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px 16px;
+}
+
+.users-ws-menu-row-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.users-ws-menu-row-action {
+  flex: none;
+  margin-left: auto;
+}
+
+.users-ws-menu-path {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* 个人信息：编辑器撑满页签，保存栏用负外边距铺满抽屉宽并贴底，与其它页签的底部栏一致。 */
+.users-ws-profile-tab > .sys-emp-managed {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.users-ws-profile-tab .sys-emp-managed-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin: auto -24px -24px;
+  padding: 12px 24px;
+  border-top: 1px solid #eef0f3;
+  background: #fff;
 }
 
 .users-ws-section-head {

@@ -177,7 +177,7 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/attendance",            TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           AnyPermissions = new List<string> { Permissions.Attendance.Schedule.ViewStore, Permissions.Attendance.Approval.ReviewManagedStore } },
                     // 工时与工资合并页：工时统计 / 工资表 / 时薪表 / MYOB 对接，任一权限即可见（页内再按各自权限显示标签与页签）。
                     // 工时统计看打卡查看权限，工资表 / 时薪表看 Payroll.View；MYOB 对接页签：连接 / 分店映射、员工绑定看独立权限码（默认不授予任何角色）；发薪公司页签看 Attendance.Payroll.Edit，但工资编辑不隐含查看，不单独打开本菜单。
-                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind } },
+                    new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind, Permissions.Myob.Payslip.ViewManagedStore, Permissions.Myob.Payslip.ViewAllStores } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
                 },
@@ -407,6 +407,16 @@ namespace BlazorApp.Api.Services
                 // 移动端店长「工时统计」：与 Web 工时页签同用 Punch.ViewManagedStore，接口再按管理分店校验；
                 // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
                 Permission = Permissions.Attendance.Punch.ViewManagedStore,
+                Order = 56,
+            },
+            new()
+            {
+                RouteName = "payslips",
+                TitleKey = "tabs.payslips",
+                Icon = "receipt-text-outline",
+                // 移动端「工资单」：任何登录账号都可见——没有查看权限的普通员工只能看绑定到自己的工资单，
+                // 持有「管辖分店 / 全部分店」查看权限的照旧看他人；数据范围与下载 / 邮件权限都由接口再判定。
+                // 设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
                 Order = 56,
             },
             new()
@@ -903,7 +913,9 @@ namespace BlazorApp.Api.Services
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage,
                 // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Myob.Connection.Manage,
-                Permissions.Myob.Employee.Bind
+                Permissions.Myob.Employee.Bind,
+                Permissions.Myob.Payslip.ViewManagedStore,
+                Permissions.Myob.Payslip.ViewAllStores
             );
         }
 

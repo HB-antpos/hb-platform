@@ -123,5 +123,25 @@
     "all": "All refunds",
     "partial": "Partial refund",
     "full": "Full refund"
+  },
+  "receipt": {
+    "tab": "Receipt",
+    "tabItems": "Items",
+    "loading": "Loading receipt",
+    "loadFailed": "Failed to load the receipt",
+    "unsupported": "Online receipts are not available for this order status",
+    "openQr": "Online QR",
+    "sendToCustomer": "Send to customer",
+    "qrTitle": "Online receipt",
+    "qrHint": "Customers scan to view it — no login needed",
+    "creating": "Creating link…",
+    "createFailed": "Could not create the link. Please retry.",
+    "copyLink": "Copy link",
+    "copied": "Link copied",
+    "shareFailed": "Sharing failed. Please copy the link instead.",
+    "regenerate": "Regenerate",
+    "regenerateConfirm": "The old link stops working immediately. Continue?",
+    "regenerated": "Regenerated. The old link no longer works.",
+    "meta": "Valid until {{date}} · opened {{count}} times"
   }
 }

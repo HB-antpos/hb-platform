@@ -103,6 +103,8 @@ namespace BlazorApp.Api.Controllers.React
                 );
             }
 
+            // 新建员工：生日、邮箱、电话必填；未满 18 岁时监护人四项必填（服务在门店范围检查之后校验）。
+            dto.RequireNewStaffProfile = true;
             var result = await _service.CreateAsync(dto, User.Identity?.Name ?? "system");
             return Ok(result);
         }

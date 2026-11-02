@@ -440,6 +440,8 @@ builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
 builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
 builder.Services.AddRateLimiter(PasswordResetRateLimits.Configure);
+// 客人在线小票匿名接口按可信 IP 限流（挡令牌枚举）。
+builder.Services.AddRateLimiter(PosReceiptRateLimits.Configure);
 builder.Services.AddRateLimiter(NetworkDiagnosticsRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
@@ -783,6 +785,9 @@ builder.Services.AddScoped<MinorEmploymentReminderService>(); // 经理待办只
 builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocumentStore>();
 builder.Services.Configure<MinorEmploymentOptions>(builder.Configuration.GetSection(MinorEmploymentOptions.SectionName));
 builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
+builder.Services.Configure<BlazorApp.Api.Services.Sms.SmsOptions>(builder.Configuration.GetSection(BlazorApp.Api.Services.Sms.SmsOptions.SectionName)); // 短信通道配置：总闸默认关，密钥只从服务器 .env 注入
+builder.Services.AddHttpClient<BlazorApp.Api.Services.Sms.ISmsGateway, BlazorApp.Api.Services.Sms.ClickSendSmsGateway>(client => client.Timeout = TimeSpan.FromSeconds(15)); // 短信服务商（ClickSend REST），换服务商只改这一行
+builder.Services.AddScoped<BlazorApp.Api.Services.Sms.ISmsSender, BlazorApp.Api.Services.Sms.SmsSender>(); // 短信发送：总闸、澳洲手机号规范化、按号与全站限流、发送记录
 builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 员工邮箱验证码设置 / 找回密码
 builder.Services.AddScoped<IAccountEmailChangeService, AccountEmailChangeService>(); // 员工绑定 / 更换账号邮箱（验证码发到新邮箱）
@@ -824,7 +829,16 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, 
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService, BlazorApp.Api.Services.Myob.MyobTimesheetPreviewService>();
-builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipProbeService, BlazorApp.Api.Services.Myob.MyobPayslipProbeService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource>(sp =>
+    (BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource)sp.GetRequiredService<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService>()); // 推送与预览共用同一段规划代码
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPushService, BlazorApp.Api.Services.Myob.MyobTimesheetPushService>(); // Timesheet 推送 / 撤销（总闸默认关）
+// Wage 节只读探针（临时，核对完 EmployeePayrollDetails 的基础时薪字段后删除）：原始 JSON 读取走独立接口，不动 IMyobApiClient。
+builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobRawReadClient, BlazorApp.Api.Services.Myob.MyobApiClient>(
+    client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobWageProbeService, BlazorApp.Api.Services.Myob.MyobWageProbeService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipPermissionChecker, BlazorApp.Api.Services.Myob.RoleServicePayslipPermissionChecker>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipEmailSender, BlazorApp.Api.Services.Myob.MyobPayslipEmailSender>(); // 工资单 PDF 邮件，复用发票邮箱的公司 SMTP 账号
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipService, BlazorApp.Api.Services.Myob.MyobPayslipService>();
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
@@ -1410,6 +1424,10 @@ builder.Services.AddScoped<IDeviceRegistrationReactService, DeviceRegistrationRe
 builder.Services.AddScoped<DeviceActivationCodeManagementService>();
 builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDeviceStatusProvider>();
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
+// POS 订单在线小票：员工生成分享链接（迁移 20261030.005 建表，须先于本版本上线）、客人免登录只读打开。
+builder.Services.Configure<BlazorApp.Api.Features.PosReceipts.PosReceiptOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.PosReceipts.PosReceiptOptions.SectionName));
+builder.Services.AddScoped<BlazorApp.Api.Features.PosReceipts.IPosReceiptService, BlazorApp.Api.Features.PosReceipts.PosReceiptService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
 // 分店现金管理（存银行 / 现金支出 / 现金池）。现金池流入只认日结实点现金：取数口读 POSM_DailyClose

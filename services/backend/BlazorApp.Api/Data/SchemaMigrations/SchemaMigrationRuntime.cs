@@ -260,6 +260,38 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMyobPayCategoryCasualAsync(CancellationToken cancellationToken);
 
+    Task ApplyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken);
+
+    Task ApplySmsSendLogAsync(CancellationToken cancellationToken);
+
+    Task VerifySmsSendLogAsync(CancellationToken cancellationToken);
+
+    Task ApplyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken);
+
+    Task ApplyPosReceiptShareLinkAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken);
+
+    Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
+
+    Task ApplyUserPreferenceAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserPreferenceAsync(CancellationToken cancellationToken);
+
+    Task ApplyMyobPayslipExportAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayslipExportAsync(CancellationToken cancellationToken);
+
+    Task ApplyMyobTimesheetPushAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobTimesheetPushAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1638,6 +1670,182 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MyobPayCategoryCasualSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryPublicHolidaySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 加列后过精确签名，通过后协调器才登记账本。
+        await VerifyMyobPayCategoryPublicHolidayAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayCategoryPublicHolidayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayCategoryPublicHolidaySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplySmsSendLogAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            SmsSendLogSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后过精确签名，通过后协调器才登记账本。
+        await VerifySmsSendLogAsync(cancellationToken);
+    }
+
+    public async Task VerifySmsSendLogAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            SmsSendLogSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceSettingsSingleActiveSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建索引后过精确签名，通过后协调器才登记账本；已有同名但定义不符的索引不会被误标为完成。
+        await VerifyAttendanceSettingsSingleActiveAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceSettingsSingleActiveAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceSettingsSingleActiveSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosReceiptShareLinkSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后过精确签名，通过后协调器才登记账本。
+        await VerifyPosReceiptShareLinkAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosReceiptShareLinkSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayslipAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表 + 写权限后过精确签名（列 / 主键 / 查询索引），通过后协调器才登记账本。
+        await VerifyMyobPayslipAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayslipAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserPreferenceAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPreferenceSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表后过精确签名（列 / 主键），通过后协调器才登记账本。
+        await VerifyUserPreferenceAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserPreferenceAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPreferenceSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayslipExportAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipExportSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 加列 + 写权限后过精确签名，通过后协调器才登记账本。
+        await VerifyMyobPayslipExportAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayslipExportAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipExportSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobTimesheetPushAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobTimesheetPushSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建表 + 写权限后过精确签名，通过后协调器才登记账本。
+        await VerifyMyobTimesheetPushAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobTimesheetPushAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobTimesheetPushSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

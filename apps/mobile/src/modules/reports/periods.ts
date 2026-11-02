@@ -122,14 +122,17 @@ export function getRevenuePeriodForDate(mode: RevenuePeriodMode, date: string, a
   return clipCurrentRevenuePeriod(period, anchor);
 }
 
+// 营业额最早可回看 18 个月；单个周期最长一个自然月，不需要另设跨度上限。
+export const REVENUE_HISTORY_MONTHS = 18;
+
 export function getRevenueDateBounds(anchor = new Date()): RevenueDateBounds {
-  const minimumYear = anchor.getFullYear() - 1;
-  const minimumDay = Math.min(
-    anchor.getDate(),
-    new Date(minimumYear, anchor.getMonth() + 1, 0).getDate(),
-  );
+  const minimumMonthStart = new Date(anchor.getFullYear(), anchor.getMonth() - REVENUE_HISTORY_MONTHS, 1);
+  // 目标月没有同一天（如 8-31 回看到 2 月）时取该月月末。
+  const minimumDay = Math.min(anchor.getDate(), endOfMonth(minimumMonthStart).getDate());
   return {
-    minDate: formatDateKey(new Date(minimumYear, anchor.getMonth(), minimumDay)),
+    minDate: formatDateKey(
+      new Date(minimumMonthStart.getFullYear(), minimumMonthStart.getMonth(), minimumDay),
+    ),
     maxDate: formatDateKey(anchor),
   };
 }

@@ -226,6 +226,23 @@ namespace BlazorApp.Shared.DTOs
 
         public bool IsActive { get; set; } = true;
 
+        /// <summary>员工电话。Web / 手机「新建账号」入口必填（控制器校验）；批量导入等内部流程不传。</summary>
+        [StringLength(50, ErrorMessage = "电话长度不能超过50个字符")]
+        public string? Phone { get; set; }
+
+        /// <summary>生日。新建入口必填，写入员工资料；未满 18 岁时须同时提供 <see cref="Guardian"/>。</summary>
+        public DateTime? Birthday { get; set; }
+
+        /// <summary>监护人；只在生日未满 18 岁时使用，会预填进未成年用工合规草稿。</summary>
+        public NewStaffGuardianDto? Guardian { get; set; }
+
+        /// <summary>
+        /// 由「新建账号」控制器置为 true：服务在权限与门店范围检查之后，按新建员工规则校验生日、电话、监护人。
+        /// 不参与 JSON 序列化，客户端无法关闭；批量导入等内部流程不设置，保持原行为。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool RequireNewStaffProfile { get; set; }
+
         /// <summary>
         /// 分配的角色GUID列表
         /// </summary>

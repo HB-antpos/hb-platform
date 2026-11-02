@@ -57,13 +57,29 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\AppIcon-{#AppVersion}.ico"
 
 [Run]
-; 更新安装完成后始终以原登录用户启动，静默安装也不能跳过。
-Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
+; 注册“HB POS Update Agent”计划任务（SYSTEM 运行、动作固定为 {app}\updater 里的更新程序）：之后更新窗口可请它免 UAC 静默安装。
+; 注册失败只影响免 UAC 安装，不影响本次安装；不在 Program Files 下的安装目录，更新程序会自己拒绝注册。
+Filename: "{app}\updater\Hbpos.Updater.exe"; Parameters: "--register-agent-task"; Flags: runhidden waituntilterminated
+; 更新安装完成后始终以原登录用户启动，静默安装也不能跳过；由更新代理（SYSTEM）安装时不启动，交给登录会话里的更新窗口打开。
+Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: not IsUpdateAgentInstall
+
+[UninstallRun]
+Filename: "{app}\updater\Hbpos.Updater.exe"; Parameters: "--unregister-agent-task"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterUpdateAgentTask"
+
+[UninstallDelete]
+; 更新代理运行时产生的安装包、状态和日志不在安装清单里，卸载时一并清掉。
+Type: filesandordirs; Name: "{app}\UpdateAgent"
 
 [Code]
 var
   UpdateProgressFile: String;
   LastReportedUpdateProgress: Integer;
+
+function IsUpdateAgentInstall: Boolean;
+begin
+  // 中文注释：管理员更新代理安装时固定传 /HBPOSAGENT=1；SYSTEM 会话里直接打开收银端会开到看不见的服务会话。
+  Result := ExpandConstant('{param:HBPOSAGENT|}') = '1';
+end;
 
 procedure ReportUpdateProgress(Stage: String; Percent: Integer);
 begin

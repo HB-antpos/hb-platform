@@ -3294,12 +3294,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             runtime.VerifyHelpFaqAsync(CancellationToken.None));
         Assert.NotNull(missing);
 
-        // 首次：建表 + 灌入 11 组 / 45 问（收银端 28 + 移动端 17），全部已发布。
+        // 首次：建表 + 灌入 11 组 / 47 问（收银端 28 + 移动端 19），全部已发布。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         await runtime.VerifyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString,
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Status = N'Published' AND Version = 1 AND PublishedAt IS NOT NULL AND DraftJson IS NULL AND IsDeleted = 0 AND CreatedBy = N'system-seed' AND UpdatedBy = N'system-seed'"));
         Assert.Equal(28, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion q JOIN dbo.HelpFaqGroup g ON g.GroupGUID = q.GroupGUID WHERE g.Tab = N'pos'"));
@@ -3307,13 +3307,13 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         // 重复执行：表非空直接跳过，行数不变（不重复灌入）。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 管理员删掉某题后再次执行迁移也不会补回（只要两表任一非空就跳过，绝不覆盖线上编辑）。
         await ExecuteNonQueryAsync(databases.MainConnectionString,
             "UPDATE dbo.HelpFaqQuestion SET IsDeleted = 1 WHERE Code = N'remove'");
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.Equal(1, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Code = N'remove' AND IsDeleted = 1"));
         await ExecuteNonQueryAsync(databases.MainConnectionString,
@@ -3329,7 +3329,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             NullLogger<HelpFaqPublicService>.Instance);
         var snapshot = await service.GetPublishedAsync();
         Assert.Equal(28, snapshot.Data.Tabs.Pos.Sum(g => g.Questions.Count));
-        Assert.Equal(17, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
+        Assert.Equal(19, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(snapshot.Data), StringComparison.Ordinal);
 
         // Code 全局唯一：重复锚点必须被数据库拒绝。
@@ -3375,12 +3375,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.HelpFaqMigrationId
         );
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.True((await coordinator.CheckAsync(CancellationToken.None)).Success);
 
         // 再次迁移：账本已登记，整步跳过，不重复灌入。
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
-        Assert.Equal(45, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 实体不在 tableTypes：全新库基线不会抢先用 CodeFirst 建出签名不符的 FAQ 表（迁移成功即证明）。
     }
@@ -4047,6 +4047,53 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 员工界面偏好表_可重复执行_主键生效_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表不存在：校验报 54380。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54380, missing.Number);
+
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql);
+        // 重复执行是空操作：员工已保存的偏好不受影响。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Graphite', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.UserPreference WHERE UserGUID = N'user-1' AND PreferenceValue = N'Graphite'"));
+
+        // 主键：同一员工同一偏好键只能一行；不同偏好键可并存。
+        // 只认主键冲突（2627），避免语句本身写错也被当成「主键生效」。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-wpf.colorTheme', N'Paper', SYSUTCDATETIME());
+            """));
+        Assert.Equal(2627, duplicate.Number);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.UserPreference (UserGUID, PreferenceKey, PreferenceValue, UpdatedAtUtc)
+            VALUES (N'user-1', N'pos-ipad.colorTheme', N'Paper', SYSUTCDATETIME());
+            """);
+
+        // 主键被删 → 54382；列宽漂移 → 54381。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.UserPreference DROP CONSTRAINT PK_UserPreference;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54382, noPrimaryKey.Number);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.UserPreference ALTER COLUMN PreferenceValue nvarchar(50) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserPreferenceSchema.VerifySql));
+        Assert.Equal(54381, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task MYOB工资类别映射_临时工周末两列_旧表加列_可重复执行_保留既有映射_识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -4083,6 +4130,274 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             ExecuteNonQueryAsync(main, MyobPayCategoryCasualSchema.VerifySql));
         Assert.Equal(54354, width.Number);
     }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资类别映射_公共假期两列_旧表加列_可重复执行_保留既有映射_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54355。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54355, noTable.Number);
+
+        // 旧表（20261027.004）已有一行映射，加列后映射原样保留，新列为 NULL。
+        await ExecuteNonQueryAsync(main, MyobPayCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayCategoryMapping (ConnectionGuid, WeekdayUid, SaturdayUid, UpdatedAt)
+            VALUES (N'c-1', N'cat-weekday', N'cat-sat', SYSUTCDATETIME());
+            """);
+        var lacksColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54356, lacksColumns.Number);
+
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE SaturdayUid = N'cat-sat' AND PublicHolidayUid IS NULL AND PublicHolidayCasualUid IS NULL"));
+
+        // 重复执行不报错、不影响已写入的新列值。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.MyobPayCategoryMapping SET PublicHolidayUid = N'cat-ph' WHERE ConnectionGuid = N'c-1';");
+        await ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayCategoryMapping WHERE PublicHolidayUid = N'cat-ph'"));
+
+        // 列宽漂移 → 54356。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayCategoryMapping ALTER COLUMN PublicHolidayCasualUid nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayCategoryPublicHolidaySchema.VerifySql));
+        Assert.Equal(54356, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 短信发送记录表_新表_可重复执行_识别列漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54410。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54410, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 重复执行不报错、不丢已写入的行。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SmsSendLog (Id, Purpose, PhoneHash, PhoneMask, Segments, Status, CreatedAtUtc)
+            VALUES (N'log-1', N'GuardianVerificationCode', N'hash', N'x', 1, N'Sent', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SmsSendLog"));
+
+        // 列宽漂移 → 54411。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SmsSendLog ALTER COLUMN PhoneMask nvarchar(10) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54411, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SmsSendLog ALTER COLUMN PhoneMask nvarchar(20) NOT NULL;");
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 号码索引缺失 → 54413；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_SmsSendLog_Phone ON dbo.SmsSendLog;");
+        var noPhoneIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54413, noPhoneIndex.Number);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+
+        // 时间索引缺失 → 54414；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_SmsSendLog_Created ON dbo.SmsSendLog;");
+        var noCreatedIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql));
+        Assert.Equal(54414, noCreatedIndex.Number);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SmsSendLogSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SmsSendLog"));
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 在线小票分享链接表_新表_可重复执行_令牌哈希唯一_识别列漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54430。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54430, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 重复执行不报错、不丢已写入的行；OpenCount 有默认值 0。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosReceiptShareLink (Id, OrderGuid, TokenHash, TokenProtected, CreatedAtUtc, ExpiresAtUtc)
+            VALUES (N'link-1', N'7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab', N'hash-1', N'protected-1', SYSUTCDATETIME(), DATEADD(day, 90, SYSUTCDATETIME()));
+            """);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PosReceiptShareLink WHERE OpenCount = 0"));
+
+        // 令牌哈希唯一：同一哈希第二次插入必须被拒绝（公开接口按哈希查到至多一行的前提）。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PosReceiptShareLink (Id, OrderGuid, TokenHash, TokenProtected, CreatedAtUtc, ExpiresAtUtc)
+            VALUES (N'link-2', N'other-order', N'hash-1', N'protected-2', SYSUTCDATETIME(), DATEADD(day, 90, SYSUTCDATETIME()));
+            """));
+
+        // 列宽漂移 → 54431。用没有索引依赖的 BranchCode 列模拟（TokenHash 上有唯一索引，SQL Server 不允许直接改它的宽度）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(10) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54431, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptShareLink ALTER COLUMN BranchCode nvarchar(20) NULL;");
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 令牌唯一索引缺失 → 54433；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_PosReceiptShareLink_TokenHash ON dbo.PosReceiptShareLink;");
+        var noTokenIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54433, noTokenIndex.Number);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+
+        // 订单索引缺失 → 54434；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_PosReceiptShareLink_Order ON dbo.PosReceiptShareLink;");
+        var noOrderIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql));
+        Assert.Equal(54434, noOrderIndex.Number);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PosReceiptShareLink"));
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤设置唯一索引_建索引前先查重不动数据_可重复执行_只约束未删除行_识别定义漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：Apply 报 54420，Verify 报 54422。
+        var applyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql));
+        Assert.Equal(54420, applyNoTable.Number);
+        var verifyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54422, verifyNoTable.Number);
+
+        // 表由 SqlSugar CodeFirst 建出（与生产启动建表一致）；先塞两条未删除行模拟历史重复。
+        using (var setup = CreateAttendanceSettingsClient(main))
+        {
+            setup.CodeFirst.InitTables(typeof(BlazorApp.Shared.Models.AttendanceSettings));
+            setup.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "dup-1" }).ExecuteCommand();
+            setup.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "dup-2" }).ExecuteCommand();
+        }
+
+        // 有重复：Apply 报 54421，两行原样保留，索引没建；Verify 报 54423（索引缺失）。
+        var duplicates = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql));
+        Assert.Equal(54421, duplicates.Number);
+        Assert.Equal(2, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+        Assert.Equal(0, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dbo.AttendanceSettings') AND [name] = N'UX_AttendanceSettings_SingleActive'"));
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, missingIndex.Number);
+
+        // 人工处理重复（这里把其中一条软删除）后重跑：建索引成功，可重复执行。
+        await ExecuteNonQueryAsync(main,
+            "UPDATE dbo.AttendanceSettings SET IsDeleted = 1 WHERE CreatedBy = N'dup-2';");
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+        Assert.Equal(2, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+
+        // 约束生效：第二条未删除行被拒（2601 / 2627）；已删除行与 IsDeleted 为 NULL 的行不受约束，可以并存。
+        using (var db = CreateAttendanceSettingsClient(main))
+        {
+            var rejected = await Assert.ThrowsAnyAsync<Exception>(() =>
+                db.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "third-live" })
+                    .ExecuteCommandAsync());
+            Assert.True(BlazorApp.Api.Services.React.AttendancePunchPersistenceException.IsUniqueConstraintViolation(rejected));
+            db.Insertable(new BlazorApp.Shared.Models.AttendanceSettings { CreatedBy = "third-deleted", IsDeleted = true })
+                .ExecuteCommand();
+        }
+        await ExecuteNonQueryAsync(main,
+            "UPDATE dbo.AttendanceSettings SET IsDeleted = NULL WHERE CreatedBy = N'third-deleted';");
+        Assert.Equal(3, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+
+        // 定义漂移：同名但非唯一的索引 → Verify 报 54423；Apply 遇同名索引不会改写，Verify 仍报 54423。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_AttendanceSettings_SingleActive ON dbo.AttendanceSettings;");
+        await ExecuteNonQueryAsync(main,
+            "CREATE NONCLUSTERED INDEX UX_AttendanceSettings_SingleActive ON dbo.AttendanceSettings (IsDeleted);");
+        var drifted = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, drifted.Number);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        var stillDrifted = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql));
+        Assert.Equal(54423, stillDrifted.Number);
+    }
+
+    // 真实 SQL Server 上的并发首建：16 个各自独立连接的请求同时发现“没有设置行”并抢着创建，
+    // 其中一半放在事务里（模拟事务内调用方）。数据库唯一索引只放行一条，输家重读赢家，所有人拿到同一个 Id。
+    [SchemaMigrationSqlServerFact]
+    public async Task 考勤设置首次创建_十六路并发只留下一行_输家重读赢家且Id已回填()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        using (var setup = CreateAttendanceSettingsClient(main))
+        {
+            setup.CodeFirst.InitTables(typeof(BlazorApp.Shared.Models.AttendanceSettings));
+        }
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceSettingsSingleActiveSchema.VerifySql);
+
+        const int workers = 16;
+        using var startLine = new ManualResetEventSlim(false);
+        var tasks = Enumerable.Range(0, workers).Select(index => Task.Run(async () =>
+        {
+            using var db = CreateAttendanceSettingsClient(main);
+            startLine.Wait();
+            if (index % 2 == 0)
+            {
+                return (await BlazorApp.Api.Services.React.AttendanceReactService.GetOrCreateSettingsAsync(db)).Id;
+            }
+
+            await db.Ado.BeginTranAsync();
+            try
+            {
+                var settings = await BlazorApp.Api.Services.React.AttendanceReactService.GetOrCreateSettingsAsync(db);
+                await db.Ado.CommitTranAsync();
+                return settings.Id;
+            }
+            catch
+            {
+                await db.Ado.RollbackTranAsync();
+                throw;
+            }
+        })).ToArray();
+        startLine.Set();
+        var ids = await Task.WhenAll(tasks);
+
+        Assert.All(ids, id => Assert.True(id > 0));
+        Assert.Single(ids.Distinct());
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings WHERE IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.AttendanceSettings"));
+    }
+
+    private static SqlSugar.SqlSugarClient CreateAttendanceSettingsClient(string connectionString) =>
+        new(new SqlSugar.ConnectionConfig
+        {
+            ConnectionString = connectionString,
+            DbType = SqlSugar.DbType.SqlServer,
+            IsAutoCloseConnection = true,
+            InitKeyType = SqlSugar.InitKeyType.Attribute,
+        });
 
     [SchemaMigrationSqlServerFact]
     public async Task MYOB同步批次撤销快照表_新表_可重复执行_识别漂移()
@@ -4139,6 +4454,160 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, MyobEmployeeSyncBatchSchema.VerifySql));
         Assert.Equal(54362, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单查看记录表与权限码_新表_权限入库不授权_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54370, missing.Number);
+
+        // 权限表存在时：两个新权限码幂等写入，重复执行不重复插入；不触碰角色权限表。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        Assert.Equal(2, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Myob.Payslip.ViewManagedStore', N'Myob.Payslip.ViewAllStores') AND IsDeleted = 0"));
+
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipViewLog (LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, MyobEmployeeUid, PaymentDate, ViewedAt)
+            VALUES (N'l-1', N'u-actor', N'c-1', NULL, N'uid-1', '2026-10-23', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobPayslipViewLog WHERE LogGuid = N'l-1'"));
+
+        // 查询索引缺失 → 54373；列宽漂移 → 54371（选不在索引里的 ActorUserGuid：SQL Server 不允许修改索引依赖的列）。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobPayslipViewLog_Connection_Employee_ViewedAt ON dbo.MyobPayslipViewLog;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54373, noIndex.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN ActorUserGuid nvarchar(20) NOT NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSchema.VerifySql));
+        Assert.Equal(54371, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单导出_查看记录加列与权限码_既有行默认View_可重复执行_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54390, missing.Number);
+
+        // 先建上一版（20261029.003）的表与权限表，再放入一条旧查看记录，验证加列不破坏既有行。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+        await ExecuteNonQueryAsync(main, MyobPayslipSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipViewLog (LogGuid, ActorUserGuid, ConnectionGuid, TargetUserGuid, MyobEmployeeUid, PaymentDate, ViewedAt)
+            VALUES (N'l-old', N'u-actor', N'c-1', NULL, N'uid-1', '2026-10-23', SYSUTCDATETIME());
+            """);
+
+        // 列缺失 → 54391；Apply 后通过；重复执行不重复插入权限。
+        var noAction = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54391, noAction.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipExportSchema.ApplySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.MyobPayslipViewLog WHERE LogGuid = N'l-old' AND [Action] = N'View' AND Recipient IS NULL"));
+        Assert.Equal(2, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Myob.Payslip.Download', N'Myob.Payslip.Email') AND IsDeleted = 0"));
+
+        // Recipient 列宽漂移 → 54392。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipViewLog ALTER COLUMN Recipient nvarchar(50) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipExportSchema.VerifySql));
+        Assert.Equal(54392, width.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOBTimesheet推送_建表与权限码_可重复执行_Running过滤唯一索引拦并发_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54400, missing.Number);
+
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            """);
+
+        // Apply 两次幂等；权限码只插入一行。
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Myob.Timesheet.Push' AND IsDeleted = 0"));
+
+        // 并发保险：同一 (公司文件, 周期) 第二个 Running 插入失败（2601 唯一索引冲突），不同周期 / 非 Running 不受影响。
+        const string insert = """
+            INSERT dbo.MyobTimesheetPush (PushGuid, BatchGuid, ConnectionGuid, PeriodStart, Weeks, UserGuid, MyobEmployeeUid, Status, PushedMinutes, StartedAt)
+            VALUES (N'{0}', N'b-1', N'c-1', '{1}', 1, N'{2}', N'uid-{2}', N'{3}', 0, SYSUTCDATETIME());
+            """;
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-1", "2026-10-26", "u1", "Running"));
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, string.Format(insert, "p-2", "2026-10-26", "u2", "Running")));
+        Assert.Equal(2601, duplicate.Number);
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-3", "2026-11-02", "u2", "Running"));
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-4", "2026-10-26", "u2", "Pushed"));
+        await ExecuteNonQueryAsync(main, string.Format(insert, "p-5", "2026-10-26", "u3", "Failed"));
+        Assert.Equal(4, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.MyobTimesheetPush")); // p-2 没进去
+
+        // 漂移：列宽 → 54401；Running 索引被删 → 54405；批次索引被删 → 54404；最近一次索引被删 → 54403。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobTimesheetPush ALTER COLUMN ErrorCode nvarchar(40) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54401, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobTimesheetPush ALTER COLUMN ErrorCode nvarchar(80) NULL;");
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush;");
+        var noRunning = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54405, noRunning.Number);
+        // 不带过滤条件的同名唯一索引也不接受。
+        await ExecuteNonQueryAsync(main, "CREATE UNIQUE INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush (ConnectionGuid, PeriodStart, UserGuid);");
+        var wrongShape = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql));
+        Assert.Equal(54405, wrongShape.Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_MyobTimesheetPush_Running ON dbo.MyobTimesheetPush;");
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql); // 只补缺的索引
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobTimesheetPush_Batch ON dbo.MyobTimesheetPush;");
+        Assert.Equal(54404, (await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql))).Number);
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobTimesheetPush_Latest ON dbo.MyobTimesheetPush;");
+        Assert.Equal(54403, (await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql))).Number);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobTimesheetPushSchema.VerifySql);
     }
 
     [SchemaMigrationSqlServerFact]

@@ -23,6 +23,12 @@ public sealed class MyobOptions
     public bool TimesheetPushEnabled { get; set; }
 
     /// <summary>
+    /// Timesheet 推送灰度白名单：逗号分隔的公司文件连接 GUID（Myob__TimesheetPushConnectionGuids）。
+    /// **空 = 全部禁止**（即使总闸已开）；<c>*</c> = 全部公司文件；否则只有列出的公司文件允许推送 / 撤销。灰度期只放一个公司文件。
+    /// </summary>
+    public string TimesheetPushConnectionGuids { get; set; } = string.Empty;
+
+    /// <summary>
     /// 空格分隔。公司文件（/{cf_uri}/、/Info）、公司设置（只读，含 GET /Company，授权后校验公司名与 ABN 用它）、
     /// 员工资料、工资。注意：sme-company-file 不覆盖 /Company，缺 sme-company-settings 会 401（2026-10-27 上线实测）。
     /// </summary>

@@ -263,6 +263,15 @@ namespace BlazorApp.Api.Services.React
                     return ApiResponse<StoreUserDetailDto>.Error("没有权限为该分店创建店员", "FORBIDDEN");
                 }
 
+                if (dto.RequireNewStaffProfile)
+                {
+                    var profileRules = NewStaffProfileRules.Validate(dto.Birthday, dto.Phone, dto.Email, dto.Guardian, NewStaffProfileRules.SydneyToday());
+                    if (!profileRules.Ok)
+                    {
+                        return ApiResponse<StoreUserDetailDto>.Error(profileRules.Error!, profileRules.Code);
+                    }
+                }
+
                 // 未传 LoginEnabled 视为允许登录，保持旧客户端（Web 等）行为不变。
                 var loginEnabled = dto.LoginEnabled ?? true;
                 // 不允许登录的账号不生成可用密码：既不要求密码，也不发初始密码邮件。
@@ -365,6 +374,7 @@ namespace BlazorApp.Api.Services.React
                         {
                             UserGUID = userGuid,
                             Phone = Normalize(dto.Phone),
+                            Birthday = dto.Birthday?.Date,
                             EmployeeType = ParseEmployeeTypeOrDefault(dto.EmploymentType),
                             CreatedAt = now,
                             UpdatedAt = now,
@@ -372,6 +382,13 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
+                    // 未满 18 岁：同一事务里预建未成年合规草稿并带上监护人（控制器已校验必填）。
+                    var newStaffRules = NewStaffProfileRules.Validate(dto.Birthday, dto.Phone, email, dto.Guardian, NewStaffProfileRules.SydneyToday());
+                    if (newStaffRules.Ok && newStaffRules.IsMinor)
+                    {
+                        await EmployeeMinorComplianceService.InsertDraftForNewStaffAsync(
+                            _db, user, Normalize(dto.Phone), dto.Birthday!.Value, targetStore, dto.Guardian!, scope.UserGuid, createdBy);
+                    }
                     if (!loginEnabled)
                     {
                         // 与建号同事务写入「不允许登录」标记，账号从创建那一刻起就无法登录。

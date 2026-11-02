@@ -43,6 +43,45 @@ public sealed class OrderHistoryApiClientTests
             client.QueryAsync(new OrderHistoryQueryRequest("S001"), cancellation.Token));
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(50, true)]
+    public async Task QueryAsync_sends_skip_only_after_the_first_page(int skip, bool expectSkipParameter)
+    {
+        var handler = new CapturingHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://hbpos.test/")
+        };
+        var client = new OrderHistoryApiClient(httpClient);
+
+        await client.QueryAsync(new OrderHistoryQueryRequest("S001", Take: 51, Skip: skip));
+
+        var query = handler.LastRequestUri?.Query ?? string.Empty;
+        Assert.Contains("take=51", query);
+        Assert.Equal(expectSkipParameter, query.Contains($"skip={skip}", StringComparison.Ordinal));
+        Assert.Equal(expectSkipParameter, query.Contains("skip=", StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        public Uri? LastRequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            LastRequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"success":true,"data":{"orders":[]}}""",
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            });
+        }
+    }
+
     private sealed class BlockingHandler : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(

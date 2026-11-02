@@ -186,6 +186,9 @@ const pages = [
       'src/pages/PosAdmin/Myob/PayCategoryMappingCard.tsx',
       'src/pages/PosAdmin/Myob/PushPreviewTab.tsx',
       'src/pages/PosAdmin/Myob/PushDetailDrawer.tsx',
+      'src/pages/PosAdmin/Myob/myobPushLogic.ts',
+      'src/pages/PosAdmin/Myob/PushConfirmModal.tsx',
+      'src/pages/PosAdmin/Myob/PushBatchesDrawer.tsx',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/Myob/myobMessages.zh.json',
@@ -193,6 +196,23 @@ const pages = [
     },
     registerImport: "from './myobMessages.zh.json'",
     registerSource: 'src/pages/PosAdmin/Myob/index.tsx',
+  },
+  {
+    // 工资单（MYOB 历史工资单）：文案全部在页面级消息文件（菜单标题 menu.payslips 在全局语言包）；错误类型 / 预设键用静态映射写在 index.tsx 里
+    name: '工资单',
+    keyPattern: /['"`](payslips\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/Payslips/index.tsx',
+      'src/pages/PosAdmin/Payslips/PayslipDrawer.tsx',
+      'src/pages/PosAdmin/Payslips/PayslipEmailModal.tsx',
+      'src/pages/PosAdmin/Payslips/payslipLogic.ts',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/Payslips/payslipMessages.zh.json',
+      en: 'src/pages/PosAdmin/Payslips/payslipMessages.en.json',
+    },
+    registerImport: "from './payslipMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/Payslips/index.tsx',
   },
   {
     name: '支付终端配置',
@@ -204,6 +224,22 @@ const pages = [
     },
     registerImport: "from './paymentTerminalSettingsMessages.zh.json'",
     registerSource: 'src/pages/System/PaymentTerminalSettings/index.tsx',
+  },
+  {
+    // 用户管理「创建用户」新建员工字段（电话 / 生日 / 监护人）的新增键在页面级消息文件。
+    name: '用户管理新建员工',
+    keyPattern: /['"`](system\.usersNewStaff\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/System/Users/NewStaffProfileFields.tsx',
+      'src/pages/System/Users/newStaffProfileRules.ts',
+      'src/pages/System/Users/createUserFeedback.ts',
+    ],
+    messages: {
+      zh: 'src/pages/System/Users/usersPageMessages.zh.json',
+      en: 'src/pages/System/Users/usersPageMessages.en.json',
+    },
+    registerImport: "from './usersPageMessages.zh.json'",
+    registerSource: 'src/pages/System/Users/index.tsx',
   },
   {
     name: '广告管理',

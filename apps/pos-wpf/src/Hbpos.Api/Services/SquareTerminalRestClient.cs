@@ -269,7 +269,11 @@ public sealed class HttpSquareTerminalRestClient(
                 },
                 device_options = new
                 {
-                    device_id = request.DeviceId
+                    device_id = request.DeviceId,
+                    // 付款完成后让终端直接回到待机，不再停在「How would you like your receipt?」收据屏。
+                    // 收据屏出现时，Square 官方的 dismiss 对「已捕获且已完成」的结账无效，下一笔收款会被挡住；
+                    // 小票由收银端自己打印。必须与直连端 SquareDirectGateway.BuildCreatePayload 保持一致（幂等键同体）。
+                    skip_receipt_screen = true
                 },
                 location_id = request.LocationId,
                 reference_id = request.ReferenceId,

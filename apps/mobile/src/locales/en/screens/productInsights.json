@@ -34,43 +34,28 @@
     "itemNumber": "Item no.",
     "barcode": "Barcode",
     "supplier": "Supplier",
-    "salesQuantity": "Store units sold",
-    "salesAmount": "Store sales ($)",
-    "purchaseQuantity": "Purchase quantity",
-    "purchaseDocuments": "Purchase documents",
     "orderedQuantity": "Ordered quantity",
     "allocatedQuantity": "Allocated quantity",
-    "salesDetail": "Sales detail",
     "date": "Date",
     "documentNo": "Document no.",
     "quantity": "Quantity",
     "outboundDate": "Outbound date"
   },
   "units": {
-    "items": "items",
-    "documents": "docs"
+    "items": "items"
   },
-  "range": "{{startDate}} to {{endDate}}",
   "generatedAt": "As of {{value}}",
   "salesUpdatedAt": "Sales statistics updated: {{value}}",
   "salesUpdatedUnavailable": "Sales statistics update time unavailable",
-  "purchaseScope": "Based on local supplier invoices",
-  "recordCount": "{{count}} records",
-  "tabs": {
-    "sales": "Sales",
-    "purchases": "Purchases",
-    "warehouseRecords": "Orders / allocations"
-  },
   "history": {
-    "noPurchases": "No purchases in the last 90 days",
-    "lastPurchase": "History: {{date}} · {{quantity}} items · {{documentNo}} · {{supplier}}. This record is excluded from the 90-day purchase total.",
+    "noPurchases": "No purchases in this period",
+    "lastPurchase": "History: {{date}} · {{quantity}} items · {{documentNo}} · {{supplier}}. This record is excluded from this period's purchase total.",
     "none": "No historical purchase record"
   },
   "warehouse": {
     "lastAllocation": "Latest allocation: {{date}} · {{quantity}} items",
-    "noAllocation": "No allocations in the last 90 days",
-    "dispatchedOn": "Dispatched {{date}}",
-    "awaitingAllocation": "Awaiting allocation"
+    "noAllocation": "No allocations in this period",
+    "dispatchedOn": "Dispatched {{date}}"
   },
   "states": {
     "initialTitle": "Search product movement",
@@ -103,5 +88,121 @@
     "totalQuantity": "Total quantity",
     "totalAmount": "Total sales",
     "totalUnknown": "POS store sales summary"
+  },
+  "source": {
+    "local": "Local supplier",
+    "warehouse": "Warehouse"
+  },
+  "period": {
+    "days": "{{count}} days",
+    "custom": "Custom period",
+    "pickerTitle": "Select period",
+    "reset": "Reset to 90 days",
+    "range_one": "{{startDate}} – {{endDate}} ({{count}} day)",
+    "range_other": "{{startDate}} – {{endDate}} ({{count}} days)"
+  },
+  "summary": {
+    "title": "Movement summary",
+    "scopeLocal": "Invoices · POS sales",
+    "scopeWarehouse": "Dispatches · POS sales",
+    "inLocal": "Received",
+    "inWarehouse": "Allocated",
+    "sales": "Sold",
+    "inSubLocal_one": "{{count}} invoice",
+    "inSubLocal_other": "{{count}} invoices",
+    "inSubWarehouse": "Ordered {{ordered}} · pending {{pending}}",
+    "salesSub_one": "{{amount}} · {{count}} day sold",
+    "salesSub_other": "{{amount}} · {{count}} days sold",
+    "sellThroughCaption": "Sell-through {{rate}} ({{sales}} / {{in}})",
+    "sellThroughNone": "Nothing received in this period; sell-through unavailable",
+    "lastInDays_one": "Last in {{count}} day ago",
+    "lastInDays_other": "Last in {{count}} days ago",
+    "lastInToday": "Received today",
+    "lastInNone": "No purchase history",
+    "lastInHistorical": "Last received {{date}}",
+    "lastAllocationDays": "Last allocated {{count}}d ago",
+    "lastAllocationToday": "Dispatched today",
+    "lastAllocationNone": "No allocation history",
+    "negative": "Sold more than received in this period — likely selling stock from before the period.",
+    "pending_one": "{{quantity}} units ordered are awaiting allocation ({{count}} order, earliest {{date}}).",
+    "pending_other": "{{quantity}} units ordered are awaiting allocation ({{count}} orders, earliest {{date}})."
+  },
+  "kpi": {
+    "net": "Net in − out",
+    "dailyAverage": "Daily avg sold",
+    "averagePrice": "Avg price",
+    "fulfillment": "Fill rate"
+  },
+  "trend": {
+    "weeklyTitle": "Weekly movement",
+    "bucketTitle": "Movement every {{count}} days",
+    "buckets": "Periods",
+    "cumulative": "Cumulative",
+    "sales": "Units sold",
+    "inLocal": "Received (units)",
+    "inWarehouse": "Dispatched (units)",
+    "cumulativeSales": "Cumulative sold",
+    "cumulativeInLocal": "Cumulative received",
+    "cumulativeInWarehouse": "Cumulative allocated",
+    "accessibility": "Movement trend: {{in}} units received and {{sales}} units sold in this period"
+  },
+  "flow": {
+    "title": "Movement log",
+    "countLocal_one": "{{count}} delivery · {{days}} selling days",
+    "countLocal_other": "{{count}} deliveries · {{days}} selling days",
+    "countWarehouse_one": "{{count}} allocation · {{days}} selling days",
+    "countWarehouse_other": "{{count}} allocations · {{days}} selling days",
+    "byBatch": "By delivery",
+    "byBatchWarehouse": "By allocation",
+    "byDate": "By date",
+    "filter": {
+      "all": "All",
+      "in": "Received only",
+      "inWarehouse": "Orders / allocations",
+      "sales": "Sales only"
+    },
+    "latest": "Latest",
+    "ongoing_one": "{{count}} day so far",
+    "ongoing_other": "{{count}} days so far",
+    "span_one": "{{start}} – {{end}} · {{count}} day",
+    "span_other": "{{start}} – {{end}} · {{count}} days",
+    "salesDays_one": "{{count}} selling day",
+    "salesDays_other": "{{count}} selling days",
+    "moreDocuments": " +{{count}} docs",
+    "batchSales": "Sold {{quantity}} · {{amount}}",
+    "overHint": "Sold more than this delivery — stock from earlier deliveries was also sold.",
+    "overHintWarehouse": "Sold more than this allocation — stock from earlier allocations was also sold.",
+    "beforeRange": "Before first delivery",
+    "noInbound": "Nothing received in this period",
+    "noAllocation": "Nothing allocated in this period",
+    "expand_one": "Show {{count}} selling day",
+    "expand_other": "Show {{count}} selling days",
+    "collapse": "Hide daily sales",
+    "posSales": "Store POS sales",
+    "warehouseOutbound": "Warehouse dispatch",
+    "orderTitle": "Order {{documentNo}}",
+    "orderStatus": {
+      "submitted": "Submitted, awaiting allocation",
+      "allocating": "Allocating",
+      "completed": "Dispatched",
+      "unknown": "Unknown status"
+    },
+    "allocated": "Allocated {{value}}",
+    "monthIn": "In {{value}}",
+    "monthOrder": "Ordered {{value}}",
+    "monthAllocation": "Allocated {{value}}",
+    "monthSales": "Sold {{value}}"
+  },
+  "badge": {
+    "in": "In",
+    "allocation": "In",
+    "order": "PO",
+    "sales": "Out"
+  },
+  "sticky": {
+    "in": "In {{value}}",
+    "sales": "Out {{value}}",
+    "sellThrough": "ST {{value}}",
+    "net": "Net {{value}}"
   }
 }

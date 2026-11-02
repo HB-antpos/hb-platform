@@ -137,6 +137,46 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Update_prompt_guard_interrupts_only_on_idle_sales_screen_and_notice_tracks_cart()
+    {
+        var cart = new PosCartService();
+        var authorization = new FakeOperationAuthorizationService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cart: cart,
+            operationAuthorizationService: authorization);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var guard = new ShellAppUpdateInstallSafetyGuard(cart, viewModel);
+
+        Assert.True(viewModel.IsPosTerminalScreenActive);
+        Assert.True(guard.CanInterruptForUpdatePrompt(out _, out _));
+        Assert.False(viewModel.AppUpdate.IsTransactionInProgress);
+
+        // 中文注释：退货页购物车为空时可以安装，但自动弹出的强更遮罩要等回到收银主页，不能挡住正在办的退货。
+        viewModel.ShowReturnsCommand.Execute(null);
+        Assert.True(guard.CanInstallUpdate(out _, out _));
+        Assert.False(guard.CanInterruptForUpdatePrompt(out var statusKey, out _));
+        Assert.Equal("appUpdate.install.waitingForIdle", statusKey);
+
+        viewModel.ShowPosCommand.Execute(null);
+        authorization.Open();
+        Assert.False(guard.CanInterruptForUpdatePrompt(out _, out _));
+        authorization.Cancel();
+        Assert.True(guard.CanInterruptForUpdatePrompt(out _, out _));
+
+        // 中文注释：购物车有商品时底部提示条不给安装按钮，安装与弹遮罩都要等交易结束。
+        cart.AddItem(CreateItem("1042", "SKU-UPDATE", "930000000123"));
+        Assert.True(viewModel.AppUpdate.IsTransactionInProgress);
+        Assert.False(viewModel.AppUpdate.CanInstallFromNotice);
+        Assert.False(guard.CanInterruptForUpdatePrompt(out statusKey, out _));
+        Assert.Equal("appUpdate.install.activeTransaction", statusKey);
+
+        cart.Clear();
+        Assert.False(viewModel.AppUpdate.IsTransactionInProgress);
+        Assert.True(viewModel.AppUpdate.CanInstallFromNotice);
+    }
+
+    [Fact]
     public async Task Api_server_switch_freezes_scanner_and_common_navigation()
     {
         var scanner = new FakeRawScannerService();
@@ -241,6 +281,45 @@ public sealed class MainViewModelScannerTests
         Assert.Null(viewModel.Session.CashierSession);
         Assert.Equal(string.Empty, viewModel.Session.CashierId);
         Assert.Equal("紧急登录已到期，请重新登录", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Daily_close_auto_logout_signs_the_cashier_out_after_the_delay()
+    {
+        var context = new CashierSessionContext();
+        context.SetCurrent(new CashierSessionDto(
+            "1042", "guid-1042", "Alice", "S001", "POS-01", [], [], ["S001"], false, false, false));
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cashierSessionContext: context);
+        var now = DateTimeOffset.Parse("2026-10-29T11:00:00Z");
+        DateTimeOffset restartAt = new DateTime(2026, 10, 30, 3, 0, 0, DateTimeKind.Local);
+
+        var delay = viewModel.ScheduleAutoLogoutAfterDailyClose(restartAt, now);
+
+        Assert.Equal(TimeSpan.FromSeconds(30), delay);
+        Assert.Equal("Daily close done. Signing out automatically in 30 seconds.", viewModel.StatusMessage);
+
+        await viewModel.AutoLogoutAfterDailyCloseIfDueAsync(now.AddSeconds(10));
+        Assert.NotNull(context.CurrentSession);
+
+        await viewModel.AutoLogoutAfterDailyCloseIfDueAsync(now.AddSeconds(30));
+        Assert.Null(context.CurrentSession);
+        Assert.Null(viewModel.Session.CashierSession);
+        Assert.Equal(string.Empty, viewModel.Session.CashierId);
+        Assert.Equal(
+            "Daily close done. Signed out automatically. The computer will restart automatically at 03:00.",
+            viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public void Daily_close_auto_logout_is_not_scheduled_without_a_cashier()
+    {
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cashierSessionContext: new CashierSessionContext());
+
+        Assert.Null(viewModel.ScheduleAutoLogoutAfterDailyClose(null, DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -7191,9 +7270,7 @@ public sealed class MainViewModelScannerTests
         Assert.True(viewModel.CardRecoveryResultDialog.CanPrintReceipt);
         Assert.Equal("Print receipt", viewModel.CardRecoveryResultDialog.PrintButtonText);
         Assert.True(viewModel.CardRecoveryResultDialog.HasReceiptPreview);
-        Assert.Equal(
-            order.OrderGuid.ToString("D"),
-            Assert.Single(viewModel.CardRecoveryResultDialog.ReceiptPreviewRows, row => row.IsQrCode).QrCodeValue);
+        Assert.DoesNotContain(viewModel.CardRecoveryResultDialog.ReceiptPreviewRows, row => row.IsQrCode);
 
         await viewModel.PrintRecoveredReceiptCommand.ExecuteAsync(null);
         await WaitUntilAsync(() => printService.Calls.Count == 2);

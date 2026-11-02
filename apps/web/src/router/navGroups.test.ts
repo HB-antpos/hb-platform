@@ -68,8 +68,8 @@ for (const group of NAV_GROUPS) {
   }
 }
 
-// 敏感页面不保活；MYOB 对接授权回跳带 ?myob= 参数，必须按新进入重新加载，同样不保活
-const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match', '/pos-admin/myob']
+// 敏感页面不保活；MYOB 对接授权回跳带 ?myob= 参数，必须按新进入重新加载，同样不保活；工资单含薪资，离开页签即丢掉内存里的数据，也不保活
+const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match', '/pos-admin/myob', '/pos-admin/payslips']
 for (const group of NAV_GROUPS) {
   for (const tab of group.tabs) {
     assert(tab.keepAlive === !sensitivePaths.includes(tab.path), `${tab.path} 保活设置与原路由一致`)
@@ -118,11 +118,12 @@ assert(
   '排班考勤标签：排班查看或审核任一即可进入',
 )
 assert(
-  payrollGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/attendance-payroll,/pos-admin/myob',
-  '工时与工资合并页含工时与工资、MYOB 对接',
+  payrollGroup.tabs.map((tab) => tab.path).join(',') === '/pos-admin/attendance-payroll,/pos-admin/payslips,/pos-admin/myob',
+  '工时与工资合并页含工时与工资、工资单、MYOB 对接（顺序与设计图一致）',
 )
+assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/payslips')?.keepAlive === false, '工资单含薪资，不保活')
 assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/myob')?.keepAlive === false, 'MYOB 授权回跳要按新进入加载，不保活')
-for (const path of ['/pos-admin/attendance-review', '/pos-admin/myob']) {
+for (const path of ['/pos-admin/attendance-review', '/pos-admin/myob', '/pos-admin/payslips']) {
   assert(!adminMenuKeys.includes(path), `${path} 不再单独出现在侧栏`)
 }
 // 只有审核权限：仍显示「排班考勤」合并页并能进入唯一的标签（页内只会显示「考勤审核」子标签），不能因合并丢入口
@@ -152,6 +153,19 @@ assert(
   getVisibleNavGroupTabs(payrollGroup, myobOnly).map((tab) => tab.path).join(',') === '/pos-admin/myob',
   'MYOB 权限只看到 MYOB 对接标签',
 )
+// 只有工资单权限：同样只显示「工时与工资」合并页，且只剩「工资单」一个标签（不连带工时与工资、MYOB 对接）
+const payslipOnly = buildAccess(createUser([P.Myob.PayslipViewManagedStore]))
+assert(collectMenuKeys(buildMenus(payslipOnly)).includes('/pos-admin/payroll'), '工资单权限显示工时与工资合并页')
+assert(
+  getVisibleNavGroupTabs(payrollGroup, payslipOnly).map((tab) => tab.path).join(',') === '/pos-admin/payslips',
+  '工资单权限只看到工资单标签',
+)
+assert(
+  getVisibleNavGroupTabs(payrollGroup, myobOnly).every((tab) => tab.path !== '/pos-admin/payslips'),
+  'MYOB 连接权限不连带工资单标签',
+)
+assert(getBreadcrumbItems('/pos-admin/payslips', admin).length === 3, '工资单面包屑含合并页与标签')
+assert(getSelectedMenuKeys('/pos-admin/payslips', admin).join(',') === '/pos-admin/payroll', '工资单侧栏高亮工时与工资')
 // 面包屑：首个标签与合并页同名时只保留一级；其余标签仍是「父菜单 / 合并页 / 当前标签」
 assert(getBreadcrumbItems('/pos-admin/schedule-attendance', admin).length === 2, '同名标签不重复面包屑')
 assert(getBreadcrumbItems('/pos-admin/myob', admin).length === 3, 'MYOB 对接面包屑含合并页与标签')

@@ -47,6 +47,7 @@ import {
 } from "./detail-rules";
 import { DetailScaffold } from "./detail-scaffold";
 import { DetailAppBar, DetailStateScreen, detailStyles } from "./detail-ui";
+import { MinorGuardianSection } from "./minor-guardian-section";
 import { MoreActionsSheet, type MoreRowModel } from "./more-actions-sheet";
 import { ConfirmDialog } from "./people-sheet";
 import { PersonHeader } from "./person-header";
@@ -606,6 +607,9 @@ export function StorePersonDetail({
 
       {/* 个人信息（员工个人信息维护）入口：四个条件由 resolveDetailPermissions 统一判断，不满足整行隐藏。 */}
       {permissions.canOpenProfile ? <ManagedProfileEntry userGuid={userGuid} /> : null}
+
+      {/* 未成年用工合规：只对未满 18 岁的员工显示，由店长 / HR 给家长发送签字链接（员工本人不再操作）。 */}
+      <MinorGuardianSection userGuid={userGuid} onMessage={setSnackbar} />
 
       {scheduleEntries.length ? (
         <>

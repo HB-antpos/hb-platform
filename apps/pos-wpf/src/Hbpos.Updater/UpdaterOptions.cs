@@ -15,6 +15,11 @@ internal sealed record UpdaterOptions
     public const string ToVersionOption = "--to";
     public const string CultureOption = "--culture";
     public const string LogOption = "--log";
+    public const string DownloadUrlOption = "--download-url";
+    public const string Sha256Option = "--sha256";
+    public const string FileSizeOption = "--file-size";
+    public const string UnattendedOption = "--unattended";
+    public const string AgentOnlyOption = "--agent-only";
 
     public required string InstallerPath { get; init; }
 
@@ -31,6 +36,19 @@ internal sealed record UpdaterOptions
     public string Culture { get; init; } = "en";
 
     public string? LogPath { get; init; }
+
+    // 中文注释：下面三项是发布合同里的下载地址、SHA256 和大小，供管理员更新代理自己重新下载核对；缺任何一项就不走代理。
+    public string? DownloadUrl { get; init; }
+
+    public string? Sha256 { get; init; }
+
+    public long? FileSize { get; init; }
+
+    // 中文注释：夜间无人值守安装：失败时不能停在需要人点的失败页，也不能退回会弹 UAC 的直接安装。
+    public bool Unattended { get; init; }
+
+    // 中文注释：只能靠管理员更新代理安装：代理不可用、拒绝请求或没响应时直接失败，绝不退回会弹 UAC 的直接运行安装器。
+    public bool AgentOnly { get; init; }
 
     public static bool TryParse(IReadOnlyList<string> args, out UpdaterOptions? options)
     {
@@ -57,9 +75,21 @@ internal sealed record UpdaterOptions
             FromVersion = Normalize(values.GetValueOrDefault(FromVersionOption)),
             ToVersion = Normalize(values.GetValueOrDefault(ToVersionOption)),
             Culture = Normalize(values.GetValueOrDefault(CultureOption)) ?? "en",
-            LogPath = Normalize(values.GetValueOrDefault(LogOption))
+            LogPath = Normalize(values.GetValueOrDefault(LogOption)),
+            DownloadUrl = Normalize(values.GetValueOrDefault(DownloadUrlOption)),
+            Sha256 = Normalize(values.GetValueOrDefault(Sha256Option)),
+            FileSize = ParseFileSize(values.GetValueOrDefault(FileSizeOption)),
+            Unattended = string.Equals(Normalize(values.GetValueOrDefault(UnattendedOption)), "1", StringComparison.Ordinal),
+            AgentOnly = string.Equals(Normalize(values.GetValueOrDefault(AgentOnlyOption)), "1", StringComparison.Ordinal)
         };
         return true;
+    }
+
+    private static long? ParseFileSize(string? value)
+    {
+        return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var fileSize) && fileSize > 0
+            ? fileSize
+            : null;
     }
 
     private static int? ParseProcessId(string? value)

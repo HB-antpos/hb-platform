@@ -7,19 +7,27 @@ using Hbpos.Client.Wpf.Services;
 
 namespace Hbpos.Client.Wpf.ViewModels;
 
-/// <summary>标题栏的配色切换菜单：只负责展示选项与转发选择，切换与保存由 IColorThemeService 完成。</summary>
+/// <summary>
+/// 标题栏的配色切换菜单：只负责展示选项与转发选择，切换与保存由 IColorThemeService 完成；
+/// 有收银员登录时经 CashierColorThemePreferenceService 同时记为该员工的偏好。
+/// </summary>
 public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
 {
     private readonly IColorThemeService _colorThemeService;
     private readonly ILocalizationService _localization;
+    private readonly CashierColorThemePreferenceService? _cashierPreferences;
 
     [ObservableProperty]
     private bool _isMenuOpen;
 
-    public ColorThemeSwitcherViewModel(IColorThemeService colorThemeService, ILocalizationService localization)
+    public ColorThemeSwitcherViewModel(
+        IColorThemeService colorThemeService,
+        ILocalizationService localization,
+        CashierColorThemePreferenceService? cashierPreferences = null)
     {
         _colorThemeService = colorThemeService;
         _localization = localization;
+        _cashierPreferences = cashierPreferences;
         Options = new ObservableCollection<ColorThemeOption>(
             Definitions.Select(definition => new ColorThemeOption(definition.Theme, definition.Swatches)));
         SelectCommand = new AsyncRelayCommand<PosColorTheme>(SelectAsync);
@@ -35,12 +43,18 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
 
     public string MenuTitle { get; private set; } = string.Empty;
 
+    // 标题栏按钮上显示的当前配色名称。
+    public string CurrentThemeName => Options.FirstOrDefault(option => option.IsSelected)?.Name ?? string.Empty;
+
     // 预览色块：背景、主色、重点金额，与 Themes/Palettes 中的色板一致。
     internal static IReadOnlyList<(PosColorTheme Theme, string[] Swatches)> Definitions { get; } =
     [
         (PosColorTheme.Blue, ["#FFF3F5F8", "#FF0B5ED7", "#FFF59E0B"]),
-        (PosColorTheme.Default, ["#FFF3F3F7", "#FF0056D2", "#FFFF8F00"]),
-        (PosColorTheme.Paper, ["#FFEDE9E1", "#FF1E5E59", "#FFAE4519"]),
+        // 彩色主题：背景、主色、第三块取该主题最有代表性的点缀色（键盘区 / 功能键）
+        (PosColorTheme.Candy, ["#FFF4F2FF", "#FF7C3AED", "#FFEA580C"]),
+        (PosColorTheme.Sunny, ["#FFFFF8EC", "#FFC2410C", "#FF0F766E"]),
+        (PosColorTheme.Ocean, ["#FFEEFAFC", "#FF0E7490", "#FFE11D48"]),
+        (PosColorTheme.Rainbow, ["#FFF5F8FF", "#FF1D4ED8", "#FF7C3AED"]),
         (PosColorTheme.Graphite, ["#FF14171B", "#FF2F76B8", "#FFEFC05A"]),
         (PosColorTheme.Celadon, ["#FFE1E8E3", "#FF245A74", "#FFF0E2A2"]),
         // 长者模式：购物车灰白、深蓝、支付绿
@@ -50,7 +64,13 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
     private async Task SelectAsync(PosColorTheme theme)
     {
         IsMenuOpen = false;
-        await _colorThemeService.SelectAsync(theme);
+        if (_cashierPreferences is null)
+        {
+            await _colorThemeService.SelectAsync(theme);
+            return;
+        }
+
+        await _cashierPreferences.SelectForCurrentCashierAsync(theme);
     }
 
     private void RefreshSelection()
@@ -59,6 +79,8 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
         {
             option.IsSelected = option.Theme == _colorThemeService.Current;
         }
+
+        OnPropertyChanged(nameof(CurrentThemeName));
     }
 
     private void RefreshText()
@@ -71,6 +93,8 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
             option.Name = _localization.T(key);
             option.Hint = _localization.T(key + ".hint");
         }
+
+        OnPropertyChanged(nameof(CurrentThemeName));
     }
 }
 

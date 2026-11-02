@@ -299,6 +299,8 @@ namespace BlazorApp.Api.Controllers
                     );
                 }
 
+                // 新建员工：生日、邮箱、电话必填；未满 18 岁时监护人四项必填（服务在权限检查之后校验）。批量导入等内部流程不走这里。
+                dto.RequireNewStaffProfile = true;
                 var result = await _userService.CreateUserAsync(dto);
                 return ToUserAccessActionResult(result);
             }

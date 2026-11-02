@@ -636,6 +636,29 @@ namespace BlazorApp.Shared.Constants
                 /// <summary>员工绑定：把我方员工与 MYOB 员工卡配对、解除绑定、忽略名单。</summary>
                 public const string Bind = "Myob.Employee.Bind";
             }
+
+            // 历史工资单（只读）：含薪资等敏感信息，默认不授予任何角色，由管理员在生产手动授权。
+            public static class Payslip
+            {
+                /// <summary>查看管辖分店员工的历史工资单：按 ICurrentUserManageableStoreScopeService 的范围过滤（店长）。</summary>
+                public const string ViewManagedStore = "Myob.Payslip.ViewManagedStore";
+
+                /// <summary>查看全部分店、全部公司文件的历史工资单，含「未绑定 / 无法确定分店」的工资单（财务 / 管理员）。</summary>
+                public const string ViewAllStores = "Myob.Payslip.ViewAllStores";
+
+                /// <summary>下载 MYOB 默认样式的工资单 PDF（须同时具备上面任一查看权限；下载会写查看记录）。</summary>
+                public const string Download = "Myob.Payslip.Download";
+
+                /// <summary>把工资单 PDF 以邮件发给员工（须同时具备上面任一查看权限；发送会写查看记录，含收件邮箱）。</summary>
+                public const string Email = "Myob.Payslip.Email";
+            }
+
+            // Timesheet 推送：会写 MYOB 的生产数据，默认不授予任何角色（含店长），由管理员在生产手动授权给财务账号。
+            public static class Timesheet
+            {
+                /// <summary>把工资周期的转账工时推送到 MYOB Timesheet，并撤销已推送的批次（预览仍用 Attendance.Payroll.Edit）。</summary>
+                public const string Push = "Myob.Timesheet.Push";
+            }
         }
 
         public static class SeasonalCards

@@ -1,0 +1,257 @@
+﻿<!-- 由色板总表生成，各套主题的键必须完全一致。糖果紫：淡紫底、深靛字、亮紫主色，键盘区天蓝、功能区淡粉，功能键白底彩色图标。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <sys:String x:Key="PosPaletteId">Candy</sys:String>
+    <sys:Boolean x:Key="PosPaletteIsDark">False</sys:Boolean>
+    <Color x:Key="PosPaletteMaterialPrimaryColor">#FF7C3AED</Color>
+
+    <!-- 整屏背景 -->
+    <SolidColorBrush x:Key="PosScreenBackgroundBrush" Color="#FFF4F2FF" />
+    <!-- 卡片/面板 -->
+    <SolidColorBrush x:Key="PosSurfaceBrush" Color="#FFFFFFFF" />
+    <!-- 次级面板/交替行 -->
+    <SolidColorBrush x:Key="PosSurfaceAltBrush" Color="#FFFAF8FF" />
+    <!-- 浅灰底（输入区、分组底） -->
+    <SolidColorBrush x:Key="PosSurfaceMutedBrush" Color="#FFF3F0FF" />
+    <!-- 较深灰底（按下、禁用块） -->
+    <SolidColorBrush x:Key="PosSurfaceStrongBrush" Color="#FFE4DEFA" />
+    <!-- 深色提示底（配白字） -->
+    <SolidColorBrush x:Key="PosInverseSurfaceBrush" Color="#FF1E1B4B" />
+    <!-- 分隔线/浅描边 -->
+    <SolidColorBrush x:Key="PosDividerBrush" Color="#FFE9E4FB" />
+    <!-- 描边 -->
+    <SolidColorBrush x:Key="PosBorderBrush" Color="#FFD4CCF5" />
+    <!-- 深描边/滚动条 -->
+    <SolidColorBrush x:Key="PosBorderStrongBrush" Color="#FFA99BE0" />
+    <!-- 正文 -->
+    <SolidColorBrush x:Key="PosTextBrush" Color="#FF1E1B4B" />
+    <!-- 次级正文 -->
+    <SolidColorBrush x:Key="PosTextSecondaryBrush" Color="#FF3F3A6B" />
+    <!-- 次要文字 -->
+    <SolidColorBrush x:Key="PosMutedForegroundBrush" Color="#FF5F5A85" />
+    <!-- 占位/弱提示文字 -->
+    <SolidColorBrush x:Key="PosSubtleForegroundBrush" Color="#FF9C96C0" />
+    <!-- 功能图标 -->
+    <SolidColorBrush x:Key="PosIconBrush" Color="#FF5B21B6" />
+    <!-- 侧栏功能图标 -->
+    <SolidColorBrush x:Key="PosSidebarIconBrush" Color="#FF7C3AED" />
+    <!-- 侧栏退款图标 -->
+    <SolidColorBrush x:Key="PosSidebarRefundIconBrush" Color="#FFE11D48" />
+    <!-- 侧栏挂单图标 -->
+    <SolidColorBrush x:Key="PosSidebarHoldIconBrush" Color="#FFEA580C" />
+    <!-- 主色填充/描边（配白字） -->
+    <SolidColorBrush x:Key="PosPrimaryBrush" Color="#FF7C3AED" />
+    <!-- 主色按下 -->
+    <SolidColorBrush x:Key="PosPrimaryStrongBrush" Color="#FF6D28D9" />
+    <!-- 主色文字/图标 -->
+    <SolidColorBrush x:Key="PosPrimaryTextBrush" Color="#FF6D28D9" />
+    <!-- 选中/主色浅底 -->
+    <SolidColorBrush x:Key="PosPrimarySoftBrush" Color="#FFF1EBFF" />
+    <!-- 主色浅底（悬停/按下） -->
+    <SolidColorBrush x:Key="PosPrimarySoftStrongBrush" Color="#FFE4D9FF" />
+    <!-- 主色浅描边 -->
+    <SolidColorBrush x:Key="PosPrimarySoftBorderBrush" Color="#FFD3C2FD" />
+    <!-- 主色按钮禁用底（配白字） -->
+    <SolidColorBrush x:Key="PosPrimaryDisabledBrush" Color="#FFC4B0F5" />
+    <!-- 标题文字 -->
+    <SolidColorBrush x:Key="PosPrimaryDarkBrush" Color="#FF2E1065" />
+    <!-- 重点金额 -->
+    <SolidColorBrush x:Key="PosAccentBrush" Color="#FFF97316" />
+    <!-- 重点金额文字 -->
+    <SolidColorBrush x:Key="PosAccentForegroundBrush" Color="#FFEA580C" />
+    <!-- 应付合计底色（荧光笔） -->
+    <SolidColorBrush x:Key="PosAmountSoftBrush" Color="#00FFFFFF" />
+    <!-- 成功填充（配白字） -->
+    <SolidColorBrush x:Key="PosSuccessBrush" Color="#FF15803D" />
+    <!-- 成功文字 -->
+    <SolidColorBrush x:Key="PosSuccessTextBrush" Color="#FF15803D" />
+    <!-- 成功浅底 -->
+    <SolidColorBrush x:Key="PosSuccessSoftBrush" Color="#FFE9F9EE" />
+    <!-- 成功描边 -->
+    <SolidColorBrush x:Key="PosSuccessBorderBrush" Color="#FFA7E3BC" />
+    <!-- 警告填充 -->
+    <SolidColorBrush x:Key="PosWarningBrush" Color="#FFF59E0B" />
+    <!-- 警告文字 -->
+    <SolidColorBrush x:Key="PosWarningTextBrush" Color="#FF92400E" />
+    <!-- 警告强调填充（配白字） -->
+    <SolidColorBrush x:Key="PosWarningStrongBrush" Color="#FFB45309" />
+    <!-- 警告浅底 -->
+    <SolidColorBrush x:Key="PosWarningSoftBrush" Color="#FFFFF6E0" />
+    <!-- 警告描边 -->
+    <SolidColorBrush x:Key="PosWarningBorderBrush" Color="#FFFBD38D" />
+    <!-- 危险填充（配白字） -->
+    <SolidColorBrush x:Key="PosDangerBrush" Color="#FFE11D48" />
+    <!-- 危险文字 -->
+    <SolidColorBrush x:Key="PosDangerTextBrush" Color="#FFBE123C" />
+    <!-- 危险浅底 -->
+    <SolidColorBrush x:Key="PosDangerSoftBrush" Color="#FFFFE8EC" />
+    <!-- 危险描边 -->
+    <SolidColorBrush x:Key="PosDangerBorderBrush" Color="#FFFDB4C2" />
+    <!-- 标题栏背景 -->
+    <SolidColorBrush x:Key="PosHeaderBackgroundBrush" Color="#FF6D28D9" />
+    <!-- 标题栏文字 -->
+    <SolidColorBrush x:Key="PosHeaderForegroundBrush" Color="#FFFFFFFF" />
+    <!-- 标题栏次要文字 -->
+    <SolidColorBrush x:Key="PosHeaderMutedForegroundBrush" Color="#FFE9DDFF" />
+    <!-- 标题栏下沿线 -->
+    <SolidColorBrush x:Key="PosHeaderBorderBrush" Color="#FF5B21B6" />
+    <!-- 标题栏内的竖分隔线 -->
+    <SolidColorBrush x:Key="PosHeaderDividerBrush" Color="#FFA78BFA" />
+    <!-- 标题栏按钮悬停底色 -->
+    <SolidColorBrush x:Key="PosHeaderHoverBrush" Color="#26000000" />
+    <!-- 标题栏按钮按下底色 -->
+    <SolidColorBrush x:Key="PosHeaderPressedBrush" Color="#40000000" />
+    <!-- 标题栏功能图标（配色切换、客显按钮） -->
+    <SolidColorBrush x:Key="PosHeaderIconBrush" Color="#FFEDE9FE" />
+    <!-- 标题栏门店图标 -->
+    <SolidColorBrush x:Key="PosHeaderAccentBrush" Color="#FFFBCFE8" />
+    <!-- 状态栏背景 -->
+    <SolidColorBrush x:Key="PosFooterBackgroundBrush" Color="#FFFFFFFF" />
+
+    <!-- ── 长者模式/支付方式/快捷金额新增语义键：旧主题取值＝改动前的等效色，视觉不变 ── -->
+    <!-- 首页购物车区底色 -->
+    <SolidColorBrush x:Key="PosZoneCartBrush" Color="#FFF4F2FF" />
+    <!-- 首页键盘区底色 -->
+    <SolidColorBrush x:Key="PosZoneKeypadBrush" Color="#FFE0F2FE" />
+    <!-- 首页功能区底色 -->
+    <SolidColorBrush x:Key="PosZoneFuncBrush" Color="#FFFDF4FF" />
+    <!-- 首页分区竖线 -->
+    <SolidColorBrush x:Key="PosZoneDividerBrush" Color="#FFD8CCF8" />
+    <!-- 键/按钮/卡片描边（原 PosBorderBrush 用法） -->
+    <SolidColorBrush x:Key="PosKeyBorderBrush" Color="#FFC7D2FE" />
+    <!-- 卡片浅描边（原 PosDividerBrush 用法） -->
+    <SolidColorBrush x:Key="PosCardBorderBrush" Color="#FFE4DEFA" />
+    <!-- 键帽底部投影色 -->
+    <SolidColorBrush x:Key="PosKeyShadowBrush" Color="#FFB9C3F7" />
+    <!-- 购物车表头底色 -->
+    <SolidColorBrush x:Key="PosCartHeaderBrush" Color="#FFEDE9FE" />
+    <!-- 购物车斑马纹 -->
+    <SolidColorBrush x:Key="PosCartAltRowBrush" Color="#FFFAF8FF" />
+    <!-- 购物车选中行底色 -->
+    <SolidColorBrush x:Key="PosCartSelectedRowBrush" Color="#FFC4B5FD" />
+    <!-- 购物车选中行左侧色条（深色主题需比主色更亮才醒目） -->
+    <SolidColorBrush x:Key="PosCartSelectedBarBrush" Color="#FF6D28D9" />
+    <!-- 购物车选中的退货/零价行底色（保留红色语义，比普通退货行略深） -->
+    <SolidColorBrush x:Key="PosCartSelectedDangerRowBrush" Color="#FFFCDCE2" />
+    <!-- 购物车应付合计金额色 -->
+    <SolidColorBrush x:Key="PosDueAmountBrush" Color="#FFEA580C" />
+    <!-- 首页 Clear 键底色 -->
+    <SolidColorBrush x:Key="PosClearKeyBrush" Color="#FFFFE4E6" />
+    <!-- 无条码按钮底色 -->
+    <SolidColorBrush x:Key="PosNoBarcodeBrush" Color="#FFC2410C" />
+    <!-- 无条码按钮文字色 -->
+    <SolidColorBrush x:Key="PosNoBarcodeForegroundBrush" Color="#FFFFFFFF" />
+    <!-- 无条码按钮按下底色 -->
+    <SolidColorBrush x:Key="PosNoBarcodePressedBrush" Color="#FF9A3412" />
+    <!-- 无条码按钮禁用底色 -->
+    <SolidColorBrush x:Key="PosNoBarcodeDisabledBrush" Color="#FFEDE9F6" />
+    <!-- 功能区按钮底色 -->
+    <SolidColorBrush x:Key="PosSidebarButtonBrush" Color="#FFFFFFFF" />
+    <!-- 功能区按钮文字色 -->
+    <SolidColorBrush x:Key="PosSidebarButtonForegroundBrush" Color="#FF1E1B4B" />
+    <!-- 功能区按钮悬停底色 -->
+    <SolidColorBrush x:Key="PosSidebarButtonHoverBrush" Color="#FFF5F3FF" />
+    <!-- 功能区按钮按下底色 -->
+    <SolidColorBrush x:Key="PosSidebarButtonPressedBrush" Color="#FFEDE9FE" />
+    <!-- 功能区退出按钮底色 -->
+    <SolidColorBrush x:Key="PosSidebarExitButtonBrush" Color="#FFFFFFFF" />
+    <!-- 功能区退出按钮文字/图标色 -->
+    <SolidColorBrush x:Key="PosSidebarExitForegroundBrush" Color="#FFDC2626" />
+    <!-- 功能区退出按钮悬停底色 -->
+    <SolidColorBrush x:Key="PosSidebarExitHoverBrush" Color="#FFF5F3FF" />
+    <!-- 功能区退出按钮按下底色 -->
+    <SolidColorBrush x:Key="PosSidebarExitPressedBrush" Color="#FFEDE9FE" />
+    <!-- 确认支付按钮底色 -->
+    <SolidColorBrush x:Key="PosConfirmPaymentBrush" Color="#FF15803D" />
+    <!-- 确认支付按钮底部厚阴影色 -->
+    <SolidColorBrush x:Key="PosConfirmPaymentShadowBrush" Color="#FF166534" />
+    <!-- 支付页取消按钮底色 -->
+    <SolidColorBrush x:Key="PosCancelButtonBrush" Color="#FFFFFFFF" />
+    <!-- 支付页取消按钮文字色 -->
+    <SolidColorBrush x:Key="PosCancelButtonForegroundBrush" Color="#FF1E1B4B" />
+    <!-- 待付/应付金额强调色 -->
+    <SolidColorBrush x:Key="PosAmountEmphasisBrush" Color="#FF6D28D9" />
+    <!-- 找零块底色 -->
+    <SolidColorBrush x:Key="PosChangeDueBackgroundBrush" Color="#FFDCFCE7" />
+    <!-- 找零文字色 -->
+    <SolidColorBrush x:Key="PosChangeDueForegroundBrush" Color="#FF15803D" />
+    <!-- 购物车加量按钮底色 -->
+    <SolidColorBrush x:Key="PosQtyPlusBrush" Color="#FFDCFCE7" />
+    <!-- 购物车加量按钮文字/图标色 -->
+    <SolidColorBrush x:Key="PosQtyPlusForegroundBrush" Color="#FF15803D" />
+    <!-- 10%–50% 折扣键文字色 -->
+    <SolidColorBrush x:Key="PosDiscountKeyForegroundBrush" Color="#FFBE185D" />
+    <!-- 折扣条分段竖线 -->
+    <SolidColorBrush x:Key="PosSegmentSeparatorBrush" Color="#FFF9A8D4" />
+    <!-- 屏幕键盘 / 搜索候选弹层的描边（旧主题＝PosDividerBrush；长者主题内容区无描边，但浮层必须有边界） -->
+    <SolidColorBrush x:Key="PosPopupBorderBrush" Color="#FFD4CCF5" />
+    <!-- 功能区警示键底色（刷卡恢复有待处理卡交易时） -->
+    <SolidColorBrush x:Key="PosSidebarWarnButtonBrush" Color="#FFFFF6E0" />
+    <!-- 功能区警示键文字/图标色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnForegroundBrush" Color="#FF92400E" />
+    <!-- 功能区警示键描边色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnBorderBrush" Color="#FFF59E0B" />
+    <!-- 功能区警示键悬停底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnHoverBrush" Color="#FFFFF6E0" />
+    <!-- 功能区警示键按下底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnPressedBrush" Color="#FFFBD38D" />
+    <!-- 功能区按钮角标底色（挂单数量、二维码秒数） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeBrush" Color="#FF7C3AED" />
+    <!-- 功能区按钮角标文字色 -->
+    <SolidColorBrush x:Key="PosSidebarBadgeForegroundBrush" Color="#FFFFFFFF" />
+    <!-- 功能区警示角标底色（待处理卡交易数量，白字） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeAlertBrush" Color="#FFE11D48" />
+    <!-- Open Item（原 No Barcode）按钮禁用时的文字色：与禁用底色配成「灰块灰字」，明显区别于可用态 -->
+    <SolidColorBrush x:Key="PosNoBarcodeDisabledForegroundBrush" Color="#FF5F5A85" />
+    <!-- 支付方式语义色：现金=琥珀棕、刷卡=深蓝、代金券=紫；Fill 选中实心 / On 实心上的字 / Soft 未选浅块 / Ink 浅块上的字与图标 -->
+    <SolidColorBrush x:Key="PosMethodCashFillBrush" Color="#FFC2410C" />
+    <SolidColorBrush x:Key="PosMethodCashOnBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosMethodCashSoftBrush" Color="#FFFFF1E6" />
+    <SolidColorBrush x:Key="PosMethodCashTileBrush" Color="#FFFED7AA" />
+    <SolidColorBrush x:Key="PosMethodCashInkBrush" Color="#FF9A3412" />
+    <SolidColorBrush x:Key="PosMethodCardFillBrush" Color="#FF7C3AED" />
+    <SolidColorBrush x:Key="PosMethodCardOnBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosMethodCardSoftBrush" Color="#FFF1EBFF" />
+    <SolidColorBrush x:Key="PosMethodCardTileBrush" Color="#FFDDD6FE" />
+    <SolidColorBrush x:Key="PosMethodCardInkBrush" Color="#FF5B21B6" />
+    <SolidColorBrush x:Key="PosMethodVoucherFillBrush" Color="#FFBE185D" />
+    <SolidColorBrush x:Key="PosMethodVoucherOnBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosMethodVoucherSoftBrush" Color="#FFFDF2F8" />
+    <SolidColorBrush x:Key="PosMethodVoucherTileBrush" Color="#FFFBCFE8" />
+    <SolidColorBrush x:Key="PosMethodVoucherInkBrush" Color="#FF9D174D" />
+    <!-- 快捷现金面额色（澳元面额主色的 UI 自定义色，不取样自纸币）：Fill 底色 / Text 数字色 -->
+    <SolidColorBrush x:Key="PosNote100FillBrush" Color="#FF2F9E6D" />
+    <SolidColorBrush x:Key="PosNote100TextBrush" Color="#FF0B1220" />
+    <SolidColorBrush x:Key="PosNote50FillBrush" Color="#FFF2C94C" />
+    <SolidColorBrush x:Key="PosNote50TextBrush" Color="#FF2E1500" />
+    <SolidColorBrush x:Key="PosNote20FillBrush" Color="#FFCF3F1B" />
+    <SolidColorBrush x:Key="PosNote20TextBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosNote10FillBrush" Color="#FF2E6BB8" />
+    <SolidColorBrush x:Key="PosNote10TextBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosNote5FillBrush" Color="#FFA8408F" />
+    <SolidColorBrush x:Key="PosNote5TextBrush" Color="#FFFFFFFF" />
+
+    <!-- 功能区逐键底色（彩色主题每个功能键一种颜色；其它主题取值＝功能键底色 PosSidebarButtonBrush，外观不变） -->
+    <SolidColorBrush x:Key="PosSidebarTileSpecialBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileRefundBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileHoldBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileRecallBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileDrawerBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileReceiptBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileLockBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileDailyCloseBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileCardRecoveryBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileAttendanceBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PosSidebarTileSettingsBrush" Color="#FFFFFFFF" />
+
+    <LinearGradientBrush x:Key="PosPrimaryGradientBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF8B5CF6" Offset="0" />
+        <GradientStop Color="#FF7C3AED" Offset="0.55" />
+        <GradientStop Color="#FF6D28D9" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="PosPayButtonGradientBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#FF22C55E" Offset="0" />
+        <GradientStop Color="#FF15803D" Offset="1" />
+    </LinearGradientBrush>
+</ResourceDictionary>

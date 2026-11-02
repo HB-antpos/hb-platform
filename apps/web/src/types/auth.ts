@@ -143,8 +143,14 @@ export interface AccessControl {
   canManageMyobConnections: boolean
   /** MYOB 对接页「员工绑定」页签：独立权限 Myob.Employee.Bind。 */
   canBindMyobEmployees: boolean
+  /** 「推送与对账」页签的推送 / 撤销 / 推送记录：独立权限 Myob.Timesheet.Push（会写 MYOB 生产数据；预览仍只需编辑工资）。 */
+  canPushMyobTimesheet: boolean
   /** MYOB 对接页入口：连接管理 / 员工绑定 / 编辑工资（发薪公司页签）三者任一；页内各页签再按各自权限显示。 */
   canAccessMyob: boolean
+  /** 「工时与工资」页面的「工资单」页签：Myob.Payslip.ViewManagedStore / ViewAllStores 任一（范围由后端按权限与管辖分店裁剪）。 */
+  canViewMyobPayslips: boolean
+  /** 工资单「全部分店」口径（只认 Myob.Payslip.ViewAllStores）：决定是否显示未归属入口、分店下拉是否不限分店。 */
+  canViewAllMyobPayslips: boolean
   /** 人脸比对页：FaceMatch.* 五个权限码任一（页签再按各自权限显示）。 */
   canAccessFaceMatch: boolean
   canManageScheduledTasks: boolean

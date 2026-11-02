@@ -341,6 +341,13 @@ public static class ServiceRegistration
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        services.AddHttpClient<ICashierPreferenceApiClient, CashierPreferenceApiClient>(client =>
+        {
+            client.BaseAddress = initialApiAddress;
+            client.Timeout = CashierPreferenceApiClient.RequestTimeout;
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
         services.AddHttpClient<IAdvertisementApiClient, AdvertisementApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
@@ -460,6 +467,8 @@ public static class ServiceRegistration
             AppUpdateProgressWindowOptions.CreateDefault()));
         services.AddSingleton<IAppUpdateInstallerLauncher, AppUpdateInstallerLauncher>();
         services.AddSingleton<IAppUpdatePromptService, WpfAppUpdatePromptService>();
+        services.AddSingleton(sp => AppUpdatePostponeOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<IAppUpdateCoordinator, AppUpdateCoordinator>();
         services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
@@ -506,6 +515,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<DeviceAuthorizationState>(),
             entryPreference: sp.GetRequiredService<IApiEntryPreferenceService>()));
         services.AddSingleton<IReceiptTextFormatter, ReceiptTextFormatter>();
+        // 中文注释：位图条码输出口暂为「不可用」默认实现（SDK 位图函数签名未验证），原生条码失败时降级为文字单号。
+        services.AddSingleton<IReceiptBitmapSink>(UnavailableReceiptBitmapSink.Instance);
         services.AddSingleton<IReceiptPrinterDriver, XpReceiptPrinterDriver>();
         services.AddSingleton<IReceiptPrintService, ReceiptPrintService>();
         services.AddSingleton<ILinklyBankReceiptPrinter, LinklyBankReceiptPrinter>();
@@ -709,7 +720,9 @@ public static class ServiceRegistration
                 () => sp.GetRequiredService<IShellCatalogService>().IsCatalogSyncActive));
         services.AddSingleton<IDisplayTopologyService, DisplayTopologyService>();
         services.AddSingleton<IColorThemeService, ColorThemeService>();
+        services.AddSingleton<CashierColorThemePreferenceService>();
         services.AddSingleton<ColorThemeSwitcherViewModel>();
+        services.AddSingleton<ColorThemeOnboardingViewModel>();
         services.AddSingleton<IWindowOwnerProvider, WpfWindowOwnerProvider>();
         services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
@@ -811,6 +824,7 @@ public static class ServiceRegistration
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
+            viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

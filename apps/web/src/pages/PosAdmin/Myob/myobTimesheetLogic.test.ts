@@ -81,21 +81,23 @@ function categories(overrides: Record<string, unknown> = {}): MyobPayCategories 
 
 assert.deepEqual(
   [...PAY_CATEGORY_KEYS],
-  ['weekday', 'saturday', 'sunday', 'saturdayCasual', 'sundayCasual', 'personalLeave', 'holidayLeave'],
-  '7 个键：全职 / 兼职的周六周日 + 临时工的周六周日（可选）',
+  ['weekday', 'saturday', 'sunday', 'saturdayCasual', 'sundayCasual', 'publicHoliday', 'publicHolidayCasual', 'personalLeave', 'holidayLeave'],
+  '9 个键：全职 / 兼职的周六周日 + 临时工的周六周日 + 公共假期（全职兼职 / 临时工各一项，均可选）',
 )
-assert.deepEqual(PAY_CATEGORY_ROWS.map((row) => row.key), [...PAY_CATEGORY_KEYS], '页面 7 行与类别键一一对应、顺序一致')
+assert.deepEqual(PAY_CATEGORY_ROWS.map((row) => row.key), [...PAY_CATEGORY_KEYS], '页面 9 行与类别键一一对应、顺序一致')
 assert.deepEqual(
   PAY_CATEGORY_ROWS.filter((row) => row.optional).map((row) => row.key),
-  ['saturdayCasual', 'sundayCasual'],
-  '只有临时工周末两行是可选的',
+  ['saturdayCasual', 'sundayCasual', 'publicHoliday', 'publicHolidayCasual'],
+  '临时工周末两行与公共假期两行是可选的',
 )
-assert.equal(PAY_CATEGORY_TOTAL, 5, '必填项数仍是 5：临时工两项不计入')
-assert.deepEqual([...PAY_CATEGORY_OPTIONAL_KEYS], ['saturdayCasual', 'sundayCasual'])
+assert.equal(PAY_CATEGORY_TOTAL, 5, '必填项数仍是 5：临时工周末与公共假期四项不计入')
+assert.deepEqual([...PAY_CATEGORY_OPTIONAL_KEYS], ['saturdayCasual', 'sundayCasual', 'publicHoliday', 'publicHolidayCasual'])
 assert.equal(isOptionalPayCategory('saturdayCasual'), true)
+assert.equal(isOptionalPayCategory('publicHoliday'), true)
+assert.equal(isOptionalPayCategory('publicHolidayCasual'), true)
 assert.equal(isOptionalPayCategory('saturday'), false)
 
-// 全新公司：什么都没保存、也没有建议 → 7 项都「未设置」，不可保存，还差 5 项必填
+// 全新公司：什么都没保存、也没有建议 → 9 项都「未设置」，不可保存，还差 5 项必填
 const fresh = categories()
 assert.equal(PAY_CATEGORY_KEYS.every((key) => getPayCategoryRowState(fresh, {}, key) === 'unset'), true)
 assert.deepEqual(getPayCategorySaveState(fresh, {}), { remaining: 5, changed: false, canSave: false })
@@ -126,6 +128,8 @@ assert.deepEqual(buildPayCategoryMappingRequest(suggested, picked), {
   sundayUid: 'sun',
   saturdayCasualUid: null,
   sundayCasualUid: null,
+  publicHolidayUid: null,
+  publicHolidayCasualUid: null,
   personalLeaveUid: 'pers',
   holidayLeaveUid: 'hol',
 })
@@ -201,6 +205,14 @@ assert.equal(getPayCategoryRowState(casualSaved, casualCleared, 'saturdayCasual'
 assert.equal(buildPayCategoryMappingRequest(casualSaved, casualCleared)?.saturdayCasualUid, null)
 assert.deepEqual(setPayCategoryEdit(casualSaved, casualCleared, 'saturdayCasual', 'other'), {})
 // 临时工类别名称相近建议也走预填；MYOB 里这个类别被删：标失效，但必填依然完整
+// 公共假期两项同样是可选行：未设置时不拦保存，选了能存进请求体，清空为 null
+const holidayPicked = setPayCategoryEdit(complete, {}, 'publicHoliday', 'sat')
+assert.deepEqual(holidayPicked, { publicHoliday: 'sat' })
+assert.equal(getPayCategoryRowState(complete, {}, 'publicHolidayCasual'), 'unset', '没设的公共假期（临时工）仍是「未设置」（可选，不拦保存）')
+assert.equal(getPayCategoryRowState(complete, holidayPicked, 'publicHoliday'), 'edited')
+assert.equal(buildPayCategoryMappingRequest(complete, holidayPicked)?.publicHolidayUid, 'sat')
+assert.equal(buildPayCategoryMappingRequest(complete, holidayPicked)?.publicHolidayCasualUid, null)
+
 const casualSuggested = categories({ suggestions: { saturdayCasualUid: 'sat' } })
 assert.equal(getPayCategoryRowState(casualSuggested, {}, 'saturdayCasual'), 'suggested')
 const casualMissing = categories({
@@ -559,8 +571,8 @@ assert.ok(csv.startsWith(CSV_BOM), 'UTF-8 带 BOM')
 assert.ok(csv.endsWith('\r\n'))
 const lines = csv.slice(CSV_BOM.length).split('\r\n')
 assert.equal(lines.length, 5, '表头 + 3 行 + 结尾空行')
-assert.equal(lines[0].split(',').length, 13)
-assert.ok(lines[1].startsWith('Mei Lin Zhang,1014 Kawana,myob.push.payMode.Transfer|,30.00,4.00,0.00,0.00,0.00,34.00,0.00,myob.push.status.ready,,Mei Lin Zhang'), lines[1])
+assert.equal(lines[0].split(',').length, 14)
+assert.ok(lines[1].startsWith('Mei Lin Zhang,1014 Kawana,myob.push.payMode.Transfer|,30.00,4.00,0.00,0.00,0.00,0.00,34.00,0.00,myob.push.status.ready,,Mei Lin Zhang'), lines[1])
 assert.ok(lines[2].startsWith(`"'=cmd|""x""",1013 Orion / 1014 Kawana,myob.push.payMode.Mixed|20,15.00`), `公式前缀与引号转义：${lines[2]}`)
 assert.ok(lines[2].includes(',8.00,myob.push.status.readyCashOut,'), '折现工时单列，状态为「可推送 · 折现不推」')
 assert.ok(lines[3].includes(`"1042 TestStore, 本期未锁定"`), '被拦截原因进 CSV，含逗号时加引号')

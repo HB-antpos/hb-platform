@@ -54,9 +54,9 @@ public sealed class ReceiptReturnsViewModelTests
     [Fact]
     public async Task OrderSummaryText_shows_order_no_sold_time_and_cashier_in_both_cultures()
     {
-        // 资源格式串的占位符语义必须与代码传参一致：{0}=单号前 8 位、{1}=本地售出时间、{2}=收银员。
+        // 资源格式串的占位符语义必须与代码传参一致：{0}=小票单号（GUID 末 8 位，与小票条码同口径）、{1}=本地售出时间、{2}=收银员。
         // 曾因资源写成「{1} 件 退款 {2:C2}」而显示成「订单 AB12CD34  2026-10-09 17:30 件  退款 Lucy」。
-        var orderGuid = Guid.Parse("ab12cd34-0000-0000-0000-000000000001");
+        var orderGuid = Guid.Parse("00000000-0000-0000-0000-0000ab12cd34");
         var soldAt = new DateTimeOffset(2026, 10, 9, 7, 30, 0, TimeSpan.Zero);
         var soldAtText = soldAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         var localization = new LocalizationService();
@@ -618,6 +618,80 @@ public sealed class ReceiptReturnsViewModelTests
             false,
             true,
             "Loaded local order; return records may be stale.");
+    }
+
+    [Fact]
+    public async Task Ambiguous_short_code_shows_candidates_and_picking_one_reloads_that_order_by_full_guid()
+    {
+        var first = Guid.Parse("11111111-0000-0000-0000-5c8d6e0f13ab");
+        var second = Guid.Parse("22222222-0000-0000-0000-5c8d6e0f13ab");
+        var soldAt = new DateTimeOffset(2026, 10, 31, 9, 15, 0, TimeSpan.Zero);
+        var order = new ReceiptReturnOrder(second, "S001", "POS-02", "Bob", soldAt, 12.5m, [], [], []);
+        var workflow = new FakeReceiptReturnsWorkflowService
+        {
+            LookupHandler = (query, _) => Task.FromResult(query == "6E0F13AB"
+                ? new ReceiptReturnLookupResult(
+                    null,
+                    false,
+                    false,
+                    "ambiguous",
+                    [
+                        new ReceiptReturnOrderCandidate(second, "S001", "POS-02", "Bob", soldAt, 12.5m),
+                        new ReceiptReturnOrderCandidate(first, "S001", "POS-01", "Alice", soldAt.AddDays(-30), -3m)
+                    ])
+                : new ReceiptReturnLookupResult(order, true, false, "loaded"))
+        };
+        var viewModel = new ReceiptReturnsViewModel(workflow, CreateSession(), () => { })
+        {
+            ScanText = "6E0F13AB"
+        };
+
+        await viewModel.LookupCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsOrderCandidateDialogOpen);
+        Assert.Equal(2, viewModel.OrderCandidates.Count);
+        Assert.Equal("$12.50", viewModel.OrderCandidates[0].AmountText);
+        Assert.Equal("-$3.00", viewModel.OrderCandidates[1].AmountText);
+        Assert.Equal("6E0F13AB", viewModel.OrderCandidates[0].ShortCode);
+        Assert.Empty(viewModel.OrderLines);
+
+        await ((CommunityToolkit.Mvvm.Input.IAsyncRelayCommand<ReceiptReturnOrderCandidateViewModel>)viewModel.SelectOrderCandidateCommand)
+            .ExecuteAsync(viewModel.OrderCandidates[0]);
+
+        // 选中后按完整 GUID 重新查单，弹窗关闭，状态回到正常加载结果。
+        Assert.Equal(second.ToString("D"), workflow.LastOrderQuery);
+        Assert.Equal(2, workflow.LookupCallCount);
+        Assert.False(viewModel.IsOrderCandidateDialogOpen);
+        Assert.Equal("loaded", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_candidate_dialog_clears_it_without_loading_any_order()
+    {
+        var workflow = new FakeReceiptReturnsWorkflowService
+        {
+            LookupResult = new ReceiptReturnLookupResult(
+                null,
+                false,
+                false,
+                "ambiguous",
+                [
+                    new ReceiptReturnOrderCandidate(Guid.NewGuid(), "S001", "POS-01", "Alice", DateTimeOffset.UtcNow, 1m),
+                    new ReceiptReturnOrderCandidate(Guid.NewGuid(), "S001", "POS-01", "Alice", DateTimeOffset.UtcNow, 2m)
+                ])
+        };
+        var viewModel = new ReceiptReturnsViewModel(workflow, CreateSession(), () => { })
+        {
+            ScanText = "6E0F13AB"
+        };
+
+        await viewModel.LookupCommand.ExecuteAsync(null);
+        viewModel.CancelOrderCandidatesCommand.Execute(null);
+
+        Assert.False(viewModel.IsOrderCandidateDialogOpen);
+        Assert.Empty(viewModel.OrderCandidates);
+        Assert.Equal(1, workflow.LookupCallCount);
+        Assert.Empty(viewModel.OrderLines);
     }
 
     private static PosSessionState CreateSession()

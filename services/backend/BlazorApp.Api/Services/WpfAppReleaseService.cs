@@ -622,6 +622,62 @@ namespace BlazorApp.Api.Services
         }
 
         /// <summary>
+        /// 读取指定渠道当前更新策略的目标版本与放量范围，用于设备列表判断「待升级 / 未放量」。
+        /// 只读；渠道没有策略时返回 null。分店范围按当前有效分店的 StoreGUID 解析成分店代码，
+        /// 与 <see cref="DoesPolicyTargetMatchAsync"/> 的口径一致。
+        /// </summary>
+        public async Task<WpfPolicyTargetSnapshot?> GetPolicyTargetSnapshotAsync(string? channel = null)
+        {
+            var normalizedChannel = NormalizeChannel(channel);
+            var policy = await _db
+                .Queryable<WpfUpdatePolicy>()
+                .FirstAsync(x => x.Channel == normalizedChannel && !x.IsDeleted);
+            if (policy == null || string.IsNullOrWhiteSpace(policy.TargetVersion))
+            {
+                return null;
+            }
+
+            var scope = NormalizeTargetScopeOrAll(policy.TargetScope);
+            var targetVersion = NormalizeVersionOrOriginal(policy.TargetVersion);
+            if (scope == "all")
+            {
+                return new WpfPolicyTargetSnapshot(targetVersion, scope);
+            }
+
+            var targets = await _db
+                .Queryable<WpfUpdatePolicyTarget>()
+                .Where(x => x.PolicyId == policy.Id && !x.IsDeleted)
+                .ToListAsync();
+            if (scope == "devices")
+            {
+                return new WpfPolicyTargetSnapshot(
+                    targetVersion,
+                    scope,
+                    deviceIds: targets
+                        .Select(target => target.DeviceRegistrationId ?? 0)
+                        .Where(id => id > 0)
+                );
+            }
+
+            var targetGuids = targets
+                .Select(target => target.StoreGuid)
+                .Where(guid => !string.IsNullOrWhiteSpace(guid))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var stores = await _db
+                .Queryable<Store>()
+                .Where(store => store.IsActive && !store.IsDeleted)
+                .ToListAsync();
+            return new WpfPolicyTargetSnapshot(
+                targetVersion,
+                scope,
+                storeCodes: stores
+                    .Where(store => targetGuids.Contains(store.StoreGUID))
+                    .Select(store => store.StoreCode)
+                    .Where(code => !string.IsNullOrWhiteSpace(code))
+            );
+        }
+
+        /// <summary>
         /// 按严格认证出的设备身份执行定向检查；定向策略在身份缺失、无效或不匹配时安全地返回无更新。
         /// </summary>
         public async Task<ApiResponse<WpfUpdateCheckResponse>> CheckTargetedUpdateAsync(

@@ -29,7 +29,17 @@ import type {
   MyobPreviewHint,
   MyobPreviewPeriodOption,
   MyobPreviewReadiness,
+  MyobPreviewPushState,
   MyobPreviewRow,
+  MyobPushBatchDetail,
+  MyobPushBatchItem,
+  MyobPushBatchSummary,
+  MyobPushRequest,
+  MyobPushResult,
+  MyobPushState,
+  MyobPushStatus,
+  MyobPushUserResult,
+  MyobUndoResult,
   MyobPreviewStatus,
   MyobPreviewTotals,
   MyobPushHours,
@@ -611,16 +621,26 @@ function num(value: unknown, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-/** 类别键与映射字段的对应；顺序即页面行的顺序（临时工周末两项可选，不计入「已映射」必填项数）。 */
+/** 类别键与映射字段的对应；顺序即页面行的顺序（临时工周末与公共假期四项可选，不计入「已映射」必填项数）。 */
 const PAY_CATEGORY_FIELDS: ReadonlyArray<readonly [MyobPayCategoryKey, keyof MyobPayCategoryMapping]> = [
   ['weekday', 'weekdayUid'],
   ['saturday', 'saturdayUid'],
   ['sunday', 'sundayUid'],
   ['saturdayCasual', 'saturdayCasualUid'],
   ['sundayCasual', 'sundayCasualUid'],
+  ['publicHoliday', 'publicHolidayUid'],
+  ['publicHolidayCasual', 'publicHolidayCasualUid'],
   ['personalLeave', 'personalLeaveUid'],
   ['holidayLeave', 'holidayLeaveUid'],
 ]
+
+/** 可选类别键（不计入「已映射」必填项数），与后端 MyobPayCategoryKeys.Required 之外的键一致。 */
+const OPTIONAL_PAY_CATEGORY_KEYS: ReadonlySet<MyobPayCategoryKey> = new Set([
+  'saturdayCasual',
+  'sundayCasual',
+  'publicHoliday',
+  'publicHolidayCasual',
+])
 
 export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMapping {
   const item = record(raw)
@@ -630,6 +650,8 @@ export function normalizeMyobPayCategoryMapping(raw: unknown): MyobPayCategoryMa
     sundayUid: nullableText(item.sundayUid),
     saturdayCasualUid: nullableText(item.saturdayCasualUid),
     sundayCasualUid: nullableText(item.sundayCasualUid),
+    publicHolidayUid: nullableText(item.publicHolidayUid),
+    publicHolidayCasualUid: nullableText(item.publicHolidayCasualUid),
     personalLeaveUid: nullableText(item.personalLeaveUid),
     holidayLeaveUid: nullableText(item.holidayLeaveUid),
   }
@@ -650,7 +672,7 @@ export function normalizeMyobPayCategories(payload: unknown): MyobPayCategories 
   const mappedCount =
     typeof data.mappedCount === 'number'
       ? Math.min(5, Math.max(0, int(data.mappedCount)))
-      : PAY_CATEGORY_FIELDS.filter(([key, field]) => key !== 'saturdayCasual' && key !== 'sundayCasual' && mapping[field] !== null).length
+      : PAY_CATEGORY_FIELDS.filter(([key, field]) => !OPTIONAL_PAY_CATEGORY_KEYS.has(key) && mapping[field] !== null).length
   return {
     connectionGuid: text(data.connectionGuid),
     connectionName: text(data.connectionName),
@@ -749,6 +771,7 @@ function normalizePushHours(raw: unknown): MyobPushHours {
     weekday: num(item.weekday),
     saturday: num(item.saturday),
     sunday: num(item.sunday),
+    publicHoliday: num(item.publicHoliday),
     personalLeave: num(item.personalLeave),
     holidayLeave: num(item.holidayLeave),
   }
@@ -800,6 +823,42 @@ function normalizeDetail(raw: unknown): MyobPreviewDetail {
   }
 }
 
+const PUSH_STATES: readonly MyobPushState[] = ['NotPushed', 'Pushed', 'NeedsRepush', 'ProcessedSkipped', 'Failed', 'Mismatch']
+
+const PUSH_STATUSES: readonly MyobPushStatus[] = [
+  'Pushed',
+  'UpToDate',
+  'SkippedProcessed',
+  'SkippedHasEntries',
+  'Blocked',
+  'Failed',
+  'Mismatch',
+  'Undone',
+  'UndoConflict',
+  'UndoBlockedProcessed',
+  'UndoBlockedNewer',
+  'Running',
+]
+
+/** 不认识的推送状态按失败处理：宁可让人多看一眼，也不把未知值显示成「已推送」。 */
+export function normalizeMyobPushStatus(value: unknown): MyobPushStatus {
+  return PUSH_STATUSES.find((status) => status === value) ?? 'Failed'
+}
+
+function normalizePreviewPushState(raw: unknown): MyobPreviewPushState {
+  const item = record(raw)
+  const needsRepush = bool(item.needsRepush)
+  const state = PUSH_STATES.find((value) => value === item.state) ?? 'NotPushed'
+  return {
+    // needsRepush 为真时一定显示「需重新推送」，不管 state 写了什么（避免旧状态让人以为 MYOB 是最新的）
+    state: needsRepush ? 'NeedsRepush' : state,
+    needsRepush,
+    lastStatus: nullableText(item.lastStatus),
+    lastBatchGuid: nullableText(item.lastBatchGuid),
+    lastPushedAt: nullableText(item.lastPushedAt),
+  }
+}
+
 export function normalizeMyobPreviewRow(raw: unknown): MyobPreviewRow | null {
   const item = record(raw)
   const userGuid = text(item.userGuid)
@@ -826,6 +885,7 @@ export function normalizeMyobPreviewRow(raw: unknown): MyobPreviewRow | null {
     hintCodes: textList(item.hintCodes),
     myobName: nullableText(item.myobName),
     myobState: normalizeMyobTimesheetState(item.myobState),
+    push: normalizePreviewPushState(item.push),
     detail: normalizeDetail(item.detail),
   }
 }
@@ -1093,4 +1153,117 @@ export async function undoMyobSyncBatch(batchGuid: string): Promise<MyobSyncUndo
     `${MYOB_BASE}/employee-sync/batches/${encodeURIComponent(batchGuid)}/undo`,
   )
   return normalizeMyobSyncUndoResult(unwrapApiData(response))
+}
+
+// ───────────────────────── Timesheet 推送与撤销 ─────────────────────────
+// 契约：MyobTimesheetPushDtos.cs。权限 Myob.Timesheet.Push；会写 MYOB 生产数据，总闸关闭时后端回 MYOB_PUSH_DISABLED。
+
+function normalizePushUserResult(raw: unknown): MyobPushUserResult | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  if (!userGuid) {
+    return null
+  }
+  return {
+    userGuid,
+    userName: text(item.userName) || userGuid,
+    status: normalizeMyobPushStatus(item.status),
+    code: nullableText(item.code),
+    message: nullableText(item.message),
+    pushedHours: num(item.pushedHours),
+  }
+}
+
+export function normalizeMyobPushResult(payload: unknown): MyobPushResult {
+  const data = record(payload)
+  return {
+    batchGuid: text(data.batchGuid),
+    connectionGuid: text(data.connectionGuid),
+    periodStart: text(data.periodStart),
+    results: list(data.results, normalizePushUserResult),
+  }
+}
+
+export function normalizeMyobUndoResult(payload: unknown): MyobUndoResult {
+  const data = record(payload)
+  return { batchGuid: text(data.batchGuid), results: list(data.results, normalizePushUserResult) }
+}
+
+function normalizePushBatchSummary(raw: unknown): MyobPushBatchSummary | null {
+  const item = record(raw)
+  const batchGuid = text(item.batchGuid)
+  if (!batchGuid) {
+    return null
+  }
+  return {
+    batchGuid,
+    startedAt: text(item.startedAt),
+    actorUserGuid: nullableText(item.actorUserGuid),
+    actorName: nullableText(item.actorName),
+    total: int(item.total),
+    pushed: int(item.pushed),
+    upToDate: int(item.upToDate),
+    skipped: int(item.skipped),
+    failed: int(item.failed),
+    mismatch: int(item.mismatch),
+    undone: int(item.undone),
+    undoable: int(item.undoable),
+  }
+}
+
+export function normalizeMyobPushBatches(payload: unknown): MyobPushBatchSummary[] {
+  return list(payload, normalizePushBatchSummary)
+}
+
+function normalizePushBatchItem(raw: unknown): MyobPushBatchItem | null {
+  const item = record(raw)
+  const userGuid = text(item.userGuid)
+  if (!userGuid) {
+    return null
+  }
+  return {
+    userGuid,
+    userName: text(item.userName) || userGuid,
+    status: normalizeMyobPushStatus(item.status),
+    errorCode: nullableText(item.errorCode),
+    errorStatus: typeof item.errorStatus === 'number' ? item.errorStatus : null,
+    pushedHours: num(item.pushedHours),
+    startedAt: text(item.startedAt),
+    finishedAt: nullableText(item.finishedAt),
+    undoneAt: nullableText(item.undoneAt),
+  }
+}
+
+export function normalizeMyobPushBatchDetail(payload: unknown): MyobPushBatchDetail {
+  const data = record(payload)
+  return {
+    summary: normalizePushBatchSummary(data.summary) ?? normalizePushBatchSummary({ batchGuid: 'unknown' })!,
+    connectionGuid: text(data.connectionGuid),
+    periodStart: text(data.periodStart),
+    items: list(data.items, normalizePushBatchItem),
+  }
+}
+
+/** 推送一块（≤10 人）。同一次「点推送」的多块用同一个 batchGuid。 */
+export async function pushMyobTimesheet(body: MyobPushRequest): Promise<MyobPushResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/timesheet/push`, body)
+  return normalizeMyobPushResult(unwrapApiData(response))
+}
+
+export async function getMyobPushBatches(connectionGuid: string, periodStart?: string | null): Promise<MyobPushBatchSummary[]> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/timesheet/batches`, {
+    params: { connectionGuid, periodStart: periodStart || undefined },
+  })
+  return normalizeMyobPushBatches(unwrapApiData(response))
+}
+
+export async function getMyobPushBatch(batchGuid: string): Promise<MyobPushBatchDetail> {
+  const response = await request.get<ApiResponse<unknown>>(`${MYOB_BASE}/timesheet/batches/${encodeURIComponent(batchGuid)}`)
+  return normalizeMyobPushBatchDetail(unwrapApiData(response))
+}
+
+/** 撤销整个批次：把推送前的快照写回 MYOB；已发薪 / 被人改过 / 有更新批次的员工不动，逐个返回原因。 */
+export async function undoMyobPushBatch(batchGuid: string): Promise<MyobUndoResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${MYOB_BASE}/timesheet/batches/${encodeURIComponent(batchGuid)}/undo`)
+  return normalizeMyobUndoResult(unwrapApiData(response))
 }

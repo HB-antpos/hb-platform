@@ -8,6 +8,9 @@ internal interface IInstallerProcess : IDisposable
 {
     int ExitCode { get; }
 
+    // 中文注释：失败时附带给失败页显示的说明；直接运行的安装器没有，代理安装会带上代理报告的原因。
+    string? FailureDetail => null;
+
     Task WaitForExitAsync(CancellationToken cancellationToken);
 }
 
@@ -24,6 +27,11 @@ internal interface IUpdaterSystem
     Task WaitForProcessExitAsync(int processId, CancellationToken cancellationToken);
 
     Task<IInstallerProcess> StartInstallerAsync(string installerPath, string arguments);
+
+    /// <summary>
+    /// 请本机的管理员更新代理（SYSTEM 任务）安装；代理未注册、不属于这份安装目录或触发失败时返回 null，由会话改走直接安装。
+    /// </summary>
+    IInstallerProcess? TryStartAgentInstall(UpdateAgentRequest request, UpdateAgentLayout layout);
 
     bool FileExists(string path);
 
@@ -43,6 +51,25 @@ internal interface IUpdaterSystem
 internal sealed class WindowsUpdaterSystem : IUpdaterSystem
 {
     private const int ErrorCancelled = 1223;
+    private readonly IUpdateAgentTaskScheduler _agentScheduler = new WindowsUpdateAgentTaskScheduler();
+
+    public IInstallerProcess? TryStartAgentInstall(UpdateAgentRequest request, UpdateAgentLayout layout)
+    {
+        var registeredAgentPath = _agentScheduler.GetRegisteredAgentPath();
+        // 中文注释：只用给这份安装目录注册的代理，避免调试版或装在别处的收银端误用 Program Files 那份代理。
+        if (registeredAgentPath is null ||
+            !string.Equals(
+                Path.GetFullPath(registeredAgentPath),
+                Path.GetFullPath(layout.UpdaterExecutablePath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return _agentScheduler.TryRun(request.Encode(), out _)
+            ? new AgentInstallProcess(request.RequestId, layout.StatusFile(request.RequestId), TryReadAllText, TimeProvider.System)
+            : null;
+    }
 
     public async Task WaitForProcessExitAsync(int processId, CancellationToken cancellationToken)
     {

@@ -1,0 +1,185 @@
+<UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.ColorThemeOnboardingOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+             FocusManager.IsFocusScope="True"
+             KeyboardNavigation.TabNavigation="Cycle"
+             KeyboardNavigation.ControlTabNavigation="Cycle">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- 配色卡片：选中项主色粗边框 + 右上角勾。 -->
+        <Style x:Key="ColorThemeOnboardingCardStyle" TargetType="Button">
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Margin" Value="5" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Grid>
+                            <Border x:Name="Root"
+                                    Padding="{TemplateBinding Padding}"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                            </Border>
+                            <Border x:Name="Check"
+                                    Width="22"
+                                    Height="22"
+                                    Margin="0,6,6,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    CornerRadius="11"
+                                    Background="{DynamicResource PosPrimaryBrush}"
+                                    Visibility="Collapsed">
+                                <materialDesign:PackIcon Kind="Check" Width="14" Height="14" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosBorderStrongBrush}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="BorderThickness" Value="2" />
+                                <Setter TargetName="Root" Property="Padding" Value="9" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- 全屏遮罩：没有关闭按钮，「开始收银」即选定当前预选项；背景点击不关闭。 -->
+    <Grid x:Name="OverlayRoot"
+          AutomationProperties.AutomationId="ColorThemeOnboardingOverlay"
+          Background="#99000000"
+          Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+        <Border Width="760"
+                Padding="22,20"
+                Background="{DynamicResource PosSurfaceBrush}"
+                BorderBrush="{DynamicResource PosDividerBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.22" />
+            </Border.Effect>
+            <StackPanel>
+                <DockPanel>
+                    <Border Width="42"
+                            Height="42"
+                            CornerRadius="21"
+                            Background="{DynamicResource PosPrimarySoftBrush}"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="{Binding AvatarText}"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}"
+                                   AutomationProperties.AutomationId="ColorThemeOnboardingTitle"
+                                   FontSize="20"
+                                   FontWeight="Black"
+                                   Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{Binding Subtitle}"
+                                   Margin="0,2,0,0"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    </StackPanel>
+                </DockPanel>
+
+                <ItemsControl x:Name="ThemeCards" ItemsSource="{Binding Options}" Margin="-5,14,-5,10">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="4" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.PreviewCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    CommandParameter="{Binding Theme}"
+                                    Style="{StaticResource ColorThemeOnboardingCardStyle}"
+                                    AutomationProperties.Name="{Binding Name}">
+                                <StackPanel>
+                                    <!-- 迷你预览：底色 + 顶栏主色 + 购物车 / 支付区，支付区底部是重点金额色。 -->
+                                    <Border Height="64" CornerRadius="6" ClipToBounds="True" Background="{Binding Swatches[0]}">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Top" Height="12" Background="{Binding Swatches[1]}" CornerRadius="6,6,0,0" />
+                                            <Grid Margin="5">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="2*" />
+                                                    <ColumnDefinition Width="4" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{Binding Swatches[1]}" Opacity="0.14" CornerRadius="3" />
+                                                <Grid Grid.Column="2">
+                                                    <Border Background="{Binding Swatches[1]}" Opacity="0.14" CornerRadius="3" />
+                                                    <Border Height="10" Margin="3" VerticalAlignment="Bottom" Background="{Binding Swatches[2]}" CornerRadius="2" />
+                                                </Grid>
+                                            </Grid>
+                                        </DockPanel>
+                                    </Border>
+                                    <TextBlock Text="{Binding Name}"
+                                               Margin="0,8,0,0"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PosTextBrush}" />
+                                    <TextBlock Text="{Binding Hint}"
+                                               FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Padding="12,9" CornerRadius="8" Background="{DynamicResource PosSurfaceAltBrush}">
+                    <DockPanel>
+                        <materialDesign:PackIcon Kind="InformationOutline"
+                                                 Width="16"
+                                                 Height="16"
+                                                 Margin="0,1,8,0"
+                                                 VerticalAlignment="Top"
+                                                 Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <TextBlock Text="{Binding Hint}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    </DockPanel>
+                </Border>
+
+                <DockPanel Margin="0,16,0,0">
+                    <Button x:Name="ConfirmButton"
+                            DockPanel.Dock="Right"
+                            MinWidth="200"
+                            Height="44"
+                            Padding="20,0"
+                            FontSize="15"
+                            FontWeight="Bold"
+                            Content="{Binding ConfirmText}"
+                            Command="{Binding ConfirmCommand}"
+                            Style="{StaticResource PosPrimaryButtonStyle}"
+                            AutomationProperties.AutomationId="ColorThemeOnboardingConfirm" />
+                    <TextBlock Text="{loc:Loc shell.colorThemeOnboarding.preselectedHint}"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="{DynamicResource PosSubtleForegroundBrush}" />
+                </DockPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

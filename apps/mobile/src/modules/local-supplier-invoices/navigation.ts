@@ -1,9 +1,11 @@
-import type {
-  InvoiceDetailPageSize,
-  InvoiceDetailPriceChangeFilter,
-  InvoiceGridFilters,
-  InvoiceGridSort,
-  InvoiceListPageSize,
+import {
+  DEFAULT_INVOICE_DATE_FIELD,
+  type InvoiceDateField,
+  type InvoiceDetailPageSize,
+  type InvoiceDetailPriceChangeFilter,
+  type InvoiceGridFilters,
+  type InvoiceGridSort,
+  type InvoiceListPageSize,
 } from "./types";
 
 export const LOCAL_SUPPLIER_INVOICES_SOURCE = "local-supplier-invoices";
@@ -11,6 +13,7 @@ export const LOCAL_SUPPLIER_INVOICES_SOURCE = "local-supplier-invoices";
 const LIST_PAGE_SIZES: InvoiceListPageSize[] = [20, 50, 100];
 const DETAIL_PAGE_SIZES: InvoiceDetailPageSize[] = [50, 100, 200];
 const SORT_COLUMNS: InvoiceGridSort["colId"][] = [
+  "CreatedAt",
   "OrderDate",
   "InvoiceNo",
   "StoreName",
@@ -103,6 +106,16 @@ function normalizeSortDirection(value: SearchParamValue) {
     : null;
 }
 
+function normalizeDateField(value: unknown): InvoiceDateField {
+  return value === "orderDate" ? "orderDate" : DEFAULT_INVOICE_DATE_FIELD;
+}
+
+/** 回跳参数里的布尔筛选：只认 "true" / "false"，其余（含空串）当作「不筛选」。 */
+function parseOptionalBoolean(value: SearchParamValue) {
+  const raw = firstParam(value);
+  return raw === "true" ? true : raw === "false" ? false : undefined;
+}
+
 function normalizeFilters(filters: InvoiceGridFilters): InvoiceGridFilters {
   const inboundStatus = filters.inboundStatus;
   return {
@@ -113,8 +126,12 @@ function normalizeFilters(filters: InvoiceGridFilters): InvoiceGridFilters {
       inboundStatus === 0 || inboundStatus === 1 || inboundStatus === 2
         ? inboundStatus
         : undefined,
-    orderDateFrom: firstParam(filters.orderDateFrom),
-    orderDateTo: firstParam(filters.orderDateTo),
+    dateField: normalizeDateField(filters.dateField),
+    dateFrom: firstParam(filters.dateFrom),
+    dateTo: firstParam(filters.dateTo),
+    productChecked: typeof filters.productChecked === "boolean" ? filters.productChecked : undefined,
+    // 关闭时统一为 undefined（false 与不筛选等价），避免回跳前后筛选对象不相等。
+    hasUncreatedProducts: filters.hasUncreatedProducts ? true : undefined,
     productKeyword: firstParam(filters.productKeyword),
   };
 }
@@ -138,8 +155,11 @@ export function buildLocalSupplierInvoicesReturnParams(
     returnFilterSupplierCode: filters.supplierCode ?? "",
     returnFilterInvoiceNo: filters.invoiceNo ?? "",
     returnFilterInboundStatus: filters.inboundStatus == null ? "" : String(filters.inboundStatus),
-    returnFilterOrderDateFrom: filters.orderDateFrom ?? "",
-    returnFilterOrderDateTo: filters.orderDateTo ?? "",
+    returnFilterDateField: filters.dateField ?? DEFAULT_INVOICE_DATE_FIELD,
+    returnFilterDateFrom: filters.dateFrom ?? "",
+    returnFilterDateTo: filters.dateTo ?? "",
+    returnFilterProductChecked: filters.productChecked == null ? "" : String(filters.productChecked),
+    returnFilterHasUncreatedProducts: filters.hasUncreatedProducts ? "true" : "",
     returnFilterProductKeyword: filters.productKeyword ?? "",
     returnSortColId: input.sort.colId,
     returnSortDirection: input.sort.direction,
@@ -194,8 +214,11 @@ export function decodeLocalSupplierInvoicesReturnParams(
       supplierCode: firstParam(params.returnFilterSupplierCode),
       invoiceNo: firstParam(params.returnFilterInvoiceNo),
       inboundStatus,
-      orderDateFrom: firstParam(params.returnFilterOrderDateFrom),
-      orderDateTo: firstParam(params.returnFilterOrderDateTo),
+      dateField: normalizeDateField(firstParam(params.returnFilterDateField)),
+      dateFrom: firstParam(params.returnFilterDateFrom),
+      dateTo: firstParam(params.returnFilterDateTo),
+      productChecked: parseOptionalBoolean(params.returnFilterProductChecked),
+      hasUncreatedProducts: parseOptionalBoolean(params.returnFilterHasUncreatedProducts),
       productKeyword: firstParam(params.returnFilterProductKeyword),
     }),
     sort: {
