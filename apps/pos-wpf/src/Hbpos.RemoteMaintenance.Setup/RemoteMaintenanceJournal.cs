@@ -34,7 +34,14 @@ public sealed record RemoteMaintenanceJournalState(
     // 成功时由 helper 把它并入 Config 并清空。旧版本 journal 没有该字段，读出为 null。
     RemoteMaintenanceConfig? PendingConfig = null,
     // 自动对账连续失败次数（UAC 被拒、服务异常等）；达到上限后不再自动弹 UAC，改由设置页手动触发。
-    int ReconcileFailureCount = 0);
+    int ReconcileFailureCount = 0,
+    // 待升级的 RustDesk 构建：白天对账时发现中心下发了新构建（且在白名单内），先下载校验到本地，
+    // 夜间空闲窗口交给 SYSTEM 代理升级。三项同时有值才算有待升级；旧版本 journal 读出为 null。
+    string? PendingUpgradeVersion = null,
+    string? PendingUpgradeSha256 = null,
+    string? PendingUpgradeArtifactPath = null,
+    // 同一个待升级构建连续失败的次数；达到上限后不再自动升级，换了构建或升级成功后清零。
+    int UpgradeFailureCount = 0);
 
 public interface IRemoteMaintenanceSecretProtector
 {

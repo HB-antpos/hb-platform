@@ -39,6 +39,26 @@ public sealed class InnoInstallerScriptTests
     }
 
     [Fact]
+    public void Inno_script_registers_the_remote_maintenance_agent_and_syncs_the_status_agent()
+    {
+        var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");
+        const string helper = "Filename: \"{app}\\Hbpos.RemoteMaintenance.Setup.exe\"";
+
+        // 中文注释：远程维护代理的注册 / 注销、升级后同步状态服务都走 helper，命令名必须与 helper 里的常量一致。
+        Assert.Contains($"{helper}; Parameters: \"{Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgent.RegisterOption}\"", script);
+        Assert.Contains($"{helper}; Parameters: \"{Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgent.SyncStatusAgentOption}\"", script);
+        Assert.Contains($"{helper}; Parameters: \"{Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgent.UnregisterOption}\"", script);
+        Assert.Contains("RunOnceId: \"UnregisterRemoteMaintenanceAgentTask\"", script);
+        Assert.Contains($"Name: \"{{app}}\\{Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgentLayout.DirectoryName}\"", script);
+
+        // 中文注释：两条都排在“启动收银端”之前；同步状态服务不能带 Check，SYSTEM 更新代理安装时也要执行。
+        var launchIndex = script.IndexOf("Check: not IsUpdateAgentInstall", StringComparison.Ordinal);
+        var syncLine = script.Split('\n').Single(line => line.Contains(Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgent.SyncStatusAgentOption));
+        Assert.DoesNotContain("Check:", syncLine);
+        Assert.True(script.IndexOf(Hbpos.RemoteMaintenance.Setup.RemoteMaintenanceAgent.SyncStatusAgentOption, StringComparison.Ordinal) < launchIndex);
+    }
+
+    [Fact]
     public void Inno_script_skips_launching_the_app_only_for_system_agent_installs()
     {
         var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");

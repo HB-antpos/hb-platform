@@ -8,7 +8,8 @@ namespace Hbpos.RemoteMaintenance.Setup;
 /// <summary>
 /// 免 UAC 的远程维护代理请求。代理以 SYSTEM 运行、任何已登录用户都能触发，所以请求只带“要切到哪个公司服务器”，
 /// 不带 journal 路径、密码或文件路径：SYSTEM 端不读写任何普通用户可控的文件，只依据 Program Files 里的接管标记执行。
-/// 目前只开放 reconcile（换服务器），安装、配置、清理仍走 UAC helper，等密码改由 SYSTEM 端生成后再迁。
+/// 开放 reconcile（换服务器）与 upgrade（见 <see cref="RemoteMaintenanceAgentUpgradeRequest"/>）；
+/// 安装、配置、清理仍走 UAC helper，等密码改由 SYSTEM 端生成后再迁。
 /// </summary>
 public sealed record RemoteMaintenanceAgentRequest(string RequestId, RemoteMaintenanceConfig Config)
 {
@@ -18,28 +19,14 @@ public sealed record RemoteMaintenanceAgentRequest(string RequestId, RemoteMaint
     public static RemoteMaintenanceAgentRequest CreateReconcile(RemoteMaintenanceConfig config) =>
         new(Guid.NewGuid().ToString("N"), config);
 
-    public string Encode()
-    {
-        var json = JsonSerializer.Serialize(new Payload(1, RequestId, ReconcileStage, Config.IdServer, Config.RelayServer, Config.PublicKey));
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
+    public string Encode() =>
+        AgentRequestEncoding.Encode(new Payload(1, RequestId, ReconcileStage, Config.IdServer, Config.RelayServer, Config.PublicKey));
 
     /// <summary>逐项按不可信输入校验：请求号必须是 GUID，服务器必须在公司白名单内。</summary>
     public static bool TryDecode(string? encoded, out RemoteMaintenanceAgentRequest? request)
     {
         request = null;
-        if (string.IsNullOrWhiteSpace(encoded) || encoded.Length > MaxEncodedLength) return false;
-        Payload? payload;
-        try
-        {
-            var base64 = encoded.Trim().Replace('-', '+').Replace('_', '/');
-            base64 = base64.PadRight(base64.Length + ((4 - (base64.Length % 4)) % 4), '=');
-            payload = JsonSerializer.Deserialize<Payload>(Convert.FromBase64String(base64));
-        }
-        catch (Exception ex) when (ex is FormatException or JsonException)
-        {
-            return false;
-        }
+        if (!AgentRequestEncoding.TryDecode<Payload>(encoded, MaxEncodedLength, out var payload)) return false;
 
         if (payload is not { Version: 1, Stage: ReconcileStage } ||
             !Guid.TryParseExact(payload.Id, "N", out var id) ||
@@ -58,6 +45,65 @@ public sealed record RemoteMaintenanceAgentRequest(string RequestId, RemoteMaint
         [property: JsonPropertyName("idServer")] string? IdServer,
         [property: JsonPropertyName("relayServer")] string? RelayServer,
         [property: JsonPropertyName("key")] string? PublicKey);
+}
+
+/// <summary>
+/// 升级请求：把受管 RustDesk 升到白名单里的某个构建。只带安装包哈希（必须在随 WPF 发布的白名单里）
+/// 和普通用户已下载、校验过的本地安装包路径；SYSTEM 端会再次拒绝网络路径与重解析点，并在复制进管理员目录后重新核对大小与哈希。
+/// </summary>
+public sealed record RemoteMaintenanceAgentUpgradeRequest(string RequestId, string Sha256, string ArtifactPath)
+{
+    private const string UpgradeStage = "upgrade";
+
+    public static RemoteMaintenanceAgentUpgradeRequest Create(string sha256, string artifactPath) =>
+        new(Guid.NewGuid().ToString("N"), sha256.Trim().ToLowerInvariant(), artifactPath);
+
+    public string Encode() => AgentRequestEncoding.Encode(new Payload(1, RequestId, UpgradeStage, Sha256, ArtifactPath));
+
+    public static bool TryDecode(string? encoded, out RemoteMaintenanceAgentUpgradeRequest? request)
+    {
+        request = null;
+        if (!AgentRequestEncoding.TryDecode<Payload>(encoded, RemoteMaintenanceAgentRequest.MaxEncodedLength, out var payload)) return false;
+        if (payload is not { Version: 1, Stage: UpgradeStage } ||
+            !Guid.TryParseExact(payload.Id, "N", out var id) ||
+            !WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(payload.Sha256, out _) ||
+            string.IsNullOrWhiteSpace(payload.Path))
+            return false;
+        // 路径是否安全由 SYSTEM 端在执行前判定（依赖本机文件系统），这里只做格式检查。
+        request = new RemoteMaintenanceAgentUpgradeRequest(id.ToString("N"), payload.Sha256!.Trim().ToLowerInvariant(), payload.Path);
+        return true;
+    }
+
+    private sealed record Payload(
+        [property: JsonPropertyName("v")] int Version,
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("stage")] string? Stage,
+        [property: JsonPropertyName("sha256")] string? Sha256,
+        [property: JsonPropertyName("path")] string? Path);
+}
+
+/// <summary>代理请求的 base64url JSON 编码：任务计划参数里只出现 URL 安全字符。</summary>
+internal static class AgentRequestEncoding
+{
+    public static string Encode<T>(T payload) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    public static bool TryDecode<T>(string? encoded, int maxLength, out T? payload) where T : class
+    {
+        payload = null;
+        if (string.IsNullOrWhiteSpace(encoded) || encoded.Length > maxLength) return false;
+        try
+        {
+            var base64 = encoded.Trim().Replace('-', '+').Replace('_', '/');
+            base64 = base64.PadRight(base64.Length + ((4 - (base64.Length % 4)) % 4), '=');
+            payload = JsonSerializer.Deserialize<T>(Convert.FromBase64String(base64));
+            return payload is not null;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>代理写给调用方的结果；Completed 为 false 表示已受理、仍在执行。</summary>
@@ -221,25 +267,29 @@ public sealed class WindowsRemoteMaintenanceAgentTaskScheduler : IRemoteMaintena
 }
 
 /// <summary>
-/// SYSTEM 端：任务计划以 --agent 拉起 helper，校验请求后在本进程内执行对账，把退出码写进状态目录。
-/// 安全依据只有 Program Files 里的接管标记与 <see cref="WindowsRemoteMaintenanceInstaller.ReconcileServerAsync"/> 的全部校验，
-/// 恶意调用最多让受管 RustDesk 在两个公司地址间切换并重启一次服务。
+/// SYSTEM 端：任务计划以 --agent 拉起 helper，校验请求后在本进程内执行对账或升级，把退出码写进状态目录。
+/// 对账的安全依据只有 Program Files 里的接管标记与 <see cref="WindowsRemoteMaintenanceInstaller.ReconcileServerAsync"/> 的全部校验，
+/// 恶意调用最多让受管 RustDesk 在两个公司地址间切换并重启一次服务；
+/// 升级只会把受管 RustDesk 重装成白名单里的构建（<see cref="WindowsRemoteMaintenanceInstaller.UpgradeRustDeskAsync"/>），不碰密码与服务器。
 /// </summary>
 public sealed class RemoteMaintenanceAgent(
     string helperPath,
     Func<RemoteMaintenanceConfig, CancellationToken, Task> reconcile,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    Func<string, string, CancellationToken, Task>? upgrade = null)
 {
     public const string AgentOption = "--agent";
     public const string RegisterOption = "--register-agent-task";
     public const string UnregisterOption = "--unregister-agent-task";
+    /// <summary>WPF 安装包（管理员或 SYSTEM）调用：把随包的新状态服务程序同步到 Program Files。</summary>
+    public const string SyncStatusAgentOption = "--sync-status-agent";
 
     internal const int InvalidRequestExitCode = 2;
     internal const int FailureExitCode = 4;
     internal const int NotProtectedExitCode = 5;
     internal const int RegistrationFailedExitCode = 6;
 
-    // 与 UAC helper 的 reconcile 阶段共用同一把全局锁：手动修复与自动对账、不同 Windows 会话不会交错停启服务。
+    // 与 UAC helper 的 reconcile 阶段共用同一把全局锁：手动修复、自动对账、升级与不同 Windows 会话都不会交错停启服务。
     internal const string ReconcileMutexName = @"Global\Hbpos.RemoteMaintenance.Setup.Reconcile";
     internal TimeSpan MutexTimeout { get; init; } = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan StatusRetention = TimeSpan.FromDays(1);
@@ -251,13 +301,28 @@ public sealed class RemoteMaintenanceAgent(
     /// </summary>
     public int Run(string? encodedRequest)
     {
-        if (!RemoteMaintenanceAgentRequest.TryDecode(encodedRequest, out var request) || request is null)
+        string requestId;
+        Func<Task> action;
+        if (RemoteMaintenanceAgentRequest.TryDecode(encodedRequest, out var reconcileRequest) && reconcileRequest is not null)
+        {
+            requestId = reconcileRequest.RequestId;
+            action = () => reconcile(reconcileRequest.Config, CancellationToken.None);
+        }
+        else if (upgrade is not null &&
+            RemoteMaintenanceAgentUpgradeRequest.TryDecode(encodedRequest, out var upgradeRequest) && upgradeRequest is not null)
+        {
+            requestId = upgradeRequest.RequestId;
+            action = () => upgrade(upgradeRequest.ArtifactPath, upgradeRequest.Sha256, CancellationToken.None);
+        }
+        else
+        {
             return InvalidRequestExitCode;
+        }
 
         var statusDirectory = RemoteMaintenanceAgentLayout.StatusDirectory(helperPath);
         Directory.CreateDirectory(statusDirectory);
         CleanupStaleStatusFiles(statusDirectory);
-        WriteStatus(request.RequestId, completed: false, exitCode: 0);
+        WriteStatus(requestId, completed: false, exitCode: 0);
 
         int exitCode;
         using (var mutex = new Mutex(false, ReconcileMutexName))
@@ -267,14 +332,14 @@ public sealed class RemoteMaintenanceAgent(
             catch (AbandonedMutexException) { acquired = true; }
             if (!acquired)
             {
-                // 另一个对账正在执行；本次放弃，由下次对账或手动修复重试。
+                // 另一个对账或升级正在执行；本次放弃，由下次对账、升级窗口或手动修复重试。
                 exitCode = FailureExitCode;
             }
             else
             {
                 try
                 {
-                    reconcile(request.Config, CancellationToken.None).GetAwaiter().GetResult();
+                    action().GetAwaiter().GetResult();
                     exitCode = 0;
                 }
                 catch (RemoteMaintenanceSetupException ex) { exitCode = (int)ex.Error; }
@@ -284,7 +349,7 @@ public sealed class RemoteMaintenanceAgent(
             }
         }
 
-        WriteStatus(request.RequestId, completed: true, exitCode);
+        WriteStatus(requestId, completed: true, exitCode);
         return exitCode;
     }
 
@@ -313,7 +378,7 @@ public sealed class RemoteMaintenanceAgent(
     }
 }
 
-/// <summary>普通用户端：把对账交给 SYSTEM 代理执行，并从受保护的状态目录读取结果。</summary>
+/// <summary>普通用户端：把对账、升级交给 SYSTEM 代理执行，并从受保护的状态目录读取结果。</summary>
 public interface IRemoteMaintenanceAgentClient
 {
     /// <summary>代理任务已注册且动作正是本机这份受保护的 helper 时才可用；否则调用方退回 UAC helper。</summary>
@@ -321,6 +386,9 @@ public interface IRemoteMaintenanceAgentClient
 
     /// <summary>返回 helper 同款退出码；代理没有受理请求时返回 <see cref="RemoteMaintenanceAgentClient.NotRespondingExitCode"/>。</summary>
     Task<int> ReconcileAsync(string helperPath, RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default);
+
+    /// <summary>用本地已下载、校验过的安装包升级受管 RustDesk；退出码含义同上。</summary>
+    Task<int> UpgradeAsync(string helperPath, string sha256, string artifactPath, CancellationToken cancellationToken = default);
 }
 
 public sealed class RemoteMaintenanceAgentClient(
@@ -342,24 +410,35 @@ public sealed class RemoteMaintenanceAgentClient(
             string.Equals(Path.GetFullPath(registered), Path.GetFullPath(helperPath), StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<int> ReconcileAsync(string helperPath, RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default)
+    public Task<int> ReconcileAsync(string helperPath, RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default)
     {
         var request = RemoteMaintenanceAgentRequest.CreateReconcile(desired);
-        if (!scheduler.TryRun(request.Encode())) return NotRespondingExitCode;
+        return RunAsync(helperPath, request.RequestId, request.Encode(), cancellationToken);
+    }
 
-        var statusFile = RemoteMaintenanceAgentLayout.StatusFile(helperPath, request.RequestId);
+    public Task<int> UpgradeAsync(string helperPath, string sha256, string artifactPath, CancellationToken cancellationToken = default)
+    {
+        var request = RemoteMaintenanceAgentUpgradeRequest.Create(sha256, artifactPath);
+        return RunAsync(helperPath, request.RequestId, request.Encode(), cancellationToken);
+    }
+
+    private async Task<int> RunAsync(string helperPath, string requestId, string encodedRequest, CancellationToken cancellationToken)
+    {
+        if (!scheduler.TryRun(encodedRequest)) return NotRespondingExitCode;
+
+        var statusFile = RemoteMaintenanceAgentLayout.StatusFile(helperPath, requestId);
         var startedAt = _timeProvider.GetTimestamp();
         var accepted = false;
         while (true)
         {
-            var status = RemoteMaintenanceAgentStatus.TryParse(TryReadAllText(statusFile), request.RequestId);
+            var status = RemoteMaintenanceAgentStatus.TryParse(TryReadAllText(statusFile), requestId);
             if (status is not null)
             {
                 if (status.Completed) return status.ExitCode;
                 accepted = true;
             }
 
-            // 已受理后不再自己计时，交给调用方的总超时（对账为 5 分钟）。
+            // 已受理后不再自己计时，交给调用方的总超时（对账 5 分钟、升级 15 分钟）。
             if (!accepted && _timeProvider.GetElapsedTime(startedAt) >= AcceptTimeout) return NotRespondingExitCode;
             await Task.Delay(PollInterval, _timeProvider, cancellationToken);
         }

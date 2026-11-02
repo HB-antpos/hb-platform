@@ -41,6 +41,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     private readonly IColorThemeService? _colorThemeService;
     private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
     private readonly AppUpdateUnattendedInstallScheduler? _appUpdateUnattendedInstallScheduler;
+    private readonly RemoteMaintenanceUpgradeScheduler? _remoteMaintenanceUpgradeScheduler;
     private readonly StartupProgressTracker? _startupProgress;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
@@ -75,7 +76,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null,
         StartupProgressTracker? startupProgress = null,
         WpfRestartPromptService? restartPrompt = null,
-        ColorThemeOnboardingViewModel? colorThemeOnboarding = null)
+        ColorThemeOnboardingViewModel? colorThemeOnboarding = null,
+        RemoteMaintenanceUpgradeScheduler? remoteMaintenanceUpgradeScheduler = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -88,6 +90,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         _colorThemeService = colorThemeService;
         _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
         _appUpdateUnattendedInstallScheduler = appUpdateUnattendedInstallScheduler;
+        _remoteMaintenanceUpgradeScheduler = remoteMaintenanceUpgradeScheduler;
         _startupProgress = startupProgress;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
@@ -480,6 +483,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
             // 中文注释：启动闸门放行后才开始运行期后台检查与夜间自动安装；Preview 与真实更新链完全隔离。
             _appUpdateBackgroundCheckScheduler?.Start();
             _appUpdateUnattendedInstallScheduler?.Start();
+            // 中文注释：夜间空闲窗口把白天预下载的 RustDesk 构建交给 SYSTEM 代理升级；与夜间安装同在 UI 线程启动。
+            _remoteMaintenanceUpgradeScheduler?.Start();
         }
 
         StartupCompleted?.Invoke(this, EventArgs.Empty);
@@ -657,6 +662,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         _viewModel.BeginShutdown();
         _appUpdateBackgroundCheckScheduler?.Stop();
         _appUpdateUnattendedInstallScheduler?.Stop();
+        _remoteMaintenanceUpgradeScheduler?.Stop();
         try
         {
             _rawScannerService.Stop();

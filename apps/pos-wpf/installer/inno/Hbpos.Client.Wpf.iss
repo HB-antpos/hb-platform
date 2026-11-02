@@ -63,6 +63,9 @@ Filename: "{app}\updater\Hbpos.Updater.exe"; Parameters: "--register-agent-task"
 ; 注册“HB POS Remote Maintenance Agent”计划任务（SYSTEM 运行、动作固定为 {app} 里的远程维护 helper）：之后收银端对账 RustDesk 服务器不再弹 UAC。
 ; 同样只在 Program Files 下注册，失败不影响本次安装，收银端会退回原来的 UAC 方式。
 Filename: "{app}\Hbpos.RemoteMaintenance.Setup.exe"; Parameters: "--register-agent-task"; Flags: runhidden waituntilterminated
+; 远程维护状态服务的程序副本在 Program Files\HBPOS\RemoteStatus，不随本安装目录更新；已装状态服务的机器在这里同步成随包的新程序（配置不动）。
+; 没装远程维护的机器什么也不做；失败只影响状态上报，不影响本次安装。
+Filename: "{app}\Hbpos.RemoteMaintenance.Setup.exe"; Parameters: "--sync-status-agent"; Flags: runhidden waituntilterminated
 ; 更新安装完成后始终以原登录用户启动，静默安装也不能跳过；由更新代理（SYSTEM）安装时不启动，交给登录会话里的更新窗口打开。
 Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: not IsUpdateAgentInstall
 
