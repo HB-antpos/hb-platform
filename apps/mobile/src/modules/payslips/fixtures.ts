@@ -52,6 +52,8 @@ export const FIXTURE_LIST_RESPONSE = {
   netTotal: 2605.76,
   unassignedCount: 1,
   canViewAllStores: true,
+  selfOnly: false,
+  selfUnbound: false,
   fetchedAt: "2026-10-29T08:00:00Z",
 };
 

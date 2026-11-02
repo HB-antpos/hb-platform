@@ -1531,22 +1531,21 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_仅凭任一工资单查看权限可见工资单入口_导出权限本身不够()
+    public void BuildAppMenu_工资单入口任何登录账号可见_无需任何权限()
     {
-        foreach (var permission in new[] { Permissions.Myob.Payslip.ViewManagedStore, Permissions.Myob.Payslip.ViewAllStores })
+        // 没有任何权限的普通员工也要能进（接口只给他看绑定到自己的工资单）；有查看 / 导出权限的照旧可见。
+        foreach (var claims in new Claim[][]
+                 {
+                     Array.Empty<Claim>(),
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.ViewManagedStore) },
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.ViewAllStores) },
+                     new[] { new Claim("permission", Permissions.Myob.Payslip.Download) },
+                 })
         {
-            var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", permission)));
+            var menu = _service.BuildAppMenu(CreateUser(claims));
             var item = Assert.Single(menu, entry => entry.RouteName == "payslips");
             Assert.Equal("tabs.payslips", item.TitleKey);
             Assert.Equal("receipt-text-outline", item.Icon);
-        }
-
-        // 只有下载 / 邮件权限、没有查看权限：看不到入口（接口里也需要同时具备查看权限）。
-        foreach (var permission in new[] { Permissions.Myob.Payslip.Download, Permissions.Myob.Payslip.Email })
-        {
-            Assert.DoesNotContain(
-                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
-                entry => entry.RouteName == "payslips");
         }
     }
 

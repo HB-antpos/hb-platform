@@ -2,7 +2,7 @@
   "title": "Payslips",
   "detailTitle": "Payslip",
   "messages": {
-    "notAllowed": "You don't have permission to view payslips. \"View payslips for managed stores\" or \"View payslips for all stores\" is required.",
+    "notAllowed": "Sign in to view payslips.",
     "reviewUnavailable": "Payslips aren't available in review demo mode.",
     "missingKey": "This payslip link is incomplete. Open it again from the list."
   },
@@ -46,7 +46,12 @@
     },
     "empty": {
       "title": "No payslips in this period",
-      "description": "Try a wider date range, or switch company or store."
+      "description": "Try a wider date range, or switch company or store.",
+      "selfDescription": "Try a wider date range."
+    },
+    "unbound": {
+      "title": "Not linked to MYOB yet",
+      "description": "Your account isn't linked to a MYOB employee card yet, so payslips can't be shown. Ask your store manager or an administrator to link it under MYOB integration → Employee matching."
     },
     "error": {
       "title": "Couldn't load payslips",

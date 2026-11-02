@@ -15,6 +15,8 @@ const list = normalizeList(FIXTURE_LIST_RESPONSE);
 assert.equal(list.rows.length, 5);
 assert.equal(list.totalCount, 5);
 assert.equal(list.canViewAllStores, true);
+assert.equal(list.selfOnly, false);
+assert.equal(list.selfUnbound, false);
 assert.equal(list.unassignedCount, 1);
 assert.equal(list.rows[0].employeeName, "ALEX MORGAN");
 assert.equal(list.rows[0].paymentDate, "2026-10-29");
@@ -39,7 +41,13 @@ assert.equal(messy.rows[0].netPay, 12.5);
 assert.equal(messy.rows[0].grossPay, null);
 assert.equal(messy.totalCount, 1, "缺 totalCount 时用规整后的行数");
 assert.equal(messy.canViewAllStores, false);
+assert.equal(messy.selfOnly, false, "缺字段时默认不是仅本人");
 assert.throws(() => normalizeList(null), /invalid/);
+// 仅本人 / 未绑定标记：只认布尔 true
+const selfList = normalizeList({ rows: [], selfOnly: true, selfUnbound: true });
+assert.equal(selfList.selfOnly, true);
+assert.equal(selfList.selfUnbound, true);
+assert.equal(normalizeList({ rows: [], selfOnly: "true" }).selfOnly, false);
 
 // 公司列表
 assert.deepEqual(normalizeCompanies([{ connectionGuid: "g", connectionName: "A" }, { connectionName: "no guid" }, null]), [{ connectionGuid: "g", connectionName: "A" }]);

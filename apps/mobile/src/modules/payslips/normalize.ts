@@ -128,6 +128,8 @@ export function normalizeList(data: unknown): PayslipListResult {
     netTotal: num(record.netTotal) ?? 0,
     unassignedCount: num(record.unassignedCount) ?? 0,
     canViewAllStores: record.canViewAllStores === true,
+    selfOnly: record.selfOnly === true,
+    selfUnbound: record.selfUnbound === true,
     fetchedAt: strOrNull(record.fetchedAt),
   };
 }

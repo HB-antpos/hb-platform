@@ -1,4 +1,5 @@
 // 「工资单」列表页（设计图 ①）：公司 / 分店 / 日期预设筛选 + 汇总条 + 每张工资单一张卡。
+// 「仅本人」口径（没有查看权限的普通员工）：只留日期预设，隐藏公司 / 分店 / 搜索；没绑定 MYOB 员工卡时整页换成友好提示。
 // 拆成两层：PayslipsListScreen 是路由外壳（登录与权限守卫、账号变化重建），PayslipsListContent 负责数据与界面。
 import { useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
@@ -13,7 +14,7 @@ import { labelColon, listSeparator } from "@/shared/i18n/punctuation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
-import { resolvePayslipStoreOptions } from "./access";
+import { canViewOthersPayslips, resolvePayslipStoreOptions } from "./access";
 import { describePayslipError } from "./errors";
 import { formatDate } from "./format";
 import { buildRowKey, buildRowTexts, buildSummary, failedCompanies, resolveRowPlacement } from "./list-model";
@@ -74,6 +75,10 @@ export function PayslipsListContent({ onBack }: { onBack: () => void }) {
   const result = query.data;
   const failed = result ? failedCompanies(result) : [];
   const summary = result ? buildSummary(result) : null;
+  // 仅本人口径：先按本地权限判一次（避免筛选条闪现），后端返回 selfOnly 时以后端为准。
+  const selfOnly = !canViewOthersPayslips(isAdmin, hasPermission) || result?.selfOnly === true;
+  // 仅本人且没有绑定过 MYOB 员工卡：整页换成友好提示，不显示筛选与列表。
+  const selfUnbound = selfOnly && result?.selfUnbound === true;
 
   const companyLabel = companies.find((company) => company.connectionGuid === companyGuid)?.connectionName ?? t("list.company.all");
   const storeLabel = storeCode
@@ -134,29 +139,31 @@ export function PayslipsListContent({ onBack }: { onBack: () => void }) {
           style={styles.searchbar}
         />
       ) : null}
-      <View style={styles.chipRow}>
-        <FilterChip
-          label={companyLabel}
-          dropdown
-          selected={companyGuid !== null}
-          onPress={() => setCompanyPickerOpen(true)}
-          accessibilityLabel={t("a11y.filterChip", { label: companyLabel })}
-        />
-        <FilterChip
-          label={storeLabel}
-          dropdown
-          selected={storeCode !== null}
-          onPress={() => setStorePickerOpen(true)}
-          accessibilityLabel={t("a11y.filterChip", { label: storeLabel })}
-        />
-        {showUnassignedChip ? (
+      {selfOnly ? null : (
+        <View style={styles.chipRow}>
           <FilterChip
-            label={t("list.onlyUnassigned", { count: result?.unassignedCount ?? 0 })}
-            selected={onlyUnassigned}
-            onPress={() => setOnlyUnassigned((value) => !value)}
+            label={companyLabel}
+            dropdown
+            selected={companyGuid !== null}
+            onPress={() => setCompanyPickerOpen(true)}
+            accessibilityLabel={t("a11y.filterChip", { label: companyLabel })}
           />
-        ) : null}
-      </View>
+          <FilterChip
+            label={storeLabel}
+            dropdown
+            selected={storeCode !== null}
+            onPress={() => setStorePickerOpen(true)}
+            accessibilityLabel={t("a11y.filterChip", { label: storeLabel })}
+          />
+          {showUnassignedChip ? (
+            <FilterChip
+              label={t("list.onlyUnassigned", { count: result?.unassignedCount ?? 0 })}
+              selected={onlyUnassigned}
+              onPress={() => setOnlyUnassigned((value) => !value)}
+            />
+          ) : null}
+        </View>
+      )}
       <View style={styles.chipRow}>
         {PAYSLIP_PRESETS.map((item) => {
           const label = item === "custom" ? customLabel : t(`list.preset.${item}`);
@@ -195,29 +202,31 @@ export function PayslipsListContent({ onBack }: { onBack: () => void }) {
     </View>
   );
 
-  let body: "loading" | "error" | "empty" | "list" = "list";
+  let body: "loading" | "error" | "empty" | "unbound" | "list" = "list";
   if (!result) body = query.isError ? "error" : "loading";
-  else if (result.rows.length === 0) body = "empty";
+  else if (result.rows.length === 0) body = selfUnbound ? "unbound" : "empty";
 
   return (
     <PayslipFrame
       onBack={onBack}
       title={t("title")}
       right={
-        <IconButton
-          icon={searchOpen ? "close" : "magnify"}
-          size={24}
-          accessibilityLabel={searchOpen ? t("list.searchClose") : t("list.searchOpen")}
-          onPress={toggleSearch}
-          style={styles.headerButton}
-        />
+        selfOnly ? undefined : (
+          <IconButton
+            icon={searchOpen ? "close" : "magnify"}
+            size={24}
+            accessibilityLabel={searchOpen ? t("list.searchClose") : t("list.searchOpen")}
+            onPress={toggleSearch}
+            style={styles.headerButton}
+          />
+        )
       }
     >
       <FlatList
         data={body === "list" || body === "empty" ? (result?.rows ?? []) : []}
         keyExtractor={buildRowKey}
         renderItem={({ item }) => <PayslipRowCard row={item} onPress={() => openDetail(item)} />}
-        ListHeaderComponent={header}
+        ListHeaderComponent={body === "unbound" ? null : header}
         ListEmptyComponent={
           body === "loading" ? (
             <PayslipLoading label={t("list.loading")} />
@@ -228,8 +237,10 @@ export function PayslipsListContent({ onBack }: { onBack: () => void }) {
               retryLabel={t("list.error.retry")}
               onRetry={() => void query.refetch()}
             />
+          ) : body === "unbound" ? (
+            <EmptyState title={t("list.unbound.title")} description={t("list.unbound.description")} />
           ) : (
-            <EmptyState title={t("list.empty.title")} description={t("list.empty.description")} />
+            <EmptyState title={t("list.empty.title")} description={selfOnly ? t("list.empty.selfDescription") : t("list.empty.description")} />
           )
         }
         contentContainerStyle={[styles.listContent, query.isPlaceholderData && query.isFetching ? styles.dimmed : null]}

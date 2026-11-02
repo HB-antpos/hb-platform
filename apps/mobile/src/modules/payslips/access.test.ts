@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import type { Store } from "@/modules/shop/types";
-import { canViewPayslips, resolvePayslipStoreOptions } from "./access";
+import { canViewOthersPayslips, canViewPayslips, resolvePayslipStoreOptions } from "./access";
 
 const has = (...codes: string[]) => (code: string) => codes.includes(code);
 
-// 入口：登录 + 非审核壳 + 两个查看权限任一
-assert.equal(canViewPayslips(true, has("Myob.Payslip.ViewManagedStore"), false), true);
-assert.equal(canViewPayslips(true, has("Myob.Payslip.ViewAllStores"), false), true);
-assert.equal(canViewPayslips(true, has("Myob.Payslip.Download"), false), false, "只有下载权限不能进入");
-assert.equal(canViewPayslips(true, has("Myob.Payslip.Email"), false), false, "只有邮件权限不能进入");
-assert.equal(canViewPayslips(false, has("Myob.Payslip.ViewAllStores"), false), false);
-assert.equal(canViewPayslips(true, has("Myob.Payslip.ViewAllStores"), true), false, "iOS 审核壳不提供");
+// 入口：登录 + 非审核壳即可，不要求权限（没有权限的员工只看本人）
+assert.equal(canViewPayslips(true, false), true);
+assert.equal(canViewPayslips(false, false), false, "未登录不能进入");
+assert.equal(canViewPayslips(true, true), false, "iOS 审核壳不提供");
+
+// 能否看别人：管理员或两个查看权限任一；下载 / 邮件权限不算
+assert.equal(canViewOthersPayslips(false, has("Myob.Payslip.ViewManagedStore")), true);
+assert.equal(canViewOthersPayslips(false, has("Myob.Payslip.ViewAllStores")), true);
+assert.equal(canViewOthersPayslips(true, () => false), true, "管理员不需要权限码");
+assert.equal(canViewOthersPayslips(false, has("Myob.Payslip.Download")), false, "只有下载权限只能看本人");
+assert.equal(canViewOthersPayslips(false, has("Myob.Payslip.Email")), false, "只有邮件权限只能看本人");
+assert.equal(canViewOthersPayslips(false, () => false), false);
 
 // 分店筛选范围：全部分店权限 / 管理员看全部启用 POS 的分店，其余只看管辖（isPrimary）分店
 const stores = [

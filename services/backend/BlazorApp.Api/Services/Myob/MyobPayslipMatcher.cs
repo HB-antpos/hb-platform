@@ -5,13 +5,29 @@ namespace BlazorApp.Api.Services.Myob;
 /// <summary>某张工资单归到哪些分店（Kind 见 <see cref="MyobPayslipPlacements"/>），StoreCodes 已按店号排序。</summary>
 internal sealed record MyobPayslipPlacement(string Kind, IReadOnlyList<string> StoreCodes);
 
-/// <summary>当前账号能看哪些工资单：All = 全部分店口径（含未绑定 / 无法确定分店）；否则只看与 StoreCodes 有交集的已绑定员工。</summary>
-internal sealed record MyobPayslipAccess(bool All, IReadOnlySet<string> StoreCodes)
+/// <summary>
+/// 当前账号能看哪些工资单：All = 全部分店口径（含未绑定 / 无法确定分店）；否则只看「已绑定且分店与 StoreCodes 有交集」的员工，
+/// 以及绑定到 SelfUserGuid（本人）的工资单。StoreCodes 为空、只有 SelfUserGuid 的就是「仅本人」口径（没有任何查看权限的普通员工）。
+/// </summary>
+internal sealed record MyobPayslipAccess(bool All, IReadOnlySet<string> StoreCodes, string? SelfUserGuid = null)
 {
     internal static MyobPayslipAccess Everything { get; } = new(true, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
-    internal static MyobPayslipAccess Stores(IEnumerable<string> storeCodes) =>
-        new(false, new HashSet<string>(storeCodes, StringComparer.OrdinalIgnoreCase));
+    internal static MyobPayslipAccess Stores(IEnumerable<string> storeCodes, string? selfUserGuid = null) =>
+        new(false, new HashSet<string>(storeCodes, StringComparer.OrdinalIgnoreCase), selfUserGuid);
+
+    /// <summary>仅本人：只能看绑定到自己账号的工资单，没有任何分店范围。</summary>
+    internal static MyobPayslipAccess Self(string userGuid) =>
+        new(false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), userGuid);
+
+    /// <summary>仅本人口径：既不是「全部」，也没有任何管辖分店。</summary>
+    internal bool SelfOnly => !All && StoreCodes.Count == 0 && !string.IsNullOrWhiteSpace(SelfUserGuid);
+
+    /// <summary>这张工资单绑定的员工是不是本人。</summary>
+    internal bool IsSelf(string? linkedUserGuid) =>
+        !string.IsNullOrWhiteSpace(SelfUserGuid)
+        && !string.IsNullOrWhiteSpace(linkedUserGuid)
+        && string.Equals(SelfUserGuid, linkedUserGuid, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -73,17 +89,27 @@ internal static class MyobPayslipMatcher
     }
 
     /// <summary>
-    /// 可见性：全部分店口径什么都能看；管辖分店口径只看「已绑定」且分店集合与管辖分店有交集的员工，
-    /// 未绑定 / 无法确定分店的工资单对他们不可见（也不暴露存在与否）。
+    /// 可见性：全部分店口径什么都能看；其余口径只看「已绑定」的工资单——绑定到本人的直接可见（不看分店归属，无法确定分店也能看），
+    /// 否则要分店集合与管辖分店有交集。未绑定的工资单对非全部口径一律不可见（也不暴露存在与否）。
     /// </summary>
-    internal static bool IsVisible(MyobPayslipAccess access, bool linked, MyobPayslipPlacement placement)
+    internal static bool IsVisible(MyobPayslipAccess access, string? linkedUserGuid, MyobPayslipPlacement placement)
     {
         if (access.All)
         {
             return true;
         }
 
-        return linked && placement.StoreCodes.Any(access.StoreCodes.Contains);
+        if (string.IsNullOrWhiteSpace(linkedUserGuid))
+        {
+            return false;
+        }
+
+        if (access.IsSelf(linkedUserGuid))
+        {
+            return true;
+        }
+
+        return placement.StoreCodes.Any(access.StoreCodes.Contains);
     }
 
     /// <summary>该工资单是否「无法归到分店」（未绑定或无法确定分店）。</summary>

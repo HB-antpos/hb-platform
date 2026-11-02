@@ -2,7 +2,7 @@
   "title": "工资单",
   "detailTitle": "工资单明细",
   "messages": {
-    "notAllowed": "没有查看工资单的权限。需要「查看管辖分店员工工资单」或「查看全部分店员工工资单」权限。",
+    "notAllowed": "请先登录后再查看工资单。",
     "reviewUnavailable": "审核演示模式不提供工资单。",
     "missingKey": "缺少工资单参数，请从列表重新进入。"
   },
@@ -46,7 +46,12 @@
     },
     "empty": {
       "title": "这段时间没有工资单",
-      "description": "试试放宽日期范围，或切换公司 / 分店。"
+      "description": "试试放宽日期范围，或切换公司 / 分店。",
+      "selfDescription": "试试放宽日期范围。"
+    },
+    "unbound": {
+      "title": "还没有绑定 MYOB 员工卡",
+      "description": "你的账号还没有和 MYOB 员工卡绑定，暂时看不了工资单。请联系店长或管理员在「MYOB 对接 → 员工绑定」里完成绑定。"
     },
     "error": {
       "title": "工资单加载失败",
