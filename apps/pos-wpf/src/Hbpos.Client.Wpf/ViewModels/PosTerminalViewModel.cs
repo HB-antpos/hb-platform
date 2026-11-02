@@ -127,7 +127,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         IRawScannerService? rawScannerService = null,
         Func<Task>? onReregisterDeviceAsync = null,
         IPosTerminalWorkflowService? workflowService = null,
-        Func<Task>? onHoldOrderAsync = null,
+        Func<Task<Guid?>>? onHoldOrderAsync = null,
         Func<Task>? onRecallOrderAsync = null,
         Func<Task>? onOpenHistoryAsync = null,
         Func<Task>? onOpenDailyCloseAsync = null,
@@ -519,6 +519,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     public void LoadMatches(IEnumerable<SellableItemDto> items)
     {
         Matches.ReplaceWith(items.Take(8));
+    }
+
+    /// <summary>后台目录同步完成后调用：只重跑当前打开的非空搜索，与手动同步一致，不替换收银员正在看的结果。</summary>
+    public void RefreshOpenSearchMatches()
+    {
+        RefreshMatches(requireOpenNonEmptySearch: true);
     }
 
     public void RefreshCart()
@@ -1906,16 +1912,20 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             result.Succeeded ? null : UserFeedbackCue.OperationError);
     }
 
+    /// <summary>
+    /// 执行会清空购物车的动作并记审计。回调返回该动作落库的单据 Guid（挂单即挂单 Guid），
+    /// 写进 OrderGuid，后台才能把挂单与之后的取单、删除挂单串成一条线；返回 null 表示没有落库。
+    /// </summary>
     private async Task RecordActionCallbackAsync(
         string operationType,
-        Func<Task> callback,
+        Func<Task<Guid?>> callback,
         OperationAuditCartSnapshot snapshot,
         string reasonCode)
     {
         var correlation = OperationAuditEvents.CreateCorrelation();
         try
         {
-            await callback();
+            var orderGuid = (await callback())?.ToString("D");
             var after = OperationAuditEvents.CaptureCart(_cart.Lines);
             if (!OperationAuditEvents.HasChanged(snapshot, after))
             {
@@ -1927,6 +1937,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
                     snapshot,
                     reasonCode: $"{reasonCode}_NO_STATE_CHANGE",
                     safeMessage: "NO_STATE_CHANGE",
+                    orderGuid: orderGuid,
                     correlationId: correlation.CorrelationId,
                     traceId: correlation.TraceId);
                 return;
@@ -1939,6 +1950,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
                 snapshot,
                 after,
                 reasonCode: reasonCode,
+                orderGuid: orderGuid,
                 correlationId: correlation.CorrelationId,
                 traceId: correlation.TraceId);
         }
@@ -2653,6 +2665,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos.status.selectCartLine" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountAmountTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountPercentOutOfRange" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.unitPriceTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.quantityMustBePositive" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             // 退货行的折扣 / 数量 / 价格被拒绝：沿用其它校验失败的错误态与错误音，不新增音效。
             "pos.status.returnLineDiscountBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),

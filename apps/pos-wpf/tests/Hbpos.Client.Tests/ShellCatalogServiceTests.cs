@@ -347,6 +347,72 @@ public sealed class ShellCatalogServiceTests
     }
 
     [Fact]
+    public async Task SyncCatalogInBackgroundAsync_reports_no_progress_and_passes_the_full_download_flag()
+    {
+        var sync = new FixedResultCatalogSyncService();
+        var service = new ShellCatalogService(new LocalSellableItemIndex(), new FakeLocalCatalogRepository(), sync, new PosCartService());
+
+        await service.SyncCatalogInBackgroundAsync("S01", allowFullDownload: false);
+        Assert.Equal((false, false, false), sync.LastCall);
+
+        await service.SyncCatalogInBackgroundAsync("S01", allowFullDownload: true);
+        Assert.Equal((false, true, false), sync.LastCall);
+
+        // 中文注释：手动 / 启动同步照旧允许全量并上报进度。
+        await service.SyncCatalogAndReloadAsync(
+            "S01",
+            forceFullDownload: false,
+            new RecordingProgress<CatalogSyncProgress>(new ConcurrentQueue<CatalogSyncProgress>()));
+        Assert.Equal((false, true, true), sync.LastCall);
+    }
+
+    [Fact]
+    public async Task SyncCatalogInBackgroundAsync_records_a_deferred_full_download_as_canceled_not_failed()
+    {
+        var clock = new CatalogSyncStatusServiceTests.MutableTimeProvider(Timestamp);
+        var syncStatus = new CatalogSyncStatusService(
+            new CatalogSyncStatusServiceTests.InMemoryAppSettingsRepository(),
+            clock);
+        var repository = new CountingCatalogRepository();
+        var sync = new FixedResultCatalogSyncService { Failure = new CatalogFullDownloadDeferredException("S01", "plan-full") };
+        var service = new ShellCatalogService(
+            new LocalSellableItemIndex(),
+            repository,
+            sync,
+            new PosCartService(),
+            catalogSyncStatus: syncStatus);
+
+        await Assert.ThrowsAsync<CatalogFullDownloadDeferredException>(
+            () => service.SyncCatalogInBackgroundAsync("S01", allowFullDownload: false));
+
+        // 中文注释：设置页不能显示“上次同步失败”；扫码索引也不重载。
+        Assert.Equal(CatalogSyncStatus.Empty, syncStatus.GetStatus("S01"));
+        Assert.Equal(0, repository.LoadCount);
+        Assert.False(service.IsCatalogSyncActive);
+    }
+
+    [Fact]
+    public async Task Catalog_sync_reapplies_promotion_rules_only_when_they_change()
+    {
+        var repository = new FakeLocalCatalogRepository { PromotionRules = [CreatePromotionRule("P1")] };
+        var cart = new PosCartService();
+        var cartChanges = 0;
+        cart.CartChanged += (_, _) => cartChanges++;
+        var service = new ShellCatalogService(new LocalSellableItemIndex(), repository, new FixedResultCatalogSyncService(), cart);
+
+        await service.SyncCatalogAndReloadAsync("S01", forceFullDownload: false);
+        Assert.Equal(1, cartChanges);
+
+        // 中文注释：每 30 分钟的自动同步规则没变，不能无故触发购物车与客显刷新。
+        await service.SyncCatalogInBackgroundAsync("S01", allowFullDownload: false);
+        Assert.Equal(1, cartChanges);
+
+        repository.PromotionRules = [CreatePromotionRule("P1", fixedPrice: 2.00m)];
+        await service.SyncCatalogInBackgroundAsync("S01", allowFullDownload: false);
+        Assert.Equal(2, cartChanges);
+    }
+
+    [Fact]
     public async Task LoadLocalCatalogAsync_adds_code_conflict_products_to_price_index_only()
     {
         const string conflictCode = "6405090401470";
@@ -424,7 +490,8 @@ public sealed class ShellCatalogServiceTests
             string storeCode,
             CancellationToken cancellationToken = default,
             IProgress<CatalogSyncProgress>? progress = null,
-            bool forceFullDownload = false)
+            bool forceFullDownload = false,
+            bool allowFullDownload = true)
         {
             Calls.Add($"{storeCode}:{forceFullDownload.ToString().ToLowerInvariant()}");
             var activeWrites = Interlocked.Increment(ref _activeWrites);
@@ -503,7 +570,8 @@ public sealed class ShellCatalogServiceTests
             string storeCode,
             CancellationToken cancellationToken = default,
             IProgress<CatalogSyncProgress>? progress = null,
-            bool forceFullDownload = false)
+            bool forceFullDownload = false,
+            bool allowFullDownload = true)
         {
             return Task.FromResult(new LocalCatalogSyncResult(storeCode, 0, 0, 0, 0));
         }
@@ -539,13 +607,19 @@ public sealed class ShellCatalogServiceTests
     {
         public LocalCatalogSyncResult Result { get; set; } = new("S01", 0, 0, 0, 0);
 
+        public Exception? Failure { get; set; }
+
+        public (bool ForceFullDownload, bool AllowFullDownload, bool ProgressProvided)? LastCall { get; private set; }
+
         public Task<LocalCatalogSyncResult> FullSyncAsync(
             string storeCode,
             CancellationToken cancellationToken = default,
             IProgress<CatalogSyncProgress>? progress = null,
-            bool forceFullDownload = false)
+            bool forceFullDownload = false,
+            bool allowFullDownload = true)
         {
-            return Task.FromResult(Result);
+            LastCall = (forceFullDownload, allowFullDownload, progress is not null);
+            return Failure is null ? Task.FromResult(Result) : Task.FromException<LocalCatalogSyncResult>(Failure);
         }
     }
 
@@ -568,7 +642,8 @@ public sealed class ShellCatalogServiceTests
             string storeCode,
             CancellationToken cancellationToken = default,
             IProgress<CatalogSyncProgress>? progress = null,
-            bool forceFullDownload = false)
+            bool forceFullDownload = false,
+            bool allowFullDownload = true)
         {
             throw new HttpRequestException("network timeout");
         }

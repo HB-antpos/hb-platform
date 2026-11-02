@@ -92,6 +92,54 @@ public sealed class RemoteMaintenanceContractTests
         Assert.Contains("LastSeenAtUtc", update, StringComparison.Ordinal);
         Assert.DoesNotContain("RustdeskId =", update, StringComparison.Ordinal);
         Assert.DoesNotContain("ClientVersion =", update, StringComparison.Ordinal);
+        // 心跳观察到的版本写进单独的列，不碰登记版本。
+        Assert.Contains("ObservedRustDeskVersion = observedRustDeskVersion", update, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("1.4.9", "running", "1.4.9", "match")]
+    // 公司定制构建带后缀，rustdesk.exe 文件版本只有上游版本号。
+    [InlineData("1.4.9", "running", "1.4.9-hb1", "match")]
+    [InlineData("1.4.9.0", "running", "1.4.9", "match")]
+    // 有人点了 RustDesk 自带的“更新”。
+    [InlineData("1.5.0", "running", "1.4.9", "drift")]
+    [InlineData("1.5.0", "stopped", "1.4.9-hb1", "drift")]
+    // 服务还在、程序文件读不到：被删或被隔离。
+    [InlineData("", "stopped", "1.4.9", "missing")]
+    [InlineData("", "running", null, "missing")]
+    // 没收到过、未安装、检查失败、中心没配下发版本：不下结论。
+    [InlineData(null, "running", "1.4.9", "unknown")]
+    [InlineData("", "notInstalled", "1.4.9", "unknown")]
+    [InlineData("1.4.9", "checkFailed", "1.4.9", "unknown")]
+    [InlineData("1.4.9", "running", null, "unknown")]
+    // 非数字版本按字符串比。
+    [InlineData("nightly", "running", "nightly-hb1", "match")]
+    public void RustDeskVersionStatus_比对实际版本与下发版本(string? observed, string serviceStatus, string? expected, string status)
+    {
+        Assert.Equal(status, RemoteMaintenanceService.ResolveRustDeskVersionStatus(observed, serviceStatus, expected));
+    }
+
+    [Fact]
+    public void DeviceList_带出实际版本与比对结果()
+    {
+        var now = DateTime.UtcNow;
+        var dto = RemoteMaintenanceService.MapListItem(new RemoteMaintenanceDevice
+        {
+            Id = Guid.NewGuid(), ClientVersion = "1.4.9", ObservedRustDeskVersion = "1.5.0",
+            ServiceStatus = RemoteMaintenanceServiceStatuses.Running, LastSeenAtUtc = now, RegisteredAtUtc = now
+        }, now.AddSeconds(-60), "1.4.9");
+
+        Assert.Equal("1.4.9", dto.ClientVersion);
+        Assert.Equal("1.5.0", dto.ObservedRustDeskVersion);
+        Assert.Equal(RemoteMaintenanceRustDeskVersionStatuses.Drift, dto.RustDeskVersionStatus);
+    }
+
+    [Fact]
+    public void Schema_补齐实际版本列并纳入门禁()
+    {
+        Assert.Contains("ADD [ObservedRustDeskVersion] nvarchar(80) NULL", BlazorApp.Api.Data.SchemaMigrations.RemoteMaintenanceSchemaMigrator.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'ObservedRustDeskVersion') IS NULL", BlazorApp.Api.Data.SchemaMigrations.RemoteMaintenanceSchemaMigrator.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("THROW 51708", BlazorApp.Api.Data.SchemaMigrations.RemoteMaintenanceSchemaMigrator.VerifySql, StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot()

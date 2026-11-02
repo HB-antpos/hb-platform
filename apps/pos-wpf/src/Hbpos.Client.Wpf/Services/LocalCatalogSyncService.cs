@@ -7,11 +7,16 @@ namespace Hbpos.Client.Wpf.Services;
 
 public interface ILocalCatalogSyncService
 {
+    /// <summary>
+    /// allowFullDownload=false（运行中白天的自动同步）：服务端要求全量时不下载，
+    /// 抛 <see cref="CatalogFullDownloadDeferredException"/>，本地目录保持不变。
+    /// </summary>
     Task<LocalCatalogSyncResult> FullSyncAsync(
         string storeCode,
         CancellationToken cancellationToken = default,
         IProgress<CatalogSyncProgress>? progress = null,
-        bool forceFullDownload = false);
+        bool forceFullDownload = false,
+        bool allowFullDownload = true);
 
     /// <summary>
     /// 只拉取并落库本店促销规则（不碰商品目录），供定时刷新使用；返回服务端最新规则。
@@ -38,6 +43,18 @@ public sealed record LocalCatalogSyncResult(
     string SyncMode = LocalCatalogSyncModes.Legacy,
     bool CatalogChanged = true,
     bool CodeConflictsChanged = true);
+
+/// <summary>
+/// 自动同步不允许全量时，服务端要求全量（基准快照过期、变化超过增量上限、增量失败需退回全量或只有旧协议）。
+/// 不是失败：本地目录没有任何写入，留给夜间、下次启动或手动同步。
+/// </summary>
+public sealed class CatalogFullDownloadDeferredException(string storeCode, string reason)
+    : Exception($"Catalog full download deferred. store={storeCode} reason={reason}")
+{
+    public string StoreCode { get; } = storeCode;
+
+    public string Reason { get; } = reason;
+}
 
 public static class LocalCatalogSyncModes
 {
@@ -90,9 +107,15 @@ public sealed class LocalCatalogSyncService(
         string storeCode,
         CancellationToken cancellationToken = default,
         IProgress<CatalogSyncProgress>? progress = null,
-        bool forceFullDownload = false)
+        bool forceFullDownload = false,
+        bool allowFullDownload = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        if (forceFullDownload && !allowFullDownload)
+        {
+            throw new ArgumentException("Forced full download cannot disallow full download.", nameof(allowFullDownload));
+        }
+
         var totalStopwatch = Stopwatch.StartNew();
         // 中文注释：与 iPad 同一协议——先问服务端要同步计划（无变化/增量/全量），只下载真正需要的数据；
         // 重置数据时不带基准版本，服务端必然给全量。
@@ -104,6 +127,7 @@ public sealed class LocalCatalogSyncService(
             var fileResult = await TryFileSyncAsync(
                 storeCode,
                 baseCatalogVersion,
+                allowFullDownload,
                 progress,
                 totalStopwatch,
                 cancellationToken);
@@ -120,6 +144,12 @@ public sealed class LocalCatalogSyncService(
         }
         catch (CatalogApiException ex) when (IsSyncPlanUnavailable(ex))
         {
+            if (!allowFullDownload)
+            {
+                // 中文注释：旧协议要逐页核对整份目录，开销等同全量，自动同步不做。
+                throw DeferFullDownload(storeCode, "legacy-protocol");
+            }
+
             Log($"sync plan unavailable store={storeCode} status={FormatStatus(ex)} errorCode={ex.ErrorCode ?? "<none>"} fallback=legacy-compare");
             return await LegacyFullSyncAsync(storeCode, cancellationToken, progress, forceFullDownload);
         }
@@ -129,6 +159,7 @@ public sealed class LocalCatalogSyncService(
             plan,
             baseCatalogVersion,
             forceFullDownload,
+            allowFullDownload,
             progress,
             totalStopwatch,
             cancellationToken);
@@ -139,6 +170,7 @@ public sealed class LocalCatalogSyncService(
         CatalogSyncPlanResponse plan,
         string? baseCatalogVersion,
         bool forceFullDownload,
+        bool allowFullDownload,
         IProgress<CatalogSyncProgress>? progress,
         Stopwatch totalStopwatch,
         CancellationToken cancellationToken)
@@ -149,6 +181,11 @@ public sealed class LocalCatalogSyncService(
         {
             Log($"planned sync start store={storeCode} mode={plan.Mode} base={baseCatalogVersion ?? "<none>"} target={plan.TargetCatalogVersion} total={plan.TargetTotal} deltaOperations={plan.DeltaOperationCount?.ToString(CultureInfo.InvariantCulture) ?? "<none>"} forceFullDownload={forceFullDownload}");
             ValidatePlan(storeCode, plan);
+            if (!allowFullDownload && plan.Mode == CatalogSyncModes.Full)
+            {
+                throw DeferFullDownload(storeCode, "plan-full");
+            }
+
             switch (plan.Mode)
             {
                 case CatalogSyncModes.NoChange:
@@ -174,6 +211,11 @@ public sealed class LocalCatalogSyncService(
                     {
                         // 中文注释：基准快照过期、本地版本被改或增量页不完整时，丢弃这次增量改走全量，本地数据保持不变。
                         Log($"delta sync fallback store={storeCode} reason={ex.GetType().Name} errorCode={(ex as CatalogApiException)?.ErrorCode ?? "<none>"} error={ex.Message}");
+                        if (!allowFullDownload)
+                        {
+                            throw DeferFullDownload(storeCode, "delta-fallback");
+                        }
+
                         counters.Reset();
                         syncMode = CatalogSyncModes.Full;
                         var fullPlan = await RequestFullPlanAsync(storeCode, cancellationToken);
@@ -199,6 +241,11 @@ public sealed class LocalCatalogSyncService(
         {
             totalStopwatch.Stop();
             Log($"planned sync canceled store={storeCode} mode={syncMode} remotePages={counters.RemotePages} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            throw;
+        }
+        catch (CatalogFullDownloadDeferredException)
+        {
+            // 中文注释：推迟全量不是失败，不上报失败进度（DeferFullDownload 已记日志）。
             throw;
         }
         catch (Exception ex)
@@ -268,6 +315,7 @@ public sealed class LocalCatalogSyncService(
     private async Task<LocalCatalogSyncResult?> TryFileSyncAsync(
         string storeCode,
         string? baseCatalogVersion,
+        bool allowFullDownload,
         IProgress<CatalogSyncProgress>? progress,
         Stopwatch totalStopwatch,
         CancellationToken cancellationToken)
@@ -288,6 +336,12 @@ public sealed class LocalCatalogSyncService(
         {
             Log($"file sync plan rejected store={storeCode} mode={plan.Mode} reason={invalidReason} fallback=paging");
             return null;
+        }
+
+        if (!allowFullDownload && plan.Mode == CatalogSyncModes.Full)
+        {
+            // 中文注释：直接推迟，不退回分页协议——分页计划同样会是全量，白白多一次请求。
+            throw DeferFullDownload(storeCode, "file-plan-full");
         }
 
         var counters = new PlannedSyncCounters();
@@ -1389,6 +1443,12 @@ public sealed class LocalCatalogSyncService(
     private static void Log(string message)
     {
         ConsoleLog.Write("CatalogSync", message);
+    }
+
+    private static CatalogFullDownloadDeferredException DeferFullDownload(string storeCode, string reason)
+    {
+        Log($"full download deferred store={storeCode} reason={reason}");
+        return new CatalogFullDownloadDeferredException(storeCode, reason);
     }
 
     /// <summary>在调用线程上直接上报；下载回调来自后台线程，进度最终由外层 IProgress 负责切回 UI。</summary>

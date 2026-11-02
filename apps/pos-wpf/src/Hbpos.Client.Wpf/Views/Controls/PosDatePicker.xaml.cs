@@ -8,7 +8,8 @@ namespace Hbpos.Client.Wpf.Views.Controls;
 /// <summary>
 /// 触屏日期选择器：整块日期按钮点开大格子月历，可选前后一天按钮。
 /// 日期文字、月份标题、星期行都按界面语言（LocalizationResourceProvider）生成，不读线程区域性，
-/// 切换语言后立即刷新；不允许未来日期时，未来格子、后一天和下月按钮都不可点。
+/// 切换语言后立即刷新；不允许未来日期时，未来格子、后一天和下月按钮都不可点；
+/// 设了最早日期（MinimumDate）时，更早的格子、前一天和上月按钮同样不可点。
 /// </summary>
 public partial class PosDatePicker : UserControl
 {
@@ -38,6 +39,12 @@ public partial class PosDatePicker : UserControl
         typeof(bool),
         typeof(PosDatePicker),
         new PropertyMetadata(false, OnDisplayPropertyChanged));
+
+    public static readonly DependencyProperty MinimumDateProperty = DependencyProperty.Register(
+        nameof(MinimumDate),
+        typeof(DateTime?),
+        typeof(PosDatePicker),
+        new PropertyMetadata(null, OnDisplayPropertyChanged));
 
     public static readonly DependencyProperty IncludeDayOfWeekProperty = DependencyProperty.Register(
         nameof(IncludeDayOfWeek),
@@ -115,6 +122,13 @@ public partial class PosDatePicker : UserControl
     {
         get => (bool)GetValue(AllowFutureDatesProperty);
         set => SetValue(AllowFutureDatesProperty, value);
+    }
+
+    /// <summary>最早可选日期（含当天）；更早的格子、前一天和上月按钮都不可点。为空表示不限。</summary>
+    public DateTime? MinimumDate
+    {
+        get => (DateTime?)GetValue(MinimumDateProperty);
+        set => SetValue(MinimumDateProperty, value);
     }
 
     public bool IncludeDayOfWeek
@@ -225,7 +239,13 @@ public partial class PosDatePicker : UserControl
         NextDayButton.IsEnabled = PosDatePickerCalendar.IsSelectable(
             (SelectedDate ?? today).Date.AddDays(1),
             today,
-            AllowFutureDates);
+            AllowFutureDates,
+            MinimumDate);
+        PreviousDayButton.IsEnabled = PosDatePickerCalendar.IsSelectable(
+            (SelectedDate ?? today).Date.AddDays(-1),
+            today,
+            AllowFutureDates,
+            MinimumDate);
 
         if (CalendarPopup.IsOpen)
         {
@@ -245,14 +265,16 @@ public partial class PosDatePicker : UserControl
             SelectedDate,
             today,
             AllowFutureDates,
-            culture);
+            culture,
+            MinimumDate);
         NextMonthButton.IsEnabled = PosDatePickerCalendar.CanShowNextMonth(_displayMonth, today, AllowFutureDates);
+        PreviousMonthButton.IsEnabled = PosDatePickerCalendar.CanShowPreviousMonth(_displayMonth, MinimumDate);
     }
 
     private void SelectDate(DateTime date)
     {
-        // 跨午夜后「今天」会变：每次选择都按当前时刻再判一次，未来日期一律不接受。
-        if (!PosDatePickerCalendar.IsSelectable(date, DateTime.Today, AllowFutureDates))
+        // 跨午夜后「今天」会变：每次选择都按当前时刻再判一次，未来日期和早于最早日期的一律不接受。
+        if (!PosDatePickerCalendar.IsSelectable(date, DateTime.Today, AllowFutureDates, MinimumDate))
         {
             return;
         }
@@ -282,6 +304,11 @@ public partial class PosDatePicker : UserControl
 
     private void PreviousMonthButtonClick(object sender, RoutedEventArgs e)
     {
+        if (!PosDatePickerCalendar.CanShowPreviousMonth(_displayMonth, MinimumDate))
+        {
+            return;
+        }
+
         _displayMonth = _displayMonth.AddMonths(-1);
         RefreshCalendar();
     }

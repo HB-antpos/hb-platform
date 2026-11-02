@@ -14,12 +14,14 @@ import {
   type ChinaGoodsSummary,
 } from "@/modules/product-report/china-goods-share";
 import { LINKED_COLORS, LINKED_STALE_OPACITY } from "@/modules/product-report/linked-colors";
-import { getCollapsedRowsWithSelection, isSameLinkedCode } from "@/modules/product-report/linked-selection";
+import { getCollapsedRowsWithSelection } from "@/modules/product-report/linked-selection";
 import { formatWholeDollars } from "@/modules/reports/format";
 import { GROWTH_COLORS, formatGrowthRate, getGrowthTone } from "@/modules/reports/growth-rate";
+import { isStoreSelected } from "@/modules/reports/store-selection";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 
 const SORT_HIT_SLOP = { top: 10, bottom: 10 };
+const EMPTY_SELECTED_BRANCH_CODES: readonly string[] = [];
 const SHARE_BAR_COLOR = "#2563EB";
 const COMPARE_TICK_COLOR = "#111827";
 
@@ -194,20 +196,21 @@ function ShareBar({ share, compareShare, scaleMax }: { share: number | null; com
  * 分店中国货占比：中国货金额 ÷ 分店营业额，本期与同期上下两行，默认按中国货金额降序。
  * 主报表四块数据同批次到齐后才渲染本区块，因此这里不再单独处理加载与失败状态。
  *
- * 三表联动：整行点按选中分店（再点取消），供应商表与商品明细随之收窄，本表自身不过滤、只高亮；
+ * 三表联动：整行点按把分店加入所选（再点移出，可多选），供应商表与商品明细随之收窄，本表自身不过滤、只高亮；
  * 传入 supplierName 时本表显示的是该供应商在各分店的销售（分母仍是分店营业额）。
  * updating 表示正在按新供应商重取，旧数据变淡但仍可点按。
  */
 export function ChinaBranchShareSection({
   rows,
-  selectedBranchCode = null,
+  selectedBranchCodes = EMPTY_SELECTED_BRANCH_CODES,
   onSelectBranch,
   supplierName = null,
   updating = false,
   onLayout,
 }: {
   rows: readonly ChinaBranchShareRow[];
-  selectedBranchCode?: string | null;
+  /** 所选分店（多选）；空数组代表全部分店，此时不高亮任何行。 */
+  selectedBranchCodes?: readonly string[];
   onSelectBranch?: (branchCode: string) => void;
   supplierName?: string | null;
   updating?: boolean;
@@ -226,7 +229,7 @@ export function ChinaBranchShareSection({
     : getCollapsedRowsWithSelection(
         sortedRows,
         CHINA_BRANCH_COLLAPSED_ROW_COUNT,
-        (row) => isSameLinkedCode(row.branchCode, selectedBranchCode),
+        (row) => isStoreSelected(selectedBranchCodes, row.branchCode),
       );
   const canExpand = sortedRows.length > CHINA_BRANCH_COLLAPSED_ROW_COUNT;
   // 点选提示由吸顶联动条统一给出，公式行只说明口径，保持单行不折行。
@@ -316,7 +319,7 @@ export function ChinaBranchShareSection({
               <Text variant="bodySmall">{t("productReport.chinaGoods.emptyBranches")}</Text>
             </View>
           ) : visibleRows.map((row, index) => {
-            const selected = isSameLinkedCode(row.branchCode, selectedBranchCode);
+            const selected = isStoreSelected(selectedBranchCodes, row.branchCode);
             // 选中供应商后，本期没卖该供应商的分店仍列出（同期可能有销售），金额置灰。
             const noSales = supplierMode && row.chinaRevenue === 0;
             const cells = (

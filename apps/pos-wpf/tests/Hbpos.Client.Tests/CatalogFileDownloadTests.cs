@@ -439,6 +439,26 @@ public sealed class CatalogFileDownloadTests : IDisposable
         Assert.Empty(api.PagingPlanRequests);
     }
 
+    [Fact]
+    public async Task Auto_sync_without_full_download_defers_a_full_file_plan_without_downloading_or_paging()
+    {
+        var bytes = FullFile("v2", Items(3));
+        var api = new FileCatalogApiClient();
+        api.AddFile("files/full", bytes);
+        api.FilePlans.Enqueue(FilePlan(CatalogSyncModes.Full, "v1-expired", "v2", 3, Descriptor("files/full", bytes)));
+        var repository = new FileVersionedRepository { CatalogVersion = "v1-expired" };
+
+        var deferred = await Assert.ThrowsAsync<CatalogFullDownloadDeferredException>(() =>
+            CreateService(repository, api).FullSyncAsync(Store, allowFullDownload: false));
+
+        // 中文注释：分页计划同样会是全量，不再多问一次；文件一个字节都不下载，本地版本不变。
+        Assert.Equal("file-plan-full", deferred.Reason);
+        Assert.Empty(api.RangeRequests);
+        Assert.Empty(api.PagingPlanRequests);
+        Assert.Null(repository.CommittedStamp);
+        Assert.Equal("v1-expired", repository.CatalogVersion);
+    }
+
     // ---------- 辅助 ----------
 
     private LocalCatalogSyncService CreateService(FileVersionedRepository repository, FileCatalogApiClient api) =>

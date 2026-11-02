@@ -41,14 +41,14 @@ const MYOB_CODE = 'Myob.Connection.Manage'
 const MYOB_BIND_CODE = 'Myob.Employee.Bind'
 const PAYROLL_EDIT_CODE = 'Attendance.Payroll.Edit'
 
-// 路由登记：作为「工时与工资」合并页的标签；懒加载、不保活（授权回跳带 ?myob= 参数，必须按新进入加载）、全局菜单键与独立访问键
+// 路由登记：作为「工时与工资」合并页的标签；懒加载、保活（切走再回来保留子页签 / 公司 / 视图；授权回跳是整页重新加载，不受保活影响）、全局菜单键与独立访问键
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 const routeStart = routeSource.indexOf(`path: '${MYOB_PATH}'`)
 assertEqual(routeStart >= 0, true, '必须登记 MYOB 对接路由')
 const routeBlock = routeSource.slice(routeStart, routeSource.indexOf('element:', routeStart) + 40)
 assertEqual(routeSource.includes("const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))"), true, '页面必须懒加载，不进首屏包')
 assertEqual(routeBlock.includes("title: 'menu.myob'"), true, '路由标题使用全局菜单键')
-assertEqual(routeBlock.includes('keepAlive: false'), true, '路由不能 keepAlive')
+assertEqual(routeBlock.includes('keepAlive: true'), true, '路由保活：切到别的页签再回来不重新加载')
 assertEqual(routeBlock.includes("accessKey: 'canAccessMyob'"), true, '路由使用「三者任一」访问键')
 assertEqual(routeBlock.includes('element: <PosAdminMyobPage />'), true, '路由必须渲染 MYOB 对接页')
 assertEqual(
@@ -141,6 +141,13 @@ for (const [code, label] of [[MYOB_BIND_CODE, '员工绑定'], [PAYROLL_EDIT_COD
 }
 assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE])).canBindMyobEmployees, true, '员工绑定页签权限')
 assertEqual(buildAccess(createCurrentUser([PAYROLL_EDIT_CODE])).canBindMyobEmployees, false, '编辑工资不连带员工绑定')
+// 「我方建档」：员工绑定 + 建门店员工（Users.CreateStoreStaff 或 Users.Create）两者都要，与后端两个策略一致
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE])).canCreateMyobOurSide, false, '只有员工绑定不能建档')
+assertEqual(buildAccess(createCurrentUser([P.Users.Create])).canCreateMyobOurSide, false, '只有建用户不能建档（进不了员工绑定）')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.CreateStoreStaff])).canCreateMyobOurSide, true, '绑定 + 建门店员工可以建档')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.Create])).canCreateMyobOurSide, true, 'Users.Create 隐含建门店员工')
+assertEqual(buildAccess(createCurrentUser([MYOB_BIND_CODE, P.Users.ViewWebConsole])).canCreateMyobOurSide, false, '只能看用户管理页不算能建档')
+assertEqual(buildAccess(createCurrentUser([], ['Admin'])).canCreateMyobOurSide, true, '管理员可以建档')
 
 // 其余考勤、系统、设备类权限仍不能打开它
 for (const code of [

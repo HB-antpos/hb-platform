@@ -5,6 +5,10 @@ using PCEFTPOS.EFTClient.IPInterface;
 
 namespace Hbpos.Client.Tests;
 
+/// <summary>
+/// 本地 IP 模式会走真实 LinklyTerminalClient 并写 LinklyLocal 日志，因此与其他全局日志用例串行。
+/// </summary>
+[Collection(GlobalLoggingTestCollection.Name)]
 public sealed class ConfiguredLinklyTerminalClientTests
 {
     [Fact]

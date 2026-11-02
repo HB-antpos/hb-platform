@@ -198,8 +198,9 @@ public sealed class ScreenNavigatorTests : IDisposable
     {
         var navigator = CreateNavigator(suspendedOrderService: null);
 
-        await navigator.SuspendCurrentOrderAsync();
+        var suspendedGuid = await navigator.SuspendCurrentOrderAsync();
 
+        Assert.Null(suspendedGuid);
         Assert.Equal(new[] { "main.suspendedUnavailable" }, _statusMessages);
     }
 
@@ -212,8 +213,10 @@ public sealed class ScreenNavigatorTests : IDisposable
         var navigator = CreateNavigator(service);
         navigator.Session = Session with { CashierId = "C009" };
 
-        await navigator.SuspendCurrentOrderAsync();
+        var suspendedGuid = await navigator.SuspendCurrentOrderAsync();
 
+        // 挂单 Guid 交给收银页写入 ORDER_HOLD 审计。
+        Assert.Equal(orderGuid, suspendedGuid);
         Assert.Equal(new[] { "Saved #34567890" }, _statusMessages);
         Assert.Equal("C009", Assert.Single(service.SuspendedSessions).CashierId);
         Assert.Empty(_screens);
@@ -226,8 +229,9 @@ public sealed class ScreenNavigatorTests : IDisposable
         var navigator = CreateNavigator(service);
         AttachPosTerminal(navigator);
 
-        await navigator.SuspendCurrentOrderAsync();
+        var suspendedGuid = await navigator.SuspendCurrentOrderAsync();
 
+        Assert.Null(suspendedGuid);
         Assert.Equal(new[] { "挂单写入失败" }, _statusMessages);
         Assert.Empty(_screens);
     }

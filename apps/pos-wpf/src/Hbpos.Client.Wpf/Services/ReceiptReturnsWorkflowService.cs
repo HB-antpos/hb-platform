@@ -116,9 +116,11 @@ public sealed class ReceiptReturnsWorkflowService(
     LocalSellableItemIndex priceIndex,
     PosCartService cart,
     ILocalizationService? localization = null,
-    IUiPriorityCoordinator? uiPriorityCoordinator = null) : IReceiptReturnsWorkflowService
+    IUiPriorityCoordinator? uiPriorityCoordinator = null,
+    TimeProvider? timeProvider = null) : IReceiptReturnsWorkflowService
 {
     private const string OpenItemLookupCode = "OPENITEM";
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     // 中文注释：8 位单号短码查单时多取的候选条数；够覆盖「子串碰巧命中其它订单」的噪音，又不至于拖慢 2 秒超时内的查询。
     private const int ShortCodeCandidateTake = 20;
     internal static readonly TimeSpan RemoteLookupTimeout = TimeSpan.FromSeconds(2);
@@ -205,6 +207,23 @@ public sealed class ReceiptReturnsWorkflowService(
                     }),
                     ex);
                 return result;
+            }
+            catch (CatalogApiException ex) when (IsOrderWindowRejection(ex))
+            {
+                // 服务端按「最早 1 年」拒绝（ORDER_TOO_OLD_FOR_RETURN 等）是确定的业务结论，不是联网故障：
+                // 不能再退回本机订单库（本机订单永久保留，退回去就绕过了期限），直接把服务端的中英提示给收银员。
+                var rejected = new ReceiptReturnLookupResult(null, false, false, ex.Message);
+                ConsoleLog.WriteInformation(
+                    "ReceiptReturns",
+                    $"lookup rejected by order window code={ex.ErrorCode} queryType={queryType} queryLength={query.Length} " +
+                    $"elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = session.StoreCode,
+                        ["deviceCode"] = session.DeviceCode,
+                        ["errorCode"] = ex.ErrorCode
+                    }));
+                return rejected;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -483,6 +502,14 @@ public sealed class ReceiptReturnsWorkflowService(
                     cancellationToken))
                 .Where(summary => ReceiptOrderShortCode.Matches(summary.OrderGuid, shortCode))
                 .ToList();
+            // 本机订单库永久保留：超过 1 年的原单不进候选；只剩它们时明确告诉收银员超期，而不是「找不到」。
+            var tooOldCandidates = candidates.Where(summary => IsTooOldForReturn(summary.SoldAt)).ToList();
+            candidates = candidates.Where(summary => !IsTooOldForReturn(summary.SoldAt)).ToList();
+            if (candidates.Count == 0 && tooOldCandidates.Count > 0)
+            {
+                return CreateTooOldForReturnResult(tooOldCandidates.Max(summary => summary.SoldAt));
+            }
+
             var sameStore = candidates
                 .Where(summary => string.Equals(summary.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -506,8 +533,10 @@ public sealed class ReceiptReturnsWorkflowService(
 
         if (order is null)
         {
+            // 按商品条码等关键字找「最近一张含它的原单」：只在可退期限（近 1 年）内找。
             var summaries = await receiptQueryService.GetRecentOrdersAsync(
                 new LocalOrderHistoryQuery(
+                    SoldFrom: EarliestReturnableStart(),
                     DeviceCode: null,
                     Keyword: query),
                 1,
@@ -523,6 +552,12 @@ public sealed class ReceiptReturnsWorkflowService(
         if (order is null)
         {
             return new ReceiptReturnLookupResult(null, false, false, T("returns.status.orderNotFound", "Order was not found."));
+        }
+
+        // 按完整订单号直接拿到的本机原单也要过「最早 1 年」这一关：离线查单、联网查不到退回本机两条路都经过这里。
+        if (IsTooOldForReturn(order.SoldAt))
+        {
+            return CreateTooOldForReturnResult(order.SoldAt);
         }
 
         // 本地降级拿不到服务端的任何退货记录：把本机保存的全部退货单（含已同步的）都算上；
@@ -740,6 +775,36 @@ public sealed class ReceiptReturnsWorkflowService(
                 ? " " + T("returns.status.cardRefundDisabledStale", "Refund to the original card is disabled until the order's return records can be loaded online.")
                 : string.Empty;
     }
+
+    // 服务端按订单查询时间窗口拒绝的错误码（POS API #1119）；这些是确定的业务结论，不能退回本机订单库重试。
+    private static bool IsOrderWindowRejection(CatalogApiException ex) =>
+        ex.ErrorCode is OrderQueryWindowRules.ErrorTooOldForReturn
+            or OrderQueryWindowRules.ErrorTooOld
+            or OrderQueryWindowRules.ErrorRangeTooLong
+            or OrderQueryWindowRules.ErrorRangeInvalid;
+
+    /// <summary>可退货的最早日期：本机今天往前推 1 年的同一天（收银机时区即门店时区；与 POS API 同一套规则）。</summary>
+    private DateTime EarliestReturnableDate() =>
+        OrderQueryWindowRules.EarliestDate(_timeProvider.GetLocalNow().Date, OrderQueryWindowRules.DefaultEarliestMonths);
+
+    private DateTimeOffset EarliestReturnableStart()
+    {
+        var earliest = EarliestReturnableDate();
+        return new DateTimeOffset(earliest, _timeProvider.LocalTimeZone.GetUtcOffset(earliest));
+    }
+
+    private bool IsTooOldForReturn(DateTimeOffset soldAt) =>
+        TimeZoneInfo.ConvertTime(soldAt, _timeProvider.LocalTimeZone).Date < EarliestReturnableDate();
+
+    private ReceiptReturnLookupResult CreateTooOldForReturnResult(DateTimeOffset soldAt) =>
+        new(
+            null,
+            false,
+            false,
+            Format(
+                "returns.status.orderTooOld",
+                "This order was sold on {0}, more than one year ago, and can no longer be returned against.",
+                TimeZoneInfo.ConvertTime(soldAt, _timeProvider.LocalTimeZone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
 
     private string T(string key, string fallback)
     {

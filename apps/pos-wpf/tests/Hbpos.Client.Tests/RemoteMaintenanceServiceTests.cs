@@ -577,6 +577,226 @@ public sealed class RemoteMaintenanceServiceTests
     }
 
     [Fact]
+    public async Task Reconcile_goes_through_the_agent_without_uac_when_the_task_is_registered()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.ReconcileAsync();
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, result);
+        Assert.Empty(fixture.Launcher.Stages);
+        Assert.Equal(new[] { DedicatedServer }, fixture.Agent.Requests);
+        // 代理不碰 journal，由服务在成功后补写。
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(DedicatedServer, journal!.Config);
+        Assert.Null(journal.PendingConfig);
+        Assert.Equal(0, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_agent_failure_keeps_the_old_config_and_never_falls_back_to_uac()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+        fixture.Agent.ExitCode = RemoteMaintenanceAgentClient.NotRespondingExitCode;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Failed, await fixture.Service.ReconcileAsync());
+
+        // 代理已注册却没受理时宁可下次再试，也不在收银时段弹 UAC。
+        Assert.Empty(fixture.Launcher.Stages);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal(LegacyServer, journal!.Config);
+        Assert.Equal(1, journal.ReconcileFailureCount);
+    }
+
+    [Fact]
+    public async Task Reconcile_through_the_agent_ignores_the_uac_retry_cap()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        var state = await WriteCommittedAsync(fixture, LegacyServer);
+        await fixture.WriteStateAsync(state with { ReconcileFailureCount = RemoteMaintenanceService.MaxAutomaticReconcileFailures });
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+        Assert.Single(fixture.Agent.Requests);
+    }
+
+    [Fact]
+    public async Task Reconcile_falls_back_to_uac_when_the_agent_task_is_missing()
+    {
+        using var fixture = new Fixture(agentAvailable: false);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.Reconciled, await fixture.Service.ReconcileAsync());
+
+        Assert.Empty(fixture.Agent.Requests);
+        Assert.Equal(new[] { "reconcile" }, fixture.Launcher.Stages);
+    }
+
+    [Fact]
+    public async Task Manual_repair_reconciles_through_the_agent_and_only_configure_still_uses_uac()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedAsync(fixture, LegacyServer);
+        fixture.Api.PrepareConfig = DedicatedServer;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(fixture.Agent.Requests);
+        Assert.Equal(new[] { "configure" }, fixture.Launcher.Stages);
+    }
+
+    // 公司定制构建 1.4.9-hb1：哈希与随 WPF 发布的白名单一致。
+    private static readonly RemoteMaintenanceArtifact Hb1 = new(
+        "1.4.9-hb1", "rustdesk-1.4.9-hb1-x86_64.exe", "/api/remote-maintenance/artifacts/rustdesk",
+        "54425f81db1433646d6ce0f440b90993770b3c15c75ebaac927a5bccce4f4884", 24351744);
+
+    private static async Task<RemoteMaintenanceJournalState> WriteCommittedWithDataAsync(Fixture fixture)
+    {
+        var state = await WriteCommittedAsync(fixture, LegacyServer);
+        // 升级包下载到 journal 的数据目录；指向测试临时目录，不碰真实 LocalAppData。
+        state = state with { DataDirectory = Path.Combine(fixture.Root, "data") };
+        await fixture.WriteStateAsync(state);
+        fixture.Api.PrepareConfig = LegacyServer;
+        return state;
+    }
+
+    [Fact]
+    public async Task Reconcile_stages_a_whitelisted_new_rustdesk_build_for_the_night_upgrade()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+
+        Assert.Equal(RemoteMaintenanceReconcileResult.UpToDate, await fixture.Service.ReconcileAsync());
+
+        Assert.Equal(new[] { Hb1 }, fixture.Downloader.Downloaded);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal("1.4.9-hb1", journal!.PendingUpgradeVersion);
+        Assert.Equal(Hb1.Sha256, journal.PendingUpgradeSha256);
+        Assert.True(File.Exists(journal.PendingUpgradeArtifactPath));
+        // 白天只下载，不升级；当前版本不变。
+        Assert.Empty(fixture.Agent.Upgrades);
+        Assert.Equal("1.4.9", journal.ClientVersion);
+    }
+
+    [Fact]
+    public async Task Reconcile_does_not_stage_builds_outside_the_whitelist_or_without_the_agent()
+    {
+        using var untrusted = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(untrusted);
+        untrusted.Api.PrepareRustDesk = Hb1 with { Version = "1.5.0", Sha256 = new string('a', 64) };
+        await untrusted.Service.ReconcileAsync();
+        Assert.Empty(untrusted.Downloader.Downloaded);
+        Assert.Null((await untrusted.ReadStateAsync())!.PendingUpgradeSha256);
+
+        // 代理不可用时升级只能弹 UAC，宁可不升也不准备。
+        using var noAgent = new Fixture(agentAvailable: false);
+        await WriteCommittedWithDataAsync(noAgent);
+        noAgent.Api.PrepareRustDesk = Hb1;
+        await noAgent.Service.ReconcileAsync();
+        Assert.Empty(noAgent.Downloader.Downloaded);
+    }
+
+    [Fact]
+    public async Task Reconcile_does_not_download_the_same_build_twice()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+
+        await fixture.Service.ReconcileAsync();
+        await fixture.Service.ReconcileAsync();
+
+        Assert.Single(fixture.Downloader.Downloaded);
+    }
+
+    [Fact]
+    public async Task Night_upgrade_applies_the_staged_build_through_the_agent_and_records_the_new_version()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+        await fixture.Service.ReconcileAsync();
+        var staged = (await fixture.ReadStateAsync())!.PendingUpgradeArtifactPath!;
+
+        Assert.Equal(RemoteMaintenanceUpgradeResult.Upgraded, await fixture.Service.ApplyPendingUpgradeAsync());
+
+        Assert.Equal(new[] { (Hb1.Sha256, staged) }, fixture.Agent.Upgrades);
+        // 升级绝不弹 UAC。
+        Assert.Empty(fixture.Launcher.Stages);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal("1.4.9-hb1", journal!.ClientVersion);
+        Assert.Null(journal.PendingUpgradeSha256);
+        Assert.Equal(0, journal.UpgradeFailureCount);
+        Assert.False(File.Exists(staged));
+
+        // 之后对账发现已是中心下发的构建，不再下载。
+        await fixture.Service.ReconcileAsync();
+        Assert.Single(fixture.Downloader.Downloaded);
+    }
+
+    [Fact]
+    public async Task Night_upgrade_stops_after_repeated_failures_until_a_new_build_is_staged()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+        await fixture.Service.ReconcileAsync();
+        fixture.Agent.UpgradeExitCode = 15;
+
+        for (var attempt = 1; attempt <= RemoteMaintenanceService.MaxAutomaticUpgradeFailures; attempt++)
+        {
+            Assert.Equal(RemoteMaintenanceUpgradeResult.Failed, await fixture.Service.ApplyPendingUpgradeAsync());
+            Assert.Equal(attempt, (await fixture.ReadStateAsync())!.UpgradeFailureCount);
+        }
+
+        Assert.Equal(RemoteMaintenanceUpgradeResult.Deferred, await fixture.Service.ApplyPendingUpgradeAsync());
+        Assert.Equal(RemoteMaintenanceService.MaxAutomaticUpgradeFailures, fixture.Agent.Upgrades.Count);
+        // 白天对账重新下载同一构建也不能清零失败次数。
+        await fixture.Service.ReconcileAsync();
+        Assert.Equal(RemoteMaintenanceService.MaxAutomaticUpgradeFailures, (await fixture.ReadStateAsync())!.UpgradeFailureCount);
+        var journal = await fixture.ReadStateAsync();
+        Assert.Equal("1.4.9", journal!.ClientVersion);
+    }
+
+    [Fact]
+    public async Task Night_upgrade_without_a_staged_file_clears_the_pending_record()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+        await fixture.Service.ReconcileAsync();
+        File.Delete((await fixture.ReadStateAsync())!.PendingUpgradeArtifactPath!);
+
+        Assert.Equal(RemoteMaintenanceUpgradeResult.NotApplicable, await fixture.Service.ApplyPendingUpgradeAsync());
+
+        Assert.Empty(fixture.Agent.Upgrades);
+        Assert.Null((await fixture.ReadStateAsync())!.PendingUpgradeSha256);
+    }
+
+    [Fact]
+    public async Task Night_upgrade_waits_for_the_agent_and_never_falls_back_to_uac()
+    {
+        using var fixture = new Fixture(agentAvailable: true);
+        await WriteCommittedWithDataAsync(fixture);
+        fixture.Api.PrepareRustDesk = Hb1;
+        await fixture.Service.ReconcileAsync();
+        fixture.Agent.Available = false;
+
+        Assert.Equal(RemoteMaintenanceUpgradeResult.Deferred, await fixture.Service.ApplyPendingUpgradeAsync());
+
+        Assert.Empty(fixture.Agent.Upgrades);
+        Assert.Empty(fixture.Launcher.Stages);
+        Assert.NotNull((await fixture.ReadStateAsync())!.PendingUpgradeSha256);
+    }
+
+    [Fact]
     public async Task Reconcile_failure_from_the_helper_keeps_the_old_config_and_retries_next_start()
     {
         using var fixture = new Fixture();
@@ -770,7 +990,7 @@ public sealed class RemoteMaintenanceServiceTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "hbpos-remote-test-" + Guid.NewGuid().ToString("N"));
         private readonly PrefixProtector _protector = new();
         private readonly RemoteMaintenanceJournal _journal;
-        public Fixture(bool cancelInstall = false, TimeSpan? reconcileHelperTimeout = null)
+        public Fixture(bool cancelInstall = false, TimeSpan? reconcileHelperTimeout = null, bool agentAvailable = false)
         {
             Directory.CreateDirectory(_root);
             _journal = new RemoteMaintenanceJournal(Path.Combine(_root, "journal.json"), _protector);
@@ -779,12 +999,15 @@ public sealed class RemoteMaintenanceServiceTests
             Launcher = new FakeLauncher(_journal);
             Launcher.CancelInstall = cancelInstall;
             Installer = new FakeInstaller();
-            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector)
+            Agent = new FakeAgentClient { Available = agentAvailable };
+            Service = new RemoteMaintenanceService(Api, Downloader, Installer, Launcher, _journal, _protector, Agent)
             {
                 ReconcileHelperTimeout = reconcileHelperTimeout ?? TimeSpan.FromMinutes(5)
             };
         }
 
+        public FakeAgentClient Agent { get; }
+        public string Root => _root;
         public FakeApi Api { get; }
         public FakeDownloader Downloader { get; }
         public FakeLauncher Launcher { get; }
@@ -842,6 +1065,8 @@ public sealed class RemoteMaintenanceServiceTests
             public Exception? CommitFailure { get; set; }
             // 对账用例需要中心返回指定的服务器配置，且 deviceId 与 journal 一致。
             public RemoteMaintenanceConfig? PrepareConfig { get; set; }
+            // 升级用例：中心下发的 RustDesk 构建。
+            public RemoteMaintenanceArtifact? PrepareRustDesk { get; set; }
             public Guid? DeviceId { get; set; }
             // 让 prepare 停在中心请求上，用来制造“安装正占着操作闸门”的并发场景。
             public Task? PrepareBlocker { get; set; }
@@ -854,7 +1079,8 @@ public sealed class RemoteMaintenanceServiceTests
                 PreparedOperations.Add(request.OperationId);
                 if (PrepareBlocker is not null) await PrepareBlocker;
                 if (PrepareFailure is not null) throw PrepareFailure;
-                return new RemoteMaintenancePrepareResponse(request.OperationId, DeviceId ?? Guid.NewGuid(), PrepareConfig ?? Manifest.Config, Manifest.Artifacts);
+                var artifacts = PrepareRustDesk is null ? Manifest.Artifacts : Manifest.Artifacts with { RustDesk = PrepareRustDesk };
+                return new RemoteMaintenancePrepareResponse(request.OperationId, DeviceId ?? Guid.NewGuid(), PrepareConfig ?? Manifest.Config, artifacts);
             }
             public Task<Stream> DownloadArtifactAsync(string downloadUrl, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task<RemoteMaintenanceCommitResponse> CommitAsync(RemoteMaintenanceCommitRequest request, CancellationToken cancellationToken = default)
@@ -871,9 +1097,11 @@ public sealed class RemoteMaintenanceServiceTests
         {
             public Action<RemoteMaintenanceArtifact>? BeforeDownload { get; set; }
             public int VerifiedCount { get; private set; }
+            public List<RemoteMaintenanceArtifact> Downloaded { get; } = [];
             public Task<string> DownloadAndVerifyAsync(RemoteMaintenanceArtifact artifact, string destinationDirectory, CancellationToken cancellationToken = default)
             {
                 BeforeDownload?.Invoke(artifact);
+                Downloaded.Add(artifact);
                 Directory.CreateDirectory(destinationDirectory);
                 var path = Path.Combine(destinationDirectory, artifact.FileName);
                 File.WriteAllBytes(path, [1]);
@@ -892,6 +1120,30 @@ public sealed class RemoteMaintenanceServiceTests
             // 默认 null：保持原有用例“状态服务状态未知 → 手动修复照常 configure”的行为。
             public string? StatusAgentStatus { get; set; }
             public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", ServiceStatus, StatusAgentStatus: StatusAgentStatus));
+        }
+
+        /// <summary>免 UAC 代理替身：只记录收到的目标服务器，不碰 journal（与真实代理一致）。</summary>
+        public sealed class FakeAgentClient : IRemoteMaintenanceAgentClient
+        {
+            public bool Available { get; set; }
+            public int ExitCode { get; set; }
+            public List<RemoteMaintenanceConfig> Requests { get; } = [];
+            public bool IsAvailable(string helperPath) => Available;
+
+            public Task<int> ReconcileAsync(string helperPath, RemoteMaintenanceConfig desired, CancellationToken cancellationToken = default)
+            {
+                Requests.Add(desired);
+                return Task.FromResult(ExitCode);
+            }
+
+            public int UpgradeExitCode { get; set; }
+            public List<(string Sha256, string ArtifactPath)> Upgrades { get; } = [];
+
+            public Task<int> UpgradeAsync(string helperPath, string sha256, string artifactPath, CancellationToken cancellationToken = default)
+            {
+                Upgrades.Add((sha256, artifactPath));
+                return Task.FromResult(UpgradeExitCode);
+            }
         }
 
         public sealed class FakeLauncher(RemoteMaintenanceJournal journal) : IRemoteMaintenanceUacHelperLauncher

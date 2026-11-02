@@ -1,3 +1,5 @@
+import { isStoreSelected } from "./store-selection";
+
 interface StoreCodeOption {
   value: string;
 }
@@ -32,4 +34,16 @@ export function getCashierScopedBranchCodes(
     (code) => code.toLocaleLowerCase() === normalizedSelection,
   );
   return matchedCode ? [matchedCode] : [];
+}
+
+/**
+ * 多店筛选的查询范围：未选（空数组）代表全部启用分店；已选分店只保留仍在白名单内的（按白名单顺序）。
+ * 已选的全部失效时返回空数组，调用方应禁用请求，不得回退到全店。
+ */
+export function getCashierScopedBranchSelection(
+  enabledCodes: readonly string[],
+  selectedStoreCodes: readonly string[],
+): string[] {
+  if (selectedStoreCodes.length === 0) return [...enabledCodes];
+  return enabledCodes.filter((code) => isStoreSelected(selectedStoreCodes, code));
 }

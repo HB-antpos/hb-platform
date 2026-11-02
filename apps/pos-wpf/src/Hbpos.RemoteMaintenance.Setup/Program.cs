@@ -10,6 +10,10 @@ public static class Program
 {
     public static int Main(string[] args)
     {
+        if (args.Length is 1 or 2 && args[0] is RemoteMaintenanceAgent.RegisterOption or RemoteMaintenanceAgent.UnregisterOption
+                or RemoteMaintenanceAgent.AgentOption or RemoteMaintenanceAgent.SyncStatusAgentOption)
+            return RunAgentCommand(args[0], args.Length == 2 ? args[1] : null);
+
         if (args.Length != 6 || !string.Equals(args[0], "--operation", StringComparison.Ordinal) ||
             !string.Equals(args[2], "--stage", StringComparison.Ordinal) ||
             args[3] is not ("install" or "configure" or "fail-closed" or "reconcile") ||
@@ -162,6 +166,60 @@ public static class Program
             return Emit(true, "reconcile", operationId, 0);
         }
         finally { mutex.ReleaseMutex(); }
+    }
+
+    /// <summary>
+    /// 免 UAC 代理的三个无界面命令：安装包以管理员身份注册 / 注销计划任务，任务计划以 SYSTEM 拉起 --agent。
+    /// 只有 helper 位于受保护的 Program Files 目录时才注册和执行；否则普通用户可能替换这个将以 SYSTEM 运行的程序。
+    /// </summary>
+    private static int RunAgentCommand(string command, string? argument)
+    {
+        var scheduler = new WindowsRemoteMaintenanceAgentTaskScheduler();
+        var helperPath = Environment.ProcessPath;
+        try
+        {
+            if (command == RemoteMaintenanceAgent.UnregisterOption)
+            {
+                scheduler.Unregister();
+                return 0;
+            }
+
+            if (helperPath is null) return RemoteMaintenanceAgent.NotProtectedExitCode;
+            try { WindowsRemoteMaintenanceInstaller.EnsureProtectedProgramPath(helperPath); }
+            catch (RemoteMaintenanceSetupException)
+            {
+                // 不在受保护目录：顺手清掉可能残留的旧任务，调用方会退回 UAC helper。
+                if (command == RemoteMaintenanceAgent.RegisterOption) scheduler.Unregister();
+                return RemoteMaintenanceAgent.NotProtectedExitCode;
+            }
+
+            if (command == RemoteMaintenanceAgent.RegisterOption)
+            {
+                scheduler.Register(helperPath);
+                return 0;
+            }
+
+            var commandRunner = new WindowsRemoteMaintenanceCommandRunner();
+            var installer = new WindowsRemoteMaintenanceInstaller(commandRunner, new WindowsRemoteMaintenanceServiceControl(commandRunner));
+            if (command == RemoteMaintenanceAgent.SyncStatusAgentOption)
+            {
+                // 源程序固定取本次安装包带来的、位于受保护目录的状态服务；失败只影响状态上报，不能让 WPF 安装失败。
+                try
+                {
+                    installer.SyncStatusAgentAsync(WindowsRemoteMaintenanceInstaller.ResolveTrustedStatusAgentPath()).GetAwaiter().GetResult();
+                    return 0;
+                }
+                catch (RemoteMaintenanceSetupException) { return RemoteMaintenanceAgent.FailureExitCode; }
+            }
+
+            return new RemoteMaintenanceAgent(helperPath, installer.ReconcileServerAsync, upgrade: installer.UpgradeRustDeskAsync).Run(argument);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            // 注册失败只影响“免 UAC”，安装包本身不能因此失败；WPF 发现任务不可用会退回 UAC helper。
+            return RemoteMaintenanceAgent.RegistrationFailedExitCode;
+        }
     }
 
     private static int Emit(bool ok, string stage, Guid operationId, int exitCode)

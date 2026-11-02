@@ -447,6 +447,11 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             return Status("pos.status.invalidKeypadValue");
         }
 
+        if (!PosPriceInputRules.IsWithinMaximum(unitPrice))
+        {
+            return UnitPriceTooHighStatus();
+        }
+
         var matches = _priceIndex.FindExactMatches(session.StoreCode, OpenItemLookupCode);
         if (matches.Count == 0)
         {
@@ -601,6 +606,11 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         if (!TryGetSelectedLineKeypadValue(selectedLine, keypadBuffer, out var line, out var value, out var failure))
         {
             return failure;
+        }
+
+        if (!PosPriceInputRules.IsWithinMaximum(value))
+        {
+            return UnitPriceTooHighStatus();
         }
 
         if (!_cart.SetLineUnitPrice(line, value))
@@ -1487,6 +1497,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             StatusArgs = args
         };
     }
+
+    // 开价与改价共用：拒绝时不清空小键盘，收银员可直接删位重输。
+    private static PosTerminalWorkflowResult UnitPriceTooHighStatus() =>
+        Status(
+            "pos.status.unitPriceTooHigh",
+            PosPriceInputRules.MaxUnitPrice.ToString("0", CultureInfo.InvariantCulture));
 
     private static string FormatBool(bool value)
     {

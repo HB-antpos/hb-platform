@@ -19,6 +19,53 @@ public sealed class RemoteMaintenanceSafetyTests
         Assert.Contains("--option \"custom-rendezvous-server\"", runner.Commands);
         Assert.Contains("--option \"relay-server\"", runner.Commands);
         Assert.Contains("--option \"key\"", runner.Commands);
+        // 安装时尽力关掉 RustDesk 自带的自动更新。
+        Assert.Contains("--option \"allow-auto-update\" \"N\"", runner.Commands);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task 关自动更新失败不影响安装配置(bool throwOnWrite)
+    {
+        // 自动更新开关与远程连接无关：写入返回非零或抛异常都只能跳过，不能让安装失败或对账回滚。
+        var runner = new CliRunner(Config, autoUpdateFailure: throwOnWrite ? "throw" : "exit");
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, null!);
+
+        await installer.ConfigureRustDeskAsync("unused.exe", Config, "test-password-only", CancellationToken.None);
+        await installer.ConfigureRustDeskAsync("unused.exe", Config, null, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task 安装包不在白名单时在触碰本机前拒绝()
+    {
+        var runner = new CliRunner(Config);
+        var control = new RecordingServiceControl();
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, control);
+        var prepare = new RemoteMaintenancePrepareResponse(
+            Guid.NewGuid(), Guid.NewGuid(), Config,
+            new(new("1.5.0", "rustdesk.exe", "/rustdesk", new string('a', 64), 1), new("1.0.0", "agent.exe", "/agent", new string('b', 64), 1)));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(new RemoteMaintenanceInstallationRequest(
+            prepare, "rustdesk.exe", "agent.exe", "test-password-only", string.Empty, "1.5.0", "data")));
+
+        Assert.Empty(runner.Commands);
+        Assert.Empty(control.StoppedServices);
+        Assert.Empty(control.StartedServices);
+    }
+
+    [Fact]
+    public void 白名单里的安装包哈希与大小格式正确()
+    {
+        Assert.NotEmpty(WindowsRemoteMaintenanceInstaller.TrustedRustDeskBuilds);
+        foreach (var (sha256, build) in WindowsRemoteMaintenanceInstaller.TrustedRustDeskBuilds)
+        {
+            // 键必须是小写十六进制：安装时把中心下发的哈希转小写后查表。
+            Assert.Equal(sha256.ToLowerInvariant(), sha256);
+            Assert.Equal(32, Convert.FromHexString(sha256).Length);
+            Assert.True(build.Size > 0);
+            Assert.False(string.IsNullOrWhiteSpace(build.Version));
+        }
     }
 
     [Fact]
@@ -126,7 +173,6 @@ public sealed class RemoteMaintenanceSafetyTests
     {
         var encoded = WindowsRemoteMaintenanceCommandRunner.Quote("\"C:\\Program Files\\HBPOS\\Agent.exe\" --service");
         Assert.Equal("\"\\\"C:\\Program Files\\HBPOS\\Agent.exe\\\" --service\"", encoded);
-        Assert.Equal(32, Convert.FromHexString(WindowsRemoteMaintenanceInstaller.TrustedRustDeskSha256).Length);
     }
 
     [Fact]
@@ -152,12 +198,17 @@ public sealed class RemoteMaintenanceSafetyTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });
         }
     }
-    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true, int passwordFailuresBeforeAck = 0) : IRemoteMaintenanceCommandRunner
+    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true, int passwordFailuresBeforeAck = 0, string? autoUpdateFailure = null) : IRemoteMaintenanceCommandRunner
     {
         private int _passwordAttempts;
         public List<string> Commands { get; } = [];
         public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
-        { Commands.Add(arguments); return Task.FromResult(0); }
+        {
+            Commands.Add(arguments);
+            if (arguments.StartsWith("--option \"allow-auto-update\"", StringComparison.Ordinal) && autoUpdateFailure is not null)
+                return autoUpdateFailure == "throw" ? throw new InvalidOperationException("ipc") : Task.FromResult(1);
+            return Task.FromResult(0);
+        }
         public Task<RemoteMaintenanceCommandResult> RunWithOutputAsync(string fileName, string arguments, CancellationToken cancellationToken)
         {
             Commands.Add(arguments);
@@ -169,6 +220,7 @@ public sealed class RemoteMaintenanceSafetyTests
                 "--option \"approve-mode\"" => "password",
                 "--option \"verification-method\"" => "use-permanent-password",
                 "--option \"allow-only-conn-window-open\"" => "N",
+                "--option \"allow-auto-update\"" => "N",
                 // 配置前会读一次 api-server 以便写回；这里模拟设备从未设置过。
                 "--option \"api-server\"" => "",
                 // 与 RustDesk 1.4.9 一致：IPC 未就绪时打印连接错误而不是 Done!。

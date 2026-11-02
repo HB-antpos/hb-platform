@@ -77,6 +77,18 @@ export function parseMyobCallback(search: string): MyobCallbackResult | null {
   return null
 }
 
+/** MYOB 对接页地址（授权回跳落在这里）。 */
+export const MYOB_PAGE_PATH = '/pos-admin/myob'
+
+/**
+ * 只在地址属于 MYOB 对接页时解析授权回跳：页面保活后切到别的页签仍然挂着，
+ * 这时 useLocation 给的是别的页面的地址，不能按它提示结果或改写地址。
+ */
+export function parseMyobCallbackAt(pathname: string, search: string): MyobCallbackResult | null {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  return normalized === MYOB_PAGE_PATH ? parseMyobCallback(search) : null
+}
+
 /** 去掉回调参数，保留其他查询参数；返回形如 `?a=1` 或空串，直接拼在 pathname 后。 */
 export function stripMyobCallbackParams(search: string): string {
   const params = new URLSearchParams(search)

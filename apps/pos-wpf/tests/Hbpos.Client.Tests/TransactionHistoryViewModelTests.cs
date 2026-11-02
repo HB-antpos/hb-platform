@@ -1474,6 +1474,69 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal(today.Date, viewModel.DateTo);
     }
 
+    [Fact]
+    public void Changing_one_end_keeps_the_date_range_within_one_calendar_month()
+    {
+        var today = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(today));
+        viewModel.ResetDateRangeToToday();
+
+        // 10-03～11-02 正好 1 个日历月，不调整。
+        viewModel.DateFrom = new DateTime(2026, 10, 3);
+        Assert.Equal(new DateTime(2026, 11, 2), viewModel.DateTo);
+
+        // 改开始日期导致超出：结束日期收到「开始 + 1 个月 − 1 天」。
+        viewModel.DateFrom = new DateTime(2026, 8, 1);
+        Assert.Equal(new DateTime(2026, 8, 31), viewModel.DateTo);
+
+        // 改结束日期导致超出：开始日期收到「结束 − 1 个月 + 1 天」。
+        viewModel.DateTo = new DateTime(2026, 10, 15);
+        Assert.Equal(new DateTime(2026, 9, 16), viewModel.DateFrom);
+        Assert.Equal(new DateTime(2026, 10, 15), viewModel.DateTo);
+    }
+
+    [Fact]
+    public void Start_after_end_pulls_the_other_end_to_the_same_day()
+    {
+        var today = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(today));
+        viewModel.ResetDateRangeToToday();
+
+        viewModel.DateTo = new DateTime(2026, 10, 10);
+
+        Assert.Equal(new DateTime(2026, 10, 10), viewModel.DateFrom);
+        Assert.Equal(new DateTime(2026, 10, 10), viewModel.DateTo);
+    }
+
+    [Fact]
+    public void Earliest_selectable_date_is_one_year_back_and_moves_with_the_reset()
+    {
+        var clock = new FixedUtcTimeProvider(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero));
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: clock);
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.ResetDateRangeToToday();
+
+        Assert.Equal(new DateTime(2025, 11, 2), viewModel.EarliestSelectableDate);
+        Assert.Contains(nameof(TransactionHistoryViewModel.EarliestSelectableDate), changed);
+    }
+
     [Theory]
     [InlineData(TransactionHistoryViewModel.QuickDateRangeToday, 0, 0)]
     [InlineData(TransactionHistoryViewModel.QuickDateRangeYesterday, -1, -1)]
@@ -3547,6 +3610,165 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Single(repository.DeleteCompletions);
         Assert.Empty(viewModel.Orders);
         Assert.Equal("Held sale deleted.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Held_delete_success_audit_records_deleted_lines_and_amount()
+    {
+        var holdGuid = Guid.NewGuid();
+        var auditLogger = new RecordingOperationAuditLogger();
+        var suspendedOrders = new CapturingSuspendedOrderService
+        {
+            Orders = { [holdGuid] = DeletableHeldOrder(holdGuid) }
+        };
+        var repository = new CapturingSharedHeldOrderRepository
+        {
+            StageDelete = (actualHoldGuid, _, _, _) => new SharedHeldOrderDeleteStage(actualHoldGuid, false),
+            CompleteDelete = (_, _, _, _) => true
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            suspendedOrders,
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            operationAuditLogger: auditLogger,
+            confirmationDialogService: new CapturingConfirmationDialogService
+            {
+                HeldOrderCancellationResult = true
+            },
+            sharedHeldOrderRepository: repository);
+
+        await viewModel.DeleteHeldOrderCommand.ExecuteAsync(HeldHistoryRow(holdGuid, canDeleteHeldOrder: true));
+
+        Assert.Single(repository.DeleteCompletions);
+        var auditEvent = Assert.Single(auditLogger.Events, e => e.OperationType == "ORDER_CANCEL");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SHARED_HELD_ORDER", auditEvent.ReasonCode);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
+        // 与挂单同一口径：改前是整张挂单，改后为空。
+        Assert.Equal(9m, auditEvent.BeforeActual);
+        Assert.Equal(0m, auditEvent.AfterActual);
+        Assert.Equal(-9m, auditEvent.AmountDelta);
+        var item = Assert.Single(auditEvent.Items);
+        Assert.Equal("SKU-DEL", item.ProductCode);
+        Assert.Equal("Deleted Tea", item.DisplayName);
+        Assert.Equal(2m, item.BeforeQuantity);
+        Assert.Equal(0m, item.AfterQuantity);
+        Assert.Equal(9m, item.BeforeActualAmount);
+    }
+
+    [Fact]
+    public async Task Held_delete_failure_audit_keeps_lines_without_amount_change()
+    {
+        var holdGuid = Guid.NewGuid();
+        var auditLogger = new RecordingOperationAuditLogger();
+        var suspendedOrders = new CapturingSuspendedOrderService
+        {
+            Orders = { [holdGuid] = DeletableHeldOrder(holdGuid) }
+        };
+        var repository = new CapturingSharedHeldOrderRepository
+        {
+            StageDelete = (actualHoldGuid, _, _, _) => new SharedHeldOrderDeleteStage(actualHoldGuid, true),
+            CompleteDelete = (_, _, _, _) => throw new InvalidOperationException("must not complete")
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            suspendedOrders,
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            operationAuditLogger: auditLogger,
+            confirmationDialogService: new CapturingConfirmationDialogService
+            {
+                HeldOrderCancellationResult = true
+            },
+            sharedHeldOrderApiClient: new StubSharedHeldOrderApiClient
+            {
+                Cancel = (_, _) => Task.FromException<SharedHeldOrderCancelResponse>(
+                    new InvalidOperationException("cancel failed"))
+            },
+            sharedHeldOrderRepository: repository);
+
+        await viewModel.DeleteHeldOrderCommand.ExecuteAsync(HeldHistoryRow(holdGuid, canDeleteHeldOrder: true));
+
+        Assert.Empty(repository.DeleteCompletions);
+        var auditEvent = Assert.Single(auditLogger.Events, e => e.OperationType == "ORDER_CANCEL");
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
+        // 删除没成功，挂单原样还在：带上整单内容，但金额不变。
+        Assert.Equal(9m, auditEvent.BeforeActual);
+        Assert.Equal(9m, auditEvent.AfterActual);
+        Assert.Equal(0m, auditEvent.AmountDelta);
+        var item = Assert.Single(auditEvent.Items);
+        Assert.Equal("SKU-DEL", item.ProductCode);
+        Assert.Equal(2m, item.AfterQuantity);
+    }
+
+    [Fact]
+    public async Task Held_delete_audit_snapshot_read_failure_does_not_block_delete()
+    {
+        var holdGuid = Guid.NewGuid();
+        var auditLogger = new RecordingOperationAuditLogger();
+        var repository = new CapturingSharedHeldOrderRepository
+        {
+            StageDelete = (actualHoldGuid, _, _, _) => new SharedHeldOrderDeleteStage(actualHoldGuid, false),
+            CompleteDelete = (_, _, _, _) => true
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService { GetOrderException = new InvalidOperationException("db locked") },
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            operationAuditLogger: auditLogger,
+            confirmationDialogService: new CapturingConfirmationDialogService
+            {
+                HeldOrderCancellationResult = true
+            },
+            sharedHeldOrderRepository: repository);
+
+        await viewModel.DeleteHeldOrderCommand.ExecuteAsync(HeldHistoryRow(holdGuid, canDeleteHeldOrder: true));
+
+        // 审计快照是旁路：读不到挂单内容也照常删除，只是退回只记 Guid。
+        Assert.Single(repository.DeleteCompletions);
+        var auditEvent = Assert.Single(auditLogger.Events, e => e.OperationType == "ORDER_CANCEL");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
+        Assert.Null(auditEvent.BeforeActual);
+        Assert.Empty(auditEvent.Items);
+    }
+
+    private static SuspendedOrder DeletableHeldOrder(Guid holdGuid)
+    {
+        // 2 件 × 5.00，行折扣 1.00，实收 9.00。
+        return new SuspendedOrder(
+            holdGuid,
+            "S001",
+            "POS-01",
+            "C001",
+            "Alice",
+            DateTimeOffset.UtcNow,
+            10m,
+            1m,
+            9m,
+            SuspendedOrderStatus.Pending,
+            [
+                new SuspendedOrderLine(
+                    Guid.NewGuid(),
+                    holdGuid,
+                    "S001",
+                    "SKU-DEL",
+                    null,
+                    "Deleted Tea",
+                    "BAR-DEL",
+                    "ITEM-DEL",
+                    null,
+                    2m,
+                    5m,
+                    1m,
+                    null,
+                    9m,
+                    PriceSourceKind.ProductBase,
+                    "Product")
+            ]);
     }
 
     [Fact]

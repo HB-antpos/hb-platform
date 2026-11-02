@@ -1,4 +1,4 @@
-// 「工资单明细」页（设计图 ②③）：头卡 + 「查看 PDF 原样」行 + MYOB 样式纸面卡片 + 分店归属与我方考勤工时 + 免责声明；
+// 「工资单明细」页（设计图 ②③）：头卡 + 「查看 PDF 原样」行 + MYOB 样式纸面卡片 + 分店归属与我方考勤工时（仅管理员可见） + 免责声明；
 // 底部固定操作条「下载 PDF / 发送邮件」，没有对应权限（canDownloadPdf / canSendEmail）时按钮不渲染。
 // 「查看 PDF 原样」：仓库没有可用的 PDF 内嵌预览（无 WebView / PDF 依赖，且不允许新增原生依赖），
 // 所以先下载到缓存，再交给系统 PDF 查看器（安卓）或分享面板的快速查看（iOS）；用完删除缓存文件。
@@ -42,6 +42,7 @@ export function PayslipDetailContent({ payslipKey, onBack }: { payslipKey: Paysl
   const insets = useSafeAreaInsets();
   const query = usePayslipDetail(payslipKey);
   const detail = query.data;
+  const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const [hoursRequested, setHoursRequested] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [busy, setBusy] = useState<"share" | "view" | null>(null);
@@ -86,7 +87,8 @@ export function PayslipDetailContent({ payslipKey, onBack }: { payslipKey: Paysl
             <HeadCard detail={detail} />
             {detail.canDownloadPdf ? <ViewPdfRow busy={busy === "view"} disabled={busy !== null} onPress={() => void runPdf("view")} /> : null}
             <PayslipPaper detail={detail} />
-            <PlacementCard payslipKey={payslipKey} detail={detail} requested={hoursRequested} onRequest={() => setHoursRequested(true)} />
+            {/* 分店归属与我方考勤工时只给管理员看；非管理员不渲染，工时接口也不会被请求（hoursRequested 恒为 false）。 */}
+            {isAdmin ? <PlacementCard payslipKey={payslipKey} detail={detail} requested={hoursRequested} onRequest={() => setHoursRequested(true)} /> : null}
             <View style={styles.disclaimer}>
               <Text style={styles.disclaimerText}>{t("detail.disclaimer")}</Text>
               {language === "zh" ? <Text style={styles.disclaimerText}>{t("detail.disclaimerEn")}</Text> : null}

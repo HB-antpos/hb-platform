@@ -71,21 +71,31 @@ public sealed class SqlSugarOrderHistoryRepository(
             query = query.Where(x => x.DeviceCode == deviceCode);
         }
 
+        DateTime? soldFromWallClock = null;
         if (request.SoldFrom is not null)
         {
             var soldFrom = StoreWallClock.ToWallClock(request.SoldFrom.Value, storeTimeZone);
+            soldFromWallClock = soldFrom;
             query = query.Where(x => x.OrderTime >= soldFrom);
         }
 
+        DateTime? soldToWallClock = null;
         if (request.SoldTo is not null)
         {
             var soldTo = StoreWallClock.ToWallClock(request.SoldTo.Value, storeTimeZone);
+            soldToWallClock = soldTo;
             query = query.Where(x => x.OrderTime <= soldTo);
         }
 
         if (!string.IsNullOrWhiteSpace(request.Keyword))
         {
-            query = await ApplyKeywordAsync(query, storeCode, request.Keyword, cancellationToken);
+            query = await ApplyKeywordAsync(
+                query,
+                storeCode,
+                request.Keyword,
+                soldFromWallClock,
+                soldToWallClock,
+                cancellationToken);
         }
 
         var take = Math.Clamp(request.Take, 1, 200);
@@ -145,6 +155,12 @@ public sealed class SqlSugarOrderHistoryRepository(
     // 最多 1000 + OrderGuidProbeLimit 个参数，远低于 SQL Server 单语句 2100 个参数的上限。
     private const int ColdProductLineLimit = 1000;
 
+    // 热门商品路径在时间窗口不超过这么多天时，强制从订单时间索引出发（见 ShouldHintOrderTimeIndex）。
+    private const int OrderTimeIndexHintMaxDays = 32;
+
+    // 生产 POSM 已有该索引（键 OrderTime，含 OrderGuid、BranchCode 等列），仓库 POSMSqlSugarContext.CreateIndexes 同步定义。
+    internal const string OrderTimeIndexHint = "WITH(INDEX(IX_sales_order_OrderTime))";
+
     /// <summary>
     /// 关键字过滤。匹配规则：订单号包含该关键字，或订单里有商品的编码 = 关键字经商品主档精确解析出的编码。
     ///
@@ -161,13 +177,15 @@ public sealed class SqlSugarOrderHistoryRepository(
         ISugarQueryable<SalesOrder> query,
         string storeCode,
         string rawKeyword,
+        DateTime? soldFromWallClock,
+        DateTime? soldToWallClock,
         CancellationToken cancellationToken)
     {
         var keyword = rawKeyword.Trim();
 
         // 第 1 步：订单号子串。GUID 里只有十六进制和连字符，别的关键字不可能命中，直接跳过这次扫描。
         var orderGuidMatches = IsOrderGuidFragment(keyword)
-            ? await ProbeOrderGuidsAsync(storeCode, keyword, cancellationToken)
+            ? await ProbeOrderGuidsAsync(storeCode, keyword, soldFromWallClock, soldToWallClock, cancellationToken)
             : [];
 
         // 小票上的 8 位单号命中订单号就够了，不再去查商品：这是退货页最要紧的路径，要在 2 秒超时内返回。
@@ -198,9 +216,9 @@ public sealed class SqlSugarOrderHistoryRepository(
                 : query.Where(x => matchedOrderGuids.Contains(x.OrderGuid!));
         }
 
-        // 热门商品：几乎每个订单都有，按订单号 IN 会超出参数上限；用 EXISTS 让数据库从本店最新的订单往回找，通常很快找满一页。
+        // 热门商品：几乎每个订单都有，按订单号 IN 会超出参数上限，改用 EXISTS。
         // 在 C# 里决定是否带订单号条件，避免 SqlSugar 把布尔变量翻译成 SQL Server 的裸 bit 谓词。
-        return orderGuidMatches.Count == 0
+        var hotQuery = orderGuidMatches.Count == 0
             ? query.Where(x => SqlFunc.Subqueryable<SalesOrderDetail>()
                 .Where(line => line.OrderGuid == x.OrderGuid && productCodes.Contains(line.ProductCode!))
                 .Any())
@@ -208,14 +226,37 @@ public sealed class SqlSugarOrderHistoryRepository(
                 || SqlFunc.Subqueryable<SalesOrderDetail>()
                     .Where(line => line.OrderGuid == x.OrderGuid && productCodes.Contains(line.ProductCode!))
                     .Any());
+        return ShouldHintOrderTimeIndex(dbContext.PosmDb.CurrentConnectionConfig.DbType, soldFromWallClock, soldToWallClock)
+            ? hotQuery.With(OrderTimeIndexHint)
+            : hotQuery;
     }
+
+    /// <summary>
+    /// 热门商品的 EXISTS 查询，优化器会从商品编码索引出发（该商品在所有分店、全部时间的明细行），再逐行回订单表筛门店和日期：
+    /// 生产实测即使只查 1 个月，店 1011 最热商品仍要 13.2 万页 / 3.2 秒。窗口不超过 1 个月时强制从订单时间索引出发，
+    /// 实测降到约 6.5 万页 / 0.36 秒，查无此商品 18 毫秒。窗口更长（按单号定位默认最早 1 年）时扫时间索引反而更多，不加提示。
+    /// 只在 SQL Server 上加（表提示是 SQL Server 语法）。
+    /// </summary>
+    internal static bool ShouldHintOrderTimeIndex(DbType dbType, DateTime? soldFromWallClock, DateTime? soldToWallClock) =>
+        dbType == DbType.SqlServer
+        && soldFromWallClock is { } from
+        && soldToWallClock is { } to
+        && to >= from
+        && to - from <= TimeSpan.FromDays(OrderTimeIndexHintMaxDays);
 
     private async Task<List<string>> ProbeOrderGuidsAsync(
         string storeCode,
         string keyword,
+        DateTime? soldFromWallClock,
+        DateTime? soldToWallClock,
         CancellationToken cancellationToken)
     {
-        var rows = await BuildOrderGuidProbeQuery(dbContext.PosmDb.Queryable<SalesOrder>(), storeCode, keyword)
+        var rows = await BuildOrderGuidProbeQuery(
+                dbContext.PosmDb.Queryable<SalesOrder>(),
+                storeCode,
+                keyword,
+                soldFromWallClock,
+                soldToWallClock)
             .ToListAsync(cancellationToken);
         return rows
             .Where(orderGuid => !string.IsNullOrEmpty(orderGuid))
@@ -313,15 +354,28 @@ public sealed class SqlSugarOrderHistoryRepository(
     /// 改去扫覆盖全部分店的 IX_sales_order_OrderTime（约 300 万行 / 5.5 万页，1.2~2.2 秒），
     /// 不排序时只扫本店的 IX_sales_order_BranchCode（约 1.9 千~4 千页，不到 0.7 秒）。
     /// 排序留给后面按精确订单号取行的那条查询。库里的订单号全是小写，关键字转小写后比较，不依赖库排序规则。
+    /// 带上与主查询相同的日期区间（OrderTime 是该索引的包含列，不增加读页数），候选里不会冒出查询窗口之外的旧订单号。
     /// </summary>
     internal static ISugarQueryable<string?> BuildOrderGuidProbeQuery(
         ISugarQueryable<SalesOrder> source,
         string storeCode,
-        string keyword)
+        string keyword,
+        DateTime? soldFromWallClock = null,
+        DateTime? soldToWallClock = null)
     {
         var lowered = keyword.Trim().ToLowerInvariant();
         var normalized = lowered.Replace("-", string.Empty, StringComparison.Ordinal);
         var scoped = source.Where(x => x.BranchCode == storeCode && x.OrderGuid != null);
+        if (soldFromWallClock is { } soldFrom)
+        {
+            scoped = scoped.Where(x => x.OrderTime >= soldFrom);
+        }
+
+        if (soldToWallClock is { } soldTo)
+        {
+            scoped = scoped.Where(x => x.OrderTime <= soldTo);
+        }
+
         // 在 C# 中决定是否带「去连字符」的第二个条件，避免布尔变量被翻译成 SQL Server 的裸 bit 谓词。
         var matched = normalized == lowered
             ? scoped.Where(x => SqlFunc.CharIndexNew(x.OrderGuid!, lowered) > 0)

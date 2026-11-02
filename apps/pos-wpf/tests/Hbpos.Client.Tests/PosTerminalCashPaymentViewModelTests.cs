@@ -806,7 +806,7 @@ public sealed class PosTerminalCashPaymentViewModelTests
                 heldOrder = true;
                 discountWhenHeldOrder = Assert.Single(viewModel!.CartLines).DiscountAmount;
                 actualAmountWhenHeldOrder = viewModel.ActualAmount;
-                return Task.CompletedTask;
+                return Task.FromResult<Guid?>(null);
             },
             promotionEvaluationService: promotionService);
 

@@ -133,6 +133,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>单轮促销刷新的总预算：挂在连通性探测里，网络异常时不能长时间占住它。</summary>
     private static readonly TimeSpan PromotionRefreshBudget = TimeSpan.FromSeconds(20);
     private int _promotionRefreshTicks;
+    // 运行中的商品目录自动同步：默认关闭（测试直接构造时不触发），生产由 ConfigureCatalogAutoSync 按配置启用。
+    private CatalogAutoSyncScheduler _catalogAutoSync = new(CatalogAutoSyncOptions.Disabled);
+    private ShellAppUpdateInstallSafetyGuard? _catalogAutoSyncIdleGuard;
+    // 进行中的自动同步任务（不会抛异常）；shutdown 令牌源要等它结束才释放，读写都在 _connectivityRefreshSync 下。
+    private Task _catalogAutoSyncTask = Task.CompletedTask;
     private readonly DispatcherTimer _catalogDownloadHideTimer = new();
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly object _connectivityRefreshSync = new();
@@ -873,6 +878,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _onCashierLoggedInForColorTheme = onCashierLoggedIn;
     }
 
+    /// <summary>启用运行中的商品目录自动同步；须在启动流程之前调用，间隔为 0 表示关闭。</summary>
+    internal void ConfigureCatalogAutoSync(CatalogAutoSyncOptions options)
+    {
+        _catalogAutoSync = new CatalogAutoSyncScheduler(options);
+        ConsoleLog.Write(
+            "CatalogSync",
+            $"auto sync configured enabled={options.IsEnabled} intervalMinutes={options.Interval.TotalMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+    }
+
     private ScreenNavigator CreateScreenNavigator() =>
         new(
             _mainChildViewModelFactory,
@@ -1307,6 +1321,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         var startupOptions = _startupOptions ?? new AppStartupOptions([], false, null, null);
         _connectivityTimer.Stop();
+        // 中文注释：换服务器后由重新初始化里的启动同步重新开始计时；进行中的同步与手动同步一样不打断。
+        _catalogAutoSync.Disarm();
         _deviceRegistrationStoreLoadTask = null;
         _startupActivationRecoveryMode = null;
         _startupActivationRecoveryIsUnreadable = false;
@@ -2477,6 +2493,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void BeginInitialCatalogSync()
     {
+        // 中文注释：在线时启动同步正在跑，由它的结果开始计时；离线跳过时，自动同步在恢复联网后补这一次。
+        _catalogAutoSync.Arm(initialSyncStarted: Session.IsOnline);
         if (!Session.IsOnline)
         {
             return;
@@ -2808,11 +2826,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CancellationToken cancellationToken)
     {
         var progress = new Progress<CatalogSyncProgress>(ApplyCatalogDownloadProgress);
-        return await _shellCatalogService.SyncCatalogAndReloadAsync(
-            Session.StoreCode,
-            forceFullDownload,
-            progress,
-            cancellationToken);
+        try
+        {
+            var items = await _shellCatalogService.SyncCatalogAndReloadAsync(
+                Session.StoreCode,
+                forceFullDownload,
+                progress,
+                cancellationToken);
+            // 中文注释：启动、手动、重置同步成功都让自动同步重新计时，并清掉白天推迟的全量。
+            _catalogAutoSync.RecordSucceeded();
+            return items;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            _catalogAutoSync.RecordFailed();
+            throw;
+        }
     }
 
     private void ApplyCatalogDownloadProgress(CatalogSyncProgress progress)
@@ -3625,6 +3658,97 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         ApplyConnectivityTimerInterval();
         _ = RefreshOnlineStateFromTimerSafeAsync();
+        TryBeginScheduledCatalogSync();
+    }
+
+    /// <summary>
+    /// 搭连通性探测节拍检查要不要做运行中的商品目录自动同步（节奏见 <see cref="CatalogAutoSyncScheduler"/>）。
+    /// 只在收银主页空闲时开始，与 #1114 自动弹更新遮罩同一判定：购物车空、无付款进行或已收款、无确认框 / 授权框；
+    /// 日结、交班、退货等页面都不算空闲。同步在后台进行、不报进度，失败只记日志，不打扰收银员。
+    /// </summary>
+    private void TryBeginScheduledCatalogSync()
+    {
+        var storeCode = Session.StoreCode;
+        if (IsLifetimeEnding ||
+            IsApiServerSwitching ||
+            _startupOptions?.PreviewMode == true ||
+            string.IsNullOrWhiteSpace(storeCode))
+        {
+            return;
+        }
+
+        _catalogAutoSyncIdleGuard ??= new ShellAppUpdateInstallSafetyGuard(_cart, this);
+        var start = _catalogAutoSync.TryBegin(
+            Session.IsOnline,
+            _catalogAutoSyncIdleGuard.CanInterruptForUpdatePrompt(out _, out _),
+            _shellCatalogService.IsCatalogSyncActive);
+        if (start is null)
+        {
+            return;
+        }
+
+        lock (_connectivityRefreshSync)
+        {
+            if (IsLifetimeEnding)
+            {
+                _catalogAutoSync.Complete(CatalogAutoSyncOutcome.Canceled);
+                return;
+            }
+
+            _catalogAutoSyncTask = RunScheduledCatalogSyncAsync(storeCode, start, _shutdownCancellation.Token);
+        }
+    }
+
+    private async Task RunScheduledCatalogSyncAsync(
+        string storeCode,
+        CatalogAutoSyncStart start,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var outcome = CatalogAutoSyncOutcome.Failed;
+        ConsoleLog.Write(
+            "CatalogSync",
+            $"scheduled sync start store={storeCode} reason={start.Reason} allowFullDownload={start.AllowFullDownload}");
+        try
+        {
+            // 中文注释：让出当前探测节拍，同步本身在 ShellCatalogService 的后台线程上进行。
+            await Task.Yield();
+            await _shellCatalogService.SyncCatalogInBackgroundAsync(storeCode, start.AllowFullDownload, cancellationToken);
+            outcome = CatalogAutoSyncOutcome.Succeeded;
+            ConsoleLog.Write(
+                "CatalogSync",
+                $"scheduled sync completed store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            if (!IsLifetimeEnding)
+            {
+                // 中文注释：只重跑打开的搜索弹窗（与手动同步一致）；不调用 LoadMatches，也不碰购物车。
+                PosTerminal?.RefreshOpenSearchMatches();
+            }
+        }
+        catch (CatalogFullDownloadDeferredException ex)
+        {
+            outcome = CatalogAutoSyncOutcome.FullDownloadDeferred;
+            ConsoleLog.Write(
+                "CatalogSync",
+                $"scheduled sync deferred full download store={storeCode} reason={ex.Reason} elapsedMs={stopwatch.ElapsedMilliseconds} next=quiet-hours-or-manual");
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = CatalogAutoSyncOutcome.Canceled;
+            ConsoleLog.Write(
+                "CatalogSync",
+                $"scheduled sync canceled store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
+        }
+        catch (Exception ex)
+        {
+            // 中文注释：失败只记日志、按 5/10/20/30 分钟退避重试，本地目录与扫码索引保持原样。
+            ConsoleLog.Write(
+                "CatalogSync",
+                $"scheduled sync failed store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            _catalogAutoSync.Complete(outcome);
+        }
     }
 
     /// <summary>
@@ -3934,20 +4058,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Task cancellationTask;
         Task<bool>? connectivityRefreshTask;
+        Task catalogAutoSyncTask;
         lock (_connectivityRefreshSync)
         {
             cancellationTask = _shutdownCancellationTask;
             connectivityRefreshTask = _connectivityRefreshTask;
+            catalogAutoSyncTask = _catalogAutoSyncTask;
         }
 
         _ = DisposeShutdownCancellationWhenSafeAsync(
             cancellationTask,
-            connectivityRefreshTask);
+            connectivityRefreshTask,
+            catalogAutoSyncTask);
     }
 
     private async Task DisposeShutdownCancellationWhenSafeAsync(
         Task cancellationTask,
-        Task<bool>? connectivityRefreshTask)
+        Task<bool>? connectivityRefreshTask,
+        Task catalogAutoSyncTask)
     {
         try
         {
@@ -3956,6 +4084,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 await connectivityRefreshTask.ConfigureAwait(false);
             }
+
+            // 中文注释：自动目录同步持有 shutdown 令牌；它已被取消，结束后再释放令牌源。
+            await catalogAutoSyncTask.ConfigureAwait(false);
         }
         catch (Exception ex)
         {

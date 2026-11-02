@@ -4899,6 +4899,10 @@
       "lastSeen": "Last seen",
       "registeredAt": "Registered",
       "stale": "Stale",
+      "rustDeskVersionStatuses": {
+        "drift": "Version drift",
+        "missing": "Executable missing"
+      },
       "lastReportedStatus": "Offline; last report",
       "serverTime": "Server time",
       "keywordPlaceholder": "Search store / device / computer",

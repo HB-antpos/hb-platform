@@ -6,6 +6,11 @@ using System.Text.Json;
 
 namespace Hbpos.Client.Tests;
 
+/// <summary>
+/// 用例订阅全局 ConsoleLog.LineWritten 并按 LinklyLocal 分类断言日志内容，
+/// 与其他写 LinklyLocal 日志的用例并行时会读到别人的事件（如 13.99 的下单请求），因此必须串行。
+/// </summary>
+[Collection(GlobalLoggingTestCollection.Name)]
 public sealed class LinklyTerminalClientTests
 {
     [Fact]

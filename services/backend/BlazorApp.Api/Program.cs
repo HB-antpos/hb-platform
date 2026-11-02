@@ -820,6 +820,8 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTokenProvider, Blazo
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobConnectionService, BlazorApp.Api.Services.Myob.MyobConnectionService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeDirectory, BlazorApp.Api.Services.Myob.MyobEmployeeDirectory>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeBindingService, BlazorApp.Api.Services.Myob.MyobEmployeeBindingService>();
+// 「MYOB 有、我方没有」的我方建档：建账号复用门店员工建档服务，再人工绑定这张卡。
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeCreateService, BlazorApp.Api.Services.Myob.MyobEmployeeCreateService>();
 // 从 MYOB 同步资料到我方（迁移 20261029.001 建批次表）：银行账户单独拉取与缓存，不拖累员工名册。
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeePaymentSource, BlazorApp.Api.Services.Myob.MyobEmployeePaymentSource>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeSyncService, BlazorApp.Api.Services.Myob.MyobEmployeeSyncService>();

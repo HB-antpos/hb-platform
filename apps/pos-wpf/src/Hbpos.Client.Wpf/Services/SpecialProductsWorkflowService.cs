@@ -35,7 +35,8 @@ public sealed record SpecialProductsPriceWorkflowResult(
 /// </summary>
 public static class SpecialProductPriceRules
 {
-    public const decimal MaxRetailPrice = 99999.99m;
+    // 与收银端其他手工价格输入同一上限（9999 以内）。
+    public const decimal MaxRetailPrice = PosPriceInputRules.MaxUnitPrice;
 
     public static bool IsValid(decimal price) =>
         price > 0m && price <= MaxRetailPrice && decimal.Round(price, 2) == price;

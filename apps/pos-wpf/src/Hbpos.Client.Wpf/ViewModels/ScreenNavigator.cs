@@ -438,12 +438,16 @@ internal sealed class ScreenNavigator
         SetCurrentScreen(TransactionHistory);
     }
 
-    public async Task SuspendCurrentOrderAsync()
+    /// <summary>
+    /// 挂起当前购物车。返回落库的挂单 Guid，供收银页把它写进 ORDER_HOLD 审计；
+    /// 服务不可用或挂单失败（异常已转成状态提示）时返回 null。
+    /// </summary>
+    public async Task<Guid?> SuspendCurrentOrderAsync()
     {
         if (_suspendedOrderService is null)
         {
             _setStatusMessage(_localization.T("main.suspendedUnavailable"));
-            return;
+            return null;
         }
 
         try
@@ -452,10 +456,12 @@ internal sealed class ScreenNavigator
             PosTerminal?.RefreshCart();
             CashPayment?.RefreshCart();
             _setStatusMessage(string.Format(_localization.CurrentCulture, _localization.T("main.suspendedSaved"), ReceiptOrderShortCode.Create(suspended.SuspendedOrderGuid)));
+            return suspended.SuspendedOrderGuid;
         }
         catch (Exception ex)
         {
             _setStatusMessage(ex.Message);
+            return null;
         }
     }
 

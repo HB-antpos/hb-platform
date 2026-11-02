@@ -5,6 +5,7 @@ import type {
   RemoteMaintenanceDeviceQuery,
   RemoteMaintenanceManifest,
   RemoteOnlineStatus,
+  RemoteRustDeskVersionStatus,
   RemoteServiceStatus,
 } from '../types/remoteMaintenance'
 
@@ -44,6 +45,12 @@ function serviceStatus(raw: Record<string, unknown>): RemoteServiceStatus {
     : 'checkFailed'
 }
 
+function rustDeskVersionStatus(raw: Record<string, unknown>): RemoteRustDeskVersionStatus {
+  const value = raw.rustDeskVersionStatus
+  // 旧版后端没有这个字段，按“无法判断”处理，不误报。
+  return value === 'match' || value === 'drift' || value === 'missing' ? value : 'unknown'
+}
+
 export function normalizeRemoteMaintenanceDevice(value: unknown): RemoteMaintenanceDevice {
   const raw = asRecord(value)
   return {
@@ -54,6 +61,9 @@ export function normalizeRemoteMaintenanceDevice(value: unknown): RemoteMaintena
     computerName: text(raw, 'computerName'),
     rustdeskId: text(raw, 'rustdeskId'),
     clientVersion: text(raw, 'clientVersion'),
+    // 空串有含义（程序文件读不到），只有字段缺失或非字符串才是 null。
+    observedRustDeskVersion: typeof raw.observedRustDeskVersion === 'string' ? raw.observedRustDeskVersion.trim() : null,
+    rustDeskVersionStatus: rustDeskVersionStatus(raw),
     agentVersion: text(raw, 'agentVersion'),
     onlineStatus: onlineStatus(raw),
     serviceStatus: serviceStatus(raw),

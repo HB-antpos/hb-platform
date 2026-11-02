@@ -87,7 +87,7 @@ public sealed class PosTerminalHeldOrderBadgeTests
                 // 模拟导航层完成挂单：购物车清空、本机多了一张今天的挂单。
                 cart.Clear();
                 counter.Count = 4;
-                return Task.CompletedTask;
+                return Task.FromResult<Guid?>(Guid.NewGuid());
             });
         Assert.Equal(0, viewModel.HeldOrderTodayCount);
 
@@ -388,7 +388,7 @@ public sealed class PosTerminalHeldOrderBadgeTests
         IHeldOrderTodayCountService? counter,
         out FakeTimeProvider clock,
         PosCartService? cart = null,
-        Func<Task>? onHoldOrderAsync = null,
+        Func<Task<Guid?>>? onHoldOrderAsync = null,
         string? startLocal = null)
     {
         // FakeTimeProvider 的本地时区默认是 UTC，所以这里的 UTC 时刻就是设备本地时间。

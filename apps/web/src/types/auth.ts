@@ -143,6 +143,8 @@ export interface AccessControl {
   canManageMyobConnections: boolean
   /** MYOB 对接页「员工绑定」页签：独立权限 Myob.Employee.Bind。 */
   canBindMyobEmployees: boolean
+  /** 「员工绑定 → 对方没有」的「我方建档」：员工绑定 + 建门店员工（Users.CreateStoreStaff 或 Users.Create）。 */
+  canCreateMyobOurSide: boolean
   /** 「推送与对账」页签的推送 / 撤销 / 推送记录：独立权限 Myob.Timesheet.Push（会写 MYOB 生产数据；预览仍只需编辑工资）。 */
   canPushMyobTimesheet: boolean
   /** MYOB 对接页入口：连接管理 / 员工绑定 / 编辑工资（发薪公司页签）三者任一；页内各页签再按各自权限显示。 */

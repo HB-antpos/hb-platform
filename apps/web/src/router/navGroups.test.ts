@@ -68,8 +68,9 @@ for (const group of NAV_GROUPS) {
   }
 }
 
-// 敏感页面不保活；MYOB 对接授权回跳带 ?myob= 参数，必须按新进入重新加载，同样不保活；工资单含薪资，离开页签即丢掉内存里的数据，也不保活
-const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match', '/pos-admin/myob', '/pos-admin/payslips']
+// 敏感页面不保活；工资单含薪资，离开页签即丢掉内存里的数据，也不保活。
+// MYOB 对接保活：授权回跳是整页重新加载，缓存本来就是空的，保活不影响读取 ?myob= 参数。
+const sensitivePaths = ['/system/remote-maintenance', '/system/face-cameras', '/system/face-match', '/pos-admin/payslips']
 for (const group of NAV_GROUPS) {
   for (const tab of group.tabs) {
     assert(tab.keepAlive === !sensitivePaths.includes(tab.path), `${tab.path} 保活设置与原路由一致`)
@@ -122,7 +123,10 @@ assert(
   '工时与工资合并页含工时与工资、工资单、MYOB 对接（顺序与设计图一致）',
 )
 assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/payslips')?.keepAlive === false, '工资单含薪资，不保活')
-assert(payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/myob')?.keepAlive === false, 'MYOB 授权回跳要按新进入加载，不保活')
+assert(
+  payrollGroup.tabs.find((tab) => tab.path === '/pos-admin/myob')?.keepAlive === true,
+  'MYOB 对接保活：切到别的页签再回来保留所选子页签、公司与视图',
+)
 for (const path of ['/pos-admin/attendance-review', '/pos-admin/myob', '/pos-admin/payslips']) {
   assert(!adminMenuKeys.includes(path), `${path} 不再单独出现在侧栏`)
 }

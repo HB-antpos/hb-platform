@@ -27,11 +27,11 @@ public enum RemoteMaintenanceReconcileResult
     NotApplicable,
     /// <summary>本机配置与中心期望一致，无需任何操作。</summary>
     UpToDate,
-    /// <summary>已提权把 RustDesk 切换到中心期望的服务器。</summary>
+    /// <summary>已通过免 UAC 代理或提权 helper 把 RustDesk 切换到中心期望的服务器。</summary>
     Reconciled,
     /// <summary>暂不处理：正在安装、中心不可达、自动重试次数已用完等，之后会再试或由手动触发。</summary>
     Deferred,
-    /// <summary>需要对账但未完成：UAC 被拒、等待超时或 helper 失败。设备仍在旧服务器，可手动修复。</summary>
+    /// <summary>需要对账但未完成：代理未受理、UAC 被拒、等待超时或 helper 失败。设备仍在旧服务器，可手动修复。</summary>
     Failed,
     /// <summary>中心给出的配置不在公司白名单或要求更换公钥，设备端拒绝执行；需要运维修正中心配置。</summary>
     Rejected
@@ -44,6 +44,27 @@ public enum RemoteMaintenanceReconcileResult
 public interface IRemoteMaintenanceReconciler
 {
     Task<RemoteMaintenanceReconcileResult> ReconcileAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>夜间升级 RustDesk 的结果，只用于日志与测试；界面不展示。</summary>
+public enum RemoteMaintenanceUpgradeResult
+{
+    /// <summary>没有待升级的构建、RustDesk 未受管或已卸载。</summary>
+    NotApplicable,
+    /// <summary>已通过 SYSTEM 代理升级到待升级构建。</summary>
+    Upgraded,
+    /// <summary>暂不处理：代理未注册、正在安装或对账、失败次数已达上限。</summary>
+    Deferred,
+    /// <summary>升级未完成，计入失败次数，下个窗口再试。</summary>
+    Failed
+}
+
+/// <summary>
+/// 把白天预先下载好的 RustDesk 构建交给 SYSTEM 代理升级。只在免 UAC 代理可用时执行，绝不为升级弹 UAC。
+/// </summary>
+public interface IRemoteMaintenanceUpgrader
+{
+    Task<RemoteMaintenanceUpgradeResult> ApplyPendingUpgradeAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IRemoteMaintenanceService
@@ -65,14 +86,23 @@ public sealed class RemoteMaintenanceService(
     IRemoteMaintenanceInstaller installer,
     IRemoteMaintenanceUacHelperLauncher uacHelperLauncher,
     RemoteMaintenanceJournal journal,
-    IRemoteMaintenanceSecretProtector secretProtector) : IRemoteMaintenanceService, IRemoteMaintenanceReconciler
+    IRemoteMaintenanceSecretProtector secretProtector,
+    // 免 UAC 代理（SYSTEM 计划任务）；为 null 或任务未注册时对账退回 UAC helper。
+    IRemoteMaintenanceAgentClient? agentClient = null) : IRemoteMaintenanceService, IRemoteMaintenanceReconciler, IRemoteMaintenanceUpgrader
 {
     // 自动对账连续失败达到该次数后不再自动弹 UAC，用户可在设置页点“修复”手动触发。
+    // 走免 UAC 代理时不弹窗，不受此上限约束。
     internal const int MaxAutomaticReconcileFailures = 5;
+
+    // 同一个构建连续升级失败达到该次数后不再自动升级（RustDesk 安装脚本不可回滚，反复重装只会反复断开远程连接）。
+    internal const int MaxAutomaticUpgradeFailures = 3;
 
     // 提权 helper 的最长等待：UAC 无人理会时不能一直占着操作闸门（安装/修复也共用它）。
     // 超时只是不再等待，已弹出的 UAC 与 helper 本身不受影响，下次对账会按实际状态收敛。
     internal TimeSpan ReconcileHelperTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
+    // 升级等待上限：复制校验安装包 + RustDesk 安装脚本最长 5 分钟 + 读回配置；与代理任务的 15 分钟执行时限一致。
+    internal TimeSpan UpgradeHelperTimeout { get; init; } = TimeSpan.FromMinutes(15);
 
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly string _helperPath = Path.Combine(AppContext.BaseDirectory, "Hbpos.RemoteMaintenance.Setup.exe");
@@ -462,6 +492,11 @@ public sealed class RemoteMaintenanceService(
             return RemoteMaintenanceReconcileResult.Rejected;
         }
 
+        // 中心若已下发新的 RustDesk 构建，趁现在有登录票据先下载校验好，夜间空闲时再交给代理升级；
+        // 下载失败不影响对账。staging 会改 journal，之后的写入要基于最新内容。
+        await StageRustDeskUpgradeAsync(state, prepare.ArtifactManifest.RustDesk, cancellationToken);
+        state = await journal.ReadAsync(cancellationToken) ?? state;
+
         if (desired == current)
         {
             // 清掉上次失败遗留的待应用配置与失败计数，保持 journal 干净；计数也因此不会把设备永久锁死。
@@ -475,13 +510,14 @@ public sealed class RemoteMaintenanceService(
             return RemoteMaintenanceReconcileResult.UpToDate;
         }
 
-        // 确实需要提权才检查自动重试上限：达到上限后不再自动弹 UAC，手动修复仍可再试。
-        if (!manual && state.ReconcileFailureCount >= MaxAutomaticReconcileFailures)
+        // 代理可用就不弹窗，不需要自动重试上限；只有要退回 UAC 时才检查：达到上限后不再自动弹 UAC，手动修复仍可再试。
+        var useAgent = agentClient?.IsAvailable(_helperPath) == true;
+        if (!useAgent && !manual && state.ReconcileFailureCount >= MaxAutomaticReconcileFailures)
         {
             return RemoteMaintenanceReconcileResult.Deferred;
         }
 
-        // PendingConfig 只是“请求”，真正是否应用由提权 helper 再次校验后决定。
+        // PendingConfig 只是“请求”，真正是否应用由提权侧再次校验后决定（UAC helper 从 journal 读取它）。
         await journal.WriteAsync(state with { PendingConfig = desired, UpdatedAtUtc = DateTimeOffset.UtcNow }, cancellationToken);
         var failureReason = "helper-failed";
         var helperCode = -1;
@@ -489,7 +525,11 @@ public sealed class RemoteMaintenanceService(
         helperTimeout.CancelAfter(ReconcileHelperTimeout);
         try
         {
-            helperCode = await uacHelperLauncher.RunAsync(_helperPath, _journalPath, state.OperationId, "reconcile", helperTimeout.Token);
+            helperCode = useAgent
+                // 代理只接收目标服务器，不读写本 journal；成功后由下面这里更新 journal。
+                ? await agentClient!.ReconcileAsync(_helperPath, desired, helperTimeout.Token)
+                : await uacHelperLauncher.RunAsync(_helperPath, _journalPath, state.OperationId, "reconcile", helperTimeout.Token);
+            if (helperCode == RemoteMaintenanceAgentClient.NotRespondingExitCode) failureReason = "agent-not-responding";
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -510,7 +550,12 @@ public sealed class RemoteMaintenanceService(
 
         if (helperCode == 0)
         {
-            LogReconcile(state.OperationId, $"reconcile applied idServer={desired.IdServer}", warning: false);
+            // UAC helper 已自行把 PendingConfig 并入 Config；代理不碰 journal，由这里补写。两条路径写入同样内容，重复写无害。
+            var applied = await journal.ReadAsync(CancellationToken.None) ?? state;
+            await journal.WriteAsync(
+                applied with { Config = desired, PendingConfig = null, ReconcileFailureCount = 0, UpdatedAtUtc = DateTimeOffset.UtcNow },
+                CancellationToken.None);
+            LogReconcile(state.OperationId, $"reconcile applied via={(useAgent ? "agent" : "uac")} idServer={desired.IdServer}", warning: false);
             return RemoteMaintenanceReconcileResult.Reconciled;
         }
 
@@ -521,9 +566,155 @@ public sealed class RemoteMaintenanceService(
             CancellationToken.None);
         LogReconcile(
             state.OperationId,
-            $"reconcile failed reason={failureReason} exitCode={helperCode} failures={latest.ReconcileFailureCount + 1}",
+            $"reconcile failed via={(useAgent ? "agent" : "uac")} reason={failureReason} exitCode={helperCode} failures={latest.ReconcileFailureCount + 1}",
             warning: failureReason != "uac-declined");
         return RemoteMaintenanceReconcileResult.Failed;
+    }
+
+    /// <summary>
+    /// 夜间空闲窗口调用：把白天预先下载好的构建交给 SYSTEM 代理升级。只走代理，不弹 UAC；
+    /// 安装 / 对账正在进行时让路，同一构建连续失败达到上限后停止自动升级。
+    /// </summary>
+    public async Task<RemoteMaintenanceUpgradeResult> ApplyPendingUpgradeAsync(CancellationToken cancellationToken = default)
+    {
+        if (!await _operationGate.WaitAsync(0, cancellationToken)) return RemoteMaintenanceUpgradeResult.Deferred;
+        try
+        {
+            var state = await journal.ReadAsync(cancellationToken);
+            if (state is not
+                {
+                    State: RemoteMaintenanceOperationState.Committed,
+                    PendingUpgradeVersion: { } version, PendingUpgradeSha256: { } sha256, PendingUpgradeArtifactPath: { } artifactPath
+                })
+                return RemoteMaintenanceUpgradeResult.NotApplicable;
+            // 安装包被清理或白名单已不含该构建（WPF 换了版本）：清掉待升级记录，等白天对账重新下载。
+            if (!File.Exists(artifactPath) || !WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(sha256, out _))
+            {
+                await journal.WriteAsync(ClearPendingUpgrade(state), cancellationToken);
+                return RemoteMaintenanceUpgradeResult.NotApplicable;
+            }
+
+            if (state.UpgradeFailureCount >= MaxAutomaticUpgradeFailures) return RemoteMaintenanceUpgradeResult.Deferred;
+            if (agentClient?.IsAvailable(_helperPath) != true) return RemoteMaintenanceUpgradeResult.Deferred;
+            var local = await GetSafeStatusAsync();
+            if (local.ServiceStatus is "notInstalled" or "checkFailed") return RemoteMaintenanceUpgradeResult.NotApplicable;
+
+            var helperCode = -1;
+            var failureReason = "helper-failed";
+            using (var helperTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                helperTimeout.CancelAfter(UpgradeHelperTimeout);
+                try
+                {
+                    helperCode = await agentClient!.UpgradeAsync(_helperPath, sha256, artifactPath, helperTimeout.Token);
+                    if (helperCode == RemoteMaintenanceAgentClient.NotRespondingExitCode) failureReason = "agent-not-responding";
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    failureReason = "helper-timeout";
+                }
+            }
+
+            var latest = await journal.ReadAsync(CancellationToken.None) ?? state;
+            if (helperCode == 0)
+            {
+                // ClientVersion 记成新构建，白天对账就不会再为同一构建重复下载。
+                await journal.WriteAsync(
+                    ClearPendingUpgrade(latest) with { ClientVersion = version, UpgradeFailureCount = 0 },
+                    CancellationToken.None);
+                TryDeleteFile(artifactPath);
+                LogReconcile(state.OperationId, $"rustdesk upgrade applied version={version}", warning: false);
+                return RemoteMaintenanceUpgradeResult.Upgraded;
+            }
+
+            await journal.WriteAsync(
+                latest with { UpgradeFailureCount = latest.UpgradeFailureCount + 1, UpdatedAtUtc = DateTimeOffset.UtcNow },
+                CancellationToken.None);
+            LogReconcile(
+                state.OperationId,
+                $"rustdesk upgrade failed version={version} reason={failureReason} exitCode={helperCode} failures={latest.UpgradeFailureCount + 1}",
+                warning: true);
+            return RemoteMaintenanceUpgradeResult.Failed;
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 白天对账拿到中心 manifest 后调用：中心下发的构建与本机已装的不同、且在随 WPF 发布的白名单内时，先下载校验到本地，
+    /// 记进 journal 等夜间升级。只在免 UAC 代理可用时准备（升级绝不弹 UAC）；失败只记日志，不影响对账。调用方必须已持有操作闸门。
+    /// </summary>
+    private async Task StageRustDeskUpgradeAsync(RemoteMaintenanceJournalState state, RemoteMaintenanceArtifact artifact, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.Equals(state.ClientVersion, artifact.Version, StringComparison.Ordinal))
+            {
+                // 已是中心下发的构建：遗留的待升级记录（例如中心改回旧版）一并清掉。
+                if (state.PendingUpgradeSha256 is not null)
+                    await journal.WriteAsync(ClearPendingUpgrade(state), cancellationToken);
+                return;
+            }
+
+            if (!WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(artifact.Sha256, out var build))
+            {
+                LogReconcile(state.OperationId, $"rustdesk upgrade skipped reason=untrusted-build version={artifact.Version}", warning: true);
+                return;
+            }
+
+            if (agentClient?.IsAvailable(_helperPath) != true) return;
+            var sha256 = artifact.Sha256.Trim().ToLowerInvariant();
+            if (string.Equals(state.PendingUpgradeSha256, sha256, StringComparison.Ordinal) &&
+                state.PendingUpgradeArtifactPath is { } existing && File.Exists(existing))
+                return;
+
+            var directory = Path.Combine(
+                state.DataDirectory ?? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HBPOS", "RemoteMaintenance", state.OperationId.ToString("N")),
+                "upgrade-" + sha256[..12]);
+            var path = await artifactDownloader.DownloadAndVerifyAsync(artifact, directory, cancellationToken);
+            var latest = await journal.ReadAsync(cancellationToken) ?? state;
+            var sameBuild = string.Equals(latest.PendingUpgradeSha256, sha256, StringComparison.Ordinal);
+            await journal.WriteAsync(latest with
+            {
+                PendingUpgradeVersion = build.Version,
+                PendingUpgradeSha256 = sha256,
+                PendingUpgradeArtifactPath = path,
+                // 换了新构建就重新给自动升级机会；同一构建重新下载不清零，避免绕过失败上限。
+                UpgradeFailureCount = sameBuild ? latest.UpgradeFailureCount : 0,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            }, cancellationToken);
+            LogReconcile(state.OperationId, $"rustdesk upgrade staged version={build.Version}", warning: false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogReconcile(state.OperationId, $"rustdesk upgrade staging failed error={ex.GetType().Name}", warning: true);
+        }
+    }
+
+    private static RemoteMaintenanceJournalState ClearPendingUpgrade(RemoteMaintenanceJournalState state) => state with
+    {
+        PendingUpgradeVersion = null,
+        PendingUpgradeSha256 = null,
+        PendingUpgradeArtifactPath = null,
+        UpdatedAtUtc = DateTimeOffset.UtcNow
+    };
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private static void LogReconcile(Guid operationId, string message, bool warning)

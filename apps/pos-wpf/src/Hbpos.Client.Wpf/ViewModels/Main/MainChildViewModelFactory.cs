@@ -276,7 +276,7 @@ internal sealed class MainChildViewModelFactory
         PosSessionState session,
         Action? onOpenPayment,
         Func<Task>? onOpenSpecialProductsAsync = null,
-        Func<Task>? onHoldOrderAsync = null,
+        Func<Task<Guid?>>? onHoldOrderAsync = null,
         Func<Task>? onRecallOrderAsync = null,
         Func<Task>? onOpenHistoryAsync = null,
         Func<Task>? onOpenDailyCloseAsync = null,

@@ -84,6 +84,7 @@ public static class ServiceRegistration
         services.AddOptions<InstallmentCancelClaimOptions>();
         services.AddOptions<InstallmentCrossDeviceLifecycleOptions>();
         services.AddOptions<SharedHeldOrderOptions>();
+        services.AddOptions<OrderQueryWindowOptions>();
         services.AddOptions<CardTenderReconciliationOptions>();
         services.AddOptions<DeviceActivationOptions>();
         services.AddOptions<RemoteMaintenanceGatewayOptions>();
@@ -106,6 +107,7 @@ public static class ServiceRegistration
             services.Configure<SquareWebhookOptions>(configuration.GetSection("Square"));
             services.Configure<SquareTerminalRestOptions>(configuration.GetSection("Square"));
             services.Configure<AppUpdateOptions>(configuration.GetSection("AppUpdate"));
+            services.Configure<OrderQueryWindowOptions>(configuration.GetSection(OrderQueryWindowOptions.SectionName));
             services.Configure<PosIpadOptions>(configuration.GetSection("PosIpad"));
             services.Configure<PosIpadAppReviewOptions>(
                 configuration.GetSection(PosIpadAppReviewOptions.SectionName));
@@ -184,6 +186,7 @@ public static class ServiceRegistration
         services.AddScoped<ISharedHeldOrderSchemaInitializer, SqlSugarSharedHeldOrderSchemaInitializer>();
         services.AddScoped<IOrderHistoryRepository, SqlSugarOrderHistoryRepository>();
         services.AddScoped<IOrderHistoryService, OrderHistoryService>();
+        services.AddScoped<IOrderQueryWindowService, OrderQueryWindowService>();
         services.AddScoped<IOrderReturnRepository, SqlSugarOrderReturnRepository>();
         services.AddScoped<IOrderReturnService, OrderReturnService>();
         services.AddSingleton<InstallmentSchemaInitializationState>();

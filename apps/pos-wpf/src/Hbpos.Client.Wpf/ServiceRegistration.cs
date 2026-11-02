@@ -114,12 +114,19 @@ public static class ServiceRegistration
         services.AddSingleton<IRemoteMaintenanceCommandRunner, WindowsRemoteMaintenanceCommandRunner>();
         services.AddSingleton<IRemoteMaintenanceServiceControl, WindowsRemoteMaintenanceServiceControl>();
         services.AddSingleton<IRemoteMaintenanceUacHelperLauncher, WindowsRemoteMaintenanceUacHelperLauncher>();
+        // 免 UAC 代理：安装包注册了 SYSTEM 计划任务时，启动对账改由它执行，不再弹 UAC。
+        services.AddSingleton<IRemoteMaintenanceAgentTaskScheduler, WindowsRemoteMaintenanceAgentTaskScheduler>();
+        services.AddSingleton<IRemoteMaintenanceAgentClient>(sp => new RemoteMaintenanceAgentClient(
+            sp.GetRequiredService<IRemoteMaintenanceAgentTaskScheduler>()));
+        services.AddSingleton<RustDeskUpdatePromptSuppressor>(sp => new RustDeskUpdatePromptSuppressor(
+            sp.GetRequiredService<RemoteMaintenanceJournal>()));
         services.AddSingleton<IRemoteMaintenanceInstaller, WindowsRemoteMaintenanceInstaller>();
         services.AddSingleton<IRemoteMaintenanceArtifactDownloader, RemoteMaintenanceArtifactDownloader>();
         // 同一个实例同时提供安装服务与启动对账，二者共用操作闸门，避免对账与手动安装并发改 journal。
         services.AddSingleton<RemoteMaintenanceService>();
         services.AddSingleton<IRemoteMaintenanceService>(sp => sp.GetRequiredService<RemoteMaintenanceService>());
         services.AddSingleton<IRemoteMaintenanceReconciler>(sp => sp.GetRequiredService<RemoteMaintenanceService>());
+        services.AddSingleton<IRemoteMaintenanceUpgrader>(sp => sp.GetRequiredService<RemoteMaintenanceService>());
         services.AddSingleton<IAppShutdownCoordinator, AppShutdownCoordinator>();
         services.AddSingleton<ICashierSessionContext, CashierSessionContext>();
         services.AddSingleton<IEmergencyLoginPublicKeyCache, EmergencyLoginPublicKeyCache>();
@@ -435,6 +442,8 @@ public static class ServiceRegistration
         services.AddSingleton<ISpecialProductService, SpecialProductService>();
         services.AddSingleton<IShellCultureService, ShellCultureService>();
         services.AddSingleton<ICatalogSyncStatusService, CatalogSyncStatusService>();
+        services.AddSingleton(sp => CatalogAutoSyncOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<IShellCatalogService, ShellCatalogService>();
         services.AddSingleton<IMainShellStartupService, MainShellStartupService>();
         services.AddSingleton<IShellSyncCenterService, ShellSyncCenterService>();
@@ -477,7 +486,11 @@ public static class ServiceRegistration
         services.AddSingleton(sp => AppUpdateUnattendedInstallOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build(),
             IsDebugBuild));
+        // 当天日结保存后由 DailyCloseService 打开；收银员登出后两个调度器不必等夜间窗口开始。
+        services.AddSingleton<IPostDailyCloseMaintenanceWindow, PostDailyCloseMaintenanceWindow>();
         services.AddSingleton<AppUpdateUnattendedInstallScheduler>();
+        // 与 WPF 夜间无人值守安装共用窗口与空闲判定，把白天预下载的 RustDesk 构建交给 SYSTEM 代理升级。
+        services.AddSingleton<RemoteMaintenanceUpgradeScheduler>();
         services.AddSingleton(sp => new AttendanceQrPanelViewModel(
             sp.GetRequiredService<IAttendanceSigningKeyApiClient>(),
             sp.GetRequiredService<IConnectivityApiClient>(),
@@ -825,6 +838,7 @@ public static class ServiceRegistration
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
             viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
+            viewModel.ConfigureCatalogAutoSync(sp.GetRequiredService<CatalogAutoSyncOptions>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

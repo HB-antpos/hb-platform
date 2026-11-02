@@ -47,7 +47,8 @@ public sealed class DeviceRegistrationRustDeskVersionTests : IDisposable
             CREATE TABLE HBweb_RemoteMaintenanceDevice (
               Id TEXT PRIMARY KEY, DeviceRegistrationId INTEGER NOT NULL, HardwareId TEXT NOT NULL,
               StoreCode TEXT NOT NULL, DeviceCode TEXT NOT NULL, ComputerName TEXT NOT NULL,
-              RustdeskId TEXT NULL, ClientVersion TEXT NULL, AgentVersion TEXT NULL, ServiceStatus TEXT NOT NULL,
+              RustdeskId TEXT NULL, ClientVersion TEXT NULL, AgentVersion TEXT NULL, ObservedRustDeskVersion TEXT NULL,
+              ServiceStatus TEXT NOT NULL,
               LastSeenAtUtc TEXT NULL, RegisteredAtUtc TEXT NOT NULL, LastAcceptedSequence INTEGER NOT NULL,
               LastAcceptedAtUtc TEXT NULL, LastOperationId TEXT NULL, MonitorTokenHash TEXT NULL,
               CredentialCiphertext TEXT NULL, CommitResponseCiphertext TEXT NULL, IsDeleted INTEGER NOT NULL)
@@ -93,6 +94,31 @@ public sealed class DeviceRegistrationRustDeskVersionTests : IDisposable
                 && p.Name != nameof(DeviceListItemDto.RustDeskClientVersion));
     }
 
+    [Fact]
+    public async Task GetDevicesPaged_心跳观察到的实际版本优先于登记版本_空串退回登记版本()
+    {
+        // 设备 1：有人在 RustDesk 界面点了“更新”，心跳报 1.5.0；设备 2：程序文件读不到，心跳报空串。
+        await SeedRemoteAsync(registrationId: 1, hardwareId: "HW-1", clientVersion: "1.4.9", observedVersion: "1.5.0");
+        await SeedRemoteAsync(registrationId: 2, hardwareId: "HW-2", clientVersion: "1.4.9", observedVersion: "");
+
+        var service = new Mock<IDeviceRegistrationService>();
+        service
+            .Setup(x => x.GetDevicesPagedAsync(1, 20, null, null, null, null, null))
+            .ReturnsAsync((new List<POSM_设备注册信息表> { CreateDevice(1, "HW-1"), CreateDevice(2, "HW-2") }, 2));
+        var controller = new DeviceRegistrationController(
+            service.Object,
+            Mock.Of<ILogger<DeviceRegistrationController>>(),
+            new MapperConfiguration(cfg => cfg.AddProfile<DeviceMappingProfile>(), NullLoggerFactory.Instance).CreateMapper(),
+            Mock.Of<IStoreService>(),
+            remoteMaintenanceService: CreateRemoteMaintenanceService("1.4.9"));
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetDevicesPaged());
+        var data = ok.Value!.GetType().GetProperty("data")!.GetValue(ok.Value)!;
+        var devices = Assert.IsType<List<DeviceListItemDto>>(data.GetType().GetProperty("devices")!.GetValue(data));
+        Assert.Equal("1.5.0", devices.Single(d => d.Id == 1).RustDeskClientVersion);
+        Assert.Equal("1.4.9", devices.Single(d => d.Id == 2).RustDeskClientVersion);
+    }
+
     public void Dispose()
     {
         _db.Dispose();
@@ -100,7 +126,7 @@ public sealed class DeviceRegistrationRustDeskVersionTests : IDisposable
         SqliteTempFileCleanup.DeleteIfExists(_dbPath);
     }
 
-    private Task SeedRemoteAsync(int registrationId, string hardwareId, string clientVersion, bool isDeleted = false)
+    private Task SeedRemoteAsync(int registrationId, string hardwareId, string clientVersion, bool isDeleted = false, string? observedVersion = null)
     {
         return _db.Insertable(new RemoteMaintenanceDevice
         {
@@ -112,6 +138,7 @@ public sealed class DeviceRegistrationRustDeskVersionTests : IDisposable
             ComputerName = $"PC{registrationId}",
             RustdeskId = "123456789",
             ClientVersion = clientVersion,
+            ObservedRustDeskVersion = observedVersion,
             CredentialCiphertext = "secret",
             RegisteredAtUtc = DateTime.UtcNow,
             IsDeleted = isDeleted,

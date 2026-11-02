@@ -98,7 +98,7 @@ public sealed class RemoteMaintenanceService
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         var response = new RemoteMaintenanceDeviceListResponseDto
         {
-            Items = rows.Select(x => MapListItem(x, threshold)).ToList(),
+            Items = rows.Select(x => MapListItem(x, threshold, GetConfiguredRustdeskVersion())).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize,
@@ -135,7 +135,8 @@ public sealed class RemoteMaintenanceService
                 .Select(x => new RemoteMaintenanceDevice
                 {
                     Id = x.Id, DeviceRegistrationId = x.DeviceRegistrationId, HardwareId = x.HardwareId,
-                    ClientVersion = x.ClientVersion, LastSeenAtUtc = x.LastSeenAtUtc, RegisteredAtUtc = x.RegisteredAtUtc
+                    ClientVersion = x.ClientVersion, ObservedRustDeskVersion = x.ObservedRustDeskVersion,
+                    LastSeenAtUtc = x.LastSeenAtUtc, RegisteredAtUtc = x.RegisteredAtUtc
                 })
                 .ToListAsync();
         }
@@ -145,6 +146,10 @@ public sealed class RemoteMaintenanceService
             _logger.LogWarning(ex, "读取 RustDesk 客户端版本失败，设备列表不显示远程版本");
             return result;
         }
+
+        // 设备上实际的版本优先（有人在 RustDesk 界面点过“更新”时与登记版本不同）；还没收到心跳上报时退回 commit 登记的版本。
+        foreach (var row in rows)
+            if (!string.IsNullOrWhiteSpace(row.ObservedRustDeskVersion)) row.ClientVersion = row.ObservedRustDeskVersion;
 
         var withVersion = rows.Where(x => !string.IsNullOrWhiteSpace(x.ClientVersion)).ToList();
         // 同一注册 ID / 硬件号若有多条，取最近上报（LastSeen 优先，其次登记时间）的那条。
@@ -355,9 +360,11 @@ public sealed class RemoteMaintenanceService
         if (request.Sequence <= row.LastAcceptedSequence) return RemoteMaintenanceResult<object>.Fail("REMOTE_MAINTENANCE_SEQUENCE_REJECTED", "心跳 sequence 必须严格递增");
         if (row.LastAcceptedAtUtc.HasValue && now - EnsureUtc(row.LastAcceptedAtUtc.Value) < TimeSpan.FromSeconds(Math.Max(1, _options.Value.HeartbeatMinIntervalSeconds))) return RemoteMaintenanceResult<object>.Fail("REMOTE_MAINTENANCE_RATE_LIMITED", "心跳过于频繁");
         var rateThreshold = now.AddSeconds(-Math.Max(1, _options.Value.HeartbeatMinIntervalSeconds));
+        // 实际观察到的版本单独存：空串表示 RustDesk 服务在但程序文件读不到（被删或被隔离），要和“没上报”（NULL）区分开。
+        var observedRustDeskVersion = Normalize(request.ClientVersion, MaxVersionLength) ?? string.Empty;
         var affected = await _dbContext.Db.Updateable<RemoteMaintenanceDevice>()
             // heartbeat 只维护状态快照；commit 登记的 RustDesk ID/版本不能被空值或旧 agent 覆盖。
-            .SetColumns(x => new RemoteMaintenanceDevice { LastAcceptedSequence = request.Sequence, LastAcceptedAtUtc = now, LastSeenAtUtc = now, AgentVersion = Normalize(request.AgentVersion, MaxVersionLength), ServiceStatus = request.ServiceStatus })
+            .SetColumns(x => new RemoteMaintenanceDevice { LastAcceptedSequence = request.Sequence, LastAcceptedAtUtc = now, LastSeenAtUtc = now, AgentVersion = Normalize(request.AgentVersion, MaxVersionLength), ServiceStatus = request.ServiceStatus, ObservedRustDeskVersion = observedRustDeskVersion })
             .Where(x => x.Id == deviceId && !x.IsDeleted && x.MonitorTokenHash == tokenHash && x.LastAcceptedSequence < request.Sequence && (x.LastAcceptedAtUtc == null || x.LastAcceptedAtUtc <= rateThreshold))
             .ExecuteCommandAsync();
         if (affected == 1) return RemoteMaintenanceResult<object>.Ok(new { });
@@ -419,7 +426,28 @@ public sealed class RemoteMaintenanceService
     private string BuildHeartbeatUrl(Guid id) => $"{(_options.Value.HeartbeatBaseUrl ?? "https://hotbargain.vip").TrimEnd('/')}/api/remote-maintenance/devices/{id:D}/heartbeat";
     private string ResolveArtifactPath(RemoteMaintenanceArtifactOptions artifact) => Path.IsPathRooted(artifact.Path) ? artifact.Path : Path.Combine(_options.Value.ArtifactRootPath ?? string.Empty, artifact.Path);
     private bool IsFeatureEnabled() => _options.Value.Enabled;
-    internal static RemoteMaintenanceDeviceListItemDto MapListItem(RemoteMaintenanceDevice x, DateTime threshold) => new() { Id = x.Id, DeviceRegistrationId = x.DeviceRegistrationId, StoreCode = x.StoreCode, DeviceCode = x.DeviceCode, ComputerName = x.ComputerName, RustdeskId = x.RustdeskId, ClientVersion = x.ClientVersion, AgentVersion = x.AgentVersion, OnlineStatus = x.LastSeenAtUtc is null ? RemoteMaintenanceOnlineStatuses.Never : x.LastSeenAtUtc >= threshold ? RemoteMaintenanceOnlineStatuses.Online : RemoteMaintenanceOnlineStatuses.Offline, ServiceStatus = x.ServiceStatus, LastSeenAtUtc = x.LastSeenAtUtc.HasValue ? EnsureUtc(x.LastSeenAtUtc.Value) : null, RegisteredAtUtc = EnsureUtc(x.RegisteredAtUtc), IsStale = x.LastSeenAtUtc.HasValue && x.LastSeenAtUtc < threshold };
+    internal static RemoteMaintenanceDeviceListItemDto MapListItem(RemoteMaintenanceDevice x, DateTime threshold, string? expectedRustDeskVersion = null) => new() { Id = x.Id, DeviceRegistrationId = x.DeviceRegistrationId, StoreCode = x.StoreCode, DeviceCode = x.DeviceCode, ComputerName = x.ComputerName, RustdeskId = x.RustdeskId, ClientVersion = x.ClientVersion, ObservedRustDeskVersion = x.ObservedRustDeskVersion, RustDeskVersionStatus = ResolveRustDeskVersionStatus(x.ObservedRustDeskVersion, x.ServiceStatus, expectedRustDeskVersion), AgentVersion = x.AgentVersion, OnlineStatus = x.LastSeenAtUtc is null ? RemoteMaintenanceOnlineStatuses.Never : x.LastSeenAtUtc >= threshold ? RemoteMaintenanceOnlineStatuses.Online : RemoteMaintenanceOnlineStatuses.Offline, ServiceStatus = x.ServiceStatus, LastSeenAtUtc = x.LastSeenAtUtc.HasValue ? EnsureUtc(x.LastSeenAtUtc.Value) : null, RegisteredAtUtc = EnsureUtc(x.RegisteredAtUtc), IsStale = x.LastSeenAtUtc.HasValue && x.LastSeenAtUtc < threshold };
+    /// <summary>
+    /// 比对心跳观察到的 RustDesk 版本与中心下发版本。下发版本可以带公司构建后缀（如 1.4.9-hb1），
+    /// 而 rustdesk.exe 的文件版本只有上游版本号（1.4.9），所以只比较“-”之前的部分；数字版本按 主.次.修订 比较，忽略多出的 .0。
+    /// </summary>
+    internal static string ResolveRustDeskVersionStatus(string? observed, string? serviceStatus, string? expected)
+    {
+        if (observed is null || serviceStatus is RemoteMaintenanceServiceStatuses.NotInstalled or RemoteMaintenanceServiceStatuses.CheckFailed)
+            return RemoteMaintenanceRustDeskVersionStatuses.Unknown;
+        if (observed.Length == 0) return RemoteMaintenanceRustDeskVersionStatuses.Missing;
+        if (string.IsNullOrWhiteSpace(expected)) return RemoteMaintenanceRustDeskVersionStatuses.Unknown;
+
+        static string BaseVersion(string value) => value.Split('-', 2)[0].Trim();
+        var actualBase = BaseVersion(observed);
+        var expectedBase = BaseVersion(expected);
+        var same = Version.TryParse(actualBase, out var actualVersion) && Version.TryParse(expectedBase, out var expectedVersion)
+            ? actualVersion.Major == expectedVersion.Major && actualVersion.Minor == expectedVersion.Minor &&
+              Math.Max(actualVersion.Build, 0) == Math.Max(expectedVersion.Build, 0)
+            : string.Equals(actualBase, expectedBase, StringComparison.OrdinalIgnoreCase);
+        return same ? RemoteMaintenanceRustDeskVersionStatuses.Match : RemoteMaintenanceRustDeskVersionStatuses.Drift;
+    }
+
     private static string GeneratePassword() => GenerateToken(24);
     private static string GenerateToken(int bytes = 32) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

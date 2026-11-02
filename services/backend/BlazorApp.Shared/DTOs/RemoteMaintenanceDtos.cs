@@ -29,6 +29,10 @@ public sealed class RemoteMaintenanceDeviceListItemDto
     public string ComputerName { get; init; } = string.Empty;
     public string? RustdeskId { get; init; }
     public string? ClientVersion { get; init; }
+    /// <summary>心跳实际观察到的 RustDesk 版本；null＝尚未收到，空串＝服务在但程序文件读不到。</summary>
+    public string? ObservedRustDeskVersion { get; init; }
+    /// <summary>实际版本与中心下发版本的比对结果，取值见 <see cref="RemoteMaintenanceRustDeskVersionStatuses"/>。</summary>
+    public string RustDeskVersionStatus { get; init; } = RemoteMaintenanceRustDeskVersionStatuses.Unknown;
     public string? AgentVersion { get; init; }
     public string OnlineStatus { get; init; } = RemoteMaintenanceOnlineStatuses.Never;
     public string ServiceStatus { get; init; } = RemoteMaintenanceServiceStatuses.NotInstalled;
@@ -110,6 +114,19 @@ public static class RemoteMaintenanceOnlineStatuses
     public const string Online = "online";
     public const string Offline = "offline";
     public const string Never = "never";
+}
+
+/// <summary>设备上实际的 RustDesk 版本与中心下发版本（RustdeskArtifact.Version）的比对结果。</summary>
+public static class RemoteMaintenanceRustDeskVersionStatuses
+{
+    /// <summary>与下发版本一致。</summary>
+    public const string Match = "match";
+    /// <summary>与下发版本不一致：多半是有人在 RustDesk 界面点了「更新」，或中心已换版本而设备还没升级。</summary>
+    public const string Drift = "drift";
+    /// <summary>RustDesk 服务还在，但读不到程序文件版本：程序被删或被杀毒软件隔离，远程维护连不上。</summary>
+    public const string Missing = "missing";
+    /// <summary>还没收到带版本的心跳、RustDesk 未安装或中心没配置下发版本，无法判断。</summary>
+    public const string Unknown = "unknown";
 }
 
 public static class RemoteMaintenanceServiceStatuses

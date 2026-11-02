@@ -22,12 +22,13 @@ import {
 interface MissingPanelProps {
   onlyInOurs: MyobOnlyInOurs[]
   onlyInMyob: MyobOnlyInMyob[]
-  /** 有「用户管理」访问权限才显示「我方建档」。 */
+  /** 员工绑定 + 建门店员工权限才显示「我方建档」。 */
   canCreateOurSide: boolean
   /** 正在忽略的 MYOB 员工 uid。 */
   ignoringUids: ReadonlySet<string>
   onCopy: (item: MyobOnlyInOurs) => void
-  onCreateOurSide: () => void
+  /** 打开「我方建档」抽屉（按这张卡预填）。 */
+  onCreateOurSide: (item: MyobOnlyInMyob) => void
   onIgnore: (item: MyobOnlyInMyob) => void
 }
 
@@ -103,7 +104,7 @@ export function MissingPanel({ onlyInOurs, onlyInMyob, canCreateOurSide, ignorin
                   </div>
                   <div className="myob-list-actions">
                     {canCreateOurSide ? (
-                      <Button size="small" onClick={onCreateOurSide}>
+                      <Button size="small" onClick={() => onCreateOurSide(item)}>
                         {t('myob.employees.missing.theirs.create')}
                       </Button>
                     ) : null}
