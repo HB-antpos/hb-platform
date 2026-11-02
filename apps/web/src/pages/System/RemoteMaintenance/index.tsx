@@ -40,6 +40,7 @@ import {
   formatRemoteMaintenanceDateTime,
   getRemoteOnlineStatusColor,
   getRemoteServiceStatusColor,
+  getRustDeskVersionDisplay,
   isRemoteMaintenanceVisible,
 } from './remoteMaintenanceLogic'
 import './remoteMaintenance.css'
@@ -221,8 +222,19 @@ export default function RemoteMaintenancePage() {
     {
       title: t('system.remoteMaintenance.clientVersion'),
       dataIndex: 'clientVersion',
-      width: 130,
-      render: (value: string) => value || '--',
+      width: 150,
+      // 显示设备上实际的版本；偏离下发版本或程序文件缺失时标红，与“最近上报”列的文本 + 标签写法一致。
+      render: (_: string, record) => {
+        const display = getRustDeskVersionDisplay(record)
+        return (
+          <Space direction="vertical" size={0}>
+            <span>{display.version}</span>
+            {display.tagKey ? (
+              <Tag color="red">{t(`system.remoteMaintenance.rustDeskVersionStatuses.${display.tagKey}`)}</Tag>
+            ) : null}
+          </Space>
+        )
+      },
     },
     {
       title: t('system.remoteMaintenance.agentVersion'),

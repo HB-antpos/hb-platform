@@ -100,6 +100,9 @@ BEGIN
 END;
 IF COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'HardwareId') IS NULL
     ALTER TABLE [dbo].[HBweb_RemoteMaintenanceDevice] ADD [HardwareId] nvarchar(100) NOT NULL CONSTRAINT [DF_HBweb_RemoteMaintenanceDevice_HardwareId] DEFAULT N'';
+-- 2026-11-02：心跳实际观察到的 RustDesk 版本（可空列，只改元数据）；用于发现被员工手动升级或程序被隔离的设备。
+IF COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'ObservedRustDeskVersion') IS NULL
+    ALTER TABLE [dbo].[HBweb_RemoteMaintenanceDevice] ADD [ObservedRustDeskVersion] nvarchar(80) NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_HBweb_RemoteMaintenanceDevice_DeviceRegistrationId' AND object_id = OBJECT_ID(N'dbo.HBweb_RemoteMaintenanceDevice'))
     CREATE UNIQUE INDEX [UX_HBweb_RemoteMaintenanceDevice_DeviceRegistrationId] ON [dbo].[HBweb_RemoteMaintenanceDevice]([DeviceRegistrationId]) WHERE [IsDeleted] = 0;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_HBweb_RemoteMaintenanceDevice_StoreCode' AND object_id = OBJECT_ID(N'dbo.HBweb_RemoteMaintenanceDevice'))
@@ -131,5 +134,7 @@ IF COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'LastOperationId') IS NULL
     THROW 51706, N'RemoteMaintenanceDevice.LastOperationId is missing.', 1;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_HBweb_RemoteMaintenanceDevice_DeviceRegistrationId' AND object_id = OBJECT_ID(N'dbo.HBweb_RemoteMaintenanceDevice') AND is_unique = 1)
     THROW 51707, N'RemoteMaintenanceDevice registration index is missing.', 1;
+IF COL_LENGTH(N'dbo.HBweb_RemoteMaintenanceDevice', N'ObservedRustDeskVersion') IS NULL
+    THROW 51708, N'RemoteMaintenanceDevice.ObservedRustDeskVersion is missing.', 1;
 """;
 }
