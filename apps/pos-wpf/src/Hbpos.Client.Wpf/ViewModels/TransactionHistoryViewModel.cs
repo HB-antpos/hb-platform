@@ -1085,7 +1085,16 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         var today = _timeProvider.GetLocalNow().Date;
         DateFrom = today;
         DateTo = today;
+        // 跨夜后最早可选日期也跟着往后挪一天。
+        OnPropertyChanged(nameof(EarliestSelectableDate));
     }
+
+    /// <summary>
+    /// 日期控件最早可选的日期：今天往前推 1 年的同一天（收银机时区即门店时区）。
+    /// 与 POS API 的订单查询时间窗口同一套规则（OrderQueryWindowRules），在线查询更早的日期会被服务端拒绝。
+    /// </summary>
+    public DateTime EarliestSelectableDate =>
+        OrderQueryWindowRules.EarliestDate(_timeProvider.GetLocalNow().Date, OrderQueryWindowRules.DefaultEarliestMonths);
 
     public const string QuickDateRangeToday = "today";
     public const string QuickDateRangeYesterday = "yesterday";
@@ -1392,9 +1401,86 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             .ToList();
     }
 
-    partial void OnDateFromChanged(DateTime? value) => ReuploadDateRangeCommand?.NotifyCanExecuteChanged();
+    partial void OnDateFromChanged(DateTime? value)
+    {
+        KeepDateRangeWithinOneMonth(changedFrom: true);
+        ReuploadDateRangeCommand?.NotifyCanExecuteChanged();
+    }
 
-    partial void OnDateToChanged(DateTime? value) => ReuploadDateRangeCommand?.NotifyCanExecuteChanged();
+    partial void OnDateToChanged(DateTime? value)
+    {
+        KeepDateRangeWithinOneMonth(changedFrom: false);
+        ReuploadDateRangeCommand?.NotifyCanExecuteChanged();
+    }
+
+    // 两端互相收拢时会再次触发变更回调，用它挡住递归。
+    private bool _isAdjustingDateRange;
+
+    /// <summary>
+    /// 查询区间最长 1 个日历月（含首尾，规则见 OrderQueryWindowRules，与 POS API 一致）：收银员改了一端导致超出时，
+    /// 把另一端收拢到 1 个月内，而不是等查询被服务端拒绝；开始晚于结束时另一端跟着对齐到同一天。
+    /// 「最早 1 年」由日期控件的 MinimumDate 限制（收银员选不到更早的日期），这里不按当前时间改写日期，
+    /// 免得长时间停留的页面或固定日期的数据随日期推移被意外改掉。
+    /// </summary>
+    private void KeepDateRangeWithinOneMonth(bool changedFrom)
+    {
+        if (_isAdjustingDateRange || DateFrom is not { } from || DateTo is not { } to)
+        {
+            return;
+        }
+
+        var spanMonths = OrderQueryWindowRules.DefaultMaxSpanMonths;
+        DateTime? adjustedFrom = null;
+        DateTime? adjustedTo = null;
+        if (from.Date > to.Date)
+        {
+            if (changedFrom)
+            {
+                adjustedTo = from.Date;
+            }
+            else
+            {
+                adjustedFrom = to.Date;
+            }
+        }
+        else if (!OrderQueryWindowRules.IsWithinSpan(from, to, spanMonths))
+        {
+            if (changedFrom)
+            {
+                // 改的是开始日期：结束日期收到「开始 + 1 个月 − 1 天」，但不越过今天（日期控件不允许未来日期）。
+                var latestTo = OrderQueryWindowRules.DefaultToDate(from, spanMonths);
+                var today = _timeProvider.GetLocalNow().Date;
+                adjustedTo = latestTo > today && today >= from.Date ? today : latestTo;
+            }
+            else
+            {
+                adjustedFrom = OrderQueryWindowRules.DefaultFromDate(to, spanMonths);
+            }
+        }
+
+        if (adjustedFrom is null && adjustedTo is null)
+        {
+            return;
+        }
+
+        _isAdjustingDateRange = true;
+        try
+        {
+            if (adjustedFrom is { } newFrom)
+            {
+                DateFrom = newFrom;
+            }
+
+            if (adjustedTo is { } newTo)
+            {
+                DateTo = newTo;
+            }
+        }
+        finally
+        {
+            _isAdjustingDateRange = false;
+        }
+    }
 
     partial void OnIsReuploadingChanged(bool value) => NotifyReuploadCanExecuteChanged();
 
