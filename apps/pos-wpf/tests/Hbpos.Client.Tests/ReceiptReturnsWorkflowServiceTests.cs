@@ -694,12 +694,126 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         Assert.True(result.ReturnRecordsMayBeStale);
     }
 
+    // 本机时间固定为 2026-11-02 01:00 UTC（本机时区按 UTC）：最早可退日期 = 2025-11-02。
+    private static readonly DateTimeOffset WindowNow = new(2026, 11, 2, 1, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task LookupOrderAsync_ServerOrderWindowRejectionIsShownWithoutLocalFallback()
+    {
+        // 服务端按「最早 1 年」拒绝是确定结论：即使本机有这张单（本机订单永久保留），也不能退回本机加载。
+        var order = CreateLocalOrder(Guid.NewGuid()) with { SoldAt = WindowNow.AddDays(-2) };
+        const string serverMessage = "原单日期 2025-10-01 早于 2025-11-02，超过可退货期限，不能按原单退货。 / The original order (2025-10-01) is older than 2025-11-02 and can no longer be returned against.";
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            ReturnContextException = new CatalogApiException(
+                serverMessage,
+                System.Net.HttpStatusCode.BadRequest,
+                OrderQueryWindowRules.ErrorTooOldForReturn)
+        };
+        var service = CreateService(remote, new FakeLocalOrderRepository([order]), timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), order.OrderGuid.ToString("D"));
+
+        Assert.Null(result.Order);
+        Assert.False(result.IsRemote);
+        Assert.Equal(serverMessage, result.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData("en-US", "This order was sold on 2025-11-01, more than one year ago")]
+    [InlineData("zh-CN", "原单日期 2025-11-01，已超过 1 年")]
+    public async Task LookupOrderAsync_OfflineLocalOrderOlderThanOneYearIsRejected(string cultureName, string expectedStatus)
+    {
+        var order = CreateLocalOrder(Guid.NewGuid()) with { SoldAt = new DateTimeOffset(2025, 11, 1, 18, 0, 0, TimeSpan.Zero) };
+        var service = CreateService(
+            localRepository: new FakeLocalOrderRepository([order]),
+            localization: CreateLocalization(cultureName),
+            timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), order.OrderGuid.ToString("D"));
+
+        Assert.Null(result.Order);
+        Assert.StartsWith(expectedStatus, result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_OfflineLocalOrderSoldOnTheEarliestDayIsAllowed()
+    {
+        var order = CreateLocalOrder(Guid.NewGuid()) with { SoldAt = new DateTimeOffset(2025, 11, 2, 0, 30, 0, TimeSpan.Zero) };
+        var service = CreateService(
+            localRepository: new FakeLocalOrderRepository([order]),
+            timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), order.OrderGuid.ToString("D"));
+
+        Assert.Equal(order.OrderGuid, result.Order?.OrderGuid);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_ServerNotFoundDoesNotLoadLocalOrderOlderThanOneYear()
+    {
+        // 线上按 1 年下限查不到旧单 → 退回本机：本机那张旧单也必须被挡住（这是此前的绕过口）。
+        var order = CreateLocalOrder(Guid.NewGuid()) with { SoldAt = new DateTimeOffset(2025, 6, 1, 3, 0, 0, TimeSpan.Zero) };
+        var remote = new FakeRemoteOrderHistoryService { ReturnContext = null };
+        var service = CreateService(remote, new FakeLocalOrderRepository([order]), timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), order.OrderGuid.ToString("D"));
+
+        Assert.Null(result.Order);
+        Assert.Contains("2025-06-01", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_OfflineShortCodeIgnoresOrdersOlderThanOneYear()
+    {
+        // 两张单末 8 位相同：一年前的不进候选，只剩近期那张时直接加载，不弹「多张订单同一单号」。
+        var old = CreateLocalOrder(Guid.Parse("11111111-0000-0000-0000-0000a1b2c3d4")) with { SoldAt = new DateTimeOffset(2025, 6, 1, 3, 0, 0, TimeSpan.Zero) };
+        var recent = CreateLocalOrder(Guid.Parse("22222222-0000-0000-0000-0000a1b2c3d4")) with { SoldAt = WindowNow.AddDays(-3) };
+        var service = CreateService(
+            localRepository: new FakeLocalOrderRepository([old, recent]),
+            timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "A1B2C3D4");
+
+        Assert.Equal(recent.OrderGuid, result.Order?.OrderGuid);
+        Assert.Null(result.Candidates);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_OfflineShortCodeMatchingOnlyAnOldOrderSaysItIsTooOld()
+    {
+        var old = CreateLocalOrder(Guid.Parse("11111111-0000-0000-0000-0000a1b2c3d4")) with { SoldAt = new DateTimeOffset(2025, 6, 1, 3, 0, 0, TimeSpan.Zero) };
+        var service = CreateService(
+            localRepository: new FakeLocalOrderRepository([old]),
+            timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "A1B2C3D4");
+
+        Assert.Null(result.Order);
+        Assert.Contains("2025-06-01", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_OfflineKeywordLookupOnlySearchesTheLastYear()
+    {
+        var order = CreateLocalOrder(Guid.NewGuid()) with { SoldAt = WindowNow.AddDays(-1) };
+        var localRepository = new FakeLocalOrderRepository([order]);
+        var service = CreateService(localRepository: localRepository, timeProvider: new FixedLocalTimeProvider(WindowNow));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), "690001");
+
+        Assert.Equal(order.OrderGuid, result.Order?.OrderGuid);
+        var keywordQuery = Assert.Single(localRepository.Queries, query => query.Keyword == "690001");
+        Assert.Equal(new DateTimeOffset(2025, 11, 2, 0, 0, 0, TimeSpan.Zero), keywordQuery.SoldFrom);
+    }
+
     private static ReceiptReturnsWorkflowService CreateService(
         IRemoteOrderHistoryService? remote = null,
         FakeLocalOrderRepository? localRepository = null,
         LocalSellableItemIndex? priceIndex = null,
         ILocalizationService? localization = null,
-        IUiPriorityCoordinator? uiPriorityCoordinator = null)
+        IUiPriorityCoordinator? uiPriorityCoordinator = null,
+        TimeProvider? timeProvider = null)
     {
         localRepository ??= new FakeLocalOrderRepository([]);
         return new ReceiptReturnsWorkflowService(
@@ -709,7 +823,8 @@ public sealed class ReceiptReturnsWorkflowServiceTests
             priceIndex ?? new LocalSellableItemIndex(),
             new PosCartService(),
             localization,
-            uiPriorityCoordinator);
+            uiPriorityCoordinator,
+            timeProvider);
     }
 
     private static PosSessionState CreateOnlineSession()
@@ -907,11 +1022,14 @@ public sealed class ReceiptReturnsWorkflowServiceTests
             return GetRecentOrdersAsync(new LocalOrderHistoryQuery(), take, cancellationToken);
         }
 
+        public List<LocalOrderHistoryQuery> Queries { get; } = [];
+
         public Task<IReadOnlyList<LocalOrderSummary>> GetRecentOrdersAsync(
             LocalOrderHistoryQuery query,
             int take = 50,
             CancellationToken cancellationToken = default)
         {
+            Queries.Add(query);
             return Task.FromResult<IReadOnlyList<LocalOrderSummary>>(_orders.Values
                 .OrderByDescending(order => order.SoldAt)
                 .Take(take)
@@ -976,6 +1094,13 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         {
             return Task.FromResult(new OrderReturnRecordCreateResponse(request.ReturnOrderGuid, []));
         }
+    }
+
+    private sealed class FixedLocalTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class ThrowingRemoteOrderHistoryService : IRemoteOrderHistoryService

@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Hbpos.Client.Wpf.Views.Controls;
 
 /// <summary>
-/// 触屏日期选择器的纯逻辑：月历格子、按界面语言格式化、未来日期限制。
+/// 触屏日期选择器的纯逻辑：月历格子、按界面语言格式化、未来日期与最早日期限制。
 /// 不依赖 WPF，也不读线程区域性，所有文字都按调用方传入的界面语言生成。
 /// </summary>
 public static class PosDatePickerCalendar
@@ -35,7 +35,8 @@ public static class PosDatePickerCalendar
         DateTime? selectedDate,
         DateTime today,
         bool allowFutureDates,
-        CultureInfo culture)
+        CultureInfo culture,
+        DateTime? minimumDate = null)
     {
         var grid = BuildMonthGrid(displayMonth);
         var cells = new PosDatePickerDayCell[grid.Count];
@@ -48,7 +49,7 @@ public static class PosDatePickerCalendar
                 date.Month == displayMonth.Month && date.Year == displayMonth.Year,
                 selectedDate?.Date == date,
                 date == today.Date,
-                IsSelectable(date, today, allowFutureDates),
+                IsSelectable(date, today, allowFutureDates, minimumDate),
                 FormatDate(date, culture, includeDayOfWeek: true));
         }
 
@@ -84,14 +85,20 @@ public static class PosDatePickerCalendar
         return date.ToString(pattern, culture);
     }
 
-    /// <summary>不允许未来日期时，只能选到今天为止。</summary>
-    public static bool IsSelectable(DateTime date, DateTime today, bool allowFutureDates) =>
-        allowFutureDates || date.Date <= today.Date;
+    /// <summary>不允许未来日期时，只能选到今天为止；设了最早日期时，更早的日期也不能选。</summary>
+    public static bool IsSelectable(DateTime date, DateTime today, bool allowFutureDates, DateTime? minimumDate = null) =>
+        (allowFutureDates || date.Date <= today.Date) &&
+        (minimumDate is null || date.Date >= minimumDate.Value.Date);
 
     /// <summary>不允许未来日期时，当月已是本月就不能再往后翻。</summary>
     public static bool CanShowNextMonth(DateTime displayMonth, DateTime today, bool allowFutureDates) =>
         allowFutureDates ||
         new DateTime(displayMonth.Year, displayMonth.Month, 1) < new DateTime(today.Year, today.Month, 1);
+
+    /// <summary>设了最早日期时，当月已是最早日期所在月就不能再往前翻。</summary>
+    public static bool CanShowPreviousMonth(DateTime displayMonth, DateTime? minimumDate) =>
+        minimumDate is null ||
+        new DateTime(displayMonth.Year, displayMonth.Month, 1) > new DateTime(minimumDate.Value.Year, minimumDate.Value.Month, 1);
 
     private static bool IsChinese(CultureInfo culture) =>
         string.Equals(culture.TwoLetterISOLanguageName, "zh", StringComparison.OrdinalIgnoreCase);

@@ -1474,6 +1474,69 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal(today.Date, viewModel.DateTo);
     }
 
+    [Fact]
+    public void Changing_one_end_keeps_the_date_range_within_one_calendar_month()
+    {
+        var today = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(today));
+        viewModel.ResetDateRangeToToday();
+
+        // 10-03～11-02 正好 1 个日历月，不调整。
+        viewModel.DateFrom = new DateTime(2026, 10, 3);
+        Assert.Equal(new DateTime(2026, 11, 2), viewModel.DateTo);
+
+        // 改开始日期导致超出：结束日期收到「开始 + 1 个月 − 1 天」。
+        viewModel.DateFrom = new DateTime(2026, 8, 1);
+        Assert.Equal(new DateTime(2026, 8, 31), viewModel.DateTo);
+
+        // 改结束日期导致超出：开始日期收到「结束 − 1 个月 + 1 天」。
+        viewModel.DateTo = new DateTime(2026, 10, 15);
+        Assert.Equal(new DateTime(2026, 9, 16), viewModel.DateFrom);
+        Assert.Equal(new DateTime(2026, 10, 15), viewModel.DateTo);
+    }
+
+    [Fact]
+    public void Start_after_end_pulls_the_other_end_to_the_same_day()
+    {
+        var today = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(today));
+        viewModel.ResetDateRangeToToday();
+
+        viewModel.DateTo = new DateTime(2026, 10, 10);
+
+        Assert.Equal(new DateTime(2026, 10, 10), viewModel.DateFrom);
+        Assert.Equal(new DateTime(2026, 10, 10), viewModel.DateTo);
+    }
+
+    [Fact]
+    public void Earliest_selectable_date_is_one_year_back_and_moves_with_the_reset()
+    {
+        var clock = new FixedUtcTimeProvider(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero));
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: clock);
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        viewModel.ResetDateRangeToToday();
+
+        Assert.Equal(new DateTime(2025, 11, 2), viewModel.EarliestSelectableDate);
+        Assert.Contains(nameof(TransactionHistoryViewModel.EarliestSelectableDate), changed);
+    }
+
     [Theory]
     [InlineData(TransactionHistoryViewModel.QuickDateRangeToday, 0, 0)]
     [InlineData(TransactionHistoryViewModel.QuickDateRangeYesterday, -1, -1)]

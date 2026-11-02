@@ -2609,6 +2609,9 @@
   <data name="returns.status.orderNotFound" xml:space="preserve">
     <value>未找到订单。</value>
   </data>
+  <data name="returns.status.orderTooOld" xml:space="preserve">
+    <value>原单日期 {0}，已超过 1 年，不能按原单退货。</value>
+  </data>
   <data name="returns.status.orderAmbiguous" xml:space="preserve">
     <value>多张订单是同一个单号，请按小票上的日期和金额选择。</value>
   </data>

@@ -116,4 +116,37 @@ public sealed class PosDatePickerCalendarTests
         Assert.All(cells.Where(cell => cell.Date > today), cell => Assert.False(cell.IsSelectable));
         Assert.All(cells.Where(cell => cell.Date <= today), cell => Assert.True(cell.IsSelectable));
     }
+
+    [Fact]
+    public void Minimum_date_blocks_earlier_days_and_previous_month_navigation()
+    {
+        var today = new DateTime(2026, 11, 2);
+        var minimum = new DateTime(2025, 11, 2);
+
+        Assert.True(PosDatePickerCalendar.IsSelectable(minimum, today, allowFutureDates: false, minimum));
+        Assert.False(PosDatePickerCalendar.IsSelectable(minimum.AddDays(-1), today, allowFutureDates: false, minimum));
+        // 不设最早日期时行为与原来一致。
+        Assert.True(PosDatePickerCalendar.IsSelectable(minimum.AddDays(-1), today, allowFutureDates: false));
+
+        Assert.False(PosDatePickerCalendar.CanShowPreviousMonth(new DateTime(2025, 11, 1), minimum));
+        Assert.True(PosDatePickerCalendar.CanShowPreviousMonth(new DateTime(2025, 12, 1), minimum));
+        Assert.True(PosDatePickerCalendar.CanShowPreviousMonth(new DateTime(2025, 11, 1), null));
+    }
+
+    [Fact]
+    public void Day_cells_before_the_minimum_date_are_not_selectable()
+    {
+        var today = new DateTime(2026, 11, 2);
+        var minimum = new DateTime(2025, 11, 2);
+        var cells = PosDatePickerCalendar.BuildDayCells(
+            new DateTime(2025, 11, 1),
+            selectedDate: null,
+            today,
+            allowFutureDates: false,
+            English,
+            minimum);
+
+        Assert.All(cells.Where(cell => cell.Date < minimum), cell => Assert.False(cell.IsSelectable));
+        Assert.All(cells.Where(cell => cell.Date >= minimum), cell => Assert.True(cell.IsSelectable));
+    }
 }
