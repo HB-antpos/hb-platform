@@ -262,15 +262,25 @@ test('Backend PR 的真实 Schema SQL 独立执行并纳入 required 门禁', ()
 
   assert.match(schemaSql, /needs:\s*plan/)
   assert.match(schemaSql, /contains\(fromJSON\(needs\.plan\.outputs\.components\), 'backend'\)/)
-  assert.match(schemaSql, /run-schema-sql\.sh/)
   assert.match(schemaSql, /HBWEB_SCHEMA_SQLSERVER_TEST_CONNECTION:/)
   assert.match(schemaSql, /docker run/)
   assert.match(schemaSql, /docker rm --force/)
   assert.match(required, /- schema_sql/)
   assert.match(required, /"schema_sql":"\$\{\{ needs\.schema_sql\.result \}\}"/)
-  assert.match(runner, /FullyQualifiedName~BlazorApp\.Api\.Tests\.SchemaMigrationSqlServerIntegrationTests/)
-  assert.match(runner, /schema-migration-sql\.trx/)
-  assert.match(runner, /'PR schema migration SQL tests'\s+\\\n\s+10/)
+  // 两片各自起隔离容器并行执行：job 名、容器名、产物名都带分片，runner 脚本按分片名取过滤表达式。
+  assert.match(schemaSql, /^    name: PR CI \/ Backend schema SQL \/ \$\{\{ matrix\.shard \}\}$/m)
+  assert.match(schemaSql, /^    strategy:\n\s+fail-fast: false\n\s+matrix:\n(?:\s+#[^\n]*\n)*\s+shard:\n\s+- a\n\s+- b\n/m)
+  assert.match(schemaSql, /CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ matrix\.shard \}\}/)
+  assert.match(schemaSql, /run: \.\/scripts\/ci\/run-schema-sql\.sh '\$\{\{ matrix\.shard \}\}'/)
+  assert.match(schemaSql, /name: schema-sql-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/)
+  assert.match(runner, /shard="\$\{1:\?[^}]*\}"/)
+  assert.match(runner, /shard_filter="\$\(node scripts\/ci\/schema-sql-shards\.mjs filter "\$shard"\)"/)
+  assert.match(runner, /--filter "\$shard_filter"/)
+  // 分片过滤会静默跳过漏片用例：先用 --list-tests 全量清单校验每个用例恰好属于一个分片，并以本片用例数作为 TRX 下限。
+  assert.match(runner, /--list-tests > "\$listing_path"/)
+  assert.match(runner, /expected_test_count="\$\(node scripts\/ci\/schema-sql-shards\.mjs coverage "\$shard" "\$listing_path"\)"/)
+  assert.match(runner, /schema-migration-sql-\$shard\.trx/)
+  assert.match(runner, /"PR schema migration SQL tests \(\$shard\)"\s+\\\n\s+"\$expected_test_count"/)
   assert.match(
     runner,
     /services\/backend\/BlazorApp\.MobileDeviceActivation\.Tests\/BlazorApp\.MobileDeviceActivation\.Tests\.csproj/,
@@ -279,6 +289,8 @@ test('Backend PR 的真实 Schema SQL 独立执行并纳入 required 门禁', ()
     runner,
     /FullyQualifiedName~BlazorApp\.MobileDeviceActivation\.Tests\.MobileDeviceActivationSchemaSqlServerIntegrationTests/,
   )
+  // Mobile 绑定表项目只在 b 片跑一次，不能两片重复。
+  assert.match(runner, /if \[\[ "\$shard" == "b" \]\]; then\n\s+mobile_activation_project=/)
   assert.match(runner, /mobile-device-activation-schema-sql\.trx/)
   assert.match(runner, /'PR Mobile device activation schema SQL test'\s+\\\n\s+1/)
   assert.doesNotMatch(runner, /docker ps --filter/)
@@ -362,7 +374,13 @@ test('POS CI 只消费根 workspace lock，并由各 job 单次安装后调用 w
     assert.match(sharedCiScript, new RegExp(`npm run ${command.replaceAll(':', '\\:')}`))
   }
   assert.doesNotMatch(sharedCiScript, /test:hbpos-client/)
-  assert.match(nodeRunner, /npm run typecheck --workspace=@hb\/pos-ipad/)
+  // pos-ipad lane 先跑 test:pos-shared-ci，其末尾的 typecheck:pos 已对 @hb/pos-ipad 跑过 tsc，不再单独 typecheck；
+  // pos-handheld lane 不跑 test:pos-shared-ci，仍需自己的 typecheck。
+  const posIpadCase = nodeRunner.slice(nodeRunner.indexOf('  pos-ipad)'), nodeRunner.indexOf('  pos-handheld)'))
+  assert.match(posIpadCase, /npm run test:pos-shared-ci/)
+  assert.doesNotMatch(posIpadCase, /npm run typecheck --workspace=@hb\/pos-ipad/)
+  assert.match(posIpadCase, /npm run lint --workspace=@hb\/pos-ipad/)
+  assert.match(nodeRunner, /npm run typecheck --workspace=@hb\/pos-handheld/)
   assert.match(nodeRunner, /npm run test:ci --workspace=@hb\/pos-handheld/)
   assert.match(dotnetRunner, /npm run test:hbpos-client/)
   assert.match(macosRunner, /npm run prebuild:ios --workspace=@hb\/pos-(?:ipad|handheld) -- --clean/)
@@ -456,9 +474,11 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.doesNotMatch(macosRunner, /\.xcworkspace -list/)
   assert.match(macosRunner, /-quiet[\s\\]*\n[\s]*-showBuildTimingSummary/)
 
-  // Android 保留既有四项 task，CI 构建只编译代表性的 arm64 ABI。
+  // Android 保留既有 task，CI 构建只编译代表性的 arm64 ABI；lint 约 2 分钟，只在 weekly 执行。
   assert.match(android, /bash\(\) \{[\s\S]*?command bash "\$@" --parallel --build-cache '-Dorg\.gradle\.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g'/)
   assert.match(android, /"\$\{1:-\}" == 'apps\/pos-handheld\/android\/gradlew'/)
+  assert.match(android, /CI_PROFILE:\s*\$\{\{ needs\.plan\.outputs\.profile \}\}/)
+  assert.match(androidRunner, /profile="\$\{CI_PROFILE:-weekly\}"/)
   assert.match(androidRunner, /-PreactNativeArchitectures=arm64-v8a/)
   assert.match(
     androidRunner,
@@ -473,10 +493,168 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
     ':hb-app-installer:testDebugUnitTest',
     ':hb-attendance-security:testDebugUnitTest',
     ':app:assembleDebug',
-    ':app:lintDebug',
   ]) {
-    assert.match(androidRunner, new RegExp(task.replaceAll(':', '\\:')))
+    assert.match(androidRunner, new RegExp(`^\\s+${task.replaceAll(':', '\\:')}$`, 'm'))
   }
+  assert.match(androidRunner, /if \[\[ "\$profile" == "weekly" \]\]; then\n\s+gradle_tasks\+=\(:app:lintDebug\)/)
+  const gradleTaskArray = androidRunner.match(/gradle_tasks=\(([\s\S]*?)\)/)?.[1]
+  assert.ok(gradleTaskArray, '缺少 gradle_tasks 数组')
+  assert.doesNotMatch(gradleTaskArray, /lintDebug/, 'lint 只能在 weekly 分支追加')
+
+  // setup-java 的 gradle 缓存 key 在 prebuild 前按不存在的 android 目录哈希、命中后不回存；
+  // 改用 setup-gradle（node24、固定 SHA）按实际内容缓存，只有合并队列的一次性分支只读。
+  assert.doesNotMatch(android, /cache:\s*gradle/)
+  assert.match(
+    android,
+    /uses: gradle\/actions\/setup-gradle@[0-9a-f]{40}\n\s+with:\n\s+cache-read-only: \$\{\{ github\.event_name == 'merge_group' \}\}/,
+  )
+  assert.ok(
+    android.indexOf('actions/setup-java@') < android.indexOf('gradle/actions/setup-gradle@'),
+    'setup-gradle 必须在 setup-java 之后执行',
+  )
+})
+
+function runAndroidProfile({ profile, includeProfile = true }) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'hb-android-profile-'))
+  const fakeBin = join(temporaryRoot, 'bin')
+  const copiedRunnerPath = join(temporaryRoot, 'scripts/ci/run-android-component.sh')
+  const commandLogPath = join(temporaryRoot, 'commands.log')
+  // PATH 上放了记录命令的假 bash，假命令的 shebang 必须指向真实 /bin/bash，否则 `env bash` 会递归调用假 bash。
+  const logCommand = '#!/bin/bash\nprintf \'%s %s\\n\' "$(basename "$0")" "$*" >> "$FAKE_COMMAND_LOG"\n'
+
+  mkdirSync(dirname(copiedRunnerPath), { recursive: true })
+  copyFileSync(fileURLToPath(androidRunnerPath), copiedRunnerPath)
+  chmodSync(copiedRunnerPath, 0o755)
+  // prebuild 产物目录由脚本 cd 进入；gradlew 由脚本经 PATH 上的 bash 调用，这里用记录命令的假 bash 接住。
+  mkdirSync(join(temporaryRoot, 'apps/pos-handheld/android'), { recursive: true })
+  for (const command of ['npm', 'node', 'bash']) {
+    writeExecutable(join(fakeBin, command), `${logCommand}exit 0\n`)
+  }
+
+  const environment = {
+    ...process.env,
+    FAKE_COMMAND_LOG: commandLogPath,
+    PATH: `${fakeBin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+  }
+  if (includeProfile) {
+    environment.CI_PROFILE = profile
+  } else {
+    delete environment.CI_PROFILE
+  }
+
+  let result
+  let commands
+  try {
+    result = spawnSync('/bin/bash', [copiedRunnerPath, 'pos-handheld-android'], {
+      encoding: 'utf8',
+      env: environment,
+      timeout: 10_000,
+    })
+    commands = existsSync(commandLogPath) ? readFileSync(commandLogPath, 'utf8') : ''
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+
+  return { commands, result }
+}
+
+test('Android runner 按 profile 执行：PR 只编译与单元测试，weekly 才跑 lint', () => {
+  const gradleInvocation = /bash apps\/pos-handheld\/android\/gradlew -p apps\/pos-handheld\/android :hb-app-installer:testDebugUnitTest :hb-attendance-security:testDebugUnitTest :app:assembleDebug( :app:lintDebug)? -PreactNativeArchitectures=arm64-v8a --no-daemon/
+
+  const pr = runAndroidProfile({ profile: 'pr' })
+  assert.equal(pr.result.status, 0, `${pr.result.stdout}\n${pr.result.stderr}`)
+  assert.match(pr.commands, /npm ci --no-audit --no-fund/)
+  assert.match(pr.commands, /npm run prebuild:android --workspace=@hb\/pos-handheld -- --clean/)
+  const prGradle = pr.commands.match(gradleInvocation)
+  assert.ok(prGradle, pr.commands)
+  assert.equal(prGradle[1], undefined, 'PR profile 不得执行 :app:lintDebug')
+  assert.match(pr.result.stdout, /跳过 :app:lintDebug/)
+
+  const weekly = runAndroidProfile({ profile: 'weekly' })
+  assert.equal(weekly.result.status, 0, `${weekly.result.stdout}\n${weekly.result.stderr}`)
+  assert.equal(weekly.commands.match(gradleInvocation)?.[1], ' :app:lintDebug')
+
+  const defaultProfile = runAndroidProfile({ includeProfile: false })
+  assert.equal(defaultProfile.result.status, 0, defaultProfile.result.stderr)
+  assert.equal(defaultProfile.commands.match(gradleInvocation)?.[1], ' :app:lintDebug', '本机默认 weekly，保留 lint')
+
+  const invalid = runAndroidProfile({ profile: 'invalid' })
+  assert.notEqual(invalid.result.status, 0)
+  assert.equal(invalid.commands, '')
+  assert.match(invalid.result.stderr, /未知 CI profile/)
+})
+
+function runNodeMobile({ failingScript = null, sleepSeconds = 0 } = {}) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'hb-node-mobile-'))
+  const fakeBin = join(temporaryRoot, 'bin')
+  const commandLogPath = join(temporaryRoot, 'commands.log')
+  // 假 npm 记录每次调用（带秒级时间戳），按需对指定脚本返回失败或休眠，用于验证并行与失败传播。
+  writeExecutable(
+    join(fakeBin, 'npm'),
+    [
+      '#!/usr/bin/env bash',
+      'printf \'%s npm %s\\n\' "$(date +%s)" "$*" >> "$FAKE_COMMAND_LOG"',
+      'script=""',
+      'for argument in "$@"; do',
+      '  if [[ "$previous" == "run" ]]; then script="$argument"; fi',
+      '  previous="$argument"',
+      'done',
+      'if [[ -n "$script" && "${FAKE_SLEEP_SECONDS:-0}" != "0" ]]; then sleep "$FAKE_SLEEP_SECONDS"; fi',
+      'echo "fake npm: $*"',
+      'if [[ -n "$script" && "$script" == "${FAKE_FAILING_SCRIPT:-}" ]]; then echo "模拟 $script 失败" >&2; exit 3; fi',
+      'exit 0',
+      '',
+    ].join('\n'),
+  )
+
+  let result
+  let commands
+  try {
+    result = spawnSync('/bin/bash', [fileURLToPath(nodeRunnerPath), 'mobile'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FAKE_COMMAND_LOG: commandLogPath,
+        FAKE_FAILING_SCRIPT: failingScript ?? '',
+        FAKE_SLEEP_SECONDS: String(sleepSeconds),
+        PATH: `${fakeBin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        RUNNER_TEMP: join(temporaryRoot, 'runner-temp'),
+      },
+      timeout: 30_000,
+    })
+    commands = existsSync(commandLogPath) ? readFileSync(commandLogPath, 'utf8') : ''
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+
+  return { commands, result }
+}
+
+test('Mobile Node lane 并行执行 typecheck/lint/test:ci/build:ci，任一失败整体失败且日志按顺序回放', () => {
+  const runner = readFileSync(nodeRunnerPath, 'utf8')
+  const mobileCase = runner.slice(runner.indexOf('  mobile)'), runner.indexOf('  pos-ipad)'))
+  assert.match(mobileCase, /run_parallel \\\n\s+'typecheck=npm --prefix apps\/mobile run typecheck' \\\n\s+'lint=npm --prefix apps\/mobile run lint' \\\n\s+'test-ci=npm --prefix apps\/mobile run test:ci' \\\n\s+'build-ci=EXPO_NO_TELEMETRY=1 npm --prefix apps\/mobile run build:ci'/)
+  assert.ok(mobileCase.indexOf('npm --prefix apps/mobile ci --no-audit --no-fund') < mobileCase.indexOf('run_parallel'), '依赖安装必须先于并行检查')
+
+  // 四项各休眠 2 秒：串行要 8 秒以上，并行应明显短于 6 秒。
+  const started = Date.now()
+  const success = runNodeMobile({ sleepSeconds: 2 })
+  const elapsedSeconds = (Date.now() - started) / 1000
+  assert.equal(success.result.status, 0, `${success.result.stdout}\n${success.result.stderr}`)
+  assert.ok(elapsedSeconds < 6, `四项检查应并行执行，实际耗时 ${elapsedSeconds.toFixed(1)}s`)
+  for (const script of ['typecheck', 'lint', 'test:ci', 'build:ci']) {
+    assert.match(success.commands, new RegExp(`npm --prefix apps/mobile run ${script.replaceAll(':', '\\:')}`))
+  }
+  const groups = [...success.result.stdout.matchAll(/^::group::(\S+) \(exit=0\)$/gm)].map((match) => match[1])
+  assert.deepEqual(groups, ['typecheck', 'lint', 'test-ci', 'build-ci'])
+
+  const failure = runNodeMobile({ failingScript: 'lint' })
+  assert.notEqual(failure.result.status, 0)
+  assert.match(failure.result.stderr, /并行检查失败: lint \(exit=3\)/)
+  assert.match(failure.result.stdout, /::group::lint \(exit=3\)[\s\S]*模拟 lint 失败/)
+  // 失败的检查不阻止其余检查跑完并回放日志。
+  assert.match(failure.result.stdout, /::group::build-ci \(exit=0\)/)
+  assert.match(failure.commands, /npm --prefix apps\/mobile run build:ci/)
 })
 
 test('WPF 挂单夹具只捕获一次当前日期，避免跨午夜产生不一致', () => {

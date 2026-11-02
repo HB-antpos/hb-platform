@@ -33,8 +33,16 @@ const DOC_PATTERNS = [
   /(?:^|\/)LICENSE(?:\.[^/]*)?$/i,
   /\.(?:md|mdx|txt)$/i,
   /^\.github\/(?:ISSUE_TEMPLATE|PULL_REQUEST_TEMPLATE)\//,
+  // 会话工作区、技能目录与本地产物目录没有任何 CI lane 读取，和文档一样不分配组件。
+  /^\.claude\//,
+  /^\.superpowers\//,
+  /^tmp\//,
+  /^outputs?\//,
 ]
 
+// 改动这些文件会影响所有 lane 的执行方式，必须全量。
+// AGENTS.md 不在其中：唯一引用它的 CardRecoveryCenterViewModelTests 只拿它做仓库根目录标记（File.Exists），
+// 没有测试读取内容，改它按文档处理。
 const CI_PATTERNS = [
   /^\.github\/workflows\//,
   /^scripts\/ci\//,
@@ -42,7 +50,24 @@ const CI_PATTERNS = [
   /^\.node-version$/,
   /^global\.json$/,
   /^services\/backend\/global\.json$/,
-  /^AGENTS\.md$/,
+]
+
+// 按实际消费方精确选组件的路径，按顺序取第一条命中；空数组表示明确不触发任何组件。
+// 这些路径不属于任一组件目录，缺少规则时会被当作未知路径 fail-safe 到 29 个 job 全量。
+const TARGETED_PATTERNS = [
+  // 运维脚本只在 plan job 里用 unittest 自测，没有组件 lane 读取。
+  [/^scripts\/ops\//, []],
+  // 跨端契约夹具按读取方选组件：挂单夹具由 iPad 与 WPF 测试读取，Linkly TxnRef 向量由
+  // pos-payments-core、iPad、手持与 Hbpos.Api.Tests 读取；其余（含新增）夹具目录默认交给三端 POS 消费者。
+  [/^test-fixtures\/shared-held-orders\//, ['pos-ipad', 'pos-wpf']],
+  [/^test-fixtures\/linkly-attempt-txnref\//, ['pos-ipad', 'pos-handheld', 'pos-wpf']],
+  [/^test-fixtures\//, ['pos-ipad', 'pos-handheld', 'pos-wpf']],
+  // 质量预算只由 quality_report 用已选质量 lane 的结果比对；Web 包体预算只由 web lane 的 verify:bundle 读取。
+  [/^quality-baseline-budget\.json$/, ['backend', 'web', 'pos-ipad', 'pos-handheld']],
+  [/^web-bundle-budget\.json$/, ['web']],
+  // 浏览器扩展契约文件同时属于 web / BlazorApp.Shared 目录，这里只补扩展消费者。
+  [/^apps\/web\/src\/components\/SupplierOrderingExtensionEntry\/supplierOrderingExtensionLogic\.ts$/, ['supplier-extension']],
+  [/^services\/backend\/BlazorApp\.Shared\/DTOs\/BrowserExtensionDtos\.cs$/, ['supplier-extension']],
 ]
 
 const COMPONENT_PATTERNS = [
@@ -110,19 +135,11 @@ export function selectComponents(files, { full = false } = {}) {
       }
     }
 
-    if (file === 'test-fixtures/shared-held-orders/example.json' ||
-        file.startsWith('test-fixtures/shared-held-orders/')) {
-      selected.add('pos-ipad')
-      selected.add('pos-wpf')
-      matched = true
-    }
-
-    if (file === 'apps/web/src/components/SupplierOrderingExtensionEntry/supplierOrderingExtensionLogic.ts') {
-      selected.add('supplier-extension')
-      matched = true
-    }
-    if (file === 'services/backend/BlazorApp.Shared/DTOs/BrowserExtensionDtos.cs') {
-      selected.add('supplier-extension')
+    const targeted = TARGETED_PATTERNS.find(([pattern]) => pattern.test(file))
+    if (targeted) {
+      for (const component of targeted[1]) {
+        selected.add(component)
+      }
       matched = true
     }
 

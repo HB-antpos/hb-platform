@@ -346,6 +346,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.android_matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
+    env:
+      CI_PROFILE: ${{ needs.plan.outputs.profile }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - if: matrix.component != 'noop'
@@ -361,7 +363,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-          cache: gradle
+      # setup-java 的 gradle 缓存 key 在 expo prebuild 之前按 **/*.gradle* 哈希，此时 android 目录还不存在：
+      # key 恒定、命中后不再回存，内容冻结在首次保存（实测 1001 个 Gradle 任务 839 个重新执行）。
+      # setup-gradle 按 Gradle User Home 的实际内容分条目缓存，job 结束时回存有变化的条目；
+      # 合并队列分支一次性使用，只读不回存，避免每次入队都上传约 1.7 GB。
+      - if: matrix.component != 'noop'
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
+        with:
+          cache-read-only: ${{ github.event_name == 'merge_group' }}
       - name: 构建并测试 Android 原生模块
         shell: bash
         run: |
@@ -378,13 +387,21 @@ jobs:
           ./scripts/ci/run-android-component.sh '${{ matrix.component }}'
 
   schema_sql:
-    name: PR CI / Backend schema SQL
+    name: PR CI / Backend schema SQL / ${{ matrix.shard }}
     needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        # 80 个真实 SQL Server 迁移用例里 10 个要跑完整迁移协调器、各约 25 秒；按方法名前缀切成两片各自起隔离容器
+        # 并行执行，分片定义与完整性校验见 scripts/ci/schema-sql-shards.mjs。required 通过 needs 取矩阵整体结果。
+        shard:
+          - a
+          - b
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
       CI_SQL_PASSWORD: HbCi_2026!Safe_Only
-      CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
       HBWEB_SCHEMA_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -406,12 +423,12 @@ jobs:
           mcr.microsoft.com/mssql/server@sha256:7c29dfbac885ad7519e219c7fe4aee0e67283e21a10e9c252d13b0fbde1866f8
       - name: 运行真实 Schema SQL 门禁
         if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        run: ./scripts/ci/run-schema-sql.sh
+        run: ./scripts/ci/run-schema-sql.sh '${{ matrix.shard }}'
       - name: 上传 Schema SQL 结果
         if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: schema-sql-${{ github.run_attempt }}
+          name: schema-sql-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/schema-sql
           if-no-files-found: ignore
           retention-days: 7
