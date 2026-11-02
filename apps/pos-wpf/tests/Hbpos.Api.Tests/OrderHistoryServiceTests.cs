@@ -233,6 +233,136 @@ public sealed class OrderHistoryServiceTests
         Assert.Contains(sql.Value, parameter => Equals(parameter.Value, itemNumberSuffix));
     }
 
+    [Theory]
+    [InlineData("DB596F11", true)]
+    [InlineData("db596f11", true)]
+    [InlineData("12345678", true)]
+    [InlineData("1234567", false)]
+    [InlineData("123456789", false)]
+    [InlineData("DB596F1G", false)]
+    [InlineData("DB59-F11", false)]
+    [InlineData("１２３４５６７８", false)]
+    public void Order_short_code_shape_requires_exactly_eight_ascii_hex_characters(string keyword, bool expected)
+    {
+        Assert.Equal(expected, SqlSugarOrderHistoryRepository.IsOrderShortCodeShape(keyword));
+    }
+
+    [Fact]
+    public async Task QueryAsync_order_short_code_matches_order_guid_without_touching_detail_table()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 100);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        var statements = database.CaptureSql();
+
+        // 小票单号是订单 GUID 末 8 位，WPF 会传大写；库里是小写，必须仍能命中。
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "EEEEEEEE", Take: 20),
+            CancellationToken.None);
+
+        var order = Assert.Single(response.Orders);
+        Assert.Equal(OrderHistorySqliteFixture.TargetOrderGuid, order.OrderGuid);
+        // 性能约束：短码命中订单号时不能再带明细 EXISTS 子查询——生产里它是 39 秒整表扫描的来源。
+        Assert.DoesNotContain(
+            statements,
+            statement => statement.Contains("sales_order_detail", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task QueryAsync_order_short_code_does_not_cross_store_boundary()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+
+        // S002 那张订单的末 8 位是 44444444；用 S001 的身份查，不能看到别的分店的订单。
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "44444444", Take: 20),
+            CancellationToken.None);
+
+        Assert.Empty(response.Orders);
+    }
+
+    [Fact]
+    public async Task QueryAsync_order_short_code_still_honors_time_window()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest(
+                "S001",
+                SoldFrom: DateTimeOffset.Parse("2026-08-20T00:00:00Z"),
+                SoldTo: DateTimeOffset.Parse("2026-08-21T00:00:00Z"),
+                Keyword: "EEEEEEEE",
+                Take: 20),
+            CancellationToken.None);
+
+        Assert.Empty(response.Orders);
+    }
+
+    [Fact]
+    public async Task QueryAsync_eight_hex_keyword_without_order_guid_match_falls_back_to_barcode_search()
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 20);
+        var repository = new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver());
+        // 8 位纯数字同样是合法十六进制（EAN-8 条码）：订单号里没有它时，必须退回完整关键字过滤。
+        var orderGuid = "11111111-2222-4333-8444-555555555555";
+        await database.DbContext.PosmDb.Insertable(new SalesOrder
+        {
+            OrderGuid = orderGuid,
+            OrderTime = DateTime.Parse("2026-08-25T10:00:00Z").ToUniversalTime(),
+            BranchCode = "S001",
+            DeviceCode = "POS01",
+            CashierName = "Cashier",
+            TotalAmount = 5m,
+            ActualAmount = 5m,
+            ItemCount = 1,
+            Status = 1
+        }).ExecuteCommandAsync();
+        await database.DbContext.PosmDb.Insertable(new SalesOrderDetail
+        {
+            OrderDetailGuid = Guid.NewGuid().ToString("D"),
+            OrderGuid = orderGuid,
+            ProductCode = "EAN8-ITEM",
+            ProductName = "Gum",
+            Barcode = "12345678",
+            Quantity = 1,
+            Price = 5m,
+            ActualAmount = 5m
+        }).ExecuteCommandAsync();
+
+        var response = await repository.QueryAsync(
+            new OrderHistoryQueryRequest("S001", Keyword: "12345678", Take: 20),
+            CancellationToken.None);
+
+        var order = Assert.Single(response.Orders);
+        Assert.Equal(Guid.Parse(orderGuid), order.OrderGuid);
+    }
+
+    [Fact]
+    public void Sql_server_short_code_probe_selects_only_order_guid_without_detail_subquery()
+    {
+        using var db = new SqlSugarClient(new ConnectionConfig
+        {
+            ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=hbpos-sql-preview;Trusted_Connection=True;",
+            DbType = DbType.SqlServer,
+            InitKeyType = InitKeyType.Attribute,
+            IsAutoCloseConnection = true
+        });
+
+        var sql = SqlSugarOrderHistoryRepository
+            .BuildShortCodeOrderGuidQuery(db.Queryable<SalesOrder>(), "1004", "db596f11")
+            .ToSql();
+
+        Assert.Contains("CHARINDEX", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("BranchCode", sql.Key, StringComparison.OrdinalIgnoreCase);
+        // 选择列表里出现 Remark / CashierName 等非覆盖索引列，优化器就会改走整表聚集索引扫描。
+        Assert.DoesNotContain("CashierName", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Remark", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("EXISTS", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sales_order_detail", sql.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(sql.Value, parameter => Equals(parameter.Value, "db596f11"));
+    }
+
     private static async Task AssertFastLookupAsync(
         SqlSugarOrderHistoryRepository repository,
         OrderHistorySqliteFixture database,

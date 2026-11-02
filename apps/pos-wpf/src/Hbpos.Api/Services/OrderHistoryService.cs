@@ -84,7 +84,7 @@ public sealed class SqlSugarOrderHistoryRepository(
 
         if (!string.IsNullOrWhiteSpace(request.Keyword))
         {
-            query = ApplyKeywordFilter(query, request.Keyword);
+            query = await ApplyKeywordWithShortCodeShortcutAsync(query, storeCode, request.Keyword, cancellationToken);
         }
 
         var take = Math.Clamp(request.Take, 1, 200);
@@ -122,6 +122,82 @@ public sealed class SqlSugarOrderHistoryRepository(
             Count(order.ItemCount),
             order.OrderGuid is not null && paymentLabels.TryGetValue(order.OrderGuid, out var paymentSummary) ? paymentSummary : string.Empty,
             FormatStatus(order.Status ?? 0))).ToList());
+    }
+
+    // 小票上的 8 位单号 = 订单 GUID 末 8 位（十六进制）。
+    private const int OrderShortCodeLength = 8;
+
+    // 8 位单号子串最多只会命中极少数订单，这里的上限只是防止 IN 列表失控。
+    private const int ShortCodeOrderGuidProbeLimit = 200;
+
+    /// <summary>
+    /// 关键字恰为 8 位十六进制（可能是小票单号）时，先只用订单号列在本店内找订单，命中就直接用精确订单号取完整行。
+    /// 生产实测（2026-11-02，3 百万行订单表 / 7 百万行明细表）：原先的 OR + 明细 EXISTS 子查询会整表扫聚集索引，
+    /// 平均 39 秒、约 140 万次逻辑读，远超 WPF 查单 2 秒的超时；只取订单号走 IX_sales_order_BranchCode 覆盖索引，
+    /// 约 1.5 千次读、不到 1 秒。没有任何订单号命中时原样退回完整关键字过滤——8 位数字也可能是 EAN-8 商品条码。
+    /// 取舍：订单号子串一旦命中，就不再并集「恰好含该 8 位数字的商品条码」的订单，这种巧合概率远小于千分之一。
+    /// </summary>
+    private async Task<ISugarQueryable<SalesOrder>> ApplyKeywordWithShortCodeShortcutAsync(
+        ISugarQueryable<SalesOrder> query,
+        string storeCode,
+        string rawKeyword,
+        CancellationToken cancellationToken)
+    {
+        var keyword = rawKeyword.Trim();
+        if (IsOrderShortCodeShape(keyword))
+        {
+            // 库里的订单号全是小写；统一转小写，既不依赖库排序规则，也让 SQLite 测试库行为一致。
+            var matchedOrderGuids = (await BuildShortCodeOrderGuidQuery(
+                        dbContext.PosmDb.Queryable<SalesOrder>(),
+                        storeCode,
+                        keyword.ToLowerInvariant())
+                    .ToListAsync(cancellationToken))
+                .Where(orderGuid => !string.IsNullOrEmpty(orderGuid))
+                .Select(orderGuid => orderGuid!)
+                .ToList();
+            if (matchedOrderGuids.Count > 0)
+            {
+                return query.Where(x => matchedOrderGuids.Contains(x.OrderGuid!));
+            }
+        }
+
+        return ApplyKeywordFilter(query, rawKeyword);
+    }
+
+    internal static bool IsOrderShortCodeShape(string keyword)
+    {
+        if (keyword.Length != OrderShortCodeLength)
+        {
+            return false;
+        }
+
+        foreach (var ch in keyword)
+        {
+            // 只认 ASCII 十六进制；char.IsDigit 会放过全角数字等。
+            if (ch is not (>= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 只查订单号：SELECT 列表里不能出现 Remark、CashierName 等不在覆盖索引里的列，
+    /// 否则优化器会放弃 IX_sales_order_BranchCode 转而整表扫聚集索引；也不带明细子查询。
+    /// </summary>
+    internal static ISugarQueryable<string?> BuildShortCodeOrderGuidQuery(
+        ISugarQueryable<SalesOrder> source,
+        string storeCode,
+        string loweredKeyword)
+    {
+        return source
+            .Where(x => x.BranchCode == storeCode
+                && x.OrderGuid != null
+                && SqlFunc.CharIndexNew(x.OrderGuid, loweredKeyword) > 0)
+            .Select(x => x.OrderGuid)
+            .Take(ShortCodeOrderGuidProbeLimit);
     }
 
     internal static ISugarQueryable<SalesOrder> ApplyKeywordFilter(
