@@ -3281,6 +3281,115 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
+  it("无码商品单价超过 9999 时在弹窗内提示、保留键盘输入且不加入购物车", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(2_000));
+    const addOpenItem = jest.fn(async (_unitPriceCents: number) => undefined);
+    const salesPresenter = presenter(cart, {
+      workflow: {
+        ...workflow(),
+        addOpenItem,
+      },
+    });
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    await fireEvent.press(screen.getByTestId("sales-open-item-button"));
+    await pressKeypadKeys(screen, "sales-open-item", ["1", "0", "0", "0", "0"]);
+    await fireEvent.press(screen.getByTestId("sales-open-item-confirm"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("sales-open-item-price-error").props.children,
+      ).toBe("价格不能超过 9999。"),
+    );
+    expect(addOpenItem).not.toHaveBeenCalled();
+    expect(screen.getByTestId("sales-open-item-modal")).toBeTruthy();
+    expect(
+      screen.getByTestId("sales-open-item-price").props.accessibilityValue,
+    ).toEqual({ text: "10000" });
+
+    // 删一位就能直接重输：1000 在上限内，加入成功后提示消失。
+    await pressKeypadKeys(screen, "sales-open-item", ["backspace"]);
+    await fireEvent.press(screen.getByTestId("sales-open-item-confirm"));
+    await waitFor(() => expect(addOpenItem).toHaveBeenCalledWith(100_000));
+    expect(screen.queryByTestId("sales-open-item-price-error")).toBeNull();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("购物车改价超过 9999 时在弹窗内提示、原行不变，关闭弹窗不残留提示", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(2_000));
+    const salesPresenter = presenter(cart);
+    const screen = await render(
+      <SalesScreen
+        locale="en"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
+    await pressKeypadKeys(screen, "sales-line-edit", [
+      "9",
+      "9",
+      "9",
+      "9",
+      "decimal",
+      "0",
+      "1",
+    ]);
+    await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("sales-line-edit-price-error").props.children,
+      ).toBe("Price cannot exceed 9999."),
+    );
+    expect(cart.edits).toEqual([]);
+    expect(
+      screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
+    ).toEqual({ text: "9999.01" });
+
+    // 切到数量页签即清掉价格提示；关闭弹窗后主界面横幅也不残留。
+    await fireEvent.press(screen.getByTestId("sales-line-edit-quantity"));
+    expect(screen.queryByTestId("sales-line-edit-price-error")).toBeNull();
+    await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
+    await pressKeypadKeys(screen, "sales-line-edit", ["1", "0", "0", "0", "0"]);
+    await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
+    await waitFor(() =>
+      expect(screen.getByTestId("sales-line-edit-price-error")).toBeTruthy(),
+    );
+    await fireEvent.press(
+      screen.getByTestId("sales-line-edit-backdrop", {
+        includeHiddenElements: true,
+      }),
+    );
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    expect(screen.queryByText("Price cannot exceed 9999.")).toBeNull();
+    expect(cart.edits).toEqual([]);
+
+    // 恰好 9999 允许改价。
+    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
+    await pressKeypadKeys(screen, "sales-line-edit", ["9", "9", "9", "9"]);
+    await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
+    await waitFor(() =>
+      expect(cart.edits).toEqual([
+        { operation: "line-price", lineId: "line-1", value: 999_900 },
+      ]),
+    );
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
   it("整单快捷/手动折扣和清空购物车均要求明确确认", async () => {
     const cart = new ScreenCartPort(cartSnapshot(2_000));
     const salesPresenter = presenter(cart);
