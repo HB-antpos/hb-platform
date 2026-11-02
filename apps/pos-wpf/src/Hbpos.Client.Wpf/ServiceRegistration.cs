@@ -486,6 +486,8 @@ public static class ServiceRegistration
         services.AddSingleton(sp => AppUpdateUnattendedInstallOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build(),
             IsDebugBuild));
+        // 当天日结保存后由 DailyCloseService 打开；收银员登出后两个调度器不必等夜间窗口开始。
+        services.AddSingleton<IPostDailyCloseMaintenanceWindow, PostDailyCloseMaintenanceWindow>();
         services.AddSingleton<AppUpdateUnattendedInstallScheduler>();
         // 与 WPF 夜间无人值守安装共用窗口与空闲判定，把白天预下载的 RustDesk 构建交给 SYSTEM 代理升级。
         services.AddSingleton<RemoteMaintenanceUpgradeScheduler>();

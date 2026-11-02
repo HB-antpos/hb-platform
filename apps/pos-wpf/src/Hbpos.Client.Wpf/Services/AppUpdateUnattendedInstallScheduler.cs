@@ -207,13 +207,15 @@ public static class WindowsUpdateAgentRegistration
 
 // 中文注释：夜间无人值守安装：窗口内（默认本机 18:00-次日 08:00，周四 20:00-次日 08:00）只要有更新且收银机空闲，就直接拉起静默安装器，
 // 不管当前是否显示强更遮罩、是否有收银员登录。白天的提示与确认流程不受影响。
+// 当天日结保存后、收银员已登出时（IPostDailyCloseMaintenanceWindow）也算在窗口内，早关门的门店不必等到 18:00。
 public sealed class AppUpdateUnattendedInstallScheduler(
     IAppUpdateCoordinator coordinator,
     IAppUpdateInstallSafetyGuard safetyGuard,
     IAppUpdateElevationProbe elevationProbe,
     AppUpdateUnattendedInstallOptions options,
     TimeProvider? timeProvider = null,
-    Func<TimeSpan, CancellationToken, Task>? delayAsync = null) : IDisposable
+    Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+    IPostDailyCloseMaintenanceWindow? postDailyCloseWindow = null) : IDisposable
 {
     public static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(5);
 
@@ -267,7 +269,7 @@ public sealed class AppUpdateUnattendedInstallScheduler(
         try
         {
             var localNow = _timeProvider.GetLocalNow();
-            if (!options.IsWithinWindow(localNow.DateTime))
+            if (!options.IsWithinWindow(localNow.DateTime) && postDailyCloseWindow?.IsOpen != true)
             {
                 ResetWindowState();
                 return;

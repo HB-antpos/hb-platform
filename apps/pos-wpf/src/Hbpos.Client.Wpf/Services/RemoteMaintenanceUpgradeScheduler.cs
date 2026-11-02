@@ -5,6 +5,7 @@ namespace Hbpos.Client.Wpf.Services;
 /// （<see cref="AppUpdateUnattendedInstallOptions"/>，默认本机 18:00–次日 08:00，周四 20:00 起），
 /// 并要求连续两轮（至少 5 分钟）收银空闲（<see cref="IAppUpdateInstallSafetyGuard"/>：购物车为空、没有付款在进行）。
 /// RustDesk 升级会断开正在进行的远程连接，所以只在营业时段外做；升级本身不影响收银。
+/// 当天日结保存后、收银员已登出时（<see cref="IPostDailyCloseMaintenanceWindow"/>）也算营业时段外，不必等到 18:00。
 /// 必须在 UI 线程启动：安全守卫读取的是界面状态。全程静默，失败只记日志。
 /// </summary>
 public sealed class RemoteMaintenanceUpgradeScheduler(
@@ -12,7 +13,8 @@ public sealed class RemoteMaintenanceUpgradeScheduler(
     IAppUpdateInstallSafetyGuard safetyGuard,
     AppUpdateUnattendedInstallOptions windowOptions,
     TimeProvider? timeProvider = null,
-    Func<TimeSpan, CancellationToken, Task>? delayAsync = null) : IDisposable
+    Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+    IPostDailyCloseMaintenanceWindow? postDailyCloseWindow = null) : IDisposable
 {
     public static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(5);
 
@@ -61,7 +63,8 @@ public sealed class RemoteMaintenanceUpgradeScheduler(
     {
         try
         {
-            if (!windowOptions.IsWithinWindow(_timeProvider.GetLocalNow().DateTime))
+            if (!windowOptions.IsWithinWindow(_timeProvider.GetLocalNow().DateTime) &&
+                postDailyCloseWindow?.IsOpen != true)
             {
                 _idleTicks = 0;
                 _nextAttemptUtc = null;

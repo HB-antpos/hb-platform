@@ -87,6 +87,42 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
     }
 
     [Fact]
+    public async Task Post_daily_close_window_installs_before_the_evening_window()
+    {
+        // 中文注释：周一 16:00 还没到 18:00 窗口；当天日结并登出后照样要连续两轮空闲才安装。
+        var harness = new Harness(localTime: new TimeOnly(16, 0));
+
+        await harness.TickAsync();
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(0, harness.Coordinator.CallCount);
+
+        harness.PostDailyCloseWindow.IsOpen = true;
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(0, harness.Coordinator.CallCount);
+
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(1, harness.Coordinator.CallCount);
+    }
+
+    [Fact]
+    public async Task Cashier_signing_back_in_after_daily_close_restarts_the_idle_count()
+    {
+        var harness = new Harness(localTime: new TimeOnly(16, 0));
+        harness.PostDailyCloseWindow.IsOpen = true;
+
+        await harness.TickAsync();
+        // 中文注释：收银员又登录（提前窗口暂停），空闲计数清零；再登出后要重新累计两轮。
+        harness.PostDailyCloseWindow.IsOpen = false;
+        await harness.AdvanceAndTickAsync();
+        harness.PostDailyCloseWindow.IsOpen = true;
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(0, harness.Coordinator.CallCount);
+
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(1, harness.Coordinator.CallCount);
+    }
+
+    [Fact]
     public void Windows_elevation_probe_reports_a_reason_without_throwing()
     {
         var canElevate = new WindowsAppUpdateElevationProbe().CanElevateWithoutPrompt(out var reason);
@@ -362,9 +398,12 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
 
         public ToggleElevationProbe Probe { get; } = new();
 
+        public TogglePostDailyCloseWindow PostDailyCloseWindow { get; } = new();
+
         public AppUpdateUnattendedInstallScheduler CreateScheduler(Func<TimeSpan, CancellationToken, Task>? delayAsync)
         {
-            return new AppUpdateUnattendedInstallScheduler(Coordinator, Guard, Probe, Options, Time, delayAsync);
+            return new AppUpdateUnattendedInstallScheduler(
+                Coordinator, Guard, Probe, Options, Time, delayAsync, PostDailyCloseWindow);
         }
 
         public Task TickAsync() => _scheduler.TickAsync(CancellationToken.None);
@@ -439,6 +478,13 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
             args = [];
             return CanInstall;
         }
+    }
+
+    private sealed class TogglePostDailyCloseWindow : IPostDailyCloseMaintenanceWindow
+    {
+        public bool IsOpen { get; set; }
+
+        public void Open(DateTime businessDate) => IsOpen = true;
     }
 
     private sealed class ToggleElevationProbe : IAppUpdateElevationProbe

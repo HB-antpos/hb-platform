@@ -34,6 +34,20 @@ public sealed class RemoteMaintenanceUpgradeSchedulerTests
     }
 
     [Fact]
+    public async Task Post_daily_close_window_upgrades_before_the_evening_window()
+    {
+        // 当天日结并登出后（提前窗口打开），16:00 也算营业时段外，仍要连续两轮空闲。
+        var harness = new Harness(new TimeOnly(16, 0));
+        harness.PostDailyCloseWindow.IsOpen = true;
+
+        await harness.TickAsync();
+        Assert.Equal(0, harness.Upgrader.CallCount);
+
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(1, harness.Upgrader.CallCount);
+    }
+
+    [Fact]
     public async Task An_active_transaction_resets_the_idle_count()
     {
         var harness = new Harness(new TimeOnly(23, 0));
@@ -109,7 +123,8 @@ public sealed class RemoteMaintenanceUpgradeSchedulerTests
             Time = new FakeTimeProvider(new DateTimeOffset(day.ToDateTime(localTime), TimeSpan.Zero));
             Time.SetLocalTimeZone(TimeZoneInfo.Utc);
             Scheduler = new RemoteMaintenanceUpgradeScheduler(
-                Upgrader, Guard, options ?? AppUpdateUnattendedInstallOptions.Default, Time);
+                Upgrader, Guard, options ?? AppUpdateUnattendedInstallOptions.Default, Time,
+                postDailyCloseWindow: PostDailyCloseWindow);
         }
 
         public FakeTimeProvider Time { get; }
@@ -117,6 +132,8 @@ public sealed class RemoteMaintenanceUpgradeSchedulerTests
         public RecordingUpgrader Upgrader { get; } = new();
 
         public ToggleGuard Guard { get; } = new();
+
+        public TogglePostDailyCloseWindow PostDailyCloseWindow { get; } = new();
 
         public RemoteMaintenanceUpgradeScheduler Scheduler { get; }
 
@@ -143,6 +160,13 @@ public sealed class RemoteMaintenanceUpgradeSchedulerTests
             if (Failure is not null) throw Failure;
             return Task.FromResult(Result);
         }
+    }
+
+    private sealed class TogglePostDailyCloseWindow : IPostDailyCloseMaintenanceWindow
+    {
+        public bool IsOpen { get; set; }
+
+        public void Open(DateTime businessDate) => IsOpen = true;
     }
 
     private sealed class ToggleGuard : IAppUpdateInstallSafetyGuard

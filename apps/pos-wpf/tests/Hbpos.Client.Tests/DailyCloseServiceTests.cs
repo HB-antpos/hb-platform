@@ -505,6 +505,66 @@ public sealed class DailyCloseServiceTests
     }
 
     [Fact]
+    public async Task SaveAsync_opens_the_post_daily_close_window_with_the_saved_business_date()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var window = new RecordingMaintenanceWindow();
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store), maintenanceWindow: window);
+
+            await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), [Count(50m, 1)]);
+
+            // 日结落库后才打开提前维护窗口，营业日由窗口自己判断是不是今天。
+            Assert.Equal([new DateTime(2026, 5, 28)], window.OpenedFor);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_still_succeeds_when_opening_the_post_daily_close_window_throws()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var window = new RecordingMaintenanceWindow { ThrowOnOpen = true };
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store), maintenanceWindow: window);
+
+            // 提前安装只是附加功能，打开窗口失败不能让"日结已保存"变成失败。
+            var archive = await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), [Count(50m, 1)]);
+
+            Assert.Single(window.OpenedFor);
+            Assert.Equal(50m, archive.CountedCashAmount);
+            Assert.Equal(1, CountDailyCloses(databasePath));
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_does_not_open_the_post_daily_close_window_when_the_local_save_fails()
+    {
+        var window = new RecordingMaintenanceWindow();
+        var service = new DailyCloseService(new FailingSaveDailyCloseRepository(), maintenanceWindow: window);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), []));
+
+        Assert.Empty(window.OpenedFor);
+    }
+
+    [Fact]
     public async Task SaveAsync_works_without_an_upload_scheduler()
     {
         var databasePath = CreateTempDatabasePath();
@@ -777,6 +837,24 @@ public sealed class DailyCloseServiceTests
             if (ThrowOnWakeUp)
             {
                 throw new ObjectDisposedException("worker", "simulated disposed upload worker");
+            }
+        }
+    }
+
+    private sealed class RecordingMaintenanceWindow : IPostDailyCloseMaintenanceWindow
+    {
+        public List<DateTime> OpenedFor { get; } = [];
+
+        public bool ThrowOnOpen { get; init; }
+
+        public bool IsOpen => OpenedFor.Count > 0;
+
+        public void Open(DateTime businessDate)
+        {
+            OpenedFor.Add(businessDate);
+            if (ThrowOnOpen)
+            {
+                throw new InvalidOperationException("simulated maintenance window failure");
             }
         }
     }

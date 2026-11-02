@@ -168,6 +168,7 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 - `RemoteMaintenanceReconcileScheduler` 保持「收银员登录后」触发对账，不受升级窗口限制（对账只换服务器地址、几秒完成）。
 - `upgrade` 新增 `RemoteMaintenanceUpgradeScheduler`，**两个条件同时满足**才发起（实施时改为复用 WPF 自身夜间无人值守安装的判定，不另造一套）：
   1. **营业时段外**：`AppUpdateUnattendedInstallOptions` 的窗口，默认本机 18:00–次日 08:00，周四 20:00 起（门店营业更晚）；可用 `AppUpdate:UnattendedInstallWindow` 配置，Debug 构建默认关。收银机系统时间即门店当地时间。
+     **日结后提前**（11-02 追加）：当天营业日的日结保存成功后打开 `PostDailyCloseMaintenanceWindow`，到次日 08:00 关闭；窗口打开且收银员已登出（日结后 30 秒自动登出）时也算营业时段外，WPF 自身更新同样适用。补做往日日结不提前；收银员又登录时暂停，登出后恢复。
   2. **收银空闲**：`IAppUpdateInstallSafetyGuard`（购物车为空、没有付款进行中）连续两轮（每轮 5 分钟）。
 - **下载放在白天**：向中心取安装包要收银员登录票据，夜里常没人登录。所以白天登录后的对账拿到 manifest 时，若构建与本机不同且在白名单内，就后台下载校验好记进 journal；夜里只需本地交给代理，不联网。
 - 失败后隔 30 分钟再试；同一构建累计失败 3 次停止自动升级，换新构建才重新给机会。
