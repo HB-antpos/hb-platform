@@ -1,6 +1,6 @@
 # 自建定制版 RustDesk（B 路线）+ 远程组件免弹窗安装 / 升级 方案
 
-日期：2026-11-02 · 状态：**方案已定稿（第 2 版，决策项已拍板，见第 10 节），未实现**（配套的「免 UAC 代理」见第 7 节，可独立先做）
+日期：2026-11-02 · 状态：**方案已定稿（第 3 版：按批 0～1 实施结果修正，见第 8 节实施记录）**；批 0、批 1 已完成，WPF 升级流程见「批 2～4 的 WPF 部分」
 
 ## 1. 目标与边界
 
@@ -75,18 +75,16 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
     "hide-websocket-settings": "Y",
     "hide-stop-service": "Y"
   },
-  "default-settings": {
-    "custom-rendezvous-server": "hotbargain.vip:21116",
-    "relay-server": "hotbargain.vip:21117",
-    "key": "<hbbs 公钥>"
-  },
   "hb-build": "hb1",
   "hb-issued-at": "2026-11-02"
 }
 ```
 
 设计要点：
-- **服务器地址放 `default-settings` 而不是 `override-settings`**。对账（`ReconcileServerAsync`）是通过 `--config` 改服务配置再读回校验；若服务器被 override，`set_option` 不落盘、读回永远是旧值，中心换域名时对账会一直失败。放默认值 + 隐藏服务器设置页，员工改不了，helper 仍能改。
+- **服务器地址不放进 custom.txt**（第 2 版写的是放 `default-settings`，实施时改掉）：
+  - 放 `override-settings`：`set_option` 不落盘、读回永远是锁定值，中心换域名时对账永远失败；
+  - 放 `default-settings`：RustDesk 的 `is_option_can_save()` 规定**写入值等于默认值时不落盘**，对账在两个公司地址间来回切换时会出现「写了没存」；
+  - 所以服务器地址只由 helper 写入并对账，隐藏服务器设置页保证员工改不了。
 - `verification-method` / `approve-mode` / `allow-only-conn-window-open` **不放进 custom.txt**：它们是 helper 判定「这是我们接管的 RustDesk」的证据（`ManagedOptions`），继续由 helper 写入并读回。
 - `hide-tray` 不设：门店偶尔要看 ID。
 - 顶层 `hb-build` / `hb-issued-at` 只是标记（进 `HARD_SETTINGS`，客户端不解释），方便排查。
@@ -94,9 +92,10 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 
 ### 4.3 签名与密钥
 
-- 格式：libsodium `crypto_sign`（签名 64 字节 + 原文），base64 后写入 `custom.txt`，与 `sign::verify` 对应。用 Python `PyNaCl`：`SigningKey.sign(json_bytes)` 的输出就是这个格式。
-- 密钥对**离线生成**，私钥只存在发布负责人的密码管理器（不进 CI、不进仓库）；公钥进 fork 源码与 WPF helper（helper 用它验 `custom.txt`，见 5.1）。
-- 签名脚本 `scripts/rustdesk-custom/sign-custom.py`（放 hb-platform，不放 fork）：输入 JSON + 私钥，输出 `custom.txt`，同时打印 `hb-build`。签好的 `custom.txt` 提交到 fork 的 `hb/custom.txt`，CI 只做复制。
+- 格式：libsodium `crypto_sign`（签名 64 字节 + 原文），base64 后写入 `custom.txt`，与 `sign::verify` 对应。实际用 Node 内置 ed25519 签名（RFC 8032 签名与 libsodium 相同），并用 PyNaCl 的 `crypto_sign_open` 独立验过。
+- 密钥对在发布负责人本机生成，私钥只存在其密码管理器（不进 CI、不进仓库）；公钥只进 fork 源码。
+- 签名工具 `hb/custom-client-signing.mjs` **放在 fork 仓库**（与配置、构建流程在一起；第 2 版写的放 hb-platform，实施时改掉）：`keygen` / `sign` / `verify` / `pubkey`，`sign` 前确认私钥与源码公钥是一对。CI 第一步就用源码公钥验 `custom.txt`。
+- WPF helper **不验签**：.NET 8 没有内置 ed25519。安装包整体已按哈希白名单校验，随包 `custom.txt` 的哈希也就确定了，装后只比对 `custom.txt` 的 SHA256（见 5.1）。
 
 ### 4.4 不做 Authenticode 代码签名（已定）
 
@@ -111,10 +110,10 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 
 ### 5.1 helper：白名单 + custom.txt 校验（`WindowsRemoteMaintenanceInstaller.cs`）
 
-1. `TrustedRustDeskSha256` / `TrustedRustDeskSize` 改为 `TrustedRustDeskBuilds`：`版本 → (Sha256, Size, RequiresCustomTxt)`。首批两条：官方 `1.4.9`（保留作回退）与 `1.4.9-hb1`。
-2. `InstallAsync`：按 manifest 的 `Version` 查白名单；查不到直接拒绝（新错误码 `RustDeskBuildNotTrusted`）。
-3. 安装 / 升级完成后新增校验 `EnsureCustomClientAsync`：`Program Files\RustDesk\custom.txt` 存在、用公司公钥验签通过、JSON 里 `override-settings.enable-check-update == "N"` 且 `allow-auto-update == "N"`。不满足 → `RustDeskCustomClientMissing`，按 fail-closed 处理。
-4. 安装 / 对账都显式执行 `--option allow-auto-update N` 并读回（对官方 1.4.9 也有效，作为 custom.txt 之外的第二道保险）。**不要**把它加进 `ManagedOptions`，否则老设备会被判成未接管。
+1. `TrustedRustDeskBuilds`：`安装包 SHA256 → (Version, Size, CustomClientSha256)`。现有两条：官方 `1.4.9`（不带 custom.txt，保留作回退）与 `1.4.9-hb1`。
+2. `InstallAsync` / `UpgradeRustDeskAsync`：按中心下发的**哈希**查白名单（不按版本字符串，避免中心配置写法不同导致误拒），查不到在触碰本机前拒绝。
+3. 安装 / 升级完成后 `EnsureCustomClientInstalledAsync`：白名单条目带 `CustomClientSha256` 时，`Program Files\RustDesk\custom.txt` 的 SHA256 必须相等，否则报配置失败（安装按 fail-closed 清理）。
+4. 安装 / 对账 / 升级都尽力写 `--option allow-auto-update N`（#1124 起不读回，写失败不影响安装与对账）。**不要**把它加进 `ManagedOptions`，否则老设备会被判成未接管。
 
 ### 5.2 新增 `upgrade` 阶段（helper `Program.cs` + `WindowsRemoteMaintenanceInstaller.cs`）
 
@@ -122,9 +121,9 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 1. 用户态：下载并校验新包到 `%LOCALAPPDATA%\HBPOS\RemoteMaintenance\<op>\`，写 journal `PendingUpgradeArtifactPath` + 目标版本。
 2. 代理（SYSTEM）：
    - 读接管标记、确认 `ManagedOptions` 齐全（证明是我们的 RustDesk）；
-   - **等无远程会话**：没有现成 CLI 查连接数，用两层判断——用户态调度只在「营业时段外 + 收银空闲」发起（7.3）；代理端再看 `rustdesk.exe` 是否有 `--server` 之外的子进程（远程会话会拉起 `rustdesk.exe --cm` / 会话进程），有则本轮放弃，下个窗口再试；
+   - **远程会话**：只靠用户态调度在夜间窗口 + 收银空闲时发起（7.3）。代理端「看有没有 `--cm` 子进程」没有做：.NET 读不到进程命令行（要引入 WMI），而夜间窗口里有人远程的概率很低，升级只会断开那一次连接；
    - 复制到受保护目录 → 哈希校验 → `--silent-install` → `WaitForDetachedRustDeskSetupAsync` → 确认服务存在并 `start`；
-   - 升级脚本会先卸载旧版：**逐项读回** `custom-rendezvous-server` / `relay-server` / `key` / `ManagedOptions` / `allow-auto-update`，任何一项不对就用 `ConfigureRustDeskAsync(password: null)` 修回（服务器走对账模式）；接管标记重写；`EnsureCustomClientAsync`；
+   - 升级后：`custom.txt` 哈希核对；`ManagedOptions` 读不回 = 服务配置连同密码被重置，升级侧拿不到密码，报配置失败交给人工修复；服务器与升级前不同就用 `ConfigureRustDeskAsync(password: null)` 写回，`api-server` 也按升级前的值补回；接管标记不变（服务器没变）；
    - 永久密码：升级不重设。RustDesk 安装脚本保留 `%ProgramData%`/服务配置，密码应仍在；用 `--password` 的 IPC 确认路径不可用（那会重设）。改为：升级后由状态服务下一次心跳上报 ID 与版本，中心按 ID 不变 + 版本变化记一条升级事件；运维用地址簿连一次验收。
    - journal `ClientVersion` 更新，`PendingUpgrade*` 清空。
 3. 失败：不回滚（RustDesk 安装脚本不可逆），记 `UpgradeFailureCount`，状态「升级未完成」，下次对账再试；连续 3 次失败停止自动重试，设置页「修复」可手动触发。
@@ -167,18 +166,18 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 ### 7.3 调度（已定：营业时段外 + 收银空闲）
 
 - `RemoteMaintenanceReconcileScheduler` 保持「收银员登录后」触发对账，不受升级窗口限制（对账只换服务器地址、几秒完成）。
-- `upgrade` 新增 `RemoteMaintenanceUpgradeScheduler`，**两个条件同时满足**才发起：
-  1. **营业时段外**：按分店时区（见 `store-timezone-policy` 记忆：昆士兰 7 店 UTC+10，其余按分店配置，未配置按地址推断）取本地时间，不在该店营业时段内。营业时段来自后台分店资料的营业时间；没配的店按 **07:00–22:00** 当营业时段。
-  2. **收银空闲**：`ICashierSessionContext` 无进行中交易、无未完成的支付 / 退货 / 日结，且最近 **10 分钟**无任何收银操作。
-- 兜底：WPF 刚启动且满足条件 1，也算一个窗口（门店早上开机通常在营业前）。
-- 窗口内每 5 分钟检查一次条件 2；窗口外每 30 分钟检查一次条件 1。失败退避 1h / 4h / 24h，连续 3 次失败停止自动重试（5.2）。
+- `upgrade` 新增 `RemoteMaintenanceUpgradeScheduler`，**两个条件同时满足**才发起（实施时改为复用 WPF 自身夜间无人值守安装的判定，不另造一套）：
+  1. **营业时段外**：`AppUpdateUnattendedInstallOptions` 的窗口，默认本机 18:00–次日 08:00，周四 20:00 起（门店营业更晚）；可用 `AppUpdate:UnattendedInstallWindow` 配置，Debug 构建默认关。收银机系统时间即门店当地时间。
+  2. **收银空闲**：`IAppUpdateInstallSafetyGuard`（购物车为空、没有付款进行中）连续两轮（每轮 5 分钟）。
+- **下载放在白天**：向中心取安装包要收银员登录票据，夜里常没人登录。所以白天登录后的对账拿到 manifest 时，若构建与本机不同且在白名单内，就后台下载校验好记进 journal；夜里只需本地交给代理，不联网。
+- 失败后隔 30 分钟再试；同一构建累计失败 3 次停止自动升级，换新构建才重新给机会。
 - 升级本身预计 1～2 分钟（下载在用户态提前完成，代理只做安装），即使收银员在窗口内回到收银台，RustDesk 升级也不影响收银操作，只影响远程连接。
 
 ## 8. 发布顺序
 
 | 批次 | 内容 | 依赖 | 需要 |
 |---|---|---|---|
-| 0 | 私有 fork 仓库、密钥对、签名脚本、CI 跑通 1.4.9-hb1（不签名） | — | 无生产变更 |
+| 0 | 私有 fork 仓库、密钥对、签名脚本、CI 跑通 1.4.9-hb1（不签名） | — | 无生产变更（**已完成**） |
 | 1 | WPF：5.3 兜底 + 7.1 代理 + `reconcile` 迁代理 + 5.1 白名单（含 hb1 哈希）+ 心跳补服务 / 文件存在性 | — | WPF 建版 |
 | 2 | 中心：上传 hb1 包 + 改 manifest；设备列表版本列 + 「文件消失 / 服务停止」标红 | 批 1 全量后 | 主 API 重建 + Web |
 | 3 | 测试店 1042 手动「立即升级」验收：5.2 全流程 + **Defender 观察满两周**（4.4）；期间不推其他门店 | 批 2 | — |
@@ -197,7 +196,21 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
   - `TrustedRustDeskSha256` 改为 `TrustedRustDeskBuilds` 白名单，按中心下发的哈希查表。目前只有官方 1.4.9，hb1 哈希等批 0 出包后再加。
   - WPF 启动时对已登记（Committed）设备写当前用户 `RustDesk_local.toml` 的 `enable-check-update = 'N'`。
 - 未做（顺延）：心跳上报「`rustdesk.exe` 存在性」（4.4 第 2 点）。现有探针在服务不存在时已上报 `notInstalled`、文件不存在时版本为空，可先用这两项识别；专门字段与中心标红并入批 2。
-- 已知限制：`allow-auto-update` 只在安装与「中心服务器有变化」的对账时写入。服务器没变化的老设备要等下次换服务器或手动修复才会写；在此之前靠 RustDesk 默认值（关）与横幅关闭兜底。
+- 已知限制：`allow-auto-update` 只在安装与「中心服务器有变化」的对账时写入。服务器没变化的老设备要等下次换服务器或手动修复才会写；在此之前靠 RustDesk 默认值（关）与横幅关闭兜底。换成 hb1 后由 custom.txt 锁定。
+
+**批 0 实施记录（2026-11-02）**
+
+- 私有仓库 `HB-antpos/rustdesk-hb`：上游 1.4.9 快照（不带历史）→ 删掉会自动触发的 6 个上游工作流 → `src/common.rs` 验签公钥换成 `8M5+hpKPmtMuqLHns094CjBTYeuf+uN8qbe4k4jRFhk=` → `hb/` 目录与手动触发的 `hb-windows-x64.yml`。
+- 首次构建约 64 分钟（无缓存）。预发布 release `1.4.9-hb1`（tag 指向构建源码 `28e3e19`）：exe SHA256 `54425f81…4884`、24,351,744 字节；内含 custom.txt SHA256 `bdc2b187…cbc5`（456 字节）。已拆包核对：105 个文件、custom.txt 与仓库逐字节一致且验签通过、`librustdesk.dll` 含公司公钥（Flutter 版验签代码在 dll，不在 358KB 的 `rustdesk.exe` 外壳里）。
+- 旁支会话另加了构建产物归档腾讯云 COS 的步骤（`7a9d11f`）。
+
+**批 2～4 的 WPF 部分（分支 `claude/rustdesk-hb1-upgrade`）**
+
+- 白名单加入 hb1（带 custom.txt 哈希），安装与升级后核对 custom.txt。
+- helper 新增 `UpgradeRustDeskAsync` 与代理 `upgrade` 请求（只带白名单哈希 + 本地包路径；SYSTEM 端拒绝 UNC / 设备路径与重解析点，复制进管理员目录后再核对大小与哈希）。
+- `RemoteMaintenanceService`：白天对账时预下载待升级构建（只在代理可用时），`ApplyPendingUpgradeAsync` 只走代理、绝不弹 UAC；`RemoteMaintenanceUpgradeScheduler` 按 7.3 调度。
+- WPF 安装包新增 `--sync-status-agent`：已装状态服务的机器在 WPF 升级时同步新的状态服务程序（配置不动），解决「状态服务副本永远停在首次安装时的版本」。
+- 中心 manifest 切到 hb1 的前提：**所有门店的 WPF 都已带上 hb1 白名单**（旧 WPF 收到不认识的哈希会拒绝安装，新装机器会装不上）。
 
 ## 9. 验证
 
@@ -219,7 +232,7 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 
 - 包：manifest 改回官方 `1.4.9`（白名单保留），已升级设备不自动降级（RustDesk 不支持），需要时走 `upgrade` 同样流程装官方包（白名单允许）。
 - 代理：任务反注册后 `UacHelperLauncher` 自动退回 `runas`。
-- custom.txt：删掉 `Program Files\RustDesk\custom.txt` 即恢复官方行为（需管理员）；helper 的 `EnsureCustomClientAsync` 只对白名单里 `RequiresCustomTxt=true` 的版本生效。
+- custom.txt：删掉 `Program Files\RustDesk\custom.txt` 即恢复官方行为（需管理员）；helper 的 custom.txt 核对只对白名单里带 `CustomClientSha256` 的构建生效，中心 manifest 改回官方 1.4.9 后，下次夜间升级会装回官方版。
 
 ## 12. 跟进上游版本的固定流程（1.5.0 及以后）
 

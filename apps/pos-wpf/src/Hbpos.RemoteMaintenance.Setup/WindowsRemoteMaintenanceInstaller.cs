@@ -186,6 +186,9 @@ public sealed class WindowsRemoteMaintenanceServiceControl(IRemoteMaintenanceCom
     }
 }
 
+/// <summary>白名单里的一个 RustDesk 安装包：版本标签、字节数，以及公司定制构建随包 custom.txt 的 SHA256（官方构建为 null）。</summary>
+public sealed record TrustedRustDeskBuild(string Version, long Size, string? CustomClientSha256);
+
 /// <summary>只允许公司服务器和白名单内的 RustDesk 安装包；提权时重新校验，绝不执行 journal 指定的任意文件。</summary>
 public sealed class WindowsRemoteMaintenanceInstaller(
     IRemoteMaintenanceCommandRunner commandRunner,
@@ -196,16 +199,30 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     private const string RustDeskServiceName = "RustDesk";
 
     /// <summary>
-    /// 允许安装的 RustDesk 安装包：SHA256（小写十六进制）→ 版本标签与字节数，随 WPF 发布。
+    /// 允许安装的 RustDesk 安装包：SHA256（小写十六进制）→ 版本标签、字节数、随包 custom.txt 的 SHA256，随 WPF 发布。
     /// 中心 manifest 决定“装哪一个”，这里决定“允许装哪些”，任何一方单独被改都装不上包。
     /// 新版本（含公司定制构建）必须先在测试店完整验收，再把哈希加进来发版。
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, (string Version, long Size)> TrustedRustDeskBuilds =
-        new Dictionary<string, (string Version, long Size)>(StringComparer.Ordinal)
+    internal static readonly IReadOnlyDictionary<string, TrustedRustDeskBuild> TrustedRustDeskBuilds =
+        new Dictionary<string, TrustedRustDeskBuild>(StringComparer.Ordinal)
         {
-            // RustDesk 官方 1.4.9 x86_64。
-            ["eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"] = ("1.4.9", 24472432)
+            // RustDesk 官方 1.4.9 x86_64（不带 custom.txt，保留作回退）。
+            ["eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"] = new("1.4.9", 24472432, null),
+            // 公司定制构建 1.4.9-hb1（HB-antpos/rustdesk-hb release 1.4.9-hb1）：锁定更新横幅与自动更新等，
+            // 装完后 Program Files\RustDesk\custom.txt 的哈希必须等于这里，否则视为没装上公司配置。
+            ["54425f81db1433646d6ce0f440b90993770b3c15c75ebaac927a5bccce4f4884"] =
+                new("1.4.9-hb1", 24351744, "bdc2b18780d49bbacb1888dadd10ed881fb7c861ea1a7da7504c7ec1bb48cbc5")
         };
+
+    /// <summary>按中心 manifest 的哈希查白名单；普通用户端用它决定要不要预先下载升级包。</summary>
+    public static bool TryGetTrustedRustDeskBuild(string? sha256, out TrustedRustDeskBuild build)
+    {
+        build = null!;
+        return sha256 is not null && TrustedRustDeskBuilds.TryGetValue(sha256.Trim().ToLowerInvariant(), out build!);
+    }
+
+    /// <summary>测试可替换白名单；生产固定用 <see cref="TrustedRustDeskBuilds"/>。</summary>
+    internal IReadOnlyDictionary<string, TrustedRustDeskBuild> TrustedBuilds { get; init; } = TrustedRustDeskBuilds;
 
     // RustDesk 服务配置里的“自动更新”开关；设备上的 RustDesk 版本只由我们发布控制，安装与对账都把它写成 N 并读回。
     // 不放进 ManagedOptions：那三项是“这是公司接管的 RustDesk”的证据，老设备没有这一项，放进去会被误判为未接管。
@@ -219,8 +236,17 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     internal TimeSpan DaemonReadyTimeout { get; init; } = TimeSpan.FromSeconds(90);
     internal TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
-    /// <summary>接管标记与 RustDesk 程序的实际位置；生产固定在 Program Files，测试可指向临时目录并关闭位置校验。</summary>
-    internal sealed record ManagedPaths(string RustDeskExecutable, string MarkerPath, bool EnforceProtectedLocation = true);
+    /// <summary>
+    /// 接管标记、RustDesk 程序、升级暂存目录与状态服务程序的实际位置；生产固定在 Program Files，测试可指向临时目录并关闭位置校验。
+    /// </summary>
+    internal sealed record ManagedPaths(string RustDeskExecutable, string MarkerPath, bool EnforceProtectedLocation = true,
+        string? StagingDirectory = null, string? StatusAgentExecutable = null)
+    {
+        public string EffectiveStagingDirectory => StagingDirectory ?? StatusProgramDirectory;
+        public string EffectiveStatusAgentExecutable => StatusAgentExecutable ?? Path.Combine(StatusProgramDirectory, "Hbpos.RemoteStatus.exe");
+        public string CustomClientConfig => Path.Combine(Path.GetDirectoryName(RustDeskExecutable)!, "custom.txt");
+    }
+
     internal ManagedPaths Paths { get; init; } = new(InstalledRustDesk, Path.Combine(StatusProgramDirectory, "managed-server.json"));
 
     public async Task<RemoteMaintenanceInstallationResult> InstallAsync(RemoteMaintenanceInstallationRequest request, CancellationToken cancellationToken = default)
@@ -231,7 +257,7 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             throw new InvalidDataException("远程维护安装参数无效。");
         // 中心指定的安装包必须在白名单内；查不到就在触碰本机任何东西之前拒绝。
         var trustedSha256 = request.Prepare.ArtifactManifest.RustDesk.Sha256.Trim().ToLowerInvariant();
-        if (!TrustedRustDeskBuilds.TryGetValue(trustedSha256, out var trustedBuild))
+        if (!TrustedBuilds.TryGetValue(trustedSha256, out var trustedBuild))
             throw new InvalidDataException("RustDesk 安装包不在允许列表内。");
         // 先确认随 WPF 发布的 Agent 位于 Program Files；禁止从下载 ZIP/用户 journal 提权复制程序。
         var statusSource = ResolveTrustedStatusAgentPath();
@@ -244,16 +270,7 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         var statusAgentTouched = false;
         try
         {
-            // 源文件打开期间禁止写入/删除，复制到管理员目录后再验证并执行，封住校验到执行的替换窗口。
-            await using (var source = new FileStream(request.RustDeskArtifactPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-            await using (var target = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                if (source.Length != trustedBuild.Size) throw new InvalidDataException("RustDesk 文件大小错误。");
-                await source.CopyToAsync(target, cancellationToken);
-            }
-            await using (var check = File.OpenRead(staged))
-                if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(check, cancellationToken)), trustedSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("RustDesk 安装包哈希错误。");
+            await StageTrustedInstallerAsync(request.RustDeskArtifactPath, staged, trustedSha256, trustedBuild, cancellationToken);
             // 外部配置预检查在此之前完成；从实际触发 RustDesk 安装起才允许外层清理该服务。
             if (progressWriter is not null)
                 await progressWriter(new(true, false, string.Empty, request.ClientVersion, request.DataDirectory));
@@ -268,6 +285,8 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             if (!File.Exists(InstalledRustDesk))
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
             EnsureProtectedProgramPath(InstalledRustDesk);
+            // 公司定制构建必须连同 custom.txt 一起装上，否则更新横幅、自动更新都没锁住，按失败清理。
+            await EnsureCustomClientInstalledAsync(Path.Combine(Path.GetDirectoryName(InstalledRustDesk)!, "custom.txt"), trustedBuild, cancellationToken);
             if (await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken) is null &&
                 await commandRunner.RunAsync(InstalledRustDesk, "--install-service", cancellationToken) != 0)
                 throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
@@ -301,6 +320,157 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             throw;
         }
         finally { if (File.Exists(staged)) File.Delete(staged); }
+    }
+
+    /// <summary>
+    /// 升级阶段（由 SYSTEM 代理执行）：把已接管的 RustDesk 原地升级成白名单里的另一个构建，例如官方 1.4.9 → 公司定制 1.4.9-hb1。
+    /// 安装包路径来自普通用户，只当作“待校验的字节”：拒绝网络路径与重解析点，复制进管理员目录后按白名单核对大小与哈希才执行。
+    /// 不碰无人值守密码：RustDesk 安装脚本保留服务配置，升级后逐项读回受管选项与服务器；服务器若被重置就按升级前的值写回，
+    /// 受管选项丢失则说明密码也没了，升级侧无法自行修复，报配置失败交给人工修复。重复下发同一个构建是空操作。
+    /// </summary>
+    public async Task UpgradeRustDeskAsync(string artifactPath, string sha256, CancellationToken cancellationToken = default)
+    {
+        var normalized = sha256.Trim().ToLowerInvariant();
+        if (!TrustedBuilds.TryGetValue(normalized, out var build))
+            throw new InvalidDataException("RustDesk 安装包不在允许列表内。");
+        ValidateLocalArtifactPath(artifactPath);
+        var executable = Paths.RustDeskExecutable;
+        // RustDesk 被卸载交给完整重装流程；没有接管标记或配置不是公司的，一律不动。
+        var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
+        if (status is null)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        EnsureManagedLocation(executable);
+        if (!File.Exists(executable))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        var marker = await ReadManagedMarkerAsync(cancellationToken);
+        if (marker is null || !RemoteMaintenanceServerPolicy.IsTrusted(marker))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+        if (status != "running" && await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+        await RequireManagedOptionsAsync(executable, cancellationToken);
+        var before = await ReadActualServerConfigAsync(cancellationToken);
+        if (!RemoteMaintenanceServerPolicy.IsTrusted(before) || !string.Equals(before.PublicKey, marker.PublicKey, StringComparison.Ordinal))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+        if (build.CustomClientSha256 is { } expectedCustomClient &&
+            await CustomClientMatchesAsync(Paths.CustomClientConfig, expectedCustomClient, cancellationToken))
+            return;
+        var preservedApiServer = await ReadPreservableApiServerAsync(executable, cancellationToken);
+
+        var stagingDirectory = Paths.EffectiveStagingDirectory;
+        Directory.CreateDirectory(stagingDirectory);
+        if (Paths.EnforceProtectedLocation)
+        {
+            EnsureProtectedProgramPath(stagingDirectory);
+            ApplyDirectoryAcl(stagingDirectory, localServiceCanRead: true);
+        }
+        var staged = Path.Combine(stagingDirectory, "rustdesk-upgrade-" + Guid.NewGuid().ToString("N") + ".exe");
+        try
+        {
+            await StageTrustedInstallerAsync(artifactPath, staged, normalized, build, cancellationToken);
+            if (await commandRunner.RunAsync(staged, "--silent-install", cancellationToken) != 0)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            // 与首次安装相同：外壳退出码 0 只代表解包完成，要等内层安装脚本跑完。
+            await WaitForDetachedRustDeskSetupAsync(cancellationToken);
+            if (!File.Exists(executable))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            EnsureManagedLocation(executable);
+            if (await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken) is null &&
+                await commandRunner.RunAsync(executable, "--install-service", cancellationToken) != 0)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            if (await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            await EnsureCustomClientInstalledAsync(Paths.CustomClientConfig, build, cancellationToken);
+            try { await RequireManagedOptionsAsync(executable, cancellationToken); }
+            catch (RemoteMaintenanceSetupException)
+            { throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed); }
+            if (await ReadActualServerConfigAsync(cancellationToken) != before)
+                await ConfigureRustDeskAsync(executable, before, password: null, cancellationToken);
+            // ConfigureRustDeskAsync 只保留它读到的 api-server；升级若已把它清掉，这里按升级前的值补回。
+            if (preservedApiServer.Length > 0 && !await OptionMatchesAsync(executable, "api-server", preservedApiServer, cancellationToken, maxAttempts: 1))
+            {
+                if (await commandRunner.RunAsync(executable, "--option " + Q("api-server") + " " + Q(preservedApiServer), cancellationToken) != 0 ||
+                    !await OptionMatchesAsync(executable, "api-server", preservedApiServer, cancellationToken))
+                    throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+            }
+            // 与安装、对账一致：自动更新开关只尽力写入（定制构建的 custom.txt 已锁定它）。
+            try { await commandRunner.RunAsync(executable, "--option " + Q(AutoUpdateOption) + " " + Q("N"), cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
+        }
+        finally { if (File.Exists(staged)) File.Delete(staged); }
+    }
+
+    /// <summary>
+    /// WPF 升级后把随包的新状态服务程序同步到 Program Files\HBPOS\RemoteStatus（安装包以管理员或 SYSTEM 身份调用）。
+    /// 状态服务没装就不动；程序文件相同也不动；配置（ProgramData 里的 agent.json）始终不碰。原来在运行的，换完重新启动。
+    /// 返回是否替换了程序文件。
+    /// </summary>
+    public async Task<bool> SyncStatusAgentAsync(string sourcePath, CancellationToken cancellationToken = default)
+    {
+        var target = Paths.EffectiveStatusAgentExecutable;
+        var status = await serviceControl.QueryAsync(StatusServiceName, cancellationToken);
+        if (status is null || !File.Exists(target)) return false;
+        EnsureManagedLocation(target);
+        if (await FilesEqualAsync(sourcePath, target, cancellationToken)) return false;
+        if (await serviceControl.StopAsync(StatusServiceName, cancellationToken) != 0)
+            throw new InvalidOperationException("状态服务无法停止，未替换程序。");
+        try { File.Copy(sourcePath, target, overwrite: true); }
+        finally
+        {
+            // 复制失败也要把原来在跑的服务拉起来，不能让心跳因为一次同步失败而中断。
+            if (status == "running" && await serviceControl.StartAsync(StatusServiceName, CancellationToken.None) != 0)
+                throw new InvalidOperationException("状态服务未能重新启动。");
+        }
+        return true;
+    }
+
+    // 升级包路径由普通用户提供：只接受本机盘符下的绝对路径。拒绝 UNC 与设备路径（SYSTEM 访问网络路径会泄露机器凭据），
+    // 也拒绝路径上的重解析点（不让 SYSTEM 顺着用户建的链接去读别处的文件）。
+    internal static void ValidateLocalArtifactPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 400 || !Path.IsPathFullyQualified(path) ||
+            path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) ||
+            !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("升级包路径无效。");
+        EnsureNoReparsePoints(path);
+    }
+
+    // 源文件打开期间禁止写入/删除，复制到管理员目录后再验证并执行，封住校验到执行的替换窗口。
+    private static async Task StageTrustedInstallerAsync(string sourcePath, string staged, string sha256, TrustedRustDeskBuild build, CancellationToken cancellationToken)
+    {
+        await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        await using (var target = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            if (source.Length != build.Size) throw new InvalidDataException("RustDesk 文件大小错误。");
+            await source.CopyToAsync(target, cancellationToken);
+        }
+        await using (var check = File.OpenRead(staged))
+            if (!string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(check, cancellationToken)), sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("RustDesk 安装包哈希错误。");
+    }
+
+    // 公司定制构建装完后，rustdesk.exe 旁边的 custom.txt 必须正是随包签名的那份；官方构建不检查。
+    private static async Task EnsureCustomClientInstalledAsync(string customClientPath, TrustedRustDeskBuild build, CancellationToken cancellationToken)
+    {
+        if (build.CustomClientSha256 is not { } expected) return;
+        if (!await CustomClientMatchesAsync(customClientPath, expected, cancellationToken))
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+    }
+
+    private static async Task<bool> CustomClientMatchesAsync(string path, string expectedSha256, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(path)) return false;
+        await using var stream = File.OpenRead(path);
+        return string.Equals(Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)), expectedSha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<bool> FilesEqualAsync(string left, string right, CancellationToken cancellationToken)
+    {
+        await using var a = File.OpenRead(left);
+        await using var b = File.OpenRead(right);
+        if (a.Length != b.Length) return false;
+        var leftHash = await SHA256.HashDataAsync(a, cancellationToken);
+        var rightHash = await SHA256.HashDataAsync(b, cancellationToken);
+        return CryptographicOperations.FixedTimeEquals(leftHash, rightHash);
     }
 
     // 受管服务固定写入的三项无人值守选项；对账时用它们的读回当作“读到的是服务自己的配置”的证据。
@@ -626,7 +796,7 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         if (!RemoteMaintenanceServerPolicy.IsTrusted(config))
             throw new InvalidDataException("RustDesk 配置必须指向公司服务器。");
     }
-    private static string ResolveTrustedStatusAgentPath()
+    internal static string ResolveTrustedStatusAgentPath()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Hbpos.RemoteStatus.exe");
         EnsureProtectedProgramPath(path);

@@ -10,7 +10,8 @@ public static class Program
 {
     public static int Main(string[] args)
     {
-        if (args.Length is 1 or 2 && args[0] is RemoteMaintenanceAgent.RegisterOption or RemoteMaintenanceAgent.UnregisterOption or RemoteMaintenanceAgent.AgentOption)
+        if (args.Length is 1 or 2 && args[0] is RemoteMaintenanceAgent.RegisterOption or RemoteMaintenanceAgent.UnregisterOption
+                or RemoteMaintenanceAgent.AgentOption or RemoteMaintenanceAgent.SyncStatusAgentOption)
             return RunAgentCommand(args[0], args.Length == 2 ? args[1] : null);
 
         if (args.Length != 6 || !string.Equals(args[0], "--operation", StringComparison.Ordinal) ||
@@ -200,7 +201,18 @@ public static class Program
 
             var commandRunner = new WindowsRemoteMaintenanceCommandRunner();
             var installer = new WindowsRemoteMaintenanceInstaller(commandRunner, new WindowsRemoteMaintenanceServiceControl(commandRunner));
-            return new RemoteMaintenanceAgent(helperPath, installer.ReconcileServerAsync).Run(argument);
+            if (command == RemoteMaintenanceAgent.SyncStatusAgentOption)
+            {
+                // 源程序固定取本次安装包带来的、位于受保护目录的状态服务；失败只影响状态上报，不能让 WPF 安装失败。
+                try
+                {
+                    installer.SyncStatusAgentAsync(WindowsRemoteMaintenanceInstaller.ResolveTrustedStatusAgentPath()).GetAwaiter().GetResult();
+                    return 0;
+                }
+                catch (RemoteMaintenanceSetupException) { return RemoteMaintenanceAgent.FailureExitCode; }
+            }
+
+            return new RemoteMaintenanceAgent(helperPath, installer.ReconcileServerAsync, upgrade: installer.UpgradeRustDeskAsync).Run(argument);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
             or System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
