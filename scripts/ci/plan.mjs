@@ -165,8 +165,11 @@ export function buildMatrices(selected, { timeout = 15 } = {}) {
     }
     if (component === 'pos-wpf') {
       linuxDotnet.push({ component: 'pos-api' })
+      // 分片按类名前缀切，目标是各片测试墙钟接近：T-Z 用例极少并入 A-H；
+      // S 里 SettingsFirstScreenReceiptDevice/Viewport 两组视图运行时测试同属串行集合、合计约 200 秒，
+      // 单独成片，避免 client-s-other 逼近 12 分钟超时。
       for (const shard of [
-        'client-a-b-d-h',
+        'client-a-b-d-h-t-z',
         'client-c-card',
         'client-c-other',
         'client-i-k-m-n',
@@ -174,8 +177,8 @@ export function buildMatrices(selected, { timeout = 15 } = {}) {
         'client-l-other',
         'client-o-r',
         'client-s-shared',
+        'client-s-settings-device-viewport',
         'client-s-other',
-        'client-t-z',
         'ui',
       ]) {
         windows.push({ component: 'pos-wpf', shard })

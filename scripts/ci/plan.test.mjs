@@ -185,7 +185,7 @@ test('各 runner 矩阵始终非空，未选择时使用 noop sentinel', () => {
   })
   assert.deepEqual(selected.windows, {
     include: [
-      { component: 'pos-wpf', shard: 'client-a-b-d-h', runner: 'windows-2025', timeout: 15 },
+      { component: 'pos-wpf', shard: 'client-a-b-d-h-t-z', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-c-card', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-c-other', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-i-k-m-n', runner: 'windows-2025', timeout: 15 },
@@ -193,8 +193,8 @@ test('各 runner 矩阵始终非空，未选择时使用 noop sentinel', () => {
       { component: 'pos-wpf', shard: 'client-l-other', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-o-r', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-s-shared', runner: 'windows-2025', timeout: 15 },
+      { component: 'pos-wpf', shard: 'client-s-settings-device-viewport', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'client-s-other', runner: 'windows-2025', timeout: 15 },
-      { component: 'pos-wpf', shard: 'client-t-z', runner: 'windows-2025', timeout: 15 },
       { component: 'pos-wpf', shard: 'ui', runner: 'windows-2025', timeout: 15 },
     ],
   })

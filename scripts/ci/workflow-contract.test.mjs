@@ -403,14 +403,32 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.match(wpfProject, /<None Update="xunit\.runner\.json" CopyToOutputDirectory="PreserveNewest" \/>/)
   assert.match(windows, /\$\{\{ matrix\.shard \|\| 'noop' \}\}/)
   assert.match(windows, /-Shard '\$\{\{ matrix\.shard \|\| 'noop' \}\}'/)
-  assert.match(windowsRunner, /client-a-b-d-h/)
+  assert.match(windowsRunner, /client-a-b-d-h-t-z/)
   assert.match(windowsRunner, /client-c-card/)
   assert.match(windowsRunner, /client-c-other/)
   assert.match(windowsRunner, /client-l-linkly/)
   assert.match(windowsRunner, /client-l-other/)
   assert.match(windowsRunner, /client-s-shared/)
+  assert.match(windowsRunner, /client-s-settings-device-viewport/)
   assert.match(windowsRunner, /client-s-other/)
-  assert.match(windowsRunner, /client-t-z/)
+  // 最重的两组串行视图测试独占一片，client-s-other 必须把它们排除，否则重复执行又回到超时边缘。
+  assert.match(
+    windowsRunner,
+    /'client-s-settings-device-viewport' = @\{ Include = @\('SettingsFirstScreenReceiptDevice', 'SettingsFirstScreenViewport'\); Exclude = @\(\) \}/,
+  )
+  assert.match(
+    windowsRunner,
+    /'client-s-other' = @\{ Include = @\('S'\); Exclude = @\('Shared', 'SettingsFirstScreenReceiptDevice', 'SettingsFirstScreenViewport'\) \}/,
+  )
+  // 预装 SDK 满足 global.json 时跳过 setup-dotnet 下载；NuGet 缓存先恢复、只由 ui 分片回存。
+  assert.match(windows, /id: sdk\n\s+if: matrix\.component != 'noop'/)
+  assert.match(windows, /if: matrix\.component != 'noop' && steps\.sdk\.outputs\.install == 'true'\n\s+uses: actions\/setup-dotnet@/)
+  assert.match(windows, /id: nuget_cache\n[\s\S]*?uses: actions\/cache\/restore@[0-9a-f]{40}\n[\s\S]*?path: ~\/\.nuget\/packages/)
+  assert.match(windows, /hashFiles\('apps\/pos-wpf\/\*\*\/\*\.csproj', 'services\/backend\/BlazorApp\.Shared\/BlazorApp\.Shared\.csproj', 'global\.json'\)/)
+  assert.match(windows, /if: \$\{\{ !cancelled\(\) && matrix\.shard == 'ui' && steps\.nuget_cache\.outputs\.cache-hit != 'true' \}\}\n\s+uses: actions\/cache\/save@[0-9a-f]{40}/)
+  const cacheShas = [...windows.matchAll(/actions\/cache\/(?:restore|save)@([0-9a-f]{40})/g)].map((match) => match[1])
+  assert.equal(cacheShas.length, 2)
+  assert.equal(new Set(cacheShas).size, 1, 'restore 与 save 必须来自同一 actions/cache 提交')
   assert.match(windowsRunner, /\$clientTestNamespace = 'Hbpos\.Client\.Tests\.'/)
   assert.match(windowsRunner, /FullyQualifiedName~\$clientTestNamespace/)
   assert.match(windowsRunner, /WPF client tests \(\$Shard\)/)
@@ -419,7 +437,11 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.match(windowsRunner, /Hbpos\.RemoteStatus\.Tests\/Hbpos\.RemoteStatus\.Tests\.csproj/)
   assert.match(windowsRunner, /--list-tests/)
   assert.match(windowsRunner, /^\s+Assert-ClientShardCoverage\s*$/m)
-  // Windows lane 只构建 slnx，RemoteStatus 必须在其中，否则上面的测试没有产物可跑。
+  // client 分片只构建测试项目；ui 分片（与本机 all）仍构建 slnx，RemoteStatus 必须在其中，否则上面的测试没有产物可跑。
+  assert.match(
+    windowsRunner,
+    /if \(\$Shard -eq 'all' -or \$Shard -eq 'ui'\) \{\n\s+dotnet restore apps\/pos-wpf\/hbpos_win\.slnx\n\s+dotnet build apps\/pos-wpf\/hbpos_win\.slnx --configuration Release --no-restore\n\} else \{\n\s+dotnet restore \$clientTestsProject\n\s+dotnet build \$clientTestsProject --configuration Release --no-restore\n\}/,
+  )
   const wpfSolution = readFileSync(wpfSolutionPath, 'utf8')
   assert.match(wpfSolution, /src\/Hbpos\.RemoteStatus\/Hbpos\.RemoteStatus\.csproj/)
   assert.match(wpfSolution, /tests\/Hbpos\.RemoteStatus\.Tests\/Hbpos\.RemoteStatus\.Tests\.csproj/)
