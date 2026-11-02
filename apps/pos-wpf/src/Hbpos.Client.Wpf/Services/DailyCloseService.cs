@@ -180,7 +180,8 @@ internal static class DailyClosePeriodFactory
 public sealed class DailyCloseService(
     ILocalDailyCloseRepository repository,
     ILocalSqliteCheckpointService? checkpointService = null,
-    IDailyCloseUploadScheduler? uploadScheduler = null) : IDailyCloseService
+    IDailyCloseUploadScheduler? uploadScheduler = null,
+    IPostDailyCloseMaintenanceWindow? maintenanceWindow = null) : IDailyCloseService
 {
     public static IReadOnlyList<CashDenomination> AustralianDenominations { get; } =
     [
@@ -237,6 +238,8 @@ public sealed class DailyCloseService(
             await TryCheckpointWalAfterDailyCloseAsync(CancellationToken.None);
             // 本地提交成功后才唤醒上传 Worker；唤醒只是尽力而为，失败不能把"日结已保存"变成失败。
             TryRequestDailyCloseUpload();
+            // 日结已落库：打开日结后的提前维护窗口，收银员登出并空闲后即可静默安装 WPF 更新与 RustDesk 升级。
+            TryOpenMaintenanceWindow(archive.Report.BusinessDate);
             return archive;
         }, cancellationToken);
     }
@@ -270,6 +273,22 @@ public sealed class DailyCloseService(
             ConsoleLog.WriteError(
                 "DailyCloseUpload",
                 $"daily close upload wake-up failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex);
+        }
+    }
+
+    private void TryOpenMaintenanceWindow(DateTime businessDate)
+    {
+        try
+        {
+            maintenanceWindow?.Open(businessDate);
+        }
+        catch (Exception ex)
+        {
+            // 提前安装只是附加功能：失败时夜间窗口照常安装，不能把"日结已保存"变成失败。
+            ConsoleLog.WriteError(
+                "PostDailyCloseWindow",
+                $"open after daily close failed error={ex.GetType().Name} message={ex.Message}",
                 exception: ex);
         }
     }
