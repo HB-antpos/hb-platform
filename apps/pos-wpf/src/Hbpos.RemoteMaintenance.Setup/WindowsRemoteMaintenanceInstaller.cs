@@ -353,12 +353,12 @@ public sealed class WindowsRemoteMaintenanceInstaller(
                     throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
         // 安装与对账都关掉 RustDesk 自带的自动更新：它会在无连接时自行下载安装新版，绕过我们的白名单。
         // 这不是无人值守选项，对账模式写它不违背“只换服务器、不动密码与认证方式”的约束。
-        if (await commandRunner.RunAsync(executable, "--option " + Q(AutoUpdateOption) + " " + Q("N"), cancellationToken) != 0)
-            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+        // 只尽力写入、不读回校验：它不影响远程连接，写失败绝不能让安装失败或让对账回滚服务器地址。
+        try { await commandRunner.RunAsync(executable, "--option " + Q(AutoUpdateOption) + " " + Q("N"), cancellationToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
         var expected = new List<(string Key, string Value)>
         {
-            ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey),
-            (AutoUpdateOption, "N")
+            ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey)
         };
         expected.AddRange(ManagedOptions);
         foreach (var option in expected)

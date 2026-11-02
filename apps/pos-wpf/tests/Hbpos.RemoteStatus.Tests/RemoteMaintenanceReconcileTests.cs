@@ -98,7 +98,7 @@ public sealed class RemoteMaintenanceReconcileTests
     }
 
     [Fact]
-    public async Task 对账同时关掉RustDesk自带的自动更新并读回()
+    public async Task 对账同时关掉RustDesk自带的自动更新()
     {
         using var rig = new Rig(Legacy);
         rig.RustDesk.Options["allow-auto-update"] = "Y";
@@ -106,7 +106,7 @@ public sealed class RemoteMaintenanceReconcileTests
         await rig.Installer.ReconcileServerAsync(Dedicated);
 
         Assert.Equal("N", rig.RustDesk.Options["allow-auto-update"]);
-        Assert.Contains("--option \"allow-auto-update\"", rig.RustDesk.Commands);
+        Assert.Contains("--option \"allow-auto-update\" \"N\"", rig.RustDesk.Commands);
     }
 
     [Fact]
