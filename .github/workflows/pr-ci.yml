@@ -284,7 +284,11 @@ jobs:
         run: ./scripts/ci/run-windows-component.ps1 -Component '${{ matrix.component }}' -Profile '${{ needs.plan.outputs.profile }}' -Shard '${{ matrix.shard || 'noop' }}'
       - name: 保存 NuGet 包缓存
         # 只由 ui 分片回存，避免未命中时 11 个分片各自上传同一份包；前缀命中（cache-hit 为 false）也回存以刷新 key。
-        if: ${{ !cancelled() && matrix.shard == 'ui' && steps.nuget_cache.outputs.cache-hit != 'true' }}
+        # 只在 main（weekly 定时与 workflow_dispatch）回存：Actions 缓存按 ref 隔离，PR 与合并队列分支回存的约 357 MB
+        # 只有该分支自己能读，白占仓库 10 GB 配额（11-03 实测 main 上一条都没有，PR 和队列 ref 各存一份）；
+        # 它们只读 main 的缓存。csproj / global.json 变化合入 main 后，用
+        # `gh workflow run pr-ci.yml --ref main -f profile=pr -f component=pos-wpf` 预热。
+        if: ${{ !cancelled() && github.ref_name == 'main' && matrix.shard == 'ui' && steps.nuget_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.nuget/packages
