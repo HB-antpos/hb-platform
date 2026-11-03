@@ -123,6 +123,7 @@ import {
   getProductStatusFilter,
   toggleStatusFilter,
 } from './statusFilters'
+import { isAutoPricingBelowMinimum } from './autoPricingEligibility'
 import {
   compareNullableNumbers,
   compareNullableText,
@@ -2178,6 +2179,15 @@ export default function InvoiceEditPage() {
     })
   }
 
+  // 检测完成提示：低价行不再让整单失败，但要说清有几行没生成自动零售价、该怎么处理。
+  const describeCheckProductsSummary = (summary: CheckProductsResponse['summary']) => {
+    const base = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', summary)
+    const unavailable = summary.autoPricingUnavailable ?? 0
+    return unavailable > 0
+      ? `${base}${t('posAdmin.invoiceWorkbench.detectAutoPricingUnavailable', { count: unavailable })}`
+      : base
+  }
+
   // ---- 商品检测 ----
   const handleCheckProducts = async () => {
     if (checking) return
@@ -2216,7 +2226,7 @@ export default function InvoiceEditPage() {
             throw new Error(completedJob.message || t('posAdmin.invoiceDetail.detectFailed', '商品检测失败'))
           }
 
-          const description = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', result.summary)
+          const description = describeCheckProductsSummary(result.summary)
           notification.success({
             message: t('posAdmin.invoiceDetail.detectCompletedTitle', '商品检测完成'),
             description,
@@ -2257,7 +2267,7 @@ export default function InvoiceEditPage() {
             invoiceGuid: submittedInvoiceGuid,
             detailGuids,
           })
-          const description = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', result.summary)
+          const description = describeCheckProductsSummary(result.summary)
           message.success(description)
           publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyCheckProductsJobResult({
@@ -3320,10 +3330,17 @@ export default function InvoiceEditPage() {
           : t('posAdmin.invoiceWorkbench.pricingAutoNoRate'))
         : t('posAdmin.invoiceWorkbench.pricingManual')
     const hasDiscount = record.discountRate != null && record.discountRate !== 0
+    // 自动定价开着但进货价低于 0.10：后端不会给倍率和新价，行内直接说原因，不让人对着一个光秃秃的「自动」猜。
+    const autoPricingBelowMin = isAutoPricingBelowMinimum(record)
     return (
       <>
         <span className="lsi-wb-pricing-line">
           <span className={pricingEdited ? 'lsi-wb-edited' : undefined}>{modeText}</span>
+          {autoPricingBelowMin ? (
+            <span className="lsi-tag lsi-tag-orange" title={t('posAdmin.invoiceWorkbench.pricingAutoBelowMinTip')}>
+              {t('posAdmin.invoiceWorkbench.pricingAutoBelowMin')}
+            </span>
+          ) : null}
           {record.isSpecialProduct ? (
             <span className="lsi-tag lsi-tag-orange">{t('posAdmin.invoiceWorkbench.pricingSpecial')}</span>
           ) : null}

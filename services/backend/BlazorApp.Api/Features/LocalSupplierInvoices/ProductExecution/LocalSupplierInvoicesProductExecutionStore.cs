@@ -5,6 +5,7 @@ using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services.Pricing;
 using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
@@ -319,6 +320,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     }
                     else if (detail.PurchasePrice.HasValue && detail.PurchasePrice > 0)
                     {
+                        // 写入前兜底：低于自动定价下限的行给行级错误（校验器已先拦一次），
+                        // 不让 CalculateRetailPrice 抛异常把整批执行变成没有原因的「批量执行失败」。
+                        if (!AutoPricingRules.SupportsAutoPricing(detail.PurchasePrice))
+                        {
+                            result.Errors.Add($"创建商品失败：货号 {detail.ItemNumber} {AutoPricingRules.BelowMinimumHint}");
+                            result.FailedCount++;
+                            continue;
+                        }
+
                         // 同一批常有大量相同进货价，按价格缓存策略，避免创建商品时重复查策略。
                         if (!pricingStrategyCache.TryGetValue(detail.PurchasePrice.Value, out var strategy))
                         {

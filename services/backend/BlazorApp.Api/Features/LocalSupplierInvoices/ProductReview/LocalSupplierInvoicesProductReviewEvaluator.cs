@@ -1,4 +1,5 @@
 using BlazorApp.Api.Interfaces;
+using BlazorApp.Api.Services.Pricing;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
@@ -73,7 +74,8 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
                 detail,
                 supplierStrategies,
                 storeStrategies,
-                globalStrategies
+                globalStrategies,
+                summary
             );
             result.DefaultAction = SelectDefaultAction(result, detail, data.ProductCodesByBarcode, data.AdditionalBarcodeOwners);
             results.Add(result);
@@ -229,7 +231,8 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
         StoreLocalSupplierInvoiceDetails detail,
         List<PricingStrategy> supplierStrategies,
         List<PricingStrategy> storeStrategies,
-        List<PricingStrategy> globalStrategies)
+        List<PricingStrategy> globalStrategies,
+        CheckProductsSummaryDto summary)
     {
         if ((result.AutoPricing ?? detail.AutoPricing) != true
             || !detail.PurchasePrice.HasValue
@@ -237,6 +240,16 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
             return;
 
         var purchasePrice = detail.PurchasePrice.Value;
+        // 关键位置：低于自动定价下限（0.10）的行不算预览、只记原因并计数；否则 CalculateRate 直接抛异常，
+        // 整单检测会因为一行脏价格失败，界面只看到「检测失败」。原因随结果返回，前端按行提示。
+        if (!AutoPricingRules.SupportsAutoPricing(purchasePrice))
+        {
+            result.PricingFloatRate = null;
+            result.NewAutoRetailPrice = null;
+            result.AutoPricingUnavailableReason = AutoPricingRules.BelowMinimumHint;
+            summary.AutoPricingUnavailable++;
+            return;
+        }
         var strategy = _autoPricingService.FindBestStrategyForPrice(
             purchasePrice,
             supplierStrategies,

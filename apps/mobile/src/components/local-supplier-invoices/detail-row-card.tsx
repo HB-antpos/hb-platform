@@ -218,6 +218,7 @@ export const DetailRowCard = memo(function DetailRowCard({
               {pricing.newAutoRetailPrice != null ? ` · ${t("detail.pricing.newPrice", { price: formatMoney(pricing.newAutoRetailPrice) })}` : ""}
             </Text>
             {storeStatusTag}
+            {pricing.belowMinimum ? <DetailTag label={t("detail.pricing.belowMin")} tone="orange" /> : null}
           </View>
           <View style={styles.line}>
             <View style={styles.statusTags}>{productStatusTag}{barcodeStatusTag}</View>

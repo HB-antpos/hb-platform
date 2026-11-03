@@ -115,6 +115,9 @@ export function buildPricingEditorChanges(detail: PricingSource, draft: PricingE
 // 定价摘要（结构化，UI 自行本地化）
 // ---------------------------------------------------------------------------
 
+/** 自动定价支持的最低进货价，与后端 AutoPricingRules.MinPurchasePrice 一致。 */
+export const AUTO_PRICING_MIN_PURCHASE_PRICE = 0.1;
+
 export type PricingModeKind = "unset" | "auto" | "autoNoRate" | "manual";
 /** 本店分店价格表的自动定价状态：hidden = 没匹配到商品，不显示；none = 本店未建；auto / manual = 本店自动 / 手动。 */
 export type StorePricingStatus = "hidden" | "none" | "auto" | "manual";
@@ -129,11 +132,13 @@ export interface PricingSummary {
   /** 折扣率：为空或 0 视为没有折扣（null）；否则给出百分数和 "12.5%" 文本。 */
   discount: { percent: number; text: string } | null;
   newAutoRetailPrice: number | null;
+  /** 自动定价开着、进货价大于 0 但低于下限（0.10）：后端不会生成倍率和新价，执行新建商品也会被拦，行内要把原因说出来。 */
+  belowMinimum: boolean;
   storeStatus: StorePricingStatus;
 }
 
 export function getPricingSummary(
-  detail: PricingSource & Pick<LocalSupplierInvoiceItem, "productCode" | "storeIsAutoPricing">
+  detail: PricingSource & Pick<LocalSupplierInvoiceItem, "productCode" | "storeIsAutoPricing" | "purchasePrice">
 ): PricingSummary {
   let mode: PricingModeKind;
   if (detail.autoPricing == null) mode = "unset";
@@ -148,6 +153,11 @@ export function getPricingSummary(
   else if (detail.storeIsAutoPricing == null) storeStatus = "none";
   else storeStatus = detail.storeIsAutoPricing ? "auto" : "manual";
 
+  const belowMinimum = Boolean(detail.autoPricing)
+    && typeof detail.purchasePrice === "number"
+    && detail.purchasePrice > 0
+    && detail.purchasePrice < AUTO_PRICING_MIN_PURCHASE_PRICE;
+
   return {
     mode,
     floatRate: mode === "auto" ? (detail.pricingFloatRate as number) : null,
@@ -160,6 +170,7 @@ export function getPricingSummary(
         }
       : null,
     newAutoRetailPrice: detail.newAutoRetailPrice ?? null,
+    belowMinimum,
     storeStatus,
   };
 }

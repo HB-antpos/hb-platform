@@ -10,6 +10,7 @@ using BlazorApp.Api.Features.LocalSupplierInvoices.Details.BatchUpsert.Infrastru
 using BlazorApp.Api.Features.LocalSupplierInvoices.Details.Mutations.Infrastructure;
 using BlazorApp.Api.Features.LocalSupplierInvoices.Details.Paste;
 using BlazorApp.Api.Features.LocalSupplierInvoices.Details.Paste.Infrastructure;
+using BlazorApp.Api.Services.Pricing;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
@@ -154,6 +155,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         {
             if (detail.AutoPricing != true || !detail.PurchasePrice.HasValue || detail.PurchasePrice <= 0)
                 return;
+
+            // 低于自动定价下限（0.10）的行：清空预览让保存成功，原因由检测结果与界面行内提示说明；
+            // 不能让 CalculateRate 抛异常把整批编辑变成「批量更新失败」。
+            if (!AutoPricingRules.SupportsAutoPricing(detail.PurchasePrice))
+            {
+                detail.PricingFloatRate = null;
+                detail.NewAutoRetailPrice = null;
+                return;
+            }
 
             var strategy = await _autoPricingService.FindStrategyForPriceAsync(
                 detail.PurchasePrice.Value,

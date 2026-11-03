@@ -59,6 +59,12 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     }
                 );
             }
+            catch (ArgumentException ex)
+            {
+                // 定价规则类异常（如进货价不在策略范围内）把原因透传给前端，不再只显示两个字的「检测失败」。
+                _logger.LogError(ex, "检测商品失败");
+                return ApiResponse<CheckProductsResponseDto>.Error($"检测失败：{ex.Message}", "CHECK_ERROR");
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "检测商品失败");
