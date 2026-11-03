@@ -443,7 +443,8 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.match(windows, /if: matrix\.component != 'noop' && steps\.sdk\.outputs\.install == 'true'\n\s+uses: actions\/setup-dotnet@/)
   assert.match(windows, /id: nuget_cache\n[\s\S]*?uses: actions\/cache\/restore@[0-9a-f]{40}\n[\s\S]*?path: ~\/\.nuget\/packages/)
   assert.match(windows, /hashFiles\('apps\/pos-wpf\/\*\*\/\*\.csproj', 'services\/backend\/BlazorApp\.Shared\/BlazorApp\.Shared\.csproj', 'global\.json'\)/)
-  assert.match(windows, /if: \$\{\{ !cancelled\(\) && matrix\.shard == 'ui' && steps\.nuget_cache\.outputs\.cache-hit != 'true' \}\}\n\s+uses: actions\/cache\/save@[0-9a-f]{40}/)
+  // 回存只在 main：PR / 合并队列分支的缓存按 ref 隔离、别人读不到，只会占配额。
+  assert.match(windows, /if: \$\{\{ !cancelled\(\) && github\.ref_name == 'main' && matrix\.shard == 'ui' && steps\.nuget_cache\.outputs\.cache-hit != 'true' \}\}\n\s+uses: actions\/cache\/save@[0-9a-f]{40}/)
   const cacheShas = [...windows.matchAll(/actions\/cache\/(?:restore|save)@([0-9a-f]{40})/g)].map((match) => match[1])
   assert.equal(cacheShas.length, 2)
   assert.equal(new Set(cacheShas).size, 1, 'restore 与 save 必须来自同一 actions/cache 提交')
