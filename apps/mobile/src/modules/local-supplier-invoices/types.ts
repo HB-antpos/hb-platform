@@ -198,6 +198,8 @@ export interface CheckProductsSummary {
   productNotExists: number;
   barcodeNormal: number;
   barcodeAbnormal: number;
+  /** 自动定价开着但进货价低于下限（0.10）、没生成自动零售价的行数；旧后端没有这个字段。 */
+  autoPricingUnavailable?: number;
 }
 
 /** 商品检测后台任务快照。status：Queued / Running 为进行中，Succeeded / Failed 为终态。 */
