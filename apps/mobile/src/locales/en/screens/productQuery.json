@@ -138,7 +138,8 @@
     "hqSyncAttempt": "Attempts: {{count}}",
     "discountAutoPrintFailed": "The regular label printed, but the discount label failed to print.",
     "discountPrintUnavailable": "This product has no discount data to print.",
-    "clearancePrintUnavailable": "This product has no clearance data to print."
+    "clearancePrintUnavailable": "This product has no clearance data to print.",
+    "autoPricingAppliedPrinted": "Auto price updated {{from}} → {{to}}, label printed"
   },
   "lookup": {
     "title": "Choose a matching product",
@@ -480,6 +481,16 @@
     },
     "label": "Labels"
   },
+  "scanned": {
+    "chipSet": "Scanned · set code",
+    "chipMulti": "Scanned · multi",
+    "chipMain": "Main barcode",
+    "toggleToMain": "Print main",
+    "toggleToScanned": "Print scanned",
+    "noteSet": "Buttons print this code · discount follows main",
+    "noteMulti": "Buttons print this code · follows main",
+    "noteMain": "Buttons print the main barcode"
+  },
   "codes": {
     "loaded": "Loaded {{loaded}} / {{total}}",
     "barcodeColumn": "Barcode",
@@ -489,7 +500,8 @@
     "follow": "As main",
     "loadMore": "Load more ({{count}} left)",
     "saveRow": "Save row",
-    "printRow": "Print label for this row"
+    "printRow": "Print label for this row",
+    "scannedRow": "Scanned"
   },
   "nameEdit": {
     "action": "Edit product name",

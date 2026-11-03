@@ -768,11 +768,16 @@ export async function printClearanceLabel(detail: ProductDetail) {
   return runLabelPrint(() => printNativeClearanceLabel(buildPayload(detail)));
 }
 
-export async function printBigDiscountLabel(detail: ProductDetail, printType?: string | null) {
+/** overrides 与 printProductLabel 一致：大标签也印条码，扫到多码时要换成多码条码。 */
+export async function printBigDiscountLabel(
+  detail: ProductDetail,
+  printType?: string | null,
+  overrides?: ProductLabelOverrides,
+) {
   if (isIosReviewSessionActive()) {
     return true;
   }
-  return runLabelPrint(() => printNativeBigDiscountLabel(buildPayload(detail), printType));
+  return runLabelPrint(() => printNativeBigDiscountLabel(buildPayload(detail, overrides), printType));
 }
 
 export async function printWarehouseProductLabel(payload: WarehouseProductLabelPrintPayload) {

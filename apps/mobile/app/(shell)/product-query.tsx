@@ -38,6 +38,7 @@ import { NumericInputModal } from "@/components/product-maintenance/NumericInput
 import { OfflineCatalogStatusRow } from "@/components/product-maintenance/OfflineCatalogStatusRow";
 import { OfflineModeBanner } from "@/components/product-maintenance/OfflineModeBanner";
 import { ProductHeroCard } from "@/components/product-maintenance/ProductHeroCard";
+import { ScannedCodeBanner } from "@/components/product-maintenance/ScannedCodeBanner";
 import { ProductPromotionSection } from "@/components/product-maintenance/ProductPromotionSection";
 import { SearchPanel } from "@/components/product-maintenance/SearchPanel";
 import { SetCodeCompactSection } from "@/components/product-maintenance/SetCodeCompactSection";
@@ -128,10 +129,14 @@ import type {
 } from "@/modules/product-maintenance/types";
 import {
   getVerifiedScanPrintTarget,
+  isSubCodeFocus,
+  resolveFocusLabelTarget,
   resolveMultiCodeLabelPrice,
+  resolveScannedCodeFocus,
   resolveScannedCodeLabel,
   shouldAutoPrintDiscountLabel,
   type CodeLabelTarget,
+  type ScannedCodeFocus,
 } from "@/modules/product-maintenance/scan-label";
 import {
   createProductDetailRequestCoordinator,
@@ -368,6 +373,8 @@ interface AutoPricingDialogState {
   /** 本次扫到的码：确认调价后要按它打子项标签，而不是一律打主档标签。手动查询为 null。 */
   scanKeyword?: string | null;
   printTarget?: ScanLabelPrintTarget | null;
+  /** 扫码焦点（本地码表 / 码表加载后补解析）：没有服务端 printTarget 时按它打子码标签。 */
+  scanFocus?: ScannedCodeFocus | null;
   /** 自动打印开关打开时才在确认调价打完普通标签后补打折扣标签；手动查询或关着自动打印时为 false。 */
   autoPrintEnabled?: boolean;
 }
@@ -384,6 +391,7 @@ interface DetailPostLoadOptions {
   scanKeyword?: string;
   autoPrintEnabled?: boolean;
   printTarget?: ScanLabelPrintTarget | null;
+  scanFocus?: ScannedCodeFocus | null;
 }
 
 interface NumericInputModalState {
@@ -406,6 +414,17 @@ interface CodeAddModalState {
   codeType: "set" | "multi";
   value: string;
   retailPrice: string;
+}
+
+/** 扫码焦点随商品 / 分店绑定：换商品、换店后旧焦点自然失效，不需要额外的清理副作用。 */
+interface ScannedFocusState {
+  productCode: string;
+  storeCode: string;
+  /** 本次扫到的码：码表分页加载后若焦点仍为空，用它再解析一次。 */
+  keyword: string;
+  focus: ScannedCodeFocus | null;
+  /** 店员在焦点码条上点了「打主条码」：价格页签的打印入口暂时回到主档。 */
+  printMain: boolean;
 }
 
 interface CreateProductDraft {
@@ -716,6 +735,25 @@ function ProductQueryContent() {
   const invoiceExitSavingRef = useRef(false);
   const [editorTab, setEditorTab] = useState<"price" | "codes">("price");
   const [savingAndPrinting, setSavingAndPrinting] = useState(false);
+  const [scannedFocusState, setScannedFocusState] = useState<ScannedFocusState | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const highlightedCodeRowRef = useRef<View>(null);
+  const autoScrolledFocusKeyRef = useRef<string | null>(null);
+  // 扫码焦点只在同商品、同分店下有效；换商品 / 换店后旧焦点自动失效。
+  const scannedFocus =
+    detail && scannedFocusState &&
+    scannedFocusState.productCode === detail.productCode &&
+    scannedFocusState.storeCode === selectedStoreCode
+      ? scannedFocusState.focus
+      : null;
+  const scannedCodeFocus = isSubCodeFocus(scannedFocus) ? scannedFocus : null;
+  const printMainInstead = Boolean(scannedCodeFocus) && scannedFocusState?.printMain === true;
+  /** 价格页签打印入口实际要打的子码；null 表示打主档（没扫到子码，或店员切回了主条码）。 */
+  const activePrintFocus = printMainInstead ? null : scannedCodeFocus;
+  const focusLabelTarget = useMemo(
+    () => (detail && scannedCodeFocus ? resolveFocusLabelTarget(detail, scannedCodeFocus) : null),
+    [detail, scannedCodeFocus],
+  );
   // 新增编码面板里的相机扫码：打开时临时隐藏面板，避免两个原生 Modal 叠加。
   const [codeAddScannerVisible, setCodeAddScannerVisible] = useState(false);
   const getErrorMessage = useCallback(
@@ -1060,6 +1098,47 @@ function ProductQueryContent() {
   useEffect(() => {
     setEditorTab("price");
   }, [detail?.productCode]);
+
+  // 码表分页在扫码后才加载：焦点此前没解析出来（快路径详情不含码表）的，码表到了再按扫到的码试一次。
+  useEffect(() => {
+    if (!detail?.codesIncluded || !scannedFocusState || scannedFocusState.focus) return;
+    if (scannedFocusState.productCode !== detail.productCode) return;
+    const resolved = resolveScannedCodeFocus(detail, scannedFocusState.keyword, null);
+    if (!resolved) return;
+    console.log("[product-query] scanned-code focus", { kind: resolved.kind, source: resolved.source, late: true });
+    setScannedFocusState((current) =>
+      current && current.productCode === detail.productCode && !current.focus
+        ? { ...current, focus: resolved }
+        : current,
+    );
+  }, [detail, scannedFocusState]);
+
+  // 切到「编码」页签时把扫到的那一行滚进视口；同一焦点只滚一次，之后由店员自己滚动。
+  useEffect(() => {
+    if (editorTab !== "codes" || !scannedCodeFocus) return;
+    const key = `${detail?.productCode ?? ""}:${scannedCodeFocus.barcode}`;
+    if (autoScrolledFocusKeyRef.current === key) return;
+    const timer = setTimeout(() => {
+      const row = highlightedCodeRowRef.current;
+      const scroll = scrollViewRef.current;
+      const container = scroll?.getInnerViewNode?.() ?? scroll;
+      if (!row || !scroll || !container) return;
+      try {
+        row.measureLayout(
+          container as unknown as number,
+          (_x, y) => {
+            autoScrolledFocusKeyRef.current = key;
+            // 留出焦点码条与页签的高度，让该行落在首屏上半部而不是贴着顶边。
+            scroll.scrollTo({ y: Math.max(y - 96, 0), animated: true });
+          },
+          () => undefined,
+        );
+      } catch {
+        // 原生节点尚未就绪时跳过，不影响行高亮本身。
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [detail?.productCode, detail?.setCodes.length, detail?.multiCodes.length, editorTab, scannedCodeFocus]);
 
   useEffect(() => {
     setClearancePriceInput(
@@ -2062,6 +2141,8 @@ function ProductQueryContent() {
       target: CodeLabelTarget,
       printType: string | null,
       withDiscountLabel = false,
+      /** 价格页签的按钮打子码时仍按 product / small 记忙碌态，让转圈落在按下的那个按钮上而不是码表行。 */
+      actionOverride?: PrintAction,
     ) => {
       if (target.retailPrice == null || !Number.isFinite(target.retailPrice)) {
         setSnackbarMessage(t(target.kind === "set"
@@ -2074,7 +2155,7 @@ function ProductQueryContent() {
         barcode: target.barcode,
         retailPrice: target.retailPrice,
         discountRate: target.discountRate,
-        action: `${target.kind}:${target.codeId}`,
+        action: actionOverride ?? `${target.kind}:${target.codeId}`,
         printType,
         withDiscountLabel,
       });
@@ -2098,7 +2179,8 @@ function ProductQueryContent() {
           codeId: target.codeId,
           barcode: target.barcode,
           retailPrice: target.retailPrice,
-          discountRate: 0,
+          // 套装子码的折扣跟保存后的主档门店价（套装行没有折扣字段），与多码同口径。
+          discountRate: savedDetail.storePrice?.discountRate ?? 0,
         }, printType, withDiscountLabel);
       }
       if (target?.kind === "multi" && target.codeId) {
@@ -2108,6 +2190,18 @@ function ProductQueryContent() {
           barcode: target.barcode,
           ...resolveMultiCodeLabelPrice(savedDetail),
         }, printType, withDiscountLabel);
+      }
+      // 没有服务端目标时用扫码焦点（本地码表 / 码表加载后补解析）：快路径的 dialog.detail 不含码表，
+      // 不能只靠下面按关键字在 dialog.detail 里重新匹配。
+      const focus = dialog.scanFocus;
+      if (!target && isSubCodeFocus(focus)) {
+        const focusTarget = resolveFocusLabelTarget(
+          { storePrice: savedDetail.storePrice, setCodes: dialog.detail.setCodes },
+          focus,
+        );
+        if (focusTarget) {
+          return sendCodeLabel(savedDetail, focusTarget, printType, withDiscountLabel);
+        }
       }
       const keyword = dialog.scanKeyword?.trim();
       if (!target && keyword) {
@@ -2133,11 +2227,55 @@ function ProductQueryContent() {
     [sendCodeLabel, sendProductLabel, smallLabel, t],
   );
 
+  /**
+   * 自动打印下的免确认调价：与弹窗「更新价格并更新标签」完全同一组写库参数，只是不等人点。
+   * 保存期间借用 autoPricingDialogSaving 闸门，防止连续扫码在落库中途插进来。
+   */
+  const applyAutoPricingWithoutPrompt = useCallback(
+    async (state: AutoPricingDialogState): Promise<AutoPricingDialogResolution> => {
+      const keepCameraOpen = state.scanSource === "camera" && cameraScanMode === "continuous";
+      setAutoPricingDialogSaving(true);
+      try {
+        const savedDetail = await persistStorePrice(state.detail, {
+          retailPrice:
+            state.evaluation.recalculatedRetailPrice ??
+            state.detail.storePrice?.retailPrice ??
+            null,
+          discountRate: normalizeDiscountRateValue(
+            state.evaluation.discountRate ?? state.detail.storePrice?.discountRate,
+          ),
+          isAutoPricing: true,
+        });
+        if (!savedDetail) {
+          return { status: "failed", keepCameraOpen, labelPrinted: false, updatedDetail: state.detail };
+        }
+        const labelPrinted = await sendAutoPricingLabel(savedDetail, state);
+        console.log("[product-query] auto pricing applied without prompt", {
+          from: state.evaluation.currentRetailPriceFormatted,
+          to: state.evaluation.recalculatedRetailPriceFormatted,
+          labelPrinted,
+        });
+        if (labelPrinted) {
+          // 打印失败时保留 sendProductLabel 给出的失败原因，不用这条覆盖。
+          setSnackbarMessage(t("messages.autoPricingAppliedPrinted", {
+            from: state.evaluation.currentRetailPriceFormatted || "--",
+            to: state.evaluation.recalculatedRetailPriceFormatted || "--",
+          }));
+        }
+        return { status: "confirmed", keepCameraOpen, labelPrinted, updatedDetail: savedDetail };
+      } finally {
+        setAutoPricingDialogSaving(false);
+      }
+    },
+    [cameraScanMode, persistStorePrice, sendAutoPricingLabel, t],
+  );
+
   const smartAutoPrint = useCallback(
     async (
       scanKeyword: string,
       targetDetail: ProductDetail,
       printTarget?: ScanLabelPrintTarget | null,
+      scanFocus?: ScannedCodeFocus | null,
     ) => {
       const kw = scanKeyword.trim();
 
@@ -2145,7 +2283,8 @@ function ProductQueryContent() {
         return sendProductLabel(targetDetail, {
           barcode: printTarget.barcode,
           retailPrice: printTarget.retailPrice,
-          discountRate: printTarget.discountRate ?? 0,
+          // 服务端套装目标不带折扣：套装子码的折扣跟主档门店价，与多码同口径。
+          discountRate: printTarget.discountRate ?? targetDetail.storePrice?.discountRate ?? 0,
           action: printTarget.kind === "product"
             ? "product"
             : `${printTarget.kind}:${printTarget.codeId}` as PrintAction,
@@ -2157,8 +2296,11 @@ function ProductQueryContent() {
       }
 
       // 无服务器 printTarget（离线、普通查询）时按扫到的码本地匹配：
-      // 套装子项打套装条码 + 套装价（不印折扣），多码打多码条码 + 主档价 + 主档折扣。
-      const resolved = printTarget ? null : resolveScannedCodeLabel(targetDetail, kw);
+      // 套装子项打套装条码 + 套装价 + 主档折扣，多码打多码条码 + 主档价 + 主档折扣。
+      // 扫码焦点（含码表加载后补解析的）优先于再按关键字匹配一遍。
+      const focusTarget =
+        !printTarget && isSubCodeFocus(scanFocus) ? resolveFocusLabelTarget(targetDetail, scanFocus) : null;
+      const resolved = printTarget ? null : focusTarget ?? resolveScannedCodeLabel(targetDetail, kw);
       if (resolved?.kind === "set" || resolved?.kind === "multi") {
         return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null, true);
       }
@@ -2209,6 +2351,7 @@ function ProductQueryContent() {
         scanSource?: ScanSource | null;
         scanKeyword?: string | null;
         printTarget?: ScanLabelPrintTarget | null;
+        scanFocus?: ScannedCodeFocus | null;
         autoPrintEnabled?: boolean;
       },
     ): Promise<LookupFlowResult> => {
@@ -2236,15 +2379,20 @@ function ProductQueryContent() {
           evaluation.recalculatedRetailPrice != null
         ) {
           playQueryFeedback("price_update_required");
-          const dialogResult = await openAutoPricingDialog({
+          const dialogState: AutoPricingDialogState = {
             detail: targetDetail,
             evaluation,
             scanSource,
             // 只有扫码才按扫到的码打子项标签；手动查询的关键字可能是商品名，仍打主档标签。
             scanKeyword: scanSource ? options?.scanKeyword ?? null : null,
             printTarget: options?.printTarget ?? null,
+            scanFocus: options?.scanFocus ?? null,
             autoPrintEnabled: options?.autoPrintEnabled === true,
-          });
+          };
+          // 自动打印开着就是「扫一下出一张」的连续贴标模式：需调价时不再弹确认框，直接按同一组参数落库并打标签。
+          const dialogResult = options?.autoPrintEnabled === true
+            ? await applyAutoPricingWithoutPrompt(dialogState)
+            : await openAutoPricingDialog(dialogState);
 
           return {
             keepCameraOpen: dialogResult.keepCameraOpen,
@@ -2289,6 +2437,7 @@ function ProductQueryContent() {
       }
     },
     [
+      applyAutoPricingWithoutPrompt,
       getErrorMessage,
       openAutoPricingDialog,
       persistStorePrice,
@@ -2318,6 +2467,7 @@ function ProductQueryContent() {
             options.scanKeyword ?? "",
             targetDetail,
             options.printTarget,
+            options.scanFocus,
           );
           return { ...DEFAULT_LOOKUP_FLOW_RESULT, labelPrinted };
         }
@@ -2328,6 +2478,7 @@ function ProductQueryContent() {
           scanSource: options.scanSource,
           scanKeyword: options.scanKeyword,
           printTarget: options.printTarget,
+          scanFocus: options.scanFocus,
           autoPrintEnabled: options.autoPrintEnabled,
         });
         if (autoPricingResult.autoPricingStatus === "no_action") {
@@ -2337,6 +2488,7 @@ function ProductQueryContent() {
               options.scanKeyword ?? "",
               targetDetail,
               options.printTarget,
+              options.scanFocus,
             );
             return { ...autoPricingResult, labelPrinted };
           }
@@ -2371,6 +2523,7 @@ function ProductQueryContent() {
         currentStorePrice?.storeProductCode,
         targetDetail.clearancePrice?.clearanceBarcode,
         options.printTarget?.barcode,
+        options.scanFocus?.barcode,
         ...targetDetail.setCodes.map((item) => item.setBarcode),
         ...targetDetail.multiCodes.map((item) => item.barcode),
       ];
@@ -2379,7 +2532,7 @@ function ProductQueryContent() {
         return DEFAULT_LOOKUP_FLOW_RESULT;
       }
       try {
-        const labelPrinted = await smartAutoPrint(scannedCode, targetDetail, options.printTarget);
+        const labelPrinted = await smartAutoPrint(scannedCode, targetDetail, options.printTarget, options.scanFocus);
         return { ...DEFAULT_LOOKUP_FLOW_RESULT, labelPrinted };
       } catch (error) {
         setSnackbarMessage(getErrorMessage(error, "messages.printFailed"));
@@ -2416,6 +2569,7 @@ function ProductQueryContent() {
         if (!items.length) {
           setDetail(null);
           setInitialDetail(null);
+          setScannedFocusState(null);
           activateHqSyncScope();
           setSelectedLookupProductCode(undefined);
           setLookupSelectionSource(null);
@@ -2478,6 +2632,20 @@ function ProductQueryContent() {
             const printTarget = fastResult
               ? getVerifiedScanPrintTarget(fastResult, nextKeyword, selectedStoreCode)
               : null;
+            // 扫码焦点：服务端目标优先，否则按详情里已有的码表本地匹配（快路径详情不含码表，码表加载后再补一次）。
+            const scanFocus = resolveScannedCodeFocus(nextDetail, nextKeyword, printTarget);
+            setScannedFocusState({
+              productCode: nextDetail.productCode,
+              storeCode: selectedStoreCode,
+              keyword: nextKeyword,
+              focus: scanFocus,
+              printMain: false,
+            });
+            console.log("[product-query] scanned-code focus", {
+              trigger,
+              kind: scanFocus?.kind ?? null,
+              source: scanFocus?.source ?? null,
+            });
             if (fastResult && continuousPrintEnabled && !printTarget) {
               setSnackbarMessage(t(nextDetail.storePrice
                 ? "messages.codesLoadFailed"
@@ -2502,6 +2670,7 @@ function ProductQueryContent() {
                 scanKeyword: nextKeyword,
                 autoPrintEnabled,
                 printTarget,
+                scanFocus,
               });
             } finally {
               if (presentAfterPrint) {
@@ -3125,6 +3294,7 @@ function ProductQueryContent() {
     }
     setKeyword("");
     setLookupItems([]);
+    setScannedFocusState(null);
     setSelectedLookupProductCode(undefined);
     loadedDetailStoreCodeRef.current = null;
     activeDetailProductCodeRef.current = null;
@@ -3158,10 +3328,22 @@ function ProductQueryContent() {
     try {
       const nextDetail = await loadDetail(selectedLookupProductCode);
       if (nextDetail) {
+        // 候选表确认后没有服务端打印目标：按扫到 / 输入的码在已加载码表里解析焦点。
+        const scanFocus = resolveScannedCodeFocus(nextDetail, keyword, null);
+        if (selectedStoreCode) {
+          setScannedFocusState({
+            productCode: nextDetail.productCode,
+            storeCode: selectedStoreCode,
+            keyword,
+            focus: scanFocus,
+            printMain: false,
+          });
+        }
         flowResult = await processLoadedDetail(nextDetail, {
           scanSource: selectionSource,
           scanKeyword: keyword,
           autoPrintEnabled: autoPrintOnLookupConfirm,
+          scanFocus,
         });
       }
     } catch (error) {
@@ -3196,6 +3378,7 @@ function ProductQueryContent() {
     processLoadedDetail,
     restoreScanAbility,
     selectedLookupProductCode,
+    selectedStoreCode,
     t,
   ]);
 
@@ -4115,10 +4298,11 @@ function ProductQueryContent() {
       await sendProductLabel(detail, {
         barcode: target.setBarcode.trim(),
         retailPrice: target.setRetailPrice,
-        // 套装标签不印折扣；必须显式传 0，否则打印层会回退到主档折扣。
-        discountRate: 0,
+        // 套装子码的折扣跟主档门店价（套装行没有折扣字段），与多码行同口径：有折扣就补打折扣标签。
+        discountRate: detail.storePrice?.discountRate ?? 0,
         action: `set:${setCodeId}`,
         printType: smallLabel ? "small" : null,
+        withDiscountLabel: true,
       });
     },
     [detail, sendProductLabel, smallLabel, t],
@@ -4166,6 +4350,9 @@ function ProductQueryContent() {
         return;
       }
 
+      // 扫到的是套装 / 多码子码且没切回主档：价格页签的按钮打该子码，而不是主条码 + 主档价。
+      const focusTarget = activePrintFocus ? resolveFocusLabelTarget(source, activePrintFocus) : null;
+
       if (
         (kind === "discount" || kind === "bigDiscount") &&
         !(source.storePrice?.discountRate && source.storePrice.discountRate > 0)
@@ -4182,6 +4369,18 @@ function ProductQueryContent() {
       setPrintingAction(kind);
       try {
         const printType = smallLabel ? "small" : null;
+        if ((kind === "product" || kind === "small") && focusTarget) {
+          // 套装：套装条码 + 套装价；多码：多码条码 + 主档价；折扣都跟主档门店价，「普通」有折扣再补打折扣标签（与码表行打印同口径）。
+          // 小标签按钮固定 60mm，不看打印设置里的小标签开关，与下方主档的小标签按钮一致。
+          await sendCodeLabel(
+            source,
+            focusTarget,
+            kind === "small" ? "small" : printType,
+            kind === "product",
+            kind,
+          );
+          return;
+        }
         if (kind === "product") {
           // 手动「普通」标签：有折扣时和自动打印一样，普通标签后接着补打折扣标签（折扣率是否 > 0 由 sendProductLabel 判定）。
           await sendProductLabel(source, { action: "product", printType, withDiscountLabel: true });
@@ -4191,14 +4390,17 @@ function ProductQueryContent() {
           await sendProductLabel(source, { action: "small", printType: "small" });
           return;
         } else if (kind === "discount") {
-          await printDiscountLabel(source, printType);
+          // 子码焦点：折扣标签换成扫到的子码条码；套装用套装价、多码用主档价，折扣率都取主档门店价。
+          const overrides = focusTarget ? { barcode: focusTarget.barcode, retailPrice: focusTarget.retailPrice } : undefined;
+          await printDiscountLabel(source, printType, overrides);
           for (let i = 1; i < printQuantity; i++) {
-            await printDiscountLabel(source, printType);
+            await printDiscountLabel(source, printType, overrides);
           }
         } else if (kind === "bigDiscount") {
-          await printBigDiscountLabel(source);
+          const overrides = focusTarget ? { barcode: focusTarget.barcode, retailPrice: focusTarget.retailPrice } : undefined;
+          await printBigDiscountLabel(source, undefined, overrides);
           for (let i = 1; i < printQuantity; i++) {
-            await printBigDiscountLabel(source);
+            await printBigDiscountLabel(source, undefined, overrides);
           }
         } else {
           await printClearanceLabel(source);
@@ -4217,10 +4419,12 @@ function ProductQueryContent() {
       }
     },
     [
+      activePrintFocus,
       detail,
       getErrorMessage,
       printQuantity,
       quantitySingleUse,
+      sendCodeLabel,
       sendProductLabel,
       smallLabel,
       t,
@@ -4239,6 +4443,11 @@ function ProductQueryContent() {
   }, []);
   const handleBigDiscountPrintPress = useCallback(() => {
     void handlePrintRef.current("bigDiscount");
+  }, []);
+  const handleTogglePrintMain = useCallback(() => {
+    setScannedFocusState((current) =>
+      current ? { ...current, printMain: !current.printMain } : current,
+    );
   }, []);
   const handleOpenPrinterSettings = useCallback(() => {
     // 就地弹出蓝牙打印机连接抽屉，不离开商品查询页。抽屉是原生 Modal，会压住 Paper Portal，
@@ -4670,6 +4879,8 @@ function ProductQueryContent() {
         // 默认 never：条码框带着键盘时，点「添加」的第一下只会被用来收键盘，表现为按钮点不灵。
         keyboardShouldPersistTaps="handled"
         pointerEvents={scannerInputBlocked ? "none" : "auto"}
+        // 切到「编码」页签时把扫到的那一行滚进视口要用到。
+        ref={scrollViewRef}
       >
         {!storePrice ? (
           // 门店名已移入价格卡页眉；未查到商品或当前分店无价格记录时在这里保留切换入口。
@@ -4777,6 +4988,29 @@ function ProductQueryContent() {
               }
               insightsDisabled={scannerInputBlocked}
             />
+
+            {scannedCodeFocus ? (
+              <ScannedCodeBanner
+                kind={scannedCodeFocus.kind}
+                barcode={focusLabelTarget?.barcode ?? scannedCodeFocus.barcode}
+                priceText={
+                  focusLabelTarget?.retailPrice != null
+                    ? `$${formatFixedDecimal(focusLabelTarget.retailPrice)}`
+                    : null
+                }
+                discountText={
+                  focusLabelTarget && focusLabelTarget.discountRate > 0
+                    ? `-${Math.round(focusLabelTarget.discountRate * 100)}%`
+                    : null
+                }
+                mainBarcode={detail.barcode}
+                mainPriceText={
+                  storePrice?.retailPrice != null ? `$${formatFixedDecimal(storePrice.retailPrice)}` : null
+                }
+                printMain={printMainInstead}
+                onTogglePrintMain={handleTogglePrintMain}
+              />
+            ) : null}
 
             <ProductPriceTaskCard
               key={`${selectedStoreCode ?? ""}:${detail.productCode}`}
@@ -4931,6 +5165,8 @@ function ProductQueryContent() {
                     loadingMore={codesLoadingMore}
                     hasMore={codesHasMore}
                     readOnly={offlineMode}
+                    highlightedBarcode={scannedCodeFocus?.kind === "set" ? scannedCodeFocus.barcode : null}
+                    highlightedRowRef={highlightedCodeRowRef}
                     onEditItemBarcode={
                       offlineMode ? notifyOfflineEditing : openEditSetCodeBarcode
                     }
@@ -4964,6 +5200,8 @@ function ProductQueryContent() {
                     loadingMore={codesLoadingMore}
                     hasMore={codesHasMore}
                     readOnly={offlineMode}
+                    highlightedBarcode={scannedCodeFocus?.kind === "multi" ? scannedCodeFocus.barcode : null}
+                    highlightedRowRef={highlightedCodeRowRef}
                     onEditItemBarcode={
                       offlineMode ? notifyOfflineEditing : openEditMultiCodeBarcode
                     }

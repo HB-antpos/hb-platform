@@ -138,7 +138,8 @@
     "hqSyncAttempt": "已尝试 {{count}} 次",
     "discountAutoPrintFailed": "普通标签已打印，折扣标签打印失败",
     "discountPrintUnavailable": "当前商品没有折扣信息，无法打印折扣标签",
-    "clearancePrintUnavailable": "当前商品没有清货信息，无法打印清货标签"
+    "clearancePrintUnavailable": "当前商品没有清货信息，无法打印清货标签",
+    "autoPricingAppliedPrinted": "自动价已更新：{{from}} → {{to}}，标签已打印"
   },
   "lookup": {
     "title": "选择匹配商品",
@@ -480,6 +481,16 @@
     },
     "label": "标签"
   },
+  "scanned": {
+    "chipSet": "扫到 · 套装码",
+    "chipMulti": "扫到 · 多码",
+    "chipMain": "改打主条码",
+    "toggleToMain": "打主条码",
+    "toggleToScanned": "打扫到的码",
+    "noteSet": "打印按钮打此码 · 折扣跟随主条码",
+    "noteMulti": "打印按钮打此码 · 价格跟随主条码",
+    "noteMain": "打印按钮改打主条码 + 主档价"
+  },
   "codes": {
     "loaded": "已加载 {{loaded}} / {{total}}",
     "barcodeColumn": "条码",
@@ -489,7 +500,8 @@
     "follow": "跟随",
     "loadMore": "加载更多（还有 {{count}} 个）",
     "saveRow": "保存该行",
-    "printRow": "打印该行标签"
+    "printRow": "打印该行标签",
+    "scannedRow": "本次扫到"
   },
   "nameEdit": {
     "action": "修改商品名称",

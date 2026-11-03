@@ -19,7 +19,12 @@ import {
   resolveWarehousePriceConfirmationFeedback,
   shouldAutoPrintWarehousePrice,
 } from "./warehouse-price-sync";
-import { resolveScannedCodeLabel, shouldAutoPrintDiscountLabel } from "./scan-label";
+import {
+  isSubCodeFocus,
+  resolveFocusLabelTarget,
+  resolveScannedCodeLabel,
+  shouldAutoPrintDiscountLabel,
+} from "./scan-label";
 import { resolveScanHighlight } from "../scanner/scan-highlight";
 
 // 执行页面真实详情后处理及扫码打印回调，只替换网络与打印机边界。
@@ -545,6 +550,8 @@ function createPageFlow(options: {
   scopeCurrent?: boolean;
   smallLabel?: boolean;
   printTarget?: Record<string, unknown> | null;
+  /** 扫码焦点（本地码表 / 码表加载后补解析）：模拟码表分页之外的码。 */
+  scanFocus?: Record<string, unknown> | null;
   print?: () => Promise<boolean>;
 } = {}) {
   const detail = options.detail ?? structuredClone(currentDetail);
@@ -571,6 +578,8 @@ function createPageFlow(options: {
       sendProductLabel,
       sendCodeLabel,
       resolveScannedCodeLabel,
+      isSubCodeFocus,
+      resolveFocusLabelTarget,
       smallLabel: options.smallLabel === true,
       printQuantity: 1,
       quantitySingleUse: false,
@@ -603,6 +612,7 @@ function createPageFlow(options: {
       scanKeyword: options.scanKeyword ?? "MAIN-1",
       autoPrintEnabled: options.autoPrintEnabled !== false,
       printTarget: options.printTarget ?? null,
+      scanFocus: options.scanFocus ?? null,
     }),
     prints, messages, feedback,
     get autoPricingCalls() { return autoPricingCalls; },
@@ -666,10 +676,10 @@ async function runAutoDiscountLabelRegression() {
   assert.deepEqual(twice.calls.map((call) => call.kind), ["product", "product", "discount", "discount"]);
   assert.deepEqual(twice.quantityResets, [1], "单次份数用完后复位");
 
-  // 不补打：没有折扣、显式折扣 0（套装子项）、调用方没带 withDiscountLabel（如「小标签」按钮）。
+  // 不补打：没有折扣、显式折扣 0、调用方没带 withDiscountLabel（如「小标签」按钮）。
   for (const [label, detail, printOptions] of [
     ["门店价无折扣", noDiscount, { withDiscountLabel: true }],
-    ["套装子项显式折扣 0", withDiscount, { barcode: "SET-1", retailPrice: 10, discountRate: 0, withDiscountLabel: true }],
+    ["显式折扣 0", withDiscount, { barcode: "SET-1", retailPrice: 10, discountRate: 0, withDiscountLabel: true }],
     ["调用方不带 withDiscountLabel", withDiscount, {}],
   ] as const) {
     const flow = createSendProductLabel();
@@ -740,7 +750,7 @@ async function runFoundFeedbackRegression() {
   console.log("商品查询找到提示音（折扣 / 促销 / 多码）回归通过");
 }
 
-// 执行页面真实的手动打印回调：「普通」按钮与多码子项补打折扣标签，「小标签」「折扣」与套码子项保持原样。
+// 执行页面真实的手动打印回调：「普通」按钮与套码 / 多码子项补打折扣标签，「小标签」「折扣」保持原样。
 async function runManualPrintRegression() {
   const withDiscount = structuredClone(currentDetail); // 主档折扣 0.2
   const sendOptions: { options?: PrintOptions }[] = [];
@@ -773,6 +783,9 @@ async function runManualPrintRegression() {
     getErrorMessage: (_error: unknown, fallback: string) => fallback,
     getMultiCodeItemId: (item: { id: string }) => item.id,
     resolveMultiCodeLabelPrice: () => ({ retailPrice: 5, discountRate: 0.2 }),
+    // 默认没有扫码焦点：价格页签的按钮打主档。
+    activePrintFocus: null,
+    resolveFocusLabelTarget,
   };
   const handlePrint = compileCallback<(kind: string) => Promise<void>>(handlePrintStatement, "handlePrint", common);
 
@@ -796,15 +809,16 @@ async function runManualPrintRegression() {
   assert.equal(codeCalls.length, 1);
   assert.equal(codeCalls[0][3], true, "多码子项手动打印带 withDiscountLabel");
 
-  // 套码子项手动打印：套装价不印折扣，不带 withDiscountLabel。
+  // 套码子项手动打印：套装条码 + 套装价 + 主档门店折扣（套装行没有折扣字段），与多码行同口径补打折扣标签。
   const handleSet = compileCallback<(id: string) => Promise<void>>(
     handlePrintSetCodeProductStatement, "handlePrintSetCodeProduct", {
       ...common,
       detail: { ...withDiscount, setCodes: [{ setCodeId: "set-id", setBarcode: "SET-1", setRetailPrice: 10 }] },
     });
   await handleSet("set-id");
-  assert.equal(sendOptions[2].options?.withDiscountLabel, undefined, "套码子项手动打印不补打折扣标签");
-  assert.equal(sendOptions[2].options?.discountRate, 0);
+  assert.equal(sendOptions[2].options?.withDiscountLabel, true, "套码子项手动打印补打折扣标签");
+  assert.equal(sendOptions[2].options?.discountRate, 0.2, "套码折扣跟主档门店价");
+  assert.equal(sendOptions[2].options?.retailPrice, 10, "套码标签价是套装价");
 
   // 真实 sendProductLabel 串联：手动「普通」标签 + 有折扣 -> 普通、折扣各一张；无折扣只打普通。
   for (const [label, detail, expected] of [
@@ -820,6 +834,34 @@ async function runManualPrintRegression() {
     await run("product");
     assert.deepEqual(real.calls.map((call) => call.kind), expected, `手动普通标签：${label}`);
   }
+
+  // 扫码焦点：扫到套装 / 多码子码后，价格页签的「普通」「小标签」按钮打该子码而不是主档。
+  const setFocus = { kind: "set", codeId: "set-id", barcode: "SET-1", retailPrice: 10, discountRate: 0.2, source: "server" };
+  const printWithSetFocus = compileCallback<(kind: string) => Promise<void>>(
+    handlePrintStatement, "handlePrint", { ...common, activePrintFocus: setFocus });
+  const codeCallsBefore = codeCalls.length;
+  const sendBefore = sendOptions.length;
+  const discountBefore = discountCalls.length;
+  await printWithSetFocus("product");
+  assert.deepEqual(codeCalls[codeCallsBefore]?.slice(1), [
+    { kind: "set", codeId: "set-id", barcode: "SET-1", retailPrice: 10, discountRate: 0.2 }, null, true, "product",
+  ], "套装焦点：普通按钮打套装条码 + 套装价 + 主档折扣，有折扣补打折扣标签，忙碌态记在 product 上");
+  await printWithSetFocus("small");
+  assert.deepEqual(codeCalls[codeCallsBefore + 1]?.slice(2), ["small", false, "small"], "套装焦点：小标签固定 60mm，不补打");
+  await printWithSetFocus("discount");
+  assert.equal(discountCalls.length, discountBefore + 1, "套装焦点下折扣按钮出纸");
+  assert.deepEqual(discountCalls.at(-1)?.[2], { barcode: "SET-1", retailPrice: 10 }, "套装焦点：折扣标签用套装条码 + 套装价，折扣率取主档");
+  assert.equal(sendOptions.length, sendBefore, "套装焦点下不走主档 sendProductLabel");
+
+  const multiFocus = { kind: "multi", codeId: "multi-id", barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, source: "server" };
+  const printWithMultiFocus = compileCallback<(kind: string) => Promise<void>>(
+    handlePrintStatement, "handlePrint", { ...common, activePrintFocus: multiFocus });
+  await printWithMultiFocus("product");
+  assert.deepEqual(codeCalls.at(-1)?.slice(1), [
+    { kind: "multi", codeId: "multi-id", barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2 }, null, true, "product",
+  ], "多码焦点：普通按钮打多码条码 + 主档价与折扣，有折扣补打折扣标签");
+  await printWithMultiFocus("discount");
+  assert.deepEqual(discountCalls.at(-1)?.[2], { barcode: "MULTI-1", retailPrice: 5 }, "多码焦点：折扣标签换成多码条码，价格仍是主档价");
   console.log("商品查询手动打印补打折扣标签回归通过");
 }
 
@@ -828,8 +870,8 @@ async function runPageRegression() {
     // 自动打印链路一律带 withDiscountLabel：普通标签之后有折扣再补打折扣标签（是否真有折扣由 sendProductLabel 判定）。
     ["MAIN-1", { printType: null, withDiscountLabel: true }],
     ["PRODUCT-1", { printType: null, withDiscountLabel: true }],
-    // 套装子项：套装条码 + 套装价，不印折扣（显式 0，避免打印层回退到主档折扣）。
-    ["SET-1", { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null, withDiscountLabel: true }],
+    // 套装子项：套装条码 + 套装价 + 主档门店折扣（套装行没有折扣字段，与多码同口径）。
+    ["SET-1", { barcode: "SET-1", retailPrice: 10, discountRate: 0.2, action: "set:set-id", printType: null, withDiscountLabel: true }],
     // 多码：多码条码 + 主档门店价 + 主档折扣。
     ["MULTI-1", { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, action: "multi:multi-id", printType: null, withDiscountLabel: true }],
   ] as const) {
@@ -871,6 +913,18 @@ async function runPageRegression() {
   assert.equal(missingCode.prints.length, 0, "未加载的多码不能回退打印主价");
   assert.deepEqual(missingCode.messages, ["messages.codesLoadFailed"]);
 
+  // 码表分页没含扫到的码、但扫码焦点已在码表加载后补解析出来：按焦点打套装标签，而不是报「条码列表加载失败」。
+  const lateFocus = createPageFlow({
+    scanKeyword: "SET-LATE",
+    detail: { ...structuredClone(currentDetail), setCodes: [] },
+    scanFocus: { kind: "set", codeId: "set-late", barcode: "SET-LATE", retailPrice: 7, discountRate: 0, source: "local" },
+  });
+  assert.equal((await lateFocus.run()).labelPrinted, true, "焦点码在已加载码表之外仍可自动打印");
+  assert.deepEqual(lateFocus.prints[0].options, {
+    barcode: "SET-LATE", retailPrice: 7, discountRate: 0.2, action: "set:set-late", printType: null, withDiscountLabel: true,
+  });
+  assert.deepEqual(lateFocus.messages, []);
+
   for (const storePrice of [
     { ...currentDetail.storePrice, uuid: "" },
     { ...currentDetail.storePrice, retailPrice: null },
@@ -898,7 +952,7 @@ async function runPageRegression() {
   assert.deepEqual(offlineMissing.messages, ["messages.codesLoadFailed"]);
   const offlineSet = createPageFlow({ offline: true, scanKeyword: "SET-1" });
   assert.equal((await offlineSet.run()).labelPrinted, true);
-  assert.deepEqual(offlineSet.prints[0].options, { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null, withDiscountLabel: true });
+  assert.deepEqual(offlineSet.prints[0].options, { barcode: "SET-1", retailPrice: 10, discountRate: 0.2, action: "set:set-id", printType: null, withDiscountLabel: true });
   const staleStore = createPageFlow({ scopeCurrent: false });
   assert.equal((await staleStore.run()).labelPrinted, false, "切店后的旧详情不打印");
   for (const print of [async () => false, async () => { throw new Error("printer disconnected"); }]) {

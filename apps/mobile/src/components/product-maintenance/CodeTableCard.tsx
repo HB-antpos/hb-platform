@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Card, IconButton, Text } from "react-native-paper";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -36,6 +37,10 @@ interface CodeTableCardProps {
    * 打印保留 —— 打标签是纯本地的蓝牙操作，断网时正是最需要的功能。
    */
   readOnly?: boolean;
+  /** 本次扫到的码所在行：绿底 + 左侧色条标出，便于在几十行里一眼找到。 */
+  highlightedId?: string | null;
+  /** 挂在高亮行上的 ref，页面用它把该行滚进视口。 */
+  highlightedRowRef?: Ref<View>;
 }
 
 /** 单行可容纳的条码最大长度：16 位在 PDA 放大字号下缩到约 80% 仍清晰，更长的改两行。 */
@@ -65,6 +70,8 @@ export function CodeTableCard({
   onAddItem,
   onLoadMore,
   readOnly = false,
+  highlightedId,
+  highlightedRowRef,
 }: CodeTableCardProps) {
   const { t } = useAppTranslation("productQuery");
   const remaining = totalCount != null ? Math.max(totalCount - rows.length, 0) : 0;
@@ -110,11 +117,16 @@ export function CodeTableCard({
       {rows.map((row) => {
         const saving = savingItemId === row.id;
         const printing = printingItemId === row.id;
+        const highlighted = highlightedId != null && highlightedId === row.id;
         return (
-          <View key={row.id} style={[styles.row, row.dirty ? styles.rowDirty : null]}>
+          <View
+            key={row.id}
+            ref={highlighted ? highlightedRowRef : undefined}
+            style={[styles.row, row.dirty ? styles.rowDirty : null, highlighted ? styles.rowHighlighted : null]}
+          >
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${t("codes.barcodeColumn")} ${row.barcode ?? "--"}`}
+              accessibilityLabel={`${highlighted ? `${t("codes.scannedRow")} ` : ""}${t("codes.barcodeColumn")} ${row.barcode ?? "--"}`}
               onPress={readOnly ? undefined : () => onEditItemBarcode(row.id)}
               style={[styles.cell, styles.barcodeColumn, row.dirty ? styles.cellDirty : null]}
             >
@@ -282,6 +294,13 @@ const styles = StyleSheet.create({
   },
   rowDirty: {
     backgroundColor: "#EAF2FF",
+  },
+  // 扫到的那一行：与「未保存」的蓝底区分开，用成功绿 + 左侧 3dp 色条；内边距同步减 3 保持对齐。
+  rowHighlighted: {
+    backgroundColor: "#F0FDF4",
+    borderLeftWidth: 3,
+    borderLeftColor: HB_COLORS.success,
+    paddingLeft: HB_SPACING.sm - 3,
   },
   cell: {
     minHeight: 36,
