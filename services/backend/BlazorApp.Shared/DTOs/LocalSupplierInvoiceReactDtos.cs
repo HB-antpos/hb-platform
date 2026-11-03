@@ -836,6 +836,11 @@ namespace BlazorApp.Shared.DTOs
         public decimal? NewAutoRetailPrice { get; set; }
 
         /// <summary>
+        /// 自动定价不可用的原因：自动定价开着但进货价低于下限（0.10）时填写，预览字段同时置空；前端按行提示。
+        /// </summary>
+        public string? AutoPricingUnavailableReason { get; set; }
+
+        /// <summary>
         /// 商品信息
         /// </summary>
         public ProductCheckInfoDto? ProductInfo { get; set; }
@@ -912,6 +917,9 @@ namespace BlazorApp.Shared.DTOs
         public int ProductNotExists { get; set; }
         public int BarcodeNormal { get; set; }
         public int BarcodeAbnormal { get; set; }
+
+        /// <summary>自动定价开着但进货价低于下限、没有生成自动零售价的行数，供完成提示说明。</summary>
+        public int AutoPricingUnavailable { get; set; }
     }
 
     /// <summary>

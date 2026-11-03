@@ -651,6 +651,8 @@ export interface ProductCheckResult {
   lastPurchasePrice?: number
   pricingFloatRate?: number
   newAutoRetailPrice?: number
+  /** 自动定价开着但进货价低于下限（0.10）时的原因；此时倍率与新自动零售价为空，行内按它提示。 */
+  autoPricingUnavailableReason?: string
   productInfo?: {
     productCode?: string
     productName?: string
@@ -678,6 +680,8 @@ export interface CheckProductsResponse {
     productNotExists: number
     barcodeNormal: number
     barcodeAbnormal: number
+    /** 自动定价开着但进货价低于下限、没生成自动零售价的行数；旧后端没有这个字段。 */
+    autoPricingUnavailable?: number
   }
 }
 

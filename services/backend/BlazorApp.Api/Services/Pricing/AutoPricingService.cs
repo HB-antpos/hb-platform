@@ -60,7 +60,7 @@ namespace BlazorApp.Api.Services.Pricing
         private static (decimal Theoretical, PricingStrategyDetail? Rule) ResolveTheoreticalRetail(
             decimal purchasePrice, PricingStrategy? strategy)
         {
-            if (purchasePrice < 0.1m)
+            if (purchasePrice < AutoPricingRules.MinPurchasePrice)
                 throw new ArgumentException("进货价必须至少为 0.10，才能满足尾数及 1.5～5 成率限制");
             // 交界归属：区间按下限排序后取第一个命中者，所以进货价恰好等于交界值时属于上一个区间（上限含、下限不含）。
             var rule = strategy?.Details?.OrderBy(d => d.MinPrice).FirstOrDefault(d =>

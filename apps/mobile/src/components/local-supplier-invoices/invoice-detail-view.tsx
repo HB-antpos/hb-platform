@@ -470,13 +470,15 @@ export function InvoiceDetailView({
         await loadDetails(false);
         await refreshHeader();
         const summary = outcome.summary;
+        // 低于自动定价下限的行不再让整单检测失败，但完成提示要说清楚有几行没生成自动零售价、该怎么处理。
+        const autoPricingUnavailable = summary?.autoPricingUnavailable ?? 0;
         notify(summary
-          ? t("detail.check.done", {
+          ? `${t("detail.check.done", {
             total: summary.total,
             exists: summary.productExists,
             notExists: summary.productNotExists,
             abnormal: summary.barcodeAbnormal,
-          })
+          })}${autoPricingUnavailable > 0 ? t("detail.check.autoPricingUnavailable", { count: autoPricingUnavailable }) : ""}`
           : t("detail.check.doneNoSummary"));
       } catch (error) {
         if (!unmountedRef.current) notify(getErrorMessage(error, "detail.check.failed"));

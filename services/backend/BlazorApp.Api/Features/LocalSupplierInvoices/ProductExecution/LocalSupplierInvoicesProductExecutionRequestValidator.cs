@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services.Pricing;
 using BlazorApp.Api.Services.Products;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -127,6 +128,13 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (string.IsNullOrWhiteSpace(detail.ItemNumber)) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：货号不能为空");
             if (string.IsNullOrWhiteSpace(detail.Barcode)) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：条码不能为空");
             if (detail.PurchasePrice == null || detail.PurchasePrice <= 0) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：进货价必须大于0");
+            // 自动定价开着且没有现成的新自动零售价时，写入阶段会按进货价算零售价；低于下限会在定价服务里抛异常，
+            // 这里提前拦成行级校验错误，整单零写入并告诉用户是哪一行、该怎么改。
+            if (detail.AutoPricing == true
+                && !(detail.NewAutoRetailPrice > 0)
+                && detail.PurchasePrice > 0
+                && !AutoPricingRules.SupportsAutoPricing(detail.PurchasePrice))
+                errors.Add($"明细 {detail.DetailGUID}（货号 {detail.ItemNumber ?? "--"}）新建商品失败：{AutoPricingRules.BelowMinimumHint}");
             if (!string.IsNullOrWhiteSpace(detail.ItemNumber) && !itemNumbers.Add(detail.ItemNumber.Trim())) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：本次执行内货号重复");
             if (!string.IsNullOrWhiteSpace(detail.Barcode) && !barcodes.Add(detail.Barcode.Trim())) errors.Add($"明细 {detail.DetailGUID} 新建商品失败：本次执行内条码重复");
 
