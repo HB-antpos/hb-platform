@@ -51,6 +51,7 @@ export function makeItem(overrides: Record<string, unknown> = {}): LocalSupplier
     newAutoRetailPrice: 1.5,
     isSpecialProduct: false,
     storeIsAutoPricing: true,
+    storeRetailPrice: null,
     ...overrides,
   } as LocalSupplierInvoiceItem;
 }
