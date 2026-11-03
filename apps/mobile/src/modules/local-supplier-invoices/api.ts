@@ -320,6 +320,7 @@ export function normalizeInvoiceItem(raw: unknown): LocalSupplierInvoiceItem {
     newAutoRetailPrice: asNullableNumber(pick(item, "newAutoRetailPrice", "NewAutoRetailPrice")),
     isSpecialProduct: asBool(pick(item, "isSpecialProduct", "IsSpecialProduct")),
     storeIsAutoPricing: asNullableBool(pick(item, "storeIsAutoPricing", "StoreIsAutoPricing")),
+    storeRetailPrice: asNullableNumber(pick(item, "storeRetailPrice", "StoreRetailPrice")),
   };
 }
 

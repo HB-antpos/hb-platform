@@ -153,6 +153,11 @@ export interface LocalSupplierInvoiceItem {
   isSpecialProduct: boolean;
   /** 本店分店价格表里的自动定价状态，仅展示；与本行要写入的 autoPricing 不同。 */
   storeIsAutoPricing: boolean | null;
+  /**
+   * 本店分店价格表里的当前零售价，与 storeIsAutoPricing 同一条记录，仅展示；未匹配商品或本店未建价格时为 null。
+   * 与 retailPrice（本行指定零售价，「更新到分店」优先写入它）不同，绝不能回填进 retailPrice。
+   */
+  storeRetailPrice: number | null;
 }
 
 /** 表头可编辑字段（对应 Web UpdateInvoiceRequest 中本页实际发送的 5 项）。 */
