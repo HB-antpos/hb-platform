@@ -180,6 +180,13 @@ namespace BlazorApp.Shared.DTOs
         /// 未匹配商品或该分店还没有分店价格记录时为空。与明细自身的 AutoPricing（执行时要写入的定价方案）不是一回事。
         /// </summary>
         public bool? StoreIsAutoPricing { get; set; }
+
+        /// <summary>
+        /// 本单分店当前的零售价（StoreRetailPrice.StoreRetailPriceValue），与 StoreIsAutoPricing 取自同一条记录，仅查询展示。
+        /// 与明细自身的 RetailPrice（指定零售价）不是一回事：「更新到分店」按 固定值 → 指定零售价 → 新自动零售价 取值，
+        /// 若把本店现价回填进 RetailPrice，会把旧价原样写回、新价永远生效不了，所以只能作为独立的只读字段。
+        /// </summary>
+        public decimal? StoreRetailPrice { get; set; }
     }
 
     public class UpdateLastPurchasePricesRequest

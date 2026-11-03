@@ -236,6 +236,9 @@
       "empty": "--"
     },
     "retailPrice": "Retail",
+    "retailStore": "Store",
+    "retailStoreWithPrice": "Store {{price}}",
+    "retailMarkup": "×{{rate}}",
     "amount": "Amount",
     "filteredOfTotal": "{{filtered}} of {{total}} lines",
     "totalRows": "{{total}} lines",

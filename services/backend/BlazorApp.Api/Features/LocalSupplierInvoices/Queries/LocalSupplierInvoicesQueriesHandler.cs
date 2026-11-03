@@ -1270,9 +1270,9 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         }
 
         /// <summary>
-        /// 回填本单分店当前的商品自动定价状态。分店价格表没有 (分店, 商品) 唯一约束，
+        /// 回填本单分店当前的商品自动定价状态与零售价（只读展示）。分店价格表没有 (分店, 商品) 唯一约束，
         /// 直接 LeftJoin 可能把一行明细翻成多行，所以分页查完后再按本页商品批量查一次；
-        /// 同一商品有多条有效记录时取最近更新的那条，与「当前状态」的含义一致。
+        /// 同一商品有多条有效记录时取最近更新的那条，与「当前状态」的含义一致，两个字段取自同一条记录。
         /// </summary>
         private static async Task MarkStoreAutoPricingAsync(
             ISqlSugarClient db,
@@ -1294,7 +1294,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (storeCodes.Count == 0 || productCodes.Count == 0)
                 return;
 
-            var statusByKey = new Dictionary<string, bool>(StringComparer.Ordinal);
+            var statusByKey = new Dictionary<string, (bool IsAutoPricing, decimal? RetailPrice)>(StringComparer.Ordinal);
             // 按 1000 个商品一批查询，避免整单明细很多时 IN 参数超过 SQL Server 上限。
             foreach (var chunk in productCodes.Chunk(1000))
             {
@@ -1307,14 +1307,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         && storeCodes.Contains(x.StoreCode)
                         && x.IsDeleted == false
                     )
-                    .Select(x => new { x.StoreCode, x.ProductCode, x.IsAutoPricing, x.UpdatedAt, x.CreatedAt })
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.IsAutoPricing, x.StoreRetailPriceValue, x.UpdatedAt, x.CreatedAt })
                     .ToListAsync();
                 foreach (var group in rows.GroupBy(x => $"{x.StoreCode}\u001f{x.ProductCode}"))
                 {
-                    statusByKey[group.Key] = group
+                    var latest = group
                         .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
-                        .First()
-                        .IsAutoPricing;
+                        .First();
+                    statusByKey[group.Key] = (latest.IsAutoPricing, latest.StoreRetailPriceValue);
                 }
             }
 
@@ -1322,8 +1322,12 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             {
                 if (string.IsNullOrWhiteSpace(item.StoreCode) || string.IsNullOrWhiteSpace(item.ProductCode))
                     continue;
-                if (statusByKey.TryGetValue($"{item.StoreCode}\u001f{item.ProductCode}", out var isAuto))
-                    item.StoreIsAutoPricing = isAuto;
+                if (statusByKey.TryGetValue($"{item.StoreCode}\u001f{item.ProductCode}", out var storePricing))
+                {
+                    item.StoreIsAutoPricing = storePricing.IsAutoPricing;
+                    // 只读展示：不能回填进明细的 RetailPrice（指定零售价），见 DTO 注释。
+                    item.StoreRetailPrice = storePricing.RetailPrice;
+                }
             }
         }
 

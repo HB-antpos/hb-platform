@@ -236,6 +236,9 @@
       "empty": "--"
     },
     "retailPrice": "零售价",
+    "retailStore": "本店",
+    "retailStoreWithPrice": "本店 {{price}}",
+    "retailMarkup": "×{{rate}}",
     "amount": "金额",
     "filteredOfTotal": "筛选后 {{filtered}} / 共 {{total}} 行",
     "totalRows": "共 {{total}} 行",
