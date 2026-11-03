@@ -125,11 +125,16 @@ assertDeepEqual(
     isSpecial: true,
     discount: { percent: 12.5, text: "12.5%" },
     newAutoRetailPrice: 4.5,
+    belowMinimum: false,
     storeStatus: "auto",
   },
   "自动定价摘要"
 );
 assertEqual(getPricingSummary(makeItem({ autoPricing: true, pricingFloatRate: null })).mode, "autoNoRate", "自动但无倍率");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, pricingFloatRate: null, purchasePrice: 0.023 })).belowMinimum, true, "自动定价且进货价低于 0.10 要提示原因");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, purchasePrice: 0.1 })).belowMinimum, false, "正好 0.10 可以自动定价");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, purchasePrice: 0 })).belowMinimum, false, "进货价为 0 走无进货价提示，不算低价");
+assertEqual(getPricingSummary(makeItem({ autoPricing: false, purchasePrice: 0.05 })).belowMinimum, false, "手动定价不受下限约束");
 assertEqual(getPricingSummary(makeItem({ autoPricing: false })).mode, "manual", "手动");
 assertEqual(getPricingSummary(makeItem({ autoPricing: null })).mode, "unset", "未设置显示 --");
 assertEqual(getPricingSummary(makeItem({ autoPricing: false, pricingFloatRate: 2 })).floatRate, null, "非自动模式不带倍率");
