@@ -37,7 +37,7 @@
     "minorAge": "{{age}} 岁 · 未成年",
     "guardian": {
       "title": "监护人",
-      "description": "未满 18 岁必须填写。创建后可在员工详情里给家长发英文签字链接（邮件 + 短信）。",
+      "description": "未满 16 岁必须填写。创建后可在员工详情里给家长发英文签字链接（邮件 + 短信）。",
       "name": "监护人姓名",
       "relationship": "关系",
       "phone": "监护人手机",
@@ -70,7 +70,7 @@
       "birthdayInvalid": "生日无效：不能晚于今天，也不能早于 1940 年",
       "phoneRequired": "请填写有效的电话",
       "emailRequired": "请填写邮箱",
-      "guardianRequired": "员工未满 18 岁，必须填写监护人姓名、关系、手机和邮箱",
+      "guardianRequired": "员工未满 16 岁，必须填写监护人姓名、关系、手机和邮箱",
       "guardianPhoneInvalid": "监护人手机必须是 04 开头的澳洲手机号",
       "guardianEmailInvalid": "监护人邮箱格式无效",
       "guardianDuplicate": "监护人的手机和邮箱不能和员工本人相同"

@@ -5,7 +5,7 @@
  * 页面只做只读说明，不提供角色或分店选择；其他角色 / 分店请找管理员。
  * 邮箱必填，默认作为账号；「允许登录 App 和 Web」默认关闭——关闭时只建账号与资料（考勤、排班等照常使用），
  * 不发密码邮件；开启时系统给员工邮箱发初始密码，员工用它登录并自己设密码，店长全程不经手密码。
- * 电话、生日必填；生日未满 18 岁时在「登录信息」之前出现「监护人」一节（设计图 7），规则见 new-staff-profile.ts。
+ * 电话、生日必填；生日未满 16 岁时在「登录信息」之前出现「监护人」一节（设计图 7），规则见 new-staff-profile.ts。
  */
 import { useCallback, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -394,7 +394,7 @@ export function StaffCreateScreen({ storeCode: requestedStoreCode }: { storeCode
           />
         </View>
 
-        {/* 未满 18 岁才出现；改回成年生日时收起，已填内容保留但不提交。 */}
+        {/* 未满 16 岁才出现；改回 16 岁以上的生日时收起，已填内容保留但不提交。 */}
         {minor ? (
           <View onLayout={anchor("guardian")}>
             <NewStaffGuardianSection

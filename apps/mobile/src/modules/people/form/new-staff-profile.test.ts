@@ -37,11 +37,12 @@ assert.equal(validateNewStaffBirthday("2026-10-31", today), "invalid", "明天�
 assert.equal(validateNewStaffBirthday("2011-02-30", today), "invalid", "不存在的日期");
 assert.equal(validateNewStaffBirthday("2011/03/02", today), "invalid");
 
-// ── 年龄与未成年：满 18 岁当天起算成年（与后端 AgeOn 一致）──
+// ── 年龄与未成年：满 16 岁当天起不再要监护人（门槛与后端 MinorAgeLimit 一致；周岁算法与 AgeOn 一致）──
 assert.deepEqual(resolveNewStaffAge("1998-07-21", today), { age: 28, minor: false });
 assert.deepEqual(resolveNewStaffAge("2011-03-02", today), { age: 15, minor: true });
-assert.deepEqual(resolveNewStaffAge("2008-10-30", today), { age: 18, minor: false }, "18 岁生日当天已成年");
-assert.deepEqual(resolveNewStaffAge("2008-10-31", today), { age: 17, minor: true }, "18 岁生日前一天仍未成年");
+assert.deepEqual(resolveNewStaffAge("2010-10-30", today), { age: 16, minor: false }, "16 岁生日当天不再要监护人");
+assert.deepEqual(resolveNewStaffAge("2010-10-31", today), { age: 15, minor: true }, "16 岁生日前一天仍要监护人");
+assert.deepEqual(resolveNewStaffAge("2008-10-31", today), { age: 17, minor: false }, "17 岁不再算未成年合规对象");
 assert.equal(resolveNewStaffAge("", today), null);
 assert.equal(resolveNewStaffAge("1939-12-31", today), null, "无效生日不显示年龄");
 assert.equal(isNewStaffMinor("", today), false, "没填生日不出现监护人一节");

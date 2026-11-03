@@ -287,7 +287,7 @@
       "versionConflict": "资料已被其他人更新，已刷新，请核对后重新操作。",
       "invalidStatus": "当前状态不能执行这个操作，请刷新后重试。",
       "dobRequired": "员工资料缺少出生日期，请先补充。",
-      "notMinor": "该员工已满 18 岁，无需家长签字。",
+      "notMinor": "该员工已满 16 岁，无需家长签字。",
       "forbidden": "你没有管理该员工所在门店的权限。",
       "stateUnconfirmed": "无法确定员工所在门店属于 NSW 还是 QLD，请先补全门店地址或时区。",
       "storeRequired": "没有找到员工的主门店，无法确定工作州。",

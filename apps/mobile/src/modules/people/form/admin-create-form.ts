@@ -8,7 +8,7 @@
  * 店长角色由后端按「管理」分店派生。第一步成功后账号已经存在，无法回滚，因此第二步失败时：
  * 不重复创建，只重试第二步，并明确告知用户是哪一步失败。
  *
- * 电话、生日必填；未满 18 岁时监护人四项必填（与后端 NewStaffProfileRules 一致，规则见 new-staff-profile.ts）。
+ * 电话、生日必填；未满 16 岁时监护人四项必填（与后端 NewStaffProfileRules 一致，规则见 new-staff-profile.ts）。
  */
 import { buildCreateNameBody, isPersonNameEmpty } from "./person-form";
 import {
@@ -43,7 +43,7 @@ export interface AdminCreateFormValues {
   phone: string;
   /** 必填；YYYY-MM-DD，未选为空串。 */
   birthday: string;
-  /** 只在生日未满 18 岁时显示与提交；改回成年后保留已填内容但不提交。 */
+  /** 只在生日未满 16 岁时显示与提交；改回 16 岁以上后保留已填内容但不提交。 */
   guardian: NewStaffGuardianInput;
   /** 立即启用：关闭则创建为停用账号。 */
   enabled: boolean;
