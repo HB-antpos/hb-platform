@@ -18,7 +18,9 @@ export function getVerifiedScanPrintTarget(
     candidate.productCode !== detail.productCode ||
     target.productCode !== detail.productCode ||
     target.storeCode !== storeCode ||
-    (target.kind !== "clearance" &&
+    // 套装标签只用套装价，不依赖主档门店价：主档在本店没有价格行（快路径不补建）时也要能打套装码。
+    // 多码价跟随主档、主条码打主档价，二者仍要求同店门店价行存在。
+    (target.kind !== "clearance" && target.kind !== "set" &&
       (detail.storePrice?.storeCode !== storeCode || !detail.storePrice?.uuid.trim())) ||
     target.retailPrice == null ||
     !Number.isFinite(target.retailPrice) ||
@@ -87,7 +89,8 @@ export function resolveMultiCodeLabelPrice(
 
 /**
  * 按本次扫到的码决定打哪种标签（无服务器 printTarget 时使用：离线、普通查询、自动定价确认后）。
- * - 套装子项（类型 1）：套装条码 + 套装价（详情里已是门店套装价优先），按业务规则不印折扣；
+ * - 套装子项（类型 1）：套装条码 + 套装价（详情里已是门店套装价优先）+ 主档门店折扣
+ *   （套装行没有自己的折扣字段；2026-11-03 起套装子码与多码同口径，可带折扣）；
  * - 多码子项（类型 2）：多码条码 + 主档门店价 + 主档折扣；
  * - 主条码 / 货号 / 商品编码 / 店内码：主档标签；
  * - 都没命中（码表分页未加载到该码）返回 null，调用方不能回退打印主档条码和价格。
@@ -106,7 +109,7 @@ export function resolveScannedCodeLabel(
       codeId: set.setCodeId,
       barcode: set.setBarcode!.trim(),
       retailPrice: set.setRetailPrice ?? null,
-      discountRate: 0,
+      discountRate: detail.storePrice?.discountRate ?? 0,
     };
   }
 
@@ -133,6 +136,115 @@ export function resolveScannedCodeLabel(
   ];
   if (productCodes.some((value) => normalizeCode(value) === code)) {
     return { kind: "product" };
+  }
+  return null;
+}
+
+/**
+ * 本次扫到的码（会话内「扫码焦点」）：页面上的焦点码条、价格页签的打印入口都以它为准，
+ * 这样扫到套装 / 多码子码后，哪怕自动打印没打成，店员手按「普通」打出来的也是这个码而不是主档。
+ */
+export interface ScannedCodeFocus {
+  kind: "set" | "multi" | "product" | "clearance";
+  codeId: string | null;
+  barcode: string;
+  /** 解析时的价格快照。套装用它兜底；多码 / 主档打印时一律按当前详情重新取价（见 resolveFocusLabelTarget）。 */
+  retailPrice: number | null;
+  discountRate: number;
+  /** server：服务端核对过的打印目标；local：按已加载码表 / 主档字段本地匹配。 */
+  source: "server" | "local";
+}
+
+/** 套装 / 多码子码焦点：只有这两类会改变价格页签打印入口的目标。 */
+export type ScannedSubCodeFocus = ScannedCodeFocus & { kind: "set" | "multi" };
+
+export function isSubCodeFocus(focus: ScannedCodeFocus | null | undefined): focus is ScannedSubCodeFocus {
+  return focus?.kind === "set" || focus?.kind === "multi";
+}
+
+/**
+ * 解析扫码焦点：优先服务端核对过的 printTarget，其次本地码表精确匹配；都没命中返回 null
+ * （码表分页未加载到该码时，由调用方在码表加载后再试一次）。手动查询的关键字恰好等于某个码时同样成立；
+ * 商品名之类的模糊关键字不会精确命中，天然不设焦点。
+ */
+export function resolveScannedCodeFocus(
+  detail: ProductDetail,
+  scannedCode: string,
+  printTarget?: ScanLabelPrintTarget | null,
+): ScannedCodeFocus | null {
+  if (printTarget) {
+    return {
+      kind: printTarget.kind,
+      codeId: printTarget.codeId,
+      barcode: printTarget.barcode,
+      retailPrice: printTarget.retailPrice,
+      // 服务端套装目标不带折扣（套装行没有折扣字段）：套装子码的折扣跟主档门店价；
+      // 清货标签没有折扣；多码 / 主档服务端给 null 时按 0。
+      discountRate:
+        printTarget.kind === "clearance"
+          ? 0
+          : printTarget.kind === "set"
+            ? detail.storePrice?.discountRate ?? 0
+            : printTarget.discountRate ?? 0,
+      source: "server",
+    };
+  }
+
+  const resolved = resolveScannedCodeLabel(detail, scannedCode);
+  if (!resolved) return null;
+  if (resolved.kind === "set" || resolved.kind === "multi") {
+    return { ...resolved, source: "local" };
+  }
+  if (resolved.kind === "clearance") {
+    return {
+      kind: "clearance",
+      codeId: detail.clearancePrice?.uuid ?? null,
+      barcode: detail.clearancePrice?.clearanceBarcode?.trim() || scannedCode.trim(),
+      retailPrice: detail.clearancePrice?.clearancePrice ?? null,
+      discountRate: 0,
+      source: "local",
+    };
+  }
+  return {
+    kind: "product",
+    codeId: detail.storePrice?.uuid ?? null,
+    barcode: detail.barcode?.trim() || scannedCode.trim(),
+    retailPrice: detail.storePrice?.retailPrice ?? null,
+    discountRate: detail.storePrice?.discountRate ?? 0,
+    source: "local",
+  };
+}
+
+/**
+ * 焦点码对应的子码打印目标，价格按「当前」详情取，而不是解析时的快照：
+ * - 套装：优先码表里同一行（同 setCodeId 或同条码）的套装价，码表没加载到该行时才用快照；折扣跟主档门店价；
+ * - 多码：主档门店价 + 主档折扣（与 resolveMultiCodeLabelPrice 同口径），调价保存后自动跟新价。
+ * 主条码 / 清货码不是子码标签，返回 null，调用方走原有主档 / 清货打印。
+ */
+export function resolveFocusLabelTarget(
+  detail: Pick<ProductDetail, "storePrice" | "setCodes">,
+  focus: ScannedCodeFocus,
+): CodeLabelTarget | null {
+  if (focus.kind === "set") {
+    const code = normalizeCode(focus.barcode);
+    const row = detail.setCodes.find(
+      (item) => item.setCodeId === focus.codeId || normalizeCode(item.setBarcode) === code,
+    );
+    return {
+      kind: "set",
+      codeId: row?.setCodeId ?? focus.codeId ?? "",
+      barcode: row?.setBarcode?.trim() || focus.barcode,
+      retailPrice: row?.setRetailPrice ?? focus.retailPrice,
+      discountRate: detail.storePrice?.discountRate ?? 0,
+    };
+  }
+  if (focus.kind === "multi") {
+    return {
+      kind: "multi",
+      codeId: focus.codeId ?? "",
+      barcode: focus.barcode,
+      ...resolveMultiCodeLabelPrice(detail),
+    };
   }
   return null;
 }
