@@ -19,7 +19,7 @@ const STATUS_LABELS: Record<string, [string, string]> = {
 };
 
 /**
- * 店长查看可管理门店里未满 18 岁的员工及其资料进度。
+ * 店长查看可管理门店里未满 16 岁的员工及其资料进度。
  * 员工本人不再填写：「去发送家长签字链接」跳到该员工的人员详情，在「未成年用工合规」一节里给家长发链接。
  */
 export function MinorEmployeeRequestsPanel({
@@ -51,8 +51,8 @@ export function MinorEmployeeRequestsPanel({
         <View style={styles.headerText}>
           <Text style={styles.muted}>
             {label(
-              "按员工资料里的生日计算，只列出你管理门店里未满 18 岁的员工。QLD 学龄儿童开工前须有监护人签署的 CE1；NSW 为公司要求。资料由你在员工详情里发送给家长填写并签字，员工本人无需操作。",
-              "Employees under 18 in your stores, by profile birthday. QLD school-aged children need a signed CE1 before starting; NSW is company policy. Send the form to the guardian from the employee's details; the employee doesn't need to do anything.",
+              "按员工资料里的生日计算，只列出你管理门店里未满 16 岁的员工。QLD 学龄儿童开工前须有监护人签署的 CE1；NSW 为公司要求。资料由你在员工详情里发送给家长填写并签字，员工本人无需操作。",
+              "Employees under 16 in your stores, by profile birthday. QLD school-aged children need a signed CE1 before starting; NSW is company policy. Send the form to the guardian from the employee's details; the employee doesn't need to do anything.",
             )}
           </Text>
           {query.isError ? (
@@ -67,7 +67,7 @@ export function MinorEmployeeRequestsPanel({
           <ActivityIndicator />
         ) : !query.isError ? (
           <Text style={styles.muted}>
-            {label("没有未满 18 岁的员工", "No employees under 18")}
+            {label("没有未满 16 岁的员工", "No employees under 16")}
           </Text>
         ) : null
       }

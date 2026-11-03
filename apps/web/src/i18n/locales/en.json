@@ -3088,6 +3088,7 @@
         "store": "Store",
         "stores": "Stores",
         "employee": "Employee",
+        "ageBadge": "Age {{age}}",
         "employeeGuid": "Employee GUID",
         "workDate": "Work Date",
         "shift": "Shift",

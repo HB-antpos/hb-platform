@@ -161,13 +161,13 @@ interface ScheduleRow {
   userGuid: string;
   employeeName?: string;
   employmentType?: EmploymentTypeCode;
-  /** 仅未成年员工有值。 */
+  /** 仅 21 岁以下员工有值（后端 ResolveMinorAge 只给 JuniorAgeLimit 以内的周岁，青少年时薪按年龄计）。 */
   age?: number;
   isStoreManager?: boolean;
   schedules: AttendanceSchedule[];
 }
 
-// F/P/C 用不同色系区分，未成年年龄用警示色提醒排班注意工时限制。
+// F/P/C 用不同色系区分，21 岁以下的年龄用警示色提醒排班注意工时限制与按年龄计的时薪。
 // F/P/C 用实心色块区分（蓝/绿/紫、白字），与浅底的状态、经理、年龄标签明显不同，一眼可辨。
 const EMPLOYMENT_TYPE_COLORS: Record<EmploymentTypeCode, string> = {
   F: "#175CD3",

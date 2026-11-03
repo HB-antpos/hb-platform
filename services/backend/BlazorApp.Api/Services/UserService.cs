@@ -1304,7 +1304,7 @@ namespace BlazorApp.Api.Services
                         await db.Insertable(userStores).ExecuteCommandAsync();
                     }
 
-                    // 新建员工带了生日 / 电话：写入员工资料；未满 18 岁时同一事务里预建未成年合规草稿（控制器已校验必填）。
+                    // 新建员工带了生日 / 电话：写入员工资料；未满 16 岁时同一事务里预建未成年合规草稿（控制器已校验必填）。
                     if (dto.Birthday.HasValue || !string.IsNullOrWhiteSpace(dto.Phone))
                     {
                         await db.Insertable(new EmployeeProfile

@@ -11,7 +11,7 @@ export const minorEmploymentApi = {
     const r = await apiClient.get(`${BASE}/me`);
     return r.data == null ? null : mapProfile(r.data);
   },
-  /** 店长：可管理门店里未满 18 岁的员工及其档案状态。 */
+  /** 店长：可管理门店里未满 16 岁的员工及其档案状态。 */
   async getManagerCandidates(storeCode?: string) {
     const data = (
       await apiClient.get(`${BASE}/manager/candidates`, {

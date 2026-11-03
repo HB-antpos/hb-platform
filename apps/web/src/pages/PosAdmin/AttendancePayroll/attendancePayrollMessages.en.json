@@ -90,7 +90,7 @@
       "confirmHoliday": "Confirm {{hours}} h paid",
       "holidayDone": "Paid public holiday handled",
       "birthdayTitle": "{{name}} turns {{age}} on {{date}}",
-      "minorSuffix": " (under 18): ",
+      "minorSuffix": " (under 21): ",
       "birthdayMinorBody": "Age-based pay rates may need updating; check the pay rates tab.",
       "gotIt": "Got it",
       "openRates": "Open pay rates"
@@ -187,7 +187,7 @@
       "minorMissing": "Age {{age}} not set",
       "belowMinimum": "Low",
       "birthdayHint": "{{name}} turned {{age}} on {{date}} but the rate was set at age {{previous}}; check it and add a new effective record.",
-      "footnote": "Set the minimum rate yourself from each employee's award level and age; any tier below it is shown in red. Under-18s are flagged after their birthday.",
+      "footnote": "Set the minimum rate yourself from each employee's award level and age; any tier below it is shown in red. Under-21s are flagged after their birthday.",
       "fromProfile": " (from staff profile)",
       "payMode": "Payment method",
       "fixedHours": "Fixed transfer hours",

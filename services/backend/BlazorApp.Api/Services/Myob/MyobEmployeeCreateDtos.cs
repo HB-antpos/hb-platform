@@ -10,7 +10,7 @@ namespace BlazorApp.Api.Services.Myob;
 //   POST /api/react/v1/myob/employee-create        Body MyobCreateFromMyobRequest      → MyobCreateFromMyobResult
 //
 // 建账号复用手机端「新建员工」同一套服务（StoreUserReactService.CreateAsync）：固定 StoreStaff 角色、按分店范围校验、
-// 新员工必填规则（未满 18 岁要监护人）、未成年合规草稿、首次登录强制改密 / 邮件发初始密码，都与那边一致。
+// 新员工必填规则（未满 16 岁要监护人）、未成年合规草稿、首次登录强制改密 / 邮件发初始密码，都与那边一致。
 
 /// <summary>草稿里可选的分店（只含当前账号能为其建员工的分店）。</summary>
 public sealed class MyobCreateStoreOptionDto
@@ -95,7 +95,7 @@ public sealed class MyobCreateDraftDto
     /// <summary>按悉尼今天算的周岁；没有生日为 null。</summary>
     public int? Age { get; set; }
 
-    /// <summary>未满 18 岁：建档必须填监护人四项（MYOB 没有，只能人工补）。</summary>
+    /// <summary>未满 16 岁：建档必须填监护人四项（MYOB 没有，只能人工补）。</summary>
     public bool IsMinor { get; set; }
 
     /// <summary>按 MYOB EmploymentStatus 对应的我方用工类型：FullTime / PartTime / Temporary；对应不上为 null（必须人工选）。</summary>
@@ -132,7 +132,7 @@ public sealed class MyobCreateFromMyobRequest
 
     public DateTime? Birthday { get; set; }
 
-    /// <summary>只在生日未满 18 岁时提交。</summary>
+    /// <summary>只在生日未满 16 岁时提交。</summary>
     public NewStaffGuardianDto? Guardian { get; set; }
 
     public string StoreCode { get; set; } = string.Empty;

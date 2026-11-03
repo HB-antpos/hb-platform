@@ -149,7 +149,7 @@
       "birthdayPlaceholder": "选择生日",
       "age": "{{age}} 岁",
       "ageMinor": "{{age}} 岁 · 未成年",
-      "guardianTitle": "监护人（未满 18 岁必填）",
+      "guardianTitle": "监护人（未满 16 岁必填）",
       "guardianHint": "创建后可在「员工个人信息维护 → 未成年用工合规」或手机「人员管理」里给家长发送英文签字链接。",
       "guardianName": "监护人姓名",
       "guardianNameRequired": "请输入监护人姓名",
@@ -172,7 +172,7 @@
       "errorBirthdayInvalid": "生日无效：不能晚于今天，也不能早于 1940 年。",
       "errorPhoneRequired": "请填写有效的电话（8–15 位数字）。",
       "errorEmailRequired": "请填写邮箱。",
-      "errorGuardianRequired": "员工未满 18 岁，必须填写监护人姓名、关系、手机和邮箱。",
+      "errorGuardianRequired": "员工未满 16 岁，必须填写监护人姓名、关系、手机和邮箱。",
       "errorGuardianPhoneInvalid": "监护人手机必须是 04 开头的澳洲手机号。",
       "errorGuardianEmailInvalid": "监护人邮箱格式无效。"
     }

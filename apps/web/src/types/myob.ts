@@ -283,7 +283,7 @@ export interface MyobCreateFromMyobRequest {
   phone: string
   /** yyyy-MM-dd。 */
   birthday: string
-  /** 只在未满 18 岁时提交。 */
+  /** 只在未满 16 岁时提交。 */
   guardian?: MyobCreateGuardian
   storeCode: string
   /** 空串 = 没选（后端会拒绝，不会默认成临时工）。 */

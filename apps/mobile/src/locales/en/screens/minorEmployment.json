@@ -55,7 +55,7 @@
   "form": {
     "loadFailed": "Unable to load information",
     "readOnlyNotice": "Your manager or HR sends this form to your parent or guardian to complete and sign. You don't need to do anything. This page only shows the details and review progress.",
-    "noRecord": "There are no under-18 employment details for you yet. Once your manager or HR sends the signing link, what your guardian fills in will appear here.",
+    "noRecord": "There are no under-16 employment details for you yet. Once your manager or HR sends the signing link, what your guardian fills in will appear here.",
     "statusLine": "Status: {{status}} · Version {{version}}",
     "refreshStatus": "Refresh status",
     "reviewComment": "HR comment: {{comment}}",

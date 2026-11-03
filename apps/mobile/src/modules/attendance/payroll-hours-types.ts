@@ -1,6 +1,12 @@
 // 店长「工时统计」接口契约：GET payroll/hours?storeCode&periodStart&weeks&includePending&mergeStores
 // （规格第 2、3 节）。工时一律十进制小时、最多 2 位小数，由后端算好，前端只展示不重算。
 
+/**
+ * 工时页显示年龄角标 / 生日核对时薪的门槛：21 岁以下显示周岁（澳洲青少年时薪按年龄逐年变）。
+ * 后端 ResolveMinorAge 也只在 21 岁以下才下发 ageYears；与新建员工的监护人门槛（16 岁）不是一回事。
+ */
+export const PAYROLL_AGE_BADGE_LIMIT = 21;
+
 export type PayrollTier = "weekday" | "saturday" | "sunday" | "publicHoliday";
 
 export interface PayrollTierHours {
@@ -63,7 +69,7 @@ export interface PayrollHoursEmployee {
   name: string;
   /** FullTime / PartTime / Casual。 */
   employmentType?: string;
-  /** 未成年才有意义：显示周岁。 */
+  /** 21 岁以下才下发：显示周岁。 */
   ageYears?: number;
   birthday?: string;
   segmentLimit?: number;

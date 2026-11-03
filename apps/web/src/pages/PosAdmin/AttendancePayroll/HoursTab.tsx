@@ -13,7 +13,7 @@ import type {
   AttendanceHoursResultDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, formatHours, isoWeekNumber, round2, summarizeEmployeeHours } from './payrollLogic'
+import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours } from './payrollLogic'
 
 interface HoursTabProps {
   data: AttendanceHoursResultDto | null
@@ -232,7 +232,7 @@ export default function HoursTab(props: HoursTabProps) {
   if (!data) return <Empty description={t('attendancePayroll.empty')} />
 
   const minorLabel = (employee: AttendanceHoursEmployeeDto) => (
-    employee.ageYears != null && employee.ageYears < 18
+    showsAgeBadge(employee.ageYears)
       ? <Tag color="gold" className="atp-tag">{t('attendancePayroll.ageYears', { age: employee.ageYears })}</Tag>
       : null
   )

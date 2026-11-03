@@ -66,3 +66,11 @@
 - **签署证据**：审计 `guardian_signed` 记录邮箱核验时间、打码邮箱、来源 IP、浏览器标识（截断）；`guardian_invite_emailed` / `guardian_code_sent` / `guardian_email_verified` 分别留痕。
 - **监护人现场修改**：签署页默认只读核对，点「修改资料」可直接更正孩子资料、监护人资料（邮箱除外）、就读情况、学校安排、其他工作、通勤接送、备用联系人，改完随签名一起提交（`guardian/sign` 的 `amendments`），无需员工回 App 重填。后端逐项比对只记真正变化的：写回同一版本（Revision+1）、`GuardianAmendedFieldsJson` 记修改分区、审计 `guardian_amended` 存修改前后完整值（审计元数据改为 nvarchar(max)），PDF 按修改后内容生成。修改后照常校验联系人、备用联系人不同号、上学时间格式与必填资料，不通过则整单不写入。监护人邮箱（验证码依据）、出生日期（以员工资料为准）、雇主信息、州与表单类型不可改；其他工作的工时区间与学校时区保留原值。员工 App 与 HR（Web/App）显示「监护人签署时修改了：…」。
 - **未做**：推送通知、PDF 证据页、纸质兜底上传。
+
+## 2026-11-03 监护人门槛改为未满 16 岁；排班 / 工时年龄显示改为 21 岁以下
+
+- **监护人确认书 / 未成年合规档案门槛 18 → 16**：常量 `MinorEmploymentComplianceCalculator.MinorAgeLimit = 16`，新建员工必填监护人（`NewStaffProfileRules`、MYOB 我方建档）、店长 / HR 发家长签字链接与未成年员工列表（`EmployeeMinorComplianceService` 两处 `adultCutoff`、两处 `NOT_MINOR`）、排班未成年合规提醒（计算器 `IsAdult` 与 `EvaluateMinorEmploymentCoreAsync` 的无档案判断）全部改用该常量。16–17 岁员工不再建档、不再发签字链接，也不再出「未找到未成年合规档案」提醒。Web / 手机端的前端门槛常量（`GUARDIAN_AGE_LIMIT` / `NEW_STAFF_GUARDIAN_AGE_LIMIT`）与文案同步改为 16。
+- **排班表 / 工时表显示年龄 18 → 21**：`AttendanceReactService.JuniorAgeLimit = 21`，`ResolveMinorAge` 只在未满 21 岁时下发周岁（考勤员工列表 `Age`、工时 / 时薪 / MYOB 推送的 `AgeYears`），生日提醒 `IsMinor` 也按 21 岁判定（青少年时薪按年龄逐年变，过生日要核对时薪）。Web 工时 / 时薪 / 工资页与手机工时页的年龄角标门槛同步改为 21（`AGE_BADGE_LIMIT` / `PAYROLL_AGE_BADGE_LIMIT`）。
+- **法律背景保持不变**：QLD 法定必须 CE1 同意书的只有未满 16 岁的学龄儿童；QLD 16–17 岁的家长 / 备用联系人留档义务此次不再由系统承担（业务决定）。NSW 仍为公司政策。
+- **排班表年龄角标**：手机排班表（`ScheduleManagementCard`）原本就按 `age` 显示「N岁」角标，后端改 21 后自动覆盖到 21 岁以下；Web 排班表（`ScheduleAttendance`）原先只用门店用户列表、没有年龄，此次加载时并行请求 `GET attendance/employees`（与手机同一接口，新增 `getAttendanceEmployees`），在姓名旁加金色「N 岁」Tag（与工时页同色），接口失败只是没有角标。
+- **FAQ**：使用帮助文案已同步改为 16，生产库 FAQ 表需执行 `SqlScripts/HelpFaq_MinorGuardianAge16_20261103.sql`。

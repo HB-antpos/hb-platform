@@ -16,6 +16,7 @@ import {
   formatMoney,
   formatSignedMoney,
   hasPublicHolidayRateMismatch,
+  showsAgeBadge,
   syncPublicHolidayRate,
   type PayRates,
 } from './payrollLogic'
@@ -172,7 +173,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
             <div className="atp-muted atp-small">
               {rate.employmentType ? t(`attendancePayroll.employmentType.${rate.employmentType}`) : ''}
               {rate.isManager ? ` · ${t('attendancePayroll.manager')}` : ''}
-              {rate.birthday && rate.ageYears != null && rate.ageYears < 18 ? (
+              {rate.birthday && showsAgeBadge(rate.ageYears) ? (
                 <>
                   {' '}<Tag className="atp-tag" color="magenta">🎂 {dayjs(rate.birthday).format('MM-DD')}</Tag>
                   <Tag className="atp-tag" color="gold">{t('attendancePayroll.ageYears', { age: rate.ageYears })}</Tag>
@@ -258,7 +259,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       align: 'right',
       render: (_, rate) => {
         if (rate.minimumRate === undefined || rate.minimumRate === null) {
-          return rate.ageYears != null && rate.ageYears < 18
+          return showsAgeBadge(rate.ageYears)
             ? <span className="atp-dashed-box atp-warn-box">{t('attendancePayroll.rates.minorMissing', { age: rate.ageYears })}</span>
             : <span className="atp-muted">{t('attendancePayroll.rates.notFilled')}</span>
         }

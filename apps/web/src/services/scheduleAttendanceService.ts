@@ -3,6 +3,7 @@ import type {
   AttendanceApprovalDto,
   AttendanceAdjustmentDetailDto,
   AttendanceAvailabilityDto,
+  AttendanceEmployeeDto,
   AttendanceLocationSampleDto,
   AttendanceMealClaimDto,
   AttendancePagedResult,
@@ -415,6 +416,28 @@ export async function getAttendanceScheduleWeek(params: AttendanceQuery): Promis
   )
   const data = unwrapAttendanceApiData<unknown[]>(response) ?? []
   return data.map(normalizeAttendanceSchedule)
+}
+
+/** 排班用的分店员工列表；排班表只用它的 age（21 岁以下才有值）在姓名旁显示年龄角标，用工类型等字段一并归一化备用。 */
+export async function getAttendanceEmployees(storeCode: string): Promise<AttendanceEmployeeDto[]> {
+  const response = await request.get<ApiResponse<AttendanceEmployeeDto[]> | AttendanceEmployeeDto[]>(
+    `${API_BASE}/employees`,
+    { params: { storeCode } },
+  )
+  const data = unwrapAttendanceApiData<unknown[]>(response) ?? []
+  return data.map((item) => {
+    const source = asRecord(item)
+    const age = readCompat<number | null>(source, 'age', 'Age')
+    return {
+      userGuid: String(readCompat<string>(source, 'userGuid', 'UserGuid') ?? ''),
+      username: String(readCompat<string>(source, 'username', 'Username') ?? ''),
+      fullName: readCompat<string | null>(source, 'fullName', 'FullName') ?? null,
+      employmentType: readCompat<AttendanceEmployeeDto['employmentType']>(source, 'employmentType', 'EmploymentType') ?? null,
+      age: typeof age === 'number' ? age : null,
+      isStoreManager: Boolean(readCompat<boolean>(source, 'isStoreManager', 'IsStoreManager')),
+      managesStore: Boolean(readCompat<boolean>(source, 'managesStore', 'ManagesStore')),
+    }
+  })
 }
 
 export async function getAttendanceRecords(params: AttendanceQuery): Promise<AttendancePagedResult<AttendanceScheduleDto>> {

@@ -90,7 +90,7 @@
       "confirmHoliday": "确认带薪 {{hours}} h",
       "holidayDone": "已处理带薪公假",
       "birthdayTitle": "{{name}} {{date}} 生日，满 {{age}} 岁",
-      "minorSuffix": "（未成年）：",
+      "minorSuffix": "（21 岁以下）：",
       "birthdayMinorBody": "按年龄计的时薪可能要调整，去个人时薪表核对。",
       "gotIt": "知道了",
       "openRates": "打开时薪表"
@@ -187,7 +187,7 @@
       "minorMissing": "{{age}} 岁未填",
       "belowMinimum": "偏低",
       "birthdayHint": "{{name}} {{date}} 已满 {{age}} 岁，时薪还是 {{previous}} 岁时设的，请核对后填新的生效记录。",
-      "footnote": "「最低时薪」由你按员工适用的 award 级别和年龄自己填，任一档时薪低于它就标红；未成年人过生日后提示更新。",
+      "footnote": "「最低时薪」由你按员工适用的 award 级别和年龄自己填，任一档时薪低于它就标红；21 岁以下员工过生日后提示更新。",
       "fromProfile": "（来自员工资料）",
       "payMode": "发放方式",
       "fixedHours": "固定转账工时",

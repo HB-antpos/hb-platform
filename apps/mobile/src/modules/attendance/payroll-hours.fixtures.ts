@@ -13,13 +13,14 @@ import {
   summarizeEmployeeDays,
   sumReportTotals,
 } from "./payroll-hours";
-import type {
-  PayrollHoursAlert,
-  PayrollHoursDay,
-  PayrollHoursEmployee,
-  PayrollHoursQuery,
-  PayrollHoursReport,
-  PayrollTierHours,
+import {
+  PAYROLL_AGE_BADGE_LIMIT,
+  type PayrollHoursAlert,
+  type PayrollHoursDay,
+  type PayrollHoursEmployee,
+  type PayrollHoursQuery,
+  type PayrollHoursReport,
+  type PayrollTierHours,
 } from "./payroll-hours-types";
 
 /** 双周起始日（样例）：与规格示例 2026-10-05 一致。 */
@@ -280,7 +281,7 @@ function buildAlerts(employees: PayrollHoursEmployee[], mergeStores: boolean): P
   for (const employee of employees) {
     const birthday = employee.days.find((day) => day.isBirthday);
     if (birthday) {
-      const isMinor = employee.ageYears !== undefined && employee.ageYears < 18;
+      const isMinor = employee.ageYears !== undefined && employee.ageYears < PAYROLL_AGE_BADGE_LIMIT;
       alerts.push({
         type: isMinor ? "MinorBirthday" : "Birthday",
         userGuid: employee.userGuid,

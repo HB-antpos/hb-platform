@@ -346,7 +346,7 @@ export default function CreateFromMyobDrawer({
             <Input autoComplete="off" />
           </Form.Item>
         </div>
-        {/* 生日 + 年龄；未满 18 岁时展开监护人四项（MYOB 没有，只能人工填）。复用的组件不能挂原值提示，MYOB 生日显示在顶部摘要里 */}
+        {/* 生日 + 年龄；未满 16 岁时展开监护人四项（MYOB 没有，只能人工填）。复用的组件不能挂原值提示，MYOB 生日显示在顶部摘要里 */}
         <NewStaffBirthdayAndGuardian />
 
         <h4 className="myob-create-section">{t('myob.create.sections.employment')}</h4>

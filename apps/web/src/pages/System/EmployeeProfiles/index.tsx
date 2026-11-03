@@ -878,7 +878,7 @@ export default function SystemEmployeeProfilesPage() {
                 </>
               ),
             },
-            // 未成年用工合规：给未满 18 岁员工的家长发送签字链接；与「待审核」同一门禁（店长在手机「人员管理」里发送）。
+            // 未成年用工合规：给未满 16 岁员工的家长发送签字链接；与「待审核」同一门禁（店长在手机「人员管理」里发送）。
             ...(canEditProfiles ? [{
               key: 'minor',
               label: (

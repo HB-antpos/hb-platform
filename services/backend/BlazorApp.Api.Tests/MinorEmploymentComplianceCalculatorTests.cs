@@ -16,7 +16,7 @@ public sealed class MinorEmploymentComplianceCalculatorTests
         {
             Profile = new MinorEmploymentProfile
             {
-                WorkState = "NSW", DateOfBirth = new DateTime(2010, 1, 1),
+                WorkState = "NSW", DateOfBirth = new DateTime(2011, 1, 1),
                 CommuteFromSchoolMinutes = 30,
                 RequiredSchoolDays = new Dictionary<DateTime, MinorEmploymentSchoolDay>
                 {
@@ -67,7 +67,7 @@ public sealed class MinorEmploymentComplianceCalculatorTests
     {
         var result = MinorEmploymentComplianceCalculator.Evaluate(new MinorEmploymentComplianceInput
         {
-            Profile = new MinorEmploymentProfile { WorkState = "NSW", DateOfBirth = new DateTime(2010, 1, 1), ConsentStatus = "Signed", ReviewStatus = "Approved", AwardCode = "MA000004", ExternalWorkKnown = true },
+            Profile = new MinorEmploymentProfile { WorkState = "NSW", DateOfBirth = new DateTime(2011, 1, 1), ConsentStatus = "Signed", ReviewStatus = "Approved", AwardCode = "MA000004", ExternalWorkKnown = true },
             WorkItems = new[] { Shift("HB", new DateTime(2026, 9, 14), 8, 20) },
         });
         Assert.Contains(result.Findings, item => item.RuleId == "NSW_AWARD_REVIEW");
@@ -82,7 +82,7 @@ public sealed class MinorEmploymentComplianceCalculatorTests
         {
             Profile = new MinorEmploymentProfile
             {
-                DateOfBirth = new DateTime(2010, 1, 1), WorkState = "NSW", ConsentStatus = "signed", ReviewStatus = "approved", AwardCode = "MA000004", ExternalWorkKnown = true,
+                DateOfBirth = new DateTime(2011, 1, 1), WorkState = "NSW", ConsentStatus = "signed", ReviewStatus = "approved", AwardCode = "MA000004", ExternalWorkKnown = true,
                 RequiredSchoolDays = new Dictionary<DateTime, MinorEmploymentSchoolDay> { [day] = new() { IsRequired = true, Start = TimeSpan.FromHours(9), End = TimeSpan.FromHours(15) } },
             },
             WorkItems = new[] { Shift("HB", day, 14, 17) },
@@ -260,6 +260,21 @@ public sealed class MinorEmploymentComplianceCalculatorTests
             WorkItems = new[] { Shift("HB", new DateTime(2026, 9, 14), 9, 17) },
         });
         Assert.Empty(result.Findings);
+    }
+
+    [Theory]
+    [InlineData("2010-09-14", true)]
+    [InlineData("2010-09-15", false)]
+    public void Evaluate_MinorAgeLimitIsSixteen_BirthdayItselfIsOutOfScope(string dateOfBirth, bool outOfScope)
+    {
+        // 门槛 MinorAgeLimit = 16：评估日当天满 16 岁即不再出未成年提醒；差一天仍在范围内。
+        var result = MinorEmploymentComplianceCalculator.Evaluate(new MinorEmploymentComplianceInput
+        {
+            Profile = new MinorEmploymentProfile { DateOfBirth = DateTime.Parse(dateOfBirth), WorkState = "QLD" },
+            WorkItems = new[] { Shift("HB", new DateTime(2026, 9, 14), 9, 17) },
+        });
+        Assert.Equal(16, MinorEmploymentComplianceCalculator.MinorAgeLimit);
+        Assert.Equal(outOfScope, !result.Findings.Any());
     }
 
     private static MinorEmploymentProfile QldProfile(DateTime sunday)

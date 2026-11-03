@@ -96,7 +96,7 @@ export interface AttendanceHoursEmployeeDto {
   /** 员工资料没填时为 null。 */
   employmentType?: AttendanceEmploymentType | null
   isManager?: boolean
-  /** 未成年才返回周岁。 */
+  /** 21 岁以下才返回周岁（青少年时薪按年龄计）。 */
   ageYears?: number | null
   birthday?: string | null
   segmentLimit?: number
@@ -125,7 +125,7 @@ export interface AttendanceHoursAlertDto {
   minCount?: number
   hours?: number | null
   approvalGuid?: string
-  /** 生日：满几岁、是否未成年（未成年提示核对时薪）。 */
+  /** 生日：满几岁、是否 21 岁以下（是则提示核对按年龄计的时薪）。 */
   ageYears?: number | null
   isMinor?: boolean | null
 }
@@ -230,7 +230,7 @@ export interface AttendancePayRateDto {
   remark?: string | null
   createdAt?: string | null
   createdBy?: string | null
-  /** 未成年过了生日、时薪还是生日前设的：提示核对。 */
+  /** 21 岁以下员工过了生日、时薪还是生日前设的：提示核对。 */
   birthdayReviewHint?: boolean
   /**
    * 当前生效记录里公假转账价与平日转账价不一致（公假价按规定永远等于平日价，历史记录不改，

@@ -629,7 +629,7 @@ export function AdminPersonDetail({
         </>
       ) : null}
 
-      {/* 未成年用工合规：只对未满 18 岁的员工显示，由店长 / HR 给家长发送签字链接（员工本人不再操作）。 */}
+      {/* 未成年用工合规：只对未满 16 岁的员工显示，由店长 / HR 给家长发送签字链接（员工本人不再操作）。 */}
       <MinorGuardianSection userGuid={userGuid} onMessage={setSnackbar} />
 
       <SectionTitle title={t("peopleDetail:sections.account")} />

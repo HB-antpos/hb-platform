@@ -9,7 +9,7 @@ import type {
   AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2 } from './payrollLogic'
+import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2, showsAgeBadge } from './payrollLogic'
 
 interface PayTabProps {
   data: AttendancePayResultDto | null
@@ -234,7 +234,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload }: PayT
                             {row.userName}{' '}
                             <span className="atp-muted atp-small">
                               {row.employmentType ? t(`attendancePayroll.employmentType.${row.employmentType}`) : ''}
-                              {row.ageYears != null && row.ageYears < 18 ? ` · ${t('attendancePayroll.ageYears', { age: row.ageYears })}` : ''}
+                              {showsAgeBadge(row.ageYears) ? ` · ${t('attendancePayroll.ageYears', { age: row.ageYears })}` : ''}
                             </span>
                           </div>
                           <div>

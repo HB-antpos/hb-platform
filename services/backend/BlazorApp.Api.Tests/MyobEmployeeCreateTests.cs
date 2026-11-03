@@ -87,7 +87,7 @@ public sealed class MyobEmployeeCreateTests : IDisposable
                 new MyobEmployeeRecord("c-gone", null, "Old", "Timer", null, true, false, [], []),
             ],
             [
-                new MyobEmployeePayrollRecord("c-erin", new DateTime(2010, 2, 23), "Casual", []),
+                new MyobEmployeePayrollRecord("c-erin", new DateTime(2011, 2, 23), "Casual", []),
                 new MyobEmployeePayrollRecord("c-kyle", new DateTime(2004, 12, 5), "FullTime", []),
                 new MyobEmployeePayrollRecord("c-gone", null, "Other", []),
             ],
@@ -193,8 +193,8 @@ public sealed class MyobEmployeeCreateTests : IDisposable
         Assert.Equal("erinchung268@gmail.com", draft.Email);
         Assert.Equal("+61412345678", draft.MyobPhone);
         Assert.Equal("0412 345 678", draft.Phone);
-        Assert.Equal("2010-02-23", draft.Birthday);
-        Assert.Equal(16, draft.Age);
+        Assert.Equal("2011-02-23", draft.Birthday);
+        Assert.Equal(15, draft.Age);
         Assert.True(draft.IsMinor);
         Assert.Equal("Temporary", draft.EmploymentType);
         Assert.Equal("erinchung", draft.Username);

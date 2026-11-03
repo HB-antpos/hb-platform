@@ -172,7 +172,7 @@
     "changeHint": "Changing the printer happens in this sheet, so you stay on the current page."
   },
   "minor": {
-    "section": "Under-18 employment compliance",
+    "section": "Under-16 employment compliance",
     "rows": {
       "form": "Consent form",
       "status": "Status",
@@ -185,7 +185,7 @@
     },
     "forms": {
       "QLD_CE1": "QLD CE1 child employment consent",
-      "NSW_COMPANY_CONSENT": "NSW company consent for under-18 staff",
+      "NSW_COMPANY_CONSENT": "NSW company consent for under-16 staff",
       "UNSUPPORTED_STATE": "Store state not confirmed"
     },
     "stages": {
@@ -287,7 +287,7 @@
       "versionConflict": "Someone else updated this record. It has been refreshed; please check and try again.",
       "invalidStatus": "This can't be done in the current status. Refresh and try again.",
       "dobRequired": "The employee's date of birth is missing. Add it first.",
-      "notMinor": "This employee is 18 or older; no guardian signature is needed.",
+      "notMinor": "This employee is 16 or older; no guardian signature is needed.",
       "forbidden": "You don't manage this employee's store.",
       "stateUnconfirmed": "Can't tell whether the store is in NSW or QLD. Complete the store address or time zone first.",
       "storeRequired": "The employee has no primary store, so the state can't be determined.",

@@ -382,7 +382,7 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
-                    // 未满 18 岁：同一事务里预建未成年合规草稿并带上监护人（控制器已校验必填）。
+                    // 未满 16 岁：同一事务里预建未成年合规草稿并带上监护人（控制器已校验必填）。
                     var newStaffRules = NewStaffProfileRules.Validate(dto.Birthday, dto.Phone, email, dto.Guardian, NewStaffProfileRules.SydneyToday());
                     if (newStaffRules.Ok && newStaffRules.IsMinor)
                     {

@@ -4,7 +4,7 @@ using Xunit;
 
 namespace BlazorApp.Api.Tests;
 
-/// <summary>新建员工必填规则：生日、邮箱、电话；未满 18 岁时监护人四项。</summary>
+/// <summary>新建员工必填规则：生日、邮箱、电话；未满 16 岁时监护人四项。</summary>
 public sealed class NewStaffProfileRulesTests
 {
     private static readonly DateTime Today = new(2026, 10, 30);
@@ -33,10 +33,12 @@ public sealed class NewStaffProfileRulesTests
     }
 
     [Fact]
-    public void 正好18岁生日当天算成年_前一天还是未成年()
+    public void 正好16岁生日当天不再要监护人_前一天还要()
     {
-        Assert.False(NewStaffProfileRules.Validate(new DateTime(2008, 10, 30), "0423 555 018", "a@example.test", null, Today).IsMinor);
-        var minor = NewStaffProfileRules.Validate(new DateTime(2008, 10, 31), "0423 555 018", "a@example.test", null, Today);
+        // 门槛 16 岁（MinorEmploymentComplianceCalculator.MinorAgeLimit）：满 16 岁当天起不再是未成年合规对象，17 岁也不要监护人。
+        Assert.False(NewStaffProfileRules.Validate(new DateTime(2010, 10, 30), "0423 555 018", "a@example.test", null, Today).IsMinor);
+        Assert.False(NewStaffProfileRules.Validate(new DateTime(2008, 10, 31), "0423 555 018", "a@example.test", null, Today).IsMinor);
+        var minor = NewStaffProfileRules.Validate(new DateTime(2010, 10, 31), "0423 555 018", "a@example.test", null, Today);
         Assert.True(minor.IsMinor);
         Assert.Equal(NewStaffProfileRules.GuardianRequiredCode, minor.Code);
     }

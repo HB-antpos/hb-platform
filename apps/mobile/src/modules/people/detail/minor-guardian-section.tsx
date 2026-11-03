@@ -29,7 +29,7 @@ import { ConfirmDialog } from "./people-sheet";
 /**
  * 人员详情「未成年用工合规」一节（店长版、管理员版共用）。
  *
- * - 只对未满 18 岁的员工显示：后端 item 为 null（成年 / 没有出生日期 / 没有主门店）或 403 时整节不显示。
+ * - 只对未满 16 岁的员工显示：后端 item 为 null（已满 16 岁 / 没有出生日期 / 没有主门店）或 403 时整节不显示。
  * - 读取需要 Attendance.Schedule.ViewStore；发送 / 作废需要 Attendance.Schedule.EditManagedStore（后端再按门店范围裁决）。
  * - 员工本人不再填写或邀请监护人：由店长 / HR 在这里给家长发英文邮件 / 短信，家长在 Web 补全资料并签字。
  */

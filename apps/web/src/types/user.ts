@@ -172,7 +172,7 @@ export interface BatchUserStoreOperationResult {
   usersGainingStoreManagerRole: string[]
 }
 
-/** 新建员工未满 18 岁时的监护人；relationship 为英文值 Mother / Father / Legal guardian / Other。 */
+/** 新建员工未满 16 岁时的监护人；relationship 为英文值 Mother / Father / Legal guardian / Other。 */
 export interface NewStaffGuardianDto {
   name: string
   relationship: string
@@ -193,7 +193,7 @@ export interface CreateUserDto extends UserNameParts {
   phone?: string
   /** 生日 YYYY-MM-DD（「创建用户」入口必填，后端校验）。 */
   birthday?: string
-  /** 只在生日未满 18 岁时提交。 */
+  /** 只在生日未满 16 岁时提交。 */
   guardian?: NewStaffGuardianDto
 }
 

@@ -1529,7 +1529,13 @@ namespace BlazorApp.Api.Services.React
             return bound.ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
-        /// <summary>未满 18 岁返回周岁，否则（含生日缺失、未来日期）返回 null。</summary>
+        /// <summary>
+        /// 排班表 / 工时表显示年龄的门槛：未满 21 岁显示周岁（澳洲青少年时薪按年龄逐年变，过生日要核对时薪）。
+        /// 与未成年合规建档门槛（<see cref="MinorEmploymentComplianceCalculator.MinorAgeLimit"/> = 16）不是一回事。
+        /// </summary>
+        internal const int JuniorAgeLimit = 21;
+
+        /// <summary>未满 21 岁（JuniorAgeLimit）返回周岁，否则（含生日缺失、未来日期）返回 null。</summary>
         internal static int? ResolveMinorAge(DateTime? birthday, DateTime today)
         {
             if (birthday == null || birthday.Value.Date > today.Date)
@@ -1542,7 +1548,7 @@ namespace BlazorApp.Api.Services.React
             {
                 age--;
             }
-            return age < 18 ? age : null;
+            return age < JuniorAgeLimit ? age : null;
         }
 
         private async Task<Dictionary<string, string>> ResolveUserDisplayNamesAsync(IEnumerable<string?> userGuids)
@@ -5571,7 +5577,8 @@ namespace BlazorApp.Api.Services.React
             {
                 var birthday = await _db.Queryable<EmployeeProfile>().Where(item => !item.IsDeleted && item.UserGUID == userGuid).Select(item => item.Birthday).FirstAsync();
                 var reference = referenceDate ?? changedSchedule?.WorkDate ?? newPunch?.WorkDate ?? DateTime.Today;
-                if (birthday.HasValue && birthday.Value.AddYears(18) <= reference) return null;
+                // 已满 16 岁（MinorAgeLimit）不在未成年合规范围，不再提示「未找到合规档案」。
+                if (birthday.HasValue && birthday.Value.AddYears(MinorEmploymentComplianceCalculator.MinorAgeLimit) <= reference) return null;
                 return MapMinorEvaluation(MinorEmploymentComplianceCalculator.Evaluate(new()
                 {
                     WorkItems = changedSchedule == null ? [] : [ToMinorWorkItem(changedSchedule)],
