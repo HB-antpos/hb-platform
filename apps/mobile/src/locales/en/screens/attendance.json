@@ -86,7 +86,7 @@
       "alertHoliday": "This day is marked as {{holidayName}}. Check with your manager whether you need to clock in.",
       "alertVerificationCaptured": "This punch will include the current verification data.",
       "alertVerificationSentForReview": "Your location and network must be checked before you can clock in or out.",
-      "alertNoSchedule": "You're not rostered on for this date. If you need to work, ask your manager to roster you on first."
+      "alertNoSchedule": "Not rostered"
     },
     "timeline": {
       "relatedStoreAlert": "Linked store alert",
