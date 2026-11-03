@@ -114,7 +114,7 @@ namespace BlazorApp.Shared.DTOs
         public string? EmploymentType { get; set; }
         public bool IsManager { get; set; }
         public bool IsStoreManager { get; set; }
-        /// <summary>未成年时的周岁（期末那天），成年为 null。</summary>
+        /// <summary>未满 21 岁时的周岁（期末那天），21 岁及以上为 null。</summary>
         public int? AgeYears { get; set; }
         public DateTime? Birthday { get; set; }
         public int SegmentLimit { get; set; }
@@ -280,7 +280,7 @@ namespace BlazorApp.Shared.DTOs
         public bool IsManager { get; set; }
         public int? AgeYears { get; set; }
         public DateTime? Birthday { get; set; }
-        /// <summary>未成年人生日已过、而当前时薪记录生效早于这次生日：提示核对时薪。</summary>
+        /// <summary>21 岁以下员工生日已过、而当前时薪记录生效早于这次生日：提示核对时薪。</summary>
         public bool BirthdayReviewHint { get; set; }
         public string? PayMode { get; set; }
         public decimal FixedTransferHoursPerWeek { get; set; }

@@ -59,7 +59,7 @@ export async function createUser(payload: CreateUserDto): Promise<UserDto> {
     FamilyName: payload.familyName ?? null,
     Nickname: payload.nickname ?? null,
     IsActive: payload.isActive ?? true,
-    // 新建员工：电话、生日（YYYY-MM-DD）必填；监护人只在未满 18 岁时带，成年不传该字段。
+    // 新建员工：电话、生日（YYYY-MM-DD）必填；监护人只在未满 16 岁时带，16 岁及以上不传该字段。
     Phone: payload.phone ?? null,
     Birthday: payload.birthday ?? null,
     ...(payload.guardian

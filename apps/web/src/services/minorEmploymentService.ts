@@ -331,7 +331,7 @@ export function mapStaffComplianceItem(value: unknown): MinorStaffComplianceItem
   }
 }
 
-/** 未满 18 岁员工列表；needsActionCount 不受筛选影响。 */
+/** 未满 16 岁员工列表；needsActionCount 不受筛选影响。 */
 export async function getMinorStaffComplianceList(query: MinorStaffComplianceQuery = {}): Promise<MinorStaffComplianceList> {
   const response = await request.get<ApiResponse<Raw>>(STAFF_PATH, {
     params: { storeCode: query.storeCode, stateCode: query.stateCode, keyword: query.keyword, needsActionOnly: query.needsActionOnly ? 'true' : 'false' },

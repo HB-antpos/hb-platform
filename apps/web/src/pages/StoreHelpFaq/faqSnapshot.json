@@ -1263,7 +1263,7 @@
                 "顶部选择你管理的分店（选「全部分店」时不会出现新增按钮）。",
                 "点右下角 [p:Add staff member|新增员工]。",
                 "在 [d:Name and contact|姓名与联系] 填姓、名（必填）和电话（必填，04 开头的澳洲手机号）；在 [d:Login details|登录信息] 填员工邮箱和账号（账号默认等于邮箱）。",
-                "选择 [i:Date of birth|生日]（必填，用于判断是否未成年）。未满 18 岁时会出现 [d:Guardian|监护人] 区域，必须填 [i:Guardian name|监护人姓名]、[i:Relationship|关系]、[i:Guardian mobile|监护人手机]（04 开头）和 [i:Guardian email|监护人邮箱]。",
+                "选择 [i:Date of birth|生日]（必填，用于判断是否未成年）。未满 16 岁时会出现 [d:Guardian|监护人] 区域，必须填 [i:Guardian name|监护人姓名]、[i:Relationship|关系]、[i:Guardian mobile|监护人手机]（04 开头）和 [i:Guardian email|监护人邮箱]。",
                 "按需打开 [t:Enable now|立即启用]，点 [p:Create account|创建账号]。"
               ],
               "en": [
@@ -1271,7 +1271,7 @@
                 "Pick a store you manage at the top (Add is hidden when “All stores” is selected).",
                 "Tap [p:Add staff member|新增员工] at the bottom right.",
                 "Under [d:Name and contact|姓名与联系], enter first and last name (required) and phone (required, an Australian mobile starting with 04). Under [d:Login details|登录信息], enter the staff email and username (defaults to the email).",
-                "Choose the [i:Date of birth|生日] (required; it is used to check whether the person is under 18). If they are under 18, a [d:Guardian|监护人] section appears and you must fill in [i:Guardian name|监护人姓名], [i:Relationship|关系], [i:Guardian mobile|监护人手机] (starting with 04) and [i:Guardian email|监护人邮箱].",
+                "Choose the [i:Date of birth|生日] (required; it is used to check whether the person is under 16). If they are under 16, a [d:Guardian|监护人] section appears and you must fill in [i:Guardian name|监护人姓名], [i:Relationship|关系], [i:Guardian mobile|监护人手机] (starting with 04) and [i:Guardian email|监护人邮箱].",
                 "Turn on [t:Enable now|立即启用] if needed, then tap [p:Create account|创建账号]."
               ]
             },
@@ -1286,7 +1286,7 @@
                 "New staff belong to this store as Staff · Casual by default.",
                 "The username cannot be changed after creation. Check it first.",
                 "The guardian’s mobile cannot be the same as the staff member’s phone, and the guardian’s email cannot be the same as the staff member’s email.",
-                "After the account is created, send the parent an English signing link from the staff details (see “How do I send a parent the signing link for an under-18 staff member?”)."
+                "After the account is created, send the parent an English signing link from the staff details (see “How do I send a parent the signing link for an under-16 staff member?”)."
               ]
             },
             "permissions": [
@@ -1337,23 +1337,23 @@
             "id": "minor-guardian-link",
             "title": {
               "zh": "如何给未成年员工的家长发签字链接？",
-              "en": "How do I send a parent the signing link for an under-18 staff member?"
+              "en": "How do I send a parent the signing link for an under-16 staff member?"
             },
             "where": {
-              "zh": "工作台 · 人员与管理 · [k:Staff|人员管理] → 员工详情 → [d:Under-18 employment compliance|未成年用工合规]",
-              "en": "Home · Staff & admin · [k:Staff|人员管理] → staff details → [d:Under-18 employment compliance|未成年用工合规]"
+              "zh": "工作台 · 人员与管理 · [k:Staff|人员管理] → 员工详情 → [d:Under-16 employment compliance|未成年用工合规]",
+              "en": "Home · Staff & admin · [k:Staff|人员管理] → staff details → [d:Under-16 employment compliance|未成年用工合规]"
             },
             "steps": {
               "zh": [
-                "在 [k:Staff|人员管理] 点未满 18 岁员工所在行，进入 [d:Staff details|员工详情]，找到 [d:Under-18 employment compliance|未成年用工合规] 区域。",
+                "在 [k:Staff|人员管理] 点未满 16 岁员工所在行，进入 [d:Staff details|员工详情]，找到 [d:Under-16 employment compliance|未成年用工合规] 区域。",
                 "核对监护人姓名和联系方式；同意书类型按门店所在州自动选择（QLD 用儿童雇佣同意书 CE1，NSW 用公司未成年员工同意书）。",
                 "点 [p:Send guardian signing link|发送家长签字链接]，家长会收到英文的邮件 / 短信。如果其中一种没发出去，页面会提示是哪一种、什么原因。",
                 "家长打开链接，补全资料并手写签名。签完后状态变为 [d:Pending review|待审核]。",
                 "到工作台的 [k:Staff profile review|员工资料审核] 审核。通过后状态是 [d:Approved|审核通过]；需要补充的退回，状态变为 [d:Returned|退回修改]，可以回到这里重新发送。"
               ],
               "en": [
-                "In [k:Staff|人员管理], tap the row of the under-18 staff member to open [d:Staff details|员工详情] and find the [d:Under-18 employment compliance|未成年用工合规] section.",
-                "Check the guardian’s name and contact details. The consent form is chosen automatically by the store’s state (QLD uses the CE1 child employment consent; NSW uses the company consent for under-18 staff).",
+                "In [k:Staff|人员管理], tap the row of the under-16 staff member to open [d:Staff details|员工详情] and find the [d:Under-16 employment compliance|未成年用工合规] section.",
+                "Check the guardian’s name and contact details. The consent form is chosen automatically by the store’s state (QLD uses the CE1 child employment consent; NSW uses the company consent for under-16 staff).",
                 "Tap [p:Send guardian signing link|发送家长签字链接]. The parent gets an English email / SMS. If one of them could not be sent, the page tells you which one and why.",
                 "The parent opens the link, completes the details and signs by hand. After signing, the status becomes [d:Pending review|待审核].",
                 "Review it under [k:Staff profile review|员工资料审核] on Home. Once passed, the status is [d:Approved|审核通过]; if more information is needed it is returned and the status becomes [d:Returned|退回修改], so you can resend it from here."

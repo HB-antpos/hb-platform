@@ -39,7 +39,7 @@ function getNewStaffFeedback(code: string | undefined, error: unknown, t: TFunct
     NEW_STAFF_BIRTHDAY_INVALID: t('system.usersNewStaff.errorBirthdayInvalid', '生日无效：不能晚于今天，也不能早于 1940 年。'),
     NEW_STAFF_PHONE_REQUIRED: t('system.usersNewStaff.errorPhoneRequired', '请填写有效的电话（8–15 位数字）。'),
     NEW_STAFF_EMAIL_REQUIRED: t('system.usersNewStaff.errorEmailRequired', '请填写邮箱。'),
-    NEW_STAFF_GUARDIAN_REQUIRED: t('system.usersNewStaff.errorGuardianRequired', '员工未满 18 岁，必须填写监护人姓名、关系、手机和邮箱。'),
+    NEW_STAFF_GUARDIAN_REQUIRED: t('system.usersNewStaff.errorGuardianRequired', '员工未满 16 岁，必须填写监护人姓名、关系、手机和邮箱。'),
     NEW_STAFF_GUARDIAN_PHONE_INVALID: t('system.usersNewStaff.errorGuardianPhoneInvalid', '监护人手机必须是 04 开头的澳洲手机号。'),
     NEW_STAFF_GUARDIAN_EMAIL_INVALID: t('system.usersNewStaff.errorGuardianEmailInvalid', '监护人邮箱格式无效。'),
   }

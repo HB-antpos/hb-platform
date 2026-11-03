@@ -80,7 +80,7 @@ for (const [code, serverMessage, field, expected] of [
   ['NEW_STAFF_BIRTHDAY_INVALID', '生日无效', 'birthday', /生日无效.*1940/],
   ['NEW_STAFF_PHONE_REQUIRED', '请填写电话', 'phone', /电话/],
   ['NEW_STAFF_EMAIL_REQUIRED', '请填写邮箱', 'email', /邮箱/],
-  ['NEW_STAFF_GUARDIAN_REQUIRED', '员工未满 18 岁…', 'guardianName', /未满 18 岁.*监护人/],
+  ['NEW_STAFF_GUARDIAN_REQUIRED', '员工未满 16 岁…', 'guardianName', /未满 16 岁.*监护人/],
   ['NEW_STAFF_GUARDIAN_PHONE_INVALID', '监护人手机必须是 04 开头的澳洲手机号', 'guardianPhone', /04 开头/],
   ['NEW_STAFF_GUARDIAN_EMAIL_INVALID', '监护人邮箱格式无效', 'guardianEmail', /监护人邮箱/],
   ['NEW_STAFF_GUARDIAN_DUPLICATE', '监护人手机不能和员工本人的电话相同', 'guardianPhone', /监护人手机不能和员工本人的电话相同/],

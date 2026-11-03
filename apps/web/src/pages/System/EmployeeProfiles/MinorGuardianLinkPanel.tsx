@@ -38,7 +38,7 @@ interface MinorGuardianLinkPanelProps {
   onGoReview: () => void
 }
 
-/** 员工个人信息维护 → 未成年用工合规：列出未满 18 岁员工，按阶段发送 / 重发 / 作废家长签字链接。 */
+/** 员工个人信息维护 → 未成年用工合规：列出未满 16 岁员工，按阶段发送 / 重发 / 作废家长签字链接。 */
 export default function MinorGuardianLinkPanel({ stores, onNeedsActionCountChange, onGoReview }: MinorGuardianLinkPanelProps) {
   const [rows, setRows] = useState<MinorStaffComplianceItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -337,7 +337,7 @@ export default function MinorGuardianLinkPanel({ stores, onNeedsActionCountChang
       <Alert
         type="info"
         showIcon
-        message="按出生日期列出未满 18 岁的员工。签字链接由这里或手机「人员管理」发给家长（英文邮件 / 短信），员工本人不会收到提醒。红点 = 还没发或被退回、需要处理的人数。"
+        message="按出生日期列出未满 16 岁的员工。签字链接由这里或手机「人员管理」发给家长（英文邮件 / 短信），员工本人不会收到提醒。红点 = 还没发或被退回、需要处理的人数。"
         style={{ marginBottom: 14 }}
       />
       <Space wrap style={{ marginBottom: 14 }}>
@@ -400,7 +400,7 @@ export default function MinorGuardianLinkPanel({ stores, onNeedsActionCountChang
         columns={columns}
         dataSource={rows}
         scroll={{ x: 1220 }}
-        locale={{ emptyText: statusFilter === 'needs' ? '没有需要处理的未成年员工' : '没有未满 18 岁的员工' }}
+        locale={{ emptyText: statusFilter === 'needs' ? '没有需要处理的未成年员工' : '没有未满 16 岁的员工' }}
         pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: false, showTotal: (count) => `共 ${count} 条` }}
       />
 

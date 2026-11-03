@@ -3088,6 +3088,7 @@
         "store": "分店",
         "stores": "分店",
         "employee": "员工",
+        "ageBadge": "{{age}} 岁",
         "employeeGuid": "员工 GUID",
         "workDate": "工作日期",
         "shift": "班次",

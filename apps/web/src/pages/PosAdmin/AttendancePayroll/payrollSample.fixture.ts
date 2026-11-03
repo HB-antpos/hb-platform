@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import {
+  AGE_BADGE_LIMIT,
   calculatePay,
   minutesToHours,
   round2,
@@ -369,7 +370,7 @@ function buildAlerts(dates: string[], mergeStores: boolean): AttendanceHoursAler
         userName: employee.userName,
         date: dayjs(SAMPLE_START).add(employee.birthdayIndex, 'day').format('YYYY-MM-DD'),
         ageYears: employee.ageYears,
-        isMinor: (employee.ageYears ?? 18) < 18,
+        isMinor: (employee.ageYears ?? AGE_BADGE_LIMIT) < AGE_BADGE_LIMIT,
       })
     }
   }

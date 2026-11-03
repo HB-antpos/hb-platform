@@ -562,7 +562,7 @@ namespace BlazorApp.Shared.DTOs
         public string? FamilyName { get; set; }
         public string? Nickname { get; set; }
         public string? EmploymentType { get; set; }
-        /// <summary>仅未满 18 岁时返回年龄（排班需关注未成年工时），成年员工为空，不下发生日。</summary>
+        /// <summary>仅未满 21 岁时返回年龄（排班需关注青少年工时与按年龄计的时薪），21 岁及以上为空，不下发生日。</summary>
         public int? Age { get; set; }
         /// <summary>是否店长角色（店长也要排班）。</summary>
         public bool IsStoreManager { get; set; }

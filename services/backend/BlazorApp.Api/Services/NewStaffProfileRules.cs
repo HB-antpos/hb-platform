@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Api.Services.Sms;
 using BlazorApp.Shared.DTOs;
 
@@ -6,7 +7,7 @@ namespace BlazorApp.Api.Services;
 
 /// <summary>
 /// 新建员工时的必填规则（Web「创建用户」、手机管理员「新增账号」、手机店长「新增员工」三个入口共用）：
-/// 生日、邮箱、电话必填；生日未满 18 岁时监护人姓名、关系、手机、邮箱必填。
+/// 生日、邮箱、电话必填；生日未满 16 岁时监护人姓名、关系、手机、邮箱必填。
 /// 只在这三个入口的控制器里校验，批量导入、门店账号批量创建等内部流程不受影响；编辑已有员工也不受影响。
 /// </summary>
 public static class NewStaffProfileRules
@@ -37,11 +38,12 @@ public static class NewStaffProfileRules
         var digits = phone.Count(char.IsDigit);
         if (digits is < 8 or > 15) return new("电话格式无效", PhoneRequiredCode, false);
 
-        var isMinor = AgeOn(day, today) < 18;
+        // 门槛见 MinorEmploymentComplianceCalculator.MinorAgeLimit（16 岁）：未满才要监护人并预建合规草稿。
+        var isMinor = AgeOn(day, today) < MinorEmploymentComplianceCalculator.MinorAgeLimit;
         if (!isMinor) return new(null, null, false);
         if (guardian is null || string.IsNullOrWhiteSpace(guardian.Name) || string.IsNullOrWhiteSpace(guardian.Relationship)
             || string.IsNullOrWhiteSpace(guardian.Phone) || string.IsNullOrWhiteSpace(guardian.Email))
-            return new("员工未满 18 岁，必须填写监护人姓名、关系、手机和邮箱", GuardianRequiredCode, true);
+            return new("员工未满 16 岁，必须填写监护人姓名、关系、手机和邮箱", GuardianRequiredCode, true);
         // 监护人手机要收签字短信和验证码，必须是澳洲手机号。
         if (!AustralianPhoneNumber.TryNormalize(guardian.Phone, out var guardianE164))
             return new("监护人手机必须是 04 开头的澳洲手机号", GuardianPhoneInvalidCode, true);
@@ -60,7 +62,7 @@ public static class NewStaffProfileRules
         catch (TimeZoneNotFoundException) { return DateTime.UtcNow.Date; }
     }
 
-    // MYOB「我方建档」草稿也用它判断是否未满 18 岁，保证与建档时的必填校验同一口径。
+    // MYOB「我方建档」草稿也用它判断是否未满 16 岁，保证与建档时的必填校验同一口径。
     internal static int AgeOn(DateTime birthday, DateTime day)
     {
         var age = day.Year - birthday.Year;

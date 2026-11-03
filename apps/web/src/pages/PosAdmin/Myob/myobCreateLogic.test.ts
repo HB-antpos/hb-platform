@@ -42,7 +42,7 @@ function draft(patch: Partial<MyobCreateDraft> = {}): MyobCreateDraft {
     email: 'erinchung268@gmail.com',
     myobPhone: '+61412345678',
     phone: '0412 345 678',
-    birthday: '2010-02-23',
+    birthday: '2011-02-23',
     age: 16,
     isMinor: true,
     employmentType: 'Temporary',
@@ -78,7 +78,7 @@ assert.deepEqual(initial, {
   username: 'erinchung',
   email: 'erinchung268@gmail.com',
   phone: '0412 345 678',
-  birthday: '2010-02-23',
+  birthday: '2011-02-23',
   employmentType: 'Temporary',
   storeCode: '1013',
   passwordMode: 'email',
@@ -107,9 +107,10 @@ assert.equal(adultRequest.sendPasswordSetupEmail, false)
 assert.equal(adultRequest.password, 'Init#2026')
 assert.equal(buildCreateRequest(draft(), { ...initial, employmentType: undefined }, TODAY).employmentType, '', '没选用工类型传空串，由后端拒绝')
 
-assert.equal(isCreateFormMinor({ birthday: '2010-02-23' }, TODAY), true)
-assert.equal(isCreateFormMinor({ birthday: '2008-11-02' }, TODAY), false, '今天满 18 岁')
-assert.equal(isCreateFormMinor({ birthday: '2008-11-03' }, TODAY), true, '明天才满 18 岁')
+assert.equal(isCreateFormMinor({ birthday: '2011-02-23' }, TODAY), true)
+assert.equal(isCreateFormMinor({ birthday: '2010-11-02' }, TODAY), false, '今天满 16 岁（门槛 16）')
+assert.equal(isCreateFormMinor({ birthday: '2010-11-03' }, TODAY), true, '明天才满 16 岁')
+assert.equal(isCreateFormMinor({ birthday: '2008-11-03' }, TODAY), false, '17 岁不再要监护人')
 assert.equal(isCreateFormMinor({}, TODAY), false)
 
 // ── 电话比较：+61 / 04 / 空格写法视为同一号码 ──

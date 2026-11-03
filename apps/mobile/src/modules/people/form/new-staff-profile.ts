@@ -4,7 +4,7 @@
  * 与后端 NewStaffProfileRules.cs 保持一致：
  * - 电话、生日必填（邮箱由各表单原有规则校验，原来就必填）；
  * - 生日不能晚于今天、不能早于 1940-01-01；年龄按悉尼当天算；
- * - 未满 18 岁时监护人姓名、关系、手机、邮箱四项必填；监护人手机必须是澳洲手机号（04 开头），
+ * - 未满 16 岁时监护人姓名、关系、手机、邮箱四项必填；监护人手机必须是澳洲手机号（04 开头），
  *   邮箱格式正确，且手机 / 邮箱都不能和员工本人相同。
  * 前端电话沿用现有的澳洲手机号校验（比后端「8–15 位数字」更严），提交前就能拦住。
  * 本文件不引用 React Native，可在 Node 下直接测试。
@@ -16,8 +16,8 @@ import { normalizePhoneInput, validateNewStaffEmail, validateNewStaffPhone } fro
 /** 最早允许的生日（与后端 EarliestBirthday 一致）；日期选择器的年份下限也取它。 */
 export const NEW_STAFF_MIN_BIRTHDAY = "1940-01-01";
 export const NEW_STAFF_MIN_BIRTH_YEAR = 1940;
-/** 未满这个年龄算未成年，需要填写监护人。 */
-export const NEW_STAFF_ADULT_AGE = 18;
+/** 未满这个年龄要填写监护人并预建未成年合规草稿；与后端 MinorEmploymentComplianceCalculator.MinorAgeLimit 一致（2026-11-03 由 18 改 16）。 */
+export const NEW_STAFF_GUARDIAN_AGE_LIMIT = 16;
 
 /** 关系选项：界面显示本地化文案，提交给后端的始终是英文值（会印在英文同意书上）。 */
 export const NEW_STAFF_GUARDIAN_RELATIONSHIPS = ["Mother", "Father", "Legal guardian", "Other"] as const;
@@ -92,10 +92,10 @@ export function validateNewStaffBirthday(value: string, today: Date): NewStaffBi
 export function resolveNewStaffAge(birthday: string, today: Date): { age: number; minor: boolean } | null {
   if (!isValidNewStaffBirthday(birthday, today)) return null;
   const age = calculateAge(birthday, today);
-  return age === null ? null : { age, minor: age < NEW_STAFF_ADULT_AGE };
+  return age === null ? null : { age, minor: age < NEW_STAFF_GUARDIAN_AGE_LIMIT };
 }
 
-/** 是否未成年：只有生日有效且未满 18 岁才算（生日没填 / 无效时不出现监护人一节）。 */
+/** 是否未成年：只有生日有效且未满 16 岁才算（生日没填 / 无效时不出现监护人一节）。 */
 export function isNewStaffMinor(birthday: string, today: Date) {
   return resolveNewStaffAge(birthday, today)?.minor ?? false;
 }

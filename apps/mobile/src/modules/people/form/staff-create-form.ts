@@ -3,7 +3,7 @@
  *
  * 业务规则（保持不变）：账号固定为本店店员（StoreStaff）、员工类型 casual、与本店关系「仅查看」；
  * 本页绝不提交任何密码——允许登录时由系统生成初始密码发到员工邮箱，店长全程不经手密码。
- * 新增（与后端 NewStaffProfileRules 一致）：电话、生日必填；未满 18 岁时监护人四项必填，规则见 new-staff-profile.ts。
+ * 新增（与后端 NewStaffProfileRules 一致）：电话、生日必填；未满 16 岁时监护人四项必填，规则见 new-staff-profile.ts。
  */
 import { isPersonNameEmpty, buildCreateNameBody } from "./person-form";
 import {
@@ -34,7 +34,7 @@ export interface StaffCreateFormValues {
   phone: string;
   /** 必填；YYYY-MM-DD，未选为空串。 */
   birthday: string;
-  /** 只在生日未满 18 岁时显示与提交；改回成年后保留已填内容但不提交。 */
+  /** 只在生日未满 16 岁时显示与提交；改回 16 岁以上后保留已填内容但不提交。 */
   guardian: NewStaffGuardianInput;
   /** 立即启用：关闭则创建为停用账号。 */
   enabled: boolean;

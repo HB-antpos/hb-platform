@@ -10,7 +10,7 @@ import {
   resolveDayDisplay,
   tierSummaryParts,
 } from "@/modules/attendance/payroll-hours";
-import type { PayrollHoursDay, PayrollHoursEmployee } from "@/modules/attendance/payroll-hours-types";
+import { PAYROLL_AGE_BADGE_LIMIT, type PayrollHoursDay, type PayrollHoursEmployee } from "@/modules/attendance/payroll-hours-types";
 import { clauseSeparator, labelColon } from "@/shared/i18n/punctuation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -26,7 +26,8 @@ export function employeeBadges(employee: PayrollHoursEmployee, t: Translate): { 
   if (employee.employmentType && EMPLOYMENT_TYPES.has(employee.employmentType)) {
     badges.push({ key: "type", label: t(`employment.${employee.employmentType}`), tone: "neutral" });
   }
-  if (employee.ageYears !== undefined && employee.ageYears < 18) {
+  // 21 岁以下显示年龄角标（青少年时薪按年龄计）；后端本来就只给 21 岁以下的 ageYears。
+  if (employee.ageYears !== undefined && employee.ageYears < PAYROLL_AGE_BADGE_LIMIT) {
     badges.push({ key: "age", label: t("employment.age", { age: employee.ageYears }), tone: "pink" });
   }
   if (employee.hasOtherStores) badges.push({ key: "multi", label: t("employment.multiStore"), tone: "info" });

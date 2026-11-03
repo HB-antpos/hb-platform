@@ -26,6 +26,16 @@ export const EMPLOYMENT_TYPE_TAG_COLORS: Record<AttendanceEmploymentType, string
 }
 export const MANAGER_TAG_COLOR = 'magenta'
 
+/**
+ * 工时 / 时薪 / 工资页显示年龄标签的门槛：21 岁以下显示周岁（澳洲青少年时薪按年龄逐年变，过生日要核对时薪）。
+ * 后端 ResolveMinorAge 也只在 21 岁以下才下发 ageYears；这里再判一次是给 mock 数据与旧接口兜底。
+ * 与新建员工的监护人门槛（newStaffProfileRules.GUARDIAN_AGE_LIMIT = 16）不是一回事。
+ */
+export const AGE_BADGE_LIMIT = 21
+export function showsAgeBadge(age: number | null | undefined): age is number {
+  return age != null && age < AGE_BADGE_LIMIT
+}
+
 /** 舍到 2 位小数（先放大成整数分再四舍五入，避免 0.005 这类浮点误差）。 */
 export function round2(value: number): number {
   return Math.round(Number((value * 100).toFixed(6))) / 100

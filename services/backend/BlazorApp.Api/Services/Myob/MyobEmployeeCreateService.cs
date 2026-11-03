@@ -109,7 +109,8 @@ public sealed class MyobEmployeeCreateService : IMyobEmployeeCreateService
             Phone = NormalizePhone(myobPhone),
             Birthday = birthday?.ToString("yyyy-MM-dd"),
             Age = age,
-            IsMinor = age is < 18,
+            // 与「新建员工」入口同一门槛：未满 16 岁才要监护人。
+            IsMinor = age is < BlazorApp.Api.Services.Attendance.MinorEmploymentComplianceCalculator.MinorAgeLimit,
             EmploymentType = employmentType,
             Stores = stores,
             SuggestedStoreCode = mappedStores.Count == 1 ? mappedStores[0].StoreCode : null,
@@ -302,7 +303,7 @@ public sealed class MyobEmployeeCreateService : IMyobEmployeeCreateService
             Password = request.SendPasswordSetupEmail ? null : request.Password,
             // 前端提交的是明文（HTTPS），必须显式标 raw，否则会被当成旧客户端的 sha256 摘要。
             PasswordFormat = PasswordHasher.PasswordFormatRaw,
-            // 与「新建员工」入口一致：生日、邮箱、电话必填，未满 18 岁要监护人。
+            // 与「新建员工」入口一致：生日、邮箱、电话必填，未满 16 岁要监护人。
             RequireNewStaffProfile = true,
         };
 

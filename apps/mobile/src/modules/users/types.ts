@@ -18,7 +18,7 @@ export interface StoreUserListItem {
   birthday?: string;
   gender?: string;
   employmentType?: string;
-  /** 仅考勤员工接口返回：未满 18 岁时的周岁。 */
+  /** 仅考勤员工接口返回：未满 21 岁时的周岁（青少年时薪按年龄计）。 */
   age?: number;
   /** 仅考勤员工接口返回：是否店长角色。 */
   isStoreManager?: boolean;
@@ -102,7 +102,7 @@ export interface StoreUserCreatePayload extends StoreUserMutationInput {
   sendPasswordSetupEmail?: boolean;
   /** 生日 YYYY-MM-DD；「新增员工」入口后端必填（旧版 App 不传会被拒绝并提示更新）。 */
   birthday?: string;
-  /** 监护人：只在生日未满 18 岁时带，后端用它预填未成年用工合规草稿。 */
+  /** 监护人：只在生日未满 16 岁时带，后端用它预填未成年用工合规草稿。 */
   guardian?: NewStaffGuardianPayload;
 }
 

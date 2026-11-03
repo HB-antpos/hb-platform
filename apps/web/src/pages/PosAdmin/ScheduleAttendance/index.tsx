@@ -62,6 +62,7 @@ import {
   deleteAttendanceHoliday,
   deleteAttendanceSchedule,
   getAttendanceAvailability,
+  getAttendanceEmployees,
   getAttendanceHolidays,
   getAttendanceLocationSamples,
   getAttendancePunches,
@@ -191,6 +192,8 @@ interface ScheduleRow {
   storeName?: string
   userGuid: string
   userName?: string
+  /** 只在 21 岁以下时有值（后端 ResolveMinorAge），姓名旁显示年龄角标。 */
+  age?: number
   schedulesByDate: Record<string, AttendanceScheduleDto[]>
 }
 
@@ -388,6 +391,8 @@ export default function ScheduleAttendancePage() {
   const [records, setRecords] = useState<ListState<AttendanceScheduleDto>>(initialListState)
   const [storeUsers, setStoreUsers] = useState<StoreUserListDto[]>([])
   const [storeUsersLoading, setStoreUsersLoading] = useState(false)
+  // 21 岁以下员工的周岁（userGuid → 岁），来自考勤员工接口；排班表姓名旁显示年龄角标（青少年时薪按年龄计，排班也要留意工时）
+  const [employeeAges, setEmployeeAges] = useState<Map<string, number>>(new Map())
   const [scheduleHolidays, setScheduleHolidays] = useState<AttendanceStoreHolidayDto[]>([])
   const [scheduleHolidaysLoading, setScheduleHolidaysLoading] = useState(false)
   const [availability, setAvailability] = useState<ListState<AttendanceAvailabilityDto>>(initialListState)
@@ -608,21 +613,30 @@ export default function ScheduleAttendancePage() {
   const loadStoreUsers = useCallback(async () => {
     if (!storeCode || !canViewStoreCode(storeCode)) {
       setStoreUsers([])
+      setEmployeeAges(new Map())
       return
     }
 
     setStoreUsersLoading(true)
     try {
-      // 一次取回该分店全部在职员工，姓名搜索在本地过滤
-      const result = await getStoreUsersGrid({
-        storeCode,
-        status: 1,
-      })
+      // 一次取回该分店全部在职员工，姓名搜索在本地过滤；年龄角标另取考勤员工接口（只给 21 岁以下的周岁），取不到只是没有角标，不影响排班表
+      const [result, employees] = await Promise.all([
+        getStoreUsersGrid({
+          storeCode,
+          status: 1,
+        }),
+        getAttendanceEmployees(storeCode).catch((error: unknown) => {
+          console.error(error)
+          return []
+        }),
+      ])
       setStoreUsers(result.items)
+      setEmployeeAges(new Map(employees.flatMap((employee) => (employee.age == null ? [] : [[employee.userGuid, employee.age] as const]))))
     } catch (error) {
       console.error(error)
       message.error(t('posAdmin.scheduleAttendance.messages.loadStoreUsersFailed'))
       setStoreUsers([])
+      setEmployeeAges(new Map())
     } finally {
       setStoreUsersLoading(false)
     }
@@ -1335,6 +1349,7 @@ export default function ScheduleAttendancePage() {
         storeName: user.storeName || storeNameMap.get(user.storeCode || storeCode || ''),
         userGuid: user.userGuid,
         userName: displayStoreUserName(user),
+        age: employeeAges.get(user.userGuid),
         schedulesByDate: {},
       })
     })
@@ -1357,7 +1372,7 @@ export default function ScheduleAttendancePage() {
 
     // 员工与班次都已整周加载完，姓名搜索只做本地过滤
     return filterRowsByKeyword(Array.from(rows.values()), staffKeyword)
-  }, [schedules.items, staffKeyword, storeCode, storeNameMap, storeUsers])
+  }, [employeeAges, schedules.items, staffKeyword, storeCode, storeNameMap, storeUsers])
 
   const weekDateKeys = useMemo(() => weekDays.map((day) => day.format('YYYY-MM-DD')), [weekDays])
 
@@ -1947,7 +1962,13 @@ export default function ScheduleAttendancePage() {
       width: 240,
       render: (_, record) => (
         <Space direction="vertical" size={0} style={{ width: '100%' }}>
-          <Typography.Text strong>{record.userName || '--'}</Typography.Text>
+          <Space size={4} wrap>
+            <Typography.Text strong>{record.userName || '--'}</Typography.Text>
+            {/* 21 岁以下显示周岁，金色与工时页的年龄标签同色 */}
+            {record.age != null ? (
+              <Tag color="gold" style={{ marginInlineEnd: 0 }}>{t('posAdmin.scheduleAttendance.fields.ageBadge', { age: record.age })}</Tag>
+            ) : null}
+          </Space>
         </Space>
       ),
     },
