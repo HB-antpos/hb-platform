@@ -686,9 +686,9 @@ test('所有 workflow yml/yaml 的第三方 uses（含条件步骤）全部固�
 test('WPF workflow 与 PR CI 使用相同的 checkout/setup-dotnet/upload-artifact SHA', () => {
   const source = readFileSync(wpfWorkflowPath, 'utf8')
   const expectedActions = [
-    ['actions/checkout', '11d5960a326750d5838078e36cf38b85af677262', 1],
-    ['actions/setup-dotnet', '67a3573c9a986a3f9c594539f4ab511d57bb3ce9', 1],
-    ['actions/upload-artifact', 'ea165f8d65b6e75b540449e92b4886f43607fa02', 2],
+    ['actions/checkout', '3d3c42e5aac5ba805825da76410c181273ba90b1', 1],
+    ['actions/setup-dotnet', '0f4a354dd5547a28c70b7853dbd95d5b67886e73', 1],
+    ['actions/upload-artifact', 'cf430e030ddbb5b0abf93d22962f4752f3646cd9', 2],
   ]
 
   for (const [action, sha, count] of expectedActions) {

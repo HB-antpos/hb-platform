@@ -64,10 +64,10 @@ jobs:
       macos_matrix: ${{ steps.plan.outputs.macos_matrix }}
       android_matrix: ${{ steps.plan.outputs.android_matrix }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 验证 CI 编排器
@@ -110,12 +110,12 @@ jobs:
       # 现有 Node 测试把“本地日”定义为 Brisbane；限制在 Node lane，避免改变原生/.NET runner。
       TZ: Australia/Brisbane
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # 共享迁移门禁直接复核固定基线的归属与语义；双端 lane 必须取得完整历史。
           fetch-depth: ${{ (matrix.component == 'pos-ipad' || matrix.component == 'pos-handheld') && '0' || '1' }}
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           # 每个组件按自己实际安装的锁文件分 key，与 quality-baseline.yml 同一公式以复用 main 上已有缓存。
@@ -156,7 +156,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 上传组件质量结果
         if: always() && contains(fromJSON(needs.plan.outputs.quality_lanes), matrix.component)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-lane-${{ github.run_id }}-${{ matrix.component }}
           path: .artifacts/quality-baseline/${{ matrix.component }}.json
@@ -165,7 +165,7 @@ jobs:
           retention-days: 7
       - name: 上传 Web 包体明细
         if: always() && matrix.component == 'web' && steps.verify.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-web-bundle-${{ github.run_id }}
           path: .artifacts/quality-baseline/web-bundle.json
@@ -182,13 +182,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - if: matrix.component == 'pos-contract'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -215,7 +215,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 上传 Backend 质量结果
         if: always() && matrix.component == 'backend'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-lane-${{ github.run_id }}-${{ matrix.component }}
           path: .artifacts/quality-baseline/backend.json
@@ -224,7 +224,7 @@ jobs:
           retention-days: 7
       - name: 上传 .NET 测试结果
         if: always() && matrix.component != 'noop'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: dotnet-${{ matrix.component }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/${{ matrix.component }}
@@ -240,7 +240,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: 检测预装 .NET SDK 与 .NET 8 运行时
         id: sdk
         if: matrix.component != 'noop'
@@ -264,7 +264,7 @@ jobs:
           "install=$install" >> $env:GITHUB_OUTPUT
           Write-Host "预装 SDK=$sdk 缺失的 .NET 8 运行时=[$($missing -join ', ')] 需要安装=$install"
       - if: matrix.component != 'noop' && steps.sdk.outputs.install == 'true'
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: |
             8.0.x
@@ -295,7 +295,7 @@ jobs:
           key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
       - name: 上传 WPF 测试结果
         if: always() && matrix.component != 'noop'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-${{ matrix.component }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pos-wpf
@@ -313,9 +313,9 @@ jobs:
     env:
       CI_PROFILE: ${{ needs.plan.outputs.profile }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -353,9 +353,9 @@ jobs:
     env:
       CI_PROFILE: ${{ needs.plan.outputs.profile }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -363,7 +363,7 @@ jobs:
             package-lock.json
             apps/mobile/package-lock.json
       - if: matrix.component != 'noop'
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
         with:
           distribution: temurin
           java-version: 17
@@ -410,12 +410,12 @@ jobs:
       CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
       HBWEB_SCHEMA_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: 非 Backend PR 无需运行真实 Schema SQL
         if: ${{ !(github.event_name == 'pull_request' || github.event_name == 'merge_group') || !contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: echo 'schema_sql=noop'
       - if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 启动隔离 SQL Server
@@ -432,7 +432,7 @@ jobs:
         run: ./scripts/ci/run-schema-sql.sh '${{ matrix.shard }}'
       - name: 上传 Schema SQL 结果
         if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: schema-sql-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/schema-sql
@@ -456,18 +456,18 @@ jobs:
       - name: 无质量组件时跳过采集
         if: needs.plan.result != 'success' || needs.plan.outputs.quality_lanes == '[]'
         run: echo 'quality_report=noop'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
       - name: 下载组件质量结果
         if: needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: quality-lane-${{ github.run_id }}-*
           path: .artifacts/quality-baseline/lanes
           merge-multiple: true
       - name: 下载 Web 包体明细
         if: needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.quality_lanes), 'web')
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: quality-web-bundle-${{ github.run_id }}
           path: .artifacts/quality-baseline/web-bundle
@@ -492,7 +492,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 保存质量报告
         if: always() && needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-baseline-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -523,8 +523,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 汇总必需检查
@@ -577,15 +577,15 @@ jobs:
       LSPA_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
       SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION: Server=127.0.0.1,15438;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 运行独立 SQL Server 集成测试
         run: ./scripts/ci/run-weekly-sql.sh
       - name: 上传 Weekly SQL 结果
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: weekly-sql-${{ github.run_attempt }}
           path: ${{ runner.temp }}/weekly-sql
@@ -599,15 +599,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 采集性能测试结果
         run: ./scripts/ci/run-weekly-performance.sh
       - name: 上传 Weekly 性能结果
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: weekly-performance-${{ github.run_attempt }}
           path: ${{ runner.temp }}/weekly-performance
@@ -625,8 +625,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 汇总每周全量检查
