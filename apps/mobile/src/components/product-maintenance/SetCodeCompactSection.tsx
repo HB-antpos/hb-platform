@@ -1,3 +1,5 @@
+import type { Ref } from "react";
+import type { View } from "react-native";
 import { CodeTableCard } from "@/components/product-maintenance/CodeTableCard";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import type { ProductSetCodeItem } from "@/modules/product-maintenance/types";
@@ -14,6 +16,9 @@ interface SetCodeCompactSectionProps {
   hasMore?: boolean;
   /** 离线模式：隐藏新增与加载更多，条码/价格不可编辑，打印保留。 */
   readOnly?: boolean;
+  /** 本次扫到的套装条码：按条码匹配行（服务端目标的 codeId 与行 id 口径一致，但条码匹配更稳）。 */
+  highlightedBarcode?: string | null;
+  highlightedRowRef?: Ref<View>;
   onEditItemBarcode: (setCodeId: string) => void;
   onEditItemRetailPrice: (setCodeId: string) => void;
   onSaveItem: (setCodeId: string) => void;
@@ -32,6 +37,8 @@ export function SetCodeCompactSection({
   loadingMore,
   hasMore,
   readOnly = false,
+  highlightedBarcode,
+  highlightedRowRef,
   onEditItemBarcode,
   onEditItemRetailPrice,
   onSaveItem,
@@ -40,6 +47,10 @@ export function SetCodeCompactSection({
   onLoadMore,
 }: SetCodeCompactSectionProps) {
   const { t } = useAppTranslation("productQuery");
+  const highlightedCode = highlightedBarcode?.trim().toUpperCase();
+  const highlightedId = highlightedCode
+    ? items.find((item) => item.setBarcode?.trim().toUpperCase() === highlightedCode)?.setCodeId ?? null
+    : null;
 
   return (
     <CodeTableCard
@@ -66,6 +77,8 @@ export function SetCodeCompactSection({
       onAddItem={onAddItem}
       onLoadMore={onLoadMore}
       readOnly={readOnly}
+      highlightedId={highlightedId}
+      highlightedRowRef={highlightedRowRef}
     />
   );
 }
