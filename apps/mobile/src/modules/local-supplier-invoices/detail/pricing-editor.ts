@@ -118,6 +118,46 @@ export function buildPricingEditorChanges(detail: PricingSource, draft: PricingE
 /** 自动定价支持的最低进货价，与后端 AutoPricingRules.MinPurchasePrice 一致。 */
 export const AUTO_PRICING_MIN_PURCHASE_PRICE = 0.1;
 
+/** 本店现价 ÷ 本次进货价低于它就标红：与自动定价 1.5～5 成率的下限一致（与 Web retailPriceDisplay 同口径）。 */
+export const STORE_RETAIL_MIN_MARKUP = 1.5;
+
+export interface RetailPriceDisplay {
+  /** 零售价格子主值：有指定零售价用指定价，否则用本店现价；两者都没有为 null。 */
+  value: number | null;
+  source: "designated" | "store" | "none";
+  /** 本店现价；没匹配商品或本店未建价格为 null。 */
+  storeRetailPrice: number | null;
+  /** 本店现价 ÷ 本次进货价，两位小数文本；进货价缺失或为 0 时为 null。 */
+  storeMarkupText: string | null;
+  storeMarkupLow: boolean;
+}
+
+/**
+ * 零售价格子显示什么：retailPrice 是本行「指定零售价」（「更新到分店」优先写入它），storeRetailPrice 是本店现价（只读）。
+ * 指定价为空或 0（执行时同样当作没填）时显示本店现价作参考，并给出与本次进货价的倍率。
+ */
+export function getRetailPriceDisplay(
+  detail: Pick<LocalSupplierInvoiceItem, "retailPrice" | "storeRetailPrice" | "purchasePrice" | "productCode">
+): RetailPriceDisplay {
+  // 没匹配到商品谈不上本店价格；改选商品后到重新加载前，旧的本店现价也不该挂在新商品上。
+  const storeRetailPrice = detail.productCode && typeof detail.storeRetailPrice === "number" && Number.isFinite(detail.storeRetailPrice)
+    ? detail.storeRetailPrice
+    : null;
+  const designated = typeof detail.retailPrice === "number" && Number.isFinite(detail.retailPrice) && detail.retailPrice > 0
+    ? detail.retailPrice
+    : null;
+  const markup = storeRetailPrice !== null && typeof detail.purchasePrice === "number" && detail.purchasePrice > 0
+    ? storeRetailPrice / detail.purchasePrice
+    : null;
+  return {
+    value: designated ?? storeRetailPrice,
+    source: designated !== null ? "designated" : storeRetailPrice !== null ? "store" : "none",
+    storeRetailPrice,
+    storeMarkupText: markup === null ? null : markup.toFixed(2),
+    storeMarkupLow: markup !== null && markup < STORE_RETAIL_MIN_MARKUP,
+  };
+}
+
 export type PricingModeKind = "unset" | "auto" | "autoNoRate" | "manual";
 /** 本店分店价格表的自动定价状态：hidden = 没匹配到商品，不显示；none = 本店未建；auto / manual = 本店自动 / 手动。 */
 export type StorePricingStatus = "hidden" | "none" | "auto" | "manual";

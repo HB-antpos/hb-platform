@@ -1,6 +1,7 @@
 import type { Key } from 'react'
 import type { LocalSupplierInvoiceItemDto } from '../../../../types/localSupplierInvoice'
 import { isActionColumnFilterKey, matchesActionColumnFilterKey } from './progressBuckets'
+import { getRetailPriceDisplay } from './retailPriceDisplay'
 import {
   getBarcodeStatusFilter,
   getActionTypeFilter,
@@ -59,6 +60,8 @@ function parseNumber(value: unknown) {
 }
 
 function getNumberColumnValue(record: LocalSupplierInvoiceItemDto, field: NumberFilterField) {
+  // 零售价列没填指定零售价时显示本店现价，列头筛选按用户看到的值匹配。
+  if (field === 'retailPrice') return getRetailPriceDisplay(record).value
   const value = record[field]
   if (value === undefined || value === null) return undefined
 
