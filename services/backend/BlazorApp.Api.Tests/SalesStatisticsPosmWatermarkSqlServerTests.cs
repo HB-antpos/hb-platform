@@ -44,7 +44,9 @@ public sealed class SalesStatisticsPosmWatermarkSqlServerTests
 
     [SalesStatisticsPosmWatermarkSqlServerFact]
     [Trait("Category", "SQL")]
-    public async Task 状态及自然日边界只计入状态1和4的当日订单()
+    // #710 起销售统计按净额并入旧 POS 退款单（Status=3），水位口径同为 SalesOrderStatusRules.NetSalesStatuses（1、3、4）；
+    // 退款单的晚上传也必须推动当日水位，否则净额统计不会重算。
+    public async Task 状态及自然日边界只计入状态1_3_4的当日订单()
     {
         await using var fixture = await Fixture.CreateAsync();
         var veryLate = TargetDate.AddDays(10);
@@ -56,10 +58,11 @@ public sealed class SalesStatisticsPosmWatermarkSqlServerTests
         await fixture.AddOrderAsync("null-status", null, TargetDate.AddHours(8), veryLate);
         await fixture.AddOrderAsync("status-0", 0, TargetDate.AddHours(8), veryLate);
         await fixture.AddOrderAsync("status-2", 2, TargetDate.AddHours(8), veryLate);
-        await fixture.AddOrderAsync("status-3", 3, TargetDate.AddHours(8), veryLate);
+        await fixture.AddOrderAsync("status-3-refund", 3, TargetDate.AddHours(8), TargetDate.AddHours(3));
 
-        // 方法接收带时分秒的日期时仍应按该日零点到次日零点查询。
-        Assert.Equal(TargetDate.AddHours(2), await fixture.QueryAsync(TargetDate.AddHours(15)));
+        // 方法接收带时分秒的日期时仍应按该日零点到次日零点查询；
+        // 退款单上传时间最晚（03:00），若状态 3 被漏掉结果会退回 02:00。
+        Assert.Equal(TargetDate.AddHours(3), await fixture.QueryAsync(TargetDate.AddHours(15)));
     }
 
     [SalesStatisticsPosmWatermarkSqlServerFact]
