@@ -1,0 +1,46 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>多选添加</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>body{background:#f0f2f5}.wrap{width:1440px;height:900px;padding:18px;box-sizing:border-box;display:flex;gap:18px}
+.col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}.cap{font-weight:700;font-size:15px}.cap span{color:#1677ff}.sub{font-size:12px;color:rgba(0,0,0,.6);line-height:1.55;min-height:54px}
+.frame{flex:1;display:flex;border-radius:12px;border:1px solid #e5e5e5;background:#fff;overflow:hidden;position:relative}
+.panel{width:262px;flex:none;border-right:1px solid #f0f0f0;display:flex;flex-direction:column;position:relative}
+.ptabs{display:flex;gap:22px;padding:0 14px;border-bottom:1px solid #f0f0f0;font-size:14px}.ptabs span{padding:10px 0}.ptabs .on{color:#1677ff;border-bottom:2px solid #1677ff;font-weight:500}
+.pi{display:flex;gap:8px;align-items:center;padding:7px 10px;border-radius:8px;margin:0 6px}
+.pi.sel{background:#e6f4ff}.pi .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pi .mt{font-size:11px;color:rgba(0,0,0,.45);white-space:nowrap}
+.cb{width:16px;height:16px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;flex:none;position:relative}
+.cb.on{background:#1677ff;border-color:#1677ff}.cb.on:after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.num{position:absolute;left:-6px;top:-6px;width:16px;height:16px;border-radius:50%;background:#1677ff;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.bar{margin-top:auto;border-top:1px solid #f0f0f0;padding:10px 12px;display:flex;align-items:center;gap:8px;font-size:13px;background:#fafafa}
+.cv{flex:1;padding:10px;position:relative;overflow:hidden}
+.toast{position:absolute;top:10px;left:10px;right:10px;background:#fff;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.12);padding:9px 14px;font-size:13px;display:flex;gap:8px;align-items:center;z-index:5;line-height:1.5}
+.rule{margin:12px 0 0;padding:8px 10px;border-radius:8px;background:#fafafa;font-size:12px;color:rgba(0,0,0,.65);line-height:1.6}
+</style><script src="lib.js"></script></head><body><div class="wrap" id="w"></div>
+<script>
+const prods = [['Tissue Paper Yellow','HB038-112',0],['TISSUE PAPER','HB038-108',1],['Tissue Paper White','HB038-101',2],['Tissue Paper Black','HB038-102',3],['Tissue Paper Cream','HB038-103',4],['TISSUE PAPER Red','HB038-104',5],['TISSUE PAPER Blue','HB038-105',6],['Crepe Paper 20 Colors','HB038-106',7]];
+const thumb = (c) => `<div style="width:34px;height:34px;border-radius:6px;overflow:hidden;flex:none">${`<svg width="34" height="34">${photo(0,0,34,34,PH[c],c)}</svg>`}</div>`;
+const lib = (sel, order, placedSet) => prods.map(([n,code,c],i)=>{ const k = sel.indexOf(i); return `<div class="pi ${k>=0?'sel':''}"><span class="cb ${k>=0?'on':''}" style="position:relative">${k>=0&&order?`<span class="num">${k+1}</span>`:''}</span>${thumb(c)}<div style="min-width:0;flex:1"><div class="nm">${n}</div><div class="mt" style="font-family:Menlo,monospace">${code}</div><div class="mt">200×500×5 · 每钩 38 · 已放 ${placedSet.includes(i)?1:0}</div></div><i class="ti ti-plus" style="color:#1677ff"></i></div>`}).join('');
+const header = `<div class="ptabs"><span class="on">商品</span><span>挂钩</span></div><div style="padding:10px 10px 6px;display:flex;gap:6px"><div class="input" style="height:30px;flex:1"><i class="ti ti-search muted"></i><span class="ph" style="font-size:13px">货号 / 条码 / 名称</span></div><span class="btn sm" style="height:30px"><i class="ti ti-filter"></i></span></div>
+<div style="padding:0 12px 6px;display:flex;justify-content:space-between;align-items:center;font-size:12px"><span class="seg"><span class="on" style="height:24px;font-size:12px">已设参数</span><span style="height:24px;font-size:12px">全部</span></span><span style="color:#1677ff">全选当前列表</span></div>`;
+const P = (x, y, c, code, st) => ({x, y, w:200, h:270, c, code, qty:38, st});
+const BS = 0.33;
+// 左：已放 -112、-108；勾选 -101～-104，按「节 → 行 → 列」找第一个空位，第 4 个本行放不下落到下一行
+const placed = [P(20,60,0,'-112'), P(232,60,1,'-108')];
+const ghostRun = [P(444,60,2,'-101','ghost'), P(656,60,3,'-102','ghost'), P(868,60,4,'-103','ghost'), P(20,400,5,'-104','ghost')];
+const left = `<div class="col"><div class="cap"><span>① 勾选</span> · 商品库多选，画布预览将放到哪里</div>
+<div class="sub">卡片左侧复选框；Shift 点击选一段，Ctrl / Cmd 点击逐个加；角标是放置顺序。翻页、换筛选后已选保留，上限 200 个。鼠标移到「添加到方案」上时，画布用绿色虚线预览落点。</div>
+<div class="frame"><div class="panel">${header}<div style="overflow:hidden">${lib([2,3,4,5],true,[0,1])}</div>
+<div class="bar"><b>已选 4 个</b><span class="btn sm primary" style="height:28px;margin-left:auto"><i class="ti ti-playlist-add"></i>添加到方案</span><span class="btn sm text" style="height:28px">清除</span></div></div>
+<div class="cv">${board({id:3, S:BS, W:1200, H:720, items:[...placed, ...ghostRun]})}
+<div class="rule"><b>落点规则</b>：按勾选顺序逐个放，和现在单个「+」添加一样，找第一个放得下的位置（节 → 行 → 列）；本节放满会接着放到下一节。每个商品用自己的默认挂钩，没有就用左栏当前选中的挂钩。</div></div></div></div>`;
+// 右：方案只剩 4 个空位，勾选 6 个 → 放 4 个，-105、-106 保留勾选
+const before2 = [P(20,60,0,'-112'), P(232,60,1,'-108'), P(20,400,6,'-109'), P(232,400,7,'-110'), P(444,400,0,'-111'), P(656,400,1,'-113')];
+const after = [...before2, P(444,60,2,'-101'), P(656,60,3,'-102'), P(868,60,4,'-103'), P(868,400,5,'-104')];
+const right = `<div class="col"><div class="cap"><span>② 添加后</span> · 放不下的保持勾选并提示</div>
+<div class="sub">放得下的先放好，放不下的仍保留勾选，提示具体个数；整批添加算一次撤销。例：方案 1 节、只剩 4 个空位，勾选了 6 个。</div>
+<div class="frame"><div class="panel">${header}<div style="overflow:hidden">${lib([6,7],false,[0,1,2,3,4,5])}</div>
+<div class="bar"><b>已选 2 个</b><span class="muted" style="font-size:12px">（放不下）</span><span class="btn sm text" style="height:28px;margin-left:auto">清除</span></div></div>
+<div class="cv"><div class="toast"><i class="ti ti-alert-circle" style="color:#fa8c16;font-size:16px"></i><span>已添加 4 个，2 个放不下：方案里没有空位了。仍保留勾选，可加节或腾出位置后再添加。</span><span style="color:#1677ff;white-space:nowrap">撤销</span></div>
+<div style="height:58px"></div>${board({id:4, S:BS, W:1200, H:720, items:after})}</div></div></div>`;
+document.getElementById('w').innerHTML = left + right;
+</script></body></html>

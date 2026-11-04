@@ -1,0 +1,55 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>拖拽规则</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>body{background:#f0f2f5}.wrap{width:1440px;height:770px;padding:20px 26px;box-sizing:border-box}
+h2{margin:0 0 4px;font-size:19px}.sub{font-size:13px;color:rgba(0,0,0,.6);margin-bottom:14px}
+.row{display:flex;gap:18px}.card{background:#fff;border-radius:12px;border:1px solid #e5e5e5;padding:16px}
+.t{font-weight:700;font-size:15px;margin-bottom:8px}.f{font-size:13px;color:rgba(0,0,0,.75);line-height:1.7}
+ol{margin:0;padding-left:20px;font-size:13px;line-height:1.75}ol li{margin-bottom:4px}
+.pill{display:inline-block;border-radius:6px;padding:0 6px;font-weight:600;font-size:12px}
+.k{font-family:Menlo,monospace;background:#f5f5f5;border-radius:4px;padding:1px 6px}
+</style></head><body><div class="wrap">
+<h2>拖拽已排商品：重叠比例决定「对调 / 插入 / 普通移动」</h2>
+<div class="sub">重叠率 = 拖动虚影与某个商品的<b>相交面积 ÷ 两者中较小方块的面积</b>（方块含价签）。阈值仍是你定的 50% / 20%。</div>
+<div class="row">
+ <div class="card" style="width:560px"><div class="t">怎么算重叠率</div>
+  <svg width="520" height="250" font-family="-apple-system,PingFang SC,sans-serif">
+   <rect x="30" y="40" width="200" height="190" rx="3" fill="#bae0ff" stroke="#8c8c8c"/><text x="95" y="140" text-anchor="middle" font-size="13" fill="#0958d9">商品 B</text><text x="95" y="158" text-anchor="middle" font-size="11.5" fill="#0958d9">200×190</text>
+   <rect x="160" y="70" width="120" height="150" rx="3" fill="#d9f7be" stroke="#52c41a" stroke-width="2" stroke-dasharray="5 3" opacity=".85"/><text x="235" y="242" text-anchor="middle" font-size="12.5" fill="#389e0d">拖动的 A（120×150，较小）</text>
+   <rect x="160" y="70" width="70" height="150" fill="#1677ff" opacity=".28"/><text x="195" y="62" text-anchor="middle" font-size="12" fill="#1677ff">相交 70×150</text>
+   <text x="305" y="100" font-size="14">重叠率 = 70×150 ÷ (120×150)</text>
+   <text x="305" y="126" font-size="18" font-weight="700" fill="#1677ff">≈ 58%</text>
+   <text x="305" y="160" font-size="12" fill="rgba(0,0,0,.55)">分母取较小方块：小商品完整落进</text>
+   <text x="305" y="178" font-size="12" fill="rgba(0,0,0,.55)">大商品里算 100%，不会因大小悬殊</text>
+   <text x="305" y="196" font-size="12" fill="rgba(0,0,0,.55)">而永远达不到阈值。</text>
+  </svg></div>
+ <div class="card" style="flex:1"><div class="t">判定顺序（建议）</div>
+  <ol>
+   <li><b>同时压住同一行相邻的两个商品，且各自重叠率 &gt; 20%</b> → <span class="pill" style="background:#fff7e6;color:#d46b08">插入</span> 到它们之间。<span style="color:#cf1322">（新增这一条，原因见下方对比）</span></li>
+   <li>否则取重叠率最大的那个商品 T：
+    <div style="margin-top:2px">≥ 50% → <span class="pill" style="background:#e6f4ff;color:#0958d9">对调</span>：A、T 交换，各自<b>左边缘对齐</b>到对方原位再吸附孔位；对调后与邻居冲突则拒绝。</div>
+    <div>20–50% → <span class="pill" style="background:#fff7e6;color:#d46b08">插入</span> 到 T 之前或之后（虚影中心在 T 左半边就插在前面）。</div>
+    <div>≤ 20% → <span class="pill" style="background:#f5f5f5">普通移动</span>：和现在一样吸附孔位，有冲突就弹回。</div></li>
+   <li><b>插入的后移</b>：插入点之后的同行商品整体右移「A 宽 + 左右间距」，彼此间距不变；超出<b>本节</b>右边的末尾商品换到下一行左侧空位（只找空位，不推下一行的商品）。</li>
+   <li><span class="pill" style="background:#fff1f0;color:#cf1322">拒绝</span>：只在本节内后移或换行，不溢到相邻的节；放不下（已是最后一行、下一行没有空位）就整次拒绝，A 回原位。</li>
+  </ol></div>
+</div>
+<div class="card" style="margin-top:16px"><div class="t">为什么要加第 1 条：同宽商品紧挨着排时，原规则的插入区太窄</div>
+ <svg width="1380" height="250" font-family="-apple-system,PingFang SC,sans-serif" id="z"></svg>
+</div>
+</div>
+<script>
+// 三个 200 宽商品、间距 12；横轴是虚影 A（同宽 200）左边缘位置 20–444 mm
+const z = document.getElementById('z'); const X0 = 150, K = 2.6; const xm = v => X0 + (v - 20) * K;
+let s = '';
+const items = [[20,220,'-112'],[232,432,'-108'],[444,644,'-101']];
+s += `<text x="10" y="40" font-size="13" font-weight="600">货架上的商品</text>`;
+for (const [a,b,n] of items) { const L = xm(a), R = Math.min(xm(b), 1370); s += `<rect x="${L}" y="22" width="${R-L}" height="30" rx="3" fill="#f5f5f5" stroke="#bfbfbf"/><text x="${(L+R)/2}" y="42" text-anchor="middle" font-size="12">${n}</text>`; }
+const bar = (y, title, zs, note) => { s += `<text x="10" y="${y+20}" font-size="13" font-weight="600">${title}</text>`;
+  for (const [t,a,b] of zs) { const L = xm(a), R = Math.min(xm(b+1), 1370); const c = t==='swap'?['#e6f4ff','#0958d9','对调']:['#fff7e6','#d46b08','插入']; s += `<rect x="${L}" y="${y}" width="${R-L}" height="30" fill="${c[0]}" stroke="#fff"/>`; if (R-L > 34) s += `<text x="${(L+R)/2}" y="${y+20}" text-anchor="middle" font-size="12" fill="${c[1]}" font-weight="600">${c[2]} ${b-a+1} mm</text>`; else s += `<text x="${(L+R)/2}" y="${y-4}" text-anchor="middle" font-size="11" fill="${c[1]}" font-weight="700">插入 ${b-a+1}mm</text>`; }
+  s += `<text x="10" y="${y+46}" font-size="12" fill="rgba(0,0,0,.6)">${note}</text>`; };
+bar(90, '原规则', [['swap',20,120],['insert',121,131],['swap',132,332],['insert',333,343],['swap',344,444]], '只看重叠最大的那个商品：两边都要低于 50% 才算插入，插入区每处只有约 11 mm，缩放 30% 时约 3 像素，几乎点不中。');
+bar(170, '加第 1 条后', [['swap',20,72],['insert',73,179],['swap',180,284],['insert',285,391],['swap',392,444]], '压住相邻两个、各超过 20% 就插入：插入区约 107 mm、对调区约 105 mm，两种操作都容易拖准。');
+s += `<text x="${xm(20)}" y="244" font-size="11" fill="rgba(0,0,0,.45)">横轴：拖动虚影 A（同样 200 宽）的左边缘位置（mm）</text>`;
+z.innerHTML = s;
+</script></body></html>

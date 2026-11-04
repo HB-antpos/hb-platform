@@ -13,6 +13,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import type { ProductSpecListItemDto } from '../../../../types/planogram'
+import { toProductThumbnailUrl } from '../../../../utils/productImageThumbnail'
 import { boardSize } from '../engine/holeGrid'
 import {
   bayBoardOriginX,
@@ -36,6 +37,17 @@ import {
   type DropHint,
   type Slot,
 } from './designerLogic'
+import {
+  arrangeFadedGuids,
+  arrangePreviewBoxes,
+  planDragArrange,
+  type ArrangeCommitPlan,
+  type ArrangeLine,
+  type ArrangePlan,
+  type ArrangeRejectPlan,
+  type CanvasPreviewBox,
+  type PreviewTone,
+} from './dragArrange'
 import type { DisplayConflict } from './useDesignerLayout'
 
 /**
@@ -65,6 +77,25 @@ const COLOR_SELECTED = '#1677ff'
 const COLOR_ERROR = '#ff4d4f'
 const COLOR_WARN = '#fa8c16'
 const COLOR_OK = '#52c41a'
+
+/** 商品图：屏幕上方块高度不足这个像素数时不加载图片（缩小到看不清时退回色块，也省流量）。 */
+export const CANVAS_IMAGE_MIN_PX = 28
+/** 商品图缩略图档位（COS 实时缩放的边长）：按方块显示尺寸 × 像素密度取最小够用的一档。 */
+export const CANVAS_IMAGE_TIERS = [72, 160, 320] as const
+
+export function canvasImageTier(displayPx: number, devicePixelRatio = 1): number {
+  const need = displayPx * Math.min(2, Math.max(1, devicePixelRatio))
+  return CANVAS_IMAGE_TIERS.find((tier) => tier >= need) ?? CANVAS_IMAGE_TIERS[CANVAS_IMAGE_TIERS.length - 1]
+}
+
+/** 预览框配色：拖动虚影 / 新位置（后移、对调）/ 换行。 */
+const PREVIEW_TONES: Record<PreviewTone, { stroke: string; fill: string }> = {
+  ghost: { stroke: COLOR_OK, fill: '#f6ffed' },
+  shift: { stroke: COLOR_SELECTED, fill: '#e6f4ff' },
+  wrap: { stroke: COLOR_WARN, fill: '#fff7e6' },
+}
+
+const NO_PLAN: ArrangePlan = { kind: 'none' }
 
 export interface CanvasMetrics {
   /** 1 mm 对应的像素数（= 缩放 / 100）。 */
@@ -182,11 +213,21 @@ interface BoardCanvasProps {
   conflictText: (conflict: DisplayConflict) => string
   /** 从左栏拖入时由外层算出的落点提示（画布内拖动用自己的提示）。 */
   externalHint: DropHint | null
-  describeHint: (hint: DropHint) => CanvasHintText
+  /** 从左栏拖入时外层算出的对调 / 插入预览（与 externalHint 成对）。 */
+  externalPlan?: ArrangePlan | null
+  /** 外层给的额外虚线预览框（多选「添加到方案」的落点预览）。 */
+  previewBoxes?: readonly CanvasPreviewBox[] | null
+  /** 商品方块里显示商品图（缺省不显示；设计器默认打开，历史版本预览不显示）。 */
+  showImages?: boolean
+  describeHint: (hint: DropHint, plan: ArrangePlan) => CanvasHintText
   onSelect: (guid: string | null) => void
   onMoveItem: (guid: string, slot: Slot) => void
   /** 松手时落点不可放（严格吸附模式）：外层提示原因，条目回到原位。 */
   onRejectMove: (hint: DropHint) => void
+  /** 画布内拖动触发对调 / 插入：外层一次提交整份新明细（一个撤销快照）。 */
+  onArrange?: (plan: ArrangeCommitPlan, draggedGuid: string) => void
+  /** 对调 / 插入放不下或会冲突：外层提示原因，什么都不改。 */
+  onRejectArrange?: (plan: ArrangeRejectPlan) => void
   onCopyRight: () => void
   onDistribute: () => void
   onRemove: () => void
@@ -322,9 +363,13 @@ interface ItemShapeProps {
   onPointerDown: (guid: string, event: ReactPointerEvent<SVGGElement>) => void
   /** 打印（PDF）模式：白底、描边略深、无选中手柄 / 交互 / 悬浮提示，价格与序号气泡按开关，冲突仍标红。 */
   print?: ItemPrintOptions
+  /** 交互画布的商品图（缩略图地址）；null = 画色块 + 名称。 */
+  image?: string | null
+  /** 商品图加载失败：外层记下这个地址，之后退回色块。 */
+  onImageError?: (href: string) => void
 }
 
-const ItemShape = memo(function ItemShape({ view, selected, dragging, m, showTags, labels, onPointerDown, print }: ItemShapeProps) {
+const ItemShape = memo(function ItemShape({ view, selected, dragging, m, showTags, labels, onPointerDown, print, image, onImageError }: ItemShapeProps) {
   const S = m.scale
   const { geometry: g, hook } = view
   const boardLeftPx = m.ox + view.boardOriginMm * S
@@ -339,12 +384,14 @@ const ItemShape = memo(function ItemShape({ view, selected, dragging, m, showTag
   const stroke = selected ? COLOR_SELECTED : view.hasError ? COLOR_ERROR : view.hasWarn ? COLOR_WARN : print ? COLOR_PRINT_STROKE : COLOR_STROKE
   const strokeWidth = selected || view.hasError ? 2 : view.hasWarn ? 1.5 : print ? 0.9 : 1
 
+  // 交互画布显示商品图时名称收起（悬浮提示 / 右栏里有名称），只留底部「货号·×每钩」；图片加载失败由外层退回色块 + 名称
+  const interactiveImage = !print && Boolean(image) && !view.missing
   // 名称：按宽度折行，最多 3 行（高度不够就少画）；双语打印时先中文（最多 2 行）再英文（最多 2 行，小一号）
   const lineHeight = fs + 2
   const maxLines = Math.max(1, Math.min(3, Math.floor((h - fs * 2.6) / (fs + 2))))
   let lines: string[] = []
   let secondaryLines: string[] = []
-  if (!view.missing) {
+  if (!view.missing && !interactiveImage) {
     if (print && view.secondaryName) {
       // 双语：先中文（最多一半行数）再英文（小一号）；框太矮放不下两行时只印主名称，不硬挤（挤了会压住货号标签）
       const budget = Math.min(4, Math.floor((h - fs * 2.6) / (fs + 2)))
@@ -401,8 +448,22 @@ const ItemShape = memo(function ItemShape({ view, selected, dragging, m, showTag
         <circle key={k} cx={boardLeftPx + (g.holeX + k * view.holePitchXMm) * S} cy={m.oy + g.holeY * S} r={holeRadius} fill="#595959" />
       ))}
       {/* 商品包装 */}
-      <rect x={x} y={y} width={w} height={h} rx={1.5} fill={print ? (view.hasError ? '#fff1f0' : '#fff') : view.fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={view.missing ? '4 3' : undefined} />
+      <rect x={x} y={y} width={w} height={h} rx={1.5} fill={print ? (view.hasError ? '#fff1f0' : '#fff') : interactiveImage ? '#fff' : view.fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={view.missing ? '4 3' : undefined} />
       {print?.image ? <image href={print.image} x={x + 1} y={y + 1} width={Math.max(0, w - 2)} height={Math.max(0, h - 2)} preserveAspectRatio="xMidYMid meet" /> : null}
+      {interactiveImage && image ? (
+        <image
+          href={image}
+          x={x + 1}
+          y={y + 1}
+          width={Math.max(0, w - 2)}
+          height={Math.max(0, h - 2)}
+          preserveAspectRatio="xMidYMid meet"
+          pointerEvents="none"
+          // React 18 会给 SVG <image> 监听 error 事件（react-dom 对 img / image / link 都挂了非冒泡监听），此规则的白名单没列 image
+          // eslint-disable-next-line react/no-unknown-property
+          onError={() => onImageError?.(image)}
+        />
+      ) : null}
       {view.hasError ? <rect x={x - 1} y={y - 1} width={w + 2} height={h + 2} fill={COLOR_ERROR} opacity={0.12} pointerEvents="none" /> : null}
       <rect x={cx - hangW / 2} y={y + 1.5} width={hangW} height={hangH} rx={1} fill="#fff" stroke="#999" strokeWidth={0.6} pointerEvents="none" />
       {hasImage && allLineCount > 0 ? (
@@ -421,6 +482,10 @@ const ItemShape = memo(function ItemShape({ view, selected, dragging, m, showTag
             <tspan key={index} x={cx} y={firstLineY + (lines.length + index) * lineHeight}>{line}</tspan>
           ))}
         </text>
+      ) : null}
+      {/* 商品图上的货号标签垫一条半透明白底，压在图上也看得清 */}
+      {interactiveImage && w >= 26 ? (
+        <rect x={x + 1} y={y + h - fs * 0.85 - 6} width={Math.max(0, w - 2)} height={fs * 0.85 + 5} fill="#fff" opacity={0.82} pointerEvents="none" />
       ) : null}
       {view.missing ? (
         <text x={cx} y={y + h / 2 + 3} fontSize={Math.max(9, fs)} textAnchor="middle" fill={COLOR_ERROR} pointerEvents="none">?</text>
@@ -695,7 +760,8 @@ function HintLayer({ hint, text, ctx, m, showRulers, fill, canvasWidth }: HintLa
   const hookModel = ctx.hooks[hint.hookModelGuid]
   const spec = ctx.specs[hint.productCode]
   if (!hookModel || !spec) return null
-  const stroke = hint.ok ? COLOR_OK : COLOR_ERROR
+  // 颜色跟着提示文字的结论走：对调 / 插入时虚影仍是绿色（松手有效），放不下时是红色
+  const stroke = text.ok ? COLOR_OK : COLOR_ERROR
   const boardLeftPx = m.ox + bayBoardOriginX(ctx.shelf, hint.bayIndex) * S
   const cx = boardLeftPx + g.centerX * S
   const w = spec.widthMm * S
@@ -719,7 +785,7 @@ function HintLayer({ hint, text, ctx, m, showRulers, fill, canvasWidth }: HintLa
       {Array.from({ length: hookModel.holeSpanX }, (_, k) => (
         <circle key={k} cx={boardLeftPx + (g.holeX + k * ctx.shelf.holePitchXMm) * S} cy={holeY} r={4} fill="none" stroke={stroke} strokeWidth={1.5} />
       ))}
-      <rect x={x} y={y} width={w} height={h} rx={1.5} fill={hint.ok ? '#f6ffed' : '#fff1f0'} stroke={stroke} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.92} />
+      <rect x={x} y={y} width={w} height={h} rx={1.5} fill={text.ok ? '#f6ffed' : '#fff1f0'} stroke={stroke} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.92} />
       <rect x={x + 2} y={y + 2} width={Math.max(0, w - 4)} height={Math.max(0, h - 4)} rx={1} fill={fill} opacity={0.35} />
       {hookModel.hasPriceTagArm && g.tagTop !== null ? (
         <rect x={cx - (hookModel.tagWidthMm * S) / 2} y={m.oy + g.tagTop * S} width={hookModel.tagWidthMm * S} height={hookModel.tagHeightMm * S} fill="#fff" stroke={stroke} strokeWidth={0.8} strokeDasharray="2 2" />
@@ -732,11 +798,47 @@ function HintLayer({ hint, text, ctx, m, showRulers, fill, canvasWidth }: HintLa
       ) : null}
       <g transform={`translate(${bubbleX}, ${bubbleY})`}>
         <rect width={bubbleW} height={bubbleH} rx={5} fill="#1f1f1f" opacity={0.92} />
-        <text x={9} y={13} fontSize={fs} fontWeight={600} fill={hint.ok ? '#73d13d' : '#ff7875'}>{text.line1}</text>
+        <text x={9} y={13} fontSize={fs} fontWeight={600} fill={text.ok ? '#73d13d' : '#ff7875'}>{text.line1}</text>
         {text.line2 ? <text x={9} y={26} fontSize={fs - 0.5} fill="rgba(255,255,255,.78)">{text.line2}</text> : null}
       </g>
     </g>
   )
+}
+
+/** 虚线预览框：对调 / 插入时被挪动商品的新位置（蓝）、换行的（橙）、多选添加的落点（绿）。 */
+function PreviewBoxesLayer({ boxes, ctx, m }: { boxes: readonly CanvasPreviewBox[]; ctx: LayoutContext; m: CanvasMetrics }) {
+  const S = m.scale
+  return (
+    <g pointerEvents="none" aria-hidden="true">
+      {boxes.map((box) => {
+        const tone = PREVIEW_TONES[box.tone]
+        return (
+          <rect
+            key={box.key}
+            x={m.ox + (bayBoardOriginX(ctx.shelf, box.bayIndex) + box.leftMm) * S}
+            y={m.oy + box.topMm * S}
+            width={box.widthMm * S}
+            height={box.heightMm * S}
+            rx={1.5}
+            fill={tone.fill}
+            fillOpacity={0.6}
+            stroke={tone.stroke}
+            strokeWidth={1.6}
+            strokeDasharray="5 3"
+          />
+        )
+      })}
+    </g>
+  )
+}
+
+/** 插入点竖线：插入有效时蓝色，放不下时红色。 */
+function InsertLineLayer({ line, ctx, m, ok }: { line: ArrangeLine; ctx: LayoutContext; m: CanvasMetrics; ok: boolean }) {
+  const S = m.scale
+  const x = m.ox + (bayBoardOriginX(ctx.shelf, line.bayIndex) + line.xMm) * S
+  const top = m.oy + line.topMm * S - 6
+  const height = Math.max(12, (line.bottomMm - line.topMm) * S + 12)
+  return <rect pointerEvents="none" aria-hidden="true" x={x - 1.5} y={top} width={3} height={height} rx={1.5} fill={ok ? COLOR_SELECTED : COLOR_ERROR} />
 }
 
 // ---------------------------------------------------------------------------
@@ -752,12 +854,14 @@ interface DragState {
   grabDxMm: number
   grabDyMm: number
   moved: boolean
+  /** 上一次算预览时的落点（节 / 列 / 行）：落点没变就不重算对调 / 插入。 */
+  lastKey: string | null
 }
 
 const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function BoardCanvas(props, ref) {
   const {
     ctx, items, placed, specs, conflictsByGuid, selectedGuid, zoom, showHoles, showRulers, showTags, readOnly, language, labels, conflictText,
-    externalHint, describeHint, onSelect, onCopyRight, onDistribute, onRemove, emptyText,
+    externalHint, externalPlan, previewBoxes, showImages = false, describeHint, onSelect, onCopyRight, onDistribute, onRemove, emptyText,
   } = props
   const latest = useRef(props)
   latest.current = props
@@ -765,8 +869,14 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  const [dragHint, setDragHint] = useState<DropHint | null>(null)
+  /** 画布内拖动的落点与对调 / 插入预览（两者成对更新）。 */
+  const [dragPreview, setDragPreview] = useState<{ hint: DropHint; plan: ArrangePlan } | null>(null)
   const [draggingGuid, setDraggingGuid] = useState<string | null>(null)
+  // 加载失败的商品图地址：之后这些方块退回色块 + 名称（换缩放档位会换地址，再试一次）
+  const [failedImages, setFailedImages] = useState<ReadonlySet<string>>(() => new Set())
+  const handleImageError = useCallback((href: string) => {
+    setFailedImages((current) => (current.has(href) ? current : new Set(current).add(href)))
+  }, [])
 
   const metrics = useMemo(() => (ctx ? canvasMetrics(ctx.shelf, ctx.bayCount, zoom, showRulers) : null), [ctx, showRulers, zoom])
   const latestMetrics = useRef(metrics)
@@ -844,7 +954,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
   // ---- 画布内拖动已放商品（pointer capture） ----
   const finishDrag = useCallback(() => {
     dragRef.current = null
-    setDragHint(null)
+    setDragPreview(null)
     setDraggingGuid(null)
   }, [])
 
@@ -873,6 +983,7 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
       grabDxMm: point.xMm - anchorX,
       grabDyMm: point.yMm - entry.geometry.holeY,
       moved: false,
+      lastKey: null,
     }
   }, [clientToShelfPoint])
 
@@ -888,19 +999,23 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
     const point = clientToShelfPoint(event.clientX, event.clientY)
     const item = current.items.find((candidate) => candidate.guid === drag.guid)
     if (!point || !item) {
-      setDragHint(null)
+      drag.lastKey = null
+      setDragPreview(null)
       return
     }
     // 指针移出画布可视区域时没有提示（松手即取消）；在画布内用「指针 − 抓取偏移」吸附最近孔位
-    setDragHint(
-      buildDropHint(
-        current.ctx,
-        current.placed,
-        { xMm: point.xMm - drag.grabDxMm, yMm: point.yMm - drag.grabDyMm },
-        { productCode: item.productCode, hookModelGuid: item.hookModelGuid, perHookQty: item.perHookQty },
-        item.guid,
-      ),
+    const hint = buildDropHint(
+      current.ctx,
+      current.placed,
+      { xMm: point.xMm - drag.grabDxMm, yMm: point.yMm - drag.grabDyMm },
+      { productCode: item.productCode, hookModelGuid: item.hookModelGuid, perHookQty: item.perHookQty },
+      item.guid,
     )
+    const key = hint ? `${hint.bayIndex}/${hint.holeCol}/${hint.holeRow}` : null
+    if (key === drag.lastKey) return
+    drag.lastKey = key
+    // 落点变了才重算对调 / 插入（重排要逐个校验被挪动的商品，指针每动一下都算没必要）
+    setDragPreview(hint ? { hint, plan: planDragArrange({ ctx: current.ctx, items: current.items, hint, dragged: item, isNew: false }) } : null)
   }, [clientToShelfPoint])
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
@@ -908,8 +1023,9 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
     if (!drag || drag.pointerId !== event.pointerId) return
     const current = latest.current
     const item = current.items.find((candidate) => candidate.guid === drag.guid)
-    // 用抬起那一刻的指针重新算一次落点，不依赖上一次 move 的状态
+    // 用抬起那一刻的指针重新算一次落点与重排，不依赖上一次 move 的状态
     let hint: DropHint | null = null
+    let plan: ArrangePlan = NO_PLAN
     if (drag.moved && current.ctx && item) {
       const point = clientToShelfPoint(event.clientX, event.clientY)
       if (point) {
@@ -920,10 +1036,21 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
           { productCode: item.productCode, hookModelGuid: item.hookModelGuid, perHookQty: item.perHookQty },
           item.guid,
         )
+        if (hint) plan = planDragArrange({ ctx: current.ctx, items: current.items, hint, dragged: item, isNew: false })
       }
     }
     finishDrag()
     if (!hint || !item) return
+    // 压住了别的商品：对调 / 插入（或放不下时整次拒绝）；没压住才按原来的普通移动处理
+    if (plan.kind === 'noop') return
+    if (plan.kind === 'swap' || plan.kind === 'insert') {
+      current.onArrange?.(plan, item.guid)
+      return
+    }
+    if (plan.kind === 'reject') {
+      current.onRejectArrange?.(plan)
+      return
+    }
     const unchanged = hint.bayIndex === item.bayIndex && hint.holeCol === item.holeCol && hint.holeRow === item.holeRow
     if (unchanged) return
     // 严格吸附：不可放就回弹（条目没动）；「自由」模式放到最近孔位，冲突之后标红
@@ -948,8 +1075,25 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
   }, [])
 
   // ---- 渲染 ----
-  const hint = externalHint ?? dragHint
+  const hint = externalHint ?? dragPreview?.hint ?? null
+  const plan: ArrangePlan = externalHint ? externalPlan ?? NO_PLAN : dragPreview?.plan ?? NO_PLAN
   const hintFill = hint ? productColor(hint.productCode) : '#fff'
+  // 对调 / 插入预览：被挪动的商品原位置淡化，新位置画虚线框；插入点画竖线
+  const arrangeBoxes = useMemo(() => (ctx ? arrangePreviewBoxes(ctx, items, plan) : []), [ctx, items, plan])
+  const fadedGuids = useMemo(() => arrangeFadedGuids(plan), [plan])
+  const insertLine = plan.kind === 'insert' || plan.kind === 'reject' ? plan.line : null
+
+  // 商品图：按方块在屏幕上的尺寸取缩略图档位；太小、没有图、加载失败都退回色块
+  const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  const imageOf = (view: ItemView): string | null => {
+    if (!showImages || view.missing || !metrics) return null
+    const raw = specs[view.item.productCode]?.productImage?.trim()
+    if (!raw) return null
+    const heightPx = view.specHeightMm * metrics.scale
+    if (heightPx < CANVAS_IMAGE_MIN_PX) return null
+    const href = toProductThumbnailUrl(raw, canvasImageTier(Math.max(heightPx, view.specWidthMm * metrics.scale), devicePixelRatio))
+    return href && !failedImages.has(href) ? href : null
+  }
   const selectedEntry = selectedGuid ? placed.find((entry) => entry.item.guid === selectedGuid) : undefined
   const toolbar = useMemo(() => {
     if (!selectedEntry?.geometry || !ctx || !metrics) return null
@@ -994,18 +1138,24 @@ const BoardCanvas = forwardRef<BoardCanvasHandle, BoardCanvasProps>(function Boa
                   key={view.item.guid}
                   view={view}
                   selected={view.item.guid === selectedGuid}
-                  dragging={view.item.guid === draggingGuid}
+                  dragging={view.item.guid === draggingGuid || fadedGuids.has(view.item.guid)}
                   m={metrics}
                   showTags={showTags}
                   labels={labels}
                   onPointerDown={handleItemPointerDown}
+                  image={imageOf(view)}
+                  onImageError={handleImageError}
                 />
               ))}
             </g>
             {selectedView ? <SelectionOverlay view={selectedView} m={metrics} /> : null}
-            {hint ? <HintLayer hint={hint} text={describeHint(hint)} ctx={ctx} m={metrics} showRulers={showRulers} fill={hintFill} canvasWidth={metrics.width} /> : null}
+            {previewBoxes && previewBoxes.length > 0 ? <PreviewBoxesLayer boxes={previewBoxes} ctx={ctx} m={metrics} /> : null}
+            {hint && arrangeBoxes.length > 0 ? <PreviewBoxesLayer boxes={arrangeBoxes} ctx={ctx} m={metrics} /> : null}
+            {hint && insertLine ? <InsertLineLayer line={insertLine} ctx={ctx} m={metrics} ok={plan.kind === 'insert'} /> : null}
+            {hint ? <HintLayer hint={hint} text={describeHint(hint, plan)} ctx={ctx} m={metrics} showRulers={showRulers} fill={hintFill} canvasWidth={metrics.width} /> : null}
           </svg>
-          {toolbar && !readOnly && !draggingGuid ? (
+          {/* 拖动中（画布内拖动或从商品库拖入）不显示浮动工具条，免得盖住落点提示 */}
+          {toolbar && !readOnly && !draggingGuid && !externalHint ? (
             <div className="planogram-designer-float" style={{ left: toolbar.left, top: toolbar.top }} role="toolbar" aria-label={labels.float.aria}>
               <button type="button" onClick={onCopyRight}><CopyOutlined aria-hidden="true" /> {labels.float.copyRight}</button>
               <button type="button" onClick={onDistribute}><ColumnWidthOutlined aria-hidden="true" /> {labels.float.distribute}</button>

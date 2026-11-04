@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>商品图开关</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>body{background:#f0f2f5}.wrap{width:1440px;height:900px;padding:18px;box-sizing:border-box;display:flex;gap:18px}
+.col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}.cap{font-weight:700;font-size:15px}.cap span{color:#1677ff}.sub{font-size:12px;color:rgba(0,0,0,.6);line-height:1.55;min-height:54px}
+.card{background:#fff;border-radius:12px;border:1px solid #e5e5e5;overflow:hidden}
+.tb{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;flex-wrap:wrap}
+.chk{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.chk i{width:16px;height:16px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;display:inline-block;position:relative}
+.chk i.on{background:#1677ff;border-color:#1677ff}.chk i.on:after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.hl{outline:2px solid #fa8c16;outline-offset:3px;border-radius:6px}
+.rule{margin:10px 14px;padding:8px 10px;border-radius:8px;background:#fafafa;font-size:12px;color:rgba(0,0,0,.65);line-height:1.6}
+.pop{position:absolute;background:#1f1f1f;color:#fff;font-size:12px;padding:6px 9px;border-radius:6px;line-height:1.4;z-index:5;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+</style><script src="lib.js"></script></head><body><div class="wrap" id="w"></div>
+<script>
+const row = (y, n, from, img) => Array.from({length:n}, (_, i) => ({x: 20 + i*212 + (from||0), y, w: 200, h: 270, c: (i + (from?3:0)) % 10, code: ['-112','-108','-101','-102','-103'][i % 5], qty: 38, name: ['Tissue Yellow','TISSUE PAPER','Tissue White','Tissue Black','Tissue Cream'][i % 5], price: 1.5}));
+const items = [...row(60, 5), ...row(400, 2)];
+const mk = (img, sel) => `<div class="col"><div class="cap"><span>${img?'开（默认）':'关'}</span> · 商品图 ${img?'显示':'不显示'}</div>
+<div class="sub">${img?'每次打开设计器都是开：商品方块里显示商品图，名称收起，只留底部「货号 × 每钩数」；选中或悬停时在浮层里显示名称。':'关掉后回到现在的样子：彩色方块加商品名，适合只看排布与尺寸、或图片多时画面太花。'}</div>
+<div class="card"><div class="tb"><span class="muted">货架型号</span><span style="border:1px solid #d9d9d9;border-radius:8px;padding:2px 10px">1.2*2.1</span><span class="muted">显示</span>
+<span class="chk"><i class="on"></i>孔位</span><span class="chk"><i class="on"></i>标尺</span><span class="chk"><i class="on"></i>价签</span><span class="chk ${'hl'}"><i class="${img?'on':''}"></i>商品图</span><span class="muted">吸附</span><span class="seg"><span class="on" style="height:24px;font-size:12px">孔位</span><span style="height:24px;font-size:12px">自由</span></span></div>
+<div style="padding:10px;position:relative">${board({id:img?1:2, img, S:0.5, W:1200, H:700, items, extra:(px)=>sel?`<rect x="${px(20+212*2)-2}" y="${px(60)-2}" width="${px(200)+4}" height="${px(270)+4}" fill="none" stroke="#1677ff" stroke-width="2"/>`:''})}
+${sel&&img?`<div class="pop" style="left:${20+10+212*2*0.5+110}px;top:${20+8+30+60*0.5+280*0.5}px">Tissue Paper White 50*50CM<br><span style="color:#91caff">HB038-101 · 200×500×5 · 每钩 38</span></div>`:''}
+</div><div class="rule">${img?'<b>规则</b>：图片按缩放档位取 72 / 160 / 320 px 三档缩略图；屏幕上高度不足约 28 px 的方块不加载图片（缩到 25% 时自动退回色块），没有图或加载失败也退回色块加名称。':'<b>规则</b>：开关只影响画布显示，不影响保存、冲突校验和 PDF；PDF 里的「商品实拍图」是另一个选项，仍默认不印。'}</div></div></div>`;
+document.getElementById('w').innerHTML = mk(true, true) + mk(false, false);
+</script></body></html>
