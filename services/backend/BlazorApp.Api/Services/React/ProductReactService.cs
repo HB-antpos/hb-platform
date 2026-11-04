@@ -489,7 +489,13 @@ namespace BlazorApp.Api.Services.React
                     );
                 }
 
-                q = await ApplySupplierCategoryFiltersAsync(q, query);
+                // 供应商分类筛选的主体已抽到 LocalSupplierCategoryFilter，商品陈列参数列表共用同一份。
+                q = await LocalSupplierCategoryFilter.ApplyProductFilterAsync(
+                    _db,
+                    q,
+                    query.SupplierCategoryGUIDs,
+                    query.SupplierCategoryUnassignedOnly
+                );
 
                 if (query.ProductType.HasValue)
                 {
@@ -1005,93 +1011,6 @@ namespace BlazorApp.Api.Services.React
                 "updatedat" => products.OrderBy(p => p.UpdatedAt, direction),
                 _ => products.OrderBy(p => p.UpdatedAt, OrderByType.Desc),
             };
-        }
-
-        /// <summary>
-        /// 供应商分类筛选：200 商品按仓库分类，其他供应商按有效归属（归属登记的供应商须与商品当前供应商一致）。
-        /// 使用 EXISTS 子查询作用在 Product 单表查询上，不改变列表快/慢路径的判定。
-        /// </summary>
-        private async Task<ISugarQueryable<Product>> ApplySupplierCategoryFiltersAsync(
-            ISugarQueryable<Product> q,
-            ProductReactFilterDto query
-        )
-        {
-            var hotBargain = DefaultLocalSupplierCode;
-            var requestedGuids = NormalizeColumnFilterValues(query.SupplierCategoryGUIDs)
-                .Where(guid => !string.IsNullOrWhiteSpace(guid))
-                .Select(guid => guid.Trim())
-                .ToList();
-            if (requestedGuids.Count > 0)
-            {
-                var (supplierGuids, warehouseGuids) = await LocalSupplierCategoryFilter.ExpandAsync(
-                    _db,
-                    requestedGuids
-                );
-                if (supplierGuids.Count == 0 && warehouseGuids.Count == 0)
-                {
-                    // 所选分类均不存在：返回空结果而不是忽略条件。
-                    q = q.Where("1 = 0");
-                }
-                else if (warehouseGuids.Count == 0)
-                {
-                    q = q.Where(p =>
-                        SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
-                            .Where(a =>
-                                a.ProductCode == p.ProductCode
-                                && a.LocalSupplierCode == p.LocalSupplierCode
-                                && supplierGuids.Contains(a.CategoryGUID)
-                            )
-                            .Any()
-                    );
-                }
-                else if (supplierGuids.Count == 0)
-                {
-                    q = q.Where(p =>
-                        (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
-                        && p.WarehouseCategoryGUID != null
-                        && warehouseGuids.Contains(p.WarehouseCategoryGUID)
-                    );
-                }
-                else
-                {
-                    q = q.Where(p =>
-                        SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
-                            .Where(a =>
-                                a.ProductCode == p.ProductCode
-                                && a.LocalSupplierCode == p.LocalSupplierCode
-                                && supplierGuids.Contains(a.CategoryGUID)
-                            )
-                            .Any()
-                        || (
-                            (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
-                            && p.WarehouseCategoryGUID != null
-                            && warehouseGuids.Contains(p.WarehouseCategoryGUID)
-                        )
-                    );
-                }
-            }
-
-            if (query.SupplierCategoryUnassignedOnly == true)
-            {
-                q = q.Where(p =>
-                    (
-                        (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
-                        && (p.WarehouseCategoryGUID == null || p.WarehouseCategoryGUID == "")
-                    )
-                    || (
-                        p.LocalSupplierCode != null
-                        && p.LocalSupplierCode != ""
-                        && p.LocalSupplierCode != hotBargain
-                        && SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
-                            .Where(a =>
-                                a.ProductCode == p.ProductCode && a.LocalSupplierCode == p.LocalSupplierCode
-                            )
-                            .NotAny()
-                    )
-                );
-            }
-
-            return q;
         }
 
         /// <summary>

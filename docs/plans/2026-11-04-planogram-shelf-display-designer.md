@@ -328,3 +328,87 @@ src/services/planogramService.ts
 **PlanogramSnapshotDto**：`{version, publishedAt, publishedBy, plan:{guid,name,notes,bayCount,gapXMm,gapYMm}, shelfModel:ShelfModelDto, hookModels:HookModelDto[](仅方案用到的), products:[{productCode, itemNumber, barcode, productName, englishName?, productImage?, retailPrice, spec:ProductDisplaySpecDto}], items:PlanogramItemDto[], stats:{itemCount,skuCount,unitCount,retailValue,fillPercent,conflictCount}}`。快照内容在发布时固化为 `LayoutJson`，之后型号、参数、商品名、价格再变，历史版本读出来仍是当时的值。
 **PlanogramExportDto**：`{formatVersion:1, exportedAt, plan:{name,notes?,bayCount,gapXMm,gapYMm}, shelfModelCode, items:[{bayIndex,productCode,hookModelCode,holeCol,holeRow,perHookQty?}]}`，用编码而不是 guid，便于跨环境搬运。导入时 `shelfModelCode`、各 `hookModelCode`、各 `productCode` 解析不到返回 `PLANOGRAM_IMPORT_UNRESOLVED`，details 为 `[{kind:'shelf'|'hook'|'product', code}]`（去重）；`formatVersion` 不认识返回 `PLANOGRAM_VALIDATION`；明细上限 2000。
 **列表补充**：`PlanogramListItemDto` 增加 `hasUnpublishedChanges: bool`（`status==0 && publishedVersion != null`，批 2 之后保存已发布方案会使其回草稿）。
+
+## 附录 D：商品陈列参数的分类过滤与批量修改（11-04 追加，用户需求）
+
+需求：商品陈列参数页要能按**仓库分类**和**本地供应商分类**过滤，并能**批量修改参数**；设计器左栏的商品库同样要有这两个分类过滤。
+
+### D.1 过滤条件（`GET /product-specs`、设计器商品库、批量修改的「按当前筛选」共用）
+
+在原有 `keyword`、`status` 之外新增（均可选，查询串里数组用重复键，如 `warehouseCategoryGuids=a&warehouseCategoryGuids=b`）：
+
+| 参数 | 语义（与商品管理页保持一致） |
+|---|---|
+| `warehouseCategoryGuids[]` | 仓库分类 GUID，**含全部子分类**（按仓库分类树展开）；商品的 `WarehouseCategoryGUID` 落在展开集合内；未设仓库分类的商品不参与。任何供应商的商品都可匹配 |
+| `localSupplierCode` | 单个本地供应商；与商品列表的 `LocalSupplierCodes` 过滤一致（编码 `200` 视为 Hot Bargain，含供应商为空的商品） |
+| `supplierCategoryGuids[]` | 本地供应商分类 GUID，**含子分类**；语义与商品列表 `SupplierCategoryGUIDs` 完全一致：`LocalSupplierCategoryFilter.ExpandAsync` 按所属树分流，供应商分类走 `LocalSupplierCategoryProductAssignment`（且归属供应商须等于商品当前供应商），200 的供应商分类就是仓库分类 |
+| `supplierCategoryUnassignedOnly` | 只看「未归类」：语义与商品列表一致 |
+
+后端实现要求：把 `ProductReactService.ApplySupplierCategoryFiltersAsync` 的主体**抽成** `LocalSupplierCategoryFilter` 里的共用静态方法（行为逐字不变），商品列表与陈列参数列表共用，不要复制一份；`ProductReactService` 改为调用它，并用既有的 `LocalSupplierCategoryServiceTests` / SQL Server 集成测试证明商品列表行为不变。
+
+### D.2 批量修改：`POST /product-specs/batch`（权限 `Planogram.Edit`）
+
+请求 `ProductSpecBatchRequest`：
+
+```json
+{
+  "target": { "productCodes": ["..."], "filter": { "keyword": "", "status": "all", "warehouseCategoryGuids": [], "localSupplierCode": null, "supplierCategoryGuids": [], "supplierCategoryUnassignedOnly": false } },
+  "patch": { "widthMm": 70, "heightMm": 150, "depthMm": 25, "hangHoleOffsetMm": 10, "hangHoleType": 2, "unitWeightG": null, "defaultHookGuid": "…", "source": 1, "notes": null },
+  "hookQtyOverrides": { "mode": "merge", "values": { "<hookGuid>": 12 } },
+  "createMissing": false,
+  "dryRun": true
+}
+```
+
+- `target` 二选一：`productCodes`（勾选的货号，≤ 2000）或 `filter`（按当前筛选，服务端解析出全部匹配商品，匹配数 > 2000 返回 `PLANOGRAM_BATCH_TOO_MANY`，details 带匹配数）。`filter` 里 `status` 对批量无意义时按原值照常过滤（前端传 `all`）。
+- `patch` 是**只含被勾选字段**的对象：键存在才修改，缺省 = 不动；可空字段（`unitWeightG`、`defaultHookGuid`、`notes`）传 `null` = 清空；非空字段（宽高厚、吊孔偏移、吊孔类型、来源）传 `null` 视为校验错误。后端用 `Dictionary<string, JsonElement>` 解析，只接受白名单键，出现未知键返回 `PLANOGRAM_VALIDATION`（details 列字段名）。
+- `hookQtyOverrides`：`mode` 取 `replace`（整体替换为 `values`；`values` 为空对象 = 清空全部覆盖）或 `merge`（只覆盖给出的挂钩，其余保留）；缺省 = 不动。挂数 ≥ 1，hookGuid 必须存在。
+- `createMissing`：目标里**未设参数**的商品是否创建。创建要求 `patch` 同时含 `widthMm`、`heightMm`、`depthMm`（吊孔偏移缺省 10、吊孔类型缺省 2、来源缺省 1），否则这些商品计入 `skipped`（原因 `MISSING_DIMENSIONS`）。`false` 时未设参数的商品计入 `skipped`（原因 `NO_SPEC`）。
+- 逐商品校验，不合法的商品跳过而不是整批失败：改后 `hangHoleOffsetMm > heightMm`（吊孔类型非「无」时）→ 跳过，原因 `OFFSET_EXCEEDS_HEIGHT`；商品不存在或已停用 / 已删除 → `PRODUCT_NOT_FOUND`。补丁本身不合法（范围、未知键、`values` 非法）→ `PLANOGRAM_VALIDATION`，整批不执行。
+- 写库：所有通过校验的商品在**一个事务**里写入；写入的行 `UpdatedBy` 为当前用户、`UpdatedAt` 更新；`Source` 缺省保持原值（新建取 1）。与现有单个保存一致：`SpecSnapshot` 之类的方案侧快照不在这里动，已引用的方案下次打开自然标「参数已变」。
+- `dryRun: true`：完整走一遍校验与计数，**不写库**。
+
+响应 `ProductSpecBatchResultDto`：
+
+```json
+{ "dryRun": true, "matched": 120, "created": 0, "updated": 0, "unchanged": 0,
+  "willCreate": 30, "willUpdate": 85, "willStayUnchanged": 2, "skipped": 3,
+  "skippedItems": [ { "productCode": "…", "itemNumber": "HB038-158", "productName": "…", "reason": "NO_SPEC" } ],
+  "changedTotal": 115,
+  "changedItems": [
+    { "productCode": "…", "itemNumber": "HB038-158", "productName": "…", "action": "update",
+      "before": { "widthMm": 120, "notes": "旧备注", "hookQtyOverrides": { "<hookGuid>": 6 } },
+      "after":  { "widthMm": 70,  "notes": null,      "hookQtyOverrides": { "<hookGuid>": 6, "<hookGuid2>": 12 } } },
+    { "productCode": "…", "itemNumber": "HB038-159", "productName": "…", "action": "create",
+      "before": null,
+      "after":  { "widthMm": 70, "heightMm": 150, "depthMm": 25, "hangHoleOffsetMm": 10, "hangHoleType": 2, "source": 1,
+                  "hookQtyOverrides": { "<hookGuid2>": 12 } } }
+  ] }
+```
+
+`dryRun` 时 `created/updated/unchanged` 恒为 0，计划数在 `will*`；真正执行时 `will*` 恒为 0，结果在 `created/updated/unchanged`。`skippedItems` 最多返回 200 条（`skipped` 是真实总数）。「unchanged」= 补丁应用后与现有值完全相同。
+
+改前改后明细 `changedItems`（预览表用；dryRun 与真正执行都返回，内容由同一份计算得出）：
+
+- 只收将创建 / 将更新（执行时为已创建 / 已更新）的商品，**不变与跳过的不进这张表**；按货号排序取前 **50** 条，`changedTotal` 是真实总数（= 创建数 + 更新数）。
+- `action`：`create` / `update`。`before` / `after` 的键名同 `patch` 白名单（`widthMm`、`heightMm`、`depthMm`、`hangHoleOffsetMm`、`hangHoleType`、`unitWeightG`、`defaultHookGuid`、`source`、`notes`），挂数覆盖用对象键 `hookQtyOverrides`（整份覆盖，键排序；没有覆盖时为 `{}`）。
+- `update`：`before` / `after` **只含本次实际改变的字段**（补丁给了但值没变的字段不出现）；清空的可空字段在 `after` 里显式为 `null`。
+- `create`：`before` 恒为 `null`（该键始终输出，不受全局「null 不输出」影响）；`after` 给出宽高厚、吊孔偏移 / 吊孔类型 / 来源（含缺省值）与其他已设置的字段，没设置的可空字段（单件重、默认挂钩、备注）与空的挂数覆盖不出现。
+
+错误码新增：`PLANOGRAM_BATCH_TOO_MANY`、`PLANOGRAM_BATCH_EMPTY`（目标为空或没有任何匹配）、`PLANOGRAM_BATCH_CONFLICT`（真正执行时的并发冲突，整批已回滚，提示「有其他人同时修改了这些商品，请重新预览后再执行」，前端应引导重新预览）：① 创建撞了主键 / 唯一约束（别人同时创建了同一货号的参数）；② 任一批更新的实际影响行数少于该批应更新的行数（别人同时清除了参数），不会记成「已更新」。其他数据库错误仍按 500 处理（同样整批回滚）。注：执行请求会按当时的数据重新计算，所以「预览之后、点确认之前」被清除参数的商品在执行结果里如实计为跳过（`NO_SPEC`，或勾选创建时计为新建），只有执行请求自身「计算之后、写入之前」被改动才报冲突。
+
+### D.3 前端
+
+- 商品陈列参数列表：筛选行增加「仓库分类」（树选择，可多选）与「本地供应商分类」（供应商 → 分类级联，含「未归类」；供应商 200 的分类就是仓库分类，这里隐藏 200，避免与「仓库分类」重复）；分类树与供应商列表复用商品管理页已有的 `warehouseCategoryService`、`localSupplierCategoryService` 与 `PosAdmin/ProductManagement/supplierCategory*` 纯函数。
+- 列表增加行选择；选中后工具栏出现「批量修改参数」；也提供「按当前筛选的全部 N 个」入口（N 为列表总数，超过 2000 提示缩小筛选）。
+- 批量修改弹窗：目标摘要（选中 N / 筛选 N，已设 X、未设 Y）；每个字段一行带「本次修改」勾选；「未设参数的商品」选项（跳过 / 创建，创建时必须勾选并填齐宽高厚）；每钩挂数覆盖按挂钩型号设置（合并 / 整体替换）；先「预览」（dryRun）看计划数与跳过明细，再「确认执行」；执行后显示结果并刷新列表。
+- 设计器左栏商品库：同样的两个分类过滤，窄栏里收进一个「筛选」按钮（弹层里放两个控件和「清除」），有条件时按钮高亮并显示条数。
+
+### D.4 追加：商品等级过滤与选定的设计（11-04 用户确认）
+
+- 过滤新增 `grades[]`：取值 `A`/`B`/`C`/`D` 与 `none`（未分级），多选取并集；语义按 `ProductGrade`（`ProductCode` 关联、未删除）。同样适用于列表、设计器商品库与批量修改的 `target.filter`。`ProductSpecListItemDto` 增加只读 `grade`。
+- 用户选定设计（图在 `docs/design/planogram-20261104/filter-batch/`）：
+  - 陈列参数页 = **方案 A 一排筛选条**（`1-list-A.png`）：搜索、状态、仓库分类、本地供应商分类、等级标签（A 核心 / B 关注 / C 停产 / D 清仓 / 未分级）、清除筛选；勾选后表格上方出现蓝色操作条（已选 N · 批量修改参数 · 取消选择 · 按当前筛选的全部 N 个批量修改）；表格第一列显示**货号（itemNumber）为主、条码为辅**，新增「等级」「仓库分类」两列。
+  - 批量修改 = **方案 1 一个弹窗**（`2-batch-1.png`）：顶部目标切换（已选 / 当前筛选）与已设、未设计数；左边字段开关列表，右边每钩挂数覆盖、未设参数商品的处理、预览结果（将创建 / 将更新 / 不变 / 跳过与改前改后明细）；底部「重新预览」「确认执行（N 个）」，改了任何输入预览失效。
+  - 设计器商品库 = **方案 a「筛选」按钮 + 弹层**（`3-designer-library.png` 左）：仓库分类、本地供应商分类、商品等级，弹层底部显示符合数、清除、完成；有条件时按钮高亮显示条数，列表上方显示可逐个删除的条件标签。
+  - 方案 3「表格内批量录入（每行值不同）」本次不做。

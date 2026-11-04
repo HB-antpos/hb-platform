@@ -9,12 +9,14 @@ import type {
   PlanogramDetailDto,
   PlanogramExportDto,
   PlanogramExportItemDto,
+  PlanogramGradeLetter,
   PlanogramHangHoleType,
   PlanogramImportInput,
   PlanogramItemDto,
   PlanogramListItemDto,
   PlanogramListQuery,
   PlanogramPaged,
+  PlanogramProductGrade,
   PlanogramProngCount,
   PlanogramRowNumberingFrom,
   PlanogramSaveInput,
@@ -28,11 +30,18 @@ import type {
   PlanogramValidateResult,
   PlanogramVersionSummaryDto,
   ProductDisplaySpecDto,
+  ProductSpecBatchChangedItem,
+  ProductSpecBatchChangeValues,
+  ProductSpecBatchRequest,
+  ProductSpecBatchResultDto,
+  ProductSpecBatchSkippedItem,
   ProductSpecListItemDto,
   ProductSpecListQuery,
+  ProductSpecScopeFilter,
   ShelfModelDto,
   ShelfModelInput,
 } from '../types/planogram'
+import { PLANOGRAM_GRADE_VALUES } from '../types/planogram'
 import request, { unwrapApiData, unwrapPagedResult } from '../utils/request'
 
 /**
@@ -167,6 +176,12 @@ export function normalizeProductSpec(raw: Partial<ProductDisplaySpecDto> | null 
   }
 }
 
+/** 等级字母：只认 A～D（不分大小写，转成大写），其余（空、未知）为 null = 未分级。 */
+export function normalizeGradeLetter(value: unknown): PlanogramGradeLetter | null {
+  const letter = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  return letter === 'A' || letter === 'B' || letter === 'C' || letter === 'D' ? letter : null
+}
+
 export function normalizeProductSpecItem(raw: Partial<ProductSpecListItemDto> | null | undefined): ProductSpecListItemDto {
   const r = (raw ?? {}) as Record<string, unknown>
   const spec = normalizeProductSpec(r.spec as Partial<ProductDisplaySpecDto> | null | undefined)
@@ -179,6 +194,8 @@ export function normalizeProductSpecItem(raw: Partial<ProductSpecListItemDto> | 
     productImage: nullableText(r.productImage),
     retailPrice: num(r.retailPrice),
     categoryName: nullableText(r.categoryName),
+    grade: normalizeGradeLetter(r.grade),
+    warehouseCategoryPath: nullableText(r.warehouseCategoryPath),
     // hasSpec 缺失时以 spec 是否存在为准，避免已设参数的行被显示成「补充参数」。
     hasSpec: typeof r.hasSpec === 'boolean' ? r.hasSpec : spec !== null,
     referencedPlanCount: num(r.referencedPlanCount),
@@ -278,6 +295,35 @@ export async function listAllHookModels(signal?: AbortSignal): Promise<HookModel
 
 // ---------------- 商品陈列参数 ----------------
 
+/** 字符串列表：去空白、去空串、去重（保持首次出现的顺序）；没有任何有效项返回 undefined（该参数不出现在查询串里）。 */
+function cleanStringList(values: readonly string[] | undefined): string[] | undefined {
+  if (!values) return undefined
+  const result = [...new Set(values.map((value) => (typeof value === 'string' ? value.trim() : '')).filter(Boolean))]
+  return result.length > 0 ? result : undefined
+}
+
+/** 等级列表：只认 A / B / C / D / none，去重；其余丢掉。 */
+function cleanGradeList(values: readonly PlanogramProductGrade[] | undefined): PlanogramProductGrade[] | undefined {
+  if (!values) return undefined
+  const known = new Set<string>(PLANOGRAM_GRADE_VALUES)
+  const result = [...new Set(values)].filter((value) => known.has(value))
+  return result.length > 0 ? result : undefined
+}
+
+/**
+ * 附录 D.1 过滤条件 → 列表查询参数：空条件不出现；数组交给 request 序列化成重复键
+ * （warehouseCategoryGuids=a&warehouseCategoryGuids=b）；supplierCategoryUnassignedOnly 只在为 true 时带上。
+ */
+export function productSpecScopeParams(filter: ProductSpecScopeFilter) {
+  return {
+    warehouseCategoryGuids: cleanStringList(filter.warehouseCategoryGuids),
+    localSupplierCode: filter.localSupplierCode?.trim() || undefined,
+    supplierCategoryGuids: cleanStringList(filter.supplierCategoryGuids),
+    supplierCategoryUnassignedOnly: filter.supplierCategoryUnassignedOnly ? true : undefined,
+    grades: cleanGradeList(filter.grades),
+  }
+}
+
 export async function listProductSpecs(
   query: ProductSpecListQuery,
   signal?: AbortSignal,
@@ -288,11 +334,100 @@ export async function listProductSpecs(
     params: {
       keyword: query.keyword?.trim() || undefined,
       status: query.status,
+      ...productSpecScopeParams(query),
       page: query.page,
       pageSize: query.pageSize,
     },
   })
   return normalizePaged(payload, normalizeProductSpecItem, query.pageSize)
+}
+
+function normalizeBatchSkippedItem(raw: unknown): ProductSpecBatchSkippedItem | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const productCode = text(r.productCode)
+  if (!productCode) return null
+  return {
+    productCode,
+    itemNumber: nullableText(r.itemNumber),
+    productName: nullableText(r.productName),
+    reason: text(r.reason),
+  }
+}
+
+/** 改前改后明细里的一侧：只保留认识的键，数值转成数字；挂数覆盖按 normalizeOverrides 过滤。 */
+function normalizeChangeValues(raw: unknown): ProductSpecBatchChangeValues | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const values: ProductSpecBatchChangeValues = {}
+  for (const key of ['widthMm', 'heightMm', 'depthMm', 'hangHoleOffsetMm'] as const) {
+    if (key in r) {
+      const value = nullableNum(r[key])
+      if (value !== null) values[key] = value
+    }
+  }
+  if ('hangHoleType' in r) values.hangHoleType = pick<PlanogramHangHoleType>(r.hangHoleType, [0, 1, 2], 2)
+  if ('source' in r) values.source = pick<PlanogramSpecSource>(r.source, [1, 2, 3], 1)
+  if ('unitWeightG' in r) values.unitWeightG = nullableNum(r.unitWeightG)
+  if ('defaultHookGuid' in r) values.defaultHookGuid = nullableText(r.defaultHookGuid)
+  if ('notes' in r) values.notes = nullableText(r.notes)
+  if ('hookQtyOverrides' in r) values.hookQtyOverrides = normalizeOverrides(r.hookQtyOverrides)
+  return values
+}
+
+function normalizeBatchChangedItem(raw: unknown): ProductSpecBatchChangedItem | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const productCode = text(r.productCode)
+  if (!productCode || (r.action !== 'create' && r.action !== 'update')) return null
+  return {
+    productCode,
+    itemNumber: nullableText(r.itemNumber),
+    productName: nullableText(r.productName),
+    action: r.action,
+    before: r.action === 'create' ? null : normalizeChangeValues(r.before),
+    after: normalizeChangeValues(r.after) ?? {},
+  }
+}
+
+/** 批量结果兜底：数字缺失给 0，跳过 / 改前改后明细缺失给空数组；不改写任何业务数值。 */
+export function normalizeBatchResult(raw: Partial<ProductSpecBatchResultDto> | null | undefined): ProductSpecBatchResultDto {
+  const r = (raw ?? {}) as Record<string, unknown>
+  const skippedItems = (Array.isArray(r.skippedItems) ? r.skippedItems : [])
+    .map(normalizeBatchSkippedItem)
+    .filter((item): item is ProductSpecBatchSkippedItem => item !== null)
+  return {
+    dryRun: r.dryRun === true,
+    matched: num(r.matched),
+    created: num(r.created),
+    updated: num(r.updated),
+    unchanged: num(r.unchanged),
+    willCreate: num(r.willCreate),
+    willUpdate: num(r.willUpdate),
+    willStayUnchanged: num(r.willStayUnchanged),
+    skipped: num(r.skipped),
+    skippedItems,
+    changedTotal: num(r.changedTotal),
+    changedItems: (Array.isArray(r.changedItems) ? r.changedItems : [])
+      .map(normalizeBatchChangedItem)
+      .filter((item): item is ProductSpecBatchChangedItem => item !== null),
+  }
+}
+
+/**
+ * 批量修改商品陈列参数（附录 D.2，权限 Planogram.Edit）。dryRun=true 只校验与计数、不写库（预览）；
+ * 失败时 request 抛带 errorCode 的 RequestError（PLANOGRAM_VALIDATION / PLANOGRAM_BATCH_TOO_MANY / PLANOGRAM_BATCH_EMPTY 等）。
+ */
+export async function batchUpdateProductSpecs(
+  input: ProductSpecBatchRequest,
+  signal?: AbortSignal,
+): Promise<ProductSpecBatchResultDto> {
+  const payload = await request<Envelope<ProductSpecBatchResultDto>>(planogramUrl('product-specs/batch'), {
+    method: 'POST',
+    data: input,
+    signal,
+  })
+  return normalizeBatchResult(unwrapApiData(payload))
 }
 
 export async function getProductSpec(productCode: string, signal?: AbortSignal): Promise<ProductSpecListItemDto> {

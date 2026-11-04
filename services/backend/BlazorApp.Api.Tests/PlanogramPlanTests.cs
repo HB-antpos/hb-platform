@@ -43,7 +43,7 @@ public sealed class PlanogramPlanTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(PlanogramShelfModel), typeof(PlanogramHookModel), typeof(ProductDisplaySpec),
             typeof(PlanogramHeader), typeof(PlanogramItem), typeof(PlanogramVersion),
-            typeof(Product), typeof(ProductCategory));
+            typeof(Product), typeof(ProductCategory), typeof(ProductGrade));
         _models = new PlanogramModelService(_db, new FixedTime(Now));
         _specs = new ProductDisplaySpecService(_db, new FixedTime(Now));
         _plans = new PlanogramPlanService(_db, new FixedTime(Now));

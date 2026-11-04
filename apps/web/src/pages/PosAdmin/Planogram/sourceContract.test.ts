@@ -65,7 +65,17 @@ const batch3Sources = [publishModal, versionsDrawer, versionPreview, importModal
 const designerSources = [designerPage, workspace, designerHeader, designerToolbar, canvas, library, inspector, designerStore, designerLayout, designerLogic, conflictTextSource, publishModal, versionsDrawer, versionPreview]
 const planSources = [planList, newPlanModal, planListLogic, importModal]
 const tsxAndLogic = [page, logic, formParts, modelsTab, shelfList, shelfDrawer, hookList, hookDrawer, modelList, specList, specDrawer, ...planSources, ...designerSources, exportModal, printPages, pdfLogic, pdfImages, pdfGenerate, pdfText, downloadFile, transferLogic]
-const allSources = [...tsxAndLogic, shelfPreview, hookPreview, dimPreview, engineQty, engineGrid, engineGeometry]
+// 附录 D：商品范围过滤（仓库分类 / 本地供应商分类 / 商品等级）与批量修改——纯逻辑 + 状态 hook（界面形态另行设计）
+const categoryFilterLogicSource = read(`${directory}/categoryFilter/categoryFilterLogic.ts`)
+const categoryFilterHookSource = read(`${directory}/categoryFilter/useCategoryFilter.ts`)
+const batchLogicSource = read(`${directory}/ProductSpecs/batchLogic.ts`)
+const batchEditHookSource = read(`${directory}/ProductSpecs/useBatchEdit.ts`)
+const batchModalSource = read(`${directory}/ProductSpecs/BatchEditModal.tsx`)
+const filterControlsSource = read(`${directory}/categoryFilter/CategoryFilterControls.tsx`)
+const gradeTagSource = read(`${directory}/GradeTag.tsx`)
+const gradeDisplaySource = read(`${directory}/gradeDisplay.ts`)
+const appendixDSources = [categoryFilterLogicSource, categoryFilterHookSource, batchLogicSource, batchEditHookSource, batchModalSource, filterControlsSource, gradeTagSource, gradeDisplaySource]
+const allSources = [...tsxAndLogic, shelfPreview, hookPreview, dimPreview, engineQty, engineGrid, engineGeometry, ...appendixDSources]
 
 // 数据：只经 planogramService 调用约定的接口（附录 A 前缀）
 assert(service.includes("'/api/react/v1/planogram'"), '服务必须请求 api/react/v1/planogram')
@@ -355,6 +365,61 @@ assert(importModal.includes('isDuplicatePlanName(') && importModal.includes("t('
 assert(importModal.includes("'PLANOGRAM_IMPORT_UNRESOLVED'") && importModal.includes('extractImportUnresolved(') && importModal.includes('groupUnresolved('), '导入失败按 details 列出缺失的货架 / 挂钩 / 商品编码')
 assert(workspace.includes('exportJsonFileName(') && transferLogic.includes('.planogram.json') && workspace.includes('downloadTextFile('), '导出 JSON：<方案名>.planogram.json')
 assert(planList.includes('navigate(planogramDesignerPath(detail.header.guid))'), '导入成功直接打开新方案')
+
+// 附录 D：商品范围过滤与批量修改的数据约定
+assert(service.includes("planogramUrl('product-specs/batch')") && /method: 'POST',\s*data: input,\s*signal/.test(service), '批量修改：POST product-specs/batch，经 planogramService')
+assert(/\.\.\.productSpecScopeParams\(query\)/.test(service), '列表查询的范围过滤条件统一由 productSpecScopeParams 转成查询参数（数组用重复键）')
+assert(service.includes('PLANOGRAM_GRADE_VALUES') && service.includes('cleanGradeList('), '等级只认 A/B/C/D/none')
+for (const source of [categoryFilterLogicSource, batchLogicSource]) {
+  assert(!/from ['"](react|antd|react-i18next)['"]/.test(source) && !source.includes('antd/'), '过滤 / 批量的纯逻辑文件不依赖 React / antd / i18n 实例（便于单测）')
+}
+// 复用商品管理页现成的服务与纯函数，不复制一份
+assert(categoryFilterHookSource.includes("getCategoryTree as getWarehouseCategoryTree") && categoryFilterHookSource.includes("from '../../../../services/warehouseCategoryService'"), '仓库分类树复用 warehouseCategoryService.getCategoryTree')
+assert(categoryFilterHookSource.includes("getActiveLocalSuppliers") && categoryFilterHookSource.includes("from '../../../../services/localSupplierService'"), '本地供应商列表复用 localSupplierService.getActiveLocalSuppliers')
+assert(categoryFilterHookSource.includes("useSupplierCategoryTrees") && categoryFilterHookSource.includes("from '../../ProductManagement/useSupplierCategoryTrees'"), '供应商分类树按供应商懒加载并缓存，复用商品管理页的 useSupplierCategoryTrees')
+assert(categoryFilterLogicSource.includes('applySupplierCategoryCascaderChange(') && categoryFilterLogicSource.includes('buildSupplierCategoryCascaderOptions(') && categoryFilterLogicSource.includes('toSupplierCategoryCascaderValue('), '供应商级联语义复用商品管理页的纯函数')
+assert(categoryFilterLogicSource.includes('HIDDEN_SUPPLIER_CODES') && categoryFilterLogicSource.includes('HOT_BARGAIN_SUPPLIER_CODE'), '级联里隐藏供应商 200（它的分类就是仓库分类）')
+assert(!/useEffect\(\(\) => \{\s*(ensureLoaded|loadWarehouseTree|loadSuppliers)\(/.test(categoryFilterHookSource), '分类树不在挂载时加载：只在用户需要时（ensureLoaded）才请求')
+// 批量：补丁只含被勾选字段；预览（dryRun）与执行是同一个请求体、仅 dryRun 不同，且预览按请求签名判定有效性
+assert(batchLogicSource.includes('export function buildBatchRequest(') && batchLogicSource.includes('dryRun,'), '预览与执行共用 buildBatchRequest，仅 dryRun 不同')
+assert(batchLogicSource.includes('export function batchRequestSignature(') && batchLogicSource.includes('export function batchConfirmBlock(') && batchLogicSource.includes("return 'noPreview'"), '没有当前签名下的有效预览就不能确认执行')
+assert(batchLogicSource.includes('BATCH_MAX_TARGETS = 2000') && batchLogicSource.includes('BATCH_SKIPPED_ITEMS_LIMIT = 200'), '批量上限 2000、跳过明细最多 200 条')
+assert(batchEditHookSource.includes("import { batchUpdateProductSpecs } from '../../../../services/planogramService'") && batchEditHookSource.includes('buildBatchRequest(current.target, current.state, true') && batchEditHookSource.includes('buildBatchRequest(current.target, current.state, false'), '批量流程：预览（dryRun=true）与执行（dryRun=false）都经 planogramService，用同一个请求构造')
+assert(batchEditHookSource.includes('executingRef.current = true') && batchEditHookSource.includes('if (executingRef.current) return'), '执行中用同步标记防重复点击')
+assert(batchEditHookSource.includes('controllerRef.current.abort()') && batchEditHookSource.includes('controller.signal.aborted'), '输入变化时中止在途预览并丢弃迟到响应')
+assert(batchEditHookSource.includes('batchConfirmBlock({') && /batchConfirmBlock\(\{[\s\S]{0,260}preview: previewRef\.current/.test(batchEditHookSource), '执行前必须通过 batchConfirmBlock（有当前输入下的有效预览）')
+for (const code of ['PLANOGRAM_BATCH_TOO_MANY', 'PLANOGRAM_BATCH_EMPTY']) {
+  assert(logic.includes(`${code}: 'planogram.errors.`) && batchLogicSource.includes(`'${code}'`), `${code} 有专门的文案并在批量里单独处理`)
+}
+
+// 附录 D.4：选定的设计（陈列参数页一排筛选条 + 勾选操作条；批量修改一个弹窗；设计器商品库「筛选」按钮 + 弹层）
+// 批量入口只在有编辑权限时渲染：勾选列、操作条、弹窗都挂在 canEdit 下
+assert(specList.includes('{canEdit ? (') && /rowSelection=\{canEdit \? \{/.test(specList) && specList.includes('{canEdit && batch ? ('), '批量入口（勾选列 / 操作条 / 弹窗）只在 canEdit 下渲染，只读账号看不到')
+assert(specList.includes('useCategoryFilter(') && specList.includes('FILTER_DEBOUNCE_MS') && specList.includes('...scope, page'), '分类 / 等级条件进入列表查询（防抖，沿用 usePlanogramRequest 的键机制）')
+assert(specList.includes('scopeFilterKey(scope)') && specList.includes('const filterKey = `${keyword}|${status}|${scopeFilterKey(scope)}`'), '分类 / 等级条件变化回到第 1 页')
+assert(specList.includes('categoryFilter.clear()') && specList.includes("t('planogram.categoryFilter.clear')"), '有「清除筛选」')
+assert(!specList.includes('useSearchParams') && !specList.includes('serializePlanogramQuery(') , '分类条件不进地址栏')
+assert(specList.includes('selectionAdd(selection, rows)') && specList.includes('selectionRemove(') && specList.includes('selectionSyncRows('), '勾选跨页保留（翻页 / 筛选变化不清空），列表刷新后同步已设标记')
+assert(specList.includes("openBatch('selected')") && specList.includes("openBatch('filter')") && specList.includes('planogram.spec.selection.byFilter'), '两个批量入口：已选 / 按当前筛选的全部 N 个')
+assert(specList.includes('row.itemNumber || row.productCode') && specList.includes("t('planogram.spec.internalCode'") && specList.includes('GradeTag') && specList.includes('warehouseCategoryPath'), '货号为主、条码为辅，内部码放悬浮提示；新增等级与仓库分类（路径按原样，过长省略 + 悬浮全路径）两列')
+assert(/rowClassName=\{\(row\) => \(selection\.has\(row\.productCode\) \? 'planogram-row-picked'/.test(specList), '已勾选行的底色优先于「未设参数」的黄色')
+assert(css.indexOf('.planogram-row-picked > td') > css.indexOf('.planogram-row-unset > td'), '已勾选行的样式排在未设参数行之后')
+
+assert(batchModalSource.includes('edit.runPreview()') && batchModalSource.includes('edit.execute()') && batchModalSource.includes('disabled={edit.confirmBlock !== null}'), '弹窗：预览 → 确认执行；没有当前输入下的有效预览时确认按钮禁用')
+assert(batchModalSource.includes('maskClosable={false}') && batchModalSource.includes('keyboard={!edit.executing}') && batchModalSource.includes('closable={!edit.executing}'), '执行中不能误关弹窗')
+assert(batchModalSource.includes("import { listProductSpecs } from '../../../../services/planogramService'") && batchModalSource.includes("status: 'set', page: 1, pageSize: 1"), '按筛选时已设 / 未设数经 planogramService 另查一次（pageSize=1 只取 total）')
+assert(batchModalSource.includes('formatChangeLines(item.before') && batchModalSource.includes('formatChangeLines(item.after') && batchModalSource.includes("planogram.spec.batch.changes.col.before"), '右栏改前改后明细来自后端 changedItems')
+assert(batchModalSource.includes('skipReasonKey(item.reason)') && batchModalSource.includes('skippedItemsTruncated(result)'), '跳过明细显示货号与原因的中文说明，超过 200 条提示截断')
+assert(batchModalSource.includes("edit.error.kind === 'conflict'") && batchEditHookSource.includes("view.kind === 'conflict'") && batchEditHookSource.includes('IDLE_BATCH_PREVIEW'), '并发冲突：黄色提示，预览作废，引导重新预览')
+
+assert(filterControlsSource.includes('filter.ensureLoaded()') && filterControlsSource.includes('aria-pressed={on}') && filterControlsSource.includes('maxTagCount="responsive"'), '分类控件首次打开才加载；等级是 aria-pressed 的按钮；仓库分类多选')
+assert(gradeDisplaySource.includes("from '../../../types/productGrade'") && gradeDisplaySource.includes('PRODUCT_GRADE_CONFIG'), '等级颜色复用 PRODUCT_GRADE_CONFIG')
+assert(!/#[0-9a-fA-F]{6}/.test(gradeTagSource + filterControlsSource), '等级颜色不在组件里另写死')
+
+assert(library.includes('...scope, page') && library.includes('useCategoryFilter(') && library.includes('<Popover') && library.includes('categoryFilter.chips.map('), '设计器商品库：筛选条件进入商品库请求；「筛选」按钮 + 弹层；可逐个删除的条件标签')
+assert(library.includes('categoryFilter.hasActive') && library.includes("'planogram.designer.library.emptyFiltered'") && library.includes("'planogram.designer.library.emptySet'"), '空结果文案区分「没有符合条件的商品」与「还没设置陈列参数」')
+assert(library.includes('useDraggable') && library.includes('onClick={() => onAdd(item)}') && library.includes('LibraryStatus'), '拖拽、「+」添加、「已设参数 / 全部」切换保持不变')
+assert(library.includes('GradeTag') && library.includes("planogram.designer.library.matchCount"), '商品卡片加等级小标签；弹层底部显示符合数')
 
 // 全局契约（noAutomaticReload）会扫描 pages 下所有文件里的该字面量，所以这里拆开拼接。
 for (const source of [...allSources, css]) {

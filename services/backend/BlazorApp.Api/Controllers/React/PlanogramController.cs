@@ -101,16 +101,50 @@ namespace BlazorApp.Api.Controllers.React
 
         // ---------------------------------------------------------------- 商品陈列参数
 
-        /// <summary>商品参数列表（联 Product）；status：all / set / unset。</summary>
+        /// <summary>
+        /// 商品参数列表（联 Product）；status：all / set / unset。附录 D.1 的过滤条件：数组用重复键
+        /// （如 <c>warehouseCategoryGuids=a&amp;warehouseCategoryGuids=b</c>），空值 / 空白 / 重复会被忽略，分类各最多 200 个；
+        /// grades 取 A / B / C / D / none（未分级），多选取并集。
+        /// </summary>
         [HttpGet("product-specs")]
         [Authorize(Policy = Permissions.Planogram.View)]
         public async Task<IActionResult> ListProductSpecs(
             [FromQuery] string? keyword,
             [FromQuery] string? status,
+            [FromQuery] string[]? warehouseCategoryGuids,
+            [FromQuery] string? localSupplierCode,
+            [FromQuery] string[]? supplierCategoryGuids,
+            [FromQuery] bool? supplierCategoryUnassignedOnly,
+            [FromQuery] string[]? grades,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20,
             CancellationToken cancellationToken = default) =>
-            ToResult(await _specs.ListAsync(keyword, status, page, pageSize, cancellationToken));
+            ToResult(await _specs.ListAsync(
+                new ProductSpecFilterDto
+                {
+                    Keyword = keyword,
+                    Status = status,
+                    WarehouseCategoryGuids = warehouseCategoryGuids?.ToList(),
+                    LocalSupplierCode = localSupplierCode,
+                    SupplierCategoryGuids = supplierCategoryGuids?.ToList(),
+                    SupplierCategoryUnassignedOnly = supplierCategoryUnassignedOnly,
+                    Grades = grades?.ToList(),
+                },
+                page,
+                pageSize,
+                cancellationToken));
+
+        /// <summary>
+        /// 批量修改商品陈列参数（附录 D.2）。字面量路径 <c>product-specs/batch</c> 只有 POST；
+        /// <c>product-specs/{productCode}</c> 没有 POST，所以不会互相抢路由。
+        /// </summary>
+        [HttpPost("product-specs/batch")]
+        [Authorize(Policy = Permissions.Planogram.Edit)]
+        public async Task<IActionResult> BatchUpdateProductSpecs(
+            [FromBody] ProductSpecBatchRequest? input,
+            CancellationToken cancellationToken) =>
+            ToResult(await _specs.BatchUpdateAsync(
+                input ?? new ProductSpecBatchRequest(), CurrentUserName(), cancellationToken));
 
         [HttpGet("product-specs/{productCode}")]
         [Authorize(Policy = Permissions.Planogram.View)]

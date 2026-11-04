@@ -43,6 +43,8 @@ export const DEFAULT_PAGE_SIZE = 20
 export const PAGE_SIZE_OPTIONS = [20, 50, 100]
 /** 搜索框输入后多久才真正发请求（毫秒）。 */
 export const SEARCH_DEBOUNCE_MS = 350
+/** 分类 / 等级条件变化后多久才真正发请求（毫秒）：连点几个分类时只发最后一次，比搜索框短，因为是离散的点选。 */
+export const FILTER_DEBOUNCE_MS = 250
 export const EMPTY_CELL = '—'
 
 // ---------------------------------------------------------------------------
@@ -126,6 +128,10 @@ const ERROR_CODE_KEYS: Record<string, string> = {
   PLANOGRAM_ALREADY_PUBLISHED: 'planogram.errors.alreadyPublished',
   PLANOGRAM_IMPORT_UNRESOLVED: 'planogram.errors.importUnresolved',
   PLANOGRAM_SNAPSHOT_INVALID: 'planogram.errors.snapshotInvalid',
+  // 附录 D（商品陈列参数批量修改）
+  PLANOGRAM_BATCH_TOO_MANY: 'planogram.errors.batchTooMany',
+  PLANOGRAM_BATCH_EMPTY: 'planogram.errors.batchEmpty',
+  PLANOGRAM_BATCH_CONFLICT: 'planogram.errors.batchConflict',
 }
 
 export interface FieldError {

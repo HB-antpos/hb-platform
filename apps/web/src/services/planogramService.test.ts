@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { resolvePlanogramError } from '../pages/PosAdmin/Planogram/planogramLogic'
 import {
   archivePlan,
+  batchUpdateProductSpecs,
   createHookModel,
   createPlan,
   createShelfModel,
@@ -22,7 +23,9 @@ import {
   listProductSpecs,
   listShelfModels,
   normalizePlanListItem,
+  normalizeBatchResult,
   PLANOGRAM_API_BASE,
+  productSpecScopeParams,
   publishPlan,
   restorePlan,
   savePlan,
@@ -500,6 +503,127 @@ try {
   }
   const unresolved = resolvePlanogramError(unresolvedError)
   assert.ok(unresolved.kind === 'error' && unresolved.code === 'PLANOGRAM_IMPORT_UNRESOLVED' && Array.isArray(unresolved.details) && unresolved.details.length === 2, '缺失编码的 details 带出')
+  nextStatus = 200
+
+  // 19) 商品陈列参数列表的范围过滤（附录 D.1 + 商品等级）：数组用重复键，空条件不出现，等级只认 A/B/C/D/none
+  ok({ items: [], total: 0, page: 1, pageSize: 20 })
+  await listProductSpecs({ status: 'all', page: 1, pageSize: 20 })
+  for (const name of ['warehouseCategoryGuids', 'localSupplierCode', 'supplierCategoryGuids', 'supplierCategoryUnassignedOnly', 'grades']) {
+    assert.equal(last().url.searchParams.has(name), false, `没选条件时不带 ${name}`)
+  }
+  await listProductSpecs({
+    keyword: ' 笔 ',
+    status: 'set',
+    warehouseCategoryGuids: ['wh-a', ' wh-b ', 'wh-a', ''],
+    localSupplierCode: ' S1 ',
+    supplierCategoryGuids: ['cat-1'],
+    supplierCategoryUnassignedOnly: false,
+    grades: ['A', 'none', 'Z' as never, 'A'],
+    page: 2,
+    pageSize: 50,
+  })
+  assert.deepEqual(last().url.searchParams.getAll('warehouseCategoryGuids'), ['wh-a', 'wh-b'], '仓库分类用重复键，去空去重')
+  assert.equal(last().url.searchParams.get('localSupplierCode'), 'S1')
+  assert.deepEqual(last().url.searchParams.getAll('supplierCategoryGuids'), ['cat-1'])
+  assert.equal(last().url.searchParams.has('supplierCategoryUnassignedOnly'), false, 'false 不出现在查询串里')
+  assert.deepEqual(last().url.searchParams.getAll('grades'), ['A', 'none'], '等级重复键：只认 A/B/C/D/none，去重')
+  assert.equal(last().url.searchParams.get('keyword'), '笔')
+  assert.equal(last().url.searchParams.get('status'), 'set')
+  assert.equal(last().url.searchParams.get('page'), '2')
+  assert.equal(last().url.search.includes('warehouseCategoryGuids=wh-a&warehouseCategoryGuids=wh-b'), true, '重复键形式 a=1&a=2')
+  await listProductSpecs({ status: 'unset', localSupplierCode: 'S1', supplierCategoryUnassignedOnly: true, page: 1, pageSize: 20 })
+  assert.equal(last().url.searchParams.get('supplierCategoryUnassignedOnly'), 'true')
+  assert.deepEqual(productSpecScopeParams({}), {
+    warehouseCategoryGuids: undefined, localSupplierCode: undefined, supplierCategoryGuids: undefined, supplierCategoryUnassignedOnly: undefined, grades: undefined,
+  })
+
+  // 20) 批量修改：POST product-specs/batch，请求体原样提交；响应数字兜底、跳过明细归一化
+  const batchRequest = {
+    target: { productCodes: ['XD0001', 'XD0002'] },
+    patch: { widthMm: 70, unitWeightG: null },
+    hookQtyOverrides: { mode: 'merge' as const, values: { h1: 12 } },
+    createMissing: false,
+    dryRun: true,
+  }
+  // 列表行新增字段：等级只认 A～D（大小写不敏感，其余为 null）、仓库分类路径按原样
+  ok({
+    items: [
+      { productCode: 'G1', productName: 'a', retailPrice: 1, grade: 'b', warehouseCategoryPath: '百货 > 收纳 > 收纳盒', itemNumber: 'HB038-158' },
+      { productCode: 'G2', productName: 'b', retailPrice: 1, grade: 'none', warehouseCategoryPath: null },
+      { productCode: 'G3', productName: 'c', retailPrice: 1, grade: 'E' },
+    ],
+    total: 3, page: 1, pageSize: 20,
+  })
+  const graded = await listProductSpecs({ status: 'all', page: 1, pageSize: 20 })
+  assert.deepEqual(graded.items.map((item) => item.grade), ['B', null, null], '等级字母归一化成大写，其余为 null（未分级）')
+  assert.equal(graded.items[0].warehouseCategoryPath, '百货 > 收纳 > 收纳盒', '仓库分类路径按原样（分隔符「 > 」）')
+  assert.equal(graded.items[1].warehouseCategoryPath, null)
+  assert.equal(graded.items[0].itemNumber, 'HB038-158')
+
+  ok({
+    dryRun: true, matched: '120', willCreate: 30, willUpdate: 85, willStayUnchanged: 2, skipped: 3, changedTotal: '115',
+    changedItems: [
+      { productCode: 'XD1', itemNumber: 'HB038-158', productName: '笔', action: 'update', before: { widthMm: 120, notes: '旧备注', hookQtyOverrides: { h1: 6 } }, after: { widthMm: '70', notes: null, hookQtyOverrides: { h1: 6, h2: 12 } } },
+      { productCode: 'XD2', itemNumber: 'HB038-159', action: 'create', before: null, after: { widthMm: 70, heightMm: 150, depthMm: 25, hangHoleOffsetMm: 10, hangHoleType: 2, source: 1, hookQtyOverrides: { h2: 12 } } },
+      { productCode: 'XD3', action: 'delete', before: null, after: {} },
+      { action: 'update', before: {}, after: {} },
+    ],
+    skippedItems: [
+      { productCode: 'XD0003', itemNumber: 'HB038-158', productName: '笔', reason: 'NO_SPEC' },
+      { productCode: '', reason: 'NO_SPEC' },
+      { productCode: 'XD0004', reason: 'FUTURE_REASON' },
+    ],
+  })
+  const preview = await batchUpdateProductSpecs(batchRequest)
+  assert.equal(last().init?.method, 'POST')
+  assert.equal(last().url.pathname, '/api/react/v1/planogram/product-specs/batch')
+  assert.deepEqual(bodyOf(last()), batchRequest, '批量请求体原样提交（null 表示清空，保留）')
+  assert.equal(preview.dryRun, true)
+  assert.equal(preview.matched, 120, '字符串数字转成数字')
+  assert.equal(preview.created + preview.updated + preview.unchanged, 0, 'dryRun 时执行数缺省为 0')
+  assert.equal(preview.willCreate, 30)
+  assert.equal(preview.skippedItems.length, 2, '缺货号的明细丢掉')
+  assert.equal(preview.skippedItems[0].itemNumber, 'HB038-158')
+  assert.equal(preview.skippedItems[1].reason, 'FUTURE_REASON', '不认识的原因原样保留')
+  assert.equal(preview.changedTotal, 115, '改前改后明细的真实总数（字符串转数字）')
+  assert.equal(preview.changedItems.length, 2, '动作不认识 / 缺货号的明细丢掉')
+  assert.deepEqual(preview.changedItems[0].before, { widthMm: 120, notes: '旧备注', hookQtyOverrides: { h1: 6 } }, 'update 的 before 只含改变的字段')
+  assert.deepEqual(preview.changedItems[0].after, { widthMm: 70, notes: null, hookQtyOverrides: { h1: 6, h2: 12 } }, 'after 里被清空的字段显式为 null')
+  assert.equal(preview.changedItems[1].action, 'create')
+  assert.equal(preview.changedItems[1].before, null, 'create 的 before 恒为 null')
+  assert.equal(preview.changedItems[1].after.hangHoleType, 2)
+  const filterBatch = {
+    target: { filter: { keyword: '', status: 'all' as const, warehouseCategoryGuids: ['wh-a'], localSupplierCode: null, supplierCategoryGuids: [], supplierCategoryUnassignedOnly: false, grades: ['A' as const] } },
+    patch: { hangHoleType: 1 as const },
+    createMissing: true,
+    dryRun: false,
+  }
+  ok({ dryRun: false, matched: 5, created: 1, updated: 3, unchanged: 1, skipped: 0 })
+  const executed = await batchUpdateProductSpecs(filterBatch)
+  assert.deepEqual(bodyOf(last()), filterBatch, '按筛选：请求体带 filter，不带 productCodes')
+  assert.equal('hookQtyOverrides' in bodyOf(last()), false, '没勾选每钩挂数就没有这个键')
+  assert.deepEqual([executed.created, executed.updated, executed.unchanged, executed.willCreate, executed.skippedItems.length], [1, 3, 1, 0, 0])
+  assert.equal(executed.dryRun, false)
+  assert.equal(normalizeBatchResult(null).matched, 0, '空响应全部兜底为 0')
+  assert.deepEqual([normalizeBatchResult(null).changedTotal, normalizeBatchResult(null).changedItems.length], [0, 0], '没有改前改后明细时兜底为空')
+  assert.deepEqual(normalizeBatchResult({ skippedItems: 'bad' as never }).skippedItems, [])
+
+  // 批量失败：错误码带出（超限 / 目标为空 / 字段校验）
+  for (const [code, details] of [['PLANOGRAM_BATCH_TOO_MANY', 2300], ['PLANOGRAM_BATCH_EMPTY', null], ['PLANOGRAM_BATCH_CONFLICT', null], ['PLANOGRAM_VALIDATION', ['foo']]] as const) {
+    nextStatus = 400
+    nextBody = { success: false, message: '服务端中文', errorCode: code, details }
+    let batchError: unknown
+    try {
+      await batchUpdateProductSpecs(batchRequest)
+    } catch (error) {
+      batchError = error
+    }
+    const resolved = resolvePlanogramError(batchError)
+    assert.ok(resolved.kind === 'error' && resolved.code === code, `${code} 带出错误码`)
+    assert.equal(resolved.kind === 'error' && resolved.serverMessage, '服务端中文')
+    if (code === 'PLANOGRAM_BATCH_TOO_MANY') assert.equal(resolved.kind === 'error' && resolved.details, 2300, '匹配数在 details 里')
+    if (code !== 'PLANOGRAM_VALIDATION') assert.notEqual(resolved.kind === 'error' && resolved.key, 'planogram.errors.unknown', `${code} 有专门的文案键`)
+  }
   nextStatus = 200
 
 

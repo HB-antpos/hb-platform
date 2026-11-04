@@ -1,0 +1,112 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>批量修改陈列参数</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="extra.css">
+<style>
+.mask{position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:5}
+.modal{position:absolute;left:50%;top:40px;transform:translateX(-50%);width:880px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.2);z-index:6;display:flex;flex-direction:column}
+.mh{padding:16px 24px 8px;font-size:16px;font-weight:600;display:flex;justify-content:space-between}
+.mb{padding:4px 24px 8px}
+.mf{padding:12px 24px 16px;display:flex;gap:8px;justify-content:flex-end;align-items:center;border-top:1px solid #f0f0f0}
+.ft{width:100%;border-collapse:collapse;font-size:13px}
+.ft td{padding:6px 8px;border-bottom:1px solid #f5f5f5;vertical-align:middle}
+.ft tr.off td{color:rgba(0,0,0,.35)}
+.ft .inp{height:28px;border:1px solid #d9d9d9;border-radius:8px;display:inline-flex;align-items:center;padding:0 8px;min-width:120px;background:#fff;gap:6px}
+.ft tr.off .inp{background:#f5f5f5;color:rgba(0,0,0,.25)}
+.sw{width:28px;height:16px;border-radius:8px;background:#1677ff;position:relative;display:inline-block}
+.sw:after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
+.sw.off{background:rgba(0,0,0,.25)}.sw.off:after{right:auto;left:2px}
+.sec{font-weight:600;font-size:13px;margin:12px 0 6px;display:flex;align-items:center;gap:8px}
+.rad{display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-size:13px}
+.rad i{width:14px;height:14px;border-radius:50%;border:1px solid #d9d9d9;display:inline-block;background:#fff}
+.rad i.on{border:4px solid #1677ff}
+.tile{flex:1;border:1px solid #f0f0f0;border-radius:10px;padding:10px 12px}
+.tile b{font-size:22px;display:block;line-height:1.2}
+.chg{width:100%;border-collapse:collapse;font-size:12px}
+.chg th{background:#fafafa;text-align:left;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-weight:600}
+.chg td{padding:6px 8px;border-bottom:1px solid #f5f5f5}
+.drawer{position:absolute;right:0;top:0;bottom:0;width:720px;background:#fff;box-shadow:-6px 0 16px rgba(0,0,0,.08);z-index:6;display:flex;flex-direction:column}
+.steps{display:flex;gap:10px;align-items:center;padding:12px 24px;border-bottom:1px solid #f0f0f0;font-size:13px}
+.st{display:flex;align-items:center;gap:8px;color:rgba(0,0,0,.45)}
+.st b{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid #d9d9d9;font-size:12px}
+.st.done b{background:#e6f4ff;border-color:#1677ff;color:#1677ff}
+.st.cur{color:rgba(0,0,0,.88);font-weight:600}.st.cur b{background:#1677ff;border-color:#1677ff;color:#fff}
+.line{flex:1;height:1px;background:#f0f0f0}
+.cell{height:30px;border:1px solid #d9d9d9;border-radius:6px;display:inline-flex;align-items:center;padding:0 8px;width:62px;background:#fff;font-size:13px}
+.cell.chg2{background:#fffbe6;border-color:#ffd666}
+.cell.err{background:#fff2f0;border-color:#ff4d4f;color:#cf1322}
+</style>
+<script src="data.js"></script></head><body><div id="root"></div>
+<script>
+const v = new URLSearchParams(location.search).get('v') || '1';
+const bgTable = `<table class="tbl"><thead><tr><th style="width:40px"><span class="cb half"></span></th><th style="width:56px">图</th><th>货号 / 条码</th><th>名称</th><th>等级</th><th>包装 宽 × 高 × 厚</th><th>吊孔偏移</th><th>单件重</th><th>每钩挂数</th></tr></thead><tbody>${ROWS.map((r,i)=>`<tr><td><span class="cb ${i<5?'on':''}"></span></td><td>${thumb(r,36)}</td><td style="white-space:nowrap"><div class="mono" style="font-weight:600">${r.item}</div><div class="muted tiny mono">${r.bc}</div></td><td>${r.name}</td><td>${gradeTag(r.grade,true)}</td><td>${r.spec||'—'}</td><td>${r.spec?r.off+' mm':'—'}</td><td>${r.spec?r.w:'—'}</td><td>${r.spec?r.q:'—'}</td></tr>`).join('')}</tbody></table>`;
+const listPage = (extra='') => `<div class="content" style="gap:10px">${subtabs()}<div class="card" style="flex:1;min-height:0;overflow:hidden">${innerTabs()}<div class="fbar"><div class="input" style="width:240px"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div><span class="sel"><span class="lbl">仓库分类</span>手工<span class="caret">▼</span></span><span class="sel"><span class="lbl">等级</span>A、B<span class="caret">▼</span></span></div>${extra}${bgTable}</div></div>`;
+const fieldRows = [
+ [true,'宽 W','80','mm',''],[true,'高 H','200','mm',''],[true,'厚 T（沿钩向）','15','mm','定挂数'],
+ [false,'吊孔距顶边','10','mm','不改'],[false,'吊孔类型','欧式挂孔','',''],[false,'单件重','','g','可清空'],
+ [true,'默认挂钩','双钩带价签 200 · 黑','',''],[true,'尺寸来源','人工量取','',''],[false,'备注','','','可清空']];
+const fieldTable = `<table class="ft">${fieldRows.map(([on,k,val,unit,hint])=>`<tr class="${on?'':'off'}"><td style="width:46px"><span class="sw ${on?'':'off'}"></span></td><td style="width:150px">${k}</td><td><span class="inp" style="min-width:${k==='默认挂钩'?220:120}px">${val||'<span style="color:rgba(0,0,0,.25)">—</span>'}${unit?`<span class="muted tiny" style="margin-left:auto">${unit}</span>`:''}</span></td><td class="muted tiny" style="white-space:nowrap">${hint}</td></tr>`).join('')}</table>`;
+let inner = '', over = '';
+if (v === '1') {
+ inner = listPage();
+ over = `<div class="mask"></div><div class="modal">
+  <div class="mh">批量修改陈列参数<i class="ti ti-x muted" style="font-weight:400"></i></div>
+  <div class="mb">
+   <div style="display:flex;gap:10px;align-items:center;background:#fafafa;border-radius:8px;padding:8px 12px;font-size:13px"><b>目标</b><span class="seg"><span class="on">已选 5 个</span><span>当前筛选 128 个</span></span><span class="muted">已设参数 2 · 未设参数 3</span></div>
+   <div style="display:flex;gap:18px;margin-top:6px">
+    <div style="flex:1.25"><div class="sec">要修改的字段 <span class="muted tiny" style="font-weight:400">打开开关的字段才会被修改，其余保持原值</span></div>${fieldTable}</div>
+    <div style="flex:1">
+     <div class="sec">每钩挂数覆盖</div>
+     <div><span class="rad"><i class="on"></i>不改</span><span class="rad"><i></i>合并</span><span class="rad"><i></i>整体替换</span><span class="rad"><i></i>清空</span></div>
+     <div class="sec" style="margin-top:14px">未设参数的商品（3 个）</div>
+     <div><span class="rad"><i></i>跳过</span><span class="rad"><i class="on"></i>按上面的值创建</span></div>
+     <div class="muted tiny" style="margin-top:4px;color:#389e0d"><i class="ti ti-circle-check"></i> 已填齐宽、高、厚，可以创建</div>
+     <div class="sec" style="margin-top:14px">预览结果 <span class="tag green" style="height:20px;font-size:11px">最新</span></div>
+     <div style="display:flex;gap:8px"><div class="tile"><b style="color:#1677ff">3</b><span class="muted tiny">将创建</span></div><div class="tile"><b style="color:#389e0d">2</b><span class="muted tiny">将更新</span></div><div class="tile"><b>0</b><span class="muted tiny">不变</span></div><div class="tile"><b style="color:#d46b08">0</b><span class="muted tiny">跳过</span></div></div>
+     <table class="chg" style="margin-top:8px"><tr><th>货号</th><th>改前</th><th>改后</th></tr>
+      <tr><td class="mono">HB038-158</td><td>110×155×12</td><td>80×200×15</td></tr><tr><td class="mono">HB038-146</td><td>60×210×40</td><td>80×200×15</td></tr><tr><td class="mono">HB038-XM-017</td><td class="muted">未设</td><td>80×200×15（新建）</td></tr></table>
+    </div>
+   </div>
+  </div>
+  <div class="mf"><span class="muted tiny" style="margin-right:auto">改了任何输入，预览会失效，需要重新预览</span><span class="btn">取消</span><span class="btn"><i class="ti ti-eye"></i>重新预览</span><span class="btn primary"><i class="ti ti-check"></i>确认执行（5 个）</span></div>
+ </div>
+ <div class="badge-opt">方案 1 · 一个弹窗：左边勾字段，右边看预览</div>`;
+}
+if (v === '2') {
+ inner = listPage();
+ over = `<div class="mask"></div><div class="drawer">
+  <div class="mh" style="padding:16px 24px">批量修改陈列参数<i class="ti ti-x muted" style="font-weight:400"></i></div>
+  <div class="steps"><span class="st done"><b><i class="ti ti-check"></i></b>选目标</span><span class="line"></span><span class="st done"><b><i class="ti ti-check"></i></b>填要改的值</span><span class="line"></span><span class="st cur"><b>3</b>预览并执行</span><span class="line"></span><span class="st"><b>4</b>完成</span></div>
+  <div class="mb" style="flex:1;overflow:hidden;padding:16px 24px">
+   <div style="font-size:13px;margin-bottom:10px">目标：<b>当前筛选的 128 个商品</b>（仓库分类 手工 · 等级 A、B） · 修改字段：<span class="tag blue" style="height:20px;font-size:11px">宽 80</span> <span class="tag blue" style="height:20px;font-size:11px">高 200</span> <span class="tag blue" style="height:20px;font-size:11px">厚 15</span> <span class="tag blue" style="height:20px;font-size:11px">默认挂钩 双钩 200</span></div>
+   <div style="display:flex;gap:10px"><div class="tile"><b style="color:#1677ff">41</b><span class="muted tiny">将创建（未设参数）</span></div><div class="tile"><b style="color:#389e0d">80</b><span class="muted tiny">将更新</span></div><div class="tile"><b>4</b><span class="muted tiny">值相同，不变</span></div><div class="tile"><b style="color:#d46b08">3</b><span class="muted tiny">跳过</span></div></div>
+   <div class="sec" style="margin-top:16px">跳过的商品（3）</div>
+   <table class="chg"><tr><th>货号</th><th>名称</th><th>原因</th></tr>
+    <tr><td class="mono">HB038-122</td><td>Craft Pipe Cleaners 100pk</td><td style="color:#d46b08">吊孔偏移 210 大于新高度 200</td></tr>
+    <tr><td class="mono">HB038-131</td><td>Mini Pegs 50pk</td><td style="color:#d46b08">商品已停用</td></tr>
+    <tr><td class="mono">HB038-188</td><td>Ribbon Spool Assorted</td><td style="color:#d46b08">每钩挂数覆盖超长</td></tr></table>
+   <div class="sec" style="margin-top:16px">变化明细（前 8 条）</div>
+   <table class="chg"><tr><th>货号</th><th>名称</th><th>宽 × 高 × 厚</th><th>默认挂钩</th></tr>
+    ${ROWS.slice(0,8).map(r=>`<tr><td class="mono">${r.item}</td><td>${r.name.slice(0,26)}</td><td>${r.spec?`<span class="muted" style="text-decoration:line-through">${r.spec}</span> → `:'<span class="tag blue" style="height:18px;font-size:11px">新建</span> '}80 × 200 × 15</td><td>${r.spec?'<span class="muted">不变</span>':'双钩 200'}</td></tr>`).join('')}</table>
+  </div>
+  <div class="mf"><span class="btn" style="margin-right:auto"><i class="ti ti-arrow-left"></i>上一步</span><span class="btn">取消</span><span class="btn primary"><i class="ti ti-check"></i>确认执行（121 个）</span></div>
+ </div>
+ <div class="badge-opt">方案 2 · 右侧抽屉分步：选目标 → 填值 → 预览执行</div>`;
+}
+if (v === '3') {
+ const rowsEdit = ROWS.slice(0,8).map((r,i)=>{ const ed = i<5; const vals = r.spec ? r.spec.split(' × ') : ['','',''];
+  const c = (val, cls='') => ed ? `<span class="cell ${cls}">${val||'<span style="color:rgba(0,0,0,.25)">—</span>'}</span>` : `<span>${val||'—'}</span>`;
+  const nv = [['80','200','15'],['95','185','20'],['60','210','40'],['70','240','12'],['110','155','12']][i] || vals;
+  return `<tr class="${ed?'picked':''}"><td><span class="cb ${ed?'on':''}"></span></td><td>${thumb(r,32)}</td><td style="white-space:nowrap"><div class="mono" style="font-weight:600">${r.item}</div></td><td style="max-width:220px"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.name}</div></td>
+   <td>${c(ed?nv[0]:vals[0], ed && nv[0]!==vals[0]?'chg2':'')}</td><td>${c(ed?nv[1]:vals[1], ed && nv[1]!==vals[1]?'chg2':'')}</td><td>${c(ed?nv[2]:vals[2], ed && nv[2]!==vals[2]?'chg2':'')}</td>
+   <td>${c(ed?(i===2?'220':'10'):(r.spec?'10':''), i===2?'err':'')}</td><td>${c(ed?(i===3?'45':r.w||''):r.w||'', i===3?'chg2':'')}</td><td>${ed?`<span class="cell" style="width:130px">双钩 200 <span class="caret muted" style="margin-left:auto;font-size:10px">▼</span></span>`:(r.hook||'—')}</td></tr>`;}).join('');
+ inner = `<div class="content" style="gap:10px">${subtabs()}<div class="card" style="flex:1;min-height:0;overflow:hidden;position:relative">${innerTabs()}
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;margin:10px 16px;border-radius:10px;background:#fffbe6;border:1px solid #ffe58f;font-size:13px"><i class="ti ti-table-options" style="color:#d48806"></i><b>批量录入模式</b><span class="muted">已选 5 行，直接在表格里改，每行可以不同</span><span class="btn sm" style="height:28px"><i class="ti ti-clipboard"></i>从 Excel 粘贴</span><span class="btn sm" style="height:28px"><i class="ti ti-arrows-down"></i>统一填充 ▾</span><span style="margin-left:auto" class="tag red">1 处错误</span><span class="btn sm" style="height:28px">退出</span><span class="btn sm primary" style="height:28px"><i class="ti ti-device-floppy"></i>保存 5 行</span></div>
+  <table class="tbl"><thead><tr><th style="width:40px"><span class="cb half"></span></th><th style="width:48px">图</th><th>货号</th><th>名称</th><th>宽 W</th><th>高 H</th><th>厚 T</th><th>吊孔偏移</th><th>单件重</th><th>默认挂钩</th></tr></thead><tbody>${rowsEdit}</tbody></table>
+  <div class="note2" style="left:1110px;top:430px"><i class="ti ti-alert-triangle"></i> 吊孔偏移 220 大于高度 210，保存前须改正</div>
+  <div class="note2" style="left:300px;top:610px;max-width:330px">适合「每个商品尺寸都不同」的大量录入：可从 Excel 按「货号 宽 高 厚 偏移 重量」整块粘贴，黄色是改过的格子。需要后端多一个按行保存的接口</div>
+ </div></div>
+ <div class="badge-opt">方案 3 · 表格里批量录入（每行值可不同）</div>`;
+}
+document.getElementById('root').innerHTML = shell(inner) ;
+document.querySelector('.app').insertAdjacentHTML('beforeend', over);
+</script></body></html>

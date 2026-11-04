@@ -281,6 +281,15 @@ const pages = [
       'src/pages/PosAdmin/Planogram/export/PlanogramPrintPages.tsx',
       'src/pages/PosAdmin/Planogram/export/sheetLogic.ts',
       'src/pages/PosAdmin/Planogram/transferLogic.ts',
+      // 附录 D：商品范围过滤（仓库分类 / 本地供应商分类 / 商品等级）与批量修改
+      'src/pages/PosAdmin/Planogram/ProductSpecs/batchLogic.ts',
+      'src/pages/PosAdmin/Planogram/categoryFilter/categoryFilterLogic.ts',
+      'src/pages/PosAdmin/Planogram/categoryFilter/useCategoryFilter.ts',
+      'src/pages/PosAdmin/Planogram/categoryFilter/CategoryFilterControls.tsx',
+      'src/pages/PosAdmin/Planogram/ProductSpecs/BatchEditModal.tsx',
+      'src/pages/PosAdmin/Planogram/ProductSpecs/useBatchEdit.ts',
+      'src/pages/PosAdmin/Planogram/GradeTag.tsx',
+      'src/pages/PosAdmin/Planogram/gradeDisplay.ts',
     ],
     messages: {
       zh: 'src/pages/PosAdmin/Planogram/planogramMessages.zh.json',

@@ -1,13 +1,17 @@
-import { LockOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { CloseOutlined, FilterOutlined, LockOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useDraggable } from '@dnd-kit/core'
-import { Alert, Button, Empty, Input, Segmented, Select, Spin, Tabs } from 'antd'
+import { Alert, Button, Empty, Input, Popover, Segmented, Select, Spin, Tabs, Tooltip, message } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ProductListImage from '../../../../components/ProductListImage'
 import { listProductSpecs } from '../../../../services/planogramService'
-import type { HookModelDto, ProductSpecListItemDto } from '../../../../types/planogram'
+import type { HookModelDto, ProductSpecListItemDto, ProductSpecScopeFilter } from '../../../../types/planogram'
+import { GradeChips, SupplierCategorySelect, WarehouseCategorySelect } from '../categoryFilter/CategoryFilterControls'
+import { scopeFilterKey } from '../categoryFilter/categoryFilterLogic'
+import { useCategoryFilter } from '../categoryFilter/useCategoryFilter'
+import GradeTag from '../GradeTag'
 import { resolveHookQty } from '../engine/hookQty'
-import { formatNumber, planogramErrorText, resolvePlanogramError, SEARCH_DEBOUNCE_MS } from '../planogramLogic'
+import { FILTER_DEBOUNCE_MS, formatNumber, planogramErrorText, resolvePlanogramError, SEARCH_DEBOUNCE_MS } from '../planogramLogic'
 import { useDebouncedValue } from '../usePlanogramRequest'
 import { pickHookForProduct, productColor } from './designerLogic'
 
@@ -30,8 +34,9 @@ interface LibraryState {
   error: unknown
 }
 
-function useProductLibrary(keyword: string, status: LibraryStatus) {
-  const key = `${keyword}|${status}`
+function useProductLibrary(keyword: string, status: LibraryStatus, scope: ProductSpecScopeFilter) {
+  // 搜索词 / 状态 / 分类 / 等级任一变化 → 换键，从第 1 页重新取
+  const key = `${keyword}|${status}|${scopeFilterKey(scope)}`
   const [state, setState] = useState<LibraryState>({ key, items: [], total: 0, page: 0, loading: true, error: null })
   const controllerRef = useRef<AbortController | null>(null)
   const nonceRef = useRef(0)
@@ -43,7 +48,7 @@ function useProductLibrary(keyword: string, status: LibraryStatus) {
     nonceRef.current += 1
     const nonce = nonceRef.current
     setState((current) => ({ ...current, key, loading: true, error: null, ...(append ? {} : { items: [], total: 0, page: 0 }) }))
-    listProductSpecs({ keyword: keyword || undefined, status, page, pageSize: LIBRARY_PAGE_SIZE }, controller.signal).then(
+    listProductSpecs({ keyword: keyword || undefined, status, ...scope, page, pageSize: LIBRARY_PAGE_SIZE }, controller.signal).then(
       (result) => {
         if (controller.signal.aborted || nonce !== nonceRef.current) return
         setState((current) => {
@@ -56,9 +61,9 @@ function useProductLibrary(keyword: string, status: LibraryStatus) {
         setState((current) => ({ ...current, loading: false, error }))
       },
     )
-  }, [key, keyword, status])
+  }, [key, keyword, scope, status])
 
-  // 搜索词 / 状态变了：从第 1 页重新取；卸载时中止在途请求
+  // 搜索词 / 状态 / 分类条件变了：从第 1 页重新取；卸载时中止在途请求
   useEffect(() => {
     load(1, false)
     return () => controllerRef.current?.abort()
@@ -116,6 +121,8 @@ export function LibraryCardBody({ info, overlay }: { info: CardInfo; overlay?: b
               !overlay && info.qty !== null && info.qty > 0 ? t('planogram.designer.library.perHook', { count: info.qty }) : null,
               !overlay ? t('planogram.designer.library.placed', { count: info.placed }) : null,
             ].filter(Boolean).join(' · ')}
+            {/* 商品等级小标签（拖动时跟手的卡片不画，保持紧凑） */}
+            {overlay ? null : <> <GradeTag grade={item.grade} /></>}
           </div>
         ) : null}
       </div>
@@ -148,7 +155,7 @@ function LibraryCard({ info, disabled, onAdd, onGoSpecs, canEdit }: LibraryCardP
         <Thumb item={item} size={38} />
         <div className="planogram-designer-card-text">
           <div className="planogram-designer-card-name">{cardName(item, info.language)}</div>
-          <div className="planogram-designer-card-meta planogram-mono">{item.itemNumber || item.productCode}</div>
+          <div className="planogram-designer-card-meta planogram-mono">{item.itemNumber || item.productCode} <GradeTag grade={item.grade} /></div>
           <div className="planogram-designer-card-meta planogram-warn-text">
             {t('planogram.designer.library.unset')}
             {canEdit ? <> · <Button type="link" size="small" className="planogram-inline-link" onClick={onGoSpecs}>{t('planogram.designer.library.addSpec')}</Button></> : null}
@@ -216,7 +223,11 @@ export default function ProductLibraryPanel(props: ProductLibraryPanelProps) {
   const [keywordDraft, setKeywordDraft] = useState('')
   const [status, setStatus] = useState<LibraryStatus>('set')
   const keyword = useDebouncedValue(keywordDraft.trim(), SEARCH_DEBOUNCE_MS)
-  const library = useProductLibrary(keyword, status)
+  // 分类 / 等级筛选：条件进入商品库请求（仍是 status=set / 全部）；分类数据在第一次打开「筛选」弹层时才加载，失败不影响列表
+  const categoryFilter = useCategoryFilter({ onLoadError: () => { message.error(t('planogram.categoryFilter.loadFailed')) } })
+  const scope = useDebouncedValue(categoryFilter.scope, FILTER_DEBOUNCE_MS)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const library = useProductLibrary(keyword, status, scope)
   const hooksByGuid = new Map(hooks.map((hook) => [hook.guid, hook]))
 
   const errorText = (() => {
@@ -235,14 +246,59 @@ export default function ProductLibraryPanel(props: ProductLibraryPanelProps) {
   const productsPane = (
     <div className="planogram-designer-library-pane">
       <div className="planogram-designer-library-filters">
-        <Input
-          allowClear
-          prefix={<SearchOutlined aria-hidden="true" />}
-          placeholder={t('planogram.designer.library.search')}
-          aria-label={t('planogram.designer.library.search')}
-          value={keywordDraft}
-          onChange={(event) => setKeywordDraft(event.target.value)}
-        />
+        <div className="planogram-designer-library-searchrow">
+          <Input
+            allowClear
+            prefix={<SearchOutlined aria-hidden="true" />}
+            placeholder={t('planogram.designer.library.search')}
+            aria-label={t('planogram.designer.library.search')}
+            value={keywordDraft}
+            onChange={(event) => setKeywordDraft(event.target.value)}
+          />
+          {/* 「筛选」按钮 + 弹层：有条件时按钮高亮并显示条数；弹层里是仓库分类 / 本地供应商分类 / 商品等级 */}
+          <Popover
+            trigger="click"
+            placement="bottomLeft"
+            open={filterOpen}
+            onOpenChange={(next) => {
+              setFilterOpen(next)
+              if (next) categoryFilter.ensureLoaded()
+            }}
+            overlayClassName="planogram-filter-popover"
+            content={(
+              <div className="planogram-filter-pop">
+                <div className="planogram-filter-pop-title">{t('planogram.designer.library.filterTitle')}</div>
+                <div className="planogram-filter-pop-label">{t('planogram.categoryFilter.warehouseWithChildren')}</div>
+                <WarehouseCategorySelect filter={categoryFilter} variant="popover" />
+                <div className="planogram-filter-pop-label">{t('planogram.categoryFilter.supplier')}</div>
+                <SupplierCategorySelect filter={categoryFilter} variant="popover" />
+                <div className="planogram-filter-pop-label">{t('planogram.grade.title')}</div>
+                <GradeChips filter={categoryFilter} size="sm" />
+                <div className="planogram-filter-pop-foot">
+                  <span className="planogram-muted-text planogram-small" aria-live="polite">
+                    {library.loading ? '…' : t('planogram.designer.library.matchCount', { count: library.total })}
+                  </span>
+                  <span className="planogram-filter-pop-actions">
+                    <Button size="small" disabled={!categoryFilter.hasActive} onClick={categoryFilter.clear}>{t('planogram.designer.library.filterClear')}</Button>
+                    <Button size="small" type="primary" onClick={() => setFilterOpen(false)}>{t('planogram.designer.library.filterDone')}</Button>
+                  </span>
+                </div>
+              </div>
+            )}
+          >
+            {/* 窄栏里按钮只放图标（有条件时再加条数），悬浮提示「筛选」；读屏用 aria-label */}
+            <Tooltip title={filterOpen ? undefined : t('planogram.designer.library.filter')}>
+              <Button
+                className={`planogram-designer-filter-btn${categoryFilter.hasActive ? ' is-active' : ''}`}
+                icon={<FilterOutlined />}
+                aria-label={t('planogram.designer.library.filter')}
+                aria-expanded={filterOpen}
+              >
+                {categoryFilter.hasActive ? categoryFilter.activeCount : null}
+              </Button>
+            </Tooltip>
+          </Popover>
+        </div>
         <Segmented<LibraryStatus>
           size="small"
           value={status}
@@ -253,6 +309,23 @@ export default function ProductLibraryPanel(props: ProductLibraryPanelProps) {
             { label: t('planogram.designer.library.all'), value: 'all' },
           ]}
         />
+        {categoryFilter.chips.length > 0 ? (
+          <div className="planogram-designer-library-chips">
+            {categoryFilter.chips.map((chip) => (
+              <span key={chip.id} className="planogram-designer-chip">
+                <span className="planogram-designer-chip-text" title={chip.label}>{chip.label}</span>
+                <button
+                  type="button"
+                  className="planogram-designer-chip-x"
+                  aria-label={t('planogram.designer.library.removeChip', { name: chip.label })}
+                  onClick={() => categoryFilter.removeGroup(chip.id)}
+                >
+                  <CloseOutlined aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="planogram-designer-library-list" role="list" aria-busy={library.loading}>
         {errorText ? <Alert type="error" showIcon message={errorText} action={<a onClick={library.reload}>{t('planogram.common.retry')}</a>} /> : null}
@@ -263,7 +336,13 @@ export default function ProductLibraryPanel(props: ProductLibraryPanelProps) {
         ))}
         {library.loading ? <div className="planogram-designer-library-loading"><Spin size="small" /></div> : null}
         {!library.loading && !library.error && library.items.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={status === 'set' ? t('planogram.designer.library.emptySet') : t('planogram.spec.empty')} />
+          // 空结果文案：有分类 / 等级条件时说「没有符合条件的商品」，否则才是「还没设置陈列参数」
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={categoryFilter.hasActive
+              ? t('planogram.designer.library.emptyFiltered')
+              : status === 'set' ? t('planogram.designer.library.emptySet') : t('planogram.spec.empty')}
+          />
         ) : null}
         {!library.loading && library.items.length < library.total ? (
           <Button block size="small" onClick={library.loadMore}>{t('planogram.designer.library.loadMore', { shown: library.items.length, total: library.total })}</Button>

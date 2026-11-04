@@ -1,0 +1,82 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>商品陈列参数 · 筛选与批量</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="extra.css">
+<script src="data.js"></script></head><body><div id="root"></div>
+<script>
+const v = new URLSearchParams(location.search).get('v') || 'A';
+const picked = new Set(['HB038-158','HB038-XM-017','HB038-146','HB038-XM-014','HB038-XM-002']);
+const head = (withSel, compact) => `<tr>${withSel?'<th style="width:40px"><span class="cb half"></span></th>':''}<th style="width:56px">图</th><th>货号 / 条码</th><th>名称</th><th>等级</th>${compact?'':'<th>仓库分类</th>'}<th>包装 宽 × 高 × 厚</th><th>吊孔偏移</th><th>单件重</th>${compact?'':'<th>默认挂钩</th>'}<th>每钩挂数</th><th>操作</th></tr>`;
+const row = (r, withSel, compact) => `<tr class="${withSel && picked.has(r.item)?'picked':''}" style="${r.spec?'':'background:#fffbe6'}">${withSel?`<td><span class="cb ${picked.has(r.item)?'on':''}"></span></td>`:''}<td>${thumb(r,36)}</td>
+ <td style="white-space:nowrap"><div class="mono" style="font-weight:600">${r.item}</div><div class="muted tiny mono">${r.bc}</div></td>
+ <td style="max-width:260px"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.name}</div></td>
+ <td style="white-space:nowrap">${gradeTag(r.grade, true)}</td>${compact?'':`<td class="muted tiny" style="white-space:nowrap">${r.wcat}</td>`}${compact?(r.spec?`<td style="white-space:nowrap">${r.spec} mm</td><td>${r.off} mm</td><td>${r.w}</td><td>${r.q} <span class="muted tiny">自动</span></td>`:`<td colspan="4" style="color:#d46b08;white-space:nowrap"><i class="ti ti-alert-circle"></i> 未设陈列参数 · 设计器里不能使用</td>`):specCells(r)}<td><a style="color:#1677ff;font-size:13px">${r.spec?'编辑':'补充参数'}</a></td></tr>`;
+const table = (withSel, rows=ROWS, compact=false) => `<table class="tbl"><thead>${head(withSel, compact)}</thead><tbody>${rows.map(r=>row(r,withSel,compact)).join('')}</tbody></table>`;
+const gradeChips = (on=['A','B']) => `<span class="muted" style="font-size:13px">等级</span>${['A','B','C','D'].map(g=>`<span class="chip ${on.includes(g)?'on':''}"><span class="dot" style="background:${GRADE[g][0]}"></span>${GRADE[g][3]}</span>`).join('')}<span class="chip">未分级</span>`;
+const pageHead = `<div style="padding:14px 16px 0"><div style="font-size:18px;font-weight:600">商品陈列图</div><div class="muted tiny">维护商品包装尺寸与每钩挂数，以及货架、挂钩型号，作为陈列图的毫米级基础资料</div></div>`;
+let inner = '';
+if (v === 'A') {
+ inner = `<div class="content" style="gap:10px">${subtabs()}<div class="card" style="flex:1;min-height:0;overflow:hidden">${innerTabs()}
+  <div class="fbar">
+   <div class="input" style="width:240px"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div>
+   <span class="seg"><span class="on">全部</span><span>已设参数</span><span>未设参数</span></span>
+   <span class="sel" style="min-width:210px"><span class="lbl">仓库分类</span>手工（含子类）<span class="caret">▼</span></span>
+   <span class="sel" style="min-width:210px"><span class="lbl">本地供应商分类</span>全部<span class="caret">▼</span></span>
+   <span style="display:inline-flex;gap:6px;align-items:center">${gradeChips()}</span>
+   <span class="btn text" style="color:#1677ff"><i class="ti ti-filter-off"></i>清除筛选</span>
+  </div>
+  <div class="selbar"><i class="ti ti-info-circle" style="color:#1677ff"></i>已选 <b>5</b> 个商品（跨页保留）<span class="btn sm primary" style="height:28px"><i class="ti ti-edit"></i>批量修改参数</span><a style="color:#1677ff">取消选择</a><span style="margin-left:auto" class="muted">或</span><span class="btn sm" style="height:28px"><i class="ti ti-list-check"></i>按当前筛选的全部 128 个批量修改</span></div>
+  ${table(true)}
+  <div style="display:flex;justify-content:flex-end;padding:10px 16px;gap:8px;align-items:center" class="muted tiny">共 128 条 · <span class="btn sm">‹</span><span class="btn sm" style="border-color:#1677ff;color:#1677ff">1</span><span class="btn sm">2</span><span class="btn sm">›</span></div>
+ </div></div>
+ <div class="badge-opt">方案 A · 一排筛选条</div>
+ <div class="note2" style="left:1080px;top:282px">分类和等级平铺在一排，最直观；条件多时自动折成两行</div>
+ <div class="note2" style="left:640px;top:318px">勾选后出现蓝色操作条；也能直接「按当前筛选全部」批量改</div>`;
+}
+if (v === 'B') {
+ const tree = (items) => items.map(([lvl,name,n,sel,open])=>`<div style="display:flex;align-items:center;gap:6px;height:30px;padding-left:${8+lvl*16}px;border-radius:6px;${sel?'background:#e6f4ff;color:#0958d9;font-weight:500':''}"><i class="ti ti-chevron-${open?'down':'right'} muted" style="font-size:12px;visibility:${open===null?'hidden':'visible'}"></i><span style="flex:1">${name}</span><span class="muted tiny" style="margin-right:6px">${n}</span></div>`).join('');
+ inner = `<div class="content" style="gap:10px">${subtabs()}<div class="card" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">${innerTabs()}
+  <div style="display:flex;flex:1;min-height:0">
+   <div style="width:270px;flex:none;border-right:1px solid #f0f0f0;padding:12px;display:flex;flex-direction:column;gap:10px">
+    <span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center">仓库分类</span><span style="flex:1;justify-content:center">本地供应商分类</span></span>
+    <div class="input" style="height:28px;border-radius:8px"><i class="ti ti-search muted"></i><span class="ph" style="font-size:13px">搜索分类</span></div>
+    <div style="font-size:13px;overflow:hidden">${tree([[0,'全部商品','17.5 万',false,null],[0,'手工','2,340',true,true],[1,'纸品','612',false,null],[1,'布艺','208',false,null],[1,'线材','331',false,null],[1,'胶水','190',false,null],[1,'毛条','144',false,null],[1,'贴纸','420',false,null],[0,'圣诞','5,102',false,true],[1,'装饰','1,880',false,null],[1,'丝带','402',false,null],[0,'文具','3,210',false,false],[0,'厨房','2,766',false,false],[0,'玩具','4,180',false,false],[0,'未设仓库分类','31,204',false,null]])}</div>
+    <div class="muted tiny" style="margin-top:auto"><span class="cb on"></span> 含子分类</div>
+   </div>
+   <div style="flex:1;min-width:0;display:flex;flex-direction:column;position:relative">
+    <div class="fbar"><div class="input" style="width:240px"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div><span class="seg"><span class="on">全部</span><span>已设参数</span><span>未设参数</span></span><span style="display:inline-flex;gap:6px;align-items:center">${gradeChips()}</span></div>
+    <div style="padding:0 16px 8px" class="muted tiny">当前：仓库分类 <b style="color:rgba(0,0,0,.88)">手工</b>（含子类）· 等级 A、B · 共 128 个</div>
+    ${table(true, ROWS.slice(0,9), true)}
+    <div style="position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:#1f1f1f;color:#fff;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;white-space:nowrap">已选 <b>5</b> 个<span style="width:1px;height:16px;background:#555"></span><span class="btn sm primary" style="height:28px">批量修改参数</span><span class="btn sm" style="height:28px;background:#333;color:#fff;border-color:#555">按筛选全部 128 个</span><a style="color:#91caff">清除选择</a></div>
+   </div>
+  </div>
+ </div></div>
+ <div class="badge-opt">方案 B · 左侧分类树</div>
+ <div class="note2" style="left:760px;top:276px">左侧切换两棵树，点节点即过滤，数量一目了然；适合按类别逐个补参数</div>
+ <div class="note2" style="left:980px;top:770px">勾选后底部浮出操作条，不挤占表格</div>`;
+}
+if (v === 'C') {
+ inner = `<div class="content" style="gap:10px">${subtabs()}<div class="card" style="flex:1;min-height:0;overflow:hidden;position:relative">${innerTabs()}
+  <div class="fbar">
+   <div class="input" style="width:280px"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div>
+   <span class="seg"><span class="on">全部</span><span>已设参数</span><span>未设参数</span></span>
+   <span class="btn" style="border-color:#1677ff;color:#1677ff;background:#e6f4ff"><i class="ti ti-adjustments-horizontal"></i>筛选 · 3</span>
+   <span class="btn" style="margin-left:auto"><i class="ti ti-stack-2"></i>批量操作 <i class="ti ti-chevron-down" style="font-size:12px"></i></span>
+  </div>
+  <div style="padding:0 16px 10px;display:flex;gap:8px;flex-wrap:wrap"><span class="tag blue" style="height:26px;font-size:13px">仓库分类：手工（含子类） <i class="ti ti-x" style="margin-left:4px"></i></span><span class="tag blue" style="height:26px;font-size:13px">等级：A、B <i class="ti ti-x" style="margin-left:4px"></i></span><span class="tag blue" style="height:26px;font-size:13px">本地供应商分类：未归类 <i class="ti ti-x" style="margin-left:4px"></i></span><a style="color:#1677ff;font-size:13px;align-self:center">清除全部</a><span class="muted tiny" style="margin-left:auto;align-self:center">已选 5 个 · 共 128 个</span></div>
+  ${table(true)}
+  <div style="position:absolute;left:470px;top:150px;width:420px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.16);border:1px solid #f0f0f0;padding:16px;z-index:10">
+   <div style="font-weight:600;margin-bottom:12px">筛选条件</div>
+   <div style="font-size:12px;color:rgba(0,0,0,.65);margin-bottom:4px">仓库分类（选父类含全部子类）</div><span class="sel" style="width:100%;justify-content:space-between">手工<span class="caret">▼</span></span>
+   <div style="font-size:12px;color:rgba(0,0,0,.65);margin:12px 0 4px">本地供应商分类</div><span class="sel" style="width:100%;justify-content:space-between">Kmart Supplier / 未归类<span class="caret">▼</span></span>
+   <div style="font-size:12px;color:rgba(0,0,0,.65);margin:12px 0 6px">商品等级</div><div style="display:flex;gap:6px;flex-wrap:wrap">${['A','B','C','D'].map(g=>`<span class="chip ${['A','B'].includes(g)?'on':''}"><span class="dot" style="background:${GRADE[g][0]}"></span>${GRADE[g][3]}</span>`).join('')}<span class="chip">未分级</span></div>
+   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><span class="btn sm">清除</span><span class="btn sm primary">应用（128 个）</span></div>
+  </div>
+  <div style="position:absolute;right:16px;top:150px;width:230px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.16);border:1px solid #f0f0f0;padding:6px;z-index:10;font-size:14px">
+   <div style="padding:8px 10px;border-radius:6px;background:#f5f5f5">批量修改已选的 5 个</div><div style="padding:8px 10px">批量修改当前筛选的 128 个</div><div style="padding:8px 10px;color:rgba(0,0,0,.45)">清除已选</div>
+  </div>
+ </div></div>
+ <div class="badge-opt">方案 C · 筛选按钮 + 条件标签</div>
+ <div class="note2" style="left:1000px;top:640px">页面最干净：条件收在弹层，生效的条件以标签显示，可逐个删除</div>`;
+}
+document.getElementById('root').innerHTML = shell(inner);
+</script></body></html>
