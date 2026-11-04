@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import {
+  getHolidayCategoryDetail,
   getHolidayCategoryMap,
+  getHolidayProductStores,
+  normalizeHolidayCategoryDetail,
+  normalizeHolidayProductStores,
   getHolidaySalesReport,
   normalizeHolidayCategoryMap,
   normalizeHolidaySalesReport,
@@ -116,6 +120,64 @@ try {
   })
   assert.equal(map.groups[0].entries[0].supplierCategory, null, '没有供应商分类名时为 null')
   assert.equal(map.groups[0].entries[0].supplierCode, '243')
+
+  // 6) 商品分店明细（榜单钻取）：请求参数、合计行、重复分店只留第一行、缺编码抛错
+  nextBody = { success: true, data: { year: 2026, productCode: 'P1', productName: 'Dagger', stores: [] } }
+  await getHolidayProductStores(2026, 'G073184')
+  const productCall = requests[requests.length - 1]
+  assert.equal(productCall.url.pathname, '/api/react/v1/dashboard/holiday-sales-report/product')
+  assert.equal(productCall.url.searchParams.get('productCode'), 'G073184')
+  assert.equal(productCall.url.searchParams.get('year'), '2026')
+  const stores = normalizeHolidayProductStores({
+    year: 2026,
+    holidayDate: '2026-10-31',
+    productCode: 'P1',
+    total: { amount: 5030, quantity: 835, purchaseQuantity: 1008, sellThrough: 0.8274 },
+    storeCount: 20,
+    soldOutStoreCount: 6,
+    stores: [
+      { branchCode: '1016', branchName: 'Greenhills', amount: 627, sellThrough: 1.09, soldOutDate: '2026-10-29', daysEarly: 2, firstSaleDate: '2026-09-20' },
+      { branchCode: '1016', branchName: 'dup', amount: 1 },
+      { branchCode: '1013', amount: 556, sellThrough: null, soldOutDate: 'soon', daysEarly: 'x' },
+      { branchName: 'no code' },
+    ],
+  })
+  assert.equal(stores.total.branchCode, '', '合计行没有分店编码')
+  assert.equal(stores.total.sellThrough, 0.8274)
+  assert.deepEqual(stores.stores.map((s) => s.branchCode), ['1016', '1013'], '同一家店只保留第一行、没有编码的丢弃')
+  assert.equal(stores.stores[0].daysEarly, 2)
+  assert.equal(stores.stores[1].branchName, '1013', '分店名缺失时用编码')
+  assert.equal(stores.stores[1].sellThrough, null, '没有进货的售罄率必须是 null')
+  assert.equal(stores.stores[1].soldOutDate, null)
+  assert.equal(stores.stores[1].daysEarly, null)
+  assert.throws(() => normalizeHolidayProductStores({ data: { stores: [] } }), /malformed/)
+
+  // 7) 大类明细：请求参数（全部供应商 / 合计视图不传）、商品与分店规范化、缺大类抛错
+  nextBody = { success: true, data: { year: 2026, category: { key: 'Costume' }, stores: [], products: [] } }
+  await getHolidayCategoryDetail({ year: 2026, categoryKey: 'Costume', supplierCode: 'all' })
+  const categoryCall = requests[requests.length - 1]
+  assert.equal(categoryCall.url.pathname, '/api/react/v1/dashboard/holiday-sales-report/category')
+  assert.equal(categoryCall.url.searchParams.get('categoryKey'), 'Costume')
+  assert.equal(categoryCall.url.searchParams.has('branchCode'), false)
+  assert.equal(categoryCall.url.searchParams.has('supplierCode'), false)
+  await getHolidayCategoryDetail({ year: 2026, categoryKey: 'Costume', branchCode: '1013', supplierCode: '243' })
+  const singleCall = requests[requests.length - 1]
+  assert.equal(singleCall.url.searchParams.get('branchCode'), '1013')
+  assert.equal(singleCall.url.searchParams.get('supplierCode'), '243')
+  const detail = normalizeHolidayCategoryDetail({
+    year: 2026,
+    branchCode: '1013',
+    category: { key: 'Costume', amount: 80432, sellThrough: 0.5653, skuCount: 469 },
+    stores: [{ branchCode: '1013', amount: 17487 }],
+    products: [{ productCode: 'X', productName: 'Cape', amount: 2487, sellThrough: null }, { productName: 'no code' }],
+  })
+  assert.equal(detail.category.key, 'Costume')
+  assert.equal(detail.category.sellThrough, 0.5653)
+  assert.equal(detail.branchCode, '1013')
+  assert.equal(detail.stores.length, 1)
+  assert.equal(detail.products.length, 1, '没有商品编码的行丢弃')
+  assert.equal(detail.products[0].sellThrough, null)
+  assert.throws(() => normalizeHolidayCategoryDetail({ data: { year: 2026 } }), /malformed/)
 
   console.log('holidaySalesReportService.test: ok')
 } finally {

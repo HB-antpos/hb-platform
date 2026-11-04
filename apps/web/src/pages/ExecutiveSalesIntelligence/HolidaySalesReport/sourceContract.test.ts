@@ -11,6 +11,7 @@ const directory = 'src/pages/ExecutiveSalesIntelligence/HolidaySalesReport'
 const read = (path: string) => readFileSync(resolve(path), 'utf8')
 const page = read(`${directory}/index.tsx`)
 const sections = read(`${directory}/Sections.tsx`)
+const drawers = read(`${directory}/Drawers.tsx`)
 const logic = read(`${directory}/logic.ts`)
 const css = read(`${directory}/styles.module.css`)
 const service = read('src/services/holidaySalesReportService.ts')
@@ -24,6 +25,8 @@ const permissions = read('src/types/permissions.ts')
 assert(service.includes("'/api/react/v1/dashboard/holiday-sales-report'"), '服务必须请求约定的接口路径')
 assert(!page.includes('/api/react/v1/dashboard/holiday-sales-report'), '页面必须经 holidaySalesReportService 调用接口')
 assert(page.includes('getHolidaySalesReport(') && page.includes('getHolidayCategoryMap('), '页面必须使用服务层读取数据')
+assert(page.includes('getHolidayProductStores(') && page.includes('getHolidayCategoryDetail('), '钻取必须经服务层读取商品分店明细与大类明细')
+assert(!drawers.includes('/api/react/v1/dashboard/holiday-sales-report'), '抽屉不能自己拼接口路径')
 assert(!/branchCodes/.test(page), '授权分店范围由服务端按用户解析，页面不能自己传 branchCodes')
 assert(page.includes('useKeepAliveContext') && page.includes('active,'), '保活页面必须按 active 控制查询')
 assert(page.includes('useReportQuery'), '加载沿用看板统一的 useReportQuery 模式')
@@ -31,7 +34,7 @@ assert(/forceRefreshRef\.current = false/.test(page), '强制刷新标记必须�
 
 // 日期必须按悉尼时区取，不能用浏览器本地时区
 assert(page.includes('formatSydneyIsoDate'), '默认年份必须取悉尼时区的今天')
-for (const [name, source] of [['index.tsx', page], ['Sections.tsx', sections], ['logic.ts', logic]] as const) {
+for (const [name, source] of [['index.tsx', page], ['Sections.tsx', sections], ['Drawers.tsx', drawers], ['logic.ts', logic]] as const) {
   assert(!/new Date\(\s*\)/.test(source) && !/dayjs\(/.test(source) && !/Date\.now\(/.test(source), `${name} 不应用浏览器本地时间推导业务日期`)
 }
 
@@ -45,8 +48,23 @@ assert(sections.includes('tabIndex={0}') && sections.includes("event.key === 'En
 assert(sections.includes('aria-live="polite"'), '图表悬停读数要能被读屏读到')
 assert(!page.includes(['window', 'location', 'reload'].join('.')), '页面不得自动 hard reload')
 
-// 商品图片失败时有占位，不显示破图
-assert(sections.includes('onError={() => setFailed(true)}') && sections.includes('thumbEmpty'), '商品图片加载失败必须有占位')
+// 商品图片失败时有占位，不显示破图（共用组件在 shared.tsx）
+const shared = read(`${directory}/shared.tsx`)
+assert(shared.includes('onError={() => setFailed(true)}') && shared.includes('thumbEmpty'), '商品图片加载失败必须有占位')
+
+// 钻取：榜单商品、大类表行都可点击且可键盘操作；抽屉在 Portal 里，样式变量要由 drawerScope 提供
+assert(sections.includes('styles.productClickable') && sections.includes('onOpen(product)'), '榜单里的商品必须可点击钻取')
+assert(sections.includes('onOpenCategory') && sections.includes("aria-label={tr('cat.open'"), '大类表的行必须可点击钻取')
+assert(drawers.includes('styles.drawerScope') && css.includes('.page, .drawerScope {'), '抽屉内容要包 drawerScope（Portal 里取不到 .page 上的颜色变量）')
+assert(drawers.includes('role="tablist"') && drawers.includes("role=\"tab\""), '大类抽屉的分店 / 商品标签要有 tab 语义')
+assert(drawers.includes('destroyOnHidden') && !drawers.includes('destroyOnClose'), '抽屉关闭后销毁内容（antd 5.29 用 destroyOnHidden）')
+assert(drawers.includes('aria-label={tr(\'drill.close\')}'), '抽屉关闭按钮必须有可访问名称')
+assert(page.includes('onOpen={setDrillProduct}'), '榜单点击要打开商品抽屉')
+assert(page.indexOf('<CategoryDrawer') < page.indexOf('<ProductStoresDrawer'), '商品抽屉要写在大类抽屉之后，才能叠在它上面')
+
+// 周分割线与周合计
+assert(sections.includes('chart.weekLines.map') && /chart\.weeks[\s\S]{0,40}\.map\(/.test(sections) && css.includes('.weekLine'), '曲线必须画周分割线和每周合计')
+assert(sections.includes("tr('chart.hoverWeek'"), '悬停读数要带本周合计')
 
 // 样式：宽表格在自己的容器里滚动；窄屏与减少动画；键盘焦点可见
 assert(css.includes('.tableScroll { overflow-x: auto; }'), '宽表格必须在自己的容器里滚动')

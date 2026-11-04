@@ -1,4 +1,5 @@
 import type {
+  HolidayProduct,
   HolidayBenchmark,
   HolidayCategory,
   HolidayCategoryKey,
@@ -53,6 +54,16 @@ export const VERDICT_KEY = {
   same: 'benchmark.same',
 } as const
 
+/** 榜单分批展开：先显示 10 个，之后每次多显示 10 个；后端每张榜最多返回 50 个（与 HolidaySalesReportBuilder.ListSize 一致）。 */
+export const BOARD_INITIAL_COUNT = 10
+export const BOARD_STEP = 10
+export const BOARD_LIMIT = 50
+
+/** 点「再显示」后的可见数量，不超过榜单总数。 */
+export function nextVisibleCount(current: number, total: number): number {
+  return Math.min(current + BOARD_STEP, total)
+}
+
 export type Tone = 'great' | 'ok' | 'warn' | 'bad' | 'none'
 
 // ---------- 格式化 ----------
@@ -61,6 +72,11 @@ export type Tone = 'great' | 'ok' | 'warn' | 'bad' | 'none'
 export function formatMoney(value: number): string {
   const rounded = Math.round(value)
   return `${rounded < 0 ? '-' : ''}$${Math.abs(rounded).toLocaleString('en-US')}`
+}
+
+/** 图上小字用的紧凑金额：≥$1,000 显示成 $1.2k。 */
+export function formatMoneyCompact(value: number): string {
+  return Math.abs(value) >= 1000 ? `$${(value / 1000).toFixed(1)}k` : formatMoney(value)
 }
 
 export function formatCount(value: number): string {
@@ -95,6 +111,12 @@ export const TONE_COLOR: Record<Tone, string> = {
   none: '#d9d9d9',
 }
 
+/** yyyy-MM-dd 是否周一（澳洲零售周以周一起算）。按 UTC 解析，不受浏览器时区影响。 */
+export function isMonday(date: string): boolean {
+  const [year, month, day] = date.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 1
+}
+
 /** yyyy-MM-dd → M/d。 */
 export function formatMonthDay(date: string): string {
   const [, month, day] = date.split('-')
@@ -124,9 +146,20 @@ export function seasonPhase(report: Pick<HolidaySalesReport, 'holidayDate' | 'sa
 
 // ---------- 日销售曲线 ----------
 
+export interface ChartWeek {
+  /** 周一起算；首周可能不满 7 天，末周以数据止日为界。 */
+  startDate: string
+  endDate: string
+  sum: number
+  x0: number
+  x1: number
+}
+
 export interface ChartGeometry {
   width: number
   height: number
+  /** 绘图区顶部纵坐标（上方留给每周合计小字）。 */
+  top: number
   line: string
   area: string
   yTicks: { y: number; value: number }[]
@@ -135,6 +168,10 @@ export interface ChartGeometry {
   holiday: { x: number; y: number; amount: number } | null
   /** 节前最后 7 天（含当天）的高亮条。 */
   weekBand: { x: number; width: number } | null
+  /** 每周一的分割线（横坐标 + 日期）。 */
+  weekLines: { x: number; date: string }[]
+  /** 每周的起止与合计，用来在曲线上方标周合计、悬停时读本周合计。 */
+  weeks: ChartWeek[]
   /** 每天的坐标，悬停时按横坐标反查。 */
   points: { x: number; y: number; date: string; amount: number }[]
 }
@@ -150,10 +187,10 @@ export function niceCeil(value: number): number {
   return 10 * base
 }
 
-export function buildChart(daily: readonly HolidayDaily[], holidayDate: string, width = 820, height = 230): ChartGeometry {
+export function buildChart(daily: readonly HolidayDaily[], holidayDate: string, width = 820, height = 250): ChartGeometry {
   const left = 52
   const right = 12
-  const top = 14
+  const top = 34
   const bottom = 26
   const count = daily.length
   const max = daily.reduce((current, row) => Math.max(current, row.amount), 0)
@@ -172,12 +209,30 @@ export function buildChart(daily: readonly HolidayDaily[], holidayDate: string, 
   const weekBand = holidayIndex < 0 ? null : { x: points[weekStart].x, width: points[holidayIndex].x - points[weekStart].x }
 
   const yTicks = [0, 1, 2, 3, 4].map((step) => ({ y: y((ceiling * step) / 4), value: (ceiling * step) / 4 }))
-  // 横轴每月 1 日与 15 日打刻度
-  const xTicks = points
-    .filter((point) => point.date.endsWith('-01') || point.date.endsWith('-15'))
-    .map((point) => ({ x: point.x, label: formatMonthDay(point.date) }))
 
-  return { width, height, line, area, yTicks, xTicks, holiday, weekBand, points }
+  // 周分割线画在每个周一的位置；横轴刻度与它对齐，标出每周从几月几号开始
+  const weekLines = points.filter((point) => isMonday(point.date)).map((point) => ({ x: point.x, date: point.date }))
+  const xTicks = weekLines.map((weekLine) => ({ x: weekLine.x, label: formatMonthDay(weekLine.date) }))
+
+  // 按周分组：遇到周一开新周；数据第一天不是周一时，第一周从曲线左端开始
+  const groups: { start: number; end: number; sum: number }[] = []
+  daily.forEach((row, index) => {
+    const last = groups[groups.length - 1]
+    if (!last || isMonday(row.date)) groups.push({ start: index, end: index, sum: row.amount })
+    else {
+      last.end = index
+      last.sum += row.amount
+    }
+  })
+  const weeks: ChartWeek[] = groups.map((group, index) => ({
+    startDate: daily[group.start].date,
+    endDate: daily[group.end].date,
+    sum: group.sum,
+    x0: index === 0 ? left : x(group.start),
+    x1: index === groups.length - 1 ? x(count - 1) : x(groups[index + 1].start),
+  }))
+
+  return { width, height, top, line, area, yTicks, xTicks, holiday, weekBand, weekLines, weeks, points }
 }
 
 /** 悬停横坐标 → 最近的一天（落在曲线之外返回 null）。 */
@@ -188,6 +243,85 @@ export function nearestPoint(chart: ChartGeometry, svgX: number) {
     if (Math.abs(point.x - svgX) < Math.abs(best.x - svgX)) best = point
   }
   return best
+}
+
+/** 某天所在的周（悬停读数用）。 */
+export function weekOf(chart: ChartGeometry, date: string): ChartWeek | null {
+  return chart.weeks.find((week) => date >= week.startDate && date <= week.endDate) ?? null
+}
+
+/** 各周合计里最大的一个；用来判断哪些周「够大」值得加粗（相对值，单店和合计视图都适用）。 */
+export function heaviestWeekSum(weeks: readonly ChartWeek[]): number {
+  return weeks.reduce((current, week) => Math.max(current, week.sum), 0)
+}
+
+/** 周一至周日的星期简称，按界面语言；日期按 UTC 解析，不受浏览器时区影响。 */
+export function formatWeekday(date: string, language: string): string {
+  const [year, month, day] = date.split('-').map(Number)
+  return new Intl.DateTimeFormat(language.startsWith('zh') ? 'zh-CN' : 'en-AU', { weekday: 'short', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, day)),
+  )
+}
+
+// ---------- 钻取抽屉里的商品筛选 / 排序 ----------
+
+export type ProductFilter = 'all' | 'early' | 'slow' | 'over'
+export type ProductSort = 'amount' | 'sellThrough' | 'leftover' | 'lost'
+
+/** 与榜单同一口径：提前卖完 = 节前卖断；滞销 = 进货 ≥12 件且售罄率 <35%；库存多 = 还有剩余。 */
+export function matchesProductFilter(product: HolidayProduct, filter: ProductFilter): boolean {
+  if (filter === 'early') return product.soldOutStoreCount > 0
+  if (filter === 'slow') return product.purchaseQuantity >= SLOW_MIN_PURCHASE && (product.sellThrough ?? 1) < SLOW_SELL_THROUGH_BELOW
+  if (filter === 'over') return product.leftoverQuantity > 0
+  return true
+}
+
+export const SLOW_MIN_PURCHASE = 12
+export const SLOW_SELL_THROUGH_BELOW = 0.35
+
+export function productFilterCounts(products: readonly HolidayProduct[]): Record<ProductFilter, number> {
+  return {
+    all: products.length,
+    early: products.filter((product) => matchesProductFilter(product, 'early')).length,
+    slow: products.filter((product) => matchesProductFilter(product, 'slow')).length,
+    over: products.filter((product) => matchesProductFilter(product, 'over')).length,
+  }
+}
+
+/** 货号或品名包含关键词（忽略大小写与首尾空格）；关键词为空则都匹配。 */
+export function matchesProductQuery(product: HolidayProduct, query: string): boolean {
+  const keyword = query.trim().toLowerCase()
+  return keyword === '' || product.productName.toLowerCase().includes(keyword) || product.itemNumber.toLowerCase().includes(keyword)
+}
+
+/** 排序：销售额 / 少卖 / 剩余进价 从大到小；售罄率从低到高，没有进货（null）的排最后。不改原数组。 */
+export function sortProducts(products: readonly HolidayProduct[], sort: ProductSort): HolidayProduct[] {
+  const copy = [...products]
+  if (sort === 'sellThrough') {
+    return copy.sort((a, b) => {
+      if (a.sellThrough === null && b.sellThrough === null) return b.amount - a.amount
+      if (a.sellThrough === null) return 1
+      if (b.sellThrough === null) return -1
+      return a.sellThrough - b.sellThrough || b.leftoverCost - a.leftoverCost
+    })
+  }
+  const key = sort === 'leftover' ? 'leftoverCost' : sort === 'lost' ? 'estimatedLostAmount' : 'amount'
+  return copy.sort((a, b) => b[key] - a[key] || b.amount - a.amount)
+}
+
+/** 钻取抽屉里商品清单：先显示 20 个，每点一次再多 20 个。 */
+export const DRAWER_PAGE_SIZE = 20
+
+export function nextDrawerCount(current: number, total: number): number {
+  return Math.min(current + DRAWER_PAGE_SIZE, total)
+}
+
+/** 先按筛选和关键词过滤，再排序（不改原数组）。 */
+export function filterAndSortProducts(products: readonly HolidayProduct[], filter: ProductFilter, query: string, sort: ProductSort): HolidayProduct[] {
+  return sortProducts(
+    products.filter((product) => matchesProductFilter(product, filter) && matchesProductQuery(product, query)),
+    sort,
+  )
 }
 
 // ---------- 关键结论 ----------

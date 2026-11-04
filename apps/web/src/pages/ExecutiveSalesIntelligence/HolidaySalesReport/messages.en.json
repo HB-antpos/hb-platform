@@ -53,11 +53,10 @@
     },
     "chart": {
       "title": "Daily sales",
-      "hint": "Orange line = Halloween day",
+      "hint": "Orange line = Halloween day, orange band = final 7 days · dashed grey = Mondays (Mon–Sun weeks), figures on top = weekly totals",
       "holiday": "{{date}} · {{amount}}",
-      "lastWeek": "Final 7 days",
-      "hover": "{{date}} · {{amount}}",
-      "aria": "Daily sales curve, {{from}} to {{through}}"
+      "aria": "Daily sales curve, {{from}} to {{through}}",
+      "hoverWeek": "{{date}} ({{weekday}}) {{amount}}  |  week {{from}}–{{to}} total {{week}}"
     },
     "insights": {
       "title": "Key takeaways",
@@ -82,7 +81,11 @@
       "colLeft": "Leftover (cost)",
       "colVsAll": "Sell-through vs all stores",
       "higher": "+{{points}} pts",
-      "lower": "−{{points}} pts"
+      "lower": "−{{points}} pts",
+      "drillHint": "Click a row for its stores and items",
+      "open": "Stores and items for {{name}}",
+      "openProducts": "Items",
+      "openBoth": "Stores / items"
     },
     "category": {
       "Costume": "Costumes",
@@ -111,9 +114,11 @@
         "title": "Overstock",
         "desc": "This year’s purchases − season sales, by units left"
       },
-      "more": "Show more",
+      "more": "Show {{count}} more ({{left}} left)",
       "less": "Show less",
-      "empty": "No items match"
+      "empty": "No items match",
+      "count": "{{count}} items",
+      "capped": "top {{limit}} only"
     },
     "product": {
       "noImage": "No image",
@@ -186,6 +191,60 @@
       "purchase": "Purchases = this year’s store invoices (Mar 1 – Oct 31, excluding warehouse 1006, drafts included). Leftover = purchases − season sales; the system has no store stock field, so last year’s stock is not included.",
       "sellThrough": "Sell-through only counts items a store actually bought this year, so selling old stock does not inflate it.",
       "soldOut": "Sold out = a store’s cumulative sales of an item reach 95% of its purchases (not judged under 3 units); days early = 10/31 − sell-out day; lost sales = 14-day pre-sell-out daily average × days early × average price."
+    },
+    "drill": {
+      "open": "Store breakdown for {{name}}",
+      "title": "Store breakdown · {{name}}",
+      "colStore": "Store",
+      "colAmount": "Sales",
+      "colQuantity": "Units sold",
+      "colPurchase": "Bought",
+      "colSellThrough": "Sell-through",
+      "colSoldOut": "Sold out on",
+      "colLost": "Lost sales",
+      "colLeft": "Units left",
+      "colFirstSale": "First sale",
+      "soldOutEarly": "{{date}} ({{days}} days early)",
+      "soldOutOnDay": "{{date}} (holiday)",
+      "total": "All stores",
+      "current": "Current",
+      "noPurchase": "No purchases",
+      "empty": "No purchases or sales for this item in the stores you can see.",
+      "close": "Close",
+      "storeData": "Store breakdown",
+      "kpiStoresSold": "{{count}} stores with sales",
+      "kpiSoldBought": "Sold / bought",
+      "units": "units",
+      "kpiStoresStocked": "{{count}} stores stocked",
+      "kpiSoldOutStores": "Sold out early",
+      "storeCount": "{{count}} stores",
+      "soldOutStores": "{{count}} stores sold out early",
+      "soldOutNote": "Sold-out day = the day a store’s cumulative sales reach 95% of what it bought; red = sold out before the holiday (short stock), orange = on the holiday itself. Sell-through only exists where the store bought the item.",
+      "catTitle": "Category · {{name}}",
+      "catHint": "Category detail · merged supplier categories, {{count}} items sold or stocked",
+      "kpiSkus": "Items sold",
+      "kpiSkusSub": "{{count}} in total",
+      "kpiBought": "Bought {{qty}} units",
+      "openProducts": "View items",
+      "storesNote": "Click a store to switch to the Items tab for that store’s {{name}} only.",
+      "tabStores": "Stores",
+      "tabProducts": "Items",
+      "search": "Search item no. / name",
+      "storeOnly": "Only {{store}}",
+      "clearStore": "Show all stores",
+      "filter": "Filter",
+      "filterAll": "All {{count}}",
+      "filterEarly": "Sold out early {{count}}",
+      "filterSlow": "Slow {{count}}",
+      "filterOver": "Overstock {{count}}",
+      "sortLabel": "Sort",
+      "sortAmount": "Sales ↓",
+      "sortSellThrough": "Sell-through ↑ (lowest first)",
+      "sortLeftover": "Leftover cost ↓",
+      "sortLost": "Lost sales ↓",
+      "rowSold": "{{sold}} sold / {{bought}} bought",
+      "leftCost": "Cost {{cost}}",
+      "noLeft": "None left"
     }
   }
 }

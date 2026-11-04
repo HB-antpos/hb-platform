@@ -175,6 +175,65 @@ namespace BlazorApp.Shared.DTOs
         public Dictionary<string, decimal?> CategorySellThrough { get; set; } = new();
     }
 
+    /// <summary>
+    /// 单个商品的分店明细（榜单里点商品钻取）：每家有进货或有销售的分店一行，按销售额降序。
+    /// 口径与榜单一致：售罄率只在该店有进货时才有值，卖断按累计销量达进货 95% 判定。
+    /// </summary>
+    public class HolidaySalesProductStoresDto
+    {
+        public int Year { get; set; }
+        public string HolidayDate { get; set; } = string.Empty;
+        public string ProductCode { get; set; } = string.Empty;
+        public string ItemNumber { get; set; } = string.Empty;
+        public string ProductName { get; set; } = string.Empty;
+        public string? ImageUrl { get; set; }
+        public string SupplierCode { get; set; } = string.Empty;
+        public string CategoryKey { get; set; } = string.Empty;
+
+        /// <summary>全部分店合计（BranchCode 为空）。</summary>
+        public HolidaySalesProductStoreDto Total { get; set; } = new();
+
+        /// <summary>有进货的分店数 / 其中节前卖断的分店数。</summary>
+        public int StoreCount { get; set; }
+        public int SoldOutStoreCount { get; set; }
+        public List<HolidaySalesProductStoreDto> Stores { get; set; } = new();
+    }
+
+    public class HolidaySalesProductStoreDto
+    {
+        public string BranchCode { get; set; } = string.Empty;
+        public string BranchName { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal PurchaseQuantity { get; set; }
+        public decimal? SellThrough { get; set; }
+
+        /// <summary>卖断日（yyyy-MM-dd，不晚于节日当天）；没有卖断为 null。0 天提前表示节日当天才卖完。</summary>
+        public string? SoldOutDate { get; set; }
+        public int? DaysEarly { get; set; }
+        public decimal EstimatedLostAmount { get; set; }
+        public decimal LeftoverQuantity { get; set; }
+        public decimal LeftoverCost { get; set; }
+
+        /// <summary>这家店这款第一次有销售的日期；没有销售为 null。</summary>
+        public string? FirstSaleDate { get; set; }
+    }
+
+    /// <summary>
+    /// 大类明细（大类表里点大类钻取）：该大类的合计、各分店表现与完整商品清单。
+    /// 单店视图（BranchCode 有值）时只含该店，Stores 为空。商品清单不截断（一个大类最多几百款），页面里再排序 / 筛选 / 分批显示。
+    /// </summary>
+    public class HolidaySalesCategoryDetailDto
+    {
+        public int Year { get; set; }
+        public string HolidayDate { get; set; } = string.Empty;
+        public string? BranchCode { get; set; }
+        public string? BranchName { get; set; }
+        public HolidaySalesCategoryDto Category { get; set; } = new();
+        public List<HolidaySalesStoreDto> Stores { get; set; } = new();
+        public List<HolidaySalesProductDto> Products { get; set; } = new();
+    }
+
     /// <summary>大类归并对照：供应商自己的分类落到哪个大类，右侧是款数与季内销售额。</summary>
     public class HolidaySalesCategoryMapDto
     {

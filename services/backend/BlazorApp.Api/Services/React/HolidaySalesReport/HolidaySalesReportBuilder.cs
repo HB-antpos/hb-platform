@@ -50,7 +50,8 @@ internal static class HolidaySalesReportBuilder
     internal const int LostWindowDays = 14;
     internal const decimal SlowSellThroughBelow = 0.35m;
     internal const decimal SlowMinPurchase = 12m;
-    internal const int ListSize = 10;
+    /// <summary>四张商品榜各自最多返回的款数；页面先显示 10 个，之后每次多展开 10 个。</summary>
+    internal const int ListSize = 50;
 
     /// <summary>某分店某商品的指标（计算中间量）。</summary>
     private sealed class PairMetric
@@ -208,30 +209,7 @@ internal static class HolidaySalesReportBuilder
             if (!productAcc.TryGetValue(m.Product, out var acc)) productAcc[m.Product] = acc = new Acc();
             acc.Add(m);
         }
-        HolidaySalesProductDto ToDto(string code, Acc acc, PairMetric? only)
-        {
-            var info = products[code];
-            return new HolidaySalesProductDto
-            {
-                ProductCode = code,
-                ItemNumber = info.ItemNumber,
-                ProductName = info.ProductName,
-                ImageUrl = info.ImageUrl,
-                SupplierCode = info.SupplierCode,
-                CategoryKey = CategoryOf(info),
-                Amount = R(acc.Amount),
-                Quantity = acc.Qty,
-                PurchaseQuantity = acc.PurchaseQty,
-                SellThrough = acc.SellThrough,
-                StoreCount = acc.StoreCount,
-                SoldOutStoreCount = acc.SoldOutStoreCount,
-                DaysEarly = acc.Earlies.Count > 0 ? Median(acc.Earlies) : null,
-                SoldOutDate = only?.SoldOutDate is { } so && only.DaysEarly is > 0 ? Fmt(so) : null,
-                EstimatedLostAmount = R(acc.Lost),
-                LeftoverQuantity = acc.LeftQty,
-                LeftoverCost = R(acc.LeftCost),
-            };
-        }
+        HolidaySalesProductDto ToDto(string code, Acc acc, PairMetric? only) => MapProduct(products[code], acc, only);
         var singlePairs = single ? visible.ToDictionary(m => m.Product, m => m, StringComparer.OrdinalIgnoreCase) : null;
         PairMetric? Only(string code) => singlePairs != null && singlePairs.TryGetValue(code, out var m) ? m : null;
 
@@ -312,6 +290,177 @@ internal static class HolidaySalesReportBuilder
         }
 
         return report;
+    }
+
+    private static HolidaySalesProductDto MapProduct(HolidayProductInfo info, Acc acc, PairMetric? only) => new()
+    {
+        ProductCode = info.ProductCode,
+        ItemNumber = info.ItemNumber,
+        ProductName = info.ProductName,
+        ImageUrl = info.ImageUrl,
+        SupplierCode = info.SupplierCode,
+        CategoryKey = CategoryOf(info),
+        Amount = R(acc.Amount),
+        Quantity = acc.Qty,
+        PurchaseQuantity = acc.PurchaseQty,
+        SellThrough = acc.SellThrough,
+        StoreCount = acc.StoreCount,
+        SoldOutStoreCount = acc.SoldOutStoreCount,
+        DaysEarly = acc.Earlies.Count > 0 ? Median(acc.Earlies) : null,
+        SoldOutDate = only?.SoldOutDate is { } so && only.DaysEarly is > 0 ? Fmt(so) : null,
+        EstimatedLostAmount = R(acc.Lost),
+        LeftoverQuantity = acc.LeftQty,
+        LeftoverCost = R(acc.LeftCost),
+    };
+
+    /// <summary>
+    /// 大类明细：该大类的合计、各分店表现（合计视图）与完整商品清单（有销售或有进货的都列，按销售额降序）。
+    /// 大类代号不认识返回 null；单店视图只含该店。
+    /// </summary>
+    internal static HolidaySalesCategoryDetailDto? BuildCategoryDetail(
+        HolidaySalesDataset data,
+        IReadOnlyCollection<string>? branchScope,
+        string? selectedBranch,
+        string? supplierCode,
+        string categoryKey
+    )
+    {
+        if (!HolidaySalesCategoryRules.AllKeys.Contains(categoryKey)) return null;
+        var products = data.Products
+            .Where(p => (string.IsNullOrWhiteSpace(supplierCode) || p.SupplierCode == supplierCode) && CategoryOf(p) == categoryKey)
+            .ToDictionary(p => p.ProductCode, p => p, StringComparer.OrdinalIgnoreCase);
+        var scope = ToScope(branchScope);
+        var pairs = ComputePairs(data, products, scope);
+        var single = !string.IsNullOrWhiteSpace(selectedBranch);
+        var branch = single ? selectedBranch!.Trim() : null;
+        var visible = single ? pairs.Where(m => string.Equals(m.Branch, branch, StringComparison.OrdinalIgnoreCase)).ToList() : pairs;
+
+        var total = new Acc();
+        foreach (var m in visible) total.Add(m);
+        var detail = new HolidaySalesCategoryDetailDto
+        {
+            Year = data.Year,
+            HolidayDate = Fmt(data.HolidayDate),
+            BranchCode = branch,
+            BranchName = single ? NameOf(data, branch!) : null,
+            Category = new HolidaySalesCategoryDto
+            {
+                Key = categoryKey,
+                Amount = R(total.Amount),
+                Quantity = total.Qty,
+                SkuCount = total.SoldProducts.Count,
+                PurchaseQuantity = total.PurchaseQty,
+                SellThrough = total.SellThrough,
+                EstimatedLostAmount = R(total.Lost),
+                LeftoverQuantity = total.LeftQty,
+                LeftoverCost = R(total.LeftCost),
+            },
+        };
+
+        var productAcc = new Dictionary<string, Acc>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in visible)
+        {
+            if (!productAcc.TryGetValue(m.Product, out var acc)) productAcc[m.Product] = acc = new Acc();
+            acc.Add(m);
+        }
+        var singlePairs = single ? visible.ToDictionary(m => m.Product, m => m, StringComparer.OrdinalIgnoreCase) : null;
+        detail.Products = productAcc
+            .Where(kv => kv.Value.Amount != 0 || kv.Value.Qty != 0 || kv.Value.PurchaseQty > 0)
+            .OrderByDescending(kv => kv.Value.Amount).ThenByDescending(kv => kv.Value.PurchaseQty)
+            .Select(kv => MapProduct(products[kv.Key], kv.Value, singlePairs != null && singlePairs.TryGetValue(kv.Key, out var only) ? only : null))
+            .ToList();
+
+        if (!single)
+        {
+            var afterByBranch = data.Sales
+                .Where(r => r.Date.Date > data.HolidayDate.Date && products.ContainsKey(r.ProductCode) && InScope(scope, r.BranchCode))
+                .GroupBy(r => r.BranchCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount), StringComparer.OrdinalIgnoreCase);
+            detail.Stores = visible
+                .GroupBy(m => m.Branch, StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var acc = new Acc();
+                    foreach (var m in g) acc.Add(m);
+                    return (Branch: g.Key, Acc: acc);
+                })
+                .Where(x => x.Acc.Amount != 0 || x.Acc.PurchaseQty > 0)
+                .OrderByDescending(x => x.Acc.Amount)
+                .Select(x => new HolidaySalesStoreDto
+                {
+                    BranchCode = x.Branch,
+                    BranchName = NameOf(data, x.Branch),
+                    Amount = R(x.Acc.Amount),
+                    Quantity = x.Acc.Qty,
+                    PurchaseQuantity = x.Acc.PurchaseQty,
+                    SellThrough = x.Acc.SellThrough,
+                    EarlySoldOutCount = x.Acc.EarlyCount,
+                    EstimatedLostAmount = R(x.Acc.Lost),
+                    LeftoverCost = R(x.Acc.LeftCost),
+                    AfterHolidayAmount = R(afterByBranch.GetValueOrDefault(x.Branch)),
+                })
+                .ToList();
+        }
+        return detail;
+    }
+
+    /// <summary>单个商品的分店明细：每家有进货或有销售的分店一行，按销售额降序；商品不在节日商品里返回 null。</summary>
+    internal static HolidaySalesProductStoresDto? BuildProductStores(
+        HolidaySalesDataset data,
+        IReadOnlyCollection<string>? branchScope,
+        string productCode
+    )
+    {
+        var info = data.Products.FirstOrDefault(p => string.Equals(p.ProductCode, productCode, StringComparison.OrdinalIgnoreCase));
+        if (info == null) return null;
+
+        var products = new Dictionary<string, HolidayProductInfo>(StringComparer.OrdinalIgnoreCase) { [info.ProductCode] = info };
+        var pairs = ComputePairs(data, products, ToScope(branchScope))
+            .Where(m => m.Amount != 0 || m.SoldQty != 0 || m.PurchaseQty > 0)
+            .OrderByDescending(m => m.Amount).ThenByDescending(m => m.PurchaseQty).ThenBy(m => m.Branch, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var total = new Acc();
+        foreach (var m in pairs) total.Add(m);
+
+        return new HolidaySalesProductStoresDto
+        {
+            Year = data.Year,
+            HolidayDate = Fmt(data.HolidayDate),
+            ProductCode = info.ProductCode,
+            ItemNumber = info.ItemNumber,
+            ProductName = info.ProductName,
+            ImageUrl = info.ImageUrl,
+            SupplierCode = info.SupplierCode,
+            CategoryKey = CategoryOf(info),
+            StoreCount = total.StoreCount,
+            SoldOutStoreCount = total.SoldOutStoreCount,
+            Total = new HolidaySalesProductStoreDto
+            {
+                Amount = R(total.Amount),
+                Quantity = total.Qty,
+                PurchaseQuantity = total.PurchaseQty,
+                SellThrough = total.SellThrough,
+                EstimatedLostAmount = R(total.Lost),
+                LeftoverQuantity = total.LeftQty,
+                LeftoverCost = R(total.LeftCost),
+            },
+            Stores = pairs.Select(m => new HolidaySalesProductStoreDto
+            {
+                BranchCode = m.Branch,
+                BranchName = NameOf(data, m.Branch),
+                Amount = R(m.Amount),
+                Quantity = m.SoldQty,
+                PurchaseQuantity = m.PurchaseQty,
+                SellThrough = m.Stocked ? Math.Round(m.SoldQty / m.PurchaseQty, 4) : null,
+                SoldOutDate = m.SoldOutDate is { } so ? Fmt(so) : null,
+                DaysEarly = m.DaysEarly,
+                EstimatedLostAmount = R(m.Lost),
+                LeftoverQuantity = m.LeftQty,
+                LeftoverCost = R(m.LeftCost),
+                FirstSaleDate = m.QtyByDay.Count > 0 ? Fmt(m.QtyByDay.Keys.Min()) : null,
+            }).ToList(),
+        };
     }
 
     /// <summary>大类归并对照：每个大类下，供应商分类 → 款数与季内销售额。</summary>
