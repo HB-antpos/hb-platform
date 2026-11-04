@@ -827,6 +827,10 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeePaymentSourc
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeSyncService, BlazorApp.Api.Services.Myob.MyobEmployeeSyncService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayrollEmployerService, BlazorApp.Api.Services.Myob.MyobPayrollEmployerService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, BlazorApp.Api.Services.Myob.MyobPayCategoryService>();
+// 商品陈列图（迁移 20261104.001-planogram 建表）：货架 / 挂钩型号、商品陈列参数与陈列方案（批 2）。
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IPlanogramModelService, BlazorApp.Api.Services.Planogram.PlanogramModelService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IProductDisplaySpecService, BlazorApp.Api.Services.Planogram.ProductDisplaySpecService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IPlanogramPlanService, BlazorApp.Api.Services.Planogram.PlanogramPlanService>();
 // 工资供数：与工资表同一个考勤服务实例（同一请求内共用同一个 DbContext / 缓存）。
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());

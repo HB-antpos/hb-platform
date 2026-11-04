@@ -1,0 +1,197 @@
+/* 导出版面图 PDF 弹窗（设计图 04）：左表单 + 右预览；窄屏上下堆叠。全局类名前缀 planogram-export-（测试打包把 .css 当空模块）。 */
+
+.planogram-export {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.planogram-export-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.planogram-export-alert {
+  margin-bottom: 0;
+}
+
+.planogram-export-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.planogram-export-row.is-top {
+  align-items: flex-start;
+}
+
+.planogram-export-row.is-note {
+  margin-top: -8px;
+}
+
+.planogram-export-label {
+  flex: none;
+  width: 76px;
+  color: #1f2329;
+  font-size: 13px;
+}
+
+.planogram-export-version {
+  flex: 1;
+  min-width: 220px;
+}
+
+.planogram-export-muted {
+  color: #8a919f;
+  font-size: 12px;
+}
+
+.planogram-export-warn {
+  color: #d46b08;
+  font-size: 12px;
+}
+
+.planogram-export-header-line {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.planogram-export-checks {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, max-content));
+  gap: 8px 14px;
+}
+
+.planogram-export-checks .ant-checkbox-wrapper {
+  margin-inline-start: 0;
+}
+
+.planogram-export-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f6f8;
+  color: #8a919f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.planogram-export-side {
+  flex: none;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f0f1f4;
+}
+
+.planogram-export-preview-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.planogram-export-preview-card.is-plain {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  align-items: center;
+  gap: 2px;
+}
+
+.planogram-export-preview-title {
+  color: #8a919f;
+  font-size: 12px;
+}
+
+.planogram-export-thumb {
+  flex: none;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+
+.planogram-export-thumb.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.planogram-export-stats {
+  color: #667085;
+  font-size: 12px;
+  white-space: pre-wrap;
+  text-align: center;
+}
+
+.planogram-export-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.planogram-export-footer-note {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.planogram-export-conflict {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid #ffa39e;
+  border-radius: 4px;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 12px;
+}
+
+.planogram-export-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+/* 出图用的屏幕外容器：不在可视区域内，也不拦截鼠标；页面本身的样式在 sheetPages.css */
+.planogram-pdf-stage {
+  position: fixed;
+  left: -20000px;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: #ffffff;
+}
+
+@media (max-width: 860px) {
+  .planogram-export {
+    flex-direction: column;
+  }
+
+  .planogram-export-side {
+    width: 100%;
+  }
+
+}

@@ -163,8 +163,10 @@ namespace BlazorApp.Api.Services
                 Children = new List<NavigationMenuDto>
                 {
                     new() { Path = "/pos-admin/suppliers",              TitleKey = "menu.suppliers",              Icon = "ShopOutlined",               Permission = Permissions.AustralianSuppliers.View },
-                    // 商品与价格：商品管理 / 分店商品价格 / 自动价格策略 / 促销管理。
-                    new() { Path = "/pos-admin/products-pricing",      TitleKey = "menu.groupProductsPricing",   Icon = "AppstoreOutlined",           AnyPermissions = new List<string> { Permissions.PosProducts.View, Permissions.StoreProducts.View, Permissions.PricingStrategy.View, Permissions.Promotions.View } },
+                    // 商品与价格：商品管理 / 分店商品价格 / 自动价格策略 / 促销管理 / 商品陈列图。
+                    // 商品陈列图是该合并页的第 5 个页签（路径 /pos-admin/planograms，menu.planogram），不单独成菜单项；
+                    // Planogram.View 由 Edit / Manage 经 PermissionAliases 满足，所以这里只列 View。
+                    new() { Path = "/pos-admin/products-pricing",      TitleKey = "menu.groupProductsPricing",   Icon = "AppstoreOutlined",           AnyPermissions = new List<string> { Permissions.PosProducts.View, Permissions.StoreProducts.View, Permissions.PricingStrategy.View, Permissions.Promotions.View, Permissions.Planogram.View } },
                     // 结算与现金：日结记录（独立权限码，分店范围由查询接口收口）/ Linkly 结算记录（仅管理员）/ 现金管理（店长只见关联分店）。
                     new() { Path = "/pos-admin/settlement-cash",       TitleKey = "menu.groupSettlementCash",    Icon = "MoneyCollectOutlined",       AnyPermissions = new List<string> { Permissions.DailyCloseRecords.View, Permissions.Cash.OverviewView } },
                     new() { Path = "/pos-admin/advertisements",        TitleKey = "menu.advertisements",         Icon = "PictureOutlined",            Permission = Permissions.Advertisements.View },
@@ -917,7 +919,9 @@ namespace BlazorApp.Api.Services
                 Permissions.Myob.Connection.Manage,
                 Permissions.Myob.Employee.Bind,
                 Permissions.Myob.Payslip.ViewManagedStore,
-                Permissions.Myob.Payslip.ViewAllStores
+                Permissions.Myob.Payslip.ViewAllStores,
+                // 商品陈列图：只有该权限的账号也要能拿到后台菜单（Edit / Manage 经别名满足 View）。
+                Permissions.Planogram.View
             );
         }
 

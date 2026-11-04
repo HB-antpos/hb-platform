@@ -12,6 +12,7 @@ import {
   paintPdfSlice,
   preparePdfPrintFrame,
   printPdfFrameAfterLayout,
+  resolvePdfPageGeometry,
   waitForStablePdfPageElements,
 } from './printUtils'
 import fs from 'node:fs'
@@ -188,7 +189,39 @@ runTest('分页 PDF 应逐页渲染 A4 页面并写入 jsPDF', () => {
   assertEqual(printUtilsSource.includes('getCurrentReadyPdfPageElement'), true, '分页 PDF 每页截图前后应重新取得当前 DOM 节点')
   assertEqual(printUtilsSource.includes('currentPageElement !== pageElement'), true, '截图期间页面节点被替换时应停止生成 PDF')
   assertEqual(printUtilsSource.includes('pdf.addPage()'), true, '分页 PDF 多页时应追加 PDF 页面')
-  assertEqual(printUtilsSource.includes('pdf.addImage(imageData, PDF_IMAGE_FORMAT, 0, 0, 210, 297)'), true, '每个分页应按 A4 尺寸写入 PDF')
+  assertEqual(printUtilsSource.includes('pdf.addImage(imageData, PDF_IMAGE_FORMAT, 0, 0, geometry.widthMm, geometry.heightMm)'), true, '每个分页应按纸张尺寸写入 PDF（不指定纸张 = A4 纵向 210 × 297）')
+  assertEqual(printUtilsSource.includes("new jsPDF(geometry.orientation, 'mm', geometry.paper)"), true, 'jsPDF 的方向与纸张取自纸张规格')
+})
+
+runTest('纸张规格：不指定 = A4 纵向（订单 / 拣货单既有行为），陈列图另有 A3 横向 / A4 横向 / A4 纵向', () => {
+  assertDeepEqual(resolvePdfPageGeometry(), { orientation: 'p', paper: 'a4', widthMm: 210, heightMm: 297, aspectRatio: 297 / 210 }, '默认 A4 纵向')
+  assertDeepEqual(resolvePdfPageGeometry({ paper: 'a3', orientation: 'landscape' }), { orientation: 'l', paper: 'a3', widthMm: 420, heightMm: 297, aspectRatio: 297 / 420 }, 'A3 横向')
+  assertDeepEqual(resolvePdfPageGeometry({ paper: 'a4', orientation: 'landscape' }), { orientation: 'l', paper: 'a4', widthMm: 297, heightMm: 210, aspectRatio: 210 / 297 }, 'A4 横向')
+  assertDeepEqual(resolvePdfPageGeometry({ paper: 'a4', orientation: 'portrait' }), { orientation: 'p', paper: 'a4', widthMm: 210, heightMm: 297, aspectRatio: 297 / 210 }, 'A4 纵向')
+})
+
+await runAsyncTest('横向纸张的页面按对应宽高比判定布局就绪，A4 纵向的老调用方不受影响', async () => {
+  const landscape = {
+    isConnected: true,
+    scrollWidth: 1218,
+    scrollHeight: 861,
+    getBoundingClientRect: () => ({ width: 1218, height: 861 }),
+    querySelectorAll: () => Array.from({ length: 3 }),
+  } as unknown as HTMLElement
+  const root = { isConnected: true, querySelectorAll: () => [landscape] } as unknown as HTMLElement
+  const pages = await waitForStablePdfPageElements(root, { pageFormat: { paper: 'a3', orientation: 'landscape' }, waitForFrame: async () => {}, maxFrames: 3 })
+  assertEqual(pages[0], landscape, 'A3 横向页面应通过布局检查')
+  // 不传纸张规格仍按 A4 纵向判断：横向页面应被拒绝（老行为）
+  await assertRejects(
+    () => waitForStablePdfPageElements(root, { layoutNotReadyErrorMessage: '布局未就绪', waitForFrame: async () => {}, maxFrames: 3 }),
+    '布局未就绪',
+    '默认 A4 纵向时横向页面不应通过',
+  )
+  assertEqual(
+    getCurrentReadyPdfPageElement(root, '.x', 0, 1, '布局未就绪', { paper: 'a4', orientation: 'landscape' }),
+    landscape,
+    '逐页取节点时同样按指定纸张判断',
+  )
 })
 
 await runAsyncTest('分页 PDF 应等待连续两帧布局一致后返回当前页面节点', async () => {

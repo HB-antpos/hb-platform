@@ -103,6 +103,12 @@ export interface AccessControl {
   canEditPricing: boolean
   canManagePromotions: boolean
   canEditPromotions: boolean
+  /** 商品陈列图页签：Planogram.View（Edit / Manage 隐含查看）。 */
+  canViewPlanogram: boolean
+  /** 维护商品陈列参数、建改陈列方案：Planogram.Edit（Manage 隐含）。 */
+  canEditPlanogram: boolean
+  /** 货架 / 挂钩型号维护、删除，发布与归档方案：Planogram.Manage。 */
+  canManagePlanogram: boolean
   canManageAdvertisements: boolean
   canEditAdvertisements: boolean
   canViewAustralianSuppliers: boolean

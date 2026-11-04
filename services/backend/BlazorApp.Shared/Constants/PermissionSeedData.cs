@@ -447,6 +447,10 @@ namespace BlazorApp.Shared.Constants
                 // 仅注册权限，不写入角色模板；定价策略直接影响分店售价，由管理员显式授予。
                 new(Permissions.PricingStrategy.View, "查看定价策略", "定价策略", "Web 页面 /pos-admin/pricing-strategies - 查看与试算自动价格策略"),
                 new(Permissions.PricingStrategy.Edit, "编辑定价策略", "定价策略", "Web 页面 /pos-admin/pricing-strategies - 新增、编辑、删除自动价格策略"),
+                // 商品陈列图：默认不授予任何角色；入库由迁移 20261104.001-planogram 幂等完成。名称 / 描述须与迁移 ApplySql 保持一致。
+                new(Permissions.Planogram.View, "查看商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 查看陈列方案、商品陈列参数与货架 / 挂钩型号"),
+                new(Permissions.Planogram.Edit, "编辑商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 新建与编辑陈列方案、维护商品陈列参数（包装尺寸、吊孔偏移、每钩挂数）"),
+                new(Permissions.Planogram.Manage, "管理商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 维护货架与挂钩型号、清除商品陈列参数、发布与归档陈列方案"),
                 new(Permissions.DeviceRegistration.View, "查看设备注册", "系统管理", "Web 页面 /system/device-registration 与移动端「设备管理」- 查看 POS 设备注册列表与状态"),
                 new(Permissions.DeviceRegistration.Manage, "管理设备注册", "系统管理", "Web 页面 /system/device-registration - 审核、维护或管理设备注册"),
                 // 仅注册权限，不写入 StoreManager/WarehouseManager 角色模板；手工委派仍受可管理分店范围约束。

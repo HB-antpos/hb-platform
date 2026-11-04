@@ -1,0 +1,518 @@
+/* 商品陈列图（普通 CSS + 全局类名前缀 planogram-：测试打包把 .css 当空模块，不能用 CSS Modules）。
+   视觉沿用后台现有的白底细边框面板、10px 圆角、antd 主色；预览 SVG 的尺寸线颜色与设计图一致
+   （蓝 = 尺寸，橙 = 预留 / 偏移，绿 = 板面）。窄屏时筛选项换行、宽表格只在表格容器里横向滚动，整页不出现横向滚动条。 */
+
+.planogram-card {
+  min-width: 0;
+  padding: 0 16px 8px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.planogram-tabs > .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.planogram-subtabs > .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.planogram-intro {
+  margin: 12px 0 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 12px;
+}
+
+.planogram-models .planogram-pane {
+  padding-top: 0;
+}
+
+/* ---------- 筛选栏 ---------- */
+
+.planogram-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+}
+
+.planogram-search {
+  width: 260px;
+  max-width: 100%;
+}
+
+.planogram-search.is-wide {
+  width: 300px;
+}
+
+.planogram-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ---------- 表格单元 ---------- */
+
+.planogram-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.planogram-muted-text {
+  color: #667085;
+}
+
+.planogram-small {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-mini-tag {
+  margin: 0 0 0 6px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.planogram-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: #f0f0f0;
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  overflow: hidden;
+  flex: none;
+}
+
+.planogram-thumb.is-large {
+  width: 52px;
+  height: 52px;
+}
+
+.planogram-row-unset > td {
+  background: #fffbe6 !important;
+}
+
+.planogram-unset-text {
+  color: #d46b08;
+}
+
+.planogram-row-default > td {
+  background: #e6f4ff !important;
+}
+
+.planogram-row-actions .ant-btn-link {
+  padding-inline: 4px;
+}
+
+/* ---------- 抽屉表单 ---------- */
+
+.planogram-form .ant-form-item {
+  margin-bottom: 8px;
+}
+
+.planogram-form .ant-form-item-label {
+  padding-bottom: 3px;
+}
+
+.planogram-form .ant-form-item-label > label {
+  height: auto;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+}
+
+.planogram-number {
+  width: 100%;
+}
+
+.planogram-unit {
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.planogram-grid {
+  display: grid;
+  column-gap: 16px;
+  min-width: 0;
+}
+
+.planogram-grid.is-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.planogram-grid.is-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.planogram-grid-gap-top {
+  margin-top: 4px;
+}
+
+.planogram-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.planogram-section-title:first-child {
+  margin-top: 0;
+}
+
+.planogram-section-hint {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.planogram-auto-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #d9d9d9;
+  border-radius: 10px;
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.65);
+  font-variant-numeric: tabular-nums;
+}
+
+.planogram-pair {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.planogram-pair-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.planogram-pair-sep {
+  align-self: center;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.planogram-field-note {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-warn-text {
+  color: #d46b08;
+}
+
+.planogram-inline-link.ant-btn {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+}
+
+.planogram-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+/* ---------- 预览 ---------- */
+
+.planogram-preview-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
+  padding: 10px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.planogram-preview-box.is-column {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.planogram-preview-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+}
+
+.planogram-preview-box.is-narrow {
+  flex: none;
+  width: 230px;
+  padding: 8px;
+}
+
+.planogram-preview-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.planogram-preview-caption {
+  margin-top: 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.planogram-preview-note {
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.planogram-preview-note.is-grow {
+  flex: 1 1 160px;
+}
+
+.planogram-preview-note p {
+  margin: 0 0 6px;
+}
+
+/* ---------- 抽屉页脚 ---------- */
+
+.planogram-drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planogram-drawer-updated {
+  min-width: 0;
+  color: #667085;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 商品陈列参数抽屉 ---------- */
+
+.planogram-product-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.planogram-product-head-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.planogram-product-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-product-head-text .planogram-mono {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-spec-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-top: 12px;
+}
+
+.planogram-spec-top-form {
+  flex: 1;
+  min-width: 0;
+}
+
+.planogram-manual-qty {
+  width: 56px;
+}
+
+.planogram-hook-table .ant-table-cell {
+  padding: 6px 10px !important;
+  font-size: 12px;
+}
+
+.planogram-hooks-alert {
+  margin-bottom: 8px;
+}
+
+.planogram-spec-tip {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* ---------- 陈列方案列表（批 2） ---------- */
+
+.planogram-plan-name {
+  font-weight: 600;
+}
+
+.planogram-clamp {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-plan-shelf-filter {
+  width: 220px;
+  max-width: 100%;
+}
+
+.planogram-modal-alert {
+  margin-bottom: 12px;
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 767px) {
+  .planogram-card {
+    padding: 0 12px 8px;
+  }
+
+  .planogram-search,
+  .planogram-search.is-wide,
+  .planogram-plan-shelf-filter {
+    width: 100%;
+  }
+
+  .planogram-toolbar-actions {
+    margin-left: 0;
+  }
+
+  .planogram-grid.is-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .planogram-grid.is-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .planogram-spec-top {
+    flex-direction: column;
+  }
+
+  .planogram-preview-box.is-narrow {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .planogram-card * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- 批 3：导入方案 JSON ---------- */
+
+.planogram-import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  font-size: 13px;
+}
+
+.planogram-import-summary > div {
+  display: flex;
+  gap: 12px;
+}
+
+.planogram-import-summary dt {
+  flex: none;
+  width: 72px;
+  color: #667085;
+}
+
+.planogram-import-summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.planogram-import-name-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.planogram-import-name-note {
+  margin-top: 4px;
+  color: #8a919f;
+  font-size: 12px;
+}
+
+.planogram-import-name-note.is-error {
+  color: #cf1322;
+}
+
+.planogram-import-unresolved {
+  margin-top: 12px;
+}
+
+.planogram-import-unresolved-group {
+  margin-bottom: 8px;
+}
+
+.planogram-import-unresolved-label {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.planogram-import-unresolved-codes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.planogram-import-unresolved-codes .ant-tag {
+  margin-inline-end: 0;
+}
+
+.planogram-import-problems {
+  margin: 0;
+  padding-left: 18px;
+}

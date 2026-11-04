@@ -103,6 +103,9 @@ function createEmptyAccess(): AccessControl {
     canEditPricing: false,
     canManagePromotions: false,
     canEditPromotions: false,
+    canViewPlanogram: false,
+    canEditPlanogram: false,
+    canManagePlanogram: false,
     canManageAdvertisements: false,
     canEditAdvertisements: false,
     canViewAustralianSuppliers: false,
@@ -344,6 +347,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManagePromotions = isAdmin || hasPermission(P.Promotions.View)
   const canEditPromotions = isAdmin || hasPermission(P.Promotions.Edit)
 
+  // 商品陈列图：Manage ⊇ Edit ⊇ View。后端下发的 permissions 已按 PermissionAliases 展开，这里再按同一包含关系推一次，
+  // 保证只拿到精确权限码（如角色预览）时行为一致；管理员由 hasPermission 统一放行。
+  const canManagePlanogram = hasPermission(P.Planogram.Manage)
+  const canEditPlanogram = canManagePlanogram || hasPermission(P.Planogram.Edit)
+  const canViewPlanogram = canEditPlanogram || hasPermission(P.Planogram.View)
+
   // 广告
   const canManageAdvertisements = isAdmin || hasPermission(P.Advertisements.View)
   const canEditAdvertisements = isAdmin || hasPermission(P.Advertisements.Edit)
@@ -548,6 +557,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canEditPricing,
     canManagePromotions,
     canEditPromotions,
+    canViewPlanogram,
+    canEditPlanogram,
+    canManagePlanogram,
     canManageAdvertisements,
     canEditAdvertisements,
     canViewAustralianSuppliers,

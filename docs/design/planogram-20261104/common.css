@@ -1,0 +1,66 @@
+/* 仿后台 antd 5 视觉：主色 #1677ff、圆角 10、浅色侧栏 248px */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f5f5f5;color:rgba(0,0,0,.88);font:14px/1.5715 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.app{display:flex;width:1440px;height:900px;overflow:hidden;background:#f5f5f5}
+.sider{width:248px;flex:0 0 248px;background:#fff;border-right:1px solid #f0f0f0;display:flex;flex-direction:column}
+.sider.collapsed{width:80px;flex-basis:80px}
+.brand{height:64px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid #f0f0f0}
+.brand-mark{width:32px;height:32px;border-radius:10px;background:#1677ff;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+.brand-text{font-weight:600;font-size:15px;white-space:nowrap}
+.menu{padding:8px;flex:1;overflow:hidden}
+.menu .group{padding:10px 12px 4px;color:rgba(0,0,0,.45);font-size:12px}
+.menu .item{height:40px;display:flex;align-items:center;gap:10px;padding:0 12px 0 36px;border-radius:10px;color:rgba(0,0,0,.88);white-space:nowrap}
+.menu .item.sub{padding-left:48px;font-size:14px}
+.menu .item.active{background:#e6f4ff;color:#1677ff}
+.menu .item .ic{width:16px;text-align:center;color:inherit}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.header{height:64px;background:#fff;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.crumb{color:rgba(0,0,0,.45)}.crumb b{color:rgba(0,0,0,.88);font-weight:400}
+.crumb .sep{margin:0 8px;color:rgba(0,0,0,.25)}
+.hdr-right{display:flex;align-items:center;gap:12px}
+.avatar{width:32px;height:32px;border-radius:50%;background:#e6f4ff;color:#1677ff;display:flex;align-items:center;justify-content:center;font-size:12px}
+.tabs{height:40px;background:#fff;border-bottom:1px solid #f0f0f0;display:flex;align-items:flex-end;padding:0 16px;gap:4px}
+.tab{height:32px;padding:0 14px;display:flex;align-items:center;gap:8px;border:1px solid #f0f0f0;border-bottom:none;border-radius:8px 8px 0 0;background:#fafafa;color:rgba(0,0,0,.65);font-size:13px}
+.tab.on{background:#fff;color:#1677ff;border-color:#e6f4ff;border-bottom:1px solid #fff;margin-bottom:-1px}
+.content{flex:1;padding:16px;min-height:0;display:flex;flex-direction:column;gap:12px}
+.card{background:#fff;border-radius:10px;border:1px solid #f0f0f0}
+.btn{height:32px;padding:0 15px;border-radius:10px;border:1px solid #d9d9d9;background:#fff;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:rgba(0,0,0,.88);white-space:nowrap}
+.btn.primary{background:#1677ff;border-color:#1677ff;color:#fff}
+.btn.text{border-color:transparent;background:transparent}
+.btn.sm{height:24px;padding:0 7px;font-size:12px;border-radius:6px}
+.btn.danger{color:#ff4d4f;border-color:#ffccc7}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:6px;font-size:12px;border:1px solid #d9d9d9;background:#fafafa;color:rgba(0,0,0,.88);line-height:1}
+.tag.blue{background:#e6f4ff;border-color:#91caff;color:#0958d9}
+.tag.green{background:#f6ffed;border-color:#b7eb8f;color:#389e0d}
+.tag.orange{background:#fff7e6;border-color:#ffd591;color:#d46b08}
+.tag.red{background:#fff2f0;border-color:#ffccc7;color:#cf1322}
+.tag.gold{background:#fffbe6;border-color:#ffe58f;color:#d48806}
+.tag.gray{color:rgba(0,0,0,.45)}
+.input{height:32px;border:1px solid #d9d9d9;border-radius:10px;background:#fff;display:flex;align-items:center;padding:0 11px;gap:8px;color:rgba(0,0,0,.88);font-size:14px}
+.input.sm{height:24px;border-radius:6px;font-size:12px;padding:0 7px}
+.input .ph{color:rgba(0,0,0,.25)}
+.input .suffix{margin-left:auto;color:rgba(0,0,0,.25);font-size:12px}
+.select{height:32px;border:1px solid #d9d9d9;border-radius:10px;background:#fff;display:inline-flex;align-items:center;padding:0 11px;gap:8px;min-width:120px;justify-content:space-between}
+.select .caret{color:rgba(0,0,0,.25);font-size:10px}
+.seg{display:inline-flex;background:#f5f5f5;border-radius:10px;padding:2px}
+.seg span{padding:0 12px;height:28px;display:flex;align-items:center;border-radius:8px;font-size:13px;color:rgba(0,0,0,.65)}
+.seg span.on{background:#fff;color:rgba(0,0,0,.88);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.muted{color:rgba(0,0,0,.45)}.tiny{font-size:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.chk{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chk i{width:16px;height:16px;border-radius:4px;border:1px solid #d9d9d9;display:inline-block;background:#fff}
+.chk i.on{background:#1677ff;border-color:#1677ff;position:relative}
+.chk i.on:after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.switch{width:28px;height:16px;border-radius:8px;background:#1677ff;position:relative;display:inline-block;vertical-align:middle}
+.switch:after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
+.switch.off{background:rgba(0,0,0,.25)}.switch.off:after{right:auto;left:2px}
+table.tbl{width:100%;border-collapse:collapse;font-size:14px}
+table.tbl th{background:#fafafa;font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid #f0f0f0;white-space:nowrap}
+table.tbl td{padding:10px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+table.tbl tr.sel td{background:#e6f4ff}
+.note{position:absolute;background:#1f1f1f;color:#fff;font-size:12px;line-height:1.4;padding:6px 9px;border-radius:6px;max-width:230px;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:9}
+.note:before{content:"";position:absolute;width:8px;height:8px;background:#1f1f1f;transform:rotate(45deg)}
+.note.l:before{left:-4px;top:12px}.note.t:before{top:-4px;left:14px}.note.b:before{bottom:-4px;left:14px}.note.r:before{right:-4px;top:12px}
+.thumb{border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:rgba(0,0,0,.35);font-size:11px;overflow:hidden;flex:none}
+.pkg{background:linear-gradient(180deg,#fff 0,#f3f3f3 100%);border:1px solid #d9d9d9;border-radius:3px;position:relative}
+.pkg:before{content:"";position:absolute;top:6%;left:50%;width:18%;height:6%;border:1px solid #bbb;border-radius:3px;transform:translateX(-50%);background:#fff}

@@ -1,0 +1,258 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>陈列图设计器</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>
+.pagehead{display:flex;align-items:center;justify-content:space-between}
+.pagehead h1{font-size:18px;margin:0;font-weight:600;display:flex;align-items:center;gap:10px}
+.pagehead .sub{color:rgba(0,0,0,.45);font-size:12px;margin-top:2px}
+.actions{display:flex;gap:8px;align-items:center}
+.toolbar{display:flex;align-items:center;gap:14px;padding:8px 12px;height:48px}
+.toolbar .lbl{color:rgba(0,0,0,.65);font-size:13px;margin-right:-6px;white-space:nowrap}
+.toolbar .chk,.toolbar .select,.toolbar .seg span{white-space:nowrap}
+.vsep{width:1px;height:20px;background:#f0f0f0}
+.work{flex:1;display:flex;gap:12px;min-height:0}
+.lpanel{width:240px;flex:0 0 240px;display:flex;flex-direction:column;min-height:0}
+.rpanel{width:280px;flex:0 0 280px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.ptabs{display:flex;border-bottom:1px solid #f0f0f0;padding:0 12px}
+.ptabs span{padding:10px 4px;margin-right:18px;font-size:14px;color:rgba(0,0,0,.65);border-bottom:2px solid transparent}
+.ptabs span.on{color:#1677ff;border-color:#1677ff;font-weight:500}
+.plist{flex:1;overflow:hidden;padding:4px 8px}
+.pitem{display:flex;align-items:center;gap:8px;padding:7px 6px;border-radius:8px;border:1px solid transparent}
+.pitem:hover{background:#fafafa}
+.pitem .nm{font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pitem .meta{font-size:11px;color:rgba(0,0,0,.45);white-space:nowrap}
+.pitem .grip{margin-left:auto;color:rgba(0,0,0,.25);font-size:14px}
+.pitem.dragging{opacity:.45;border:1px dashed #91caff;background:#e6f4ff}
+.pitem.noparam{opacity:.75}
+.pitem.noparam .nm{color:rgba(0,0,0,.45)}
+.hookbar{border-top:1px solid #f0f0f0;padding:10px 12px;font-size:12px;display:flex;align-items:center;gap:8px}
+.canvaswrap{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.canvas{flex:1;position:relative;background:#fff;overflow:hidden}
+.legend{height:30px;border-top:1px solid #f0f0f0;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:12px;color:rgba(0,0,0,.45)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.rp-card{padding:10px 14px}
+.rp-card h3{margin:0 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+.frow{display:flex;align-items:center;justify-content:space-between;margin:6px 0;font-size:13px}
+.frow .k{white-space:nowrap}
+.frow .k{color:rgba(0,0,0,.65)}
+.stepper{display:inline-flex;border:1px solid #d9d9d9;border-radius:8px;height:28px;align-items:center;overflow:hidden}
+.stepper span{width:26px;text-align:center;color:rgba(0,0,0,.45);border-right:1px solid #f0f0f0;font-size:14px}
+.stepper b{width:44px;text-align:center;font-weight:500;font-size:13px}
+.stepper span.r{border-right:none;border-left:1px solid #f0f0f0}
+.hint{font-size:11px;color:rgba(0,0,0,.45);line-height:1.4;background:#fafafa;border-radius:6px;padding:6px 8px;margin-top:4px}
+.kv{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 8px;font-size:11px}
+.kv div b{display:block;font-size:15px;font-weight:600;line-height:1.2}
+.kv div{color:rgba(0,0,0,.45)}
+.dragclone{position:absolute;left:722px;top:690px;opacity:.95;width:196px;background:#fff;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.18);padding:6px 8px;display:flex;gap:8px;align-items:center;transform:rotate(-2deg);border:1px solid #91caff;z-index:8;pointer-events:none}
+.cursor{position:absolute;width:18px;height:18px;z-index:10}
+</style></head><body>
+<div class="app">
+  <aside class="sider collapsed">
+    <div class="brand" style="justify-content:center;padding:0"><div class="brand-mark">HB</div></div>
+    <div class="menu" style="padding:8px 12px">
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-layout-dashboard"></i></div>
+      <div class="item active" style="padding:0;justify-content:center"><i class="ti ti-tags"></i></div>
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-building-store"></i></div>
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-cash-register"></i></div>
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-users"></i></div>
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-device-desktop"></i></div>
+      <div class="item" style="padding:0;justify-content:center"><i class="ti ti-settings"></i></div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="header">
+      <div class="crumb"><i class="ti ti-layout-sidebar-left-expand" style="margin-right:14px;color:rgba(0,0,0,.65)"></i>商品与价格<span class="sep">/</span>商品陈列图<span class="sep">/</span><b>陈列方案 · 文具挂板 A1</b></div>
+      <div class="hdr-right"><span class="muted">中文 ▾</span><span class="btn primary"><i class="ti ti-shopping-bag"></i>订货前台</span><span class="avatar"><i class="ti ti-user"></i></span><div style="line-height:1.2"><div style="font-weight:600;font-size:13px">admin</div><div class="muted tiny">Administrator</div></div></div>
+    </div>
+    <div class="tabs"><span class="tab"><i class="ti ti-home"></i>工作台</span><span class="tab">商品陈列图 <i class="ti ti-x muted"></i></span><span class="tab on">陈列方案 · 文具挂板 A1 <i class="ti ti-x muted"></i></span><span class="tab">货架与挂钩型号 <i class="ti ti-x muted"></i></span></div>
+    <div class="content">
+      <div class="pagehead">
+        <div>
+          <h1>陈列方案：文具挂板 A1 <span class="tag orange">草稿</span><span class="tag">v3</span></h1>
+          <div class="sub">最后保存 2026-11-04 10:12 · admin · <span style="color:#d46b08">有未保存改动</span></div>
+        </div>
+        <div class="actions">
+          <span class="btn text"><i class="ti ti-arrow-back-up"></i></span><span class="btn text"><i class="ti ti-arrow-forward-up"></i></span>
+          <span class="btn"><i class="ti ti-copy"></i>另存为</span>
+          <span class="btn"><i class="ti ti-file-type-pdf"></i>导出 PDF</span>
+          <span class="btn"><i class="ti ti-send"></i>发布</span>
+          <span class="btn primary"><i class="ti ti-device-floppy"></i>保存</span>
+          <span class="btn text"><i class="ti ti-dots"></i></span>
+        </div>
+      </div>
+      <div class="card toolbar">
+        <span class="lbl">货架型号</span><span class="select" style="min-width:230px">单面洞洞板 900×1200 · 白<span class="caret">▼</span></span>
+        <span class="lbl">节数</span><span class="stepper"><span>−</span><b>2</b><span class="r">+</span></span>
+        <span class="vsep"></span>
+        <span class="lbl">缩放</span><span class="stepper"><span>−</span><b>40%</b><span class="r">+</span></span><span class="btn sm text"><i class="ti ti-maximize"></i>适应</span>
+        <span class="vsep"></span>
+        <span class="lbl">显示</span><span class="chk"><i class="on"></i>孔位</span><span class="chk"><i class="on"></i>标尺</span><span class="chk"><i class="on"></i>价签</span>
+        <span class="vsep"></span>
+        <span class="lbl">吸附</span><span class="seg"><span class="on">孔位</span><span>自由</span></span>
+        <span style="margin-left:auto" class="tag red"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>冲突 1 · 定位</span>
+      </div>
+      <div class="work">
+        <div class="card lpanel">
+          <div class="ptabs"><span class="on">商品</span><span>挂钩</span><span>层板</span></div>
+          <div style="padding:10px 12px 6px;display:flex;flex-direction:column;gap:8px">
+            <div class="input"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><span class="seg"><span class="on">已设参数 12</span><span>全部</span></span><span class="muted tiny">按分类 ▾</span></div>
+          </div>
+          <div class="plist" id="plist"></div>
+          <div class="hookbar"><span class="muted">当前挂钩</span><span class="select" style="height:26px;min-width:0;flex:1;font-size:12px;border-radius:6px;padding:0 8px">双钩带价签 · 臂长 200<span class="caret">▼</span></span></div>
+        </div>
+        <div class="card canvaswrap">
+          <div class="canvas" id="canvas"></div>
+          <div class="legend"><span><i style="background:#fff;border:1px solid #8c8c8c"></i>已放置</span><span><i style="background:#e6f4ff;border:1px solid #1677ff"></i>选中</span><span><i style="background:#fff2f0;border:1px solid #ff4d4f"></i>冲突 / 超出板面</span><span><i style="background:#f6ffed;border:1px dashed #52c41a"></i>可放置（拖拽中）</span><span style="margin-left:auto">板面 870×1050 mm / 节 · 孔距 25 mm · 34 列 × 41 行 · 1 格 = 10 px</span></div>
+        </div>
+        <div class="rpanel">
+          <div class="card rp-card" id="selcard">
+            <h3>选中项 <span class="muted tiny" style="font-weight:400">节 2 · 列 25 · 行 22</span></h3>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+              <div class="thumb" style="width:44px;height:44px;background:#fff1b8">A6</div>
+              <div style="min-width:0"><div style="font-weight:500;font-size:13px">笔记本 A6 横线 80 页</div><div class="muted tiny mono">XD0001211 · $2.50</div><div class="muted tiny">包装 110 × 155 × 12 mm</div></div>
+            </div>
+            <div class="frow"><span class="k">挂钩型号</span><span class="select" style="height:28px;min-width:160px;border-radius:8px;font-size:12px">双钩带价签 · 臂长 200<span class="caret">▼</span></span></div>
+            <div class="frow"><span class="k">孔位 列 / 行</span><span style="display:flex;gap:6px"><span class="stepper"><span>−</span><b>25</b><span class="r">+</span></span><span class="stepper"><span>−</span><b>22</b><span class="r">+</span></span></span></div>
+            <div class="frow"><span class="k">面位（横向连排）</span><span class="stepper"><span>−</span><b>1</b><span class="r">+</span></span></div>
+            <div class="frow"><span class="k">每钩挂数</span><span class="stepper"><span>−</span><b>15</b><span class="r">+</span></span></div>
+            <div class="hint">建议 15 = ⌊(臂长 200 − 预留 20) ÷ 厚度 12⌋，可手动改；本钩合计 <b>15 件</b>。左空隙 12 mm · 右空隙 47 mm · 距底板 240 mm（要求 ≥ 10）。</div>
+            <div style="display:flex;gap:8px;margin-top:10px"><span class="btn sm"><i class="ti ti-copy"></i>向右复制</span><span class="btn sm"><i class="ti ti-arrows-horizontal"></i>整行均分</span><span class="btn sm danger" style="margin-left:auto"><i class="ti ti-trash"></i>删除</span></div>
+          </div>
+          <div class="card rp-card">
+            <h3>方案信息 <i class="ti ti-chevron-up muted"></i></h3>
+            <div class="frow"><span class="k">方案名称</span><span>文具挂板 A1</span></div>
+                        <div class="frow"><span class="k">货架 / 节数</span><span>单面洞洞板 900×1200 · 2 节</span></div>
+            <div class="frow"><span class="k">间距 左右 / 上下</span><span style="display:flex;gap:4px"><span class="stepper"><span style="width:20px">−</span><b style="width:30px">10</b><span class="r" style="width:20px">+</span></span><span class="stepper"><span style="width:20px">−</span><b style="width:30px">10</b><span class="r" style="width:20px">+</span></span><span class="muted tiny" style="align-self:center">mm</span></span></div>
+                      </div>
+          <div class="card rp-card">
+            <h3>统计</h3>
+            <div class="kv" id="stats"></div>
+                      </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// ===== 样例数据（mm）=====
+const S=0.4; // 比例：1 mm = 0.4 px
+const PITCH=25, HOLE0=25, BAY_W=900, INNER_W=870, BOARD_H=1050, BASE_H=150, TOTAL_H=1200, UP_W=30;
+const HOOK={len:200,drop:50,span:2,label:[52,26],tagAboveArm:10}; // 双钩带价签：臂长 200，上下臂间距 50，横向占 2 孔，价签底边高于挂货臂 10
+const HANG=10; // 吊孔距包装顶 10 mm
+const P={
+ p1:{code:'XD0001201',name:'胶棒 2 支装',w:70,h:150,t:25,q:7,price:2.5,c:'#ffd8bf'},
+ p2:{code:'XD0001202',name:'圆珠笔 10 支',w:90,h:185,t:20,q:9,price:3.5,c:'#bae0ff'},
+ p3:{code:'XD0001203',name:'剪刀 170mm',w:95,h:215,t:15,q:12,price:4,c:'#d9f7be'},
+ p4:{code:'XD0001204',name:'荧光笔 6 色',w:130,h:165,t:18,q:10,price:5,c:'#fff1b8'},
+ p5:{code:'XD0001205',name:'便利贴 3 本',w:80,h:105,t:30,q:6,price:2,c:'#ffccc7'},
+ p6:{code:'XD0001206',name:'修正带 2 个',w:75,h:150,t:25,q:7,price:3,c:'#d3adf7'},
+ p7:{code:'XD0001207',name:'橡皮 3 个装',w:65,h:120,t:22,q:8,price:1.5,c:'#b5f5ec'},
+ p8:{code:'XD0001208',name:'马克笔 4 色',w:115,h:190,t:20,q:9,price:4.5,c:'#ffd6e7'},
+ p9:{code:'XD0001209',name:'尺子 30cm',w:45,h:330,t:5,q:20,price:1.5,c:'#f4ffb8'},
+ p10:{code:'XD0001210',name:'胶带 2 卷',w:100,h:150,t:55,q:3,price:3.5,c:'#ffe7ba'},
+ p11:{code:'XD0001211',name:'笔记本 A6',w:110,h:155,t:12,q:15,price:2.5,c:'#fff1b8'},
+ p12:{code:'XD0001212',name:'订书机',w:90,h:200,t:40,q:4,price:6,c:'#d6e4ff'},
+};
+// [bay, product, col, row, flag]
+const items=[
+ [0,'p3',1,2],[0,'p3',6,2],[0,'p2',11,2],[0,'p2',15,2],[0,'p8',20,2],[0,'p4',26,2],[0,'p12',31,2],
+ [0,'p1',1,12],[0,'p1',5,12],[0,'p1',9,12],[0,'p6',13,12],[0,'p6',17,12],[0,'p11',22,12],[0,'p11',27,12],[0,'p7',31,12],
+ [0,'p5',1,22],[0,'p5',5,22],[0,'p5',9,22],[0,'p5',13,22],[0,'p10',17,22],[0,'p10',22,22],[0,'p10',25,22,'conflict'],[0,'p7',31,22],
+ [0,'p11',1,31],[0,'p11',6,31],[0,'p1',10,31],[0,'p1',14,31],[0,'p7',18,31],[0,'p7',21,31],[0,'p7',24,31],
+ [1,'p8',1,2],[1,'p8',6,2],[1,'p8',11,2],[1,'p4',17,2],[1,'p4',23,2],[1,'p9',30,2],
+ [1,'p2',1,12],[1,'p2',5,12],[1,'p12',9,12],[1,'p3',14,12],[1,'p3',19,12],[1,'p6',23,12],
+ [1,'p5',1,22],[1,'p5',5,22],[1,'p5',9,22],[1,'p10',13,22],[1,'p1',17,22],[1,'p1',21,22],[1,'p11',25,22,'selected'],
+ [1,'p7',1,31],[1,'p7',4,31],
+];
+const ghost=[0,'p2',28,31];
+// ===== 画布 =====
+const OX=34, OY=40; // 标尺留白（px）
+const W=(BAY_W*2)*S+OX+10, H=TOTAL_H*S+OY+10;
+let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,PingFang SC,Segoe UI,Roboto,Helvetica Neue,Arial,Microsoft YaHei,sans-serif">`;
+svg+=`<defs><pattern id="holes" width="${PITCH*S}" height="${PITCH*S}" patternUnits="userSpaceOnUse"><circle cx="${PITCH*S/2}" cy="${PITCH*S/2}" r="1.5" fill="#cfcfcf"/></pattern></defs>`;
+// 标尺
+svg+=`<rect x="0" y="0" width="${W}" height="${OY-14}" fill="#fafafa"/><rect x="0" y="0" width="${OX-8}" height="${H}" fill="#fafafa"/>`;
+for(let mm=0;mm<=BAY_W*2;mm+=100){const x=OX+mm*S;svg+=`<line x1="${x}" y1="${OY-22}" x2="${x}" y2="${OY-14}" stroke="#bfbfbf"/>`;if(mm%300==0)svg+=`<text x="${x+2}" y="${OY-24}" font-size="9" fill="rgba(0,0,0,.45)">${mm}</text>`;}
+for(let mm=0;mm<=TOTAL_H;mm+=100){const y=OY+mm*S;svg+=`<line x1="${OX-16}" y1="${y}" x2="${OX-8}" y2="${y}" stroke="#bfbfbf"/>`;if(mm%300==0)svg+=`<text x="2" y="${y+3}" font-size="9" fill="rgba(0,0,0,.45)">${mm}</text>`;}
+// 节标题
+for(let b=0;b<2;b++){const x=OX+b*BAY_W*S;svg+=`<text x="${x+BAY_W*S/2}" y="${OY-4}" font-size="11" text-anchor="middle" fill="rgba(0,0,0,.65)" font-weight="600">节 ${b+1} · 900 mm</text>`;}
+// 货架本体：立柱、板面、底板
+const bx=OX, by=OY;
+svg+=`<rect x="${bx}" y="${by}" width="${BAY_W*2*S}" height="${TOTAL_H*S}" fill="#f7f7f7" stroke="#bfbfbf"/>`;
+for(let b=0;b<2;b++){const x=bx+b*BAY_W*S+(b?0:0);
+  // 板面区域（内宽 870，居中）
+  const px=bx+b*BAY_W*S+(BAY_W-INNER_W)/2*S;
+  svg+=`<rect x="${px}" y="${by}" width="${INNER_W*S}" height="${BOARD_H*S}" fill="#fff" stroke="#d9d9d9"/>`;
+  svg+=`<rect x="${px+(HOLE0-PITCH/2)*S}" y="${by+(HOLE0-PITCH/2)*S}" width="${34*PITCH*S}" height="${41*PITCH*S}" fill="url(#holes)"/>`;
+}
+// 立柱
+for(let i=0;i<=2;i++){const x=bx+i*BAY_W*S-(i==2?UP_W*S:0)-(i==1?UP_W*S/2:0);svg+=`<rect x="${x}" y="${by-2}" width="${UP_W*S}" height="${TOTAL_H*S+2}" fill="#e8e8e8" stroke="#bfbfbf"/>`;}
+// 底板
+svg+=`<rect x="${bx}" y="${by+BOARD_H*S}" width="${BAY_W*2*S}" height="${BASE_H*S}" fill="#ededed" stroke="#bfbfbf"/>`;
+svg+=`<text x="${bx+BAY_W*S}" y="${by+(BOARD_H+BASE_H/2)*S+4}" font-size="10" text-anchor="middle" fill="rgba(0,0,0,.45)">底板 · 深 300 mm（层板类商品可放置，二期）</text>`;
+// 商品与挂钩
+function holeXY(bay,col,row){const px=bx+bay*BAY_W*S+(BAY_W-INNER_W)/2*S;return [px+(HOLE0+col*PITCH)*S, by+(HOLE0+row*PITCH)*S];}
+let units=0, area=0, skus=new Set();
+function drawItem(it,mode){
+  const [bay,pid,col,row]=it, p=P[pid];
+  const [hx,hy]=holeXY(bay,col,row);
+  const cx=hx+(HOOK.span-1)*PITCH*S/2; // 双钩中心
+  const w=p.w*S,h=p.h*S, x=cx-w/2, y=hy+(HOOK.drop-HANG)*S;
+  let stroke='#8c8c8c', fill=p.c, dash='', sw=1;
+  if(mode==='conflict'){stroke='#ff4d4f';sw=2}
+  if(mode==='selected'){stroke='#1677ff';sw=2}
+  if(mode==='ghost'){stroke='#52c41a';dash='stroke-dasharray="4 3"';fill='#f6ffed'}
+  let g='';
+  // 挂钩：两个挂孔点 + 竖直落差线 + 价签
+  if(mode!=='ghost'){
+    g+=`<circle cx="${hx}" cy="${hy}" r="2" fill="#595959"/><circle cx="${hx+PITCH*S}" cy="${hy}" r="2" fill="#595959"/>`;
+  } else {
+    g+=`<circle cx="${hx}" cy="${hy}" r="4" fill="none" stroke="#52c41a" stroke-width="1.5"/><circle cx="${hx+PITCH*S}" cy="${hy}" r="4" fill="none" stroke="#52c41a" stroke-width="1.5"/>`;
+  }
+  // 商品包装
+  g+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" ${dash} opacity="${mode==='ghost'?0.9:1}"/>`;
+  // 吊孔
+  g+=`<rect x="${cx-3}" y="${y+1.5}" width="6" height="2.2" rx="1" fill="#fff" stroke="#999" stroke-width=".6"/>`;
+  // 名称（纵向剩余空间够才画两行）
+  const fs=7.5; const maxCh=Math.max(2,Math.floor((w-4)/fs)); const nm=p.name.replace(/\s/g,'').length>maxCh?p.name.replace(/\s/g,'').slice(0,maxCh):p.name;
+  g+=`<text x="${cx}" y="${y+h/2+1}" font-size="${fs}" text-anchor="middle" fill="rgba(0,0,0,.75)">${nm}</text>`;
+  g+=`<text x="${cx}" y="${y+h-3}" font-size="6" text-anchor="middle" fill="rgba(0,0,0,.45)" font-family="Menlo,Consolas,monospace">${p.code.slice(-4)}·×${p.q}</text>`;
+  // 价签（挂孔高度处，覆盖在商品顶部前方）
+  const [lw,lh]=HOOK.label; const lx=cx-lw*S/2, ly=hy+(HOOK.drop-HOOK.tagAboveArm-lh)*S; // 价签压在商品顶边
+  g+=`<rect x="${lx}" y="${ly}" width="${lw*S}" height="${lh*S}" rx="1" fill="#fff" stroke="#8c8c8c" stroke-width=".7"/>`;
+  g+=`<text x="${cx}" y="${ly+lh*S-2.6}" font-size="6.5" text-anchor="middle" font-weight="700" fill="#1f1f1f">$${p.price.toFixed(2)}</text>`;
+  if(mode==='conflict'){g+=`<rect x="${x-1}" y="${y-1}" width="${w+2}" height="${h+2}" fill="#ff4d4f" opacity=".12"/>`;
+    g+=`<g transform="translate(${x-36},${y-16})"><rect width="118" height="14" rx="3" fill="#ff4d4f"/><text x="59" y="10" font-size="8.5" text-anchor="middle" fill="#fff">重叠 25 mm（需间距 10）</text></g>`;}
+  if(mode==='selected'){
+    for(const [px,py] of [[x,y],[x+w,y],[x,y+h],[x+w,y+h]])g+=`<rect x="${px-2.5}" y="${py-2.5}" width="5" height="5" fill="#fff" stroke="#1677ff"/>`;
+    g+=`<g transform="translate(${cx-46},${y-30})"><rect width="92" height="20" rx="5" fill="#1f1f1f"/><text x="12" y="13.5" font-size="9" fill="#fff">⧉ 复制</text><line x1="40" y1="4" x2="40" y2="16" stroke="#555"/><text x="48" y="13.5" font-size="9" fill="#fff">↔ 对齐</text><text x="78" y="13.5" font-size="9" fill="#ff7875">✕</text></g>`;}
+  if(mode==='ghost'){
+    g+=`<g transform="translate(${x+w+10},${y+8})"><rect width="158" height="30" rx="5" fill="#1f1f1f" opacity=".92"/><text x="8" y="12" font-size="9" fill="#73d13d" font-weight="600">✓ 可放置</text><text x="56" y="12" font-size="9" fill="#fff">节 1 · 列 28 · 行 31</text><text x="8" y="24" font-size="8.5" fill="rgba(255,255,255,.75)">圆珠笔 10 支 · 90×185 · 每钩 9 件</text></g>`;}
+  if(mode!=='ghost'){units+=p.q;area+=p.w*p.h;skus.add(pid);}
+  return g;
+}
+let layer='',topLayer='';
+for(const it of items){const m=it[4]||'normal'; if(m==='normal')layer+=drawItem(it,m); else topLayer+=drawItem(it,m);}
+svg+=layer+topLayer+drawItem(ghost,'ghost');
+// 标尺上的列/行指示（拖拽中）
+{const [gx,gy]=holeXY(ghost[0],ghost[2],ghost[3]);svg+=`<rect x="${gx-6}" y="${OY-22}" width="${PITCH*S+12}" height="8" rx="2" fill="#52c41a" opacity=".7"/><rect x="${OX-16}" y="${gy-4}" width="8" height="8" rx="2" fill="#52c41a" opacity=".7"/>`;}
+svg+='</svg>';
+document.getElementById('canvas').innerHTML=`<div style="position:absolute;left:10px;top:14px">${svg}</div>`;
+// 统计
+const fill=Math.round(area/(INNER_W*BOARD_H*2)*100);
+document.getElementById('stats').innerHTML=`<div><b>${skus.size}</b>商品（SKU）</div><div><b>${items.length}</b>挂钩数</div><div><b>${units}</b>挂货合计（件）</div><div><b>${fill}%</b>板面利用率</div><div><b style="color:#cf1322">1</b>冲突</div><div><b>$${(items.reduce((s,it)=>s+P[it[1]].price*P[it[1]].q,0)).toFixed(0)}</b>陈列零售总值</div>`;
+// 左侧商品列表
+const order=['p2','p1','p3','p4','p5','p6','p7','p8','p9','p10','p11','p12'];
+document.getElementById('plist').innerHTML=order.map(k=>{const p=P[k];const used=items.filter(i=>i[1]===k).length;return `<div class="pitem ${k==='p2'?'dragging':''}"><div class="thumb" style="width:38px;height:38px;background:${p.c}">${p.name.slice(0,2)}</div><div style="min-width:0"><div class="nm">${p.name}</div><div class="meta mono">${p.code}</div><div class="meta">${p.w}×${p.h}×${p.t} · 每钩 ${p.q} · 已放 ${used}</div></div><i class="ti ti-grip-vertical grip"></i></div>`}).join('')+
+`<div class="pitem noparam"><div class="thumb" style="width:38px;height:38px">无图</div><div style="min-width:0"><div class="nm">文件夹 A4 彩色</div><div class="meta mono">XD0001213</div><div class="meta" style="color:#d46b08">未设陈列参数 · <u>去补充</u></div></div><i class="ti ti-lock grip"></i></div>`;
+</script>
+<!-- 拖拽中的卡片克隆（跟随鼠标） -->
+<div class="dragclone"><div class="thumb" style="width:34px;height:34px;background:#bae0ff">圆珠</div><div style="min-width:0"><div style="font-size:12px;font-weight:500">圆珠笔 10 支</div><div class="muted tiny mono">XD0001202 · 90×185</div></div></div>
+<svg class="cursor" style="left:702px;top:676px" viewBox="0 0 24 24"><path d="M5 3l14 9-6 1.5L16 20l-2.5 1L10 14.5 5 18z" fill="#fff" stroke="#000" stroke-width="1.5"/></svg>
+<!-- 标注 -->
+<div class="note l" style="left:352px;top:270px">① 左侧商品库：只有已维护「陈列参数」的商品才能拖入画布；拖动时实时吸附到孔位</div>
+<div class="note" style="left:372px;top:800px">② 工具栏随时切换货架型号 / 节数，切换后自动重新校验所有商品是否仍在板面内</div>
+<div class="note t" style="left:884px;top:722px">③ 画布按真实毫米等比绘制：孔阵、立柱、底板、挂钩价签、包装外形；重叠与越界即时标红</div>
+<div class="note" style="left:640px;top:800px">④ 右侧属性：挂钩型号、孔位列/行、每钩挂数（按臂长 ÷ 厚度自动建议）；方案信息里设左右 / 上下间距（默认 10 mm）</div>
+</body></html>

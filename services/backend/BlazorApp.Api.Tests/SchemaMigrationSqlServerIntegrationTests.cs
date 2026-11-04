@@ -4274,6 +4274,123 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 商品陈列图六张表与权限码_新表_权限入库不授权_型号编码唯一_可重复执行_识别漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54440。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54440, missing.Number);
+
+        // 权限表存在时：三个权限码幂等写入，重复执行不重复插入；不创建也不触碰任何角色权限表。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            INSERT dbo.HbwebSysPermissions (Id, Code, Name, Category, CreatedAt, IsDeleted)
+            VALUES (N'p-1', N'Orders.View', N'查看订单', N'分店订货', SYSUTCDATETIME(), 0);
+            """);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(3, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Planogram.View', N'Planogram.Edit', N'Planogram.Manage') AND Category = N'商品陈列图' AND IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Orders.View' AND Category = N'分店订货'"));
+
+        // 既有数据不被重复执行改动；货架型号编码唯一：同编码第二次插入必须被拒绝。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramShelfModel
+                (Guid, Code, Name, BayWidthMm, TotalHeightMm, BaseDepthMm, BaseTopHeightMm, UprightWidthMm,
+                 HolePitchXMm, HolePitchYMm, HoleDiameterMm, FirstHoleLeftMm, FirstHoleTopMm, HoleCols, HoleRows, CreatedAt)
+            VALUES (N'shelf-1', N'G-S-PEG-90x30x120', N'单面洞洞板', 900, 1200, 300, 150, 30, 25.4, 25, 6, 25, 25, 33, 41, SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.PlanogramShelfModel WHERE Guid = N'shelf-1' AND HolePitchXMm = 25.4 AND SideType = 1 AND IsActive = 1 AND RowNumberingFrom = 1"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramShelfModel
+                (Guid, Code, Name, BayWidthMm, TotalHeightMm, BaseDepthMm, BaseTopHeightMm, UprightWidthMm,
+                 HolePitchXMm, HolePitchYMm, HoleDiameterMm, FirstHoleLeftMm, FirstHoleTopMm, HoleCols, HoleRows, CreatedAt)
+            VALUES (N'shelf-2', N'G-S-PEG-90x30x120', N'重复编码', 900, 1200, 300, 150, 30, 25, 25, 6, 25, 25, 33, 41, SYSUTCDATETIME());
+            """));
+
+        // 挂钩型号：价签底边高度默认 10；编码同样唯一。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramHookModel (Guid, Code, Name, ArmLengthMm, DropMm, WireDiameterMm, CreatedAt)
+            VALUES (N'hook-1', N'HK-D-PT-200', N'双钩带价签 200', 200, 50, 5, SYSUTCDATETIME());
+            """);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.PlanogramHookModel WHERE Guid = N'hook-1' AND TagBottomAboveArmMm = 10 AND ProngCount = 2 AND HoleSpanX = 2 AND HoleSpanY = 1"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramHookModel (Guid, Code, Name, ArmLengthMm, DropMm, WireDiameterMm, CreatedAt)
+            VALUES (N'hook-2', N'HK-D-PT-200', N'重复编码', 200, 50, 5, SYSUTCDATETIME());
+            """));
+
+        // 方案头：间距默认 10 / 10，没有 StoreCode；同一方案同一版本号只能有一份快照。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.Planogram (Guid, Name, ShelfModelGuid, CreatedAt) VALUES (N'plan-1', N'试验方案', N'shelf-1', SYSUTCDATETIME());
+            INSERT dbo.PlanogramVersion (Guid, PlanogramGuid, Version, LayoutJson, PublishedAt)
+            VALUES (N'ver-1', N'plan-1', 1, N'{}', SYSUTCDATETIME());
+            """);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.Planogram WHERE Guid = N'plan-1' AND GapXMm = 10 AND GapYMm = 10 AND Status = 0 AND Version = 1"));
+        Assert.Equal(0, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.Planogram') AND name = N'StoreCode'"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramVersion (Guid, PlanogramGuid, Version, LayoutJson, PublishedAt)
+            VALUES (N'ver-2', N'plan-1', 1, N'{}', SYSUTCDATETIME());
+            """));
+
+        // 列宽漂移 → 54441（选没有索引依赖的 Color 列：SQL Server 不允许修改索引依赖列的宽度）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN Color nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54441, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN Color nvarchar(50) NULL;");
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // decimal 精度漂移 → 54441。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN HoleDiameterMm decimal(8,3) NOT NULL;");
+        var precision = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54441, precision.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN HoleDiameterMm decimal(6,2) NOT NULL;");
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // 货架型号编码唯一索引缺失 → 54443；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_PlanogramShelfModel_Code ON dbo.PlanogramShelfModel;");
+        var noUnique = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54443, noUnique.Number);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // 明细方案索引缺失 → 54444；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_PlanogramItem_Plan ON dbo.PlanogramItem;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54444, noIndex.Number);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PlanogramShelfModel"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PlanogramHookModel"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.Planogram"));
+
+        // 主键缺失 → 54442（商品陈列参数表以 ProductCode 为主键）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ProductDisplaySpec DROP CONSTRAINT PK_ProductDisplaySpec;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54442, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 考勤设置唯一索引_建索引前先查重不动数据_可重复执行_只约束未删除行_识别定义漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
