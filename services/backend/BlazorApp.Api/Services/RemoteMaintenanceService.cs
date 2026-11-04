@@ -300,9 +300,26 @@ public sealed class RemoteMaintenanceService
         if (string.IsNullOrWhiteSpace(row.CredentialCiphertext)) row.CredentialCiphertext = _secretProtector.ProtectPassword(request.Password);
         if (!string.IsNullOrWhiteSpace(row.CommitResponseCiphertext))
         {
-            if (!string.Equals(row.RustdeskId, Normalize(request.RustdeskId, MaxRustdeskIdLength), StringComparison.Ordinal)
-                || !string.Equals(row.ClientVersion, Normalize(request.ClientVersion, MaxVersionLength), StringComparison.Ordinal))
-                return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "同一操作的 RustDesk 客户端信息不匹配");
+            var requestedRustdeskId = Normalize(request.RustdeskId, MaxRustdeskIdLength);
+            var requestedClientVersion = Normalize(request.ClientVersion, MaxVersionLength);
+            if (!string.Equals(row.RustdeskId, requestedRustdeskId, StringComparison.Ordinal)
+                || !string.Equals(row.ClientVersion, requestedClientVersion, StringComparison.Ordinal))
+            {
+                // RustDesk 被卸载后 WPF 沿用原操作号和密码完整重装，新装的 RustDesk 可能换了 ID（或版本）。
+                // 上面已用登记密码核验过身份，这里只刷新登记的 ID/版本；监控 token 和提交响应保持不变，
+                // 状态服务与地址簿无需重新登记。条件限定同一已提交操作，防止与并发 prepare/删除交错。
+                // 没有登记密码可核验时（理论上不应出现）保持原冲突，不允许凭操作号改 ID。
+                if (string.IsNullOrWhiteSpace(expectedPassword))
+                    return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "同一操作的 RustDesk 客户端信息不匹配");
+                var refreshed = await _dbContext.Db.Updateable<RemoteMaintenanceDevice>()
+                    .SetColumns(x => new RemoteMaintenanceDevice { RustdeskId = requestedRustdeskId, ClientVersion = requestedClientVersion })
+                    .Where(x => x.Id == row.Id && !x.IsDeleted && x.LastOperationId == request.OperationId && x.CommitResponseCiphertext != null)
+                    .ExecuteCommandAsync();
+                if (refreshed != 1) return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "设备登记正在被其他操作处理");
+                _logger.LogInformation(
+                    "Remote maintenance re-registered after reinstall. DeviceId={DeviceId}, OldRustdeskId={OldRustdeskId}, NewRustdeskId={NewRustdeskId}, OldVersion={OldVersion}, NewVersion={NewVersion}",
+                    row.Id, row.RustdeskId, requestedRustdeskId, row.ClientVersion, requestedClientVersion);
+            }
             try { return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Ok(JsonSerializer.Deserialize<RemoteMaintenanceCommitResponseDto>(_secretProtector.UnprotectOperationResponse(row.CommitResponseCiphertext))!); }
             catch { return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_UNAVAILABLE", "操作响应无法恢复"); }
         }

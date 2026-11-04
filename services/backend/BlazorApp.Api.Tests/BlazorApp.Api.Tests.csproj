@@ -99,6 +99,7 @@
     <Compile Include="DeviceRegistrationRustDeskVersionTests.cs" />
     <Compile Include="DeviceRegistrationReactServiceTests.cs" />
     <Compile Include="DeviceActivationCodeManagementTests.cs" />
+    <Compile Include="RemoteMaintenanceCommitTests.cs" />
     <Compile Include="RemoteMaintenanceContractTests.cs" />
     <Compile Include="RemoteMaintenancePrepareTests.cs" />
     <Compile Include="RemoteMaintenanceRegistrationResolverTests.cs" />
