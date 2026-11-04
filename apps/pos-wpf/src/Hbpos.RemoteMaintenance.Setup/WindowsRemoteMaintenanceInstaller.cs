@@ -215,7 +215,11 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             // 公司定制构建 1.5.0-hb2（release 1.5.0-hb2，fork 分支 hb/1.5.0）：上游升到 1.5.0，
             // 另外锁定 allow-hide-cm=Y，受控端被连接时不弹连接管理窗口。
             ["212b72a745d841f7730f077ce173281fea526893945682b940c1206b6377a72c"] =
-                new("1.5.0-hb2", 25765376, "f53058f04d05c7f29746c5fa64df81fff81b318b9d76501a93a35dc8272632b1")
+                new("1.5.0-hb2", 25765376, "f53058f04d05c7f29746c5fa64df81fff81b318b9d76501a93a35dc8272632b1"),
+            // 公司定制构建 1.4.9-hb3（release 1.4.9-hb3，fork 分支 main）：上游仍是 1.4.9，
+            // 在 hb1 基础上同样锁定 allow-hide-cm=Y，受控端被连接时不弹连接管理窗口。
+            ["b595f1a66ad7aa00345c6683ab7bb43e52af1078d59ba99b2af6ed7e1377489e"] =
+                new("1.4.9-hb3", 24357888, "aa1307b59209ac924a219c83f7bc1223ddc7e8fe1cb4f39e59227f92076d8113")
         };
 
     /// <summary>按中心 manifest 的哈希查白名单；普通用户端用它决定要不要预先下载升级包。</summary>
