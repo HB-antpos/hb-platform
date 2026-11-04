@@ -88,7 +88,7 @@ for (const tab of tabs) {
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
 // 快照当前的题数（防止快照被误截断）；刷新快照后同步更新这两个数字
 assert.equal(countQuestions('pos'), 28)
-assert.equal(countQuestions('mobile'), 19)
+assert.equal(countQuestions('mobile'), 20)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
@@ -106,13 +106,15 @@ assert.equal(posNumbering.get('app-update'), 26)
 assert.equal(posNumbering.get('remote-assist'), 27)
 assert.equal(posNumbering.get('pda-product-sync'), 28)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
-assert.equal(mobileNumbering.get('revenue-report'), 6)
-assert.equal(mobileNumbering.get('product-report'), 7)
-assert.equal(mobileNumbering.get('supplier-invoices'), 12)
-assert.equal(mobileNumbering.get('promotions-manage'), 14)
-assert.equal(mobileNumbering.get('promotion-not-applied'), 15)
-assert.equal(mobileNumbering.get('floating-button'), 18)
-assert.equal(mobileNumbering.get('app-download'), 19)
+// roster-manage 追加在 people 分组末尾（第 4 题），其后各题编号随之 +1
+assert.equal(mobileNumbering.get('roster-manage'), 4)
+assert.equal(mobileNumbering.get('revenue-report'), 7)
+assert.equal(mobileNumbering.get('product-report'), 8)
+assert.equal(mobileNumbering.get('supplier-invoices'), 13)
+assert.equal(mobileNumbering.get('promotions-manage'), 15)
+assert.equal(mobileNumbering.get('promotion-not-applied'), 16)
+assert.equal(mobileNumbering.get('floating-button'), 19)
+assert.equal(mobileNumbering.get('app-download'), 20)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))
@@ -153,6 +155,13 @@ const onlineReceiptHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile,
 assert.ok(onlineReceiptHits.includes('online-receipt'))
 const guardianLinkHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '家长签字', 'zh').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(guardianLinkHits.includes('minor-guardian-link'))
+// 店长手机端排班：中文按钮名、英文按钮名都能搜到；标签与权限与手机端 Roster 页一致
+const rosterZhHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '发布本周', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(rosterZhHits.includes('roster-manage'))
+const rosterEnHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'publish week', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(rosterEnHits.includes('roster-manage'))
+const rosterQuestion = STORE_HELP_FAQ_GROUPS.mobile.flatMap((group) => group.questions).find((question) => question.id === 'roster-manage')
+assert.deepEqual(rosterQuestion?.permissions, ['Attendance.Schedule.ViewStore', 'Attendance.Schedule.EditManagedStore'])
 const candyThemeHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '糖果紫', 'zh').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(candyThemeHits.includes('color-theme'))
 const scannerHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '扫码枪灵敏度', 'zh').flatMap((group) => group.questions.map((question) => question.id))
