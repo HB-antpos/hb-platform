@@ -272,4 +272,32 @@ assert.equal(rangeWeekly[1], otherWeek, '不含今天的周原样返回')
 assert.equal(referenceClockHour(Date.UTC(2026, 8, 24, 6, 12)), 16)
 assert.equal(referenceClockHour(Date.UTC(2026, 8, 24, 14, 30)), 0, 'UTC+10 已过零点')
 
+// 本期提早打烊：去年 18:00 仍有成交、今年 17:00 后无成交 → 逐小时口径标记 closedHour，不当作 −100%
+const earlyCloseRows = [
+  hourly(9, 500, 180, 'S1', 5, 4), hourly(12, 0, 389, 'S1', 0, 9), hourly(13, 200, 155, 'S1', 3, 4),
+  hourly(17, 67, 142, 'S1', 2, 3), hourly(18, 0, 166, 'S1', 0, 6),
+]
+const earlyCloseSeries = buildHourlySeries(earlyCloseRows)
+const earlyCloseHourly = buildHourlyDetailRows(earlyCloseSeries, { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: false })
+assert.deepEqual(
+  earlyCloseHourly.filter(row => row.closedHour).map(row => row.hour),
+  [18],
+  '只有晚于本期最后成交小时的无成交整点算未营业；营业时段中间的 $0（12:00）仍是真实同比',
+)
+assert.ok(
+  buildHourlyDetailRows(earlyCloseSeries, { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: true })
+    .every(row => !row.closedHour),
+  '累计口径本期累计不会回落，不标记',
+)
+assert.ok(
+  buildHourlyDetailRows(earlyCloseSeries, { cutoffHour: 13, live: true, cumulative: false })
+    .every(row => !row.closedHour),
+  '当天进行中 / 未到的小时有自己的状态，不套用打烊',
+)
+assert.ok(
+  buildHourlyDetailRows(buildHourlySeries([hourly(10, 0, 100), hourly(11, 0, 80)]), { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: false })
+    .every(row => !row.closedHour),
+  '整天都没有成交（休息日）时不套用，仍显示真实同比',
+)
+
 console.log('营业额分时累计对齐：通过')

@@ -26,7 +26,8 @@ export interface HourlyCumulativeTableProps {
 
 /**
  * 单日时段表：累计口径从开门累加到每个整点，逐小时口径与原表一致。
- * 进行中的小时不算同比，未到的小时只显示去年值，不再出现 $0 / −100%。
+ * 进行中的小时不算同比，未到的小时只显示去年值，不再出现 $0 / −100%；
+ * 本期已打烊的小时（去年仍营业）同样只显示去年值，标注「未营业」。
  */
 export default function HourlyCumulativeTable({ series, cutoff, effectiveCutoffHour, mode, liveClock, onSelectCutoff }: HourlyCumulativeTableProps) {
   const text = useReportText()
@@ -55,14 +56,14 @@ export default function HourlyCumulativeTable({ series, cutoff, effectiveCutoffH
           const label = formatHourLabel(cumulative ? row.boundaryHour : row.hour)
           const lowBase = cumulative && isLowBase(row.compareRevenue, fullDayCompare)
           const trend = getRevenueTrend(row.revenue, row.compareRevenue)
-          const percent = row.status === 'upcoming'
+          const percent = row.status === 'upcoming' || row.closedHour
             ? null
             : cumulative
               ? fullDayCompare > 0 ? Math.round((row.revenue / fullDayCompare) * 100) : null
               : maxCompleteHour > 0 ? Math.round((row.revenue / maxCompleteHour) * 100) : 0
           const rowClass = [
             row.isCutoffRow ? styles.cutoffRow : '',
-            row.status === 'upcoming' ? styles.upcomingRow : '',
+            row.status === 'upcoming' || row.closedHour ? styles.upcomingRow : '',
             !cumulative && row.status === 'complete' && maxCompleteHour > 0 && row.revenue >= maxCompleteHour * 0.8 ? pageStyles.peakRow : '',
           ].filter(Boolean).join(' ') || undefined
           return (
@@ -81,6 +82,9 @@ export default function HourlyCumulativeTable({ series, cutoff, effectiveCutoffH
               <td>
                 {row.status === 'upcoming' ? (
                   <span className={styles.cellWithTag}><span className={pageStyles.mutedValue}>—</span><span className={styles.mutedTag}>{text('未到', 'Not yet')}</span></span>
+                ) : row.closedHour ? (
+                  // 本期该小时已打烊：不显示 $0，标注「未营业」，避免被读成业绩下滑。
+                  <span className={styles.cellWithTag}><span className={pageStyles.mutedValue}>—</span><span className={styles.mutedTag}>{text('未营业', 'Closed')}</span></span>
                 ) : row.status === 'live' ? (
                   <span className={styles.cellWithTag}><span className={styles.liveValue}>{formatAud(row.revenue)}</span><span className={styles.liveTag}>{text(`实时 ${liveLabel}`, `Live ${liveLabel}`)}</span></span>
                 ) : (
@@ -89,7 +93,7 @@ export default function HourlyCumulativeTable({ series, cutoff, effectiveCutoffH
               </td>
               <td className={pageStyles.mutedValue}>{formatAud(row.compareRevenue)}</td>
               <td>
-                {row.status === 'complete' ? (
+                {row.status === 'complete' && !row.closedHour ? (
                   lowBase
                     ? <span className={`${pageStyles.trend} ${pageStyles.neutral}`} title={text('去年同时刻基数太小，显示金额差', 'Low base; dollar gap shown')}>
                       {`${row.revenue - row.compareRevenue >= 0 ? '+' : '−'}${formatAud(Math.abs(row.revenue - row.compareRevenue))}`}

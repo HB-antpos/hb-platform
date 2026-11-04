@@ -61,6 +61,11 @@ export interface HourlyDetailRow {
   status: HourlyDetailStatus
   /** 这一行正好是当前截止整点，用于高亮。 */
   isCutoffRow: boolean
+  /**
+   * 本期该小时已结束且没有任何成交，并且晚于本期最后一个有成交的小时（例如今年提早打烊、去年仍营业）。
+   * 此时 $0 / −100% 只是营业时间不同，不是业绩下滑，界面改成中性显示。仅逐小时口径会置位。
+   */
+  closedHour: boolean
 }
 
 export interface CumulativePoint {
@@ -273,7 +278,8 @@ export function getDisplayCutoffHour(series: HourlySeries, cutoffHour: number) {
 
 /**
  * 时段表的行：累计口径把本期与对比期都从开门累加到该小时结束；
- * 当天进行中的小时不算增长率，尚未到达的小时只保留去年值，避免出现 $0 / −100%。
+ * 当天进行中的小时不算增长率，尚未到达的小时只保留去年值，避免出现 $0 / −100%；
+ * 本期已提早打烊的小时（closedHour）同样不算增长率。
  */
 export function buildHourlyDetailRows(
   series: HourlySeries,
@@ -288,9 +294,16 @@ export function buildHourlyDetailRows(
 ): HourlyDetailRow[] {
   if (series.firstHour === null || series.endHour === null) return []
   const rows: HourlyDetailRow[] = []
+  // 本期最后一个有成交的小时：其后已结束的无成交小时视为「本期未营业」。
+  let lastCurrentHour = -1
+  for (let hour = 0; hour < HOURS_PER_DAY; hour += 1) {
+    if (series.revenue[hour] !== 0 || series.orders[hour] !== 0) lastCurrentHour = hour
+  }
   for (let hour = series.firstHour; hour < series.endHour; hour += 1) {
     const status: HourlyDetailStatus = !live || hour < cutoffHour ? 'complete' : hour === cutoffHour ? 'live' : 'upcoming'
     const end = hour + 1
+    // 累计口径下本期累计不会回落为 0，只在逐小时口径判断；整天都没成交（休息日）时不套用。
+    const closedHour = !cumulative && status === 'complete' && lastCurrentHour >= 0 && hour > lastCurrentHour
     rows.push({
       hour,
       boundaryHour: end,
@@ -301,6 +314,7 @@ export function buildHourlyDetailRows(
       status,
       // 逐小时口径下 11:00 这一行是 11–12 点，容易被误读为截至 11 点，故只在累计口径高亮。
       isCutoffRow: cumulative && end === highlightCutoffHour,
+      closedHour,
     })
   }
   return rows
