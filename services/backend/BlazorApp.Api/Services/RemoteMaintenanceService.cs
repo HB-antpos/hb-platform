@@ -447,6 +447,8 @@ public sealed class RemoteMaintenanceService
     /// <summary>
     /// 比对心跳观察到的 RustDesk 版本与中心下发版本。下发版本可以带公司构建后缀（如 1.4.9-hb1），
     /// 而 rustdesk.exe 的文件版本只有上游版本号（1.4.9），所以只比较“-”之前的部分；数字版本按 主.次.修订 比较，忽略多出的 .0。
+    /// 实际 rustdesk.exe 的产品版本形如 1.4.9+67（“+”后是 Flutter 的构建号，生产 42 台设备都是这样上报的），
+    /// 构建号不代表版本不同，所以“+”之后的部分同样忽略；否则 Version.TryParse 解析失败，退回字符串比较，全部被误判为偏离。
     /// </summary>
     internal static string ResolveRustDeskVersionStatus(string? observed, string? serviceStatus, string? expected)
     {
@@ -455,7 +457,7 @@ public sealed class RemoteMaintenanceService
         if (observed.Length == 0) return RemoteMaintenanceRustDeskVersionStatuses.Missing;
         if (string.IsNullOrWhiteSpace(expected)) return RemoteMaintenanceRustDeskVersionStatuses.Unknown;
 
-        static string BaseVersion(string value) => value.Split('-', 2)[0].Trim();
+        static string BaseVersion(string value) => value.Split(['-', '+'], 2)[0].Trim();
         var actualBase = BaseVersion(observed);
         var expectedBase = BaseVersion(expected);
         var same = Version.TryParse(actualBase, out var actualVersion) && Version.TryParse(expectedBase, out var expectedVersion)

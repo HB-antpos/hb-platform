@@ -101,6 +101,12 @@ public sealed class RemoteMaintenanceContractTests
     // 公司定制构建带后缀，rustdesk.exe 文件版本只有上游版本号。
     [InlineData("1.4.9", "running", "1.4.9-hb1", "match")]
     [InlineData("1.4.9.0", "running", "1.4.9", "match")]
+    // rustdesk.exe 实际上报的产品版本带 Flutter 构建号（生产 42 台都是 1.4.9+67），构建号不算版本不同。
+    [InlineData("1.4.9+67", "running", "1.4.9", "match")]
+    [InlineData("1.4.9+67", "running", "1.4.9-hb1", "match")]
+    [InlineData("1.4.9-hb1+67", "running", "1.4.9+70", "match")]
+    [InlineData("1.5.0+70", "running", "1.4.9", "drift")]
+    [InlineData("1.4.8+66", "running", "1.4.9-hb1", "drift")]
     // 有人点了 RustDesk 自带的“更新”。
     [InlineData("1.5.0", "running", "1.4.9", "drift")]
     [InlineData("1.5.0", "stopped", "1.4.9-hb1", "drift")]
