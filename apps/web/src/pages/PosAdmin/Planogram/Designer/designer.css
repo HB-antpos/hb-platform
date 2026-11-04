@@ -1,0 +1,975 @@
+/* 陈列方案设计器样式（普通 CSS + 全局类名前缀 planogram-designer-；随设计器代码块一起懒加载，不进首屏）。
+   视觉沿用后台白底细边框面板（#e7eaf0 / 10px 圆角 / antd 主色）；画布内的颜色沿用设计稿 01-designer：
+   蓝 = 选中，红 = 冲突，绿 = 可放置，灰 = 货架本体。窄屏（< 1100）只读：只留页头 + 画布，没有左右栏。 */
+
+.planogram-designer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  /* 让工作区吃满可视高度：后台外壳（顶栏 + 页签栏）之下的空间都给设计器；太矮时保底 640px，整页再滚动 */
+  height: max(640px, calc(100vh - 180px));
+}
+
+.planogram-designer-state {
+  padding: 16px;
+}
+
+.planogram-designer-state.is-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+/* ---------- 页头 ---------- */
+
+.planogram-designer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.planogram-designer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planogram-designer-title-text {
+  min-width: 0;
+}
+
+.planogram-designer-title h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.planogram-designer-title h1 .ant-tag {
+  margin-inline-end: 0;
+}
+
+.planogram-designer-title-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-designer-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- 工具栏 ---------- */
+
+.planogram-designer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 12px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.planogram-designer-toolbar-label {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.planogram-designer-shelf-select {
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.planogram-designer-vsep {
+  width: 1px;
+  height: 20px;
+  background: #f0f0f0;
+}
+
+.planogram-designer-toolbar-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.planogram-designer-ok-tag {
+  color: #389e0d;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.planogram-designer-stepper {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.planogram-designer-stepper > button {
+  width: 26px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+}
+
+.planogram-designer-stepper > button:first-child {
+  border-right: 1px solid #f0f0f0;
+}
+
+.planogram-designer-stepper > button:last-child {
+  border-left: 1px solid #f0f0f0;
+}
+
+.planogram-designer-stepper > button:hover:not(:disabled) {
+  background: #f5f5f5;
+  color: #1677ff;
+}
+
+.planogram-designer-stepper > button:disabled {
+  cursor: not-allowed;
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.planogram-designer-stepper > button:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.planogram-designer-stepper output {
+  min-width: 44px;
+  padding: 0 6px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 工作区：左栏 / 画布 / 右栏 ---------- */
+
+.planogram-designer-work {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.planogram-designer-library {
+  display: flex;
+  flex: 0 0 240px;
+  flex-direction: column;
+  width: 240px;
+  min-height: 0;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.planogram-designer-library-tabs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.planogram-designer-library-tabs > .ant-tabs-nav {
+  margin: 0;
+  padding: 0 12px;
+}
+
+.planogram-designer-library-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.planogram-designer-library-tabs .ant-tabs-content,
+.planogram-designer-library-tabs .ant-tabs-tabpane {
+  height: 100%;
+}
+
+.planogram-designer-library-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.planogram-designer-library-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.planogram-designer-library-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 4px 8px;
+  overflow-y: auto;
+}
+
+.planogram-designer-library-loading {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+
+.planogram-designer-library-tip {
+  margin: 0;
+  padding: 10px 12px 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-designer-library-hookbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+}
+
+.planogram-designer-hook-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 商品卡片 */
+
+.planogram-designer-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.planogram-designer-card:hover {
+  background: #fafafa;
+}
+
+.planogram-designer-card:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.planogram-designer-card.is-dragging {
+  border: 1px dashed #91caff;
+  background: #e6f4ff;
+  opacity: 0.45;
+}
+
+.planogram-designer-card.is-disabled {
+  cursor: default;
+}
+
+.planogram-designer-card.is-unset {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.planogram-designer-card.is-unset .planogram-designer-card-name {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.planogram-designer-card.is-overlay {
+  width: 220px;
+  border: 1px solid #91caff;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  cursor: grabbing;
+  transform: rotate(-2deg);
+}
+
+.planogram-designer-card-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.planogram-designer-card-name {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-designer-card-meta {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 1.4;
+  /* 中文不在字间断开（「已放 7」不被拆成两行），只在空格 / 间隔号处换行 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.planogram-designer-card-meta.planogram-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-designer-card-grip {
+  margin-left: auto;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+}
+
+.planogram-designer-card-add.ant-btn {
+  flex: none;
+  margin-left: auto;
+  color: #1677ff;
+}
+
+.planogram-designer-thumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #f0f0f0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  overflow: hidden;
+}
+
+/* 挂钩型号选择卡 */
+
+.planogram-designer-hook-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planogram-designer-hook-card:hover:not(:disabled) {
+  background: #fafafa;
+}
+
+.planogram-designer-hook-card.is-selected {
+  border-color: #1677ff;
+  background: #e6f4ff;
+}
+
+.planogram-designer-hook-card:disabled {
+  cursor: default;
+}
+
+.planogram-designer-hook-card:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.planogram-designer-hook-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ---------- 画布 ---------- */
+
+.planogram-designer-canvas-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.planogram-designer-canvas-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  overflow: auto;
+}
+
+.planogram-designer-canvas-scroll:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.planogram-designer-canvas-inner {
+  position: relative;
+}
+
+.planogram-designer-svg {
+  display: block;
+  touch-action: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Microsoft YaHei', sans-serif;
+}
+
+.planogram-designer-item {
+  cursor: grab;
+}
+
+.planogram-designer-item:active {
+  cursor: grabbing;
+}
+
+.planogram-designer-canvas-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: #667085;
+  font-size: 13px;
+}
+
+/* 选中项上方的浮动工具条 */
+
+.planogram-designer-float {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #1f1f1f;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.planogram-designer-float button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.planogram-designer-float button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.planogram-designer-float button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+
+.planogram-designer-float button.is-danger {
+  color: #ff7875;
+}
+
+/* 图例 */
+
+.planogram-designer-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border-top: 1px solid #f0f0f0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.planogram-designer-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.planogram-designer-legend i.is-placed {
+  border: 1px solid #8c8c8c;
+  background: #fff;
+}
+
+.planogram-designer-legend i.is-selected {
+  border: 1px solid #1677ff;
+  background: #e6f4ff;
+}
+
+.planogram-designer-legend i.is-conflict {
+  border: 1px solid #ff4d4f;
+  background: #fff2f0;
+}
+
+.planogram-designer-legend i.is-ok {
+  border: 1px dashed #52c41a;
+  background: #f6ffed;
+}
+
+.planogram-designer-legend-end {
+  margin-left: auto;
+}
+
+/* ---------- 右栏 ---------- */
+
+.planogram-designer-right {
+  display: flex;
+  flex: 0 0 280px;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.planogram-designer-card-box {
+  padding: 8px 12px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.planogram-designer-card-box h3 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.planogram-designer-empty-note {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.planogram-designer-selected-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.planogram-designer-selected-text {
+  min-width: 0;
+}
+
+.planogram-designer-selected-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.planogram-designer-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 5px 0;
+  font-size: 13px;
+}
+
+.planogram-designer-field-label {
+  flex: none;
+  color: rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+}
+
+.planogram-designer-field-control {
+  width: 96px;
+}
+
+.planogram-designer-field-control.is-wide {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  max-width: 170px;
+}
+
+.planogram-designer-field-text {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-designer-field.is-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.planogram-designer-field-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.planogram-designer-field-grid.is-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.planogram-designer-field-grid.is-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.planogram-designer-field-grid .ant-input-number {
+  width: 100%;
+}
+
+.planogram-designer-field-pair {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.planogram-designer-field-pair .ant-input-number {
+  width: 76px;
+}
+
+.planogram-designer-field-pair .ant-input-number-group-addon {
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.planogram-designer-hint {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.planogram-designer-mini-alert {
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.planogram-designer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.planogram-designer-actions-end {
+  margin-left: auto;
+}
+
+.planogram-designer-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.planogram-designer-stat {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+}
+
+.planogram-designer-stat b {
+  display: block;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.planogram-designer-stat b.is-danger {
+  color: #cf1322;
+}
+
+.planogram-designer-conflict-list {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.planogram-designer-conflict-list.is-inline {
+  max-height: none;
+  margin-top: 6px;
+}
+
+.planogram-designer-conflict-list li {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-designer-conflict-list.is-inline li.is-error {
+  color: #cf1322;
+}
+
+.planogram-designer-conflict-list.is-inline li.is-warn {
+  color: #d46b08;
+}
+
+.planogram-designer-conflict-list button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planogram-designer-conflict-list button:hover {
+  background: #fff2f0;
+}
+
+.planogram-designer-conflict-list button:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.planogram-designer-conflict-name {
+  font-weight: 500;
+}
+
+/* 仅供读屏器朗读的状态提示 */
+.planogram-designer-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- 窄屏：只读，只留页头 + 画布 ---------- */
+
+@media (max-width: 1099px) {
+  .planogram-designer {
+    height: auto;
+  }
+
+  .planogram-designer-work {
+    flex-direction: column;
+  }
+
+  .planogram-designer-canvas-card {
+    min-height: 420px;
+  }
+
+  .planogram-designer-shelf-select {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 200px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .planogram-designer *,
+  .planogram-designer *::before,
+  .planogram-designer *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- 批 3：发布 / 版本 / 预览 ---------- */
+
+/* 版本预览时设计器主体被隐藏（保留状态），显示时不参与布局（display: contents 让子元素直接成为 .planogram-designer 的子项） */
+.planogram-designer-main:not([hidden]) {
+  display: contents;
+}
+
+.planogram-designer-preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.planogram-designer-preview-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planogram-publish-version {
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.planogram-publish-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.planogram-publish-stats dt {
+  color: #667085;
+  font-size: 12px;
+}
+
+.planogram-publish-stats dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.planogram-publish-conflicts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.planogram-publish-conflicts li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+
+.planogram-publish-conflict-text {
+  min-width: 0;
+}
+
+.planogram-publish-conflict-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-versions-hint {
+  margin: 0 0 12px;
+}
+
+.planogram-versions-loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.planogram-versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planogram-versions-list li {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e7eaf0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.planogram-versions-list li.is-active {
+  border-color: #91caff;
+  background: #f0f7ff;
+}
+
+.planogram-versions-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planogram-versions-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.planogram-versions-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.planogram-versions-main:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}

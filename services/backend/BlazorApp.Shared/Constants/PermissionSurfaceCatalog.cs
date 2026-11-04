@@ -56,6 +56,10 @@ namespace BlazorApp.Shared.Constants
             "OrderFront.BatchProductSales.View",
             "Orders.Delete",
             "Orders.Edit",
+            // 商品陈列图：只有 Web 设计器与 Web 型号 / 商品参数页，手机端暂无入口（二期才做手机端只读查看）。
+            "Planogram.Edit",
+            "Planogram.Manage",
+            "Planogram.View",
             "PosProducts.Manage",
             "PosProducts.View",
             "Prices.Delete",

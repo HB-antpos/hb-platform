@@ -1,0 +1,76 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>PDF 版面图</title>
+<link rel="stylesheet" href="common.css">
+<style>
+body{background:#e9e9e9;padding:20px}
+.sheet{width:1218px;height:861px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.18);position:relative;margin:0 auto 24px;padding:28px 34px;overflow:hidden;color:#1f1f1f}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1f1f1f;padding-bottom:8px}
+.hd h1{margin:0;font-size:20px;font-weight:700}
+.hd .meta{font-size:12px;color:#444;margin-top:4px;display:flex;gap:16px;white-space:nowrap}
+.hd .right{text-align:right;font-size:11px;color:#444;line-height:1.5}
+.lg{position:absolute;left:34px;bottom:26px;right:34px;display:flex;justify-content:space-between;font-size:10.5px;color:#444;border-top:1px solid #d9d9d9;padding-top:6px}
+table.pt{width:100%;border-collapse:collapse;font-size:11px}
+table.pt th{background:#f0f0f0;border:1px solid #bfbfbf;padding:4px 6px;text-align:left;font-weight:600}
+table.pt td{border:1px solid #d9d9d9;padding:3.5px 6px;white-space:nowrap}
+table.pt td.c,table.pt th.c{text-align:center}
+table.pt tr.grp td{background:#fafafa;font-weight:600}
+.badge{display:inline-flex;width:15px;height:15px;border-radius:50%;background:#1f1f1f;color:#fff;font-size:9px;align-items:center;justify-content:center;font-weight:600}
+.sum{display:flex;gap:28px;font-size:12px;margin:10px 0 8px}
+.sum b{font-size:16px;margin-right:4px}
+.pg{position:absolute;right:34px;bottom:8px;font-size:10px;color:#888}
+</style></head><body>
+<div class="sheet">
+  <div class="hd" id="p1head"></div>
+  <div id="board" style="position:absolute;left:52px;top:96px"></div>
+  <div style="position:absolute;right:30px;top:118px;width:128px;font-size:10.5px;color:#444;line-height:1.6" id="p1side"></div>
+  <div class="lg" id="p1foot"></div>
+  <div class="pg" id="p1pg"></div>
+</div>
+<div class="sheet">
+  <div class="hd" id="p2head"></div>
+  <div class="sum" id="p2sum"></div>
+  <div style="display:flex;gap:16px"><div style="flex:1" id="t1"></div><div style="flex:1" id="t2"></div></div>
+  <div class="lg" id="p2foot"></div>
+  <div class="pg" id="p2pg"></div>
+</div>
+<script src="plano.js"></script>
+<script>
+const EN=new URLSearchParams(location.search).get('lang')==='en';
+const T=EN?{
+ t1:'Planogram · Stationery Pegboard A1', m1:'Shelf: Single-sided pegboard 900×1200 · 2 bays', m2:'Hook: Double-prong w/ tag 200', m3:'v3 · Published 2026-11-04', m4:'By admin',
+ r1:'Scale approx. 1 : 4.9 · unit mm', r2:'Pitch 25 × 25 · 34 cols × 41 rows / bay', r3:'Cols from left, rows from top · Gap 10/10 mm',
+ lg:'Legend', l1:'No. = checklist line', l2:'● Peg holes (double prong = 2)', l3:'▭ Price tag holder 52×26', l4:'Box: name / last 4 of code × qty per hook',
+ sum:'Totals', s1:'12 products · 51 hooks', s2:'433 units · retail value $1,291', s3:'Board fill 39%',
+ tips:'Set-up notes', k1:'1. Check hook type & hole position against the checklist', k2:'2. Price tag faces out; system price prevails', k3:'3. Photograph and upload to the plan\'s "Execution log"',
+ f1:'Validation: no overflow · no overlap (published v3 passed)', foot:'hotbargain.vip · Planogram · Stationery Pegboard A1 · v3', pg1:'Page 1 / 3', pg2:'Page 2 / 3',
+ t2:'Set-up checklist · Stationery Pegboard A1', n1:'Order: bay → row → column, top to bottom, left to right', n2:'Version v3', n3:'Position: col / row (left prong hole for double hooks)', n4:'Per hook = units on one hook · Total = facings × per hook',
+ c1:'products', c2:'hooks', c3:'units', c4:'retail value', c5:'Bay 1: 31 hooks · Bay 2: 20 hooks',
+ th:['#','Bay','Col/Row','Code','Product','Hook','Per hook','Total','Retail','Notes'], grp:(b,r)=>`Bay ${b} · hook row ${r}`, hook:'Dbl-prong 200', f2:'If out of stock or size mismatch, write in "Notes" and report back', cont:'Continued on page 3 (#41–#51)'
+}:{
+ t1:'商品陈列图 · 文具挂板 A1', m1:'货架 单面洞洞板 900×1200 · 白 · 2 节', m2:'挂钩 双钩带价签 200（未注明者）', m3:'版本 v3 · 已发布 2026-11-04', m4:'制图 admin',
+ r1:'比例约 1 : 4.9 · 单位 mm', r2:'孔距 25 × 25 · 34 列 × 41 行 / 节', r3:'列号自左 1 起，行号自板顶 1 起 · 间距 10 / 10 mm',
+ lg:'图例', l1:'序号 = 执行清单行号', l2:'● 挂孔位置（双钩占 2 孔）', l3:'▭ 价签架 52×26', l4:'方格内：名称 / 货号末 4 位 × 每钩挂数',
+ sum:'合计', s1:'商品 12 种 · 挂钩 51 个', s2:'挂货 433 件 · 零售总值 $1 291', s3:'板面利用 39%',
+ tips:'上货要点', k1:'1. 先按清单核对挂钩型号与孔位', k2:'2. 价签架朝外，价格以系统为准', k3:'3. 拍照回传至方案「执行记录」',
+ f1:'校验：无越界 · 无重叠 · 间距 ≥ 10 mm（发布版 v3 已通过）', foot:'hotbargain.vip · 商品陈列图 · 文具挂板 A1 · v3', pg1:'第 1 页 / 共 3 页', pg2:'第 2 页 / 共 3 页',
+ t2:'执行清单 · 文具挂板 A1', n1:'按「节 → 行 → 列」顺序，自上而下、自左而右上货', n2:'版本 v3', n3:'孔位：列 / 行（双钩取左脚所在孔）', n4:'每钩挂数 = 单钩陈列量 · 合计 = 面位 × 每钩',
+ c1:'商品', c2:'挂钩', c3:'件', c4:'零售总值', c5:'节 1：31 钩 · 节 2：20 钩',
+ th:['#','节','列/行','货号','商品','挂钩','每钩','合计','零售','备注'], grp:(b,r)=>`节 ${b} · 第 ${r} 行挂孔`, hook:'双钩价签 200', f2:'缺货或尺寸不符时，在「备注」栏记录后回传', cont:'续第 3 页（#41–#51）'
+};
+document.getElementById('p1head').innerHTML=`<div><h1>${T.t1}</h1><div class="meta"><span>${T.m1}</span><span>${T.m2}</span><span>${T.m3}</span><span>${T.m4}</span></div></div><div class="right"><div style="font-weight:700;font-size:14px;color:#1f1f1f">HB Admin Platform</div>${T.r1}<br>${T.r2}<br>${T.r3}</div>`;
+document.getElementById('p1side').innerHTML=`<div style="font-weight:600;color:#1f1f1f;margin-bottom:4px">${T.lg}</div><div><span class="badge">1</span> ${T.l1}</div><div>${T.l2}</div><div>${T.l3}</div><div>${T.l4}</div><div style="margin-top:8px;font-weight:600;color:#1f1f1f">${T.sum}</div><div>${T.s1}</div><div>${T.s2}</div><div>${T.s3}</div><div style="margin-top:8px;font-weight:600;color:#1f1f1f">${T.tips}</div><div>${T.k1}</div><div>${T.k2}</div><div>${T.k3}</div>`;
+document.getElementById('p1foot').innerHTML=`<span>${T.f1}</span><span>${T.foot}</span>`; document.getElementById('p1pg').textContent=T.pg1;
+document.getElementById('p2head').innerHTML=`<div><h1>${T.t2}</h1><div class="meta"><span>${T.n1}</span><span>${T.n2}</span></div></div><div class="right">${T.n3}<br>${T.n4}</div>`;
+document.getElementById('p2sum').innerHTML=`<span><b>12</b>${T.c1}</span><span><b>51</b>${T.c2}</span><span><b>433</b>${T.c3}</span><span><b>$1 291</b>${T.c4}</span><span class="muted">${T.c5}</span>`;
+document.getElementById('p2foot').innerHTML=`<span>${T.f2}</span><span>${T.foot}</span>`; document.getElementById('p2pg').textContent=T.pg2;
+const r=PLANO.render({scale:0.52,ox:36,oy:44,print:true,numbered:true,coords:true,lang:EN?'en':'zh'});
+document.getElementById('board').innerHTML=r.svg;
+// 执行清单（两栏）
+const rows=PLANO.items.map((it,i)=>{const p=PLANO.P[it[1]];return {n:i+1,bay:it[0]+1,col:it[2]+1,row:it[3]+1,p}});
+function table(list){const h0=T.th;let h=`<table class="pt"><thead><tr><th class="c" style="width:30px">${h0[0]}</th><th class="c">${h0[1]}</th><th class="c">${h0[2]}</th><th>${h0[3]}</th><th>${h0[4]}</th><th>${h0[5]}</th><th class="c">${h0[6]}</th><th class="c">${h0[7]}</th><th class="c">${h0[8]}</th><th style="width:54px">${h0[9]}</th></tr></thead><tbody>`;
+ let lastKey='';for(const r of list){const key=r.bay+'-'+r.row;if(key!==lastKey){h+=`<tr class="grp"><td colspan="10">${T.grp(r.bay,r.row)}</td></tr>`;lastKey=key;}
+ h+=`<tr><td class="c"><span class="badge">${r.n}</span></td><td class="c">${r.bay}</td><td class="c">${r.col} / ${r.row}</td><td style="font-family:Menlo,Consolas,monospace">${r.p.code}</td><td>${EN?r.p.en:r.p.name}</td><td>${T.hook}</td><td class="c">${r.p.q}</td><td class="c"><b>${r.p.q}</b></td><td class="c">$${r.p.price.toFixed(2)}</td><td></td></tr>`;}
+ return h+'</tbody></table>';}
+document.getElementById('t1').innerHTML=table(rows.slice(0,20));
+document.getElementById('t2').innerHTML=table(rows.slice(20,40))+`<div style="font-size:10.5px;color:#888;margin-top:6px;text-align:right">${T.cont}</div>`;
+</script>
+</body></html>

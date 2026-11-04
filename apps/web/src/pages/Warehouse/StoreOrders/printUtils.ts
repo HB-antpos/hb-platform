@@ -18,16 +18,37 @@ interface DownloadPdfOptions {
   avoidBreakOffsets?: number[]
 }
 
+/**
+ * 分页 PDF 的纸张规格：不传 = A4 纵向（分店订单 / 拣货单的既有行为，完全不变）；
+ * 商品陈列图按用户选择用 A3 横向、A4 横向、A4 纵向。页面 DOM 的宽高比必须与纸张一致（见 getPdfPageLayoutSignature）。
+ */
+export interface PdfPageFormat {
+  paper: 'a3' | 'a4'
+  orientation: 'portrait' | 'landscape'
+}
+
+export interface PdfPageGeometry {
+  /** jsPDF 构造函数的方向参数。 */
+  orientation: 'p' | 'l'
+  paper: 'a3' | 'a4'
+  widthMm: number
+  heightMm: number
+  /** 高 / 宽，页面布局稳定性检查按它判断 DOM 是不是对应纸张。 */
+  aspectRatio: number
+}
+
 interface PagedPdfOptions {
   createCanvasContextErrorMessage?: string
   layoutNotReadyErrorMessage?: string
   pageSelector?: string
+  pageFormat?: PdfPageFormat
 }
 
 interface WaitForStablePdfPageElementsOptions {
   layoutNotReadyErrorMessage?: string
   maxFrames?: number
   pageSelector?: string
+  pageFormat?: PdfPageFormat
   waitForFrame?: () => Promise<void>
 }
 
@@ -41,6 +62,24 @@ const DEFAULT_LAYOUT_STABILITY_FRAMES = 6
 export interface PdfSlicePlanItem {
   offsetY: number
   height: number
+}
+
+const DEFAULT_PDF_PAGE_FORMAT: PdfPageFormat = { paper: 'a4', orientation: 'portrait' }
+
+/** 纸张规格 → jsPDF 参数与页面尺寸（毫米）。A3 = 297 × 420，A4 = 210 × 297；横向宽高互换。 */
+export function resolvePdfPageGeometry(format: PdfPageFormat = DEFAULT_PDF_PAGE_FORMAT): PdfPageGeometry {
+  const short = format.paper === 'a3' ? 297 : 210
+  const long = format.paper === 'a3' ? 420 : 297
+  const landscape = format.orientation === 'landscape'
+  const widthMm = landscape ? long : short
+  const heightMm = landscape ? short : long
+  return {
+    orientation: landscape ? 'l' : 'p',
+    paper: format.paper,
+    widthMm,
+    heightMm,
+    aspectRatio: heightMm / widthMm,
+  }
 }
 
 function normalizePrintLocale(locale?: string) {
@@ -227,14 +266,14 @@ function getPdfPageElements(root: HTMLElement, pageSelector: string) {
   return pages.length > 0 ? pages : [root]
 }
 
-function getPdfPageLayoutSignature(pageElements: HTMLElement[]) {
+function getPdfPageLayoutSignature(pageElements: HTMLElement[], expectedAspectRatio = A4_ASPECT_RATIO) {
   const pageSignatures = pageElements.map((pageElement) => {
     const rect = pageElement.getBoundingClientRect()
     const aspectRatio = rect.width > 0 ? rect.height / rect.width : 0
     const hasA4Geometry =
       rect.width > 0 &&
       rect.height > 0 &&
-      Math.abs(aspectRatio - A4_ASPECT_RATIO) <= A4_ASPECT_RATIO_TOLERANCE
+      Math.abs(aspectRatio - expectedAspectRatio) <= A4_ASPECT_RATIO_TOLERANCE
 
     if (!pageElement.isConnected || !hasA4Geometry) {
       return null
@@ -263,6 +302,7 @@ export async function waitForStablePdfPageElements(
   const maxFrames = Math.max(2, Math.floor(options.maxFrames ?? DEFAULT_LAYOUT_STABILITY_FRAMES))
   const pageSelector = options.pageSelector || '.store-order-pdf-page'
   const waitForFrame = options.waitForFrame || waitForAnimationFrame
+  const expectedAspectRatio = resolvePdfPageGeometry(options.pageFormat).aspectRatio
   let previousSignature: string | null = null
 
   if (!root.isConnected) {
@@ -277,7 +317,7 @@ export async function waitForStablePdfPageElements(
 
     // 每帧重新读取当前节点，避免 React/KeepAlive 更新后继续截图旧 DOM 引用。
     const pageElements = getPdfPageElements(root, pageSelector)
-    const signature = getPdfPageLayoutSignature(pageElements)
+    const signature = getPdfPageLayoutSignature(pageElements, expectedAspectRatio)
     if (!signature) {
       previousSignature = null
       continue
@@ -298,6 +338,7 @@ export function getCurrentReadyPdfPageElement(
   pageIndex: number,
   expectedPageCount: number,
   errorMessage = '打印内容尚未准备完成，请稍后重试',
+  pageFormat?: PdfPageFormat,
 ) {
   if (!root.isConnected) {
     throw new Error(errorMessage)
@@ -309,7 +350,7 @@ export function getCurrentReadyPdfPageElement(
   if (
     currentPageElements.length !== expectedPageCount ||
     !currentPageElement ||
-    !getPdfPageLayoutSignature([currentPageElement])
+    !getPdfPageLayoutSignature([currentPageElement], resolvePdfPageGeometry(pageFormat).aspectRatio)
   ) {
     throw new Error(errorMessage)
   }
@@ -366,10 +407,13 @@ async function createPdfDocumentFromPages(root: HTMLElement, options?: PagedPdfO
   const pageElements = await waitForStablePdfPageElements(root, {
     layoutNotReadyErrorMessage: options?.layoutNotReadyErrorMessage,
     pageSelector,
+    pageFormat: options?.pageFormat,
   })
   const errorMessage = options?.layoutNotReadyErrorMessage || '打印内容尚未准备完成，请稍后重试'
   const expectedPageCount = pageElements.length
-  const pdf = new jsPDF('p', 'mm', 'a4')
+  // 纸张规格不传时与以前完全一致：A4 纵向 210 × 297
+  const geometry = resolvePdfPageGeometry(options?.pageFormat)
+  const pdf = new jsPDF(geometry.orientation, 'mm', geometry.paper)
 
   for (let pageIndex = 0; pageIndex < expectedPageCount; pageIndex += 1) {
     const pageElement = getCurrentReadyPdfPageElement(
@@ -378,6 +422,7 @@ async function createPdfDocumentFromPages(root: HTMLElement, options?: PagedPdfO
       pageIndex,
       expectedPageCount,
       errorMessage,
+      options?.pageFormat,
     )
     const canvas = await html2canvas(pageElement, {
       scale: 2,
@@ -391,6 +436,7 @@ async function createPdfDocumentFromPages(root: HTMLElement, options?: PagedPdfO
       pageIndex,
       expectedPageCount,
       errorMessage,
+      options?.pageFormat,
     )
     if (currentPageElement !== pageElement) {
       throw new Error(errorMessage)
@@ -407,7 +453,7 @@ async function createPdfDocumentFromPages(root: HTMLElement, options?: PagedPdfO
     }
 
     const imageData = getPdfSliceImageData(canvas)
-    pdf.addImage(imageData, PDF_IMAGE_FORMAT, 0, 0, 210, 297)
+    pdf.addImage(imageData, PDF_IMAGE_FORMAT, 0, 0, geometry.widthMm, geometry.heightMm)
   }
 
   return pdf
@@ -448,6 +494,12 @@ export async function downloadElementAsPdf(element: HTMLElement, fileName: strin
   const pdf = await createPdfDocumentFromElement(element, options)
 
   pdf.save(fileName)
+}
+
+/** 分页 PDF 输出为 Blob（不触发下载 / 打印）：商品陈列图的自动化验证与需要自行处理文件的调用方使用。 */
+export async function createElementPagesPdfBlob(element: HTMLElement, options?: PagedPdfOptions): Promise<Blob> {
+  const pdf = await createPdfDocumentFromPages(element, options)
+  return pdf.output('blob') as Blob
 }
 
 export async function downloadElementPagesAsPdf(element: HTMLElement, fileName: string, options?: PagedPdfOptions) {

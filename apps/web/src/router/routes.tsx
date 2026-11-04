@@ -79,6 +79,10 @@ const SupplierPreorderOrderFormPage = lazy(() => import('../pages/SupplierPreord
 const PosAdminCashRegisterUsersPage = lazy(() => import('../pages/PosAdmin/CashRegisterUsers'))
 const PosAdminPricingStrategiesPage = lazy(() => import('../pages/PosAdmin/PricingStrategies'))
 const PosAdminPromotionsPage = lazy(() => import('../pages/PosAdmin/Promotions'))
+// 商品陈列图：商品陈列参数 + 货架与挂钩型号（页面文案与 SVG 预览都随页面懒加载，不进首屏包）。
+const PosAdminPlanogramPage = lazy(() => import('../pages/PosAdmin/Planogram'))
+// 陈列方案设计器（子页面，不进菜单）：画布 / 拖拽 / 几何引擎独立成块，只在打开某个方案时才加载。
+const PosAdminPlanogramDesignerPage = lazy(() => import('../pages/PosAdmin/Planogram/Designer'))
 const PosAdminScheduleAttendancePage = lazy(() => import('../pages/PosAdmin/ScheduleAttendance'))
 const PosAdminAttendancePayrollPage = lazy(() => import('../pages/PosAdmin/AttendancePayroll'))
 const PosAdminMyobPage = lazy(() => import('../pages/PosAdmin/Myob'))
@@ -269,6 +273,8 @@ const PRODUCTS_PRICING_NAV_GROUP: NavGroupDefinition = {
     { path: '/pos-admin/store-product-price', title: 'menu.storeProductPrice', accessKey: 'canManageStoreProducts', keepAlive: true, element: <PosAdminStoreProductPricePage /> },
     { path: '/pos-admin/pricing-strategies', title: 'menu.pricingStrategies', accessKey: 'canManagePricing', keepAlive: true, element: <PosAdminPricingStrategiesPage /> },
     { path: '/pos-admin/promotions', title: 'menu.promotions', accessKey: 'canManagePromotions', keepAlive: true, element: <PosAdminPromotionsPage /> },
+    // 商品陈列图：Planogram.View（Edit / Manage 隐含）；页内页签与按钮再按 canEditPlanogram / canManagePlanogram 显隐。保活：切走再回来保留页签、筛选与分页。
+    { path: '/pos-admin/planograms', title: 'menu.planogram', accessKey: 'canViewPlanogram', keepAlive: true, element: <PosAdminPlanogramPage /> },
   ],
 }
 
@@ -931,6 +937,20 @@ export const appRoutes: AppRouteItem[] = [
           activeMenu: '/pos-admin/operation-logs',
         },
         element: <Navigate to="/pos-admin/operation-logs?source=legacy" replace />,
+      },
+      {
+        // 陈列方案设计器：从「商品陈列图」的方案列表「打开」进入，不进菜单；每个方案一个页签（保活缓存键 = 路径），
+        // 方案 guid 在页面里经保活路由上下文读取。查看权限即可进入（只读），编辑能力页内再按 canEditPlanogram 控制。
+        path: '/pos-admin/planograms/:guid/design',
+        meta: {
+          title: 'menu.planogramDesigner',
+          hidden: true,
+          keepAlive: true,
+          accessKey: 'canViewPlanogram',
+          activeMenu: PRODUCTS_PRICING_NAV_GROUP.path,
+          dynamicTitle: () => i18n.t('menu.planogramDesigner'),
+        },
+        element: <PosAdminPlanogramDesignerPage />,
       },
       {
         path: '/pos-admin/linkly-settlements/:id',

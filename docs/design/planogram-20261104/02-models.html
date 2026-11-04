@@ -1,0 +1,188 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>货架与挂钩型号</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>
+.pagehead{display:flex;align-items:center;justify-content:space-between}
+.pagehead h1{font-size:18px;margin:0;font-weight:600}
+.ptabs{display:flex;border-bottom:1px solid #f0f0f0;padding:0 16px}
+.ptabs span{padding:12px 4px;margin-right:24px;font-size:14px;color:rgba(0,0,0,.65);border-bottom:2px solid transparent}
+.ptabs span.on{color:#1677ff;border-color:#1677ff;font-weight:500}
+.filters{display:flex;gap:10px;padding:14px 16px;align-items:center}
+.mask{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.drawer{position:absolute;right:0;top:0;bottom:0;width:600px;background:#fff;box-shadow:-6px 0 16px rgba(0,0,0,.08);display:flex;flex-direction:column}
+.drawer .dh{height:56px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:16px;font-weight:600}
+.drawer .db{flex:1;overflow:hidden;padding:16px 24px}
+.drawer .df{height:56px;border-top:1px solid #f0f0f0;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 24px}
+.sec{font-size:13px;font-weight:600;margin:10px 0 6px;display:flex;align-items:center;gap:8px}
+.sec:first-child{margin-top:0}
+.sec .muted{font-weight:400}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px}
+.grid.c3{grid-template-columns:1fr 1fr 1fr}
+.fld label{display:block;font-size:12px;color:rgba(0,0,0,.65);margin-bottom:4px}
+.fld .input,.fld .select{height:30px;border-radius:8px;width:100%}
+.fld .input.auto{background:#fafafa;color:rgba(0,0,0,.65)}
+.unit{color:rgba(0,0,0,.35);font-size:12px;margin-left:auto}
+.preview{border:1px dashed #d9d9d9;border-radius:8px;padding:10px;background:#fafafa;display:flex;gap:16px;align-items:flex-start}
+.preview .cap{font-size:11px;color:rgba(0,0,0,.45);line-height:1.6}
+.ops a{color:#1677ff;margin-right:12px;font-size:13px}
+.ops a.danger{color:#ff4d4f}
+</style></head><body>
+<div class="app" style="position:relative">
+  <aside class="sider">
+    <div class="brand"><div class="brand-mark">HB</div><span class="brand-text">HB Admin Platform</span></div>
+    <div class="menu">
+      <div class="item"><i class="ti ti-layout-dashboard ic"></i>工作台</div>
+      <div class="group">商品与价格</div>
+      <div class="item sub">商品维护</div>
+      <div class="item sub">分店商品价格</div>
+      <div class="item sub">促销活动</div>
+      <div class="item sub active">商品陈列图</div>
+      <div class="item sub">价格任务</div>
+      <div class="group">结算与现金</div>
+      <div class="item sub">门店现金</div>
+      <div class="item sub">结算明细</div>
+      <div class="group">设备与远程</div>
+      <div class="item sub">设备管理</div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="header">
+      <div class="crumb"><i class="ti ti-layout-sidebar-left-collapse" style="margin-right:14px;color:rgba(0,0,0,.65)"></i>商品与价格<span class="sep">/</span>商品陈列图<span class="sep">/</span><b>货架与挂钩型号</b></div>
+      <div class="hdr-right"><span class="muted">中文 ▾</span><span class="btn primary"><i class="ti ti-shopping-bag"></i>订货前台</span><span class="avatar"><i class="ti ti-user"></i></span><div style="line-height:1.2"><div style="font-weight:600;font-size:13px">admin</div><div class="muted tiny">Administrator</div></div></div>
+    </div>
+    <div class="tabs"><span class="tab"><i class="ti ti-home"></i>工作台</span><span class="tab">商品陈列图 <i class="ti ti-x muted"></i></span><span class="tab on">货架与挂钩型号 <i class="ti ti-x muted"></i></span></div>
+    <div class="content">
+      <div class="pagehead"><div><h1>货架与挂钩型号</h1><div class="muted tiny">陈列图的基础资料：先维护货架的板面孔阵与挂钩的尺寸，设计器才能按毫米校验</div></div>
+        <div style="display:flex;gap:8px"><span class="btn"><i class="ti ti-file-import"></i>导入 Excel</span><span class="btn primary"><i class="ti ti-plus"></i>新建<span id="newlbl"></span></span></div></div>
+      <div class="card" style="flex:1;min-height:0">
+        <div class="ptabs" id="ptabs"></div>
+        <div class="filters"><div class="input" style="width:260px"><i class="ti ti-search muted"></i><span class="ph">名称 / 编码</span></div><span class="select">类型：全部<span class="caret">▼</span></span><span class="select">状态：启用<span class="caret">▼</span></span><span class="btn text" style="margin-left:auto"><i class="ti ti-refresh"></i></span></div>
+        <div id="table"></div>
+      </div>
+    </div>
+  </div>
+  <div class="mask"></div>
+  <div class="drawer" id="drawer"></div>
+</div>
+<script>
+const v=new URLSearchParams(location.search).get('v')||'shelf';
+document.getElementById('ptabs').innerHTML=`<span class="${v==='shelf'?'on':''}">货架型号 4</span><span class="${v==='hook'?'on':''}">挂钩型号 5</span><span>层板型号 <span class="tag gray" style="height:18px;font-size:11px;margin-left:4px">二期</span></span>`;
+document.getElementById('newlbl').textContent=v==='shelf'?'货架型号':'挂钩型号';
+if(v==='shelf'){
+document.getElementById('table').innerHTML=`<table class="tbl"><thead><tr><th>型号名称</th><th>编码</th><th>类型</th><th>节宽 × 总高</th><th>底板深</th><th>孔距 横/纵</th><th>孔阵 列 × 行</th><th>被方案引用</th><th>状态</th><th>操作</th></tr></thead><tbody>
+<tr class="sel"><td><b>单面洞洞板 900×1200 · 白</b></td><td class="mono">G-S-PEG-90x30x120</td><td><span class="tag">单面</span></td><td>900 × 1200 mm</td><td>300 mm</td><td>25 / 25</td><td>34 × 41</td><td>6</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>单面洞洞板 900×1500 · 白</td><td class="mono">G-S-PEG-90x30x150</td><td><span class="tag">单面</span></td><td>900 × 1500 mm</td><td>300 mm</td><td>25 / 25</td><td>34 × 53</td><td>3</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>双面洞洞板 1200×1800 · 白</td><td class="mono">G-D-PEG-120x45x180</td><td><span class="tag">双面</span></td><td>1200 × 1800 mm</td><td>450 mm</td><td>25 / 25</td><td>46 × 65</td><td>2</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>单面洞洞板 600×1200 · 白</td><td class="mono">G-S-PEG-60x30x120</td><td><span class="tag">单面</span></td><td>600 × 1200 mm</td><td>300 mm</td><td>25 / 25</td><td>22 × 41</td><td>0</td><td><span class="tag gray">停用</span></td><td class="ops"><a>编辑</a><a>复制</a><a>启用</a></td></tr>
+</tbody></table>`;
+// 预览 SVG：一节货架正视图 + 尺寸线
+const S=0.13, W=900,H=1200,BH=150,IN=870,UP=30; const ox=40,oy=18;
+let sv=`<svg width="${W*S+ox+60}" height="${H*S+oy+30}" xmlns="http://www.w3.org/2000/svg" font-size="9" font-family="-apple-system,PingFang SC,Segoe UI,sans-serif">`;
+sv+=`<defs><pattern id="h" width="${25*S}" height="${25*S}" patternUnits="userSpaceOnUse"><circle cx="${12.5*S}" cy="${12.5*S}" r=".9" fill="#bfbfbf"/></pattern></defs>`;
+sv+=`<rect x="${ox}" y="${oy}" width="${W*S}" height="${H*S}" fill="#f5f5f5" stroke="#bfbfbf"/>`;
+sv+=`<rect x="${ox+15*S}" y="${oy}" width="${IN*S}" height="${(H-BH)*S}" fill="#fff" stroke="#d9d9d9"/>`;
+sv+=`<rect x="${ox+(15+12.5)*S}" y="${oy+12.5*S}" width="${34*25*S}" height="${41*25*S}" fill="url(#h)"/>`;
+sv+=`<rect x="${ox}" y="${oy}" width="${UP*S}" height="${H*S}" fill="#e8e8e8" stroke="#bfbfbf"/><rect x="${ox+W*S-UP*S}" y="${oy}" width="${UP*S}" height="${H*S}" fill="#e8e8e8" stroke="#bfbfbf"/>`;
+sv+=`<rect x="${ox}" y="${oy+(H-BH)*S}" width="${W*S}" height="${BH*S}" fill="#ededed" stroke="#bfbfbf"/>`;
+// 尺寸线
+const dim=(x1,y1,x2,y2,t,dx=0,dy=0)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#1677ff" stroke-width=".8"/><text x="${(x1+x2)/2+dx}" y="${(y1+y2)/2+dy}" fill="#1677ff" text-anchor="middle">${t}</text>`;
+sv+=dim(ox,oy-8,ox+W*S,oy-8,'节宽 900',0,-3);
+sv+=dim(ox+W*S+10,oy,ox+W*S+10,oy+H*S,'',0,0)+`<text x="${ox+W*S+14}" y="${oy+H*S/2}" fill="#1677ff">总高</text><text x="${ox+W*S+14}" y="${oy+H*S/2+11}" fill="#1677ff">1200</text>`;
+sv+=dim(ox+W*S+34,oy,ox+W*S+34,oy+(H-BH)*S,'')+`<text x="${ox+W*S+38}" y="${oy+(H-BH)*S/2}" fill="#52c41a">板面</text><text x="${ox+W*S+38}" y="${oy+(H-BH)*S/2+11}" fill="#52c41a">1050</text>`;
+sv+=`<text x="${ox+W*S/2}" y="${oy+(H-BH/2)*S+3}" text-anchor="middle" fill="rgba(0,0,0,.45)">底板 深 300 · 面高 150</text>`;
+sv+=`<text x="${ox-30}" y="${oy+H*S+22}" fill="rgba(0,0,0,.45)">孔距 25 × 25 · 首孔距左 25 / 距顶 25 · 34 列 × 41 行</text>`;
+sv+='</svg>';
+document.getElementById('drawer').innerHTML=`<div class="dh">编辑货架型号<i class="ti ti-x muted" style="font-weight:400"></i></div><div class="db">
+<div class="sec">基本信息</div>
+<div class="grid">
+ <div class="fld"><label>型号名称 *</label><div class="input">单面洞洞板 900×1200 · 白</div></div>
+ <div class="fld"><label>编码 *</label><div class="input mono">G-S-PEG-90x30x120</div></div>
+ <div class="fld"><label>类型</label><span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center">单面</span><span style="flex:1;justify-content:center">双面</span></span></div>
+ <div class="fld"><label>颜色 / 来源</label><div class="input">白 · Shop Fittings Store G</div></div>
+</div>
+<div class="sec">外形尺寸 <span class="muted tiny">单位 mm，对应采购页的 Gondola Length / Height / Base Shelf Depth</span></div>
+<div class="grid c3">
+ <div class="fld"><label>节宽（Length）*</label><div class="input">900<span class="unit">mm</span></div></div>
+ <div class="fld"><label>总高（Height）*</label><div class="input">1200<span class="unit">mm</span></div></div>
+ <div class="fld"><label>底板深（Base Depth）</label><div class="input">300<span class="unit">mm</span></div></div>
+ <div class="fld"><label>底板面离地高</label><div class="input">150<span class="unit">mm</span></div></div>
+ <div class="fld"><label>立柱宽</label><div class="input">30<span class="unit">mm</span></div></div>
+ <div class="fld"><label>板面可用 宽 × 高</label><div class="input auto">870 × 1050<span class="unit">自动</span></div></div>
+</div>
+<div class="sec">孔阵（洞洞板） <span class="muted tiny">按实板量取填写、可随时修改（支持 25.4 等小数）；设计器按此吸附与校验</span></div>
+<div class="grid c3">
+ <div class="fld"><label>孔距 横向 *</label><div class="input">25<span class="unit">mm</span></div></div>
+ <div class="fld"><label>孔距 纵向 *</label><div class="input">25<span class="unit">mm</span></div></div>
+ <div class="fld"><label>孔径</label><div class="input">6<span class="unit">mm</span></div></div>
+ <div class="fld"><label>首孔距板左边</label><div class="input">25<span class="unit">mm</span></div></div>
+ <div class="fld"><label>首孔距板顶</label><div class="input">25<span class="unit">mm</span></div></div>
+ <div class="fld"><label>横向孔数 × 纵向孔数</label><div class="input auto">34 × 41<span class="unit">自动，可改</span></div></div>
+</div>
+<div class="grid" style="margin-top:10px">
+ <div class="fld"><label>行号起算</label><span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center">从板顶</span><span style="flex:1;justify-content:center">从底板</span></span></div>
+ <div class="fld"><label>启用</label><div style="height:30px;display:flex;align-items:center;gap:8px"><span class="switch"></span><span class="tiny muted">停用后已有方案仍可查看，不可新建</span></div></div>
+</div>
+<div class="sec" style="margin-top:10px">预览 <span class="muted tiny">正视，灰色为立柱与底板</span></div>
+<div class="preview">${sv}<div class="cap">孔数换算：⌊(870 − 2×25) ÷ 25⌋ + 1 = 34 列；<br>⌊(1050 − 2×25) ÷ 25⌋ + 1 = 41 行。<br><br>手改孔数时以手填为准，<br>并提示与换算值的差异。</div></div>
+</div><div class="df"><span class="btn">取消</span><span class="btn primary">保存</span></div>`;
+} else {
+document.getElementById('table').innerHTML=`<table class="tbl"><thead><tr><th>型号名称</th><th>编码</th><th>类型</th><th>臂长 L</th><th>钩高 H</th><th>价签</th><th>占孔 横×纵</th><th>承重</th><th>被方案引用</th><th>状态</th><th>操作</th></tr></thead><tbody>
+<tr><td>双钩带价签 150 · 黑</td><td class="mono">HK-D-PT-150</td><td><span class="tag">双钩</span></td><td>150 mm</td><td>50 mm</td><td>52 × 26</td><td>2 × 1</td><td>3 kg</td><td>2</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr class="sel"><td><b>双钩带价签 200 · 黑</b></td><td class="mono">HK-D-PT-200</td><td><span class="tag">双钩</span></td><td>200 mm</td><td>50 mm</td><td>52 × 26</td><td>2 × 1</td><td>3 kg</td><td>6</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>双钩带价签 250 · 黑</td><td class="mono">HK-D-PT-250</td><td><span class="tag">双钩</span></td><td>250 mm</td><td>50 mm</td><td>52 × 26</td><td>2 × 1</td><td>4 kg</td><td>1</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>双钩带价签 300 · 黑</td><td class="mono">HK-D-PT-300</td><td><span class="tag">双钩</span></td><td>300 mm</td><td>50 mm</td><td>52 × 26</td><td>2 × 1</td><td>4 kg</td><td>0</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+<tr><td>单钩 200 · 镀铬</td><td class="mono">HK-S-200</td><td><span class="tag">单钩</span></td><td>200 mm</td><td>—</td><td>无</td><td>1 × 1</td><td>2 kg</td><td>1</td><td><span class="tag green">启用</span></td><td class="ops"><a>编辑</a><a>复制</a><a class="danger">停用</a></td></tr>
+</tbody></table>`;
+// 侧视图预览（对应实物图：上臂带价签，下臂挂货，后脚插两孔）
+let sv=`<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" font-size="9" font-family="-apple-system,PingFang SC,Segoe UI,sans-serif">`;
+sv+=`<rect x="286" y="10" width="10" height="160" fill="#f0f0f0" stroke="#bfbfbf"/>`; // 洞洞板侧面
+for(let y=20;y<170;y+=15)sv+=`<circle cx="291" cy="${y}" r="1.6" fill="#bfbfbf"/>`;
+// 挂钩：后脚、上臂、下臂
+sv+=`<path d="M291 50 l6 -8 M291 50 L286 50 L286 60 L291 60 L291 52" fill="none" stroke="#1f1f1f" stroke-width="3" stroke-linecap="round"/>`;
+sv+=`<path d="M291 50 L72 50" stroke="#1f1f1f" stroke-width="3.5" stroke-linecap="round"/>`; // 上臂（价签臂）
+sv+=`<path d="M72 50 L66 64" stroke="#1f1f1f" stroke-width="2" stroke-linecap="round"/><rect x="60" y="64" width="8" height="26" rx="1.5" fill="#fff" stroke="#1f1f1f" stroke-width="1.2"/>`; // 价签架：从上臂前端垂下，底边高于下臂 10
+sv+=`<path d="M291 60 L291 100 L60 100 L48 90" fill="none" stroke="#1f1f1f" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`; // 下臂（挂货臂）上翘
+// 挂着的商品（侧面厚度）
+for(let i=0;i<9;i++){const x=78+i*20;sv+=`<rect x="${x}" y="${90}" width="12" height="66" fill="#fff1b8" stroke="#8c8c8c" stroke-width=".8" opacity=".9"/>`;}
+// 尺寸线
+sv+=`<line x1="60" y1="120" x2="291" y2="120" stroke="#1677ff" stroke-width=".8" stroke-dasharray="3 2"/><text x="175" y="131" text-anchor="middle" fill="#1677ff">臂长 L = 200</text>`;
+sv+=`<line x1="305" y1="50" x2="305" y2="100" stroke="#1677ff" stroke-width=".8"/><text x="308" y="78" fill="#1677ff">H</text><text x="300" y="112" fill="#1677ff" font-size="8">50</text>`;
+sv+=`<line x1="60" y1="168" x2="80" y2="168" stroke="#fa8c16" stroke-width=".8"/><text x="70" y="180" text-anchor="middle" fill="#fa8c16">预留 20</text>`;
+sv+=`<text x="30" y="60" fill="rgba(0,0,0,.45)">价签 52×26</text><line x1="54" y1="90" x2="54" y2="100" stroke="#fa8c16" stroke-width=".8"/><text x="10" y="98" fill="#fa8c16" font-size="8">底边高 10</text>`;
+sv+=`<text x="100" y="178" font-size="8.5" fill="rgba(0,0,0,.55)">每钩挂数 = ⌊(L − 预留) ÷ 包装厚⌋ = ⌊180 ÷ 20⌋ = 9</text>`;
+sv+='</svg>';
+document.getElementById('drawer').innerHTML=`<div class="dh">编辑挂钩型号<i class="ti ti-x muted" style="font-weight:400"></i></div><div class="db">
+<div class="sec">基本信息</div>
+<div class="grid">
+ <div class="fld"><label>型号名称 *</label><div class="input">双钩带价签 200 · 黑</div></div>
+ <div class="fld"><label>编码 *</label><div class="input mono">HK-D-PT-200</div></div>
+ <div class="fld"><label>钩型</label><span class="seg" style="width:100%"><span style="flex:1;justify-content:center">单钩</span><span class="on" style="flex:1;justify-content:center">双钩</span></span></div>
+ <div class="fld"><label>价签臂</label><span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center">有</span><span style="flex:1;justify-content:center">无</span></span></div>
+</div>
+<div class="sec">尺寸 <span class="muted tiny">单位 mm，按实物量取</span></div>
+<div class="grid c3">
+ <div class="fld"><label>臂长 L *</label><div class="input">200<span class="unit">mm</span></div></div>
+ <div class="fld"><label>钩高 H（上下臂间距）*</label><div class="input">50<span class="unit">mm</span></div></div>
+ <div class="fld"><label>线径</label><div class="input">5<span class="unit">mm</span></div></div>
+ <div class="fld"><label>价签架 宽 × 高</label><div class="input">52 × 26<span class="unit">mm</span></div></div>
+ <div class="fld"><label>臂端预留（不挂货）</label><div class="input">20<span class="unit">mm</span></div></div>
+ <div class="fld"><label>承重</label><div class="input">3<span class="unit">kg</span></div></div>
+ <div class="fld"><label>价签架底边高于挂货臂 *</label><div class="input">10<span class="unit">mm</span></div></div>
+ <div class="fld"><label>价签架顶边距挂孔</label><div class="input auto">14<span class="unit">= H − 10 − 26</span></div></div>
+</div>
+<div class="sec">占孔与挂货基准 <span class="muted tiny">设计器定位用</span></div>
+<div class="grid c3">
+ <div class="fld"><label>横向占孔</label><div class="input">2<span class="unit">孔</span></div></div>
+ <div class="fld"><label>纵向占孔</label><div class="input">1<span class="unit">孔</span></div></div>
+ <div class="fld"><label>挂货臂相对挂孔下落</label><div class="input auto">50<span class="unit">= H</span></div></div>
+</div>
+<div class="grid" style="margin-top:10px">
+ <div class="fld"><label>适用货架孔距</label><div class="input">25 mm（通用）</div></div>
+ <div class="fld"><label>启用</label><div style="height:30px;display:flex;align-items:center;gap:8px"><span class="switch"></span><span class="tiny muted">停用后已有方案仍可查看</span></div></div>
+</div>
+<div class="sec" style="margin-top:10px">预览（侧视）</div>
+<div class="preview">${sv}<div class="cap">商品挂在下臂，顶边 = 下臂 − 吊孔偏移（默认 10）。<br>价签架从上臂前端垂下，底边高于下臂 10 mm，<br>正好压在商品顶边；吊孔偏移更大的商品会被盖住一截。<br><br>横向占位 = max(包装宽, 价签宽 52)。<br>承重用于提示：挂数 × 单件重 > 承重时标黄。</div></div>
+</div><div class="df"><span class="btn">取消</span><span class="btn primary">保存</span></div>`;
+}
+</script>
+</body></html>

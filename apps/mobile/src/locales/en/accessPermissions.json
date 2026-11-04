@@ -27,6 +27,7 @@
     "前台订货": "Ordering portal",
     "后台管理": "Back-office management",
     "商品管理": "Product management",
+    "商品陈列图": "Product planograms",
     "国内采购": "China purchasing",
     "定价策略": "Pricing rules",
     "广告管理": "Advertisement management",
@@ -312,6 +313,18 @@
     "Orders.View": {
       "name": "View orders",
       "description": "View POS sales records on the web admin, and store orders and incoming delivery notices in the app."
+    },
+    "Planogram.View": {
+      "name": "View planograms",
+      "description": "View display plans, product display specs, and shelf and hook models on the web admin."
+    },
+    "Planogram.Edit": {
+      "name": "Edit planograms",
+      "description": "Create and edit display plans and maintain product display specs (pack size, hang-hole offset, quantity per hook) on the web admin."
+    },
+    "Planogram.Manage": {
+      "name": "Manage planograms",
+      "description": "Maintain shelf and hook models, clear product display specs, and publish or archive display plans on the web admin."
     },
     "SalesOrders.View": {
       "name": "View POS orders",

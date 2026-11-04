@@ -1,0 +1,645 @@
+{
+  "version": 1,
+  "description": "商品陈列图几何夹具：前端 engine/geometry.ts 与后端 PlanogramLayoutValidator 必须对同一份夹具给出同样结果。规则见 docs/plans/2026-11-04-planogram-shelf-display-designer.md 附录 B.1。比较方式：把冲突按 (code, itemGuid, otherItemGuid 缺省为空) 排序后逐项对比，severity 同时对比；统计逐字段对比，retailValue 允许 0.005 误差。单位 mm，比较容差 0.001。hooks 以挂钩型号 Guid 为键、specs 以 ProductCode 为键；停用的型号（isActive=false）仍在字典里；缺失的型号 / 参数就是不在字典里。retailPrice 取自 Product.RetailPrice。",
+  "toleranceMm": 0.001,
+  "semantics": [
+    "比较容差 0.001 mm：判定 a<b 写成 a<b-0.001，判定 a>b 写成 a>b+0.001，所以恰好等于间距 / 板边不算冲突。",
+    "BAY_OUT_OF_RANGE 只报告，不阻止该条目继续按自己的节号参与后续判定（节号 0、4 这类各自成一组）。",
+    "缺参数（PRODUCT_SPEC_MISSING）/ 缺挂钩型号（HOOK_MODEL_MISSING）的条目不参与任何后续判定，也不计入 unitCount / retailValue / fillPercent，但计入 itemCount / skuCount。",
+    "HOLE_OUT_OF_RANGE 的条目只退出几何判定（占孔冲突 / 越界 / 边距 / 重叠）；承重（OVERLOAD）与统计仍照常计算。",
+    "OUT_OF_BOARD 的条目不再报 EDGE_GAP；两者都不阻止该条目参与 HOOK_HOLE_CLASH / OVERLAP。",
+    "OVERLAP：两矩形各向外扩 gapX/2、gapY/2 后相交面积 > 0，即横向重叠量 min(右)-max(左)+gapX 与纵向 min(底)-max(顶)+gapY 都 > 容差；只有一个方向不足间距不算冲突。",
+    "HOOK_HOLE_CLASH 只看同一节内占孔区间（列、行都相交），与几何无关。",
+    "每钩挂数：条目 perHookQty（>=1）> 规格 hookQtyOverrides[挂钩Guid]（>=1）> floor((臂长-臂端预留)/包装厚)（臂太短或厚度<=0 时为 0）；perHookQty / 覆盖值 <1 视为没填。",
+    "OVERLOAD 只在挂钩有 loadKg 且规格有 unitWeightG 时判：每钩挂数*unitWeightG（克）> loadKg*1000，严格大于才报，severity=warn。",
+    "conflictCount = 有 error 级冲突的条目数（按条目去重，warn 不计）。",
+    "unitCount = Σ 每钩挂数；retailValue = Σ 每钩挂数*retailPrice，最后四舍五入到 2 位小数；fillPercent = round(Σ 宽*高 / (板面宽*板面高*bayCount) * 100)，四舍五入（0.5 向上），不计价签，板面面积为 0 时为 0。"
+  ],
+  "cases": [
+    {
+      "name": "baseline_no_conflicts",
+      "note": "无冲突基准：两节、双钩带价签、三个条目",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-A": {"widthMm": 120, "heightMm": 180, "depthMm": 30, "hangHoleOffsetMm": 10, "unitWeightG": 200, "hookQtyOverrides": {}, "retailPrice": 4.5},
+        "P-B": {"widthMm": 100, "heightMm": 150, "depthMm": 25, "hangHoleOffsetMm": 10, "unitWeightG": 150, "hookQtyOverrides": {}, "retailPrice": 3.2}
+      },
+      "bayCount": 2,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "i1", "bayIndex": 1, "productCode": "P-A", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 3, "perHookQty": null},
+        {"guid": "i2", "bayIndex": 1, "productCode": "P-B", "hookModelGuid": "hook-d", "holeCol": 13, "holeRow": 3, "perHookQty": null},
+        {"guid": "i3", "bayIndex": 2, "productCode": "P-A", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 20, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 3, "skuCount": 2, "unitCount": 19, "retailValue": 76.4, "fillPercent": 3, "conflictCount": 0}
+    },
+    {
+      "name": "horizontal_gap_exactly_equal_no_conflict",
+      "note": "横向净间距恰好等于 GapX(10)，不冲突",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25.4, "holePitchYMm": 25.4, "firstHoleLeftMm": 12.7, "firstHoleTopMm": 12.7, "holeCols": 34, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-W117": {"widthMm": 117, "heightMm": 100, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 2.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-W117", "hookModelGuid": "hook-s", "holeCol": 6, "holeRow": 10, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-W117", "hookModelGuid": "hook-s", "holeCol": 11, "holeRow": 10, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 12, "retailValue": 24, "fillPercent": 3, "conflictCount": 0}
+    },
+    {
+      "name": "horizontal_gap_short_by_0_01_overlap",
+      "note": "横向净间距 9.99（差 0.01）-> OVERLAP",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25.4, "holePitchYMm": 25.4, "firstHoleLeftMm": 12.7, "firstHoleTopMm": 12.7, "holeCols": 34, "holeRows": 41},
+      "hooks": {
+        "hook-tw": {"hasPriceTagArm": true, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 117.01, "tagHeightMm": 20, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-W100": {"widthMm": 100, "heightMm": 100, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 2.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-W100", "hookModelGuid": "hook-tw", "holeCol": 6, "holeRow": 10, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-W100", "hookModelGuid": "hook-tw", "holeCol": 11, "holeRow": 10, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 12, "retailValue": 24, "fillPercent": 2, "conflictCount": 2}
+    },
+    {
+      "name": "vertical_gap_product_bottom_to_tag_top_equal",
+      "note": "上排商品底到下排价签顶恰好 10，不冲突",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-V164": {"widthMm": 100, "heightMm": 164, "depthMm": 30, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-V164", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 3, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-V164", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 11, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 12, "retailValue": 12, "fillPercent": 4, "conflictCount": 0}
+    },
+    {
+      "name": "vertical_gap_short_overlap",
+      "note": "上排商品底到下排价签顶 9 mm -> OVERLAP",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-V165": {"widthMm": 100, "heightMm": 165, "depthMm": 30, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-V165", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 3, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-V165", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 11, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 12, "retailValue": 12, "fillPercent": 4, "conflictCount": 2}
+    },
+    {
+      "name": "vertical_tag_top_lower_than_product_top_uses_product_top",
+      "note": "价签顶低于商品顶时 top 取商品顶",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-OFF40": {"widthMm": 100, "heightMm": 117, "depthMm": 30, "hangHoleOffsetMm": 40, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-OFF40", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 3, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-OFF40", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 8, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 12, "retailValue": 12, "fillPercent": 3, "conflictCount": 2}
+    },
+    {
+      "name": "tag_wider_than_product_widens_footprint",
+      "note": "价签宽度大于商品宽度，占位取价签宽",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-N": {"widthMm": 30, "heightMm": 50, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-N", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-N", "hookModelGuid": "hook-d", "holeCol": 7, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 18, "retailValue": 18, "fillPercent": 0, "conflictCount": 2}
+    },
+    {
+      "name": "no_price_tag_arm_ignores_tag_fields",
+      "note": "不带价签臂的挂钩忽略价签字段",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s2": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 80, "tagHeightMm": 30, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-N": {"widthMm": 30, "heightMm": 50, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-N", "hookModelGuid": "hook-s2", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-N", "hookModelGuid": "hook-s2", "holeCol": 7, "holeRow": 5, "perHookQty": null},
+        {"guid": "c", "bayIndex": 1, "productCode": "P-N", "hookModelGuid": "hook-s2", "holeCol": 5, "holeRow": 8, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 3, "skuCount": 1, "unitCount": 18, "retailValue": 18, "fillPercent": 0, "conflictCount": 0}
+    },
+    {
+      "name": "double_prong_center_shift",
+      "note": "双钩 holeSpanX=2 的中心偏移（左右边距）",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-L": {"widthMm": 60, "heightMm": 50, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-R": {"widthMm": 96, "heightMm": 50, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 2,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "l", "bayIndex": 1, "productCode": "P-L", "hookModelGuid": "hook-d", "holeCol": 1, "holeRow": 5, "perHookQty": null},
+        {"guid": "r", "bayIndex": 2, "productCode": "P-R", "hookModelGuid": "hook-d", "holeCol": 32, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "EDGE_GAP", "itemGuid": "l", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "r", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 2, "unitCount": 18, "retailValue": 18, "fillPercent": 0, "conflictCount": 2}
+    },
+    {
+      "name": "board_edges_horizontal",
+      "note": "左右板边：恰好等于间距、不足间距、越界",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-W80": {"widthMm": 80, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W82": {"widthMm": 82, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W60": {"widthMm": 60, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W70": {"widthMm": 70, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W72": {"widthMm": 72, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W90": {"widthMm": 90, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W92": {"widthMm": 92, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 7,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "e1", "bayIndex": 1, "productCode": "P-W80", "hookModelGuid": "hook-s", "holeCol": 2, "holeRow": 5, "perHookQty": null},
+        {"guid": "e2", "bayIndex": 2, "productCode": "P-W82", "hookModelGuid": "hook-s", "holeCol": 2, "holeRow": 5, "perHookQty": null},
+        {"guid": "e3", "bayIndex": 3, "productCode": "P-W60", "hookModelGuid": "hook-s", "holeCol": 1, "holeRow": 5, "perHookQty": null},
+        {"guid": "e4", "bayIndex": 4, "productCode": "P-W70", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 5, "perHookQty": null},
+        {"guid": "e5", "bayIndex": 5, "productCode": "P-W72", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 5, "perHookQty": null},
+        {"guid": "e6", "bayIndex": 6, "productCode": "P-W90", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 5, "perHookQty": null},
+        {"guid": "e7", "bayIndex": 7, "productCode": "P-W92", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "EDGE_GAP", "itemGuid": "e2", "severity": "error"},
+        {"code": "OUT_OF_BOARD", "itemGuid": "e3", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "e5", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "e6", "severity": "error"},
+        {"code": "OUT_OF_BOARD", "itemGuid": "e7", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 7, "skuCount": 7, "unitCount": 42, "retailValue": 42, "fillPercent": 0, "conflictCount": 5}
+    },
+    {
+      "name": "board_edges_vertical",
+      "note": "上下板边：恰好等于间距、不足间距、越界；价签顶参与上边距",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true},
+        "hook-tt": {"hasPriceTagArm": true, "armLengthMm": 150, "dropMm": 30, "tipReserveMm": 15, "tagWidthMm": 52, "tagHeightMm": 41, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-T65": {"widthMm": 40, "heightMm": 80, "depthMm": 20, "hangHoleOffsetMm": 65, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-T66": {"widthMm": 40, "heightMm": 80, "depthMm": 20, "hangHoleOffsetMm": 66, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-T75": {"widthMm": 40, "heightMm": 80, "depthMm": 20, "hangHoleOffsetMm": 75, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-T76": {"widthMm": 40, "heightMm": 80, "depthMm": 20, "hangHoleOffsetMm": 76, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-B50": {"widthMm": 40, "heightMm": 50, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-B51": {"widthMm": 40, "heightMm": 51, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-B60": {"widthMm": 40, "heightMm": 60, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-B61": {"widthMm": 40, "heightMm": 61, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 9,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "v1", "bayIndex": 1, "productCode": "P-T65", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 1, "perHookQty": null},
+        {"guid": "v2", "bayIndex": 2, "productCode": "P-T66", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 1, "perHookQty": null},
+        {"guid": "v3", "bayIndex": 3, "productCode": "P-T75", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 1, "perHookQty": null},
+        {"guid": "v4", "bayIndex": 4, "productCode": "P-T76", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 1, "perHookQty": null},
+        {"guid": "v5", "bayIndex": 5, "productCode": "P-B50", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 38, "perHookQty": null},
+        {"guid": "v6", "bayIndex": 6, "productCode": "P-B51", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 38, "perHookQty": null},
+        {"guid": "v7", "bayIndex": 7, "productCode": "P-B60", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 38, "perHookQty": null},
+        {"guid": "v8", "bayIndex": 8, "productCode": "P-B61", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 38, "perHookQty": null},
+        {"guid": "v9", "bayIndex": 9, "productCode": "P-S2", "hookModelGuid": "hook-tt", "holeCol": 5, "holeRow": 1, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "EDGE_GAP", "itemGuid": "v2", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "v3", "severity": "error"},
+        {"code": "OUT_OF_BOARD", "itemGuid": "v4", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "v6", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "v7", "severity": "error"},
+        {"code": "OUT_OF_BOARD", "itemGuid": "v8", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "v9", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 9, "skuCount": 9, "unitCount": 54, "retailValue": 54, "fillPercent": 0, "conflictCount": 7}
+    },
+    {
+      "name": "hole_out_of_range_excluded_from_geometry",
+      "note": "孔位超出孔阵（列 / 行 / 纵向占孔），不参与后续几何判定",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true},
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true},
+        "hook-t2": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 20, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 2, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-S": {"widthMm": 40, "heightMm": 20, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-WIDE": {"widthMm": 120, "heightMm": 20, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 2.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "ok-edge", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-d", "holeCol": 32, "holeRow": 5, "perHookQty": null},
+        {"guid": "col-over", "bayIndex": 1, "productCode": "P-WIDE", "hookModelGuid": "hook-d", "holeCol": 33, "holeRow": 5, "perHookQty": null},
+        {"guid": "col0-a", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-s", "holeCol": 0, "holeRow": 10, "perHookQty": null},
+        {"guid": "col0-b", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-s", "holeCol": 0, "holeRow": 10, "perHookQty": null},
+        {"guid": "row0", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 0, "perHookQty": null},
+        {"guid": "row42", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-s", "holeCol": 8, "holeRow": 42, "perHookQty": null},
+        {"guid": "span-over", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-t2", "holeCol": 10, "holeRow": 41, "perHookQty": null},
+        {"guid": "span-ok", "bayIndex": 1, "productCode": "P-S", "hookModelGuid": "hook-t2", "holeCol": 15, "holeRow": 40, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "col-over", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "col0-a", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "col0-b", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "row0", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "row42", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "span-over", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 8, "skuCount": 2, "unitCount": 54, "retailValue": 63, "fillPercent": 1, "conflictCount": 6}
+    },
+    {
+      "name": "hook_hole_clash_pairs",
+      "note": "同孔 / 占孔区间相交 -> HOOK_HOLE_CLASH，成对各报一条",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true},
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true},
+        "hook-deep": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 200, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true},
+        "hook-t2": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 20, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 2, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-TINY": {"widthMm": 10, "heightMm": 30, "depthMm": 10, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 0.5}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "c1", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "c2", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-d", "holeCol": 6, "holeRow": 5, "perHookQty": null},
+        {"guid": "c3", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 20, "holeRow": 5, "perHookQty": null},
+        {"guid": "c4", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-deep", "holeCol": 20, "holeRow": 5, "perHookQty": null},
+        {"guid": "c5", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-t2", "holeCol": 30, "holeRow": 10, "perHookQty": null},
+        {"guid": "c6", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 30, "holeRow": 11, "perHookQty": null},
+        {"guid": "c7", "bayIndex": 1, "productCode": "P-TINY", "hookModelGuid": "hook-s", "holeCol": 25, "holeRow": 5, "perHookQty": null},
+        {"guid": "c8", "bayIndex": 1, "productCode": "P-TINY", "hookModelGuid": "hook-s", "holeCol": 26, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c1", "otherItemGuid": "c2", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c2", "otherItemGuid": "c1", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c3", "otherItemGuid": "c4", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c4", "otherItemGuid": "c3", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c5", "otherItemGuid": "c6", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "c6", "otherItemGuid": "c5", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "c1", "otherItemGuid": "c2", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "c2", "otherItemGuid": "c1", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 8, "skuCount": 2, "unitCount": 68, "retailValue": 55, "fillPercent": 1, "conflictCount": 6}
+    },
+    {
+      "name": "bay_out_of_range",
+      "note": "节号超出 1..bayCount；该条目仍按自己的节号参与后续判定",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 3,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "b1", "bayIndex": 0, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "b2", "bayIndex": 4, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "b3", "bayIndex": 4, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "b4", "bayIndex": 3, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "BAY_OUT_OF_RANGE", "itemGuid": "b1", "severity": "error"},
+        {"code": "BAY_OUT_OF_RANGE", "itemGuid": "b2", "severity": "error"},
+        {"code": "BAY_OUT_OF_RANGE", "itemGuid": "b3", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "b2", "otherItemGuid": "b3", "severity": "error"},
+        {"code": "HOOK_HOLE_CLASH", "itemGuid": "b3", "otherItemGuid": "b2", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b2", "otherItemGuid": "b3", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b3", "otherItemGuid": "b2", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 4, "skuCount": 1, "unitCount": 24, "retailValue": 24, "fillPercent": 0, "conflictCount": 3}
+    },
+    {
+      "name": "spec_or_hook_missing_not_geometry",
+      "note": "缺商品参数 / 缺挂钩型号：只报缺失，不参与几何，不计入件数金额",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "m1", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "m2", "bayIndex": 1, "productCode": "P-NOSPEC", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 5, "perHookQty": 10},
+        {"guid": "m3", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-ghost", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "m4", "bayIndex": 1, "productCode": "P-NOSPEC", "hookModelGuid": "hook-ghost", "holeCol": 5, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "PRODUCT_SPEC_MISSING", "itemGuid": "m2", "severity": "error"},
+        {"code": "PRODUCT_SPEC_MISSING", "itemGuid": "m4", "severity": "error"},
+        {"code": "HOOK_MODEL_MISSING", "itemGuid": "m3", "severity": "error"},
+        {"code": "HOOK_MODEL_MISSING", "itemGuid": "m4", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 4, "skuCount": 2, "unitCount": 6, "retailValue": 6, "fillPercent": 0, "conflictCount": 3}
+    },
+    {
+      "name": "overload_and_per_hook_qty_priority",
+      "note": "承重警告与每钩挂数优先级：条目 > 规格覆盖 > 建议值",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true},
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-HEAVY": {"widthMm": 60, "heightMm": 60, "depthMm": 10, "hangHoleOffsetMm": 10, "unitWeightG": 200, "hookQtyOverrides": {}, "retailPrice": 2.5},
+        "P-OVR": {"widthMm": 50, "heightMm": 40, "depthMm": 10, "hangHoleOffsetMm": 10, "unitWeightG": 200, "hookQtyOverrides": {"hook-d": 3}, "retailPrice": 1.2},
+        "P-LIGHT": {"widthMm": 30, "heightMm": 30, "depthMm": 10, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 0.8}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "o1", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "o2", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 15, "holeRow": 5, "perHookQty": 15},
+        {"guid": "o3", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 25, "holeRow": 5, "perHookQty": 16},
+        {"guid": "o4", "bayIndex": 1, "productCode": "P-OVR", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 15, "perHookQty": null},
+        {"guid": "o5", "bayIndex": 1, "productCode": "P-OVR", "hookModelGuid": "hook-d", "holeCol": 15, "holeRow": 15, "perHookQty": 16},
+        {"guid": "o6", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-s", "holeCol": 25, "holeRow": 15, "perHookQty": null},
+        {"guid": "o7", "bayIndex": 1, "productCode": "P-LIGHT", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 25, "perHookQty": null},
+        {"guid": "o8", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 15, "holeRow": 25, "perHookQty": 0}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLOAD", "itemGuid": "o1", "severity": "warn"},
+        {"code": "OVERLOAD", "itemGuid": "o3", "severity": "warn"},
+        {"code": "OVERLOAD", "itemGuid": "o5", "severity": "warn"},
+        {"code": "OVERLOAD", "itemGuid": "o8", "severity": "warn"}
+      ],
+      "expectedStats": {"itemCount": 8, "skuCount": 3, "unitCount": 117, "retailValue": 237.2, "fillPercent": 3, "conflictCount": 0}
+    },
+    {
+      "name": "overload_applies_even_when_position_invalid",
+      "note": "承重判定与节号 / 孔位有效性无关",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-HEAVY": {"widthMm": 60, "heightMm": 60, "depthMm": 10, "hangHoleOffsetMm": 10, "unitWeightG": 200, "hookQtyOverrides": {}, "retailPrice": 2.5}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "p1", "bayIndex": 1, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 33, "holeRow": 5, "perHookQty": null},
+        {"guid": "p2", "bayIndex": 2, "productCode": "P-HEAVY", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "p1", "severity": "error"},
+        {"code": "OVERLOAD", "itemGuid": "p1", "severity": "warn"},
+        {"code": "BAY_OUT_OF_RANGE", "itemGuid": "p2", "severity": "error"},
+        {"code": "OVERLOAD", "itemGuid": "p2", "severity": "warn"}
+      ],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 36, "retailValue": 90, "fillPercent": 1, "conflictCount": 2}
+    },
+    {
+      "name": "cross_bay_items_never_conflict",
+      "note": "同孔位同商品放在不同节：互不冲突",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 2,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "x1", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null},
+        {"guid": "x2", "bayIndex": 2, "productCode": "P-S2", "hookModelGuid": "hook-d", "holeCol": 5, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 2, "skuCount": 1, "unitCount": 18, "retailValue": 18, "fillPercent": 0, "conflictCount": 0}
+    },
+    {
+      "name": "inactive_hook_is_not_missing",
+      "note": "停用的挂钩型号不算缺失",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-old": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": false}
+      },
+      "specs": {
+        "P-S2": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "i1", "bayIndex": 1, "productCode": "P-S2", "hookModelGuid": "hook-old", "holeCol": 5, "holeRow": 5, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 1, "skuCount": 1, "unitCount": 6, "retailValue": 6, "fillPercent": 0, "conflictCount": 0}
+    },
+    {
+      "name": "decimal_hole_pitch_25_4",
+      "note": "孔距 25.4 的小数坐标",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25.4, "holePitchYMm": 25.4, "firstHoleLeftMm": 12.7, "firstHoleTopMm": 12.7, "holeCols": 34, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-W69": {"widthMm": 69, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W70": {"widthMm": 70, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-W40": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-H23": {"widthMm": 40, "heightMm": 23, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 5,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "d1", "bayIndex": 1, "productCode": "P-W69", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 10, "perHookQty": null},
+        {"guid": "d2", "bayIndex": 2, "productCode": "P-W70", "hookModelGuid": "hook-s", "holeCol": 33, "holeRow": 10, "perHookQty": null},
+        {"guid": "d3", "bayIndex": 3, "productCode": "P-W40", "hookModelGuid": "hook-s", "holeCol": 34, "holeRow": 10, "perHookQty": null},
+        {"guid": "d4", "bayIndex": 4, "productCode": "P-W40", "hookModelGuid": "hook-s", "holeCol": 35, "holeRow": 10, "perHookQty": null},
+        {"guid": "d5", "bayIndex": 5, "productCode": "P-H23", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 39, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "EDGE_GAP", "itemGuid": "d2", "severity": "error"},
+        {"code": "OUT_OF_BOARD", "itemGuid": "d3", "severity": "error"},
+        {"code": "HOLE_OUT_OF_RANGE", "itemGuid": "d4", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "d5", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 5, "skuCount": 4, "unitCount": 30, "retailValue": 30, "fillPercent": 0, "conflictCount": 4}
+    },
+    {
+      "name": "empty_plan",
+      "note": "没有明细：统计全 0",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-d": {"hasPriceTagArm": true, "armLengthMm": 200, "dropMm": 50, "tipReserveMm": 20, "tagWidthMm": 52, "tagHeightMm": 26, "tagBottomAboveArmMm": 10, "holeSpanX": 2, "holeSpanY": 1, "loadKg": 3, "isActive": true}
+      },
+      "specs": {},
+      "bayCount": 3,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 0, "skuCount": 0, "unitCount": 0, "retailValue": 0, "fillPercent": 0, "conflictCount": 0}
+    },
+    {
+      "name": "diagonal_neighbours_both_axes_short",
+      "note": "对角相邻两轴都不足间距 -> OVERLAP；只一轴不足 -> 不冲突",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-D": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-DB": {"widthMm": 50, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 0, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 2,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-D", "hookModelGuid": "hook-s", "holeCol": 10, "holeRow": 10, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-DB", "hookModelGuid": "hook-s", "holeCol": 12, "holeRow": 11, "perHookQty": null},
+        {"guid": "a2", "bayIndex": 2, "productCode": "P-D", "hookModelGuid": "hook-s", "holeCol": 10, "holeRow": 10, "perHookQty": null},
+        {"guid": "c2", "bayIndex": 2, "productCode": "P-DB", "hookModelGuid": "hook-s", "holeCol": 12, "holeRow": 12, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 4, "skuCount": 2, "unitCount": 24, "retailValue": 24, "fillPercent": 0, "conflictCount": 2}
+    },
+    {
+      "name": "custom_gaps_x20_y0",
+      "note": "自定义间距：左右 20、上下 0",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-G": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-GD": {"widthMm": 40, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 5, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-G62": {"widthMm": 62, "heightMm": 30, "depthMm": 20, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0},
+        "P-GT": {"widthMm": 40, "heightMm": 80, "depthMm": 20, "hangHoleOffsetMm": 75, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.0}
+      },
+      "bayCount": 4,
+      "gaps": {"gapXMm": 20, "gapYMm": 0},
+      "items": [
+        {"guid": "a", "bayIndex": 1, "productCode": "P-G", "hookModelGuid": "hook-s", "holeCol": 10, "holeRow": 5, "perHookQty": null},
+        {"guid": "b", "bayIndex": 1, "productCode": "P-G", "hookModelGuid": "hook-s", "holeCol": 12, "holeRow": 5, "perHookQty": null},
+        {"guid": "c", "bayIndex": 2, "productCode": "P-G", "hookModelGuid": "hook-s", "holeCol": 10, "holeRow": 5, "perHookQty": null},
+        {"guid": "d", "bayIndex": 2, "productCode": "P-GD", "hookModelGuid": "hook-s", "holeCol": 10, "holeRow": 6, "perHookQty": null},
+        {"guid": "e", "bayIndex": 3, "productCode": "P-G62", "hookModelGuid": "hook-s", "holeCol": 2, "holeRow": 5, "perHookQty": null},
+        {"guid": "f", "bayIndex": 4, "productCode": "P-GT", "hookModelGuid": "hook-s", "holeCol": 5, "holeRow": 1, "perHookQty": null}
+      ],
+      "expectedConflicts": [
+        {"code": "OVERLAP", "itemGuid": "a", "otherItemGuid": "b", "severity": "error"},
+        {"code": "OVERLAP", "itemGuid": "b", "otherItemGuid": "a", "severity": "error"},
+        {"code": "EDGE_GAP", "itemGuid": "e", "severity": "error"}
+      ],
+      "expectedStats": {"itemCount": 6, "skuCount": 4, "unitCount": 36, "retailValue": 36, "fillPercent": 0, "conflictCount": 3}
+    },
+    {
+      "name": "fill_percent_rounding_and_retail_sum",
+      "note": "占板率四舍五入与零售总值累加",
+      "shelf": {"bayWidthMm": 900, "totalHeightMm": 1200, "uprightWidthMm": 30, "baseTopHeightMm": 150, "holePitchXMm": 25, "holePitchYMm": 25, "firstHoleLeftMm": 25, "firstHoleTopMm": 25, "holeCols": 33, "holeRows": 41},
+      "hooks": {
+        "hook-s": {"hasPriceTagArm": false, "armLengthMm": 150, "dropMm": 50, "tipReserveMm": 15, "tagWidthMm": 0, "tagHeightMm": 0, "tagBottomAboveArmMm": 10, "holeSpanX": 1, "holeSpanY": 1, "loadKg": null, "isActive": true}
+      },
+      "specs": {
+        "P-100": {"widthMm": 100, "heightMm": 100, "depthMm": 50, "hangHoleOffsetMm": 10, "unitWeightG": null, "hookQtyOverrides": {}, "retailPrice": 1.99}
+      },
+      "bayCount": 1,
+      "gaps": {"gapXMm": 10, "gapYMm": 10},
+      "items": [
+        {"guid": "f01", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 4, "holeRow": 5, "perHookQty": null},
+        {"guid": "f02", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 9, "holeRow": 5, "perHookQty": null},
+        {"guid": "f03", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 14, "holeRow": 5, "perHookQty": null},
+        {"guid": "f04", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 19, "holeRow": 5, "perHookQty": null},
+        {"guid": "f05", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 24, "holeRow": 5, "perHookQty": null},
+        {"guid": "f06", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 29, "holeRow": 5, "perHookQty": null},
+        {"guid": "f07", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 4, "holeRow": 17, "perHookQty": null},
+        {"guid": "f08", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 9, "holeRow": 17, "perHookQty": null},
+        {"guid": "f09", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 14, "holeRow": 17, "perHookQty": null},
+        {"guid": "f10", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 19, "holeRow": 17, "perHookQty": null},
+        {"guid": "f11", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 24, "holeRow": 17, "perHookQty": null},
+        {"guid": "f12", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 29, "holeRow": 17, "perHookQty": null},
+        {"guid": "f13", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 4, "holeRow": 29, "perHookQty": null},
+        {"guid": "f14", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 9, "holeRow": 29, "perHookQty": null},
+        {"guid": "f15", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 14, "holeRow": 29, "perHookQty": null},
+        {"guid": "f16", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 19, "holeRow": 29, "perHookQty": null},
+        {"guid": "f17", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 24, "holeRow": 29, "perHookQty": null},
+        {"guid": "f18", "bayIndex": 1, "productCode": "P-100", "hookModelGuid": "hook-s", "holeCol": 29, "holeRow": 29, "perHookQty": null}
+      ],
+      "expectedConflicts": [],
+      "expectedStats": {"itemCount": 18, "skuCount": 1, "unitCount": 36, "retailValue": 71.64, "fillPercent": 20, "conflictCount": 0}
+    }
+  ]
+}

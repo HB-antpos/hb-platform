@@ -509,6 +509,9 @@
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
     <Compile Include="EnglishOnlyEmailTemplatesTests.cs" />
     <Compile Include="SmsTests.cs" />
+    <Compile Include="PlanogramTests.cs" />
+    <Compile Include="PlanogramPlanTests.cs" />
+    <Compile Include="PlanogramPublishTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

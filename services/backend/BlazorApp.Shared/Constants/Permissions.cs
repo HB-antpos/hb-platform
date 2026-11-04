@@ -485,6 +485,20 @@ namespace BlazorApp.Shared.Constants
             public const string Edit = "PricingStrategy.Edit";
         }
 
+        // 商品陈列图（方案 docs/plans/2026-11-04-planogram-shelf-display-designer.md 第 8 节）：Web「商品与价格」合并页的页签。
+        // 默认不授予任何角色，由管理员在生产手动授权（迁移 20261104.001-planogram 入库）；PermissionAliases 设 Manage ⊇ Edit ⊇ View。
+        public static class Planogram
+        {
+            /// <summary>看方案 / 商品陈列参数 / 货架与挂钩型号（只读）。</summary>
+            public const string View = "Planogram.View";
+
+            /// <summary>建改方案、维护商品陈列参数。</summary>
+            public const string Edit = "Planogram.Edit";
+
+            /// <summary>维护货架与挂钩型号、清除商品陈列参数、发布与归档方案。</summary>
+            public const string Manage = "Planogram.Manage";
+        }
+
         public static class DeviceRegistration
         {
             public const string View = "DeviceRegistration.View";
@@ -531,6 +545,9 @@ namespace BlazorApp.Shared.Constants
                 [Users.CreateStoreStaff] = [Users.Create],
                 [Users.EditStoreStaff] = [Users.Edit],
                 [Users.ResetStoreStaffPassword] = [Users.ResetPassword],
+                // 商品陈列图：Manage 隐含 Edit、Edit 隐含 View（持有高一级权限即满足低一级接口与菜单）；反向不成立。
+                [Planogram.View] = [Planogram.Edit, Planogram.Manage],
+                [Planogram.Edit] = [Planogram.Manage],
             };
 
         public static class AustralianSuppliers

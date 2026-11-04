@@ -276,6 +276,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPosReceiptShareLinkAsync(CancellationToken cancellationToken);
 
+    Task ApplyPlanogramAsync(CancellationToken cancellationToken);
+
+    Task VerifyPlanogramAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1758,6 +1762,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PosReceiptShareLinkSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPlanogramAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PlanogramSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 建六张表 + 写权限码后过精确签名（列 / 主键 / 唯一索引 / 普通索引），通过后协调器才登记账本。
+        await VerifyPlanogramAsync(cancellationToken);
+    }
+
+    public async Task VerifyPlanogramAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PlanogramSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -89,7 +89,8 @@ assert.equal(implicitPreview[0].visible && implicitPreview[0].readOnly, true);
 assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
-assert.equal(fullMenus.filter((item) => item.platform === "web").length, 50);
+// Web 菜单目录按页签登记：51 = 原 50 项 + 商品陈列图（/pos-admin/planograms，Planogram.View，商品与价格合并页的第 5 个页签）。
+assert.equal(fullMenus.filter((item) => item.platform === "web").length, 51);
 assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 44);
 // 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
 assert.deepEqual(
