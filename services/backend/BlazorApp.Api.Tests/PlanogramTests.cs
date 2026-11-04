@@ -45,7 +45,7 @@ public sealed class PlanogramTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(PlanogramShelfModel), typeof(PlanogramHookModel), typeof(ProductDisplaySpec),
             typeof(PlanogramHeader), typeof(PlanogramItem), typeof(PlanogramVersion),
-            typeof(Product), typeof(ProductCategory));
+            typeof(Product), typeof(ProductCategory), typeof(ProductGrade));
         _models = new PlanogramModelService(_db, new FixedTime(Now));
         _specs = new ProductDisplaySpecService(_db, new FixedTime(Now));
         _plans = new PlanogramPlanService(_db, new FixedTime(Now));
@@ -1027,7 +1027,7 @@ public sealed class PlanogramTests : IDisposable
     }
 
     [Fact]
-    public void 控制器_所有公开动作都在附录A和B和C清单里且都带权限策略()
+    public void 控制器_所有公开动作都在附录A和B和C和D清单里且都带权限策略()
     {
         var declared = typeof(PlanogramController)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
@@ -1036,6 +1036,7 @@ public sealed class PlanogramTests : IDisposable
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
         var contract = ControllerContract().Concat(PlanogramPlanTests.ControllerContract()).Concat(PlanogramPublishTests.ControllerContract())
+            .Concat(PlanogramBatchTests.ControllerContract())
             .Select(row => (string)row[0]).OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(contract, declared);
@@ -1121,7 +1122,7 @@ public sealed class PlanogramTests : IDisposable
         };
         var item = new ProductSpecListItemDto
         {
-            EnglishName = "e", ProductImage = "i", CategoryName = "c", Spec = spec, UpdatedAt = Now, UpdatedBy = "a",
+            EnglishName = "e", ProductImage = "i", CategoryName = "c", Grade = "A", WarehouseCategoryPath = "百货 > 收纳", Spec = spec, UpdatedAt = Now, UpdatedBy = "a",
         };
 
         Assert.Equal(
@@ -1132,7 +1133,7 @@ public sealed class PlanogramTests : IDisposable
         Assert.Equal(
             Sorted(
                 "productCode", "itemNumber", "barcode", "productName", "englishName", "productImage", "retailPrice",
-                "categoryName", "hasSpec", "referencedPlanCount", "spec", "updatedAt", "updatedBy"),
+                "categoryName", "grade", "warehouseCategoryPath", "hasSpec", "referencedPlanCount", "spec", "updatedAt", "updatedBy"),
             JsonKeys(item));
     }
 

@@ -1,5 +1,23 @@
 {
   "planogram": {
+    "categoryFilter": {
+      "all": "All",
+      "clear": "Clear filters",
+      "emptyTree": "No website categories",
+      "loadFailed": "Couldn't load the categories. Retry from the dropdown.",
+      "loadFailedRetry": "Failed to load. Click to retry",
+      "loading": "Loading…",
+      "more": "+{{count}} more",
+      "noSuppliers": "No suppliers to choose from",
+      "supplier": "Supplier category",
+      "supplierSearch": "Search suppliers or loaded categories",
+      "supplierSearchEmpty": "No match. Expand a supplier first to load its categories.",
+      "unassigned": "Unassigned",
+      "warehouse": "Warehouse category",
+      "warehouseHint": "Picking a parent includes all its sub-categories",
+      "warehouseWithChildren": "Warehouse category (incl. sub)",
+      "withChildren": " (incl. sub)"
+    },
     "common": {
       "auto": "Auto",
       "cancel": "Cancel",
@@ -132,16 +150,23 @@
         "currentHook": "Current hook",
         "dims": "{{w}}×{{h}}×{{t}}",
         "dragAria": "Drag {{name}} onto the canvas, or press Enter to add it to the first free spot",
+        "emptyFiltered": "No products match the chosen categories / grades. Adjust or clear them.",
         "emptySet": "No products have display specs yet. Add them in the Product display specs tab first.",
+        "filter": "Filter",
+        "filterClear": "Clear",
+        "filterDone": "Done",
+        "filterTitle": "Filter products",
         "hookArm": "Arm {{arm}} / H {{drop}}",
         "hookLoad": "Load {{kg}} kg",
         "hookNoTag": "No price tag",
         "hookTag": "Tag {{w}}×{{h}}",
         "hooksTip": "Pick the hook model used for newly placed products (a product's default hook wins when it has one).",
         "loadMore": "Load more ({{shown}} / {{total}})",
+        "matchCount": "{{count}} match",
         "noHooks": "No active hook models",
         "perHook": "{{count}} per hook",
         "placed": "{{count}} placed",
+        "removeChip": "Remove filter \"{{name}}\"",
         "search": "Item no. / barcode / name",
         "tabHooks": "Hooks",
         "tabProducts": "Products",
@@ -226,6 +251,10 @@
     "errors": {
       "alreadyPublished": "This version has already been published (maybe just now by someone else). Refresh; to publish a new version, edit and save the plan first",
       "archived": "This plan is archived and can't be saved. Restore it to a draft first.",
+      "batchConflict": "Someone else changed these products at the same time. Nothing was saved. Preview again, then run it.",
+      "batchEmpty": "No matching products. Adjust the selection or filters and try again.",
+      "batchTooMany": "Batch edit is limited to {{max}} products at a time. Narrow the filters.",
+      "batchTooManyCount": "{{count}} products match, over the limit of {{max}}. Narrow the filters.",
       "codeDuplicate": "This code already exists. Please use another one.",
       "empty": "The plan has no products yet and cannot be published",
       "forbidden": "You do not have permission to do this.",
@@ -301,6 +330,24 @@
       "versionCurrent": "Saved v{{version}} (current)",
       "versionCurrentLoading": "Current saved version",
       "versionPublished": "Published v{{version}} · {{date}} · {{by}}"
+    },
+    "grade": {
+      "label": "Grade",
+      "name": {
+        "A": "A Core",
+        "B": "B Watch",
+        "C": "C Discontinue",
+        "D": "D Clearance",
+        "none": "No grade"
+      },
+      "short": {
+        "A": "A",
+        "B": "B",
+        "C": "C",
+        "D": "D",
+        "none": "No grade"
+      },
+      "title": "Product grade"
     },
     "hook": {
       "col": {
@@ -619,18 +666,138 @@
       "addSpec": "Add specs",
       "autoTag": "auto",
       "autoValue": "auto {{value}}",
+      "batch": {
+        "change": {
+          "cleared": "cleared",
+          "noOverrides": "no overrides"
+        },
+        "changes": {
+          "col": {
+            "after": "After",
+            "before": "Before",
+            "item": "Item no."
+          },
+          "created": "(new)",
+          "title": "Before → after",
+          "truncated": "{{total}} changes in all, showing the first {{shown}}",
+          "unset": "No specs"
+        },
+        "clear": "Clear",
+        "create": {
+          "create": "Create with the values above",
+          "noUnset": "No products without specs in this target",
+          "ready": "Width, Height and Depth are filled in, so they can be created (hang hole 10, Euro slot, Measured by default)",
+          "skip": "Skip",
+          "title": "Products without specs",
+          "titleCount": "Products without specs ({{count}})"
+        },
+        "error": {
+          "needDimensions": "To create specs for products that have none, set Width, Height and Depth together",
+          "nonNegativeInt": "Enter a whole number, 0 or more",
+          "notesTooLong": "Notes can't exceed {{max}} characters",
+          "offsetExceedsHeight": "Hang hole from top can't exceed the pack height",
+          "qtyInvalid": "Per-hook counts must be whole numbers from 1 to {{max}}",
+          "qtyNone": "Fill in the per-hook count for at least one hook model",
+          "rangeInt": "Enter a whole number from {{min}} to {{max}}",
+          "required": "Required",
+          "unknownHook": "That hook model isn't available. Pick another."
+        },
+        "fields": {
+          "hint": "Only fields switched on are changed; the rest keep their values",
+          "title": "Fields to change"
+        },
+        "footer": {
+          "confirm": "Run it",
+          "confirmCount": "Run it ({{count}})",
+          "hint": "Changing any input invalidates the preview; preview again",
+          "preview": "Preview",
+          "rePreview": "Preview again",
+          "refresh": "Refresh list",
+          "stale": "Inputs changed, so the preview is out of date. Preview again."
+        },
+        "hint": {
+          "off": "No change",
+          "qty": "sets per hook",
+          "required": "Required"
+        },
+        "hookQty": {
+          "clearAll": "Clear",
+          "clearHint": "Clears all manual per-hook counts on these products (back to calculated)",
+          "empty": "No active hook models",
+          "merge": "Merge",
+          "mergeHint": "Only hook models with a number are overridden; the rest stay",
+          "none": "No change",
+          "replace": "Replace all",
+          "replaceHint": "Replaced as a whole; hook models left empty lose their override",
+          "title": "Per-hook count overrides"
+        },
+        "preview": {
+          "empty": "Click Preview to see how many will be created / updated / unchanged / skipped. Nothing is saved.",
+          "latest": "Latest",
+          "loading": "Previewing…",
+          "nothing": "Nothing to create or update, so there is nothing to run",
+          "skipped": "Skipped",
+          "stale": "Out of date",
+          "title": "Preview",
+          "unchanged": "Unchanged",
+          "willCreate": "To create",
+          "willUpdate": "To update"
+        },
+        "result": {
+          "created": "Created",
+          "done": "Done: {{created}} created, {{updated}} updated, {{unchanged}} unchanged, {{skipped}} skipped",
+          "title": "Result",
+          "updated": "Updated"
+        },
+        "short": {
+          "defaultHook": "Default hook",
+          "depth": "T",
+          "hangOffset": "Hang",
+          "hangType": "Hang type",
+          "height": "H",
+          "hookQty": "Per hook",
+          "notes": "Notes",
+          "source": "Source",
+          "weight": "Weight",
+          "width": "W"
+        },
+        "skip": {
+          "col": {
+            "name": "Name",
+            "reason": "Reason"
+          },
+          "missingDimensions": "Creating needs Width, Height and Depth together",
+          "noSpec": "No display specs yet, and \"create\" wasn't chosen",
+          "offsetExceedsHeight": "Hang hole from top would exceed the pack height",
+          "overridesTooLong": "The per-hook overrides would be too long to save",
+          "productNotFound": "Product not found, or it is disabled / deleted",
+          "title": "Skipped ({{count}})",
+          "truncated": "showing the first {{shown}}"
+        },
+        "switchAria": "Change \"{{name}}\"",
+        "target": {
+          "counts": "With specs {{set}} · Without {{unset}}",
+          "countsUnknown": "With specs — · Without —",
+          "filter": "Matching filters ({{count}})",
+          "label": "Target",
+          "selected": "Selected ({{count}})"
+        },
+        "title": "Batch edit display specs"
+      },
       "clear": "Clear specs",
       "clearConfirm": "The product goes back to \"no specs\". Clear them?",
       "cleared": "Specs cleared",
       "col": {
         "code": "Item code / barcode",
         "defaultHook": "Default hook",
+        "grade": "Grade",
         "hangOffset": "Hang-hole offset",
         "image": "Image",
         "name": "Name",
         "qty": "Per hook",
         "size": "Pack W × H × T",
         "updated": "Updated",
+        "warehouse": "Warehouse category",
         "weight": "Unit weight"
       },
       "drawer": {
@@ -638,11 +805,13 @@
         "view": "Display specs"
       },
       "empty": "No matching products",
+      "emptyFiltered": "No products match the filters. Try \"Clear filters\".",
       "field": {
         "depth": "Depth T (on hook)",
         "hangOffset": "Hang hole from top",
         "hangType": "Hang-hole type",
         "height": "Height H",
+        "notes": "Notes",
         "weight": "Unit weight",
         "width": "Width W"
       },
@@ -664,6 +833,7 @@
         "manualAria": "Manual per-hook quantity for \"{{name}}\""
       },
       "hooksFailed": "Hook models failed to load. Saving is disabled so the default hook and manual quantities are not lost.",
+      "internalCode": "Internal code {{code}}",
       "manualTag": "manual",
       "noImage": "No img",
       "overLoad": "over limit",
@@ -685,6 +855,16 @@
         "size": "Package size",
         "sizeHint": "Outer pack facing out on the board, mm",
         "source": "Size source"
+      },
+      "selection": {
+        "batchEdit": "Batch edit",
+        "byFilter": "Batch edit all {{count}} matching the filters",
+        "clear": "Clear selection",
+        "idle": "Tick products to batch edit them, or edit everything matching the filters",
+        "limit": "You can select up to {{max}} products at a time; the rest weren't added",
+        "or": "or",
+        "region": "Batch edit",
+        "selected": "{{count}} selected (kept across pages)"
       },
       "source": {
         "manual": "Measured",

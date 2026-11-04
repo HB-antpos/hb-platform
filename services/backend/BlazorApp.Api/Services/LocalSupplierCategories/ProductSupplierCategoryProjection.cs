@@ -39,6 +39,39 @@ public static class ProductSupplierCategoryProjection
     }
 
     /// <summary>
+    /// 按仓库分类 GUID 批量取完整路径（"祖父 &gt; 父 &gt; 本级"，分隔符同供应商分类路径），
+    /// 与商品列表里 200 商品的供应商分类路径同一份逐级回溯实现。库里查不到的 GUID 不在结果里。
+    /// 调用方只传当前页商品的仓库分类，不要拿它参与分页前的联表。
+    /// </summary>
+    public static async Task<Dictionary<string, string>> LoadWarehousePathsAsync(
+        ISqlSugarClient db,
+        IReadOnlyCollection<string> warehouseCategoryGuids
+    )
+    {
+        var guids = warehouseCategoryGuids
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (guids.Count == 0)
+        {
+            return paths;
+        }
+
+        var nodes = await LoadWarehouseAncestorsAsync(db, guids);
+        foreach (var guid in guids)
+        {
+            if (nodes.TryGetValue(guid, out var node))
+            {
+                paths[guid] = BuildWarehousePath(nodes, node);
+            }
+        }
+
+        return paths;
+    }
+
+    /// <summary>
     /// 200 的供应商分类即仓库分类：GUID 直接取仓库分类，名称与路径逐级回溯祖先拼出。
     /// </summary>
     private static async Task FillHotBargainAsync(ISqlSugarClient db, List<ProductDto> items)
@@ -251,6 +284,131 @@ public static class LocalSupplierCategoryFilter
             supplierGuids.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             warehouseGuids.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
         );
+    }
+
+    /// <summary>
+    /// 仅按仓库分类树展开：把所选仓库分类 GUID 连同全部子分类展开成集合（已软删的分类不参与）。
+    /// 不经过供应商分类树分流（<see cref="ExpandAsync"/> 会先在供应商分类里找），供只关心仓库分类的调用方使用，
+    /// 例如商品陈列参数列表的「仓库分类」过滤。所选 GUID 在树里都不存在时返回空集合；返回的 GUID 取库里的写法。
+    /// </summary>
+    public static async Task<List<string>> ExpandWarehouseSubtreeAsync(
+        ISqlSugarClient db,
+        IReadOnlyCollection<string> requestedGuids
+    )
+    {
+        var requested = requestedGuids
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (requested.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var edges = await db.Queryable<WarehouseCategory>()
+            .Where(category => category.IsDeleted == false)
+            .Select(category => new TreeEdge { Guid = category.CategoryGUID, ParentGuid = category.ParentGUID })
+            .ToListAsync();
+        var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edge in edges)
+        {
+            canonical.TryAdd(edge.Guid, edge.Guid);
+        }
+
+        var roots = requested.Where(canonical.ContainsKey).Select(guid => canonical[guid]).ToList();
+        return ExpandSubtree(edges, roots).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// 供应商分类筛选（商品列表与商品陈列参数列表共用，主体由 ProductReactService 原样搬来）：
+    /// 200 商品按仓库分类，其他供应商按有效归属（归属登记的供应商须与商品当前供应商一致）。
+    /// 使用 EXISTS 子查询作用在 Product 单表查询上，不改变列表快/慢路径的判定。
+    /// </summary>
+    /// <param name="db">用于展开子分类树的数据库客户端。</param>
+    /// <param name="q">Product 单表查询。</param>
+    /// <param name="supplierCategoryGuids">所选分类 GUID（含子分类）；空表示不按分类过滤。</param>
+    /// <param name="supplierCategoryUnassignedOnly">true = 只看未归类的商品。</param>
+    public static async Task<ISugarQueryable<Product>> ApplyProductFilterAsync(
+        ISqlSugarClient db,
+        ISugarQueryable<Product> q,
+        IEnumerable<string>? supplierCategoryGuids,
+        bool? supplierCategoryUnassignedOnly
+    )
+    {
+        var hotBargain = LocalSupplierCategoryConstants.HotBargainSupplierCode;
+        var requestedGuids = (supplierCategoryGuids?.Distinct().ToList() ?? new List<string>())
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid.Trim())
+            .ToList();
+        if (requestedGuids.Count > 0)
+        {
+            var (supplierGuids, warehouseGuids) = await ExpandAsync(db, requestedGuids);
+            if (supplierGuids.Count == 0 && warehouseGuids.Count == 0)
+            {
+                // 所选分类均不存在：返回空结果而不是忽略条件。
+                q = q.Where("1 = 0");
+            }
+            else if (warehouseGuids.Count == 0)
+            {
+                q = q.Where(p =>
+                    SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                        .Where(a =>
+                            a.ProductCode == p.ProductCode
+                            && a.LocalSupplierCode == p.LocalSupplierCode
+                            && supplierGuids.Contains(a.CategoryGUID)
+                        )
+                        .Any()
+                );
+            }
+            else if (supplierGuids.Count == 0)
+            {
+                q = q.Where(p =>
+                    (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                    && p.WarehouseCategoryGUID != null
+                    && warehouseGuids.Contains(p.WarehouseCategoryGUID)
+                );
+            }
+            else
+            {
+                q = q.Where(p =>
+                    SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                        .Where(a =>
+                            a.ProductCode == p.ProductCode
+                            && a.LocalSupplierCode == p.LocalSupplierCode
+                            && supplierGuids.Contains(a.CategoryGUID)
+                        )
+                        .Any()
+                    || (
+                        (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                        && p.WarehouseCategoryGUID != null
+                        && warehouseGuids.Contains(p.WarehouseCategoryGUID)
+                    )
+                );
+            }
+        }
+
+        if (supplierCategoryUnassignedOnly == true)
+        {
+            q = q.Where(p =>
+                (
+                    (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                    && (p.WarehouseCategoryGUID == null || p.WarehouseCategoryGUID == "")
+                )
+                || (
+                    p.LocalSupplierCode != null
+                    && p.LocalSupplierCode != ""
+                    && p.LocalSupplierCode != hotBargain
+                    && SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                        .Where(a =>
+                            a.ProductCode == p.ProductCode && a.LocalSupplierCode == p.LocalSupplierCode
+                        )
+                        .NotAny()
+                )
+            );
+        }
+
+        return q;
     }
 
     private static IEnumerable<string> ExpandSubtree(IReadOnlyList<TreeEdge> edges, IEnumerable<string> roots)

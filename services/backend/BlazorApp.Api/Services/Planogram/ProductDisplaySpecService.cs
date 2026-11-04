@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Models.Planogram;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using SqlSugar;
@@ -12,6 +13,18 @@ public interface IProductDisplaySpecService
     /// <summary>商品参数列表；status 取 all（默认）/ set（已设参数）/ unset（未设参数）。</summary>
     Task<ApiResponse<PagedResult<ProductSpecListItemDto>>> ListAsync(
         string? keyword, string? status, int page, int pageSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 带分类 / 供应商 / 等级过滤的商品参数列表（附录 D.1）：各条件并且，计数与分页仍作用在 Product 单表查询上。
+    /// </summary>
+    Task<ApiResponse<PagedResult<ProductSpecListItemDto>>> ListAsync(
+        ProductSpecFilterDto filter, int page, int pageSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 批量修改商品陈列参数（附录 D.2）。<c>dryRun</c> 只校验计数不写库；真正执行时所有通过校验的商品在一个事务里写入。
+    /// </summary>
+    Task<ApiResponse<ProductSpecBatchResultDto>> BatchUpdateAsync(
+        ProductSpecBatchRequest request, string actor, CancellationToken cancellationToken);
 
     Task<ApiResponse<ProductSpecListItemDto>> GetAsync(string productCode, CancellationToken cancellationToken);
 
@@ -27,7 +40,7 @@ public interface IProductDisplaySpecService
 /// 商品陈列参数（附录 A）：按 ProductCode 业务键联 Product，只面向启用且未软删的商品。
 /// 权限在控制器按方法区分（GET 为 Planogram.View，PUT 为 Planogram.Edit，DELETE 为 Planogram.Manage）。
 /// </summary>
-public sealed class ProductDisplaySpecService : IProductDisplaySpecService
+public sealed partial class ProductDisplaySpecService : IProductDisplaySpecService
 {
     private const int MaxMm = 10000;
     private const int MaxPageSize = 500;
@@ -35,6 +48,14 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
 
     // 表里 HookQtyOverridesJson 是 nvarchar(1000)；每个挂钩型号约占 50 字符，超长直接拒绝而不是截断。
     private const int MaxOverridesJsonLength = 1000;
+
+    // 单个保存与批量修改共用的字段规则，改一处两边同步。
+    private const int MinUnitWeightG = 1;
+    private const int MaxUnitWeightG = 1_000_000;
+    private const int MaxNotesLength = 500;
+
+    // 过滤条件里分类 GUID 的数量上限（仓库分类、供应商分类各自计）：每个 GUID 都会展开成子树放进 IN 子句，必须设防。
+    private const int MaxCategoryGuids = 200;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
@@ -52,10 +73,43 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
         _time = timeProvider ?? TimeProvider.System;
     }
 
+    public Task<ApiResponse<PagedResult<ProductSpecListItemDto>>> ListAsync(
+        string? keyword, string? status, int page, int pageSize, CancellationToken cancellationToken) =>
+        ListAsync(new ProductSpecFilterDto { Keyword = keyword, Status = status }, page, pageSize, cancellationToken);
+
     public async Task<ApiResponse<PagedResult<ProductSpecListItemDto>>> ListAsync(
-        string? keyword, string? status, int page, int pageSize, CancellationToken cancellationToken)
+        ProductSpecFilterDto filter, int page, int pageSize, CancellationToken cancellationToken)
     {
-        var mode = (status ?? "all").Trim().ToLowerInvariant();
+        var errors = new PlanogramFieldErrors();
+        var query = await BuildFilteredQueryAsync(filter ?? new ProductSpecFilterDto(), errors);
+        if (query is null)
+        {
+            return errors.ToFailure<PagedResult<ProductSpecListItemDto>>();
+        }
+
+        page = Math.Max(page, 1);
+        pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, MaxPageSize);
+
+        // 过滤全部以 WHERE / EXISTS 的形式作用在 Product 单表上：计数、排序、取页仍是原来的快路径。
+        RefAsync<int> total = 0;
+        var products = await query.OrderBy(product => product.ProductCode).ToPageListAsync(page, pageSize, total);
+        var items = await BuildRowsAsync(products);
+        return ApiResponse<PagedResult<ProductSpecListItemDto>>.OK(new PagedResult<ProductSpecListItemDto>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        });
+    }
+
+    /// <summary>
+    /// 把过滤条件翻译成 Product 单表查询（列表与批量修改「按当前筛选」共用）。
+    /// 条件不合法（状态、等级取值，分类 GUID 超过上限）时把错误收进 <paramref name="errors"/> 并返回 null。
+    /// </summary>
+    private async Task<ISugarQueryable<Product>?> BuildFilteredQueryAsync(ProductSpecFilterDto filter, PlanogramFieldErrors errors)
+    {
+        var mode = (filter.Status ?? "all").Trim().ToLowerInvariant();
         if (mode.Length == 0)
         {
             mode = "all";
@@ -63,16 +117,19 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
 
         if (mode is not ("all" or "set" or "unset"))
         {
-            var errors = new PlanogramFieldErrors();
             errors.Add("status", "状态只能是 all、set 或 unset");
-            return errors.ToFailure<PagedResult<ProductSpecListItemDto>>();
         }
 
-        page = Math.Max(page, 1);
-        pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, MaxPageSize);
+        var warehouseGuids = NormalizeCategoryGuids(filter.WarehouseCategoryGuids, "warehouseCategoryGuids", "仓库分类", errors);
+        var supplierCategoryGuids = NormalizeCategoryGuids(filter.SupplierCategoryGuids, "supplierCategoryGuids", "供应商分类", errors);
+        var (gradeLetters, includeNoGrade) = NormalizeGrades(filter.Grades, errors);
+        if (errors.Any)
+        {
+            return null;
+        }
 
         var query = ActiveProducts();
-        var key = keyword?.Trim();
+        var key = filter.Keyword?.Trim();
         if (!string.IsNullOrEmpty(key))
         {
             // 货号 / 条码 / 名称 / 英文名；货号即 ProductCode 业务键，也一并匹配，方便直接粘贴。
@@ -95,16 +152,122 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
                 !SqlFunc.Subqueryable<ProductDisplaySpec>().Where(spec => spec.ProductCode == product.ProductCode).Any());
         }
 
-        RefAsync<int> total = 0;
-        var products = await query.OrderBy(product => product.ProductCode).ToPageListAsync(page, pageSize, total);
-        var items = await BuildRowsAsync(products);
-        return ApiResponse<PagedResult<ProductSpecListItemDto>>.OK(new PagedResult<ProductSpecListItemDto>
+        if (warehouseGuids.Count > 0)
         {
-            Items = items,
-            Total = total,
-            Page = page,
-            PageSize = pageSize,
-        });
+            // 仓库分类按分类树展开到全部子分类；未设仓库分类的商品不参与，任何供应商的商品都可匹配。
+            var expanded = await LocalSupplierCategoryFilter.ExpandWarehouseSubtreeAsync(_db, warehouseGuids);
+            query = expanded.Count == 0
+                // 所选分类都不存在：返回空结果，而不是忽略条件。
+                ? query.Where("1 = 0")
+                : query.Where(product => product.WarehouseCategoryGUID != null && expanded.Contains(product.WarehouseCategoryGUID));
+        }
+
+        var supplierCode = filter.LocalSupplierCode?.Trim();
+        if (!string.IsNullOrEmpty(supplierCode))
+        {
+            if (LocalSupplierCategoryConstants.IsHotBargain(supplierCode))
+            {
+                // 200 = Hot Bargain 自营；与商品写入口径（空供应商视为 200）一致，供应商为空的商品也算。
+                var hotBargain = LocalSupplierCategoryConstants.HotBargainSupplierCode;
+                query = query.Where(product =>
+                    product.LocalSupplierCode == hotBargain || product.LocalSupplierCode == null || product.LocalSupplierCode == "");
+            }
+            else
+            {
+                query = query.Where(product => product.LocalSupplierCode == supplierCode);
+            }
+        }
+
+        // 供应商分类（含子分类、按所属树分流）与「未归类」：与商品列表共用同一份实现。
+        query = await LocalSupplierCategoryFilter.ApplyProductFilterAsync(
+            _db, query, supplierCategoryGuids, filter.SupplierCategoryUnassignedOnly);
+
+        // 商品等级：选了字母 → 有未删除的等级行且等级在所选集合内；选了 none → 没有未删除的等级行；两者取并集。
+        // 都是 EXISTS / NOT EXISTS 子查询，作用在 Product 单表上。
+        if (gradeLetters.Count > 0 && includeNoGrade)
+        {
+            query = query.Where(product =>
+                SqlFunc.Subqueryable<ProductGrade>()
+                    .Where(grade => grade.ProductCode == product.ProductCode && grade.IsDeleted == false && gradeLetters.Contains(grade.Grade))
+                    .Any()
+                || SqlFunc.Subqueryable<ProductGrade>()
+                    .Where(grade => grade.ProductCode == product.ProductCode && grade.IsDeleted == false)
+                    .NotAny());
+        }
+        else if (gradeLetters.Count > 0)
+        {
+            query = query.Where(product =>
+                SqlFunc.Subqueryable<ProductGrade>()
+                    .Where(grade => grade.ProductCode == product.ProductCode && grade.IsDeleted == false && gradeLetters.Contains(grade.Grade))
+                    .Any());
+        }
+        else if (includeNoGrade)
+        {
+            query = query.Where(product =>
+                SqlFunc.Subqueryable<ProductGrade>()
+                    .Where(grade => grade.ProductCode == product.ProductCode && grade.IsDeleted == false)
+                    .NotAny());
+        }
+
+        return query;
+    }
+
+    /// <summary>分类 GUID 归一化：去空白、去空值、去重（不分大小写）；超过上限报校验错误。</summary>
+    private static List<string> NormalizeCategoryGuids(
+        IEnumerable<string>? raw, string field, string label, PlanogramFieldErrors errors)
+    {
+        var guids = (raw ?? Enumerable.Empty<string>())
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (guids.Count > MaxCategoryGuids)
+        {
+            errors.Add(field, $"{label}最多选择 {MaxCategoryGuids} 个");
+        }
+
+        return guids;
+    }
+
+    /// <summary>
+    /// 商品等级过滤值归一化：A～D（不分大小写）与 none；空白值忽略；出现其他取值报校验错误（字段 grades）。
+    /// </summary>
+    private static (List<string> Letters, bool IncludeNoGrade) NormalizeGrades(IEnumerable<string>? raw, PlanogramFieldErrors errors)
+    {
+        var letters = new List<string>();
+        var includeNone = false;
+        var invalid = false;
+        foreach (var value in raw ?? Enumerable.Empty<string>())
+        {
+            var text = value?.Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            if (text == PlanogramGradeFilter.None.ToUpperInvariant())
+            {
+                includeNone = true;
+            }
+            else if (PlanogramGradeFilter.Letters.Contains(text, StringComparer.Ordinal))
+            {
+                if (!letters.Contains(text, StringComparer.Ordinal))
+                {
+                    letters.Add(text);
+                }
+            }
+            else
+            {
+                invalid = true;
+            }
+        }
+
+        if (invalid)
+        {
+            errors.Add("grades", "商品等级只能是 A、B、C、D 或 none（未分级）");
+        }
+
+        return (letters, includeNone);
     }
 
     public async Task<ApiResponse<ProductSpecListItemDto>> GetAsync(string productCode, CancellationToken cancellationToken)
@@ -261,19 +424,19 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
         {
             errors.Add("hangHoleOffsetMm", "吊孔偏移不能为负数");
         }
-        else if (input.HangHoleType != 0 && input.HeightMm > 0 && input.HangHoleOffsetMm > input.HeightMm)
+        else if (OffsetExceedsHeight(input.HangHoleType, input.HeightMm, input.HangHoleOffsetMm))
         {
             errors.Add("hangHoleOffsetMm", "吊孔偏移不能大于包装高");
         }
 
-        if (input.UnitWeightG.HasValue && (input.UnitWeightG.Value < 1 || input.UnitWeightG.Value > 1_000_000))
+        if (input.UnitWeightG.HasValue && (input.UnitWeightG.Value < MinUnitWeightG || input.UnitWeightG.Value > MaxUnitWeightG))
         {
-            errors.Add("unitWeightG", "单件重必须在 1～1000000 克之间（不填表示未知）");
+            errors.Add("unitWeightG", $"单件重必须在 {MinUnitWeightG}～{MaxUnitWeightG} 克之间（不填表示未知）");
         }
 
-        if (input.Notes is { } notes && notes.Trim().Length > 500)
+        if (input.Notes is { } notes && notes.Trim().Length > MaxNotesLength)
         {
-            errors.Add("notes", "备注不能超过 500 个字符");
+            errors.Add("notes", $"备注不能超过 {MaxNotesLength} 个字符");
         }
 
         // 挂钩引用：默认挂钩 + 覆盖里的每个 hookGuid 必须存在。
@@ -331,6 +494,10 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
         return json;
     }
 
+    /// <summary>吊孔偏移不能大于包装高（吊孔类型为「无」或高度未知时不判）；单个保存与批量修改同一条规则。</summary>
+    private static bool OffsetExceedsHeight(int hangHoleType, int heightMm, int hangHoleOffsetMm) =>
+        hangHoleType != 0 && heightMm > 0 && hangHoleOffsetMm > heightMm;
+
     // ---------------------------------------------------------------- 查询与映射
 
     private ISugarQueryable<Product> ActiveProducts() =>
@@ -378,6 +545,29 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
             .GroupBy(item => item.ProductCode, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Select(item => item.PlanogramGuid).Distinct().Count());
 
+        // 商品等级：只对当前页货号做一次小查询回填（只读展示），不进分页前的联表。
+        var gradeRows = await _db.Queryable<ProductGrade>()
+            .Where(grade => codes.Contains(grade.ProductCode) && grade.IsDeleted == false)
+            .Select(grade => new { grade.ProductCode, grade.Grade })
+            .ToListAsync();
+        var grades = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var row in gradeRows)
+        {
+            var letter = row.Grade?.Trim().ToUpperInvariant();
+            if (letter is not null && PlanogramGradeFilter.Letters.Contains(letter, StringComparer.Ordinal))
+            {
+                grades.TryAdd(row.ProductCode, letter);
+            }
+        }
+
+        // 仓库分类路径：同样只对当前页商品的仓库分类做小查询（逐级回溯祖先，复用商品列表的实现）。
+        var warehouseGuids = products
+            .Select(product => product.WarehouseCategoryGUID)
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid!)
+            .ToList();
+        var warehousePaths = await ProductSupplierCategoryProjection.LoadWarehousePathsAsync(_db, warehouseGuids);
+
         return products.Select(product =>
         {
             var code = product.ProductCode!;
@@ -393,6 +583,11 @@ public sealed class ProductDisplaySpecService : IProductDisplaySpecService
                 RetailPrice = product.RetailPrice ?? 0m,
                 CategoryName = product.ProductCategoryGUID is { Length: > 0 } guid && categories.TryGetValue(guid, out var name)
                     ? name
+                    : null,
+                Grade = grades.GetValueOrDefault(code),
+                WarehouseCategoryPath = product.WarehouseCategoryGUID is { Length: > 0 } warehouseGuid
+                    && warehousePaths.TryGetValue(warehouseGuid.Trim(), out var warehousePath)
+                    ? warehousePath
                     : null,
                 HasSpec = spec is not null,
                 ReferencedPlanCount = referenceCounts.GetValueOrDefault(code),

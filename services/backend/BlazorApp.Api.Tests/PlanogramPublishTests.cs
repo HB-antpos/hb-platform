@@ -60,7 +60,7 @@ public sealed class PlanogramPublishTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(PlanogramShelfModel), typeof(PlanogramHookModel), typeof(ProductDisplaySpec),
             typeof(PlanogramHeader), typeof(PlanogramItem), typeof(PlanogramVersion),
-            typeof(Product), typeof(ProductCategory));
+            typeof(Product), typeof(ProductCategory), typeof(ProductGrade));
         // 与迁移 20261104.001 的 UX_PlanogramVersion_Plan_Version 一致：同一方案同一版本号只能有一份快照（并发发布的最后防线）。
         _db.Ado.ExecuteCommand("CREATE UNIQUE INDEX UX_PlanogramVersion_Plan_Version ON PlanogramVersion (PlanogramGuid, Version)");
         _models = new PlanogramModelService(_db, new FixedTime(Now));
@@ -1398,7 +1398,7 @@ public sealed class PlanogramPublishPipelineTests : IDisposable
         _db.CodeFirst.InitTables(
             typeof(PlanogramShelfModel), typeof(PlanogramHookModel), typeof(ProductDisplaySpec),
             typeof(PlanogramHeader), typeof(PlanogramItem), typeof(PlanogramVersion),
-            typeof(Product), typeof(ProductCategory));
+            typeof(Product), typeof(ProductCategory), typeof(ProductGrade));
         _db.Ado.ExecuteCommand("CREATE UNIQUE INDEX UX_PlanogramVersion_Plan_Version ON PlanogramVersion (PlanogramGuid, Version)");
         _models = new PlanogramModelService(_db, new FixedTime(Now));
         _specs = new ProductDisplaySpecService(_db, new FixedTime(Now));
@@ -2124,7 +2124,7 @@ public sealed class PlanogramPublishSqlServerTests
             var database = new IsolatedDatabase(server, name, connectionString);
             using (var db = database.CreateClient())
             {
-                db.CodeFirst.InitTables(typeof(Product), typeof(ProductCategory));
+                db.CodeFirst.InitTables(typeof(Product), typeof(ProductCategory), typeof(ProductGrade));
             }
 
             // 真实迁移建表脚本（含 UX_PlanogramVersion_Plan_Version），并跑一遍只读门禁。

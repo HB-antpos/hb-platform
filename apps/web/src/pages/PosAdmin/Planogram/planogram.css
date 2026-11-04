@@ -401,6 +401,497 @@
   margin-bottom: 12px;
 }
 
+/* ---------- 附录 D：商品范围过滤（仓库分类 / 本地供应商分类 / 等级）与批量修改 ---------- */
+
+.planogram-filter-select {
+  min-width: 210px;
+  max-width: 100%;
+}
+
+/* 本地供应商分类的取值是「供应商 / 分类」，比仓库分类长，给宽一点 */
+.planogram-filter-select.is-supplier {
+  min-width: 270px;
+}
+
+.planogram-filter-label {
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.planogram-filter-caption {
+  color: #667085;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.planogram-filter-grades {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.planogram-filter-clear {
+  padding: 0 4px;
+}
+
+.planogram-filter-pop-hint {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.planogram-filter-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 8px;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.planogram-filter-hint.is-error a {
+  color: #cf1322;
+}
+
+/* 等级多选标签：圆点是等级主色，选中态与主色系一致（蓝底蓝字）；按钮元素，键盘可用 */
+.planogram-grade-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.planogram-grade-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 999px;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.planogram-grade-chip:hover {
+  border-color: #4096ff;
+}
+
+.planogram-grade-chip:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.planogram-grade-chip.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #0958d9;
+}
+
+.planogram-grade-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.planogram-grade-chips.is-sm {
+  gap: 4px;
+}
+
+.planogram-grade-chips.is-sm .planogram-grade-chip {
+  height: 24px;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.planogram-grade-chips.is-sm .planogram-grade-dot {
+  width: 7px;
+  height: 7px;
+}
+
+/* 等级小标签（列表「等级」列 / 设计器商品卡片） */
+.planogram-grade-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.planogram-grade-tag.is-none {
+  border-color: #d9d9d9;
+  background: #fafafa;
+  color: #8c8c8c;
+}
+
+.planogram-item-no {
+  font-weight: 600;
+}
+
+.planogram-warehouse-path {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* 勾选后的蓝色操作条；没勾选时是灰色的一行，仍能「按当前筛选的全部」批量改 */
+.planogram-selbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  border: 1px solid #91caff;
+  border-radius: 10px;
+  background: #e6f4ff;
+  font-size: 13px;
+}
+
+.planogram-selbar.is-idle {
+  border-color: #f0f0f0;
+  background: #fafafa;
+  color: #667085;
+}
+
+.planogram-selbar-icon {
+  color: #1677ff;
+}
+
+.planogram-selbar.is-idle .planogram-selbar-icon {
+  color: #8c8c8c;
+}
+
+.planogram-selbar-or {
+  margin-left: auto;
+  color: #667085;
+}
+
+.planogram-selbar.is-idle .planogram-selbar-idle-text {
+  margin-right: auto;
+}
+
+/* 已勾选的行：蓝色底（盖过「未设参数」的黄色底） */
+.planogram-row-picked > td {
+  background: #e6f4ff !important;
+}
+
+.planogram-row-picked:hover > td {
+  background: #d6ebff !important;
+}
+
+/* 批量修改弹窗（一个弹窗：左边字段开关，右边预览） */
+.planogram-batch {
+  max-height: calc(100vh - 230px);
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.planogram-batch-alert {
+  margin-bottom: 10px;
+}
+
+.planogram-batch-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 13px;
+}
+
+.planogram-batch-cols {
+  display: flex;
+  gap: 18px;
+  margin-top: 6px;
+}
+
+.planogram-batch-fields {
+  flex: 1.25;
+  min-width: 0;
+}
+
+.planogram-batch-side {
+  flex: 1;
+  min-width: 0;
+}
+
+.planogram-batch-sec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.planogram-batch-sec.is-gap {
+  margin-top: 16px;
+}
+
+.planogram-batch-sec .planogram-small {
+  font-weight: 400;
+}
+
+.planogram-batch-row {
+  display: grid;
+  grid-template-columns: 38px 118px minmax(0, 1fr) 62px;
+  align-items: start;
+  gap: 6px 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f5f5f5;
+  font-size: 13px;
+}
+
+.planogram-batch-row .ant-switch {
+  margin-top: 4px;
+}
+
+.planogram-batch-label {
+  padding-top: 3px;
+}
+
+.planogram-batch-row.is-off .planogram-batch-label {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.planogram-batch-hint {
+  padding-top: 1px;
+  color: #8c8c8c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.planogram-batch-required {
+  margin-top: 2px;
+  color: #d46b08;
+  font-size: 12px;
+}
+
+.planogram-batch-control {
+  min-width: 0;
+}
+
+.planogram-batch-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.planogram-batch-number {
+  width: 128px;
+}
+
+.planogram-batch-select {
+  width: 128px;
+}
+
+.planogram-batch-select.is-wide,
+.planogram-batch-text {
+  width: 100%;
+  min-width: 140px;
+  max-width: 220px;
+}
+
+.planogram-batch-error {
+  margin-top: 2px;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.planogram-batch-note {
+  margin-top: 4px;
+}
+
+.planogram-batch-note.is-ok {
+  color: #389e0d;
+}
+
+.planogram-batch-note.is-warn {
+  color: #d46b08;
+}
+
+.planogram-batch-hookqty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.planogram-batch-hookrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.planogram-batch-hookname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-batch-hookrow .ant-input-number {
+  width: 72px;
+  flex: none;
+}
+
+.planogram-batch-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 10px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planogram-batch-tiles {
+  display: flex;
+  gap: 8px;
+}
+
+.planogram-batch-tile {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+}
+
+.planogram-batch-tile b {
+  display: block;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.planogram-batch-tile span {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.planogram-batch-tile b.is-blue {
+  color: #1677ff;
+}
+
+.planogram-batch-tile b.is-green {
+  color: #389e0d;
+}
+
+.planogram-batch-tile b.is-orange {
+  color: #d46b08;
+}
+
+.planogram-batch-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.planogram-batch-caption .planogram-muted-text {
+  font-weight: 400;
+}
+
+.planogram-batch-scroll {
+  max-height: 170px;
+  margin-top: 4px;
+  overflow: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.planogram-batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.planogram-batch-table th {
+  position: sticky;
+  top: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.planogram-batch-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f5f5f5;
+  vertical-align: top;
+}
+
+.planogram-batch-skipname {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-batch-reason {
+  color: #d46b08;
+}
+
+.planogram-batch-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.planogram-batch-footer-hint {
+  margin-right: auto;
+  color: #667085;
+  font-size: 12px;
+}
+
+.planogram-batch-footer-hint.is-warn {
+  color: #d46b08;
+}
+
 /* ---------- 窄屏 ---------- */
 
 @media (max-width: 767px) {
@@ -410,8 +901,21 @@
 
   .planogram-search,
   .planogram-search.is-wide,
-  .planogram-plan-shelf-filter {
+  .planogram-plan-shelf-filter,
+  .planogram-filter-select {
     width: 100%;
+  }
+
+  .planogram-batch-cols {
+    flex-direction: column;
+  }
+
+  .planogram-batch-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .planogram-batch-hint {
+    display: none;
   }
 
   .planogram-toolbar-actions {

@@ -1,5 +1,23 @@
 {
   "planogram": {
+    "categoryFilter": {
+      "all": "全部",
+      "clear": "清除筛选",
+      "emptyTree": "暂无网站分类",
+      "loadFailed": "分类数据加载失败，可在下拉里点击重试",
+      "loadFailedRetry": "加载失败，点击重试",
+      "loading": "加载中…",
+      "more": "等 {{count}} 项",
+      "noSuppliers": "没有可选的供应商",
+      "supplier": "本地供应商分类",
+      "supplierSearch": "搜索供应商或已加载的分类",
+      "supplierSearchEmpty": "没有匹配项；请先展开供应商以加载分类",
+      "unassigned": "未归类",
+      "warehouse": "仓库分类",
+      "warehouseHint": "选父类等于选了它下面的全部子类",
+      "warehouseWithChildren": "仓库分类（含子类）",
+      "withChildren": "（含子类）"
+    },
     "common": {
       "auto": "自动",
       "cancel": "取消",
@@ -132,16 +150,23 @@
         "currentHook": "当前挂钩",
         "dims": "{{w}}×{{h}}×{{t}}",
         "dragAria": "拖到画布添加「{{name}}」，或按回车添加到第一个空位",
+        "emptyFiltered": "没有符合所选分类 / 等级的商品，可调整或清除条件",
         "emptySet": "还没有设置陈列参数的商品，请先到「商品陈列参数」页签补充",
+        "filter": "筛选",
+        "filterClear": "清除",
+        "filterDone": "完成",
+        "filterTitle": "筛选商品",
         "hookArm": "臂长 {{arm}} / 钩高 {{drop}}",
         "hookLoad": "承重 {{kg}} kg",
         "hookNoTag": "无价签",
         "hookTag": "价签 {{w}}×{{h}}",
         "hooksTip": "选择新放商品使用的挂钩型号（商品参数里设了默认挂钩的，优先用默认挂钩）。",
         "loadMore": "加载更多（{{shown}} / {{total}}）",
+        "matchCount": "符合 {{count}} 个",
         "noHooks": "没有启用的挂钩型号",
         "perHook": "每钩 {{count}}",
         "placed": "已放 {{count}}",
+        "removeChip": "移除条件「{{name}}」",
         "search": "货号 / 条码 / 名称",
         "tabHooks": "挂钩",
         "tabProducts": "商品",
@@ -226,6 +251,10 @@
     "errors": {
       "alreadyPublished": "这个版本已经发布过了（可能刚被其他人发布），请刷新；要发布新版本请先修改并保存方案",
       "archived": "方案已归档，不能保存；请先恢复为草稿",
+      "batchConflict": "有其他人同时修改了这些商品，整批已回滚、没有保存。请重新预览后再执行",
+      "batchEmpty": "没有匹配的商品，请调整勾选或筛选条件后重试",
+      "batchTooMany": "一次最多批量修改 {{max}} 个商品，请缩小筛选范围",
+      "batchTooManyCount": "当前匹配 {{count}} 个商品，超过 {{max}} 个的上限，请缩小筛选范围",
       "codeDuplicate": "编码已存在，请换一个",
       "empty": "方案还没有任何商品，不能发布",
       "forbidden": "没有权限执行此操作",
@@ -301,6 +330,24 @@
       "versionCurrent": "已保存 v{{version}}（当前）",
       "versionCurrentLoading": "当前已保存版本",
       "versionPublished": "已发布 v{{version}} · {{date}} · {{by}}"
+    },
+    "grade": {
+      "label": "等级",
+      "name": {
+        "A": "A 核心",
+        "B": "B 关注",
+        "C": "C 停产",
+        "D": "D 清仓",
+        "none": "未分级"
+      },
+      "short": {
+        "A": "A",
+        "B": "B",
+        "C": "C",
+        "D": "D",
+        "none": "未分级"
+      },
+      "title": "商品等级"
     },
     "hook": {
       "col": {
@@ -619,18 +666,138 @@
       "addSpec": "补充参数",
       "autoTag": "自动",
       "autoValue": "自动 {{value}}",
+      "batch": {
+        "change": {
+          "cleared": "已清空",
+          "noOverrides": "无覆盖"
+        },
+        "changes": {
+          "col": {
+            "after": "改后",
+            "before": "改前",
+            "item": "货号"
+          },
+          "created": "（新建）",
+          "title": "改前 → 改后",
+          "truncated": "共 {{total}} 条变化，仅列前 {{shown}} 条",
+          "unset": "未设"
+        },
+        "clear": "清空",
+        "create": {
+          "create": "按上面的值创建",
+          "noUnset": "目标里没有未设参数的商品",
+          "ready": "已填齐宽、高、厚，可以创建（吊孔偏移缺省 10、欧式挂孔、人工量取）",
+          "skip": "跳过",
+          "title": "未设参数的商品",
+          "titleCount": "未设参数的商品（{{count}} 个）"
+        },
+        "error": {
+          "needDimensions": "创建未设参数的商品时，必须同时勾选并填写宽、高、厚",
+          "nonNegativeInt": "请填写不小于 0 的整数",
+          "notesTooLong": "备注不能超过 {{max}} 个字符",
+          "offsetExceedsHeight": "吊孔偏移不能大于包装高",
+          "qtyInvalid": "每钩挂数请填 1～{{max}} 的整数",
+          "qtyNone": "请至少填写一个挂钩型号的每钩挂数",
+          "rangeInt": "请填写 {{min}}～{{max}} 的整数",
+          "required": "请填写",
+          "unknownHook": "这个挂钩型号不可用，请重新选择"
+        },
+        "fields": {
+          "hint": "打开开关的字段才会被修改，其余保持原值",
+          "title": "要修改的字段"
+        },
+        "footer": {
+          "confirm": "确认执行",
+          "confirmCount": "确认执行（{{count}} 个）",
+          "hint": "改了任何输入，预览会失效，需要重新预览",
+          "preview": "预览",
+          "rePreview": "重新预览",
+          "refresh": "刷新列表",
+          "stale": "输入已修改，预览已失效，请重新预览"
+        },
+        "hint": {
+          "off": "不改",
+          "qty": "定挂数",
+          "required": "请填写"
+        },
+        "hookQty": {
+          "clearAll": "清空",
+          "clearHint": "清空这些商品的全部手填每钩挂数（回到自动换算）",
+          "empty": "没有启用的挂钩型号",
+          "merge": "合并",
+          "mergeHint": "只覆盖填了数的挂钩型号，其余保留",
+          "none": "不改",
+          "replace": "整体替换",
+          "replaceHint": "用填写的整体替换，没填的型号会被清掉",
+          "title": "每钩挂数覆盖"
+        },
+        "preview": {
+          "empty": "点「预览」查看将创建 / 更新 / 不变 / 跳过的数量，预览不会写库",
+          "latest": "最新",
+          "loading": "正在预览…",
+          "nothing": "预览显示没有需要创建或更新的商品，无需执行",
+          "skipped": "跳过",
+          "stale": "已过期",
+          "title": "预览结果",
+          "unchanged": "不变",
+          "willCreate": "将创建",
+          "willUpdate": "将更新"
+        },
+        "result": {
+          "created": "已创建",
+          "done": "已完成：创建 {{created}} 个，更新 {{updated}} 个，不变 {{unchanged}} 个，跳过 {{skipped}} 个",
+          "title": "执行结果",
+          "updated": "已更新"
+        },
+        "short": {
+          "defaultHook": "默认挂钩",
+          "depth": "厚",
+          "hangOffset": "吊孔",
+          "hangType": "吊孔类型",
+          "height": "高",
+          "hookQty": "挂数",
+          "notes": "备注",
+          "source": "来源",
+          "weight": "单件重",
+          "width": "宽"
+        },
+        "skip": {
+          "col": {
+            "name": "名称",
+            "reason": "原因"
+          },
+          "missingDimensions": "创建需要同时填写宽、高、厚",
+          "noSpec": "还没有设置陈列参数，且未选择创建",
+          "offsetExceedsHeight": "修改后吊孔偏移大于包装高",
+          "overridesTooLong": "改后的每钩挂数覆盖太长，无法保存",
+          "productNotFound": "商品不存在，或已停用 / 已删除",
+          "title": "跳过的商品（{{count}}）",
+          "truncated": "仅列前 {{shown}} 条"
+        },
+        "switchAria": "本次修改「{{name}}」",
+        "target": {
+          "counts": "已设参数 {{set}} · 未设参数 {{unset}}",
+          "countsUnknown": "已设参数 — · 未设参数 —",
+          "filter": "当前筛选 {{count}} 个",
+          "label": "目标",
+          "selected": "已选 {{count}} 个"
+        },
+        "title": "批量修改陈列参数"
+      },
       "clear": "清除参数",
       "clearConfirm": "清除后该商品会回到「未设参数」。确认清除？",
       "cleared": "已清除参数",
       "col": {
         "code": "货号 / 条码",
         "defaultHook": "默认挂钩",
+        "grade": "等级",
         "hangOffset": "吊孔偏移",
         "image": "图",
         "name": "名称",
         "qty": "每钩挂数",
         "size": "包装 宽 × 高 × 厚",
         "updated": "更新",
+        "warehouse": "仓库分类",
         "weight": "单件重"
       },
       "drawer": {
@@ -638,11 +805,13 @@
         "view": "陈列参数详情"
       },
       "empty": "没有符合条件的商品",
+      "emptyFiltered": "没有符合筛选条件的商品，可点「清除筛选」",
       "field": {
         "depth": "厚 T（沿钩向）",
         "hangOffset": "吊孔距顶边",
         "hangType": "吊孔类型",
         "height": "高 H",
+        "notes": "备注",
         "weight": "单件重",
         "width": "宽 W"
       },
@@ -664,6 +833,7 @@
         "manualAria": "「{{name}}」手填每钩挂数"
       },
       "hooksFailed": "挂钩型号加载失败，暂时不能保存，以免清掉默认挂钩与手填挂数",
+      "internalCode": "内部码 {{code}}",
       "manualTag": "手填",
       "noImage": "无图",
       "overLoad": "超承重",
@@ -685,6 +855,16 @@
         "size": "包装尺寸",
         "sizeHint": "挂板正面朝外的外包装，单位 mm",
         "source": "尺寸来源"
+      },
+      "selection": {
+        "batchEdit": "批量修改参数",
+        "byFilter": "按当前筛选的全部 {{count}} 个批量修改",
+        "clear": "取消选择",
+        "idle": "勾选商品后批量修改；也可以直接修改当前筛选的全部商品",
+        "limit": "一次最多选择 {{max}} 个商品，超出的没有加入",
+        "or": "或",
+        "region": "批量修改",
+        "selected": "已选 {{count}} 个商品（跨页保留）"
       },
       "source": {
         "manual": "人工量取",

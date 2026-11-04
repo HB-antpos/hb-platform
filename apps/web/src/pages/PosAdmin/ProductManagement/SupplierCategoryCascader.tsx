@@ -1,5 +1,5 @@
 import { Button, Cascader, Input, theme } from 'antd'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatCascaderDisplayLabels } from './supplierCategoryFilter'
@@ -17,6 +17,20 @@ export interface SupplierCategoryCascaderProps {
   onRetrySupplier: (supplierCode: string) => void
   placeholder?: string
   style?: CSSProperties
+  /**
+   * 以下为可选的复用扩展（商品管理页都不传，行为不变）：
+   * - prefix / size / className：输入框前缀标签、尺寸与样式类；
+   * - onOpen：弹层打开时回调（懒加载供应商列表）；
+   * - searchPlaceholder / searchEmptyText：覆盖弹层内搜索框与空结果的文案（默认读商品管理页的文案键）；
+   * - notFoundContent：没有选项时的内容（加载中 / 加载失败）。
+   */
+  prefix?: ReactNode
+  size?: 'small' | 'middle' | 'large'
+  className?: string
+  onOpen?: () => void
+  searchPlaceholder?: string
+  searchEmptyText?: string
+  notFoundContent?: ReactNode
 }
 
 /**
@@ -31,6 +45,13 @@ export default function SupplierCategoryCascader({
   onRetrySupplier,
   placeholder,
   style,
+  prefix,
+  size,
+  className,
+  onOpen,
+  searchPlaceholder,
+  searchEmptyText,
+  notFoundContent,
 }: SupplierCategoryCascaderProps) {
   const { token } = theme.useToken()
   const { t } = useTranslation()
@@ -65,11 +86,16 @@ export default function SupplierCategoryCascader({
           return
         }
         setOpen(true)
+        onOpen?.()
         const selectedSupplier = options.find((option) => option.value === value?.[0])
         if (nextOpen && selectedSupplier?.isLeaf === false) onLoadSupplier(selectedSupplier.value)
       }}
       placeholder={placeholder}
       style={style}
+      prefix={prefix}
+      size={size}
+      className={className}
+      notFoundContent={notFoundContent}
       options={options}
       value={value}
       onChange={handleChange}
@@ -96,7 +122,7 @@ export default function SupplierCategoryCascader({
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
               onKeyDown={(event) => event.stopPropagation()}
-              placeholder={t(`${I18N}.filterSearchPlaceholder`, '搜索供应商或已加载的分类')}
+              placeholder={searchPlaceholder ?? t(`${I18N}.filterSearchPlaceholder`, '搜索供应商或已加载的分类')}
             />
           </div>
           {searchText.trim() ? (
@@ -118,7 +144,7 @@ export default function SupplierCategoryCascader({
                 </Button>
               )) : (
                 <div style={{ padding: 8, color: token.colorTextSecondary }}>
-                  {t(`${I18N}.filterSearchEmpty`, '没有匹配项；请先展开供应商以加载分类')}
+                  {searchEmptyText ?? t(`${I18N}.filterSearchEmpty`, '没有匹配项；请先展开供应商以加载分类')}
                 </div>
               )}
             </div>

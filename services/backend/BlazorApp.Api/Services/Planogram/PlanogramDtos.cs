@@ -48,6 +48,20 @@ public static class PlanogramErrorCodes
     /// 明确报错而不是抛 500，前端提示「该版本快照已损坏」即可。
     /// </summary>
     public const string SnapshotInvalid = "PLANOGRAM_SNAPSHOT_INVALID";
+
+    // ---- 附录 D：商品陈列参数批量修改
+
+    /// <summary>批量修改的目标超过 2000 个商品；<c>details</c> 是 <see cref="PlanogramBatchLimitDetails"/>（带匹配数）。</summary>
+    public const string BatchTooMany = "PLANOGRAM_BATCH_TOO_MANY";
+
+    /// <summary>批量修改的目标为空，或按筛选没有匹配到任何商品。</summary>
+    public const string BatchEmpty = "PLANOGRAM_BATCH_EMPTY";
+
+    /// <summary>
+    /// 批量执行时发生并发冲突：创建撞了主键 / 唯一约束（别人同时创建了同一货号的参数），
+    /// 或更新的实际影响行数少于应更新行数（别人同时清除了参数）。整批已回滚，请重新预览后再执行。
+    /// </summary>
+    public const string BatchConflict = "PLANOGRAM_BATCH_CONFLICT";
 }
 
 /// <summary>校验失败时 <c>details</c> 里的一项：<c>field</c> 用请求 JSON 的字段名（camelCase），前端据此标红对应输入框。</summary>
@@ -168,6 +182,16 @@ public sealed class ProductSpecListItemDto
     public string? ProductImage { get; set; }
     public decimal RetailPrice { get; set; }
     public string? CategoryName { get; set; }
+
+    /// <summary>商品等级（A～D），未分级为 null。只读：按当前页货号小查询回填，不参与分页前的联表。</summary>
+    public string? Grade { get; set; }
+
+    /// <summary>
+    /// 仓库分类完整路径（逐级祖先拼出，分隔符 " &gt; "，如「百货 &gt; 收纳 &gt; 收纳盒」）；未设仓库分类或分类已不存在时为 null。
+    /// 只读：与 <see cref="Grade"/> 一样按当前页商品小查询回填，不参与分页前的联表。
+    /// </summary>
+    public string? WarehouseCategoryPath { get; set; }
+
     public bool HasSpec { get; set; }
 
     /// <summary>被多少个陈列方案引用（按方案明细计数，同一方案多行只算一次）。</summary>
@@ -177,6 +201,160 @@ public sealed class ProductSpecListItemDto
     public DateTime? UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// 附录 D：商品陈列参数的分类 / 等级过滤与批量修改（接口契约见 docs/plans/2026-11-04-planogram-shelf-display-designer.md 附录 D）
+// ---------------------------------------------------------------------------------------------------------------
+
+/// <summary>商品等级过滤里「未分级」的取值（其余取值为 A / B / C / D）。</summary>
+public static class PlanogramGradeFilter
+{
+    public const string None = "none";
+    public static readonly string[] Letters = { "A", "B", "C", "D" };
+}
+
+/// <summary>
+/// 商品陈列参数的过滤条件。<c>GET product-specs</c> 的查询串（数组用重复键）与批量修改 <c>target.filter</c> 共用同一套字段。
+/// 各条件之间是「并且」；数组内多选取并集。
+/// </summary>
+public sealed class ProductSpecFilterDto
+{
+    /// <summary>货号 / 条码 / 名称 / 英文名。</summary>
+    public string? Keyword { get; set; }
+
+    /// <summary>all（默认）/ set / unset。批量修改里照常按原值过滤。</summary>
+    public string? Status { get; set; }
+
+    /// <summary>仓库分类 GUID，含全部子分类；未设仓库分类的商品不参与。最多 200 个。</summary>
+    public List<string>? WarehouseCategoryGuids { get; set; }
+
+    /// <summary>单个本地供应商；编码 200（Hot Bargain）同时包含供应商为空的商品。</summary>
+    public string? LocalSupplierCode { get; set; }
+
+    /// <summary>本地供应商分类 GUID，含子分类，语义同商品列表的 SupplierCategoryGUIDs。最多 200 个。</summary>
+    public List<string>? SupplierCategoryGuids { get; set; }
+
+    /// <summary>只看供应商分类「未归类」的商品。</summary>
+    public bool? SupplierCategoryUnassignedOnly { get; set; }
+
+    /// <summary>商品等级：A / B / C / D / none（未分级），多选取并集；未知值报校验错误。</summary>
+    public List<string>? Grades { get; set; }
+}
+
+/// <summary>批量修改的目标：<c>productCodes</c>（勾选的货号）与 <c>filter</c>（按当前筛选）二选一。</summary>
+public sealed class ProductSpecBatchTargetDto
+{
+    public List<string>? ProductCodes { get; set; }
+    public ProductSpecFilterDto? Filter { get; set; }
+}
+
+/// <summary>
+/// 挂数覆盖的批量补丁：<c>mode</c> 取 replace（整体替换为 values；空对象 = 清空全部覆盖）或 merge（只覆盖给出的挂钩）。
+/// values 用 JsonElement 接，类型 / 范围不合法时返回 PLANOGRAM_VALIDATION，而不是被 MVC 绑定层直接 400。
+/// </summary>
+public sealed class ProductSpecBatchOverridesDto
+{
+    public string? Mode { get; set; }
+    public Dictionary<string, System.Text.Json.JsonElement>? Values { get; set; }
+}
+
+/// <summary>
+/// 批量修改请求。<c>patch</c> 只含被勾选的字段（键存在才修改）；可空字段（unitWeightG / defaultHookGuid / notes）传 null = 清空。
+/// </summary>
+public sealed class ProductSpecBatchRequest
+{
+    public ProductSpecBatchTargetDto? Target { get; set; }
+    public Dictionary<string, System.Text.Json.JsonElement>? Patch { get; set; }
+    public ProductSpecBatchOverridesDto? HookQtyOverrides { get; set; }
+
+    /// <summary>目标里未设参数的商品是否创建。</summary>
+    public bool CreateMissing { get; set; }
+
+    /// <summary>true = 完整走一遍校验与计数但不写库。</summary>
+    public bool DryRun { get; set; }
+}
+
+/// <summary>批量修改里被跳过的商品的原因代码。</summary>
+public static class PlanogramBatchSkipReasons
+{
+    /// <summary>目标里没有陈列参数，且没有勾选「创建未设参数的商品」。</summary>
+    public const string NoSpec = "NO_SPEC";
+
+    /// <summary>要创建参数，但补丁没有同时给出宽、高、厚。</summary>
+    public const string MissingDimensions = "MISSING_DIMENSIONS";
+
+    /// <summary>改后吊孔偏移大于包装高（吊孔类型非「无」时）。</summary>
+    public const string OffsetExceedsHeight = "OFFSET_EXCEEDS_HEIGHT";
+
+    /// <summary>商品不存在或已停用 / 已删除。</summary>
+    public const string ProductNotFound = "PRODUCT_NOT_FOUND";
+
+    /// <summary>改后的挂数覆盖序列化后超出库里 1000 字符的上限（跳过，不截断）。</summary>
+    public const string OverridesTooLong = "OVERRIDES_TOO_LONG";
+}
+
+public sealed class ProductSpecBatchSkippedItemDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string ItemNumber { get; set; } = string.Empty;
+    public string ProductName { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>改前改后明细里的动作。</summary>
+public static class PlanogramBatchChangeActions
+{
+    public const string Create = "create";
+    public const string Update = "update";
+}
+
+/// <summary>
+/// 改前改后明细的一行（不变与跳过的商品不进这张表）。<c>before</c> / <c>after</c> 的键名同批量补丁白名单，
+/// <c>hookQtyOverrides</c> 用对象。更新时只含本次实际改变的字段；新建时 <c>before</c> 为 null（始终输出该键），
+/// <c>after</c> 给出宽高厚、吊孔偏移 / 类型、来源与其他已设置的字段。
+/// </summary>
+public sealed class ProductSpecBatchChangedItemDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string ItemNumber { get; set; } = string.Empty;
+    public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>create / update（<see cref="PlanogramBatchChangeActions"/>）。</summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>新建时为 null；生产环境全局 WhenWritingNull，这里强制输出 <c>"before": null</c>，与契约一致。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public Dictionary<string, object?>? Before { get; set; }
+
+    public Dictionary<string, object?> After { get; set; } = new();
+}
+
+/// <summary>
+/// 批量修改结果。<c>dryRun</c> 时 created / updated / unchanged 恒为 0，计划数在 will*；真正执行时 will* 恒为 0。
+/// <c>skipped</c> 是真实总数，<c>skippedItems</c> 最多返回 200 条；<c>changedTotal</c> 是真实总数，<c>changedItems</c> 最多 50 条。
+/// </summary>
+public sealed class ProductSpecBatchResultDto
+{
+    public bool DryRun { get; set; }
+    public int Matched { get; set; }
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Unchanged { get; set; }
+    public int WillCreate { get; set; }
+    public int WillUpdate { get; set; }
+    public int WillStayUnchanged { get; set; }
+    public int Skipped { get; set; }
+    public List<ProductSpecBatchSkippedItemDto> SkippedItems { get; set; } = new();
+
+    /// <summary>将创建 + 将更新（或已创建 + 已更新）的真实总数。</summary>
+    public int ChangedTotal { get; set; }
+
+    /// <summary>改前改后明细：按货号排序取前 50 条，dryRun 与真正执行都返回。</summary>
+    public List<ProductSpecBatchChangedItemDto> ChangedItems { get; set; } = new();
+}
+
+/// <summary>PLANOGRAM_BATCH_TOO_MANY 的 details：实际匹配数与上限。</summary>
+public sealed record PlanogramBatchLimitDetails(int Matched, int Max);
 
 // ---------------------------------------------------------------------------------------------------------------
 // 批 2：陈列方案（接口契约见 docs/plans/2026-11-04-planogram-shelf-display-designer.md 附录 B.2）

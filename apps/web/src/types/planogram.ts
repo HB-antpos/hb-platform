@@ -34,6 +34,11 @@ export const PLANOGRAM_ERROR_CODES = [
   'PLANOGRAM_IMPORT_UNRESOLVED',
   // 附录 C 之外、后端另加：历史版本的发布快照被改坏，读不出来
   'PLANOGRAM_SNAPSHOT_INVALID',
+  // 附录 D（11-04 追加）：商品陈列参数批量修改
+  'PLANOGRAM_BATCH_TOO_MANY',
+  'PLANOGRAM_BATCH_EMPTY',
+  // 真正执行时的并发冲突（整批已回滚）：提示重新预览
+  'PLANOGRAM_BATCH_CONFLICT',
 ] as const
 export type PlanogramErrorCode = (typeof PLANOGRAM_ERROR_CODES)[number]
 
@@ -126,7 +131,12 @@ export interface ProductSpecListItemDto {
   englishName?: string | null
   productImage?: string | null
   retailPrice: number
+  /** 商品分类（POS ProductCategory）叶子名，注意不是仓库分类。 */
   categoryName?: string | null
+  /** 商品等级 A～D（商品等级表），未分级为 null；只读。 */
+  grade?: PlanogramGradeLetter | null
+  /** 仓库分类完整路径，分隔符「 > 」（如「手工 > 纸品 > 皱纹纸」），没有仓库分类为 null；按原样显示。 */
+  warehouseCategoryPath?: string | null
   hasSpec: boolean
   referencedPlanCount: number
   spec?: ProductDisplaySpecDto | null
@@ -145,7 +155,33 @@ export interface ModelListQuery {
   pageSize: number
 }
 
-export interface ProductSpecListQuery {
+/**
+ * 商品等级过滤取值：A / B / C / D 与 none（未分级）。等级定义与颜色复用 types/productGrade.ts 的 PRODUCT_GRADE_CONFIG，
+ * 这里只固定「请求里传什么字符串」，多选取并集。
+ */
+export const PLANOGRAM_GRADE_NONE = 'none'
+export const PLANOGRAM_GRADE_VALUES = ['A', 'B', 'C', 'D', PLANOGRAM_GRADE_NONE] as const
+export type PlanogramProductGrade = (typeof PLANOGRAM_GRADE_VALUES)[number]
+/** 列表行上的等级字母（行上没有 none：未分级就是 null）。 */
+export type PlanogramGradeLetter = Exclude<PlanogramProductGrade, typeof PLANOGRAM_GRADE_NONE>
+
+/**
+ * 附录 D.1 的商品范围过滤条件（商品陈列参数列表、设计器商品库、批量修改「按当前筛选」共用）。
+ * 都是可选条件；数组在查询串里用重复键（warehouseCategoryGuids=a&warehouseCategoryGuids=b）。
+ * - warehouseCategoryGuids：仓库分类，服务端按分类树展开含全部子分类；
+ * - localSupplierCode：单个本地供应商；
+ * - supplierCategoryGuids：本地供应商分类（含子分类）；supplierCategoryUnassignedOnly：只看「未归类」；
+ * - grades：商品等级（11-04 追加，协调人口头补充，附录 D 稍后补）。
+ */
+export interface ProductSpecScopeFilter {
+  warehouseCategoryGuids?: string[]
+  localSupplierCode?: string
+  supplierCategoryGuids?: string[]
+  supplierCategoryUnassignedOnly?: boolean
+  grades?: PlanogramProductGrade[]
+}
+
+export interface ProductSpecListQuery extends ProductSpecScopeFilter {
   keyword?: string
   status: ProductSpecStatusFilter
   page: number
@@ -388,3 +424,116 @@ export interface PlanogramImportUnresolvedItem {
 }
 
 export const PLANOGRAM_EXPORT_FORMAT_VERSION = 1
+
+// ---------------------------------------------------------------------------
+// 附录 D.2：商品陈列参数批量修改 POST /product-specs/batch（权限 Planogram.Edit）
+// ---------------------------------------------------------------------------
+
+/** 批量目标里的「按当前筛选」：服务端自己解析出全部匹配商品（> 2000 返回 PLANOGRAM_BATCH_TOO_MANY）。 */
+export interface ProductSpecBatchFilter {
+  keyword: string
+  status: ProductSpecStatusFilter
+  warehouseCategoryGuids: string[]
+  localSupplierCode: string | null
+  supplierCategoryGuids: string[]
+  supplierCategoryUnassignedOnly: boolean
+  grades: PlanogramProductGrade[]
+}
+
+/** 二选一：勾选的货号（≤ 2000），或按当前筛选。 */
+export type ProductSpecBatchTarget =
+  | { productCodes: string[] }
+  | { filter: ProductSpecBatchFilter }
+
+/**
+ * 只含被勾选字段的补丁：键存在才修改，缺省 = 不动；
+ * 可空字段（unitWeightG / defaultHookGuid / notes）传 null = 清空；非空字段传 null 后端按校验错误处理，所以类型上不允许。
+ */
+export interface ProductSpecBatchPatch {
+  widthMm?: number
+  heightMm?: number
+  depthMm?: number
+  hangHoleOffsetMm?: number
+  hangHoleType?: PlanogramHangHoleType
+  unitWeightG?: number | null
+  defaultHookGuid?: string | null
+  source?: PlanogramSpecSource
+  notes?: string | null
+}
+
+/** 每钩挂数覆盖：merge 只覆盖给出的挂钩；replace 整体替换（values 为空对象 = 清空全部覆盖）。缺省整个字段 = 不动。 */
+export interface ProductSpecBatchHookQty {
+  mode: 'merge' | 'replace'
+  values: Record<string, number>
+}
+
+export interface ProductSpecBatchRequest {
+  target: ProductSpecBatchTarget
+  patch: ProductSpecBatchPatch
+  hookQtyOverrides?: ProductSpecBatchHookQty
+  /** 目标里「未设参数」的商品是否创建（创建要求补丁同时含宽、高、厚）。 */
+  createMissing: boolean
+  /** true = 完整校验与计数但不写库（预览）。 */
+  dryRun: boolean
+}
+
+/** 跳过原因（后端枚举字符串）；界面遇到不认识的原因原样显示。 */
+export const PLANOGRAM_BATCH_SKIP_REASONS = ['NO_SPEC', 'MISSING_DIMENSIONS', 'OFFSET_EXCEEDS_HEIGHT', 'PRODUCT_NOT_FOUND', 'OVERRIDES_TOO_LONG'] as const
+export type PlanogramBatchSkipReason = (typeof PLANOGRAM_BATCH_SKIP_REASONS)[number]
+
+export interface ProductSpecBatchSkippedItem {
+  productCode: string
+  itemNumber?: string | null
+  productName?: string | null
+  reason: string
+}
+
+/**
+ * dryRun 时 created / updated / unchanged 恒为 0，计划数在 will*；真正执行时 will* 恒为 0，结果在 created / updated / unchanged。
+ * skippedItems 最多 200 条，skipped 才是真实总数。
+ */
+/** 改前改后明细里的键：同 patch 白名单，挂数覆盖用对象键 hookQtyOverrides。 */
+export interface ProductSpecBatchChangeValues {
+  widthMm?: number
+  heightMm?: number
+  depthMm?: number
+  hangHoleOffsetMm?: number
+  hangHoleType?: PlanogramHangHoleType
+  unitWeightG?: number | null
+  defaultHookGuid?: string | null
+  source?: PlanogramSpecSource
+  notes?: string | null
+  /** 整份覆盖（{ hookGuid: 件数 }，键排序）；没有覆盖时为 {}。 */
+  hookQtyOverrides?: Record<string, number>
+}
+
+/**
+ * 改前改后明细的一行（不变与跳过的不进表）：
+ * - update：before / after 只含本次实际改变的字段，被清空的可空字段在 after 里显式为 null；
+ * - create：before 恒为 null，after 给宽高厚、吊孔偏移 / 类型 / 来源（含缺省值）与其他已设置的字段。
+ */
+export interface ProductSpecBatchChangedItem {
+  productCode: string
+  itemNumber?: string | null
+  productName?: string | null
+  action: 'create' | 'update'
+  before: ProductSpecBatchChangeValues | null
+  after: ProductSpecBatchChangeValues
+}
+
+export interface ProductSpecBatchResultDto {
+  dryRun: boolean
+  matched: number
+  created: number
+  updated: number
+  unchanged: number
+  willCreate: number
+  willUpdate: number
+  willStayUnchanged: number
+  skipped: number
+  skippedItems: ProductSpecBatchSkippedItem[]
+  /** 将创建 + 将更新（执行时为已创建 + 已更新）的真实总数。 */
+  changedTotal: number
+  /** 改前改后明细：按货号排序取前 50 条，dryRun 与真正执行都返回。 */
+  changedItems: ProductSpecBatchChangedItem[]
+}
