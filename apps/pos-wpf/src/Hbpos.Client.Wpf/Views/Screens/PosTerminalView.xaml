@@ -22,6 +22,34 @@
         <converters:ProductThumbnailImageSourceConverter x:Key="ProductThumbnailImageSourceConverter" DecodePixelWidth="72" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringHasValueToVis" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringIsEmptyToVis" Invert="True" />
+        <converters:LocalizationKeyConverter x:Key="LocalizationKeyConverter" />
+
+        <!-- 支付成功卡片主块文字：要给顾客现金时红字（黄底上），其余随主块配色。DataContext 为 PaymentSuccessViewModel。 -->
+        <Style x:Key="SuccessHeroEmphasisTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardSummary.IsCashToCustomer}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource PosCashToCustomerTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CardSummary.IsNoChange}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CardSummary.IsNonCashRefund}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- 小字说明在黄底上用深红，保证可读。 -->
+        <Style x:Key="SuccessHeroSubtitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SuccessHeroEmphasisTextStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardSummary.IsCashToCustomer}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource PosCashToCustomerSubtleTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CardSummary.IsNoChange}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
         <Style x:Key="CartColumnHeaderCenterStyle" TargetType="DataGridColumnHeader">
             <Setter Property="Background" Value="{DynamicResource PosCartHeaderBrush}" />
@@ -1588,171 +1616,334 @@
                 </DataGrid>
             </Border>
 
-            <!-- 结账完成后在购物车区域显示上一单结果；扫码或加入商品后由 VM 收起。与购物车同行叠放，不包裹购物车 DataGrid。 -->
-            <Border x:Name="PaymentSuccessCard"
-                    Grid.Row="1"
-                    Panel.ZIndex="3"
-                    MaxWidth="540"
-                    Margin="37,44,30,30"
-                    Padding="20,16"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Background="{DynamicResource PosSurfaceBrush}"
-                    BorderBrush="{DynamicResource PosSuccessBrush}"
-                    BorderThickness="2"
-                    CornerRadius="12"
-                    AutomationProperties.AutomationId="PaymentSuccessCard"
-                    Visibility="{Binding IsLastSaleVisible, Converter={StaticResource BoolToVis}}">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.16" />
-                </Border.Effect>
-                <Grid DataContext="{Binding LastSale}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+            <!-- 结账完成后在购物车区域显示上一单结果；扫码或加入商品后由 VM 收起。与购物车同行叠放，不包裹购物车 DataGrid。
+                 要给顾客现金（找零、退现金）统一黄底红字、最醒目；应收、实收等其余金额降为一行小字，避免看错。
+                 卡片按 640 宽设计，购物车区域放不下时 Viewbox 整卡等比缩小，不裁切、不改变触屏按钮的比例。 -->
+            <Viewbox Grid.Row="1"
+                     Panel.ZIndex="3"
+                     Margin="20,40,20,12"
+                     Stretch="Uniform"
+                     StretchDirection="DownOnly"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Visibility="{Binding IsLastSaleVisible, Converter={StaticResource BoolToVis}}">
+                <Border x:Name="PaymentSuccessCard"
+                        Width="640"
+                        Padding="20,14,20,18"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderThickness="2"
+                        CornerRadius="14"
+                        AutomationProperties.AutomationId="PaymentSuccessCard">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding LastSale.CardSummary.IsRefund}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.16" />
+                    </Border.Effect>
+                    <Grid DataContext="{Binding LastSale}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Border Width="40"
-                                Height="40"
-                                CornerRadius="20"
-                                Background="{DynamicResource PosSuccessSoftBrush}"
-                                VerticalAlignment="Center">
-                            <materialDesign:PackIcon Kind="Check"
-                                                     Width="24"
-                                                     Height="24"
-                                                     HorizontalAlignment="Center"
-                                                     VerticalAlignment="Center"
-                                                     Foreground="{DynamicResource PosSuccessTextBrush}" />
-                        </Border>
-                        <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
-                            <TextBlock Text="{loc:Loc PaymentSuccessful}"
-                                       FontSize="20"
-                                       FontWeight="Black"
-                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
-                            <StackPanel Margin="0,2,0,0" Orientation="Horizontal">
-                                <TextBlock Text="{Binding TransactionIdDisplay}"
-                                           AutomationProperties.AutomationId="CompletedTransactionId"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                <TextBlock Text="  ·  " FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                <TextBlock Text="{Binding SoldAtDisplay}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <Button Grid.Column="2"
-                                Width="40"
-                                Height="40"
-                                VerticalAlignment="Top"
-                                Command="{Binding DataContext.DismissLastSaleCommand, ElementName=PaymentSuccessCard}"
-                                Style="{StaticResource PosSearchSegmentButtonStyle}"
-                                AutomationProperties.AutomationId="PaymentSuccessCardCloseButton"
-                                AutomationProperties.Name="{loc:Loc success.card.close}"
-                                ToolTip="{loc:Loc success.card.close}">
-                            <materialDesign:PackIcon Kind="Close" Width="20" Height="20" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                        </Button>
-                    </Grid>
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="32"
+                                    Height="32"
+                                    CornerRadius="16"
+                                    VerticalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding CardSummary.IsRefund}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <materialDesign:PackIcon Width="20"
+                                                         Height="20"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center">
+                                    <materialDesign:PackIcon.Style>
+                                        <Style TargetType="materialDesign:PackIcon">
+                                            <Setter Property="Kind" Value="Check" />
+                                            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CardSummary.IsRefund}" Value="True">
+                                                    <Setter Property="Kind" Value="UndoVariant" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </materialDesign:PackIcon.Style>
+                                </materialDesign:PackIcon>
+                            </Border>
+                            <WrapPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center" Orientation="Horizontal">
+                                <TextBlock Text="{Binding CardSummary.HeaderTitleKey, Converter={StaticResource LocalizationKeyConverter}}"
+                                           AutomationProperties.AutomationId="PaymentSuccessCardTitle"
+                                           Margin="0,0,10,0"
+                                           VerticalAlignment="Center"
+                                           FontSize="18"
+                                           FontWeight="Black">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CardSummary.IsRefund}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TransactionIdDisplay}"
+                                               AutomationProperties.AutomationId="CompletedTransactionId"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                    <TextBlock Text="  ·  " FontSize="13" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                    <TextBlock Text="{Binding SoldAtDisplay}" FontSize="13" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                </StackPanel>
+                            </WrapPanel>
+                            <Button Grid.Column="2"
+                                    Width="48"
+                                    Height="48"
+                                    VerticalAlignment="Center"
+                                    Command="{Binding DataContext.DismissLastSaleCommand, ElementName=PaymentSuccessCard}"
+                                    Style="{StaticResource PosSearchSegmentButtonStyle}"
+                                    AutomationProperties.AutomationId="PaymentSuccessCardCloseButton"
+                                    AutomationProperties.Name="{loc:Loc success.card.close}"
+                                    ToolTip="{loc:Loc success.card.close}">
+                                <materialDesign:PackIcon Kind="Close" Width="22" Height="22" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            </Button>
+                        </Grid>
 
-                    <!-- 现金单并排显示实付、实收与找零；非现金单只显示实付。UniformGrid 不为折叠的子项留位。 -->
-                    <UniformGrid Grid.Row="1" Margin="0,14,0,0" Rows="1">
-                        <Border Margin="0,0,8,0" Padding="12,8" Background="{DynamicResource PosSurfaceAltBrush}" CornerRadius="8">
-                            <StackPanel>
-                                <TextBlock Text="{loc:Loc success.totalPaid}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                <TextBlock Text="{Binding TotalAmountPaidDisplay}"
-                                           AutomationProperties.AutomationId="CompletedSaleTotalPaid"
-                                           Margin="0,2,0,0"
-                                           FontSize="22"
-                                           FontWeight="Black" />
-                            </StackPanel>
-                        </Border>
-                        <Border Margin="0,0,8,0"
-                                Padding="12,8"
-                                Background="{DynamicResource PosSurfaceAltBrush}"
-                                CornerRadius="8"
-                                Visibility="{Binding IsCashChangeVisible, Converter={StaticResource BoolToVis}}">
-                            <StackPanel>
-                                <TextBlock Text="{loc:Loc payment.cash.amountTendered}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                <TextBlock Text="{Binding TenderedAmountDisplay}" Margin="0,2,0,0" FontSize="22" FontWeight="Black" />
-                            </StackPanel>
-                        </Border>
-                        <Border Padding="12,8"
-                                Background="{DynamicResource PosWarningSoftBrush}"
-                                CornerRadius="8"
-                                Visibility="{Binding IsCashChangeVisible, Converter={StaticResource BoolToVis}}">
-                            <StackPanel>
-                                <TextBlock Text="{loc:Loc payment.cash.changeDue}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosAccentBrush}" />
-                                <TextBlock Text="{Binding ChangeAmountDisplay}"
+                        <!-- 醒目主块：找零 / 退现金黄底红字；刚好付清灰色；非现金已收款绿色；退卡、退款代金券浅蓝。 -->
+                        <Border Grid.Row="1"
+                                Margin="0,12,0,0"
+                                Padding="22,10"
+                                CornerRadius="12"
+                                AutomationProperties.AutomationId="PaymentSuccessHero">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CardSummary.IsCashToCustomer}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource PosCashToCustomerBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CardSummary.IsNoChange}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PosKeyBorderBrush}" />
+                                            <Setter Property="BorderThickness" Value="2" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CardSummary.IsNonCashRefund}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="{Binding CardSummary.HeroTitleKey, Converter={StaticResource LocalizationKeyConverter}}"
+                                               AutomationProperties.AutomationId="PaymentSuccessHeroTitle"
+                                               FontSize="26"
+                                               FontWeight="Black"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource SuccessHeroEmphasisTextStyle}" />
+                                    <TextBlock Text="{Binding CardSummary.HeroSubtitleKey, Converter={StaticResource LocalizationKeyConverter}}"
+                                               Margin="0,2,0,0"
+                                               FontSize="14"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource SuccessHeroSubtitleTextStyle}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding CardSummary.HeroAmountDisplay}"
                                            AutomationProperties.AutomationId="CompletedSaleChangeDue"
-                                           FontSize="30"
+                                           VerticalAlignment="Center"
                                            FontWeight="Black"
-                                           Foreground="{DynamicResource PosAccentBrush}" />
-                            </StackPanel>
+                                           LineStackingStrategy="BlockLineHeight">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource SuccessHeroEmphasisTextStyle}">
+                                            <Setter Property="FontSize" Value="64" />
+                                            <Setter Property="LineHeight" Value="70" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CardSummary.IsCashToCustomer}" Value="True">
+                                                    <Setter Property="FontSize" Value="80" />
+                                                    <Setter Property="LineHeight" Value="86" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding CardSummary.IsNoChange}" Value="True">
+                                                    <Setter Property="FontSize" Value="56" />
+                                                    <Setter Property="LineHeight" Value="62" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
                         </Border>
-                    </UniformGrid>
 
-                    <TextBlock Grid.Row="2"
-                               Margin="0,10,0,0"
-                               FontSize="13"
-                               TextWrapping="Wrap"
-                               Foreground="{DynamicResource PosTextBrush}"
-                               Visibility="{Binding IsCardPaymentSummaryVisible, Converter={StaticResource BoolToVis}}">
-                        <Run Text="{loc:Loc success.cardDetails}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                        <Run Text=" " />
-                        <Run Text="{Binding CardPaymentSummary, Mode=OneWay}" />
-                    </TextBlock>
-
-                    <Border Grid.Row="3"
-                            Margin="0,10,0,0"
-                            Padding="10,8"
-                            Background="{DynamicResource PosDangerSoftBrush}"
-                            CornerRadius="8"
-                            AutomationProperties.AutomationId="PaymentCompletedWarning"
-                            Visibility="{Binding HasPostCommitWarning, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="{loc:Loc payment.status.completedWarning}"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap"
-                                   Foreground="{DynamicResource PosDangerTextBrush}" />
-                    </Border>
-
-                    <Grid Grid.Row="4" Margin="0,14,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                            <materialDesign:PackIcon Kind="BarcodeScan" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                            <TextBlock Text="{loc:Loc success.card.scanToContinue}"
+                        <!-- 次要金额：一行小字，字重与主块明显区分。 -->
+                        <WrapPanel Grid.Row="2" Margin="4,10,0,0" Orientation="Horizontal">
+                            <StackPanel Margin="0,0,24,4" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CardSummary.SummaryLabelKey, Converter={StaticResource LocalizationKeyConverter}}"
+                                           FontSize="17"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding CardSummary.SummaryAmountDisplay}"
+                                           AutomationProperties.AutomationId="CompletedSaleTotalPaid"
+                                           Margin="6,0,0,0"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                            </StackPanel>
+                            <TextBlock Margin="0,0,24,4"
                                        VerticalAlignment="Center"
+                                       FontSize="17"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       Visibility="{Binding CardSummary.IsCashReceivedVisible, Converter={StaticResource BoolToVis}}">
+                                <Run Text="{loc:Loc success.card.cashReceived}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding CardSummary.CashReceivedDisplay, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" />
+                            </TextBlock>
+                            <TextBlock Margin="0,0,24,4"
+                                       VerticalAlignment="Center"
+                                       FontSize="17"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       Visibility="{Binding CardSummary.IsReturnedQuantityVisible, Converter={StaticResource BoolToVis}}">
+                                <Run Text="{loc:Loc success.card.returnedItems}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding CardSummary.ReturnedQuantityDisplay, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" />
+                            </TextBlock>
+                            <TextBlock Margin="0,0,24,4"
+                                       VerticalAlignment="Center"
+                                       FontSize="17"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       Visibility="{Binding CardSummary.IsRefundVoucherCodeVisible, Converter={StaticResource BoolToVis}}">
+                                <Run Text="{loc:Loc success.card.voucherCode}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding CardSummary.RefundVoucherCode, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" />
+                            </TextBlock>
+                            <ItemsControl ItemsSource="{Binding CardSummary.PaymentChips}"
+                                          AutomationProperties.AutomationId="PaymentSuccessPaymentChips"
+                                          Visibility="{Binding CardSummary.HasPaymentChips, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,8,4"
+                                                Padding="10,3"
+                                                BorderBrush="{DynamicResource PosCardBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="14">
+                                            <TextBlock FontSize="15" Foreground="{DynamicResource PosMutedForegroundBrush}">
+                                                <Run Text="{Binding LabelKey, Mode=OneWay, Converter={StaticResource LocalizationKeyConverter}}" />
+                                                <Run Text=" " />
+                                                <Run Text="{Binding AmountDisplay, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" />
+                                            </TextBlock>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </WrapPanel>
+
+                        <WrapPanel Grid.Row="3" Margin="4,2,0,0" Orientation="Horizontal">
+                            <TextBlock Margin="0,0,16,0"
                                        FontSize="13"
                                        TextWrapping="Wrap"
-                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                        </StackPanel>
-                        <!-- 不可获得键盘焦点：点过之后焦点若停在按钮上，下一次扫码枪尾部的 Enter 一旦没被扫码逻辑吃掉，
-                             就会再次激活本按钮、重复打印小票。 -->
-                        <Button Grid.Column="1"
-                                MinHeight="40"
-                                Padding="14,4"
-                                Focusable="False"
-                                IsTabStop="False"
-                                Command="{Binding PrintReceiptCommand}"
-                                Style="{StaticResource PosSecondaryButtonStyle}"
-                                AutomationProperties.AutomationId="PaymentSuccessCardPrintButton">
-                            <StackPanel Orientation="Horizontal">
-                                <materialDesign:PackIcon Kind="PrinterOutline" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                <TextBlock Text="{loc:Loc success.printReceipt}" VerticalAlignment="Center" FontWeight="Bold" />
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       Visibility="{Binding IsCardPaymentSummaryVisible, Converter={StaticResource BoolToVis}}">
+                                <Run Text="{loc:Loc success.cardDetails}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding CardPaymentSummary, Mode=OneWay}" Foreground="{DynamicResource PosTextBrush}" />
+                            </TextBlock>
+                            <TextBlock Text="{loc:Loc success.card.changeFromCashOnly}"
+                                       FontSize="13"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       Visibility="{Binding CardSummary.IsChangeFromCashOnlyVisible, Converter={StaticResource BoolToVis}}" />
+                        </WrapPanel>
+
+                        <Border Grid.Row="4"
+                                Margin="0,6,0,0"
+                                Padding="12,6"
+                                Background="{DynamicResource PosDangerSoftBrush}"
+                                CornerRadius="8"
+                                AutomationProperties.AutomationId="PaymentCompletedWarning"
+                                Visibility="{Binding HasPostCommitWarning, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{loc:Loc payment.status.completedWarning}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource PosDangerTextBrush}" />
+                        </Border>
+
+                        <Grid Grid.Row="5" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,16,0">
+                                <materialDesign:PackIcon Kind="BarcodeScan" Width="20" Height="20" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{loc:Loc success.card.scanToContinue}"
+                                           MaxWidth="250"
+                                           VerticalAlignment="Center"
+                                           FontSize="14"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
                             </StackPanel>
-                        </Button>
+                            <!-- 触屏大按钮。不可获得键盘焦点：点过之后焦点若停在按钮上，下一次扫码枪尾部的 Enter 一旦没被扫码逻辑吃掉，
+                                 就会再次激活本按钮、重复打印小票。 -->
+                            <Button Grid.Column="1"
+                                    Height="80"
+                                    MinWidth="280"
+                                    Padding="26,0"
+                                    Focusable="False"
+                                    IsTabStop="False"
+                                    BorderThickness="2"
+                                    Background="{DynamicResource PosPrimarySoftBrush}"
+                                    BorderBrush="{DynamicResource PosPrimaryBrush}"
+                                    Foreground="{DynamicResource PosPrimaryDarkBrush}"
+                                    Command="{Binding PrintReceiptCommand}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                    AutomationProperties.AutomationId="PaymentSuccessCardPrintButton">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="PrinterOutline" Width="32" Height="32" Margin="0,0,10,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding CardSummary.PrintButtonTextKey, Converter={StaticResource LocalizationKeyConverter}}"
+                                               VerticalAlignment="Center"
+                                               FontSize="24"
+                                               FontWeight="Black" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
                     </Grid>
-                </Grid>
-            </Border>
+                </Border>
+            </Viewbox>
 
             <Border Grid.Row="2" Padding="17,0,12,18" Background="{DynamicResource PosZoneCartBrush}">
                 <Grid>

@@ -78,6 +78,10 @@
     <SolidColorBrush x:Key="PosWarningStrongBrush" Color="#FFB45309" />
     <!-- 警告浅底 -->
     <SolidColorBrush x:Key="PosWarningSoftBrush" Color="#FFFFF6E5" />
+    <!-- 要把现金交给顾客（找零、退现金）的醒目配色：各主题保持一致的黄底红字。 -->
+    <SolidColorBrush x:Key="PosCashToCustomerBrush" Color="#FFFBBF24" />
+    <SolidColorBrush x:Key="PosCashToCustomerTextBrush" Color="#FFD40000" />
+    <SolidColorBrush x:Key="PosCashToCustomerSubtleTextBrush" Color="#FF7F1D1D" />
     <!-- 警告描边 -->
     <SolidColorBrush x:Key="PosWarningBorderBrush" Color="#FFF6D38F" />
     <!-- 危险填充（配白字） -->
