@@ -4,14 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'reac
 import { useTranslation } from 'react-i18next'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
+  getHolidayCategoryDetail,
   getHolidayCategoryMap,
+  getHolidayProductStores,
   getHolidaySalesReport,
+  type HolidayCategoryDetail,
+  type HolidayCategoryKey,
+  type HolidayProduct,
+  type HolidayProductStores,
   type HolidaySalesReport,
   type HolidaySupplierFilter,
 } from '../../../services/holidaySalesReportService'
 import { useAuthStore } from '../../../store/auth'
 import { formatSydneyIsoDate } from '../../../utils/sydneyDate'
 import { useReportQuery } from '../ReportWorkbench/useReportQuery'
+import { CategoryDrawer, ProductStoresDrawer } from './Drawers'
 import { defaultYear, formatMonthDay, resolveStore, seasonPhase, stepStore, storeOptions, yearOptions } from './logic'
 import en from './messages.en.json'
 import zh from './messages.zh.json'
@@ -34,6 +41,8 @@ registerPageMessages({ zh, en })
 
 const REPORT_METRIC_ID = 'holiday-sales-report'
 const MAP_METRIC_ID = 'holiday-sales-report-category-map'
+const PRODUCT_METRIC_ID = 'holiday-sales-report-product'
+const CATEGORY_METRIC_ID = 'holiday-sales-report-category'
 const SUPPLIERS: { value: HolidaySupplierFilter; labelKey: string }[] = [
   { value: 'all', labelKey: 'supplier.all' },
   { value: '257', labelKey: 'supplier.kfc' },
@@ -43,7 +52,7 @@ const SUPPLIERS: { value: HolidaySupplierFilter; labelKey: string }[] = [
 type ViewMode = 'all' | 'store'
 
 const HolidaySalesReportPage: FC = () => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const tr = useCallback<Tr>((key, params) => t(`holidaySalesReport.${key}`, params) as string, [t])
 
   const { active } = useKeepAliveContext()
@@ -58,6 +67,10 @@ const HolidaySalesReportPage: FC = () => {
   const [storeCode, setStoreCode] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [mapOpen, setMapOpen] = useState(false)
+  // 钻取：榜单里点商品 → 商品的分店数据；大类表里点大类 → 大类明细（分店 / 商品两个标签）
+  const [drillProduct, setDrillProduct] = useState<HolidayProduct | null>(null)
+  const [drillCategory, setDrillCategory] = useState<HolidayCategoryKey | null>(null)
+  const [categoryStore, setCategoryStore] = useState<{ code: string; name: string } | null>(null)
   const forceRefreshRef = useRef(false)
 
   // 分店授权范围由服务端按用户解析；这里只用来区分缓存键，并判断有没有可看的分店。
@@ -104,6 +117,27 @@ const HolidaySalesReportPage: FC = () => {
   }, [refresh])
 
   const single = mode === 'store'
+
+  const productQuery = useReportQuery<HolidayProductStores>(
+    `holiday-product:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}:${drillProduct?.productCode ?? ''}`,
+    async (signal) => ({ data: await getHolidayProductStores(year, drillProduct?.productCode ?? '', signal) }),
+    { active, enabled: hasStoreScope && drillProduct !== null, metricId: PRODUCT_METRIC_ID },
+  )
+  // 单店视图里大类抽屉只看当前店；合计视图里点了某家店后才按该店取
+  const categoryBranch = single ? activeStore ?? undefined : categoryStore?.code
+  const categoryQuery = useReportQuery<HolidayCategoryDetail>(
+    `holiday-category:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}:${supplier}:${drillCategory ?? ''}:${categoryBranch ?? 'ALL'}`,
+    async (signal) => ({
+      data: await getHolidayCategoryDetail({ year, categoryKey: drillCategory ?? 'Costume', branchCode: categoryBranch, supplierCode: supplier }, signal),
+    }),
+    { active, enabled: hasStoreScope && drillCategory !== null && !(single && activeStore === null), metricId: CATEGORY_METRIC_ID },
+  )
+  const closeDrills = () => {
+    setDrillProduct(null)
+    setDrillCategory(null)
+    setCategoryStore(null)
+  }
+
   const query = single ? storeQuery : allQuery
   // 单店视图要等合计视图先出来（拿到分店列表）才知道默认看哪家店。
   const loading = single ? allQuery.loading || (activeStore !== null && storeQuery.loading) : allQuery.loading
@@ -159,10 +193,10 @@ const HolidaySalesReportPage: FC = () => {
       <div className={styles.filters}>
         <span className={styles.filterLabel}>{tr('filters.view')}</span>
         <div className={styles.segment} role="group" aria-label={tr('filters.view')}>
-          <button type="button" className={mode === 'all' ? styles.segmentOn : undefined} aria-pressed={mode === 'all'} onClick={() => setMode('all')}>
+          <button type="button" className={mode === 'all' ? styles.segmentOn : undefined} aria-pressed={mode === 'all'} onClick={() => { setMode('all'); closeDrills() }}>
             {tr('view.all')}
           </button>
-          <button type="button" className={mode === 'store' ? styles.segmentOn : undefined} aria-pressed={mode === 'store'} onClick={() => setMode('store')}>
+          <button type="button" className={mode === 'store' ? styles.segmentOn : undefined} aria-pressed={mode === 'store'} onClick={() => { setMode('store'); closeDrills() }}>
             {tr('view.store')}
           </button>
         </div>
@@ -185,7 +219,7 @@ const HolidaySalesReportPage: FC = () => {
           </div>
         )}
         <span className={styles.filterLabel}>{tr('filters.year')}</span>
-        <select className={styles.select} aria-label={tr('filters.year')} value={year} onChange={(event) => setYear(Number(event.target.value))}>
+        <select className={styles.select} aria-label={tr('filters.year')} value={year} onChange={(event) => { setYear(Number(event.target.value)); closeDrills() }}>
           {yearOptions(today).map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
@@ -193,7 +227,7 @@ const HolidaySalesReportPage: FC = () => {
         <span className={styles.filterLabel}>{tr('filters.supplier')}</span>
         <div className={styles.chips} role="group" aria-label={tr('filters.supplier')}>
           {SUPPLIERS.map((option) => (
-            <button key={option.value} type="button" className={supplier === option.value ? styles.chipOn : styles.chip} aria-pressed={supplier === option.value} onClick={() => setSupplier(option.value)}>
+            <button key={option.value} type="button" className={supplier === option.value ? styles.chipOn : styles.chip} aria-pressed={supplier === option.value} onClick={() => { setSupplier(option.value); closeDrills() }}>
               {tr(option.labelKey)}
             </button>
           ))}
@@ -220,16 +254,43 @@ const HolidaySalesReportPage: FC = () => {
         <>
           <KpiRow report={report} single={single} tr={tr} allStoresSellThrough={report.benchmark?.sellThrough ?? null} />
           <div className={styles.row}>
-            <DailyChart report={report} tr={tr} />
+            <DailyChart report={report} tr={tr} language={i18n.language} />
             <InsightCard report={report} tr={tr} />
           </div>
-          <CategoryTable report={report} single={single} tr={tr} benchmark={report.benchmark} onOpenMap={() => setMapOpen(true)} />
-          <ProductBoards report={report} single={single} tr={tr} />
+          <CategoryTable report={report} single={single} tr={tr} benchmark={report.benchmark} onOpenMap={() => setMapOpen(true)}
+            onOpenCategory={(key) => { setCategoryStore(null); setDrillCategory(key) }}
+          />
+          <ProductBoards report={report} single={single} tr={tr} onOpen={setDrillProduct} />
           {single && report.benchmark ? <BenchmarkCard report={report} benchmark={report.benchmark} tr={tr} /> : <StoreTable report={report} tr={tr} onOpen={openStore} />}
           <Footer report={report} tr={tr} />
         </>
       )}
 
+      <CategoryDrawer
+        open={drillCategory !== null}
+        onClose={() => { setDrillCategory(null); setCategoryStore(null) }}
+        categoryKey={drillCategory}
+        data={categoryQuery.data}
+        loading={categoryQuery.loading}
+        error={categoryQuery.error}
+        single={single}
+        storeFilter={categoryStore}
+        onPickStore={(code, name) => setCategoryStore({ code, name })}
+        onClearStore={() => setCategoryStore(null)}
+        onOpenProduct={setDrillProduct}
+        tr={tr}
+      />
+      {/* 商品抽屉写在大类抽屉之后：从大类清单里点商品时叠在它上面 */}
+      <ProductStoresDrawer
+        open={drillProduct !== null}
+        onClose={() => setDrillProduct(null)}
+        product={drillProduct}
+        data={productQuery.data}
+        loading={productQuery.loading}
+        error={productQuery.error}
+        currentStore={single ? activeStore : null}
+        tr={tr}
+      />
       <CategoryMapDrawer open={mapOpen} onClose={() => setMapOpen(false)} map={mapQuery.data} loading={mapQuery.loading} error={mapQuery.error} tr={tr} />
     </div>
   )

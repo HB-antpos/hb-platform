@@ -132,6 +132,60 @@ export interface HolidaySalesReport {
   benchmark: HolidayBenchmark | null
 }
 
+/** 单个商品在某家分店的进货 / 售出 / 卖断 / 剩余（榜单里点商品钻取）。 */
+export interface HolidayProductStore {
+  /** 合计行（HolidayProductStores.total）的编码为空串。 */
+  branchCode: string
+  branchName: string
+  amount: number
+  quantity: number
+  purchaseQuantity: number
+  /** 没有进货时为 null（不是 0%）。 */
+  sellThrough: number | null
+  /** 卖断日（不晚于节日当天）；没有卖断为 null。 */
+  soldOutDate: string | null
+  /** 0 = 节日当天才卖完；null = 没有卖断。 */
+  daysEarly: number | null
+  estimatedLostAmount: number
+  leftoverQuantity: number
+  leftoverCost: number
+  firstSaleDate: string | null
+}
+
+export interface HolidayProductStores {
+  year: number
+  holidayDate: string
+  productCode: string
+  itemNumber: string
+  productName: string
+  imageUrl: string | null
+  supplierCode: string
+  categoryKey: HolidayCategoryKey
+  total: HolidayProductStore
+  storeCount: number
+  soldOutStoreCount: number
+  stores: HolidayProductStore[]
+}
+
+/** 大类明细（大类表里点大类钻取）：合计、各分店表现（合计视图）与完整商品清单。 */
+export interface HolidayCategoryDetail {
+  year: number
+  holidayDate: string
+  /** 单店视图时的分店；合计视图为 null，此时 stores 有值。 */
+  branchCode: string | null
+  branchName: string | null
+  category: HolidayCategory
+  stores: HolidayStore[]
+  products: HolidayProduct[]
+}
+
+export interface HolidayCategoryDetailQuery {
+  year: number
+  categoryKey: HolidayCategoryKey
+  branchCode?: string
+  supplierCode?: HolidaySupplierFilter
+}
+
 export interface HolidayCategoryMapEntry {
   supplierCode: string
   /** 供应商网站分类名；商品没有归类时为 null。 */
@@ -240,6 +294,20 @@ function normalizeStore(raw: Record<string, unknown>): HolidayStore | null {
   }
 }
 
+function normalizeCategory(c: Record<string, unknown>): HolidayCategory {
+  return {
+    key: readCategoryKey(c.key),
+    amount: readNumber(c.amount),
+    quantity: readNumber(c.quantity),
+    skuCount: readNumber(c.skuCount),
+    purchaseQuantity: readNumber(c.purchaseQuantity),
+    sellThrough: readNullableNumber(c.sellThrough),
+    estimatedLostAmount: readNumber(c.estimatedLostAmount),
+    leftoverQuantity: readNumber(c.leftoverQuantity),
+    leftoverCost: readNumber(c.leftoverCost),
+  }
+}
+
 function normalizeTotals(raw: unknown): HolidayTotals {
   const r = isRecord(raw) ? raw : {}
   return {
@@ -327,17 +395,7 @@ export function normalizeHolidaySalesReport(payload: unknown): HolidaySalesRepor
         .reduce((map, row) => (map.has(row.date) ? map : map.set(row.date, row)), new Map<string, HolidayDaily>())
         .values(),
     ).sort((a, b) => a.date.localeCompare(b.date)),
-    categories: list(r.categories, (c) => ({
-      key: readCategoryKey(c.key),
-      amount: readNumber(c.amount),
-      quantity: readNumber(c.quantity),
-      skuCount: readNumber(c.skuCount),
-      purchaseQuantity: readNumber(c.purchaseQuantity),
-      sellThrough: readNullableNumber(c.sellThrough),
-      estimatedLostAmount: readNumber(c.estimatedLostAmount),
-      leftoverQuantity: readNumber(c.leftoverQuantity),
-      leftoverCost: readNumber(c.leftoverCost),
-    })),
+    categories: list(r.categories, normalizeCategory),
     bestSellers: list(r.bestSellers, normalizeProduct),
     earlySoldOut: list(r.earlySoldOut, normalizeProduct),
     slowSellers: list(r.slowSellers, normalizeProduct),
@@ -345,6 +403,68 @@ export function normalizeHolidaySalesReport(payload: unknown): HolidaySalesRepor
     stores: list(r.stores, normalizeStore),
     storesWithoutSales: list(r.storesWithoutSales, normalizeStore),
     benchmark: normalizeBenchmark(r.benchmark),
+  }
+}
+
+function normalizeProductStore(raw: unknown): HolidayProductStore {
+  const r = isRecord(raw) ? raw : {}
+  return {
+    branchCode: readString(r.branchCode) ?? '',
+    branchName: readString(r.branchName) ?? readString(r.branchCode) ?? '',
+    amount: readNumber(r.amount),
+    quantity: readNumber(r.quantity),
+    purchaseQuantity: readNumber(r.purchaseQuantity),
+    sellThrough: readNullableNumber(r.sellThrough),
+    soldOutDate: readDate(r.soldOutDate),
+    daysEarly: readNullableNumber(r.daysEarly),
+    estimatedLostAmount: readNumber(r.estimatedLostAmount),
+    leftoverQuantity: readNumber(r.leftoverQuantity),
+    leftoverCost: readNumber(r.leftoverCost),
+    firstSaleDate: readDate(r.firstSaleDate),
+  }
+}
+
+export function normalizeHolidayProductStores(payload: unknown): HolidayProductStores {
+  const r = unwrapPayload(payload)
+  const productCode = readString(r.productCode)
+  if (!productCode) throw new Error('Holiday product stores response is malformed')
+  const seen = new Set<string>()
+  const stores: HolidayProductStore[] = []
+  // 同一家店出现多行时只保留第一行，避免合计之外重复显示。
+  for (const item of Array.isArray(r.stores) ? r.stores : []) {
+    if (!isRecord(item) || !readString(item.branchCode)) continue
+    const store = normalizeProductStore(item)
+    if (seen.has(store.branchCode)) continue
+    seen.add(store.branchCode)
+    stores.push(store)
+  }
+  return {
+    year: readNumber(r.year),
+    holidayDate: readDate(r.holidayDate) ?? '',
+    productCode,
+    itemNumber: readString(r.itemNumber) ?? '',
+    productName: readString(r.productName) ?? productCode,
+    imageUrl: readString(r.imageUrl) ?? null,
+    supplierCode: readString(r.supplierCode) ?? '',
+    categoryKey: readCategoryKey(r.categoryKey),
+    total: normalizeProductStore(r.total),
+    storeCount: readNumber(r.storeCount),
+    soldOutStoreCount: readNumber(r.soldOutStoreCount),
+    stores,
+  }
+}
+
+export function normalizeHolidayCategoryDetail(payload: unknown): HolidayCategoryDetail {
+  const r = unwrapPayload(payload)
+  if (!isRecord(r.category)) throw new Error('Holiday category detail response is malformed')
+  return {
+    year: readNumber(r.year),
+    holidayDate: readDate(r.holidayDate) ?? '',
+    branchCode: readString(r.branchCode) ?? null,
+    branchName: readString(r.branchName) ?? null,
+    category: normalizeCategory(r.category),
+    stores: list(r.stores, normalizeStore),
+    products: list(r.products, normalizeProduct),
   }
 }
 
@@ -383,6 +503,29 @@ export async function getHolidaySalesReport(
     },
   })
   return normalizeHolidaySalesReport(response)
+}
+
+export async function getHolidayCategoryDetail(query: HolidayCategoryDetailQuery, signal?: AbortSignal): Promise<HolidayCategoryDetail> {
+  const response = await request<ApiResponse<HolidayCategoryDetail> | HolidayCategoryDetail>(`${BASE}/category`, {
+    method: 'GET',
+    signal,
+    params: {
+      year: query.year,
+      categoryKey: query.categoryKey,
+      branchCode: query.branchCode,
+      supplierCode: query.supplierCode && query.supplierCode !== 'all' ? query.supplierCode : undefined,
+    },
+  })
+  return normalizeHolidayCategoryDetail(response)
+}
+
+export async function getHolidayProductStores(year: number, productCode: string, signal?: AbortSignal): Promise<HolidayProductStores> {
+  const response = await request<ApiResponse<HolidayProductStores> | HolidayProductStores>(`${BASE}/product`, {
+    method: 'GET',
+    signal,
+    params: { year, productCode },
+  })
+  return normalizeHolidayProductStores(response)
 }
 
 export async function getHolidayCategoryMap(year: number, signal?: AbortSignal): Promise<HolidayCategoryMap> {

@@ -73,6 +73,43 @@ public sealed class HolidaySalesReportReactService : IHolidaySalesReportReactSer
         return HolidaySalesReportBuilder.BuildCategoryMap(dataset, branchScope);
     }
 
+    public async Task<HolidaySalesCategoryDetailDto?> GetCategoryDetailAsync(
+        int year,
+        IReadOnlyCollection<string>? branchScope,
+        string? branchCode,
+        string? supplierCode,
+        string categoryKey,
+        CancellationToken cancellationToken
+    )
+    {
+        ValidateYear(year);
+        var supplier = NormalizeSupplier(supplierCode);
+        var branch = string.IsNullOrWhiteSpace(branchCode) ? null : branchCode.Trim();
+        var dataset = await GetDatasetAsync(year, false, cancellationToken);
+
+        // 授权范围为空、或指定的单店不在授权范围内：按空范围算（控制器已拦截越权，这里是兜底）。
+        var scope = branchScope is { Count: 0 }
+            || (branch != null && branchScope != null
+                && !branchScope.Any(code => string.Equals(code.Trim(), branch, StringComparison.OrdinalIgnoreCase)))
+            ? Array.Empty<string>()
+            : branchScope;
+        return HolidaySalesReportBuilder.BuildCategoryDetail(dataset, scope, branch, supplier, categoryKey);
+    }
+
+    public async Task<HolidaySalesProductStoresDto?> GetProductStoresAsync(
+        int year,
+        IReadOnlyCollection<string>? branchScope,
+        string productCode,
+        CancellationToken cancellationToken
+    )
+    {
+        ValidateYear(year);
+        if (string.IsNullOrWhiteSpace(productCode))
+            throw new ArgumentException("商品编码不能为空");
+        var dataset = await GetDatasetAsync(year, false, cancellationToken);
+        return HolidaySalesReportBuilder.BuildProductStores(dataset, branchScope, productCode.Trim());
+    }
+
     private void ValidateYear(int year)
     {
         var current = BusinessTodayProvider().Year;

@@ -81,6 +81,88 @@ public sealed class HolidaySalesReportController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// GET api/react/v1/dashboard/holiday-sales-report/category?categoryKey=Costume&amp;year=2026&amp;branchCode=1013&amp;supplierCode=257
+    /// 大类表里点大类钻取：该大类的合计、各分店表现与完整商品清单；传 branchCode 只看这一家店（越权 403）。
+    /// </summary>
+    [HttpGet("category")]
+    public async Task<IActionResult> GetCategoryDetail(
+        [FromQuery] string categoryKey,
+        [FromQuery] int? year = null,
+        [FromQuery] string? branchCode = null,
+        [FromQuery] string? supplierCode = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var scope = await ResolveBranchScopeAsync();
+            if (!scope.HasAccess)
+                return Forbid();
+
+            var branch = string.IsNullOrWhiteSpace(branchCode) ? null : branchCode.Trim();
+            if (branch != null && scope.BranchCodes != null
+                && !scope.BranchCodes.Contains(branch, StringComparer.OrdinalIgnoreCase))
+                return Forbid();
+
+            var result = await _service.GetCategoryDetailAsync(
+                year ?? DefaultYear(), scope.BranchCodes, branch, supplierCode, categoryKey ?? string.Empty, cancellationToken);
+            return result == null
+                ? NotFound(new { success = false, message = "大类不存在" })
+                : Ok(new { success = true, data = result });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetHolidaySalesCategoryDetail failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
+    /// <summary>
+    /// GET api/react/v1/dashboard/holiday-sales-report/product?year=2026&amp;productCode=...
+    /// 榜单里点商品钻取：这款商品在授权范围内各分店的进货、售出、卖断与剩余。
+    /// </summary>
+    [HttpGet("product")]
+    public async Task<IActionResult> GetProductStores(
+        [FromQuery] string productCode,
+        [FromQuery] int? year = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var scope = await ResolveBranchScopeAsync();
+            if (!scope.HasAccess)
+                return Forbid();
+
+            var result = await _service.GetProductStoresAsync(year ?? DefaultYear(), scope.BranchCodes, productCode, cancellationToken);
+            return result == null
+                ? NotFound(new { success = false, message = "商品不在节日商品范围内" })
+                : Ok(new { success = true, data = result });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetHolidaySalesProductStores failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
     /// <summary>GET api/react/v1/dashboard/holiday-sales-report/category-map?year=2026</summary>
     [HttpGet("category-map")]
     public async Task<IActionResult> GetCategoryMap(

@@ -34,7 +34,7 @@ function stripComments(source: string) {
 
 const directory = 'src/pages/ExecutiveSalesIntelligence/HolidaySalesReport'
 const NAMESPACE = 'holidaySalesReport'
-const sources = ['index.tsx', 'Sections.tsx', 'logic.ts'].map(name => ({
+const sources = ['index.tsx', 'Sections.tsx', 'Drawers.tsx', 'shared.tsx', 'logic.ts'].map(name => ({
   name,
   text: stripComments(readFileSync(resolve(directory, name), 'utf8')),
 }))

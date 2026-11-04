@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FC, type MouseEvent } from '
 import type {
   HolidayBenchmark,
   HolidayCategory,
+  HolidayCategoryKey,
   HolidayCategoryMap,
   HolidayProduct,
   HolidaySalesReport,
@@ -11,6 +12,9 @@ import type {
 import {
   BENCHMARK_LABEL_KEY,
   benchmarkMetrics,
+  BOARD_INITIAL_COUNT,
+  BOARD_LIMIT,
+  BOARD_STEP,
   buildChart,
   buildInsights,
   CATEGORY_COLOR,
@@ -20,26 +24,26 @@ import {
   formatCount,
   formatMetric,
   formatMoney,
+  formatMoneyCompact,
   formatMonthDay,
   formatPercent,
+  formatWeekday,
   formatSellThrough,
   hasNoPurchase,
+  heaviestWeekSum,
   INSIGHT_KEY,
   nearestPoint,
+  nextVisibleCount,
   sellThroughTone,
   supplierShares,
+  weekOf,
   TONE_COLOR,
   VERDICT_KEY,
 } from './logic'
+import { ProductImage, supplierTag, type Tr } from './shared'
 import styles from './styles.module.css'
 
-export type Tr = (key: string, params?: Record<string, string | number>) => string
-
-const SUPPLIER_TAG: Record<string, string> = { '257': 'KFC', '243': 'Brazco' }
-
-function supplierTag(code: string): { label: string; className: string } {
-  return code === '243' ? { label: SUPPLIER_TAG[code], className: styles.tagBrazco } : { label: SUPPLIER_TAG[code] ?? code, className: styles.tagKfc }
-}
+export type { Tr } from './shared'
 
 // ---------- 顶部 6 个指标 ----------
 
@@ -98,10 +102,11 @@ export const KpiRow: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr; a
 
 // ---------- 每日销售曲线 ----------
 
-export const DailyChart: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report, tr }) => {
+export const DailyChart: FC<{ report: HolidaySalesReport; tr: Tr; language: string }> = ({ report, tr, language }) => {
   const chart = useMemo(() => buildChart(report.daily, report.holidayDate), [report.daily, report.holidayDate])
   const [hover, setHover] = useState<{ x: number; y: number; date: string; amount: number } | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const heaviest = useMemo(() => heaviestWeekSum(chart.weeks), [chart.weeks])
 
   // 窄屏下曲线可横向滚动，节日在最右端，默认停在右端而不是 8 月初的空白段。
   useEffect(() => {
@@ -114,6 +119,7 @@ export const DailyChart: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report,
     if (box.width <= 0) return
     setHover(nearestPoint(chart, ((event.clientX - box.left) * chart.width) / box.width))
   }
+  const week = hover ? weekOf(chart, hover.date) : null
 
   return (
     <section className={styles.card}>
@@ -122,59 +128,67 @@ export const DailyChart: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report,
         <span className={styles.hint}>{tr('chart.hint')}</span>
       </h2>
       <div className={styles.chartWrap} ref={wrapRef}>
-      <svg
-        className={styles.chart}
-        viewBox={`0 0 ${chart.width} ${chart.height}`}
-        role="img"
-        aria-label={tr('chart.aria', { from: formatMonthDay(report.salesFrom), through: formatMonthDay(report.salesThrough) })}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
-      >
-        {chart.yTicks.map((tick) => (
-          <g key={tick.value}>
-            <line x1={52} x2={chart.width - 12} y1={tick.y} y2={tick.y} className={styles.gridLine} />
-            <text x={46} y={tick.y + 4} textAnchor="end" className={styles.axisText}>
-              {tick.value >= 1000 ? `$${tick.value / 1000}k` : `$${tick.value}`}
-            </text>
-          </g>
-        ))}
-        {chart.weekBand && <rect x={chart.weekBand.x} y={14} width={chart.weekBand.width} height={chart.height - 40} className={styles.weekBand} />}
-        {chart.area && <polygon points={chart.area} className={styles.chartArea} />}
-        {chart.line && <polyline points={chart.line} className={styles.chartLine} />}
-        {chart.holiday && (
-          <g>
-            <line x1={chart.holiday.x} x2={chart.holiday.x} y1={14} y2={chart.height - 26} className={styles.holidayLine} />
-            <circle cx={chart.holiday.x} cy={chart.holiday.y} r={4} className={styles.holidayDot} />
-            <text
-              x={(chart.weekBand?.x ?? chart.holiday.x) - 8}
-              y={Math.max(chart.holiday.y + 10, 46)}
-              textAnchor="end"
-              className={styles.holidayText}
-            >
-              {tr('chart.holiday', { date: formatMonthDay(report.holidayDate), amount: formatMoney(chart.holiday.amount) })}
-            </text>
-            {chart.weekBand && (
-              <text x={chart.weekBand.x - 4} y={26} textAnchor="end" className={styles.weekText}>
-                {tr('chart.lastWeek')} ▸
+        <svg
+          className={styles.chart}
+          viewBox={`0 0 ${chart.width} ${chart.height}`}
+          role="img"
+          aria-label={tr('chart.aria', { from: formatMonthDay(report.salesFrom), through: formatMonthDay(report.salesThrough) })}
+          onMouseMove={onMove}
+          onMouseLeave={() => setHover(null)}
+        >
+          {chart.yTicks.map((tick) => (
+            <g key={tick.value}>
+              <line x1={52} x2={chart.width - 12} y1={tick.y} y2={tick.y} className={styles.gridLine} />
+              <text x={46} y={tick.y + 4} textAnchor="end" className={styles.axisText}>
+                {tick.value >= 1000 ? `$${tick.value / 1000}k` : `$${tick.value}`}
               </text>
-            )}
-          </g>
-        )}
-        {chart.xTicks.map((tick) => (
-          <text key={tick.label + tick.x} x={tick.x} y={chart.height - 8} textAnchor="middle" className={styles.axisText}>
-            {tick.label}
-          </text>
-        ))}
-        {hover && (
-          <g pointerEvents="none">
-            <line x1={hover.x} x2={hover.x} y1={14} y2={chart.height - 26} className={styles.hoverLine} />
-            <circle cx={hover.x} cy={hover.y} r={3.5} className={styles.hoverDot} />
-          </g>
-        )}
-      </svg>
+            </g>
+          ))}
+          {chart.weekBand && <rect x={chart.weekBand.x} y={chart.top} width={chart.weekBand.width} height={chart.height - chart.top - 26} className={styles.weekBand} />}
+          {chart.weekLines.map((line) => (
+            <line key={line.date} x1={line.x} x2={line.x} y1={chart.top} y2={chart.height - 26} className={styles.weekLine} />
+          ))}
+          {/* 不足约 3 天宽的残周（首周、末周）放不下小字，不标；悬停读数里仍有本周合计 */}
+          {chart.weeks.filter((w) => w.x1 - w.x0 >= 28).map((w) => (
+            <text key={w.startDate} x={(w.x0 + w.x1) / 2} y={14} textAnchor="middle" className={heaviest > 0 && w.sum >= heaviest * 0.15 ? styles.weekTotalStrong : styles.weekTotal}>
+              {formatMoneyCompact(w.sum)}
+            </text>
+          ))}
+          {chart.area && <polygon points={chart.area} className={styles.chartArea} />}
+          {chart.line && <polyline points={chart.line} className={styles.chartLine} />}
+          {chart.holiday && (
+            <g>
+              <line x1={chart.holiday.x} x2={chart.holiday.x} y1={chart.top} y2={chart.height - 26} className={styles.holidayLine} />
+              <circle cx={chart.holiday.x} cy={chart.holiday.y} r={4} className={styles.holidayDot} />
+              <text x={(chart.weekBand?.x ?? chart.holiday.x) - 8} y={Math.max(chart.holiday.y + 10, chart.top + 22)} textAnchor="end" className={styles.holidayText}>
+                {tr('chart.holiday', { date: formatMonthDay(report.holidayDate), amount: formatMoney(chart.holiday.amount) })}
+              </text>
+            </g>
+          )}
+          {chart.xTicks.map((tick) => (
+            <text key={tick.label + tick.x} x={tick.x} y={chart.height - 8} textAnchor="middle" className={styles.axisText}>
+              {tick.label}
+            </text>
+          ))}
+          {hover && (
+            <g pointerEvents="none">
+              <line x1={hover.x} x2={hover.x} y1={chart.top} y2={chart.height - 26} className={styles.hoverLine} />
+              <circle cx={hover.x} cy={hover.y} r={3.5} className={styles.hoverDot} />
+            </g>
+          )}
+        </svg>
       </div>
       <div className={styles.chartReadout} aria-live="polite">
-        {hover ? tr('chart.hover', { date: formatMonthDay(hover.date), amount: formatMoney(hover.amount) }) : ' '}
+        {hover && week
+          ? tr('chart.hoverWeek', {
+              date: formatMonthDay(hover.date),
+              weekday: formatWeekday(hover.date, language),
+              amount: formatMoney(hover.amount),
+              from: formatMonthDay(week.startDate),
+              to: formatMonthDay(week.endDate),
+              week: formatMoney(week.sum),
+            })
+          : ' '}
       </div>
     </section>
   )
@@ -225,19 +239,21 @@ export const InsightCard: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report
 
 // ---------- 大类表 ----------
 
-export const CategoryTable: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr; benchmark: HolidayBenchmark | null; onOpenMap: () => void }> = ({
-  report,
-  single,
-  tr,
-  benchmark,
-  onOpenMap,
-}) => {
+export const CategoryTable: FC<{
+  report: HolidaySalesReport
+  single: boolean
+  tr: Tr
+  benchmark: HolidayBenchmark | null
+  onOpenMap: () => void
+  onOpenCategory: (key: HolidayCategoryKey) => void
+}> = ({ report, single, tr, benchmark, onOpenMap, onOpenCategory }) => {
   const max = report.categories.reduce((current, category) => Math.max(current, category.amount), 0)
   return (
     <section className={styles.card}>
       <h2 className={styles.cardTitle}>
         {tr('cat.title')}
         <span className={styles.hint}>{tr('cat.hint')}</span>
+        <span className={styles.hintAction}>{tr('cat.drillHint')}</span>
         <button type="button" className={styles.linkButton} onClick={onOpenMap}>
           {tr('actions.categoryMap')} ›
         </button>
@@ -255,11 +271,12 @@ export const CategoryTable: FC<{ report: HolidaySalesReport; single: boolean; tr
               <th className={styles.num}>{tr('cat.colLost')}</th>
               <th className={styles.num}>{tr('cat.colLeft')}</th>
               {single && <th className={styles.num}>{tr('cat.colVsAll')}</th>}
+              <th />
             </tr>
           </thead>
           <tbody>
             {report.categories.map((category) => (
-              <CategoryRow key={category.key} category={category} report={report} max={max} single={single} tr={tr} benchmark={benchmark} />
+              <CategoryRow key={category.key} category={category} report={report} max={max} single={single} tr={tr} benchmark={benchmark} onOpen={onOpenCategory} />
             ))}
           </tbody>
         </table>
@@ -275,11 +292,24 @@ const CategoryRow: FC<{
   single: boolean
   tr: Tr
   benchmark: HolidayBenchmark | null
-}> = ({ category, report, max, single, tr, benchmark }) => {
+  onOpen: (key: HolidayCategoryKey) => void
+}> = ({ category, report, max, single, tr, benchmark, onOpen }) => {
   const tone = sellThroughTone(category.sellThrough)
   const diff = single ? categoryPointDiff(category, benchmark) : null
+  const open = () => onOpen(category.key)
   return (
-    <tr>
+    <tr
+      className={styles.clickRow}
+      tabIndex={0}
+      aria-label={tr('cat.open', { name: tr(CATEGORY_LABEL_KEY[category.key]) })}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open()
+        }
+      }}
+    >
       <td>
         <i className={styles.swatch} style={{ background: CATEGORY_COLOR[category.key] }} aria-hidden="true" />
         {tr(CATEGORY_LABEL_KEY[category.key])}
@@ -310,21 +340,23 @@ const CategoryRow: FC<{
           {diff === null ? '—' : diff >= 0 ? <span className={`${styles.pill} ${styles.pillGood}`}>{tr('cat.higher', { points: diff })}</span> : <span className={`${styles.pill} ${styles.pillBad}`}>{tr('cat.lower', { points: -diff })}</span>}
         </td>
       )}
+      <td className={styles.openText}>{single ? tr('cat.openProducts') : tr('cat.openBoth')} ›</td>
     </tr>
   )
 }
 
 // ---------- 商品四张榜 ----------
 
-const ProductImage: FC<{ src: string | null; label: string }> = ({ src, label }) => {
-  const [failed, setFailed] = useState(false)
-  if (!src || failed) return <div className={`${styles.thumb} ${styles.thumbEmpty}`}>{label}</div>
-  return <img className={styles.thumb} src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
-}
-
 type BoardKind = 'best' | 'early' | 'slow' | 'over'
 
-const ProductLine: FC<{ product: HolidayProduct; index: number; kind: BoardKind; single: boolean; tr: Tr }> = ({ product, index, kind, single, tr }) => {
+const ProductLine: FC<{ product: HolidayProduct; index: number; kind: BoardKind; single: boolean; tr: Tr; onOpen: (product: HolidayProduct) => void }> = ({
+  product,
+  index,
+  kind,
+  single,
+  tr,
+  onOpen,
+}) => {
   const tag = supplierTag(product.supplierCode)
   const rate = formatSellThrough(product.sellThrough)
   let head: string
@@ -362,8 +394,20 @@ const ProductLine: FC<{ product: HolidayProduct; index: number; kind: BoardKind;
       tr('product.overSold', { qty: formatCount(product.quantity), amount: formatMoney(product.amount) }),
     ]
   }
+  const open = () => onOpen(product)
   return (
-    <li className={styles.product}>
+    <li
+      className={`${styles.product} ${styles.productClickable}`}
+      tabIndex={0}
+      aria-label={tr('drill.open', { name: product.productName })}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open()
+        }
+      }}
+    >
       <span className={styles.rank}>{index + 1}</span>
       <ProductImage src={product.imageUrl} label={tr('product.noImage')} />
       <div className={styles.productMain}>
@@ -382,6 +426,7 @@ const ProductLine: FC<{ product: HolidayProduct; index: number; kind: BoardKind;
           <div key={line} className={styles.valueSub}>{line}</div>
         ))}
       </div>
+      <span className={styles.chev} aria-hidden="true">›</span>
     </li>
   )
 }
@@ -395,37 +440,49 @@ const Board: FC<{
   products: HolidayProduct[]
   single: boolean
   tr: Tr
-}> = ({ kind, icon, iconClass, title, desc, products, single, tr }) => {
-  const [expanded, setExpanded] = useState(false)
-  const shown = expanded ? products : products.slice(0, 5)
+  onOpen: (product: HolidayProduct) => void
+}> = ({ kind, icon, iconClass, title, desc, products, single, tr, onOpen }) => {
+  // 先显示 10 个，每点一次再多 10 个；收起回到 10 个
+  const [visible, setVisible] = useState(BOARD_INITIAL_COUNT)
+  const shown = products.slice(0, visible)
+  const left = products.length - shown.length
   return (
     <section className={styles.card}>
       <div className={styles.boardHead}>
         <span className={`${styles.boardIcon} ${iconClass}`} aria-hidden="true">{icon}</span>
         <span className={styles.boardTitle}>{title}</span>
         <span className={styles.hint}>{desc}</span>
+        <span className={`${styles.hint} ${styles.boardCount}`}>
+          {tr('board.count', { count: products.length })}
+          {products.length >= BOARD_LIMIT && ` · ${tr('board.capped', { limit: BOARD_LIMIT })}`}
+        </span>
       </div>
       {shown.length === 0 ? (
         <div className={styles.empty}>{tr('board.empty')}</div>
       ) : (
         <ol className={styles.productList}>
           {shown.map((product, index) => (
-            <ProductLine key={product.productCode} product={product} index={index} kind={kind} single={single} tr={tr} />
+            <ProductLine key={product.productCode} product={product} index={index} kind={kind} single={single} tr={tr} onOpen={onOpen} />
           ))}
         </ol>
       )}
-      {products.length > 5 && (
-        <button type="button" className={styles.moreButton} onClick={() => setExpanded((current) => !current)}>
-          {expanded ? tr('board.less') : `${tr('board.more')} (${products.length - 5})`}
+      {left > 0 && (
+        <button type="button" className={styles.moreButton} onClick={() => setVisible((current) => nextVisibleCount(current, products.length))}>
+          {tr('board.more', { count: Math.min(left, BOARD_STEP), left })}
+        </button>
+      )}
+      {left <= 0 && products.length > BOARD_INITIAL_COUNT && (
+        <button type="button" className={styles.moreButton} onClick={() => setVisible(BOARD_INITIAL_COUNT)}>
+          {tr('board.less')}
         </button>
       )}
     </section>
   )
 }
 
-export const ProductBoards: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr }> = ({ report, single, tr }) => (
+export const ProductBoards: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr; onOpen: (product: HolidayProduct) => void }> = ({ report, single, tr, onOpen }) => (
   <div className={styles.quad}>
-    <Board kind="best" icon="↑" iconClass={styles.iconGood} title={tr('board.best.title')} desc={tr('board.best.desc')} products={report.bestSellers} single={single} tr={tr} />
+    <Board kind="best" icon="↑" iconClass={styles.iconGood} title={tr('board.best.title')} desc={tr('board.best.desc')} products={report.bestSellers} single={single} tr={tr} onOpen={onOpen} />
     <Board
       kind="early"
       icon="!"
@@ -435,9 +492,10 @@ export const ProductBoards: FC<{ report: HolidaySalesReport; single: boolean; tr
       products={report.earlySoldOut}
       single={single}
       tr={tr}
+      onOpen={onOpen}
     />
-    <Board kind="slow" icon="↓" iconClass={styles.iconGray} title={tr('board.slow.title')} desc={tr('board.slow.desc')} products={report.slowSellers} single={single} tr={tr} />
-    <Board kind="over" icon="▣" iconClass={styles.iconWarn} title={tr('board.over.title')} desc={tr('board.over.desc')} products={report.overstock} single={single} tr={tr} />
+    <Board kind="slow" icon="↓" iconClass={styles.iconGray} title={tr('board.slow.title')} desc={tr('board.slow.desc')} products={report.slowSellers} single={single} tr={tr} onOpen={onOpen} />
+    <Board kind="over" icon="▣" iconClass={styles.iconWarn} title={tr('board.over.title')} desc={tr('board.over.desc')} products={report.overstock} single={single} tr={tr} onOpen={onOpen} />
   </div>
 )
 
@@ -580,7 +638,8 @@ export const CategoryMapDrawer: FC<{ open: boolean; onClose: () => void; map: Ho
   error,
   tr,
 }) => (
-  <Drawer open={open} onClose={onClose} width="min(1040px, 100vw)" title={tr('map.title')} destroyOnClose>
+  <Drawer open={open} onClose={onClose} width="min(1040px, 100vw)" title={tr('map.title')} destroyOnHidden>
+    <div className={styles.drawerScope}>
     <p className={styles.note}>{tr('map.desc')}</p>
     {loading && <div className={styles.empty}>{tr('state.loading')}</div>}
     {error && !loading && <div className={styles.errorBox}>{tr('state.error', { message: error })}</div>}
@@ -615,6 +674,7 @@ export const CategoryMapDrawer: FC<{ open: boolean; onClose: () => void; map: Ho
         </section>
       </div>
     )}
+    </div>
   </Drawer>
 )
 

@@ -199,6 +199,145 @@ public sealed class HolidaySalesReportBuilderTests
     }
 
     [Fact]
+    public void Build_ProductBoards_CapAtListSizeAndKeepOrder()
+    {
+        // 60 款商品都有销售、都进了货且卖得很差：四张榜里除「提前卖完」外都应只取前 50，并按各自的排序键降序
+        var products = Enumerable.Range(1, 60)
+            .Select(i => new HolidayProductInfo($"P{i:00}", $"XH{i:0000}", $"Item {i}", null, HolidaySalesSuppliers.Kfc, "Decorations"))
+            .ToList();
+        var sales = products.Select((p, i) => Sale("1013", new DateTime(2026, 10, 20), p.ProductCode, 1, 10m + i)).ToList();
+        var purchases = products.Select(p => Buy("1013", p.ProductCode, 20, 60m)).ToList();
+        var data = new HolidaySalesDataset
+        {
+            Year = 2026,
+            HolidayDate = Holiday,
+            SalesFrom = new DateTime(2026, 8, 1),
+            SalesThrough = new DateTime(2026, 11, 3),
+            Products = products,
+            Sales = sales,
+            Purchases = purchases,
+            StoreNames = new Dictionary<string, string> { ["1013"] = "Orion" },
+        };
+
+        var report = HolidaySalesReportBuilder.Build(data, null, null, null);
+
+        Assert.Equal(HolidaySalesReportBuilder.ListSize, report.BestSellers.Count);
+        Assert.Equal("P60", report.BestSellers[0].ProductCode); // 销售额最高的排第一（10 + 59）
+        Assert.Equal(report.BestSellers.Select(p => p.Amount).OrderByDescending(a => a), report.BestSellers.Select(p => p.Amount));
+        Assert.Equal(HolidaySalesReportBuilder.ListSize, report.SlowSellers.Count); // 进货 20 件只卖 1 件：售罄率 5%
+        Assert.Equal(HolidaySalesReportBuilder.ListSize, report.Overstock.Count);
+        Assert.Equal(60, report.Totals.SkuCount); // 榜单截断不影响合计
+    }
+
+    [Fact]
+    public void BuildProductStores_ListsEveryStoreWithStockOrSales()
+    {
+        // 1013：进 100 卖 95（10/25 卖断，提前 6 天）；1012：进 100 只卖 10；1004：没进货却卖了 20；1020：只进货没销售
+        var data = Dataset(
+            sales:
+            [
+                Sale("1013", new DateTime(2026, 10, 20), "A", 50, 500m),
+                Sale("1013", new DateTime(2026, 10, 25), "A", 45, 450m),
+                Sale("1012", new DateTime(2026, 10, 22), "A", 10, 100m),
+                Sale("1004", new DateTime(2026, 10, 21), "A", 20, 200m),
+                Sale("1013", new DateTime(2026, 10, 20), "B", 5, 50m),
+            ],
+            purchases: [Buy("1013", "A", 100, 300m), Buy("1012", "A", 100, 300m), Buy("1020", "A", 12, 36m), Buy("1013", "B", 9, 27m)]);
+
+        var result = HolidaySalesReportBuilder.BuildProductStores(data, null, "a")!; // 商品编码忽略大小写
+
+        Assert.Equal("A", result.ProductCode);
+        Assert.Equal(new[] { "1013", "1004", "1012", "1020" }, result.Stores.Select(s => s.BranchCode)); // 按销售额降序，没销售的排最后
+        var orion = result.Stores[0];
+        Assert.Equal("Orion", orion.BranchName);
+        Assert.Equal(0.95m, orion.SellThrough);
+        Assert.Equal("2026-10-25", orion.SoldOutDate);
+        Assert.Equal(6, orion.DaysEarly);
+        Assert.Equal("2026-10-20", orion.FirstSaleDate);
+        Assert.Equal(15m, orion.LeftoverCost); // 剩 5 件 × 进价 3
+        Assert.Null(result.Stores[1].SellThrough); // 1004 没有进货：售罄率不适用
+        Assert.Null(result.Stores[1].SoldOutDate);
+        Assert.Null(result.Stores[3].FirstSaleDate); // 1020 只进货没销售
+        Assert.Equal(12m, result.Stores[3].LeftoverQuantity);
+        // 合计的售罄率只算有进货的店：(95 + 10 + 0) / (100 + 100 + 12)
+        Assert.Equal(Math.Round(105m / 212m, 4), result.Total.SellThrough);
+        Assert.Equal(3, result.StoreCount);
+        Assert.Equal(1, result.SoldOutStoreCount);
+    }
+
+    [Fact]
+    public void BuildProductStores_RespectsBranchScopeAndUnknownProduct()
+    {
+        var data = Dataset(
+            sales: [Sale("1013", new DateTime(2026, 10, 20), "A", 5, 50m), Sale("1012", new DateTime(2026, 10, 20), "A", 3, 30m)],
+            purchases: [Buy("1013", "A", 10, 30m), Buy("1012", "A", 10, 30m)]);
+
+        var scoped = HolidaySalesReportBuilder.BuildProductStores(data, ["1012"], "A")!;
+
+        Assert.Equal("1012", Assert.Single(scoped.Stores).BranchCode);
+        Assert.Equal(30m, scoped.Total.Amount);
+        Assert.Empty(HolidaySalesReportBuilder.BuildProductStores(data, Array.Empty<string>(), "A")!.Stores);
+        Assert.Null(HolidaySalesReportBuilder.BuildProductStores(data, null, "NOPE"));
+    }
+
+    [Fact]
+    public void BuildCategoryDetail_ReturnsTotalsStoresAndFullProductList()
+    {
+        // A（服装）：1013 进 100 卖 95（节前卖断）、1012 进 100 卖 10；B（装饰）不属于本大类
+        var data = Dataset(
+            sales:
+            [
+                Sale("1013", new DateTime(2026, 10, 20), "A", 50, 500m),
+                Sale("1013", new DateTime(2026, 10, 25), "A", 45, 450m),
+                Sale("1012", new DateTime(2026, 10, 22), "A", 10, 100m),
+                Sale("1013", new DateTime(2026, 11, 2), "A", 1, 10m),
+                Sale("1013", new DateTime(2026, 10, 20), "B", 7, 70m),
+            ],
+            purchases: [Buy("1013", "A", 100, 300m), Buy("1012", "A", 100, 300m), Buy("1013", "B", 9, 27m)]);
+
+        var detail = HolidaySalesReportBuilder.BuildCategoryDetail(data, null, null, null, HolidaySalesCategoryRules.Costume)!;
+
+        Assert.Equal(HolidaySalesCategoryRules.Costume, detail.Category.Key);
+        Assert.Equal(1060m, detail.Category.Amount); // 只含 A：500 + 450 + 100 + 10
+        Assert.Equal("A", Assert.Single(detail.Products).ProductCode);
+        Assert.Equal(new[] { "1013", "1012" }, detail.Stores.Select(s => s.BranchCode)); // 按销售额降序
+        Assert.Equal(1, detail.Stores[0].EarlySoldOutCount);
+        Assert.Equal(10m, detail.Stores[0].AfterHolidayAmount); // 节后 11/2 的销售
+        Assert.Null(detail.BranchCode);
+    }
+
+    [Fact]
+    public void BuildCategoryDetail_SingleStoreHasNoStoreListAndOnlyThatStoreProducts()
+    {
+        var data = Dataset(
+            sales: [Sale("1013", new DateTime(2026, 10, 20), "A", 5, 50m), Sale("1012", new DateTime(2026, 10, 20), "A", 3, 30m)],
+            purchases: [Buy("1013", "A", 10, 30m), Buy("1012", "A", 10, 30m)]);
+
+        var detail = HolidaySalesReportBuilder.BuildCategoryDetail(data, null, "1012", null, HolidaySalesCategoryRules.Costume)!;
+
+        Assert.Equal("1012", detail.BranchCode);
+        Assert.Equal("Glendale", detail.BranchName);
+        Assert.Empty(detail.Stores);
+        Assert.Equal(30m, detail.Category.Amount);
+        Assert.Equal(30m, Assert.Single(detail.Products).Amount);
+    }
+
+    [Fact]
+    public void BuildCategoryDetail_UnknownCategoryReturnsNullAndScopeIsRespected()
+    {
+        var data = Dataset(
+            sales: [Sale("1013", new DateTime(2026, 10, 20), "A", 5, 50m), Sale("1012", new DateTime(2026, 10, 20), "A", 3, 30m)],
+            purchases: []);
+
+        Assert.Null(HolidaySalesReportBuilder.BuildCategoryDetail(data, null, null, null, "Nope"));
+        var scoped = HolidaySalesReportBuilder.BuildCategoryDetail(data, ["1012"], null, null, HolidaySalesCategoryRules.Costume)!;
+        Assert.Equal("1012", Assert.Single(scoped.Stores).BranchCode);
+        Assert.Equal(30m, scoped.Category.Amount);
+        var supplier = HolidaySalesReportBuilder.BuildCategoryDetail(data, null, null, HolidaySalesSuppliers.Brazco, HolidaySalesCategoryRules.Costume)!;
+        Assert.Empty(supplier.Products); // A 是 KFC 的，按 Brazco 过滤后没有
+    }
+
+    [Fact]
     public void Build_SupplierFilter_OnlyKeepsThatSupplier()
     {
         var data = Dataset(

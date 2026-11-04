@@ -53,11 +53,10 @@
     },
     "chart": {
       "title": "每日销售额",
-      "hint": "橙色竖线 = 万圣节当天",
+      "hint": "橙色竖线 = 万圣节当天，橙色底色 = 节前最后 7 天 · 灰色虚线 = 每周一（周一至周日为一周），顶部小字 = 当周合计",
       "holiday": "{{date}} 当天 {{amount}}",
-      "lastWeek": "节前最后 7 天",
-      "hover": "{{date}} · {{amount}}",
-      "aria": "{{from}} 到 {{through}} 每日销售额曲线"
+      "aria": "{{from}} 到 {{through}} 每日销售额曲线",
+      "hoverWeek": "{{date}}（{{weekday}}）{{amount}}　｜　本周 {{from}}–{{to}} 合计 {{week}}"
     },
     "insights": {
       "title": "关键结论",
@@ -82,7 +81,11 @@
       "colLeft": "剩余库存（进价）",
       "colVsAll": "本店售罄率 vs 全店",
       "higher": "高 {{points}} 点",
-      "lower": "低 {{points}} 点"
+      "lower": "低 {{points}} 点",
+      "drillHint": "点任一行查看该大类的分店和商品",
+      "open": "查看 {{name}} 的分店和商品",
+      "openProducts": "商品",
+      "openBoth": "分店 / 商品"
     },
     "category": {
       "Costume": "服装",
@@ -111,9 +114,11 @@
         "title": "库存很多",
         "desc": "今年进货 − 季内销量，按剩余件数"
       },
-      "more": "展开更多",
+      "more": "再显示 {{count}} 个（还剩 {{left}} 个）",
       "less": "收起",
-      "empty": "没有符合条件的商品"
+      "empty": "没有符合条件的商品",
+      "count": "共 {{count}} 款",
+      "capped": "只列前 {{limit}} 款"
     },
     "product": {
       "noImage": "无图",
@@ -186,6 +191,60 @@
       "purchase": "进货 = 今年分店进货单（3/1 ~ 10/31，不含仓库 1006，草稿也计入）；剩余库存 = 今年进货 − 季内销量，系统没有门店库存字段，去年剩货不在内。",
       "sellThrough": "售罄率只统计「该店有进货的商品」，没进货的店卖去年存货不会把比例抬高。",
       "soldOut": "卖断 = 某店某款累计销量达到该店进货的 95%（进货不足 3 件不判）；提前天数 = 10/31 − 卖断日；少卖估算 = 卖断前 14 天日均销量 × 提前天数 × 平均成交价。"
+    },
+    "drill": {
+      "open": "查看 {{name}} 的分店数据",
+      "title": "分店数据 · {{name}}",
+      "colStore": "分店",
+      "colAmount": "销售额",
+      "colQuantity": "售出件数",
+      "colPurchase": "今年进货",
+      "colSellThrough": "售罄率",
+      "colSoldOut": "卖完日",
+      "colLost": "卖断少卖",
+      "colLeft": "剩余件数",
+      "colFirstSale": "首销日",
+      "soldOutEarly": "{{date}}（提前 {{days}} 天）",
+      "soldOutOnDay": "{{date}}（节日当天）",
+      "total": "全部分店合计",
+      "current": "当前分店",
+      "noPurchase": "无今年进货单",
+      "empty": "这款商品在你可见的分店里没有进货或销售记录。",
+      "close": "关闭",
+      "storeData": "分店数据",
+      "kpiStoresSold": "{{count}} 家店有销售",
+      "kpiSoldBought": "售出 / 今年进货",
+      "units": "件",
+      "kpiStoresStocked": "{{count}} 家店有进货",
+      "kpiSoldOutStores": "节前卖断",
+      "storeCount": "{{count}} 家店",
+      "soldOutStores": "{{count}} 家店节前卖断",
+      "soldOutNote": "卖完日 = 该店累计销量达到进货 95% 的那天；红色 = 节前提前卖完（库存不够），橙色 = 节日当天才卖完。售罄率只在该店有进货时才有。",
+      "catTitle": "大类明细 · {{name}}",
+      "catHint": "大类明细 · 供应商分类归并，共 {{count}} 款有销售或进货",
+      "kpiSkus": "动销款数",
+      "kpiSkusSub": "共 {{count}} 款",
+      "kpiBought": "进货 {{qty}} 件",
+      "openProducts": "看商品",
+      "storesNote": "点分店 → 切到「商品」标签并只看这家店的{{name}}清单。",
+      "tabStores": "分店",
+      "tabProducts": "商品",
+      "search": "搜货号 / 品名",
+      "storeOnly": "只看 {{store}}",
+      "clearStore": "取消只看这家店",
+      "filter": "筛选",
+      "filterAll": "全部 {{count}}",
+      "filterEarly": "提前卖完 {{count}}",
+      "filterSlow": "滞销 {{count}}",
+      "filterOver": "库存多 {{count}}",
+      "sortLabel": "排序",
+      "sortAmount": "销售额 ↓",
+      "sortSellThrough": "售罄率 ↑（低在前）",
+      "sortLeftover": "剩余进价 ↓",
+      "sortLost": "卖断少卖 ↓",
+      "rowSold": "售 {{sold}} / 进 {{bought}} 件",
+      "leftCost": "进价 {{cost}}",
+      "noLeft": "无剩余"
     }
   }
 }

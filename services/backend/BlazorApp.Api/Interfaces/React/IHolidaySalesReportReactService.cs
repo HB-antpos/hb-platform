@@ -22,6 +22,27 @@ namespace BlazorApp.Api.Interfaces.React
             CancellationToken cancellationToken
         );
 
+        /// <summary>单个商品的分店明细（榜单钻取）；商品不在节日商品范围内返回 null。</summary>
+        Task<HolidaySalesProductStoresDto?> GetProductStoresAsync(
+            int year,
+            IReadOnlyCollection<string>? branchScope,
+            string productCode,
+            CancellationToken cancellationToken
+        );
+
+        /// <summary>
+        /// 大类明细（大类表里点大类钻取）：该大类的合计、各分店表现与完整商品清单。
+        /// 大类代号不认识返回 null；传 branchCode 只看这一家店。
+        /// </summary>
+        Task<HolidaySalesCategoryDetailDto?> GetCategoryDetailAsync(
+            int year,
+            IReadOnlyCollection<string>? branchScope,
+            string? branchCode,
+            string? supplierCode,
+            string categoryKey,
+            CancellationToken cancellationToken
+        );
+
         /// <summary>大类归并对照（供应商分类落到哪个大类）。</summary>
         Task<HolidaySalesCategoryMapDto> GetCategoryMapAsync(
             int year,
