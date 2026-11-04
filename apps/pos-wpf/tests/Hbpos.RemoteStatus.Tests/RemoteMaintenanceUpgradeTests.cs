@@ -222,6 +222,11 @@ public sealed class RemoteMaintenanceUpgradeTests : IDisposable
         Assert.Equal(25765376, hb2.Size);
         Assert.Equal("f53058f04d05c7f29746c5fa64df81fff81b318b9d76501a93a35dc8272632b1", hb2.CustomClientSha256);
         Assert.True(WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(
+            "b595f1a66ad7aa00345c6683ab7bb43e52af1078d59ba99b2af6ed7e1377489e", out var hb3));
+        Assert.Equal("1.4.9-hb3", hb3.Version);
+        Assert.Equal(24357888, hb3.Size);
+        Assert.Equal("aa1307b59209ac924a219c83f7bc1223ddc7e8fe1cb4f39e59227f92076d8113", hb3.CustomClientSha256);
+        Assert.True(WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(
             "eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274", out var official));
         Assert.Null(official.CustomClientSha256);
         Assert.False(WindowsRemoteMaintenanceInstaller.TryGetTrustedRustDeskBuild(null, out _));
