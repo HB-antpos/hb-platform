@@ -1,0 +1,191 @@
+{
+  "holidaySalesReport": {
+    "title": "万圣节销售报告",
+    "titleAll": "{{year}} 万圣节销售报告 · 全部分店合计",
+    "titleStore": "{{year}} 万圣节销售报告 · {{store}}",
+    "subtitle": "KFC（Uncle Bills）+ Brazco 万圣节商品 · 销售 {{from}} ~ {{through}}（含节后清货）· 进货按今年分店进货单",
+    "phase": {
+      "running": "节前进行中",
+      "ended": "已过节 · {{date}}"
+    },
+    "filters": {
+      "view": "查看",
+      "year": "年份",
+      "store": "分店",
+      "supplier": "供应商"
+    },
+    "view": {
+      "all": "全部分店合计",
+      "store": "分店独立看"
+    },
+    "supplier": {
+      "all": "全部",
+      "kfc": "KFC",
+      "brazco": "Brazco",
+      "title": "供应商构成"
+    },
+    "store": {
+      "prev": "上一家",
+      "next": "下一家",
+      "placeholder": "选择分店"
+    },
+    "actions": {
+      "refresh": "刷新",
+      "categoryMap": "分类对照"
+    },
+    "kpi": {
+      "amount": "销售额（含 GST）",
+      "amountAll": "{{count}} 家分店有销售",
+      "amountStore": "全店第 {{rank}} / {{total}}",
+      "quantity": "售出件数",
+      "quantitySub": "{{count}} 款有销售",
+      "sellThrough": "售罄率（售出 ÷ 今年进货）",
+      "sellThroughAll": "进货 {{qty}} 件 · 成本 {{cost}}",
+      "sellThroughStore": "全店 {{value}}",
+      "early": "提前卖断款数",
+      "earlyAll": "10/31 前已卖完 · {{count}} 店次",
+      "earlyStore": "10/31 前已卖完 · 库存不够",
+      "lost": "卖断少卖（估算）",
+      "lostSub": "按卖断前 14 天日均推算",
+      "left": "剩余库存（估算）",
+      "leftValue": "{{qty}} 件",
+      "leftSub": "按进价 {{cost}}"
+    },
+    "chart": {
+      "title": "每日销售额",
+      "hint": "橙色竖线 = 万圣节当天",
+      "holiday": "{{date}} 当天 {{amount}}",
+      "lastWeek": "节前最后 7 天",
+      "hover": "{{date}} · {{amount}}",
+      "aria": "{{from}} 到 {{through}} 每日销售额曲线"
+    },
+    "insights": {
+      "title": "关键结论",
+      "auto": "系统自动生成"
+    },
+    "insight": {
+      "lastWeek": "节前最后 7 天卖了 {{lastWeek}}，{{holidayDate}} 当天占 {{holiday}}；节后清货仅 {{after}}。",
+      "topCategory": "{{name}}销售额最高（{{amount}}，占 {{share}}），其次是 {{second}}。",
+      "lostCategory": "{{name}}卖断最严重，估算少卖 {{amount}}，明年这类要加深。",
+      "leftCategory": "{{name}}剩余库存最多（按进价 {{cost}}），明年减量或换款。"
+    },
+    "cat": {
+      "title": "大类销售情况",
+      "hint": "供应商（KFC / Brazco）自己的分类归并为 7 大类",
+      "colName": "大类",
+      "colAmount": "销售额",
+      "colShare": "占比",
+      "colQuantity": "售出件数",
+      "colSkus": "动销款数",
+      "colSellThrough": "售罄率",
+      "colLost": "卖断少卖",
+      "colLeft": "剩余库存（进价）",
+      "colVsAll": "本店售罄率 vs 全店",
+      "higher": "高 {{points}} 点",
+      "lower": "低 {{points}} 点"
+    },
+    "category": {
+      "Costume": "服装",
+      "Decoration": "装饰",
+      "MakeUp": "化妆·血浆·纹身",
+      "Accessory": "配件·道具",
+      "Party": "派对·讨糖",
+      "MaskWig": "面具·假发·头饰",
+      "Animated": "动态·灯光·充气"
+    },
+    "board": {
+      "best": {
+        "title": "卖得好",
+        "desc": "按销售额"
+      },
+      "early": {
+        "title": "库存不够 · 提前卖完",
+        "descAll": "10/31 前卖完 ≥95% 进货，至少 2 家店卖断，按估算少卖排序",
+        "descStore": "10/31 前卖完 ≥95% 进货，按估算少卖排序"
+      },
+      "slow": {
+        "title": "卖得不好",
+        "desc": "进货 ≥12 件、售罄率 <35%，按剩余进价"
+      },
+      "over": {
+        "title": "库存很多",
+        "desc": "今年进货 − 季内销量，按剩余件数"
+      },
+      "more": "展开更多",
+      "less": "收起",
+      "empty": "没有符合条件的商品"
+    },
+    "product": {
+      "noImage": "无图",
+      "soldRate": "售 {{qty}} 件 · 售罄率 {{rate}}",
+      "stores": "{{count}} 店有货",
+      "soldOutStores": "{{count}} 店卖断",
+      "soldOutSelf": "已卖断",
+      "earlyDays": "提前 {{days}} 天卖完",
+      "earlyStore": "{{date}} 卖完 · 进 {{qty}} 件",
+      "earlyAll": "{{out}}/{{stocked}} 店卖断 · 中位数",
+      "lost": "估算少卖 {{amount}}",
+      "slowHead": "售罄率 {{rate}}",
+      "slowBought": "进 {{bought}} · 售 {{sold}} 件",
+      "slowLeft": "剩余 {{qty}} 件 · 进价 {{cost}}",
+      "overHead": "剩 {{qty}} 件",
+      "overCost": "进价 {{cost}} · 售罄率 {{rate}}",
+      "overSold": "已售 {{qty}} 件 · {{amount}}"
+    },
+    "stores": {
+      "title": "分店排行",
+      "hint": "点任一行进入「分店独立看」",
+      "colStore": "分店",
+      "colAmount": "销售额",
+      "colQuantity": "售出件数",
+      "colPurchase": "今年进货",
+      "colSellThrough": "售罄率",
+      "colEarly": "提前卖断款数",
+      "colLost": "卖断少卖",
+      "colLeft": "剩余库存（进价）",
+      "colAfter": "节后清货",
+      "open": "单店查看",
+      "noPurchase": "无今年进货单",
+      "noPurchaseNote": "「无今年进货单」= 有销售但今年没录进货单（去年剩货或调拨），售罄率不计。",
+      "withoutSales": "有进货单但本季没有收银销售：{{names}}。"
+    },
+    "benchmark": {
+      "title": "本店在全部分店中的位置",
+      "hint": "{{count}} 家有销售的分店",
+      "average": "全店平均 {{value}}",
+      "better": "优于平均",
+      "worse": "需关注",
+      "same": "持平",
+      "amount": "销售额",
+      "sellThrough": "售罄率",
+      "early": "提前卖断款数",
+      "lost": "卖断少卖",
+      "left": "剩余库存（进价）",
+      "after": "节后清货"
+    },
+    "map": {
+      "title": "大类归并对照",
+      "desc": "KFC / Brazco 网站分类 → 7 个大类；右侧是款数 · 季内销售额。",
+      "noCategory": "未归类，按品名",
+      "rulesTitle": "归并规则",
+      "rules": "1. 品名含 Costume 一律归「服装」。2. 其余按供应商分类名关键词归类。3. KFC 的主题系列（Witch、Vampire、Creepy Clown、Zombie、Devil、Asylum…）与未归类商品按品名关键词归类，认不出的归「配件·道具」。",
+      "more": "… 另 {{count}} 个分类"
+    },
+    "state": {
+      "loading": "加载中…",
+      "slow": "数据量较大，首次加载需要几秒钟",
+      "error": "加载失败：{{message}}",
+      "retry": "重试",
+      "noAccess": "没有可查看的分店。",
+      "empty": "{{year}} 年还没有万圣节销售数据。",
+      "storeEmpty": "这家店本季没有万圣节销售。"
+    },
+    "footer": {
+      "title": "口径",
+      "scope": "万圣节商品 = 我方分类 HalloWeen 及子类，且供应商为 KFC / Brazco，共 {{count}} 款；销售取商品分店日统计（含 GST，退款按净额）。",
+      "purchase": "进货 = 今年分店进货单（3/1 ~ 10/31，不含仓库 1006，草稿也计入）；剩余库存 = 今年进货 − 季内销量，系统没有门店库存字段，去年剩货不在内。",
+      "sellThrough": "售罄率只统计「该店有进货的商品」，没进货的店卖去年存货不会把比例抬高。",
+      "soldOut": "卖断 = 某店某款累计销量达到该店进货的 95%（进货不足 3 件不判）；提前天数 = 10/31 − 卖断日；少卖估算 = 卖断前 14 天日均销量 × 提前天数 × 平均成交价。"
+    }
+  }
+}

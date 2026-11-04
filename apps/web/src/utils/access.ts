@@ -67,6 +67,7 @@ function createEmptyAccess(): AccessControl {
     canViewSalesDetail: false,
     canViewCompactSalesBoard: false,
     canViewMonthlyDailySalesDownload: false,
+    canViewHolidaySalesReport: false,
     canViewProductMovementReport: false,
     canViewBatchProductSalesAnalysis: false,
     canViewShopBatchProductSales: false,
@@ -272,6 +273,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSalesDetail = hasPermission(P.SalesDashboard.SalesDetailView)
   const canViewCompactSalesBoard = hasPermission(P.SalesDashboard.CompactBoardView)
   const canViewMonthlyDailySalesDownload = hasPermission(P.SalesDashboard.MonthlyDailySalesDownloadView)
+  const canViewHolidaySalesReport = hasPermission(P.SalesDashboard.HolidaySalesReportView)
   const canViewProductMovementReport = hasPermission(P.SalesDashboard.ProductMovementView)
   const canViewBatchProductSalesAnalysis = hasPermission(P.SalesDashboard.BatchProductSalesView)
   // 订货前台货号销量页只认前台权限码，不与后台销售看板权限互相放行，避免订货员被判定为拥有后台入口。
@@ -289,7 +291,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || currentExactPermissionSet.has(P.Reports.ProductMovementView.toLowerCase())
   // 父菜单由可见子页决定，不额外要求工作台或报表总权限。
   const canViewSalesIntelligence =
-    canViewSalesData || canViewSalesDetail || canViewCompactSalesBoard || canViewMonthlyDailySalesDownload ||
+    canViewSalesData || canViewSalesDetail || canViewCompactSalesBoard || canViewMonthlyDailySalesDownload || canViewHolidaySalesReport ||
     canViewProductMovementReport || canViewWarehouseProductFlowAnalysis ||
     canViewLocalProductSalesAnalysis || canViewPurchaseAmountDashboard || canViewBatchProductSalesAnalysis ||
     canViewLocalSupplierPurchaseSalesAnalysis
@@ -510,6 +512,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewSalesDetail,
     canViewCompactSalesBoard,
     canViewMonthlyDailySalesDownload,
+    canViewHolidaySalesReport,
     canViewProductMovementReport,
     canViewBatchProductSalesAnalysis,
     canViewShopBatchProductSales,
