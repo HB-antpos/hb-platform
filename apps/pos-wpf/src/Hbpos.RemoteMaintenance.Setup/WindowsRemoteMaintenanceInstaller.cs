@@ -211,7 +211,11 @@ public sealed class WindowsRemoteMaintenanceInstaller(
             // 公司定制构建 1.4.9-hb1（HB-antpos/rustdesk-hb release 1.4.9-hb1）：锁定更新横幅与自动更新等，
             // 装完后 Program Files\RustDesk\custom.txt 的哈希必须等于这里，否则视为没装上公司配置。
             ["54425f81db1433646d6ce0f440b90993770b3c15c75ebaac927a5bccce4f4884"] =
-                new("1.4.9-hb1", 24351744, "bdc2b18780d49bbacb1888dadd10ed881fb7c861ea1a7da7504c7ec1bb48cbc5")
+                new("1.4.9-hb1", 24351744, "bdc2b18780d49bbacb1888dadd10ed881fb7c861ea1a7da7504c7ec1bb48cbc5"),
+            // 公司定制构建 1.5.0-hb2（release 1.5.0-hb2，fork 分支 hb/1.5.0）：上游升到 1.5.0，
+            // 另外锁定 allow-hide-cm=Y，受控端被连接时不弹连接管理窗口。
+            ["212b72a745d841f7730f077ce173281fea526893945682b940c1206b6377a72c"] =
+                new("1.5.0-hb2", 25765376, "f53058f04d05c7f29746c5fa64df81fff81b318b9d76501a93a35dc8272632b1")
         };
 
     /// <summary>按中心 manifest 的哈希查白名单；普通用户端用它决定要不要预先下载升级包。</summary>
