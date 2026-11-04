@@ -34,6 +34,8 @@ interface DesignerToolbarProps {
   showHoles: boolean
   showRulers: boolean
   showTags: boolean
+  /** 商品方块里显示商品图（每次打开设计器都是开，不记忆）。 */
+  showImages: boolean
   snapMode: CanvasSnapMode
   conflictCount: number
   readOnly: boolean
@@ -41,14 +43,14 @@ interface DesignerToolbarProps {
   onBayCountChange: (count: number) => void
   onZoomChange: (zoom: number) => void
   onFit: () => void
-  onToggle: (key: 'holes' | 'rulers' | 'tags', value: boolean) => void
+  onToggle: (key: 'holes' | 'rulers' | 'tags' | 'images', value: boolean) => void
   onSnapChange: (mode: CanvasSnapMode) => void
   onLocate: () => void
 }
 
 /** 工具栏：货架型号 / 节数 / 缩放 / 显示开关 / 吸附方式 / 冲突定位。切换货架或减少节数不会自动挪动商品，只会重新校验并标红。 */
 export default function DesignerToolbar(props: DesignerToolbarProps) {
-  const { shelfModels, shelfModelGuid, bayCount, zoom, showHoles, showRulers, showTags, snapMode, conflictCount, readOnly } = props
+  const { shelfModels, shelfModelGuid, bayCount, zoom, showHoles, showRulers, showTags, showImages, snapMode, conflictCount, readOnly } = props
   const { t } = useTranslation()
   return (
     <div className="planogram-designer-toolbar" role="toolbar" aria-label={t('planogram.designer.toolbar.aria')}>
@@ -72,6 +74,7 @@ export default function DesignerToolbar(props: DesignerToolbarProps) {
       <Checkbox checked={showHoles} onChange={(event) => props.onToggle('holes', event.target.checked)}>{t('planogram.designer.toolbar.holes')}</Checkbox>
       <Checkbox checked={showRulers} onChange={(event) => props.onToggle('rulers', event.target.checked)}>{t('planogram.designer.toolbar.rulers')}</Checkbox>
       <Checkbox checked={showTags} onChange={(event) => props.onToggle('tags', event.target.checked)}>{t('planogram.designer.toolbar.tags')}</Checkbox>
+      <Checkbox checked={showImages} onChange={(event) => props.onToggle('images', event.target.checked)}>{t('planogram.designer.toolbar.images')}</Checkbox>
       <span className="planogram-designer-vsep" aria-hidden="true" />
       <span className="planogram-designer-toolbar-label">{t('planogram.designer.toolbar.snap')}</span>
       <Segmented<CanvasSnapMode>

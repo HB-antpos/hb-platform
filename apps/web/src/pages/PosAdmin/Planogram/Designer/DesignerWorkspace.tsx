@@ -1,5 +1,5 @@
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from '@dnd-kit/core'
-import { Alert, Input, Modal, message } from 'antd'
+import { Alert, Button, Input, Modal, message } from 'antd'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -21,16 +21,28 @@ import {
   createDesignerItem,
   DESIGNER_MIN_EDIT_WIDTH,
   distributeRow,
+  DROP_CANDIDATE_GUID,
   findCopyRightSlot,
   findFirstFreeSlot,
   MAX_PLAN_ITEMS,
   nextLocateGuid,
   pickHookForProduct,
+  planBatchAdd,
   primaryConflict,
   sortChecklistItems,
   ZOOM_STEP,
   type DropHint,
 } from './designerLogic'
+import {
+  planDragArrange,
+  productBoxAt,
+  ratePercent,
+  type ArrangeCommitPlan,
+  type ArrangePlan,
+  type ArrangeRejectPlan,
+  type ArrangeTarget,
+  type CanvasPreviewBox,
+} from './dragArrange'
 import InspectorPanel from './InspectorPanel'
 import ProductLibraryPanel, { LibraryCardBody, type LibraryTab } from './ProductLibraryPanel'
 import { resolveHookQty } from '../engine/hookQty'
@@ -131,6 +143,8 @@ interface ActiveDrag {
   hookModelGuid: string
 }
 
+const NO_PLAN: ArrangePlan = { kind: 'none' }
+
 function sameHint(a: DropHint | null, b: DropHint | null): boolean {
   if (a === b) return true
   if (!a || !b) return false
@@ -191,7 +205,11 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
   const [showHoles, setShowHoles] = useState(true)
   const [showRulers, setShowRulers] = useState(true)
   const [showTags, setShowTags] = useState(true)
+  // 商品图：每次打开设计器都是开（不记忆上次的选择）
+  const [showImages, setShowImages] = useState(true)
   const [snapMode, setSnapMode] = useState<CanvasSnapMode>('hole')
+  /** 多选「添加到方案」的落点预览（鼠标移到按钮上时）。 */
+  const [batchPreview, setBatchPreview] = useState<CanvasPreviewBox[] | null>(null)
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('products')
   const [announce, setAnnounce] = useState('')
   const canvasRef = useRef<BoardCanvasHandle | null>(null)
@@ -297,6 +315,83 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
     }
   }, [activeHooks, addProduct, announceText, ctxWithSpec, currentHookGuid, doc.items, itemLabel, readOnly, storeApi, t])
 
+  // ---- 多选添加：按勾选顺序逐个找第一个空位（与单个「＋」同一规则），整批一次撤销 ----
+  const batchContext = useCallback((list: readonly ProductSpecListItemDto[]) => {
+    if (!shelf) return null
+    const merged: Record<string, ProductSpecListItemDto> = { ...specs }
+    for (const item of list) merged[item.productCode] = item
+    return buildLayoutContext({ shelf, hooks, specs: merged, bayCount: doc.bayCount, gapXMm: doc.gapXMm, gapYMm: doc.gapYMm })
+  }, [doc.bayCount, doc.gapXMm, doc.gapYMm, hooks, shelf, specs])
+  const batchEntries = useCallback((list: readonly ProductSpecListItemDto[]) => list.map((item) => ({
+    productCode: item.productCode,
+    hookModelGuid: pickHookForProduct(item.spec?.defaultHookGuid, activeHooks, currentHookGuid),
+  })), [activeHooks, currentHookGuid])
+
+  const handlePreviewMany = useCallback((list: readonly ProductSpecListItemDto[] | null) => {
+    const context = list && list.length > 0 && !readOnly ? batchContext(list) : null
+    if (!list || !context) {
+      setBatchPreview(null)
+      return
+    }
+    const outcomes = planBatchAdd(context, storeApi.getState().doc.items, batchEntries(list), { makeGuid: (index) => `preview-${index}` })
+    setBatchPreview(outcomes.flatMap((outcome, index) => {
+      if (outcome.status !== 'ok') return []
+      const box = productBoxAt(context, outcome.item, outcome.slot)
+      return box ? [{ ...box, key: `batch-${index}`, tone: 'ghost' as const }] : []
+    }))
+  }, [batchContext, batchEntries, readOnly, storeApi])
+
+  const handleAddMany = useCallback((list: readonly ProductSpecListItemDto[]): string[] => {
+    setBatchPreview(null)
+    const all = list.map((item) => item.productCode)
+    if (readOnly || list.length === 0) return all
+    const context = batchContext(list)
+    const entries = batchEntries(list)
+    if (!context || entries.every((entry) => !entry.hookModelGuid)) {
+      message.warning(t('planogram.designer.messages.noHook'))
+      return all
+    }
+    const state = storeApi.getState()
+    const outcomes = planBatchAdd(context, state.doc.items, entries)
+    const added = outcomes.flatMap((outcome) => (outcome.status === 'ok' ? [outcome.item] : []))
+    const remaining = list.filter((_, index) => outcomes[index].status !== 'ok').map((item) => item.productCode)
+    if (added.length === 0) {
+      message.warning(outcomes.some((outcome) => outcome.status === 'tooMany')
+        ? t('planogram.designer.messages.tooManyItems', { count: MAX_PLAN_ITEMS })
+        : t('planogram.designer.messages.batchNone', { count: list.length }))
+      return remaining
+    }
+    state.registerSpecs(list.filter((_, index) => outcomes[index].status === 'ok'))
+    state.replaceItems([...state.doc.items, ...added], added[added.length - 1].guid)
+    const afterDoc = storeApi.getState().doc
+    const text = remaining.length === 0
+      ? t('planogram.designer.messages.batchAdded', { count: added.length })
+      : outcomes.some((outcome) => outcome.status === 'tooMany')
+        ? t('planogram.designer.messages.batchTooMany', { added: added.length, failed: remaining.length, max: MAX_PLAN_ITEMS })
+        : t('planogram.designer.messages.batchPartial', { added: added.length, failed: remaining.length })
+    // 提示里带「撤销」：只在整批添加之后没有别的改动时才撤销，避免撤掉后来的编辑
+    const key = `planogram-batch-${Date.now()}`
+    const undoBatch = () => {
+      const current = storeApi.getState()
+      if (current.doc === afterDoc) current.undo()
+      message.destroy(key)
+    }
+    message.open({
+      key,
+      type: remaining.length > 0 ? 'warning' : 'success',
+      duration: remaining.length > 0 ? 8 : 4,
+      content: (
+        <span>
+          {text}
+          <Button type="link" size="small" className="planogram-inline-link" onClick={undoBatch}>{t('planogram.designer.messages.batchUndo')}</Button>
+        </span>
+      ),
+    })
+    announceText(text)
+    window.requestAnimationFrame(() => canvasRef.current?.scrollToItem(added[0].guid))
+    return remaining
+  }, [announceText, batchContext, batchEntries, readOnly, storeApi, t])
+
   const handleCopyRight = useCallback(() => {
     if (readOnly || !ctx || !selectedGuid) return
     const source = doc.items.find((item) => item.guid === selectedGuid)
@@ -349,8 +444,63 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
     canvasRef.current?.scrollToItem(target)
   }, [layout.locateList, selectedGuid, storeApi])
 
+  // ---- 对调 / 插入：提示文案与提交 ----
+  const nameOfGuid = useCallback((guid: string) => {
+    const item = storeApi.getState().doc.items.find((candidate) => candidate.guid === guid)
+    return item ? itemLabel(specs[item.productCode], item.productCode) : ''
+  }, [itemLabel, specs, storeApi])
+  // 拖动气泡里用货号指明压住的是哪件：同系列商品名前缀往往一样（「Tissue Paper …」），截短后分不出；画布方块上印的也是货号
+  const codeOfGuid = useCallback((guid: string) => {
+    const item = storeApi.getState().doc.items.find((candidate) => candidate.guid === guid)
+    if (!item) return ''
+    return specs[item.productCode]?.itemNumber || item.productCode
+  }, [specs, storeApi])
+  const targetsText = useCallback((targets: readonly ArrangeTarget[]) => targets
+    .map((target) => t('planogram.designer.hint.target', { name: codeOfGuid(target.guid), rate: ratePercent(target.rate) }))
+    .join(t('planogram.designer.hint.listSep')), [codeOfGuid, t])
+  const insertSummary = useCallback((plan: Extract<ArrangePlan, { kind: 'insert' }>) => [
+    plan.shiftCount > 0 ? t('planogram.designer.hint.shiftCount', { count: plan.shiftCount }) : null,
+    plan.wrapCount > 0 ? t('planogram.designer.hint.wrapCount', { count: plan.wrapCount }) : null,
+  ].filter(Boolean).join(t('planogram.designer.hint.partSep')), [t])
+  const rejectArrangeText = useCallback((plan: ArrangeRejectPlan, key: 'hint' | 'messages') => {
+    if (plan.reason === 'noRoom') return t(`planogram.designer.${key}.arrangeNoRoom`)
+    return t(plan.action === 'swap' ? `planogram.designer.${key}.arrangeSwapConflict` : `planogram.designer.${key}.arrangeInsertConflict`)
+  }, [t])
+
+  const handleArrange = useCallback((plan: ArrangeCommitPlan, draggedGuid: string) => {
+    const draggedName = nameOfGuid(draggedGuid)
+    let text: string
+    if (plan.kind === 'swap') {
+      text = t('planogram.designer.messages.swapped', { a: draggedName, b: nameOfGuid(plan.target.guid) })
+    } else {
+      const summary = insertSummary(plan)
+      text = [t('planogram.designer.messages.inserted', { name: draggedName }), summary].filter(Boolean).join(t('planogram.designer.hint.partSep'))
+    }
+    storeApi.getState().replaceItems(plan.items, draggedGuid)
+    announceText(text)
+    // 有商品被换到下一行时明确提示（不在视线里，容易没注意到）
+    if (plan.kind === 'insert' && plan.wrapCount > 0) message.info(text)
+  }, [announceText, insertSummary, nameOfGuid, storeApi, t])
+
+  const handleRejectArrange = useCallback((plan: ArrangeRejectPlan) => {
+    message.warning(rejectArrangeText(plan, 'messages'))
+  }, [rejectArrangeText])
+
   // ---- 落点提示文案 ----
-  const describeHint = useCallback((hint: DropHint): CanvasHintText => {
+  const describeHint = useCallback((hint: DropHint, plan: ArrangePlan = NO_PLAN): CanvasHintText => {
+    if (plan.kind === 'swap') {
+      return { ok: true, line1: `⇄ ${t('planogram.designer.hint.swap', { target: targetsText([plan.target]) })}`, line2: t('planogram.designer.hint.swapDetail') }
+    }
+    if (plan.kind === 'insert') {
+      const where = t(plan.position === 'between' ? 'planogram.designer.hint.insertBetween' : plan.position === 'before' ? 'planogram.designer.hint.insertBefore' : 'planogram.designer.hint.insertAfter')
+      return {
+        ok: true,
+        line1: `↦ ${t('planogram.designer.hint.insert', { targets: targetsText(plan.targets) })}`,
+        line2: [where, insertSummary(plan)].filter(Boolean).join(t('planogram.designer.hint.partSep')),
+      }
+    }
+    if (plan.kind === 'reject') return { ok: false, line1: `✕ ${rejectArrangeText(plan, 'hint')}`, line2: targetsText(plan.targets) }
+    if (plan.kind === 'noop') return { ok: true, line1: `↺ ${t('planogram.designer.hint.noop')}` }
     const at = t('planogram.designer.hint.at', { bay: hint.bayIndex, col: hint.holeCol, row: hint.holeRow })
     // 从左栏拖入的新商品，参数还没进 store：用正在拖动的那一行
     const dragging = dragRef.current?.item
@@ -370,7 +520,7 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
     // 「自由」吸附：不可放的位置也会放下（之后标红），气泡如实说明，不再写「不可放置」
     const label = snapMode === 'free' ? t('planogram.designer.hint.free') : t('planogram.designer.hint.no')
     return { ok: false, line1: `✕ ${label}  ${at}`, line2: primary ? conflictText(t, primary, textEnv) : undefined }
-  }, [hooks, itemLabel, snapMode, specs, t, textEnv])
+  }, [hooks, insertSummary, itemLabel, rejectArrangeText, snapMode, specs, t, targetsText, textEnv])
 
   const handleRejectMove = useCallback((hint: DropHint) => {
     const primary = primaryConflict(hint.conflicts)
@@ -386,44 +536,86 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null)
   const [externalHint, setExternalHint] = useState<DropHint | null>(null)
-  const dragRef = useRef<{ item: ProductSpecListItemDto; hookModelGuid: string | null; hint: DropHint | null } | null>(null)
+  const [externalPlan, setExternalPlan] = useState<ArrangePlan | null>(null)
+  const dragRef = useRef<{ item: ProductSpecListItemDto; hookModelGuid: string | null; hint: DropHint | null; plan: ArrangePlan } | null>(null)
+  // 拖动期间的真实指针位置：dnd-kit 给的 delta 会把拖动源所在列表的滚动量也算进去（列表一滚，「起点 + delta」就偏了），
+  // 所以在捕获阶段直接记录 pointermove 的坐标，换算画布落点只用它
+  const pointerRef = useRef<{ x: number; y: number } | null>(null)
+  const trackPointer = useCallback((event: PointerEvent) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY }
+  }, [])
+  useEffect(() => () => window.removeEventListener('pointermove', trackPointer, true), [trackPointer])
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const item = (event.active.data.current as { item?: ProductSpecListItemDto } | undefined)?.item
     if (!item) return
     const hookModelGuid = pickHookForProduct(item.spec?.defaultHookGuid, activeHooks, currentHookGuid)
-    dragRef.current = { item, hookModelGuid, hint: null }
+    dragRef.current = { item, hookModelGuid, hint: null, plan: NO_PLAN }
+    const activator = event.activatorEvent as PointerEvent | MouseEvent | null
+    pointerRef.current = activator && 'clientX' in activator ? { x: activator.clientX, y: activator.clientY } : null
+    window.addEventListener('pointermove', trackPointer, true)
+    // 画布按 store 里的商品参数画落点虚影：还没放过的新商品要先登记参数，否则虚影画不出来（只登记目录，不进明细、不算改动）
+    storeApi.getState().registerSpecs([item])
     setActiveDrag({ item, hookModelGuid: hookModelGuid ?? '' })
-  }, [activeHooks, currentHookGuid])
+  }, [activeHooks, currentHookGuid, storeApi, trackPointer])
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
     const drag = dragRef.current
     const activator = event.activatorEvent as PointerEvent | MouseEvent | TouchEvent | undefined
     if (!drag || !drag.hookModelGuid || !activator || !layout.ctx) return
     const start = 'clientX' in activator ? { x: activator.clientX, y: activator.clientY } : { x: activator.touches?.[0]?.clientX ?? 0, y: activator.touches?.[0]?.clientY ?? 0 }
-    const point = canvasRef.current?.clientToShelfPoint(start.x + event.delta.x, start.y + event.delta.y) ?? null
+    const pointer = pointerRef.current ?? { x: start.x + event.delta.x, y: start.y + event.delta.y }
+    const point = canvasRef.current?.clientToShelfPoint(pointer.x, pointer.y) ?? null
     let hint: DropHint | null = null
-    if (point) {
-      const context = ctxWithSpec(drag.item)
-      if (context) hint = buildDropHint(context, layout.placed, point, { productCode: drag.item.productCode, hookModelGuid: drag.hookModelGuid })
+    let plan: ArrangePlan = NO_PLAN
+    const context = point ? ctxWithSpec(drag.item) : null
+    if (point && context) hint = buildDropHint(context, layout.placed, point, { productCode: drag.item.productCode, hookModelGuid: drag.hookModelGuid })
+    if (sameHint(drag.hint, hint)) return
+    // 新商品压住已放的商品：一律按插入处理（预览用占位 guid，松手时再用真正的 guid 重算一次）
+    if (hint && context) {
+      const candidate = createDesignerItem({ productCode: drag.item.productCode, hookModelGuid: drag.hookModelGuid, bayIndex: hint.bayIndex, holeCol: hint.holeCol, holeRow: hint.holeRow, guid: DROP_CANDIDATE_GUID })
+      plan = planDragArrange({ ctx: context, items: storeApi.getState().doc.items, hint, dragged: candidate, isNew: true })
     }
-    if (!sameHint(drag.hint, hint)) {
-      drag.hint = hint
-      setExternalHint(hint)
-    }
-  }, [ctxWithSpec, layout.ctx, layout.placed])
+    drag.hint = hint
+    drag.plan = plan
+    setExternalHint(hint)
+    setExternalPlan(plan)
+  }, [ctxWithSpec, layout.ctx, layout.placed, storeApi])
 
   const finishExternalDrag = useCallback(() => {
+    window.removeEventListener('pointermove', trackPointer, true)
+    pointerRef.current = null
     dragRef.current = null
     setActiveDrag(null)
     setExternalHint(null)
-  }, [])
+    setExternalPlan(null)
+  }, [trackPointer])
 
   const handleDragEnd = useCallback((_event: DragEndEvent) => {
     const drag = dragRef.current
     const hint = drag?.hint ?? null
     finishExternalDrag()
     if (!drag || !hint || !drag.hookModelGuid || readOnly) return
+    if (drag.plan.kind === 'reject') {
+      handleRejectArrange(drag.plan)
+      return
+    }
+    if (drag.plan.kind === 'insert') {
+      if (storeApi.getState().doc.items.length >= MAX_PLAN_ITEMS) {
+        message.warning(t('planogram.designer.messages.tooManyItems', { count: MAX_PLAN_ITEMS }))
+        return
+      }
+      const context = ctxWithSpec(drag.item)
+      const created = createDesignerItem({ productCode: drag.item.productCode, hookModelGuid: drag.hookModelGuid, bayIndex: hint.bayIndex, holeCol: hint.holeCol, holeRow: hint.holeRow })
+      const plan = context ? planDragArrange({ ctx: context, items: storeApi.getState().doc.items, hint, dragged: created, isNew: true }) : NO_PLAN
+      if (plan.kind === 'insert') {
+        storeApi.getState().registerSpecs([drag.item])
+        handleArrange(plan, created.guid)
+      } else if (plan.kind === 'reject') {
+        handleRejectArrange(plan)
+      }
+      return
+    }
     // 严格吸附：不可放就回弹并提示原因；「自由」模式放到最近孔位，冲突之后标红
     if (!hint.ok && snapMode === 'hole') {
       handleRejectMove(hint)
@@ -432,7 +624,7 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
     if (addProduct(drag.item, { bayIndex: hint.bayIndex, holeCol: hint.holeCol, holeRow: hint.holeRow }, drag.hookModelGuid)) {
       announceText(t('planogram.designer.messages.added', { name: itemLabel(drag.item, drag.item.productCode), bay: hint.bayIndex, col: hint.holeCol, row: hint.holeRow }))
     }
-  }, [addProduct, announceText, finishExternalDrag, handleRejectMove, itemLabel, readOnly, snapMode, t])
+  }, [addProduct, announceText, ctxWithSpec, finishExternalDrag, handleArrange, handleRejectArrange, handleRejectMove, itemLabel, readOnly, snapMode, storeApi, t])
 
   // ---- 键盘：方向键移动一个孔位、Delete 删除、撤销重做、保存 ----
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -751,6 +943,7 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
           showHoles={showHoles}
           showRulers={showRulers}
           showTags={showTags}
+          showImages={showImages}
           snapMode={snapMode}
           conflictCount={layout.stats.conflictCount}
           readOnly={readOnly}
@@ -761,12 +954,14 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
           onToggle={(key, value) => {
             if (key === 'holes') setShowHoles(value)
             else if (key === 'rulers') setShowRulers(value)
+            else if (key === 'images') setShowImages(value)
             else setShowTags(value)
           }}
           onSnapChange={setSnapMode}
           onLocate={() => locate()}
         />
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={finishExternalDrag}>
+        {/* autoScroll 关掉：它只会滚动拖动源所在的商品库列表（往画布拖时指针靠近列表上下沿，列表会自己滚走），对放到画布没有帮助 */}
+        <DndContext sensors={sensors} autoScroll={false} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={finishExternalDrag}>
           <div className="planogram-designer-work">
             {narrow ? null : (
               <ProductLibraryPanel
@@ -780,6 +975,8 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
                 canEdit={canEdit}
                 language={language}
                 onAdd={handleAdd}
+                onAddMany={handleAddMany}
+                onPreviewMany={handlePreviewMany}
                 onGoSpecs={goSpecs}
               />
             )}
@@ -796,16 +993,21 @@ export default function DesignerWorkspace({ canEdit, canManage, canView, onReloa
                 showHoles={showHoles}
                 showRulers={showRulers}
                 showTags={showTags}
+                showImages={showImages}
                 snapMode={snapMode}
                 readOnly={readOnly}
                 language={language}
                 labels={labels}
                 conflictText={conflictLabel}
                 externalHint={externalHint}
+                externalPlan={externalPlan}
+                previewBoxes={batchPreview}
                 describeHint={describeHint}
                 onSelect={(guid) => storeApi.getState().select(guid)}
                 onMoveItem={handleMoveItem}
                 onRejectMove={handleRejectMove}
+                onArrange={handleArrange}
+                onRejectArrange={handleRejectArrange}
                 onCopyRight={handleCopyRight}
                 onDistribute={handleDistribute}
                 onRemove={handleRemove}

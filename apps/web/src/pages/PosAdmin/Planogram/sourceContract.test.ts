@@ -421,6 +421,25 @@ assert(library.includes('categoryFilter.hasActive') && library.includes("'planog
 assert(library.includes('useDraggable') && library.includes('onClick={() => onAdd(item)}') && library.includes('LibraryStatus'), '拖拽、「+」添加、「已设参数 / 全部」切换保持不变')
 assert(library.includes('GradeTag') && library.includes("planogram.designer.library.matchCount"), '商品卡片加等级小标签；弹层底部显示符合数')
 
+// ---------------------------------------------------------------------------
+// 设计器增强：商品图开关 / 多选添加 / 拖拽对调与插入（设计图 docs/design/planogram-20261104/designer-enhance）
+// ---------------------------------------------------------------------------
+const dragArrangeSource = read(`${directory}/Designer/dragArrange.ts`)
+assert(!stripComments(dragArrangeSource).match(/[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]+/), 'dragArrange 里不能写死中文文案')
+assert(workspace.includes('const [showImages, setShowImages] = useState(true)') && !/localStorage|sessionStorage/.test(workspace), '商品图默认开，每次打开设计器都恢复成开（不记忆上次的选择）')
+assert(designerToolbar.includes("t('planogram.designer.toolbar.images')") && workspace.includes('showImages={showImages}'), '工具栏「商品图」开关接到画布')
+assert(canvas.includes('toProductThumbnailUrl(') && canvas.includes('CANVAS_IMAGE_MIN_PX') && canvas.includes('onImageError'), '画布商品图用 COS 缩略图；方块太小 / 没有图 / 加载失败都退回色块')
+assert(!versionPreview.includes('showImages'), '历史版本预览不显示商品图（画布缺省关闭）')
+assert(library.includes('LIBRARY_SELECT_LIMIT') && library.includes('onAddMany(selection)') && library.includes('onPreviewMany(selection)'), '商品库多选：上限、添加到方案、移到按钮上预览落点')
+assert(library.includes("t('planogram.designer.library.selectAll')") && library.includes('event.shiftKey'), '全选当前列表；Shift 整段选')
+assert(workspace.includes('planBatchAdd(') && designerLogic.includes('findFirstFreeSlot(ctx, current'), '多选添加逐个找第一个空位（与单个「＋」同一规则）')
+assert(workspace.includes('state.replaceItems([...state.doc.items, ...added]') && workspace.includes('if (current.doc === afterDoc) current.undo()'), '整批添加一个撤销快照；提示里的「撤销」只撤这一批')
+assert(dragArrangeSource.includes('ARRANGE_SWAP_RATE = 0.5') && dragArrangeSource.includes('ARRANGE_INSERT_RATE = 0.2'), '对调 50% / 插入 20% 两个阈值集中在一处')
+assert(dragArrangeSource.includes('Math.min((a.right - a.left) * (a.bottom - a.top), (b.right - b.left) * (b.bottom - b.top))'), '重叠率的分母取两者中较小的方块')
+assert(canvas.includes('planDragArrange(') && workspace.includes('planDragArrange('), '画布内拖动与商品库拖入走同一个重排函数')
+assert(workspace.includes('storeApi.getState().replaceItems(plan.items, draggedGuid)'), '对调 / 插入一次提交整份明细（一个撤销快照）')
+assert(canvas.includes("if (plan.kind === 'reject')") && workspace.includes('handleRejectArrange'), '放不下 / 会冲突时整次拒绝并提示原因')
+
 // 全局契约（noAutomaticReload）会扫描 pages 下所有文件里的该字面量，所以这里拆开拼接。
 for (const source of [...allSources, css]) {
   assert(!source.includes(['window', 'location', 'reload'].join('.')), '页面不得自动 hard reload')

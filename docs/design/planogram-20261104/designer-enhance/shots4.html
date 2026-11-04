@@ -1,0 +1,51 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>拖拽场景</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>body{background:#f0f2f5}.wrap{width:1440px;height:900px;padding:16px 18px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px}
+.card{background:#fff;border-radius:12px;border:1px solid #e5e5e5;padding:10px 12px;position:relative;overflow:hidden}
+.t{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}.d{font-size:12px;color:rgba(0,0,0,.6);margin:2px 0 4px;min-height:34px}
+.chip{position:absolute;background:#1f1f1f;color:#fff;font-size:12px;padding:5px 9px;border-radius:6px;white-space:nowrap;z-index:3}
+.chip b{color:#69b1ff}.chip .o{color:#ffc069}.chip .r{color:#ff7875}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600}
+.lg{position:absolute;right:14px;top:13px;font-size:11px;color:rgba(0,0,0,.55);display:flex;gap:10px}
+.lg i{display:inline-block;width:12px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+</style><script src="lib.js"></script></head><body><div class="wrap" id="w"></div>
+<script>
+const S = 0.52, H = 640;
+const it = (x, y, w, c, code, st, h=260) => ({x, y, w, h, c, code, qty: 38, st});
+const cursor = (x, y) => `<path transform="translate(${x},${y})" d="M0 0l11 7-5 1 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1.2"/>`;
+const defs = `<defs><marker id="ab" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="#1677ff"/></marker><marker id="ao" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#fa8c16"/></marker></defs>`;
+const newPos = (px, x, y, w, label, color='#1677ff') => `<rect x="${px(x)}" y="${px(y)}" width="${px(w)}" height="${px(260)}" rx="2" fill="${color==='#1677ff'?'#e6f4ff':'#fff7e6'}" fill-opacity=".55" stroke="${color}" stroke-width="1.6" stroke-dasharray="5 3"/><text x="${px(x+w/2)}" y="${px(y+140)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${color}">${label}</text>`;
+const insLine = (px, x, color='#1677ff') => `<rect x="${px(x)-1.5}" y="${px(14)}" width="3" height="${px(330)}" fill="${color}"/>`;
+// ① 对调：A（-150，宽 140，原在最右）拖到 B（-108）上，重叠 77%
+const swap = board({id:21, S, H, items:[
+  it(20,60,200,0,'-112'), it(232,60,200,1,'-108','swap'), it(444,60,200,2,'-101'), it(656,60,200,3,'-102'), it(868,60,140,9,'-150 原位','old'),
+  it(214,90,140,9,'A -150','ghost')],
+ extra:(px)=> defs + newPos(px, 868, 60, 200, 'B -108 将到这里') + `<path d="M${px(332)} ${px(345)} C ${px(420)} ${px(430)}, ${px(880)} ${px(430)}, ${px(968)} ${px(345)}" fill="none" stroke="#1677ff" stroke-width="2" marker-end="url(#ab)" marker-start="url(#ab)"/><text x="${px(650)}" y="${px(440)}" text-anchor="middle" font-size="11" fill="#1677ff" font-weight="700">⇄ 对调</text>` + cursor(px(300),px(240))});
+// ② 插入（本行放得下）：A 同时压住 -112 35%、-108 59%
+const ins = board({id:22, S, H, items:[
+  it(20,60,200,0,'-112'), it(232,60,200,1,'-108','old'), it(444,60,200,2,'-101','old'), it(656,60,200,3,'-102','old'),
+  it(140,90,200,6,'A','ghost')],
+ extra:(px)=> defs + insLine(px, 226) + newPos(px, 444, 60, 200, '-108') + newPos(px, 656, 60, 200, '-101') + newPos(px, 868, 60, 200, '-102') +
+ `<path d="M${px(700)} ${px(352)} L${px(940)} ${px(352)}" stroke="#1677ff" stroke-width="1.8" marker-end="url(#ab)"/><text x="${px(820)}" y="${px(372)}" text-anchor="middle" font-size="10.5" fill="#1677ff">整体右移 212 mm，间距不变</text>` + cursor(px(250),px(240))});
+// ③ 插入 → 末尾换到下一行：A 压住 -108 36%、-101 58%
+const wrapC = board({id:23, S, H, items:[
+  it(20,60,200,0,'-112'), it(232,60,200,1,'-108'), it(444,60,200,2,'-101','old'), it(656,60,200,3,'-102','old'), it(868,60,200,4,'-103','old'),
+  it(656,380,200,5,'-104'), it(868,380,200,7,'-106'),
+  it(350,90,200,6,'A','ghost')],
+ extra:(px)=> defs + insLine(px, 438) + newPos(px, 656, 60, 200, '-101') + newPos(px, 868, 60, 200, '-102') + newPos(px, 20, 380, 200, '-103 换到这里', '#fa8c16') +
+ `<path d="M${px(1080)} ${px(200)} C ${px(1150)} ${px(330)}, ${px(300)} ${px(350)}, ${px(160)} ${px(375)}" fill="none" stroke="#fa8c16" stroke-width="1.8" marker-end="url(#ao)"/>` + cursor(px(450),px(240))});
+// ④ 拒绝：本行满、下一行也满（最后一行）
+const rej = board({id:24, S, H, items:[
+  it(20,60,200,0,'-112'), it(232,60,200,1,'-108'), it(444,60,200,2,'-101'), it(656,60,200,3,'-102'), it(868,60,200,4,'-103'),
+  it(20,380,200,5,'-104'), it(232,380,200,6,'-105'), it(444,380,200,7,'-106'), it(656,380,200,8,'-107'), it(868,380,200,9,'-109'),
+  it(380,95,200,6,'A','bad')],
+ extra:(px)=> insLine(px, 438, '#ff4d4f') + `<rect x="${px(1188)}" y="0" width="${px(12)}" height="${px(640)}" fill="#ff4d4f" opacity=".25"/><text x="${px(1176)}" y="${px(10)}" text-anchor="end" font-size="10" fill="#cf1322" font-weight="700">本节右边界</text>` + cursor(px(480),px(240))});
+const legend = `<div class="lg"><span><i style="background:#e6f4ff;border:1px dashed #1677ff"></i>新位置</span><span><i style="background:#f5f5f5;border:1px dashed #bfbfbf;opacity:.6"></i>原位置</span><span><i style="background:#f6ffed;border:1px dashed #52c41a"></i>拖动虚影</span><span><i style="background:#fff7e6;border:1px dashed #fa8c16"></i>换行</span></div>`;
+const card = (tag, color, title, desc, svg, chip, chipPos) => `<div class="card"><div class="t"><span class="tag" style="background:${color[0]};color:${color[1]}">${tag}</span>${title}</div><div class="d">${desc}</div>${svg}<div class="chip" style="${chipPos}">${chip}</div>${legend}</div>`;
+document.getElementById('w').innerHTML =
+ card('≥ 50%', ['#e6f4ff','#0958d9'], '对调', '把最右边的 A（-150）拖到 B（-108）上：只压住 B，重叠 77%。松手后两者交换，各自左边缘对齐到对方原位再吸附孔位。', swap, '压住「-108」<b>77%</b> · 对调', 'left:200px;top:250px') +
+ card('插入', ['#fff7e6','#d46b08'], '插入（本行放得下）', '新商品 A 同时压住 -112（35%）和 -108（48%），两边都超过 20% → 插到它们之间；后面 3 个整体右移，彼此间距不变。', ins, '压住「-112」<b class="o">35%</b>、「-108」<b class="o">48%</b> · 插入两者之间，后移 3 个', 'left:170px;top:250px') +
+ card('插入', ['#fff7e6','#d46b08'], '插入 → 末尾换到下一行', '本行已满：插入后 -103 超出本节右边，换到下一行左侧的空位；只找空位，不推下一行的 -104、-106。', wrapC, '压住「-108」<b class="o">36%</b>、「-101」<b class="o">47%</b> · 插入，后移 2 个，<span class="o">1 个换行</span>', 'left:270px;top:250px') +
+ card('拒绝', ['#fff1f0','#cf1322'], '本节放不下', '本行已满，下一行（本节最后一行）也没有空位：不溢到相邻的节，整次拒绝，A 回到原位。', rej, '压住「-108」<b class="o">22%</b>、「-101」<b class="o">59%</b> · <span class="r">本节放不下，松手无效</span>', 'left:300px;top:250px');
+</script></body></html>

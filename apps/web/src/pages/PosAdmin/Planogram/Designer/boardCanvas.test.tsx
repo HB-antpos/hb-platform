@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ProductSpecListItemDto } from '../../../../types/planogram'
 import { buildPlaced, validateLayout, type LayoutContext, type LayoutHook, type LayoutShelf, type LayoutSpec } from '../engine/geometry'
-import BoardCanvas, { BoardPrintSvg, buildItemViews, canvasMetrics, fitZoomFor, printMetrics, type BoardCanvasLabels } from './BoardCanvas'
-import { buildDropHint, conflictsByItem, createDesignerItem, type DesignerItem } from './designerLogic'
+import BoardCanvas, { BoardPrintSvg, buildItemViews, CANVAS_IMAGE_MIN_PX, canvasImageTier, canvasMetrics, fitZoomFor, printMetrics, type BoardCanvasLabels } from './BoardCanvas'
+import { buildDropHint, conflictsByItem, createDesignerItem, DROP_CANDIDATE_GUID, type DesignerItem } from './designerLogic'
+import { planDragArrange, type ArrangePlan } from './dragArrange'
 
 // 画布渲染契约：用设计稿样例数据静态渲染（服务端渲染，不跑指针交互），核对关键几何、冲突标记、选中覆盖层、显示开关与只读。
 // 指针拖动 / 拖入 / 键盘交互在真实浏览器里验证（docs 里记录的目测），这里守住「渲染不崩 + 关键元素在」。
@@ -151,6 +152,54 @@ assert(ghostHtml.includes('✓ 可放置') && ghostHtml.includes('stroke-dasharr
 const bad = buildDropHint(ctx, placed, { xMm: 15 + 25 * 4 + 5, yMm: 75 + 20 }, { productCode: 'PEN', hookModelGuid: 'H' })
 assert(bad !== null && !bad.ok, '压在已有商品上不可放')
 assert(render({ externalHint: bad, describeHint: () => ({ ok: false, line1: '✕ 不可放置' }) }).includes('✕ 不可放置'), '不可放置的气泡')
+
+// ---------- 商品图开关 ----------
+assertEqual(canvasImageTier(30, 1), 72, '方块 30 px → 72 档缩略图')
+assertEqual(canvasImageTier(74, 2), 160, '高清屏按 2 倍像素取档：148 → 160')
+assertEqual(canvasImageTier(500, 3), 320, '超过最大档取 320（像素密度最多按 2 倍算）')
+assertEqual(CANVAS_IMAGE_MIN_PX, 28, '方块高度不足 28 px 不加载图片')
+const cosImage = 'https://hb-1250000000.cos.ap-sydney.myqcloud.com/products/pen.jpg'
+const withImages = { ...specRows, PEN: { ...specRows.PEN, productImage: cosImage } }
+const imageOn = render({ specs: withImages, showImages: true })
+assertEqual(count(imageOn, '<image'), 2, '开启商品图：圆珠笔出现 2 次 → 2 张图；笔记本没有图仍是色块')
+assert(imageOn.includes(`${cosImage}?imageMogr2/thumbnail/160x160/format/webp`), '用 COS 缩略图（74 px 高的方块取 160 档）')
+assert(count(imageOn, '<tspan') < count(html, '<tspan'), '显示商品图时名称收起（读屏标题里仍有名称）')
+assert(imageOn.includes('圆珠笔 10 支(XD0001202)'), '悬浮 / 读屏标题保留名称')
+assert(!render({ specs: withImages }).includes('<image'), '默认（不传）不显示商品图：历史版本预览不受影响')
+assert(!render({ specs: withImages, showImages: false }).includes('<image'), '关闭商品图：只画色块')
+// 185 mm 高的圆珠笔在 25% 时约 46 px，仍显示；把高度换算成 < 28 px 的缩放不存在（最小 25%），所以用一个矮商品验证阈值
+const shortSpecs = { ...specs, PEN: { ...specs.PEN, heightMm: 100 } }
+const shortCtx: LayoutContext = { ...ctx, specs: shortSpecs }
+assert(!render({ ctx: shortCtx, specs: withImages, showImages: true, zoom: 25 }).includes('<image'), '方块太小（100 mm × 25% = 25 px）退回色块')
+
+// ---------- 预览框 / 对调插入预览 ----------
+const batchBoxes = render({ previewBoxes: [{ key: 'b1', bayIndex: 1, leftMm: 400, topMm: 400, widthMm: 90, heightMm: 185, tone: 'ghost' }] })
+assert(batchBoxes.includes('stroke-dasharray="5 3"') && batchBoxes.includes('fill="#f6ffed"'), '多选落点预览：绿色虚线框')
+// 从商品库拖笔记本压到 i1 上：新商品一律插入，i1 后移
+// 指针在第 1 节板面 x = 100（第 4 列附近）、第 3 行：笔记本占位 57.5～167.5，压住 i1（圆珠笔 92.5～182.5）
+const insertHint = buildDropHint(ctx, placed, { xMm: 15 + 100, yMm: 75 }, { productCode: 'NOTE', hookModelGuid: 'H' })
+assert(insertHint !== null && insertHint.bayIndex === 1, '能算出拖入落点')
+const insertPlan = planDragArrange({
+  ctx,
+  items,
+  hint: insertHint,
+  dragged: createDesignerItem({ guid: DROP_CANDIDATE_GUID, productCode: 'NOTE', hookModelGuid: 'H', bayIndex: insertHint.bayIndex, holeCol: insertHint.holeCol, holeRow: insertHint.holeRow }),
+  isNew: true,
+})
+assertEqual(insertPlan.kind, 'insert', '新商品压住 i1：插入')
+let describedPlan: ArrangePlan | null = null
+const insertHtml = render({
+  externalHint: insertHint,
+  externalPlan: insertPlan,
+  describeHint: (_hint, plan) => {
+    describedPlan = plan
+    return { ok: true, line1: '↦ 插入', line2: '后移 1 个' }
+  },
+})
+assertEqual((describedPlan as ArrangePlan | null)?.kind, 'insert', '提示文案拿到重排结果')
+assert(insertHtml.includes('↦ 插入') && insertHtml.includes('fill="#e6f4ff"'), '被后移的商品在新位置画蓝色虚线框')
+assert(insertHtml.includes('width="3"') && insertHtml.includes('fill="#1677ff"'), '插入点画蓝色竖线')
+assert(/data-item-guid="i1"[^>]*opacity="0.4"|opacity="0.4"[^>]*data-item-guid="i1"/.test(insertHtml), '被挪动的 i1 原位置淡化')
 
 // ---------- 没有货架 ----------
 const empty = render({ ctx: null, items: [], placed: [] })

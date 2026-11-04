@@ -357,6 +357,31 @@
   line-height: 1.5;
 }
 
+/* 「已设参数 / 全部」与「全选当前列表」同一行 */
+.planogram-designer-library-statusrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 多选底栏：已选 N 个 · 添加到方案 · 清除 */
+.planogram-designer-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  font-size: 12px;
+}
+
+.planogram-designer-selection-count {
+  margin-right: auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .planogram-designer-library-hookbar {
   display: flex;
   align-items: center;
@@ -404,6 +429,38 @@
 
 .planogram-designer-card.is-disabled {
   cursor: default;
+}
+
+.planogram-designer-card.is-selected {
+  border-color: #91caff;
+  background: #e6f4ff;
+}
+
+/* 卡片左侧复选框 + 放置顺序角标 */
+.planogram-designer-card-check {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  cursor: default;
+}
+
+.planogram-designer-card-order {
+  position: absolute;
+  top: -9px;
+  left: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
 }
 
 .planogram-designer-card.is-unset {

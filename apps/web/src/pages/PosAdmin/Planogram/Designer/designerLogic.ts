@@ -440,6 +440,40 @@ export function findFirstFreeSlot(ctx: LayoutContext, items: readonly DesignerIt
   return null
 }
 
+export interface BatchAddEntry {
+  productCode: string
+  /** 没有可用挂钩时为 null（该条记为 noHook）。 */
+  hookModelGuid: string | null
+}
+
+export type BatchAddOutcome =
+  | { status: 'ok'; slot: Slot; item: DesignerItem }
+  | { status: 'noHook' | 'noRoom' | 'tooMany' }
+
+/**
+ * 商品库多选「添加到方案」：按勾选顺序逐个放，每个都和单个「＋」添加一样找第一个能放下的空位（节 → 行 → 列），
+ * 前面放好的会占位，所以一批商品不会叠在一起；本节放满会接着放到下一节。超过方案明细上限的不再添加。
+ * 返回与 entries 一一对应的结果（成功的带新条目，guid 由 makeGuid 生成，预览时可以传固定前缀）。
+ */
+export function planBatchAdd(
+  ctx: LayoutContext,
+  items: readonly DesignerItem[],
+  entries: readonly BatchAddEntry[],
+  options: { limit?: number; makeGuid?: (index: number) => string } = {},
+): BatchAddOutcome[] {
+  const limit = options.limit ?? MAX_PLAN_ITEMS
+  const current: DesignerItem[] = [...items]
+  return entries.map<BatchAddOutcome>((entry, index) => {
+    if (!entry.hookModelGuid) return { status: 'noHook' }
+    if (current.length >= limit) return { status: 'tooMany' }
+    const slot = findFirstFreeSlot(ctx, current, { productCode: entry.productCode, hookModelGuid: entry.hookModelGuid })
+    if (!slot) return { status: 'noRoom' }
+    const item = createDesignerItem({ productCode: entry.productCode, hookModelGuid: entry.hookModelGuid, ...slot, guid: options.makeGuid?.(index) })
+    current.push(item)
+    return { status: 'ok', slot, item }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // 整行均分
 // ---------------------------------------------------------------------------
