@@ -242,3 +242,41 @@ WPF helper 白名单（版本 → 哈希 / 大小，随 WPF 发布） ──► 
 3. 新建 `hb/<ver>` 分支 cherry-pick 公钥与 CI 两个提交，CI 出包，记录哈希。
 4. 1042：官方 1.4.9 → 新版、hb1 → 新版两条升级路径 + 对账 + 无人值守连接，全部通过后才把新版加进 helper 白名单并发 WPF 版。
 5. 中心 manifest 最后切，且先只对 1042 生效（批 4 的门店灰度机制）。
+
+## 附录 A：1.5.0 核对记录与 hb2（2026-11-04）
+
+**为什么跟 1.5.0**：门店要求受控端被连接时不弹连接管理窗口（CM）。截图里门店关掉 CM 或点 Disconnect 会直接断开远程（控制端报「连接错误：被对方手动关闭」）。
+
+**隐藏 CM 的条件（1.4.9 与 1.5.0 相同）**：
+
+- hbb_common `password_security::hide_cm()` = `approve-mode=password` 且 `verification-method=use-permanent-password` 且 `allow-hide-cm=Y`。前两项 helper 已作为 `ManagedOptions` 写入。
+- 但 CM 进程启动时经 IPC 向服务端要 `hide_cm`（`flutter/lib/main.dart` `runConnectionManagerScreen()` → `cm_get_config` → `src/ipc.rs` `"hide_cm"` 分支），服务端只在 `is_pro() || is_custom_client()`（`app-name ≠ RustDesk`）时才返回值。我们不改名，所以 fork 必须去掉这道门槛；`allow-hide-cm` 不在任何 KEYS 数组里，放进 custom.txt `override-settings` 时按「不认识的键四类都写」进入 `OVERWRITE_SETTINGS`，`Config::get_option` 优先读它。
+- Flutter `server_model.dart` 里按选项动态显示 / 隐藏的代码上游已注释掉，只在 CM 启动时决定一次。
+
+**第 12 节逐条核对（`rustdesk/rustdesk@1.5.0` = `fada664`，`hbb_common@229b904`）**：
+
+| 项 | 结论 |
+|---|---|
+| ① 自解压外壳 spawn 内层后立即退出 | `libs/portable` 新增 RDPKG 资源（按客户注入、免重编译），资源不存在时 `parse_package_blob` 返回空，仍走内嵌 `data.bin`；`execute()` 仍是 spawn 不等待。解压目录改为按 exe 名（`rustdesk`），与原 `APP_PREFIX` 相同 |
+| ② `--password` 经 IPC 确认才输出 `Done!` | `core_main.rs` 的 `--password` / `--config` / `--option` / `--get-id` / `--silent-install` 分支与 1.4.9 逐行一致 |
+| ③ IPC 不通时回退本地配置 | `get_config` / `set_config` / `set_option` / `set_permanent_password` 不变；`get_id()` 新增「IPC 返回空 ID 视为无回应、回退本地」，更稳 |
+| 安装复制 | `copy_raw_cmd` 的 `XCOPY` 不变，custom.txt 仍随目录复制；`install_me` 新增「已有 MSI 安装时拒绝 EXE 覆盖」（门店都是 EXE 安装）与路径字符校验 |
+| custom.txt 机制 | `read_custom_client()` 与 1.4.9 一致，公钥常量仍在 `src/common.rs`；选项键常量迁到新 crate `libs/base/src/config/keys.rs`，锁定项的键都在 |
+| 构建（x64） | Rust 1.75 / Flutter 3.24.5 / LLVM 15.0.6 / FRB 1.80.1 不变；`VCPKG_COMMIT_ID` 120deac → 9e593bb；上游新增 MSI 模板步骤与我们无关；`build.py` 改动只涉及 Linux |
+| 上游工作流 | 新增每周定时的 `update-webpki-roots.yml`，fork 已删 |
+
+**1042 必须实测的新风险**：
+
+- Kx v1（#16326，协商式密钥交换）与 WebRTC（#15684）：上游称兼容旧端，但我们的 hbbs/hbbr 是 1.1.16 + WSS 补丁版，控制端仍是 1.4.9。要测 Mac / Windows 1.4.9 控制端 → 1.5.0-hb2 受控端的原生 TCP 与 WSS 两条路、通讯录在线状态、无人值守密码。
+- 1.5.0 `update_me` 注释承认覆盖升级后可能丢托盘图标直到下次启动。隐藏 CM 后托盘图标是门店唯一的「RustDesk 在运行」提示，验收要专门看。
+- 隐藏 CM 后门店看不到有人在远程、也不能自己断开（新州 Workplace Surveillance Act 2005 有告知要求），是否在 WPF 加「远程维护中」提示另行决定。
+
+**hb2 构建**（fork 分支 `hb/1.5.0`，源码 `1ee7dbb`）：
+
+- 提交：导入上游 1.5.0 快照 → 删自动触发工作流（多删 `update-webpki-roots.yml`）→ 换公钥 → hb/ 目录与构建流程 → COS 归档两提交 → `src/ipc.rs` 去掉 hide_cm 门槛 + custom.txt 加 `allow-hide-cm=Y`（hb-build=hb2）→ 构建流程跟进 1.5.0。
+- custom.txt：484 字节，SHA256 `f53058f04d05c7f29746c5fa64df81fff81b318b9d76501a93a35dc8272632b1`。
+- 构建：Actions run 41785536474（约 57 分钟，vcpkg 换提交后无缓存），预发布 release `1.5.0-hb2`（tag 指向 `1ee7dbb`），COS 已归档 `rustdesk-builds/1.5.0-hb2/`。
+- 安装包 `rustdesk-1.5.0-hb2-x86_64.exe`：SHA256 `212b72a745d841f7730f077ce173281fea526893945682b940c1206b6377a72c`，25,765,376 字节。
+- 已拆包核对：105 个文件；custom.txt 与仓库逐字节一致，PyNaCl 验签通过；`librustdesk.dll` 含公司公钥；`rustdesk.exe` 版本资源为 1.5.0。
+- WPF 白名单条目（1042 验收通过后才加）：`["212b72a7…a72c"] = new("1.5.0-hb2", 25765376, "f53058f0…32b1")`。
+- 尚未在任何门店机器上安装验证。
