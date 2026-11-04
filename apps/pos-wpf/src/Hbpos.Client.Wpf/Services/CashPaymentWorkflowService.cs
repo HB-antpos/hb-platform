@@ -796,6 +796,19 @@ public sealed class CashPaymentWorkflowService(
             : await RunLocalStoreAsync(
                 () => cardTerminalSettingsProvider.GetSettingsAsync(persistenceCancellationToken),
                 persistenceCancellationToken);
+        if (isRefund && settingsSnapshot is not null)
+        {
+            // 中文注释：退款通道必须在创建退款 attempt 之前确定，后续的 attempt、提交边界与终端调用都使用同一份设置快照。
+            var routedSettings = CardRefundProcessorRouting.Resolve(settingsSnapshot, referenceText);
+            if (routedSettings.Processor != settingsSnapshot.Processor)
+            {
+                ConsoleLog.Write(
+                    "CardRefund",
+                    $"workflow refund routed to original processor from={settingsSnapshot.Processor} to={routedSettings.Processor} originalReference={LogValue(referenceText)}");
+                settingsSnapshot = routedSettings;
+            }
+        }
+
         (LocalCardPaymentAttempt? Attempt, bool Reused, bool RequiresRecovery) cardAttemptSelection =
             (null, false, false);
         (LocalSquarePaymentAttempt? Attempt, bool Reused) squareAttemptSelection = (null, false);
