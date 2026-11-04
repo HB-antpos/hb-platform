@@ -673,6 +673,10 @@
       "name": "查看并下载月度日销售",
       "description": "Web 页面 /executive-sales-intelligence/monthly-daily-sales-download - 选择月份和分店，预览并下载各店每天的营业额、刷卡和现金"
     },
+    "SalesDashboard.HolidaySalesReport.View": {
+      "name": "查看节日销售报告",
+      "description": "Web 页面 /executive-sales-intelligence/holiday-sales-report - 查看万圣节 KFC / Brazco 商品的销售、卖断提前天数、滞销与库存，可看全部分店合计或单店"
+    },
     "SalesDashboard.BatchProductSales.View": {
       "name": "查看批量货号销量",
       "description": "Web 页面 /executive-sales-intelligence/purchase-sales-analysis「批量货号销量」标签 - 按导入货号查看商品每日销量、分店销量及折扣成交情况"

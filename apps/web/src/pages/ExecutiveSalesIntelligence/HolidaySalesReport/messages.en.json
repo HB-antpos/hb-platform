@@ -1,0 +1,191 @@
+{
+  "holidaySalesReport": {
+    "title": "Halloween Sales Report",
+    "titleAll": "{{year}} Halloween Sales Report · All stores",
+    "titleStore": "{{year}} Halloween Sales Report · {{store}}",
+    "subtitle": "KFC (Uncle Bills) + Brazco Halloween items · sales {{from}} – {{through}} (incl. post-holiday clearance) · purchases from this year’s store invoices",
+    "phase": {
+      "running": "Season in progress",
+      "ended": "Ended · {{date}}"
+    },
+    "filters": {
+      "view": "View",
+      "year": "Year",
+      "store": "Store",
+      "supplier": "Supplier"
+    },
+    "view": {
+      "all": "All stores",
+      "store": "Single store"
+    },
+    "supplier": {
+      "all": "All",
+      "kfc": "KFC",
+      "brazco": "Brazco",
+      "title": "Supplier mix"
+    },
+    "store": {
+      "prev": "Previous",
+      "next": "Next",
+      "placeholder": "Choose a store"
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "categoryMap": "Category map"
+    },
+    "kpi": {
+      "amount": "Sales (incl. GST)",
+      "amountAll": "{{count}} stores with sales",
+      "amountStore": "Rank {{rank}} of {{total}}",
+      "quantity": "Units sold",
+      "quantitySub": "{{count}} items sold",
+      "sellThrough": "Sell-through (sold ÷ bought)",
+      "sellThroughAll": "Bought {{qty}} units · cost {{cost}}",
+      "sellThroughStore": "All stores {{value}}",
+      "early": "Items sold out early",
+      "earlyAll": "Sold out before 10/31 · {{count}} store-items",
+      "earlyStore": "Sold out before 10/31 · short stock",
+      "lost": "Lost sales from sell-outs (est.)",
+      "lostSub": "Based on 14-day pre-sell-out average",
+      "left": "Leftover stock (est.)",
+      "leftValue": "{{qty}} units",
+      "leftSub": "At cost {{cost}}"
+    },
+    "chart": {
+      "title": "Daily sales",
+      "hint": "Orange line = Halloween day",
+      "holiday": "{{date}} · {{amount}}",
+      "lastWeek": "Final 7 days",
+      "hover": "{{date}} · {{amount}}",
+      "aria": "Daily sales curve, {{from}} to {{through}}"
+    },
+    "insights": {
+      "title": "Key takeaways",
+      "auto": "Auto-generated"
+    },
+    "insight": {
+      "lastWeek": "The final 7 days sold {{lastWeek}} of the season, {{holidayDate}} alone {{holiday}}; clearance afterwards only {{after}}.",
+      "topCategory": "{{name}} leads with {{amount}} ({{share}} of sales), then {{second}}.",
+      "lostCategory": "{{name}} sold out the hardest, about {{amount}} in lost sales — order deeper next year.",
+      "leftCategory": "{{name}} has the most leftover stock ({{cost}} at cost) — order less or change ranges."
+    },
+    "cat": {
+      "title": "Sales by category",
+      "hint": "Supplier categories (KFC / Brazco) merged into 7 groups",
+      "colName": "Category",
+      "colAmount": "Sales",
+      "colShare": "Share",
+      "colQuantity": "Units",
+      "colSkus": "Items sold",
+      "colSellThrough": "Sell-through",
+      "colLost": "Lost sales",
+      "colLeft": "Leftover (cost)",
+      "colVsAll": "Sell-through vs all stores",
+      "higher": "+{{points}} pts",
+      "lower": "−{{points}} pts"
+    },
+    "category": {
+      "Costume": "Costumes",
+      "Decoration": "Decorations",
+      "MakeUp": "Make-up & blood",
+      "Accessory": "Accessories & props",
+      "Party": "Party & trick-or-treat",
+      "MaskWig": "Masks, wigs & hats",
+      "Animated": "Animated, light-up & inflatable"
+    },
+    "board": {
+      "best": {
+        "title": "Best sellers",
+        "desc": "By sales"
+      },
+      "early": {
+        "title": "Short stock · sold out early",
+        "descAll": "Sold ≥95% of stock before 10/31 in 2+ stores, by estimated lost sales",
+        "descStore": "Sold ≥95% of stock before 10/31, by estimated lost sales"
+      },
+      "slow": {
+        "title": "Slow sellers",
+        "desc": "Bought ≥12 units, sell-through <35%, by leftover cost"
+      },
+      "over": {
+        "title": "Overstock",
+        "desc": "This year’s purchases − season sales, by units left"
+      },
+      "more": "Show more",
+      "less": "Show less",
+      "empty": "No items match"
+    },
+    "product": {
+      "noImage": "No image",
+      "soldRate": "{{qty}} sold · sell-through {{rate}}",
+      "stores": "{{count}} stores stocked",
+      "soldOutStores": "{{count}} sold out",
+      "soldOutSelf": "Sold out",
+      "earlyDays": "{{days}} days early",
+      "earlyStore": "Out on {{date}} · bought {{qty}}",
+      "earlyAll": "{{out}}/{{stocked}} stores · median",
+      "lost": "Est. lost {{amount}}",
+      "slowHead": "Sell-through {{rate}}",
+      "slowBought": "Bought {{bought}} · sold {{sold}}",
+      "slowLeft": "{{qty}} left · cost {{cost}}",
+      "overHead": "{{qty}} left",
+      "overCost": "Cost {{cost}} · sell-through {{rate}}",
+      "overSold": "{{qty}} sold · {{amount}}"
+    },
+    "stores": {
+      "title": "Store ranking",
+      "hint": "Click a row for the single-store view",
+      "colStore": "Store",
+      "colAmount": "Sales",
+      "colQuantity": "Units",
+      "colPurchase": "Bought",
+      "colSellThrough": "Sell-through",
+      "colEarly": "Sold out early",
+      "colLost": "Lost sales",
+      "colLeft": "Leftover (cost)",
+      "colAfter": "After 10/31",
+      "open": "Open",
+      "noPurchase": "No purchases",
+      "noPurchaseNote": "“No purchases” = sales but no invoice this year (old stock or transfers); sell-through is not calculated.",
+      "withoutSales": "Stocked but no till sales this season: {{names}}."
+    },
+    "benchmark": {
+      "title": "This store vs all stores",
+      "hint": "{{count}} stores with sales",
+      "average": "Average {{value}}",
+      "better": "Better",
+      "worse": "Watch",
+      "same": "Equal",
+      "amount": "Sales",
+      "sellThrough": "Sell-through",
+      "early": "Sold out early",
+      "lost": "Lost sales",
+      "left": "Leftover (cost)",
+      "after": "After 10/31"
+    },
+    "map": {
+      "title": "Category mapping",
+      "desc": "KFC / Brazco website categories → 7 groups; right side is items · season sales.",
+      "noCategory": "Uncategorised (by name)",
+      "rulesTitle": "Rules",
+      "rules": "1. Names containing “Costume” always go to Costumes. 2. Otherwise by supplier category keywords. 3. KFC theme series (Witch, Vampire, Creepy Clown, Zombie, Devil, Asylum…) and uncategorised items go by product-name keywords; anything unrecognised lands in Accessories & props.",
+      "more": "… {{count}} more"
+    },
+    "state": {
+      "loading": "Loading…",
+      "slow": "Large dataset — the first load takes a few seconds",
+      "error": "Failed to load: {{message}}",
+      "retry": "Retry",
+      "noAccess": "No stores available to you.",
+      "empty": "No Halloween sales data for {{year}} yet.",
+      "storeEmpty": "This store has no Halloween sales this season."
+    },
+    "footer": {
+      "title": "Definitions",
+      "scope": "Halloween items = our HalloWeen category and sub-categories supplied by KFC / Brazco ({{count}} items); sales come from the daily item-store statistics (incl. GST, refunds netted).",
+      "purchase": "Purchases = this year’s store invoices (Mar 1 – Oct 31, excluding warehouse 1006, drafts included). Leftover = purchases − season sales; the system has no store stock field, so last year’s stock is not included.",
+      "sellThrough": "Sell-through only counts items a store actually bought this year, so selling old stock does not inflate it.",
+      "soldOut": "Sold out = a store’s cumulative sales of an item reach 95% of its purchases (not judged under 3 units); days early = 10/31 − sell-out day; lost sales = 14-day pre-sell-out daily average × days early × average price."
+    }
+  }
+}

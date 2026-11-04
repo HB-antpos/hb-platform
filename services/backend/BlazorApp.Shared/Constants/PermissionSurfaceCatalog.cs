@@ -69,6 +69,7 @@ namespace BlazorApp.Shared.Constants
             "Roles.Delete",
             "SalesDashboard.BatchProductSales.View",
             "SalesDashboard.CompactBoard.View",
+            "SalesDashboard.HolidaySalesReport.View",
             "SalesDashboard.KfcRestockSignal.AllStores",
             "SalesDashboard.KfcRestockSignal.View",
             "SalesDashboard.LocalProductAnalysis.View",

@@ -85,6 +85,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     ['sales-detail-v2', [P.SalesDashboard.SalesDetailView]],
     ['compact-sales-board', [P.SalesDashboard.CompactBoardView]],
     ['monthly-daily-sales-download', [P.SalesDashboard.MonthlyDailySalesDownloadView]],
+    ['holiday-sales-report', [P.SalesDashboard.HolidaySalesReportView]],
     ['product-movement-report', [P.SalesDashboard.ProductMovementView]],
     [
       'purchase-sales-analysis',
