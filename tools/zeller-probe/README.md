@@ -1,0 +1,64 @@
+# Zeller 第 0 阶段验证程序
+
+在正式把 Zeller 接入收银系统之前，用真机回答几个决定设计的问题。程序独立于收银系统，不读写收银数据库，也不在 CI 里编译。
+
+> **所有交易都是真钱。** Zeller 没有沙箱。请用 Zeller 借记卡小额测试（买一笔、退一笔，资金在自有账户里循环），不要在营业门店里试。可以发邮件给 developer@myzeller.com 申请把最低交易额降到 $0.01。
+
+## 要回答的问题
+
+| # | 问题 | 对应场景 |
+|---|---|---|
+| Q1 | 收银机在刷卡过程中断网，刷卡机仍完成扣款；网络恢复后，能不能按 reference 查到这笔？要多久？ | S8 |
+| Q2 | 收银程序在刷卡过程中被杀掉，重启后能不能按 reference 查到？ | S9 |
+| Q3 | 同一个 reference 第二次调用 `purchase`：拒绝、返回原结果，还是再扣一次？ | S11 |
+| Q4 | 被拒、被取消、超时的交易，按 reference 能不能查到？「查不到」能否说明刷卡机没收到请求？ | S4–S7、S10 |
+| Q5 | 哪些错误类型发生时，请求一定没有到达刷卡机？ | S12、S14 |
+| Q6 | 配对信息在重启后是否保留？换一个 Windows 用户登录是否失效？ | S1 |
+| Q7 | 成交结果是否带银行小票原文（`ReceiptText`）？ | S2 |
+
+## 准备
+
+1. Windows 10/11，已安装 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 和 WebView2 运行时（Windows 11 自带）。
+2. Zeller 业务账号里建好测试 Site；刷卡机开机、登录、分配到该 Site；准备一张有 $5–$10 余额的 Zeller 借记卡（可加到 Apple Pay / Google Pay）。
+3. 设置 Zeller 私有包源的凭据（取值见开发者文档「Payments SDK - .NET」快速入门第 6 步，那是 Zeller 公开给所有开发者的只读账号）。在 PowerShell 里：
+
+   ```powershell
+   $env:ZELLER_NUGET_USERNAME = "<文档里的用户名>"
+   $env:ZELLER_NUGET_TOKEN = "<文档里的令牌>"
+   ```
+
+4. 编译并运行：
+
+   ```powershell
+   cd tools\zeller-probe\dotnet
+   dotnet run
+   ```
+
+所有记录写在 `%LOCALAPPDATA%\HbZellerProbe\`：
+- `zeller-probe-journal.jsonl`：每次调用一条「调用前」、一条「结果」（含 SDK 原始返回）。
+- `zeller-probe-log.jsonl`：界面上看到的全部日志，带毫秒时间。
+
+## 测试场景
+
+每个场景做完，在纸上或聊天里记下**场景编号、实际做了什么、大约几点几分**，方便和日志对时间。金额默认 100 分（$1.00）。
+
+| 场景 | 操作 | 观察 |
+|---|---|---|
+| S1 配对 | 点「配对 / 设置」，用 Zeller 账号登录并选刷卡机。关掉程序再打开，点「初始化」。如果方便，换一个 Windows 用户登录这台电脑再点「初始化」 | 重启后是否仍已配对；换用户后是否要求重新配对 |
+| S2 正常扣款 | 点「扣款」，在刷卡机上刷卡 | 成交字段；日志里 `receiptText` 是否有内容 |
+| S3 查询 | 点「查询」（reference 已自动填好）；再清空 reference 查一次 | 按 reference 和查最近一笔各返回什么 |
+| S4 被拒 | 金额填大于卡余额（例如 100000 分），刷卡 | 返回的是「成交但 status=Declined」还是错误；再按 reference 查询 |
+| S5 顾客在刷卡机上取消 | 点「扣款」，在刷卡机上按取消 | 错误类型；再按 reference 查询 |
+| S6 收银端取消 | 点「扣款」，不刷卡，点「取消当前操作」 | 错误类型；再按 reference 查询 |
+| S7 超时 | 点「扣款」，不刷卡也不取消，一直等 | 多久超时、错误类型；再按 reference 查询 |
+| **S8 断网（最关键）** | 点「扣款」；刷卡机提示刷卡时，**断开这台电脑的网络**（拔网线或关 Wi-Fi，刷卡机保持联网）；在刷卡机上刷卡并等它显示结果；记下刷卡机显示的结果；**恢复网络**，点「开始轮询」 | 程序返回的错误类型；网络恢复后第几次、多少秒能查到；查到的状态是否与刷卡机显示一致 |
+| **S9 杀进程（最关键）** | 点「扣款」，刷卡后**立刻**在任务管理器里结束 ZellerProbe；记下刷卡机显示的结果；重新打开程序 | 程序启动时提示有未完成调用；点「逐条查询未完成」能否查到 |
+| S10 关闭 Zeller 窗口 | 点「扣款」，在弹出的 Zeller 窗口上点关闭 | 错误类型（预期 OperationInterrupted）；再按 reference 查询 |
+| **S11 重复 reference** | 在 S2 成交之后，勾选「复用上面的 reference」，再点「扣款」 | 是否被拒；是否又扣了一次（看刷卡机和 Zeller 后台）；按 reference 查到几笔 |
+| S12 忙碌 | 点「扣款」，在等待刷卡时点「忙碌时再查一次」 | 预期 OperationBusy；之后正常刷卡能否成交 |
+| S13 退款 | 按原 reference 全额退；再做一笔扣款后部分退（金额改小）；勾选「持卡退款」再退一次；原交易填一个不存在的 reference | 各种退款的返回；不存在时的错误类型（预期 TransactionNotFound） |
+| S14 刷卡机离线 | 把刷卡机关机或断网，点「扣款」 | 错误类型（预期 PairedDeviceNotAvailable 之类）；再按 reference 查询 |
+
+## 把结果发回
+
+把 `%LOCALAPPDATA%\HbZellerProbe\` 整个文件夹打包，连同每个场景的操作记录一起发回。日志里没有完整卡号（SDK 只返回屏蔽后的卡号），也没有 Zeller 账号密码（登录在 Zeller 的页面里完成）。
