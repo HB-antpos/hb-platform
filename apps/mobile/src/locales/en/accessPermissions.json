@@ -686,6 +686,10 @@
       "name": "View and download monthly daily sales",
       "description": "Choose a month and stores, then preview and download each store's daily revenue, card and cash."
     },
+    "SalesDashboard.HolidaySalesReport.View": {
+      "name": "View holiday sales report",
+      "description": "View Halloween KFC / Brazco item sales, sell-out lead days, slow movers and stock, for all stores combined or a single store."
+    },
     "SalesDashboard.BatchProductSales.View": {
       "name": "View batch item sales",
       "description": "View daily, store and discounted sales for imported item numbers."

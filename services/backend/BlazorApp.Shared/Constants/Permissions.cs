@@ -427,6 +427,9 @@ namespace BlazorApp.Shared.Constants
             // 月度日销售下载页：按分店、按日查看并下载营业额、刷卡、现金。
             public const string MonthlyDailySalesDownloadView =
                 "SalesDashboard.MonthlyDailySalesDownload.View";
+
+            // 节日销售报告（万圣节）：KFC / Brazco 节日商品的销售、卖断、滞销，按全部分店合计与分店独立查看。
+            public const string HolidaySalesReportView = "SalesDashboard.HolidaySalesReport.View";
             public const string ProductMovementView = "SalesDashboard.ProductMovement.View";
             public const string BatchProductSalesView = "SalesDashboard.BatchProductSales.View";
             public const string WarehouseFlowView = "SalesDashboard.WarehouseFlow.View";

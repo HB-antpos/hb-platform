@@ -50,6 +50,10 @@ public sealed partial class PaymentSuccessViewModel : ObservableObject
     [ObservableProperty]
     private bool _hasPostCommitWarning;
 
+    // 中文注释：主页支付成功卡片的醒目信息（找零 / 退现金 / 已收款等），只由已完成订单推导。
+    [ObservableProperty]
+    private PaymentSuccessCardSummary _cardSummary = PaymentSuccessCardSummary.Empty;
+
     public PaymentSuccessViewModel()
         : this(initialize: true, receiptQueryService: null, receiptTextFormatter: null, receiptPrinterSettingsStore: null)
     {
@@ -191,6 +195,7 @@ public sealed partial class PaymentSuccessViewModel : ObservableObject
         OnPropertyChanged(nameof(DiscountTotal));
         OnPropertyChanged(nameof(TenderedAmountDisplay));
         OnPropertyChanged(nameof(ChangeAmountDisplay));
+        CardSummary = PaymentSuccessCardSummary.Create(receipt);
         PrintReceiptCommand.NotifyCanExecuteChanged();
     }
 

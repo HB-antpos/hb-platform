@@ -1436,6 +1436,7 @@ builder.Services.Configure<BlazorApp.Api.Features.PosReceipts.PosReceiptOptions>
 builder.Services.AddScoped<BlazorApp.Api.Features.PosReceipts.IPosReceiptService, BlazorApp.Api.Features.PosReceipts.PosReceiptService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
+builder.Services.AddScoped<IHolidaySalesReportReactService, BlazorApp.Api.Services.React.HolidaySalesReport.HolidaySalesReportReactService>();
 // 分店现金管理（存银行 / 现金支出 / 现金池）。现金池流入只认日结实点现金：取数口读 POSM_DailyClose
 // （收银端日结上传，表由 Hbpos.Api 建立、后台只读）；若需临时停用，换回 NotConnectedCashDailyCloseSource 即可。
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashAccessResolver, BlazorApp.Api.Services.StoreCash.CashAccessResolver>();

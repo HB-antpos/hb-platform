@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 中文注释：Zeller 第 0 阶段验证程序，独立工程，不在 hbpos_win.slnx 中，CI 不编译它。 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ZellerProbe</RootNamespace>
+    <AssemblyName>ZellerProbe</AssemblyName>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 版本固定，升级 SDK 时手动改这里并重跑全部验证场景。 -->
+    <PackageReference Include="Zeller.PaymentsSdk" Version="0.1.0" />
+  </ItemGroup>
+
+</Project>

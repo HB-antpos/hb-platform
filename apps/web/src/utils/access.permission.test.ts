@@ -1055,6 +1055,7 @@ const adminWebMenuPreview = buildWebRoleMenuPreview(adminAccess, translate, {
 const productStatisticMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/product-statistics')
 const compactSalesBoardMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/compact-sales-board')
 const monthlyDailySalesDownloadMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/monthly-daily-sales-download')
+const holidaySalesReportMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/holiday-sales-report')
 const productMovementReportOnlyWebPreview = buildWebRoleMenuPreview(productMovementReportOnlyAccess, translate, {
   includeHidden: true,
 })
@@ -1074,6 +1075,10 @@ const hiddenCompactSalesBoardForProductMovementOnly = findWebMenuNode(
 const hiddenMonthlyDailySalesDownloadForProductMovementOnly = findWebMenuNode(
   productMovementReportOnlyWebPreview,
   '/executive-sales-intelligence/monthly-daily-sales-download',
+)
+const hiddenHolidaySalesReportForProductMovementOnly = findWebMenuNode(
+  productMovementReportOnlyWebPreview,
+  '/executive-sales-intelligence/holiday-sales-report',
 )
 const localPurchaseOnlyWebPreview = buildWebRoleMenuPreview(localPurchaseDashboardOnlyAccess, translate, {
   includeHidden: true,
@@ -1216,6 +1221,18 @@ assertEqual(
 )
 
 assertEqual(
+  holidaySalesReportMenu?.visible,
+  true,
+  '管理员应显示节日销售报告入口',
+)
+
+assertEqual(
+  holidaySalesReportMenu?.permissionCodes.join(','),
+  P.SalesDashboard.HolidaySalesReportView,
+  '节日销售报告应仅要求本页查看权限',
+)
+
+assertEqual(
   productMovementParentMenu?.visible,
   true,
   '只有商品经营分析权限时销售看板父菜单应可见',
@@ -1243,6 +1260,12 @@ assertEqual(
   hiddenMonthlyDailySalesDownloadForProductMovementOnly?.visible,
   false,
   '只有商品经营分析权限时不应打开月度日销售下载',
+)
+
+assertEqual(
+  hiddenHolidaySalesReportForProductMovementOnly?.visible,
+  false,
+  '只有商品经营分析权限时不应打开节日销售报告',
 )
 
 assertEqual(

@@ -63,6 +63,7 @@ const ProductGradeManagementPage = lazy(() => import('../pages/Warehouse/Product
 const ExecutiveSalesIntelligencePage = lazy(() => import('../pages/ExecutiveSalesIntelligence'))
 const CompactSalesBoardPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/CompactSalesBoard'))
 const MonthlyDailySalesDownloadPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/MonthlyDailySalesDownload'))
+const HolidaySalesReportPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/HolidaySalesReport'))
 const SalesDetailAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/SalesDetailAnalysisV2'))
 const ProductMovementReportPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/ProductMovementReport'))
 const WarehouseProductFlowAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/WarehouseProductFlowAnalysis'))
@@ -779,6 +780,16 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewMonthlyDailySalesDownload',
         },
         element: <MonthlyDailySalesDownloadPage />,
+      },
+      {
+        path: '/executive-sales-intelligence/holiday-sales-report',
+        meta: {
+          title: 'menu.holidaySalesReport',
+          icon: 'GiftOutlined',
+          keepAlive: true,
+          accessKey: 'canViewHolidaySalesReport',
+        },
+        element: <HolidaySalesReportPage />,
       },
       {
         path: '/executive-sales-intelligence/product-movement-report',
