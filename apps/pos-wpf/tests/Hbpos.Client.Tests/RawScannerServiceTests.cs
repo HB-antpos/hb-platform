@@ -48,6 +48,24 @@ public sealed class RawScannerServiceTests
     }
 
     [Fact]
+    public void DispatchResultForDiagnostics_does_not_deliver_tail_of_previous_barcode()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var delivered = new List<string>();
+        service.Subscribe("pos", e => delivered.Add(e.Barcode));
+        service.SetActivePage("pos");
+        var now = DateTimeOffset.UtcNow;
+
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("9525810220077", "scanner-device", RawScannerCompletionKind.Enter, now));
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("5810220077", "scanner-device", RawScannerCompletionKind.Enter, now.AddMilliseconds(250)));
+
+        Assert.Equal(["9525810220077"], delivered);
+        Assert.Contains(logs.Lines, line =>
+            line.Contains("scan tail of previous barcode suppressed source=raw barcodeInfo=length=10 previousBarcodeInfo=length=13", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task InitializeAsync_loads_scanner_settings_and_survives_a_load_failure()
     {
         var settings = new FakeScannerSettingsStore();
