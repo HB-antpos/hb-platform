@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 中文注释：Zeller 接入第 2 阶段第一步的 WPF 内技术验证程序。独立工程，不在 hbpos_win.slnx 中，CI 不编译它。 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ZellerWpfSpike</RootNamespace>
+    <AssemblyName>ZellerWpfSpike</AssemblyName>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 版本与第 0 阶段验证程序一致。 -->
+    <PackageReference Include="Zeller.PaymentsSdk" Version="0.1.0" />
+    <!-- 中文注释：故意引用和收银端相同版本的 Hosting，验证 SDK（按 Logging.Abstractions 6.0.4 编译）在这套依赖下能否正常运行。 -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用第 0 阶段的记录格式，日志可以用同一套办法读取。 -->
+    <Compile Include="..\dotnet\ProbeJournal.cs" Link="ProbeJournal.cs" />
+    <!-- 中文注释：WPF 工程的隐式 using 不含 System.IO，而复用的 ProbeJournal.cs 依赖它。 -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+</Project>
