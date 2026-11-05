@@ -73,6 +73,10 @@ public interface IInstallmentOrderService
     Task<bool> IsAmendLinesSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
 
+    /// <summary>服务端是否声明支持银行卡续付（capabilities.CardRepaymentSupported）；无法确认一律按不支持处理。</summary>
+    Task<bool> IsCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
     Task<InstallmentWriteResult<InstallmentCancelResponse>> CancelWithRefundAsync(PosSessionState session, InstallmentCancelRequest request, CancellationToken cancellationToken = default);
 
     Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default);
@@ -341,6 +345,28 @@ public sealed class InstallmentOrderService(
             ConsoleLog.WriteWarning(
                 "Installment",
                 $"installment amend capability check failed error={ex.GetType().Name} message={ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> IsCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
+    {
+        if (!session.IsOnline)
+        {
+            return false;
+        }
+
+        try
+        {
+            var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
+            return capabilities.CardRepaymentSupported;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // 中文注释：服务端会拒绝无法核验 provider 证据的卡续付；能力未知时同样按不支持处理，避免收银员把卡 tender 加进来后被拒。
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"installment card repayment capability check failed error={ex.GetType().Name} message={ex.Message}");
             return false;
         }
     }

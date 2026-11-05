@@ -699,6 +699,24 @@ public sealed class InstallmentOperationService(
 
             return RepaymentClaimReady.Success(claim);
         }
+        catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED")
+        {
+            // 中文注释：服务端在读取/写入任何 claim 之前就按付款方式拒绝（当前即银行卡补款），本机也尚未调用 provider；
+            // 这是确定性拒绝，必须把本地操作结案为 Failed 并解锁付款页，否则收银员既删不掉 tender 也退不出页面。
+            LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Failed (method unsupported, provider not called)", exception);
+            await repository.TryTransitionAsync(
+                operation.OperationGuid,
+                [LocalInstallmentOperationState.Prepared],
+                LocalInstallmentOperationState.Failed,
+                DateTimeOffset.UtcNow,
+                failureMessage: exception.Message,
+                cancellationToken: CancellationToken.None);
+            return RepaymentClaimReady.Failed(
+                request.Method == PaymentMethodKind.Card
+                    ? "分期续付暂不支持刷卡，本机未调用刷卡终端，请改用现金或礼券。"
+                    : "服务端不支持该补款方式，本机未调用 provider，请改用其他付款方式。",
+                requiresReview: false);
+        }
         catch (CatalogApiException exception) when (exception.ErrorCode is
             "INSTALLMENT_REPAYMENT_BUSY" or
             "INSTALLMENT_REPAYMENT_CLAIM_MISMATCH")

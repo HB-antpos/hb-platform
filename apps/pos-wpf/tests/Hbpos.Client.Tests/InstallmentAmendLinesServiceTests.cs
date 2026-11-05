@@ -325,6 +325,24 @@ public sealed class InstallmentAmendLinesServiceTests
     }
 
     [Fact]
+    public async Task IsCardRepaymentSupportedAsync_follows_the_capabilities_flag_and_fails_closed()
+    {
+        await using var harness = await Harness.CreateAsync();
+
+        Assert.False(await harness.Service.IsCardRepaymentSupportedAsync(Session(isOnline: false)));
+        Assert.Equal(0, harness.Api.CapabilitiesCallCount);
+
+        harness.Api.Capabilities = new(true, false, false, 120, CardRepaymentSupported: true);
+        Assert.True(await harness.Service.IsCardRepaymentSupportedAsync(Session()));
+
+        harness.Api.Capabilities = new(true, false, false, 120, CardRepaymentSupported: false);
+        Assert.False(await harness.Service.IsCardRepaymentSupportedAsync(Session()));
+
+        harness.Api.CapabilitiesException = new HttpRequestException("offline");
+        Assert.False(await harness.Service.IsCardRepaymentSupportedAsync(Session()));
+    }
+
+    [Fact]
     public async Task Api_client_posts_amend_lines_with_expected_updated_at()
     {
         var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

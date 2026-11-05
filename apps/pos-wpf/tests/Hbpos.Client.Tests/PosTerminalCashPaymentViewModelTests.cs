@@ -8055,6 +8055,95 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.Null(installmentService.LastRepaymentRequest.Payment.CardTransactions);
     }
 
+    [Fact]
+    public async Task Payment_page_installment_repayment_rejects_card_tender_when_server_does_not_support_card_repayment()
+    {
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderException = new InvalidOperationException("Card provider must not run while selecting a repayment tender.")
+        };
+        var installmentService = new FakeInstallmentOrderService { CardRepaymentSupported = false };
+        var order = CreateInstallmentOrder("IO-20260703-0006", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var viewModel = new PaymentViewModel(
+            new PosCartService(),
+            workflow,
+            Session,
+            installmentOrderService: installmentService);
+
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        viewModel.TenderAmountText = "1";
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, installmentService.CardRepaymentCapabilityChecks);
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(0, workflow.AddTenderCallCount);
+        Assert.Null(installmentService.LastRepaymentRequest);
+        Assert.True(viewModel.BackToPosCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Payment_page_installment_repayment_card_draft_can_be_removed_after_review_failure_and_page_can_exit()
+    {
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderException = new InvalidOperationException("Card provider must not run while selecting a repayment tender.")
+        };
+        var installmentService = new FakeInstallmentOrderService
+        {
+            AddRepaymentResult = new InstallmentOrderActionResult(false, "创建补款 claim 失败，已在 provider 调用前停止。", RequiresReview: true)
+        };
+        var order = CreateInstallmentOrder("IO-20260703-0007", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var backToPosCount = 0;
+        var viewModel = new PaymentViewModel(
+            new PosCartService(),
+            workflow,
+            Session,
+            installmentOrderService: installmentService,
+            onBackToPos: () => backToPosCount++);
+
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        viewModel.TenderAmountText = "1";
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+        await viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+
+        // 续付刷卡 tender 只是未授权草稿：即使提交要求核对，也必须能删掉并退出，不能把收银员困在付款页。
+        var draft = Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Card, draft.Method);
+        Assert.True(viewModel.RemoveTenderCommand.CanExecute(draft));
+
+        await viewModel.RemoveTenderCommand.ExecuteAsync(draft);
+        Assert.Empty(viewModel.PaymentTenders);
+
+        viewModel.BackToPosCommand.Execute(null);
+        Assert.Equal(1, backToPosCount);
+        Assert.Equal(0, workflow.AddTenderCallCount);
+    }
+
+    [Fact]
+    public async Task Payment_page_installment_repayment_clears_card_draft_when_method_is_rejected_without_review()
+    {
+        var workflow = new FakeCashPaymentWorkflowService();
+        var installmentService = new FakeInstallmentOrderService
+        {
+            AddRepaymentResult = new InstallmentOrderActionResult(false, "分期续付暂不支持刷卡，本机未调用刷卡终端，请改用现金或礼券。")
+        };
+        var order = CreateInstallmentOrder("IO-20260703-0008", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var viewModel = new PaymentViewModel(
+            new PosCartService(),
+            workflow,
+            Session,
+            installmentOrderService: installmentService);
+
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        viewModel.TenderAmountText = "1";
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+        await viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.True(viewModel.BackToPosCommand.CanExecute(null));
+    }
+
     private static PosSessionState Session => new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
 
     private static PosSessionState OfflineSession => Session with { IsOnline = false };
@@ -8745,6 +8834,12 @@ public sealed class PosTerminalCashPaymentViewModelTests
 
         public Exception? ThrowOnAddRepayment { get; init; }
 
+        public InstallmentOrderActionResult? AddRepaymentResult { get; init; }
+
+        public bool CardRepaymentSupported { get; init; } = true;
+
+        public int CardRepaymentCapabilityChecks { get; private set; }
+
         public InstallmentOrderCreateRequest? LastCreateRequest { get; private set; }
 
         public InstallmentOrderRepaymentRequest? LastRepaymentRequest { get; private set; }
@@ -8811,7 +8906,13 @@ public sealed class PosTerminalCashPaymentViewModelTests
                 throw ThrowOnAddRepayment;
             }
 
-            return Task.FromResult(new InstallmentOrderActionResult(true, "补款已记录。"));
+            return Task.FromResult(AddRepaymentResult ?? new InstallmentOrderActionResult(true, "补款已记录。"));
+        }
+
+        public Task<bool> IsCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
+        {
+            CardRepaymentCapabilityChecks++;
+            return Task.FromResult(CardRepaymentSupported);
         }
 
         public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default)

@@ -1617,6 +1617,16 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (method == PaymentMethodKind.Card &&
+            IsInstallmentRepaymentMode &&
+            !await _installmentOrderService.IsCardRepaymentSupportedAsync(Session))
+        {
+            // 中文注释：服务端未声明支持卡续付时，提交时必然被 claim 拒绝；在加 tender 前就拦下并提示改用现金/礼券。
+            SetStatus("payment.installment.status.cardRepaymentUnsupported");
+            NotifyPaymentCommandStates();
+            return;
+        }
+
         if (!TryApplyAddTenderPlan(
                 _tenderController.CreateAddTenderPlan(BuildAddTenderRequest(method, allowExistingTender: accumulateInto is not null)),
                 out var amountText,
@@ -2153,7 +2163,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
         if (IsRecoveredCardAttemptTender(tender))
         {
-            // PaymentTenders 中的银行卡项都已经过终端批准，不能像现金 tender 一样删除后重新刷卡。
+            // PaymentTenders 中的银行卡项（分期续付尚未授权的草稿除外）都已经过终端批准，不能像现金 tender 一样删除后重新刷卡。
             return;
         }
 
@@ -2244,9 +2254,22 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             !IsRecoveredCardAttemptTender(tender);
     }
 
-    private static bool IsRecoveredCardAttemptTender(PaymentTender tender)
+    private bool IsRecoveredCardAttemptTender(PaymentTender tender)
     {
-        return tender.Method == PaymentMethodKind.Card;
+        return tender.Method == PaymentMethodKind.Card &&
+            !IsDeferredInstallmentRepaymentCardTender(tender);
+    }
+
+    /// <summary>
+    /// 分期续付页的银行卡 tender 只是草稿：终端授权要等 durable operation + 中央 claim 成功后才发生，
+    /// 因此没有卡交易证据/引用的草稿可以像现金一样删除；同页重新加回同金额会复用原草稿身份，不会产生第二笔操作。
+    /// </summary>
+    private bool IsDeferredInstallmentRepaymentCardTender(PaymentTender tender)
+    {
+        return IsInstallmentRepaymentMode &&
+            tender.Method == PaymentMethodKind.Card &&
+            tender.CardTransactions is not { Count: > 0 } &&
+            string.IsNullOrWhiteSpace(tender.Reference);
     }
 
     private async Task ConfirmPaymentAsync()
