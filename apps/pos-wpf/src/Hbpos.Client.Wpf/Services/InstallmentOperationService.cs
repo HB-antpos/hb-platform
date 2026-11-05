@@ -215,7 +215,7 @@ public sealed class InstallmentOperationService(
                 RequiresReview: true);
         }
 
-        var ready = await EnsureRepaymentTerminalApprovalAsync(operation, session, authorizeCard, cancellationToken);
+        var ready = await EnsureRepaymentTerminalApprovalAsync(operation, session, authorizeCard, cancellationToken, claim.CardSettings);
         if (!ready.Succeeded)
         {
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: ready.Message, RequiresReview: ready.RequiresReview);
@@ -697,6 +697,25 @@ public sealed class InstallmentOperationService(
                 return RepaymentClaimReady.Failed("原补款 claim 已结束，请重新发起付款。", requiresReview: false);
             }
 
+            if (claim.Status == InstallmentRepaymentClaimStatus.Prepared &&
+                request.Method == PaymentMethodKind.Card &&
+                request.CardTransactions is not { Count: > 0 } &&
+                cardTerminalSettingsProvider is not null)
+            {
+                // 中文注释：服务端按通道放开刷卡续付。只在中央 claim 仍是 Prepared（尚未登记任何通道、刷卡机没收到请求）时
+                // 判断本机通道；不支持就当场释放 claim 并结案，否则 begin-provider 会被拒、claim 要等 120 秒过期才解锁。
+                var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
+                if (!InstallmentCardRepaymentCapability.IsSupported(capabilities, settings.Processor))
+                {
+                    return await FailUnsupportedCardRepaymentAsync(operation, "repayment-claim-create")
+                        ? RepaymentClaimReady.Failed(UnsupportedCardRepaymentMessage, requiresReview: false)
+                        : RepaymentClaimReady.Failed("分期续付刷卡未开始，但本地状态未能更新，请到分期中心恢复。", requiresReview: true);
+                }
+
+                // 中文注释：这次读到的设置就是本次分期全程使用的快照，交给刷卡 attempt，不再重读。
+                return RepaymentClaimReady.Success(claim, settings);
+            }
+
             return RepaymentClaimReady.Success(claim);
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED")
@@ -759,11 +778,57 @@ public sealed class InstallmentOperationService(
                 ? TerminalReady.Success(operation)
                 : TerminalReady.Unknown($"中央补款 claim 状态为 {claim.Status}，禁止调用 provider。");
         }
+        catch (CatalogApiException exception) when (exception.ErrorCode == PaymentMethodUnsupportedErrorCode)
+        {
+            // 中文注释：服务端只在首次登记通道时按开关拒绝（已登记的恢复重放不会走到这里），此时 claim 仍是 Prepared、
+            // 刷卡机没收到请求：确定性拒绝，本地结案并释放 claim，付款页随即解锁。
+            LogOperationIssue(operation.OperationGuid, "repayment-begin-provider", "Failed (provider not enabled, provider not called)", exception);
+            return await FailUnsupportedCardRepaymentAsync(operation, "repayment-begin-provider")
+                ? TerminalReady.Failed(UnsupportedCardRepaymentMessage)
+                : TerminalReady.Unknown($"登记补款 provider 被拒，未调用 provider：{exception.Message}");
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogOperationIssue(operation.OperationGuid, "repayment-begin-provider", "Unknown (provider not called)", exception);
             return TerminalReady.Unknown($"登记补款 provider 失败，未调用 provider：{exception.Message}");
         }
+    }
+
+    private const string PaymentMethodUnsupportedErrorCode = "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED";
+
+    private const string UnsupportedCardRepaymentMessage = "本机刷卡通道暂不支持分期续付，刷卡终端未收到请求，请改用现金或礼券。";
+
+    /// <summary>
+    /// 刷卡终端尚未收到请求、中央 claim 尚未登记通道时的确定性拒绝：本地 Prepared → Failed，再尽力释放 claim
+    /// （释放失败也无妨，Prepared claim 120 秒后自动过期）。本地状态已被其他入口推进时返回 false，交给恢复处理。
+    /// </summary>
+    private async Task<bool> FailUnsupportedCardRepaymentAsync(LocalInstallmentOperation operation, string stage)
+    {
+        if (!await repository.TryTransitionAsync(
+                operation.OperationGuid,
+                [LocalInstallmentOperationState.Prepared],
+                LocalInstallmentOperationState.Failed,
+                DateTimeOffset.UtcNow,
+                failureMessage: UnsupportedCardRepaymentMessage,
+                cancellationToken: CancellationToken.None))
+        {
+            return false;
+        }
+
+        try
+        {
+            await apiClient.ResolveRepaymentClaimAsync(
+                operation.InstallmentGuid,
+                operation.OperationGuid,
+                new InstallmentRepaymentClaimResolveRequest(InstallmentRepaymentClaimResolveOutcome.Released),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            LogOperationIssue(operation.OperationGuid, $"{stage}-release", "Release failed (claim expires automatically)", exception);
+        }
+
+        return true;
     }
 
     private async Task TryResolveRepaymentClaimAsync(
@@ -1133,7 +1198,7 @@ public sealed class InstallmentOperationService(
             cancellationToken);
     }
 
-    private async Task<TerminalReady> EnsureRepaymentTerminalApprovalAsync(LocalInstallmentOperation operation, PosSessionState session, bool authorizeCard, CancellationToken cancellationToken)
+    private async Task<TerminalReady> EnsureRepaymentTerminalApprovalAsync(LocalInstallmentOperation operation, PosSessionState session, bool authorizeCard, CancellationToken cancellationToken, CardTerminalSettings? settingsSnapshot = null)
     {
         var request = Deserialize<InstallmentAppendPaymentRequest>(operation.RequestJson);
         if (request.Method == PaymentMethodKind.Voucher && string.IsNullOrWhiteSpace(request.ReservationToken))
@@ -1173,7 +1238,8 @@ public sealed class InstallmentOperationService(
                 CardTransactions = authorization.CardTransactions
             }, JsonOptions),
             cancellationToken,
-            beginRepaymentClaim: true);
+            beginRepaymentClaim: true,
+            settingsSnapshot: settingsSnapshot);
     }
 
     private async Task<TerminalReady> EnsureVoucherRepaymentApprovalAsync(
@@ -1317,12 +1383,12 @@ public sealed class InstallmentOperationService(
         }
     }
 
-    private async Task<TerminalReady> ApproveCardAsync(LocalInstallmentOperation operation, decimal amount, PosSessionState session, Func<PaymentAuthorizationResult, string> approvedRequestFactory, CancellationToken cancellationToken, bool beginRepaymentClaim = false)
+    private async Task<TerminalReady> ApproveCardAsync(LocalInstallmentOperation operation, decimal amount, PosSessionState session, Func<PaymentAuthorizationResult, string> approvedRequestFactory, CancellationToken cancellationToken, bool beginRepaymentClaim = false, CardTerminalSettings? settingsSnapshot = null)
     {
         TerminalAttemptScope? terminalAttempt = null;
         try
         {
-            terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, cancellationToken);
+            terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, cancellationToken, settingsSnapshot);
             if (terminalAttempt.IsUnsupportedProcessor)
             {
                 // 中文注释：Zeller 暂不支持分期。刷卡机不会收到任何请求，也还没登记还款 claim。
@@ -1508,14 +1574,15 @@ public sealed class InstallmentOperationService(
         LocalInstallmentOperation operation,
         decimal amount,
         PosSessionState session,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CardTerminalSettings? settingsSnapshot = null)
     {
         if (cardTerminalSettingsProvider is null)
         {
             return TerminalAttemptScope.Empty;
         }
 
-        var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
+        var settings = settingsSnapshot ?? await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
         if (settings.Processor == CardProcessorKind.Zeller)
         {
             // 中文注释：Zeller 暂不支持分期（方案：单机试点通过后再接）。沿用这一处唯一的设置读取，不另读一次，
@@ -3228,9 +3295,11 @@ public sealed class InstallmentOperationService(
         InstallmentRepaymentClaimDto? Claim,
         InstallmentAppendPaymentResponse? Response,
         string? Message,
-        bool RequiresReview)
+        bool RequiresReview,
+        CardTerminalSettings? CardSettings = null)
     {
-        public static RepaymentClaimReady Success(InstallmentRepaymentClaimDto claim) => new(true, claim, null, null, false);
+        public static RepaymentClaimReady Success(InstallmentRepaymentClaimDto claim, CardTerminalSettings? cardSettings = null) =>
+            new(true, claim, null, null, false, cardSettings);
         public static RepaymentClaimReady Committed(InstallmentRepaymentClaimDto claim, InstallmentAppendPaymentResponse response) => new(true, claim, response, null, false);
         public static RepaymentClaimReady Failed(string message, bool requiresReview) => new(false, null, null, message, requiresReview);
     }

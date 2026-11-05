@@ -157,7 +157,8 @@ public sealed class InstallmentOrderService(
     PosCartService? cart = null,
     ICardTerminalClient? cardTerminalClient = null,
     IVoucherTenderClient? voucherTenderClient = null,
-    IInstallmentOperationService? installmentOperations = null) : IInstallmentOrderService
+    IInstallmentOperationService? installmentOperations = null,
+    ICardTerminalSettingsProvider? cardTerminalSettingsProvider = null) : IInstallmentOrderService
 {
     private readonly ICardTerminalClient _cardTerminalClient = cardTerminalClient ?? UnavailableCardTerminalClient.Instance;
     // 保留注入边界供旧组合根兼容；取消退款已强制由 durable operation service 使用该依赖。
@@ -359,11 +360,19 @@ public sealed class InstallmentOrderService(
         try
         {
             var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
-            return capabilities.CardRepaymentSupported;
+            if (cardTerminalSettingsProvider is null)
+            {
+                // 中文注释：不知道本机刷卡通道时无法按通道判断，只能按旧的总开关。
+                return capabilities.CardRepaymentSupported;
+            }
+
+            // 中文注释：服务端按通道放开刷卡续付；本机当前通道不在列表里时，提交必然在 begin-provider 被拒。
+            var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
+            return InstallmentCardRepaymentCapability.IsSupported(capabilities, settings.Processor);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // 中文注释：服务端会拒绝无法核验 provider 证据的卡续付；能力未知时同样按不支持处理，避免收银员把卡 tender 加进来后被拒。
+            // 中文注释：能力或本机设置未知时按不支持处理，避免收银员把卡 tender 加进来后被拒。
             ConsoleLog.WriteWarning(
                 "Installment",
                 $"installment card repayment capability check failed error={ex.GetType().Name} message={ex.Message}");

@@ -342,6 +342,38 @@ public sealed class InstallmentAmendLinesServiceTests
         Assert.False(await harness.Service.IsCardRepaymentSupportedAsync(Session()));
     }
 
+    [Theory]
+    [InlineData(CardProcessorKind.Square, true)]
+    [InlineData(CardProcessorKind.Linkly, true)]
+    [InlineData(CardProcessorKind.Zeller, false)]
+    [InlineData(CardProcessorKind.None, false)]
+    public async Task IsCardRepaymentSupportedAsync_checks_the_current_processor_against_the_server_provider_list(
+        CardProcessorKind processor,
+        bool expected)
+    {
+        await using var harness = await Harness.CreateAsync();
+        harness.Api.Capabilities = new(
+            true,
+            false,
+            false,
+            120,
+            CardRepaymentSupported: true,
+            CardRepaymentProviders: ["square", "linkly"]);
+        var service = new InstallmentOrderService(
+            harness.Repository,
+            harness.Api,
+            cardTerminalSettingsProvider: new FixedCardTerminalSettingsProvider(
+                CardTerminalSettings.FromEnvironment() with { Processor = processor }));
+
+        Assert.Equal(expected, await service.IsCardRepaymentSupportedAsync(Session()));
+    }
+
+    private sealed class FixedCardTerminalSettingsProvider(CardTerminalSettings settings) : ICardTerminalSettingsProvider
+    {
+        public Task<CardTerminalSettings> GetSettingsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(settings);
+    }
+
     [Fact]
     public async Task Api_client_posts_amend_lines_with_expected_updated_at()
     {
