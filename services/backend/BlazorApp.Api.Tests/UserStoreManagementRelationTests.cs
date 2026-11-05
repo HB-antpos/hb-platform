@@ -5644,6 +5644,80 @@ namespace BlazorApp.Api.Tests
             Assert.Contains(result.Data.Items!, item => item.UserGUID == "custom-high");
         }
 
+        // 角色成员读取：仓库经理看不到管理员 / 同级 / 更高等级账号，超管仍全部可见。
+        [Theory]
+        [InlineData("wh-viewer", new[] { "staff-user", "wh-viewer" })]
+        [InlineData("super-admin", new[] { "custom-high", "staff-user", "super-admin", "wh-peer", "wh-viewer" })]
+        public async Task RoleMemberReads_WarehouseManagerHidesPrivilegedAndPeerAccounts(
+            string actorGuid,
+            string[] expected
+        )
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+            // 让所有被测账号都挂到同一个自定义角色上，便于一次断言成员可见性。
+            await _db.Insertable(new Role { RoleGUID = "role-shared", RoleName = "SharedRole", IsActive = true })
+                .ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("wh-viewer", "role-shared"),
+                CreateUserRole("wh-peer", "role-shared"),
+                CreateUserRole("super-admin", "role-shared"),
+                CreateUserRole("custom-high", "role-shared"),
+                CreateUserRole("staff-user", "role-shared"),
+            }).ExecuteCommandAsync();
+            var roleService = new RoleService(
+                CreateSqlSugarContext(_db),
+                NullLogger<RoleService>.Instance,
+                new HttpContextAccessor(),
+                new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+                {
+                    IsAllowed = true, IsAuthenticated = true, IsAdmin = true, UserGuid = actorGuid,
+                })
+            );
+
+            var detail = await roleService.GetRoleByGuidAsync("role-shared");
+            var members = await roleService.GetRoleUsersAsync("role-shared", new RoleQueryDto
+            {
+                Page = 1, PageSize = 100,
+            });
+
+            Assert.Equal(expected, detail.Data!.Users.Select(user => user.UserGUID).OrderBy(g => g).ToArray());
+            Assert.Equal(expected, members.Data!.Items!.Select(user => user.UserGUID).OrderBy(g => g).ToArray());
+        }
+
+        [Theory]
+        [InlineData("wh-viewer", new[] { "staff-user", "wh-viewer" })]
+        [InlineData("super-admin", new[] { "custom-high", "staff-user", "super-admin", "wh-peer", "wh-viewer" })]
+        public async Task GetStoreUsersAsync_WarehouseManagerHidesPrivilegedAndPeerAccounts(
+            string actorGuid,
+            string[] expected
+        )
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-wh", StoreCode = "SWH", StoreName = "Store WH", IsActive = true,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("wh-viewer", "store-wh", false),
+                CreateUserStore("wh-peer", "store-wh", false),
+                CreateUserStore("super-admin", "store-wh", false),
+                CreateUserStore("custom-high", "store-wh", false),
+                CreateUserStore("staff-user", "store-wh", false),
+            }).ExecuteCommandAsync();
+            var service = CreateStoreService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, IsAdmin = true, UserGuid = actorGuid,
+            }));
+
+            var result = await service.GetStoreUsersAsync("store-wh", new UserQueryDto { Page = 1, PageSize = 100 });
+
+            Assert.True(result.Success);
+            Assert.Equal(expected, result.Data!.Items!.Select(u => u.UserGUID).OrderBy(g => g).ToArray());
+            Assert.Equal(expected.Length, result.Data.Total);
+        }
+
         private UserService CreateUserService(
             ICurrentUserManageableStoreScopeService? manageableStoreScopeService = null
         )

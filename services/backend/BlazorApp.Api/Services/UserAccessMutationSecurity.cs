@@ -10,6 +10,40 @@ namespace BlazorApp.Api.Services
     /// </summary>
     internal static class UserAccessMutationSecurity
     {
+        internal static async Task<string[]> ResolveWarehouseHiddenUserGuidsAsync(
+            ISqlSugarClient db,
+            ICurrentUserManageableStoreScopeService? manageableStoreScopeService
+        )
+        {
+            if (manageableStoreScopeService == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            var actor = await ResolveActorAsync(
+                db,
+                manageableStoreScopeService
+            );
+            if (!actor.IsWarehouseManager)
+            {
+                return Array.Empty<string>();
+            }
+
+            var hidden = await GetHighPrivilegeUserGuidsAsync(
+                db,
+                candidateUserGuids: null,
+                warehouseDelegation: true
+            );
+            var actorLevel = await GetUserLevelAsync(db, actor.UserGuid);
+            hidden.UnionWith(
+                await GetUserGuidsAtOrAboveLevelAsync(db, actorLevel)
+            );
+
+            return hidden
+                .Where(userGuid => !string.Equals(userGuid, actor.UserGuid, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
         internal static async Task<UserAccessMutationActor> ResolveActorAsync(
             ISqlSugarClient db,
             ICurrentUserManageableStoreScopeService? manageableStoreScopeService
