@@ -130,7 +130,64 @@ public sealed record InstallmentRepaymentCapabilitiesResponse(
     bool CardRepaymentSupported = false,
     [property: JsonPropertyName("repaymentClaimPrepareProviderV1")]
     bool RepaymentClaimPrepareProviderV1 = false,
-    bool AmendLinesSupported = false);
+    bool AmendLinesSupported = false,
+    // 允许刷卡续付的通道族（square / linkly / zeller）。旧服务端不返回（null）时，客户端只能看 CardRepaymentSupported。
+    IReadOnlyList<string>? CardRepaymentProviders = null);
+
+/// <summary>
+/// 分期续付刷卡通道族的统一口径：claim 上登记的 provider、卡证据的 Processor、能力位与服务端开关都按它归一。
+/// 只比较字母和数字、忽略大小写，按前缀识别：Linkly 卡证据的 Processor 是 "ANZ"，移动端登记的是 "linkly-cloud"。
+/// </summary>
+public static class InstallmentCardRepaymentProviders
+{
+    public const string Square = "square";
+    public const string Linkly = "linkly";
+    public const string Zeller = "zeller";
+
+    public static IReadOnlyList<string> All { get; } = [Square, Linkly, Zeller];
+
+    /// <summary>归一到通道族；不认识的返回 null。</summary>
+    public static string? NormalizeFamily(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = new string(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+        if (normalized.StartsWith(Square, StringComparison.Ordinal))
+        {
+            return Square;
+        }
+
+        if (normalized.StartsWith(Linkly, StringComparison.Ordinal) ||
+            normalized.StartsWith("anz", StringComparison.Ordinal))
+        {
+            return Linkly;
+        }
+
+        return normalized.StartsWith(Zeller, StringComparison.Ordinal) ? Zeller : null;
+    }
+
+    /// <summary>解析逗号分隔的配置（如 "square,linkly,zeller"），去重、忽略不认识的项，按固定顺序返回。</summary>
+    public static IReadOnlyList<string> ParseList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var families = value
+            .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeFamily)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        return All.Where(families.Contains).ToArray();
+    }
+}
 
 public sealed record InstallmentRepaymentClaimCreateRequest(
     Guid OperationGuid,

@@ -6769,6 +6769,7 @@ export interface components {
             cardRepaymentSupported?: boolean;
             repaymentClaimPrepareProviderV1?: boolean;
             amendLinesSupported?: boolean;
+            cardRepaymentProviders?: string[] | null;
         };
         InstallmentRepaymentCapabilitiesResponseApiResult: {
             success?: boolean;

@@ -21,12 +21,18 @@ public static class CardTenderIssueTypes
     public const string SessionTxnTypeMismatch = "SessionTxnTypeMismatch";
     public const string SessionTxnRefMismatch = "SessionTxnRefMismatch";
     public const string SessionLinkedToOtherOrder = "SessionLinkedToOtherOrder";
+
+    // 分期续付（InstallmentRepayment）：同一笔刷卡批准（TxnRef）已记在别的付款上。
+    public const string DuplicateCardTxnRef = "DuplicateCardTxnRef";
 }
 
 public static class CardTenderIssueSources
 {
     public const string OrderSync = "OrderSync";
     public const string ReconciliationJob = "ReconciliationJob";
+
+    // 分期续付刷卡提交后的旁路核对；异常的 OrderGuid 列填分期单号。
+    public const string InstallmentRepayment = "InstallmentRepayment";
 }
 
 public static class CardTenderIssueSeverities
@@ -56,6 +62,19 @@ public sealed record CardTenderIssue(
 }
 
 /// <summary>
+/// 一笔待核对的卡付款。普通销售来自订单上传；分期续付来自 claim 提交（LinkGuid 填分期单号，用于会话回链与异常定位）。
+/// </summary>
+public sealed record CardTenderPaymentContext(
+    string Source,
+    string StoreCode,
+    string? DeviceCode,
+    string LinkGuid,
+    Guid PaymentGuid,
+    decimal Amount,
+    string? Reference,
+    IReadOnlyList<CardTransactionDto>? CardTransactions);
+
+/// <summary>
 /// 订单同步时校验卡付款证据的纯函数（不访问数据库）。
 /// 服务端不能因校验不过而拒单：钱已经在银行侧扣了，拒单只会让收银端订单永久卡在 Failed，
 /// 所以这里只产出异常，由调用方登记并告警。
@@ -77,52 +96,68 @@ public static class CardTenderEvidenceChecker
                 continue;
             }
 
-            var transactions = payment.CardTransactions ?? [];
-            if (transactions.Count == 0)
-            {
-                issues.Add(Create(
-                    request,
-                    payment,
-                    CardTenderIssueTypes.NoCardTransactions,
-                    CardTenderIssueSeverities.Error,
-                    "Card payment has no card transaction evidence, so no BankTransaction row can be written."));
-                continue;
-            }
-
-            // planner 把银行流水金额统一成与 payment 同号的绝对值，这里同样只比较绝对值之和。
-            var evidenceTotal = transactions.Sum(transaction => Math.Abs(transaction.Amount));
-            var paymentTotal = Math.Abs(payment.Amount);
-            if (decimal.Round(evidenceTotal, 2, MidpointRounding.AwayFromZero) !=
-                decimal.Round(paymentTotal, 2, MidpointRounding.AwayFromZero))
-            {
-                issues.Add(Create(
-                    request,
-                    payment,
-                    CardTenderIssueTypes.CardAmountMismatch,
-                    CardTenderIssueSeverities.Error,
-                    $"Card transaction amounts sum to {evidenceTotal:0.00} but the payment amount is {paymentTotal:0.00}."));
-            }
-
-            foreach (var transaction in transactions)
-            {
-                if (!RequiresApprovalResponseCode(transaction.Processor) ||
-                    IsApprovedResponseCode(transaction.ResponseCode))
-                {
-                    continue;
-                }
-
-                issues.Add(Create(
-                    request,
-                    payment,
-                    CardTenderIssueTypes.CardNotApproved,
-                    CardTenderIssueSeverities.Error,
-                    $"Card transaction txnRef={transaction.TxnRef} responseCode={transaction.ResponseCode ?? "<null>"} is not an approval code.",
-                    transaction.TxnRef));
-            }
+            issues.AddRange(CheckPaymentConsistency(ToContext(request, payment)));
         }
 
         return issues;
     }
+
+    /// <summary>单笔卡付款的内部一致性：有证据、金额合计相符、Linkly 交易带批准码。</summary>
+    public static IReadOnlyList<CardTenderIssue> CheckPaymentConsistency(CardTenderPaymentContext payment)
+    {
+        var issues = new List<CardTenderIssue>();
+        var transactions = payment.CardTransactions ?? [];
+        if (transactions.Count == 0)
+        {
+            issues.Add(Create(
+                payment,
+                CardTenderIssueTypes.NoCardTransactions,
+                CardTenderIssueSeverities.Error,
+                "Card payment has no card transaction evidence, so no BankTransaction row can be written."));
+            return issues;
+        }
+
+        // planner 把银行流水金额统一成与 payment 同号的绝对值，这里同样只比较绝对值之和。
+        var evidenceTotal = transactions.Sum(transaction => Math.Abs(transaction.Amount));
+        var paymentTotal = Math.Abs(payment.Amount);
+        if (decimal.Round(evidenceTotal, 2, MidpointRounding.AwayFromZero) !=
+            decimal.Round(paymentTotal, 2, MidpointRounding.AwayFromZero))
+        {
+            issues.Add(Create(
+                payment,
+                CardTenderIssueTypes.CardAmountMismatch,
+                CardTenderIssueSeverities.Error,
+                $"Card transaction amounts sum to {evidenceTotal:0.00} but the payment amount is {paymentTotal:0.00}."));
+        }
+
+        foreach (var transaction in transactions)
+        {
+            if (!RequiresApprovalResponseCode(transaction.Processor) ||
+                IsApprovedResponseCode(transaction.ResponseCode))
+            {
+                continue;
+            }
+
+            issues.Add(Create(
+                payment,
+                CardTenderIssueTypes.CardNotApproved,
+                CardTenderIssueSeverities.Error,
+                $"Card transaction txnRef={transaction.TxnRef} responseCode={transaction.ResponseCode ?? "<null>"} is not an approval code.",
+                transaction.TxnRef));
+        }
+
+        return issues;
+    }
+
+    internal static CardTenderPaymentContext ToContext(OrderSyncRequest request, PaymentSyncDto payment) => new(
+        CardTenderIssueSources.OrderSync,
+        request.StoreCode,
+        request.DeviceCode,
+        request.OrderGuid.ToString("D"),
+        payment.PaymentGuid,
+        payment.Amount,
+        payment.Reference,
+        payment.CardTransactions);
 
     // 人工确认（Manual）没有银行响应码；Square 的批准状态写在 ResponseText 里且不带 ISO 响应码。
     // 只有 Linkly（ANZ）的交易才有可核对的响应码，其余处理器不做批准码检查，避免误报。
@@ -137,24 +172,25 @@ public static class CardTenderEvidenceChecker
         return LinklyApprovedResponseCodes.Contains(code, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static CardTenderIssue Create(
-        OrderSyncRequest request,
-        PaymentSyncDto payment,
+    internal static CardTenderIssue Create(
+        CardTenderPaymentContext payment,
         string issueType,
         string severity,
         string detail,
-        string? txnRef = null)
+        string? txnRef = null,
+        string? environment = null,
+        string? sessionId = null)
     {
         return new CardTenderIssue(
             issueType,
             severity,
-            CardTenderIssueSources.OrderSync,
-            request.StoreCode,
-            request.DeviceCode,
-            null,
-            null,
+            payment.Source,
+            payment.StoreCode,
+            payment.DeviceCode,
+            environment,
+            sessionId,
             txnRef,
-            request.OrderGuid.ToString("D"),
+            payment.LinkGuid,
             payment.PaymentGuid.ToString("D"),
             payment.Amount,
             Truncate(detail));
@@ -232,6 +268,15 @@ public interface ICardTenderReconciliationRepository
 
     /// <summary>把「已批准会话无订单」类型、其会话已回链订单的未结异常自动置为 Resolved，返回解除条数。</summary>
     Task<int> ResolveIssuesForLinkedSessionsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 找出已经带着同一刷卡 TxnRef 的其他付款（分期付款与订单银行流水），返回付款号；排除 <paramref name="excludePaymentGuid"/> 本身。
+    /// </summary>
+    Task<IReadOnlyList<string>> FindOtherPaymentsWithCardTxnRefAsync(
+        string txnRef,
+        Guid excludePaymentGuid,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
 }
 
 /// <summary>对账作业用到的最小会话信息。</summary>
@@ -277,7 +322,6 @@ public sealed class CardTenderOrderVerifier(
         try
         {
             var issues = new List<CardTenderIssue>(CardTenderEvidenceChecker.CheckConsistency(request));
-            var orderGuid = request.OrderGuid.ToString("D");
             foreach (var payment in request.Payments)
             {
                 if (payment.Method != PaymentMethodKind.Card ||
@@ -287,9 +331,7 @@ public sealed class CardTenderOrderVerifier(
                 }
 
                 issues.AddRange(await VerifySessionAsync(
-                    request,
-                    payment,
-                    orderGuid,
+                    CardTenderEvidenceChecker.ToContext(request, payment),
                     environment,
                     sessionId,
                     timeout.Token));
@@ -329,30 +371,17 @@ public sealed class CardTenderOrderVerifier(
         }
     }
 
-    private async Task<IReadOnlyList<CardTenderIssue>> VerifySessionAsync(
-        OrderSyncRequest request,
-        PaymentSyncDto payment,
-        string orderGuid,
+    internal async Task<IReadOnlyList<CardTenderIssue>> VerifySessionAsync(
+        CardTenderPaymentContext payment,
         string environment,
         string sessionId,
         CancellationToken cancellationToken)
     {
         var issues = new List<CardTenderIssue>();
-        CardTenderIssue Issue(string type, string severity, string detail, string? txnRef = null) => new(
-            type,
-            severity,
-            CardTenderIssueSources.OrderSync,
-            request.StoreCode,
-            request.DeviceCode,
-            environment,
-            sessionId,
-            txnRef,
-            orderGuid,
-            payment.PaymentGuid.ToString("D"),
-            payment.Amount,
-            CardTenderEvidenceChecker.Truncate(detail));
+        CardTenderIssue Issue(string type, string severity, string detail, string? txnRef = null) =>
+            CardTenderEvidenceChecker.Create(payment, type, severity, detail, txnRef, environment, sessionId);
 
-        var sessions = await repository.FindSessionsAsync(environment, request.StoreCode, sessionId, cancellationToken);
+        var sessions = await repository.FindSessionsAsync(environment, payment.StoreCode, sessionId, cancellationToken);
         if (sessions.Count == 0)
         {
             issues.Add(Issue(
@@ -364,19 +393,19 @@ public sealed class CardTenderOrderVerifier(
 
         // 理论上 (环境, 会话号) 唯一；同号多行时优先取与订单同店同设备的那条，核对其余事实。
         var session = sessions.FirstOrDefault(candidate =>
-                SameStore(candidate, request) &&
-                string.Equals(candidate.DeviceCode, request.DeviceCode, StringComparison.OrdinalIgnoreCase))
-            ?? sessions.FirstOrDefault(candidate => SameStore(candidate, request))
+                SameStore(candidate, payment) &&
+                string.Equals(candidate.DeviceCode, payment.DeviceCode, StringComparison.OrdinalIgnoreCase))
+            ?? sessions.FirstOrDefault(candidate => SameStore(candidate, payment))
             ?? sessions[0];
 
-        var sameStore = SameStore(session, request);
-        var sameDevice = string.Equals(session.DeviceCode, request.DeviceCode, StringComparison.OrdinalIgnoreCase);
+        var sameStore = SameStore(session, payment);
+        var sameDevice = string.Equals(session.DeviceCode, payment.DeviceCode, StringComparison.OrdinalIgnoreCase);
         if (!sameStore || !sameDevice)
         {
             issues.Add(Issue(
                 CardTenderIssueTypes.SessionScopeMismatch,
                 sameStore ? CardTenderIssueSeverities.Warning : CardTenderIssueSeverities.Error,
-                $"Session belongs to store={session.StoreCode} device={session.DeviceCode}, but the order was uploaded by store={request.StoreCode} device={request.DeviceCode}."));
+                $"Session belongs to store={session.StoreCode} device={session.DeviceCode}, but the order was uploaded by store={payment.StoreCode} device={payment.DeviceCode}."));
         }
 
         var approved = string.Equals(session.Status, LinklyCloudBackendStatusConstants.StatusCompleted, StringComparison.OrdinalIgnoreCase) &&
@@ -432,9 +461,9 @@ public sealed class CardTenderOrderVerifier(
         // 只对同店同环境的会话回链：跨店会话回链会让对方门店的「无订单」对账被错误的订单抵消。
         if (sameStore)
         {
-            var linkedOrder = await repository.TryLinkSessionToOrderAsync(session.Id, orderGuid, cancellationToken);
+            var linkedOrder = await repository.TryLinkSessionToOrderAsync(session.Id, payment.LinkGuid, cancellationToken);
             if (!string.IsNullOrWhiteSpace(linkedOrder) &&
-                !string.Equals(linkedOrder, orderGuid, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(linkedOrder, payment.LinkGuid, StringComparison.OrdinalIgnoreCase))
             {
                 issues.Add(Issue(
                     CardTenderIssueTypes.SessionLinkedToOtherOrder,
@@ -447,9 +476,9 @@ public sealed class CardTenderOrderVerifier(
         return issues;
     }
 
-    private static bool SameStore(CardTenderSessionFact session, OrderSyncRequest request)
+    private static bool SameStore(CardTenderSessionFact session, CardTenderPaymentContext payment)
     {
-        return string.Equals(session.StoreCode?.Trim(), request.StoreCode?.Trim(), StringComparison.OrdinalIgnoreCase);
+        return string.Equals(session.StoreCode?.Trim(), payment.StoreCode?.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static long ToCents(decimal amount)
@@ -607,7 +636,59 @@ public sealed class SqlSugarCardTenderReconciliationRepository(
         var orderGuid = await dbContext.PosmDb.Ado.GetScalarAsync(
             FindOrderByBackendPaymentSql,
             new SugarParameter("@Pattern", pattern));
-        return orderGuid is null or DBNull ? null : Convert.ToString(orderGuid);
+        if (orderGuid is not null and not DBNull)
+        {
+            return Convert.ToString(orderGuid);
+        }
+
+        // 分期定金与续付的刷卡不进 payment_detail，而是记在 InstallmentPayment：按同一引用找到分期单号回链，不报孤儿。
+        var installmentGuid = await dbContext.PosmDb.Ado.GetScalarAsync(
+            FindInstallmentByBackendPaymentSql,
+            new SugarParameter("@Pattern", pattern));
+        return installmentGuid is null or DBNull ? null : Convert.ToString(installmentGuid);
+    }
+
+    internal const string FindInstallmentByBackendPaymentSql = """
+        SELECT TOP (1) [InstallmentGuid]
+        FROM [dbo].[InstallmentPayment]
+        WHERE [Reference] LIKE @Pattern ESCAPE N'!'
+        ORDER BY [InstallmentGuid];
+        """;
+
+    // CardTransactionsJson 用 Web 默认序列化（camelCase），按 "txnRef":"…" 片段匹配；BankTransaction 只看正向扣款流水。
+    internal const string FindOtherPaymentsWithCardTxnRefSql = """
+        SELECT TOP (10) [PaymentGuid]
+        FROM (
+            SELECT [PaymentGuid]
+            FROM [dbo].[InstallmentPayment]
+            WHERE [CardTransactionsJson] LIKE @JsonPattern ESCAPE N'!'
+              AND [Amount] > 0
+              AND [PaymentGuid] <> @ExcludePaymentGuid
+            UNION
+            SELECT [PaymentGuid]
+            FROM [dbo].[BankTransaction]
+            WHERE [TxnRef] = @TxnRef
+              AND [Amount] > 0
+              AND [PaymentGuid] <> @ExcludePaymentGuid
+        ) AS matches
+        ORDER BY [PaymentGuid];
+        """;
+
+    public async Task<IReadOnlyList<string>> FindOtherPaymentsWithCardTxnRefAsync(
+        string txnRef,
+        Guid excludePaymentGuid,
+        CancellationToken cancellationToken)
+    {
+        var normalized = txnRef.Trim();
+        var jsonLiteral = System.Text.Json.JsonSerializer.Serialize(
+            normalized,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var rows = await dbContext.PosmDb.Ado.SqlQueryAsync<string>(
+            FindOtherPaymentsWithCardTxnRefSql,
+            new SugarParameter("@JsonPattern", $"%\"txnRef\":{EscapeLike(jsonLiteral)}%"),
+            new SugarParameter("@TxnRef", normalized),
+            new SugarParameter("@ExcludePaymentGuid", excludePaymentGuid.ToString("D")));
+        return rows;
     }
 
     public async Task<int> ResolveIssuesForLinkedSessionsAsync(CancellationToken cancellationToken)

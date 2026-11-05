@@ -1138,29 +1138,223 @@ public sealed class InstallmentRepaymentClaimServiceTests
     }
 
     [Fact]
-    public async Task Legacy_provider_pending_card_claim_rejects_forged_complete_evidence_without_state_changes()
+    public async Task Provider_pending_card_claim_commits_client_evidence_even_after_card_repayment_is_disabled()
+    {
+        // 开关只管新开始的刷卡续付：已登记通道（可能已扣款）的 claim 关掉开关后也必须能入账，否则会永久挡住该分期。
+        var harness = CreateHarness();
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+
+        var committed = await harness.Service.CommitAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "APPROVED",
+                CardTransactions: [CardTransaction("ANZ", "TXN-LINKLY", claim.Amount)]),
+            Identity(),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, committed.Status);
+        Assert.Equal(1, harness.Installments.AppendCount);
+        Assert.Equal(1, harness.Verifier.Calls);
+    }
+
+    [Fact]
+    public async Task Capabilities_list_enabled_card_providers_in_fixed_order_and_ignore_unknown_entries()
+    {
+        var harness = CreateHarness(cardRepaymentProviders: " Zeller ; square, tyro,ZELLER");
+
+        var capabilities = harness.Service.GetCapabilities();
+
+        Assert.True(capabilities.CardRepaymentSupported);
+        Assert.Equal(["square", "zeller"], capabilities.CardRepaymentProviders);
+    }
+
+    [Fact]
+    public void Capabilities_keep_card_repayment_disabled_by_default()
+    {
+        var capabilities = CreateHarness().Service.GetCapabilities();
+
+        Assert.False(capabilities.CardRepaymentSupported);
+        Assert.NotNull(capabilities.CardRepaymentProviders);
+        Assert.Empty(capabilities.CardRepaymentProviders!);
+    }
+
+    [Theory]
+    [InlineData("square", "Square", "Square")]
+    [InlineData("linkly", "Linkly", "ANZ")]
+    [InlineData("linkly", "linkly-cloud", "ANZ")]
+    [InlineData("zeller", "Zeller", "Zeller")]
+    public async Task Enabled_card_provider_can_create_begin_and_commit_a_repayment(
+        string enabledProvider,
+        string claimProvider,
+        string evidenceProcessor)
+    {
+        var harness = CreateHarness(cardRepaymentProviders: enabledProvider);
+        var request = CreateRequest(amount: 10m, method: PaymentMethodKind.Card);
+
+        var created = await harness.Service.CreateAsync(harness.InstallmentGuid, request, Identity(), CancellationToken.None);
+        var begun = await harness.Service.BeginProviderAsync(
+            harness.InstallmentGuid,
+            request.OperationGuid,
+            new InstallmentRepaymentClaimBeginProviderRequest(claimProvider, "attempt-card"),
+            Identity(),
+            CancellationToken.None);
+        var committed = await harness.Service.CommitAsync(
+            harness.InstallmentGuid,
+            request.OperationGuid,
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "CARD-REF",
+                CardTransactions: [CardTransaction(evidenceProcessor, "TXN-1", 10m)]),
+            Identity(),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentRepaymentClaimStatus.Prepared, created.Status);
+        Assert.Equal(InstallmentRepaymentClaimStatus.ProviderPending, begun.Status);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, committed.Status);
+        Assert.Equal(1, harness.Installments.AppendCount);
+        Assert.Equal(1, harness.Verifier.Calls);
+    }
+
+    [Fact]
+    public async Task Begin_rejects_a_card_provider_that_is_not_enabled_and_keeps_the_claim_prepared()
+    {
+        var harness = CreateHarness(cardRepaymentProviders: "square");
+        var request = CreateRequest(amount: 10m, method: PaymentMethodKind.Card);
+        await harness.Service.CreateAsync(harness.InstallmentGuid, request, Identity(), CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.BeginProviderAsync(
+                harness.InstallmentGuid,
+                request.OperationGuid,
+                new InstallmentRepaymentClaimBeginProviderRequest("Linkly", "attempt-card"),
+                Identity(),
+                CancellationToken.None));
+
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.PaymentMethodUnsupported, exception.Code);
+        var stored = await harness.Repository.GetAsync(request.OperationGuid, CancellationToken.None);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Prepared, stored?.Status);
+        Assert.Null(stored?.Provider);
+
+        // 确定性拒绝后客户端释放 claim，分期不再被挡住。
+        var released = await harness.Service.ResolveAsync(
+            harness.InstallmentGuid,
+            request.OperationGuid,
+            new InstallmentRepaymentClaimResolveRequest(InstallmentRepaymentClaimResolveOutcome.Released),
+            Identity(),
+            CancellationToken.None);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Released, released.Status);
+    }
+
+    [Fact]
+    public async Task Prepare_provider_rejects_a_card_provider_that_is_not_enabled_before_writing_a_claim()
+    {
+        var harness = CreateHarness(cardRepaymentProviders: "linkly");
+        var create = CreateRequest(amount: 10m, method: PaymentMethodKind.Card);
+
+        var exception = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.PrepareProviderAsync(
+                harness.InstallmentGuid,
+                create.OperationGuid,
+                PrepareRequest(create, "square", "attempt-square"),
+                Identity(),
+                CancellationToken.None));
+
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.PaymentMethodUnsupported, exception.Code);
+        Assert.Null(await harness.Repository.GetAsync(create.OperationGuid, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Provider_pending_card_claim_replays_its_binding_after_card_repayment_is_disabled()
     {
         var harness = CreateHarness();
         var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
-        var before = await harness.Installments.GetDetailsAsync(harness.InstallmentGuid, CancellationToken.None);
+
+        var replay = await harness.Service.BeginProviderAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            new InstallmentRepaymentClaimBeginProviderRequest("linkly", "legacy-attempt"),
+            Identity(),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentRepaymentClaimStatus.ProviderPending, replay.Status);
+        Assert.True(replay.AlreadyExists);
+    }
+
+    public static TheoryData<string, InstallmentRepaymentClaimCommitRequest> InvalidCardEvidence => new()
+    {
+        { "no evidence", new InstallmentRepaymentClaimCommitRequest(Reference: "APPROVED") },
+        {
+            "amount mismatch",
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "APPROVED",
+                CardTransactions: [CardTransaction("ANZ", "TXN-1", 9.99m)])
+        },
+        {
+            "processor of another provider",
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "APPROVED",
+                CardTransactions: [CardTransaction("Square", "TXN-1", 10m)])
+        },
+        {
+            "voucher reservation",
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "APPROVED",
+                ReservationToken: "reservation-1",
+                CardTransactions: [CardTransaction("ANZ", "TXN-1", 10m)])
+        },
+        {
+            "reference too long",
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: new string('R', 201),
+                CardTransactions: [CardTransaction("ANZ", "TXN-1", 10m)])
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidCardEvidence))]
+    public async Task Card_commit_rejects_evidence_a_normal_terminal_flow_cannot_produce(
+        string scenario,
+        InstallmentRepaymentClaimCommitRequest request)
+    {
+        var harness = CreateHarness(cardRepaymentProviders: "linkly");
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
 
         var exception = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
             harness.Service.CommitAsync(
                 harness.InstallmentGuid,
                 claim.OperationGuid,
-                new InstallmentRepaymentClaimCommitRequest(
-                    Reference: "APPROVED",
-                    CardTransactions: [CardTransaction("ANZ", "TXN-FORGED", claim.Amount)]),
+                request,
                 Identity(),
                 CancellationToken.None));
 
-        Assert.Equal(InstallmentRepaymentClaimErrorCodes.PaymentMethodUnsupported, exception.Code);
+        Assert.True(exception.Code == InstallmentRepaymentClaimErrorCodes.Invalid, scenario);
         Assert.Equal(0, harness.Installments.AppendCount);
-        Assert.Equal(before, await harness.Installments.GetDetailsAsync(harness.InstallmentGuid, CancellationToken.None));
         var stored = await harness.Repository.GetAsync(claim.OperationGuid, CancellationToken.None);
         Assert.Equal(InstallmentRepaymentClaimStatus.ProviderPending, stored?.Status);
-        Assert.Null(stored?.CommittedAtUtc);
-        Assert.Null(stored?.CommitResponseJson);
+        Assert.Equal(0, harness.Verifier.Calls);
+    }
+
+    [Fact]
+    public async Task Card_commit_accepts_split_evidence_and_unrecognized_processors_for_later_review()
+    {
+        var harness = CreateHarness(cardRepaymentProviders: "linkly");
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+
+        var committed = await harness.Service.CommitAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            new InstallmentRepaymentClaimCommitRequest(
+                Reference: "APPROVED",
+                CardTransactions:
+                [
+                    CardTransaction("ANZ", "TXN-1", 4m),
+                    CardTransaction("Manual", "MANUAL-1", 6m, null, null)
+                ]),
+            Identity(),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, committed.Status);
+        Assert.Equal(1, harness.Verifier.Calls);
     }
 
     [Theory]
@@ -1667,7 +1861,8 @@ public sealed class InstallmentRepaymentClaimServiceTests
     private static Harness CreateHarness(
         bool crossDeviceEnabled = false,
         string installmentDeviceCode = "POS-01",
-        string installmentStoreCode = "S01")
+        string installmentStoreCode = "S01",
+        string? cardRepaymentProviders = null)
     {
         var installmentGuid = Guid.NewGuid();
         var repository = new InMemoryClaimRepository();
@@ -1677,16 +1872,19 @@ public sealed class InstallmentRepaymentClaimServiceTests
             installmentStoreCode));
         var time = new MutableFakeTimeProvider(InitialNow);
         var commitRepository = new InMemoryCommitRepository(repository, installments);
+        var verifier = new CountingCardTenderVerifier();
         var service = new InstallmentRepaymentClaimService(
             repository,
             installments,
             commitRepository,
             Options.Create(new InstallmentRepaymentClaimOptions
             {
-                CrossDeviceEnabled = crossDeviceEnabled
+                CrossDeviceEnabled = crossDeviceEnabled,
+                CardRepaymentProviders = cardRepaymentProviders
             }),
-            time);
-        return new Harness(installmentGuid, service, repository, installments, commitRepository, time);
+            time,
+            cardTenderVerifier: verifier);
+        return new Harness(installmentGuid, service, repository, installments, commitRepository, time, verifier);
     }
 
     private static InstallmentRepaymentClaimCreateRequest CreateRequest(
@@ -1857,7 +2055,19 @@ public sealed class InstallmentRepaymentClaimServiceTests
         InMemoryClaimRepository Repository,
         FakeInstallmentRepository Installments,
         InMemoryCommitRepository CommitRepository,
-        MutableFakeTimeProvider Time);
+        MutableFakeTimeProvider Time,
+        CountingCardTenderVerifier Verifier);
+
+    private sealed class CountingCardTenderVerifier : IInstallmentRepaymentCardTenderVerifier
+    {
+        public int Calls { get; private set; }
+
+        public Task VerifyAsync(InstallmentRepaymentClaimRecord claim, InstallmentRepaymentClaimCommitRequest request)
+        {
+            Calls++;
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class MutableFakeTimeProvider(DateTimeOffset now) : TimeProvider
     {

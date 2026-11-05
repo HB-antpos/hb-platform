@@ -384,7 +384,8 @@ assert.deepEqual(
     "crossDevicePickupEnabled",
     "cardRepaymentSupported",
     "repaymentClaimPrepareProviderV1",
-    "amendLinesSupported"
+    "amendLinesSupported",
+    "cardRepaymentProviders"
   ]
 );
 assert.deepEqual(

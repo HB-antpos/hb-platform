@@ -175,6 +175,7 @@ public static class ServiceRegistration
         services.AddScoped<IOrderRepository, SqlSugarOrderRepository>();
         services.AddScoped<ICardTenderReconciliationRepository, SqlSugarCardTenderReconciliationRepository>();
         services.AddScoped<ICardTenderOrderVerifier, CardTenderOrderVerifier>();
+        services.AddScoped<IInstallmentRepaymentCardTenderVerifier, InstallmentRepaymentCardTenderVerifier>();
         services.AddScoped<ICardTenderReconciliationService, CardTenderReconciliationService>();
         services.AddHostedService<CardTenderReconciliationBackgroundService>();
         services.AddScoped<IOrderSyncService, OrderSyncService>();
