@@ -1219,6 +1219,38 @@
                                 <materialDesign:PackIcon Kind="CreditCard" Style="{StaticResource CardMethodIconStyle}" />
                             </Border>
                             <TextBlock Grid.Row="1" Text="{Binding CardMethodText}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
+                            <!-- 刷卡类型角标（ANZ / Zeller / Square）：贴右上角、不占行高；选中时底色反转，与圆盘图标同一套 Fill/On 色。 -->
+                            <Border Grid.RowSpan="2"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Margin="0,-2,-2,0"
+                                    Padding="7,2"
+                                    CornerRadius="9"
+                                    AutomationProperties.AutomationId="CardProviderBadge"
+                                    Visibility="{Binding IsCardProviderBadgeVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource PosMethodCardFillBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCardSelected}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource PosMethodCardOnBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding CardProviderBadgeText}" FontSize="11" FontWeight="Black">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PosMethodCardOnBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsCardSelected}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosMethodCardFillBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
                         </Grid>
                     </Button>
                     <!-- 手动刷卡入口：只是打开确认弹窗的动作按钮，固定刷卡色未选外观，不显示 ✓。 -->
