@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using Hbpos.Client.Wpf.Models;
 using Microsoft.Data.Sqlite;
 
 namespace Hbpos.Client.Wpf.Services.Zeller;
@@ -186,6 +187,23 @@ public interface ILocalZellerPaymentAttemptRepository
     Task<LocalZellerPaymentAttempt?> TryUpdateAsync(
         LocalZellerPaymentAttempt current,
         LocalZellerPaymentAttempt next,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 和 <see cref="TryUpdateAsync"/> 一样的乐观锁更新，同时在同一个事务里写一条主管结案日志（LocalFinancialSupervisorResolutions）。
+    /// 更新没有生效（版本已变）时日志也不写，返回 null。
+    /// </summary>
+    Task<LocalZellerPaymentAttempt?> TryUpdateWithJournalAsync(
+        LocalZellerPaymentAttempt current,
+        LocalZellerPaymentAttempt next,
+        LocalFinancialSupervisorResolution journal,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>这台收银机最近的尝试（不分状态，最新的在前），恢复中心的历史页用。</summary>
+    Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListRecentAsync(
+        string storeCode,
+        string deviceCode,
+        int limit,
         CancellationToken cancellationToken = default);
 
     /// <summary>这台收银机上还没有结论的尝试：已发出但没有结果，或结果未知。</summary>
@@ -396,10 +414,52 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
     }
 
-    public async Task<LocalZellerPaymentAttempt?> TryUpdateAsync(
+    public Task<LocalZellerPaymentAttempt?> TryUpdateAsync(
         LocalZellerPaymentAttempt current,
         LocalZellerPaymentAttempt next,
+        CancellationToken cancellationToken = default) =>
+        TryUpdateCoreAsync(current, next, journal: null, cancellationToken);
+
+    public Task<LocalZellerPaymentAttempt?> TryUpdateWithJournalAsync(
+        LocalZellerPaymentAttempt current,
+        LocalZellerPaymentAttempt next,
+        LocalFinancialSupervisorResolution journal,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        return TryUpdateCoreAsync(current, next, journal, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListRecentAsync(
+        string storeCode,
+        string deviceCode,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {Columns} FROM LocalZellerPaymentAttempts
+            WHERE StoreCode = $StoreCode AND DeviceCode = $DeviceCode
+            ORDER BY UpdatedAt DESC, CreatedAt DESC
+            LIMIT $Limit;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Limit", limit);
+        return await ReadAllAsync(command, cancellationToken);
+    }
+
+    private async Task<LocalZellerPaymentAttempt?> TryUpdateCoreAsync(
+        LocalZellerPaymentAttempt current,
+        LocalZellerPaymentAttempt next,
+        LocalFinancialSupervisorResolution? journal,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(next);
@@ -411,7 +471,10 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
 
         var persisted = next with { Version = current.Version + 1 };
         await using var connection = await OpenAsync(cancellationToken);
+        // 中文注释：带日志时更新和日志在同一个事务里，要么都写进去，要么都不写（和 Square 的主管结案一致）。
+        await using var transaction = journal is null ? null : (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE LocalZellerPaymentAttempts SET
                 Status = $Status,
@@ -452,7 +515,23 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         AddParameters(command, persisted);
         command.Parameters.AddWithValue("$ExpectedStatus", current.Status.ToString());
         command.Parameters.AddWithValue("$ExpectedVersion", current.Version);
-        return await command.ExecuteNonQueryAsync(cancellationToken) == 1 ? persisted : null;
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+
+            return null;
+        }
+
+        if (transaction is not null)
+        {
+            await LocalFinancialSupervisorResolutionRepository.InsertAsync(connection, transaction, journal!, cancellationToken);
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        return persisted;
     }
 
     public Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListOpenAsync(

@@ -969,5 +969,16 @@ public static class ServiceRegistration
             sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
             sp.GetRequiredService<ZellerCardTerminalClient>(),
             log: Log));
+        // 卡交易恢复协调器的 Zeller 提供方（协调器按类型构造，注册后自动带上）。
+        services.AddSingleton(sp => new ZellerCardRecoveryProvider(
+            sp.GetRequiredService<ZellerPaymentRecoveryService>(),
+            sp.GetRequiredService<ZellerCardTerminalClient>(),
+            sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
+            sp.GetRequiredService<CashCheckoutService>(),
+            sp.GetRequiredService<ILocalOrderRepository>(),
+            sp.GetRequiredService<ICardTerminalSettingsProvider>(),
+            sp.GetService<ILocalizationService>(),
+            sp.GetService<FinancialSupervisorAuditReplayService>(),
+            sp.GetService<ISharedHeldOrderRepository>()));
     }
 }

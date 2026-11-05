@@ -4378,4 +4378,14 @@
   <data name="payment.card.zeller.notStarted" xml:space="preserve"><value>无法发起 Zeller 收款，顾客未被扣款。</value></data>
   <data name="payment.card.zeller.paymentPageOnly" xml:space="preserve"><value>Zeller 刷卡只能在付款页发起。</value></data>
   <data name="payment.status.cardVerifying" xml:space="preserve"><value>正在向 Zeller 核实结果（第 {0} 次），请勿让顾客重新刷卡。</value></data>
+  <data name="cardRecovery.center.channel.zeller" xml:space="preserve"><value>Zeller</value></data>
+  <data name="cardRecovery.center.transactionStatus.submitted" xml:space="preserve"><value>已发往刷卡机，尚无结果</value></data>
+  <data name="cardRecovery.zeller.approved" xml:space="preserve"><value>上一笔 Zeller 刷卡已成功，订单已自动补回并保存。</value></data>
+  <data name="cardRecovery.zeller.unknown" xml:space="preserve"><value>无法确认 Zeller 刷卡结果，请先由主管核实，再决定是否重新收款。</value></data>
+  <data name="cardRecovery.zeller.inProgress" xml:space="preserve"><value>这笔 Zeller 刷卡仍在本机核实中，请稍后再试。</value></data>
+  <data name="cardRecovery.zeller.notPaid" xml:space="preserve"><value>Zeller 显示这笔刷卡未获批准，顾客未被扣款。</value></data>
+  <data name="cardRecovery.zeller.notFound" xml:space="preserve"><value>本机找不到这笔 Zeller 刷卡记录。</value></data>
+  <data name="cardRecovery.zeller.keepWaiting" xml:space="preserve"><value>这笔 Zeller 刷卡保持未结，请稍后再查。</value></data>
+  <data name="cardRecovery.zeller.confirmedNotPaid" xml:space="preserve"><value>已记为未付款，顾客可以重新付款。</value></data>
+  <data name="cardRecovery.zeller.partialRefund" xml:space="preserve"><value>Zeller 退款已批准，但只覆盖了部分退货金额，无法自动补单，请主管处理这笔退货。</value></data>
 </root>

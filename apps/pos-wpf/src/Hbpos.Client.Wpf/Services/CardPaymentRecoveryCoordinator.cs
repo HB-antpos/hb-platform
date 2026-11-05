@@ -1,4 +1,5 @@
 using Hbpos.Client.Wpf.Models;
+using Hbpos.Client.Wpf.Services.Zeller;
 
 namespace Hbpos.Client.Wpf.Services;
 
@@ -6,7 +7,8 @@ public sealed class CardPaymentRecoveryCoordinator(
     ICardTerminalSettingsProvider settingsProvider,
     CardPaymentRecoveryService linklyRecoveryService,
     ISquarePaymentRecoveryService squareRecoveryService,
-    FinancialSupervisorAuditReplayService? supervisorAuditReplay = null) :
+    FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
+    ZellerCardRecoveryProvider? zellerRecovery = null) :
     ICardPaymentRecoveryService,
     ICardRecoveryQueueLoader
 {
@@ -21,6 +23,7 @@ public sealed class CardPaymentRecoveryCoordinator(
         {
             CardProcessorKind.Linkly => await linklyRecoveryService.RecoverLatestAsync(cart, session, cancellationToken),
             CardProcessorKind.Square => await squareRecoveryService.RecoverLatestAsync(cart, session, cancellationToken),
+            CardProcessorKind.Zeller when zellerRecovery is not null => await zellerRecovery.RecoverLatestAsync(cart, session, cancellationToken),
             _ => CardPaymentRecoveryResult.None
         };
     }
@@ -144,9 +147,23 @@ public sealed class CardPaymentRecoveryCoordinator(
                 ? squareRecoveryService.ListHistoryAsync(session, cancellationToken)
                 : squareRecoveryService.ListOpenAsync(session, cancellationToken),
             cancellationToken);
-        await Task.WhenAll(linklyLoad, squareLoad);
+        // Zeller 只在注册了提供方时参与；和另外两家一样隔离读取故障。
+        async Task<CardRecoveryProviderLoad?> LoadZellerAsync(ZellerCardRecoveryProvider? provider) =>
+            provider is null
+                ? null
+                : await LoadProviderAsync(
+                    CardProcessorKind.Zeller,
+                    () => includeHistory
+                        ? provider.ListHistoryAsync(session, cancellationToken)
+                        : provider.ListOpenAsync(session, cancellationToken),
+                    cancellationToken);
+        var zellerLoad = LoadZellerAsync(zellerRecovery);
+        await Task.WhenAll(linklyLoad, squareLoad, zellerLoad);
 
-        var results = new[] { await linklyLoad, await squareLoad };
+        var results = new[] { await linklyLoad, await squareLoad, await zellerLoad }
+            .Where(result => result is not null)
+            .Select(result => result!)
+            .ToArray();
         var items = results
             .Where(result => result.Succeeded)
             .SelectMany(result => result.Items)
@@ -198,6 +215,7 @@ public sealed class CardPaymentRecoveryCoordinator(
         {
             CardProcessorKind.Linkly => await linklyRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken),
             CardProcessorKind.Square => await squareRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken),
+            CardProcessorKind.Zeller when zellerRecovery is not null => await zellerRecovery.AutoRecoverDeterministicAsync(session, cancellationToken),
             _ => CardAutoRecoverySummary.None
         };
     }
@@ -217,6 +235,11 @@ public sealed class CardPaymentRecoveryCoordinator(
                 session,
                 cancellationToken),
             CardProcessorKind.Square => await squareRecoveryService.RecoverAttemptAsync(
+                key.AttemptGuid,
+                cart,
+                session,
+                cancellationToken),
+            CardProcessorKind.Zeller when zellerRecovery is not null => await zellerRecovery.RecoverAttemptAsync(
                 key.AttemptGuid,
                 cart,
                 session,
@@ -248,6 +271,15 @@ public sealed class CardPaymentRecoveryCoordinator(
                 session,
                 cancellationToken),
             CardProcessorKind.Square => await squareRecoveryService.ResolveAttemptAsync(
+                key.AttemptGuid,
+                decision,
+                reason,
+                evidence,
+                reference,
+                cart,
+                session,
+                cancellationToken),
+            CardProcessorKind.Zeller when zellerRecovery is not null => await zellerRecovery.ResolveAttemptAsync(
                 key.AttemptGuid,
                 decision,
                 reason,
