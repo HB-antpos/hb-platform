@@ -1,0 +1,149 @@
+<Window x:Class="ZellerWpfSpike.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Zeller WPF 技术验证"
+        Width="1320"
+        Height="880"
+        FontSize="14"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="Padding" Value="12,6" />
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,0,14,8" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="Padding" Value="4,3" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,6,8" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Padding" Value="8,8,8,0" />
+        </Style>
+    </Window.Resources>
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="600" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
+            <StackPanel>
+                <GroupBox Header="0. 窗口环境（模仿收银端主窗口）">
+                    <StackPanel>
+                        <WrapPanel>
+                            <Button Content="切换：收银端模式 / 普通窗口" Click="OnToggleWindowMode" />
+                            <TextBlock x:Name="ModeText" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <CheckBox x:Name="HostTopmostBox" Content="主窗口置顶" Click="OnHostTopmostChanged" />
+                            <CheckBox x:Name="ScannerBox" Content="模拟扫码抢焦点（每 2 秒）" Click="OnScannerChanged" />
+                            <CheckBox x:Name="WatchWindowsBox" Content="记录 SDK 窗口信息" IsChecked="True" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="把 SDK 窗口的 Owner 设为主窗口" Click="OnSetOwner" />
+                            <Button Content="启用 WinForms 键盘互操作" Click="OnEnableWinFormsInterop" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="打开记录目录" Click="OnOpenFolder" />
+                            <Button Content="最小化" Click="OnMinimize" />
+                            <Button Content="退出" Click="OnExit" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="1. Terminal 实例与配对">
+                    <StackPanel>
+                        <WrapPanel>
+                            <TextBlock Text="应用名" />
+                            <TextBox x:Name="VendorAppBox" Width="170" Text="HBPOS-ZellerProbe" />
+                            <TextBlock Text="版本" />
+                            <TextBox x:Name="VendorVersionBox" Width="70" Text="0.1.0" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <TextBlock Text="设备类型" />
+                            <TextBox x:Name="VendorDeviceBox" Width="70" Text="POS" />
+                            <TextBlock Text="厂商" />
+                            <TextBox x:Name="VendorNameBox" Width="120" Text="HotBargain" />
+                            <Button Content="作废并重建 Terminal" Click="OnRebuild" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="初始化 initialise" Click="OnInitialise" />
+                            <Button Content="配对 / 设置 setup" Click="OnSetup" />
+                            <CheckBox x:Name="BackgroundThreadBox" Content="从后台线程调用（预期可能失败）" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="2. 扣款（按钮始终可点，可在上一笔没返回时再发起）">
+                    <StackPanel>
+                        <WrapPanel>
+                            <TextBlock Text="金额（分）" />
+                            <TextBox x:Name="AmountBox" Width="80" Text="100" />
+                            <CheckBox x:Name="UnattendedBox" Content="无人值守 unattended" />
+                            <CheckBox x:Name="FullscreenBox" Content="全屏" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <CheckBox x:Name="TerminalReceiptBox" Content="刷卡机电子小票按钮" />
+                            <CheckBox x:Name="TerminalReceiptPrintBox" Content="刷卡机打印小票按钮" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <CheckBox x:Name="WatchdogBox" Content="启用看门狗" IsChecked="True" />
+                            <TextBlock Text="总时长（秒）" />
+                            <TextBox x:Name="WatchdogTotalBox" Width="50" Text="150" />
+                            <TextBlock Text="进入处理后（秒）" />
+                            <TextBox x:Name="WatchdogProcessingBox" Width="50" Text="45" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <CheckBox x:Name="RebuildOnWatchdogBox" Content="看门狗接手后先重建 Terminal 再轮询" IsChecked="True" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <CheckBox x:Name="StrictBox" Content="严格串行：有调用没返回时不发新调用（取消勾选可重现串线）" IsChecked="True" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="扣款 purchase" Click="OnPurchase" FontWeight="Bold" />
+                            <Button Content="取消最近一笔 cancel" Click="OnCancel" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="3. 查询与退款">
+                    <StackPanel>
+                        <WrapPanel>
+                            <TextBlock Text="reference 或 uuid" />
+                            <TextBox x:Name="ReferenceBox" Width="400" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="查询 getTransactions" Click="OnQuery" />
+                            <Button Content="轮询（每 5 秒，最多 3 分钟）" Click="OnPoll" />
+                            <Button Content="停止轮询" Click="OnStopPoll" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button Content="按上面的原交易退款（金额用上面的分）" Click="OnRefund" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBox x:Name="LogBox"
+                 Grid.Column="1"
+                 Margin="0"
+                 IsReadOnly="True"
+                 FontFamily="Consolas"
+                 FontSize="12.5"
+                 TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 VerticalAlignment="Stretch"
+                 VerticalContentAlignment="Top" />
+    </Grid>
+</Window>
