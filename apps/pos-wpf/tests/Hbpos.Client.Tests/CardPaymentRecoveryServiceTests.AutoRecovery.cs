@@ -1,5 +1,6 @@
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
@@ -99,6 +100,33 @@ public sealed partial class CardPaymentRecoveryServiceTests
         var again = await service.AutoRecoverDeterministicAsync(fixture.Session);
         Assert.Equal(0, again.Examined);
         Assert.Single(await fixture.OrderRepository.GetRecentOrdersAsync());
+    }
+
+    [Fact]
+    public async Task A_lay_by_down_payment_marked_completed_is_not_rebuilt_into_a_sale_order()
+    {
+        // 中文注释：付款页 Lay-by 的定金刷卡走普通销售流程，留下「已批准、带销售草稿」的 Linkly 记录。
+        // 上面 builds_the_order_for_an_approved_attempt 用例说明：不标记的话，自动恢复会把它补成一张销售单。
+        var cloudApi = new ScriptedLinklyCloudApi(returnApprovalAfterRelease: false);
+        await using var fixture = await PaymentFlowTestFixture.CreateAsync(cloudApi);
+        var attempt = CreateApprovedLocalAttempt(AutoLocalTxnRef);
+        await fixture.AttemptRepository.CreateAsync(attempt);
+        var deposit = new PaymentTender(
+            PaymentMethodKind.Card,
+            10m,
+            $"ANZ:{AutoLocalTxnRef}",
+            IdempotencyKey: $"CARD_ATTEMPT:{attempt.AttemptGuid:N}");
+
+        var warning = await fixture.Workflow.MarkInstallmentCardAttemptsCompletedAsync(new PosCartService(), [deposit], Guid.NewGuid());
+
+        Assert.False(warning);
+        Assert.Equal(
+            LocalCardPaymentAttemptStatus.OrderCompleted,
+            (await fixture.AttemptRepository.GetAttemptAsync(attempt.AttemptGuid))!.Status);
+        var summary = await CreateAutoRecoveryService(fixture, new FakeLinklyBackendTerminalClient())
+            .AutoRecoverDeterministicAsync(fixture.Session);
+        Assert.Equal(0, summary.RecoveredOrders);
+        Assert.Empty(await fixture.OrderRepository.GetRecentOrdersAsync());
     }
 
     [Fact]

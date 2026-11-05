@@ -15,6 +15,17 @@ public interface ICashPaymentWorkflowService
     /// <summary>进付款页时提前建好刷卡终端到后端的连接（尽力而为）；默认什么都不做，旧实现与测试替身无需改动。</summary>
     Task WarmUpCardTerminalAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    /// <summary>
+    /// 付款页 Lay-by 建单成功后调用：定金刷卡走的是普通销售流程，会留下带销售订单草稿的扣款记录（Linkly / Square / Zeller）。
+    /// 分期建单成功后要把这些记录标为已建单，否则启动登录时的自动恢复会把它们当成「扣了钱没出单」，按草稿再补一张销售单。
+    /// 返回是否有收尾告警（标记失败只记日志，不影响已经建好的分期单）。默认什么都不做，测试替身无需改动。
+    /// </summary>
+    Task<bool> MarkInstallmentCardAttemptsCompletedAsync(
+        PosCartService cart,
+        IReadOnlyList<PaymentTender> tenders,
+        Guid installmentOrderGuid,
+        CancellationToken cancellationToken = default) => Task.FromResult(false);
+
     bool TryParseTenderedAmount(string? amountTenderedText, out decimal tenderedAmount);
 
     decimal CalculateChange(string? amountTenderedText, decimal actualAmount);
@@ -3112,6 +3123,50 @@ public sealed partial class CashPaymentWorkflowService(
     private static bool IsSupervisorResolutionCode(string? responseCode) =>
         !string.IsNullOrWhiteSpace(responseCode) &&
         responseCode.Trim().StartsWith("SUPERVISOR_", StringComparison.Ordinal);
+
+    public async Task<bool> MarkInstallmentCardAttemptsCompletedAsync(
+        PosCartService cart,
+        IReadOnlyList<PaymentTender> tenders,
+        Guid installmentOrderGuid,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(cart);
+        ArgumentNullException.ThrowIfNull(tenders);
+        // 中文注释：和销售订单落盘后的收尾一样，三家各自标记、互不影响；分期单已经在服务端建好，这里失败只记告警。
+        // 不涉及恢复购物车（没有恢复 owner），所以 owner 参数都传 null。
+        var hasPostCommitWarning = false;
+        try
+        {
+            await MarkCompletedCardAttemptsAsync(cart, tenders, null, null, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            hasPostCommitWarning = true;
+            LogPostCommitWarning("installment-mark-card-attempt-completed", installmentOrderGuid, ex);
+        }
+
+        try
+        {
+            await MarkCompletedSquareAttemptsAsync(cart, tenders, null, null, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            hasPostCommitWarning = true;
+            LogPostCommitWarning("installment-mark-square-attempt-completed", installmentOrderGuid, ex);
+        }
+
+        try
+        {
+            await MarkCompletedZellerAttemptsAsync(tenders, installmentOrderGuid, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            hasPostCommitWarning = true;
+            LogPostCommitWarning("installment-mark-zeller-attempt-completed", installmentOrderGuid, ex);
+        }
+
+        return hasPostCommitWarning;
+    }
 
     private async Task MarkCompletedCardAttemptsAsync(
         PosCartService cart,

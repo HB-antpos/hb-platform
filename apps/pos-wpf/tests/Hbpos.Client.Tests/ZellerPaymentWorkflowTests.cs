@@ -59,6 +59,23 @@ public sealed class ZellerPaymentWorkflowTests
     }
 
     [Fact]
+    public async Task An_approved_zeller_deposit_used_by_a_lay_by_is_marked_completed_without_a_sale_order()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync();
+        fixture.Gateway.OnPurchase = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(Approved(request.AmountCents, request.Reference)));
+        var deposit = (await AddSaleAsync(fixture, 20m)).Tender!;
+        Assert.True(CashPaymentWorkflowService.TryReadZellerAttemptTenderKey(deposit.IdempotencyKey, out var attemptGuid));
+        Assert.Equal(ZellerAttemptStatus.Approved, (await fixture.Attempts.GetAsync(attemptGuid))!.Status);
+
+        var warning = await fixture.Workflow.MarkInstallmentCardAttemptsCompletedAsync(new PosCartService(), [deposit], Guid.NewGuid());
+
+        // 中文注释：标为已建单后，恢复不会再把它当成「扣了钱没出单」按销售草稿补单。
+        Assert.False(warning);
+        Assert.Equal(ZellerAttemptStatus.OrderCompleted, (await fixture.Attempts.GetAsync(attemptGuid))!.Status);
+        Assert.Empty(await fixture.Orders.GetRecentOrdersAsync());
+    }
+
+    [Fact]
     public async Task Declined_sale_returns_a_bank_decline_without_locking_the_page()
     {
         await using var fixture = await ZellerWorkflowFixture.CreateAsync();

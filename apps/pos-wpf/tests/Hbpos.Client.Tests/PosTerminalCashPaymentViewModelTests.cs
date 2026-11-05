@@ -7577,6 +7577,64 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Payment_page_lay_by_card_deposit_marks_the_square_attempt_completed_so_recovery_cannot_rebuild_a_sale()
+    {
+        // 中文注释：端到端复现。付款页 Lay-by 刷卡收定金走普通销售流程，留下带销售草稿、已核实的 Square 记录；
+        // 分期建单后如果不标记，启动登录的自动恢复会把它补成一张销售单（同一笔钱和货记两次）。
+        // 刷卡必须是最后一笔、付清剩余金额（普通销售的规则），所以付款页上刷卡建分期只会是「首付即付清」这种情况。
+        var path = Path.Combine(Path.GetTempPath(), $"hbpos-layby-square-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var squareAttempts = new LocalSquarePaymentAttemptRepository(store);
+            var cart = new PosCartService();
+            cart.AddItem(CreateItem("SKU-INST-SQUARE", "Square Lay-by Tea", "939021", PriceSourceKind.StoreRetailPrice, 80m));
+            var squareContext = new SquarePaymentAttemptContextAccessor();
+            var terminal = new VerifyingSquareTerminalClient(squareAttempts, squareContext);
+            var installmentService = new FakeInstallmentOrderService();
+            var viewModel = new PaymentViewModel(
+                cart,
+                new CashPaymentWorkflowService(
+                    new CashCheckoutService(),
+                    new InMemoryOrderRepository(),
+                    new InMemorySyncQueueRepository(),
+                    cardTerminalClient: terminal,
+                    cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(CardTerminalSettings.FromEnvironment() with
+                    {
+                        Processor = CardProcessorKind.Square,
+                        SquareDeviceId = "device:TEST-DEVICE",
+                        SquareLocationId = "TEST-LOCATION"
+                    }),
+                    squarePaymentAttemptRepository: squareAttempts,
+                    squarePaymentAttemptContextAccessor: squareContext),
+                Session,
+                installmentOrderService: installmentService,
+                onInstallmentOrderCreatedAsync: _ => Task.CompletedTask)
+            {
+                IsInstallmentPaymentEnabled = true,
+                InstallmentCustomerName = "Alice",
+                InstallmentCustomerPhone = "0400111222",
+                TenderAmountText = "80"
+            };
+
+            await viewModel.SelectCardCommand.ExecuteAsync(null);
+            await viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+
+            var deposit = Assert.IsType<InstallmentOrderCreateRequest>(installmentService.LastCreateRequest).DownPayment;
+            Assert.Equal(PaymentMethodKind.Card, deposit.Method);
+            Assert.StartsWith("SQUARE_ATTEMPT:", deposit.IdempotencyKey, StringComparison.Ordinal);
+            var attemptGuid = Guid.ParseExact(deposit.IdempotencyKey!["SQUARE_ATTEMPT:".Length..], "N");
+            var attempt = Assert.IsType<LocalSquarePaymentAttempt>(await squareAttempts.GetAttemptAsync(attemptGuid));
+            Assert.Equal(LocalSquarePaymentAttemptStatus.OrderCompleted, attempt.Status);
+        }
+        finally
+        {
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(path);
+        }
+    }
+
+    [Fact]
     public async Task Payment_page_new_installment_creates_order_with_partial_first_payment_without_completing_regular_order()
     {
         var cart = new PosCartService();
@@ -8812,6 +8870,44 @@ public sealed class PosTerminalCashPaymentViewModelTests
         {
             Cues.Add(cue);
         }
+    }
+
+    /// <summary>
+    /// 模拟生产 Square 客户端：扣款成功时把当前 Square 记录标为已核实（PaymentVerified），再返回批准结果。
+    /// 已核实、未建单的记录正是自动恢复会补成销售单的那种。
+    /// </summary>
+    private sealed class VerifyingSquareTerminalClient(
+        ILocalSquarePaymentAttemptRepository attempts,
+        SquarePaymentAttemptContextAccessor context) : ICardTerminalClient
+    {
+        public async Task<PaymentAuthorizationResult> AuthorizeAsync(
+            decimal amount,
+            PosSessionState session,
+            CancellationToken cancellationToken = default)
+        {
+            var attempt = context.Current ?? throw new InvalidOperationException("No Square attempt is active.");
+            await attempts.MarkPaymentVerifiedAsync(
+                attempt.AttemptGuid,
+                "payment-layby",
+                "COMPLETED",
+                responseCode: null,
+                responseText: "Payment verified.",
+                DateTimeOffset.UtcNow,
+                CancellationToken.None);
+            return new PaymentAuthorizationResult(
+                true,
+                "SQ:payment-layby",
+                "Square",
+                amount,
+                [new CardTransactionDto("Square", "payment-layby", null, null, null, null, null, null, "COMPLETED", null, DateTimeOffset.UtcNow, amount, null)]);
+        }
+
+        public Task<PaymentAuthorizationResult> RefundAsync(
+            decimal amount,
+            PosSessionState session,
+            string? originalReference,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     /// <summary>只回答「读取卡终端配置」的设置服务替身：接口很大，这里用动态代理，调用其他成员直接报错。</summary>
