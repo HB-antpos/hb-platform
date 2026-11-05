@@ -93,6 +93,15 @@ namespace BlazorApp.Api.Services
                         userQuery = userQuery.Where(u => !excludedHighPrivilegeGuids.Contains(u.UserGUID));
                     }
                 }
+                else
+                {
+                    // 不限分店的读者里，仓库经理仍看不到管理员 / 同级别账号（超管与其他人此处名单为空）。
+                    var warehouseHiddenGuids = await ResolveWarehouseHiddenUserGuidsAsync(db);
+                    if (warehouseHiddenGuids.Length > 0)
+                    {
+                        userQuery = userQuery.Where(u => !warehouseHiddenGuids.Contains(u.UserGUID));
+                    }
+                }
 
                 // 搜索条件
                 if (!string.IsNullOrEmpty(query.SearchKeyword))
@@ -397,6 +406,17 @@ namespace BlazorApp.Api.Services
                         );
                     }
                 }
+                else
+                {
+                    // 不限分店的读者里，仓库经理仍看不到管理员 / 同级别账号（超管与其他人此处名单为空）。
+                    var warehouseHiddenGuids = await ResolveWarehouseHiddenUserGuidsAsync(db);
+                    if (warehouseHiddenGuids.Length > 0)
+                    {
+                        baseQuery = baseQuery.Where(
+                            (u, ur, r, us, s) => !warehouseHiddenGuids.Contains(u.UserGUID)
+                        );
+                    }
+                }
 
                 // 搜索条件
                 if (!string.IsNullOrEmpty(query.SearchKeyword))
@@ -654,6 +674,46 @@ namespace BlazorApp.Api.Services
             return excluded
                 .Where(userGuid => !string.Equals(userGuid, scope.UserGuid, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// 仓库经理在列表 / 统计里不可见的账号：
+        /// 1) 详情页已禁止仓库经理读取的「保护目标」（管理员、仓库经理角色，以及持有提升类权限码的账号）；
+        /// 2) 有效等级不低于自己的账号（同级别也看不见，与写入侧「不能修改等级不低于自己的账号」对齐）；
+        /// 本人始终可见。
+        /// 关键逻辑：用户范围服务把仓库经理当作「不限分店」（IsAdmin），列表因此原先不做任何过滤，
+        /// 导致列表能看到详情页明令禁止读取的管理员账号。只有「仓库经理（非超管）」才会返回非空名单，
+        /// 超级管理员与店长（走上面的分店范围过滤）不受这里影响。
+        /// </summary>
+        private async Task<string[]> ResolveWarehouseHiddenUserGuidsAsync(ISqlSugarClient db)
+        {
+            if (_manageableStoreScopeService == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            var actor = await UserAccessMutationSecurity.ResolveActorAsync(
+                db,
+                _manageableStoreScopeService
+            );
+            if (!actor.IsWarehouseManager)
+            {
+                return Array.Empty<string>();
+            }
+
+            var hidden = await UserAccessMutationSecurity.GetHighPrivilegeUserGuidsAsync(
+                db,
+                candidateUserGuids: null,
+                warehouseDelegation: true
+            );
+            var actorLevel = await UserAccessMutationSecurity.GetUserLevelAsync(db, actor.UserGuid);
+            hidden.UnionWith(
+                await UserAccessMutationSecurity.GetUserGuidsAtOrAboveLevelAsync(db, actorLevel)
+            );
+
+            return hidden
+                .Where(userGuid => !string.Equals(userGuid, actor.UserGuid, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
         }
 
@@ -3626,6 +3686,17 @@ namespace BlazorApp.Api.Services
                         scopedUserGuids.Contains(user.UserGUID)
                         && !excluded.Contains(user.UserGUID)
                     );
+                }
+                else
+                {
+                    // 统计口径必须与列表一致：仓库经理的总数不计入管理员 / 同级别账号。
+                    var warehouseHiddenGuids = await ResolveWarehouseHiddenUserGuidsAsync(db);
+                    if (warehouseHiddenGuids.Length > 0)
+                    {
+                        visibleUserQuery = visibleUserQuery.Where(user =>
+                            !warehouseHiddenGuids.Contains(user.UserGUID)
+                        );
+                    }
                 }
 
                 // 统计只读取用户标识和状态，关系表也只读取去重后的用户标识，避免构造完整列表 DTO。
