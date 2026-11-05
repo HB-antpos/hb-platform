@@ -32,6 +32,12 @@ public sealed class InstallmentRepaymentClaimOptions
     public bool Required { get; set; } = true;
 
     public bool CrossDeviceEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 允许刷卡续付的通道族，逗号分隔（如 "square,linkly,zeller"）。默认空：维持「刷卡续付一律拒绝」。
+    /// 只管新的刷卡续付能否开始；已经登记了通道的 claim（可能已扣款）的恢复与提交不受它影响。
+    /// </summary>
+    public string? CardRepaymentProviders { get; set; }
 }
 
 public sealed record InstallmentRepaymentClaimIdentity(
@@ -98,10 +104,13 @@ public sealed class InstallmentRepaymentClaimService(
     IOptions<InstallmentRepaymentClaimOptions> options,
     TimeProvider? timeProvider = null,
     IOptions<InstallmentCancelClaimOptions>? cancelOptions = null,
-    IOptions<InstallmentCrossDeviceLifecycleOptions>? lifecycleOptions = null) : IInstallmentRepaymentClaimService
+    IOptions<InstallmentCrossDeviceLifecycleOptions>? lifecycleOptions = null,
+    IInstallmentRepaymentCardTenderVerifier? cardTenderVerifier = null) : IInstallmentRepaymentClaimService
 {
     public const int PreparedClaimTtlSeconds = 120;
     private readonly InstallmentRepaymentClaimOptions _options = options.Value;
+    private readonly IReadOnlyList<string> _cardRepaymentProviders =
+        InstallmentCardRepaymentProviders.ParseList(options.Value.CardRepaymentProviders);
     private readonly InstallmentCancelClaimOptions _cancelOptions =
         cancelOptions?.Value ?? new InstallmentCancelClaimOptions();
     private readonly InstallmentCrossDeviceLifecycleOptions _lifecycleOptions =
@@ -113,7 +122,7 @@ public sealed class InstallmentRepaymentClaimService(
         return new InstallmentRepaymentCapabilitiesResponse(
             RepaymentClaimsSupported: true,
             RepaymentClaimsRequired: _options.Required,
-            CardRepaymentSupported: false,
+            CardRepaymentSupported: _cardRepaymentProviders.Count > 0,
             CrossDeviceRepaymentEnabled: _options.CrossDeviceEnabled,
             PreparedClaimTtlSeconds: PreparedClaimTtlSeconds,
             CancelClaimsSupported: true,
@@ -123,7 +132,8 @@ public sealed class InstallmentRepaymentClaimService(
             CrossDeviceVoidEnabled: _lifecycleOptions.VoidEnabled,
             CrossDevicePickupEnabled: _lifecycleOptions.PickupEnabled,
             RepaymentClaimPrepareProviderV1: true,
-            AmendLinesSupported: true);
+            AmendLinesSupported: true,
+            CardRepaymentProviders: _cardRepaymentProviders);
     }
 
     public async Task<InstallmentRepaymentClaimDto> CreateAsync(
@@ -134,7 +144,8 @@ public sealed class InstallmentRepaymentClaimService(
     {
         var normalizedIdentity = NormalizeIdentity(identity);
         var normalizedRequest = NormalizeCreateRequest(request);
-        EnsureServerVerifiablePaymentMethod(normalizedRequest.Method);
+        // 旧入口建 claim 时还不知道通道，只看刷卡续付总开关；通道白名单在 begin-provider 时检查。
+        EnsureNewCardRepaymentAllowed(normalizedRequest.Method, provider: null);
         ValidatePaymentPermissions(normalizedIdentity, normalizedRequest.Method);
         var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
         ValidateInstallmentForNewClaim(details, normalizedIdentity, normalizedRequest.Amount);
@@ -222,7 +233,7 @@ public sealed class InstallmentRepaymentClaimService(
                 cancellationToken);
         }
 
-        EnsureServerVerifiablePaymentMethod(normalized.CreateRequest.Method);
+        EnsureNewCardRepaymentAllowed(normalized.CreateRequest.Method, normalized.Provider);
         ValidatePaymentPermissions(normalizedIdentity, normalized.CreateRequest.Method);
         InstallmentRepaymentClaimCommitEvidenceValidator.ValidateProviderForMethod(
             normalized.CreateRequest.Method,
@@ -301,7 +312,6 @@ public sealed class InstallmentRepaymentClaimService(
             throw Mismatch("operationGuid is already bound to different repayment facts.");
         }
 
-        EnsureServerVerifiablePaymentMethod(current.Method);
         InstallmentRepaymentClaimCommitEvidenceValidator.ValidateProviderForMethod(current.Method, provider);
         current = await ExpirePreparedAsync(current, cancellationToken);
 
@@ -319,6 +329,8 @@ public sealed class InstallmentRepaymentClaimService(
         switch (current.Status)
         {
             case InstallmentRepaymentClaimStatus.Prepared:
+                // 只有尚未登记通道的 claim 才算「新开始一笔刷卡」，受开关约束；已登记的恢复重放不受影响。
+                EnsureNewCardRepaymentAllowed(current.Method, provider);
                 ValidatePaymentPermissions(normalizedIdentity, current.Method);
                 if (!string.Equals(current.CashierId, normalizedIdentity.CashierId, StringComparison.OrdinalIgnoreCase))
                 {
@@ -427,9 +439,13 @@ public sealed class InstallmentRepaymentClaimService(
         var currentIdentity = NormalizeIdentity(identity);
         var current = await GetRequiredAccessibleClaimAsync(installmentGuid, operationGuid, identity, cancellationToken);
         ValidatePaymentPermissions(currentIdentity, current.Method);
-        EnsureServerVerifiablePaymentMethod(current.Method);
         current = await ExpirePreparedAsync(current, cancellationToken);
         InstallmentRepaymentClaimCommitEvidenceValidator.ValidateProviderForMethod(current.Method, provider);
+        if (current.Status == InstallmentRepaymentClaimStatus.Prepared)
+        {
+            // 首次登记通道才受开关约束；ProviderPending / Unknown 的同 attempt 恢复必须放行（刷卡机可能已扣款）。
+            EnsureNewCardRepaymentAllowed(current.Method, provider);
+        }
         if (current.Status == InstallmentRepaymentClaimStatus.Prepared &&
             !string.Equals(current.CashierId, currentIdentity.CashierId, StringComparison.OrdinalIgnoreCase))
         {
@@ -641,8 +657,8 @@ public sealed class InstallmentRepaymentClaimService(
         CancellationToken cancellationToken)
     {
         var current = await GetRequiredAccessibleClaimAsync(installmentGuid, operationGuid, identity, cancellationToken);
+        // 提交不再看刷卡续付开关：走到这里的卡 claim 已经登记过通道、刷卡机可能已扣款，关掉开关也必须能入账。
         ValidateContinuationPermissions(identity, current);
-        EnsureServerVerifiablePaymentMethod(current.Method);
         if (current.Status == InstallmentRepaymentClaimStatus.Committed)
         {
             current = await RecordRecoveryCashierAsync(
@@ -665,6 +681,14 @@ public sealed class InstallmentRepaymentClaimService(
             NormalizeIdentity(identity),
             _timeProvider.GetUtcNow(),
             cancellationToken);
+        if (cardTenderVerifier is not null &&
+            result.Claim.Method == PaymentMethodKind.Card &&
+            !result.AlreadyRecorded)
+        {
+            // 旁路核对：只登记异常、不影响已入账的结果（与普通销售订单同口径）。
+            await cardTenderVerifier.VerifyAsync(result.Claim, request);
+        }
+
         return Map(
             result.Claim,
             result.CommitResponse,
@@ -1113,12 +1137,32 @@ public sealed class InstallmentRepaymentClaimService(
         }
     }
 
-    private static void EnsureServerVerifiablePaymentMethod(PaymentMethodKind method)
+    /// <summary>
+    /// 新开始一笔刷卡续付前的开关检查（建 claim、首次登记通道）。刷卡结果与普通销售一样信任收银机上报，
+    /// 由配置 <see cref="InstallmentRepaymentClaimOptions.CardRepaymentProviders"/> 按通道放开；
+    /// <paramref name="provider"/> 为空表示旧入口建 claim 时还不知道通道，只看是否有任一通道放开。
+    /// </summary>
+    private void EnsureNewCardRepaymentAllowed(PaymentMethodKind method, string? provider)
     {
-        if (method == PaymentMethodKind.Card)
+        if (method != PaymentMethodKind.Card)
         {
-            // 当前 Card 结果仅由客户端提交，服务端无法向 Square/Linkly 核验；在权威绑定完成前必须拒绝。
-            throw PaymentMethodUnsupported("Card installment repayment is unavailable until provider evidence can be verified by the server.");
+            return;
+        }
+
+        if (_cardRepaymentProviders.Count == 0)
+        {
+            throw PaymentMethodUnsupported("Card installment repayment is not enabled on this server.");
+        }
+
+        if (provider is null)
+        {
+            return;
+        }
+
+        var family = InstallmentCardRepaymentProviders.NormalizeFamily(provider);
+        if (family is null || !_cardRepaymentProviders.Contains(family, StringComparer.Ordinal))
+        {
+            throw PaymentMethodUnsupported($"Card installment repayment is not enabled for provider '{provider}'.");
         }
     }
 

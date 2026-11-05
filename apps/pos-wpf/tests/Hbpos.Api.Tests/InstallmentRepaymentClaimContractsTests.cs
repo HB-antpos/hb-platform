@@ -53,6 +53,31 @@ public sealed class InstallmentRepaymentClaimContractsTests
         Assert.Contains("\"repaymentClaimPrepareProviderV1\":true", json, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Square", "square")]
+    [InlineData("SQUARE_TERMINAL", "square")]
+    [InlineData("Linkly", "linkly")]
+    [InlineData("linkly-cloud", "linkly")]
+    [InlineData("ANZ", "linkly")]
+    [InlineData("Zeller", "zeller")]
+    [InlineData("Manual", null)]
+    [InlineData("cash", null)]
+    [InlineData("  ", null)]
+    public void Card_repayment_provider_families_normalize_claim_and_evidence_names(string value, string? expected)
+    {
+        Assert.Equal(expected, InstallmentCardRepaymentProviders.NormalizeFamily(value));
+    }
+
+    [Fact]
+    public void Card_repayment_provider_list_parses_comma_separated_config_in_fixed_order()
+    {
+        Assert.Empty(InstallmentCardRepaymentProviders.ParseList(null));
+        Assert.Empty(InstallmentCardRepaymentProviders.ParseList(" "));
+        Assert.Equal(
+            ["square", "linkly", "zeller"],
+            InstallmentCardRepaymentProviders.ParseList("zeller,LINKLY, square,square,tyro"));
+    }
+
     [Fact]
     public void Prepare_provider_request_contains_only_the_locked_payment_and_provider_facts()
     {

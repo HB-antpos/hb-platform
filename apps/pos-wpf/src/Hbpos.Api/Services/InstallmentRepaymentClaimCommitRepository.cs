@@ -529,7 +529,18 @@ public sealed class InstallmentRepaymentClaimEntity
 
 internal static class InstallmentRepaymentClaimCommitEvidenceValidator
 {
-    // Cash/Voucher 可由服务端权威记账；Card 在缺少 Square/Linkly 服务端绑定前一律 fail closed。
+    // 卡证据最多几条：一次续付只对应一笔刷卡；留余量给分步授权，再多就是异常请求。
+    internal const int MaxCardTransactions = 10;
+
+    // 单条卡证据序列化后的上限（含小票原文）；正常小票只有几 KB，超出只可能是异常请求。
+    internal const int MaxCardTransactionJsonLength = 64 * 1024;
+
+    // 与 InstallmentPaymentEntity.Reference 列宽一致，超长会在插入时被数据库截断报错。
+    internal const int MaxReferenceLength = 200;
+
+    // Cash/Voucher 由服务端权威记账；Card 与普通销售一样信任收银机上报的刷卡结果。
+    // Card 只硬拒「正常流程不可能产生」的证据（为空、金额不符、通道不符、超长）：钱已经扣了，
+    // 其余可疑之处（批准码、TxnRef 重复、Linkly 会话不符）只在入账后旁路登记，见 InstallmentRepaymentCardTenderVerifier。
     public static void Validate(
         InstallmentRepaymentClaimRecord claim,
         InstallmentRepaymentClaimCommitRequest request)
@@ -553,7 +564,8 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
                 NormalizeRequired(request.ReservationToken, "reservationToken");
                 break;
             case PaymentMethodKind.Card:
-                throw CardRepaymentUnavailable();
+                ValidateCardEvidence(claim, provider, request);
+                break;
             default:
                 throw Invalid("Repayment claim method is invalid.");
         }
@@ -571,9 +583,69 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
                 RequireProvider(provider, ProviderFamily.Voucher, "voucher");
                 break;
             case PaymentMethodKind.Card:
-                throw CardRepaymentUnavailable();
+                if (!IsCardFamily(provider))
+                {
+                    throw Invalid("Repayment claim provider does not match the card method.");
+                }
+                break;
             default:
                 throw Invalid("Repayment claim method is invalid.");
+        }
+    }
+
+    private static void ValidateCardEvidence(
+        InstallmentRepaymentClaimRecord claim,
+        ProviderFamily provider,
+        InstallmentRepaymentClaimCommitRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.ReservationToken))
+        {
+            throw Invalid("Card repayment must not contain a voucher reservation token.");
+        }
+
+        if (request.Reference is { Length: > MaxReferenceLength })
+        {
+            throw Invalid($"Card repayment reference must not exceed {MaxReferenceLength} characters.");
+        }
+
+        var transactions = request.CardTransactions;
+        if (transactions is not { Count: > 0 })
+        {
+            throw Invalid("Card repayment requires card transaction evidence.");
+        }
+
+        if (transactions.Count > MaxCardTransactions)
+        {
+            throw Invalid($"Card repayment must not contain more than {MaxCardTransactions} card transactions.");
+        }
+
+        foreach (var transaction in transactions)
+        {
+            if (transaction is null)
+            {
+                throw Invalid("Card transaction evidence must not contain empty entries.");
+            }
+
+            if (JsonSerializer.Serialize(transaction, InstallmentRepaymentClaimCommitRepositoryJson.Options).Length >
+                MaxCardTransactionJsonLength)
+            {
+                throw Invalid("Card transaction evidence is too large.");
+            }
+
+            // 认得出的处理器必须与 claim 登记的通道族一致；认不出的（如人工卡）只在旁路核对里登记。
+            var evidenceFamily = ProviderFamilyOf(transaction.Processor);
+            if (IsCardFamily(evidenceFamily) && evidenceFamily != provider)
+            {
+                throw Invalid("Card transaction processor does not match the repayment claim provider.");
+            }
+        }
+
+        // 与普通销售口径一致：银行流水金额按绝对值合计，必须等于 claim 锁定的金额。
+        var evidenceTotal = RoundCurrency(transactions.Sum(transaction => Math.Abs(transaction.Amount)));
+        if (evidenceTotal != RoundCurrency(claim.Amount))
+        {
+            throw Invalid(
+                $"Card transaction amounts sum to {evidenceTotal:0.00} but the repayment claim amount is {claim.Amount:0.00}.");
         }
     }
 
@@ -593,16 +665,28 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
         }
     }
 
+    private static bool IsCardFamily(ProviderFamily family) =>
+        family is ProviderFamily.Square or ProviderFamily.Linkly or ProviderFamily.Zeller;
+
     private static ProviderFamily ProviderFamilyOf(string? value)
     {
         var normalized = new string((value ?? string.Empty)
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray());
-        return normalized switch
+        switch (normalized)
         {
-            "cash" => ProviderFamily.Cash,
-            "voucher" => ProviderFamily.Voucher,
+            case "cash":
+                return ProviderFamily.Cash;
+            case "voucher":
+                return ProviderFamily.Voucher;
+        }
+
+        return InstallmentCardRepaymentProviders.NormalizeFamily(value) switch
+        {
+            InstallmentCardRepaymentProviders.Square => ProviderFamily.Square,
+            InstallmentCardRepaymentProviders.Linkly => ProviderFamily.Linkly,
+            InstallmentCardRepaymentProviders.Zeller => ProviderFamily.Zeller,
             _ => ProviderFamily.Unknown
         };
     }
@@ -624,13 +708,13 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
         InstallmentRepaymentClaimErrorCodes.Invalid,
         message);
 
-    private static InstallmentRepaymentClaimException CardRepaymentUnavailable() => Invalid(
-        "Card installment repayment is unavailable until provider evidence can be verified by the server.");
-
     private enum ProviderFamily
     {
         Unknown,
         Cash,
-        Voucher
+        Voucher,
+        Square,
+        Linkly,
+        Zeller
     }
 }

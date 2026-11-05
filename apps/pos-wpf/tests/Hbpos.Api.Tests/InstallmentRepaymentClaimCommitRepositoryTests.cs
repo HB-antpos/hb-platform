@@ -75,7 +75,44 @@ public sealed class InstallmentRepaymentClaimCommitRepositoryTests
     }
 
     [Fact]
-    public async Task Card_commit_fails_closed_before_transaction_and_leaves_all_ledgers_unchanged()
+    public async Task Card_commit_records_the_client_evidence_atomically_and_replays_idempotently()
+    {
+        await using var fixture = new CommitSqliteFixture();
+        var claim = await fixture.SeedProviderPendingClaimAsync(PaymentMethodKind.Card, amount: 10m);
+        var repository = new SqlSugarInstallmentRepaymentClaimCommitRepository(
+            fixture.DbContext,
+            new SqlSugarInstallmentRepository(fixture.DbContext),
+            new NoOpInstallmentRepaymentClaimCommitFaultInjector());
+
+        var first = await repository.CommitAsync(
+            claim,
+            CardCommitRequest(claim.Amount),
+            RecoveryIdentity(),
+            Now,
+            CancellationToken.None);
+        var replay = await repository.CommitAsync(
+            claim,
+            CardCommitRequest(claim.Amount),
+            RecoveryIdentity(),
+            Now,
+            CancellationToken.None);
+
+        Assert.False(first.AlreadyRecorded);
+        Assert.True(replay.AlreadyRecorded);
+        var state = await fixture.ReadStateAsync(claim);
+        Assert.Equal(1, state.RepaymentCount);
+        Assert.Equal((int)PaymentMethodKind.Card, state.Repayment.Method);
+        Assert.Equal(10m, state.Repayment.Amount);
+        Assert.Equal("APPROVED", state.Repayment.Reference);
+        Assert.Contains("\"txnRef\":\"TXN-ATOMIC\"", state.Repayment.CardTransactionsJson);
+        Assert.Equal(30m, state.Order.PaidAmount);
+        Assert.Equal(70m, state.Order.BalanceAmount);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed.ToString(), state.Claim.Status);
+        Assert.False(state.Claim.IsBlocking);
+    }
+
+    [Fact]
+    public async Task Card_commit_with_mismatched_evidence_amount_fails_closed_and_leaves_all_ledgers_unchanged()
     {
         await using var fixture = new CommitSqliteFixture();
         var claim = await fixture.SeedProviderPendingClaimAsync(PaymentMethodKind.Card, amount: 10m);
@@ -88,7 +125,7 @@ public sealed class InstallmentRepaymentClaimCommitRepositoryTests
         var exception = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
             repository.CommitAsync(
                 claim,
-                CardCommitRequest(claim.Amount),
+                CardCommitRequest(claim.Amount + 1m),
                 RecoveryIdentity(),
                 Now,
                 CancellationToken.None));
