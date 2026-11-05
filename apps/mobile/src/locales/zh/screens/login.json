@@ -147,7 +147,7 @@
   "resetPassword": {
     "entry": "设置 / 忘记密码",
     "title": "设置 / 找回密码",
-    "emailDescription": "输入你的员工邮箱，我们会发送 6 位验证码。店长新建账号后，你收到的邮件里也有验证码。",
+    "emailDescription": "输入你的员工邮箱，我们会发送 6 位验证码。新员工也可以直接用账号邮件里的初始密码登录。",
     "codeDescription": "验证码已发送到 {{email}}（如果该邮箱已开通账号）。请查收邮件，然后设置新密码。",
     "email": "员工邮箱",
     "changeEmail": "修改邮箱",
