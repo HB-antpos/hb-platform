@@ -244,6 +244,7 @@
   <data name="payment.installment.minimumNotice.ok" xml:space="preserve"><value>OK</value></data>
   <data name="payment.installment.status.invalidAmount" xml:space="preserve"><value>Lay-by payment amount must be greater than zero and not exceed the outstanding amount.</value></data>
   <data name="payment.installment.status.singleTenderOnly" xml:space="preserve"><value>Lay-by mode accepts one payment at a time.</value></data>
+  <data name="payment.installment.status.cardRepaymentUnsupported" xml:space="preserve"><value>Card payments for lay-by repayments are not supported yet. Please use cash or a voucher.</value></data>
   <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This lay-by order cannot receive more payments.</value></data>
   <data name="payment.installment.status.actionFailed" xml:space="preserve"><value>Lay-by payment failed.</value></data>
   <data name="payment.installment.status.created" xml:space="preserve"><value>Lay-by order created.</value></data>

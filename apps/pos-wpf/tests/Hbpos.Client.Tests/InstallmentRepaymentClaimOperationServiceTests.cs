@@ -127,6 +127,43 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         }
     }
 
+    [Fact]
+    public async Task Unsupported_card_method_fails_cleanly_before_provider_without_review_lock()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events)
+            {
+                CreateException = new CatalogApiException(
+                    "Card installment repayment is unavailable until provider evidence can be verified by the server.",
+                    HttpStatusCode.BadRequest,
+                    "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED")
+            };
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(true, AuthorizedAmount: request.Amount));
+            var service = new InstallmentOperationService(repository, api, terminal, new NoopVoucherTenderClient());
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            // 服务端在写 claim 前就拒绝：本地操作必须结案为 Failed 且不要求人工核对，付款页才能清掉草稿 tender。
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("暂不支持刷卡", result.Message);
+            Assert.Equal(["claim:create"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            Assert.Equal(0, api.LegacyAppendCalls);
+            var operation = await repository.GetAsync(request.PaymentGuid);
+            Assert.Equal(LocalInstallmentOperationState.Failed, operation?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
