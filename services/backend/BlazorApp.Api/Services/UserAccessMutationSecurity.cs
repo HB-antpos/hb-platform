@@ -401,6 +401,33 @@ namespace BlazorApp.Api.Services
         }
 
         /// <summary>
+        /// 有效等级不低于 <paramref name="level"/> 的全部账号。账号等级 = 其任一有效角色（未删除且启用）的最高有效等级，
+        /// 与 <see cref="GetUserLevelsAsync"/> 同口径；不需要候选名单，一次查询取完。
+        /// 供列表 / 统计类读取接口落实「只能看到等级严格低于自己的账号」，与写入侧 <see cref="ValidateTargetLevelAsync"/> 对齐。
+        /// </summary>
+        internal static async Task<HashSet<string>> GetUserGuidsAtOrAboveLevelAsync(
+            ISqlSugarClient db,
+            int level
+        )
+        {
+            var rows = await db.Queryable<UserRole>()
+                .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+                .Where((userRole, role) => !userRole.IsDeleted && !role.IsDeleted && role.IsActive)
+                .Select((userRole, role) => new
+                {
+                    UserGuid = userRole.UserGUID,
+                    role.RoleName,
+                    role.Level,
+                })
+                .ToListAsync();
+
+            return rows
+                .Where(row => EffectiveRoleLevel(row.RoleName, row.Level) >= level)
+                .Select(row => row.UserGuid)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// 目标账号等级必须严格低于操作者等级；本人不在此处判断（本人规则由各调用方单独处理）。
         /// 超级管理员由调用方在更早处放行，不经过这里。
         /// </summary>

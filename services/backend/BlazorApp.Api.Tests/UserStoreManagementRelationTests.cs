@@ -5521,6 +5521,129 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(4, result.Data!.TotalUsers);
         }
 
+        // 仓库经理视角的等级梯队：
+        //   wh-viewer（仓库经理 + 店长，等于线上 sean 账号）、wh-peer（同为仓库经理）、super-admin（管理员）、
+        //   custom-high（自定义角色且等级 85 > 仓库经理 80）、store-manager-user（店长 70）、staff-user（店员）、no-role-user（无角色）。
+        private async Task SeedWarehouseHierarchyUsersAsync()
+        {
+            await _db.Insertable(new[]
+            {
+                CreateUser("wh-viewer", "wh-viewer@example.test"),
+                CreateUser("wh-peer", "wh-peer@example.test"),
+                CreateUser("super-admin", "super-admin@example.test"),
+                CreateUser("custom-high", "custom-high@example.test"),
+                CreateUser("store-manager-user", "store-manager-user@example.test"),
+                CreateUser("staff-user", "staff-user@example.test"),
+                CreateUser("no-role-user-wh", "no-role-user-wh@example.test"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                new Role { RoleGUID = "role-hier-admin", RoleName = "Admin", IsActive = true },
+                new Role { RoleGUID = "role-hier-warehouse", RoleName = "WarehouseManager", IsActive = true },
+                new Role { RoleGUID = "role-hier-store-manager", RoleName = "StoreManager", IsActive = true },
+                new Role { RoleGUID = "role-hier-store-staff", RoleName = "StoreStaff", IsActive = true },
+                new Role { RoleGUID = "role-hier-custom", RoleName = "Supervisor", IsActive = true, Level = 85 },
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("wh-viewer", "role-hier-warehouse"),
+                CreateUserRole("wh-viewer", "role-hier-store-manager"),
+                CreateUserRole("wh-peer", "role-hier-warehouse"),
+                CreateUserRole("super-admin", "role-hier-admin"),
+                CreateUserRole("custom-high", "role-hier-custom"),
+                CreateUserRole("store-manager-user", "role-hier-store-manager"),
+                CreateUserRole("staff-user", "role-hier-store-staff"),
+            }).ExecuteCommandAsync();
+        }
+
+        private UserService CreateWarehouseManagerUserService() =>
+            CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                // 与线上一致：范围服务把仓库经理当作不限分店（IsAdmin），身份细分由 UserAccessMutationSecurity 按角色解析。
+                IsAllowed = true,
+                IsAuthenticated = true,
+                IsAdmin = true,
+                UserGuid = "wh-viewer",
+            }));
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GetUsers_WarehouseManagerCannotSeeAdminOrSameOrHigherLevelAccounts(bool useOptimized)
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+
+            var result = await GetUsersAsync(
+                CreateWarehouseManagerUserService(),
+                useOptimized,
+                new UserQueryDto { Page = 1, PageSize = 100 }
+            );
+
+            Assert.True(result.Success);
+            // 本人 + 等级严格更低的账号（店长 70、店员 30、无角色）可见。
+            Assert.Equal(
+                new[] { "no-role-user-wh", "staff-user", "store-manager-user", "wh-viewer" },
+                result.Data!.Items!.Select(item => item.UserGUID).OrderBy(item => item).ToArray()
+            );
+            // 管理员、同级别仓库经理、自定义高等级角色账号一律不可见。
+            Assert.DoesNotContain(result.Data.Items!, item =>
+                item.UserGUID is "super-admin" or "wh-peer" or "custom-high");
+        }
+
+        [Fact]
+        public async Task GetUsersOptimizedAsync_WarehouseManagerSearchCannotFindHiddenAccounts()
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+            var service = CreateWarehouseManagerUserService();
+
+            // 搜索关键字命中管理员时也不能把它找出来（手机「人员管理」搜 adm 的场景）。
+            var admin = await service.GetUsersOptimizedAsync(
+                new UserQueryDto { Page = 1, PageSize = 100, SearchKeyword = "super-admin" }
+            );
+            var peer = await service.GetUsersOptimizedAsync(
+                new UserQueryDto { Page = 1, PageSize = 100, SearchKeyword = "wh-peer" }
+            );
+
+            Assert.True(admin.Success);
+            Assert.Empty(admin.Data!.Items!);
+            Assert.True(peer.Success);
+            Assert.Empty(peer.Data!.Items!);
+        }
+
+        [Fact]
+        public async Task GetUserStatisticsAsync_WarehouseManagerCountsSameVisibleUsersAsList()
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+
+            var result = await CreateWarehouseManagerUserService().GetUserStatisticsAsync();
+
+            Assert.True(result.Success);
+            // wh-viewer、store-manager-user、staff-user、no-role-user-wh；管理员 / 同级别 / 更高等级账号不计入。
+            Assert.Equal(4, result.Data!.TotalUsers);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GetUsers_AdminStillSeesWarehouseManagerAndAdminAccounts(bool useOptimized)
+        {
+            await SeedWarehouseHierarchyUsersAsync();
+            var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                IsAdmin = true,
+                UserGuid = "super-admin",
+            }));
+
+            var result = await GetUsersAsync(service, useOptimized, new UserQueryDto { Page = 1, PageSize = 100 });
+
+            Assert.True(result.Success);
+            Assert.Equal(7, result.Data!.Items!.Count);
+            Assert.Contains(result.Data.Items!, item => item.UserGUID == "wh-peer");
+            Assert.Contains(result.Data.Items!, item => item.UserGUID == "custom-high");
+        }
+
         private UserService CreateUserService(
             ICurrentUserManageableStoreScopeService? manageableStoreScopeService = null
         )
