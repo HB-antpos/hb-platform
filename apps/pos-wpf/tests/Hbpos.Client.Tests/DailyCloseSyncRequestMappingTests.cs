@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.DailyClose;
+using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
@@ -79,6 +80,46 @@ public sealed class DailyCloseSyncRequestMappingTests
         var request = DailyCloseSyncRequestMapper.ToRequest(withRounding, "1.0.81");
 
         Assert.Equal(0.03m, request.CashRoundingAmount);
+    }
+
+    [Fact]
+    public async Task ToRequest_uploads_sales_plus_installment_totals_per_tender_and_still_passes_the_server_rules()
+    {
+        await using var fixture = await DailyCloseUploadFixture.CreateAsync();
+        var saved = await DailyCloseTestData.SaveRealisticDailyCloseAsync(fixture.Store, new DateTime(2026, 5, 28));
+        var archive = (await fixture.Repository.GetArchiveForUploadAsync(saved.DailyCloseGuid))!;
+        var salesCash = archive.Report.PaymentSummaries.Single(item => item.Method == PaymentMethodKind.Cash);
+        var salesCard = archive.Report.PaymentSummaries.Single(item => item.Method == PaymentMethodKind.Card);
+
+        // 分期现金收 20.03、退 5.02，刷卡收 30：上传的现金、刷卡是「销售 + 分期」合计，差额按合计后的应有现金算。
+        var report = archive.Report with
+        {
+            InstallmentSummaries =
+            [
+                new DailyClosePaymentSummary(PaymentMethodKind.Cash, 20.03m, 5.02m, 15.01m, 2),
+                new DailyClosePaymentSummary(PaymentMethodKind.Card, 30m, 0m, 30m, 1),
+                new DailyClosePaymentSummary(PaymentMethodKind.Voucher, 0m, 0m, 0m, 0)
+            ],
+            InstallmentPaymentCount = 3,
+            CashRoundingAmount = archive.Report.CashRoundingAmount + 0.04m
+        };
+        var withInstallments = archive with
+        {
+            Report = report,
+            CashDifference = archive.CountedCashAmount - report.ExpectedCashAmount
+        };
+
+        var request = DailyCloseSyncRequestMapper.ToRequest(withInstallments, "1.0.81");
+
+        var cash = request.Tenders.Single(tender => tender.Method == DailyCloseContractConstants.TenderCash);
+        Assert.Equal(salesCash.SalesAmount + 20.03m, cash.SalesAmount);
+        Assert.Equal(salesCash.RefundAmount + 5.02m, cash.RefundAmount);
+        Assert.Equal(salesCash.NetAmount + 15.01m, cash.NetAmount);
+        var card = request.Tenders.Single(tender => tender.Method == DailyCloseContractConstants.TenderCard);
+        Assert.Equal(salesCard.NetAmount + 30m, card.NetAmount);
+        Assert.Equal(3, request.InstallmentPaymentCount);
+        Assert.Equal(archive.Report.OrderCount, request.OrderCount);
+        Assert.Null(DailyCloseServerRuleReplica.FirstViolation(request, archive.Report.StoreCode, archive.Report.DeviceCode));
     }
 
     [Theory]

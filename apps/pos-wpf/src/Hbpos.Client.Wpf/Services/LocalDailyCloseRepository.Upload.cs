@@ -204,7 +204,9 @@ public sealed partial class LocalDailyCloseRepository : ILocalDailyCloseUploadRe
                 SELECT DailyCloseGuid, StoreCode, DeviceCode, CashierId, CashierName, BusinessDate, PeriodFrom, PeriodTo, SavedAt,
                        OrderCount, CashSalesAmount, CashRefundAmount, CashNetAmount, CardSalesAmount, CardRefundAmount, CardNetAmount,
                        VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
-                       CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount
+                       CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
+                       InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
+                       InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount
                 FROM LocalDailyCloses
                 WHERE DailyCloseGuid = $DailyCloseGuid;
                 """;

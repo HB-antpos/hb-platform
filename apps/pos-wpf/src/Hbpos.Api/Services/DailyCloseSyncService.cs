@@ -184,9 +184,16 @@ internal sealed class DailyCloseSyncService(
 
         // 每张订单的现金进位最多 ±2 分（5 分进位），合计不可能超过 订单数 × 2 分；
         // 超出说明客户端数据有问题，直接拒绝，避免用进位去掩盖真实的现金差异。
-        if (Math.Abs(cashRoundingAmount) > request.OrderCount * MaximumRoundingPerOrder + RoundingTolerance)
+        if (request.InstallmentPaymentCount < 0)
         {
-            throw Invalid("INVALID_CASH_ROUNDING", "cashRoundingAmount exceeds the maximum possible cash rounding for the order count.");
+            throw Invalid("INVALID_INSTALLMENT_PAYMENT_COUNT", "installmentPaymentCount cannot be negative.");
+        }
+
+        // 分期（Lay-by）的现金收款、退款和订单一样按笔进位，所以上限按 订单数 + 分期付款笔数 计算。
+        var roundedTransactionCount = (long)request.OrderCount + request.InstallmentPaymentCount;
+        if (Math.Abs(cashRoundingAmount) > roundedTransactionCount * MaximumRoundingPerOrder + RoundingTolerance)
+        {
+            throw Invalid("INVALID_CASH_ROUNDING", "cashRoundingAmount exceeds the maximum possible cash rounding for the order and installment payment count.");
         }
 
         // 应有现金 = 现金净额 + 现金进位；旧客户端进位为 0，结果与此前一致。

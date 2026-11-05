@@ -54,7 +54,8 @@ public sealed class DailyCloseSyncContractsTests
                 "PeriodFrom", "PeriodTo", "SavedAt", "CashierId", "CashierName", "AppVersion",
                 "OrderCount", "ReturnQuantity", "RefundAmount", "Tenders", "CashCounts",
                 "NoteSubtotal", "CoinSubtotal", "CountedCashAmount", "CashDifference",
-                "CashRoundingAmount"
+                "CashRoundingAmount",
+                "InstallmentPaymentCount"
             ],
             properties);
     }

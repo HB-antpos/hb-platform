@@ -147,7 +147,8 @@ internal static class DailyCloseSyncRequestMapper
             archive.CoinSubtotal,
             archive.CountedCashAmount,
             archive.CashDifference,
-            report.CashRoundingAmount);
+            report.CashRoundingAmount,
+            report.InstallmentPaymentCount);
     }
 
     /// <summary>本地面额是以元为单位的 decimal（如 100、0.05），换算成分用 decimal 乘 100 取整，避免浮点误差。</summary>
@@ -169,12 +170,14 @@ internal static class DailyCloseSyncRequestMapper
 
     private static DailyCloseTenderSync ToTender(DailyCloseReport report, PaymentMethodKind method, string contractMethod)
     {
-        var summary = report.PaymentSummaries.FirstOrDefault(item => item.Method == method);
+        // 中文注释：上传的是这种付款方式当天进出本机的全部款项（销售订单 + 分期）。
+        // 服务端按「实点现金 − (现金净额 + 进位)」核对差额，银行结算也是按合计对；分期明细只在本机存档和小票上单列。
+        var summary = report.GetCombinedSummary(method);
         return new DailyCloseTenderSync(
             contractMethod,
-            summary?.SalesAmount ?? 0m,
-            summary?.RefundAmount ?? 0m,
-            summary?.NetAmount ?? 0m);
+            summary.SalesAmount,
+            summary.RefundAmount,
+            summary.NetAmount);
     }
 }
 

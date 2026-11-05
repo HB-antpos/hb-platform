@@ -2,6 +2,7 @@ using System.Globalization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Catalog;
+using Hbpos.Contracts.Installments;
 using Hbpos.Contracts.Orders;
 using Microsoft.Data.Sqlite;
 
@@ -300,6 +301,160 @@ public sealed class DailyCloseServiceTests
             DeleteTempDatabase(databasePath);
         }
     }
+
+    [Fact]
+    public async Task LoadReportAsync_lists_this_tills_installment_payments_separately_and_adds_their_cash_to_expected_cash()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var orderRepository = new LocalOrderRepository(store);
+            var installments = new LocalInstallmentOrderRepository(store);
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+            var session = CreateSession();
+            var businessDate = new DateTime(2026, 5, 28);
+            var today = CreateLocalTimestamp(2026, 5, 28, 10, 0, 0);
+
+            await schema.InitializeAsync();
+            await orderRepository.SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 9, 0, 0), 10m,
+                [CreateLine("SKU-S1", "S1", 1m, 10m)],
+                [CreatePayment(PaymentMethodKind.Cash, 10m)]));
+            // 一张分期：本机当天收现金 20.03（进位 +0.02）、刷卡 30、礼券 10；另有昨天的定金、别的收银机的续付、作废的付款，都不计入。
+            await installments.UpsertAsync(CreateInstallment(
+                session.StoreCode,
+                today,
+                InstallmentPayment(PaymentMethodKind.Cash, 20.03m, today, session.DeviceCode),
+                InstallmentPayment(PaymentMethodKind.Card, 30m, today.AddMinutes(5), session.DeviceCode),
+                InstallmentPayment(PaymentMethodKind.Voucher, 10m, today.AddMinutes(6), session.DeviceCode),
+                InstallmentPayment(PaymentMethodKind.Cash, 50m, today.AddDays(-1), session.DeviceCode),
+                InstallmentPayment(PaymentMethodKind.Cash, 40m, today, "POS-02"),
+                InstallmentPayment(PaymentMethodKind.Cash, 15m, today, session.DeviceCode, InstallmentPaymentStatus.Voided)));
+            // 另一张分期当天在本机取消：现金退 5.02（进位 +0.02），刷卡原付款改退礼券 8。
+            await installments.UpsertAsync(CreateInstallment(
+                session.StoreCode,
+                today.AddHours(2),
+                InstallmentPayment(PaymentMethodKind.Cash, -5.02m, today.AddHours(2), session.DeviceCode),
+                InstallmentPayment(PaymentMethodKind.Voucher, -8m, today.AddHours(2), session.DeviceCode)));
+
+            var report = await service.LoadReportAsync(session, businessDate);
+
+            // 销售汇总不变：订单数、销售额只算销售订单。
+            Assert.Equal(1, report.OrderCount);
+            Assert.Equal(10m, report.SalesAmount);
+            Assert.Equal(10m, report.NetAmount);
+            Assert.Equal(10m, report.PaymentSummaries.Single(item => item.Method == PaymentMethodKind.Cash).NetAmount);
+            // 分期单列。
+            Assert.True(report.HasInstallmentPayments);
+            Assert.Equal(5, report.InstallmentPaymentCount);
+            var cash = report.InstallmentPayments.Single(item => item.Method == PaymentMethodKind.Cash);
+            Assert.Equal((20.03m, 5.02m, 15.01m), (cash.SalesAmount, cash.RefundAmount, cash.NetAmount));
+            var card = report.InstallmentPayments.Single(item => item.Method == PaymentMethodKind.Card);
+            Assert.Equal((30m, 0m, 30m), (card.SalesAmount, card.RefundAmount, card.NetAmount));
+            var voucher = report.InstallmentPayments.Single(item => item.Method == PaymentMethodKind.Voucher);
+            Assert.Equal((10m, 8m, 2m), (voucher.SalesAmount, voucher.RefundAmount, voucher.NetAmount));
+            Assert.Equal(47.01m, report.InstallmentNetAmount);
+            // 应有现金 = 销售现金 10 + 分期现金 15.01 + 进位 0.04 = 25.05（钱箱里是 10 + 20.05 − 5.00）。
+            Assert.Equal(25.01m, report.SystemCashAmount);
+            Assert.Equal(0.04m, report.CashRoundingAmount);
+            Assert.Equal(25.05m, report.ExpectedCashAmount);
+            Assert.Equal((30.03m, 5.02m, 25.01m), (report.GetCombinedSummary(PaymentMethodKind.Cash).SalesAmount, report.GetCombinedSummary(PaymentMethodKind.Cash).RefundAmount, report.GetCombinedSummary(PaymentMethodKind.Cash).NetAmount));
+
+            var archive = await service.SaveAsync(
+                session,
+                businessDate,
+                [Count(20m, 1), Count(5m, 1), Count(0.05m, 1)],
+                report);
+            Assert.Equal(25.05m, archive.CountedCashAmount);
+            Assert.Equal(0m, archive.CashDifference);
+
+            // 存档重新读出后分期明细还在，重印小票和上传用的都是同一份数字。
+            var reloaded = Assert.Single(await service.GetArchivesAsync(session, businessDate));
+            Assert.Equal(5, reloaded.Report.InstallmentPaymentCount);
+            Assert.Equal(15.01m, reloaded.Report.InstallmentPayments.Single(item => item.Method == PaymentMethodKind.Cash).NetAmount);
+            Assert.Equal(30m, reloaded.Report.InstallmentPayments.Single(item => item.Method == PaymentMethodKind.Card).NetAmount);
+            Assert.Equal(25.05m, reloaded.Report.ExpectedCashAmount);
+            Assert.Equal(0m, reloaded.CashDifference);
+
+            // 点钞之后又在本机收了一笔分期现金：保存时必须拦下，让收银员按新的应有现金重新核对。
+            await installments.UpsertAsync(CreateInstallment(
+                session.StoreCode,
+                today.AddHours(3),
+                InstallmentPayment(PaymentMethodKind.Cash, 20m, today.AddHours(3), session.DeviceCode)));
+            var changed = await Assert.ThrowsAsync<DailyCloseReportChangedException>(() =>
+                service.SaveAsync(session, businessDate, [Count(20m, 1), Count(5m, 1), Count(0.05m, 1)], report));
+            Assert.Equal(45.05m, changed.LatestReport.ExpectedCashAmount);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task LoadReportAsync_without_installment_payments_keeps_the_previous_figures()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var session = CreateSession();
+            await new LocalOrderRepository(store).SavePendingOrderAsync(CreateOrder(
+                session.StoreCode, session.DeviceCode, CreateLocalTimestamp(2026, 5, 28, 9, 0, 0), 12.43m,
+                [CreateLine("SKU-N1", "N1", 1m, 12.43m)],
+                [CreatePayment(PaymentMethodKind.Cash, 12.43m)]));
+
+            var report = await new DailyCloseService(new LocalDailyCloseRepository(store)).LoadReportAsync(session, new DateTime(2026, 5, 28));
+
+            Assert.False(report.HasInstallmentPayments);
+            Assert.Equal(0, report.InstallmentPaymentCount);
+            Assert.Equal(12.43m, report.SystemCashAmount);
+            Assert.Equal(12.45m, report.ExpectedCashAmount);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    private static LocalInstallmentOrder CreateInstallment(string storeCode, DateTimeOffset updatedAt, params InstallmentPaymentDto[] payments)
+    {
+        var installmentGuid = Guid.NewGuid();
+        return new LocalInstallmentOrder(
+            installmentGuid,
+            installmentGuid,
+            $"INS-{installmentGuid:N}"[..12],
+            storeCode,
+            "POS-ORIGIN",
+            "C001",
+            "Alice",
+            "Bob",
+            "0400000000",
+            updatedAt.AddDays(-2),
+            updatedAt,
+            200m,
+            20m,
+            20m,
+            payments.Where(payment => payment.Status == InstallmentPaymentStatus.Recorded).Sum(payment => payment.Amount),
+            100m,
+            InstallmentStatus.Active,
+            [],
+            payments,
+            null);
+    }
+
+    private static InstallmentPaymentDto InstallmentPayment(
+        PaymentMethodKind method,
+        decimal amount,
+        DateTimeOffset recordedAt,
+        string deviceCode,
+        InstallmentPaymentStatus status = InstallmentPaymentStatus.Recorded) =>
+        new(Guid.NewGuid(), method, amount, null, status, recordedAt.ToUniversalTime(), "C001", deviceCode);
 
     [Fact]
     public void HasSameFiguresAs_compares_order_count_and_cash_but_ignores_card_amounts()

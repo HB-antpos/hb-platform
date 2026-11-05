@@ -37,6 +37,46 @@ public sealed class DailyClosePrintingTests
     }
 
     [Fact]
+    public async Task Daily_close_print_lists_installment_payments_separately_and_counts_their_cash_as_expected()
+    {
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new DailyClosePrintService(
+            new FakeReceiptPrinterSettingsStore { Settings = ReceiptPrinterSettings.Default with { PrinterPort = "COM5" } },
+            driver);
+        var baseArchive = CreateArchive();
+        // 销售现金净额 280.00 + 分期现金净额 45.00 = 应有现金 325.00；销售汇总行不变。
+        var archive = baseArchive with
+        {
+            Report = baseArchive.Report with
+            {
+                InstallmentSummaries =
+                [
+                    new DailyClosePaymentSummary(PaymentMethodKind.Cash, 60m, 15m, 45m, 3),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Card, 120m, 0m, 120m, 2),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Voucher, 0m, 0m, 0m, 0)
+                ],
+                InstallmentPaymentCount = 5
+            }
+        };
+
+        var result = await service.PrintAsync(archive, ReceiptPrintReason.Manual);
+
+        Assert.True(result.Succeeded);
+        var rows = driver.Documents[0].PreviewRows.Select(row => row.Text).ToList();
+        Assert.Contains(rows, text => text.Contains("Lay-by Payments", StringComparison.Ordinal) && text.TrimEnd().EndsWith("5", StringComparison.Ordinal));
+        Assert.Contains(rows, text => text.StartsWith("LB Cash", StringComparison.Ordinal) && text.Contains("$60.00", StringComparison.Ordinal) && text.Contains("$15.00", StringComparison.Ordinal) && text.Contains("$45.00", StringComparison.Ordinal));
+        Assert.Contains(rows, text => text.StartsWith("LB Card", StringComparison.Ordinal) && text.Contains("$120.00", StringComparison.Ordinal));
+        Assert.Contains(rows, text => text.Contains("Lay-by Net", StringComparison.Ordinal) && text.Contains("$165.00", StringComparison.Ordinal));
+        Assert.Contains(rows, text => text.Contains("Sales Amount", StringComparison.Ordinal) && text.Contains("$860.50", StringComparison.Ordinal));
+        Assert.Contains(rows, text => text.Contains("Cash Expected", StringComparison.Ordinal) && text.Contains("$325.00", StringComparison.Ordinal));
+
+        // 没有分期款项的日结小票不出现这一段。
+        driver.Documents.Clear();
+        await service.PrintAsync(baseArchive, ReceiptPrintReason.Manual);
+        Assert.DoesNotContain(driver.Documents[0].PreviewRows, row => row.Text.Contains("Lay-by", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Daily_close_print_service_prints_required_daily_close_sections()
     {
         var settingsStore = new FakeReceiptPrinterSettingsStore

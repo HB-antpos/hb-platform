@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using Hbpos.Client.Wpf.Models;
+using Hbpos.Contracts.Installments;
 using Hbpos.Contracts.Orders;
 using Microsoft.Data.Sqlite;
 
@@ -46,16 +48,44 @@ public sealed record DailyCloseReport(
     IReadOnlyList<DailyClosePaymentSummary> PaymentSummaries,
     decimal RefundAmount,
     decimal ReturnQuantity,
-    decimal CashRoundingAmount = 0m)
+    decimal CashRoundingAmount = 0m,
+    // 分期（Lay-by）在本机当天收到和退回的款项，按付款方式汇总：SalesAmount 是收款（定金、续付），RefundAmount 是取消分期的退款。
+    // 分期付款不属于销售订单，所以单列，不并进 PaymentSummaries；旧存档没有这项，为 null。
+    IReadOnlyList<DailyClosePaymentSummary>? InstallmentSummaries = null,
+    // 分期收款与退款的笔数（现金进位按笔计算，上传时服务端据此核对进位上限）。
+    int InstallmentPaymentCount = 0)
 {
     public decimal SalesAmount => Round(PaymentSummaries.Sum(summary => summary.SalesAmount));
 
     public decimal NetAmount => Round(PaymentSummaries.Sum(summary => summary.NetAmount));
 
-    // 系统记录的现金支付净额（按订单精确金额，不含现金进位）。
-    public decimal SystemCashAmount => Round(PaymentSummaries
-        .FirstOrDefault(summary => summary.Method == PaymentMethodKind.Cash)
-        ?.NetAmount ?? 0m);
+    public IReadOnlyList<DailyClosePaymentSummary> InstallmentPayments => InstallmentSummaries ?? [];
+
+    public bool HasInstallmentPayments => InstallmentPayments.Any(summary => summary.SalesAmount != 0m || summary.RefundAmount != 0m);
+
+    public decimal InstallmentReceivedAmount => Round(InstallmentPayments.Sum(summary => summary.SalesAmount));
+
+    public decimal InstallmentRefundAmount => Round(InstallmentPayments.Sum(summary => summary.RefundAmount));
+
+    public decimal InstallmentNetAmount => Round(InstallmentPayments.Sum(summary => summary.NetAmount));
+
+    /// <summary>某种付款方式当天进出这台收银机的全部款项：销售订单加分期。上传和银行对账用这个口径。</summary>
+    public DailyClosePaymentSummary GetCombinedSummary(PaymentMethodKind method)
+    {
+        var sales = PaymentSummaries.FirstOrDefault(summary => summary.Method == method);
+        var installment = InstallmentPayments.FirstOrDefault(summary => summary.Method == method);
+        var received = Round((sales?.SalesAmount ?? 0m) + (installment?.SalesAmount ?? 0m));
+        var refunded = Round((sales?.RefundAmount ?? 0m) + (installment?.RefundAmount ?? 0m));
+        return new DailyClosePaymentSummary(
+            method,
+            received,
+            refunded,
+            Round(received - refunded),
+            (sales?.TransactionCount ?? 0) + (installment?.TransactionCount ?? 0));
+    }
+
+    // 系统记录的现金净额（精确金额，不含现金进位）：销售订单的现金加分期的现金，两者都进同一个钱箱。
+    public decimal SystemCashAmount => GetCombinedSummary(PaymentMethodKind.Cash).NetAmount;
 
     // 应有现金 = 精确现金净额 + 现金进位：澳洲现金按 5 分进位，钱箱里实际多出/少出的是进位后的金额，
     // 所以实点现金必然是 5 分的整数倍，对账必须拿进位后的金额比，否则每天都会有几分钱的假差额。
@@ -69,7 +99,18 @@ public sealed record DailyCloseReport(
     /// </summary>
     public bool HasSameFiguresAs(DailyCloseReport other)
     {
-        if (OrderCount != other.OrderCount || CashRoundingAmount != other.CashRoundingAmount)
+        if (OrderCount != other.OrderCount ||
+            CashRoundingAmount != other.CashRoundingAmount ||
+            InstallmentPaymentCount != other.InstallmentPaymentCount)
+        {
+            return false;
+        }
+
+        // 分期现金同样进钱箱，点钞期间有新的分期收款或退款也要重新核对。
+        var myInstallmentCash = InstallmentPayments.FirstOrDefault(item => item.Method == PaymentMethodKind.Cash);
+        var theirInstallmentCash = other.InstallmentPayments.FirstOrDefault(item => item.Method == PaymentMethodKind.Cash);
+        if ((myInstallmentCash?.SalesAmount ?? 0m) != (theirInstallmentCash?.SalesAmount ?? 0m) ||
+            (myInstallmentCash?.RefundAmount ?? 0m) != (theirInstallmentCash?.RefundAmount ?? 0m))
         {
             return false;
         }
@@ -341,6 +382,7 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
         var paymentSummaries = await ReadPaymentSummariesAsync(connection, orderGuids, cancellationToken);
         var returnQuantity = await ReadReturnQuantityAsync(connection, orderGuids, cancellationToken);
         var cashRoundingAmount = await ReadCashRoundingAmountAsync(connection, orderGuids, cancellationToken);
+        var installments = await ReadInstallmentPaymentsAsync(connection, session, period.From, period.To, cancellationToken);
 
         return new DailyCloseReport(
             businessDate.Date,
@@ -354,8 +396,105 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             paymentSummaries,
             Round(paymentSummaries.Sum(summary => summary.RefundAmount)),
             returnQuantity,
-            cashRoundingAmount);
+            Round(cashRoundingAmount + installments.CashRoundingAmount),
+            installments.Summaries,
+            installments.PaymentCount);
     }
+
+    /// <summary>
+    /// 本机当天的分期收款与退款。来源是本机保存的分期快照（LocalOrderInstallments.PaymentsJson）：
+    /// 每次在本机收定金、续付、取消退款成功后都会保存最新快照。只统计本机（DeviceCode）经手、且记账时间落在当天的有效付款；
+    /// 负数金额是取消分期的退款。现金按每笔付款各自进位到 5 分，与收银时一致。
+    /// </summary>
+    private static async Task<InstallmentPaymentTotals> ReadInstallmentPaymentsAsync(
+        SqliteConnection connection,
+        PosSessionState session,
+        DateTimeOffset periodFrom,
+        DateTimeOffset periodTo,
+        CancellationToken cancellationToken)
+    {
+        var accumulators = InstallmentMethods.ToDictionary(method => method, method => new PaymentAccumulator(method));
+        var seenPayments = new HashSet<Guid>();
+        var cashRounding = 0m;
+        var policy = new CashRoundingPolicy();
+
+        await using var command = connection.CreateCommand();
+        // 当天有付款的分期单，快照的更新时间一定不早于当天开始；据此先筛一遍，避免每次日结都解析全部历史分期。
+        command.CommandText = """
+            SELECT PaymentsJson
+            FROM LocalOrderInstallments
+            WHERE StoreCode = $StoreCode
+              AND julianday(UpdatedAt) >= julianday($PeriodFrom);
+            """;
+        command.Parameters.AddWithValue("$StoreCode", session.StoreCode);
+        command.Parameters.AddWithValue("$PeriodFrom", periodFrom.ToString("O"));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            IReadOnlyList<InstallmentPaymentDto>? payments;
+            try
+            {
+                payments = JsonSerializer.Deserialize<IReadOnlyList<InstallmentPaymentDto>>(reader.GetString(0), InstallmentJsonOptions);
+            }
+            catch (JsonException)
+            {
+                // 单张分期快照损坏不能让整个日结打不开；这张分期的付款不计入，并留下日志。
+                ConsoleLog.WriteWarning("DailyClose", "installment snapshot payments could not be parsed and were skipped");
+                continue;
+            }
+
+            foreach (var payment in payments ?? [])
+            {
+                if (payment.Status != InstallmentPaymentStatus.Recorded ||
+                    payment.Amount == 0m ||
+                    !string.Equals(payment.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
+                    payment.RecordedAt < periodFrom ||
+                    payment.RecordedAt >= periodTo ||
+                    !accumulators.TryGetValue(payment.Method, out var accumulator) ||
+                    !seenPayments.Add(payment.PaymentGuid))
+                {
+                    continue;
+                }
+
+                accumulator.TransactionCount++;
+                if (payment.Amount > 0m)
+                {
+                    accumulator.SalesAmount += payment.Amount;
+                }
+                else
+                {
+                    accumulator.RefundAmount += Math.Abs(payment.Amount);
+                }
+
+                if (payment.Method == PaymentMethodKind.Cash)
+                {
+                    cashRounding += policy.NormalizeCashTender(payment.Amount) - payment.Amount;
+                }
+            }
+        }
+
+        var summaries = InstallmentMethods
+            .Select(method => accumulators[method])
+            .Select(item => new DailyClosePaymentSummary(
+                item.Method,
+                Round(item.SalesAmount),
+                Round(item.RefundAmount),
+                Round(item.SalesAmount - item.RefundAmount),
+                item.TransactionCount))
+            .ToList();
+        return new InstallmentPaymentTotals(summaries, Round(cashRounding), summaries.Sum(summary => summary.TransactionCount));
+    }
+
+    private static readonly PaymentMethodKind[] InstallmentMethods =
+        [PaymentMethodKind.Cash, PaymentMethodKind.Card, PaymentMethodKind.Voucher];
+
+    private static readonly JsonSerializerOptions InstallmentJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private sealed record InstallmentPaymentTotals(
+        IReadOnlyList<DailyClosePaymentSummary> Summaries,
+        decimal CashRoundingAmount,
+        int PaymentCount);
 
     public async Task<DailyCloseArchive> SaveAsync(
         DailyCloseReport report,
@@ -382,12 +521,16 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                 (DailyCloseGuid, StoreCode, DeviceCode, CashierId, CashierName, BusinessDate, PeriodFrom, PeriodTo, SavedAt,
                  OrderCount, CashSalesAmount, CashRefundAmount, CashNetAmount, CardSalesAmount, CardRefundAmount, CardNetAmount,
                  VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
-                 CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount)
+                 CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
+                 InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
+                 InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount)
                 VALUES
                 ($DailyCloseGuid, $StoreCode, $DeviceCode, $CashierId, $CashierName, $BusinessDate, $PeriodFrom, $PeriodTo, $SavedAt,
                  $OrderCount, $CashSalesAmount, $CashRefundAmount, $CashNetAmount, $CardSalesAmount, $CardRefundAmount, $CardNetAmount,
                  $VoucherSalesAmount, $VoucherRefundAmount, $VoucherNetAmount, $RefundAmount, $ReturnQuantity, $NoteSubtotal,
-                 $CoinSubtotal, $CountedCashAmount, $CashDifference, $CashRoundingAmount);
+                 $CoinSubtotal, $CountedCashAmount, $CashDifference, $CashRoundingAmount,
+                 $InstallmentCashReceivedAmount, $InstallmentCashRefundAmount, $InstallmentCardReceivedAmount, $InstallmentCardRefundAmount,
+                 $InstallmentVoucherReceivedAmount, $InstallmentVoucherRefundAmount, $InstallmentPaymentCount);
                 """;
             command.Parameters.AddWithValue("$DailyCloseGuid", dailyCloseGuid.ToString());
             command.Parameters.AddWithValue("$StoreCode", report.StoreCode);
@@ -407,6 +550,10 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             command.Parameters.AddWithValue("$CountedCashAmount", countedCashAmount);
             command.Parameters.AddWithValue("$CashDifference", cashDifference);
             command.Parameters.AddWithValue("$CashRoundingAmount", report.CashRoundingAmount);
+            AddInstallmentParameter(command, report, PaymentMethodKind.Cash, "Cash");
+            AddInstallmentParameter(command, report, PaymentMethodKind.Card, "Card");
+            AddInstallmentParameter(command, report, PaymentMethodKind.Voucher, "Voucher");
+            command.Parameters.AddWithValue("$InstallmentPaymentCount", report.InstallmentPaymentCount);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -444,7 +591,9 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             SELECT DailyCloseGuid, StoreCode, DeviceCode, CashierId, CashierName, BusinessDate, PeriodFrom, PeriodTo, SavedAt,
                    OrderCount, CashSalesAmount, CashRefundAmount, CashNetAmount, CardSalesAmount, CardRefundAmount, CardNetAmount,
                    VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
-                   CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount
+                   CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
+                   InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
+                   InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount
             FROM LocalDailyCloses
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -497,7 +646,13 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             ReadPaymentSummaries(reader),
             ReadDecimal(reader, "RefundAmount"),
             ReadDecimal(reader, "ReturnQuantity"),
-            ReadDecimal(reader, "CashRoundingAmount"));
+            ReadDecimal(reader, "CashRoundingAmount"),
+            [
+                ReadInstallmentSummary(reader, PaymentMethodKind.Cash, "Cash"),
+                ReadInstallmentSummary(reader, PaymentMethodKind.Card, "Card"),
+                ReadInstallmentSummary(reader, PaymentMethodKind.Voucher, "Voucher")
+            ],
+            reader.GetInt32(reader.GetOrdinal("InstallmentPaymentCount")));
         return new DailyCloseArchiveRow(
             ReadGuid(reader, "DailyCloseGuid"),
             report,
@@ -704,6 +859,20 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             ReadDecimal(reader, $"{prefix}RefundAmount"),
             ReadDecimal(reader, $"{prefix}NetAmount"),
             0);
+    }
+
+    private static DailyClosePaymentSummary ReadInstallmentSummary(SqliteDataReader reader, PaymentMethodKind method, string prefix)
+    {
+        var received = ReadDecimal(reader, $"Installment{prefix}ReceivedAmount");
+        var refunded = ReadDecimal(reader, $"Installment{prefix}RefundAmount");
+        return new DailyClosePaymentSummary(method, received, refunded, Round(received - refunded), 0);
+    }
+
+    private static void AddInstallmentParameter(SqliteCommand command, DailyCloseReport report, PaymentMethodKind method, string prefix)
+    {
+        var summary = report.InstallmentPayments.FirstOrDefault(item => item.Method == method);
+        command.Parameters.AddWithValue($"$Installment{prefix}ReceivedAmount", summary?.SalesAmount ?? 0m);
+        command.Parameters.AddWithValue($"$Installment{prefix}RefundAmount", summary?.RefundAmount ?? 0m);
     }
 
     private static void AddPaymentParameters(SqliteCommand command, IReadOnlyList<DailyClosePaymentSummary> summaries)
