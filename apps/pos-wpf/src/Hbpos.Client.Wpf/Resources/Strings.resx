@@ -1934,7 +1934,6 @@ Logged with reference {2}</value></data>
   <data name="installment.text.1a82c84c" xml:space="preserve"><value>This lay-by is being paid or cancelled elsewhere. No refund was sent from this POS.</value></data>
   <data name="installment.text.1a93b644" xml:space="preserve"><value>Repayment recorded.</value></data>
   <data name="installment.text.1ae472b7" xml:space="preserve"><value>A manual card repayment request must carry a MANUAL reference and no card transaction evidence.</value></data>
-  <data name="installment.text.1ae7697f" xml:space="preserve"><value>The manual card repayment is being handled by another recovery.</value></data>
   <data name="installment.text.1b4926a6" xml:space="preserve"><value>The voucher approval is incomplete. It stays locked for reconciliation.</value></data>
   <data name="installment.text.1d2b54f5" xml:space="preserve"><value>The lay-by create result is unknown. Do not take the payment again.</value></data>
   <data name="installment.text.1e7b7775" xml:space="preserve"><value>This lay-by operation is being recovered or its result is unknown. Do not retry.</value></data>
@@ -2017,7 +2016,6 @@ Logged with reference {2}</value></data>
   <data name="installment.text.757be352" xml:space="preserve"><value>The cancellation does not match the server's refund plan. No refund was sent from this POS.</value></data>
   <data name="installment.text.7808474a" xml:space="preserve"><value>This lay-by has no balance to pay.</value></data>
   <data name="installment.text.794d97e9" xml:space="preserve"><value>The repayment result is incomplete. It stays locked for recovery.</value></data>
-  <data name="installment.text.794db9d8" xml:space="preserve"><value>This lay-by is being paid on another POS. No payment was taken here.</value></data>
   <data name="installment.text.79ef15cd" xml:space="preserve"><value>Refund steps must be handled through the cancellation.</value></data>
   <data name="installment.text.79f6184e" xml:space="preserve"><value>The pickup confirmation timed out and may have been recorded. It is locked; refresh to recover and do not confirm again.</value></data>
   <data name="installment.text.7adf4ff0" xml:space="preserve"><value>The terminal result was unknown at restart. It will not be retried automatically.</value></data>
@@ -2036,7 +2034,6 @@ Logged with reference {2}</value></data>
   <data name="installment.text.891631ed" xml:space="preserve"><value>The cancellation is being recovered.</value></data>
   <data name="installment.text.89e4d93a" xml:space="preserve"><value>The voucher reservation result is unknown. The voucher will not be redeemed again.</value></data>
   <data name="installment.text.8abf7609" xml:space="preserve"><value>Could not register the payment channel. No payment was taken: {0}</value></data>
-  <data name="installment.text.8b5b6b04" xml:space="preserve"><value>The manual card repayment had not started and was released. You can start again.</value></data>
   <data name="installment.text.8c2a453b" xml:space="preserve"><value>The refund terminal call was cancelled. The result is unknown.</value></data>
   <data name="installment.text.8d14b04e" xml:space="preserve"><value>The saved card attempt does not match the current Linkly connection mode or Local IP reference. It stays locked for a supervisor.</value></data>
   <data name="installment.text.8debe136" xml:space="preserve"><value>Could not read the state of the expired cancellation. It stays locked for manual reconciliation.</value></data>
@@ -2149,4 +2146,9 @@ Logged with reference {2}</value></data>
   <data name="installment.center.supervisorCard.reason" xml:space="preserve"><value>Reason: where it was checked and what was found (required)</value></data>
   <data name="installment.center.supervisorCard.reference" xml:space="preserve"><value>Approval code, RRN or transaction ID (optional)</value></data>
   <data name="installment.center.supervisorCard.save" xml:space="preserve"><value>Resolve card repayment</value></data>
+  <data name="installment.text.31395ba8" xml:space="preserve"><value>This lay-by has another payment that is not finished yet (possibly on another POS). No payment was taken. Try again shortly, or check the Lay-by Center.</value></data>
+  <data name="installment.text.7ae1434d" xml:space="preserve"><value>This lay-by has an earlier payment on this POS with an unknown result. No payment was taken. Recover it in the Lay-by Center, or ask a supervisor to resolve it.</value></data>
+  <data name="installment.text.781062ca" xml:space="preserve"><value>The card payment never started. This repayment is closed; you can start again.</value></data>
+  <data name="installment.text.f4945dee" xml:space="preserve"><value>This card repayment is being handled by another recovery.</value></data>
+  <data name="installment.text.ce2676c8" xml:space="preserve"><value>The earlier payment on this POS was confirmed and has been recorded. No new payment was taken. Reopen this lay-by to check the balance.</value></data>
 </root>

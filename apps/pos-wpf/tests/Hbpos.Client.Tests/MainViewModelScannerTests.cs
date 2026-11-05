@@ -2585,6 +2585,28 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Cashier_login_recovers_pending_installments_again_with_the_cashier_identity()
+    {
+        // 启动时那一次恢复发生在收银员登录之前，后台要求收银员身份，一定被拒；登录成功后必须再跑一次。
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var installmentService = new RecordingInstallmentOrderService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            installmentOrderService: installmentService,
+            cashierLoginService: new FakeCashierLoginService(cashierSession));
+        var startupOptions = new AppStartupOptions([], false, null, null);
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        Assert.Equal(1, installmentService.RecoverPendingOperationsCallCount);
+
+        viewModel.CashierBarcodeInput = "BAR-1";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+
+        await WaitUntilAsync(() => installmentService.RecoverPendingOperationsCallCount == 2);
+        Assert.Same(cashierSession, installmentService.LastRecoverySession?.CashierSession);
+    }
+
+    [Fact]
     public async Task Payment_completion_plays_checkout_feedback_once()
     {
         var feedback = new RecordingUserFeedbackService();

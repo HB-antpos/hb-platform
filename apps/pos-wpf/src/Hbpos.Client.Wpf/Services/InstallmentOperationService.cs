@@ -45,6 +45,11 @@ public interface IInstallmentOperationService
         CancellationToken cancellationToken = default) =>
         Task.FromResult(new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"), RequiresReview: true));
 
+    /// <summary>付款页放弃了手动刷卡收款窗口：这笔操作不再算进行中，交给恢复或主管结案。</summary>
+    void AbandonManualCardRepayment(Guid operationGuid)
+    {
+    }
+
     /// <summary>收银员确认没有收款：中央 claim 结案为 Declined，本地操作结案为失败。中央结案失败时返回 false，保持占用。</summary>
     Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
@@ -116,6 +121,11 @@ public sealed class InstallmentOperationService(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan ApiClaimLease = TimeSpan.FromMinutes(2);
+    // 中文注释：本进程里正在执行的操作。恢复（启动、登录、分期中心、付款页自动复核）随时可能运行，
+    // 它会把「已发给终端」的操作当成中断的操作改成结果不明；正在执行的操作必须跳过，否则会打断一笔进行中的收款。
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> _inFlight = new();
+    // 开单、取消退款、提货在执行期间按分期单登记：它们的操作号在执行中途才确定。
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, int> _inFlightInstallments = new();
     private readonly string _apiClaimToken = Guid.NewGuid().ToString("N");
     private readonly SemaphoreSlim _createGate = new(1, 1);
 
@@ -132,6 +142,7 @@ public sealed class InstallmentOperationService(
         bool authorizeCard,
         CancellationToken cancellationToken = default)
     {
+        using var inFlight = EnterInFlightInstallment(request.InstallmentGuid);
         await _createGate.WaitAsync(cancellationToken);
         try
         {
@@ -183,12 +194,51 @@ public sealed class InstallmentOperationService(
         CancellationToken cancellationToken = default) =>
         Task.Run(() => ExecuteRepaymentCoreAsync(session, request, authorizeCard, cancellationToken), CancellationToken.None);
 
+    private IDisposable EnterInFlight(Guid operationGuid)
+    {
+        _inFlight[operationGuid] = 0;
+        return new InFlightScope(this, operationGuid);
+    }
+
+    private sealed class InFlightScope(InstallmentOperationService owner, Guid operationGuid) : IDisposable
+    {
+        public void Dispose() => owner._inFlight.TryRemove(operationGuid, out _);
+    }
+
+    private IDisposable EnterInFlightInstallment(Guid installmentGuid)
+    {
+        _inFlightInstallments.AddOrUpdate(installmentGuid, 1, (_, count) => count + 1);
+        return new InFlightInstallmentScope(this, installmentGuid);
+    }
+
+    private sealed class InFlightInstallmentScope(InstallmentOperationService owner, Guid installmentGuid) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            if (owner._inFlightInstallments.AddOrUpdate(installmentGuid, 0, (_, count) => count - 1) <= 0)
+            {
+                owner._inFlightInstallments.TryRemove(new KeyValuePair<Guid, int>(installmentGuid, 0));
+            }
+        }
+    }
+
+    /// <summary>付款页放弃了手动刷卡收款窗口（页面重入）：这笔操作不再算进行中，交给恢复或主管结案。</summary>
+    public void AbandonManualCardRepayment(Guid operationGuid) => _inFlight.TryRemove(operationGuid, out _);
+
     private async Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> ExecuteRepaymentCoreAsync(
         PosSessionState session,
         InstallmentAppendPaymentRequest request,
         bool authorizeCard,
         CancellationToken cancellationToken = default)
     {
+        using var inFlight = EnterInFlight(request.PaymentGuid);
         // 中文注释：调用方的取消只作用于刷卡终端这一步（收银员在付款页点取消）。占 claim、登记通道、提交入账都不随它取消：
         // 这些步骤被打断只会留下结果不明的操作；终端批准之后更不能因为取消而不入账。
         var terminalCancellation = cancellationToken;
@@ -206,7 +256,7 @@ public sealed class InstallmentOperationService(
         // 同一 operation 的所有重试只使用首次落盘的不可变请求指纹，忽略后续 UI/body 漂移。
         request = Deserialize<InstallmentAppendPaymentRequest>(operation.RequestJson);
 
-        var claim = await EnsureRepaymentClaimAsync(operation, request, cancellationToken);
+        var claim = await EnsureRepaymentClaimAsync(operation, request, cancellationToken, session);
         if (!claim.Succeeded)
         {
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
@@ -264,9 +314,34 @@ public sealed class InstallmentOperationService(
         PosSessionState session,
         InstallmentAppendPaymentRequest request,
         CancellationToken cancellationToken = default) =>
-        Task.Run(() => BeginManualCardRepaymentCoreAsync(request, cancellationToken), CancellationToken.None);
+        Task.Run(() => BeginManualCardRepaymentGuardedAsync(session, request, cancellationToken), CancellationToken.None);
+
+    private async Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentGuardedAsync(
+        PosSessionState session,
+        InstallmentAppendPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        // 中文注释：收款窗口打开期间这笔操作一直算进行中，直到收银员确认、取消或页面放弃；
+        // 否则这期间运行的恢复会把它当成中断的操作改成结果不明。续付的操作号就是付款号。
+        _inFlight[request.PaymentGuid] = 0;
+        var started = false;
+        try
+        {
+            var result = await BeginManualCardRepaymentCoreAsync(session, request, cancellationToken);
+            started = result.Succeeded;
+            return result;
+        }
+        finally
+        {
+            if (!started)
+            {
+                _inFlight.TryRemove(request.PaymentGuid, out _);
+            }
+        }
+    }
 
     private async Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentCoreAsync(
+        PosSessionState session,
         InstallmentAppendPaymentRequest request,
         CancellationToken cancellationToken)
     {
@@ -304,7 +379,7 @@ public sealed class InstallmentOperationService(
             JsonSerializer.Serialize(request, JsonOptions)), cancellationToken);
         request = Deserialize<InstallmentAppendPaymentRequest>(operation.RequestJson);
 
-        var claim = await EnsureRepaymentClaimAsync(operation, request, cancellationToken);
+        var claim = await EnsureRepaymentClaimAsync(operation, request, cancellationToken, session);
         if (!claim.Succeeded)
         {
             return new InstallmentOperationResult<bool>(false, Message: claim.Message, RequiresReview: claim.RequiresReview);
@@ -336,7 +411,18 @@ public sealed class InstallmentOperationService(
     public Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentAsync(
         Guid operationGuid,
         CancellationToken cancellationToken = default) =>
-        Task.Run(() => CompleteManualCardRepaymentCoreAsync(operationGuid, cancellationToken), CancellationToken.None);
+        Task.Run(async () =>
+        {
+            try
+            {
+                return await CompleteManualCardRepaymentCoreAsync(operationGuid, cancellationToken);
+            }
+            finally
+            {
+                // 确认之后不论结果如何都不再算进行中：没走完的交给恢复或主管结案。
+                _inFlight.TryRemove(operationGuid, out _);
+            }
+        }, CancellationToken.None);
 
     private async Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentCoreAsync(
         Guid operationGuid,
@@ -394,7 +480,16 @@ public sealed class InstallmentOperationService(
     }
 
     public Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
-        Task.Run(() => CancelManualCardRepaymentCoreAsync(operationGuid, cancellationToken), CancellationToken.None);
+        Task.Run(async () =>
+        {
+            var cancelled = await CancelManualCardRepaymentCoreAsync(operationGuid, cancellationToken);
+            if (cancelled)
+            {
+                _inFlight.TryRemove(operationGuid, out _);
+            }
+
+            return cancelled;
+        }, CancellationToken.None);
 
     private async Task<bool> CancelManualCardRepaymentCoreAsync(Guid operationGuid, CancellationToken cancellationToken)
     {
@@ -440,6 +535,7 @@ public sealed class InstallmentOperationService(
         InstallmentConfirmPickupRequest request,
         CancellationToken cancellationToken)
     {
+        using var inFlight = EnterInFlightInstallment(request.InstallmentGuid);
         var operationGuid = request.OperationGuid == Guid.Empty ? request.InstallmentGuid : request.OperationGuid;
         request = request with
         {
@@ -530,6 +626,7 @@ public sealed class InstallmentOperationService(
         InstallmentCancelRefundMode refundMode,
         CancellationToken cancellationToken)
     {
+        using var inFlight = EnterInFlightInstallment(localOrder.InstallmentGuid);
         refundMode = InstallmentLifecycleRules.NormalizeRefundMode(refundMode);
         if (!string.Equals(localOrder.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(localOrder.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase))
@@ -617,13 +714,24 @@ public sealed class InstallmentOperationService(
     public Task<IReadOnlyList<InstallmentOperationRecoveryResult>> RecoverAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
         Task.Run(() => RecoverCoreAsync(session, cancellationToken), CancellationToken.None);
 
-    private async Task<IReadOnlyList<InstallmentOperationRecoveryResult>> RecoverCoreAsync(PosSessionState session, CancellationToken cancellationToken = default)
+    private async Task<IReadOnlyList<InstallmentOperationRecoveryResult>> RecoverCoreAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default,
+        Func<LocalInstallmentOperation, bool>? filter = null)
     {
         var recoverable = await repository.GetRecoverableAsync(session.StoreCode, cancellationToken);
         var results = new List<InstallmentOperationRecoveryResult>();
         foreach (var operation in recoverable)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_inFlight.ContainsKey(operation.OperationGuid) ||
+                _inFlightInstallments.ContainsKey(operation.InstallmentGuid) ||
+                filter?.Invoke(operation) == false)
+            {
+                // 正在执行的操作不是中断的操作，恢复不能碰它。
+                continue;
+            }
+
             if (operation.State == LocalInstallmentOperationState.TerminalSubmitting)
             {
                 if (operation.Kind == LocalInstallmentOperationKind.Cancel)
@@ -851,6 +959,7 @@ public sealed class InstallmentOperationService(
         CancellationToken cancellationToken = default)
     {
         var operation = await repository.GetAsync(operationGuid, cancellationToken);
+        using var inFlight = operation is null ? null : EnterInFlightInstallment(operation.InstallmentGuid);
         if (operation is null || operation.Kind != LocalInstallmentOperationKind.Cancel)
         {
             return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.67190cad", "未找到待主管结案的取消操作。"));
@@ -859,10 +968,15 @@ public sealed class InstallmentOperationService(
         return await ContinueCancelAsync(operation, installmentNumber, session, true, cancellationToken);
     }
 
+    /// <param name="recoverySession">
+    /// 给出时，分期单被占用（BUSY）会先恢复本机在这张分期单上没结案的续付，再重试一次。
+    /// 只有收银员发起的顶层调用才传；恢复流程内部不传，避免两笔旧操作互相恢复。
+    /// </param>
     private async Task<RepaymentClaimReady> EnsureRepaymentClaimAsync(
         LocalInstallmentOperation operation,
         InstallmentAppendPaymentRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PosSessionState? recoverySession = null)
     {
         try
         {
@@ -950,6 +1064,28 @@ public sealed class InstallmentOperationService(
             "INSTALLMENT_REPAYMENT_CLAIM_MISMATCH")
         {
             LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Failed (provider not called)", exception);
+            var busyMessage = InstallmentText.L("installment.text.31395ba8", "这张分期单还有一笔付款没有结束（可能在其他收银机上），本次没有收款。请稍后再试，或到分期中心查看。");
+            if (exception.ErrorCode == "INSTALLMENT_REPAYMENT_BUSY" && recoverySession is not null)
+            {
+                // 中文注释：占用这张分期单的常常是本机自己之前没结案的续付（例如刷卡超时后关了程序）。
+                // 先把它恢复出结论：确认没收款就重试这一次；仍然不明就如实告诉收银员去恢复或找主管。
+                var own = await RecoverOwnBlockingRepaymentsAsync(operation, recoverySession);
+                if (own.Resolved)
+                {
+                    return await EnsureRepaymentClaimAsync(operation, request, cancellationToken);
+                }
+
+                if (own.Paid)
+                {
+                    // 之前那笔其实收到了款并已入账：收银员这次多半是在重试同一笔，不能接着再收一次。
+                    busyMessage = InstallmentText.L("installment.text.ce2676c8", "本机之前那笔付款已确认收款并入账，本次没有再收款。请重新打开这张分期单核对余额。");
+                }
+                else if (own.StillPending)
+                {
+                    busyMessage = InstallmentText.L("installment.text.7ae1434d", "这张分期单在本机还有一笔付款结果不明，本次没有收款。请到分期中心恢复，或请主管结案。");
+                }
+            }
+
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.Prepared],
@@ -959,7 +1095,7 @@ public sealed class InstallmentOperationService(
                 cancellationToken: CancellationToken.None);
             return RepaymentClaimReady.Failed(
                 exception.ErrorCode == "INSTALLMENT_REPAYMENT_BUSY"
-                    ? InstallmentText.L("installment.text.794db9d8", "该分期正在另一台收银机付款，本机未调用 provider。")
+                    ? busyMessage
                     : InstallmentText.L("installment.text.a7f622f1", "补款 claim 与本地付款指纹不一致，本机未调用 provider。"),
                 requiresReview: false);
         }
@@ -967,6 +1103,35 @@ public sealed class InstallmentOperationService(
         {
             LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Stopped before provider", exception);
             return RepaymentClaimReady.Failed(InstallmentText.L("installment.text.4aa9dbc0", "创建补款 claim 失败，已在 provider 调用前停止：{0}", exception.Message), requiresReview: true);
+        }
+    }
+
+    /// <summary>
+    /// 恢复本机在同一张分期单上没结案的其他续付。Resolved：都确认没有收款并已结案；Paid：其中有一笔确认收款并入账；
+    /// StillPending：还有结果不明的。
+    /// </summary>
+    private async Task<(bool Resolved, bool StillPending, bool Paid)> RecoverOwnBlockingRepaymentsAsync(
+        LocalInstallmentOperation current,
+        PosSessionState session)
+    {
+        try
+        {
+            bool IsOwnBlocking(LocalInstallmentOperation candidate) =>
+                candidate.Kind == LocalInstallmentOperationKind.Repayment &&
+                candidate.InstallmentGuid == current.InstallmentGuid &&
+                candidate.OperationGuid != current.OperationGuid &&
+                string.Equals(candidate.DeviceCode, current.DeviceCode, StringComparison.OrdinalIgnoreCase);
+
+            var results = await RecoverCoreAsync(session, CancellationToken.None, IsOwnBlocking);
+            var paid = results.Any(result => result.State == LocalInstallmentOperationState.Completed);
+            var stillPending = results.Any(result => result.State is not (LocalInstallmentOperationState.Failed or LocalInstallmentOperationState.Completed));
+            var notCharged = results.Any(result => result.State == LocalInstallmentOperationState.Failed);
+            return (notCharged && !paid && !stillPending, stillPending, paid);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogOperationIssue(current.OperationGuid, "repayment-claim-busy-recover", "Ignored", exception);
+            return (false, false, false);
         }
     }
 
@@ -2920,6 +3085,26 @@ public sealed class InstallmentOperationService(
                     message);
             }
 
+            if (request.Method == PaymentMethodKind.Card)
+            {
+                // 中文注释：刷卡续付的本地操作还停在 Prepared、没有任何终端 attempt 或证据，说明刷卡终端从没收到过请求；
+                // 中央也没有这笔 claim。直接结案，不再为它重建 claim（重建只会白白占住这张分期单）。
+                var cardNotStarted = InstallmentText.L("installment.text.781062ca", "刷卡尚未开始，这笔续付已结案，可重新发起。");
+                var closed = await repository.TryTransitionAsync(
+                    operation.OperationGuid,
+                    [LocalInstallmentOperationState.Prepared],
+                    LocalInstallmentOperationState.Failed,
+                    DateTimeOffset.UtcNow,
+                    failureMessage: cardNotStarted,
+                    cancellationToken: CancellationToken.None);
+                return new InstallmentOperationRecoveryResult(
+                    operation.OperationGuid,
+                    operation.Kind,
+                    closed ? LocalInstallmentOperationState.Failed : LocalInstallmentOperationState.ResultUnknown,
+                    false,
+                    closed ? cardNotStarted : InstallmentText.L("installment.text.f4945dee", "这笔刷卡续付正由另一恢复入口处理。"));
+            }
+
             // 中文注释：只有纯 Prepared 且无任何 provider 证据的本地 action，才能证明 create claim 可能尚未到达服务端。
             var recreated = await EnsureRepaymentClaimAsync(operation, request, cancellationToken);
             if (!recreated.Succeeded || recreated.Claim is null)
@@ -3048,14 +3233,15 @@ public sealed class InstallmentOperationService(
 
         if (operation.State == LocalInstallmentOperationState.Prepared &&
             claim.Status == InstallmentRepaymentClaimStatus.Prepared &&
-            ManualCardPaymentReference.IsManual(request.Reference) &&
+            request.Method == PaymentMethodKind.Card &&
             request.CardTransactions is not { Count: > 0 })
         {
-            // 中文注释：还没登记 Manual 通道，收款窗口没有打开过，确定没有收款：释放 claim，可重新发起。
-            var notStartedMessage = InstallmentText.L("installment.text.8b5b6b04", "手动刷卡续付尚未开始收款，已释放，可重新发起。");
-            return await FailUnsupportedCardRepaymentAsync(operation, "recover-manual-card", notStartedMessage)
+            // 中文注释：中央 claim 还没登记任何通道、本地也没推进过：刷卡终端没收到请求（手动刷卡则是收款窗口没打开过）。
+            // 确定没有收款：释放 claim 并结案，可重新发起。
+            var notStartedMessage = InstallmentText.L("installment.text.781062ca", "刷卡尚未开始，这笔续付已结案，可重新发起。");
+            return await FailUnsupportedCardRepaymentAsync(operation, "recover-card-not-started", notStartedMessage)
                 ? new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, notStartedMessage)
-                : new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.1ae7697f", "手动刷卡续付正由另一恢复入口处理。"));
+                : new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.f4945dee", "这笔刷卡续付正由另一恢复入口处理。"));
         }
 
         if (request.Method == PaymentMethodKind.Card && request.CardTransactions is not { Count: > 0 })

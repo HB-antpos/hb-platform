@@ -63,6 +63,11 @@ public interface IInstallmentOrderService
     Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
         Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"), RequiresReview: true));
 
+    /// <summary>付款页放弃了手动刷卡收款窗口：这笔操作不再算进行中，交给恢复或主管结案。</summary>
+    void AbandonManualCardRepayment(Guid operationGuid)
+    {
+    }
+
     /// <summary>收银员确认没有收款。中央结案失败时返回 false，收款窗口要保持打开。</summary>
     Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
@@ -484,6 +489,8 @@ public sealed class InstallmentOrderService(
             operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
             operation.RequiresReview);
     }
+
+    public void AbandonManualCardRepayment(Guid operationGuid) => installmentOperations?.AbandonManualCardRepayment(operationGuid);
 
     public Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
         installmentOperations is null

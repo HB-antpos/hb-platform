@@ -1687,6 +1687,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await ReportRuntimeStatusSafeAsync(Session.IsOnline, cancellationToken);
         await RecoverPendingStartupCardPaymentAttemptAfterLoginAsync();
         await RecoverSharedHeldClaimsSafelyAsync();
+        // 中文注释：分期操作的恢复要用收银员身份向后台核对；启动时那一次发生在登录之前，一定被拒。
+        // 登录成功后在后台再恢复一次，不拖住登录。没有待恢复的操作时只查一次本地库。
+        _ = RecoverPendingInstallmentOperationsSafelyAsync("login");
         return true;
     }
 
@@ -1823,7 +1826,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (!startupOptions.PreviewMode)
         {
-            await RecoverPendingInstallmentOperationsSafelyAsync();
+            await RecoverPendingInstallmentOperationsSafelyAsync("startup");
             await RecoverSharedHeldClaimsSafelyAsync();
         }
 
@@ -1899,7 +1902,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _screenNavigator.NavigateFromStartup(startupOptions.InitialScreen);
     }
 
-    private async Task RecoverPendingInstallmentOperationsSafelyAsync()
+    private async Task RecoverPendingInstallmentOperationsSafelyAsync(string trigger)
     {
         try
         {
@@ -1911,7 +1914,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 ConsoleLog.Write(
                     "InstallmentRecovery",
-                    $"startup recovery completed store={Session.StoreCode} count={recovered.Count}");
+                    $"{trigger} recovery completed store={Session.StoreCode} count={recovered.Count}");
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
@@ -1919,7 +1922,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // 未知金融结果必须继续保持锁定；启动恢复失败不能阻断 POS 或清空后来建立的购物车。
             ConsoleLog.WriteError(
                 "InstallmentRecovery",
-                $"startup recovery failed store={Session.StoreCode} error={ex.GetType().Name}",
+                $"{trigger} recovery failed store={Session.StoreCode} error={ex.GetType().Name}",
                 null,
                 ex);
         }
