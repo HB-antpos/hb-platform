@@ -8055,6 +8055,122 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.Null(installmentService.LastRepaymentRequest.Payment.CardTransactions);
     }
 
+    [Fact]
+    public async Task Card_repayment_shows_the_cancel_button_while_the_terminal_is_waiting_and_passes_the_cancel_on()
+    {
+        var pending = new TaskCompletionSource<InstallmentOrderActionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken terminalToken = default;
+        var service = new FakeInstallmentOrderService
+        {
+            AddRepaymentHandler = (_, token) =>
+            {
+                terminalToken = token;
+                return pending.Task;
+            }
+        };
+        var order = CreateInstallmentOrder("IO-20260703-0201", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var viewModel = new PaymentViewModel(new PosCartService(), new FakeCashPaymentWorkflowService(), Session, installmentOrderService: service);
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        viewModel.TenderAmountText = "30";
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        // 选了刷卡只是草稿：不能提示「刷卡已批准」，也还没有取消按钮。
+        Assert.Equal("payment.installment.status.cardRepaymentReady", viewModel.StatusMessage);
+        Assert.False(viewModel.IsCancelPaymentVisible);
+
+        var confirm = viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+        await WaitForManualCardAsync(() => terminalToken.CanBeCanceled);
+
+        Assert.True(viewModel.IsCancelPaymentVisible);
+        Assert.True(viewModel.CancelCommand.CanExecute(null));
+        Assert.Equal(30m, viewModel.CardPaymentAmount);
+        Assert.Equal("payment.status.cardProcessing", viewModel.StatusMessage);
+        Assert.False(viewModel.BackToPosCommand.CanExecute(null));
+
+        viewModel.CancelCommand.Execute(null);
+
+        // 取消传给终端调用；在终端给出结论前页面保持锁定，取消按钮变灰，不能重复点。
+        Assert.True(terminalToken.IsCancellationRequested);
+        Assert.False(viewModel.CancelCommand.CanExecute(null));
+        Assert.True(viewModel.IsPaymentInteractionLocked);
+        Assert.Equal("payment.installment.status.cardRepaymentCancelling", viewModel.StatusMessage);
+
+        pending.SetResult(new InstallmentOrderActionResult(false, "已取消，刷卡终端未收到请求，没有扣款。"));
+        await confirm;
+
+        Assert.False(viewModel.IsCancelPaymentVisible);
+        Assert.False(viewModel.IsPaymentInteractionLocked);
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.True(viewModel.BackToPosCommand.CanExecute(null));
+    }
+
+    [Theory]
+    [InlineData(LocalInstallmentOperationState.Failed)]
+    [InlineData(LocalInstallmentOperationState.Completed)]
+    [InlineData(LocalInstallmentOperationState.ResultUnknown)]
+    public async Task Zeller_repayment_awaiting_recheck_is_recovered_automatically_when_the_recheck_is_due(LocalInstallmentOperationState recoveredState)
+    {
+        var order = CreateInstallmentOrder("IO-20260703-0202", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var service = new FakeInstallmentOrderService
+        {
+            AddRepaymentResult = new InstallmentOrderActionResult(
+                false,
+                "Zeller 暂未查到这笔扣款。",
+                RequiresReview: true,
+                AutoRecoveryDueAt: DateTimeOffset.UtcNow.AddSeconds(60))
+        };
+        var viewModel = new PaymentViewModel(new PosCartService(), new FakeCashPaymentWorkflowService(), Session, installmentOrderService: service);
+        var waited = new TaskCompletionSource<TimeSpan>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.InstallmentAutoRecoveryDelay = delay =>
+        {
+            waited.TrySetResult(delay);
+            return release.Task;
+        };
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        viewModel.TenderAmountText = "30";
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        await viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+
+        // 结果不明：草稿保留、不自动重扣，等到复核时间（约 60 秒）再恢复。
+        Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(0, service.RecoveryCalls);
+        Assert.InRange((await waited.Task).TotalSeconds, 55, 70);
+
+        service.RecoveryResults =
+        [
+            new InstallmentOperationRecoveryResult(
+                service.LastRepaymentRequest!.Payment.PaymentGuid,
+                LocalInstallmentOperationKind.Repayment,
+                recoveredState,
+                recoveredState == LocalInstallmentOperationState.Completed,
+                null)
+        ];
+        release.SetResult();
+        await viewModel.InstallmentAutoRecoveryTask!;
+
+        Assert.Equal(1, service.RecoveryCalls);
+        switch (recoveredState)
+        {
+            case LocalInstallmentOperationState.Failed:
+                // 确认没有扣款：草稿清掉，可以重新收款。
+                Assert.Empty(viewModel.PaymentTenders);
+                Assert.Equal("payment.installment.status.cardRepaymentNotCharged", viewModel.StatusMessage);
+                break;
+            case LocalInstallmentOperationState.Completed:
+                // 迟到的批准：已入账，按成功收尾。
+                Assert.Empty(viewModel.PaymentTenders);
+                Assert.Equal("payment.installment.status.repaymentRecorded", viewModel.StatusMessage);
+                break;
+            default:
+                Assert.Single(viewModel.PaymentTenders);
+                Assert.Equal("payment.installment.status.cardRepaymentStillUnknown", viewModel.StatusMessage);
+                break;
+        }
+    }
+
     private PaymentViewModel CreateManualRepaymentViewModel(FakeInstallmentOrderService service, InstallmentOrderSummary order)
     {
         var viewModel = new PaymentViewModel(
@@ -9042,12 +9158,30 @@ public sealed class PosTerminalCashPaymentViewModelTests
                 CreateInstallmentOrder("IO-NEW", request.CustomerName, request.CustomerPhone, request.DownPaymentAmount, request.CartSnapshot.ActualAmount - request.DownPaymentAmount)));
         }
 
+        /// <summary>设置后，续付调用停在这里，直到测试给出结果；用来模拟刷卡终端还在等待。</summary>
+        public Func<InstallmentOrderRepaymentRequest, CancellationToken, Task<InstallmentOrderActionResult>>? AddRepaymentHandler { get; init; }
+
+        public IReadOnlyList<InstallmentOperationRecoveryResult> RecoveryResults { get; set; } = [];
+
+        public int RecoveryCalls { get; private set; }
+
+        public Task<IReadOnlyList<InstallmentOperationRecoveryResult>> RecoverPendingOperationsAsync(PosSessionState session, CancellationToken cancellationToken = default)
+        {
+            RecoveryCalls++;
+            return Task.FromResult(RecoveryResults);
+        }
+
         public Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default)
         {
             LastRepaymentRequest = request;
             if (ThrowOnAddRepayment is not null)
             {
                 throw ThrowOnAddRepayment;
+            }
+
+            if (AddRepaymentHandler is not null)
+            {
+                return AddRepaymentHandler(request, cancellationToken);
             }
 
             return Task.FromResult(AddRepaymentResult ?? new InstallmentOrderActionResult(true, "补款已记录。"));

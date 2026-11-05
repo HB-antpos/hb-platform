@@ -611,6 +611,145 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         }
     }
 
+    [Fact]
+    public async Task Card_repayment_cancelled_before_the_terminal_is_called_closes_cleanly_and_can_be_retried()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events);
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(true, AuthorizedAmount: request.Amount));
+            var settings = CardTerminalSettings.FromEnvironment() with
+            {
+                Processor = CardProcessorKind.Linkly,
+                LinklyConnectionMode = LinklyConnectionMode.LocalIp
+            };
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: new LinklyPaymentAttemptContextAccessor());
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true, cancelled.Token);
+
+            // 取消只作用于终端调用：占 claim、登记通道照常完成，终端没有收到请求，随后按明确取消结案。
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Null(result.AutoRecoveryDueAt);
+            Assert.Equal(["claim:create", "claim:begin:Linkly", "claim:resolve:Declined"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Declined, api.Status);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(request.PaymentGuid))?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Card_repayment_approved_by_the_terminal_is_still_committed_when_cancel_arrives_late()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var api = new ClaimApi(request, events);
+            using var cancel = new CancellationTokenSource();
+            var terminal = new RecordingTerminal(
+                events,
+                new PaymentAuthorizationResult(false),
+                amount =>
+                {
+                    // 收银员在终端批准的同时点了取消：钱已经扣了，入账不能被取消打断。
+                    cancel.Cancel();
+                    var txnRef = context.Current?.TxnRef ?? throw new InvalidOperationException("Linkly 尝试上下文未提供交易号。");
+                    return new PaymentAuthorizationResult(
+                        true,
+                        $"ANZ:{txnRef}",
+                        AuthorizedAmount: amount,
+                        CardTransactions: [CreateCardTransaction(amount, txnRef)],
+                        Processor: "Linkly");
+                });
+            var settings = CardTerminalSettings.FromEnvironment() with
+            {
+                Processor = CardProcessorKind.Linkly,
+                LinklyConnectionMode = LinklyConnectionMode.LocalIp
+            };
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: context);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true, cancel.Token);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal(["claim:create", "claim:begin:Linkly", "provider:card", "claim:commit"], events);
+            Assert.Equal(1, api.CommitCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Zeller_repayment_cancelled_on_the_terminal_reports_when_it_can_be_rechecked_automatically()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events);
+            var zeller = new ZellerRepaymentRig(path);
+            using var cancel = new CancellationTokenSource();
+            zeller.Gateway.OnPurchase = (_, _, token) =>
+            {
+                // 收银员点取消：取消信号传到 Zeller 调用，SDK 以「已取消」结束。
+                cancel.Cancel();
+                Assert.True(token.IsCancellationRequested);
+                return Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+            };
+            zeller.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+            var service = zeller.CreateService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)));
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true, cancel.Token);
+
+            Assert.False(result.Succeeded);
+            Assert.True(result.RequiresReview);
+            // 60 秒后的迟到复核时间随结果带出，付款页据此到点自动恢复。
+            Assert.Equal(zeller.Time.GetUtcNow() + new ZellerClientOptions().LateRecheckDelay, result.AutoRecoveryDueAt);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, api.Status);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     private const string ZellerTransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
 
     private static ZellerTransaction ZellerApproved(string reference, int amountCents) => new(

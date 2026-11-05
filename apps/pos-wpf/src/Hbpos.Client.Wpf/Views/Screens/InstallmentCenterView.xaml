@@ -43,7 +43,7 @@
                     <Button Command="{Binding RecoveryCommand}" Style="{StaticResource PosSecondaryButtonStyle}" MinHeight="38" Padding="14,0" Margin="12,0,0,0">
                         <StackPanel Orientation="Horizontal">
                             <materialDesign:PackIcon Kind="ShieldRefreshOutline" Width="16" Height="16" Margin="0,0,6,0" />
-                            <TextBlock Text="安全恢复" FontWeight="Bold" />
+                            <TextBlock Text="{loc:Loc installment.center.action.recover}" FontWeight="Bold" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -69,7 +69,7 @@
                         <DataGridTextColumn Header="{loc:Loc installment.center.column.total}" Binding="{Binding TotalAmount, StringFormat={}{0:C2}}" Width="100" />
                         <DataGridTextColumn Header="{loc:Loc installment.center.column.paid}" Binding="{Binding PaidAmount, StringFormat={}{0:C2}}" Width="100" />
                         <DataGridTextColumn Header="{loc:Loc installment.center.column.outstanding}" Binding="{Binding OutstandingAmount, StringFormat={}{0:C2}}" Width="100" />
-                        <DataGridTextColumn Header="{loc:Loc installment.center.column.status}" Binding="{Binding Status}" Width="90" />
+                        <DataGridTextColumn Header="{loc:Loc installment.center.column.status}" Binding="{Binding StatusLabel}" Width="90" />
                         <DataGridTextColumn Header="{loc:Loc installment.center.column.terminal}" Binding="{Binding DeviceCode}" Width="90" />
                         <DataGridTextColumn Header="{loc:Loc installment.center.column.updated}" Binding="{Binding UpdatedAt, StringFormat={}{0:g}}" Width="140" />
                     </DataGrid.Columns>
@@ -142,15 +142,15 @@
                 <Border Margin="0,14,0,0" Padding="12" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8"
                         Visibility="{Binding HasRefundStepsForReview, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel>
-                        <TextBlock Text="主管退款三态结案" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
-                        <TextBlock Text="仅持有取消分期权限的主管可操作；普通用户没有退款重试入口。" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <TextBlock Text="{loc:Loc installment.center.supervisorRefund.title}" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{loc:Loc installment.center.supervisorRefund.note}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                         <ComboBox ItemsSource="{Binding RefundStepsForReview}" SelectedItem="{Binding SelectedRefundStep, Mode=TwoWay}" DisplayMemberPath="OriginalPaymentGuid" Margin="0,10,0,0" Height="40" />
                         <ComboBox ItemsSource="{Binding SupervisorRefundDecisions}" SelectedItem="{Binding SupervisorRefundDecision, Mode=TwoWay}" Margin="0,8,0,0" Height="40" />
-                        <TextBox Text="{Binding SupervisorRefundReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="结案原因或备注（必填）" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
-                        <TextBox Text="{Binding SupervisorRefundReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="确认已退款时填写退款引用" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
-                        <TextBox Text="{Binding SupervisorRefundEvidence, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="确认未退款时填写银行证据" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBox Text="{Binding SupervisorRefundReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorRefund.reason}" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBox Text="{Binding SupervisorRefundReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorRefund.reference}" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBox Text="{Binding SupervisorRefundEvidence, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorRefund.evidence}" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
                         <Button Command="{Binding SupervisorResolveRefundCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="42" Margin="0,10,0,0">
-                            <TextBlock Text="保存主管结案" FontWeight="Bold" />
+                            <TextBlock Text="{loc:Loc installment.center.supervisorRefund.save}" FontWeight="Bold" />
                         </Button>
                     </StackPanel>
                 </Border>
@@ -158,14 +158,14 @@
                 <Border Margin="0,14,0,0" Padding="12" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8"
                         Visibility="{Binding HasPendingCardRepayment, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel>
-                        <TextBlock Text="刷卡续付主管结案" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{loc:Loc installment.center.supervisorCard.title}" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
                         <TextBlock Text="{Binding PendingCardRepaymentText}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                        <TextBlock Text="需持有取消分期权限的主管授权。确认已扣款会按这笔金额入账；确认未扣款会结案并解除占用。" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                        <ComboBox ItemsSource="{Binding SupervisorCardRepaymentDecisions}" DisplayMemberPath="Label" SelectedValuePath="Decision" SelectedValue="{Binding SupervisorCardRepaymentDecision, Mode=TwoWay}" materialDesign:HintAssist.Hint="选择核实结果" Margin="0,10,0,0" Height="40" />
-                        <TextBox Text="{Binding SupervisorCardRepaymentReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="结案原因：在哪里核实、看到了什么（必填）" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
-                        <TextBox Text="{Binding SupervisorCardRepaymentReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="批准码、RRN 或交易号（选填）" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBlock Text="{loc:Loc installment.center.supervisorCard.note}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <ComboBox ItemsSource="{Binding SupervisorCardRepaymentDecisions}" DisplayMemberPath="Label" SelectedValuePath="Decision" SelectedValue="{Binding SupervisorCardRepaymentDecision, Mode=TwoWay}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorCard.decision}" Margin="0,10,0,0" Height="40" />
+                        <TextBox Text="{Binding SupervisorCardRepaymentReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorCard.reason}" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBox Text="{Binding SupervisorCardRepaymentReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.supervisorCard.reference}" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
                         <Button Command="{Binding SupervisorResolveCardRepaymentCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="42" Margin="0,10,0,0">
-                            <TextBlock Text="主管结案刷卡续付" FontWeight="Bold" />
+                            <TextBlock Text="{loc:Loc installment.center.supervisorCard.save}" FontWeight="Bold" />
                         </Button>
                     </StackPanel>
                 </Border>

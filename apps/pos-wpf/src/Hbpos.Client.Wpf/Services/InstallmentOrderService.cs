@@ -30,7 +30,7 @@ public interface IInstallmentOrderService
         Guid installmentGuid,
         CancellationToken cancellationToken = default) =>
         session.IsOnline
-            ? Task.FromException<LocalInstallmentOrder?>(new NotSupportedException("在线分期详情服务尚未接入。"))
+            ? Task.FromException<LocalInstallmentOrder?>(new NotSupportedException(InstallmentText.L("installment.text.57a439b3", "在线分期详情服务尚未接入。")))
             : GetLocalOrderAsync(installmentGuid, cancellationToken);
 
     Task<LocalInstallmentOrder?> GetLocalOrderAsync(Guid installmentGuid, CancellationToken cancellationToken = default);
@@ -57,11 +57,11 @@ public interface IInstallmentOrderService
         PosSessionState session,
         decimal amount,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentManualCardRepaymentBeginResult(false, "当前版本不支持手动刷卡续付。"));
+        Task.FromResult(new InstallmentManualCardRepaymentBeginResult(false, InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。")));
 
     /// <summary>手动刷卡续付第二步：收银员已核实独立刷卡机收款成功。</summary>
     Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentOrderActionResult(false, "当前版本不支持手动刷卡续付。", RequiresReview: true));
+        Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"), RequiresReview: true));
 
     /// <summary>收银员确认没有收款。中央结案失败时返回 false，收款窗口要保持打开。</summary>
     Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
@@ -79,10 +79,10 @@ public interface IInstallmentOrderService
         string reason,
         string? reference,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentOrderActionResult(false, "当前版本不支持主管结案刷卡续付。"));
+        Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.6d4333ba", "当前版本不支持主管结案刷卡续付。")));
 
     Task<InstallmentOrderActionResult> ResumeCancelAfterSupervisorAsync(Guid operationGuid, string installmentNumber, PosSessionState session, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentOrderActionResult(false, "未配置主管结案恢复服务。", RequiresReview: true));
+        Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.d081e8fa", "未配置主管结案恢复服务。"), RequiresReview: true));
 
     Task<InstallmentWriteResult<InstallmentCreateResponse>> CreateAsync(PosSessionState session, InstallmentCreateRequest request, CancellationToken cancellationToken = default);
 
@@ -101,7 +101,7 @@ public interface IInstallmentOrderService
         CancellationToken cancellationToken = default) =>
         Task.FromResult(InstallmentAmendLinesResult.Create(
             session.IsOnline ? InstallmentAmendLinesOutcome.Rejected : InstallmentAmendLinesOutcome.OnlineRequired,
-            session.IsOnline ? "分期服务尚未接入修改商品。" : "OnlineRequired"));
+            session.IsOnline ? InstallmentText.L("installment.text.e12b043f", "分期服务尚未接入修改商品。") : "OnlineRequired"));
 
     /// <summary>服务端是否声明支持修改商品（capabilities.AmendLinesSupported）；无法确认一律按不支持处理。</summary>
     Task<bool> IsAmendLinesSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
@@ -131,54 +131,54 @@ public interface IInstallmentApiClient
     Task<InstallmentHistoryQueryResponse> QueryHistoryAsync(
         InstallmentHistoryQueryRequest request,
         CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentHistoryQueryResponse>(new NotSupportedException("当前分期 API 客户端未实现历史查询。"));
+        Task.FromException<InstallmentHistoryQueryResponse>(new NotSupportedException(InstallmentText.L("installment.text.ad9cf6f7", "当前分期 API 客户端未实现历史查询。")));
 
     Task<InstallmentDetailsDto> GetDetailsAsync(
         Guid installmentGuid,
         CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentDetailsDto>(new NotSupportedException("当前分期 API 客户端未实现详情查询。"));
+        Task.FromException<InstallmentDetailsDto>(new NotSupportedException(InstallmentText.L("installment.text.85a38c72", "当前分期 API 客户端未实现详情查询。")));
 
     Task<InstallmentRepaymentCapabilitiesResponse> GetRepaymentCapabilitiesAsync(CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentCapabilitiesResponse>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentCapabilitiesResponse>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentClaimDto> CreateRepaymentClaimAsync(Guid installmentGuid, InstallmentRepaymentClaimCreateRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentClaimDto> BeginRepaymentProviderAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimBeginProviderRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentClaimDto> GetRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentClaimDto> ResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimResolveRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentClaimDto> CommitRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimCommitRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.72fd2194", "当前分期 API 客户端未实现补款 claim 协议。")));
 
     Task<InstallmentRepaymentBlockingClaimResponse> GetBlockingRepaymentClaimAsync(Guid installmentGuid, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentBlockingClaimResponse>(new NotSupportedException("当前分期 API 客户端未实现主管结案协议。"));
+        Task.FromException<InstallmentRepaymentBlockingClaimResponse>(new NotSupportedException(InstallmentText.L("installment.text.ce7fc949", "当前分期 API 客户端未实现主管结案协议。")));
 
     Task<InstallmentRepaymentClaimDto> SupervisorResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimSupervisorResolveRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现主管结案协议。"));
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.ce7fc949", "当前分期 API 客户端未实现主管结案协议。")));
 
     Task<InstallmentCancelClaimDto> CreateCancelClaimAsync(Guid installmentGuid, InstallmentCancelClaimCreateRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.4fa8bf56", "当前分期 API 客户端未实现取消 claim 协议。")));
 
     Task<InstallmentCancelClaimDto> BeginCancelRefundAsync(Guid installmentGuid, Guid operationGuid, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.4fa8bf56", "当前分期 API 客户端未实现取消 claim 协议。")));
 
     Task<InstallmentCancelClaimDto> GetCancelClaimAsync(Guid installmentGuid, Guid operationGuid, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.4fa8bf56", "当前分期 API 客户端未实现取消 claim 协议。")));
 
     Task<InstallmentCancelClaimDto> ResolveCancelClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentCancelClaimResolveRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.4fa8bf56", "当前分期 API 客户端未实现取消 claim 协议。")));
 
     Task<InstallmentCancelClaimDto> CommitCancelClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentCancelClaimCommitRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+        Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException(InstallmentText.L("installment.text.4fa8bf56", "当前分期 API 客户端未实现取消 claim 协议。")));
 
     Task<InstallmentAmendLinesResponse> AmendLinesAsync(InstallmentAmendLinesRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromException<InstallmentAmendLinesResponse>(new NotSupportedException("当前分期 API 客户端未实现修改商品。"));
+        Task.FromException<InstallmentAmendLinesResponse>(new NotSupportedException(InstallmentText.L("installment.text.7cc08205", "当前分期 API 客户端未实现修改商品。")));
 
     Task<InstallmentCreateResponse> CreateAsync(InstallmentCreateRequest request, CancellationToken cancellationToken = default);
 
@@ -267,7 +267,7 @@ public sealed class InstallmentOrderService(
         var details = await apiClient.GetDetailsAsync(installmentGuid, cancellationToken);
         if (details.InstallmentGuid != installmentGuid)
         {
-            throw new InvalidOperationException("分期详情与查询订单不一致，已停止显示。 / Lay-by detail does not match the requested order.");
+            throw new InvalidOperationException(InstallmentText.L("installment.text.97098fea", "分期详情与查询订单不一致，已停止显示。 / Lay-by detail does not match the requested order."));
         }
 
         return await SaveSnapshotAsync(details, cancellationToken);
@@ -294,11 +294,11 @@ public sealed class InstallmentOrderService(
     {
         if (installmentOperations is null)
         {
-            return new InstallmentOrderActionResult(false, "未配置主管结案恢复服务。", RequiresReview: true);
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.d081e8fa", "未配置主管结案恢复服务。"), RequiresReview: true);
         }
 
         var result = await installmentOperations.ResumeCancelAfterSupervisorAsync(operationGuid, installmentNumber, session, cancellationToken);
-        return new InstallmentOrderActionResult(result.Succeeded, result.Message ?? "取消恢复未完成。", result.LocalOrder is null ? null : MapSummary(result.LocalOrder), result.RequiresReview);
+        return new InstallmentOrderActionResult(result.Succeeded, result.Message ?? InstallmentText.L("installment.text.324acd2c", "取消恢复未完成。"), result.LocalOrder is null ? null : MapSummary(result.LocalOrder), result.RequiresReview);
     }
 
     public async Task<InstallmentWriteResult<InstallmentCreateResponse>> CreateAsync(PosSessionState session, InstallmentCreateRequest request, CancellationToken cancellationToken = default)
@@ -313,7 +313,7 @@ public sealed class InstallmentOrderService(
             var operation = await installmentOperations.ExecuteCreateAsync(session, request, authorizeCard: false, cancellationToken);
             if (!operation.Succeeded || operation.Response is null || operation.LocalOrder is null)
             {
-                return InstallmentWriteResult<InstallmentCreateResponse>.OnlineRequired(operation.Message ?? "分期创建结果未知，请勿重复收款。");
+                return InstallmentWriteResult<InstallmentCreateResponse>.OnlineRequired(operation.Message ?? InstallmentText.L("installment.text.f2fe4446", "分期创建结果未知，请勿重复收款。"));
             }
 
             cart?.Clear();
@@ -338,14 +338,14 @@ public sealed class InstallmentOrderService(
             var operation = await installmentOperations.ExecuteRepaymentAsync(session, request, authorizeCard: false, cancellationToken);
             if (!operation.Succeeded || operation.Response is null || operation.LocalOrder is null)
             {
-                return InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired(operation.Message ?? "补款结果未知，请勿重复收款。");
+                return InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired(operation.Message ?? InstallmentText.L("installment.text.282513ec", "补款结果未知，请勿重复收款。"));
             }
 
             return InstallmentWriteResult<InstallmentAppendPaymentResponse>.Success(operation.Response, operation.LocalOrder, operation.Message);
         }
 
         // 中文注释：新 WPF 补款必须经过 durable operation + 中央 claim；未注入协调器时在任何 provider/API 副作用前失败。
-        return InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired("安全补款服务未配置，已停止付款；禁止降级调用旧 /payments。");
+        return InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired(InstallmentText.L("installment.text.72b0db62", "安全补款服务未配置，已停止付款；禁止降级调用旧 /payments。"));
     }
 
     public async Task<InstallmentWriteResult<InstallmentConfirmPickupResponse>> ConfirmPickupAsync(PosSessionState session, InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default)
@@ -360,7 +360,7 @@ public sealed class InstallmentOrderService(
             var operation = await installmentOperations.ExecutePickupAsync(session, request, cancellationToken);
             return operation.Succeeded && operation.Response is not null && operation.LocalOrder is not null
                 ? InstallmentWriteResult<InstallmentConfirmPickupResponse>.Success(operation.Response, operation.LocalOrder, operation.Message)
-                : InstallmentWriteResult<InstallmentConfirmPickupResponse>.OnlineRequired(operation.Message ?? "提货确认结果未知，请刷新核对。");
+                : InstallmentWriteResult<InstallmentConfirmPickupResponse>.OnlineRequired(operation.Message ?? InstallmentText.L("installment.text.98e896f6", "提货确认结果未知，请刷新核对。"));
         }
 
         var response = await apiClient.ConfirmPickupAsync(request, cancellationToken);
@@ -435,19 +435,19 @@ public sealed class InstallmentOrderService(
     {
         if (installmentOperations is null)
         {
-            return new InstallmentManualCardRepaymentBeginResult(false, "当前版本不支持手动刷卡续付。");
+            return new InstallmentManualCardRepaymentBeginResult(false, InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"));
         }
 
         var local = await localRepository.GetAsync(installmentGuid, cancellationToken);
         if (local is null)
         {
-            return new InstallmentManualCardRepaymentBeginResult(false, "未找到本机缓存的分期单。");
+            return new InstallmentManualCardRepaymentBeginResult(false, InstallmentText.L("installment.text.5b6ee401", "未找到本机缓存的分期单。"));
         }
 
         var appliedAmount = Math.Min(amount, local.BalanceAmount);
         if (appliedAmount <= 0m)
         {
-            return new InstallmentManualCardRepaymentBeginResult(false, "这张分期单没有待付余额。");
+            return new InstallmentManualCardRepaymentBeginResult(false, InstallmentText.L("installment.text.7808474a", "这张分期单没有待付余额。"));
         }
 
         var paymentGuid = Guid.NewGuid();
@@ -467,20 +467,20 @@ public sealed class InstallmentOrderService(
         var begin = await installmentOperations.BeginManualCardRepaymentAsync(session, request, cancellationToken);
         return begin.Succeeded
             ? new InstallmentManualCardRepaymentBeginResult(true, begin.Message ?? string.Empty, paymentGuid, appliedAmount)
-            : new InstallmentManualCardRepaymentBeginResult(false, begin.Message ?? "手动刷卡续付未能开始，请勿收款。", RequiresReview: begin.RequiresReview);
+            : new InstallmentManualCardRepaymentBeginResult(false, begin.Message ?? InstallmentText.L("installment.text.c5b9da04", "手动刷卡续付未能开始，请勿收款。"), RequiresReview: begin.RequiresReview);
     }
 
     public async Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default)
     {
         if (installmentOperations is null)
         {
-            return new InstallmentOrderActionResult(false, "当前版本不支持手动刷卡续付。", RequiresReview: true);
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"), RequiresReview: true);
         }
 
         var operation = await installmentOperations.CompleteManualCardRepaymentAsync(operationGuid, cancellationToken);
         return new InstallmentOrderActionResult(
             operation.Succeeded,
-            operation.Message ?? (operation.Succeeded ? "补款已记录。" : "补款结果未知，请勿重复收款。"),
+            operation.Message ?? (operation.Succeeded ? InstallmentText.L("installment.text.1a93b644", "补款已记录。") : InstallmentText.L("installment.text.282513ec", "补款结果未知，请勿重复收款。")),
             operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
             operation.RequiresReview);
     }
@@ -544,12 +544,12 @@ public sealed class InstallmentOrderService(
     {
         if (!session.IsOnline)
         {
-            return new InstallmentOrderActionResult(false, "主管结案需要联网。");
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.dd0c1097", "主管结案需要联网。"));
         }
 
         if (string.IsNullOrWhiteSpace(reason))
         {
-            return new InstallmentOrderActionResult(false, "请填写结案原因（例如核实了哪里的交易记录）。");
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.a01a1f80", "请填写结案原因（例如核实了哪里的交易记录）。"));
         }
 
         var claim = await apiClient.SupervisorResolveRepaymentClaimAsync(
@@ -583,13 +583,13 @@ public sealed class InstallmentOrderService(
         {
             InstallmentRepaymentClaimStatus.Committed => new InstallmentOrderActionResult(
                 true,
-                string.Format(CultureInfo.CurrentCulture, "主管已确认扣款，刷卡续付 {0:C2} 已入账。", pending.Amount),
+                string.Format(CultureInfo.CurrentCulture, InstallmentText.L("installment.text.97c931a4", "主管已确认扣款，刷卡续付 {0:C2} 已入账。"), pending.Amount),
                 summary),
             InstallmentRepaymentClaimStatus.Declined => new InstallmentOrderActionResult(
                 true,
-                "主管已确认未扣款，这笔刷卡续付已结案，可重新收款。",
+                InstallmentText.L("installment.text.a749c009", "主管已确认未扣款，这笔刷卡续付已结案，可重新收款。"),
                 summary),
-            _ => new InstallmentOrderActionResult(false, $"主管结案后状态为 {claim.Status}，请刷新核对。", summary, RequiresReview: true)
+            _ => new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.0fd34e37", "主管结案后状态为 {0}，请刷新核对。", claim.Status), summary, RequiresReview: true)
         };
     }
 
@@ -640,7 +640,7 @@ public sealed class InstallmentOrderService(
         {
             return InstallmentAmendLinesResult.Create(
                 InstallmentAmendLinesOutcome.Rejected,
-                "当前订单状态不允许修改商品。",
+                InstallmentText.L("installment.text.305d14d1", "当前订单状态不允许修改商品。"),
                 InstallmentAmendLinesErrorCodes.StatusNotAllowed);
         }
 
@@ -648,7 +648,7 @@ public sealed class InstallmentOrderService(
         {
             return InstallmentAmendLinesResult.Create(
                 InstallmentAmendLinesOutcome.Rejected,
-                "商品明细不完整或金额不合法。",
+                InstallmentText.L("installment.text.9c9e895a", "商品明细不完整或金额不合法。"),
                 InstallmentAmendLinesErrorCodes.InvalidLines);
         }
 
@@ -659,8 +659,8 @@ public sealed class InstallmentOrderService(
             return InstallmentAmendLinesResult.Create(
                 InstallmentAmendLinesOutcome.Rejected,
                 totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
-                    ? "新总额不得低于已付金额。"
-                    : "新总额低于分期订单最低总额。",
+                    ? InstallmentText.L("installment.text.30956fab", "新总额不得低于已付金额。")
+                    : InstallmentText.L("installment.text.81fc82fd", "新总额低于分期订单最低总额。"),
                 totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
                     ? InstallmentAmendLinesErrorCodes.TotalBelowPaid
                     : InstallmentAmendLinesErrorCodes.TotalBelowMinimum);
@@ -683,7 +683,7 @@ public sealed class InstallmentOrderService(
             if (response.Details.InstallmentGuid != installmentGuid)
             {
                 // 响应与请求订单不一致时不能写快照，按结果未知处理并交给对账。
-                return await ReconcileAmendLinesAsync(baseline, lines, "修改商品响应与订单不一致。", cancellationToken);
+                return await ReconcileAmendLinesAsync(baseline, lines, InstallmentText.L("installment.text.bd763bf6", "修改商品响应与订单不一致。"), cancellationToken);
             }
 
             var localOrder = await SaveSnapshotAsync(response.Details, cancellationToken);
@@ -747,7 +747,7 @@ public sealed class InstallmentOrderService(
         var refreshed = await TryRefreshSnapshotAsync(installmentGuid, cancellationToken);
         return InstallmentAmendLinesResult.Create(
             InstallmentAmendLinesOutcome.Stale,
-            "订单已被其他设备修改，已刷新，请重新修改。",
+            InstallmentText.L("installment.text.3ade43b5", "订单已被其他设备修改，已刷新，请重新修改。"),
             InstallmentAmendLinesErrorCodes.Stale,
             refreshed,
             refreshed is null ? null : MapSummary(refreshed));
@@ -785,7 +785,7 @@ public sealed class InstallmentOrderService(
         {
             return InstallmentAmendLinesResult.Create(
                 InstallmentAmendLinesOutcome.Unknown,
-                $"保存结果未能确认（{reason}）。请核对订单后再保存；重复保存不会重复生效。");
+                InstallmentText.L("installment.text.44fdcf25", "保存结果未能确认（{0}）。请核对订单后再保存；重复保存不会重复生效。", reason));
         }
 
         if (AmendLinesContentEqual(refreshed.Lines, targetLines))
@@ -797,7 +797,7 @@ public sealed class InstallmentOrderService(
         {
             return InstallmentAmendLinesResult.Create(
                 InstallmentAmendLinesOutcome.Stale,
-                "订单已被其他设备修改，已刷新，请重新修改。",
+                InstallmentText.L("installment.text.3ade43b5", "订单已被其他设备修改，已刷新，请重新修改。"),
                 InstallmentAmendLinesErrorCodes.Stale,
                 refreshed,
                 MapSummary(refreshed));
@@ -805,7 +805,7 @@ public sealed class InstallmentOrderService(
 
         return InstallmentAmendLinesResult.Create(
             InstallmentAmendLinesOutcome.Failed,
-            $"保存未成功（{reason}），订单未被修改，请重试。",
+            InstallmentText.L("installment.text.cbf0eb9f", "保存未成功（{0}），订单未被修改，请重试。", reason),
             order: refreshed,
             summary: MapSummary(refreshed));
     }
@@ -836,7 +836,7 @@ public sealed class InstallmentOrderService(
         }
 
         // 取消必须从本机分期快照建立 durable operation 与中央 claim，禁止直接提交已组装的退款结果。
-        return Task.FromResult(InstallmentWriteResult<InstallmentCancelResponse>.OnlineRequired("安全取消服务要求从分期详情发起，已停止旧 /cancel 调用。"));
+        return Task.FromResult(InstallmentWriteResult<InstallmentCancelResponse>.OnlineRequired(InstallmentText.L("installment.text.57641432", "安全取消服务要求从分期详情发起，已停止旧 /cancel 调用。")));
     }
 
     public async Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default)
@@ -914,10 +914,10 @@ public sealed class InstallmentOrderService(
             if (operation.Succeeded && operation.Response is not null && operation.LocalOrder is not null)
             {
                 cart?.Clear();
-                return new InstallmentOrderCreateResult(true, operation.Message ?? $"已创建分期单 {operation.LocalOrder.InstallmentNumber}。", MapSummary(operation.LocalOrder));
+                return new InstallmentOrderCreateResult(true, operation.Message ?? InstallmentText.L("installment.text.49bd1a59", "已创建分期单 {0}。", operation.LocalOrder.InstallmentNumber), MapSummary(operation.LocalOrder));
             }
 
-            return new InstallmentOrderCreateResult(false, operation.Message ?? "分期创建结果未知，请勿重复收款。");
+            return new InstallmentOrderCreateResult(false, operation.Message ?? InstallmentText.L("installment.text.f2fe4446", "分期创建结果未知，请勿重复收款。"));
         }
 
         if (payment.Method == PaymentMethodKind.Card && !HasExistingCardAuthorization(payment))
@@ -926,7 +926,7 @@ public sealed class InstallmentOrderService(
             var authorization = await _cardTerminalClient.AuthorizeAsync(payment.Amount, request.Session, cancellationToken);
             if (!authorization.Approved)
             {
-                return new InstallmentOrderCreateResult(false, authorization.Message ?? "银行卡首付未授权，分期单未创建。");
+                return new InstallmentOrderCreateResult(false, authorization.Message ?? InstallmentText.L("installment.text.dc04c2e9", "银行卡首付未授权，分期单未创建。"));
             }
 
             payment = payment with
@@ -944,16 +944,19 @@ public sealed class InstallmentOrderService(
         };
         var result = await CreateAsync(request.Session, apiRequest, cancellationToken);
         return result.Status == InstallmentWriteStatus.Succeeded && result.LocalOrder is not null
-            ? new InstallmentOrderCreateResult(true, result.Message ?? $"已创建分期单 {result.LocalOrder.InstallmentNumber}。", MapSummary(result.LocalOrder))
+            ? new InstallmentOrderCreateResult(true, result.Message ?? InstallmentText.L("installment.text.49bd1a59", "已创建分期单 {0}。", result.LocalOrder.InstallmentNumber), MapSummary(result.LocalOrder))
             : new InstallmentOrderCreateResult(false, result.Message ?? result.Status.ToString());
     }
 
     public async Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default)
     {
+        // 中文注释：cancellationToken 只用来取消刷卡终端调用（付款页的取消按钮），本地读取不随它中断。
+        var terminalCancellation = cancellationToken;
+        cancellationToken = CancellationToken.None;
         var local = await localRepository.GetAsync(request.InstallmentGuid, cancellationToken);
         if (local is null)
         {
-            return new InstallmentOrderActionResult(false, "未找到本机缓存的分期单。");
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.5b6ee401", "未找到本机缓存的分期单。"));
         }
 
         var apiRequest = new InstallmentAppendPaymentRequest(
@@ -981,16 +984,17 @@ public sealed class InstallmentOrderService(
                 request.Session,
                 apiRequest,
                 request.Payment.Method == PaymentMethodKind.Card && !HasExistingCardAuthorization(request.Payment),
-                cancellationToken);
+                terminalCancellation);
             return new InstallmentOrderActionResult(
                 operation.Succeeded,
-                operation.Message ?? (operation.Succeeded ? "补款已记录。" : "补款结果未知，请勿重复收款。"),
+                operation.Message ?? (operation.Succeeded ? InstallmentText.L("installment.text.1a93b644", "补款已记录。") : InstallmentText.L("installment.text.282513ec", "补款结果未知，请勿重复收款。")),
                 operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
-                operation.RequiresReview);
+                operation.RequiresReview,
+                operation.AutoRecoveryDueAt);
         }
 
         var result = await AppendPaymentAsync(request.Session, apiRequest, cancellationToken);
-        return new InstallmentOrderActionResult(result.Status == InstallmentWriteStatus.Succeeded, result.Message ?? "补款已记录。", result.LocalOrder is null ? null : MapSummary(result.LocalOrder));
+        return new InstallmentOrderActionResult(result.Status == InstallmentWriteStatus.Succeeded, result.Message ?? InstallmentText.L("installment.text.1a93b644", "补款已记录。"), result.LocalOrder is null ? null : MapSummary(result.LocalOrder));
     }
 
     public Task<InstallmentOrderActionResult> AddRepaymentAsync(
@@ -1010,7 +1014,7 @@ public sealed class InstallmentOrderService(
         var local = await localRepository.GetAsync(orderId, cancellationToken);
         if (local is null)
         {
-            return new InstallmentOrderActionResult(false, "未找到本机缓存的分期单。");
+            return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.5b6ee401", "未找到本机缓存的分期单。"));
         }
 
         if (installmentOperations is not null)
@@ -1021,13 +1025,13 @@ public sealed class InstallmentOrderService(
                 operation.Message ?? (operation.Succeeded
                     ? refundMode == InstallmentCancelRefundMode.Voucher
                         ? FormatVoucherRefundCompletedMessage(operation.LocalOrder)
-                        : "分期单已取消并退款。"
-                    : "退款结果未知，已锁定等待处理。"),
+                        : InstallmentText.L("installment.text.ac38fe22", "分期单已取消并退款。")
+                    : InstallmentText.L("installment.text.397b1898", "退款结果未知，已锁定等待处理。")),
                 operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
                 operation.RequiresReview);
         }
 
-        return new InstallmentOrderActionResult(false, "安全取消服务未配置，已在退款 provider 调用前停止。", RequiresReview: true);
+        return new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.98661790", "安全取消服务未配置，已在退款 provider 调用前停止。"), RequiresReview: true);
     }
 
     // 完成提示同时列出券码与金额：即使退款券凭证打印失败，收银员也能当场看到券码。
@@ -1039,8 +1043,8 @@ public sealed class InstallmentOrderService(
                 .Select(voucher => $"{voucher.VoucherCode} {voucher.Amount.ToString("C2", CultureInfo.GetCultureInfo("en-AU"))}")
                 .ToList();
         return vouchers.Count == 0
-            ? "分期单已取消，已发退款代金券。"
-            : $"分期单已取消，退款代金券：{string.Join("、", vouchers)}";
+            ? InstallmentText.L("installment.text.0e15d337", "分期单已取消，已发退款代金券。")
+            : InstallmentText.L("installment.text.4ff81fab", "分期单已取消，退款代金券：{0}", string.Join("、", vouchers));
     }
 
     public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, string? reason, CancellationToken cancellationToken = default)
@@ -1063,7 +1067,7 @@ public sealed class InstallmentOrderService(
                 $"{orderId:D}:void",
                 orderId),
             cancellationToken);
-        return new InstallmentOrderActionResult(result.Status == InstallmentWriteStatus.Succeeded, result.Message ?? "分期单已作废。", result.LocalOrder is null ? null : MapSummary(result.LocalOrder));
+        return new InstallmentOrderActionResult(result.Status == InstallmentWriteStatus.Succeeded, result.Message ?? InstallmentText.L("installment.text.4e68a38d", "分期单已作废。"), result.LocalOrder is null ? null : MapSummary(result.LocalOrder));
     }
 
     public Task<InstallmentOrderActionResult> VoidAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default)
@@ -1093,7 +1097,7 @@ public sealed class InstallmentOrderService(
             var operation = await installmentOperations.ExecutePickupAsync(session, request, cancellationToken);
             return new InstallmentOrderActionResult(
                 operation.Succeeded,
-                operation.Message ?? (operation.Succeeded ? "分期单已确认提货。" : "提货确认未完成。"),
+                operation.Message ?? (operation.Succeeded ? InstallmentText.L("installment.text.18912330", "分期单已确认提货。") : InstallmentText.L("installment.text.eb24bc18", "提货确认未完成。")),
                 operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
                 operation.RequiresReview);
         }
@@ -1108,7 +1112,7 @@ public sealed class InstallmentOrderService(
             // HTTP 超时发生时服务端可能已经确认提货，必须进入人工核对而不是允许重复提交。
             return new InstallmentOrderActionResult(
                 false,
-                "提货确认请求超时，结果可能已提交；请刷新核对，勿重复确认提货。",
+                InstallmentText.L("installment.text.4acb52ad", "提货确认请求超时，结果可能已提交；请刷新核对，勿重复确认提货。"),
                 RequiresReview: true);
         }
     }
@@ -1237,7 +1241,7 @@ public sealed record InstallmentAmendLinesResult(
         new(outcome, message, errorCode, order, summary);
 
     public static InstallmentAmendLinesResult Success(LocalInstallmentOrder order, InstallmentOrderSummary summary) =>
-        new(InstallmentAmendLinesOutcome.Succeeded, "商品已修改。", null, order, summary);
+        new(InstallmentAmendLinesOutcome.Succeeded, InstallmentText.L("installment.text.c254ecd9", "商品已修改。"), null, order, summary);
 }
 
 public sealed record InstallmentHistorySearchQuery(
@@ -1250,6 +1254,17 @@ public sealed record InstallmentHistorySearchQuery(
 public sealed record InstallmentOrderSummary(Guid OrderId, string OrderNumber, string CustomerName, string CustomerPhone, decimal TotalAmount, decimal DownPaymentAmount, decimal PaidAmount, decimal OutstandingAmount, int InstallmentMonths, bool CanAddRepayment, bool CanConfirmPickup, bool CanCancelRefund, bool CanVoid, string Status, string DeviceCode, DateTimeOffset UpdatedAt)
 {
     public bool CanCancelWithRefund => CanCancelRefund;
+
+    /// <summary>列表里显示的状态文字，跟随界面语言。Status 本身保持原值：交易记录等处按它的文字判断状态。</summary>
+    public string StatusLabel => Status switch
+    {
+        "待补款" => InstallmentText.L("history.installment.status.paymentDue", "待补款"),
+        "待提货" => InstallmentText.L("history.installment.status.readyForPickup", "待提货"),
+        "已提货" => InstallmentText.L("history.installment.status.pickedUp", "已提货"),
+        "已作废" => InstallmentText.L("history.installment.status.voided", "已作废"),
+        "已取消" => InstallmentText.L("history.installment.status.cancelled", "已取消"),
+        _ => Status
+    };
 
     public bool CanVoidCancel => CanVoid;
 
@@ -1304,7 +1319,9 @@ public sealed record InstallmentOrderActionResult(
     bool Succeeded,
     string Message,
     InstallmentOrderSummary? Order = null,
-    bool RequiresReview = false);
+    bool RequiresReview = false,
+    // 结果暂时不明，但到这个时间之后再恢复一次就能有结论（Zeller 取消或超时后的迟到复核）。
+    DateTimeOffset? AutoRecoveryDueAt = null);
 
 public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentApiClient
 {
@@ -1352,7 +1369,7 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
                     }),
                 ex);
             throw new CatalogApiException(
-                "分期查询超过 2 秒，请缩小日期范围后重试。 / Lay-by search exceeded 2 seconds. Narrow the date range and retry.",
+                InstallmentText.L("installment.text.aed24720", "分期查询超过 2 秒，请缩小日期范围后重试。 / Lay-by search exceeded 2 seconds. Narrow the date range and retry."),
                 HttpStatusCode.RequestTimeout,
                 "INSTALLMENT_HISTORY_QUERY_TIMEOUT",
                 ex);
@@ -1559,14 +1576,14 @@ public sealed class NoopInstallmentOrderService : IInstallmentOrderService
     public Task<IReadOnlyList<InstallmentOrderSummary>> GetOrdersAsync(PosSessionState session, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<InstallmentOrderSummary>>([]);
     public Task<IReadOnlyList<InstallmentOrderSummary>> SearchAsync(PosSessionState session, string? keyword, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<InstallmentOrderSummary>>([]);
     public Task<LocalInstallmentOrder?> GetLocalOrderAsync(Guid installmentGuid, CancellationToken cancellationToken = default) => Task.FromResult<LocalInstallmentOrder?>(null);
-    public Task<InstallmentWriteResult<InstallmentCreateResponse>> CreateAsync(PosSessionState session, InstallmentCreateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentCreateResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
-    public Task<InstallmentWriteResult<InstallmentAppendPaymentResponse>> AppendPaymentAsync(PosSessionState session, InstallmentAppendPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
-    public Task<InstallmentWriteResult<InstallmentConfirmPickupResponse>> ConfirmPickupAsync(PosSessionState session, InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentConfirmPickupResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
-    public Task<InstallmentWriteResult<InstallmentCancelResponse>> CancelWithRefundAsync(PosSessionState session, InstallmentCancelRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentCancelResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
-    public Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentVoidResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
-    public Task<InstallmentOrderCreateResult> CreateOrderAsync(InstallmentOrderCreateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderCreateResult(false, "分期服务尚未接入。"));
-    public Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
-    public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
-    public Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
-    public Task<InstallmentOrderActionResult> ConfirmPickupAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
+    public Task<InstallmentWriteResult<InstallmentCreateResponse>> CreateAsync(PosSessionState session, InstallmentCreateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentCreateResponse>.OnlineRequired(session.IsOnline ? InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。") : "OnlineRequired"));
+    public Task<InstallmentWriteResult<InstallmentAppendPaymentResponse>> AppendPaymentAsync(PosSessionState session, InstallmentAppendPaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentAppendPaymentResponse>.OnlineRequired(session.IsOnline ? InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。") : "OnlineRequired"));
+    public Task<InstallmentWriteResult<InstallmentConfirmPickupResponse>> ConfirmPickupAsync(PosSessionState session, InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentConfirmPickupResponse>.OnlineRequired(session.IsOnline ? InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。") : "OnlineRequired"));
+    public Task<InstallmentWriteResult<InstallmentCancelResponse>> CancelWithRefundAsync(PosSessionState session, InstallmentCancelRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentCancelResponse>.OnlineRequired(session.IsOnline ? InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。") : "OnlineRequired"));
+    public Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentVoidResponse>.OnlineRequired(session.IsOnline ? InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。") : "OnlineRequired"));
+    public Task<InstallmentOrderCreateResult> CreateOrderAsync(InstallmentOrderCreateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderCreateResult(false, InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。")));
+    public Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。")));
+    public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。")));
+    public Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。")));
+    public Task<InstallmentOrderActionResult> ConfirmPickupAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, InstallmentText.L("installment.text.ce2ccb2a", "分期服务尚未接入。")));
 }

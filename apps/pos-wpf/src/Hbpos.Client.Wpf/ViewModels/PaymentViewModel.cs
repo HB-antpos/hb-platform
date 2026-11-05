@@ -49,6 +49,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     private decimal _workflowRemainingAmount;
     private InstallmentOrderSummary? _installmentRepaymentOrder;
     private string? _installmentDraftFingerprint;
+    // 中文注释：续付刷卡进行中的取消源。续付的刷卡在提交时才调用终端，不经过 _cardSession（那套状态是为销售的迟到结果设计的）。
+    private CancellationTokenSource? _installmentCardRepaymentCts;
+    // 自动复核前的等待，测试里替换成立即返回。
+    internal Func<TimeSpan, Task> InstallmentAutoRecoveryDelay { get; set; } = delay => Task.Delay(delay);
+    internal Task? InstallmentAutoRecoveryTask { get; private set; }
     private Guid? _installmentDraftPaymentGuid;
     private string? _installmentDraftCardIdempotencyKey;
     private bool _requiresAlternativeRefundMethod;
@@ -2679,16 +2684,32 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             if (_installmentRepaymentOrder is { } repaymentOrder)
             {
                 InstallmentOrderActionResult repaymentResult;
+                var repaymentDraft = CreateInstallmentPaymentDraft(appliedTender);
+                // 中文注释：续付的刷卡草稿在这里才真正调用刷卡终端；进行中显示和销售相同的取消按钮，取消信号传到终端。
+                var cardRepaymentCts = IsDeferredInstallmentRepaymentCardTender(appliedTender)
+                    ? BeginInstallmentCardRepayment(appliedTender.Amount)
+                    : null;
                 try
                 {
                     repaymentResult = await _installmentOrderService.AddRepaymentAsync(
                         new InstallmentOrderRepaymentRequest(
                             repaymentOrder.OrderId,
                             Session,
-                            CreateInstallmentPaymentDraft(appliedTender)));
+                            repaymentDraft),
+                        cardRepaymentCts?.Token ?? CancellationToken.None);
+                }
+                catch (OperationCanceledException) when (cardRepaymentCts?.IsCancellationRequested == true)
+                {
+                    // 取消发生在任何操作开始之前：没有占 claim，也没有调用终端，草稿保留。
+                    EndInstallmentCardRepayment(cardRepaymentCts);
+                    cardRepaymentCts = null;
+                    SetStatus("payment.status.cardCancelled");
+                    return;
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
+                    EndInstallmentCardRepayment(cardRepaymentCts);
+                    cardRepaymentCts = null;
                     var correlation = OperationAuditEvents.CreateCorrelation();
                     OperationAuditEvents.RecordAction(
                         _operationAuditLogger,
@@ -2711,7 +2732,19 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                     throw;
                 }
 
+                EndInstallmentCardRepayment(cardRepaymentCts);
                 await FinishInstallmentRepaymentAsync(repaymentOrder, appliedTender, repaymentResult, auditCart);
+                if (!repaymentResult.Succeeded && repaymentResult.AutoRecoveryDueAt is { } autoRecoveryDueAt)
+                {
+                    // 中文注释：Zeller 取消或超时后要等迟到复核才有结论。到点自动恢复一次，收银员不用再去分期中心。
+                    InstallmentAutoRecoveryTask = AutoRecoverInstallmentRepaymentAsync(
+                        repaymentOrder,
+                        appliedTender,
+                        repaymentDraft.PaymentGuid,
+                        autoRecoveryDueAt,
+                        auditCart);
+                }
+
                 return;
             }
 
@@ -2866,6 +2899,95 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
     }
 
+    private CancellationTokenSource BeginInstallmentCardRepayment(decimal amount)
+    {
+        _installmentCardRepaymentCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _installmentCardRepaymentCts = cts;
+        CardPaymentAmount = amount;
+        IsCardPaymentInProgress = true;
+        SetStatus("payment.status.cardProcessing");
+        NotifyPaymentCommandStates();
+        return cts;
+    }
+
+    private void EndInstallmentCardRepayment(CancellationTokenSource? cts)
+    {
+        if (cts is null || !ReferenceEquals(_installmentCardRepaymentCts, cts))
+        {
+            return;
+        }
+
+        _installmentCardRepaymentCts = null;
+        IsCardPaymentInProgress = false;
+        cts.Dispose();
+        NotifyPaymentCommandStates();
+    }
+
+    /// <summary>
+    /// 等到 Zeller 迟到复核的时间后自动恢复这笔续付：确认未扣款就清掉草稿，可以重新收款；确认已扣款就按成功收尾。
+    /// 页面已经换了分期单或草稿时只做恢复，不动界面。任何失败都只记日志，分期中心的手动恢复仍然可用。
+    /// </summary>
+    private async Task AutoRecoverInstallmentRepaymentAsync(
+        InstallmentOrderSummary order,
+        PaymentTender tender,
+        Guid operationGuid,
+        DateTimeOffset dueAt,
+        OperationAuditCartSnapshot auditCart)
+    {
+        try
+        {
+            var wait = dueAt - DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
+            if (wait < TimeSpan.FromSeconds(1)) wait = TimeSpan.FromSeconds(1);
+            if (wait > TimeSpan.FromMinutes(5)) wait = TimeSpan.FromMinutes(5);
+            await InstallmentAutoRecoveryDelay(wait);
+            if (IsShuttingDown)
+            {
+                return;
+            }
+
+            var results = await _installmentOrderService.RecoverPendingOperationsAsync(Session);
+            var recovered = results.FirstOrDefault(result => result.OperationGuid == operationGuid);
+            // 页面还停在同一张分期单、同一份草稿上才更新界面。
+            if (recovered is null ||
+                _installmentRepaymentOrder?.OrderId != order.OrderId ||
+                _installmentDraftPaymentGuid != operationGuid ||
+                IsPaymentInteractionLocked)
+            {
+                return;
+            }
+
+            switch (recovered.State)
+            {
+                case LocalInstallmentOperationState.Failed:
+                    ResetInstallmentPaymentDraft();
+                    PaymentTenders.Clear();
+                    RecalculateTenderSummary();
+                    SetStatus("payment.installment.status.cardRepaymentNotCharged");
+                    NotifyPaymentCommandStates();
+                    break;
+                case LocalInstallmentOperationState.Completed:
+                    var updated = (await _installmentOrderService.GetOrdersAsync(Session))
+                        .FirstOrDefault(item => item.OrderId == order.OrderId);
+                    await FinishInstallmentRepaymentAsync(
+                        order,
+                        tender,
+                        new InstallmentOrderActionResult(true, recovered.Message ?? string.Empty, updated),
+                        auditCart);
+                    break;
+                default:
+                    SetStatus("payment.installment.status.cardRepaymentStillUnknown");
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteWarning(
+                "InstallmentAudit",
+                $"installment repayment auto recovery failed operation={operationGuid:D} error={ex.GetType().Name}");
+        }
+    }
+
     /// <summary>续付提交之后的收尾：失败留痕并按需丢弃草稿；成功留痕并走外层打印、回 POS 流程。</summary>
     private async Task FinishInstallmentRepaymentAsync(
         InstallmentOrderSummary repaymentOrder,
@@ -2913,7 +3035,9 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         _installmentRepaymentOrder = completedOrder;
         TenderAmountText = string.Empty;
         RecalculateTenderSummary();
-        SetStatus("payment.installment.status.repaymentRecorded", repaymentResult.Message);
+        SetStatus(
+            "payment.installment.status.repaymentRecorded",
+            string.IsNullOrWhiteSpace(repaymentResult.Message) ? null : repaymentResult.Message);
         OnPropertyChanged(nameof(InstallmentOrderInfoText));
         if (_navigationActions.InstallmentOrderCreatedAsync is not null)
         {
@@ -3514,6 +3638,25 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     private void CancelPayment()
     {
+        if (_installmentCardRepaymentCts is { IsCancellationRequested: false } installmentCardRepaymentCts)
+        {
+            // 中文注释：续付刷卡的取消只把信号传给终端调用；页面保持锁定，等终端给出结论（已取消 / 结果不明）再解锁。
+            ConsoleLog.Write("CardPayment", "installment card repayment cancel requested");
+            installmentCardRepaymentCts.Cancel();
+            SetStatus("payment.installment.status.cardRepaymentCancelling");
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.PaymentCancel,
+                "Succeeded",
+                Session,
+                OperationAuditEvents.CaptureCart(_cart.Lines),
+                reasonCode: "INSTALLMENT_CARD_MANUAL_CANCEL",
+                paymentMethod: PaymentMethodKind.Card.ToString(),
+                orderGuid: _installmentRepaymentOrder?.OrderId.ToString("D"));
+            NotifyPaymentCommandStates();
+            return;
+        }
+
         if (IsCardPaymentInProgress)
         {
             _cardSession.Cancel();
@@ -3541,7 +3684,8 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     private bool CanCancelPayment()
     {
         // 中文注释：人工取消只允许中断仍在等待的终端调用；晚到结果窗口不能再次取消并丢弃已批准款项。
-        return IsCardPaymentInProgress;
+        // 续付刷卡已经点过取消后，按钮变灰，等终端给出结论。
+        return IsCardPaymentInProgress && _installmentCardRepaymentCts?.IsCancellationRequested != true;
     }
 
     internal bool IsCurrentPaymentEntry(int paymentEntryVersion)
@@ -3601,7 +3745,8 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         var statusKey = method switch
         {
             PaymentMethodKind.Cash => "payment.status.cashTenderAdded",
-            PaymentMethodKind.Card => "payment.status.cardTenderAdded",
+            // 续付的刷卡此时还没有扣款，不能显示「刷卡已批准」。
+            PaymentMethodKind.Card => "payment.installment.status.cardRepaymentReady",
             PaymentMethodKind.Voucher => "payment.status.voucherTenderAdded",
             _ => "payment.status.unsupportedMethod"
         };
