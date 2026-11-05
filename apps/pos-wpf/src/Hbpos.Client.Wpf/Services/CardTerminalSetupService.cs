@@ -86,6 +86,9 @@ public interface ICardTerminalSetupService
         CardTerminalConfiguration configuration,
         CancellationToken cancellationToken = default);
 
+    /// <summary>单独保存 Zeller 的选项（无关联退款开关）：不改处理器，也不碰 Square / Linkly 的任何设置。</summary>
+    Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default);
+
     Task<LinklyConnectionTestResult> TestLinklyConnectionAsync(
         string host,
         int port,
@@ -332,6 +335,11 @@ public sealed class CardTerminalSetupService(
         CancellationToken cancellationToken = default)
     {
         return settingsStore.SaveAsync(configuration with { Processor = CardProcessorKind.Zeller }, squareAccessToken: null, cancellationToken);
+    }
+
+    public Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default)
+    {
+        return settingsStore.SaveZellerOptionsAsync(allowUnmatchedRefund, cancellationToken);
     }
 
     public Task<LinklyConnectionTestResult> TestLinklyConnectionAsync(

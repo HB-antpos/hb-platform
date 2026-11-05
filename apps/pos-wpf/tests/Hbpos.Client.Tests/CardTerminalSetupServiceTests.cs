@@ -954,6 +954,14 @@ public sealed class CardTerminalSetupServiceTests
             return Task.CompletedTask;
         }
 
+        public bool? SavedZellerUnmatchedRefund { get; private set; }
+
+        public Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default)
+        {
+            SavedZellerUnmatchedRefund = allowUnmatchedRefund;
+            return Task.CompletedTask;
+        }
+
         public Task<string?> GetSquareAccessTokenAsync(CancellationToken cancellationToken = default)
         {
             CachedTokenReadCount++;

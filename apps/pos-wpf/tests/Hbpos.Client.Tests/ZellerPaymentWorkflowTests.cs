@@ -16,6 +16,8 @@ public sealed class ZellerPaymentWorkflowTests
     private const string TransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
     private const string OriginalTransactionUuid = "e65e0a8d-0000-4000-8000-000000000001";
     private const string OriginalReference = "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:" + OriginalTransactionUuid;
+    // 主管确认已付款、查不到 Zeller 交易时的订单引用：只有 reference，没有交易号。
+    private const string UnverifiedOriginalReference = "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a";
 
     [Fact]
     public async Task Approved_sale_adds_a_zeller_tender_and_completes_the_draft_order()
@@ -169,6 +171,81 @@ public sealed class ZellerPaymentWorkflowTests
     }
 
     [Fact]
+    public async Task Refund_of_an_unverified_original_stays_blocked_when_the_switch_is_off()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync(allowUnmatchedRefund: false);
+
+        var result = await AddRefundAsync(fixture, 4m, UnverifiedOriginalReference);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("payment.card.zeller.originalUnverified", result.StatusKey);
+        Assert.Empty(fixture.Gateway.Calls.ToArray());
+        Assert.Empty(await fixture.Attempts.ListOpenAsync(fixture.Session.StoreCode, fixture.Session.DeviceCode));
+    }
+
+    [Fact]
+    public async Task Refund_of_an_unverified_original_becomes_a_card_present_refund_when_the_switch_is_on()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync(allowUnmatchedRefund: true);
+        fixture.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            Approved(request.AmountCents, request.Reference) with { Type = ZellerTransactionType.Refund }));
+
+        var result = await AddRefundAsync(fixture, 4m, UnverifiedOriginalReference);
+
+        Assert.True(result.Succeeded, result.StatusKey);
+        var request = Assert.Single(fixture.Gateway.RefundRequests.ToArray());
+        Assert.True(request.IsUnmatched);
+        Assert.Null(request.OriginalTransactionUuid);
+        Assert.Equal(400, request.AmountCents);
+
+        var tender = result.Tender!;
+        Assert.Equal(-4m, tender.Amount);
+        // 中文注释：订单里仍记着原付款引用，付款页靠它扣减这笔原付款的可退额度。
+        Assert.True(CardRefundReference.TryGetOriginalReference(tender.Reference, out var original));
+        Assert.Equal(UnverifiedOriginalReference, original);
+        Assert.True(CashPaymentWorkflowService.TryReadZellerAttemptTenderKey(tender.IdempotencyKey, out var attemptGuid));
+        var attempt = (await fixture.Attempts.GetAsync(attemptGuid))!;
+        Assert.Equal(ZellerAttemptOperation.Refund, attempt.OperationKind);
+        Assert.Null(attempt.OriginalTransactionUuid);
+    }
+
+    [Fact]
+    public async Task A_refund_that_can_be_matched_still_refunds_the_original_transaction_when_the_switch_is_on()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync(allowUnmatchedRefund: true);
+        fixture.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            Approved(request.AmountCents, request.Reference) with { Type = ZellerTransactionType.Refund }));
+
+        var result = await AddRefundAsync(fixture, 4m, OriginalReference);
+
+        Assert.True(result.Succeeded, result.StatusKey);
+        var request = Assert.Single(fixture.Gateway.RefundRequests.ToArray());
+        Assert.False(request.IsUnmatched);
+        Assert.Equal(OriginalTransactionUuid, request.OriginalTransactionUuid);
+    }
+
+    [Fact]
+    public async Task A_declined_unmatched_refund_is_not_a_refund_and_does_not_lock_the_page()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync(allowUnmatchedRefund: true);
+        fixture.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            Approved(request.AmountCents, request.Reference) with
+            {
+                Type = ZellerTransactionType.Refund,
+                Status = ZellerTransactionStatus.Declined,
+                ResponseCode = "05",
+                ResponseText = "DO NOT HONOUR"
+            }));
+
+        var result = await AddRefundAsync(fixture, 4m, UnverifiedOriginalReference);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.IsTerminalDecline);
+        Assert.False(result.CardResult!.RequiresRecovery);
+        Assert.Null(result.RecoveryAttemptKey);
+    }
+
+    [Fact]
     public async Task Sale_without_a_cart_snapshot_is_refused_before_anything_is_stored()
     {
         await using var fixture = await ZellerWorkflowFixture.CreateAsync();
@@ -223,6 +300,17 @@ public sealed class ZellerPaymentWorkflowTests
         Assert.False(CashPaymentWorkflowService.TryReadZellerAttemptTenderKey($"SQUARE_ATTEMPT:{attemptGuid:N}", out _));
         Assert.False(CashPaymentWorkflowService.TryReadZellerAttemptTenderKey(null, out _));
     }
+
+    private static Task<PaymentTenderAttemptResult> AddRefundAsync(ZellerWorkflowFixture fixture, decimal amount, string originalReference) =>
+        fixture.Workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            fixture.Session,
+            -amount,
+            [],
+            amount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            originalReference,
+            CancellationToken.None,
+            ReturnCart(amount).CreateSnapshot());
 
     private static Task<PaymentTenderAttemptResult> AddSaleAsync(ZellerWorkflowFixture fixture, decimal amount) =>
         fixture.Workflow.AddTenderAsync(
@@ -292,7 +380,7 @@ public sealed class ZellerPaymentWorkflowTests
     {
         private readonly string _databasePath;
 
-        private ZellerWorkflowFixture(string databasePath, LocalSqliteStore store, bool withClient)
+        private ZellerWorkflowFixture(string databasePath, LocalSqliteStore store, bool withClient, bool allowUnmatchedRefund)
         {
             _databasePath = databasePath;
             Attempts = new LocalZellerPaymentAttemptRepository(store);
@@ -312,7 +400,11 @@ public sealed class ZellerPaymentWorkflowTests
                 Orders,
                 new SyncQueueRepository(store),
                 cardTerminalSettingsProvider: new StaticSettingsProvider(
-                    CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Zeller }),
+                    CardTerminalSettings.FromEnvironment() with
+                    {
+                        Processor = CardProcessorKind.Zeller,
+                        ZellerAllowUnmatchedRefund = allowUnmatchedRefund
+                    }),
                 zellerCardTerminalClient: withClient ? client : null,
                 zellerPaymentAttemptRepository: Attempts);
         }
@@ -327,12 +419,12 @@ public sealed class ZellerPaymentWorkflowTests
 
         public PosSessionState Session { get; } = new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
 
-        public static async Task<ZellerWorkflowFixture> CreateAsync(bool withClient = true)
+        public static async Task<ZellerWorkflowFixture> CreateAsync(bool withClient = true, bool allowUnmatchedRefund = false)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-zeller-workflow-{Guid.NewGuid():N}.db");
             var store = new LocalSqliteStore(databasePath);
             await new LocalSchemaService(store).InitializeAsync();
-            return new ZellerWorkflowFixture(databasePath, store, withClient);
+            return new ZellerWorkflowFixture(databasePath, store, withClient, allowUnmatchedRefund);
         }
 
         public async ValueTask DisposeAsync() => await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(_databasePath);

@@ -659,4 +659,11 @@
   <data name="settings.zeller.steps.three" xml:space="preserve"><value>3. When it says Paired, tap Enable Zeller. Pairing is done once per POS and survives restarts and updates.</value></data>
   <data name="settings.zeller.footer.help" xml:space="preserve"><value>Pair first, then enable. Switching back to Square or Linkly keeps their settings.</value></data>
   <data name="settings.status.zellerEnabled" xml:space="preserve"><value>Zeller is enabled for this POS.</value></data>
+  <data name="settings.zeller.unmatchedRefund.title" xml:space="preserve"><value>Unmatched refunds</value></data>
+  <data name="settings.zeller.unmatchedRefund.help" xml:space="preserve"><value>Off by default. When on, a refund whose original Zeller payment has no transaction number (a payment a supervisor confirmed as paid) can still go back to a card: the customer presents any card on the terminal and the money goes to that card, which may not be the original card. Refunds that can be matched to the original Zeller transaction are not affected.</value></data>
+  <data name="settings.zeller.unmatchedRefund.state.on" xml:space="preserve"><value>On</value></data>
+  <data name="settings.zeller.unmatchedRefund.state.off" xml:space="preserve"><value>Off</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.enabled" xml:space="preserve"><value>Unmatched refunds are on. A refund can now go to any card the customer presents.</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.disabled" xml:space="preserve"><value>Unmatched refunds are off.</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.saveFailed" xml:space="preserve"><value>Could not save the unmatched refund setting. Please try again.</value></data>
 </root>

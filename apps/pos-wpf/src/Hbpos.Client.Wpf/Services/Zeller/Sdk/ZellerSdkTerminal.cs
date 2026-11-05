@@ -94,15 +94,17 @@ internal sealed class ZellerSdkTerminal : IZellerSdkTerminal
     }
 
     /// <summary>
-    /// 按原交易的 transactionUuid 退款，不需要刷卡。
+    /// 按原交易的 transactionUuid 退款，不需要刷卡；没有原交易号时是无关联退款（cardPresent: true），
+    /// 由顾客在刷卡机上刷一张卡，钱退到刷的那张卡。SDK 要求两者必须二选一，都不给会直接返回 OperationRequestInvalid。
     /// SDK 0.1.0 的 refund() 没有无人值守参数，是否会弹 Zeller 窗口要在真机上确认。
     /// </summary>
     public IZellerSdkOperation<ZellerCallResult> Refund(ZellerRefundRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return ZellerSdkOperation<RefundResponse, ZellerCallResult>.From(
-            _terminal.refund(request.AmountCents, purchase: request.OriginalTransactionUuid, reference: request.Reference),
-            ZellerSdkMapper.ToCallResult);
+        var operation = request.OriginalTransactionUuid is { } originalTransactionUuid
+            ? _terminal.refund(request.AmountCents, purchase: originalTransactionUuid, reference: request.Reference)
+            : _terminal.refund(request.AmountCents, cardPresent: true, reference: request.Reference);
+        return ZellerSdkOperation<RefundResponse, ZellerCallResult>.From(operation, ZellerSdkMapper.ToCallResult);
     }
 
     public IZellerSdkOperation<ZellerQueryResult> GetTransactions(string reference)

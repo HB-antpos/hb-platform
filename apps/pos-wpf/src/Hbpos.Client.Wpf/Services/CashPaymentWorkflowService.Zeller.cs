@@ -57,11 +57,19 @@ public sealed partial class CashPaymentWorkflowService
             return CreateCardFailureResult(ZellerStatusKey("invalidRequest"));
         }
 
-        if (isRefund && !ZellerPaymentReference.TryGetOriginalTransactionUuid(referenceText, out _))
+        // 中文注释：无关联退款（默认关闭）。原付款无法关联到 Zeller 交易时（目前付款页只对主管确认的未核实付款提供：
+        // 只有 reference、没有交易号），Zeller 没法按原交易退。开关关闭：交给收银员改用其他方式；开关打开：改走刷卡退款，
+        // 由顾客在刷卡机上刷一张卡，钱退到刷的那张卡，不一定是原卡。能关联到原交易的退款永远按原交易退，不看这个开关。
+        var unmatchedRefund = isRefund && !ZellerPaymentReference.TryGetOriginalTransactionUuid(referenceText, out _);
+        if (unmatchedRefund && !settings.ZellerAllowUnmatchedRefund)
         {
-            // 未核实的原付款只有 reference、没有交易号：Zeller 只能按原交易号退款，交给收银员改用其他方式。
             ConsoleLog.Write("Zeller", $"workflow refund blocked reason=original-not-verified originalReference={LogValue(referenceText)}");
             return CreateCardFailureResult(ZellerStatusKey("originalUnverified"));
+        }
+
+        if (unmatchedRefund)
+        {
+            ConsoleLog.WriteWarning("Zeller", $"workflow refund proceeding as UNMATCHED card-present refund originalReference={LogValue(referenceText)} amountCents={amountCents}");
         }
 
         var draft = new CardPaymentOrderDraft(
@@ -95,7 +103,8 @@ public sealed partial class CashPaymentWorkflowService
                             session,
                             amount,
                             referenceText,
-                            "AUD")),
+                            "AUD"),
+                        Unmatched: unmatchedRefund),
                     progress,
                     cancellationToken)
                 : await _zellerCardTerminalClient.PurchaseAsync(

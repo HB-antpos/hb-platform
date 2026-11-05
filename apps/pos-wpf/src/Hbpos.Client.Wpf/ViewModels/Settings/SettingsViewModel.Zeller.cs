@@ -84,6 +84,82 @@ public sealed partial class SettingsViewModel
         ? T("settings.zeller.active.yes")
         : T("settings.zeller.active.no");
 
+    // ---- 无关联退款开关（默认关闭） ----
+    // 中文注释：开关自己存在这里，不从 _loadedConfiguration 读——Square / Linkly 保存后 _loadedConfiguration
+    // 会换成它们新建的配置，里面没有这个开关。存储层也让这个开关独立于 SaveAsync，所以两边都不会被悄悄清掉。
+    private bool _zellerAllowUnmatchedRefund;
+
+    /// <summary>
+    /// 允许 Zeller 无关联退款。打开后，遇到没有交易号的 Zeller 原付款（主管确认已付款的未核实付款），
+    /// 收银员可以让顾客在刷卡机上刷一张卡，钱退到刷的那张卡，不一定是原卡。
+    /// </summary>
+    public bool ZellerAllowUnmatchedRefund
+    {
+        get => _zellerAllowUnmatchedRefund;
+        set
+        {
+            if (value == _zellerAllowUnmatchedRefund || !CanChangeZellerUnmatchedRefund)
+            {
+                // 控件已经自己翻过去了：重新通知一次，让它回到真实状态。
+                OnPropertyChanged(nameof(ZellerAllowUnmatchedRefund));
+                return;
+            }
+
+            _ = SetZellerAllowUnmatchedRefundAsync(value);
+        }
+    }
+
+    public bool CanChangeZellerUnmatchedRefund =>
+        IsZellerAvailable && !IsBusy && !IsZellerPairingInProgress && !IsZellerChecking;
+
+    public string ZellerUnmatchedRefundStateText => T(_zellerAllowUnmatchedRefund
+        ? "settings.zeller.unmatchedRefund.state.on"
+        : "settings.zeller.unmatchedRefund.state.off");
+
+    private void LoadZellerUnmatchedRefundOption(CardTerminalConfiguration configuration)
+    {
+        _zellerAllowUnmatchedRefund = configuration.ZellerAllowUnmatchedRefund;
+        OnPropertyChanged(nameof(ZellerAllowUnmatchedRefund));
+        OnPropertyChanged(nameof(ZellerUnmatchedRefundStateText));
+    }
+
+    private async Task SetZellerAllowUnmatchedRefundAsync(bool allow)
+    {
+        if (_zellerCoordinator is null)
+        {
+            return;
+        }
+
+        using (var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Settings.PaymentTerminal, "set-zeller-unmatched-refund"))
+        {
+            if (permissionGrant is not null)
+            {
+                using var authorizationActivation = permissionGrant.Activate();
+                await RunBusyAsync(async () =>
+                {
+                    try
+                    {
+                        await _zellerCoordinator.SetAllowUnmatchedRefundAsync(allow);
+                        _zellerAllowUnmatchedRefund = allow;
+                        SetStatus(allow
+                            ? "settings.zeller.unmatchedRefund.status.enabled"
+                            : "settings.zeller.unmatchedRefund.status.disabled");
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+                    {
+                        ConsoleLog.WriteWarning("ZellerSettings", $"settings ui set unmatched refund failed message={LogValue(ex.Message)}", exception: ex);
+                        SetStatus("settings.zeller.unmatchedRefund.status.saveFailed");
+                    }
+                }, "set zeller unmatched refund");
+            }
+        }
+
+        // 没有授权或保存失败时，开关要回到保存前的状态。
+        OnPropertyChanged(nameof(ZellerAllowUnmatchedRefund));
+        OnPropertyChanged(nameof(ZellerUnmatchedRefundStateText));
+        OnPropertyChanged(nameof(CanChangeZellerUnmatchedRefund));
+    }
+
     private bool CanCheckZeller() => IsZellerAvailable && !IsBusy && !IsZellerPairingInProgress && !IsZellerChecking;
 
     private bool CanPairZeller() => CanCheckZeller();
@@ -207,11 +283,14 @@ public sealed partial class SettingsViewModel
         OnPropertyChanged(nameof(IsZellerPaired));
         OnPropertyChanged(nameof(ZellerStatusText));
         OnPropertyChanged(nameof(ZellerActiveText));
+        OnPropertyChanged(nameof(CanChangeZellerUnmatchedRefund));
         RaiseZellerCommandStates();
     }
 
     private void RaiseZellerCommandStates()
     {
+        // 开关随忙碌、配对、检查状态一起启用或置灰。
+        OnPropertyChanged(nameof(CanChangeZellerUnmatchedRefund));
         CheckZellerCommand?.NotifyCanExecuteChanged();
         PairZellerCommand?.NotifyCanExecuteChanged();
         EnableZellerCommand?.NotifyCanExecuteChanged();

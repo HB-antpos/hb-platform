@@ -895,6 +895,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             await LoadRestartPromptAsync();
             await LoadScannerSettingsAsync();
             _loadedConfiguration = await _setupService.LoadConfigurationAsync();
+            LoadZellerUnmatchedRefundOption(_loadedConfiguration);
             await LoadReceiptPrinterSettingsAsync();
             IsSquareSandbox = _loadedConfiguration.Environment == CardTerminalEnvironment.Sandbox;
             IsLinklySandbox = _loadedConfiguration.Environment == CardTerminalEnvironment.Sandbox;

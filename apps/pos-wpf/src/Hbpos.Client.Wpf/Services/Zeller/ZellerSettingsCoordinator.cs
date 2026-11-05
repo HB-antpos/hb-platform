@@ -40,17 +40,36 @@ public sealed class ZellerSettingsCoordinator
     private readonly Func<CardTerminalConfiguration, CancellationToken, Task> _saveConfigurationAsync;
     private readonly IScannerInputSuspension? _scannerSuspension;
     private readonly Action<string>? _log;
+    private readonly Func<bool, CancellationToken, Task>? _saveUnmatchedRefundOptionAsync;
 
     public ZellerSettingsCoordinator(
         IZellerTerminalGateway gateway,
         Func<CardTerminalConfiguration, CancellationToken, Task> saveConfigurationAsync,
         IScannerInputSuspension? scannerSuspension = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        Func<bool, CancellationToken, Task>? saveUnmatchedRefundOptionAsync = null)
     {
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _saveConfigurationAsync = saveConfigurationAsync ?? throw new ArgumentNullException(nameof(saveConfigurationAsync));
         _scannerSuspension = scannerSuspension;
         _log = log;
+        _saveUnmatchedRefundOptionAsync = saveUnmatchedRefundOptionAsync;
+    }
+
+    /// <summary>
+    /// 保存「允许无关联退款」开关（默认关闭）。只写这一个设置，不改处理器，也不要求已配对。
+    /// 打开后，Zeller 收银机遇到没有交易号的 Zeller 原付款（主管确认已付款的未核实付款）时，
+    /// 可以在刷卡机上刷一张卡退款，钱退到刷的那张卡，不一定是原卡。
+    /// </summary>
+    public async Task SetAllowUnmatchedRefundAsync(bool allow, CancellationToken cancellationToken = default)
+    {
+        if (_saveUnmatchedRefundOptionAsync is null)
+        {
+            throw new InvalidOperationException("Saving the Zeller unmatched refund option is not configured.");
+        }
+
+        await _saveUnmatchedRefundOptionAsync(allow, cancellationToken).ConfigureAwait(false);
+        Log($"unmatched refund {(allow ? "enabled" : "disabled")}");
     }
 
     /// <summary>检查是否已配对：不弹窗，已配对约几秒返回。</summary>

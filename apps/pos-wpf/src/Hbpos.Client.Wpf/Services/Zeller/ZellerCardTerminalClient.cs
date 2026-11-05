@@ -74,6 +74,8 @@ public sealed record ZellerPaymentProgress(ZellerPaymentProgressKind Kind, int V
 /// 按原交易退款所需的信息。OriginalPaymentReference 是原扣款写在订单里的引用（ZELLER:…），
 /// 也可以是包装过的退款引用；退款用其中的 transactionUuid 指向原交易，不用 reference（一个 reference 可能对应多笔）。
 /// RefundBusinessKey 标识「这一笔退货要退回原卡」这件事，同一个键同时只允许一笔进行中或结果未知的退款。
+/// Unmatched 为 true 表示无关联退款：原付款无法关联到 Zeller 交易（主管确认的未核实付款、人工刷卡），
+/// 不带原交易号，由顾客在刷卡机上刷一张卡，钱退到刷的那张卡；OriginalPaymentReference 仍是原付款的引用，只用于订单记录。
 /// </summary>
 public sealed record ZellerRefundContext(
     int AmountCents,
@@ -83,7 +85,8 @@ public sealed record ZellerRefundContext(
     string DeviceCode,
     string CashierId,
     string? RefundBusinessKey = null,
-    Guid? OperationGuid = null);
+    Guid? OperationGuid = null,
+    bool Unmatched = false);
 
 public sealed record ZellerPaymentOutcome(
     ZellerPaymentState State,
@@ -217,10 +220,16 @@ public sealed class ZellerCardTerminalClient
         ArgumentException.ThrowIfNullOrWhiteSpace(context.StoreCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(context.DeviceCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(context.CashierId);
-        if (!ZellerPaymentReference.TryGetOriginalTransactionUuid(context.OriginalPaymentReference, out var originalTransactionUuid))
+        string? originalTransactionUuid = null;
+        if (!context.Unmatched)
         {
-            // 调用方只应该把 Zeller 的原交易路由到这里（方案 D7）。
-            throw new ArgumentException("The original payment is not a Zeller payment reference.", nameof(context));
+            if (!ZellerPaymentReference.TryGetOriginalTransactionUuid(context.OriginalPaymentReference, out var parsedOriginalTransactionUuid))
+            {
+                // 调用方只应该把 Zeller 的原交易路由到这里（方案 D7）；无法关联的原付款要显式走无关联退款。
+                throw new ArgumentException("The original payment is not a Zeller payment reference.", nameof(context));
+            }
+
+            originalTransactionUuid = parsedOriginalTransactionUuid;
         }
 
         var attemptGuid = Guid.NewGuid();
@@ -261,7 +270,9 @@ public sealed class ZellerCardTerminalClient
             }
         }
 
-        Log($"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, original {originalTransactionUuid}");
+        Log(originalTransactionUuid is null
+            ? $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, UNMATCHED (card present, no original transaction)"
+            : $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, original {originalTransactionUuid}");
         return await RunAsync(
             pending,
             (events, token) => _gateway.RefundAsync(new ZellerRefundRequest(context.AmountCents, reference, originalTransactionUuid), events, token),
