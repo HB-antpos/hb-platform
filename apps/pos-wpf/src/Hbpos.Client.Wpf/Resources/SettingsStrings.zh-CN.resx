@@ -659,4 +659,11 @@
   <data name="settings.zeller.steps.three" xml:space="preserve"><value>3. 显示「已配对」后，点「启用 Zeller」。每台收银机只需配对一次，重启和更新都不用重配。</value></data>
   <data name="settings.zeller.footer.help" xml:space="preserve"><value>先配对，再启用。切回 Square 或 Linkly 时，它们的设置都还在。</value></data>
   <data name="settings.status.zellerEnabled" xml:space="preserve"><value>已为这台收银机启用 Zeller。</value></data>
+  <data name="settings.zeller.unmatchedRefund.title" xml:space="preserve"><value>无关联退款</value></data>
+  <data name="settings.zeller.unmatchedRefund.help" xml:space="preserve"><value>默认关闭。打开后，原 Zeller 付款没有交易号时（主管手工确认已付款的那种），也可以退到卡上：由顾客在刷卡机上刷一张卡，钱退到刷的那张卡，不一定是原卡。能关联到原 Zeller 交易的退款不受影响。</value></data>
+  <data name="settings.zeller.unmatchedRefund.state.on" xml:space="preserve"><value>已开启</value></data>
+  <data name="settings.zeller.unmatchedRefund.state.off" xml:space="preserve"><value>已关闭</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.enabled" xml:space="preserve"><value>已开启无关联退款：退款可以退到顾客刷的任意一张卡。</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.disabled" xml:space="preserve"><value>已关闭无关联退款。</value></data>
+  <data name="settings.zeller.unmatchedRefund.status.saveFailed" xml:space="preserve"><value>无法保存无关联退款设置，请重试。</value></data>
 </root>

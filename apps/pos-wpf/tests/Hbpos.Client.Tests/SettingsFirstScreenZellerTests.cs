@@ -48,6 +48,14 @@ public sealed class SettingsFirstScreenZellerTests(PaymentViewRuntimeStaTestHost
                 var texts = PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(page).Select(text => text.Text).ToList();
                 Assert.Contains(vm.ZellerStatusText, texts);
                 Assert.Contains(localization.T("settings.zeller.steps.two"), texts);
+                // 无关联退款开关卡（默认关闭）在首屏里，和正文一起不滚动。
+                Assert.Contains(localization.T("settings.zeller.unmatchedRefund.title"), texts);
+                Assert.Contains(localization.T("settings.zeller.unmatchedRefund.help"), texts);
+                var toggle = Assert.Single(
+                    PaymentViewRuntimeStaTestHost.FindVisualDescendants<System.Windows.Controls.Primitives.ToggleButton>(page),
+                    candidate => candidate.Name == "ZellerUnmatchedRefundToggle");
+                Assert.False(toggle.IsChecked);
+                Assert.True(toggle.IsEnabled);
                 Assert.DoesNotContain(texts, text => text.Contains("[[", StringComparison.Ordinal));
             }
             finally

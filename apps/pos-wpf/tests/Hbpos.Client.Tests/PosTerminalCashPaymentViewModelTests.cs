@@ -8775,6 +8775,133 @@ public sealed class PosTerminalCashPaymentViewModelTests
         }
     }
 
+    /// <summary>只回答「读取卡终端配置」的设置服务替身：接口很大，这里用动态代理，调用其他成员直接报错。</summary>
+    private class ConfigurationOnlySetupService : DispatchProxy
+    {
+        public CardTerminalConfiguration Configuration { get; set; } = CardTerminalConfiguration.Default;
+
+        public static ICardTerminalSetupService Create(CardTerminalConfiguration configuration)
+        {
+            var proxy = Create<ICardTerminalSetupService, ConfigurationOnlySetupService>();
+            ((ConfigurationOnlySetupService)(object)proxy).Configuration = configuration;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
+            targetMethod?.Name is "LoadConfigurationWithoutTokenStatusAsync" or "LoadConfigurationAsync"
+                ? Task.FromResult(Configuration)
+                : throw new NotSupportedException(targetMethod?.Name);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Refund_mode_offers_an_unverified_zeller_original_only_when_unmatched_refunds_are_on(bool enabled)
+    {
+        const string unverified = "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a";
+        var cart = new PosCartService();
+        cart.AddReturnLine(new ReturnCartLineRequest(
+            "S001",
+            "SKU-REFUND-ZELLER",
+            null,
+            "Refund Zeller Tea",
+            "930142Z",
+            "ITEM-REFUND-ZELLER",
+            null,
+            1m,
+            4m,
+            PriceSourceKind.StoreRetailPrice,
+            PriceSourceKind.StoreRetailPrice.ToString(),
+            "RETURN-VM-ZELLER",
+            Guid.NewGuid(),
+            Guid.NewGuid()));
+        cart.AddReturnPaymentCapacities([new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 4m, 0m, 4m, unverified)]);
+        var cardTerminal = new ApprovedCardTerminalClient("CARD-REFUND");
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashPaymentWorkflowService(
+                new CashCheckoutService(),
+                new InMemoryOrderRepository(),
+                new InMemorySyncQueueRepository(),
+                cardTerminalClient: cardTerminal),
+            Session,
+            cardTerminalSetupService: ConfigurationOnlySetupService.Create(CardTerminalConfiguration.Default with
+            {
+                Processor = CardProcessorKind.Zeller,
+                ZellerAllowUnmatchedRefund = enabled
+            }));
+
+        PaymentCompletedEventArgs? completed = null;
+        viewModel.PaymentCompleted += (_, args) => completed = args;
+
+        viewModel.PrepareForEntry(Session);
+        await viewModel.RefreshLinklyCloudTerminalsAsync();
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        if (enabled)
+        {
+            // 中文注释：开关打开：这笔没有交易号的原付款也能退到卡上，原付款引用原样带给退款流程。
+            // 这一笔刚好退完整张退货单，所以直接完成订单。
+            var payment = Assert.Single(Assert.IsType<PaymentCompletedEventArgs>(completed).Order.Payments);
+            Assert.Equal(-4m, payment.Amount);
+            Assert.True(CardRefundReference.TryGetOriginalReference(payment.Reference, out var original));
+            Assert.Equal(unverified, original);
+            Assert.Equal([unverified], cardTerminal.RefundOriginalReferences);
+        }
+        else
+        {
+            // 中文注释：开关关闭（默认）：和以前一样，不提供原卡退回，不会向刷卡机发任何请求。
+            Assert.Null(completed);
+            Assert.Empty(viewModel.PaymentTenders);
+            Assert.Empty(cardTerminal.RefundOriginalReferences);
+        }
+    }
+
+    [Fact]
+    public async Task Refund_mode_does_not_offer_an_unverified_zeller_original_on_a_till_that_is_not_zeller()
+    {
+        const string unverified = "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a";
+        var cart = new PosCartService();
+        cart.AddReturnLine(new ReturnCartLineRequest(
+            "S001",
+            "SKU-REFUND-ZELLER",
+            null,
+            "Refund Zeller Tea",
+            "930142Z",
+            "ITEM-REFUND-ZELLER",
+            null,
+            1m,
+            4m,
+            PriceSourceKind.StoreRetailPrice,
+            PriceSourceKind.StoreRetailPrice.ToString(),
+            "RETURN-VM-ZELLER",
+            Guid.NewGuid(),
+            Guid.NewGuid()));
+        cart.AddReturnPaymentCapacities([new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 4m, 0m, 4m, unverified)]);
+        var cardTerminal = new ApprovedCardTerminalClient("CARD-REFUND");
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashPaymentWorkflowService(
+                new CashCheckoutService(),
+                new InMemoryOrderRepository(),
+                new InMemorySyncQueueRepository(),
+                cardTerminalClient: cardTerminal),
+            Session,
+            // 开关是以前在 Zeller 收银机上打开的、现在这台已经换成 Square：不能再提供。
+            cardTerminalSetupService: ConfigurationOnlySetupService.Create(CardTerminalConfiguration.Default with
+            {
+                Processor = CardProcessorKind.Square,
+                ZellerAllowUnmatchedRefund = true
+            }));
+
+        viewModel.PrepareForEntry(Session);
+        await viewModel.RefreshLinklyCloudTerminalsAsync();
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Empty(cardTerminal.RefundOriginalReferences);
+    }
+
     private sealed class ApprovedCardTerminalClient(
         string reference,
         PaymentAuthorizationResult? authorization = null) : ICardTerminalClient

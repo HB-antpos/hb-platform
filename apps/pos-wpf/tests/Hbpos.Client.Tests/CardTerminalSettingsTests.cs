@@ -172,6 +172,53 @@ public sealed class CardTerminalSettingsTests
     }
 
     [Fact]
+    public async Task The_zeller_unmatched_refund_option_is_off_by_default_and_round_trips()
+    {
+        var store = new CardTerminalSettingsStore(new InMemorySettingsRepository(), new FakeAuthorizationProtector());
+
+        Assert.False((await store.LoadAsync()).ZellerAllowUnmatchedRefund);
+        Assert.False((await store.GetSettingsAsync()).ZellerAllowUnmatchedRefund);
+
+        await store.SaveZellerOptionsAsync(true);
+
+        Assert.True((await store.LoadAsync()).ZellerAllowUnmatchedRefund);
+        Assert.True((await store.GetSettingsAsync()).ZellerAllowUnmatchedRefund);
+
+        await store.SaveZellerOptionsAsync(false);
+
+        Assert.False((await store.LoadAsync()).ZellerAllowUnmatchedRefund);
+        Assert.False((await store.GetSettingsAsync()).ZellerAllowUnmatchedRefund);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1")]
+    [InlineData("yes")]
+    [InlineData("maybe")]
+    public async Task Only_an_explicit_true_turns_the_zeller_unmatched_refund_option_on(string stored)
+    {
+        var repository = new InMemorySettingsRepository(new Dictionary<string, string?>
+        {
+            ["CardTerminal:ZellerAllowUnmatchedRefund"] = stored
+        });
+        var store = new CardTerminalSettingsStore(repository, new FakeAuthorizationProtector());
+
+        Assert.False((await store.LoadAsync()).ZellerAllowUnmatchedRefund);
+    }
+
+    [Fact]
+    public async Task Saving_other_card_terminal_settings_does_not_clear_the_zeller_unmatched_refund_option()
+    {
+        var store = new CardTerminalSettingsStore(new InMemorySettingsRepository(), new FakeAuthorizationProtector());
+        await store.SaveZellerOptionsAsync(true);
+
+        // 中文注释：Square / Linkly 保存时用的是新建的配置（开关字段是默认的 false），不能因此把已打开的开关清掉。
+        await store.SaveAsync(CardTerminalConfiguration.Default with { Processor = CardProcessorKind.Square }, null);
+
+        Assert.True((await store.LoadAsync()).ZellerAllowUnmatchedRefund);
+    }
+
+    [Fact]
     public async Task GetSettingsAsync_does_not_expose_legacy_local_square_access_token()
     {
         var repository = new InMemorySettingsRepository(new Dictionary<string, string?>

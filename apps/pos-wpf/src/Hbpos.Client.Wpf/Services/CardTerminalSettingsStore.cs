@@ -26,6 +26,7 @@ public sealed class CardTerminalSettingsStore(
     private const string SquareLocationIdKey = "CardTerminal:SquareLocationId";
     private const string SquareDeviceIdKey = "CardTerminal:SquareDeviceId";
     private const string TimeoutSecondsKey = "CardTerminal:TimeoutSeconds";
+    private const string ZellerAllowUnmatchedRefundKey = "CardTerminal:ZellerAllowUnmatchedRefund";
 
     public Task<CardTerminalConfiguration> LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -94,7 +95,20 @@ public sealed class CardTerminalSettingsStore(
             timeoutSeconds,
             linklyConnectionMode,
             !string.IsNullOrWhiteSpace(protectedLinklySecret),
-            linklyConnectionModePriority);
+            linklyConnectionModePriority,
+            // 中文注释：只有明确存成 "true" 才算开启；没存过、存了别的值、读到乱码都按关闭处理。
+            string.Equals(
+                (await settingsRepository.GetValueAsync(ZellerAllowUnmatchedRefundKey, cancellationToken))?.Trim(),
+                bool.TrueString,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    public Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default)
+    {
+        return settingsRepository.SetValueAsync(
+            ZellerAllowUnmatchedRefundKey,
+            allowUnmatchedRefund ? bool.TrueString : bool.FalseString,
+            cancellationToken);
     }
 
     public async Task SaveAsync(
@@ -447,7 +461,8 @@ public sealed class CardTerminalSettingsStore(
             CardTerminalSettings.ResolveLinklyPosVendorId(configuration.Environment),
             CardTerminalSettings.NormalizeLinklyConnectionModePriority(
                 configuration.LinklyConnectionModePriority,
-                configuration.LinklyConnectionMode));
+                configuration.LinklyConnectionMode),
+            configuration.ZellerAllowUnmatchedRefund);
     }
 
     private async Task<bool> ResolveSquareTokenConfiguredAsync(

@@ -115,6 +115,82 @@ public sealed partial class SettingsViewModelTests
         Assert.False(viewModel.EnableZellerCommand.CanExecute(null));
     }
 
+    // ── 无关联退款开关（默认关闭） ──
+
+    [Fact]
+    public async Task The_unmatched_refund_switch_is_off_by_default_and_saves_without_touching_the_processor()
+    {
+        var service = new FakeCardTerminalSetupService(CardTerminalConfiguration.Default with { Processor = CardProcessorKind.Square });
+        var viewModel = CreateViewModel(service, ZellerCoordinatorFor(new ZellerSettingsTests.ZellerPairingGateway(), service));
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.ZellerAllowUnmatchedRefund);
+        Assert.True(viewModel.CanChangeZellerUnmatchedRefund);
+        var offText = viewModel.ZellerUnmatchedRefundStateText;
+
+        viewModel.ZellerAllowUnmatchedRefund = true;
+        await AsyncTestWaitSupport.WaitUntilAsync(() => viewModel.ZellerAllowUnmatchedRefund);
+        Assert.NotEqual(offText, viewModel.ZellerUnmatchedRefundStateText);
+
+        Assert.Equal([true], service.SavedZellerUnmatchedRefundOptions);
+        // 中文注释：只存这个开关，不能顺手把处理器切成 Zeller。
+        Assert.Equal(0, service.SaveZellerCallCount);
+        Assert.False(viewModel.IsZellerActive);
+
+        viewModel.ZellerAllowUnmatchedRefund = false;
+        await AsyncTestWaitSupport.WaitUntilAsync(() => !viewModel.ZellerAllowUnmatchedRefund && service.SavedZellerUnmatchedRefundOptions.Count == 2);
+
+        Assert.Equal([true, false], service.SavedZellerUnmatchedRefundOptions);
+    }
+
+    [Fact]
+    public async Task A_saved_unmatched_refund_switch_is_shown_on_load()
+    {
+        var service = new FakeCardTerminalSetupService(CardTerminalConfiguration.Default with
+        {
+            Processor = CardProcessorKind.Zeller,
+            ZellerAllowUnmatchedRefund = true
+        });
+        var viewModel = CreateViewModel(service, ZellerCoordinatorFor(new ZellerSettingsTests.ZellerPairingGateway(), service));
+
+        await viewModel.LoadAsync();
+
+        Assert.True(viewModel.ZellerAllowUnmatchedRefund);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.ZellerUnmatchedRefundStateText));
+    }
+
+    [Fact]
+    public async Task A_failed_save_puts_the_unmatched_refund_switch_back()
+    {
+        var service = new FakeCardTerminalSetupService(CardTerminalConfiguration.Default)
+        {
+            SaveZellerOptionsException = new IOException("disk full")
+        };
+        var viewModel = CreateViewModel(service, ZellerCoordinatorFor(new ZellerSettingsTests.ZellerPairingGateway(), service));
+        await viewModel.LoadAsync();
+        var raised = 0;
+        viewModel.PropertyChanged += (_, e) => raised += e.PropertyName == nameof(SettingsViewModel.ZellerAllowUnmatchedRefund) ? 1 : 0;
+
+        viewModel.ZellerAllowUnmatchedRefund = true;
+        await AsyncTestWaitSupport.WaitUntilAsync(() => raised > 0 && viewModel.CanChangeZellerUnmatchedRefund);
+
+        // 中文注释：没存成功，开关必须回到关闭，并且通知界面重新读取（控件自己已经翻过去了）。
+        Assert.False(viewModel.ZellerAllowUnmatchedRefund);
+        Assert.Empty(service.SavedZellerUnmatchedRefundOptions);
+    }
+
+    [Fact]
+    public async Task Without_a_coordinator_the_unmatched_refund_switch_cannot_be_changed()
+    {
+        var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService(CardTerminalConfiguration.Default));
+        await viewModel.LoadAsync();
+
+        viewModel.ZellerAllowUnmatchedRefund = true;
+
+        Assert.False(viewModel.CanChangeZellerUnmatchedRefund);
+        Assert.False(viewModel.ZellerAllowUnmatchedRefund);
+    }
+
     [Fact]
     public async Task Selecting_the_zeller_sub_tab_selects_provider_tab_two_and_back()
     {
@@ -166,7 +242,10 @@ public sealed partial class SettingsViewModelTests
     }
 
     private static ZellerSettingsCoordinator ZellerCoordinatorFor(ZellerSettingsTests.ZellerPairingGateway gateway, FakeCardTerminalSetupService service) =>
-        new(gateway, (configuration, cancellationToken) => service.SaveZellerAsync(configuration, cancellationToken));
+        new(
+            gateway,
+            (configuration, cancellationToken) => service.SaveZellerAsync(configuration, cancellationToken),
+            saveUnmatchedRefundOptionAsync: (allow, cancellationToken) => service.SaveZellerOptionsAsync(allow, cancellationToken));
 
     private static SettingsViewModel CreateViewModel(FakeCardTerminalSetupService service, ZellerSettingsCoordinator coordinator) =>
         new(service, zellerSettingsCoordinator: coordinator);

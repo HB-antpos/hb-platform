@@ -4897,6 +4897,22 @@ public sealed partial class SettingsViewModelTests
 
         public int SaveZellerCallCount { get; private set; }
 
+        public List<bool> SavedZellerUnmatchedRefundOptions { get; } = [];
+
+        public Exception? SaveZellerOptionsException { get; set; }
+
+        public Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default)
+        {
+            if (SaveZellerOptionsException is not null)
+            {
+                return Task.FromException(SaveZellerOptionsException);
+            }
+
+            SavedZellerUnmatchedRefundOptions.Add(allowUnmatchedRefund);
+            _configuration = _configuration with { ZellerAllowUnmatchedRefund = allowUnmatchedRefund };
+            return Task.CompletedTask;
+        }
+
         public Task SaveZellerAsync(
             CardTerminalConfiguration configuration,
             CancellationToken cancellationToken = default)

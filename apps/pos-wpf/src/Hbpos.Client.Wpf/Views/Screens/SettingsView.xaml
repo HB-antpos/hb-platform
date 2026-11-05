@@ -3439,6 +3439,7 @@
                                 </TabItem.Header>
                                 <!-- Zeller 首屏版式（1366×632 内正文不滚动）：左 = 配对状态卡，右 = 配对步骤。
                                      没有输入框；检查配对 / 配对刷卡机 / 启用 Zeller 都在固定底栏 FOOTER: Zeller。 -->
+                                <StackPanel>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -3491,6 +3492,39 @@
                                         </StackPanel>
                                     </Border>
                                 </Grid>
+                                <!-- 无关联退款开关（默认关闭）：打开后，无法关联到 Zeller 原交易的原付款也可以退到刷卡机上刷的卡。 -->
+                                <Border Style="{StaticResource SettingsActionCardStyle}"
+                                        Padding="16"
+                                        Margin="0,16,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.zeller.unmatchedRefund.title}"
+                                                       FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="{loc:Loc settings.zeller.unmatchedRefund.help}"
+                                                       TextWrapping="Wrap" FontSize="12.5" LineHeight="18"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <ToggleButton x:Name="ZellerUnmatchedRefundToggle"
+                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                          IsChecked="{Binding ZellerAllowUnmatchedRefund, Mode=TwoWay}"
+                                                          IsEnabled="{Binding CanChangeZellerUnmatchedRefund}"
+                                                          AutomationProperties.Name="{loc:Loc settings.zeller.unmatchedRefund.title}"
+                                                          MinHeight="48" MinWidth="56"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding ZellerUnmatchedRefundStateText}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                </StackPanel>
                             </TabItem>
                             <!-- ===== PAGE: PaymentTerminal / Zeller END ===== -->
                         </TabControl>

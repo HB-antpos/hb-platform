@@ -158,5 +158,12 @@ public sealed record ZellerPairingResult(bool IsPaired, ZellerErrorType? ErrorTy
 
 public sealed record ZellerPurchaseRequest(int AmountCents, string Reference);
 
-/// <summary>按原交易退款。OriginalTransactionUuid 是原扣款的 transactionUuid，不用 reference（一个 reference 可能对应多笔）。</summary>
-public sealed record ZellerRefundRequest(int AmountCents, string Reference, string OriginalTransactionUuid);
+/// <summary>
+/// 退款请求。OriginalTransactionUuid 是原扣款的 transactionUuid，不用 reference（一个 reference 可能对应多笔）。
+/// OriginalTransactionUuid 为 null 表示无关联退款（刷卡退款）：不关联任何原交易，由顾客在刷卡机上刷一张卡，钱退到刷的那张卡。
+/// </summary>
+public sealed record ZellerRefundRequest(int AmountCents, string Reference, string? OriginalTransactionUuid)
+{
+    /// <summary>无关联退款：需要刷卡，钱退到刷的那张卡。</summary>
+    public bool IsUnmatched => OriginalTransactionUuid is null;
+}

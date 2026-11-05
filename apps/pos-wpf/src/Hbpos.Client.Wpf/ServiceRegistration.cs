@@ -976,7 +976,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<IZellerTerminalGateway>(),
             (configuration, cancellationToken) => sp.GetRequiredService<ICardTerminalSetupService>().SaveZellerAsync(configuration, cancellationToken),
             sp.GetRequiredService<IScannerInputSuspension>(),
-            Log));
+            Log,
+            (allow, cancellationToken) => sp.GetRequiredService<ICardTerminalSetupService>().SaveZellerOptionsAsync(allow, cancellationToken)));
         // 卡交易恢复协调器的 Zeller 提供方（协调器按类型构造，注册后自动带上）。
         services.AddSingleton(sp => new ZellerCardRecoveryProvider(
             sp.GetRequiredService<ZellerPaymentRecoveryService>(),

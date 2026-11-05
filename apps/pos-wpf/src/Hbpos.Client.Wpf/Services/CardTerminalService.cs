@@ -52,7 +52,10 @@ public sealed record CardTerminalConfiguration(
     int TerminalTimeoutSeconds,
     LinklyConnectionMode LinklyConnectionMode = LinklyConnectionMode.LocalIp,
     bool HasProtectedLinklyCloudSecret = false,
-    IReadOnlyList<LinklyConnectionMode>? LinklyConnectionModePriority = null)
+    IReadOnlyList<LinklyConnectionMode>? LinklyConnectionModePriority = null,
+    // 中文注释：Zeller 无关联退款开关，默认关闭。它不随 SaveAsync 写入——Square / Linkly 保存时会用新建的配置，
+    // 若跟着写就会把这个开关悄悄清掉；只通过 SaveZellerOptionsAsync 单独保存。
+    bool ZellerAllowUnmatchedRefund = false)
 {
     public static CardTerminalConfiguration Default { get; } = new(
         CardProcessorKind.None,
@@ -84,7 +87,8 @@ public sealed record CardTerminalSettings(
     string LinklyPosName = "HBPOS",
     string LinklyPosVersion = "1.0.0",
     string? LinklyPosVendorId = null,
-    IReadOnlyList<LinklyConnectionMode>? LinklyConnectionModePriority = null)
+    IReadOnlyList<LinklyConnectionMode>? LinklyConnectionModePriority = null,
+    bool ZellerAllowUnmatchedRefund = false)
 {
     public const string SquareVersion = "2026-01-22";
     public const string DefaultLinklyPosName = "HotBargainPOS";
@@ -509,6 +513,9 @@ public interface ICardTerminalSettingsStore : ICardTerminalSettingsProvider, ISq
         CardTerminalConfiguration configuration,
         string? squareAccessToken,
         CancellationToken cancellationToken = default);
+
+    /// <summary>单独保存 Zeller 的选项（目前只有无关联退款开关），不碰其他任何设置。</summary>
+    Task SaveZellerOptionsAsync(bool allowUnmatchedRefund, CancellationToken cancellationToken = default);
 
     Task<string?> GetSquareAccessTokenAsync(CancellationToken cancellationToken = default);
 }

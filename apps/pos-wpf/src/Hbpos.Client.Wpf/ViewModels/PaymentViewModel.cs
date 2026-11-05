@@ -364,6 +364,9 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         });
     }
 
+    // 中文注释：这台收银机是 Zeller 且打开了「无关联退款」开关。进付款页时随处理器配置一起读入，读不到就保持 false（不提供）。
+    private bool _zellerUnmatchedRefundEnabled;
+
     public async Task RefreshLinklyCloudTerminalsAsync()
     {
         if (!IsIntegratedCardPaymentVisible || !_paymentMethodSettingsReady ||
@@ -381,6 +384,8 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             // 中文注释：这里只用处理器 / 环境 / Linkly 模式，不读「令牌是否已配置」；
             // 用不联网的版本，免得每次进付款页都多等一次到新加坡的往返（约 0.9 秒）才放行刷卡。
             var configuration = await _cardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync();
+            _zellerUnmatchedRefundEnabled =
+                configuration.Processor == CardProcessorKind.Zeller && configuration.ZellerAllowUnmatchedRefund;
             if (configuration.Processor == CardProcessorKind.Square)
             {
                 StartCardTerminalWarmUp();
@@ -3802,7 +3807,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             : NormalizeReference(reference);
     }
 
-    private static string? ResolveOriginalCardRefundReference(OrderReturnPaymentCapacityDto capacity)
+    private string? ResolveOriginalCardRefundReference(OrderReturnPaymentCapacityDto capacity)
     {
         var reference = NormalizeReference(capacity.Reference);
         if (ManualCardPaymentReference.IsManualRefundSource(reference) ||
@@ -3812,9 +3817,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
 
         // 中文注释：未核实的 Zeller 原付款（主管按已付款结案、只有 reference 没有交易号）不能在刷卡机上按原交易退回，和人工确认的付款一样不提供原卡退回。
+        // 例外：Zeller 收银机打开了「无关联退款」开关时，仍提供这一笔，改走刷卡退款（顾客在刷卡机上刷一张卡，钱退到刷的那张卡，
+        // 不一定是原卡）。人工刷卡的原付款不在例外里，所有通道都一样不提供。
         if (ZellerPaymentReference.IsUnverified(reference))
         {
-            return null;
+            return _zellerUnmatchedRefundEnabled ? reference : null;
         }
 
         if (reference is null || RequiresLinklyRefundReference(reference))
