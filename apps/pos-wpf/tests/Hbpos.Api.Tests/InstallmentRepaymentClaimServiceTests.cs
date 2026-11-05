@@ -1159,6 +1159,144 @@ public sealed class InstallmentRepaymentClaimServiceTests
     }
 
     [Fact]
+    public async Task Supervisor_on_another_device_confirms_not_charged_and_unblocks_the_installment()
+    {
+        var harness = CreateHarness();
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+        var supervisor = SupervisorIdentity(deviceCode: "POS-09");
+
+        var blocking = await harness.Service.GetBlockingForSupervisorAsync(harness.InstallmentGuid, supervisor, CancellationToken.None);
+        var resolved = await harness.Service.SupervisorResolveAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            new InstallmentRepaymentClaimSupervisorResolveRequest(
+                InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged,
+                "Bank portal shows no charge"),
+            supervisor,
+            CancellationToken.None);
+
+        Assert.Equal(claim.OperationGuid, blocking?.OperationGuid);
+        Assert.Equal("POS-01", blocking?.ClaimantDeviceCode);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Declined, resolved.Status);
+        Assert.Null(await harness.Repository.GetBlockingAsync(harness.InstallmentGuid, CancellationToken.None));
+        Assert.Null(await harness.Service.GetBlockingForSupervisorAsync(harness.InstallmentGuid, supervisor, CancellationToken.None));
+        Assert.Equal(0, harness.Installments.AppendCount);
+        var stored = await harness.Repository.GetAsync(claim.OperationGuid, CancellationToken.None);
+        Assert.Equal("SUP01", stored?.LastRecoveryCashierId);
+        var audit = Assert.Single(harness.Verifier.SupervisorResolutions);
+        Assert.Equal(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, audit.Decision);
+        Assert.Equal("Bank portal shows no charge", audit.Reason);
+    }
+
+    [Fact]
+    public async Task Supervisor_confirms_an_unknown_card_repayment_as_charged_and_records_it_once()
+    {
+        var harness = CreateHarness();
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+        await harness.Service.ResolveAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            new InstallmentRepaymentClaimResolveRequest(InstallmentRepaymentClaimResolveOutcome.Unknown),
+            Identity(),
+            CancellationToken.None);
+        var request = new InstallmentRepaymentClaimSupervisorResolveRequest(
+            InstallmentRepaymentSupervisorDecision.ConfirmedCharged,
+            "Linkly portal shows approved",
+            "RRN-123456");
+
+        var first = await harness.Service.SupervisorResolveAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            request,
+            SupervisorIdentity(deviceCode: "POS-09"),
+            CancellationToken.None);
+        var replay = await harness.Service.SupervisorResolveAsync(
+            harness.InstallmentGuid,
+            claim.OperationGuid,
+            request,
+            SupervisorIdentity(deviceCode: "POS-09"),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, first.Status);
+        Assert.NotNull(first.Commit);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, replay.Status);
+        Assert.True(replay.AlreadyExists);
+        Assert.Equal(1, harness.Installments.AppendCount);
+        var details = await harness.Installments.GetDetailsAsync(harness.InstallmentGuid, CancellationToken.None);
+        var payment = Assert.Single(details!.Payments, item => item.PaymentGuid == claim.PaymentGuid);
+        Assert.Equal("SUPERVISOR:RRN-123456", payment?.Reference);
+        var evidence = Assert.Single(payment!.CardTransactions!);
+        Assert.Equal("ANZ Supervisor", evidence.Processor);
+        Assert.Equal(claim.Amount, evidence.Amount);
+        Assert.Single(harness.Verifier.SupervisorResolutions);
+    }
+
+    [Fact]
+    public async Task Supervisor_resolution_requires_the_installment_cancel_permission()
+    {
+        var harness = CreateHarness();
+        var claim = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+
+        var exception = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.SupervisorResolveAsync(
+                harness.InstallmentGuid,
+                claim.OperationGuid,
+                new InstallmentRepaymentClaimSupervisorResolveRequest(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, "no"),
+                Identity(),
+                CancellationToken.None));
+
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.PermissionDenied, exception.Code);
+        Assert.Equal(
+            InstallmentRepaymentClaimStatus.ProviderPending,
+            (await harness.Repository.GetAsync(claim.OperationGuid, CancellationToken.None))?.Status);
+    }
+
+    [Fact]
+    public async Task Supervisor_cannot_resolve_another_store_or_a_claim_that_never_reached_the_terminal()
+    {
+        var harness = CreateHarness(cardRepaymentProviders: "linkly");
+        var pending = await SeedLegacyCardClaimAsync(harness, InstallmentRepaymentClaimStatus.ProviderPending);
+
+        var otherStore = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.SupervisorResolveAsync(
+                harness.InstallmentGuid,
+                pending.OperationGuid,
+                new InstallmentRepaymentClaimSupervisorResolveRequest(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, "x"),
+                SupervisorIdentity(storeCode: "S02"),
+                CancellationToken.None));
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.Mismatch, otherStore.Code);
+
+        var missingReason = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.SupervisorResolveAsync(
+                harness.InstallmentGuid,
+                pending.OperationGuid,
+                new InstallmentRepaymentClaimSupervisorResolveRequest(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, " "),
+                SupervisorIdentity(),
+                CancellationToken.None));
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.Invalid, missingReason.Code);
+
+        var preparedHarness = CreateHarness(cardRepaymentProviders: "linkly");
+        var preparedClaim = await SeedLegacyCardClaimAsync(preparedHarness, InstallmentRepaymentClaimStatus.Prepared);
+        var notStarted = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            preparedHarness.Service.SupervisorResolveAsync(
+                preparedHarness.InstallmentGuid,
+                preparedClaim.OperationGuid,
+                new InstallmentRepaymentClaimSupervisorResolveRequest(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, "x"),
+                SupervisorIdentity(),
+                CancellationToken.None));
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.Mismatch, notStarted.Code);
+    }
+
+    private static InstallmentRepaymentClaimIdentity SupervisorIdentity(string storeCode = "S01", string deviceCode = "POS-01") =>
+        Identity(
+            storeCode: storeCode,
+            deviceCode: deviceCode,
+            cashierId: "SUP01",
+            cashierName: "Supervisor",
+            permissionCodes: [Permissions.PosTerminal.Installments.Cancel],
+            cashierUserGuid: "U-SUP");
+
+    [Fact]
     public async Task Capabilities_list_enabled_card_providers_in_fixed_order_and_ignore_unknown_entries()
     {
         var harness = CreateHarness(cardRepaymentProviders: " Zeller ; square, tyro,ZELLER");
@@ -2065,6 +2203,19 @@ public sealed class InstallmentRepaymentClaimServiceTests
         public Task VerifyAsync(InstallmentRepaymentClaimRecord claim, InstallmentRepaymentClaimCommitRequest request)
         {
             Calls++;
+            return Task.CompletedTask;
+        }
+
+        public List<(InstallmentRepaymentSupervisorDecision Decision, string Reason)> SupervisorResolutions { get; } = [];
+
+        public Task RecordSupervisorResolutionAsync(
+            InstallmentRepaymentClaimRecord claim,
+            InstallmentRepaymentSupervisorDecision decision,
+            string reason,
+            string? reference,
+            InstallmentRepaymentClaimIdentity supervisor)
+        {
+            SupervisorResolutions.Add((decision, reason));
             return Task.CompletedTask;
         }
     }

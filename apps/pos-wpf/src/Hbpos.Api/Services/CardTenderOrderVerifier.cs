@@ -24,6 +24,10 @@ public static class CardTenderIssueTypes
 
     // 分期续付（InstallmentRepayment）：同一笔刷卡批准（TxnRef）已记在别的付款上。
     public const string DuplicateCardTxnRef = "DuplicateCardTxnRef";
+
+    // 分期续付（InstallmentRepayment）：卡状态不明时主管人工结案的留痕，供财务按银行流水复核。
+    public const string SupervisorConfirmedCharged = "SupervisorConfirmedCharged";
+    public const string SupervisorConfirmedNotCharged = "SupervisorConfirmedNotCharged";
 }
 
 public static class CardTenderIssueSources

@@ -47,6 +47,20 @@ public interface IInstallmentOrderService
     Task<bool> ResolveRefundStepAsync(Guid refundStepGuid, InstallmentRefundSupervisorResolution resolution, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
 
+    /// <summary>占用该分期、卡状态不明的刷卡续付（任意收银机发起的）；没有、离线或服务端不支持时返回 null。</summary>
+    Task<InstallmentPendingCardRepayment?> GetPendingCardRepaymentAsync(PosSessionState session, Guid installmentGuid, CancellationToken cancellationToken = default) =>
+        Task.FromResult<InstallmentPendingCardRepayment?>(null);
+
+    /// <summary>主管结案卡状态不明的刷卡续付。调用方须已在主管授权作用域内（票据带分期取消权限）。</summary>
+    Task<InstallmentOrderActionResult> ResolveCardRepaymentBySupervisorAsync(
+        PosSessionState session,
+        InstallmentPendingCardRepayment pending,
+        InstallmentRepaymentSupervisorDecision decision,
+        string reason,
+        string? reference,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new InstallmentOrderActionResult(false, "当前版本不支持主管结案刷卡续付。"));
+
     Task<InstallmentOrderActionResult> ResumeCancelAfterSupervisorAsync(Guid operationGuid, string installmentNumber, PosSessionState session, CancellationToken cancellationToken = default) =>
         Task.FromResult(new InstallmentOrderActionResult(false, "未配置主管结案恢复服务。", RequiresReview: true));
 
@@ -121,6 +135,12 @@ public interface IInstallmentApiClient
 
     Task<InstallmentRepaymentClaimDto> CommitRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimCommitRequest request, CancellationToken cancellationToken = default) =>
         Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现补款 claim 协议。"));
+
+    Task<InstallmentRepaymentBlockingClaimResponse> GetBlockingRepaymentClaimAsync(Guid installmentGuid, CancellationToken cancellationToken = default) =>
+        Task.FromException<InstallmentRepaymentBlockingClaimResponse>(new NotSupportedException("当前分期 API 客户端未实现主管结案协议。"));
+
+    Task<InstallmentRepaymentClaimDto> SupervisorResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimSupervisorResolveRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromException<InstallmentRepaymentClaimDto>(new NotSupportedException("当前分期 API 客户端未实现主管结案协议。"));
 
     Task<InstallmentCancelClaimDto> CreateCancelClaimAsync(Guid installmentGuid, InstallmentCancelClaimCreateRequest request, CancellationToken cancellationToken = default) =>
         Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
@@ -365,6 +385,109 @@ public sealed class InstallmentOrderService(
 
         var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
         return settings.Processor == CardProcessorKind.Zeller;
+    }
+
+    public async Task<InstallmentPendingCardRepayment?> GetPendingCardRepaymentAsync(
+        PosSessionState session,
+        Guid installmentGuid,
+        CancellationToken cancellationToken = default)
+    {
+        if (!session.IsOnline)
+        {
+            return null;
+        }
+
+        try
+        {
+            var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
+            if (!capabilities.CardRepaymentSupervisorResolveSupported)
+            {
+                return null;
+            }
+
+            var claim = (await apiClient.GetBlockingRepaymentClaimAsync(installmentGuid, cancellationToken)).Claim;
+            return claim is
+            {
+                Method: PaymentMethodKind.Card,
+                Status: InstallmentRepaymentClaimStatus.ProviderPending or InstallmentRepaymentClaimStatus.Unknown,
+                Provider: not null
+            }
+                ? new InstallmentPendingCardRepayment(
+                    claim.InstallmentGuid,
+                    claim.OperationGuid,
+                    claim.Amount,
+                    claim.Provider,
+                    claim.ClaimantDeviceCode,
+                    claim.Status,
+                    claim.UpdatedAtUtc)
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"pending card repayment lookup failed installmentGuid={installmentGuid:D} error={ex.GetType().Name} message={ex.Message}");
+            return null;
+        }
+    }
+
+    public async Task<InstallmentOrderActionResult> ResolveCardRepaymentBySupervisorAsync(
+        PosSessionState session,
+        InstallmentPendingCardRepayment pending,
+        InstallmentRepaymentSupervisorDecision decision,
+        string reason,
+        string? reference,
+        CancellationToken cancellationToken = default)
+    {
+        if (!session.IsOnline)
+        {
+            return new InstallmentOrderActionResult(false, "主管结案需要联网。");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return new InstallmentOrderActionResult(false, "请填写结案原因（例如核实了哪里的交易记录）。");
+        }
+
+        var claim = await apiClient.SupervisorResolveRepaymentClaimAsync(
+            pending.InstallmentGuid,
+            pending.OperationGuid,
+            new InstallmentRepaymentClaimSupervisorResolveRequest(
+                decision,
+                reason.Trim(),
+                string.IsNullOrWhiteSpace(reference) ? null : reference.Trim()),
+            cancellationToken);
+        InstallmentOrderSummary? summary = null;
+        if (claim.Commit?.Details is { } details)
+        {
+            summary = MapSummary(await SaveSnapshotAsync(details, cancellationToken));
+        }
+
+        if (installmentOperations is not null)
+        {
+            try
+            {
+                // 中文注释：如果这台就是发起续付的收银机，按中央结论把本地锁定的操作收尾（入账快照或结案为失败）。
+                await installmentOperations.RecoverAsync(session, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                ConsoleLog.WriteWarning("Installment", $"local recovery after supervisor resolution failed error={ex.GetType().Name}");
+            }
+        }
+
+        return claim.Status switch
+        {
+            InstallmentRepaymentClaimStatus.Committed => new InstallmentOrderActionResult(
+                true,
+                string.Format(CultureInfo.CurrentCulture, "主管已确认扣款，刷卡续付 {0:C2} 已入账。", pending.Amount),
+                summary),
+            InstallmentRepaymentClaimStatus.Declined => new InstallmentOrderActionResult(
+                true,
+                "主管已确认未扣款，这笔刷卡续付已结案，可重新收款。",
+                summary),
+            _ => new InstallmentOrderActionResult(false, $"主管结案后状态为 {claim.Status}，请刷新核对。", summary, RequiresReview: true)
+        };
     }
 
     public async Task<bool> IsCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
@@ -1056,6 +1179,16 @@ public sealed record InstallmentOrderCreateResult(
     InstallmentOrderSummary? Order = null,
     bool RequiresReview = false);
 
+/// <summary>卡状态不明、等待主管结案的刷卡续付。</summary>
+public sealed record InstallmentPendingCardRepayment(
+    Guid InstallmentGuid,
+    Guid OperationGuid,
+    decimal Amount,
+    string Provider,
+    string? ClaimantDeviceCode,
+    InstallmentRepaymentClaimStatus Status,
+    DateTimeOffset UpdatedAtUtc);
+
 public sealed record InstallmentOrderActionResult(
     bool Succeeded,
     string Message,
@@ -1136,6 +1269,12 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
 
     public Task<InstallmentRepaymentClaimDto> ResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimResolveRequest request, CancellationToken cancellationToken = default) =>
         PostAsync<InstallmentRepaymentClaimResolveRequest, InstallmentRepaymentClaimDto>($"api/v1/installments/{installmentGuid:D}/repayment-claims/{operationGuid:D}/resolve", request, cancellationToken);
+
+    public Task<InstallmentRepaymentBlockingClaimResponse> GetBlockingRepaymentClaimAsync(Guid installmentGuid, CancellationToken cancellationToken = default) =>
+        GetAsync<InstallmentRepaymentBlockingClaimResponse>($"api/v1/installments/{installmentGuid:D}/repayment-claims/blocking", cancellationToken);
+
+    public Task<InstallmentRepaymentClaimDto> SupervisorResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimSupervisorResolveRequest request, CancellationToken cancellationToken = default) =>
+        PostAsync<InstallmentRepaymentClaimSupervisorResolveRequest, InstallmentRepaymentClaimDto>($"api/v1/installments/{installmentGuid:D}/repayment-claims/{operationGuid:D}/supervisor-resolve", request, cancellationToken);
 
     public Task<InstallmentRepaymentClaimDto> CommitRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimCommitRequest request, CancellationToken cancellationToken = default) =>
         PostAsync<InstallmentRepaymentClaimCommitRequest, InstallmentRepaymentClaimDto>($"api/v1/installments/{installmentGuid:D}/repayment-claims/{operationGuid:D}/commit", request, cancellationToken);

@@ -9,11 +9,11 @@ assert.equal(existsSync(snapshotPath), true, "缺少由 Hbpos.Api 测试宿主�
 assert.equal(existsSync(generatedPath), true, "缺少由 openapi-typescript 生成的 DTO 类型");
 
 const document = JSON.parse(readFileSync(snapshotPath, "utf8"));
-assert.equal(Object.keys(document.paths ?? {}).length, 127, "共享 OpenAPI 必须锁定当前 127 条路径");
+assert.equal(Object.keys(document.paths ?? {}).length, 129, "共享 OpenAPI 必须锁定当前 129 条路径");
 assert.equal(
   Object.keys(document.components?.schemas ?? {}).length,
-  305,
-  "共享 OpenAPI 必须锁定当前 305 个 schema",
+  309,
+  "共享 OpenAPI 必须锁定当前 309 个 schema",
 );
 
 for (const route of [
@@ -385,7 +385,8 @@ assert.deepEqual(
     "cardRepaymentSupported",
     "repaymentClaimPrepareProviderV1",
     "amendLinesSupported",
-    "cardRepaymentProviders"
+    "cardRepaymentProviders",
+    "cardRepaymentSupervisorResolveSupported"
   ]
 );
 assert.deepEqual(
@@ -470,7 +471,8 @@ assert.deepEqual(
     "updatedAtUtc",
     "expiresAtUtc",
     "commit",
-    "alreadyExists"
+    "alreadyExists",
+    "claimantDeviceCode"
   ]
 );
 assert.equal(

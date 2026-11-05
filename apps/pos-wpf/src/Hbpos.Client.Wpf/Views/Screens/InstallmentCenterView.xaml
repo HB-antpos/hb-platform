@@ -138,7 +138,8 @@
                     </Button>
                 </StackPanel>
 
-                <Border Grid.Row="4" Margin="0,14,0,0" Padding="12" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8"
+                <StackPanel Grid.Row="4">
+                <Border Margin="0,14,0,0" Padding="12" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8"
                         Visibility="{Binding HasRefundStepsForReview, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel>
                         <TextBlock Text="主管退款三态结案" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
@@ -153,6 +154,22 @@
                         </Button>
                     </StackPanel>
                 </Border>
+
+                <Border Margin="0,14,0,0" Padding="12" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="8"
+                        Visibility="{Binding HasPendingCardRepayment, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock Text="刷卡续付主管结案" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{Binding PendingCardRepaymentText}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <TextBlock Text="需持有取消分期权限的主管授权。确认已扣款会按这笔金额入账；确认未扣款会结案并解除占用。" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <ComboBox ItemsSource="{Binding SupervisorCardRepaymentDecisions}" DisplayMemberPath="Label" SelectedValuePath="Decision" SelectedValue="{Binding SupervisorCardRepaymentDecision, Mode=TwoWay}" materialDesign:HintAssist.Hint="选择核实结果" Margin="0,10,0,0" Height="40" />
+                        <TextBox Text="{Binding SupervisorCardRepaymentReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="结案原因：在哪里核实、看到了什么（必填）" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <TextBox Text="{Binding SupervisorCardRepaymentReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="批准码、RRN 或交易号（选填）" Margin="0,8,0,0" Height="40" Style="{StaticResource PosSearchTextBoxStyle}" />
+                        <Button Command="{Binding SupervisorResolveCardRepaymentCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="42" Margin="0,10,0,0">
+                            <TextBlock Text="主管结案刷卡续付" FontWeight="Bold" />
+                        </Button>
+                    </StackPanel>
+                </Border>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

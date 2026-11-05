@@ -553,6 +553,64 @@ public sealed class InstallmentsController(
         }
     }
 
+    /// <summary>查看占用该分期的续付 claim（同店任意收银机；需要分期查看或取消权限）。没有占用时 claim 为 null。</summary>
+    [Authorize]
+    [HttpGet("{installmentGuid:guid}/repayment-claims/blocking")]
+    public async Task<ActionResult<ApiResult<InstallmentRepaymentBlockingClaimResponse>>> GetBlockingRepaymentClaim(
+        Guid installmentGuid,
+        CancellationToken cancellationToken)
+    {
+        var identity = await ResolveRepaymentClaimIdentityAsync(cancellationToken);
+        if (identity is null)
+        {
+            return CashierIdentityRequired<InstallmentRepaymentBlockingClaimResponse>();
+        }
+
+        try
+        {
+            var response = await RequireRepaymentClaimService().GetBlockingForSupervisorAsync(
+                installmentGuid,
+                identity,
+                cancellationToken);
+            return Ok(ApiResult<InstallmentRepaymentBlockingClaimResponse>.Ok(new InstallmentRepaymentBlockingClaimResponse(response)));
+        }
+        catch (InstallmentRepaymentClaimException ex)
+        {
+            return ClaimError<InstallmentRepaymentBlockingClaimResponse>(ex);
+        }
+    }
+
+    /// <summary>主管结案卡状态不明的刷卡续付（同店任意收银机；需要分期取消权限）。</summary>
+    [Authorize]
+    [HttpPost("{installmentGuid:guid}/repayment-claims/{operationGuid:guid}/supervisor-resolve")]
+    public async Task<ActionResult<ApiResult<InstallmentRepaymentClaimDto>>> SupervisorResolveRepaymentClaim(
+        Guid installmentGuid,
+        Guid operationGuid,
+        [FromBody] InstallmentRepaymentClaimSupervisorResolveRequest request,
+        CancellationToken cancellationToken)
+    {
+        var identity = await ResolveRepaymentClaimIdentityAsync(cancellationToken);
+        if (identity is null)
+        {
+            return CashierIdentityRequired<InstallmentRepaymentClaimDto>();
+        }
+
+        try
+        {
+            var response = await RequireRepaymentClaimService().SupervisorResolveAsync(
+                installmentGuid,
+                operationGuid,
+                request,
+                identity,
+                cancellationToken);
+            return Ok(ApiResult<InstallmentRepaymentClaimDto>.Ok(response));
+        }
+        catch (InstallmentRepaymentClaimException ex)
+        {
+            return ClaimError<InstallmentRepaymentClaimDto>(ex);
+        }
+    }
+
     [Authorize]
     [HttpPost("{installmentGuid:guid}/repayment-claims/{operationGuid:guid}/commit")]
     public async Task<ActionResult<ApiResult<InstallmentRepaymentClaimDto>>> CommitRepaymentClaim(
