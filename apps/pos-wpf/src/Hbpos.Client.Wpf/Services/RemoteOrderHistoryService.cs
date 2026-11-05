@@ -117,8 +117,8 @@ public sealed class RemoteOrderHistoryService(IOrderHistoryApiClient apiClient) 
                 ProductCode = line.ProductCode,
                 ItemNumber = line.ItemNumber
             }).ToList(),
-            payments,
-            RefundVoucher: ReceiptRefundVoucherMapper.TryCreate(payments));
+            // 中文注释：与本地 CreateReceipt 一致，纯退代金券单也是普通退款小票；补打时打印服务再另出券面。
+            payments);
     }
 
     public Task<OrderReturnContextDto?> GetReturnContextAsync(

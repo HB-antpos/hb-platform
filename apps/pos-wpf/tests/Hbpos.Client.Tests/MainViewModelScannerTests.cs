@@ -1968,7 +1968,7 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
-    public async Task Mixed_cash_and_voucher_refund_prints_refund_voucher_document()
+    public async Task Mixed_cash_and_voucher_refund_prints_refund_receipt_then_refund_voucher_document()
     {
         var printService = new RecordingReceiptPrintService();
         var viewModel = CreateAuthorizedMainViewModel(
@@ -1988,14 +1988,29 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 1);
-        var call = Assert.Single(printService.Calls);
-        Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, call.Reason);
-        Assert.Equal(new RefundVoucherReceipt("RF456", 4m), call.Receipt!.RefundVoucher);
+        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 2);
+        // 现金 + 退款券：先自动出带商品明细的退款小票，再出退款券券面。
+        var receiptCall = printService.Calls[0];
+        Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, receiptCall.Reason);
+        Assert.Null(receiptCall.Receipt!.RefundVoucher);
+        AssertOrdinaryRefundReceipt(receiptCall.Receipt, order.SoldAt);
+        var voucherCall = printService.Calls[1];
+        Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, voucherCall.Reason);
+        Assert.Equal(new RefundVoucherReceipt("RF456", 4m), voucherCall.Receipt!.RefundVoucher);
+    }
+
+    private static void AssertOrdinaryRefundReceipt(ReceiptDetails receipt, DateTimeOffset printTime)
+    {
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, printTime);
+        Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("*** Refund ***", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
+        Assert.NotEmpty(receipt.Lines);
+        Assert.All(receipt.Lines, line => Assert.Contains(line.DisplayName, document.PlainText, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task Voucher_refund_completion_auto_prints_voucher_after_success_screen()
+    public async Task Voucher_refund_completion_auto_prints_refund_receipt_then_voucher_after_success_screen()
     {
         var printService = new RecordingReceiptPrintService();
         var cashierContext = new CashierSessionContext();
@@ -2022,17 +2037,88 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 1);
-        var call = Assert.Single(printService.Calls);
-        Assert.Equal(order.OrderGuid, call.OrderGuid);
-        Assert.Equal("VoucherRefundAuto", call.Reason.ToString());
-        Assert.Equal("RF123", call.Receipt!.RefundVoucher!.VoucherCode);
-        Assert.Equal(8m, call.Receipt.RefundVoucher.Amount);
+        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 2);
+        // 纯退代金券：先出带商品明细的退款小票，再出退款券券面；两张都是系统自动打印，不需要补打权限。
+        var receiptCall = printService.Calls[0];
+        Assert.Equal(order.OrderGuid, receiptCall.OrderGuid);
+        Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, receiptCall.Reason);
+        Assert.Null(receiptCall.Receipt!.RefundVoucher);
+        AssertOrdinaryRefundReceipt(receiptCall.Receipt, order.SoldAt);
+        var voucherCall = printService.Calls[1];
+        Assert.Equal(order.OrderGuid, voucherCall.OrderGuid);
+        Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, voucherCall.Reason);
+        Assert.Equal("RF123", voucherCall.Receipt!.RefundVoucher!.VoucherCode);
+        Assert.Equal(8m, voucherCall.Receipt.RefundVoucher.Amount);
         Assert.False(cashierContext.RequirePermission(Permissions.PosTerminal.Receipt.PrintLast, out _));
     }
 
     [Fact]
-    public async Task Pending_voucher_refund_completion_does_not_auto_print()
+    public async Task Voucher_refund_auto_print_reports_voucher_failure_over_later_success()
+    {
+        var printService = new RecordingReceiptPrintService();
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(true, "printed"));
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(false, "paper out"));
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(true, "printed"));
+        var syncQueue = new FakeSyncQueueRepository();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            syncQueueRepository: syncQueue);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var readCountBeforePayment = syncQueue.ReadCount;
+        var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash, PaymentMethodKind.Voucher) with
+        {
+            TotalAmount = -10m,
+            ActualAmount = -10m,
+            Payments =
+            [
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, -4m, null),
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, -3m, "VOUCHER_REFUND:RF701"),
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, -3m, "VOUCHER_REFUND:RF702")
+            ]
+        };
+
+        InvokePaymentCompleted(viewModel, order);
+
+        // 小票 → RF701（失败）→ RF702（成功）：最后一张成功不能盖掉券面失败，收银员要知道哪张券没出来。
+        // 待同步刷新排在全部自动打印之后，等它开始读队列即说明状态栏已是最终结果。
+        await WaitUntilAsync(() => printService.Calls.Count == 3 && syncQueue.ReadCount > readCountBeforePayment);
+        Assert.Equal(
+            [ReceiptPrintReason.VoucherOrderAuto, ReceiptPrintReason.VoucherRefundAuto, ReceiptPrintReason.VoucherRefundAuto],
+            printService.Calls.Select(call => call.Reason).ToArray());
+        Assert.Equal("Receipt print failed: RF701: paper out", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Voucher_sale_auto_print_reports_receipt_failure_when_balance_slip_succeeds()
+    {
+        var printService = new RecordingReceiptPrintService();
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(false, "printer offline"));
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(true, "printed"));
+        var syncQueue = new FakeSyncQueueRepository();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            syncQueueRepository: syncQueue);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var readCountBeforePayment = syncQueue.ReadCount;
+        var order = CreateReceiptPrintOrder(PaymentMethodKind.Voucher) with
+        {
+            Payments = [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, 10m, "VOUCHER:VC200:LOCK-1:12.34")]
+        };
+
+        InvokePaymentCompleted(viewModel, order);
+
+        // 普通小票失败、余额凭证成功：状态栏要留住小票失败，提示收银员在成功卡片上补打。
+        await WaitUntilAsync(() => printService.Calls.Count == 2 && syncQueue.ReadCount > readCountBeforePayment);
+        Assert.Equal(
+            [ReceiptPrintReason.VoucherOrderAuto, ReceiptPrintReason.VoucherBalanceAuto],
+            printService.Calls.Select(call => call.Reason).ToArray());
+        Assert.Equal("Receipt print failed: printer offline", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Pending_voucher_refund_completion_prints_refund_receipt_without_voucher_document()
     {
         var printService = new RecordingReceiptPrintService();
         var viewModel = CreateAuthorizedMainViewModel(
@@ -2055,13 +2141,17 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel));
+        // 券还没签发（无券码）时不出券面，但退款小票照常自动打印。
+        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 1);
         await Task.Delay(50);
-        Assert.Empty(printService.Calls);
+        var call = Assert.Single(printService.Calls);
+        Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, call.Reason);
+        Assert.Null(call.Receipt!.RefundVoucher);
+        AssertOrdinaryRefundReceipt(call.Receipt, order.SoldAt);
     }
 
     [Fact]
-    public async Task Voucher_payment_with_remaining_balance_auto_prints_standalone_balance_without_permission()
+    public async Task Voucher_payment_with_remaining_balance_auto_prints_sale_receipt_then_standalone_balance_without_permission()
     {
         var printService = new RecordingReceiptPrintService();
         var cashierContext = new CashierSessionContext();
@@ -2079,8 +2169,17 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => printService.Calls.Count == 1);
-        var call = Assert.Single(printService.Calls);
+        await WaitUntilAsync(() => printService.Calls.Count == 2);
+        // 代金券付款的销售：先自动出普通小票（TAX INVOICE / Paid），再出余额凭证。
+        var receiptCall = printService.Calls[0];
+        Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, receiptCall.Reason);
+        Assert.Null(receiptCall.Receipt!.VoucherBalance);
+        Assert.Null(receiptCall.Receipt.RefundVoucher);
+        var document = new ReceiptTextFormatter().Build(receiptCall.Receipt, ReceiptPrinterSettings.Default, order.SoldAt);
+        Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("*** Paid ***", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Receipt Item", document.PlainText, StringComparison.Ordinal);
+        var call = printService.Calls[1];
         Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, call.Reason);
         Assert.Equal("VC200", call.Receipt!.VoucherBalance!.VoucherCode);
         Assert.Equal(12.34m, call.Receipt.VoucherBalance.RemainingBalance);
@@ -2106,10 +2205,12 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => printService.Calls.Count == 2);
-        Assert.All(printService.Calls, call => Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, call.Reason));
-        Assert.Equal(["VC200", "VC201"], printService.Calls.Select(call => call.Receipt!.VoucherBalance!.VoucherCode).ToArray());
-        Assert.Equal(9.00m, printService.Calls[0].Receipt!.VoucherBalance!.RemainingBalance);
+        await WaitUntilAsync(() => printService.Calls.Count == 3);
+        Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, printService.Calls[0].Reason);
+        var balanceCalls = printService.Calls.Skip(1).ToArray();
+        Assert.All(balanceCalls, call => Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, call.Reason));
+        Assert.Equal(["VC200", "VC201"], balanceCalls.Select(call => call.Receipt!.VoucherBalance!.VoucherCode).ToArray());
+        Assert.Equal(9.00m, balanceCalls[0].Receipt!.VoucherBalance!.RemainingBalance);
     }
 
     [Fact]
@@ -2135,7 +2236,17 @@ public sealed class MainViewModelScannerTests
 
             await WaitUntilAsync(() => IsShowingCompletedSale(viewModel));
             await Task.Delay(30);
-            Assert.Empty(printService.Calls);
+            // 无有效余额时不出余额凭证；用了代金券付款的单子只出普通小票，纯现金单什么都不自动打。
+            Assert.DoesNotContain(printService.Calls, call => call.Reason == ReceiptPrintReason.VoucherBalanceAuto);
+            if (payment.Method == PaymentMethodKind.Voucher)
+            {
+                await WaitUntilAsync(() => printService.Calls.Count == 1);
+                Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, Assert.Single(printService.Calls).Reason);
+            }
+            else
+            {
+                Assert.Empty(printService.Calls);
+            }
         }
     }
 
@@ -2143,6 +2254,8 @@ public sealed class MainViewModelScannerTests
     public async Task Voucher_balance_auto_print_continues_after_failure_and_restores_first_error()
     {
         var printService = new RecordingReceiptPrintService();
+        // 第一张是普通小票（成功），随后两张余额凭证：首张失败、第二张成功。
+        printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(true, "printed"));
         printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(false, "printer offline"));
         printService.PrintReceiptResults.Enqueue(new ReceiptPrintResult(true, "printed"));
         var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService(), printService);
@@ -2160,7 +2273,7 @@ public sealed class MainViewModelScannerTests
 
         // 余额券全部打完后才汇总写状态栏（续体可能在其他线程），等到汇总文案出现再断言。
         await WaitUntilAsync(() =>
-            printService.Calls.Count == 2 &&
+            printService.Calls.Count == 3 &&
             (viewModel.StatusMessage ?? string.Empty).Contains("VC200", StringComparison.Ordinal));
         Assert.Contains("VC200", viewModel.StatusMessage, StringComparison.Ordinal);
         Assert.Contains("printer offline", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
@@ -2613,17 +2726,20 @@ public sealed class MainViewModelScannerTests
             // 预览加载完后进入余额券自动打印。生产上 SyncQueue 读取在 UI 线程同步执行，若与打印并行会插进打印续体前面，
             // 所以待同步刷新必须等自动打印全部结束才开始：打印卡在打印机期间，同步概览一次都不能读。
             settingsStore.Gate.TrySetResult();
+            // 代金券付款的销售先自动出普通小票，再出余额凭证；第一张卡在打印机期间，同步概览一次都不能读。
             await WaitUntilAsync(() => printService.Calls.Count == 1);
-            Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, printService.Calls[0].Reason);
+            Assert.Equal(ReceiptPrintReason.VoucherOrderAuto, printService.Calls[0].Reason);
             var refreshStartedDuringPrint = await Task.WhenAny(
                 syncQueue.OverviewReadStarted.Task,
                 Task.Delay(TimeSpan.FromMilliseconds(200))) == syncQueue.OverviewReadStarted.Task;
             Assert.False(refreshStartedDuringPrint);
 
-            // 打印结束后刷新才开始。
+            // 打印结束（含随后的余额凭证）后刷新才开始。
             printService.ReleaseReceiptPrint.TrySetResult();
             await syncQueue.OverviewReadStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-            Assert.Single(printService.Calls);
+            Assert.Equal(
+                [ReceiptPrintReason.VoucherOrderAuto, ReceiptPrintReason.VoucherBalanceAuto],
+                printService.Calls.Select(call => call.Reason).ToArray());
         }
         finally
         {
@@ -2686,8 +2802,10 @@ public sealed class MainViewModelScannerTests
             IsShowingCompletedSale(viewModel) &&
             viewModel.PaymentSuccess.HasPostCommitWarning &&
             syncQueue.ReadCount > readCountBeforePayment);
-        var printCall = Assert.Single(printService.Calls);
-        Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, printCall.Reason);
+        // 普通小票和余额凭证都失败时，状态栏优先留余额凭证的失败（它没有补打入口）。
+        Assert.Equal(
+            [ReceiptPrintReason.VoucherOrderAuto, ReceiptPrintReason.VoucherBalanceAuto],
+            printService.Calls.Select(call => call.Reason).ToArray());
         Assert.Equal("Receipt print failed: VC200: printer offline", viewModel.StatusMessage);
     }
 
