@@ -2828,6 +2828,19 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 paymentMethod: $"Installment+{appliedTender.Method}",
                 paymentAmount: appliedTender.Amount,
                 orderGuid: createResult.Order?.OrderId.ToString("D"));
+            if (appliedTender.Method == PaymentMethodKind.Card)
+            {
+                // 中文注释：定金刷卡时走的是普通销售流程，留下了带销售订单草稿的扣款记录。分期单建好后必须标为已建单，
+                // 否则下次登录的自动恢复会按草稿再补一张销售单，同一笔钱和货被记两次。失败只记告警，分期单已经建好。
+                var installmentOrderGuid = createResult.Order?.OrderId ?? Guid.Empty;
+                if (await _workflowService.MarkInstallmentCardAttemptsCompletedAsync(_cart, [appliedTender], installmentOrderGuid, CancellationToken.None))
+                {
+                    ConsoleLog.WriteWarning(
+                        "InstallmentAudit",
+                        $"installment created but its card attempt could not be marked completed installmentOrder={installmentOrderGuid:D} idempotencyKey={LogValue(appliedTender.IdempotencyKey)}");
+                }
+            }
+
             ResetInstallmentPaymentDraft();
             PaymentTenders.Clear();
             _cart.Clear();
