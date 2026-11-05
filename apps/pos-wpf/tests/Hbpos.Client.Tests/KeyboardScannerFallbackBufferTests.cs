@@ -218,6 +218,107 @@ public sealed class KeyboardScannerFallbackBufferTests
     }
 
     [Theory]
+    [InlineData(10)]
+    [InlineData(250)]
+    [InlineData(1000)]
+    public void DuplicateGuard_drops_tail_of_previous_barcode_within_window(int lagMs)
+    {
+        // 回归：连读的第二次读码被界面卡顿截掉开头，只剩结尾，不能再当成新扫码写进搜索框。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.False(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(lagMs)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_keeps_tail_shaped_barcode_after_window()
+    {
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.True(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(1001)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_drops_tail_on_keyboard_only_machine_without_eating_the_next_rescan()
+    {
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "keyboard-fallback", now));
+        Assert.False(guard.TryAccept("5810220077", "keyboard-fallback", now.AddMilliseconds(250)));
+        // 没有 Raw 通道就不登记配对额度，紧接着的真实重扫必须放行。
+        Assert.True(guard.TryAccept("9525810220077", "keyboard-fallback", now.AddMilliseconds(300)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_absorbs_full_keyboard_copy_of_a_truncated_raw_read()
+    {
+        // Raw 被截断而键盘通道收到完整的一份：这份也属于被丢弃的连读，不能加购第二次。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.False(guard.TryAccept("9525810220077", "keyboard-fallback", now.AddMilliseconds(100)));
+        Assert.False(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(250)));
+        Assert.False(guard.TryAccept("9525810220077", "keyboard-fallback", now.AddMilliseconds(300)));
+        // 额度用完后的键盘提交才是新的真实扫码。
+        Assert.True(guard.TryAccept("9525810220077", "keyboard-fallback", now.AddMilliseconds(1000)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_treats_truncated_read_as_part_of_a_held_over_burst()
+    {
+        // 连读中间夹一次被截断的读码：窗口照样顺延，后面的完整读码仍算同一串连读。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.False(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(250)));
+        Assert.False(guard.TryAccept("9525810220077", "raw", now.AddMilliseconds(700)));
+        Assert.True(guard.TryAccept("9525810220077", "raw", now.AddMilliseconds(1400)));
+    }
+
+    [Theory]
+    [InlineData("95258")]
+    [InlineData("1234510220077")]
+    public void DuplicateGuard_keeps_barcodes_that_are_not_a_shorter_tail(string barcode)
+    {
+        // 只认比上一次短、且正好是其结尾的读码；开头相同或结尾相同但等长的都是别的条码。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.True(guard.TryAccept(barcode, "raw", now.AddMilliseconds(100)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_compares_tail_only_with_the_most_recent_barcode()
+    {
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.True(guard.TryAccept("9351972009975", "raw", now.AddMilliseconds(100)));
+        Assert.True(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(200)));
+    }
+
+    [Theory]
+    [InlineData("history-amend-search")]
+    [InlineData("login-box")]
+    public void DuplicateGuard_does_not_filter_tail_from_text_box_sources(string source)
+    {
+        // 输入框提交可能是手输内容，只有扫码枪通道才会被截断。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.True(guard.TryAccept("5810220077", source, now.AddMilliseconds(100)));
+    }
+
+    [Theory]
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]
     [InlineData(false, true, false)]

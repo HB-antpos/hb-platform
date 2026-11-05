@@ -865,7 +865,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         }
 
         if (_rawScannerService is IScannerInputDeduplicator deduplicator &&
-            !deduplicator.TryAcceptScanDelivery(result, "keyboard-fallback", timestamp))
+            !deduplicator.TryAcceptScanDelivery(result, ScannerInputDuplicateGuard.KeyboardFallbackSource, timestamp))
         {
             // 同一把 HID 扫码枪可能同时产生 Raw Input 与普通键盘事件，只允许其中一路提交。
             e.Handled = true;

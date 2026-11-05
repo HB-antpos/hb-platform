@@ -75,7 +75,15 @@ internal sealed class ScannerInputDuplicateGuard
     /// <summary>来源标识：Raw Input 通道；其余来源（键盘兜底、输入框回车等）都是同一次扫码的另一份拷贝。</summary>
     private const string RawSource = "raw";
 
+    /// <summary>来源标识：窗口层键盘兜底缓冲。它和 Raw 是仅有的两条扫码枪通道，其余来源是输入框提交，可能是手输内容。</summary>
+    internal const string KeyboardFallbackSource = "keyboard-fallback";
+
     private static readonly TimeSpan CrossSourceDuplicateWindow = TimeSpan.FromMilliseconds(200);
+
+    // 连读的第二次读码遇到界面线程卡顿时，扫码缓冲会因字符间隔超过 120ms 清掉开头，只剩条码结尾：
+    // 它与上一次条码不相等，躲过重复过滤后被当成新扫码，查不到商品就留在搜索框里（如 9525810220077 → 5810220077）。
+    // 卡顿会拉长两次读码的间隔，所以固定 1 秒，不跟随设置页的重复窗口（最低可调到 100ms）。
+    private static readonly TimeSpan TruncatedRepeatWindow = TimeSpan.FromMilliseconds(1000);
 
     // 键盘通道的 Enter 经 WPF 输入队列到达，实测比 Raw Input 晚 200～530ms（10-14 POS_1004_0613 / POS_1013_0222 日志），
     // 固定 200ms 窗口会漏掉而让同一次扫码加购两次；配对额度留 1.5 秒余量，过期未被配对的额度作废，不会吞掉之后的真实扫码。
@@ -94,6 +102,8 @@ internal sealed class ScannerInputDuplicateGuard
     private DateTimeOffset _lastAcceptedAt = DateTimeOffset.MinValue;
     private string? _lastRawBarcode;
     private DateTimeOffset _lastRawAt = DateTimeOffset.MinValue;
+    private string? _lastFullScanBarcode;
+    private DateTimeOffset _lastFullScanAt = DateTimeOffset.MinValue;
 
     public ScannerInputDuplicateGuard(Func<TimeSpan>? rawRepeatWindowProvider = null)
     {
@@ -110,6 +120,7 @@ internal sealed class ScannerInputDuplicateGuard
         }
 
         var isRaw = string.Equals(source, RawSource, StringComparison.OrdinalIgnoreCase);
+        var isScannerChannel = isRaw || string.Equals(source, KeyboardFallbackSource, StringComparison.OrdinalIgnoreCase);
         lock (_gate)
         {
             if (!isRaw && TryPairWithRawDelivery(normalizedBarcode, timestamp))
@@ -117,6 +128,12 @@ internal sealed class ScannerInputDuplicateGuard
                 // 关键逻辑：按次配对——每次 Raw 投递只抵消随后到来的一份同条码拷贝，与到达延迟无关；
                 // 连续快速扫同一商品时 Raw 额度逐次累积，拷贝逐个消耗，不会把真实的第二次扫码吞掉；
                 // 被抵消的拷贝不是新的投递，不更新「最近一次接受」，免得下一次真实 Raw 扫码被误判成跨来源重复。
+                return false;
+            }
+
+            if (isScannerChannel && IsTruncatedRepeat(normalizedBarcode, timestamp))
+            {
+                DropTruncatedRepeat(normalizedBarcode, source, isRaw, timestamp);
                 return false;
             }
 
@@ -134,6 +151,7 @@ internal sealed class ScannerInputDuplicateGuard
                     // 否则拷贝会被当成「没有 Raw 对应的真实键盘扫码」放行，同一商品仍被加购两次。
                     PruneExpiredRawDeliveries(timestamp);
                     _unpairedRawDeliveries.Add((normalizedBarcode, timestamp));
+                    RememberFullScan(normalizedBarcode, timestamp);
                     return false;
                 }
             }
@@ -159,8 +177,50 @@ internal sealed class ScannerInputDuplicateGuard
                 _unpairedRawDeliveries.Add((normalizedBarcode, timestamp));
             }
 
+            if (isScannerChannel)
+            {
+                RememberFullScan(normalizedBarcode, timestamp);
+            }
+
             return true;
         }
+    }
+
+    /// <summary>判断这次读码是否只是上一次完整条码被截断后的结尾；调用方须已持有 <c>_gate</c>。</summary>
+    private bool IsTruncatedRepeat(string normalizedBarcode, DateTimeOffset timestamp)
+    {
+        return _lastFullScanBarcode is { } fullBarcode &&
+            normalizedBarcode.Length < fullBarcode.Length &&
+            fullBarcode.EndsWith(normalizedBarcode, StringComparison.OrdinalIgnoreCase) &&
+            (timestamp - _lastFullScanAt).Duration() <= TruncatedRepeatWindow;
+    }
+
+    /// <summary>丢弃被截断的连读，并按完整条码的连读更新基准；调用方须已持有 <c>_gate</c>。</summary>
+    private void DropTruncatedRepeat(string normalizedBarcode, string source, bool isRaw, DateTimeOffset timestamp)
+    {
+        var fullBarcode = _lastFullScanBarcode!;
+        var gapMs = (timestamp - _lastFullScanAt).Duration().TotalMilliseconds;
+        // 与连读同理，无论放行与否都刷新基准：扫码枪还对着条码时，后面的读码继续按连读处理。
+        RememberFullScan(fullBarcode, timestamp);
+        if (isRaw)
+        {
+            _lastRawBarcode = fullBarcode;
+            _lastRawAt = timestamp;
+            // 关键逻辑：Raw 被截断时键盘通道可能收到完整的一份，登记完整条码的额度抵消它，否则同一商品被加购两次。
+            // 只有 Raw 能登记：没有 Raw 通道的机器上额度没有对应的拷贝，会吞掉之后的真实重扫。
+            PruneExpiredRawDeliveries(timestamp);
+            _unpairedRawDeliveries.Add((fullBarcode, timestamp));
+        }
+
+        ConsoleLog.Write(
+            "RawScanner",
+            $"scan tail of previous barcode suppressed source={source} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(normalizedBarcode)} previousBarcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(fullBarcode)} gapMs={gapMs:0.###}");
+    }
+
+    private void RememberFullScan(string normalizedBarcode, DateTimeOffset timestamp)
+    {
+        _lastFullScanBarcode = normalizedBarcode;
+        _lastFullScanAt = timestamp;
     }
 
     /// <summary>尝试用一次待配对的 Raw 投递抵消这份拷贝；调用方须已持有 <c>_gate</c>。</summary>
