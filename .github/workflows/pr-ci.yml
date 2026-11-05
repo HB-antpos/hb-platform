@@ -279,31 +279,14 @@ jobs:
           key: nuget-pos-wpf-${{ runner.os }}-${{ hashFiles('apps/pos-wpf/**/*.csproj', 'services/backend/BlazorApp.Shared/BlazorApp.Shared.csproj', 'global.json') }}
           restore-keys: |
             nuget-pos-wpf-${{ runner.os }}-
-      - name: 临时诊断 Zeller 私有源访问
-        if: matrix.shard == 'ui'
-        continue-on-error: true
+      - name: 检查 Zeller 私有源凭据
+        # 凭据不对时 NuGet 只报 NU1301 / 403，看不出是 Secret 的问题；这里先请求一次，失败时直接说明（不打印凭据）。
+        if: matrix.component != 'noop'
         shell: pwsh
         env:
-          ZU: ${{ secrets.ZELLER_NUGET_USERNAME }}
-          ZT: ${{ secrets.ZELLER_NUGET_TOKEN }}
-        run: |
-          $sha = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("$env:ZT"))).Replace('-', '').Substring(0, 8).ToLowerInvariant()
-          $trimmed = "$env:ZT".Trim()
-          $shaTrimmed = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($trimmed))).Replace('-', '').Substring(0, 8).ToLowerInvariant()
-          Write-Host "username length=$("$env:ZU".Length) isZellerPublic=$("$env:ZU".Trim() -ceq 'zeller-public') token length=$("$env:ZT".Length) trimmedLength=$($trimmed.Length) sha8=$sha trimmedSha8=$shaTrimmed startsEyJ=$($trimmed.StartsWith('eyJ'))"
-          $url = 'https://zeller.jfrog.io/artifactory/api/nuget/v3/nuget/index.json'
-          $body = Join-Path $env:RUNNER_TEMP 'zeller-probe.txt'
-          $cases = [ordered]@{
-            anonymous = @()
-            basic = @('-u', "$("$env:ZU".Trim()):$trimmed")
-            tokenOnly = @('-u', ":$trimmed")
-          }
-          foreach ($name in $cases.Keys) {
-            $code = & curl.exe -s -o $body -w '%{http_code}' @($cases[$name]) $url
-            $snippet = (Get-Content -LiteralPath $body -Raw -ErrorAction SilentlyContinue)
-            if ($snippet) { $snippet = $snippet.Substring(0, [Math]::Min(200, $snippet.Length)) -replace '\s+', ' ' }
-            Write-Host "$name -> HTTP $code $snippet"
-          }
+          ZELLER_NUGET_USERNAME: ${{ secrets.ZELLER_NUGET_USERNAME }}
+          ZELLER_NUGET_TOKEN: ${{ secrets.ZELLER_NUGET_TOKEN }}
+        run: ./scripts/ci/check-zeller-feed.ps1
       - name: 构建并测试 WPF
         shell: pwsh
         env:

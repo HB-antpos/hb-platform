@@ -52,10 +52,8 @@ jobs:
         env:
           ZELLER_NUGET_USERNAME: ${{ secrets.ZELLER_NUGET_USERNAME }}
           ZELLER_NUGET_TOKEN: ${{ secrets.ZELLER_NUGET_TOKEN }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:ZELLER_NUGET_USERNAME) -or [string]::IsNullOrWhiteSpace($env:ZELLER_NUGET_TOKEN)) {
-            throw '缺少仓库 Secret ZELLER_NUGET_USERNAME / ZELLER_NUGET_TOKEN：无法从 Zeller 私有源下载 Zeller.PaymentsSdk，拒绝构建。'
-          }
+        # 缺 Secret 或凭据被拒时直接失败并说明原因，不用等后面十几分钟的测试跑完才在还原时报 NU1301。
+        run: ./scripts/ci/check-zeller-feed.ps1
 
       - name: 安装 .NET 8 与仓库固定 SDK
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
