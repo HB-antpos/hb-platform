@@ -1898,4 +1898,5 @@ Logged with reference {2}</value></data>
   <data name="cardRecovery.zeller.keepWaiting" xml:space="preserve"><value>The Zeller payment stays open. Check it again later.</value></data>
   <data name="cardRecovery.zeller.confirmedNotPaid" xml:space="preserve"><value>Recorded as not paid. The customer can pay again.</value></data>
   <data name="cardRecovery.zeller.partialRefund" xml:space="preserve"><value>The Zeller refund was approved but only covers part of the return, so the order cannot be completed automatically. Ask a supervisor to finish the return.</value></data>
+  <data name="payment.card.zeller.minimumAmount" xml:space="preserve"><value>Zeller card payments must be at least $1.00. Use cash or another payment method for this amount. The customer was not charged.</value></data>
 </root>
