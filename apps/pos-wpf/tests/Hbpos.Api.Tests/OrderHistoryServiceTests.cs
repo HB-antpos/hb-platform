@@ -50,6 +50,58 @@ public sealed class OrderHistoryServiceTests
         Assert.Null(transaction.RefundReference);
     }
 
+    public static TheoryData<string, string> CardReferencesAndProcessors()
+    {
+        const string purchase = "HBZ-799287a33dc24df1bca3d33eea19b35a";
+        const string refund = "HBZR-799287a33dc24df1bca3d33eea19b35a";
+        const string uuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+        var payment = ZellerPaymentReference.FormatPayment(purchase, uuid);
+        return new TheoryData<string, string>
+        {
+            { payment, "Zeller" },
+            // 退款引用由收款流程包装，显示用的是里面的退款部分。
+            { CardRefundReference.Format(ZellerPaymentReference.FormatRefund(refund, uuid), payment), "Zeller" },
+            // 主管确认已付款、但没有 transactionUuid 的未核实格式。
+            { $"ZELLER:{purchase}", "Zeller" },
+            { "ANZ:TXN-1", "ANZ" },
+            { "SQ:payment-1", "Square" },
+            { "CARD:unknown", "Card" }
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(CardReferencesAndProcessors))]
+    public async Task GetDetailsAsync_infers_the_card_processor_from_the_persisted_reference(string reference, string processor)
+    {
+        using var database = await OrderHistorySqliteFixture.CreateAsync(orderCount: 1);
+        var db = database.DbContext.PosmDb;
+        db.CodeFirst.InitTables<BankTransaction>();
+        var orderGuid = OrderHistorySqliteFixture.TargetOrderGuid;
+        var paymentGuid = Guid.NewGuid().ToString("D");
+        await db.Insertable(new PaymentDetail
+        {
+            PaymentGuid = paymentGuid,
+            OrderGuid = orderGuid.ToString("D"),
+            PaymentMethod = (int)PaymentMethodKind.Card,
+            Amount = 1m,
+            Reference = reference
+        }).ExecuteCommandAsync();
+        await db.Insertable(new BankTransaction
+        {
+            Id = Guid.NewGuid(),
+            PaymentGuid = paymentGuid,
+            OrderGuid = orderGuid.ToString("D"),
+            TxnRef = "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            Amount = 1m,
+            ResponseText = "APPROVED"
+        }).ExecuteCommandAsync();
+
+        var details = await new SqlSugarOrderHistoryRepository(database.DbContext, new StubStoreTimeZoneResolver()).GetDetailsAsync(orderGuid, CancellationToken.None);
+        var transaction = Assert.Single(Assert.Single(details!.Payments).CardTransactions!);
+
+        Assert.Equal(processor, transaction.Processor);
+    }
+
     [Fact]
     [Trait("Category", "Performance")]
     public async Task QueryAsync_matches_item_number_and_barcode_within_two_seconds_without_global_detail_materialization()

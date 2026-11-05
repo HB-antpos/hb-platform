@@ -580,6 +580,12 @@ public sealed class SqlSugarOrderHistoryRepository(
             return ManualCardPaymentReference.Processor;
         }
 
+        // 中文注释：Zeller 的扣款（ZELLER:…）与退款（ZELLERRF:…）引用，含主管确认、没有 transactionUuid 的未核实格式。
+        if (ZellerPaymentReference.IsZeller(displayReference))
+        {
+            return ZellerPaymentReference.Processor;
+        }
+
         if (displayReference?.StartsWith("ANZ:", StringComparison.OrdinalIgnoreCase) == true)
         {
             return "ANZ";
