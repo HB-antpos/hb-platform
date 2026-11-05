@@ -1307,9 +1307,26 @@ public sealed class InstallmentOperationService(
             terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, cancellationToken);
             if (terminalAttempt.IsUnsupportedProcessor)
             {
-                // 中文注释：Zeller 暂不支持分期。在推进 TerminalSubmitting、登记 claim 之前拦下，
-                // 刷卡机不会收到任何请求，分期操作保持原状态，可以改用其他方式。
-                return TerminalReady.Failed("Zeller 刷卡暂不支持分期付款，请改用其他付款方式。");
+                // 中文注释：Zeller 暂不支持分期。刷卡机不会收到任何请求，也还没登记还款 claim。
+                // 开单路径进到这里时操作已经是 TerminalSubmitting（EnsureCreateTerminalApprovalAsync 先推进再调用），
+                // 必须和银行拒绝一样落成 Failed：否则重启后会变成「结果未知」，并挡住这台机器后续所有分期开单。
+                // 还款路径这时仍是 Prepared，没有推进过，不用回退。
+                const string unsupportedMessage = "Zeller 刷卡暂不支持分期付款，请改用其他付款方式。";
+                if (!beginRepaymentClaim &&
+                    !await repository.TryTransitionAsync(
+                        operation.OperationGuid,
+                        [LocalInstallmentOperationState.TerminalSubmitting],
+                        LocalInstallmentOperationState.Failed,
+                        DateTimeOffset.UtcNow,
+                        terminalProcessor: CardProcessorKind.Zeller.ToString(),
+                        failureMessage: unsupportedMessage,
+                        cancellationToken: CancellationToken.None))
+                {
+                    // 本地状态没写成功（另一个入口已经推进了它）：交给恢复处理。这笔确实没有发给刷卡机。
+                    return TerminalReady.Unknown("Zeller 刷卡暂不支持分期付款，刷卡机没有收到请求；分期操作状态未能更新，请到分期中心恢复。");
+                }
+
+                return TerminalReady.Failed(unsupportedMessage);
             }
             if (terminalAttempt.RequiresReview)
             {
