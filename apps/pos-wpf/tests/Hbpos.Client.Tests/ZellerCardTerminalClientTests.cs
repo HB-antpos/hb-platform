@@ -161,6 +161,70 @@ public sealed class ZellerCardTerminalClientTests
     }
 
     [Fact]
+    public async Task Sdk_error_text_is_kept_in_the_attempt_and_the_call_ended_log()
+    {
+        // 真机 $0.99：SDK 返回 Cancelled，只有原文能分清是刷卡机拒绝、取消了遗留调用，还是收银员取消。
+        await using var harness = new Harness();
+        harness.Gateway.OnPurchase = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(
+            ZellerErrorType.Cancelled, "The request was cancelled before it could be processed", reachedTerminal: true));
+        harness.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+
+        var outcome = await harness.Client.PurchaseAsync(Context);
+        var attempt = await harness.AttemptAsync(outcome);
+
+        Assert.Equal("Cancelled", attempt.CallErrorType);
+        Assert.Equal("The request was cancelled before it could be processed", attempt.CallErrorMessage);
+        Assert.Null(attempt.ResponseText);
+        Assert.Contains(harness.Log.ToArray(), line =>
+            line.Contains("call ended as Error Cancelled", StringComparison.Ordinal) &&
+            line.Contains("message \"The request was cancelled before it could be processed\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Call_that_returned_a_transaction_has_no_call_error_and_logs_the_response()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnPurchase = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            Approved(request.Reference) with { Status = ZellerTransactionStatus.Declined, ResponseCode = "51", ResponseText = "Insufficient funds" }));
+
+        var outcome = await harness.Client.PurchaseAsync(Context);
+        var attempt = await harness.AttemptAsync(outcome);
+
+        Assert.Null(attempt.CallErrorType);
+        Assert.Null(attempt.CallErrorMessage);
+        Assert.Contains(harness.Log.ToArray(), line =>
+            line.Contains("status Declined, responseCode \"51\", responseText \"Insufficient funds\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Gateway_exception_text_is_kept_even_after_the_query_finds_the_approval()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnPurchase = (_, _, _) => throw new InvalidOperationException("unexpected\nsecond line");
+        harness.Gateway.OnQuery = (reference, _) => ZellerQueryResult.Found(Queried(reference));
+
+        var outcome = await harness.Client.PurchaseAsync(Context);
+        var attempt = await harness.AttemptAsync(outcome);
+
+        Assert.Equal(ZellerAttemptStatus.Approved, attempt.Status);
+        Assert.Equal("Faulted", attempt.CallErrorType);
+        Assert.Equal("InvalidOperationException: unexpected\nsecond line", attempt.CallErrorMessage);
+        Assert.Contains(harness.Log.ToArray(), line =>
+            line.Contains("message \"InvalidOperationException: unexpected\\nsecond line\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Long_call_error_text_is_truncated()
+    {
+        var error = ZellerCardTerminalClient.DescribeCallError(
+            ZellerCallResult.Faulted(new string('x', ZellerCardTerminalClient.MaximumCallErrorMessageLength + 50)));
+
+        Assert.Equal("Faulted", error!.Value.Type);
+        Assert.Equal(ZellerCardTerminalClient.MaximumCallErrorMessageLength, error.Value.Message!.Length);
+        Assert.Equal(("Abandoned", (string?)null), ZellerCardTerminalClient.DescribeCallError(ZellerCallResult.Abandoned()));
+    }
+
+    [Fact]
     public async Task Late_recheck_that_finds_an_approval_reopens_the_attempt_as_unknown()
     {
         await using var harness = new Harness();

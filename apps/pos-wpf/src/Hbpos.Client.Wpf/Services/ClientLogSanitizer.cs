@@ -135,6 +135,9 @@ internal static partial class ClientLogSanitizer
     [GeneratedRegex("(?i)((?:authorization|password|pin|secret|api[_-]?key|token|credential|authorization[_-]?code|pan|cvv|voucher(?:[_-]?code)?|employee[_-]?barcode)\\s*[:=]\\s*)[^\\s,;\\\"']+", RegexOptions.CultureInvariant)]
     private static partial Regex InlineSecretRegex();
 
-    [GeneratedRegex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)", RegexOptions.CultureInvariant)]
+    // 中文注释：卡号前后不能紧挨字母或数字，也不能用连字符接着字母或数字。
+    // 否则 GUID（15b5f123-4567-8901-23f7-…）、HBZ- reference 这类十六进制编号里恰好连成 13 位以上的数字也会被当成卡号打码，
+    // 日志就和尝试记录、Zeller 后台对不上。真实卡号前后是空格、标点或冒号，不受影响。
+    [GeneratedRegex("(?<![0-9A-Za-z]-?)(?:\\d[ -]?){13,19}(?!-?[0-9A-Za-z])", RegexOptions.CultureInvariant)]
     private static partial Regex PanRegex();
 }
