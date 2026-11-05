@@ -56,6 +56,12 @@ public sealed record LocalZellerPaymentAttempt(
 
     public Guid? OperationGuid { get; init; }
 
+    /// <summary>
+    /// 退款的业务键，标识「这一笔退货要退回原卡」这件事。同一个键同时只能有一笔进行中或结果未知的退款，
+    /// 防止结果未知时收银员再点一次退款而退两次。扣款为空。
+    /// </summary>
+    public string? RefundBusinessKey { get; init; }
+
     public ZellerFailureKind FailureKind { get; init; }
 
     public ZellerUnknownReason UnknownReason { get; init; }
@@ -152,6 +158,14 @@ public interface ILocalZellerPaymentAttemptRepository
     Task<LocalZellerPaymentAttempt?> GetAsync(Guid attemptGuid, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 新建一条带业务键的退款尝试；同一个业务键已经有进行中或结果未知的退款时，不新建，返回那一条。
+    /// 调用方比较返回记录的 AttemptGuid 就知道是不是自己这一条。
+    /// </summary>
+    Task<LocalZellerPaymentAttempt> CreateOrGetOpenRefundAsync(
+        LocalZellerPaymentAttempt attempt,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 按版本号做乐观并发更新。成功返回落库后的记录（版本号已加一）；记录已被别人改过时返回 null。
     /// 不允许的状态转换、或者试图改动不可变字段，会抛出异常。
     /// </summary>
@@ -191,6 +205,7 @@ public static class ZellerPaymentAttemptSchema
             Status TEXT NOT NULL,
             Version INTEGER NOT NULL DEFAULT 0,
             OperationGuid TEXT NULL,
+            RefundBusinessKey TEXT NULL,
             FailureKind TEXT NOT NULL DEFAULT 'None',
             UnknownReason TEXT NOT NULL DEFAULT 'None',
             ReachedTerminal INTEGER NOT NULL DEFAULT 0,
@@ -224,6 +239,12 @@ public static class ZellerPaymentAttemptSchema
         // 中文注释：reference 是找回交易的唯一线索，绝不允许两条尝试共用。
         "CREATE UNIQUE INDEX IF NOT EXISTS UX_LocalZellerPaymentAttempts_Reference ON LocalZellerPaymentAttempts (Reference);",
         "CREATE INDEX IF NOT EXISTS IX_LocalZellerPaymentAttempts_Open ON LocalZellerPaymentAttempts (StoreCode, DeviceCode, Status, UpdatedAt DESC);",
+        // 中文注释：同一笔退货同时只能有一笔进行中或结果未知的退款。
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_LocalZellerPaymentAttempts_OpenRefundBusinessKey
+        ON LocalZellerPaymentAttempts (RefundBusinessKey)
+        WHERE OperationKind = 'Refund' AND RefundBusinessKey IS NOT NULL AND Status IN ('Pending', 'Submitted', 'Unknown');
+        """,
         """
         CREATE INDEX IF NOT EXISTS IX_LocalZellerPaymentAttempts_LateRecheck
         ON LocalZellerPaymentAttempts (LateRecheckDueAt)
@@ -245,7 +266,7 @@ public static class ZellerPaymentAttemptSchema
 public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) : ILocalZellerPaymentAttemptRepository
 {
     private const string Columns = """
-        AttemptGuid, OperationKind, Reference, AmountCents, Currency, Status, Version, OperationGuid,
+        AttemptGuid, OperationKind, Reference, AmountCents, Currency, Status, Version, OperationGuid, RefundBusinessKey,
         FailureKind, UnknownReason, ReachedTerminal, ProcessingStarted,
         TransactionUuid, OriginalTransactionUuid, ResponseCode, ResponseText, ApprovalCode, Rrn,
         PanMasked, Scheme, Bin, MerchantId, TerminalId, ReceiptText, ReceiptLink, TransactionTimestamp,
@@ -261,11 +282,68 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         ArgumentNullException.ThrowIfNull(attempt);
         Validate(attempt);
         await using var connection = await OpenAsync(cancellationToken);
+        await InsertAsync(connection, attempt, cancellationToken);
+    }
+
+    public async Task<LocalZellerPaymentAttempt> CreateOrGetOpenRefundAsync(
+        LocalZellerPaymentAttempt attempt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        Validate(attempt);
+        if (attempt.OperationKind != ZellerAttemptOperation.Refund || string.IsNullOrWhiteSpace(attempt.RefundBusinessKey))
+        {
+            throw new ArgumentException("Only a refund with a business key can be deduplicated.", nameof(attempt));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken);
+        if (await FindOpenRefundAsync(connection, attempt.RefundBusinessKey, cancellationToken) is { } existing)
+        {
+            return existing;
+        }
+
+        try
+        {
+            await InsertAsync(connection, attempt, cancellationToken);
+            return attempt with { Version = 0 };
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            // 中文注释：两边同时为同一笔退货建退款，唯一索引只放进一条，另一边读回那一条。
+            var winner = await FindOpenRefundAsync(connection, attempt.RefundBusinessKey, cancellationToken);
+            if (winner is null)
+            {
+                throw;
+            }
+
+            return winner;
+        }
+    }
+
+    private static async Task<LocalZellerPaymentAttempt?> FindOpenRefundAsync(
+        SqliteConnection connection,
+        string refundBusinessKey,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {Columns} FROM LocalZellerPaymentAttempts
+            WHERE OperationKind = 'Refund' AND RefundBusinessKey = $RefundBusinessKey
+              AND Status IN ('Pending', 'Submitted', 'Unknown')
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$RefundBusinessKey", refundBusinessKey);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+    }
+
+    private static async Task InsertAsync(SqliteConnection connection, LocalZellerPaymentAttempt attempt, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             INSERT INTO LocalZellerPaymentAttempts ({Columns})
             VALUES (
-                $AttemptGuid, $OperationKind, $Reference, $AmountCents, $Currency, $Status, $Version, $OperationGuid,
+                $AttemptGuid, $OperationKind, $Reference, $AmountCents, $Currency, $Status, $Version, $OperationGuid, $RefundBusinessKey,
                 $FailureKind, $UnknownReason, $ReachedTerminal, $ProcessingStarted,
                 $TransactionUuid, $OriginalTransactionUuid, $ResponseCode, $ResponseText, $ApprovalCode, $Rrn,
                 $PanMasked, $Scheme, $Bin, $MerchantId, $TerminalId, $ReceiptText, $ReceiptLink, $TransactionTimestamp,
@@ -439,6 +517,8 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
             !string.Equals(current.DeviceCode, next.DeviceCode, StringComparison.Ordinal) ||
             !string.Equals(current.CashierId, next.CashierId, StringComparison.Ordinal) ||
             current.OperationGuid != next.OperationGuid ||
+            !string.Equals(current.RefundBusinessKey, next.RefundBusinessKey, StringComparison.Ordinal) ||
+            !string.Equals(current.OriginalTransactionUuid, next.OriginalTransactionUuid, StringComparison.Ordinal) ||
             current.CreatedAt != next.CreatedAt)
         {
             throw new ArgumentException("Only the outcome fields of a Zeller attempt can change.", nameof(next));
@@ -455,6 +535,7 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         command.Parameters.AddWithValue("$Status", attempt.Status.ToString());
         command.Parameters.AddWithValue("$Version", attempt.Version);
         command.Parameters.AddWithValue("$OperationGuid", (object?)attempt.OperationGuid?.ToString("D") ?? DBNull.Value);
+        AddText(command, "$RefundBusinessKey", attempt.RefundBusinessKey);
         command.Parameters.AddWithValue("$FailureKind", attempt.FailureKind.ToString());
         command.Parameters.AddWithValue("$UnknownReason", attempt.UnknownReason.ToString());
         command.Parameters.AddWithValue("$ReachedTerminal", attempt.ReachedTerminal ? 1 : 0);
@@ -514,6 +595,7 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
             Currency = Text("Currency")!,
             Version = Integer("Version"),
             OperationGuid = Text("OperationGuid") is { } operationGuid ? Guid.Parse(operationGuid) : null,
+            RefundBusinessKey = Text("RefundBusinessKey"),
 
             // 中文注释：读到不认识的值时按最保守的一侧处理。
             FailureKind = ParseEnum(Text("FailureKind"), ZellerFailureKind.ResultUnknown),

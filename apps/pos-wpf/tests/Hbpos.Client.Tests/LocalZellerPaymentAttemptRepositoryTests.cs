@@ -183,6 +183,68 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Open_refund_for_the_same_business_key_is_returned_instead_of_a_second_one()
+    {
+        var first = RefundAttempt("RETURN-1");
+        var second = RefundAttempt("RETURN-1");
+
+        var storedFirst = await _repository.CreateOrGetOpenRefundAsync(first);
+        var storedSecond = await _repository.CreateOrGetOpenRefundAsync(second);
+
+        Assert.Equal(first.AttemptGuid, storedFirst.AttemptGuid);
+        Assert.Equal(first.AttemptGuid, storedSecond.AttemptGuid);
+        Assert.Null(await _repository.GetAsync(second.AttemptGuid));
+    }
+
+    [Fact]
+    public async Task Concurrent_refunds_for_the_same_business_key_create_only_one_attempt()
+    {
+        var attempts = Enumerable.Range(0, 6).Select(_ => RefundAttempt("RETURN-RACE")).ToArray();
+
+        var stored = await Task.WhenAll(attempts.Select(attempt => _repository.CreateOrGetOpenRefundAsync(attempt)));
+
+        Assert.Single(stored.Select(attempt => attempt.AttemptGuid).Distinct());
+    }
+
+    [Fact]
+    public async Task Business_key_is_free_again_once_the_refund_has_an_outcome()
+    {
+        var first = await _repository.CreateOrGetOpenRefundAsync(RefundAttempt("RETURN-2"));
+        var submitted = await _repository.TryUpdateAsync(first, first with { Status = ZellerAttemptStatus.Submitted });
+        await _repository.TryUpdateAsync(submitted!, submitted! with { Status = ZellerAttemptStatus.Declined });
+        var retry = RefundAttempt("RETURN-2");
+
+        var stored = await _repository.CreateOrGetOpenRefundAsync(retry);
+
+        Assert.Equal(retry.AttemptGuid, stored.AttemptGuid);
+    }
+
+    [Fact]
+    public async Task Different_business_keys_do_not_block_each_other()
+    {
+        var a = await _repository.CreateOrGetOpenRefundAsync(RefundAttempt("RETURN-A"));
+        var b = await _repository.CreateOrGetOpenRefundAsync(RefundAttempt("RETURN-B"));
+
+        Assert.NotEqual(a.AttemptGuid, b.AttemptGuid);
+    }
+
+    [Fact]
+    public async Task Only_keyed_refunds_can_be_deduplicated()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _repository.CreateOrGetOpenRefundAsync(Attempt()));
+        await Assert.ThrowsAsync<ArgumentException>(() => _repository.CreateOrGetOpenRefundAsync(RefundAttempt("x") with { RefundBusinessKey = null }));
+    }
+
+    [Fact]
+    public async Task Refund_target_and_business_key_cannot_change_after_creation()
+    {
+        var stored = await _repository.CreateOrGetOpenRefundAsync(RefundAttempt("RETURN-3"));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _repository.TryUpdateAsync(stored, stored with { RefundBusinessKey = "OTHER" }));
+        await Assert.ThrowsAsync<ArgumentException>(() => _repository.TryUpdateAsync(stored, stored with { OriginalTransactionUuid = "98b690b7-5eaa-41ec-8ff8-168c60364aac" }));
+    }
+
+    [Fact]
     public async Task Works_alongside_the_regular_schema_service()
     {
         await new LocalSchemaService(_store).InitializeAsync();
@@ -247,6 +309,19 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
         "C001",
         Created,
         Created);
+
+    private static LocalZellerPaymentAttempt RefundAttempt(string businessKey)
+    {
+        var guid = Guid.NewGuid();
+        return Attempt() with
+        {
+            AttemptGuid = guid,
+            OperationKind = ZellerAttemptOperation.Refund,
+            Reference = $"HBZR-{guid:N}",
+            RefundBusinessKey = businessKey,
+            OriginalTransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c"
+        };
+    }
 
     private async Task<LocalZellerPaymentAttempt> CreateAsync(
         ZellerAttemptStatus status,

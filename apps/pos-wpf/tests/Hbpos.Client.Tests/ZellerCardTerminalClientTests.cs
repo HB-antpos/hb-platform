@@ -429,6 +429,206 @@ public sealed class ZellerCardTerminalClientTests
         Assert.Equal(ZellerAttemptStatus.Canceled, attempt.Status);
     }
 
+    // ── 退款 ──
+
+    private const string OriginalPayment = $"ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:{Uuid}";
+    private const string RefundUuid = "28b1e54e-a420-41d6-bb8e-2a7497bf783d";
+    private static readonly ZellerRefundContext Refund = new(100, OriginalPayment, "{\"return\":1}", "S001", "POS-01", "C001");
+
+    private static ZellerTransaction RefundApproved(string reference) => new(
+        ZellerTransactionStatus.Approved,
+        ZellerTransactionType.Refund,
+        100,
+        RefundUuid,
+        reference,
+        ResponseCode: "00",
+        ResponseText: "APPROVED",
+        Rrn: "629266629008",
+        Scheme: "OTHER",
+        ReceiptText: "REFUND RECEIPT");
+
+    [Fact]
+    public async Task Approved_refund_targets_the_original_transaction_uuid_and_returns_a_refund_reference()
+    {
+        // 真机 S13：按原交易的 transactionUuid 退款成功，不需要刷卡。
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(RefundApproved(request.Reference)));
+
+        var outcome = await harness.Client.RefundAsync(Refund);
+        var attempt = await harness.AttemptAsync(outcome);
+        var request = Assert.Single(harness.Gateway.RefundRequests.ToArray());
+
+        Assert.Equal(ZellerPaymentState.Approved, outcome.State);
+        Assert.Equal(ZellerAttemptOperation.Refund, outcome.Operation);
+        Assert.StartsWith("HBZR-", outcome.Reference, StringComparison.Ordinal);
+        Assert.Equal($"ZELLERRF:{outcome.Reference}:{RefundUuid}", outcome.PaymentReference);
+        Assert.Equal(Uuid, request.OriginalTransactionUuid);
+        Assert.Equal(outcome.Reference, request.Reference);
+        Assert.Equal(100, request.AmountCents);
+        Assert.Equal(ZellerAttemptOperation.Refund, attempt.OperationKind);
+        Assert.Equal(Uuid, attempt.OriginalTransactionUuid);
+        Assert.Equal(RefundUuid, attempt.TransactionUuid);
+        Assert.Equal(ZellerAttemptStatus.Approved, attempt.Status);
+    }
+
+    [Fact]
+    public async Task Refund_accepts_the_original_reference_inside_a_card_refund_wrapper()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(RefundApproved(request.Reference)));
+
+        var outcome = await harness.Client.RefundAsync(Refund with
+        {
+            OriginalPaymentReference = Hbpos.Contracts.Orders.CardRefundReference.Format(null, OriginalPayment)
+        });
+
+        Assert.Equal(ZellerPaymentState.Approved, outcome.State);
+        Assert.Equal(Uuid, Assert.Single(harness.Gateway.RefundRequests.ToArray()).OriginalTransactionUuid);
+    }
+
+    [Theory]
+    [InlineData("SQ:payment-1")]
+    [InlineData("ANZ:TXN-1")]
+    [InlineData("ZELLER:broken")]
+    [InlineData("")]
+    public async Task Refund_of_a_payment_that_is_not_a_zeller_payment_is_rejected_before_anything_is_saved(string original)
+    {
+        await using var harness = new Harness();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => harness.Client.RefundAsync(Refund with { OriginalPaymentReference = original }));
+        Assert.Empty(harness.Gateway.Calls.ToArray());
+    }
+
+    [Fact]
+    public async Task Refund_above_what_is_left_is_declined()
+    {
+        // 真机 S13：超额退款返回成交类响应，Status=Declined，code 13。
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            RefundApproved(request.Reference) with { Status = ZellerTransactionStatus.Declined, ResponseCode = "13", ResponseText = "Invalid amount" }));
+
+        var outcome = await harness.Client.RefundAsync(Refund);
+
+        Assert.Equal(ZellerPaymentState.Declined, outcome.State);
+        Assert.Equal("13", outcome.Transaction!.ResponseCode);
+        Assert.Null(outcome.PaymentReference);
+        Assert.Equal(0, harness.Gateway.QueryCount);
+    }
+
+    [Fact]
+    public async Task Refund_of_a_missing_original_is_not_refunded_and_not_retried()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.TransactionNotFound));
+
+        var outcome = await harness.Client.RefundAsync(Refund);
+        var attempt = await harness.AttemptAsync(outcome);
+
+        Assert.Equal(ZellerPaymentState.NotPaid, outcome.State);
+        Assert.Equal(ZellerFailureKind.OriginalTransactionNotFound, outcome.FailureKind);
+        Assert.Equal(ZellerAttemptStatus.Canceled, attempt.Status);
+        Assert.Null(attempt.LateRecheckDueAt);
+        Assert.Equal(0, harness.Gateway.QueryCount);
+        Assert.Single(harness.Gateway.RefundRequests.ToArray());
+    }
+
+    [Fact]
+    public async Task Unknown_refund_is_verified_by_the_refund_reference_and_never_sent_again()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.NetworkFailure, reachedTerminal: true));
+        harness.Gateway.OnQuery = (reference, index) => index < 1 ? ZellerQueryResult.Found() : ZellerQueryResult.Found(RefundApproved(reference));
+
+        var refund = harness.Client.RefundAsync(Refund);
+        await harness.AdvanceUntilAsync(() => refund.IsCompleted, TimeSpan.FromSeconds(1));
+        var outcome = await refund;
+
+        Assert.Equal(ZellerPaymentState.Approved, outcome.State);
+        Assert.Single(harness.Gateway.RefundRequests.ToArray());
+        Assert.All(
+            harness.Gateway.Calls.ToArray().Where(call => call.StartsWith("query:", StringComparison.Ordinal)),
+            call => Assert.Equal($"query:{outcome.Reference}", call));
+    }
+
+    [Fact]
+    public async Task Refund_verification_ignores_the_original_purchase_under_the_same_query()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+        // 查询结果里混进一笔扣款（类型不同），不能被当成退款已完成。
+        harness.Gateway.OnQuery = (reference, _) => ZellerQueryResult.Found(Approved(reference));
+
+        var outcome = await harness.Client.RefundAsync(Refund);
+
+        Assert.Equal(ZellerPaymentState.NotPaid, outcome.State);
+    }
+
+    [Fact]
+    public async Task Second_refund_for_the_same_return_while_the_first_is_unknown_is_not_sent()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.NetworkFailure, reachedTerminal: true));
+        harness.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+        using var stopWaiting = new CancellationTokenSource();
+        var keyed = Refund with { RefundBusinessKey = "RETURN-1:LINE-1" };
+
+        var first = harness.Client.RefundAsync(keyed, cancellationToken: stopWaiting.Token);
+        await WaitUntilAsync(() => Task.FromResult(harness.Gateway.QueryCount >= 1));
+        stopWaiting.Cancel();
+        var firstOutcome = await first.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = await harness.Client.RefundAsync(keyed);
+
+        Assert.Equal(ZellerPaymentState.Unknown, firstOutcome.State);
+        Assert.Equal(ZellerPaymentState.Unknown, second.State);
+        Assert.Equal(ZellerUnknownReason.RefundAlreadyInProgress, second.UnknownReason);
+        Assert.Equal(firstOutcome.AttemptGuid, second.AttemptGuid);
+        Assert.Single(harness.Gateway.RefundRequests.ToArray());
+    }
+
+    [Fact]
+    public async Task Refund_for_the_same_return_is_allowed_again_once_the_first_was_declined()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            RefundApproved(request.Reference) with { Status = ZellerTransactionStatus.Declined, ResponseCode = "13" }));
+        var keyed = Refund with { RefundBusinessKey = "RETURN-2:LINE-1" };
+
+        var first = await harness.Client.RefundAsync(keyed);
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(RefundApproved(request.Reference)));
+        var second = await harness.Client.RefundAsync(keyed);
+
+        Assert.Equal(ZellerPaymentState.Declined, first.State);
+        Assert.Equal(ZellerPaymentState.Approved, second.State);
+        Assert.NotEqual(first.AttemptGuid, second.AttemptGuid);
+        Assert.Equal(2, harness.Gateway.RefundRequests.Count);
+    }
+
+    [Fact]
+    public async Task Cancelled_refund_is_rechecked_as_a_refund_later()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+        harness.Gateway.OnQuery = (reference, index) => index == 0 ? ZellerQueryResult.Found() : ZellerQueryResult.Found(RefundApproved(reference));
+
+        var outcome = await harness.Client.RefundAsync(Refund);
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(async () => (await harness.AttemptAsync(outcome)).Status == ZellerAttemptStatus.Unknown);
+        var reopened = await harness.AttemptAsync(outcome);
+
+        Assert.Equal(ZellerPaymentState.NotPaid, outcome.State);
+        Assert.Equal(ZellerUnknownReason.LateApproval, reopened.UnknownReason);
+        Assert.Equal(RefundUuid, reopened.TransactionUuid);
+    }
+
+    [Fact]
+    public async Task Non_positive_refund_amount_is_rejected_before_anything_is_saved()
+    {
+        await using var harness = new Harness();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => harness.Client.RefundAsync(Refund with { AmountCents = -100 }));
+        Assert.Empty(harness.Gateway.Calls.ToArray());
+    }
+
     // ── 参数 ──
 
     [Fact]
@@ -579,11 +779,20 @@ internal sealed class ScriptedZellerGateway : IZellerTerminalGateway
         return OnPurchase(request, progress, cancellationToken);
     }
 
+    public Func<ZellerRefundRequest, IProgress<ZellerTerminalEvent>?, CancellationToken, Task<ZellerCallResult>> OnRefund { get; set; } =
+        (_, _, _) => Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled));
+
+    public SafeList<ZellerRefundRequest> RefundRequests { get; } = new();
+
     public Task<ZellerCallResult> RefundAsync(
         ZellerRefundRequest request,
         IProgress<ZellerTerminalEvent>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"refund:{request.Reference}");
+        RefundRequests.Add(request);
+        return OnRefund(request, progress, cancellationToken);
+    }
 
     public Task<ZellerQueryResult> GetTransactionsAsync(string reference, CancellationToken cancellationToken = default)
     {

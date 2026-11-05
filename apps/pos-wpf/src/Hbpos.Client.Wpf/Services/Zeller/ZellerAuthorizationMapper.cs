@@ -20,35 +20,41 @@ public static class ZellerAuthorizationMapper
     {
         ArgumentNullException.ThrowIfNull(outcome);
         var amount = outcome.AmountCents / 100m;
+        var isRefund = outcome.Operation == ZellerAttemptOperation.Refund;
 
         switch (outcome.State)
         {
             case ZellerPaymentState.Approved:
                 var transaction = outcome.Transaction
                     ?? throw new ArgumentException("An approved Zeller outcome must carry its transaction.", nameof(outcome));
+
+                // 中文注释：退款时 Reference 是 ZELLERRF:…，收款流程会再和原交易引用包成 CARD_REFUND|refund=…|original=…。
                 return new PaymentAuthorizationResult(
                     Approved: true,
                     Reference: outcome.PaymentReference,
-                    Message: "Zeller payment approved.",
+                    Message: isRefund ? "Zeller refund approved." : "Zeller payment approved.",
                     AuthorizedAmount: transaction.AmountCents / 100m,
                     CardTransactions: [ToCardTransaction(transaction)],
                     Processor: ZellerPaymentReference.Processor,
                     TxnRef: outcome.Reference,
                     ResponseCode: transaction.ResponseCode,
                     ResponseText: transaction.ResponseText,
-                    StatusKey: StatusKeyPrefix + "approved");
+                    StatusKey: StatusKeyPrefix + (isRefund ? "refundApproved" : "approved"));
 
             case ZellerPaymentState.Declined:
                 // 中文注释：带上银行的响应码和文案，付款页才会弹「银行未批准」而不是普通错误。
+                // 退款被拒最常见的是超额退款（code 13）。
                 return new PaymentAuthorizationResult(
                     Approved: false,
                     Reference: outcome.Reference,
-                    Message: outcome.Transaction?.ResponseText ?? "The card was declined.",
+                    Message: outcome.Transaction?.ResponseText ?? (isRefund ? "The refund was declined." : "The card was declined."),
                     Processor: ZellerPaymentReference.Processor,
                     TxnRef: outcome.Reference,
                     ResponseCode: outcome.Transaction?.ResponseCode ?? "DECLINED",
                     ResponseText: outcome.Transaction?.ResponseText ?? "Declined",
-                    StatusKey: StatusKeyPrefix + (outcome.FailureKind == ZellerFailureKind.CardProblem ? "cardProblem" : "declined"));
+                    StatusKey: StatusKeyPrefix + (isRefund
+                        ? "refundDeclined"
+                        : outcome.FailureKind == ZellerFailureKind.CardProblem ? "cardProblem" : "declined"));
 
             case ZellerPaymentState.NotPaid:
                 return new PaymentAuthorizationResult(
@@ -60,14 +66,19 @@ public static class ZellerAuthorizationMapper
                     StatusKey: StatusKeyPrefix + NotPaidKey(outcome.FailureKind));
 
             default:
+                var inProgress = outcome.UnknownReason == ZellerUnknownReason.RefundAlreadyInProgress;
                 return new PaymentAuthorizationResult(
                     Approved: false,
                     Reference: outcome.Reference,
-                    Message: "The Zeller payment result is not known yet. Do not ask the customer to pay again; check it in the recovery center.",
+                    Message: inProgress
+                        ? "A refund for this return is already in progress. Check it in the recovery center instead of refunding again."
+                        : isRefund
+                            ? "The Zeller refund result is not known yet. Do not refund again; check it in the recovery center."
+                            : "The Zeller payment result is not known yet. Do not ask the customer to pay again; check it in the recovery center.",
                     AuthorizedAmount: amount,
                     Processor: ZellerPaymentReference.Processor,
                     TxnRef: outcome.Reference,
-                    StatusKey: StatusKeyPrefix + "resultUnknown",
+                    StatusKey: StatusKeyPrefix + (inProgress ? "refundInProgress" : "resultUnknown"),
                     ResultUnknown: true);
         }
     }
@@ -102,6 +113,7 @@ public static class ZellerAuthorizationMapper
         ZellerFailureKind.InvalidRequest => "invalidRequest",
         ZellerFailureKind.CardProblem => "cardProblem",
         ZellerFailureKind.BankDeclined => "declined",
+        ZellerFailureKind.OriginalTransactionNotFound => "originalNotFound",
         _ => "notPaid"
     };
 
@@ -114,6 +126,7 @@ public static class ZellerAuthorizationMapper
         ZellerFailureKind.SdkUnavailable => "The Zeller payment component could not start on this POS.",
         ZellerFailureKind.Busy => "The Zeller terminal is busy. Try again in a moment.",
         ZellerFailureKind.InvalidRequest => "The Zeller payment request was invalid.",
+        ZellerFailureKind.OriginalTransactionNotFound => "Zeller could not find the original transaction. Nothing was refunded.",
         _ => "The customer was not charged."
     };
 }

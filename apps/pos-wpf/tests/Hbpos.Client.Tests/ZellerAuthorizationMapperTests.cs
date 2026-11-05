@@ -126,6 +126,76 @@ public sealed class ZellerAuthorizationMapperTests
     }
 
     [Fact]
+    public void Approved_refund_returns_the_refund_reference_for_the_workflow_to_wrap()
+    {
+        const string refundReference = "HBZR-799287a33dc24df1bca3d33eea19b35a";
+        const string refundUuid = "28b1e54e-a420-41d6-bb8e-2a7497bf783d";
+        var refund = ApprovedTransaction with { Type = ZellerTransactionType.Refund, TransactionUuid = refundUuid, ExternalReference = refundReference };
+
+        var result = ZellerAuthorizationMapper.ToAuthorizationResult(new ZellerPaymentOutcome(
+            ZellerPaymentState.Approved, Attempt, refundReference, 100, Transaction: refund, Operation: ZellerAttemptOperation.Refund));
+
+        Assert.True(result.Approved);
+        Assert.Equal($"ZELLERRF:{refundReference}:{refundUuid}", result.Reference);
+        Assert.Equal("payment.card.zeller.refundApproved", result.StatusKey);
+        var card = Assert.Single(result.CardTransactions!);
+        Assert.Equal(refundUuid, card.TxnRef);
+        Assert.Equal(1.00m, card.Amount);
+        Assert.Null(card.RefundReference);
+    }
+
+    [Fact]
+    public void Declined_refund_has_its_own_status_key()
+    {
+        var result = ZellerAuthorizationMapper.ToAuthorizationResult(new ZellerPaymentOutcome(
+            ZellerPaymentState.Declined,
+            Attempt,
+            "HBZR-799287a33dc24df1bca3d33eea19b35a",
+            100,
+            ZellerFailureKind.BankDeclined,
+            Transaction: ApprovedTransaction with { Type = ZellerTransactionType.Refund, Status = ZellerTransactionStatus.Declined, ResponseCode = "13", ResponseText = "Invalid amount" },
+            Operation: ZellerAttemptOperation.Refund));
+
+        Assert.Equal("payment.card.zeller.refundDeclined", result.StatusKey);
+        Assert.Equal("13", result.ResponseCode);
+    }
+
+    [Fact]
+    public void Refund_of_a_missing_original_has_its_own_status_key()
+    {
+        var result = ZellerAuthorizationMapper.ToAuthorizationResult(new ZellerPaymentOutcome(
+            ZellerPaymentState.NotPaid, Attempt, "HBZR-799287a33dc24df1bca3d33eea19b35a", 100,
+            ZellerFailureKind.OriginalTransactionNotFound, Operation: ZellerAttemptOperation.Refund));
+
+        Assert.Equal("payment.card.zeller.originalNotFound", result.StatusKey);
+        Assert.Contains("Nothing was refunded", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Refund_already_in_progress_is_unknown_and_says_not_to_refund_again()
+    {
+        var result = ZellerAuthorizationMapper.ToAuthorizationResult(new ZellerPaymentOutcome(
+            ZellerPaymentState.Unknown, Attempt, "HBZR-799287a33dc24df1bca3d33eea19b35a", 100,
+            ZellerFailureKind.ResultUnknown, ZellerUnknownReason.RefundAlreadyInProgress, Operation: ZellerAttemptOperation.Refund));
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal("payment.card.zeller.refundInProgress", result.StatusKey);
+        Assert.Contains("already in progress", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unknown_refund_says_not_to_refund_again()
+    {
+        var result = ZellerAuthorizationMapper.ToAuthorizationResult(new ZellerPaymentOutcome(
+            ZellerPaymentState.Unknown, Attempt, "HBZR-799287a33dc24df1bca3d33eea19b35a", 100,
+            ZellerFailureKind.ResultUnknown, ZellerUnknownReason.SdkError, Operation: ZellerAttemptOperation.Refund));
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal("payment.card.zeller.resultUnknown", result.StatusKey);
+        Assert.Contains("Do not refund again", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Unknown_outcome_is_flagged_so_the_payment_page_locks_for_recovery()
     {
         var result = ZellerAuthorizationMapper.ToAuthorizationResult(

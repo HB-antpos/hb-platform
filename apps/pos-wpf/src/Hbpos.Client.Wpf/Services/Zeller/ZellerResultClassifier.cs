@@ -56,7 +56,10 @@ public enum ZellerUnknownReason
     MultipleApproved,
     LateApproval,
     VerificationFailed,
-    ProcessExited
+    ProcessExited,
+
+    /// <summary>同一笔退货已经有一笔退款在进行或结果未知，不能再发第二笔。只出现在返回给调用方的结论里，不落库。</summary>
+    RefundAlreadyInProgress
 }
 
 /// <summary>本地 attempt 对这次调用的预期：类型、金额（分）和发给 Zeller 的 reference。</summary>
