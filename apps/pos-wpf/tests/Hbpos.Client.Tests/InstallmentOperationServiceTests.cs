@@ -3613,7 +3613,16 @@ public sealed class InstallmentOperationServiceTests
         }
 
         public Task<InstallmentRepaymentCapabilitiesResponse> GetRepaymentCapabilitiesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new InstallmentRepaymentCapabilitiesResponse(true, false, false, 120, true, false, 120));
+            Task.FromResult(new InstallmentRepaymentCapabilitiesResponse(
+                true,
+                false,
+                false,
+                120,
+                true,
+                false,
+                120,
+                CardRepaymentSupported: true,
+                CardRepaymentProviders: ["square", "linkly", "zeller"]));
 
         public Task<InstallmentCancelClaimDto> CreateCancelClaimAsync(Guid installmentGuid, InstallmentCancelClaimCreateRequest request, CancellationToken cancellationToken = default)
         {

@@ -164,6 +164,102 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         }
     }
 
+    [Fact]
+    public async Task Card_repayment_on_a_processor_the_server_has_not_enabled_releases_the_claim_before_the_terminal()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events)
+            {
+                Capabilities = new InstallmentRepaymentCapabilitiesResponse(
+                    true,
+                    false,
+                    true,
+                    120,
+                    CardRepaymentSupported: true,
+                    CardRepaymentProviders: ["square"])
+            };
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(true, AuthorizedAmount: request.Amount));
+            var settings = CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Linkly };
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings));
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            // 中央 claim 还没登记通道：当场释放并结案，付款页可以清掉草稿，不必等 120 秒过期。
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("暂不支持分期续付", result.Message);
+            Assert.Equal(["claim:create", "claim:resolve:Released"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Released, api.Status);
+            var operation = await repository.GetAsync(request.PaymentGuid);
+            Assert.Equal(LocalInstallmentOperationState.Failed, operation?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Begin_provider_rejected_as_not_enabled_fails_cleanly_and_releases_the_claim()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events)
+            {
+                BeginException = new CatalogApiException(
+                    "Card installment repayment is not enabled for provider 'Linkly'.",
+                    HttpStatusCode.BadRequest,
+                    "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED")
+            };
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(true, AuthorizedAmount: request.Amount));
+            var settings = CardTerminalSettings.FromEnvironment() with
+            {
+                Processor = CardProcessorKind.Linkly,
+                LinklyConnectionMode = LinklyConnectionMode.LocalIp
+            };
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: new LinklyPaymentAttemptContextAccessor());
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("暂不支持分期续付", result.Message);
+            Assert.Equal(["claim:create", "claim:begin:Linkly", "claim:resolve:Released"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            var operation = await repository.GetAsync(request.PaymentGuid);
+            Assert.Equal(LocalInstallmentOperationState.Failed, operation?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -809,7 +905,15 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         public Exception? GetException { get; set; }
         public bool LoseFirstBeginResponse { get; init; }
         public bool LoseFirstCommitResponse { get; init; }
-        public InstallmentRepaymentCapabilitiesResponse Capabilities { get; init; } = new(true, false, true, 120);
+        public Exception? BeginException { get; init; }
+        // 默认按「三个刷卡通道都已放开」的服务端：这些用例验证的是放开之后的续付流程。
+        public InstallmentRepaymentCapabilitiesResponse Capabilities { get; init; } = new(
+            true,
+            false,
+            true,
+            120,
+            CardRepaymentSupported: true,
+            CardRepaymentProviders: ["square", "linkly", "zeller"]);
         public InstallmentRepaymentClaimStatus Status => _status;
         public int CommitCalls { get; private set; }
         public int LegacyAppendCalls { get; private set; }
@@ -830,6 +934,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         public Task<InstallmentRepaymentClaimDto> BeginRepaymentProviderAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimBeginProviderRequest beginRequest, CancellationToken cancellationToken = default)
         {
             events.Add($"claim:begin:{beginRequest.Provider}");
+            if (BeginException is not null) return Task.FromException<InstallmentRepaymentClaimDto>(BeginException);
             _status = InstallmentRepaymentClaimStatus.ProviderPending;
             _provider = beginRequest.Provider;
             _providerAttemptId = beginRequest.ProviderAttemptId;
@@ -1009,8 +1114,15 @@ internal sealed class ClaimAwareInstallmentApiTestAdapter(
     InstallmentAppendPaymentRequest repayment,
     RepaymentClaimTestState state) : IInstallmentApiClient
 {
+    // 按「三个刷卡通道都已放开」的服务端：共用这个适配器的用例验证的是放开之后的续付流程。
     public Task<InstallmentRepaymentCapabilitiesResponse> GetRepaymentCapabilitiesAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentRepaymentCapabilitiesResponse(true, false, true, 120));
+        Task.FromResult(new InstallmentRepaymentCapabilitiesResponse(
+            true,
+            false,
+            true,
+            120,
+            CardRepaymentSupported: true,
+            CardRepaymentProviders: ["square", "linkly", "zeller"]));
 
     public Task<InstallmentRepaymentClaimDto> CreateRepaymentClaimAsync(Guid installmentGuid, InstallmentRepaymentClaimCreateRequest request, CancellationToken cancellationToken = default) =>
         Task.FromResult(state.Create(request, repayment));
