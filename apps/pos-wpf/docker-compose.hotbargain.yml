@@ -59,6 +59,9 @@ services:
       # 收银端订单查询时间窗口：最早 N 个月、按区间浏览 / 按商品搜跨度 M 个月；设为 0 关闭该项（不重建镜像即可调整）。
       - OrderQueryWindow__EarliestMonths=${HBPOS_ORDER_QUERY_EARLIEST_MONTHS:-12}
       - OrderQueryWindow__MaxSpanMonths=${HBPOS_ORDER_QUERY_MAX_SPAN_MONTHS:-1}
+      # 分期续付允许刷卡的通道族，逗号分隔（square / linkly / zeller / manual）；留空 = 刷卡续付一律拒绝（默认，行为不变）。
+      # 只管「新开始」的刷卡续付；已登记通道的 claim（可能已扣款）的恢复与提交不受影响。改 .env 后只需 --force-recreate，不必重建镜像。
+      - InstallmentRepaymentClaims__CardRepaymentProviders=${HBPOS_INSTALLMENT_CARD_REPAYMENT_PROVIDERS:-}
       # App Review 默认关闭；仅在审核窗口从服务器 .env 注入专用门店、UTC 到期时间和开通码 SHA-256。
       - PosIpadAppReview__Enabled=${HBPOS_IPAD_APP_REVIEW_ENABLED:-false}
       - PosIpadAppReview__StoreCode=${HBPOS_IPAD_APP_REVIEW_STORE_CODE:-}
