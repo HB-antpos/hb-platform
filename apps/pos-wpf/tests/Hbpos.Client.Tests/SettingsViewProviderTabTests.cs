@@ -18,11 +18,12 @@ public sealed class SettingsViewProviderTabTests
         Assert.Equal(
             "{Binding SelectedProviderTabIndex, Mode=TwoWay}",
             (string?)tabs.Attribute("SelectedIndex"));
-        // 标签顺序必须与 SettingsViewModel.SelectedProviderTabIndex 的约定一致：0 = Square，1 = Linkly。
+        // 标签顺序必须与 SettingsViewModel.SelectedProviderTabIndex 的约定一致：0 = Square，1 = Linkly，2 = Zeller。
         var headers = tabs.Elements(presentation + "TabItem").Select(item => item.ToString()).ToArray();
-        Assert.Equal(2, headers.Length);
+        Assert.Equal(3, headers.Length);
         Assert.Contains("SquareTitleText", headers[0]);
         Assert.Contains("LinklyTitleText", headers[1]);
+        Assert.Contains("ZellerTitleText", headers[2]);
     }
 
     private static string FindRepoRoot()

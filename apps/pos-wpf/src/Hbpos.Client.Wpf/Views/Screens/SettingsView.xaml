@@ -1259,6 +1259,15 @@
                                             <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasLinklyUnsaved, Converter={StaticResource BoolToVis}}" />
                                         </StackPanel>
                                     </RadioButton>
+                                    <!-- Zeller 没有输入框，也就没有未保存红点。 -->
+                                    <RadioButton GroupName="PaymentSubTabs"
+                                                 Style="{StaticResource SettingsSubTabRadioStyle}"
+                                                 IsChecked="{Binding IsZellerSubTabSelected, Mode=TwoWay}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="CreditCardOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding ZellerTitleText}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </RadioButton>
                                 </StackPanel>
                             </Border>
 
@@ -1584,6 +1593,59 @@
                                 </Button>
                             </controls:SettingsFooterBar>
                             <!-- ===== FOOTER: Linkly END ===== -->
+                            <!-- ===== FOOTER: Zeller BEGIN ===== -->
+                            <!-- Zeller 底栏：检查配对｜配对刷卡机（配对中多一个取消配对）｜说明文字｜右侧「启用 Zeller」（配对成功后才可点）。 -->
+                            <controls:SettingsFooterBar Spacing="8" Visibility="{Binding IsZellerSubTabSelected, Converter={StaticResource BoolToVis}}">
+                                <Button Command="{Binding CheckZellerCommand}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        Padding="14,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.zeller.check}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding PairZellerCommand}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        Padding="14,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="LinkVariant" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.zeller.pair}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding CancelZellerPairingCommand}"
+                                        Visibility="{Binding IsZellerPairingInProgress, Converter={StaticResource BoolToVis}}"
+                                        Style="{StaticResource SettingsTouchButtonHeight}"
+                                        Padding="14,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Close" Width="20" Height="20" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc settings.zeller.cancelPairing}" />
+                                    </StackPanel>
+                                </Button>
+                                <Border Style="{StaticResource SettingsFooterDividerStyle}" />
+                                <TextBlock controls:SettingsFooterBar.IsFill="True"
+                                           Text="{loc:Loc settings.zeller.footer.help}"
+                                           ToolTip="{loc:Loc settings.zeller.footer.help}"
+                                           FontSize="12.5"
+                                           LineHeight="16"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxHeight="32"
+                                           Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                <Button controls:SettingsFooterBar.IsRight="True"
+                                        Command="{Binding EnableZellerCommand}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Height="48"
+                                        MinWidth="176"
+                                        Padding="18,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="ContentSave" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                                        <TextBlock Text="{loc:Loc settings.zeller.enable}" Foreground="White" FontSize="16" />
+                                    </StackPanel>
+                                </Button>
+                            </controls:SettingsFooterBar>
+                            <!-- ===== FOOTER: Zeller END ===== -->
                         </Grid>
                     </controls:SettingsPageHost.Footer>
                     <Grid>
@@ -3359,6 +3421,78 @@
                                 </Grid>
                             </TabItem>
                             <!-- ===== PAGE: PaymentTerminal / Linkly END ===== -->
+                            <!-- ===== PAGE: PaymentTerminal / Zeller BEGIN ===== -->
+                            <TabItem>
+                                <TabItem.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource PosPrimarySoftBrush}" Margin="0,0,14,0">
+                                            <materialDesign:PackIcon Kind="CreditCardOutline" Width="24" Height="24" Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding ZellerTitleText}" FontSize="17" />
+                                            <TextBlock Text="{loc:Loc settings.payment.provider.zeller.subtitle}"
+                                                       FontSize="12" FontWeight="Normal"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </TabItem.Header>
+                                <!-- Zeller 首屏版式（1366×632 内正文不滚动）：左 = 配对状态卡，右 = 配对步骤。
+                                     没有输入框；检查配对 / 配对刷卡机 / 启用 Zeller 都在固定底栏 FOOTER: Zeller。 -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="1.35*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Style="{StaticResource SettingsActionCardStyle}"
+                                            VerticalAlignment="Top"
+                                            Padding="16">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Border DockPanel.Dock="Left"
+                                                        Width="52" Height="52"
+                                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                                        CornerRadius="12"
+                                                        Margin="0,0,14,0">
+                                                    <materialDesign:PackIcon Kind="ContactlessPayment" Width="28" Height="28"
+                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding ZellerTitleText}"
+                                                               FontSize="12" FontWeight="Bold"
+                                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                    <TextBlock Text="{Binding ZellerStatusText}"
+                                                               FontSize="17" FontWeight="Bold"
+                                                               TextWrapping="Wrap" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding ZellerActiveText}"
+                                                       FontSize="13"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap"
+                                                       LineHeight="20"
+                                                       Margin="0,12,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2"
+                                            Style="{StaticResource SettingsActionCardStyle}"
+                                            VerticalAlignment="Top"
+                                            Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="{loc:Loc settings.zeller.steps.title}"
+                                                       Style="{StaticResource SettingsSectionTitleStyle}"
+                                                       FontSize="15" />
+                                            <TextBlock Text="{loc:Loc settings.zeller.steps.one}" FontSize="13" LineHeight="20" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                            <TextBlock Text="{loc:Loc settings.zeller.steps.two}" FontSize="13" LineHeight="20" TextWrapping="Wrap" Margin="0,6,0,0" />
+                                            <TextBlock Text="{loc:Loc settings.zeller.steps.three}" FontSize="13" LineHeight="20" TextWrapping="Wrap" Margin="0,6,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </TabItem>
+                            <!-- ===== PAGE: PaymentTerminal / Zeller END ===== -->
                         </TabControl>
                     </Grid>
                 </controls:SettingsPageHost>

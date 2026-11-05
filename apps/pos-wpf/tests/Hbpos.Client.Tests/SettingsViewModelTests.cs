@@ -357,7 +357,8 @@ public sealed partial class SettingsViewModelTests
             "The category navigation must precede the page column so keyboard focus follows the visual order.");
 
         var providerTabs = paymentSection.Descendants().Where(element => element.Name.LocalName == "TabItem").ToArray();
-        Assert.Equal(2, providerTabs.Length);
+        // Square / Linkly / Zeller 三个服务商页签。
+        Assert.Equal(3, providerTabs.Length);
         Assert.DoesNotContain(providerTabs, tab => tab.Attribute("IsSelected") is not null);
         foreach (var command in new[]
                  {
@@ -365,7 +366,10 @@ public sealed partial class SettingsViewModelTests
                      "OpenLinklySetupInstructionsCommand",
                      "TestLinklyCommand",
                      "LogonLinklyCommand",
-                     "SaveLinklyCommand"
+                     "SaveLinklyCommand",
+                     "CheckZellerCommand",
+                     "PairZellerCommand",
+                     "EnableZellerCommand"
                  })
         {
             Assert.Contains(paymentSection.Descendants(), element =>
@@ -1661,6 +1665,7 @@ public sealed partial class SettingsViewModelTests
     [Theory]
     [InlineData(CardProcessorKind.Square, 0)]
     [InlineData(CardProcessorKind.Linkly, 1)]
+    [InlineData(CardProcessorKind.Zeller, 2)]
     public async Task LoadAsync_selects_provider_tab_of_the_active_card_processor(
         CardProcessorKind processor,
         int expectedTabIndex)
@@ -4885,6 +4890,18 @@ public sealed partial class SettingsViewModelTests
             CancellationToken cancellationToken = default)
         {
             SaveLinklyCallCount++;
+            SavedConfiguration = configuration;
+            _configuration = configuration;
+            return Task.CompletedTask;
+        }
+
+        public int SaveZellerCallCount { get; private set; }
+
+        public Task SaveZellerAsync(
+            CardTerminalConfiguration configuration,
+            CancellationToken cancellationToken = default)
+        {
+            SaveZellerCallCount++;
             SavedConfiguration = configuration;
             _configuration = configuration;
             return Task.CompletedTask;

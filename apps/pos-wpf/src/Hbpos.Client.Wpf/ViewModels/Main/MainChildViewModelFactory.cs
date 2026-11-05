@@ -1,6 +1,7 @@
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.Zeller;
 using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Orders;
 
@@ -433,6 +434,9 @@ internal sealed class MainChildViewModelFactory
     /// <summary>设置页「扫码枪灵敏度」的存储；同样在 MainViewModel 构造完成后配置。</summary>
     public IScannerSettingsStore? ScannerSettingsStore { get; set; }
 
+    /// <summary>设置页「Zeller」分页（检查配对、配对、启用）用的协调器；同样在 MainViewModel 构造完成后配置，没有时分页里的按钮不可用。</summary>
+    public ZellerSettingsCoordinator? ZellerSettingsCoordinator { get; set; }
+
     public DailyCloseViewModel CreateDailyCloseViewModel(
         PosSessionState session,
         Action? returnToPos = null,
@@ -496,7 +500,8 @@ internal sealed class MainChildViewModelFactory
             restartCoordinatorProvider: RestartCoordinatorProvider,
             scannerSettingsStore: ScannerSettingsStore,
             // 设置页改了直接保存；离开时有保存失败 / 未生效的修改会提示。
-            autoSaveSettings: true);
+            autoSaveSettings: true,
+            zellerSettingsCoordinator: ZellerSettingsCoordinator);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()
