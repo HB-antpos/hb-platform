@@ -2,8 +2,10 @@ using System.Net;
 using System.Text.Json;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.Zeller;
 using Hbpos.Contracts.Installments;
 using Hbpos.Contracts.Orders;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hbpos.Client.Tests;
 
@@ -258,6 +260,251 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         {
             DeleteTempDatabase(path);
         }
+    }
+
+    [Fact]
+    public async Task Zeller_repayment_binds_the_claim_before_the_sdk_and_commits_the_approved_transaction()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events);
+            var zeller = new ZellerRepaymentRig(path);
+            string? sentReference = null;
+            zeller.Gateway.OnPurchase = (purchase, _, _) =>
+            {
+                // 中文注释：调用 SDK 时中央 claim 必须已经登记了 Zeller 通道和这一条尝试。
+                events.Add($"zeller:purchase:{purchase.AmountCents}");
+                sentReference = purchase.Reference;
+                return Task.FromResult(ZellerCallResult.FromTransaction(ZellerApproved(purchase.Reference, purchase.AmountCents)));
+            };
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(false));
+            var service = zeller.CreateService(repository, api, terminal);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal(["claim:create", "claim:begin:Zeller", "zeller:purchase:4000", "claim:commit"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            var attempt = Assert.Single(await zeller.Attempts.ListRecentAsync(Session.StoreCode, Session.DeviceCode, 10));
+            Assert.Equal(api.ProviderAttemptId, attempt.AttemptGuid.ToString("D"));
+            Assert.Equal(ZellerAttemptOperation.InstallmentRepayment, attempt.OperationKind);
+            Assert.Equal(ZellerAttemptStatus.OrderCompleted, attempt.Status);
+            Assert.Equal(request.PaymentGuid, attempt.OperationGuid);
+            var commit = api.LastCommittedRequest!;
+            Assert.Equal($"ZELLER:{sentReference}:{ZellerTransactionUuid}", commit.Reference);
+            var transaction = Assert.Single(commit.CardTransactions!);
+            Assert.Equal("Zeller", transaction.Processor);
+            Assert.Equal(ZellerTransactionUuid, transaction.TxnRef);
+            Assert.Equal(40m, transaction.Amount);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Zeller_not_paid_awaiting_late_recheck_keeps_the_claim_open_until_recovery_confirms_it()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events);
+            var zeller = new ZellerRepaymentRig(path);
+            zeller.Gateway.OnPurchase = (_, _, _) =>
+                Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+            zeller.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+            var service = zeller.CreateService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)));
+
+            var first = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            // 中文注释：查到 0 笔但 60 秒后还要复核：分期 claim 不能按拒绝结案（结案后迟到的批准就无法入账）。
+            Assert.False(first.Succeeded);
+            Assert.True(first.RequiresReview);
+            Assert.Contains("复核", first.Message);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, api.Status);
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, (await repository.GetAsync(request.PaymentGuid))?.State);
+            Assert.Equal(0, api.CommitCalls);
+
+            // 复核时间已到（尝试表用的假时钟早于真实时钟）：恢复时补做复核，仍是 0 笔才按拒绝结案。
+            var recovered = Assert.Single(await service.RecoverAsync(Session));
+
+            Assert.Equal(LocalInstallmentOperationState.Failed, recovered.State);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Declined, api.Status);
+            Assert.Equal(1, zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal)));
+            var attempt = Assert.Single(await zeller.Attempts.ListRecentAsync(Session.StoreCode, Session.DeviceCode, 10));
+            Assert.Equal(ZellerAttemptStatus.Canceled, attempt.Status);
+            Assert.NotNull(attempt.LateRecheckedAt);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Zeller_unknown_repayment_recovers_by_query_only_and_commits_without_a_second_purchase()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card);
+            var api = new ClaimApi(request, events);
+            // 中文注释：结果未知时客户端按真实时钟重查；窗口压到几毫秒，让这一笔很快交给恢复。
+            var zeller = new ZellerRepaymentRig(
+                path,
+                new ZellerClientOptions
+                {
+                    VerificationInterval = TimeSpan.FromMilliseconds(1),
+                    VerificationWindow = TimeSpan.FromMilliseconds(5)
+                },
+                TimeProvider.System);
+            var queryFindsApproval = false;
+            zeller.Gateway.OnPurchase = (_, _, _) => Task.FromResult(ZellerCallResult.Faulted("network dropped"));
+            zeller.Gateway.OnQuery = (reference, _) => queryFindsApproval
+                ? ZellerQueryResult.Found(ZellerApproved(reference, 4000))
+                : ZellerQueryResult.Failed(ZellerErrorType.NetworkFailure);
+            var service = zeller.CreateService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)));
+
+            var first = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+            Assert.False(first.Succeeded);
+            Assert.True(first.RequiresReview);
+
+            queryFindsApproval = true;
+            var recovered = Assert.Single(await service.RecoverAsync(Session));
+
+            Assert.Equal(LocalInstallmentOperationState.Completed, recovered.State);
+            Assert.Equal(1, api.CommitCalls);
+            Assert.Equal(1, zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal)));
+            Assert.Equal(ZellerTransactionUuid, Assert.Single(api.LastCommittedRequest!.CardTransactions!).TxnRef);
+            var attempt = Assert.Single(await zeller.Attempts.ListRecentAsync(Session.StoreCode, Session.DeviceCode, 10));
+            Assert.Equal(ZellerAttemptStatus.OrderCompleted, attempt.Status);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Zeller_repayment_below_one_dollar_releases_the_claim_before_the_sdk()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Card) with { Amount = 0.99m };
+            var api = new ClaimApi(request, events);
+            var zeller = new ZellerRepaymentRig(path);
+            var service = zeller.CreateService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)));
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("$1.00", result.Message);
+            Assert.Equal(["claim:create", "claim:resolve:Released"], events);
+            Assert.Empty(zeller.Gateway.Calls.ToArray());
+            Assert.Empty(await zeller.Attempts.ListRecentAsync(Session.StoreCode, Session.DeviceCode, 10));
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Zeller_purchase_with_an_existing_fixed_attempt_is_never_sent_again()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var zeller = new ZellerRepaymentRig(path);
+            var attemptGuid = Guid.NewGuid();
+            var context = new ZellerPurchaseContext(4000, "{}", "S001", "POS-01", "C001")
+            {
+                AttemptGuid = attemptGuid,
+                OperationKind = ZellerAttemptOperation.InstallmentRepayment
+            };
+            zeller.Gateway.OnPurchase = (purchase, _, _) =>
+                Task.FromResult(ZellerCallResult.FromTransaction(ZellerApproved(purchase.Reference, purchase.AmountCents)));
+            await zeller.Client.PurchaseAsync(context);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => zeller.Client.PurchaseAsync(context));
+
+            Assert.Single(zeller.Gateway.Calls.ToArray(), call => call.StartsWith("purchase:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    private const string ZellerTransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+
+    private static ZellerTransaction ZellerApproved(string reference, int amountCents) => new(
+        ZellerTransactionStatus.Approved,
+        ZellerTransactionType.Purchase,
+        amountCents,
+        ZellerTransactionUuid,
+        reference,
+        ResponseCode: "00",
+        ResponseText: "APPROVED",
+        ApprovalCode: "456321",
+        Rrn: "264753970917",
+        PanMasked: "…2902",
+        Scheme: "VISA",
+        Bin: "483028",
+        MerchantId: "000000000143281",
+        TerminalId: "00134553",
+        ReceiptText: "RECEIPT",
+        ReceiptLink: null);
+
+    /// <summary>分期续付用的 Zeller 组件：脚本网关、真实 SQLite 尝试表、和收款流程共用同一份「进行中」登记。</summary>
+    private sealed class ZellerRepaymentRig
+    {
+        public ZellerRepaymentRig(string databasePath, ZellerClientOptions? options = null, TimeProvider? timeProvider = null)
+        {
+            var time = timeProvider ?? Time;
+            Attempts = new LocalZellerPaymentAttemptRepository(new LocalSqliteStore(databasePath));
+            Client = new ZellerCardTerminalClient(Gateway, Attempts, options, time);
+            Recovery = new ZellerPaymentRecoveryService(Gateway, Attempts, Client, timeProvider: time);
+        }
+
+        public ScriptedZellerGateway Gateway { get; } = new();
+
+        public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 5, 1, 0, 0, TimeSpan.Zero));
+
+        public LocalZellerPaymentAttemptRepository Attempts { get; }
+
+        public ZellerCardTerminalClient Client { get; }
+
+        public ZellerPaymentRecoveryService Recovery { get; }
+
+        public InstallmentOperationService CreateService(
+            ILocalInstallmentOperationRepository repository,
+            IInstallmentApiClient api,
+            ICardTerminalClient terminal) =>
+            new(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                    CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Zeller }),
+                zellerCardTerminalClient: Client,
+                zellerPaymentRecoveryService: Recovery,
+                zellerPaymentAttemptRepository: Attempts);
     }
 
     [Theory]
@@ -915,6 +1162,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
             CardRepaymentSupported: true,
             CardRepaymentProviders: ["square", "linkly", "zeller"]);
         public InstallmentRepaymentClaimStatus Status => _status;
+        public string? ProviderAttemptId => _providerAttemptId;
         public int CommitCalls { get; private set; }
         public int LegacyAppendCalls { get; private set; }
         public InstallmentRepaymentClaimCreateRequest? LastCreate { get; private set; }

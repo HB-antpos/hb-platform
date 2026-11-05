@@ -350,6 +350,23 @@ public sealed class InstallmentOrderService(
         }
     }
 
+    private async Task<bool> IsBelowZellerMinimumAsync(
+        InstallmentAppendPaymentRequest apiRequest,
+        InstallmentPaymentDraft payment,
+        CancellationToken cancellationToken)
+    {
+        if (apiRequest.Method != PaymentMethodKind.Card ||
+            HasExistingCardAuthorization(payment) ||
+            cardTerminalSettingsProvider is null ||
+            decimal.Round(apiRequest.Amount * 100m, 0, MidpointRounding.AwayFromZero) >= InstallmentOperationService.ZellerMinimumPurchaseCents)
+        {
+            return false;
+        }
+
+        var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
+        return settings.Processor == CardProcessorKind.Zeller;
+    }
+
     public async Task<bool> IsCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
     {
         if (!session.IsOnline)
@@ -726,6 +743,12 @@ public sealed class InstallmentOrderService(
             request.Payment.ReservationToken,
             request.Payment.CardTransactions,
             EnsureIdempotencyKey(request.Payment.IdempotencyKey, request.InstallmentGuid));
+        if (await IsBelowZellerMinimumAsync(apiRequest, request.Payment, cancellationToken))
+        {
+            // 中文注释：Zeller 单笔最低 1.00 澳元，刷卡机上改不了；在建本地操作和中央 claim 之前拦下，不留任何待恢复记录。
+            return new InstallmentOrderActionResult(false, InstallmentOperationService.ZellerBelowMinimumMessage);
+        }
+
         if (installmentOperations is not null)
         {
             var operation = await installmentOperations.ExecuteRepaymentAsync(

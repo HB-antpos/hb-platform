@@ -37,7 +37,17 @@ public sealed record ZellerPurchaseContext(
     string StoreCode,
     string DeviceCode,
     string CashierId,
-    Guid? OperationGuid = null);
+    Guid? OperationGuid = null)
+{
+    /// <summary>
+    /// 调用方事先确定的尝试号（分期续付由 operationGuid 派生，先登记到中央 claim 再扣款）。为空时每次新建。
+    /// 给定的尝试号已经存在时绝不再扣款：Zeller 不对 reference 去重，重发就是第二笔扣款。
+    /// </summary>
+    public Guid? AttemptGuid { get; init; }
+
+    /// <summary>扣款的用途：普通销售或分期续付。不能是退款。</summary>
+    public ZellerAttemptOperation OperationKind { get; init; } = ZellerAttemptOperation.Sale;
+}
 
 /// <summary>一次扣款的最终结论。</summary>
 public enum ZellerPaymentState
@@ -165,13 +175,24 @@ public sealed class ZellerCardTerminalClient
         ArgumentException.ThrowIfNullOrWhiteSpace(context.StoreCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(context.DeviceCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(context.CashierId);
+        if (context.OperationKind == ZellerAttemptOperation.Refund)
+        {
+            throw new ArgumentException("A purchase cannot be recorded as a refund attempt.", nameof(context));
+        }
 
-        var attemptGuid = Guid.NewGuid();
+        var attemptGuid = context.AttemptGuid ?? Guid.NewGuid();
+        if (context.AttemptGuid is { } fixedGuid &&
+            await _attempts.GetAsync(fixedGuid, CancellationToken.None).ConfigureAwait(false) is not null)
+        {
+            // 中文注释：同一个尝试号已经落过库，说明这一笔可能已经发给刷卡机，只能查询恢复，绝不重发。
+            throw new InvalidOperationException($"Zeller attempt {fixedGuid} already exists; it must be recovered, not purchased again.");
+        }
+
         var reference = ZellerPaymentReference.CreatePurchaseReference(attemptGuid);
         var now = _time.GetUtcNow();
         var pending = new LocalZellerPaymentAttempt(
             attemptGuid,
-            ZellerAttemptOperation.Sale,
+            context.OperationKind,
             reference,
             context.AmountCents,
             ZellerAttemptStatus.Pending,
