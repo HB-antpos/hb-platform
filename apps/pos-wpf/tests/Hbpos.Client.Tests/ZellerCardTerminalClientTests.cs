@@ -152,7 +152,7 @@ public sealed class ZellerCardTerminalClientTests
 
         await harness.AdvanceAsync(TimeSpan.FromSeconds(55), TimeSpan.FromSeconds(5));
         Assert.Equal(1, harness.Gateway.QueryCount);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        await harness.AdvanceUntilRecheckAsync();
         await WaitUntilAsync(async () => (await harness.AttemptAsync(outcome)).LateRecheckedAt is not null);
         var rechecked = await harness.AttemptAsync(outcome);
 
@@ -168,7 +168,7 @@ public sealed class ZellerCardTerminalClientTests
         harness.Gateway.OnQuery = (reference, index) => index == 0 ? ZellerQueryResult.Found() : ZellerQueryResult.Found(Queried(reference));
 
         var outcome = await harness.Client.PurchaseAsync(Context);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5));
+        await harness.AdvanceUntilRecheckAsync();
         await WaitUntilAsync(async () => (await harness.AttemptAsync(outcome)).Status == ZellerAttemptStatus.Unknown);
         var reopened = await harness.AttemptAsync(outcome);
 
@@ -611,7 +611,7 @@ public sealed class ZellerCardTerminalClientTests
         harness.Gateway.OnQuery = (reference, index) => index == 0 ? ZellerQueryResult.Found() : ZellerQueryResult.Found(RefundApproved(reference));
 
         var outcome = await harness.Client.RefundAsync(Refund);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5));
+        await harness.AdvanceUntilRecheckAsync();
         await WaitUntilAsync(async () => (await harness.AttemptAsync(outcome)).Status == ZellerAttemptStatus.Unknown);
         var reopened = await harness.AttemptAsync(outcome);
 
@@ -729,6 +729,16 @@ public sealed class ZellerCardTerminalClientTests
                 await Task.Delay(15);
             }
         }
+
+        /// <summary>
+        /// 推进假时钟直到迟到复核真的发出了查询（第一次核实之后的第二次查询）。
+        /// </summary>
+        /// <remarks>
+        /// 中文注释：复核在后台线程上先算剩余等待再登记计时器，CI 负载高时测试可能恰好在这两步之间把时钟拨到终点，
+        /// 计时器就会晚登记一步。所以按「查询发生了没有」推进，而不是推进固定的 60 秒。
+        /// </remarks>
+        public Task AdvanceUntilRecheckAsync() =>
+            AdvanceUntilAsync(() => Gateway.QueryCount >= 2, TimeSpan.FromSeconds(5), maxSteps: 120);
 
         public async Task AdvanceUntilAsync(Func<bool> condition, TimeSpan step, int maxSteps = 400)
         {
