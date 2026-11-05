@@ -33,7 +33,13 @@ public enum ZellerAttemptStatus
 public enum ZellerAttemptOperation
 {
     Sale,
-    Refund
+    Refund,
+
+    /// <summary>
+    /// 分期续付扣款。OrderDraftJson 存的是分期续付请求而不是销售草稿：卡交易恢复中心不列出、不补单，
+    /// 由分期操作（InstallmentOperationService）按同一条记录查询恢复并提交到中央 claim。
+    /// </summary>
+    InstallmentRepayment
 }
 
 /// <summary>一次 Zeller 扣款或退款尝试的本地记录。付款前先落库，崩溃后靠它按 reference 找回交易。</summary>

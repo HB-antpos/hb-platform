@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Models;
+using Hbpos.Client.Wpf.Services.Zeller;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Installments;
@@ -86,7 +87,10 @@ public sealed class InstallmentOperationService(
     ISquarePaymentAttemptContextAccessor? squarePaymentAttemptContextAccessor = null,
     FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
     ISquareTerminalPaymentClient? squareTerminalPaymentClient = null,
-    ILinklyBackendTerminalClient? linklyBackendTerminalClient = null) : IInstallmentOperationService
+    ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
+    ZellerCardTerminalClient? zellerCardTerminalClient = null,
+    ZellerPaymentRecoveryService? zellerPaymentRecoveryService = null,
+    ILocalZellerPaymentAttemptRepository? zellerPaymentAttemptRepository = null) : IInstallmentOperationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan ApiClaimLease = TimeSpan.FromMinutes(2);
@@ -705,10 +709,15 @@ public sealed class InstallmentOperationService(
                 // 中文注释：服务端按通道放开刷卡续付。只在中央 claim 仍是 Prepared（尚未登记任何通道、刷卡机没收到请求）时
                 // 判断本机通道；不支持就当场释放 claim 并结案，否则 begin-provider 会被拒、claim 要等 120 秒过期才解锁。
                 var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
-                if (!InstallmentCardRepaymentCapability.IsSupported(capabilities, settings.Processor))
+                var rejection = !InstallmentCardRepaymentCapability.IsSupported(capabilities, settings.Processor)
+                    ? UnsupportedCardRepaymentMessage
+                    : settings.Processor == CardProcessorKind.Zeller && ToCents(request.Amount) < ZellerMinimumPurchaseCents
+                        ? ZellerBelowMinimumMessage
+                        : null;
+                if (rejection is not null)
                 {
-                    return await FailUnsupportedCardRepaymentAsync(operation, "repayment-claim-create")
-                        ? RepaymentClaimReady.Failed(UnsupportedCardRepaymentMessage, requiresReview: false)
+                    return await FailUnsupportedCardRepaymentAsync(operation, "repayment-claim-create", rejection)
+                        ? RepaymentClaimReady.Failed(rejection, requiresReview: false)
                         : RepaymentClaimReady.Failed("分期续付刷卡未开始，但本地状态未能更新，请到分期中心恢复。", requiresReview: true);
                 }
 
@@ -798,18 +807,32 @@ public sealed class InstallmentOperationService(
 
     private const string UnsupportedCardRepaymentMessage = "本机刷卡通道暂不支持分期续付，刷卡终端未收到请求，请改用现金或礼券。";
 
+    /// <summary>Zeller 单笔扣款最低 100 分（1.00 澳元），与付款页同口径（CashPaymentWorkflowService.ZellerMinimumPurchaseCents）。</summary>
+    internal const int ZellerMinimumPurchaseCents = CashPaymentWorkflowService.ZellerMinimumPurchaseCents;
+
+    internal const string ZellerBelowMinimumMessage = "Zeller 单笔刷卡最低 $1.00，刷卡终端未收到请求，请改用现金或礼券。";
+
+    private const string ZellerAwaitingLateRecheckMessage =
+        "Zeller 暂未查到这笔扣款（顾客取消或刷卡超时）。系统约 1 分钟后会再向 Zeller 复核一次，复核前请勿重新收款；之后在分期中心恢复这笔续付即可。";
+
+    private static int ToCents(decimal amount) =>
+        (int)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero);
+
     /// <summary>
     /// 刷卡终端尚未收到请求、中央 claim 尚未登记通道时的确定性拒绝：本地 Prepared → Failed，再尽力释放 claim
     /// （释放失败也无妨，Prepared claim 120 秒后自动过期）。本地状态已被其他入口推进时返回 false，交给恢复处理。
     /// </summary>
-    private async Task<bool> FailUnsupportedCardRepaymentAsync(LocalInstallmentOperation operation, string stage)
+    private async Task<bool> FailUnsupportedCardRepaymentAsync(
+        LocalInstallmentOperation operation,
+        string stage,
+        string message = UnsupportedCardRepaymentMessage)
     {
         if (!await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.Prepared],
                 LocalInstallmentOperationState.Failed,
                 DateTimeOffset.UtcNow,
-                failureMessage: UnsupportedCardRepaymentMessage,
+                failureMessage: message,
                 cancellationToken: CancellationToken.None))
         {
             return false;
@@ -883,6 +906,10 @@ public sealed class InstallmentOperationService(
         {
             return "ANZ";
         }
+        if (value.StartsWith("Zeller", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Zeller";
+        }
 
         return null;
     }
@@ -915,6 +942,7 @@ public sealed class InstallmentOperationService(
         }
 
         await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
+        await TryMarkZellerRepaymentCompletedAsync(operation.OperationGuid);
         return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(true, response, local, response.Message);
     }
 
@@ -1464,7 +1492,8 @@ public sealed class InstallmentOperationService(
                 return TerminalReady.Unknown("终端操作正在恢复，请勿重复收款。");
             }
             using var terminalContext = terminalAttempt.BeginContext();
-            var authorization = await cardTerminalClient.AuthorizeAsync(amount, session, cancellationToken);
+            var authorization = await (terminalAttempt.AuthorizeAsync(amount, session, cancellationToken)
+                ?? cardTerminalClient.AuthorizeAsync(amount, session, cancellationToken));
             var terminalAttemptGuid = terminalAttempt.AttemptGuid?.ToString("D");
             if (authorization.ResultUnknown)
             {
@@ -1585,9 +1614,16 @@ public sealed class InstallmentOperationService(
         var settings = settingsSnapshot ?? await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
         if (settings.Processor == CardProcessorKind.Zeller)
         {
-            // 中文注释：Zeller 暂不支持分期（方案：单机试点通过后再接）。沿用这一处唯一的设置读取，不另读一次，
-            // 保证分期全程只用第一次读到的设置快照。
-            return TerminalAttemptScope.UnsupportedZeller;
+            // 中文注释：Zeller 只接分期续付（分期中心开单收定金仍不支持）。续付由 operationGuid 派生尝试号，
+            // 先登记到中央 claim 再调用 SDK；结果未知时只按同一条记录查询，绝不重发（Zeller 不对 reference 去重）。
+            if (operation.Kind != LocalInstallmentOperationKind.Repayment ||
+                zellerCardTerminalClient is null ||
+                zellerPaymentAttemptRepository is null)
+            {
+                return TerminalAttemptScope.UnsupportedZeller;
+            }
+
+            return CreateZellerRepaymentScope(operation);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -1763,6 +1799,172 @@ public sealed class InstallmentOperationService(
         return TerminalAttemptScope.Empty;
     }
 
+    private TerminalAttemptScope CreateZellerRepaymentScope(LocalInstallmentOperation operation)
+    {
+        var attemptGuid = ZellerRepaymentAttemptGuid(operation.OperationGuid);
+        return new TerminalAttemptScope(
+            attemptGuid,
+            CardProcessorKind.Zeller.ToString(),
+            beginContext: null,
+            // 中文注释：批准必须带 Zeller 交易号（transactionUuid），否则不能把这笔当成已扣款入账。
+            hasVerifiedApprovalEvidence: authorization =>
+                authorization.CardTransactions is { Count: > 0 } transactions &&
+                transactions.All(transaction => !string.IsNullOrWhiteSpace(transaction.TxnRef)),
+            // 中文注释：Zeller 客户端自己把每一步写进尝试表，这里不用另记。
+            recordOutcomeAsync: null,
+            authorizeAsync: (amount, session, cancellationToken) =>
+                AuthorizeZellerRepaymentAsync(operation, attemptGuid, amount, session, cancellationToken));
+    }
+
+    private async Task<PaymentAuthorizationResult> AuthorizeZellerRepaymentAsync(
+        LocalInstallmentOperation operation,
+        Guid attemptGuid,
+        decimal amount,
+        PosSessionState session,
+        CancellationToken cancellationToken)
+    {
+        var amountCents = ToCents(amount);
+        if (amountCents < ZellerMinimumPurchaseCents)
+        {
+            // 中文注释：建 claim 后已经拦过一次；这里是最后一道防线，请求没有发出，按明确拒绝结案。
+            return new PaymentAuthorizationResult(
+                false,
+                Message: ZellerBelowMinimumMessage,
+                Processor: ZellerPaymentReference.Processor,
+                ResponseCode: "MINIMUM_AMOUNT",
+                ResponseText: "DECLINED");
+        }
+
+        var outcome = await zellerCardTerminalClient!.PurchaseAsync(
+            new ZellerPurchaseContext(
+                amountCents,
+                operation.RequestJson,
+                session.StoreCode,
+                session.DeviceCode,
+                session.CashierId,
+                operation.OperationGuid)
+            {
+                AttemptGuid = attemptGuid,
+                OperationKind = ZellerAttemptOperation.InstallmentRepayment
+            },
+            progress: null,
+            cancellationToken);
+        var authorization = ZellerAuthorizationMapper.ToAuthorizationResult(outcome);
+        if (outcome.State != ZellerPaymentState.NotPaid)
+        {
+            return outcome.State == ZellerPaymentState.Declined
+                ? authorization with { ResponseText = authorization.ResponseText ?? "DECLINED" }
+                : authorization;
+        }
+
+        var stored = await zellerPaymentAttemptRepository!.GetAsync(attemptGuid, CancellationToken.None);
+        if (stored is { LateRecheckDueAt: not null, LateRecheckedAt: null })
+        {
+            // 中文注释：Zeller 查到 0 笔但还要在 60 秒后复核（迟到的批准会被复核翻回结果未知）。
+            // 销售可以先放行、迟到批准再按草稿补单；分期 claim 一旦按拒绝结案就无法再入账，所以复核前保持结果未知。
+            return authorization with { ResultUnknown = true, Message = ZellerAwaitingLateRecheckMessage };
+        }
+
+        // 中文注释：请求没有发出（刷卡机没连上、未配对等），确定没有扣款，按明确拒绝结案。
+        return authorization with { ResponseText = "CANCELLED" };
+    }
+
+    private async Task<TerminalAttemptRecovery> RecoverZellerRepaymentAttemptAsync(
+        LocalZellerPaymentAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        // 中文注释：最多推进两步（例如 Pending → 关闭为未付款，或 Unknown → 查询后批准），每一步都只查询、不重发。
+        for (var round = 0; round < 3; round++)
+        {
+            switch (attempt.Status)
+            {
+                case ZellerAttemptStatus.Approved:
+                case ZellerAttemptStatus.OrderCompleted:
+                    if (string.IsNullOrWhiteSpace(attempt.TransactionUuid))
+                    {
+                        return TerminalAttemptRecovery.Unknown;
+                    }
+
+                    return new TerminalAttemptRecovery(
+                        true,
+                        false,
+                        ZellerPaymentRecoveryService.OrderReferenceFor(attempt),
+                        [ZellerCardRecoveryProvider.BuildCardTransaction(attempt, attempt.AmountCents / 100m)]);
+
+                case ZellerAttemptStatus.Declined:
+                    return TerminalAttemptRecovery.RejectedResult;
+
+                case ZellerAttemptStatus.Canceled:
+                    if (attempt.LateRecheckDueAt is null || attempt.LateRecheckedAt is not null)
+                    {
+                        return TerminalAttemptRecovery.RejectedResult;
+                    }
+
+                    if (attempt.LateRecheckDueAt > DateTimeOffset.UtcNow || zellerCardTerminalClient is null)
+                    {
+                        return TerminalAttemptRecovery.Unknown;
+                    }
+
+                    await zellerCardTerminalClient.RecheckAsync(attempt.AttemptGuid, cancellationToken);
+                    break;
+
+                case ZellerAttemptStatus.Pending:
+                    if (zellerPaymentRecoveryService is null)
+                    {
+                        return TerminalAttemptRecovery.Unknown;
+                    }
+
+                    await zellerPaymentRecoveryService.ClosePendingAttemptAsync(attempt.AttemptGuid);
+                    break;
+
+                default:
+                    if (zellerPaymentRecoveryService is null)
+                    {
+                        return TerminalAttemptRecovery.Unknown;
+                    }
+
+                    var recovered = await zellerPaymentRecoveryService.RecoverAttemptAsync(attempt.AttemptGuid, cancellationToken);
+                    if (recovered.Status is not ZellerRecoveryStatus.Resolved)
+                    {
+                        return TerminalAttemptRecovery.Unknown;
+                    }
+
+                    break;
+            }
+
+            var reloaded = await zellerPaymentAttemptRepository!.GetAsync(attempt.AttemptGuid, cancellationToken);
+            if (reloaded is null || reloaded.Status == attempt.Status && reloaded.Version == attempt.Version)
+            {
+                return TerminalAttemptRecovery.Unknown;
+            }
+
+            attempt = reloaded;
+        }
+
+        return TerminalAttemptRecovery.Unknown;
+    }
+
+    private static Guid ZellerRepaymentAttemptGuid(Guid operationGuid) =>
+        DeterministicGuid($"installment-zeller:{operationGuid:D}");
+
+    // 中文注释：分期续付入账（本地快照也已完成）后把 Zeller 尝试标为已完成，与付款页建单后的标记同口径。失败只记日志。
+    private async Task TryMarkZellerRepaymentCompletedAsync(Guid operationGuid)
+    {
+        if (zellerCardTerminalClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await zellerCardTerminalClient.MarkOrderCompletedAsync(ZellerRepaymentAttemptGuid(operationGuid), CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            LogOperationIssue(operationGuid, "zeller-mark-completed", "Ignored", exception);
+        }
+    }
+
     // 中文注释：后端模式下终端结果落定后，会话仍会占用该设备/终端，直到 POS 确认（ack）。销售在落单后 ack，
     // 分期过去从不 ack：每笔分期刷卡之后，下一笔刷卡都会先被 409 拦下，并被迫接管出一条来源不明的待复核记录。
     // 只在本地已持久化终态（完成，或终端明确拒绝）之后调用；ack 失败只记日志，不改变分期操作状态，
@@ -1922,6 +2124,7 @@ public sealed class InstallmentOperationService(
                 return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果已提交，正在安全对账，请勿重复收款。", RequiresReview: true);
             }
             await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
+            await TryMarkZellerRepaymentCompletedAsync(operation.OperationGuid);
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(true, response, local, response.Message);
         }
         catch (OperationCanceledException exception)
@@ -2299,6 +2502,14 @@ public sealed class InstallmentOperationService(
             }
 
             return TerminalAttemptRecovery.Unknown;
+        }
+
+        var zellerAttempt = zellerPaymentAttemptRepository is null ? null : await zellerPaymentAttemptRepository.GetAsync(attemptGuid, cancellationToken);
+        if (zellerAttempt is not null)
+        {
+            return zellerAttempt.OperationKind == ZellerAttemptOperation.InstallmentRepayment
+                ? await RecoverZellerRepaymentAttemptAsync(zellerAttempt, cancellationToken)
+                : TerminalAttemptRecovery.Unknown;
         }
 
         var squareAttempt = squarePaymentAttemptRepository is null ? null : await squarePaymentAttemptRepository.GetAttemptAsync(attemptGuid, cancellationToken);
@@ -3333,7 +3544,8 @@ public sealed class InstallmentOperationService(
         Func<PaymentAuthorizationResult, bool>? hasVerifiedApprovalEvidence,
         Func<PaymentAuthorizationResult, CancellationToken, Task>? recordOutcomeAsync,
         bool requiresReview = false,
-        string? reviewMessage = null) : IDisposable
+        string? reviewMessage = null,
+        Func<decimal, PosSessionState, CancellationToken, Task<PaymentAuthorizationResult>>? authorizeAsync = null) : IDisposable
     {
         public static TerminalAttemptScope Empty { get; } = new(null, null, null, null, null);
 
@@ -3350,6 +3562,10 @@ public sealed class InstallmentOperationService(
             new(attemptGuid, processor, null, null, null, true, message);
 
         public IDisposable? BeginContext() => beginContext?.Invoke();
+
+        /// <summary>通道自带的授权调用（Zeller 走本机 SDK，不经过 ICardTerminalClient）；为空时用通用刷卡客户端。</summary>
+        public Task<PaymentAuthorizationResult>? AuthorizeAsync(decimal amount, PosSessionState session, CancellationToken cancellationToken) =>
+            authorizeAsync?.Invoke(amount, session, cancellationToken);
 
         public bool HasVerifiedApprovalEvidence(PaymentAuthorizationResult authorization) =>
             hasVerifiedApprovalEvidence?.Invoke(authorization) ?? true;

@@ -331,6 +331,9 @@ public sealed class ZellerPaymentRecoveryService
 
     // ───────────── 辅助 ─────────────
 
+    /// <summary>关闭一条从未发出的记录（Pending 且本进程没有在处理它）：请求没到刷卡机，按未付款收尾。</summary>
+    public Task<ZellerRecoveryResult> ClosePendingAttemptAsync(Guid attemptGuid) => ClosePendingAsync(attemptGuid);
+
     private async Task<ZellerRecoveryResult> ClosePendingAsync(Guid attemptGuid)
     {
         using var lease = _activity.TryEnter(attemptGuid);

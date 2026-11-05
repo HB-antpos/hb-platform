@@ -90,6 +90,7 @@ public sealed class ZellerCardRecoveryProvider
         return open
             .Select(attempt => ToQueueItem(attempt, environment, isOpen: true))
             .Concat(recent
+                .Where(attempt => !IsInstallmentAttempt(attempt))
                 .Where(attempt => !openGuids.Contains(attempt.AttemptGuid))
                 .Select(attempt => ToQueueItem(attempt, environment, isOpen: false)))
             .OrderByDescending(item => item.UpdatedAt)
@@ -121,7 +122,7 @@ public sealed class ZellerCardRecoveryProvider
         CancellationToken cancellationToken = default)
     {
         var attempt = await _attempts.GetAsync(attemptGuid, cancellationToken);
-        if (attempt is null || !SameTerminal(attempt, session))
+        if (attempt is null || !SameTerminal(attempt, session) || IsInstallmentAttempt(attempt))
         {
             return CardPaymentRecoveryResult.None;
         }
@@ -165,7 +166,7 @@ public sealed class ZellerCardRecoveryProvider
         var summary = await _recovery.AutoRecoverAsync(session.StoreCode, session.DeviceCode, cancellationToken);
         var idleBefore = _time.GetUtcNow() - AutoCompletionIdle;
         var recoveredOrders = 0;
-        foreach (var attempt in summary.AwaitingOrderCompletion.Where(attempt => attempt.UpdatedAt <= idleBefore))
+        foreach (var attempt in summary.AwaitingOrderCompletion.Where(attempt => attempt.UpdatedAt <= idleBefore && !IsInstallmentAttempt(attempt)))
         {
             try
             {
@@ -205,7 +206,7 @@ public sealed class ZellerCardRecoveryProvider
         CancellationToken cancellationToken = default)
     {
         var attempt = await _attempts.GetAsync(attemptGuid, cancellationToken);
-        if (attempt is null || !SameTerminal(attempt, session))
+        if (attempt is null || !SameTerminal(attempt, session) || IsInstallmentAttempt(attempt))
         {
             return new CardRecoveryResolutionResult(
                 false,
@@ -285,6 +286,13 @@ public sealed class ZellerCardRecoveryProvider
     /// </summary>
     internal async Task<CardPaymentRecoveryResult> CompleteOrderAsync(LocalZellerPaymentAttempt attempt)
     {
+        if (IsInstallmentAttempt(attempt))
+        {
+            // 中文注释：分期续付的记录里存的是续付请求，不是销售草稿；按草稿补单会多出一张销售单。由分期操作恢复。
+            Log($"installment attempt is not completed from a sale draft attemptGuid={attempt.AttemptGuid:D}");
+            return Unknown();
+        }
+
         if (!CardRecoveryCartMaterializer.TryPrepare(attempt.OrderDraftJson, JsonOptions, out var draft) || draft is null)
         {
             Log($"draft could not be read attemptGuid={attempt.AttemptGuid:D}");
@@ -404,6 +412,7 @@ public sealed class ZellerCardRecoveryProvider
         var awaiting = await _recovery.ListAwaitingOrderCompletionAsync(session.StoreCode, session.DeviceCode, cancellationToken);
         return open
             .Concat(awaiting)
+            .Where(attempt => !IsInstallmentAttempt(attempt))
             .OrderByDescending(attempt => attempt.UpdatedAt)
             .ThenByDescending(attempt => attempt.CreatedAt)
             .ToArray();
@@ -495,7 +504,11 @@ public sealed class ZellerCardRecoveryProvider
             : "sale-semantics";
     }
 
-    private static CardTransactionDto BuildCardTransaction(LocalZellerPaymentAttempt attempt, decimal amount)
+    /// <summary>分期续付的 Zeller 记录：不进卡交易恢复中心、不按销售草稿补单，由分期操作按同一条记录恢复。</summary>
+    internal static bool IsInstallmentAttempt(LocalZellerPaymentAttempt attempt) =>
+        attempt.OperationKind == ZellerAttemptOperation.InstallmentRepayment;
+
+    internal static CardTransactionDto BuildCardTransaction(LocalZellerPaymentAttempt attempt, decimal amount)
     {
         // 主管按已付款结案、没有交易号时，和 Square 一样标成「Zeller Supervisor」，便于对账时区分。
         var supervisorConfirmed = string.IsNullOrWhiteSpace(attempt.TransactionUuid) &&

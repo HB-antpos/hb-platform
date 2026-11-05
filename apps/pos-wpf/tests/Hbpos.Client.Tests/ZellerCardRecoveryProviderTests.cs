@@ -192,6 +192,35 @@ public sealed class ZellerCardRecoveryProviderTests
     }
 
     [Fact]
+    public async Task Installment_repayment_attempts_are_never_listed_or_completed_from_a_sale_draft()
+    {
+        await using var fixture = await RecoveryFixture.CreateAsync();
+        fixture.Gateway.OnPurchase = (request, _, _) =>
+            Task.FromResult(ZellerCallResult.FromTransaction(Approved(request.AmountCents, request.Reference)));
+        var outcome = await fixture.Client.PurchaseAsync(
+            new ZellerPurchaseContext(1000, "{\"installmentGuid\":\"x\"}", fixture.Session.StoreCode, fixture.Session.DeviceCode, fixture.Session.CashierId)
+            {
+                AttemptGuid = Guid.NewGuid(),
+                OperationKind = ZellerAttemptOperation.InstallmentRepayment
+            });
+        Assert.Equal(ZellerPaymentState.Approved, outcome.State);
+        fixture.Time.SetUtcNow(DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1));
+
+        var open = await fixture.Provider.ListOpenAsync(fixture.Session);
+        var history = await fixture.Provider.ListHistoryAsync(fixture.Session);
+        var summary = await fixture.Provider.AutoRecoverDeterministicAsync(fixture.Session);
+        var recovered = await fixture.Provider.RecoverAttemptAsync(outcome.AttemptGuid, new PosCartService(), fixture.Session);
+
+        // 中文注释：分期续付的扣款由分期操作入账；这里补单会多出一张销售单。
+        Assert.Empty(open);
+        Assert.Empty(history);
+        Assert.Equal(0, summary.RecoveredOrders);
+        Assert.Equal(CardPaymentRecoveryOutcome.None, recovered.Outcome);
+        Assert.Empty(await fixture.Orders.GetRecentOrdersAsync());
+        Assert.Equal(ZellerAttemptStatus.Approved, (await fixture.Attempts.GetAsync(outcome.AttemptGuid))!.Status);
+    }
+
+    [Fact]
     public async Task Attempts_from_another_till_are_not_recovered_here()
     {
         await using var fixture = await RecoveryFixture.CreateAsync();
