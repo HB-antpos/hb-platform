@@ -7274,6 +7274,45 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.True(viewModel.ConfirmPaymentCommand.CanExecute(null));
     }
 
+    [Theory]
+    [InlineData(CardProcessorKind.Zeller, true)]
+    [InlineData(CardProcessorKind.Linkly, false)]
+    public async Task Payment_page_lay_by_refuses_a_zeller_card_deposit_before_the_terminal(CardProcessorKind processor, bool refused)
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-INST-ZELLER", "Lay-by Zeller Tea", "939011", PriceSourceKind.StoreRetailPrice, 55m));
+        var cardTerminal = new ApprovedCardTerminalClient("CARD-LAYBY");
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashPaymentWorkflowService(
+                new CashCheckoutService(),
+                new InMemoryOrderRepository(),
+                new InMemorySyncQueueRepository(),
+                cardTerminalClient: cardTerminal),
+            Session,
+            installmentOrderService: new FakeInstallmentOrderService(),
+            cardTerminalSetupService: ConfigurationOnlySetupService.Create(CardTerminalConfiguration.Default with { Processor = processor }));
+        viewModel.PrepareForEntry(Session);
+        viewModel.IsInstallmentPaymentEnabled = true;
+        viewModel.InstallmentCustomerName = "Alice";
+        viewModel.InstallmentCustomerPhone = "0400111222";
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        if (refused)
+        {
+            // 中文注释：Zeller 收银机上 Lay-by 的定金不能刷卡：请求不能发出，也不会留下 Zeller 销售记录。
+            Assert.Equal("payment.installment.status.zellerUnsupported", viewModel.StatusMessage);
+            Assert.Empty(viewModel.PaymentTenders);
+            Assert.Equal(0, cardTerminal.AuthorizeCalls);
+        }
+        else
+        {
+            // 中文注释：其他通道不受这条拦截影响（之后是否放行由原有的分期规则决定）。
+            Assert.NotEqual("payment.installment.status.zellerUnsupported", viewModel.StatusMessage);
+        }
+    }
+
     [Fact]
     public void Payment_page_installment_toggle_can_be_closed_before_confirm_and_prepare_resets()
     {
@@ -8908,11 +8947,14 @@ public sealed class PosTerminalCashPaymentViewModelTests
     {
         public List<string?> RefundOriginalReferences { get; } = [];
 
+        public int AuthorizeCalls { get; private set; }
+
         public Task<PaymentAuthorizationResult> AuthorizeAsync(
             decimal amount,
             PosSessionState session,
             CancellationToken cancellationToken = default)
         {
+            AuthorizeCalls++;
             return Task.FromResult(authorization ?? new PaymentAuthorizationResult(true, reference));
         }
 

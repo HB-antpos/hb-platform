@@ -62,6 +62,54 @@ public sealed class InstallmentOperationServiceTests
     }
 
     [Fact]
+    public async Task Zeller_refusal_on_create_fails_the_operation_without_locking_the_till()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var terminal = new CountingTerminal(approve: true);
+            var service = new InstallmentOperationService(
+                repository,
+                new RecordingInstallmentApi(),
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                    CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Zeller }));
+            var request = CreateInstallmentRequest(Guid.NewGuid());
+
+            var result = await service.ExecuteCreateAsync(Session, request, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("Zeller", result.Message, StringComparison.Ordinal);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            // 中文注释：开单路径拦截时操作已经推进到 TerminalSubmitting，必须落成 Failed，不能留在「正在提交」。
+            var stored = Assert.IsType<LocalInstallmentOperation>(await repository.GetAsync(request.DownPayment.PaymentGuid));
+            Assert.Equal(LocalInstallmentOperationState.Failed, stored.State);
+            Assert.Equal(CardProcessorKind.Zeller.ToString(), stored.TerminalProcessor);
+            Assert.Empty(await repository.GetRecoverableAsync(Session.StoreCode));
+
+            // 中文注释：模拟重启后的恢复：不能变成「结果未知」。
+            Assert.DoesNotContain(
+                await service.RecoverAsync(Session),
+                recovery => recovery.OperationGuid == request.DownPayment.PaymentGuid &&
+                    recovery.State == LocalInstallmentOperationState.ResultUnknown);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(request.DownPayment.PaymentGuid))!.State);
+
+            // 中文注释：同一台机器的下一笔分期开单不会被「上一笔分期开单未完成」挡住（仍因 Zeller 被拒，但不需要主管）。
+            var next = await service.ExecuteCreateAsync(Session, CreateInstallmentRequest(Guid.NewGuid()), authorizeCard: true);
+            Assert.False(next.RequiresReview);
+            Assert.Contains("Zeller", next.Message, StringComparison.Ordinal);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
     public async Task Create_is_blocked_when_terminal_has_another_recoverable_create()
     {
         var path = CreateTempDatabasePath();

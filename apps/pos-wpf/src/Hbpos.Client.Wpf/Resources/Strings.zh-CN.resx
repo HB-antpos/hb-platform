@@ -4389,4 +4389,5 @@
   <data name="cardRecovery.zeller.confirmedNotPaid" xml:space="preserve"><value>已记为未付款，顾客可以重新付款。</value></data>
   <data name="cardRecovery.zeller.partialRefund" xml:space="preserve"><value>Zeller 退款已批准，但只覆盖了部分退货金额，无法自动补单，请主管处理这笔退货。</value></data>
   <data name="payment.card.zeller.minimumAmount" xml:space="preserve"><value>Zeller 刷卡单笔最低 $1.00，这个金额请改用现金或其他付款方式。顾客未被扣款。</value></data>
+  <data name="payment.installment.status.zellerUnsupported" xml:space="preserve"><value>Zeller 刷卡暂不支持分期（Lay-by），定金请改用现金或代金券。没有刷卡扣款。</value></data>
 </root>
