@@ -281,6 +281,11 @@ jobs:
             nuget-pos-wpf-${{ runner.os }}-
       - name: 构建并测试 WPF
         shell: pwsh
+        env:
+          # WPF 客户端引用 Zeller.PaymentsSdk，只能从 Zeller 私有源下载（apps/pos-wpf/NuGet.config）。
+          # NuGet 按源名从这个变量取凭据；值是 Zeller 开发者文档公开的只读账号，存在仓库 Secret 里不进代码。
+          # 缓存命中 main 上已含该包的 NuGet 缓存时不会访问私有源。
+          NuGetPackageSourceCredentials_zeller: Username=${{ secrets.ZELLER_NUGET_USERNAME }};Password=${{ secrets.ZELLER_NUGET_TOKEN }}
         run: ./scripts/ci/run-windows-component.ps1 -Component '${{ matrix.component }}' -Profile '${{ needs.plan.outputs.profile }}' -Shard '${{ matrix.shard || 'noop' }}'
       - name: 保存 NuGet 包缓存
         # 只由 ui 分片回存，避免未命中时 11 个分片各自上传同一份包；前缀命中（cache-hit 为 false）也回存以刷新 key。

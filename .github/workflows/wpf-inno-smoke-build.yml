@@ -24,6 +24,9 @@ jobs:
     timeout-minutes: 90
     env:
       REQUESTED_VERSION: ${{ inputs.version }}
+      # WPF 客户端引用 Zeller.PaymentsSdk，只能从 Zeller 私有源下载（apps/pos-wpf/NuGet.config）。
+      # 下面的测试与安装包构建都会还原，所以放在作业级；值是 Zeller 开发者文档公开的只读账号。
+      NuGetPackageSourceCredentials_zeller: Username=${{ secrets.ZELLER_NUGET_USERNAME }};Password=${{ secrets.ZELLER_NUGET_TOKEN }}
 
     steps:
       - name: 检出源码
@@ -43,6 +46,16 @@ jobs:
           }
 
           "normalized=$version" >> $env:GITHUB_OUTPUT
+
+      - name: 检查 Zeller 私有源凭据
+        shell: pwsh
+        env:
+          ZELLER_NUGET_USERNAME: ${{ secrets.ZELLER_NUGET_USERNAME }}
+          ZELLER_NUGET_TOKEN: ${{ secrets.ZELLER_NUGET_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ZELLER_NUGET_USERNAME) -or [string]::IsNullOrWhiteSpace($env:ZELLER_NUGET_TOKEN)) {
+            throw '缺少仓库 Secret ZELLER_NUGET_USERNAME / ZELLER_NUGET_TOKEN：无法从 Zeller 私有源下载 Zeller.PaymentsSdk，拒绝构建。'
+          }
 
       - name: 安装 .NET 8 与仓库固定 SDK
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
