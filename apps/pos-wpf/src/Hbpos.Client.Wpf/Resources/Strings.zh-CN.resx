@@ -4358,4 +4358,24 @@
   <data name="cardRecovery.v2.preset.notPaid.terminalFailed" xml:space="preserve"><value>刷卡机显示失败</value></data>
   <data name="cardRecovery.v2.preset.notPaid.terminalOffline" xml:space="preserve"><value>刷卡机离线</value></data>
   <data name="cardRecovery.v2.preset.notPaid.terminalStuck" xml:space="preserve"><value>刷卡机卡住了</value></data>
+  <data name="payment.card.zeller.approved" xml:space="preserve"><value>Zeller 刷卡已批准。</value></data>
+  <data name="payment.card.zeller.refundApproved" xml:space="preserve"><value>Zeller 退款已批准。</value></data>
+  <data name="payment.card.zeller.declined" xml:space="preserve"><value>银行未批准这张卡。</value></data>
+  <data name="payment.card.zeller.refundDeclined" xml:space="preserve"><value>退款被拒绝，请核对退款金额是否超过原付款。</value></data>
+  <data name="payment.card.zeller.cardProblem" xml:space="preserve"><value>无法读取这张卡，请顾客重试或换一张卡。</value></data>
+  <data name="payment.card.zeller.cancelled" xml:space="preserve"><value>Zeller 刷卡已取消，顾客未被扣款。</value></data>
+  <data name="payment.card.zeller.timeout" xml:space="preserve"><value>顾客没有及时刷卡，未扣款。</value></data>
+  <data name="payment.card.zeller.terminalUnavailable" xml:space="preserve"><value>连接不上 Zeller 刷卡机，请确认刷卡机已开机并联网后重试。</value></data>
+  <data name="payment.card.zeller.setupRequired" xml:space="preserve"><value>这台收银机还没有和 Zeller 刷卡机配对，请到设置里配对。</value></data>
+  <data name="payment.card.zeller.sdkUnavailable" xml:space="preserve"><value>这台收银机上的 Zeller 收款组件无法启动。</value></data>
+  <data name="payment.card.zeller.busy" xml:space="preserve"><value>Zeller 刷卡机正忙，请稍后再试。</value></data>
+  <data name="payment.card.zeller.invalidRequest" xml:space="preserve"><value>Zeller 收款请求无效，顾客未被扣款。</value></data>
+  <data name="payment.card.zeller.originalNotFound" xml:space="preserve"><value>Zeller 找不到原交易，没有退款。</value></data>
+  <data name="payment.card.zeller.notPaid" xml:space="preserve"><value>顾客未被扣款。</value></data>
+  <data name="payment.card.zeller.resultUnknown" xml:space="preserve"><value>Zeller 结果暂不确定。请勿重新收款或重复退款，请到卡交易异常中心处理。</value></data>
+  <data name="payment.card.zeller.refundInProgress" xml:space="preserve"><value>这笔退货已有一笔退款在处理中，请到卡交易异常中心查看，不要重复退款。</value></data>
+  <data name="payment.card.zeller.originalUnverified" xml:space="preserve"><value>原 Zeller 付款没有交易号，无法在刷卡机上原路退回，请改用其他退款方式。</value></data>
+  <data name="payment.card.zeller.notStarted" xml:space="preserve"><value>无法发起 Zeller 收款，顾客未被扣款。</value></data>
+  <data name="payment.card.zeller.paymentPageOnly" xml:space="preserve"><value>Zeller 刷卡只能在付款页发起。</value></data>
+  <data name="payment.status.cardVerifying" xml:space="preserve"><value>正在向 Zeller 核实结果（第 {0} 次），请勿让顾客重新刷卡。</value></data>
 </root>

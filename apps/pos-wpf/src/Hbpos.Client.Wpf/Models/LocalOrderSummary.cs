@@ -68,7 +68,9 @@ public sealed record ReceiptPaymentLine(
             ? "Square"
             : PaymentReferenceDisplay.Format(Method, Reference)?.StartsWith("ANZ:", StringComparison.OrdinalIgnoreCase) == true
                 ? "ANZ Linkly"
-                : "Card",
+                : ZellerPaymentReference.IsZeller(PaymentReferenceDisplay.Format(Method, Reference))
+                    ? "Zeller"
+                    : "Card",
         PaymentMethodKind.Voucher => "Voucher",
         _ => Method.ToString()
     };

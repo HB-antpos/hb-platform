@@ -69,6 +69,33 @@ public sealed class ZellerWpfUiDispatcherTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.InvokeAsync(() => 1));
     }
 
+    [Fact]
+    public async Task Lazy_dispatcher_is_only_looked_up_when_a_call_is_made()
+    {
+        // 服务容器里用的是这种：没有 WPF 应用（例如测试）时，容器照常解析，只有真正调用 Zeller 时才失败。
+        var lookups = 0;
+        var dispatcher = new WpfZellerUiDispatcher(() =>
+        {
+            lookups++;
+            return null;
+        });
+
+        Assert.Equal(0, lookups);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.InvokeAsync(() => 1));
+        Assert.Equal(1, lookups);
+    }
+
+    [Fact]
+    public async Task Lazy_dispatcher_runs_calls_on_the_ui_thread_once_available()
+    {
+        using var ui = UiThread.Start();
+        var dispatcher = new WpfZellerUiDispatcher(() => ui.Dispatcher);
+
+        var threadId = await Task.Run(() => dispatcher.InvokeAsync(() => Environment.CurrentManagedThreadId));
+
+        Assert.Equal(ui.ThreadId, threadId);
+    }
+
     /// <summary>一个跑着 WPF Dispatcher 的 STA 线程，相当于收银端的界面线程。</summary>
     private sealed class UiThread : IDisposable
     {

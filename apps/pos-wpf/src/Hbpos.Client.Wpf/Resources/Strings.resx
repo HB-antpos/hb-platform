@@ -1868,4 +1868,24 @@ Logged with reference {2}</value></data>
   <data name="cardRecovery.v2.preset.notPaid.terminalFailed" xml:space="preserve"><value>Terminal shows failed</value></data>
   <data name="cardRecovery.v2.preset.notPaid.terminalOffline" xml:space="preserve"><value>Terminal offline</value></data>
   <data name="cardRecovery.v2.preset.notPaid.terminalStuck" xml:space="preserve"><value>Terminal stuck</value></data>
+  <data name="payment.card.zeller.approved" xml:space="preserve"><value>Zeller payment approved.</value></data>
+  <data name="payment.card.zeller.refundApproved" xml:space="preserve"><value>Zeller refund approved.</value></data>
+  <data name="payment.card.zeller.declined" xml:space="preserve"><value>The card was declined by the bank.</value></data>
+  <data name="payment.card.zeller.refundDeclined" xml:space="preserve"><value>The refund was declined. Check the refund amount against the original payment.</value></data>
+  <data name="payment.card.zeller.cardProblem" xml:space="preserve"><value>The card could not be read. Ask the customer to try again or use another card.</value></data>
+  <data name="payment.card.zeller.cancelled" xml:space="preserve"><value>The Zeller payment was cancelled. The customer was not charged.</value></data>
+  <data name="payment.card.zeller.timeout" xml:space="preserve"><value>No card was presented in time. The customer was not charged.</value></data>
+  <data name="payment.card.zeller.terminalUnavailable" xml:space="preserve"><value>The Zeller terminal is not reachable. Check that it is on and online, then try again.</value></data>
+  <data name="payment.card.zeller.setupRequired" xml:space="preserve"><value>This POS is not paired with a Zeller terminal. Pair it in Settings.</value></data>
+  <data name="payment.card.zeller.sdkUnavailable" xml:space="preserve"><value>The Zeller payment component could not start on this POS.</value></data>
+  <data name="payment.card.zeller.busy" xml:space="preserve"><value>The Zeller terminal is busy. Try again in a moment.</value></data>
+  <data name="payment.card.zeller.invalidRequest" xml:space="preserve"><value>The Zeller payment request was invalid. The customer was not charged.</value></data>
+  <data name="payment.card.zeller.originalNotFound" xml:space="preserve"><value>Zeller could not find the original transaction. Nothing was refunded.</value></data>
+  <data name="payment.card.zeller.notPaid" xml:space="preserve"><value>The customer was not charged.</value></data>
+  <data name="payment.card.zeller.resultUnknown" xml:space="preserve"><value>The Zeller result is not known yet. Do not take payment or refund again; check it in Card transaction recovery.</value></data>
+  <data name="payment.card.zeller.refundInProgress" xml:space="preserve"><value>A refund for this return is already in progress. Check it in Card transaction recovery instead of refunding again.</value></data>
+  <data name="payment.card.zeller.originalUnverified" xml:space="preserve"><value>The original Zeller payment has no transaction number, so it cannot be refunded on the terminal. Use another refund method.</value></data>
+  <data name="payment.card.zeller.notStarted" xml:space="preserve"><value>The Zeller payment could not be started. The customer was not charged.</value></data>
+  <data name="payment.card.zeller.paymentPageOnly" xml:space="preserve"><value>Zeller card payments can only be taken from the payment page.</value></data>
+  <data name="payment.status.cardVerifying" xml:space="preserve"><value>Checking the result with Zeller (check {0}). Do not ask the customer to tap again.</value></data>
 </root>

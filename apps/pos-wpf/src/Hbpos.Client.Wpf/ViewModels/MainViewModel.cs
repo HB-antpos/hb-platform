@@ -3328,6 +3328,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 CardProcessorKind.Linkly => $"CARD_ATTEMPT:{selectedKey.AttemptGuid:N}",
                 CardProcessorKind.Square => $"SQUARE_ATTEMPT:{selectedKey.AttemptGuid:N}",
+                CardProcessorKind.Zeller => CashPaymentWorkflowService.FormatZellerAttemptTenderKey(selectedKey.AttemptGuid),
                 _ => null
             };
             // 中文注释：批准后的落盘异常只有冻结订单身份；补单须同时匹配订单和所选 attempt 的付款证据。

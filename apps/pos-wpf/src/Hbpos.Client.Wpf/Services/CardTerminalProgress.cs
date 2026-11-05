@@ -6,7 +6,10 @@ public enum CardTerminalProgressKind
     NetworkRetrying,
 
     /// <summary>重试后已连上，恢复为普通的「等待刷卡终端返回结果」。</summary>
-    NetworkRecovered
+    NetworkRecovered,
+
+    /// <summary>刷卡机没有给出明确结果，正在向支付服务按交易号核实（Zeller）；Attempt 为第几次核实。</summary>
+    ResultVerifying
 }
 
 /// <summary>刷卡过程中推给收银界面的实时提示。</summary>

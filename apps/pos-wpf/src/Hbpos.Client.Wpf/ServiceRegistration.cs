@@ -5,6 +5,8 @@ using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.Services.Facades;
 using Hbpos.Client.Wpf.Services.NetworkDiagnostics;
+using Hbpos.Client.Wpf.Services.Zeller;
+using Hbpos.Client.Wpf.Services.Zeller.Sdk;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.RemoteMaintenance.Setup;
 using Microsoft.Extensions.Configuration;
@@ -253,6 +255,7 @@ public static class ServiceRegistration
         services.AddSingleton<ILinklyTerminalSelectionTransitionGate, LinklyTerminalSelectionTransitionGate>();
         services.AddSingleton<ILocalSquarePaymentAttemptRepository, LocalSquarePaymentAttemptRepository>();
         services.AddSingleton<ISquarePaymentAttemptContextAccessor, SquarePaymentAttemptContextAccessor>();
+        AddZellerServices(services);
         services.AddSingleton<ILocalInstallmentOrderRepository, LocalInstallmentOrderRepository>();
         services.AddSingleton<ILocalInstallmentOperationRepository, LocalInstallmentOperationRepository>();
         services.AddSingleton<LocalFinancialSupervisorResolutionRepository>();
@@ -502,6 +505,8 @@ public static class ServiceRegistration
             endpointState: sp.GetRequiredService<ApiRuntimeEndpointState>()));
         services.AddSingleton<ICardPaymentResultPolicy, LinklyCardPaymentResultPolicy>();
         services.AddSingleton<ICardPaymentResultPolicy, SquareCardPaymentResultPolicy>();
+        // 兜底策略认得所有结果，必须排在各提供方之后。
+        services.AddSingleton<ICardPaymentResultPolicy, ZellerCardPaymentResultPolicy>();
         services.AddSingleton<ICardPaymentResultPolicy, FallbackCardPaymentResultPolicy>();
         services.AddSingleton<ICashPaymentWorkflowService, CashPaymentWorkflowService>();
         services.AddSingleton<CardPaymentRecoveryService>();
@@ -932,5 +937,37 @@ public static class ServiceRegistration
     private static IHttpClientBuilder AddRuntimeApiEndpoint(this IHttpClientBuilder builder)
     {
         return builder.AddHttpMessageHandler<ApiRuntimeEndpointHandler>();
+    }
+
+    /// <summary>
+    /// Zeller 刷卡机（本机 SDK 直连）。全部是单例：网关保证同一时刻只有一个 SDK 调用，扣款客户端和恢复服务共用同一份「进行中」登记。
+    /// 这些对象创建时都不碰 SDK：Terminal 只在第一次真正调用 Zeller 时才创建，没选 Zeller 的收银机不会加载 SDK。
+    /// </summary>
+    private static void AddZellerServices(IServiceCollection services)
+    {
+        static void Log(string message) => ConsoleLog.Write("Zeller", message);
+
+        services.AddSingleton<ILocalZellerPaymentAttemptRepository, LocalZellerPaymentAttemptRepository>();
+        services.AddSingleton<ZellerAttemptActivity>();
+        services.AddSingleton<IZellerSdkTerminalFactory>(_ => new ZellerSdkTerminalFactory(
+            ZellerSdkVendorInfo.ForCurrentApplication(),
+            () => ZellerSdkLogging.CreateLoggerFactory()));
+        // SDK 的窗口和 WebView2 都在界面线程上：每次调用时取应用的主调度器（没有 WPF 应用时调用失败，不影响容器解析）。
+        services.AddSingleton<IZellerUiDispatcher>(_ => new WpfZellerUiDispatcher(() => System.Windows.Application.Current?.Dispatcher));
+        services.AddSingleton(sp => new ZellerTerminalGateway(
+            sp.GetRequiredService<IZellerSdkTerminalFactory>(),
+            sp.GetRequiredService<IZellerUiDispatcher>(),
+            log: Log));
+        services.AddSingleton<IZellerTerminalGateway>(sp => sp.GetRequiredService<ZellerTerminalGateway>());
+        services.AddSingleton(sp => new ZellerCardTerminalClient(
+            sp.GetRequiredService<IZellerTerminalGateway>(),
+            sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
+            log: Log,
+            activity: sp.GetRequiredService<ZellerAttemptActivity>()));
+        services.AddSingleton(sp => new ZellerPaymentRecoveryService(
+            sp.GetRequiredService<IZellerTerminalGateway>(),
+            sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
+            sp.GetRequiredService<ZellerCardTerminalClient>(),
+            log: Log));
     }
 }

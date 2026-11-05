@@ -57,6 +57,9 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Zeller 尝试表（含索引）的语句和仓储放在一起维护；仓储第一次使用时也会自建，这里提前建好，恢复与列表查询不必等到第一次刷卡。
+        await Zeller.ZellerPaymentAttemptSchema.EnsureAsync(connection, cancellationToken);
+
         await EnsureLocalSellableItemIndexColumnsAsync(connection, cancellationToken);
         await EnsureDeviceCacheColumnsAsync(connection, cancellationToken);
         await EnsureLocalOrderColumnsAsync(connection, cancellationToken);

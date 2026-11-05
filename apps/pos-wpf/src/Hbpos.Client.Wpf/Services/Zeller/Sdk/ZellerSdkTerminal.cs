@@ -24,25 +24,40 @@ public sealed record ZellerSdkVendorInfo(string ApplicationName, string Applicat
 
 /// <summary>创建真正的 Zeller SDK Terminal。</summary>
 /// <remarks>
-/// 中文注释：SDK 的日志工厂是静态属性，文档要求在构造 Terminal 之前设置，所以放在构造函数里。
+/// 中文注释：SDK 的日志工厂是静态属性，文档要求在构造 Terminal 之前设置。
+/// 这里推迟到第一次 Create 时才设置：工厂随收款流程服务在启动时就被创建，没选 Zeller 的收银机不应加载 SDK、触发它的静态初始化。
 /// Terminal 的构造本身不连网、不弹窗；缺少 WebView2 运行时这类问题会在第一次调用时以异常的形式出现，
 /// 网关把它记成「调用没有进入 SDK」，上层提示 Zeller 不可用。
 /// </remarks>
 public sealed class ZellerSdkTerminalFactory : IZellerSdkTerminalFactory
 {
     private readonly ZellerSdkVendorInfo _vendor;
+    private readonly Func<ILoggerFactory>? _sdkLoggerFactory;
+    private int _loggerConfigured;
 
-    public ZellerSdkTerminalFactory(ZellerSdkVendorInfo vendor, ILoggerFactory? sdkLoggerFactory = null)
+    public ZellerSdkTerminalFactory(ZellerSdkVendorInfo vendor, Func<ILoggerFactory>? sdkLoggerFactory = null)
     {
         _vendor = vendor ?? throw new ArgumentNullException(nameof(vendor));
-        if (sdkLoggerFactory is not null)
-        {
-            Terminal.LoggerFactory = sdkLoggerFactory;
-        }
+        _sdkLoggerFactory = sdkLoggerFactory;
     }
 
-    public IZellerSdkTerminal Create() =>
-        new ZellerSdkTerminal(new Terminal(_vendor.ApplicationName, _vendor.ApplicationVersion, _vendor.DeviceType, _vendor.VendorName));
+    public IZellerSdkTerminal Create()
+    {
+        if (_sdkLoggerFactory is not null && Interlocked.Exchange(ref _loggerConfigured, 1) == 0)
+        {
+            ConfigureSdkLogging(_sdkLoggerFactory());
+        }
+
+        return CreateTerminal(_vendor);
+    }
+
+    // 中文注释：下面两个方法单独成方法，引用 SDK 类型的代码只在真正调用时才编译、加载 SDK 程序集。
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void ConfigureSdkLogging(ILoggerFactory loggerFactory) => Terminal.LoggerFactory = loggerFactory;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static IZellerSdkTerminal CreateTerminal(ZellerSdkVendorInfo vendor) =>
+        new ZellerSdkTerminal(new Terminal(vendor.ApplicationName, vendor.ApplicationVersion, vendor.DeviceType, vendor.VendorName));
 }
 
 /// <summary>对一个 SDK Terminal 的薄包装：只转换参数和结果。排队、超时、重建都在 <see cref="ZellerTerminalGateway"/> 里。</summary>

@@ -3810,6 +3810,13 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         {
             return null;
         }
+
+        // 中文注释：未核实的 Zeller 原付款（主管按已付款结案、只有 reference 没有交易号）不能在刷卡机上按原交易退回，和人工确认的付款一样不提供原卡退回。
+        if (ZellerPaymentReference.IsUnverified(reference))
+        {
+            return null;
+        }
+
         if (reference is null || RequiresLinklyRefundReference(reference))
         {
             return BuildLinklyRefundReference(capacity.CardTransactions, reference) ?? reference;
@@ -4037,6 +4044,18 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                     T("payment.status.cardNetworkRetrying"),
                     progress.Attempt,
                     progress.MaxAttempts));
+            return;
+        }
+
+        if (progress.Kind == CardTerminalProgressKind.ResultVerifying)
+        {
+            // 中文注释：结果还没确定，提示收银员不要让顾客重新刷卡。
+            SetStatus(
+                "payment.status.cardVerifying",
+                string.Format(
+                    _localization?.CurrentCulture ?? CultureInfo.CurrentCulture,
+                    T("payment.status.cardVerifying"),
+                    Math.Max(progress.Attempt, 1)));
             return;
         }
 
