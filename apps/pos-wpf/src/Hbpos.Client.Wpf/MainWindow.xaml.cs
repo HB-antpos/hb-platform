@@ -33,6 +33,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     private readonly MainViewModel _viewModel;
     private readonly AppStartupOptions _startupOptions;
     private readonly IRawScannerService _rawScannerService;
+    private readonly IScannerInputSuspension? _scannerInputSuspension;
     private readonly IDisplayTopologyService _displayTopologyService;
     private readonly IUiPriorityCoordinator _uiPriorityCoordinator;
     private readonly IAppUpdateCoordinator _appUpdateCoordinator;
@@ -77,9 +78,11 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         StartupProgressTracker? startupProgress = null,
         WpfRestartPromptService? restartPrompt = null,
         ColorThemeOnboardingViewModel? colorThemeOnboarding = null,
-        RemoteMaintenanceUpgradeScheduler? remoteMaintenanceUpgradeScheduler = null)
+        RemoteMaintenanceUpgradeScheduler? remoteMaintenanceUpgradeScheduler = null,
+        IScannerInputSuspension? scannerInputSuspension = null)
     {
         _viewModel = viewModel;
+        _scannerInputSuspension = scannerInputSuspension;
         _startupOptions = startupOptions;
         _rawScannerService = rawScannerService;
         _displayTopologyService = displayTopologyService;
@@ -136,6 +139,31 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         Activated += MainWindowActivated;
         Closing += MainWindowClosing;
         Closed += MainWindowClosed;
+        if (_scannerInputSuspension is not null)
+        {
+            _scannerInputSuspension.Changed += OnScannerInputSuspensionChanged;
+        }
+    }
+
+    private bool IsScannerInputSuspended => _scannerInputSuspension?.IsSuspended == true;
+
+    /// <summary>暂停开始或结束时丢掉已攒的扫码输入，避免暂停前后的半截条码拼到一起。</summary>
+    private void OnScannerInputSuspensionChanged(object? sender, EventArgs e)
+    {
+        void Clear()
+        {
+            _keyboardScannerFallback.Clear();
+            _rawScannerService.ClearPendingInput();
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            Clear();
+        }
+        else
+        {
+            Dispatcher.BeginInvoke(Clear);
+        }
     }
 
     private void CashierLoginOverlayPasswordBoxPasswordChanged(object sender, RoutedEventArgs e)
@@ -519,6 +547,12 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
     public void ActivateForScannerInput()
     {
+        if (IsScannerInputSuspended)
+        {
+            // 中文注释：Zeller 配对窗口（自带置顶）打开期间不抢焦点，否则店长在里面登录时键盘焦点会被抢走。
+            return;
+        }
+
         if (WindowState == WindowState.Minimized)
         {
             ApplyWindowMode(_lastNonMinimizedWindowState, persist: false);
@@ -639,6 +673,11 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         StateChanged -= MainWindowStateChanged;
         Activated -= MainWindowActivated;
         Closing -= MainWindowClosing;
+        if (_scannerInputSuspension is not null)
+        {
+            _scannerInputSuspension.Changed -= OnScannerInputSuspensionChanged;
+        }
+
         _hwndSource?.RemoveHook(MainWindowMessageHook);
     }
 
@@ -701,7 +740,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         QueueDisplayTopologyCheck(msg);
         return ProcessRawScannerWindowMessage(
             _viewModel.AppUpdate.IsForceUpdateBlocking,
-            _viewModel.ConfirmationDialog.IsOpen,
+            // 中文注释：Zeller 配对窗口打开期间同样吞掉 WM_INPUT（扫码枪在后台也会收到原始输入）。
+            _viewModel.ConfirmationDialog.IsOpen || IsScannerInputSuspended,
             msg,
             hwnd,
             wParam,
@@ -790,6 +830,14 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
         var isForceUpdateBlocking = _viewModel.AppUpdate.IsForceUpdateBlocking;
         var isConfirmationDialogOpen = _viewModel.ConfirmationDialog.IsOpen;
+        if (!isForceUpdateBlocking && !isConfirmationDialogOpen && IsScannerInputSuspended)
+        {
+            // 中文注释：配对期间不把按键攒成扫码，也不吞掉按键（主窗口本来就不是输入焦点）。
+            _keyboardScannerFallback.Clear();
+            _rawScannerService.ClearPendingInput();
+            return;
+        }
+
         if (IsKeyboardScannerFallbackBlocked(isForceUpdateBlocking, isConfirmationDialogOpen))
         {
             _keyboardScannerFallback.Clear();

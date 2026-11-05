@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.Zeller;
 using Hbpos.Client.Wpf.ViewModels.Settings;
 using Hbpos.Contracts.Linkly;
 using Hbpos.Contracts.Stores;
@@ -335,13 +336,16 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null,
         IScannerSettingsStore? scannerSettingsStore = null,
         bool autoSaveSettings = false,
-        Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
+        ZellerSettingsCoordinator? zellerSettingsCoordinator = null)
     {
         _setupService = setupService;
+        _zellerCoordinator = zellerSettingsCoordinator;
         _systemRestartSettingsStore = systemRestartSettingsStore;
         _restartCoordinatorProvider = restartCoordinatorProvider;
         _scannerSettingsStore = scannerSettingsStore;
         InitializeScannerCommands();
+        InitializeZellerCommands();
         RestartComputerCommand = new AsyncRelayCommand(RestartComputerAsync, CanRestartComputer);
         _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
@@ -657,6 +661,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ? T("settings.payment.activeProvider.manual")
         : _loadedConfiguration.Processor == CardProcessorKind.Linkly
         ? T("settings.payment.activeProvider.linkly")
+        : _loadedConfiguration.Processor == CardProcessorKind.Zeller
+        ? T("settings.payment.activeProvider.zeller")
         : T("settings.payment.activeProvider.square");
 
     public string ActivePaymentProviderDetailText => _paymentMethodSettingsService?.Current.UseManualCard == true
@@ -665,6 +671,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ? Format(
             "settings.payment.activeProvider.linkly.detail",
             T(GetLinklyModeLocalizationKey(ToSettingsMode(_loadedConfiguration.LinklyConnectionMode))))
+        : _loadedConfiguration.Processor == CardProcessorKind.Zeller
+        ? T("settings.payment.activeProvider.zeller.detail")
         : T("settings.payment.activeProvider.square.detail");
 
     public string ReceiptPrinterTitleText => T("settings.receiptPrinter.title");
@@ -929,7 +937,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
                 $"load settings succeeded squareEnvironment={SelectedSquareEnvironment} linklyEnvironment={SelectedLinklyEnvironment} hasSavedToken={HasSavedSquareToken} savedLocationId={LogValue(_savedSquareLocationId)} savedDeviceId={LogValue(_savedSquareDeviceId)}");
             RaiseActivePaymentProviderProperties();
             // 默认显示当前启用的刷卡方式对应的标签（Linkly 的云端/本地连接方式由页内单选按钮显示，已按已保存的模式选中）。
-            SelectedProviderTabIndex = _loadedConfiguration.Processor == CardProcessorKind.Linkly ? 1 : 0;
+            SelectedProviderTabIndex = ProviderTabIndexFor(_loadedConfiguration.Processor);
             SetStatus("settings.status.loaded");
         }, operationName: "load settings");
         await LoadCatalogSyncStatusAsync();
@@ -2727,6 +2735,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RemoteMaintenanceStatusText));
         OnPropertyChanged(nameof(RemoteMaintenanceDetailText));
         OnPropertyChanged(nameof(SquareTitleText));
+        OnPropertyChanged(nameof(ZellerTitleText));
+        OnPropertyChanged(nameof(ZellerStatusText));
+        OnPropertyChanged(nameof(ZellerActiveText));
         MobileAppDownload.RaiseLocalizedProperties();
         OnPropertyChanged(nameof(RemoteMaintenanceProgressText));
         OnPropertyChanged(nameof(LinklyTitleText));
@@ -2763,6 +2774,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(ActivePaymentProviderText));
         OnPropertyChanged(nameof(ActivePaymentProviderDetailText));
+        // 当前启用的处理器变了，Zeller 页签上的「已启用」与启用按钮也要跟着变。
+        RaiseZellerProperties();
     }
 
     private void OnCultureChanged(object? sender, EventArgs e)
@@ -3245,6 +3258,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     private void RaiseCommandStates()
     {
+        RaiseZellerCommandStates();
         SavePaymentMethodsCommand.NotifyCanExecuteChanged();
         LoadLocationsCommand.NotifyCanExecuteChanged();
         LoadDevicesCommand.NotifyCanExecuteChanged();
@@ -3552,6 +3566,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     private static string ResolveSettingsLogCategory(string operationName)
     {
+        if (operationName.Contains("zeller", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ZellerSettings";
+        }
+
         return operationName.Contains("linkly", StringComparison.OrdinalIgnoreCase) ? "LinklySettings" : "Square";
     }
 

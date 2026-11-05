@@ -81,6 +81,11 @@ public interface ICardTerminalSetupService
         CardTerminalConfiguration configuration,
         CancellationToken cancellationToken = default);
 
+    /// <summary>启用 Zeller：把处理器存成 Zeller，其余字段（Square / Linkly 的设置）原样保留。配对信息由 Zeller SDK 自己保存，不经过这里。</summary>
+    Task SaveZellerAsync(
+        CardTerminalConfiguration configuration,
+        CancellationToken cancellationToken = default);
+
     Task<LinklyConnectionTestResult> TestLinklyConnectionAsync(
         string host,
         int port,
@@ -320,6 +325,13 @@ public sealed class CardTerminalSetupService(
         CancellationToken cancellationToken = default)
     {
         return settingsStore.SaveAsync(configuration with { LinklyConnectionMode = LinklyConnectionMode.Local }, squareAccessToken: null, cancellationToken);
+    }
+
+    public Task SaveZellerAsync(
+        CardTerminalConfiguration configuration,
+        CancellationToken cancellationToken = default)
+    {
+        return settingsStore.SaveAsync(configuration with { Processor = CardProcessorKind.Zeller }, squareAccessToken: null, cancellationToken);
     }
 
     public Task<LinklyConnectionTestResult> TestLinklyConnectionAsync(

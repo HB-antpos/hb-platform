@@ -2,12 +2,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Hbpos.Client.Wpf.ViewModels;
 
-/// <summary>支付终端页的分页：付款方式 / Square / ANZ Linkly。</summary>
+/// <summary>支付终端页的分页：付款方式 / Square / ANZ Linkly / Zeller。</summary>
 public enum SettingsPaymentSubTab
 {
     Methods,
     Square,
-    Linkly
+    Linkly,
+    Zeller
 }
 
 /// <summary>小票打印机页的分页：打印机与选项 / 门店信息 / 小票条款。</summary>
@@ -93,7 +94,20 @@ public sealed partial class SettingsViewModel
         }
     }
 
-    /// <summary>Square / Linkly 分页共用原来的服务商 TabControl（标签头隐藏，由页内分页切换）。</summary>
+    public bool IsZellerSubTabSelected
+    {
+        get => SelectedPaymentSubTab == SettingsPaymentSubTab.Zeller;
+        set
+        {
+            if (value)
+            {
+                SelectedPaymentSubTab = SettingsPaymentSubTab.Zeller;
+                SelectedProviderTabIndex = 2;
+            }
+        }
+    }
+
+    /// <summary>Square / Linkly / Zeller 分页共用原来的服务商 TabControl（标签头隐藏，由页内分页切换）。</summary>
     public bool IsProviderSubTabSelected => SelectedPaymentSubTab != SettingsPaymentSubTab.Methods;
 
     // ── 小票打印机分页 ──
@@ -191,6 +205,7 @@ public sealed partial class SettingsViewModel
         OnPropertyChanged(nameof(IsPaymentMethodsSubTabSelected));
         OnPropertyChanged(nameof(IsSquareSubTabSelected));
         OnPropertyChanged(nameof(IsLinklySubTabSelected));
+        OnPropertyChanged(nameof(IsZellerSubTabSelected));
         OnPropertyChanged(nameof(IsProviderSubTabSelected));
     }
 
@@ -212,6 +227,6 @@ public sealed partial class SettingsViewModel
             return;
         }
 
-        SelectedPaymentSubTab = value == 1 ? SettingsPaymentSubTab.Linkly : SettingsPaymentSubTab.Square;
+        SelectedPaymentSubTab = SubTabForProviderIndex(value);
     }
 }

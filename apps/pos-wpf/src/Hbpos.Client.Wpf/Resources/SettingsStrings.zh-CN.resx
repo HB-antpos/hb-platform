@@ -634,4 +634,29 @@
   <data name="settings.subtab.receiptHardware" xml:space="preserve"><value>打印机与选项</value></data>
   <data name="settings.subtab.receiptStore" xml:space="preserve"><value>门店信息</value></data>
   <data name="settings.subtab.receiptTerms" xml:space="preserve"><value>小票条款</value></data>
+  <data name="settings.zeller.title" xml:space="preserve"><value>Zeller</value></data>
+  <data name="settings.payment.provider.zeller.subtitle" xml:space="preserve"><value>Zeller 刷卡机，由这台收银机直连</value></data>
+  <data name="settings.payment.activeProvider.zeller" xml:space="preserve"><value>Zeller</value></data>
+  <data name="settings.payment.activeProvider.zeller.detail" xml:space="preserve"><value>刷卡走已配对的 Zeller 刷卡机，配对信息保存在这台收银机上；Square / Linkly 的设置会保留，随时可以切回去。</value></data>
+  <data name="settings.zeller.status.notChecked" xml:space="preserve"><value>还没有检查，请点「检查配对」。</value></data>
+  <data name="settings.zeller.status.checking" xml:space="preserve"><value>正在向 Zeller 检查配对……</value></data>
+  <data name="settings.zeller.status.pairing" xml:space="preserve"><value>正在配对：请在弹出的 Zeller 窗口里登录并选择刷卡机。</value></data>
+  <data name="settings.zeller.status.paired" xml:space="preserve"><value>已和 Zeller 刷卡机配对。</value></data>
+  <data name="settings.zeller.status.notPaired" xml:space="preserve"><value>还没有配对，请点「配对刷卡机」。</value></data>
+  <data name="settings.zeller.status.cancelled" xml:space="preserve"><value>已取消配对。</value></data>
+  <data name="settings.zeller.status.failed" xml:space="preserve"><value>连不上 Zeller，请检查网络后重试。</value></data>
+  <data name="settings.zeller.status.failedWithReason" xml:space="preserve"><value>连不上 Zeller：{0}</value></data>
+  <data name="settings.zeller.status.checkDone" xml:space="preserve"><value>检查完成：这台收银机还没有和 Zeller 刷卡机配对。</value></data>
+  <data name="settings.zeller.active.yes" xml:space="preserve"><value>已启用 Zeller：这台收银机的刷卡走 Zeller 刷卡机。</value></data>
+  <data name="settings.zeller.active.no" xml:space="preserve"><value>这台收银机还没有启用 Zeller。</value></data>
+  <data name="settings.zeller.check" xml:space="preserve"><value>检查配对</value></data>
+  <data name="settings.zeller.pair" xml:space="preserve"><value>配对刷卡机</value></data>
+  <data name="settings.zeller.cancelPairing" xml:space="preserve"><value>取消配对</value></data>
+  <data name="settings.zeller.enable" xml:space="preserve"><value>启用 Zeller</value></data>
+  <data name="settings.zeller.steps.title" xml:space="preserve"><value>配对步骤</value></data>
+  <data name="settings.zeller.steps.one" xml:space="preserve"><value>1. 刷卡机登录 Zeller 账号，并确认已联网。</value></data>
+  <data name="settings.zeller.steps.two" xml:space="preserve"><value>2. 点「配对刷卡机」，在弹出的 Zeller 窗口里登录同一个账号，选择这台收银机对应的刷卡机。</value></data>
+  <data name="settings.zeller.steps.three" xml:space="preserve"><value>3. 显示「已配对」后，点「启用 Zeller」。每台收银机只需配对一次，重启和更新都不用重配。</value></data>
+  <data name="settings.zeller.footer.help" xml:space="preserve"><value>先配对，再启用。切回 Square 或 Linkly 时，它们的设置都还在。</value></data>
+  <data name="settings.status.zellerEnabled" xml:space="preserve"><value>已为这台收银机启用 Zeller。</value></data>
 </root>

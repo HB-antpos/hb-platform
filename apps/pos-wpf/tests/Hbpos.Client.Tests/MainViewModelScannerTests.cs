@@ -9117,6 +9117,13 @@ public sealed class MainViewModelScannerTests
             return Task.CompletedTask;
         }
 
+        public Task SaveZellerAsync(
+            CardTerminalConfiguration configuration,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
         public Task<LinklyConnectionTestResult> TestLinklyConnectionAsync(
             string host,
             int port,

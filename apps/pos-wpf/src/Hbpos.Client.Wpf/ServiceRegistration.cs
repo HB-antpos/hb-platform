@@ -842,6 +842,7 @@ public static class ServiceRegistration
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
+            viewModel.ConfigureZellerSettings(sp.GetRequiredService<ZellerSettingsCoordinator>());
             viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
             viewModel.ConfigureCatalogAutoSync(sp.GetRequiredService<CatalogAutoSyncOptions>());
             viewModel.ConfigureAuditSyncCenter(
@@ -969,6 +970,13 @@ public static class ServiceRegistration
             sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
             sp.GetRequiredService<ZellerCardTerminalClient>(),
             log: Log));
+        // 设置页 Zeller 分页：检查配对、配对（期间暂停主窗口扫码）、启用。保存走设置向导同一个入口。
+        services.AddSingleton<IScannerInputSuspension, ScannerInputSuspension>();
+        services.AddSingleton(sp => new ZellerSettingsCoordinator(
+            sp.GetRequiredService<IZellerTerminalGateway>(),
+            (configuration, cancellationToken) => sp.GetRequiredService<ICardTerminalSetupService>().SaveZellerAsync(configuration, cancellationToken),
+            sp.GetRequiredService<IScannerInputSuspension>(),
+            Log));
         // 卡交易恢复协调器的 Zeller 提供方（协调器按类型构造，注册后自动带上）。
         services.AddSingleton(sp => new ZellerCardRecoveryProvider(
             sp.GetRequiredService<ZellerPaymentRecoveryService>(),

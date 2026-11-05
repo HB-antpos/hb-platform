@@ -299,8 +299,9 @@ public sealed partial class SettingsViewModel
             {
                 _squareDraftBaseline = _loadedConfiguration;
             }
-            else
+            else if (_loadedConfiguration.Processor != CardProcessorKind.Zeller)
             {
+                // Zeller 没有输入框，也就没有草稿基线：启用 Zeller 不改 Square / Linkly 各自的基线。
                 _linklyDraftBaseline = _loadedConfiguration;
             }
         }
@@ -507,7 +508,7 @@ public sealed partial class SettingsViewModel
 
         if (IsProviderSubTabSelected)
         {
-            SelectedPaymentSubTab = SelectedProviderTabIndex == 1 ? SettingsPaymentSubTab.Linkly : SettingsPaymentSubTab.Square;
+            SelectedPaymentSubTab = SubTabForProviderIndex(SelectedProviderTabIndex);
         }
     }
 

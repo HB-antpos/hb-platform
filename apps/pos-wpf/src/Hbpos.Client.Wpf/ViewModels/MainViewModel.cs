@@ -872,6 +872,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _mainChildViewModelFactory.ScannerSettingsStore = settingsStore;
     }
 
+    /// <summary>配置设置页「Zeller」分页用的协调器（见 <see cref="MainChildViewModelFactory.ZellerSettingsCoordinator"/>）。</summary>
+    internal void ConfigureZellerSettings(Services.Zeller.ZellerSettingsCoordinator? coordinator)
+    {
+        _mainChildViewModelFactory.ZellerSettingsCoordinator = coordinator;
+    }
+
     /// <summary>收银员登录成功后切换到其个人配色（没有偏好时由回调弹首次选择窗）；未配置时保持本机配色。</summary>
     internal void ConfigureCashierColorTheme(Func<CashierSessionDto, Task>? onCashierLoggedIn)
     {
