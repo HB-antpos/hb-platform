@@ -56,7 +56,10 @@ public enum ZellerUnknownReason
     MultipleApproved,
     LateApproval,
     VerificationFailed,
-    ProcessExited
+    ProcessExited,
+
+    /// <summary>同一笔退货已经有一笔退款在进行或结果未知，不能再发第二笔。只出现在返回给调用方的结论里，不落库。</summary>
+    RefundAlreadyInProgress
 }
 
 /// <summary>本地 attempt 对这次调用的预期：类型、金额（分）和发给 Zeller 的 reference。</summary>
@@ -155,9 +158,11 @@ public static class ZellerResultClassifier
         var approved = relevant.Where(transaction => transaction.Status == ZellerTransactionStatus.Approved).ToList();
 
         // 同一个 reference 下出现多笔批准（Zeller 不去重），只能由主管处理。被拒的笔数不算。
+        // 中文注释：把最早的那笔带出来作为证据落库：顾客确实被扣过款，主管不能再「确认未付款」。
         if (approved.Count > 1)
         {
-            return KeepUnknown(ZellerUnknownReason.MultipleApproved);
+            var earliest = approved.OrderBy(transaction => transaction.Timestamp ?? DateTimeOffset.MaxValue).First();
+            return KeepUnknown(ZellerUnknownReason.MultipleApproved, earliest);
         }
 
         if (approved.Count == 1)

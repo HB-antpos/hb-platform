@@ -162,6 +162,44 @@ public sealed class ZellerPaymentReferenceTests
         Assert.Equal(TransactionUuid, fromWrapper);
     }
 
+    [Fact]
+    public void Unverified_references_carry_no_transaction_and_cannot_be_refunded_to_card()
+    {
+        var purchase = ZellerPaymentReference.CreatePurchaseReference(Attempt);
+        var refund = ZellerPaymentReference.CreateRefundReference(Attempt);
+
+        var payment = ZellerPaymentReference.FormatUnverifiedPayment(purchase);
+        var refunded = ZellerPaymentReference.FormatUnverifiedRefund(refund);
+
+        Assert.Equal($"ZELLER:{purchase}", payment);
+        Assert.Equal($"ZELLERRF:{refund}", refunded);
+        Assert.True(ZellerPaymentReference.IsZeller(payment));
+        Assert.True(ZellerPaymentReference.IsUnverified(payment));
+        Assert.True(ZellerPaymentReference.IsUnverified(refunded));
+        Assert.False(ZellerPaymentReference.TryParsePayment(payment, out _));
+        Assert.False(ZellerPaymentReference.TryGetOriginalTransactionUuid(payment, out _));
+        Assert.True(ZellerPaymentReference.IsZellerRefundSource(payment));
+    }
+
+    [Theory]
+    [InlineData("ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c")] // 已核实
+    [InlineData("ZELLER:HBZR-799287a33dc24df1bca3d33eea19b35a")] // 前缀和 reference 种类不配
+    [InlineData("ZELLERRF:HBZ-799287a33dc24df1bca3d33eea19b35a")]
+    [InlineData("ZELLER:broken")]
+    [InlineData("SQ:payment-1")]
+    [InlineData(null)]
+    public void Only_well_formed_references_without_a_transaction_are_unverified(string? reference)
+    {
+        Assert.False(ZellerPaymentReference.IsUnverified(reference));
+    }
+
+    [Fact]
+    public void Unverified_formats_reject_the_wrong_kind_of_reference()
+    {
+        Assert.Throws<ArgumentException>(() => ZellerPaymentReference.FormatUnverifiedPayment(ZellerPaymentReference.CreateRefundReference(Attempt)));
+        Assert.Throws<ArgumentException>(() => ZellerPaymentReference.FormatUnverifiedRefund(ZellerPaymentReference.CreatePurchaseReference(Attempt)));
+    }
+
     [Theory]
     [InlineData("SQ:payment-1")]
     [InlineData("ZELLER:broken")]
