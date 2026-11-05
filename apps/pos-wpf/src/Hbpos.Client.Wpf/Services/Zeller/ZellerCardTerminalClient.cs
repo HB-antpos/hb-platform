@@ -67,7 +67,8 @@ public enum ZellerPaymentProgressKind
     Verifying
 }
 
-public sealed record ZellerPaymentProgress(ZellerPaymentProgressKind Kind, int VerificationRound = 0);
+/// <summary>扣款、退款过程中的进度。AttemptGuid 只在 Submitted 时带上：调用方据此知道请求已经发出、对应哪一条尝试。</summary>
+public sealed record ZellerPaymentProgress(ZellerPaymentProgressKind Kind, int VerificationRound = 0, Guid AttemptGuid = default);
 
 /// <summary>
 /// 按原交易退款所需的信息。OriginalPaymentReference 是原扣款写在订单里的引用（ZELLER:…），
@@ -286,7 +287,7 @@ public sealed class ZellerCardTerminalClient
         }
 
         var submitted = await SaveAsync(pending, pending with { Status = ZellerAttemptStatus.Submitted }).ConfigureAwait(false);
-        progress?.Report(new ZellerPaymentProgress(ZellerPaymentProgressKind.Submitted));
+        progress?.Report(new ZellerPaymentProgress(ZellerPaymentProgressKind.Submitted, AttemptGuid: attemptGuid));
 
         ZellerCallResult result;
         try

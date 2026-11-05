@@ -74,7 +74,7 @@ public interface ICashPaymentWorkflowService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class CashPaymentWorkflowService(
+public sealed partial class CashPaymentWorkflowService(
     CashCheckoutService checkout,
     ILocalOrderRepository orderRepository,
     ISyncQueueRepository syncQueueRepository,
@@ -89,8 +89,14 @@ public sealed class CashPaymentWorkflowService(
     ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
     IEnumerable<ICardPaymentResultPolicy>? cardPaymentResultPolicies = null,
     ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
-    Func<TimeSpan, CancellationToken, Task>? acknowledgeRetryDelayAsync = null) : ICashPaymentWorkflowService
+    Func<TimeSpan, CancellationToken, Task>? acknowledgeRetryDelayAsync = null,
+    Zeller.ZellerCardTerminalClient? zellerCardTerminalClient = null,
+    Zeller.ILocalZellerPaymentAttemptRepository? zellerPaymentAttemptRepository = null) : ICashPaymentWorkflowService
 {
+    // 中文注释：Zeller 的收款与订单完成标记在 CashPaymentWorkflowService.Zeller.cs，分部类文件里用这两个字段。
+    private readonly Zeller.ZellerCardTerminalClient? _zellerCardTerminalClient = zellerCardTerminalClient;
+    private readonly Zeller.ILocalZellerPaymentAttemptRepository? _zellerPaymentAttemptRepository = zellerPaymentAttemptRepository;
+
     private static readonly JsonSerializerOptions CardAttemptJsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -104,6 +110,7 @@ public sealed class CashPaymentWorkflowService(
         [
             new LinklyCardPaymentResultPolicy(),
             new SquareCardPaymentResultPolicy(),
+            new ZellerCardPaymentResultPolicy(),
             new FallbackCardPaymentResultPolicy()
         ]);
     private readonly ISharedHeldOrderPaymentSourceResolver? _heldOrderPaymentSourceResolver =
@@ -641,6 +648,18 @@ public sealed class CashPaymentWorkflowService(
             LogPostCommitWarning($"{logOperationPrefix}mark-square-attempt-completed", order.OrderGuid, ex);
         }
 
+        try
+        {
+            // 没有 Zeller 付款的订单在这里立即返回，不读库。
+            PaymentCompletionTrace.Mark("mark-zeller-attempt");
+            await MarkCompletedZellerAttemptsAsync(completionTenders, order.OrderGuid, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            hasPostCommitWarning = true;
+            LogPostCommitWarning($"{logOperationPrefix}mark-zeller-attempt-completed", order.OrderGuid, ex);
+        }
+
         PaymentCompletionTrace.Mark("clear-cart");
         hasPostCommitWarning |= TryClearCartAfterCommit(cart, order.OrderGuid);
         PaymentCompletionTrace.Mark("read-pending-sync");
@@ -807,6 +826,24 @@ public sealed class CashPaymentWorkflowService(
                     $"workflow refund routed to original processor from={settingsSnapshot.Processor} to={routedSettings.Processor} originalReference={LogValue(referenceText)}");
                 settingsSnapshot = routedSettings;
             }
+        }
+
+        if (settingsSnapshot?.Processor == CardProcessorKind.Zeller)
+        {
+            // 中文注释：Zeller 的客户端自己负责先落库、调用、核实和结果未知，不经过下面 Linkly/Square 的尝试变量与提交边界。
+            return await AuthorizeZellerTenderAsync(
+                settingsSnapshot,
+                amount,
+                remainingAmount,
+                session,
+                actualAmount,
+                tenderSnapshot,
+                cartSnapshot,
+                referenceText,
+                isRefund,
+                declinedStatusKey,
+                approvedStatusKey,
+                cancellationToken);
         }
 
         (LocalCardPaymentAttempt? Attempt, bool Reused, bool RequiresRecovery) cardAttemptSelection =
@@ -4333,6 +4370,12 @@ public sealed class CashPaymentWorkflowService(
                     draft is null ? order : order with { OrderGuid = draft.OrderGuid },
                     AlreadyPersisted: false);
             }
+        }
+
+        // Zeller 同样必须沿用刷卡前草稿里的订单 GUID：恢复按草稿补单时才不会和这里的正常落单重复。
+        if (await TryPrepareZellerOrderPersistenceAsync(order, tenders, cancellationToken) is { } zellerOrder)
+        {
+            return zellerOrder;
         }
 
         return new RecoverableOrderPersistence(order, AlreadyPersisted: false);

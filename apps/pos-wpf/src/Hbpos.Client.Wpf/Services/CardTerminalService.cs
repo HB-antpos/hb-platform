@@ -17,7 +17,11 @@ public enum CardProcessorKind
 {
     None,
     Linkly,
-    Square
+    Square,
+
+    // 中文注释：Zeller 刷卡机经本机 SDK 直连（Services/Zeller）。配对信息由 SDK 自己保存，
+    // 本地设置只记处理器名，不存任何凭据；收款流程里走独立的 Zeller 方法，不经过下面的 Linkly/Square 尝试变量。
+    Zeller
 }
 
 public enum CardTerminalEnvironment
@@ -106,6 +110,7 @@ public sealed record CardTerminalSettings(
         {
             "LINKLY" or "ANZ" => CardProcessorKind.Linkly,
             "SQUARE" => CardProcessorKind.Square,
+            "ZELLER" => CardProcessorKind.Zeller,
             _ => CardProcessorKind.None
         };
 
@@ -714,9 +719,20 @@ public sealed class ConfiguredCardTerminalClient :
         {
             CardProcessorKind.Linkly => await AuthorizeLinklyWithAvailabilityAsync(settings, amount, session, cancellationToken),
             CardProcessorKind.Square => await AuthorizeSquareAsync(settings, amount, session, cancellationToken),
+            CardProcessorKind.Zeller => ZellerRequiresPaymentPage(),
             _ => new PaymentAuthorizationResult(false, null, T("payment.card.status.notConfigured", "Card terminal is not configured."))
         };
     }
+
+    // 中文注释：Zeller 只能经付款页的收款流程发起（CashPaymentWorkflowService 的独立方法，带订单草稿先落库）。
+    // 别的入口（例如分期）直接走到这里时一律拒绝，请求确定没有发给刷卡机。
+    private PaymentAuthorizationResult ZellerRequiresPaymentPage() =>
+        new(
+            false,
+            null,
+            T("payment.card.zeller.paymentPageOnly", "Zeller card payments can only be taken from the payment page."),
+            Processor: CardProcessorKind.Zeller.ToString(),
+            StatusKey: "payment.card.zeller.paymentPageOnly");
 
     private Task<PaymentAuthorizationResult> AuthorizeLinklyWithAvailabilityAsync(
         CardTerminalSettings settings,
@@ -827,6 +843,7 @@ public sealed class ConfiguredCardTerminalClient :
             CardProcessorKind.Linkly => await RefundLinklyWithAvailabilityAsync(
                 settings, amount, session, originalReference, idempotencyKey, cancellationToken),
             CardProcessorKind.Square => await RefundSquareAsync(settings, amount, originalReference, idempotencyKey, cancellationToken),
+            CardProcessorKind.Zeller => ZellerRequiresPaymentPage(),
             _ => new PaymentAuthorizationResult(false, null, T("payment.card.status.notConfigured", "Card terminal is not configured."))
         };
     }

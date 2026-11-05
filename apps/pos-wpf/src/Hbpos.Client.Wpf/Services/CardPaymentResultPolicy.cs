@@ -122,6 +122,44 @@ public sealed class SquareCardPaymentResultPolicy : ICardPaymentResultPolicy
     }
 }
 
+/// <summary>
+/// Zeller 的结果（状态键 payment.card.zeller.*，见 ZellerAuthorizationMapper）。
+/// 结果未知锁付款页并交给恢复中心；同一笔退货已有退款在处理时不锁页，只提示去恢复中心。
+/// </summary>
+public sealed class ZellerCardPaymentResultPolicy : ICardPaymentResultPolicy
+{
+    public const string StatusKeyPrefix = "payment.card.zeller.";
+
+    public bool CanClassify(PaymentTenderAttemptResult result) =>
+        result.StatusKey.StartsWith(StatusKeyPrefix, StringComparison.Ordinal);
+
+    public CardPaymentResultDisposition Classify(PaymentTenderAttemptResult result)
+    {
+        return result.StatusKey[StatusKeyPrefix.Length..] switch
+        {
+            "resultUnknown" => new(
+                CardPaymentTerminalOutcome.ResultUnknown,
+                CardPaymentErrorKind.ActiveSessionRequiresRecovery,
+                PreserveStatus: true),
+            "refundInProgress" => new(
+                CardPaymentTerminalOutcome.None,
+                CardPaymentErrorKind.ActiveSessionRequiresRecovery,
+                PreserveStatus: true),
+            "cancelled" => new(CardPaymentTerminalOutcome.Cancelled, PreserveStatus: true),
+            "timeout" => new(CardPaymentTerminalOutcome.TimedOut, CardPaymentErrorKind.Timeout, PreserveStatus: true),
+            "terminalUnavailable" or "sdkUnavailable" or "busy" => new(
+                CardPaymentTerminalOutcome.None,
+                CardPaymentErrorKind.ConnectionFailed,
+                PreserveStatus: true),
+            "declined" or "cardProblem" or "refundDeclined" => new(
+                CardPaymentTerminalOutcome.None,
+                CardPaymentErrorKind.CardDeclined,
+                PreserveStatus: true),
+            _ => new(CardPaymentTerminalOutcome.None, PreserveStatus: true)
+        };
+    }
+}
+
 public sealed class FallbackCardPaymentResultPolicy : ICardPaymentResultPolicy
 {
     public bool CanClassify(PaymentTenderAttemptResult result) => true;

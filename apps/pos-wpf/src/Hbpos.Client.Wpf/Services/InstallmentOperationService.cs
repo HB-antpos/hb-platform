@@ -1305,6 +1305,12 @@ public sealed class InstallmentOperationService(
         try
         {
             terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, cancellationToken);
+            if (terminalAttempt.IsUnsupportedProcessor)
+            {
+                // 中文注释：Zeller 暂不支持分期。在推进 TerminalSubmitting、登记 claim 之前拦下，
+                // 刷卡机不会收到任何请求，分期操作保持原状态，可以改用其他方式。
+                return TerminalReady.Failed("Zeller 刷卡暂不支持分期付款，请改用其他付款方式。");
+            }
             if (terminalAttempt.RequiresReview)
             {
                 var reviewMessage = terminalAttempt.ReviewMessage ?? "银行卡 attempt 无法按当前终端模式安全复用，保持锁定等待主管恢复。";
@@ -1475,6 +1481,13 @@ public sealed class InstallmentOperationService(
         }
 
         var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
+        if (settings.Processor == CardProcessorKind.Zeller)
+        {
+            // 中文注释：Zeller 暂不支持分期（方案：单机试点通过后再接）。沿用这一处唯一的设置读取，不另读一次，
+            // 保证分期全程只用第一次读到的设置快照。
+            return TerminalAttemptScope.UnsupportedZeller;
+        }
+
         var now = DateTimeOffset.UtcNow;
         if (settings.Processor == CardProcessorKind.Linkly && cardPaymentAttemptRepository is not null && linklyPaymentAttemptContextAccessor is not null)
         {
@@ -3219,6 +3232,11 @@ public sealed class InstallmentOperationService(
         string? reviewMessage = null) : IDisposable
     {
         public static TerminalAttemptScope Empty { get; } = new(null, null, null, null, null);
+
+        /// <summary>当前设置是暂不支持分期的处理器（Zeller）。调用方据此在登记尝试、推进状态之前拦下。</summary>
+        public static TerminalAttemptScope UnsupportedZeller { get; } = new(null, CardProcessorKind.Zeller.ToString(), null, null, null);
+
+        public bool IsUnsupportedProcessor => ReferenceEquals(this, UnsupportedZeller);
         public Guid? AttemptGuid { get; } = attemptGuid;
         public string? Processor { get; } = processor;
         public bool RequiresReview { get; } = requiresReview;
