@@ -410,6 +410,9 @@ namespace BlazorApp.Shared.Constants
             public const string ManageSuppliers = "DomesticPurchase.ManageSuppliers";
             public const string ManageProducts = "DomesticPurchase.ManageProducts";
             public const string ManagePrefixCodes = "DomesticPurchase.ManagePrefixCodes";
+            // 查看国内供应商名称（含店铺号、联系人、联系方式、门头照、备注）：没有它时接口只返回供应商代码（如 HB196）。
+            // 默认只授予 WarehouseManager（管理员自动放行）；「管理国内供应商」经 PermissionAliases 自动具备，其余国内采购权限不自动具备。
+            public const string ViewSupplierName = "DomesticPurchase.ViewSupplierName";
         }
 
         public static class Reports
@@ -551,6 +554,8 @@ namespace BlazorApp.Shared.Constants
                 // 商品陈列图：Manage 隐含 Edit、Edit 隐含 View（持有高一级权限即满足低一级接口与菜单）；反向不成立。
                 [Planogram.View] = [Planogram.Edit, Planogram.Manage],
                 [Planogram.Edit] = [Planogram.Manage],
+                // 「管理国内供应商」页面本身就是编辑名称与联系方式，持有它必须能看到名称；反向不成立。
+                [DomesticPurchase.ViewSupplierName] = [DomesticPurchase.ManageSuppliers],
             };
 
         public static class AustralianSuppliers

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System.ComponentModel.DataAnnotations;
 
 namespace BlazorApp.Shared.DTOs
@@ -24,24 +26,28 @@ namespace BlazorApp.Shared.DTOs
         /// </summary>
         [Required(ErrorMessage = "供应商名称不能为空")]
         [StringLength(100, ErrorMessage = "供应商名称长度不能超过100个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string SupplierName { get; set; } = string.Empty;
 
         /// <summary>
         /// 商铺编号
         /// </summary>
         [StringLength(50, ErrorMessage = "商铺编号长度不能超过50个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ShopNumber { get; set; }
 
         /// <summary>
         /// 联系人
         /// </summary>
         [StringLength(50, ErrorMessage = "联系人长度不能超过50个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ContactPerson { get; set; }
 
         /// <summary>
         /// 联系电话
         /// </summary>
         [StringLength(20, ErrorMessage = "联系电话长度不能超过20个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Phone { get; set; }
 
         /// <summary>
@@ -49,6 +55,7 @@ namespace BlazorApp.Shared.DTOs
         /// </summary>
         [EmailAddress(ErrorMessage = "邮箱格式不正确")]
         [StringLength(100, ErrorMessage = "邮箱长度不能超过100个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Email { get; set; }
 
         /// <summary>
@@ -60,12 +67,14 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 商户门头照片
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? StorefrontPhoto { get; set; }
 
         /// <summary>
         /// 备注
         /// </summary>
         [StringLength(500, ErrorMessage = "备注长度不能超过500个字符")]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Remarks { get; set; }
 
         /// <summary>

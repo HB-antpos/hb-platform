@@ -352,6 +352,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),
+                // 名称 / 描述须与入库脚本 Data/Migrations/20261105_AddDomesticSupplierNamePermission.sql 保持一致；只写入 WarehouseManager 模板。
+                new(Permissions.DomesticPurchase.ViewSupplierName, "查看国内供应商名称", "国内采购", "Web 与移动端所有显示国内供应商的页面及导出文件 - 默认只显示供应商代码（如 HB196），有此权限才显示供应商名称、店铺号、联系人与联系方式"),
                 // 销售看板各页已改由 SalesDashboard.* 逐页授权，Reports.View 只剩高管看板的三个聚合接口。
                 new(Permissions.Reports.View, "查看报表", "报表", "高管看板接口 - 时段客流、分店日绩效与周绩效层级接口；同时视为 Reports.ProductMovement.View 的别名"),
                 // 显示名与 SalesDashboard.ProductMovement.View 区分开，避免角色配置页出现两个同名权限。
@@ -530,6 +532,7 @@ namespace BlazorApp.Shared.Constants
                         Permissions.DomesticPurchase.ManageSuppliers,
                         Permissions.DomesticPurchase.ManageProducts,
                         Permissions.DomesticPurchase.ManagePrefixCodes,
+                        Permissions.DomesticPurchase.ViewSupplierName,
                         Permissions.Reports.View,
                         // 澳洲供应商接口原按 WarehouseManager 角色放行，改为权限策略后由模板保留原能力。
                         Permissions.AustralianSuppliers.View,

@@ -20,6 +20,7 @@ import {
   queryWarehouseProductFlowSummary,
 } from '../../../services/warehouseProductFlowAnalysisService'
 import { getCategoryTree, type WarehouseCategoryNode } from '../../../services/warehouseCategoryService'
+import { useAuthStore } from '../../../store/auth'
 import type {
   WarehouseProductFlowBranch,
   WarehouseProductFlowCandidate,
@@ -125,6 +126,7 @@ export default function WarehouseProductFlowAnalysisPage() {
   const { t } = useTranslation()
   // 货柜编号默认只显示后 4 位；有权限的账号点列头眼睛按钮显示完整编号。
   const { format: formatContainerNumber } = useContainerNumberDisplay()
+  const canViewDomesticSupplierName = useAuthStore((state) => state.access.canViewDomesticSupplierName)
   const defaultPeriods = useMemo(() => buildWarehouseProductFlowDefaultPeriods(), [])
   const [periods, setPeriods] = useState<WarehouseProductFlowPeriods>(defaultPeriods)
   const [containerRange, setContainerRange] = useState<[Dayjs, Dayjs]>(() => toRange(defaultPeriods.containerPeriod))
@@ -414,7 +416,9 @@ export default function WarehouseProductFlowAnalysisPage() {
       ),
       dataIndex: 'containerNumber',
       render: (value) => (typeof value === 'string' ? formatContainerNumber(value) : value),
-    }, { title: t('warehouseProductFlowAnalysis.tables.arrivalDate'), dataIndex: 'arrivalDate' }, { title: t('warehouseProductFlowAnalysis.tables.quantity'), dataIndex: 'inboundQuantity', align: 'right' }, { title: t('warehouseProductFlowAnalysis.tables.unitPrice'), dataIndex: 'inboundUnitPrice', align: 'right', render: (value) => typeof value === 'number' ? moneyFormatter.format(value) : '—' }, { title: t('warehouseProductFlowAnalysis.tables.supplier'), dataIndex: 'supplierName' },
+    }, { title: t('warehouseProductFlowAnalysis.tables.arrivalDate'), dataIndex: 'arrivalDate' }, { title: t('warehouseProductFlowAnalysis.tables.quantity'), dataIndex: 'inboundQuantity', align: 'right' }, { title: t('warehouseProductFlowAnalysis.tables.unitPrice'), dataIndex: 'inboundUnitPrice', align: 'right', render: (value) => typeof value === 'number' ? moneyFormatter.format(value) : '—' },
+    // 货柜明细只返回国内供应商名称（没有代码）：没有「查看国内供应商名称」权限时整列隐藏，避免一列空值。
+    ...(canViewDomesticSupplierName ? [{ title: t('warehouseProductFlowAnalysis.tables.supplier'), dataIndex: 'supplierName' }] : []),
   ]
   const orderColumns: ColumnsType<Record<string, unknown>> = [
     { title: t('warehouseProductFlowAnalysis.tables.orderNumber'), dataIndex: 'orderNumber' }, { title: t('warehouseProductFlowAnalysis.tables.branch'), dataIndex: 'branchName' }, { title: t('warehouseProductFlowAnalysis.tables.orderDate'), dataIndex: 'orderDate' }, { title: t('warehouseProductFlowAnalysis.tables.orderedQuantity'), dataIndex: 'orderedQuantity', align: 'right' },
@@ -473,7 +477,7 @@ export default function WarehouseProductFlowAnalysisPage() {
           <LocalPanel loading={candidateLoading} error={candidateError} retry={loadCandidates}>
             {candidateItems.length ? <div className={styles.candidateList}>{candidateItems.map((product) => <div key={product.productCode} className={`${styles.candidate} ${currentProductCode === product.productCode ? styles.currentCandidate : ''}`}>
               <Checkbox checked={isProductSelected(selection, product.productCode)} onClick={(event) => event.stopPropagation()} onChange={(event) => toggleCandidate(product, event.target.checked)} />
-              <button type="button" className={styles.candidateMain} disabled={!isProductSelected(selection, product.productCode)} onClick={() => { setCurrentProductCode(product.productCode); setCurrentProductSnapshot(product) }}><ProductImage src={product.imageUrl} alt={product.productName || product.productCode} size={48} /><span className={styles.candidateText}><strong>{t('warehouseProductFlowAnalysis.product.itemNumber')}: {product.itemNumber || '—'}</strong><span>{product.productName || product.englishName || t('warehouseProductFlowAnalysis.product.unnamed')}</span><small>{t('warehouseProductFlowAnalysis.product.code')}: {product.productCode}</small><small>{t('warehouseProductFlowAnalysis.product.barcode')}: {product.barcode || '—'}</small><small>{product.categoryName || t('warehouseProductFlowAnalysis.product.uncategorized')} · {product.supplierName || t('warehouseProductFlowAnalysis.product.supplierUnmapped')}</small></span></button>
+              <button type="button" className={styles.candidateMain} disabled={!isProductSelected(selection, product.productCode)} onClick={() => { setCurrentProductCode(product.productCode); setCurrentProductSnapshot(product) }}><ProductImage src={product.imageUrl} alt={product.productName || product.productCode} size={48} /><span className={styles.candidateText}><strong>{t('warehouseProductFlowAnalysis.product.itemNumber')}: {product.itemNumber || '—'}</strong><span>{product.productName || product.englishName || t('warehouseProductFlowAnalysis.product.unnamed')}</span><small>{t('warehouseProductFlowAnalysis.product.code')}: {product.productCode}</small><small>{t('warehouseProductFlowAnalysis.product.barcode')}: {product.barcode || '—'}</small><small>{product.categoryName || t('warehouseProductFlowAnalysis.product.uncategorized')} · {product.supplierName || product.supplierCode || t('warehouseProductFlowAnalysis.product.supplierUnmapped')}</small></span></button>
             </div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('warehouseProductFlowAnalysis.empty.noProducts')} />}
           </LocalPanel>
           <Pagination size="small" current={candidatePage} total={candidates?.total || 0} pageSize={20} showSizeChanger={false} onChange={setCandidatePage} />

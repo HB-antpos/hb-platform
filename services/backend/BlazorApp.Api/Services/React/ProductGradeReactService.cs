@@ -94,11 +94,13 @@ namespace BlazorApp.Api.Services.React
 
                 if (!string.IsNullOrWhiteSpace(query.Search))
                 {
+                    // 没有「查看国内供应商名称」权限时，名称这一支换成匹配不到的占位关键词。
+                    var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(query.Search);
                     gradeQuery = gradeQuery.Where(
                         (g, d, s, w, p, c) =>
                             (d.HBProductNo != null && d.HBProductNo.Contains(query.Search))
                             || (d.ProductName != null && d.ProductName.Contains(query.Search))
-                            || (s.SupplierName != null && s.SupplierName.Contains(query.Search))
+                            || (s.SupplierName != null && s.SupplierName.Contains(supplierNameKeyword))
                             || (d.SupplierCode != null && d.SupplierCode.Contains(query.Search))
                     );
                 }
@@ -213,6 +215,10 @@ namespace BlazorApp.Api.Services.React
                         "hbproductno" => isDesc
                             ? gradeQuery.OrderByDescending((g, d, s, w, p, c) => d.HBProductNo)
                             : gradeQuery.OrderBy((g, d, s, w, p, c) => d.HBProductNo),
+                        // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+                        "suppliername" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => isDesc
+                            ? gradeQuery.OrderByDescending((g, d, s, w, p, c) => d.SupplierCode)
+                            : gradeQuery.OrderBy((g, d, s, w, p, c) => d.SupplierCode),
                         "suppliername" => isDesc
                             ? gradeQuery.OrderByDescending((g, d, s, w, p, c) => s.SupplierName)
                             : gradeQuery.OrderBy((g, d, s, w, p, c) => s.SupplierName),

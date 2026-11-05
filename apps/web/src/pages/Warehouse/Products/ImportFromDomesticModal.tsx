@@ -33,6 +33,8 @@ interface ImportFromDomesticModalProps {
   open: boolean
   onCancel: () => void
   onSuccess: () => void
+  /** 是否显示「供应商」列：该接口只返回国内供应商名称（没有代码），无查看名称权限时整列隐藏。 */
+  showSupplierName?: boolean
 }
 
 function sortByItemNumber<T extends { itemNumber?: string }>(items: T[]) {
@@ -71,6 +73,7 @@ export default function ImportFromDomesticModal({
   open,
   onCancel,
   onSuccess,
+  showSupplierName = true,
 }: ImportFromDomesticModalProps) {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
@@ -221,12 +224,15 @@ export default function ImportFromDomesticModal({
         width: 76,
         render: (value: number) => ProductTypeLabels[value as keyof typeof ProductTypeLabels] || '--',
       },
-      {
-        title: t('domesticProducts.supplier', '供应商'),
-        dataIndex: 'supplierName',
-        width: 132,
-        render: (value?: string) => value ? <div className="warehouse-import-domestic-two-line">{value}</div> : '--',
-      },
+      // 纯名称列：没有「查看国内供应商名称」权限时后端不返回名称，整列不显示，避免一列空值。
+      ...(showSupplierName
+        ? [{
+            title: t('domesticProducts.supplier', '供应商'),
+            dataIndex: 'supplierName',
+            width: 132,
+            render: (value?: string) => value ? <div className="warehouse-import-domestic-two-line">{value}</div> : '--',
+          }]
+        : []),
       {
         title: t('domesticProducts.domesticPrice', '国内价'),
         dataIndex: 'domesticPrice',
@@ -324,7 +330,7 @@ export default function ImportFromDomesticModal({
         ),
       },
     ],
-    [editablePrices],
+    [editablePrices, showSupplierName],
   )
 
   const handleImport = async () => {

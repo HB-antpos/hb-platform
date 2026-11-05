@@ -4,6 +4,7 @@ using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Logging;
 using SqlSugar;
@@ -47,6 +48,10 @@ namespace BlazorApp.Api.Services
         {
             try
             {
+                // 没有「查看国内供应商名称」权限时，供应商名称这一支换成匹配不到的占位关键词。
+                var supplierNameFilter = DomesticSupplierInfoMasking.GuardNameKeyword(
+                    filter.LocalSupplierCode ?? string.Empty
+                );
                 // 构建查询条件 - 通过DomesticProduct获取供应商信息
                 var query = _db.Queryable<WarehouseProduct>()
                     .LeftJoin<Product>((wp, p) => wp.ProductCode == p.ProductCode)
@@ -63,7 +68,7 @@ namespace BlazorApp.Api.Services
                     .WhereIF(!string.IsNullOrEmpty(filter.LocalSupplierCode),
                         (wp, p, dp, cs) => (dp.SupplierCode != null && dp.SupplierCode.Contains(filter.LocalSupplierCode!)) ||
                                            (cs.SupplierCode != null && cs.SupplierCode.Contains(filter.LocalSupplierCode!)) ||
-                                           (cs.SupplierName != null && cs.SupplierName.Contains(filter.LocalSupplierCode!)))
+                                           (cs.SupplierName != null && cs.SupplierName.Contains(supplierNameFilter)))
                     .WhereIF(filter.DomesticPriceMin.HasValue,
                         (wp, p, dp, cs) => wp.DomesticPrice >= filter.DomesticPriceMin)
                     .WhereIF(filter.DomesticPriceMax.HasValue,

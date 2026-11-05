@@ -104,6 +104,7 @@ export const P = {
     ManageSuppliers: 'DomesticPurchase.ManageSuppliers',
     ManageProducts: 'DomesticPurchase.ManageProducts',
     ManagePrefixCodes: 'DomesticPurchase.ManagePrefixCodes',
+    ViewSupplierName: 'DomesticPurchase.ViewSupplierName',
   },
   Reports: {
     View: 'Reports.View',

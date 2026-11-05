@@ -60,19 +60,24 @@ internal sealed class ProductWarehouseMobileSlice
                     mobileLookupPattern = BuildSqlServerContainsPattern(
                         trimmed.ToUpperInvariant()
                     ),
+                    // 没有「查看国内供应商名称」权限（含设备头放行的 PDA）时换成匹配不到的占位关键词，不能按名称搜出商品。
+                    mobileLookupSupplierNamePattern = BuildSqlServerContainsPattern(
+                        DomesticSupplierInfoMasking.GuardNameKeyword(trimmed).ToUpperInvariant()
+                    ),
                 }
             );
         }
         else
         {
             var lowered = trimmed.ToLower();
+            var loweredSupplierName = DomesticSupplierInfoMasking.GuardNameKeyword(lowered);
             joined = joined.Where((w, p, dp, s, pl, l, pg) =>
                 (w.ProductCode != null && w.ProductCode.ToLower().Contains(lowered))
                 || (p.ProductName != null && p.ProductName.ToLower().Contains(lowered))
                 || (p.ItemNumber != null && p.ItemNumber.ToLower().Contains(lowered))
                 || (p.Barcode != null && p.Barcode.ToLower().Contains(lowered))
                 || (p.LocalSupplierCode != null && p.LocalSupplierCode.ToLower().Contains(lowered))
-                || (s.SupplierName != null && s.SupplierName.ToLower().Contains(lowered))
+                || (s.SupplierName != null && s.SupplierName.ToLower().Contains(loweredSupplierName))
                 || (s.SupplierCode != null && s.SupplierCode.ToLower().Contains(lowered))
                 || (l.LocationCode != null && l.LocationCode.ToLower().Contains(lowered))
                 || (l.LocationBarcode != null && l.LocationBarcode.ToLower().Contains(lowered))
@@ -150,6 +155,12 @@ internal sealed class ProductWarehouseMobileSlice
     internal const string MobileLookupPatternParameter = "@mobileLookupPattern";
 
     /// <summary>
+    /// 国内供应商名称两处匹配专用的参数：有名称权限时与 <see cref="MobileLookupPatternParameter"/> 同值，
+    /// 无权限时是匹配不到的占位关键词。两个参数名互不为前缀，避免参数替换时相互干扰。
+    /// </summary>
+    internal const string MobileLookupSupplierNamePatternParameter = "@mobileLookupSupplierNamePattern";
+
+    /// <summary>
     /// SQL Server 移动端查询过滤，接在 7 表联接之后，依赖 lambda 别名 [w]/[p]/[s]/[l]。
     /// 内层：四类来源（仓库编码、商品名称/货号/条码/本地供应商、国内供应商、货位）各自 UNION 出 varchar 候选编码，
     /// 再按货号取前 50 个商品；TOP 50 行必然落在货号前 50 个命中商品内，所以结果与原宽 OR 一致。
@@ -170,7 +181,7 @@ internal sealed class ProductWarehouseMobileSlice
         + " UNION SELECT CAST([mdp].[ProductCode] AS varchar(255)) FROM [DomesticProduct] [mdp]"
         + " INNER JOIN [ChinaSupplier] [ms] ON [ms].[SupplierCode] = [mdp].[SupplierCode] AND [ms].[IsDeleted] = 0"
         + " WHERE [mdp].[IsDeleted] = 0 AND ("
-        + SqlServerContainsMatch("[ms].[SupplierName]")
+        + SqlServerContainsMatch("[ms].[SupplierName]", MobileLookupSupplierNamePatternParameter)
         + " OR " + SqlServerContainsMatch("[ms].[SupplierCode]") + ")"
         + " UNION SELECT [mpl].[ProductCode] FROM [ProductLocation] [mpl]"
         + " INNER JOIN [Location] [ml] ON [ml].[LocationGuid] = [mpl].[LocationGuid] AND [ml].[IsDeleted] = 0"
@@ -187,7 +198,7 @@ internal sealed class ProductWarehouseMobileSlice
         + " OR " + SqlServerContainsMatch("[p].[ItemNumber]")
         + " OR " + SqlServerContainsMatch("[p].[Barcode]")
         + " OR " + SqlServerContainsMatch("[p].[LocalSupplierCode]")
-        + " OR " + SqlServerContainsMatch("[s].[SupplierName]")
+        + " OR " + SqlServerContainsMatch("[s].[SupplierName]", MobileLookupSupplierNamePatternParameter)
         + " OR " + SqlServerContainsMatch("[s].[SupplierCode]")
         + " OR " + SqlServerContainsMatch("[l].[LocationCode]")
         + " OR " + SqlServerContainsMatch("[l].[LocationBarcode]") + "))";
@@ -196,9 +207,12 @@ internal sealed class ProductWarehouseMobileSlice
     /// UPPER + BIN2 逐字节比较替代 CI 排序规则 LIKE，大小写不敏感由 UPPER 保证。
     /// 先转 nvarchar 再 COLLATE：varchar 列直接 COLLATE 到 Latin1 会按 1252 代码页重解释，中文永远匹配不到。
     /// </summary>
-    private static string SqlServerContainsMatch(string column) =>
+    private static string SqlServerContainsMatch(
+        string column,
+        string parameter = MobileLookupPatternParameter
+    ) =>
         "UPPER(CAST(" + column + " AS nvarchar(4000))) COLLATE Latin1_General_100_BIN2 LIKE "
-        + MobileLookupPatternParameter;
+        + parameter;
 
     /// <summary>把用户输入里的 LIKE 通配符按方括号转义后包成包含匹配，输入须已转大写。</summary>
     internal static string BuildSqlServerContainsPattern(string upperKeyword)

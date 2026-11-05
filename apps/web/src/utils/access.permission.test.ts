@@ -1948,4 +1948,46 @@ assertEqual(
   '从角色菜单授予陈列图只补 Planogram.View，不连带授予工作台（它自带后台入口）',
 )
 
+// 查看国内供应商名称：专用权限、管理国内供应商、管理员三者之一即可；其余账号只看到供应商代码。
+assertEqual(P.DomesticPurchase.ViewSupplierName, 'DomesticPurchase.ViewSupplierName', '权限码须与后端一致')
+assertEqual(buildAccess(null).canViewDomesticSupplierName, false, '未登录默认不可见国内供应商名称')
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [] })).canViewDomesticSupplierName,
+  false,
+  '没有任何权限时不可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ViewSupplierName] })).canViewDomesticSupplierName,
+  true,
+  '持有 DomesticPurchase.ViewSupplierName 可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ManageSuppliers] })).canViewDomesticSupplierName,
+  true,
+  '管理国内供应商的账号视为可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ roleNames: ['Admin'] })).canViewDomesticSupplierName,
+  true,
+  '管理员可见国内供应商名称',
+)
+const domesticProductManager = buildAccess(createCurrentUser({
+  permissions: [P.DomesticPurchase.ManageProducts, P.DomesticPurchase.ManagePrefixCodes, P.Warehouse.Manage],
+}))
+assertEqual(
+  domesticProductManager.canViewDomesticSupplierName,
+  false,
+  '管理国内商品 / 前缀码 / 仓库的权限不连带国内供应商名称',
+)
+assertEqual(
+  domesticProductManager.canManageDomesticSuppliers,
+  false,
+  '查看名称的判断不得反过来放开国内供应商管理',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ViewSupplierName] })).canManageDomesticSuppliers,
+  false,
+  '只有查看名称权限时不得进入国内供应商管理',
+)
+
 console.log('access.permission.test: ok')

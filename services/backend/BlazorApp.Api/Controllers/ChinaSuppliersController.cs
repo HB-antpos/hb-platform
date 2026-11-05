@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -155,6 +156,19 @@ namespace BlazorApp.Api.Controllers
         {
             try
             {
+                // 没有「查看国内供应商名称」权限的账号拿到的名称、联系方式都是空的，
+                // 表单原样提交会把空值写回数据库，所以整单拒绝修改。
+                if (!await HttpContext.CanViewDomesticSupplierNameAsync())
+                {
+                    return StatusCode(
+                        StatusCodes.Status403Forbidden,
+                        ApiResponse<ChinaSupplierDto>.Error(
+                            "没有查看国内供应商名称的权限，不能修改供应商资料",
+                            "DOMESTIC_SUPPLIER_NAME_FORBIDDEN"
+                        )
+                    );
+                }
+
                 if (!ModelState.IsValid)
                 {
                     return BadRequest(

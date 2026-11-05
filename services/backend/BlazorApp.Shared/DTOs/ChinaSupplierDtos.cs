@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System.ComponentModel.DataAnnotations;
 
 namespace BlazorApp.Shared.DTOs
@@ -131,36 +133,43 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 供应商名称
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         
         /// <summary>
         /// 店铺号
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ShopNumber { get; set; }
         
         /// <summary>
         /// 联系人
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ContactPerson { get; set; }
         
         /// <summary>
         /// 电话
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Phone { get; set; }
         
         /// <summary>
         /// 邮箱
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Email { get; set; }
         
         /// <summary>
         /// 店面照片URL
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? StorefrontPhoto { get; set; }
         
         /// <summary>
         /// 备注信息
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Remarks { get; set; }
         
         /// <summary>

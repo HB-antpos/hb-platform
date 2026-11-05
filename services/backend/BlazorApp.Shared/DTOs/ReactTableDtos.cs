@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 
@@ -32,8 +34,10 @@ namespace BlazorApp.Shared.DTOs
         public string? CategoryName { get; set; }
         public List<string> LocationCodes { get; set; } = new List<string>();
         public List<string> LocationBarcodes { get; set; } = new List<string>();
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public string? SupplierCode { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? DomesticSupplierName { get; set; }
         public string? DomesticSupplierCode { get; set; }
         public decimal? DomesticPrice { get; set; }

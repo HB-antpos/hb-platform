@@ -22,6 +22,7 @@ import {
   fetchDomesticSuppliers,
   updateDomesticProduct,
 } from "@/modules/domestic-purchase/api";
+import { formatDomesticSupplierLabel } from "@/modules/domestic-purchase/supplier-label";
 import type {
   DomesticProductListItem,
   DomesticSupplierOption,
@@ -103,7 +104,8 @@ function buildEditState(product: DomesticProductListItem): DomesticProductEditSt
 
 function buildCopyText(product: DomesticProductListItem, labels: Record<string, string>) {
   return [
-    `${labels.supplier}: ${formatDisplayValue([product.supplierCode, product.supplierName].filter(Boolean).join(" - "))}`,
+    // 没有「查看国内供应商名称」权限时名称为空，复制出去的文本也只带供应商代码。
+    `${labels.supplier}: ${formatDisplayValue(formatDomesticSupplierLabel(product.supplierCode, product.supplierName))}`,
     `${labels.image}: ${formatDisplayValue(product.productImage)}`,
     `${labels.itemNumber}: ${formatDisplayValue(product.hbProductNo)}`,
     `${labels.barcode}: ${formatDisplayValue(product.barcode)}`,
@@ -217,12 +219,13 @@ export function DomesticProductList() {
 
   // 筛选弹窗选项：首项 value 为空串 =「全部供应商」（与价格策略页同一约定）；
   // 搜索由 OptionPickerSheet 按 label / value 过滤，label 含编码与名称，两者都能搜到。
+  // 没有「查看国内供应商名称」权限时名称为空，label 只剩供应商代码（也就只能按代码搜）。
   const supplierPickerOptions = useMemo(
     () => [
       { value: "", label: t("productList.filters.allSuppliers") },
       ...sortedSuppliers.map((supplier) => ({
         value: supplier.supplierCode,
-        label: `${supplier.supplierCode} - ${supplier.supplierName}`,
+        label: formatDomesticSupplierLabel(supplier.supplierCode, supplier.supplierName),
       })),
     ],
     [sortedSuppliers, t]
@@ -403,7 +406,7 @@ export function DomesticProductList() {
                   {formatDisplayValue(item.productName)}
                 </Text>
                 <Text variant="bodySmall" style={styles.mutedText}>
-                  {formatDisplayValue([item.supplierCode, item.supplierName].filter(Boolean).join(" - "))}
+                  {formatDisplayValue(formatDomesticSupplierLabel(item.supplierCode, item.supplierName))}
                 </Text>
               </View>
             </View>
@@ -454,7 +457,7 @@ export function DomesticProductList() {
 
         <Button mode="outlined" onPress={() => setSupplierModalVisible(true)} style={styles.fullButton}>
           {selectedSupplier
-            ? `${selectedSupplier.supplierCode} - ${selectedSupplier.supplierName}`
+            ? formatDomesticSupplierLabel(selectedSupplier.supplierCode, selectedSupplier.supplierName)
             : t("productList.filters.allSuppliers")}
         </Button>
 
@@ -680,7 +683,7 @@ export function DomesticProductList() {
                   </Text>
                   <Text variant="bodySmall" style={styles.mutedText}>
                     {t("productList.fields.supplier")}:{" "}
-                    {formatDisplayValue([editingProduct?.supplierCode, editingProduct?.supplierName].filter(Boolean).join(" - "))}
+                    {formatDisplayValue(formatDomesticSupplierLabel(editingProduct?.supplierCode, editingProduct?.supplierName))}
                   </Text>
                 </View>
                 <View style={styles.modalActions}>

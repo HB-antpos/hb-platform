@@ -34,12 +34,16 @@ function SupplierSelectInner({ suppliers, ...selectProps }: SupplierSelectProps,
         if (!keyword) return true
         return `${option?.label ?? ''}`.toLowerCase().includes(keyword) || `${option?.code ?? ''}`.toLowerCase().includes(keyword)
       }}
-      optionRender={(option) => (
-        <span className="pc-supplier-option">
-          <span className="pc-supplier-option-name">{option.label}</span>
-          <span className="pc-supplier-option-code">{(option.data as { code?: string }).code}</span>
-        </span>
-      )}
+      optionRender={(option) => {
+        const code = (option.data as { code?: string }).code
+        return (
+          <span className="pc-supplier-option">
+            <span className="pc-supplier-option-name">{option.label}</span>
+            {/* 没有名称（无「查看国内供应商名称」权限）时名称位已是编码，旁边不再重复。 */}
+            {code !== option.label ? <span className="pc-supplier-option-code">{code}</span> : null}
+          </span>
+        )
+      }}
       {...selectProps}
       options={options}
     />

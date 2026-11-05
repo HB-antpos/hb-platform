@@ -116,6 +116,8 @@ export interface AccessControl {
   canManageDomesticSuppliers: boolean
   canManageDomesticProducts: boolean
   canManageDomesticPrefixCodes: boolean
+  /** 可查看国内供应商名称（无权限时后端只返回供应商代码） */
+  canViewDomesticSupplierName: boolean
   canViewAttendanceSchedule: boolean
   canEditAttendanceSchedule: boolean
   canViewAttendanceAvailability: boolean

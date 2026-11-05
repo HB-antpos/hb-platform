@@ -72,12 +72,14 @@ namespace BlazorApp.Api.Services.React
 
                 if (!string.IsNullOrWhiteSpace(query.Search))
                 {
+                    // 没有「查看国内供应商名称」权限时，名称、店铺号两支换成匹配不到的占位关键词。
+                    var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(query.Search);
                     prefixQuery = prefixQuery.Where((p, s) =>
                         p.PrefixName.Contains(query.Search) ||
                         (p.PrefixDescription != null && p.PrefixDescription.Contains(query.Search)) ||
-                        (s.SupplierName != null && s.SupplierName.Contains(query.Search)) ||
+                        (s.SupplierName != null && s.SupplierName.Contains(supplierNameKeyword)) ||
                         p.SupplierCode.Contains(query.Search) ||
-                        (s.ShopNumber != null && s.ShopNumber.Contains(query.Search)));
+                        (s.ShopNumber != null && s.ShopNumber.Contains(supplierNameKeyword)));
                 }
 
                 if (!string.IsNullOrWhiteSpace(query.SupplierCode))
@@ -100,6 +102,10 @@ namespace BlazorApp.Api.Services.React
                         "prefixname" => isDescending
                             ? prefixQuery.OrderByDescending((p, s) => p.PrefixName)
                             : prefixQuery.OrderBy((p, s) => p.PrefixName),
+                        // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+                        "suppliername" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => isDescending
+                            ? prefixQuery.OrderByDescending((p, s) => p.SupplierCode)
+                            : prefixQuery.OrderBy((p, s) => p.SupplierCode),
                         "suppliername" => isDescending
                             ? prefixQuery.OrderByDescending((p, s) => s.SupplierName)
                             : prefixQuery.OrderBy((p, s) => s.SupplierName),

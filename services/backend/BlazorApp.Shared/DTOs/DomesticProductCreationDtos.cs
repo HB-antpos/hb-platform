@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
@@ -176,6 +177,7 @@ namespace BlazorApp.Shared.DTOs
     {
         public string BatchNumber { get; set; } = string.Empty;
         public string SupplierCode { get; set; } = string.Empty;
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public DateTime CreatedTime { get; set; }
         public int NormalProductCount { get; set; }
@@ -191,6 +193,7 @@ namespace BlazorApp.Shared.DTOs
     {
         public string BatchNumber { get; set; } = string.Empty;
         public string SupplierCode { get; set; } = string.Empty;
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public DateTime CreatedTime { get; set; }
         public string? Remark { get; set; }

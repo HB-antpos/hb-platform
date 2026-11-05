@@ -9,6 +9,7 @@ import {
   type PasteImportPreviewItem,
   type PasteImportResult,
 } from '../../../types/productGrade'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
 interface Props {
@@ -43,7 +44,8 @@ export default function PasteImportModal({ open, onClose, onSuccess }: Props) {
       const result = await getActiveChinaSuppliers()
       setSuppliers(
         result.map((item) => ({
-          label: `${item.supplierCode} - ${item.supplierName}`,
+          // 无「查看国内供应商名称」权限时名称为空，只显示代码。
+          label: formatDomesticSupplierLabel(item.supplierCode, item.supplierName),
           value: item.supplierCode,
         })),
       )

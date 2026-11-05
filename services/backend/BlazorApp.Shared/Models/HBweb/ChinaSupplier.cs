@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using SqlSugar;
 using System;
 
@@ -25,42 +27,49 @@ namespace BlazorApp.Shared.Models
         /// 供应商名称
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
 
         /// <summary>
         /// 店铺/商店编号
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ShopNumber { get; set; }
 
         /// <summary>
         /// 联系人姓名
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ContactPerson { get; set; }
 
         /// <summary>
         /// 电话号码
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Phone { get; set; }
 
         /// <summary>
         /// 邮箱地址
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Email { get; set; }
 
         /// <summary>
         /// 门店照片URL/路径
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? StorefrontPhoto { get; set; }
 
         /// <summary>
         /// 附加备注或说明
         /// </summary>
         [SugarColumn(IsNullable = true)]
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Remarks { get; set; }
 
         /// <summary>

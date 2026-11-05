@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -293,6 +295,7 @@ namespace BlazorApp.Shared.DTOs
         public decimal OEMPrice { get; set; }
         public decimal ImportPrice { get; set; }
         public decimal? Volume { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public int? SupplierId { get; set; }
         public bool HasSetProducts { get; set; }
@@ -577,6 +580,7 @@ namespace BlazorApp.Shared.DTOs
         public string? ProductTypeLabel { get; set; }
         public string? LocalSupplierCode { get; set; }
         public string? SupplierCode { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public string? Grade { get; set; }
         /// <summary>
@@ -645,6 +649,7 @@ namespace BlazorApp.Shared.DTOs
         public string ProductName { get; set; } = string.Empty;
         public string? ItemNumber { get; set; }
         public string? Barcode { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public decimal? RetailPrice { get; set; }
         public decimal? DomesticPrice { get; set; }

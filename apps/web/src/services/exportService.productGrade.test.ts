@@ -70,6 +70,39 @@ function withWindowOrigin(origin: string, run: () => void) {
 }
 
 {
+  // 没有查看国内供应商名称权限：后端不返回名称，导出不得留下空的「供应商」名称列。
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet('商品等级')
+
+  const result = populateProductGradesWorksheet(
+    worksheet,
+    [createSampleProduct({ supplierName: undefined })],
+    { includeSupplierName: false },
+  )
+
+  const headers = Array.from({ length: worksheet.columnCount }, (_, index) => worksheet.getRow(1).getCell(index + 1).value)
+  assertEqual(headers.includes('供应商'), false, '无名称权限时不应导出「供应商」名称列')
+  assertEqual(headers[0], '供应商编码', '无名称权限时首列应为供应商编码')
+  assertEqual(worksheet.getRow(2).getCell(1).value, 'SUP001', '供应商编码应照常导出')
+  assertEqual(worksheet.getRow(2).getCell(2).value, 'HB100-001', '去掉名称列后其余列应整体前移')
+  assertEqual(result.productImageColIndex, 3, '图片列序号应随名称列去掉而前移')
+  assertEqual(worksheet.getRow(1).getCell(4).value, '商品图片', '图片列表头应与返回的列序号一致')
+  assertEqual(worksheet.getRow(2).getCell(7).numFmt, '¥#,##0.00', '去掉名称列后国内价仍应使用 RMB 格式')
+}
+
+{
+  // 默认（有权限）保持原有两列：供应商名称 + 供应商编码。
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet('商品等级')
+
+  populateProductGradesWorksheet(worksheet, [createSampleProduct()])
+
+  assertEqual(worksheet.getRow(1).getCell(1).value, '供应商', '默认导出应保留供应商名称列')
+  assertEqual(worksheet.getRow(1).getCell(2).value, '供应商编码', '默认导出应保留供应商编码列')
+  assertEqual(worksheet.getRow(2).getCell(1).value, '义乌供应商', '默认导出应写入供应商名称')
+}
+
+{
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet('商品等级')
 

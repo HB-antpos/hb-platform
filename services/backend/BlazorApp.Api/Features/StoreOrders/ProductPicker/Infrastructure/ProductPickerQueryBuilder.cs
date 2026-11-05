@@ -1,5 +1,6 @@
 using BlazorApp.Api.Features.StoreOrders.ProductPicker.Domain;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
 using SqlSugar;
@@ -101,6 +102,8 @@ internal static class ProductPickerQueryBuilder
         var supplierKeyword = NormalizeColumnFilterText(filters.SupplierKeyword);
         if (supplierKeyword != null)
         {
+            // 没有「查看国内供应商名称」权限的账号只能按供应商代码筛选：名称、店铺号两支换成匹配不到的占位关键词。
+            var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(supplierKeyword);
             query = query.Where(
                 (product, warehouseProduct, category, supplier) =>
                     SqlFunc.Subqueryable<DomesticProduct>()
@@ -123,13 +126,13 @@ internal static class ProductPickerQueryBuilder
                                             chinaSupplier.SupplierName != null
                                             && chinaSupplier.SupplierName
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                         || (
                                             chinaSupplier.ShopNumber != null
                                             && chinaSupplier.ShopNumber
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                     )
                                 )
@@ -250,6 +253,8 @@ internal static class ProductPickerQueryBuilder
         var supplierKeyword = NormalizeColumnFilterText(filters.SupplierKeyword);
         if (supplierKeyword != null)
         {
+            // 没有「查看国内供应商名称」权限的账号只能按供应商代码筛选：名称、店铺号两支换成匹配不到的占位关键词。
+            var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(supplierKeyword);
             query = query.Where(
                 (product, warehouseProduct, category) =>
                     SqlFunc.Subqueryable<DomesticProduct>()
@@ -272,13 +277,13 @@ internal static class ProductPickerQueryBuilder
                                             chinaSupplier.SupplierName != null
                                             && chinaSupplier.SupplierName
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                         || (
                                             chinaSupplier.ShopNumber != null
                                             && chinaSupplier.ShopNumber
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                     )
                                 )
@@ -399,6 +404,8 @@ internal static class ProductPickerQueryBuilder
         var supplierKeyword = NormalizeColumnFilterText(filters.SupplierKeyword);
         if (supplierKeyword != null)
         {
+            // 没有「查看国内供应商名称」权限的账号只能按供应商代码筛选：名称、店铺号两支换成匹配不到的占位关键词。
+            var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(supplierKeyword);
             query = query.Where(
                 (product, category, supplier) =>
                     SqlFunc.Subqueryable<DomesticProduct>()
@@ -421,13 +428,13 @@ internal static class ProductPickerQueryBuilder
                                             chinaSupplier.SupplierName != null
                                             && chinaSupplier.SupplierName
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                         || (
                                             chinaSupplier.ShopNumber != null
                                             && chinaSupplier.ShopNumber
                                                 .ToLower()
-                                                .Contains(supplierKeyword)
+                                                .Contains(supplierNameKeyword)
                                         )
                                     )
                                 )

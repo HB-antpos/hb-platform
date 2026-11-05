@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs
 {
     /// <summary>
@@ -441,6 +444,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 供应商名称
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string SupplierName { get; set; } = string.Empty;
 
         /// <summary>
@@ -679,6 +683,17 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>同期成本状态：Complete、Missing 或 NoActivity。</summary>
         public string CompareCostStatus { get; set; } = "NoActivity";
+
+        /// <summary>
+        /// 返回把名称换成供应商代码的浅拷贝。本 DTO 国内、澳洲供应商行混用，不能在属性上直接挂遮罩；
+        /// 无国内供应商名称权限时由接口对国内供应商行调用。不改动缓存里被共用的原对象。
+        /// </summary>
+        public StoreSupplierSalesDto WithSupplierCodeAsName()
+        {
+            var copy = (StoreSupplierSalesDto)MemberwiseClone();
+            copy.SupplierName = copy.SupplierCode;
+            return copy;
+        }
     }
 
     /// <summary>
@@ -960,6 +975,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 供应商名称
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string SupplierName { get; set; } = string.Empty;
 
         /// <summary>
@@ -1165,6 +1181,17 @@ namespace BlazorApp.Shared.DTOs
         public decimal? CompareShare { get; set; }
         public decimal? ChinaShare { get; set; }
         public decimal? CompareChinaShare { get; set; }
+
+        /// <summary>
+        /// 返回去掉名称的浅拷贝。本 DTO 被供应商 / 分店 / 商品三栏以及国内、澳洲两种范围共用，
+        /// 不能在 Name 属性上直接挂遮罩；国内供应商栏无名称权限时由接口调用本方法。不改动可能被缓存共用的原对象。
+        /// </summary>
+        public SalesDetailRowDto WithoutName()
+        {
+            var copy = (SalesDetailRowDto)MemberwiseClone();
+            copy.Name = string.Empty;
+            return copy;
+        }
     }
 
     /// <summary>
@@ -1176,6 +1203,15 @@ namespace BlazorApp.Shared.DTOs
         public int Total { get; set; }
         public SalesDetailRowDto? Summary { get; set; }
         public string? OrderCountNote { get; set; }
+
+        /// <summary>返回各行去掉名称的副本（国内供应商栏无名称权限时使用）；合计行与其余字段沿用原引用，原对象不变。</summary>
+        public SalesDetailSectionResultDto WithoutRowNames() => new()
+        {
+            Rows = Rows.Select(row => row.WithoutName()).ToList(),
+            Total = Total,
+            Summary = Summary,
+            OrderCountNote = OrderCountNote,
+        };
     }
 
     /// <summary>
@@ -1247,6 +1283,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 供应商名称
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
 
         /// <summary>
@@ -1672,6 +1709,7 @@ namespace BlazorApp.Shared.DTOs
     public sealed class CompactSalesBoardChinaSupplierDto
     {
         public string SupplierCode { get; set; } = string.Empty;
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string SupplierName { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
         public int TotalQuantity { get; set; }
@@ -1696,6 +1734,7 @@ namespace BlazorApp.Shared.DTOs
         public string? ProductImage { get; set; }
         public string? ProductName { get; set; }
         public string? ChinaSupplierCode { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? ChinaSupplierName { get; set; }
         public int TotalQuantity { get; set; }
         public decimal UnitPrice { get; set; }

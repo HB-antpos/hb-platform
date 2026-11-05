@@ -59,6 +59,8 @@ import {
   getGradesByProductCodes,
   getProductGradeList,
 } from '../../../services/productGradeService'
+import { useAuthStore } from '../../../store/auth'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import {
   PRODUCT_GRADE_CONFIG,
   type ProductGradeListItem,
@@ -350,6 +352,7 @@ function ProductGradeWarehouseStatusCell({ record }: { record: ProductGradeListI
 
 export default function ProductGradeManagementPage() {
   const { t, i18n } = useTranslation()
+  const canViewDomesticSupplierName = useAuthStore((state) => state.access.canViewDomesticSupplierName)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<ProductGradeListItem[]>([])
   const [page, setPage] = useState(1)
@@ -439,7 +442,8 @@ export default function ProductGradeManagementPage() {
       const result = await getActiveChinaSuppliers(controller.signal)
       setSuppliers(
         result.map((item) => ({
-          label: `${item.supplierCode} - ${item.supplierName}`,
+          // 无「查看国内供应商名称」权限时名称为空，只显示代码。
+          label: formatDomesticSupplierLabel(item.supplierCode, item.supplierName),
           value: item.supplierCode,
         })),
       )
@@ -780,6 +784,8 @@ export default function ProductGradeManagementPage() {
 
       const result = await exportProductGradesToExcel(orderedRows, {
         includeProductImage: exportIncludeImage,
+        // 没有名称权限时后端不返回供应商名称，导出只保留「供应商编码」列，不留空的名称列。
+        includeSupplierName: canViewDomesticSupplierName,
         fileName: t('productGrade.exportFileName'),
         onProgress: (progress, nextMessage) => {
           setExportProgress(progress)

@@ -113,6 +113,7 @@ function createEmptyAccess(): AccessControl {
     canManageDomesticSuppliers: false,
     canManageDomesticProducts: false,
     canManageDomesticPrefixCodes: false,
+    canViewDomesticSupplierName: false,
     canViewAttendanceSchedule: false,
     canEditAttendanceSchedule: false,
     canViewAttendanceAvailability: false,
@@ -366,6 +367,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageDomesticProducts = isAdmin || hasPermission(P.DomesticPurchase.ManageProducts)
   const canManageDomesticPrefixCodes =
     isAdmin || hasPermission(P.DomesticPurchase.ManagePrefixCodes)
+  // 国内供应商名称：管理国内供应商的账号也视为可见
+  const canViewDomesticSupplierName =
+    canManageDomesticSuppliers || hasPermission(P.DomesticPurchase.ViewSupplierName)
 
   // 排班考勤
   const canViewAttendanceSchedule =
@@ -567,6 +571,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageDomesticSuppliers,
     canManageDomesticProducts,
     canManageDomesticPrefixCodes,
+    canViewDomesticSupplierName,
     canViewAttendanceSchedule,
     canEditAttendanceSchedule,
     canViewAttendanceAvailability,
