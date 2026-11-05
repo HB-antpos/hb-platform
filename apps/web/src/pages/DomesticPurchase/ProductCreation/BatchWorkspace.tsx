@@ -375,7 +375,8 @@ export default function BatchWorkspace({ suppliers, suppliersLoading, onExit, on
       <SetTemplateDrawer
         open={templateDrawerOpen}
         supplierCode={supplierCode}
-        supplierName={supplierName}
+        // 没有「查看国内供应商名称」权限时名称为空，副标题回退到供应商编码。
+        supplierName={supplierName || supplierCode}
         onClose={() => setTemplateDrawerOpen(false)}
         onChanged={() => {
           if (supplierCode) void loadTemplates(supplierCode)
@@ -396,7 +397,7 @@ export default function BatchWorkspace({ suppliers, suppliersLoading, onExit, on
         open={previewOpen}
         products={products}
         prefixCode={prefixCode}
-        supplierName={supplierName}
+        supplierName={supplierName || supplierCode}
         onClose={() => setPreviewOpen(false)}
       />
     </div>

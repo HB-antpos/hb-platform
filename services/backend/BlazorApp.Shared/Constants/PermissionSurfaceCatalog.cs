@@ -164,6 +164,7 @@ namespace BlazorApp.Shared.Constants
             "DomesticPurchase.ManagePrefixCodes",
             "DomesticPurchase.ManageProducts",
             "DomesticPurchase.ManageSuppliers",
+            "DomesticPurchase.ViewSupplierName",
             "EmployeeProfiles.Edit",
             "EmployeeProfiles.EditManagedStore",
             "EmployeeProfiles.ReviewSensitiveManagedStore",

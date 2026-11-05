@@ -1,5 +1,36 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs
 {
+    /// <summary>
+    /// 「国内供应商引用列表」专用 JSON 转换器。<see cref="ProductSalesSupplierRefDto"/> 被澳洲与国内两个列表共用，
+    /// 不能直接在 Name 属性上挂遮罩（会连澳洲供应商名称一起遮掉），所以只挂在 ChinaSuppliers 列表属性上：
+    /// 遮罩作用域内每一项只输出代码，作用域外与读取原样。输出的是临时副本，不改动缓存里的原对象。
+    /// </summary>
+    public sealed class ChinaSupplierRefListJsonConverter : JsonConverter<List<ProductSalesSupplierRefDto>>
+    {
+        // 转换器是挂在属性上的，这里按类型再走一次默认序列化不会递归回本转换器。
+        public override List<ProductSalesSupplierRefDto>? Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options
+        ) => JsonSerializer.Deserialize<List<ProductSalesSupplierRefDto>>(ref reader, options);
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            List<ProductSalesSupplierRefDto> value,
+            JsonSerializerOptions options
+        )
+        {
+            var output = DomesticSupplierInfoMasking.IsMaskingActive
+                ? value.Select(item => new ProductSalesSupplierRefDto { Code = item.Code }).ToList()
+                : value;
+            JsonSerializer.Serialize(writer, output, options);
+        }
+    }
+
     /// <summary>
     /// 商品日分店统计的只读完整性状态。
     /// 旧报表接口保留原有 data 形状，仅在外层附加此状态的字段。
@@ -135,6 +166,7 @@ namespace BlazorApp.Shared.DTOs
         public string? EnglishName { get; set; }
         public string? ImageUrl { get; set; }
         public List<ProductSalesSupplierRefDto> AustralianSuppliers { get; set; } = new();
+        [JsonConverter(typeof(ChinaSupplierRefListJsonConverter))]
         public List<ProductSalesSupplierRefDto> ChinaSuppliers { get; set; } = new();
         public bool ChinaSupplierUnmapped { get; set; }
         public ProductSalesAnalysisMetricsDto Metrics { get; set; } = new();
@@ -166,6 +198,7 @@ namespace BlazorApp.Shared.DTOs
     public class ProductSalesAnalysisOptionsDto
     {
         public List<ProductSalesSupplierRefDto> AustralianSuppliers { get; set; } = new();
+        [JsonConverter(typeof(ChinaSupplierRefListJsonConverter))]
         public List<ProductSalesSupplierRefDto> ChinaSuppliers { get; set; } = new();
     }
 }

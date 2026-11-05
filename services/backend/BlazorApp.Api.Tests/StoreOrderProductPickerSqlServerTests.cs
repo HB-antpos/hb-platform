@@ -9,6 +9,7 @@ using BlazorApp.Api.Features.StoreOrders.ProductPicker.Domain;
 using BlazorApp.Api.Features.StoreOrders.ProductPicker.Infrastructure;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
@@ -141,6 +142,45 @@ public sealed class StoreOrderProductPickerSqlServerTests
         Assert.True(comparedPages > Cases.Length * 2, $"只比对了 {comparedPages} 页");
         // 造数要让每种形态都有命中，空结果对照没有区分度；只有“分类不存在”应为空。
         Assert.Equal(new[] { "分类不存在" }, emptyCases);
+    }
+
+    /// <summary>
+    /// 没有「查看国内供应商名称」权限的账号，供应商关键字只按供应商代码匹配；
+    /// 名称、店铺号两支换成匹配不到的占位关键词。原生 SQL 与 SqlSugar 两种写法都要成立。
+    /// </summary>
+    [StoreOrderProductPickerSqlServerFact]
+    public async Task 无国内供应商名称权限_供应商关键字只按代码匹配_名称与店号筛不出结果()
+    {
+        await using var fixture = await PickerSqlServerFixture.CreateAsync();
+        var store = fixture.CreatePageQueryStore(location: false);
+
+        async Task<(int Native, int Legacy)> CountAsync(string keyword)
+        {
+            var native = await store.GetPagedListAsync(
+                ToInput(Filter(columns: new StoreOrderProductColumnFiltersDto { SupplierKeyword = keyword }))
+            );
+            var legacy = await store.GetPagedListWithSqlSugarAsync(
+                ToInput(Filter(columns: new StoreOrderProductColumnFiltersDto { SupplierKeyword = keyword }))
+            );
+            return (native.Total, legacy.Total);
+        }
+
+        // 有权限（请求之外）：名称、店铺号、代码三种关键字都能命中，且两种写法一致。
+        foreach (var keyword in new[] { "礼品", "z-01", "hb215" })
+        {
+            var (native, legacy) = await CountAsync(keyword);
+            Assert.True(native > 0, $"关键字 {keyword} 应有命中");
+            Assert.Equal(legacy, native);
+        }
+
+        using (DomesticSupplierInfoMasking.BeginQueryScope(canView: false))
+        {
+            Assert.Equal((0, 0), await CountAsync("礼品"));
+            Assert.Equal((0, 0), await CountAsync("z-01"));
+            var (native, legacy) = await CountAsync("hb215");
+            Assert.True(native > 0, "按供应商代码筛选应仍有命中");
+            Assert.Equal(legacy, native);
+        }
     }
 
     [StoreOrderProductPickerSqlServerFact]

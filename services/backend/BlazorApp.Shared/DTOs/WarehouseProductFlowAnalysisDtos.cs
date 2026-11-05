@@ -82,6 +82,7 @@ namespace BlazorApp.Shared.DTOs
     {
         public string Code { get; set; } = string.Empty;
 
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? Name { get; set; }
     }
 
@@ -134,6 +135,7 @@ namespace BlazorApp.Shared.DTOs
 
         public string? SupplierCode { get; set; }
 
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
 
         public WarehouseProductFlowMetricsDto Metrics { get; set; } = new();
@@ -185,6 +187,7 @@ namespace BlazorApp.Shared.DTOs
 
         public decimal? InboundUnitPrice { get; set; }
 
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
     }
 

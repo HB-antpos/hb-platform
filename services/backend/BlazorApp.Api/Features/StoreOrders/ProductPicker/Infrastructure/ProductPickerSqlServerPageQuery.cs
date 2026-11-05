@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using BlazorApp.Api.Features.StoreOrders.ProductPicker.Domain;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using SqlSugar;
 // 项目全局引用了 SqlSugar，其 DbType 与 ADO.NET 参数类型同名。
 using AdoDbType = System.Data.DbType;
@@ -217,14 +218,20 @@ internal static class ProductPickerSqlServerPageQuery
             // 并按 商品编码 / 货号=HBProductNo / 条码 三种方式之一关联。拆成三个去重派生表分别左连接，
             // 任一命中即等价于 EXISTS。
             var keyword = AddString("@ColumnSupplierKeyword", supplierKeyword);
+            // 没有「查看国内供应商名称」权限的账号只能按供应商代码筛选：名称、店铺号两支用独立参数，
+            // 无权限时参数值是匹配不到的占位关键词；SQL 文本不随权限变化，仍复用同一份计划。
+            var nameKeyword = AddString(
+                "@ColumnSupplierNameKeyword",
+                DomesticSupplierInfoMasking.GuardNameKeyword(supplierKeyword)
+            );
             var source =
                 "FROM [ChinaSupplier] cs" + noLockHint
                 + " INNER LOOP JOIN [DomesticProduct] dps" + noLockHint
                 + " ON dps.[SupplierCode] = cs.[SupplierCode]"
                 + " WHERE cs.[IsDeleted] = 0 AND cs.[Status] = 1 AND dps.[IsDeleted] = 0 AND ("
                 + ContainsCondition("cs.[SupplierCode]", keyword) + " OR "
-                + ContainsCondition("cs.[SupplierName]", keyword) + " OR "
-                + ContainsCondition("cs.[ShopNumber]", keyword) + ")";
+                + ContainsCondition("cs.[SupplierName]", nameKeyword) + " OR "
+                + ContainsCondition("cs.[ShopNumber]", nameKeyword) + ")";
             from.Append("LEFT HASH JOIN (SELECT DISTINCT dps.[ProductCode] ")
                 .Append(source)
                 .AppendLine(") supplierByCode ON supplierByCode.[ProductCode] = p.[ProductCode]");

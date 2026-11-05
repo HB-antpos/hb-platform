@@ -2,6 +2,7 @@
 // 全部写成不依赖 React / antd 的纯函数，便于在 Node 下直接做单元测试。
 
 import { ProductType } from '../../../types/domesticProduct'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import { allocateCappedColumns, type CappedColumn } from '../tableWidthLogic'
 import type {
   CreateDomesticProductPayload,
@@ -206,9 +207,11 @@ export interface SupplierSelectOption {
 export function buildSupplierOptions(suppliers: SupplierOption[]): SupplierSelectOption[] {
   return suppliers.map((item) => ({
     value: item.code,
-    label: `${item.code} - ${item.name}${item.shopNumber ? ` - ${item.shopNumber}` : ''}`,
+    // 没有「查看国内供应商名称」权限时名称、店铺号都不返回：只显示编码，不留「HB012 - 」。
+    label: `${formatDomesticSupplierLabel(item.code, item.name)}${item.shopNumber ? ` - ${item.shopNumber}` : ''}`,
     shortLabel: item.name || item.code,
-    searchText: `${item.code} ${item.name} ${item.shopNumber ?? ''}`.toLowerCase(),
+    // 无名称权限时 name 为空，不能把字面量 "null" 拼进搜索文本。
+    searchText: `${item.code} ${item.name ?? ''} ${item.shopNumber ?? ''}`.toLowerCase(),
   }))
 }
 

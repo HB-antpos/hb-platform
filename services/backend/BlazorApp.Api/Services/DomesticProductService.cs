@@ -149,9 +149,11 @@ namespace BlazorApp.Api.Services
                 // 供应商名称筛选
                 if (!string.IsNullOrWhiteSpace(query.SupplierName))
                 {
+                    // 没有「查看国内供应商名称」权限的账号按名称筛选时筛不出结果，不能借筛选试探名称。
+                    var supplierNameFilter = DomesticSupplierInfoMasking.GuardNameKeyword(query.SupplierName);
                     productQuery = productQuery.Where(
                         (p, s) =>
-                            s.SupplierName != null && s.SupplierName.Contains(query.SupplierName)
+                            s.SupplierName != null && s.SupplierName.Contains(supplierNameFilter)
                     );
                 }
 
@@ -213,6 +215,10 @@ namespace BlazorApp.Api.Services
                             ? productQuery.OrderByDescending((p, s) => p.HBProductNo)
                             : productQuery.OrderBy((p, s) => p.HBProductNo),
                         "suppliercode" => isDescending
+                            ? productQuery.OrderByDescending((p, s) => p.SupplierCode)
+                            : productQuery.OrderBy((p, s) => p.SupplierCode),
+                        // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+                        "suppliername" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => isDescending
                             ? productQuery.OrderByDescending((p, s) => p.SupplierCode)
                             : productQuery.OrderBy((p, s) => p.SupplierCode),
                         "suppliername" => isDescending
@@ -1241,6 +1247,10 @@ namespace BlazorApp.Api.Services
                     ),
                     _ => queryable,
                 },
+                // 没有「查看国内供应商名称」权限的账号按名称列筛选时筛不出结果（名称不可能等于占位值）。
+                "Supplier.SupplierName" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => queryable.Where(
+                    (p, s) => s.SupplierName == DomesticSupplierInfoMasking.BlockedNameKeyword
+                ),
                 "Supplier.SupplierName" => firstCondition.Operator switch
                 {
                     FilterOperator.Contains => queryable.Where(
@@ -1382,6 +1392,10 @@ namespace BlazorApp.Api.Services
                     FilterOperator.Equals => queryable.Where((p, s) => p.SupplierCode == value),
                     _ => queryable,
                 },
+                // 没有「查看国内供应商名称」权限的账号按名称列筛选时筛不出结果（名称不可能等于占位值）。
+                "Supplier.SupplierName" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => queryable.Where(
+                    (p, s) => s.SupplierName == DomesticSupplierInfoMasking.BlockedNameKeyword
+                ),
                 "Supplier.SupplierName" => condition.Operator switch
                 {
                     FilterOperator.Contains => queryable.Where(
@@ -1436,6 +1450,10 @@ namespace BlazorApp.Api.Services
                 "suppliercode" => isDescending
                     ? queryable.OrderByDescending((p, s) => p.SupplierCode)
                     : queryable.OrderBy((p, s) => p.SupplierCode),
+                // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+                "suppliername" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => isDescending
+                    ? queryable.OrderByDescending((p, s) => p.SupplierCode)
+                    : queryable.OrderBy((p, s) => p.SupplierCode),
                 "suppliername" => isDescending
                     ? queryable.OrderByDescending((p, s) => s.SupplierName)
                     : queryable.OrderBy((p, s) => s.SupplierName),
@@ -1485,6 +1503,10 @@ namespace BlazorApp.Api.Services
                     ? products.OrderByDescending(p => p.HBProductNo).ToList()
                     : products.OrderBy(p => p.HBProductNo).ToList(),
                 "suppliercode" => isDescending
+                    ? products.OrderByDescending(p => p.SupplierCode).ToList()
+                    : products.OrderBy(p => p.SupplierCode).ToList(),
+                // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+                "suppliername" when !DomesticSupplierInfoMasking.IsNameSearchAllowed => isDescending
                     ? products.OrderByDescending(p => p.SupplierCode).ToList()
                     : products.OrderBy(p => p.SupplierCode).ToList(),
                 "suppliername" => isDescending
@@ -3840,6 +3862,7 @@ namespace BlazorApp.Api.Services
                 if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
                 {
                     var keyword = request.GlobalSearch.Trim();
+                    var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
                     query = query.Where(
                         (p, s) =>
                             (p.ProductName != null && p.ProductName.Contains(keyword))
@@ -3849,7 +3872,11 @@ namespace BlazorApp.Api.Services
                                 p.EnglishProductName != null
                                 && p.EnglishProductName.Contains(keyword)
                             )
-                            || (s.SupplierName != null && s.SupplierName.Contains(keyword))
+                            // 没有「查看国内供应商名称」权限时，名称这一支换成匹配不到的占位关键词。
+                            || (
+                                s.SupplierName != null
+                                && s.SupplierName.Contains(supplierNameKeyword)
+                            )
                             || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
                     );
                 }
@@ -3880,6 +3907,7 @@ namespace BlazorApp.Api.Services
                 if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
                 {
                     var keyword = request.GlobalSearch.Trim();
+                    var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
                     countQuery = countQuery.Where(
                         (p, s) =>
                             (p.ProductName != null && p.ProductName.Contains(keyword))
@@ -3890,7 +3918,11 @@ namespace BlazorApp.Api.Services
                                 && p.EnglishProductName.Contains(keyword)
                             )
                             || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
-                            || (s.SupplierName != null && s.SupplierName.Contains(keyword))
+                            // 没有「查看国内供应商名称」权限时，名称这一支换成匹配不到的占位关键词。
+                            || (
+                                s.SupplierName != null
+                                && s.SupplierName.Contains(supplierNameKeyword)
+                            )
                     );
                 }
 

@@ -6,6 +6,7 @@ import { CreateBatchKeyboard, CreateBatchNumberInput } from "./CreateBatchNumber
 import { CreateBatchProductEditor } from "./CreateBatchProductEditor";
 import { newProduct, validSubItems, type ProductDraft } from "./create-batch-draft";
 import { sortSuppliersByName } from "@/shared/utils/name-sort";
+import { formatDomesticSupplierLabel } from "./supplier-label";
 import { ProductCreationType } from "./types";
 import { useCreateBatch, type CreateBatchCallbacks } from "./use-create-batch";
 
@@ -24,7 +25,8 @@ export function CreateBatchModal(props: CreateBatchCallbacks) {
   const filtering = form.query.trim().toLocaleLowerCase();
   const steps = [t("wizard.stepSupplier"), t("wizard.stepProducts"), t("wizard.stepConfirm")];
   const panelTitle = form.panel ? t(`wizard.panels.${form.panel}`) : t("create.title");
-  const supplierLabel = form.supplier ? `${form.supplier.supplierCode} · ${form.supplier.supplierName}` : t("create.selectSupplier");
+  // 没有「查看国内供应商名称」权限时名称为空，只显示供应商代码。
+  const supplierLabel = form.supplier ? formatDomesticSupplierLabel(form.supplier.supplierCode, form.supplier.supplierName, " · ") : t("create.selectSupplier");
   const prefixLabel = form.prefix ? [form.prefix.prefixName, form.prefix.prefixDescription].filter(Boolean).join(" · ") : t("create.noPrefix");
   const choosing = form.panel === "supplier" || form.panel === "prefix" || form.panel === "templates";
 
@@ -47,7 +49,7 @@ export function CreateBatchModal(props: CreateBatchCallbacks) {
   }, [setProducts]);
 
   const options = form.panel === "supplier"
-    ? sortedSuppliers.map((supplier) => ({ key: supplier.supplierCode, title: `${supplier.supplierCode} · ${supplier.supplierName}`, description: "", selected: supplier.supplierCode === form.supplier?.supplierCode, select: () => form.selectSupplier(supplier) }))
+    ? sortedSuppliers.map((supplier) => ({ key: supplier.supplierCode, title: formatDomesticSupplierLabel(supplier.supplierCode, supplier.supplierName, " · "), description: "", selected: supplier.supplierCode === form.supplier?.supplierCode, select: () => form.selectSupplier(supplier) }))
     : form.panel === "prefix"
       ? [{ key: "__none__", title: t("create.noPrefix"), description: "", selected: !form.prefix, select: () => form.selectPrefix(null) }, ...form.prefixes.map((prefix) => ({ key: prefix.prefixCode || prefix.prefixName, title: prefix.prefixName || prefix.prefixCode, description: prefix.prefixDescription || "", selected: Boolean(form.prefix && prefix.prefixCode === form.prefix.prefixCode && prefix.prefixName === form.prefix.prefixName), select: () => form.selectPrefix(prefix) }))]
       : form.templates.map((template) => ({ key: template.templateId, title: template.templateName, description: `${template.setProductName} · ${t("wizard.subItems", { count: template.setQuantity })}`, selected: false, select: () => void form.apply(template.templateId) }));

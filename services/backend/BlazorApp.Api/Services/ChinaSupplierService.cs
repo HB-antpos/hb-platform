@@ -1,6 +1,7 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HqEntities;
 using Microsoft.Extensions.Logging;
@@ -42,15 +43,23 @@ namespace BlazorApp.Api.Services
                 // 构建基础查询
                 var supplierQuery = db.Queryable<ChinaSupplier>();
 
+                // 没有「查看国内供应商名称」权限的账号只能按代码搜索和排序：
+                // 否则反复用名称片段去搜，就能把被遮掉的名称、店铺号、联系人一点点试出来。
+                var allowNameSearch = DomesticSupplierInfoMasking.IsNameSearchAllowed;
+
                 // 搜索条件 - 供应商名称、代码、联系人
                 if (!string.IsNullOrEmpty(query.Search))
                 {
-                    supplierQuery = supplierQuery.Where(s =>
-                        (s.SupplierName != null && s.SupplierName.Contains(query.Search))
-                        || (s.SupplierCode != null && s.SupplierCode.Contains(query.Search))
-                        || (s.ShopNumber != null && s.ShopNumber.Contains(query.Search))
-                        || (s.ContactPerson != null && s.ContactPerson.Contains(query.Search))
-                    );
+                    supplierQuery = allowNameSearch
+                        ? supplierQuery.Where(s =>
+                            (s.SupplierName != null && s.SupplierName.Contains(query.Search))
+                            || (s.SupplierCode != null && s.SupplierCode.Contains(query.Search))
+                            || (s.ShopNumber != null && s.ShopNumber.Contains(query.Search))
+                            || (s.ContactPerson != null && s.ContactPerson.Contains(query.Search))
+                        )
+                        : supplierQuery.Where(s =>
+                            s.SupplierCode != null && s.SupplierCode.Contains(query.Search)
+                        );
                 }
 
                 // 状态筛选
@@ -75,7 +84,17 @@ namespace BlazorApp.Api.Services
                         !string.IsNullOrEmpty(query.SortDirection)
                         && query.SortDirection.ToLower() == "desc";
 
-                    supplierQuery = query.SortField.ToLower() switch
+                    // 按被遮掉的字段排序会泄露它们的相对顺序，无权限时一律改按代码排。
+                    var sortField = query.SortField.ToLower();
+                    if (
+                        !allowNameSearch
+                        && sortField is "suppliername" or "shopnumber" or "contactperson" or "phone"
+                    )
+                    {
+                        sortField = "suppliercode";
+                    }
+
+                    supplierQuery = sortField switch
                     {
                         "suppliercode" => isDescending
                             ? supplierQuery.OrderByDescending(s => s.SupplierCode)
@@ -736,7 +755,10 @@ namespace BlazorApp.Api.Services
                     {
                         result.FailCount++;
                         result.Errors.Add(
-                            $"{supplier.SupplierCode}({supplier.SupplierName}): {ex.Message}"
+                            // 错误文本会原样返回给调用方：没有「查看国内供应商名称」权限时只带供应商代码。
+                            DomesticSupplierInfoMasking.IsNameVisibleInCurrentAction
+                                ? $"{supplier.SupplierCode}({supplier.SupplierName}): {ex.Message}"
+                                : $"{supplier.SupplierCode}: {ex.Message}"
                         );
                         _logger.LogError(ex, "同步供应商 {Code} 失败", supplier.SupplierCode);
                     }

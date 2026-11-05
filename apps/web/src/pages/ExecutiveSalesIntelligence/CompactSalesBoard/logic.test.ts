@@ -1,6 +1,7 @@
 import {
   buildPanelKeys,
   buildRequestKey,
+  buildSupplierSelection,
   defaultProductSort,
   describeExportFilters,
   describeProductSort,
@@ -112,6 +113,14 @@ assert(shouldHandleEscape(null), '无目标元素时可处理 Esc')
 assertEqual(describeExportFilters(base), '全部国内供应商 · 全部分店', '无筛选时说明全部范围')
 assertEqual(describeExportFilters({ ...base, branch, supplier, keyword: ' 笔 ' }), '国内供应商 玛索文具（HB215） · 分店 Glendale（1012） · 搜索「笔」', '供应商在前、分店在后，并附搜索词')
 assertEqual(describeExportFilters({ ...base, branch: { code: '1012', label: '1012' } }), '分店 1012', '名称缺失时只写代码')
+
+// 国内供应商选中项：没有名称权限时后端不返回名称（或服务层用代码兜底），标签只显示代码，不带重复的代码明细。
+assertEqual(buildSupplierSelection('HB215', '玛索文具'), { code: 'HB215', label: '玛索文具', detail: 'HB215' }, '有名称时标签为名称、明细为代码')
+assertEqual(buildSupplierSelection('HB215', undefined), { code: 'HB215', label: 'HB215' }, '名称缺失时只显示代码')
+assertEqual(buildSupplierSelection('HB215', null), { code: 'HB215', label: 'HB215' }, '名称为 null 时只显示代码')
+assertEqual(buildSupplierSelection('HB215', ''), { code: 'HB215', label: 'HB215' }, '名称为空串时只显示代码')
+assertEqual(buildSupplierSelection('HB215', 'HB215'), { code: 'HB215', label: 'HB215' }, '名称被兜底成代码时不重复显示')
+assertEqual(describeExportFilters({ ...base, supplier: buildSupplierSelection('HB215', null) }), '国内供应商 HB215', '无名称时导出说明只写代码')
 
 // 偏好存储：默认折叠；存储不可用或抛错时退回默认值且不影响使用。
 const memory = new Map<string, string>()

@@ -27,6 +27,7 @@ import {
 } from '../../../services/chinaSupplierService'
 import type { ChinaSupplierItem, ChinaSupplierListParams } from '../../../types/chinaSupplier'
 import { copyTextToClipboard } from '../../../utils/clipboard'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import {
   createLatestRequestGuard,
   runLatestGuardedRequest,
@@ -313,7 +314,7 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.confirmToggle', {
         action: disabling ? t('chinaSuppliers.actionDisable') : t('chinaSuppliers.actionEnable'),
       }),
-      content: `${record.supplierCode} ${record.supplierName}`,
+      content: formatDomesticSupplierLabel(record.supplierCode, record.supplierName, ' '),
       okText: t('common.confirm'),
       cancelText: t('common.cancel'),
       okButtonProps: { danger: disabling },
@@ -326,7 +327,7 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.confirmDelete'),
       content: (
         <>
-          <div>{`${record.supplierCode} ${record.supplierName}`}</div>
+          <div>{formatDomesticSupplierLabel(record.supplierCode, record.supplierName, ' ')}</div>
           <div>{t('chinaSuppliers.deleteWarning')}</div>
         </>
       ),
@@ -397,14 +398,17 @@ export default function DomesticChinaSuppliersPage() {
       sortOrder: sortOrderForColumn('supplierName', sort),
       render: (_value: string, record) => (
         <div className="china-sup-two">
-          <div className="china-sup-name-row">
-            <span className="china-sup-name" title={record.supplierName}>{record.supplierName}</span>
-            {record.remarks ? (
-              <Tooltip title={record.remarks}>
-                <InfoCircleOutlined className="china-sup-note" tabIndex={0} aria-label={t('common.remarks')} />
-              </Tooltip>
-            ) : null}
-          </div>
+          {/* 名称与备注都没有时（后端按权限不返回名称）不留空行，只显示下面的代码行。 */}
+          {record.supplierName || record.remarks ? (
+            <div className="china-sup-name-row">
+              <span className="china-sup-name" title={record.supplierName}>{record.supplierName}</span>
+              {record.remarks ? (
+                <Tooltip title={record.remarks}>
+                  <InfoCircleOutlined className="china-sup-note" tabIndex={0} aria-label={t('common.remarks')} />
+                </Tooltip>
+              ) : null}
+            </div>
+          ) : null}
           <div className="china-sup-code-row">
             <span className="china-sup-mono china-sup-sub">{record.supplierCode}</span>
             <Tooltip title={t('common.copy')}>

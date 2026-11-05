@@ -218,6 +218,10 @@
       "name": "管理国内供应商",
       "description": "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"
     },
+    "DomesticPurchase.ViewSupplierName": {
+      "name": "查看国内供应商名称",
+      "description": "Web 与移动端所有显示国内供应商的页面及导出文件 - 默认只显示供应商代码（如 HB196），有此权限才显示供应商名称、店铺号、联系人与联系方式"
+    },
     "EmployeeProfiles.EditPositionType": {
       "name": "修改职位类型",
       "description": "修改全职、兼职、临时工等职位类型，保存时仍需维护员工个人信息权限。"

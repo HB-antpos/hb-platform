@@ -88,7 +88,7 @@ const normalProduct: DomesticProductItem = {
 }
 
 // —— 列表列：勾选 + 序号 + 9 列 = 11 列，没有条码画布 ——
-function renderTable(canWrite: boolean, page = 1) {
+function renderTable(canWrite: boolean, page = 1, dataSource: DomesticProductItem[] = [setProduct, normalProduct]) {
   return renderToStaticMarkup(
     <MeasuredTable
       metricId="domestic-products-render-test"
@@ -97,7 +97,7 @@ function renderTable(canWrite: boolean, page = 1) {
       scroll={{ x: LIST_TABLE_MIN_WIDTH }}
       pagination={false}
       rowSelection={{ columnWidth: 44 }}
-      dataSource={[setProduct, normalProduct]}
+      dataSource={dataSource}
       columns={buildProductColumns({
         t,
         sortField: 'updatedAt',
@@ -150,6 +150,19 @@ assert.ok(tableMarkup.includes('aria-label="更多操作"'), '更多菜单按钮
 assert.equal((tableMarkup.match(/ant-table-column-has-sorters/g) ?? []).length, 4, '恰好四列可排序（商品 / 货号 / 供应商 / 更新）')
 assert.ok(tableMarkup.includes('aria-sort="descending"'), '默认按更新降序，当前排序列带 aria-sort')
 assert.ok(!renderTable(false).includes('>编辑<'), '无编辑权限时不显示「编辑」')
+
+// —— 没有「查看国内供应商名称」权限：后端不返回名称（服务层归一成空串），供应商列只显示一次编码 ——
+const hiddenNameProduct: DomesticProductItem = { ...normalProduct, id: 'P9', supplierCode: 'HB196', supplierName: '' }
+const hiddenNameMarkup = renderTable(true, 1, [hiddenNameProduct])
+assert.equal((hiddenNameMarkup.match(/>HB196</g) ?? []).length, 1, '没有名称时供应商列只显示一次编码')
+assert.ok(hiddenNameMarkup.includes('<span class="dp-c2-t" title="HB196">HB196</span>'), '没有名称时主行直接显示编码')
+assert.ok(!/<span class="dp-c2-t"[^>]*>--<\/span>/.test(hiddenNameMarkup), '没有名称时不得显示「--」占位再跟一行编码')
+assert.ok(!/>(null|undefined)</.test(hiddenNameMarkup), '不得把 null / undefined 渲染进单元格')
+const hiddenNameBodyMarkup = renderToStaticMarkup(
+  <ProductDetailBody product={hiddenNameProduct} setItems={[]} setItemsLoading={false} setItemsFailed={false} />,
+)
+assert.ok(hiddenNameBodyMarkup.includes('<span class="dp-mono">HB196</span>'), '抽屉里没有名称时仍显示供应商编码')
+assert.ok(!/>(null|undefined)</.test(hiddenNameBodyMarkup), '抽屉里不得渲染 null / undefined')
 
 // —— 抽屉：头部 / 主体 ——
 const headerMarkup = renderToStaticMarkup(<ProductDetailHeader product={setProduct} />)

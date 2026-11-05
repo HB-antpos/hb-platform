@@ -16,6 +16,7 @@ import {
   type CompactSalesBoardStore,
   type DateRange,
 } from '../../../services/salesDashboardService'
+import { hasDomesticSupplierName } from '../../../utils/domesticSupplierLabel'
 import styles from './styles.module.css'
 import { MAX_REPORT_DAYS, quickDateSelection, type QuickRange as ReportQuickRange } from '../ReportWorkbench/logic'
 import { MAX_PRODUCT_IMAGE_EXPORT_ROWS } from '../SalesDetailAnalysisV2/logic'
@@ -24,6 +25,7 @@ import type { CompactBoardExportProgress } from './export'
 import {
   buildPanelKeys,
   buildRequestKey,
+  buildSupplierSelection,
   defaultProductSort,
   describeExportFilters,
   describeProductSort,
@@ -161,6 +163,7 @@ function ShareBar({ value, total, compact, title }: { value: number; total: numb
 const CompactSalesBoardPage: React.FC = () => {
   const { active } = useKeepAliveContext()
   const access = useAuthStore((state) => state.access)
+  const canViewDomesticSupplierName = access.canViewDomesticSupplierName
   const rawManagedStoreCodes = access.managedStoreCodes?.() ?? undefined
   const managedStoreCodesKey = rawManagedStoreCodes?.join('|') ?? 'ALL'
   const managedStoreCodes = useMemo(
@@ -406,7 +409,8 @@ const CompactSalesBoardPage: React.FC = () => {
     {
       title: '国内供应商', dataIndex: 'supplierName', key: 'supplierName', ellipsis: true,
       sorter: (a, b) => a.supplierName.localeCompare(b.supplierName, 'zh-CN'), sortDirections: ['ascend', 'descend'],
-      render: (_, record) => <div className={styles.primaryCell}><span>{record.supplierName || record.supplierCode}</span><small>{record.supplierCode}<i>·</i>{formatInteger(record.productCount)} 款</small></div>,
+      // 中文注释：没有名称（无「查看国内供应商名称」权限）时主行已是代码，副行不再重复代码，只留款数。
+      render: (_, record) => <div className={styles.primaryCell}><span>{record.supplierName || record.supplierCode}</span><small>{hasDomesticSupplierName(record.supplierCode, record.supplierName) && <>{record.supplierCode}<i>·</i></>}{formatInteger(record.productCount)} 款</small></div>,
     },
     { title: '金额', dataIndex: 'totalAmount', key: 'totalAmount', align: 'right', width: amountWidth, className: styles.numCell, defaultSortOrder: 'descend', sorter: (a, b) => a.totalAmount - b.totalAmount, sortDirections: ['descend', 'ascend'], render: (value: number) => <span className={styles.num}>{formatCurrency(value)}</span> },
     { title: '数量', dataIndex: 'totalQuantity', key: 'totalQuantity', align: 'right', width: quantityWidth, className: styles.numCell, sorter: (a, b) => a.totalQuantity - b.totalQuantity, sortDirections: ['descend', 'ascend'], render: formatInteger },
@@ -473,7 +477,7 @@ const CompactSalesBoardPage: React.FC = () => {
               onClick={(event) => {
                 // 中文注释：只切换供应商，不触发整行的商品选中。
                 event.stopPropagation()
-                selectSupplier({ code: value, label: record.chinaSupplierName || value, detail: value })
+                selectSupplier(buildSupplierSelection(value, record.chinaSupplierName))
               }}
               onKeyDown={(event) => event.stopPropagation()}
             >
@@ -527,6 +531,8 @@ const CompactSalesBoardPage: React.FC = () => {
         fileSuffix: mode === 'page' ? `第${details.pageIndex}页` : '全部',
         scopeAmount: details.scopeAmount,
         firstRank: mode === 'page' ? (details.pageIndex - 1) * details.pageSize + 1 : 1,
+        // 中文注释：没有名称权限时后端不返回国内供应商名称，导出只保留代码列。
+        includeSupplierName: canViewDomesticSupplierName,
         signal: controller.signal,
         onProgress: (progress) => setExportProgress({ ...progress, finalizing: false }),
         onFinalize: () => setExportProgress({ text: '正在生成 Excel 文件…', finalizing: true }),
@@ -543,7 +549,7 @@ const CompactSalesBoardPage: React.FC = () => {
       if (exportAbortRef.current === controller) exportAbortRef.current = null
       setExportProgress(null)
     }
-  }, [board.productDetails, filterState, managedStoreCodes])
+  }, [board.productDetails, canViewDomesticSupplierName, filterState, managedStoreCodes])
 
   const selectableRow = (selection: BoardSelection, selected: boolean, onSelect: (next: BoardSelection) => void) => ({
     role: 'button',
@@ -644,7 +650,7 @@ const CompactSalesBoardPage: React.FC = () => {
     <>
       {selectedSupplier && (
         <span className={`${styles.chip} ${styles.chipSupplier}`}>
-          <i /><span>国内供应商</span><b>{selectedSupplier.label}</b><small>{selectedSupplier.detail}</small>
+          <i /><span>国内供应商</span><b>{selectedSupplier.label}</b>{selectedSupplier.detail && <small>{selectedSupplier.detail}</small>}
           {removable && <button type="button" aria-label="移除国内供应商筛选" onClick={() => { setSelectedSupplier(null); setPageIndex(1) }}><CloseOutlined /></button>}
         </span>
       )}
@@ -731,7 +737,7 @@ const CompactSalesBoardPage: React.FC = () => {
             locale={{ emptyText: emptyText(suppliersStale) }}
             scroll={{ y: tableBodyHeight }}
             rowClassName={(record) => rowClassName(record.supplierCode === selectedSupplier?.code)}
-            onRow={(record) => selectableRow({ code: record.supplierCode, label: record.supplierName || record.supplierCode, detail: record.supplierCode }, record.supplierCode === selectedSupplier?.code, selectSupplier)}
+            onRow={(record) => selectableRow(buildSupplierSelection(record.supplierCode, record.supplierName), record.supplierCode === selectedSupplier?.code, selectSupplier)}
           />
         </section>
 

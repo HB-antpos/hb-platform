@@ -96,6 +96,8 @@ export interface AccessControl {
   canDeleteContainer: boolean;
   /** 可点按钮查看完整货柜编号（默认只显示后 4 位） */
   canViewFullContainerNumber: boolean;
+  /** 可查看国内供应商名称（没有时后端只返回供应商代码，如 HB196） */
+  canViewDomesticSupplierName: boolean;
   canManageStore: boolean;
   canViewReports: boolean;
   canViewDeviceRegistration: boolean;

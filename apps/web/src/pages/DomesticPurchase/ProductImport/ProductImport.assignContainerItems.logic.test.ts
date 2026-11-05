@@ -100,7 +100,8 @@ assertDeepEqual(
   [
     pageSource.includes('searchText: [s.supplierCode, s.supplierName, s.shopNumber]'),
     pageSource.includes('String(option?.searchText || option?.label || option?.value || \'\').toLowerCase()'),
-    pageSource.includes('label: `${s.supplierCode} - ${s.supplierName}${s.shopNumber ? ` - ${s.shopNumber}` : \'\'}'),
+    // 名称缺失（没有查看国内供应商名称权限）时只显示编码，由 formatDomesticSupplierLabel 统一处理。
+    pageSource.includes('label: `${formatDomesticSupplierLabel(s.supplierCode, s.supplierName)}${s.shopNumber ? ` - ${s.shopNumber}` : \'\'}'),
   ],
   [true, true, true],
   '商品导入供应商搜索应覆盖编码、名称、店号和完整展示文本',

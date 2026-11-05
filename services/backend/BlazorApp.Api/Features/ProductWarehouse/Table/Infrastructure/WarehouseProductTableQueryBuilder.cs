@@ -74,6 +74,8 @@ internal sealed class WarehouseProductTableQueryBuilder : ProductWarehouseSliceB
                     }
             );
 
+        // 没有「查看国内供应商名称」权限的账号不能按名称搜出商品：名称这一支换成匹配不到的占位关键词。
+        var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
         var domesticSupplierNameQuery = _context
             .Db.Queryable<DomesticProduct>()
             .InnerJoin<ChinaSupplier>(
@@ -86,7 +88,7 @@ internal sealed class WarehouseProductTableQueryBuilder : ProductWarehouseSliceB
                     !domesticProduct.IsDeleted
                     && domesticProduct.ProductCode != null
                     && supplier.SupplierName != null
-                    && supplier.SupplierName.Contains(keyword)
+                    && supplier.SupplierName.Contains(supplierNameKeyword)
             )
             .Select(
                 (domesticProduct, supplier) =>

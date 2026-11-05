@@ -37,6 +37,7 @@ import {
 } from "@/modules/domestic-purchase/api";
 import { CreateBatchModal } from "@/modules/domestic-purchase/CreateBatchModal";
 import { DomesticProductList } from "@/modules/domestic-purchase/DomesticProductList";
+import { formatDomesticSupplierLabel } from "@/modules/domestic-purchase/supplier-label";
 import type {
   DomesticProductBatch,
   DomesticProductBatchDetail,
@@ -401,7 +402,7 @@ export default function DomesticPurchaseScreen() {
                       {item.batchNumber}
                     </Text>
                     <Text variant="bodySmall" style={styles.mutedText}>
-                      {item.supplierCode} {item.supplierName ? `- ${item.supplierName}` : ""}
+                      {formatDomesticSupplierLabel(item.supplierCode, item.supplierName)}
                     </Text>
                   </View>
                   <Text variant="labelMedium" style={styles.countBadge}>

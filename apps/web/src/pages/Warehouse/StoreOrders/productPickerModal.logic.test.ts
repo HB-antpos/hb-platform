@@ -91,7 +91,9 @@ async function main() {
 
   const supplierColumnFailure = await runTest('商品弹窗应显示供应商名称列', () => {
     assert(
-      detailSource.includes("title: t('column.supplierName', '供应商名称')") &&
+      // 列始终保留：有「查看国内供应商名称」权限时叫「供应商名称」，没有时改叫「供应商代码」并显示代码兜底。
+      detailSource.includes("? t('column.supplierName', '供应商名称')") &&
+        detailSource.includes(": t('column.supplierCode', '供应商代码')") &&
         detailSource.includes("dataIndex: 'domesticSupplierName'") &&
         detailSource.includes("record.domesticSupplierCode || '--'"),
       '商品弹窗缺少国内供应商名称列或编码兜底',

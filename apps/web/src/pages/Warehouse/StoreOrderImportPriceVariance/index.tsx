@@ -59,6 +59,7 @@ import type {
   StoreOrderImportPriceVarianceSummary,
   StoreOrderImportPriceVarianceSupplierSummary,
 } from '../../../types/storeOrder'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import {
@@ -482,7 +483,8 @@ export default function StoreOrderImportPriceVariancePage() {
         suppliers
           .filter((item) => Boolean(item.supplierCode))
           .map((item) => ({
-            label: `${item.supplierCode} - ${item.supplierName || item.supplierCode}`,
+            // 无「查看国内供应商名称」权限时名称为空，只显示代码（不再拼成「代码 - 代码」）。
+            label: formatDomesticSupplierLabel(item.supplierCode, item.supplierName),
             value: item.supplierCode,
           })),
       )
@@ -1409,7 +1411,7 @@ export default function StoreOrderImportPriceVariancePage() {
       return supplierOptions
     }
     const known = supplierRows.find((row) => row.supplierCode === code)
-    return [{ value: code, label: `${code} - ${known?.supplierName || code}` }, ...supplierOptions]
+    return [{ value: code, label: formatDomesticSupplierLabel(code, known?.supplierName) }, ...supplierOptions]
   }, [filterValues.supplierCode, supplierOptions, supplierRows])
 
   const directionLabel = (direction: StoreOrderImportPriceVarianceDirection) =>

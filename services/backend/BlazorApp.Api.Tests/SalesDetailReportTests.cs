@@ -5,6 +5,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
 using BlazorApp.Shared.Models.POSM;
@@ -105,6 +106,35 @@ public sealed class SalesDetailReportTests : IDisposable
             Range(day, day), SalesDetailKind.China, new() { "S1" }, search: "English",
             sections: new[] { SalesDetailSection.Products });
         Assert.Equal("P-HIGH", Assert.Single(englishSearch.Data!.Products!.Rows).Code);
+    }
+
+    /// <summary>
+    /// 没有「查看国内供应商名称」权限的账号不能拿关键词试探国内供应商名称（非 SQL Server 的通用查询路径）：
+    /// 名称这一支匹配不到，按供应商代码仍可命中。
+    /// </summary>
+    [Fact]
+    public async Task 无国内供应商名称权限时关键词不匹配国内供应商名称_按代码仍可命中()
+    {
+        var day = new DateTime(2026, 7, 9);
+        await SeedCatalogAsync("CN1", "Zebra Crafts");
+        await SeedProductAsync("P-HIGH");
+        await SeedStatisticAsync(day, "S1", "200", "P-HIGH", 20, 200m);
+        await SeedMappingAsync("P-HIGH", "CN1");
+
+        async Task<int> CountAsync(string search) =>
+            (await CreateService().GetSalesDetailReportAsync(
+                Range(day, day), SalesDetailKind.China, new() { "S1" }, search: search,
+                sections: new[] { SalesDetailSection.Products })).Data!.Products!.Rows.Count;
+
+        // 有权限（请求之外）：名称与代码都能命中。
+        Assert.Equal(1, await CountAsync("Zebra"));
+        Assert.Equal(1, await CountAsync("CN1"));
+
+        using (DomesticSupplierInfoMasking.BeginQueryScope(canView: false))
+        {
+            Assert.Equal(0, await CountAsync("Zebra"));
+            Assert.Equal(1, await CountAsync("CN1"));
+        }
     }
 
     [Fact]

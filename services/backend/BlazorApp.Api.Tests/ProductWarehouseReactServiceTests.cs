@@ -3551,8 +3551,11 @@ namespace BlazorApp.Api.Tests
             // 判别列必须是字面量才能命中 IsDeleted=0 过滤索引。
             Assert.Equal(8, CountOccurrences(filter, "[IsDeleted] = 0"));
             Assert.DoesNotContain("LOWER(", filter, StringComparison.OrdinalIgnoreCase);
-            // 候选 9 列 + 外层复核 9 列，全部走 UPPER + BIN2 且共用同一参数。
-            Assert.Equal(18, CountOccurrences(filter, "COLLATE Latin1_General_100_BIN2 LIKE @mobileLookupPattern"));
+            // 候选 9 列 + 外层复核 9 列，全部走 UPPER + BIN2；其中国内供应商名称 2 处用独立参数
+            // （无「查看国内供应商名称」权限时换成匹配不到的占位关键词），其余 16 处共用同一参数。
+            Assert.Equal(16, CountOccurrences(filter, "COLLATE Latin1_General_100_BIN2 LIKE @mobileLookupPattern"));
+            Assert.Equal(2, CountOccurrences(filter, "COLLATE Latin1_General_100_BIN2 LIKE @mobileLookupSupplierNamePattern"));
+            Assert.Equal(2, CountOccurrences(filter, "[SupplierName] AS nvarchar(4000))) COLLATE Latin1_General_100_BIN2 LIKE @mobileLookupSupplierNamePattern"));
             Assert.Equal(18, CountOccurrences(filter, "UPPER(CAST("));
             foreach (var column in new[]
             {

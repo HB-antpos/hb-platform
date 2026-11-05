@@ -253,6 +253,8 @@ namespace BlazorApp.Api.Services.React
             if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
             {
                 var keyword = request.GlobalSearch.Trim();
+                // 没有「查看国内供应商名称」权限时，名称这一支换成匹配不到的占位关键词。
+                var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
                 query = query.Where(
                     (p, s) =>
                         (p.ProductName != null && p.ProductName.Contains(keyword))
@@ -262,7 +264,7 @@ namespace BlazorApp.Api.Services.React
                             p.EnglishProductName != null
                             && p.EnglishProductName.Contains(keyword)
                         )
-                        || (s.SupplierName != null && s.SupplierName.Contains(keyword))
+                        || (s.SupplierName != null && s.SupplierName.Contains(supplierNameKeyword))
                         || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
                 );
             }

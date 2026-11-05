@@ -3,6 +3,7 @@ import type {
   CompactSalesBoardSortOrder,
   DateRange,
 } from '../../../services/salesDashboardService'
+import { hasDomesticSupplierName } from '../../../utils/domesticSupplierLabel'
 
 export interface BoardSelection {
   code: string
@@ -87,6 +88,16 @@ export function resolveSupplierToggle(
     ? null
     : current.product
   return { supplier, product }
+}
+
+/**
+ * 国内供应商的选中项。没有名称（账号无「查看国内供应商名称」权限，或服务层用代码兜底）时
+ * 标签就是代码，不再附带一份相同的代码明细，避免标签显示成「HB196 HB196」。
+ */
+export function buildSupplierSelection(code: string, name?: string | null): BoardSelection {
+  return hasDomesticSupplierName(code, name)
+    ? { code, label: name as string, detail: code }
+    : { code, label: code }
 }
 
 export function toggleSelection(current: BoardSelection | null, next: BoardSelection): BoardSelection | null {

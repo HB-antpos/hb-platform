@@ -14,6 +14,7 @@ import { batchDetectProducts, batchImportConfirm, batchUpdateDomesticProducts, f
 import { describeProductsFromImages, getDescribedEnglishName } from '../../../services/productDescriptionService'
 import type { ContainerMain } from '../../../types/container'
 import { isValidEAN13 } from '../../../utils/barcode'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import type { ProductImportItem, DuplicateGroup } from './types'
 import { buildAssignContainerItems, buildHbwebProductNameSyncNotificationDecision, buildHbwebProductNameUpdates, calculateStatistics, createEmptyProduct, detectDuplicates, findInvalidAssignContainerItems, generateImageUrl, getHbwebProductNameSyncConfirmationKeys, mergeDuplicateProducts, parseProductImportPasteText, stripAssignContainerItemsForRequest, summarizeAssignProductsResult, summarizeHbwebProductNameSyncResponse, updateCalculatedFields } from './utils'
@@ -874,7 +875,8 @@ export default function ProductImportPage() {
   }, [containers, formatContainerNumber, pendingSend])
 
   const supplierOptions = useMemo(() => [...suppliers].sort((a, b) => (a.supplierCode || '').localeCompare(b.supplierCode || '')).map((s) => ({
-    label: `${s.supplierCode} - ${s.supplierName}${s.shopNumber ? ` - ${s.shopNumber}` : ''}`,
+    // 没有「查看国内供应商名称」权限时名称、店号都不返回：只显示编码，不留「HB196 - 」。
+    label: `${formatDomesticSupplierLabel(s.supplierCode, s.supplierName)}${s.shopNumber ? ` - ${s.shopNumber}` : ''}`,
     value: s.supplierCode,
     // 供应商下拉搜索覆盖完整展示信息，店号/附加编码也能直接命中。
     searchText: [s.supplierCode, s.supplierName, s.shopNumber].filter(Boolean).join(' '),

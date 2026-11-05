@@ -1,6 +1,9 @@
 using System.Security.Claims;
+using BlazorApp.Api.Data;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -708,6 +711,20 @@ namespace BlazorApp.Api.Controllers.React
                     targetBranchCodes,
                     topN
                 );
+                // 本接口国内、澳洲供应商行混在同一个 DTO 里，挂不了属性遮罩：没有「查看国内供应商名称」权限时，
+                // 把国内供应商行的名称换成代码。结果来自缓存、被多个账号共用，只替换成副本，不改原对象。
+                if (result.Count > 0 && !await HttpContext.CanViewDomesticSupplierNameAsync())
+                {
+                    var db = HttpContext.RequestServices.GetRequiredService<SqlSugarContext>().Db;
+                    var chinaSupplierCodes = await ChinaSupplierCodeFamily.LoadChinaSupplierCodesAsync(db);
+                    result = result
+                        .Select(row =>
+                            chinaSupplierCodes.Contains((row.SupplierCode ?? string.Empty).Trim())
+                                ? row.WithSupplierCodeAsName()
+                                : row
+                        )
+                        .ToList();
+                }
                 return Ok(new { success = true, data = result });
             }
             catch (Exception ex)

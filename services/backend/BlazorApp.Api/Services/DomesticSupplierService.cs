@@ -2,6 +2,7 @@ using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using SqlSugar;
 
@@ -38,13 +39,18 @@ namespace BlazorApp.Api.Services
             {
                 var queryable = _context.ChinaSupplierDb.AsQueryable();
 
+                // 没有「查看国内供应商名称」权限的账号只能按代码搜索和排序，不能拿名称片段去试探。
+                var allowNameSearch = DomesticSupplierInfoMasking.IsNameSearchAllowed;
+
                 // 关键词搜索
                 if (!string.IsNullOrWhiteSpace(query.Keyword))
                 {
-                    queryable = queryable.Where(s =>
-                        (s.SupplierCode ?? string.Empty).Contains(query.Keyword)
-                        || (s.SupplierName ?? string.Empty).Contains(query.Keyword)
-                    );
+                    queryable = allowNameSearch
+                        ? queryable.Where(s =>
+                            (s.SupplierCode ?? string.Empty).Contains(query.Keyword)
+                            || (s.SupplierName ?? string.Empty).Contains(query.Keyword)
+                        )
+                        : queryable.Where(s => (s.SupplierCode ?? string.Empty).Contains(query.Keyword));
                 }
 
                 // 状态筛选
@@ -55,6 +61,10 @@ namespace BlazorApp.Api.Services
 
                 // 排序
                 var sortField = query.SortField ?? "CreatedAt";
+                if (!allowNameSearch && sortField.Equals("suppliername", StringComparison.OrdinalIgnoreCase))
+                {
+                    sortField = "suppliercode";
+                }
                 var sortDirection =
                     query.SortDirection?.ToLower() == "asc" ? OrderByType.Asc : OrderByType.Desc;
 

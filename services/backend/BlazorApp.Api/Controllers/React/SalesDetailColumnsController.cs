@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Constants;
@@ -101,6 +102,13 @@ public sealed class SalesDetailColumnsController : ControllerBase
                 cancellationToken
             );
             cancellationToken.ThrowIfCancellationRequested();
+            // 国内供应商栏：没有「查看国内供应商名称」权限时只留代码；在副本上处理，不改动服务层可能缓存的对象。
+            if (kind == SalesDetailKind.China
+                && parsedSection == SalesDetailSection.Suppliers
+                && !await HttpContext.CanViewDomesticSupplierNameAsync())
+            {
+                result = result.WithoutRowNames();
+            }
             return Ok(CreateResponse(result, status));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

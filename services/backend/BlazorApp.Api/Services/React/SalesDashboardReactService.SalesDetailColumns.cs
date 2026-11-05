@@ -1,4 +1,5 @@
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using BlazorApp.Api.Interfaces.React;
 using Microsoft.Extensions.Caching.Memory;
@@ -125,12 +126,18 @@ public partial class SalesDashboardReactService
         if (!string.Equals(status.StatisticStatus, SalesStatisticRefreshStatus.Fresh, StringComparison.OrdinalIgnoreCase))
             return new SalesDetailSectionResultDto();
 
+        // 没有「查看国内供应商名称」权限的账号，关键词不匹配国内供应商名称（见 ApplySalesDetailSearchFilterAsync）。
+        // 结果会进缓存并在并发请求间共用，所以带关键词时要把这个开关写进缓存键，两类账号不能拿到对方的结果。
+        var chinaNameSearchAllowed =
+            string.IsNullOrWhiteSpace(search) || DomesticSupplierInfoMasking.IsNameSearchAllowed;
+
         return await ReadSalesDetailCompleteReportAsync(
             dateRange,
             status,
             version => BuildSalesDetailColumnsCacheKey(
                 dateRange, kind, section, branchCodes, selectedBranchCode,
-                selectedSupplierCode, selectedProductCode, search, pageIndex, pageSize, version
+                selectedSupplierCode, selectedProductCode, search, pageIndex, pageSize, version,
+                chinaNameSearchAllowed
             ),
             (executor, sharedToken) => executor.ComputeSalesDetailColumnsAsync(
                 dateRange, kind, section, branchCodes, selectedBranchCode,
@@ -223,7 +230,8 @@ public partial class SalesDashboardReactService
         string? search,
         int pageIndex,
         int pageSize,
-        string? version
+        string? version,
+        bool chinaNameSearchAllowed = true
     )
     {
         static string[] Codes(IEnumerable<string>? values) => (values ?? Array.Empty<string>())
@@ -249,6 +257,8 @@ public partial class SalesDashboardReactService
             pageIndex,
             pageSize,
             version,
+            // 只有「带关键词且不允许按国内供应商名称搜索」时才写入，其余情况的缓存键与原来完全一致。
+            chinaNameSearchBlocked = chinaNameSearchAllowed ? (bool?)null : true,
         });
         return $"SalesDetailColumns:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)))}";
     }
@@ -672,6 +682,8 @@ public partial class SalesDashboardReactService
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? Array.Empty<string>();
         if (tokens.Length == 0)
             return query;
+        // 本方法运行在「按缓存键共用」的计算里；缓存键已区分这个开关，所以这里读到的值与发起方一致。
+        var chinaNameSearchAllowed = DomesticSupplierInfoMasking.IsNameSearchAllowed;
         var localNames = kind == SalesDetailKind.Australia
             ? (await _context.Db.Queryable<HBLocalSupplier>()
                 .Where(supplier => !supplier.IsDeleted)
@@ -691,8 +703,10 @@ public partial class SalesDashboardReactService
             var supplierCodes = localNames
                 .Where(supplier => ($"{supplier.Key} {supplier.Value}").Contains(token, StringComparison.OrdinalIgnoreCase))
                 .Select(supplier => supplier.Key).ToList();
+            // 没有名称权限时只按国内供应商代码匹配，不能拿关键词试探被遮掉的名称。
             var chinaSupplierCodes = chinaCatalog.Names
-                .Where(item => ($"{item.Key} {item.Value}").Contains(token, StringComparison.OrdinalIgnoreCase))
+                .Where(item => (chinaNameSearchAllowed ? $"{item.Key} {item.Value}" : item.Key)
+                    .Contains(token, StringComparison.OrdinalIgnoreCase))
                 .Select(item => item.Key)
                 .ToList();
             var chinaProducts = chinaMap

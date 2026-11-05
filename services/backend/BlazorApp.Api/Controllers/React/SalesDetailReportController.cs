@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Constants;
@@ -104,6 +105,28 @@ public sealed class SalesDetailReportController : ControllerBase
                 supplierCategoryGuids,
                 warehouseCategoryGuids);
             cancellationToken.ThrowIfCancellationRequested();
+            // 国内供应商栏：没有「查看国内供应商名称」权限时只留代码。行 DTO 与澳洲范围共用，挂不了属性遮罩；
+            // 结果对象来自缓存、被多个账号共用，只能换成副本，不能改原对象。
+            if (kind == SalesDetailKind.China
+                && result.Data?.Suppliers != null
+                && !await HttpContext.CanViewDomesticSupplierNameAsync())
+            {
+                result = new ProductReportResponseDto<SalesDetailReportDto>
+                {
+                    Success = result.Success,
+                    StatisticStatus = result.StatisticStatus,
+                    StatisticMessage = result.StatisticMessage,
+                    StatisticUpdatedAt = result.StatisticUpdatedAt,
+                    CacheVersion = result.CacheVersion,
+                    Data = new SalesDetailReportDto
+                    {
+                        Summary = result.Data.Summary,
+                        Suppliers = result.Data.Suppliers.WithoutRowNames(),
+                        Branches = result.Data.Branches,
+                        Products = result.Data.Products,
+                    },
+                };
+            }
             return Ok(result);
         }
         catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))

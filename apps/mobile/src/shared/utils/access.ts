@@ -94,6 +94,11 @@ export const PERMISSIONS = {
     Edit: "LocalPurchase.Edit",
     PushToHq: "LocalPurchase.PushToHq",
   },
+  DomesticPurchase: {
+    ManageSuppliers: "DomesticPurchase.ManageSuppliers",
+    // 查看国内供应商名称：没有它时后端只返回供应商代码（如 HB196），名称 / 店铺号 / 联系人 / 电话都是 null。
+    ViewSupplierName: "DomesticPurchase.ViewSupplierName",
+  },
   InstallmentOrders: {
     View: "InstallmentOrders.View",
   },
@@ -266,6 +271,7 @@ function createEmptyAccess(): AccessControl {
     canEditContainer: false,
     canDeleteContainer: false,
     canViewFullContainerNumber: false,
+    canViewDomesticSupplierName: false,
     canManageStore: false,
     canViewReports: false,
     canViewDeviceRegistration: false,
@@ -398,6 +404,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canEditContainer = hasPermission(PERMISSIONS.Container.Edit);
   const canDeleteContainer = hasPermission(PERMISSIONS.Container.Delete);
   const canViewFullContainerNumber = hasPermission(PERMISSIONS.Container.ViewFullNumber);
+  // 管理国内供应商的账号同样视为可看名称，与后端口径一致；管理员由 hasPermission 自动放行。
+  const canViewDomesticSupplierName =
+    hasPermission(PERMISSIONS.DomesticPurchase.ViewSupplierName) ||
+    hasPermission(PERMISSIONS.DomesticPurchase.ManageSuppliers);
   const canManageStore = hasPermission("Stores.Edit") || hasPermission("Warehouse.Manage");
 
   const canReadOrder = hasPermission("Orders.View");
@@ -510,6 +520,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canEditContainer,
     canDeleteContainer,
     canViewFullContainerNumber,
+    canViewDomesticSupplierName,
     canManageStore,
     canViewReports,
     canViewDeviceRegistration,

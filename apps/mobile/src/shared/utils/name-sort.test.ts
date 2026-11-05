@@ -54,6 +54,23 @@ assert.deepEqual(
   ], "zh").map((item) => item.supplierCode),
   ["2", "3", "1"],
 );
+// 国内供应商没有「查看名称」权限时名称全是空：退回按代码排（数字按数值比），中英文界面结果一致、可重复
+for (const language of [undefined, "zh", "en"]) {
+  const unnamed = [
+    { supplierCode: "HB196", supplierName: "" },
+    { supplierCode: "HB20", supplierName: null },
+    { supplierCode: "HB3", supplierName: "   " },
+    { supplierCode: "HB101" },
+  ];
+  assert.deepEqual(
+    sortSuppliersByName(unnamed, language).map((item) => item.supplierCode),
+    ["HB3", "HB20", "HB101", "HB196"],
+  );
+  assert.deepEqual(
+    sortSuppliersByName([...unnamed].reverse(), language).map((item) => item.supplierCode),
+    ["HB3", "HB20", "HB101", "HB196"],
+  );
+}
 
 // 通用：{code, name} 形状
 assert.deepEqual(

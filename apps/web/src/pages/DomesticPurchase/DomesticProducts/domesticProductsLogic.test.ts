@@ -200,6 +200,15 @@ assert(!filterSupplierOption('zzz', supplierOptions[0]), '不匹配时过滤掉'
 assertEqual(describeSupplier(suppliers, 'HB017'), '义乌市恒美塑料制品厂', '已生效标签显示供应商名称')
 assertEqual(describeSupplier(suppliers, 'HB999'), 'HB999', '供应商选项未加载时退回编码')
 
+// 没有「查看国内供应商名称」权限：后端不返回名称与店铺号（服务层归一成空串 / undefined），下拉只显示编码。
+const hiddenNameSuppliers = [{ code: 'HB012', name: '' }]
+const hiddenNameOptions = buildSupplierOptions(hiddenNameSuppliers)
+assertEqual(hiddenNameOptions[0].label, 'HB012', '没有名称时下拉只显示编码，不留「HB012 - 」')
+assertEqual(hiddenNameOptions[0].shortLabel, 'HB012', '没有名称时选中后显示编码')
+assertEqual(hiddenNameOptions[0].value, 'HB012', '选项值仍是供应商编码')
+assert(filterSupplierOption('hb012', hiddenNameOptions[0]), '没有名称时仍可按编码搜索')
+assertEqual(describeSupplier(hiddenNameSuppliers, 'HB012'), 'HB012', '没有名称时已生效标签显示编码')
+
 // ---------------------------------------------------------------------------
 // 展示格式化
 // ---------------------------------------------------------------------------

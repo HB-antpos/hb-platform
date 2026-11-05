@@ -110,6 +110,27 @@ const noScope = await buildCompactBoardWorkbook([product(1)], {
   scopeLabel: '第 1 页（每页 50 行）', scopeAmount: 0, firstRank: 1, signal: controller.signal, loadImage: async () => null,
 })
 assert.equal(noScope.workbook.worksheets[0]!.getRow(4).getCell(10).value, null, '分母为 0 时占比留空，不写成 0')
+assert.equal(sheet.getRow(4).getCell(column('国内供应商')).value, '玛索文具', '默认（有名称权限）导出国内供应商名称列')
+
+// ---------- 没有查看国内供应商名称权限：后端不返回名称，导出只保留代码列 ----------
+const hidden = await buildCompactBoardWorkbook([{ ...product(1), chinaSupplierName: undefined }], {
+  startDate: '2026-09-24', endDate: '2026-09-24', filterLabel: '国内供应商 HB215', sortLabel: '按金额降序',
+  scopeLabel: '全部结果', scopeAmount: 100, firstRank: 1, signal: controller.signal, loadImage: async () => null,
+  includeSupplierName: false,
+})
+const hiddenSheet = hidden.workbook.worksheets[0]!
+const hiddenHeaders = Array.from({ length: hiddenSheet.columnCount }, (_, offset) => hiddenSheet.getRow(3).getCell(offset + 1).value)
+assert.deepEqual(
+  hiddenHeaders,
+  ['排名', '商品图片', '货号', '商品名称', '国内供应商代码', '数量', '单价', '金额', '占比'],
+  '无名称权限时不导出空的「国内供应商」名称列，其余列顺序不变',
+)
+assert.equal(hiddenSheet.getRow(4).getCell(5).value, 'HB215', '供应商代码照常导出')
+assert.equal(hiddenSheet.getRow(4).getCell(6).value, 10, '去掉名称列后数量列前移')
+assert.equal(hiddenSheet.getRow(4).getCell(8).numFmt, '$#,##0.00;[Red]($#,##0.00)', '去掉名称列后金额格式仍落在金额列')
+assert.equal(hiddenSheet.getRow(4).getCell(9).value, 0.25, '去掉名称列后占比仍落在最后一列')
+assert.equal(hiddenSheet.getRow(4).getCell(2).value, '无图片', '图片说明仍写在图片列')
+assert.deepEqual(hiddenSheet.autoFilter, { from: { row: 3, column: 1 }, to: { row: 3, column: 9 } }, '筛选范围随列数收窄')
 
 await assert.rejects(buildCompactBoardWorkbook(rows, {
   startDate: '2026-09-24', endDate: '2026-09-24', filterLabel: '', sortLabel: '', scopeLabel: '',

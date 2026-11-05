@@ -469,6 +469,7 @@
     <Compile Include="ContainerNewProductsControllerTests.cs" />
     <Compile Include="HealthControllerNetworkDiagnosticsTests.cs" />
     <Compile Include="ContainerNumberMaskingTests.cs" />
+    <Compile Include="DomesticSupplierInfoMaskingTests.cs" />
     <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
     <Compile Include="ContainerWarehouseArrivalTests.cs" />

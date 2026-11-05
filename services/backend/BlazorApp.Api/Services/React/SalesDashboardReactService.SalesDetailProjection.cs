@@ -136,7 +136,7 @@ DROP TABLE #SalesDetailChangedMappingDates;
         // 最终条件是所有关键词同时成立，所以任选一个必要条件都能覆盖全部正确结果。
         // 用较长词先缩小候选，避免短词命中大量供应商后搬入整段事实；最终仍逐词精筛。
         var aliasFilter = $"(LTRIM(RTRIM(a.[ProductCode])) LIKE @sdrSearch{candidateToken} OR a.[ProductName] LIKE @sdrSearch{candidateToken} OR a.[Barcode] LIKE @sdrSearch{candidateToken})";
-        var supplierFilter = $"(f.[RawSupplierCode] LIKE @sdrSearch{candidateToken} OR f.[SupplierCode] LIKE @sdrSearch{candidateToken} OR f.[SupplierName] LIKE @sdrSearch{candidateToken})";
+        var supplierFilter = $"(f.[RawSupplierCode] LIKE @sdrSearch{candidateToken} OR f.[SupplierCode] LIKE @sdrSearch{candidateToken} OR f.[SupplierName] LIKE @sdrFactNameSearch{candidateToken})";
         var selectedProductFilter = string.IsNullOrWhiteSpace(selectedProduct)
             ? string.Empty : " OR LTRIM(RTRIM(a.[ProductCode]))=@sdrSelectedProduct";
         // 授权在原始门店码上应用，之后才合并规范化后的门店码，保持旧查询的空白处理边界。
@@ -288,7 +288,7 @@ IF EXISTS (SELECT 1 FROM #SalesDetailCandidateSuppliers)
         return string.Join("\n", tokenIndexes.Select(i => $"""
 IF NOT EXISTS
  (SELECT 1 FROM #SalesDetailProjectionSupplierNames f
-  WHERE f.[RawSupplierCode] LIKE @sdrSearch{i} OR f.[SupplierCode] LIKE @sdrSearch{i} OR f.[SupplierName] LIKE @sdrSearch{i}
+  WHERE f.[RawSupplierCode] LIKE @sdrSearch{i} OR f.[SupplierCode] LIKE @sdrSearch{i} OR f.[SupplierName] LIKE @sdrFactNameSearch{i}
    OR EXISTS (SELECT 1 FROM #SalesDetailSupplierSearchMatches c WHERE c.[SupplierCode]=f.[ChinaSupplierCode] AND c.[TokenIndex]={i}))
 BEGIN
  SELECT LTRIM(RTRIM(a.[ProductCode])) [ProductCode] INTO #SalesDetailTokenCandidateCodes{i}

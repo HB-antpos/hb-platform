@@ -134,6 +134,8 @@ builder
     {
         // 仓库改价后把"已通知几家分店"的汇总写入响应头，供前端提示"已发送到通知列表"。
         options.Filters.Add<BlazorApp.Api.Filters.PriceNotificationHeaderFilter>();
+        // 没有「查看国内供应商名称」权限的账号：响应里的国内供应商名称等字段输出为空，且不能按名称搜索。
+        options.Filters.Add<BlazorApp.Api.Filters.DomesticSupplierInfoMaskingFilter>();
     })
     .AddJsonOptions(options =>
     {

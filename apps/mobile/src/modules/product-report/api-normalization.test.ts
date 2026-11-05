@@ -532,6 +532,16 @@ assert.equal(supplierBranchRows[0]?.compareGrossProfit, 0);
 assert.equal(supplierBranchRows[0]?.grossMarginRate, 0.12);
 assert.equal(supplierBranchRows[0]?.compareGrossMarginRate, 0);
 
+// 没有「查看国内供应商名称」权限时后端名称为 null：名称回退成代码，不能变成 "null" 或空白。
+for (const payload of [
+  { supplierCode: "HB196", supplierName: null, totalAmount: 1 },
+  { SupplierCode: "HB196", SupplierName: null, TotalAmount: 1 },
+  { supplierCode: "HB196", totalAmount: 1 },
+]) {
+  assert.equal(normalizeSupplierRows([payload])[0]?.supplierName, "HB196");
+  assert.equal(normalizeSupplierBranchRows([{ ...payload, branchCode: "S1" }])[0]?.supplierName, "HB196");
+}
+
 // 订单数与商品数量刻意不同，验证供应商均价始终以商品数量为分母。
 for (const normalize of [normalizeSupplierRows, normalizeSupplierBranchRows]) {
   const [metrics] = normalize([{ supplierCode: "test", branchCode: "test", totalAmount: 120, compareTotalAmount: 75, totalQuantity: 30, compareTotalQuantity: 15, orderCount: 6, compareOrderCount: 3, averageTransaction: 20, compareAverageTransaction: 25 }]);
