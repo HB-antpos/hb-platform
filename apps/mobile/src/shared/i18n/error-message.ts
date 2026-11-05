@@ -144,7 +144,10 @@ function resolveCommonErrorKey(error: unknown) {
       "token expired",
       "session expired",
       "no refresh token",
-      "auth",
+      // 不能用裸词 auth：错误信息里常带接口路径，/auth/... 会被误判成登录失效，盖住真实原因。
+      "authenticat",
+      "authoriz",
+      "authoris",
       "设备未授权",
       "设备授权失败",
     ])

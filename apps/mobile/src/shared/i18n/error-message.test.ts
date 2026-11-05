@@ -137,6 +137,25 @@ async function main() {
     "productQuery:messages.lookupFailed",
     "英文界面未知中文错误应回退到页面文案"
   );
+
+  // 错误信息带接口路径时不能因为 /auth/ 误报登录失效（iOS 重置密码页曾因此看不出真实原因）。
+  assertEqual(
+    resolveLocalizedErrorMessage(new Error("IOS_REVIEW_UNHANDLED_REQUEST: POST /auth/password-reset/request"), {
+      language: "en",
+      t,
+      fallbackKey: "resetPassword.errors.sendFailed",
+    }),
+    "resetPassword.errors.sendFailed",
+    "路径里的 auth 不算登录失效"
+  );
+
+  for (const message of ["User not authenticated", "Authentication required", "WPF update check is not authorized.", "Unauthorized"]) {
+    assertEqual(
+      resolveLocalizedErrorMessage(new Error(message), { language: "en", t }),
+      "common:errors.unauthorized",
+      `真正的登录失效仍要识别: ${message}`
+    );
+  }
 }
 
 void main();
