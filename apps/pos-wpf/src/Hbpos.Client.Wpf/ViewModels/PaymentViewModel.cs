@@ -384,6 +384,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             // 中文注释：这里只用处理器 / 环境 / Linkly 模式，不读「令牌是否已配置」；
             // 用不联网的版本，免得每次进付款页都多等一次到新加坡的往返（约 0.9 秒）才放行刷卡。
             var configuration = await _cardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync();
+            CardProviderBadgeText = GetCardProviderBadgeText(configuration.Processor);
             _zellerUnmatchedRefundEnabled =
                 configuration.Processor == CardProcessorKind.Zeller && configuration.ZellerAllowUnmatchedRefund;
             if (configuration.Processor == CardProcessorKind.Square)
@@ -695,6 +696,32 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     public string CashMethodText => T(GetMethodTextKey(PaymentMethodKind.Cash));
 
     public string CardMethodText => T(GetMethodTextKey(PaymentMethodKind.Card));
+
+    // 中文注释：刷卡按钮右上角的刷卡类型角标（ANZ / Zeller / Square）。品牌名不翻译；
+    // 进付款页读处理器配置后才赋值，未配置刷卡机或配置读不到时为 null，角标隐藏。
+    private string? _cardProviderBadgeText;
+
+    public string? CardProviderBadgeText
+    {
+        get => _cardProviderBadgeText;
+        private set
+        {
+            if (SetProperty(ref _cardProviderBadgeText, value))
+            {
+                OnPropertyChanged(nameof(IsCardProviderBadgeVisible));
+            }
+        }
+    }
+
+    public bool IsCardProviderBadgeVisible => !string.IsNullOrEmpty(CardProviderBadgeText);
+
+    private static string? GetCardProviderBadgeText(CardProcessorKind processor) => processor switch
+    {
+        CardProcessorKind.Linkly => "ANZ",
+        CardProcessorKind.Zeller => "Zeller",
+        CardProcessorKind.Square => "Square",
+        _ => null
+    };
 
     public string VoucherMethodText => T(GetMethodTextKey(PaymentMethodKind.Voucher));
 

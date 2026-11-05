@@ -136,6 +136,30 @@ public sealed class PaymentTerminalSelectionViewModelTests
         Assert.Equal(2, proxy.ListCalls);
     }
 
+    [Theory]
+    [InlineData(CardProcessorKind.Linkly, "ANZ")]
+    [InlineData(CardProcessorKind.Zeller, "Zeller")]
+    [InlineData(CardProcessorKind.Square, "Square")]
+    [InlineData(CardProcessorKind.None, null)]
+    public async Task RefreshLinklyCloudTerminalsAsync_shows_card_provider_badge_for_configured_processor(
+        CardProcessorKind processor,
+        string? expectedBadge)
+    {
+        var (setup, proxy) = CreateSetup(new LinklyCloudTerminalListResponse("Sandbox", null, null, [], "Legacy"));
+        proxy.Configuration = proxy.Configuration with
+        {
+            Processor = processor,
+            LinklyConnectionMode = LinklyConnectionMode.LocalIp
+        };
+        using var viewModel = CreateViewModel(setup);
+        Assert.False(viewModel.IsCardProviderBadgeVisible);
+
+        await viewModel.RefreshLinklyCloudTerminalsAsync();
+
+        Assert.Equal(expectedBadge, viewModel.CardProviderBadgeText);
+        Assert.Equal(expectedBadge is not null, viewModel.IsCardProviderBadgeVisible);
+    }
+
     private static PaymentViewModel CreateViewModel(ICardTerminalSetupService setup)
     {
         return new PaymentViewModel(
