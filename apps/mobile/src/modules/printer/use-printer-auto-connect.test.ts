@@ -65,7 +65,18 @@ async function run() {
       return true;
     },
   });
-  const { usePrinterAutoConnect } = await import("./use-printer-auto-connect");
+  const {
+    MAX_CONSECUTIVE_RECONNECT_FAILURES,
+    getReconnectDelayMs,
+    usePrinterAutoConnect,
+  } = await import("./use-printer-auto-connect");
+
+  // 退避序列：5s、10s、20s、40s，之后封顶 60s；异常入参按 0 次处理。
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 10, 100].map(getReconnectDelayMs),
+    [5_000, 10_000, 20_000, 40_000, 60_000, 60_000, 60_000, 60_000],
+  );
+  assert.equal(getReconnectDelayMs(-3), 5_000);
   function Harness() {
     usePrinterAutoConnect();
     return null;
@@ -120,10 +131,53 @@ async function run() {
     assert.equal(connects, 3);
     await act(async () => { nativeListener?.(); nativeListener?.(); interval?.(); });
     assert.equal(connects, 3, "同一重试间隔内的重复事件不能形成连接风暴");
+    // 失败 1 次后退避到 10 秒：5 秒时还不能再连，满 10 秒才重试。
     now += 5_000;
     await act(async () => { connectFails = false; interval?.(); });
+    assert.equal(connects, 3, "失败后必须退避，不能 5 秒就重连");
+    now += 5_000;
+    await act(async () => { interval?.(); });
     assert.equal(connects, 4);
     assert.equal(usePrinterStore.getState().status, "connected");
+
+    // 打印机持续连不上：每次间隔足够长也只尝试到上限，之后本轮不再自动重连。
+    await act(async () => {
+      nativeStatus.connected = false;
+      connectFails = true;
+    });
+    const beforeFailures = connects;
+    for (let i = 0; i < MAX_CONSECUTIVE_RECONNECT_FAILURES + 5; i += 1) {
+      now += 61_000;
+      await act(async () => { interval?.(); });
+    }
+    assert.equal(connects - beforeFailures, MAX_CONSECUTIVE_RECONNECT_FAILURES, "连续失败达到上限后不再自动重连");
+    assert.notEqual(usePrinterStore.getState().status, "connected", "放弃自动重连后保持未连接，供用户手动连接");
+    now += 61_000;
+    await act(async () => { nativeListener?.(); interval?.(); });
+    assert.equal(connects - beforeFailures, MAX_CONSECUTIVE_RECONNECT_FAILURES, "放弃后事件与轮询都不能再触发连接");
+
+    // 蓝牙关闭后重新打开：重新开始自动重连。
+    const afterGiveUp = connects;
+    await act(async () => { nativeStatus.enabled = false; interval?.(); });
+    assert.equal(connects, afterGiveUp, "蓝牙关闭时不连接");
+    await act(async () => { nativeStatus.enabled = true; interval?.(); });
+    assert.equal(connects, afterGiveUp + 1, "蓝牙重新打开应恢复自动重连");
+
+    // 失败 1 次后间隔已是 10 秒；回到前台视为新一轮，5 秒后即可重试。
+    now += 5_000;
+    await act(async () => { interval?.(); });
+    assert.equal(connects, afterGiveUp + 1, "未回前台时仍按退避等待");
+    await act(async () => {
+      appState.currentState = "background";
+      appListener?.("background");
+      appState.currentState = "active";
+      appListener?.("active");
+    });
+    assert.equal(connects, afterGiveUp + 2, "回到前台应清零失败计数并立即重连");
+    connectFails = false;
+    now += 10_000;
+    await act(async () => { interval?.(); });
+    assert.equal(usePrinterStore.getState().status, "connected", "连上后恢复正常");
   } finally {
     await act(async () => { root.unmount(); });
     globalThis.setInterval = originalInterval;
