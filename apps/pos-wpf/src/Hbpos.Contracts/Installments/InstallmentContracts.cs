@@ -131,7 +131,7 @@ public sealed record InstallmentRepaymentCapabilitiesResponse(
     [property: JsonPropertyName("repaymentClaimPrepareProviderV1")]
     bool RepaymentClaimPrepareProviderV1 = false,
     bool AmendLinesSupported = false,
-    // 允许刷卡续付的通道族（square / linkly / zeller）。旧服务端不返回（null）时，客户端只能看 CardRepaymentSupported。
+    // 允许刷卡续付的通道族（square / linkly / zeller / manual）。旧服务端不返回（null）时，客户端只能看 CardRepaymentSupported。
     IReadOnlyList<string>? CardRepaymentProviders = null,
     // 服务端支持主管结案卡状态不明的刷卡续付（supervisor-resolve 与 blocking 查询）。
     bool CardRepaymentSupervisorResolveSupported = false);
@@ -146,7 +146,10 @@ public static class InstallmentCardRepaymentProviders
     public const string Linkly = "linkly";
     public const string Zeller = "zeller";
 
-    public static IReadOnlyList<string> All { get; } = [Square, Linkly, Zeller];
+    /// <summary>手动刷卡：在独立刷卡机上收款，由收银员在 POS 上确认，没有刷卡机证据也无法查询。</summary>
+    public const string Manual = "manual";
+
+    public static IReadOnlyList<string> All { get; } = [Square, Linkly, Zeller, Manual];
 
     /// <summary>归一到通道族；不认识的返回 null。</summary>
     public static string? NormalizeFamily(string? value)
@@ -169,6 +172,11 @@ public static class InstallmentCardRepaymentProviders
             normalized.StartsWith("anz", StringComparison.Ordinal))
         {
             return Linkly;
+        }
+
+        if (normalized.StartsWith(Manual, StringComparison.Ordinal))
+        {
+            return Manual;
         }
 
         return normalized.StartsWith(Zeller, StringComparison.Ordinal) ? Zeller : null;

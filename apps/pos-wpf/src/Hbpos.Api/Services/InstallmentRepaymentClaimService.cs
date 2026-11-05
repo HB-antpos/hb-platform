@@ -34,7 +34,7 @@ public sealed class InstallmentRepaymentClaimOptions
     public bool CrossDeviceEnabled { get; set; } = true;
 
     /// <summary>
-    /// 允许刷卡续付的通道族，逗号分隔（如 "square,linkly,zeller"）。默认空：维持「刷卡续付一律拒绝」。
+    /// 允许刷卡续付的通道族，逗号分隔（如 "square,linkly,zeller,manual"）。默认空：维持「刷卡续付一律拒绝」。
     /// 只管新的刷卡续付能否开始；已经登记了通道的 claim（可能已扣款）的恢复与提交不受它影响。
     /// </summary>
     public string? CardRepaymentProviders { get; set; }
@@ -838,6 +838,7 @@ public sealed class InstallmentRepaymentClaimService(
                 InstallmentCardRepaymentProviders.Linkly => "ANZ Supervisor",
                 InstallmentCardRepaymentProviders.Square => "Square Supervisor",
                 InstallmentCardRepaymentProviders.Zeller => "Zeller Supervisor",
+                InstallmentCardRepaymentProviders.Manual => "Manual Supervisor",
                 _ => $"{reopened.Provider} Supervisor"
             };
             var commitRequest = new InstallmentRepaymentClaimCommitRequest(

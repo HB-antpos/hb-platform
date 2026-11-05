@@ -666,7 +666,7 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
     }
 
     private static bool IsCardFamily(ProviderFamily family) =>
-        family is ProviderFamily.Square or ProviderFamily.Linkly or ProviderFamily.Zeller;
+        family is ProviderFamily.Square or ProviderFamily.Linkly or ProviderFamily.Zeller or ProviderFamily.Manual;
 
     private static ProviderFamily ProviderFamilyOf(string? value)
     {
@@ -687,6 +687,7 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
             InstallmentCardRepaymentProviders.Square => ProviderFamily.Square,
             InstallmentCardRepaymentProviders.Linkly => ProviderFamily.Linkly,
             InstallmentCardRepaymentProviders.Zeller => ProviderFamily.Zeller,
+            InstallmentCardRepaymentProviders.Manual => ProviderFamily.Manual,
             _ => ProviderFamily.Unknown
         };
     }
@@ -715,6 +716,7 @@ internal static class InstallmentRepaymentClaimCommitEvidenceValidator
         Voucher,
         Square,
         Linkly,
-        Zeller
+        Zeller,
+        Manual
     }
 }

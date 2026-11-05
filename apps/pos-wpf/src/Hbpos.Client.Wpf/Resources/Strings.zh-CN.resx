@@ -654,6 +654,15 @@
   <data name="payment.installment.status.cardRepaymentUnsupported" xml:space="preserve">
     <value>分期续付暂不支持刷卡，请改用现金或礼券。</value>
   </data>
+  <data name="payment.installment.status.manualCardRepaymentUnsupported" xml:space="preserve">
+    <value>分期续付暂不支持手动刷卡，请勿收款，请改用其他付款方式。</value>
+  </data>
+  <data name="payment.installment.status.manualCardRepaymentCancelled" xml:space="preserve">
+    <value>已取消手动刷卡续付，未记录任何付款。</value>
+  </data>
+  <data name="payment.installment.status.manualCardRepaymentCancelFailed" xml:space="preserve">
+    <value>未能释放这笔续付。请检查网络后重试，或由主管在分期中心结案。</value>
+  </data>
   <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve">
     <value>该分期单不能继续补款。</value>
   </data>

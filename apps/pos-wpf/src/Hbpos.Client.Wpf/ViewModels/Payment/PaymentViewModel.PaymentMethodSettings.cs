@@ -76,7 +76,7 @@ public partial class PaymentViewModel
         _paymentMethodSettings = _paymentMethodSettingsService.Current;
         if (!IsPaymentInteractionLocked && !_cardSession.IsActive && !IsManualCardSavePending)
         {
-            if (!IsManualCardPaymentVisible && IsManualCardDialogOpen) CancelManualCard();
+            if (!IsManualCardPaymentVisible && IsManualCardDialogOpen && _manualCardRepaymentOperationGuid is null) CancelManualCard();
             if (!IsVoucherPaymentVisible && IsVoucherEntryDialogOpen) CancelVoucherEntry();
             if (!IsPaymentMethodEnabled(SelectedPaymentMethod)) SelectedPaymentMethod = PaymentMethodKind.Cash;
         }

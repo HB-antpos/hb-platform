@@ -24,6 +24,13 @@ public static class InstallmentCardRepaymentCapability
             : capabilities.CardRepaymentSupported;
     }
 
+    /// <summary>手动刷卡不依赖本机刷卡机配置，只看服务端是否放开；旧服务端没有通道列表时一律不支持。</summary>
+    public static bool IsManualSupported(InstallmentRepaymentCapabilitiesResponse capabilities) =>
+        capabilities.CardRepaymentProviders?.Any(provider => string.Equals(
+            InstallmentCardRepaymentProviders.NormalizeFamily(provider),
+            InstallmentCardRepaymentProviders.Manual,
+            StringComparison.Ordinal)) == true;
+
     public static string? ToFamily(CardProcessorKind processor) => processor switch
     {
         CardProcessorKind.Square => InstallmentCardRepaymentProviders.Square,

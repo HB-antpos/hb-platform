@@ -450,6 +450,167 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         }
     }
 
+    private static InstallmentAppendPaymentRequest CreateManualRequest()
+    {
+        var request = CreateRequest(PaymentMethodKind.Card);
+        return request with { Reference = ManualCardPaymentReference.Format(request.PaymentGuid) };
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_holds_the_claim_first_and_commits_cashier_confirmed_evidence()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events);
+            var terminal = new RecordingTerminal(events, new PaymentAuthorizationResult(false));
+            var service = new InstallmentOperationService(repository, api, terminal, new NoopVoucherTenderClient());
+
+            var begin = await service.BeginManualCardRepaymentAsync(Session, request);
+
+            Assert.True(begin.Succeeded, begin.Message);
+            Assert.Equal(["claim:create", "claim:begin:Manual"], events);
+            Assert.Equal(request.PaymentGuid.ToString("D"), api.ProviderAttemptId);
+            var held = await repository.GetAsync(request.PaymentGuid);
+            Assert.Equal(LocalInstallmentOperationState.TerminalSubmitting, held?.State);
+            Assert.Equal("Manual", held?.TerminalProcessor);
+
+            var result = await service.CompleteManualCardRepaymentAsync(request.PaymentGuid);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal(["claim:create", "claim:begin:Manual", "claim:commit"], events);
+            Assert.Equal(0, terminal.AuthorizeCalls);
+            Assert.Equal(request.Reference, api.LastCommittedRequest!.Reference);
+            var transaction = Assert.Single(api.LastCommittedRequest.CardTransactions!);
+            Assert.Equal("Manual", transaction.Processor);
+            Assert.Equal(request.Reference, transaction.TxnRef);
+            Assert.Equal(request.Amount, transaction.Amount);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_cancel_declines_the_claim_and_a_failed_release_keeps_it_held()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events) { ResolveException = new HttpRequestException("offline") };
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+            await service.BeginManualCardRepaymentAsync(Session, request);
+
+            Assert.False(await service.CancelManualCardRepaymentAsync(request.PaymentGuid));
+            Assert.Equal(LocalInstallmentOperationState.TerminalSubmitting, (await repository.GetAsync(request.PaymentGuid))?.State);
+
+            api.ResolveException = null;
+            Assert.True(await service.CancelManualCardRepaymentAsync(request.PaymentGuid));
+
+            Assert.Equal(InstallmentRepaymentClaimStatus.Declined, api.Status);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(request.PaymentGuid))?.State);
+            Assert.Equal(0, api.CommitCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_stops_before_any_claim_when_the_server_has_not_enabled_it()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events)
+            {
+                Capabilities = new InstallmentRepaymentCapabilitiesResponse(
+                    true,
+                    false,
+                    true,
+                    120,
+                    CardRepaymentSupported: true,
+                    CardRepaymentProviders: ["square", "linkly"])
+            };
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+
+            var begin = await service.BeginManualCardRepaymentAsync(Session, request);
+
+            Assert.False(begin.Succeeded);
+            Assert.False(begin.RequiresReview);
+            Assert.Contains("手动刷卡", begin.Message);
+            Assert.Empty(events);
+            Assert.Null(await repository.GetAsync(request.PaymentGuid));
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_interrupted_while_collecting_stays_locked_for_the_supervisor()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events);
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+            await service.BeginManualCardRepaymentAsync(Session, request);
+
+            // 程序在收款窗口打开时退出：POS 无法查询独立刷卡机，既不能自动入账，也不能自动放开。
+            var restarted = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+            var recovered = Assert.Single(await restarted.RecoverAsync(Session));
+
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, recovered.State);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, api.Status);
+            Assert.Equal(0, api.CommitCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_whose_claim_never_reached_the_server_can_be_recreated_and_released()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            await repository.CreateOrGetAsync(CreateOperation(request, LocalInstallmentOperationState.Prepared));
+            var api = new ClaimApi(request, events) { GetException = new CatalogApiException("missing", HttpStatusCode.NotFound) };
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+
+            var recovered = Assert.Single(await service.RecoverAsync(Session));
+
+            Assert.Equal(LocalInstallmentOperationState.Failed, recovered.State);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Released, api.Status);
+            Assert.Equal(0, api.CommitCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     private const string ZellerTransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
 
     private static ZellerTransaction ZellerApproved(string reference, int amountCents) => new(
@@ -1153,6 +1314,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         public bool LoseFirstBeginResponse { get; init; }
         public bool LoseFirstCommitResponse { get; init; }
         public Exception? BeginException { get; init; }
+        public Exception? ResolveException { get; set; }
         // 默认按「三个刷卡通道都已放开」的服务端：这些用例验证的是放开之后的续付流程。
         public InstallmentRepaymentCapabilitiesResponse Capabilities { get; init; } = new(
             true,
@@ -1160,7 +1322,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
             true,
             120,
             CardRepaymentSupported: true,
-            CardRepaymentProviders: ["square", "linkly", "zeller"]);
+            CardRepaymentProviders: ["square", "linkly", "zeller", "manual"]);
         public InstallmentRepaymentClaimStatus Status => _status;
         public string? ProviderAttemptId => _providerAttemptId;
         public int CommitCalls { get; private set; }
@@ -1216,6 +1378,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
 
         public Task<InstallmentRepaymentClaimDto> ResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimResolveRequest resolveRequest, CancellationToken cancellationToken = default)
         {
+            if (ResolveException is not null) return Task.FromException<InstallmentRepaymentClaimDto>(ResolveException);
             _status = resolveRequest.Outcome switch
             {
                 InstallmentRepaymentClaimResolveOutcome.Released => InstallmentRepaymentClaimStatus.Released,
