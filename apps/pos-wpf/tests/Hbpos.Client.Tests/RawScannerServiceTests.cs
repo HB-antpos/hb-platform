@@ -66,6 +66,51 @@ public sealed class RawScannerServiceTests
     }
 
     [Fact]
+    public void ProcessScannerKey_keeps_full_barcode_through_a_stall_and_reports_it()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var delivered = new List<string>();
+        service.Subscribe("pos", e => delivered.Add(e.Barcode));
+        service.SetActivePage("pos");
+        var now = DateTimeOffset.UtcNow;
+        Key[] keys = [Key.D9, Key.D5, Key.D2, Key.D5, Key.D8, Key.D1];
+
+        for (var index = 0; index < keys.Length; index++)
+        {
+            var eventAt = now.AddMilliseconds(index * 15);
+            // 第 4 个键起积压：处理时刻比事件时间晚 200ms。
+            var handledAt = index < 3 ? eventAt : eventAt.AddMilliseconds(200);
+            Assert.Null(service.ProcessScannerKeyForDiagnostics("scanner-device", keys[index], eventAt, handledAt));
+        }
+
+        var result = service.ProcessScannerKeyForDiagnostics("scanner-device", Key.Enter, now.AddMilliseconds(90));
+        Assert.NotNull(result);
+        service.DispatchResultForDiagnostics(result);
+
+        Assert.Equal(["952581"], delivered);
+        Assert.Contains(logs.Lines, line =>
+            line.Contains("scan input stall absorbed source=raw barcodeInfo=length=6 handledGapMs=215", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ProcessScannerKey_reports_a_real_gap_between_key_events()
+    {
+        // 事件时间本身就断开：这不是界面卡顿，上报后用来判断扫码枪或链路是否有问题。
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var now = DateTimeOffset.UtcNow;
+
+        service.ProcessScannerKeyForDiagnostics("scanner-device", Key.D9, now);
+        service.ProcessScannerKeyForDiagnostics("scanner-device", Key.D5, now.AddMilliseconds(10));
+        service.ProcessScannerKeyForDiagnostics("scanner-device", Key.D2, now.AddMilliseconds(20));
+        service.ProcessScannerKeyForDiagnostics("scanner-device", Key.D5, now.AddMilliseconds(220));
+
+        Assert.Contains(logs.Lines, line =>
+            line.Contains("scan input gap reset source=raw discardedLength=3 gapMs=200", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task InitializeAsync_loads_scanner_settings_and_survives_a_load_failure()
     {
         var settings = new FakeScannerSettingsStore();

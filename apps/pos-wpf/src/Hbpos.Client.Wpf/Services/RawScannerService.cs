@@ -80,10 +80,10 @@ internal sealed class ScannerInputDuplicateGuard
 
     private static readonly TimeSpan CrossSourceDuplicateWindow = TimeSpan.FromMilliseconds(200);
 
-    // 连读的第二次读码遇到界面线程卡顿时，扫码缓冲会因字符间隔超过 120ms 清掉开头，只剩条码结尾：
+    // 字符间隔已按事件时间判断，这里是兜底：扫码枪或链路真的停顿时，连读的第二次读码仍可能只剩条码结尾。
     // 它与上一次条码不相等，躲过重复过滤后被当成新扫码，查不到商品就留在搜索框里（如 9525810220077 → 5810220077）。
-    // 卡顿会拉长两次读码的间隔，所以固定 1 秒，不跟随设置页的重复窗口（最低可调到 100ms）。
-    private static readonly TimeSpan TruncatedRepeatWindow = TimeSpan.FromMilliseconds(1000);
+    // 窗口与 Raw 配对额度同为 1.5 秒，不跟随设置页的重复窗口（最低可调到 100ms）。
+    private static readonly TimeSpan TruncatedRepeatWindow = TimeSpan.FromMilliseconds(1500);
 
     // 键盘通道的 Enter 经 WPF 输入队列到达，实测比 Raw Input 晚 200～530ms（10-14 POS_1004_0613 / POS_1013_0222 日志），
     // 固定 200ms 窗口会漏掉而让同一次扫码加购两次；配对额度留 1.5 秒余量，过期未被配对的额度作废，不会吞掉之后的真实扫码。
@@ -212,9 +212,10 @@ internal sealed class ScannerInputDuplicateGuard
             _unpairedRawDeliveries.Add((fullBarcode, timestamp));
         }
 
-        ConsoleLog.Write(
+        ConsoleLog.WriteWarning(
             "RawScanner",
-            $"scan tail of previous barcode suppressed source={source} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(normalizedBarcode)} previousBarcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(fullBarcode)} gapMs={gapMs:0.###}");
+            $"scan tail of previous barcode suppressed source={source} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(normalizedBarcode)} previousBarcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(fullBarcode)} gapMs={gapMs:0.###}",
+            ScannerInputTiming.CreateContext("scan-tail-suppressed", source, gapMs));
     }
 
     private void RememberFullScan(string normalizedBarcode, DateTimeOffset timestamp)
@@ -277,6 +278,7 @@ public sealed class RawScannerService(
         TimeSpan.FromMilliseconds(scannerSettings?.RepeatWindowMs ?? ScannerSettingsStore.DefaultRepeatWindowMs));
     private readonly DispatcherTimer _diagnosticsTimer = new() { Interval = DiagnosticsInterval };
     private readonly RawScannerDiagnostics _diagnostics = new();
+    private readonly ScanInputLagTracker _inputLag = new();
     private IntPtr _registeredHwnd;
     private string? _activePageId;
     private Func<RawBarcodeScannedEventArgs, bool>? _globalBarcodeInterceptor;
@@ -518,9 +520,11 @@ public sealed class RawScannerService(
                 return;
             }
 
-            var timestamp = DateTimeOffset.Now;
+            var handledAt = DateTimeOffset.Now;
+            // 关键逻辑：按 WM_INPUT 的消息时间判断字符间隔，界面线程卡顿时积压的按键仍算连续，条码不会被截断。
+            var timestamp = ScannerInputTiming.ResolveEventTime(GetMessageTime(), Environment.TickCount, handledAt);
             var key = KeyInterop.KeyFromVirtualKey(raw.keyboard.VKey);
-            var result = ProcessScannerKey(devicePath, key, timestamp);
+            var result = ProcessScannerKey(devicePath, key, timestamp, handledAt);
 
             if (result is not null)
             {
@@ -533,9 +537,13 @@ public sealed class RawScannerService(
         }
     }
 
-    internal RawScannerInputResult? ProcessScannerKeyForDiagnostics(string devicePath, Key key, DateTimeOffset timestamp)
+    internal RawScannerInputResult? ProcessScannerKeyForDiagnostics(
+        string devicePath,
+        Key key,
+        DateTimeOffset timestamp,
+        DateTimeOffset? handledAt = null)
     {
-        return ProcessScannerKey(devicePath, key, timestamp);
+        return ProcessScannerKey(devicePath, key, timestamp, handledAt ?? timestamp);
     }
 
     internal void DispatchResultForDiagnostics(RawScannerInputResult result)
@@ -543,7 +551,11 @@ public sealed class RawScannerService(
         DispatchResult(result);
     }
 
-    private RawScannerInputResult? ProcessScannerKey(string devicePath, Key key, DateTimeOffset timestamp)
+    private RawScannerInputResult? ProcessScannerKey(
+        string devicePath,
+        Key key,
+        DateTimeOffset timestamp,
+        DateTimeOffset handledAt)
     {
         if (!RawScannerInputProcessor.CanAcceptDevice(devicePath, _boundDevicePath))
         {
@@ -561,6 +573,7 @@ public sealed class RawScannerService(
         if (TryMapCharacter(key, out var character))
         {
             _lastUnmappedKey = null;
+            _inputLag.RecordCharacter(timestamp, handledAt);
             return inputProcessor.ProcessCharacter(devicePath, character, timestamp, _boundDevicePath);
         }
 
@@ -649,6 +662,11 @@ public sealed class RawScannerService(
         ConsoleLog.Write(
             "RawScanner",
             $"scan accepted barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} completion={result.CompletionKind} activePage={_activePageId} dispatchDelayMs={dispatchDelayMs:0.###}");
+        if (_inputLag.TakeAbsorbedGapMs() is { } absorbedGapMs)
+        {
+            ScannerInputTiming.ReportStallAbsorbed("raw", result.Barcode, absorbedGapMs);
+        }
+
         handler(scannedEvent);
     }
 
@@ -963,6 +981,9 @@ public sealed class RawScannerService(
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetRegisteredRawInputDevices(
