@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.Zeller;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Cashiers;
@@ -7274,42 +7275,73 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.True(viewModel.ConfirmPaymentCommand.CanExecute(null));
     }
 
-    [Theory]
-    [InlineData(CardProcessorKind.Zeller, true)]
-    [InlineData(CardProcessorKind.Linkly, false)]
-    public async Task Payment_page_lay_by_refuses_a_zeller_card_deposit_before_the_terminal(CardProcessorKind processor, bool refused)
+    [Fact]
+    public async Task Payment_page_lay_by_takes_a_zeller_card_deposit_and_marks_the_zeller_attempt_completed()
     {
-        var cart = new PosCartService();
-        cart.AddItem(CreateItem("SKU-INST-ZELLER", "Lay-by Zeller Tea", "939011", PriceSourceKind.StoreRetailPrice, 55m));
-        var cardTerminal = new ApprovedCardTerminalClient("CARD-LAYBY");
-        var viewModel = new PaymentViewModel(
-            cart,
-            new CashPaymentWorkflowService(
-                new CashCheckoutService(),
-                new InMemoryOrderRepository(),
-                new InMemorySyncQueueRepository(),
-                cardTerminalClient: cardTerminal),
-            Session,
-            installmentOrderService: new FakeInstallmentOrderService(),
-            cardTerminalSetupService: ConfigurationOnlySetupService.Create(CardTerminalConfiguration.Default with { Processor = processor }));
-        viewModel.PrepareForEntry(Session);
-        viewModel.IsInstallmentPaymentEnabled = true;
-        viewModel.InstallmentCustomerName = "Alice";
-        viewModel.InstallmentCustomerPhone = "0400111222";
-
-        await viewModel.SelectCardCommand.ExecuteAsync(null);
-
-        if (refused)
+        // 中文注释：Zeller 收银机上，付款页 Lay-by 刷卡收定金（首付即付清）：走普通的 Zeller 收款，分期建好后
+        // 这条 Zeller 记录必须标为已建单，恢复才不会把它当成「扣了钱没出单」按销售草稿再补一张销售单。
+        var path = Path.Combine(Path.GetTempPath(), $"hbpos-layby-zeller-{Guid.NewGuid():N}.db");
+        try
         {
-            // 中文注释：Zeller 收银机上 Lay-by 的定金不能刷卡：请求不能发出，也不会留下 Zeller 销售记录。
-            Assert.Equal("payment.installment.status.zellerUnsupported", viewModel.StatusMessage);
-            Assert.Empty(viewModel.PaymentTenders);
-            Assert.Equal(0, cardTerminal.AuthorizeCalls);
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var attempts = new LocalZellerPaymentAttemptRepository(store);
+            var gateway = new ScriptedZellerGateway
+            {
+                OnPurchase = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(new ZellerTransaction(
+                    ZellerTransactionStatus.Approved,
+                    ZellerTransactionType.Purchase,
+                    request.AmountCents,
+                    "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+                    request.Reference,
+                    ResponseCode: "00",
+                    ResponseText: "APPROVED",
+                    ApprovalCode: "123456",
+                    PanMasked: "...2902",
+                    Scheme: "VISA",
+                    ReceiptText: "RECEIPT")))
+            };
+            var client = new ZellerCardTerminalClient(
+                gateway,
+                attempts,
+                new ZellerClientOptions { LateRecheckDelay = TimeSpan.FromHours(1) });
+            var cart = new PosCartService();
+            cart.AddItem(CreateItem("SKU-INST-ZELLER", "Zeller Lay-by Tea", "939011", PriceSourceKind.StoreRetailPrice, 80m));
+            var installmentService = new FakeInstallmentOrderService();
+            var viewModel = new PaymentViewModel(
+                cart,
+                new CashPaymentWorkflowService(
+                    new CashCheckoutService(),
+                    new InMemoryOrderRepository(),
+                    new InMemorySyncQueueRepository(),
+                    cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                        CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Zeller }),
+                    zellerCardTerminalClient: client,
+                    zellerPaymentAttemptRepository: attempts),
+                Session,
+                installmentOrderService: installmentService,
+                onInstallmentOrderCreatedAsync: _ => Task.CompletedTask,
+                cardTerminalSetupService: ConfigurationOnlySetupService.Create(CardTerminalConfiguration.Default with { Processor = CardProcessorKind.Zeller }))
+            {
+                IsInstallmentPaymentEnabled = true,
+                InstallmentCustomerName = "Alice",
+                InstallmentCustomerPhone = "0400111222",
+                TenderAmountText = "80"
+            };
+
+            await viewModel.SelectCardCommand.ExecuteAsync(null);
+            await viewModel.ConfirmPaymentCommand.ExecuteAsync(null);
+
+            var deposit = Assert.IsType<InstallmentOrderCreateRequest>(installmentService.LastCreateRequest).DownPayment;
+            Assert.Equal(PaymentMethodKind.Card, deposit.Method);
+            Assert.Equal(80m, deposit.Amount);
+            Assert.True(ZellerPaymentReference.TryParsePayment(deposit.Reference, out _));
+            Assert.True(CashPaymentWorkflowService.TryReadZellerAttemptTenderKey(deposit.IdempotencyKey, out var attemptGuid));
+            Assert.Equal(ZellerAttemptStatus.OrderCompleted, (await attempts.GetAsync(attemptGuid))!.Status);
         }
-        else
+        finally
         {
-            // 中文注释：其他通道不受这条拦截影响（之后是否放行由原有的分期规则决定）。
-            Assert.NotEqual("payment.installment.status.zellerUnsupported", viewModel.StatusMessage);
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(path);
         }
     }
 
