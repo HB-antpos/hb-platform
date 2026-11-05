@@ -11,6 +11,8 @@ The privacy policy is available before sign-in from the **Privacy** link and aft
 
 This iOS production build includes a fully featured offline demo mode for App Review. The demo contains synthetic sample data only and does not connect to the production API, database, object storage, logging service, or device heartbeat service.
 
+Before sign-in, the app makes one anonymous request to check for an app update. It contains only the app version and update identifiers, with no account or device data. No update is offered to a build under review, and the check stops as soon as the demo session starts.
+
 The five primary navigation destinations are **Home** (the workspace), **Scan**, **Check in**, **Reports**, and **Me**. All authorised business functions are grouped by domain on **Home** and remain available according to the review account's menu permissions. Data-changing actions update an in-memory demo dataset so reviewers can create, edit, submit, approve, clock in, and view the resulting changes across screens. Demo changes reset when the app is restarted or the reviewer signs out.
 
 Navigation follows the standard iOS hierarchy: tapping **Home** returns directly to the workspace root, while a left-edge swipe returns from secondary and tertiary screens to the previous level.
