@@ -4217,7 +4217,7 @@
     <value>凌晨自动重启</value>
   </data>
   <data name="settings.restartPrompt.description" xml:space="preserve">
-    <value>日结完成后，如果这台收银机已连续运行 7 天以上，会在凌晨（默认 3:00）自动重启电脑。</value>
+    <value>这台收银机连续运行满 7 天后，会在凌晨（默认 3:00）自动重启电脑；不在本机日结的副收银机同样适用。</value>
   </data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve">
     <value>日结后凌晨自动重启</value>

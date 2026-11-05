@@ -7,6 +7,7 @@ namespace Hbpos.Client.Tests;
 
 /// <summary>
 /// 日结后凌晨自动重启协调器的完整流程：日结后排定（不弹窗）、凌晨到点无人值守执行（阻止、窗口作废、倒计时取消、成功与失败），
+/// 开机时长兜底（本机没日结的副收银机也在凌晨窗口里重启，每晚最多处理一次），
 /// 以及设置页测试入口；全部用虚拟时间（本地时区固定为 UTC）与假界面驱动。
 /// </summary>
 public sealed class PostDailyCloseRestartCoordinatorTests
@@ -447,6 +448,152 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         Assert.Contains("test=true", Assert.Single(harness.Audit.Events).SafeMessage);
     }
 
+    // ---------- 开机时长兜底（本机没日结也排凌晨重启） ----------
+
+    // 10-16 03:10（本地 = UTC）：处在凌晨 3:00 起 2 小时的可执行窗口里。
+    private static readonly DateTimeOffset InsideTonightsWindow = new(2026, 10, 16, 3, 10, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task Uptime_fallback_restarts_a_register_that_never_did_daily_close()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+
+        var outcome = await harness.RunOvernightWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        Assert.Equal(1, harness.Ui.CountdownShown);
+        Assert.Equal(1, harness.Restart.Calls);
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(new DateOnly(2026, 10, 16), await harness.Store.GetLastOvernightHandledDateAsync());
+        // 兜底不占用日结的「每营业日一次」名额。
+        Assert.Null(await harness.Store.GetLastPromptBusinessDateAsync());
+        Assert.Equal(
+            ["OVERNIGHT_SCHEDULED_BY_UPTIME", "INITIATED"],
+            harness.Audit.Events.Select(audit => audit.ReasonCode).ToArray());
+        Assert.Contains("restartAt=2026-10-16T03:00+00:00", harness.Audit.Events[0].SafeMessage);
+    }
+
+    [Theory]
+    [InlineData(2, 59)] // 窗口开始前
+    [InlineData(5, 0)]  // 窗口刚结束（3:00 + 120 分钟）
+    [InlineData(14, 0)] // 营业时间
+    public async Task Uptime_fallback_never_fires_outside_the_overnight_window(int hour, int minute)
+    {
+        var harness = new Harness(new DateTimeOffset(2026, 10, 16, hour, minute, 0, TimeSpan.Zero));
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+
+        // 窗口外只读一次「已排定时间」，兜底不再额外读 SQLite（白天每 30 秒一次的检查不增加成本）。
+        Assert.Equal(1, harness.Settings.Reads);
+        Assert.Equal(0, harness.Checker.CheckCalls);
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Empty(harness.Audit.Events);
+    }
+
+    [Fact]
+    public async Task Uptime_fallback_requires_the_uptime_threshold()
+    {
+        var harness = new Harness(InsideTonightsWindow) { UptimeSeconds = (long)TimeSpan.FromDays(6.9).TotalSeconds };
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Equal(0, harness.Checker.CheckCalls);
+        Assert.Empty(harness.Audit.Events);
+    }
+
+    [Fact]
+    public async Task Uptime_fallback_respects_the_switch()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        await harness.Store.SetPromptEnabledAsync(false);
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Empty(harness.Audit.Events);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_fallback_countdown_is_not_rescheduled_the_same_night_but_is_the_next_night()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
+
+        Assert.Equal(RestartFlowOutcome.Cancelled, await harness.RunOvernightWithClockAsync());
+        // 同一凌晨后续每 30 秒的检查：不再排、不再弹倒计时（用推进时钟的版本，回归时会明确失败而不是挂住）。
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightWithClockAsync());
+        harness.Advance(TimeSpan.FromMinutes(30));
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightWithClockAsync());
+        Assert.Equal(1, harness.Ui.CountdownShown);
+        Assert.Equal(0, harness.Restart.Calls);
+
+        // 第二天凌晨重新兜底。
+        harness.Advance(TimeSpan.FromDays(1) - TimeSpan.FromMinutes(30));
+        harness.Ui.CountdownAction = null;
+        Assert.Equal(RestartFlowOutcome.Initiated, await harness.RunOvernightWithClockAsync());
+        Assert.Equal(2, harness.Ui.CountdownShown);
+        Assert.Equal(1, harness.Restart.Calls);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_daily_close_schedule_also_stops_the_fallback_tonight()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        await harness.SetDueAsync();
+        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
+
+        Assert.Equal(RestartFlowOutcome.Cancelled, await harness.RunOvernightWithClockAsync());
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightWithClockAsync());
+
+        Assert.Equal(1, harness.Ui.CountdownShown);
+        Assert.DoesNotContain(harness.Audit.Events, audit => audit.ReasonCode == "OVERNIGHT_SCHEDULED_BY_UPTIME");
+    }
+
+    [Fact]
+    public async Task Failed_restart_command_is_not_retried_by_the_fallback_tonight()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        harness.Restart.Result = new SystemRestartResult(SystemRestartStatus.Failed, 5, "denied");
+
+        Assert.Equal(RestartFlowOutcome.Failed, await harness.RunOvernightWithClockAsync());
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightWithClockAsync());
+
+        Assert.Equal(1, harness.Restart.Calls);
+        Assert.Equal(0, harness.Exit.Calls);
+    }
+
+    [Fact]
+    public async Task Blocked_fallback_keeps_the_schedule_and_restarts_once_clear()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        harness.Checker.Report = Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 1));
+
+        Assert.Equal(RestartFlowOutcome.Blocked, await harness.RunOvernightAsync());
+        Assert.Equal(RestartFlowOutcome.Blocked, await harness.RunOvernightAsync());
+        Assert.Equal(new DateTimeOffset(2026, 10, 16, 3, 0, 0, TimeSpan.Zero), await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(
+            ["OVERNIGHT_SCHEDULED_BY_UPTIME", "BLOCKED_CART"],
+            harness.Audit.Events.Select(audit => audit.ReasonCode).ToArray());
+
+        harness.Checker.Report = RestartSafetyReport.Safe;
+        Assert.Equal(RestartFlowOutcome.Initiated, await harness.RunOvernightWithClockAsync());
+        Assert.Equal(1, harness.Restart.Calls);
+    }
+
+    [Fact]
+    public async Task Blocked_fallback_until_the_window_ends_expires_without_restarting()
+    {
+        var harness = new Harness(InsideTonightsWindow);
+        harness.Checker.Report = Report(Hard(RestartSafetyIssueCode.PaymentActive));
+        Assert.Equal(RestartFlowOutcome.Blocked, await harness.RunOvernightAsync());
+
+        harness.Advance(TimeSpan.FromHours(2)); // 05:10，窗口已过
+        harness.Checker.Report = RestartSafetyReport.Safe;
+
+        Assert.Equal(RestartFlowOutcome.NotDue, await harness.RunOvernightAsync());
+        Assert.Null(await harness.Store.GetScheduledRestartAtAsync());
+        Assert.Equal(0, harness.Restart.Calls);
+        Assert.Equal("OVERNIGHT_WINDOW_MISSED", harness.Audit.Events[^1].ReasonCode);
+    }
+
     // ---------- 工具 ----------
 
     private static RestartSafetyIssue Hard(RestartSafetyIssueCode code, int count = 0) =>
@@ -470,6 +617,8 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         public long? UptimeSeconds { get; set; } = (long)TimeSpan.FromDays(9).TotalSeconds;
 
         public DateTimeOffset Now => _time.GetUtcNow();
+
+        public void Advance(TimeSpan delta) => _time.Advance(delta);
 
         public InMemorySettings Settings { get; } = new();
 
@@ -700,10 +849,16 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         /// <summary>设置后读取会失败（模拟本地库被锁）。</summary>
         public Exception? Exception { get; set; }
 
-        public Task<string?> GetValueAsync(string key, CancellationToken cancellationToken = default) =>
-            Exception is not null
+        /// <summary>读取次数：用来确认白天的定时检查不会额外读本地库。</summary>
+        public int Reads { get; private set; }
+
+        public Task<string?> GetValueAsync(string key, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            return Exception is not null
                 ? Task.FromException<string?>(Exception)
                 : Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
+        }
 
         public Task SetValueAsync(string key, string value, CancellationToken cancellationToken = default)
         {

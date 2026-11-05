@@ -623,6 +623,12 @@ public sealed class SettingsFirstScreenDataRemoteAppTests(PaymentViewRuntimeStaT
             Task.CompletedTask;
 
         public Task ClearScheduledRestartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<DateOnly?> GetLastOvernightHandledDateAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateOnly?>(null);
+
+        public Task MarkOvernightHandledAsync(DateOnly localDate, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakeRemoteMaintenanceService : IRemoteMaintenanceService

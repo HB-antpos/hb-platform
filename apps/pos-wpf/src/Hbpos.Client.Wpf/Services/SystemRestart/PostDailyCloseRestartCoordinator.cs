@@ -91,6 +91,8 @@ public interface IPostDailyCloseRestartCoordinator
     /// <summary>
     /// 由主界面定时调用：到了排定的凌晨重启时间就无人值守地执行「安全检查 → 可取消倒计时 → 冲刷上传 → 重启」。
     /// 有硬性问题时不弹阻止界面、保留排定，下次调用再查；过了可执行窗口就作废。
+    /// 没有日结排定时也有兜底：开关开、开机满阈值天数、正处在今天的凌晨可执行窗口里，就当场排定并执行
+    /// （副收银机通常不在本机日结，否则永远不会自动重启）；同一凌晨处理过一次（取消或已下发）就不再兜底。
     /// shutdown.exe 以当前用户身份运行，Windows 工作站上普通用户自带关机权限，不需要管理员、不会弹 UAC。
     /// </summary>
     Task<RestartFlowOutcome> RunScheduledIfDueAsync(
@@ -197,13 +199,14 @@ public sealed class PostDailyCloseRestartCoordinator(
         var log = new ApplicationLogContext(TraceId: correlation.TraceId);
         try
         {
-            var restartAt = await settingsStore.GetScheduledRestartAtAsync(cancellationToken);
+            var now = _clock.GetUtcNow();
+            var restartAt = await settingsStore.GetScheduledRestartAtAsync(cancellationToken)
+                ?? await TryScheduleByUptimeAsync(session, correlation, log, cancellationToken);
             if (restartAt is null)
             {
                 return RestartFlowOutcome.NotDue;
             }
 
-            var now = _clock.GetUtcNow();
             if (now < restartAt.Value)
             {
                 return RestartFlowOutcome.NotDue;
@@ -254,9 +257,9 @@ public sealed class PostDailyCloseRestartCoordinator(
             var countdown = await RunCountdownAsync(cancellationToken);
             if (countdown == CountdownEnd.Cancelled)
             {
-                // 有人在店里点了「取消重启」：今晚不再重启。
+                // 有人在店里点了「取消重启」：今晚不再重启（同时记下当晚已处理，兜底也不会再排）。
                 ui.Hide();
-                await ClearScheduleAsync(cancellationToken);
+                await EndTonightAsync(cancellationToken);
                 ConsoleLog.WriteInformation(LogCategory, "overnight-countdown-cancelled", log);
                 RecordAudit(session, "Skipped", "COUNTDOWN_CANCELLED", Describe(uptime, null) + ";overnight=true", correlation);
                 return RestartFlowOutcome.Cancelled;
@@ -268,8 +271,8 @@ public sealed class PostDailyCloseRestartCoordinator(
                 return RestartFlowOutcome.Blocked;
             }
 
-            // 先清掉排定再下发：无论重启成功还是命令失败，都不会在本窗口内反复尝试。
-            await ClearScheduleAsync(cancellationToken);
+            // 先清掉排定并记下当晚已处理再下发：无论重启成功还是命令失败，都不会在本窗口内反复尝试（兜底也不会）。
+            await EndTonightAsync(cancellationToken);
             return await ExecuteRestartAsync(session, uptime, correlation, log, isTest: false, cancellationToken);
         }
         catch (OperationCanceledException)
@@ -323,6 +326,67 @@ public sealed class PostDailyCloseRestartCoordinator(
     {
         var uptimeSeconds = resourceSampler.Capture().SystemUptimeSeconds;
         return uptimeSeconds is null ? null : TimeSpan.FromSeconds(uptimeSeconds.Value);
+    }
+
+    /// <summary>
+    /// 开机时长兜底：没有日结排定的收银机（典型是从不在本机日结的副收银机），开机满阈值天数、
+    /// 且现在正处在今天的凌晨可执行窗口里，就把今天凌晨的重启时间当场排定，后续与日结排定走完全相同的流程。
+    /// 返回排定的时间；不满足条件返回 null。先判断廉价的时间窗口，窗口外（白天每 30 秒一次）不读 SQLite。
+    /// </summary>
+    private async Task<DateTimeOffset?> TryScheduleByUptimeAsync(
+        PosSessionState session,
+        (string CorrelationId, string TraceId) correlation,
+        ApplicationLogContext log,
+        CancellationToken cancellationToken)
+    {
+        var localNow = _clock.GetLocalNow();
+        var tonight = AtLocalHour(localNow.Date, options.OvernightRestartHour, _clock.LocalTimeZone);
+        if (localNow < tonight || localNow >= tonight + options.OvernightWindow)
+        {
+            return null;
+        }
+
+        var uptime = CaptureUptime();
+        if (uptime is null || uptime.Value < options.UptimeThreshold)
+        {
+            return null;
+        }
+
+        if (!await settingsStore.IsPromptEnabledAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        // 同一个凌晨已经处理过（倒计时被取消 / 已下发重启但命令失败）：不再兜底，避免反复弹倒计时。
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        if (await settingsStore.GetLastOvernightHandledDateAsync(cancellationToken) == today)
+        {
+            return null;
+        }
+
+        // 排定时间取今天的凌晨重启时间（而不是「现在」），窗口作废的判定与日结排定保持一致。
+        await settingsStore.SetScheduledRestartAtAsync(tonight, cancellationToken);
+        _lastScheduledBlockReason = null;
+        ConsoleLog.WriteInformation(
+            LogCategory,
+            $"overnight-scheduled-by-uptime restartAt={tonight:O} uptimeDays={FormatDays(uptime.Value)} thresholdDays={options.UptimeThresholdDays}",
+            log);
+        RecordAudit(
+            session,
+            "Skipped",
+            "OVERNIGHT_SCHEDULED_BY_UPTIME",
+            $"{Describe(uptime.Value, null)};restartAt={tonight:yyyy-MM-ddTHH:mmzzz}",
+            correlation);
+        return tonight;
+    }
+
+    /// <summary>当晚的凌晨重启到此结束：清掉排定，并记下本地日期，开机时长兜底今晚不再重新排定。</summary>
+    private async Task EndTonightAsync(CancellationToken cancellationToken)
+    {
+        await ClearScheduleAsync(cancellationToken);
+        await settingsStore.MarkOvernightHandledAsync(
+            DateOnly.FromDateTime(_clock.GetLocalNow().DateTime),
+            cancellationToken);
     }
 
     private async Task ClearScheduleAsync(CancellationToken cancellationToken)
