@@ -39,6 +39,8 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
             OriginalTransactionUuid = "98b690b7-5eaa-41ec-8ff8-168c60364aac",
             ResponseCode = "00",
             ResponseText = "APPROVED",
+            CallErrorType = "NetworkFailure",
+            CallErrorMessage = "Network request failed",
             ApprovalCode = "456321",
             Rrn = "264753970917",
             PanMasked = "…2902",
@@ -274,6 +276,33 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
         await _repository.CreateAsync(Attempt());
 
         Assert.NotNull(await _repository.GetAsync(Attempt().AttemptGuid));
+    }
+
+    [Fact]
+    public async Task Table_created_before_the_call_error_columns_gets_them_added()
+    {
+        // 试点和本机调试的库是旧版本建的表，没有 CallErrorType / CallErrorMessage。
+        var oldCreateTable = ZellerPaymentAttemptSchema.Statements[0]
+            .Replace("CallErrorType TEXT NULL,", string.Empty, StringComparison.Ordinal)
+            .Replace("CallErrorMessage TEXT NULL,", string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("CallError", oldCreateTable, StringComparison.Ordinal);
+        await using (var connection = await _store.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = oldCreateTable;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var attempt = Attempt() with { CallErrorType = "Cancelled", CallErrorMessage = "The request was cancelled before it could be processed" };
+        await _repository.CreateAsync(attempt);
+        var loaded = await _repository.GetAsync(attempt.AttemptGuid);
+
+        Assert.Equal("Cancelled", loaded!.CallErrorType);
+        Assert.Equal("The request was cancelled before it could be processed", loaded.CallErrorMessage);
+
+        // 再跑一次补列不会报「列已存在」。
+        await using var again = await _store.OpenConnectionAsync();
+        await ZellerPaymentAttemptSchema.EnsureAsync(again);
     }
 
     [Fact]

@@ -40,8 +40,10 @@ namespace BlazorApp.Api.Services.Logging
             @"([""'])([^""'\r\n]{1,128})\1(\s*[:=]\s*)([\[{])",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled
         );
+        // 卡号前后不能紧挨字母或数字，也不能用连字符接着字母或数字：GUID、HBZ- 这类十六进制编号里恰好连成 13 位以上的数字不是卡号。
+        // 规则与 WPF 的 ClientLogSanitizer 保持一致，否则客户端保留下来的编号到了这里又会被打码。
         private static readonly Regex PanPattern = new(
-            @"(?<!\d)(?:\d[ -]?){13,19}(?!\d)",
+            @"(?<![0-9A-Za-z]-?)(?:\d[ -]?){13,19}(?!-?[0-9A-Za-z])",
             RegexOptions.CultureInvariant | RegexOptions.Compiled
         );
         private static readonly Regex SafeIdentifierPattern = new(

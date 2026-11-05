@@ -1098,6 +1098,42 @@ public class ApplicationLogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task IngestAsync_Guid和Zeller引用里连成长串的数字_不当卡号打码()
+    {
+        var service = CreateService();
+        // 尝试编号里恰好连成 13 位以上数字，HBZ- reference 是 32 位十六进制；真卡号仍要打码。
+        const string message = "attempt 15b5f123-4567-8901-23f7-1f3cdc97cc6a: call ended as Error Cancelled, " +
+            "reference HBZ-15b5f12345678901234567f71f3cdc97, card 4111 1111 1111 1111.";
+        var result = await service.IngestAsync(
+            "HBBBackend",
+            new ApplicationLogIngestRequestDto
+            {
+                Logs =
+                [
+                    new ApplicationLogIngestItemDto
+                    {
+                        ClientEventId = Guid.NewGuid(),
+                        Level = "Information",
+                        Message = message,
+                        TimestampUtc = DateTime.UtcNow,
+                        ProjectCode = "HBBBackend",
+                        Environment = "Production",
+                        SourceType = "POS",
+                    },
+                ],
+            },
+            "203.0.113.10"
+        );
+
+        Assert.Equal(1, result.AcceptedCount);
+        var saved = await _db.Queryable<ApplicationLog>().SingleAsync();
+        Assert.Contains("15b5f123-4567-8901-23f7-1f3cdc97cc6a", saved.Message);
+        Assert.Contains("HBZ-15b5f12345678901234567f71f3cdc97", saved.Message);
+        Assert.DoesNotContain("4111 1111 1111 1111", saved.Message);
+        Assert.Contains("[REDACTED_CARD]", saved.Message);
+    }
+
+    [Fact]
     public async Task IngestAsync_递归脱敏根JSON和嵌入文本中的敏感父键对象数组()
     {
         var service = CreateService();

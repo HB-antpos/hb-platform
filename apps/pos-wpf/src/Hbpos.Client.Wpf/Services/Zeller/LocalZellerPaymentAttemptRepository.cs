@@ -82,6 +82,15 @@ public sealed record LocalZellerPaymentAttempt(
 
     public string? ResponseText { get; init; }
 
+    /// <summary>
+    /// 扣款或退款调用以错误结束时 SDK 给的错误类型（ZellerErrorType 的名字），调用返回交易时为空。
+    /// 和 ResponseText 分开存：ResponseText 是交易的响应文字，会进订单和恢复补单；这里只用于排查。
+    /// </summary>
+    public string? CallErrorType { get; init; }
+
+    /// <summary>SDK 返回的错误原文（或网关、异常给的原因），例如「取消了上一次遗留的调用」和「收银员取消」的区别只在这里看得出来。</summary>
+    public string? CallErrorMessage { get; init; }
+
     public string? ApprovalCode { get; init; }
 
     public string? Rrn { get; init; }
@@ -253,6 +262,8 @@ public static class ZellerPaymentAttemptSchema
             OriginalTransactionUuid TEXT NULL,
             ResponseCode TEXT NULL,
             ResponseText TEXT NULL,
+            CallErrorType TEXT NULL,
+            CallErrorMessage TEXT NULL,
             ApprovalCode TEXT NULL,
             Rrn TEXT NULL,
             PanMasked TEXT NULL,
@@ -297,6 +308,13 @@ public static class ZellerPaymentAttemptSchema
         """
     ];
 
+    /// <summary>建表之后补加的列。已经建过表的机器（试点、本机调试）靠这里补上。</summary>
+    public static readonly IReadOnlyList<(string Name, string Definition)> AddedColumns =
+    [
+        ("CallErrorType", "TEXT NULL"),
+        ("CallErrorMessage", "TEXT NULL")
+    ];
+
     public static async Task EnsureAsync(SqliteConnection connection, CancellationToken cancellationToken = default)
     {
         foreach (var statement in Statements)
@@ -304,6 +322,29 @@ public static class ZellerPaymentAttemptSchema
             await using var command = connection.CreateCommand();
             command.CommandText = statement;
             await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA table_info(LocalZellerPaymentAttempts);";
+            await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existing.Add(reader.GetString(1));
+            }
+        }
+
+        foreach (var (name, definition) in AddedColumns)
+        {
+            if (existing.Contains(name))
+            {
+                continue;
+            }
+
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE LocalZellerPaymentAttempts ADD COLUMN {name} {definition};";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 }
@@ -313,7 +354,7 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
     private const string Columns = """
         AttemptGuid, OperationKind, Reference, AmountCents, Currency, Status, Version, OperationGuid, RefundBusinessKey,
         FailureKind, UnknownReason, ReachedTerminal, ProcessingStarted,
-        TransactionUuid, OriginalTransactionUuid, ResponseCode, ResponseText, ApprovalCode, Rrn,
+        TransactionUuid, OriginalTransactionUuid, ResponseCode, ResponseText, CallErrorType, CallErrorMessage, ApprovalCode, Rrn,
         PanMasked, Scheme, Bin, MerchantId, TerminalId, ReceiptText, ReceiptLink, TransactionTimestamp,
         OrderDraftJson, StoreCode, DeviceCode, CashierId, VerificationRounds,
         LateRecheckDueAt, LateRecheckedAt, CreatedAt, UpdatedAt, CompletedAt,
@@ -392,7 +433,7 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
             VALUES (
                 $AttemptGuid, $OperationKind, $Reference, $AmountCents, $Currency, $Status, $Version, $OperationGuid, $RefundBusinessKey,
                 $FailureKind, $UnknownReason, $ReachedTerminal, $ProcessingStarted,
-                $TransactionUuid, $OriginalTransactionUuid, $ResponseCode, $ResponseText, $ApprovalCode, $Rrn,
+                $TransactionUuid, $OriginalTransactionUuid, $ResponseCode, $ResponseText, $CallErrorType, $CallErrorMessage, $ApprovalCode, $Rrn,
                 $PanMasked, $Scheme, $Bin, $MerchantId, $TerminalId, $ReceiptText, $ReceiptLink, $TransactionTimestamp,
                 $OrderDraftJson, $StoreCode, $DeviceCode, $CashierId, $VerificationRounds,
                 $LateRecheckDueAt, $LateRecheckedAt, $CreatedAt, $UpdatedAt, $CompletedAt,
@@ -487,6 +528,8 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
                 OriginalTransactionUuid = $OriginalTransactionUuid,
                 ResponseCode = $ResponseCode,
                 ResponseText = $ResponseText,
+                CallErrorType = $CallErrorType,
+                CallErrorMessage = $CallErrorMessage,
                 ApprovalCode = $ApprovalCode,
                 Rrn = $Rrn,
                 PanMasked = $PanMasked,
@@ -679,6 +722,8 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         AddText(command, "$OriginalTransactionUuid", attempt.OriginalTransactionUuid);
         AddText(command, "$ResponseCode", attempt.ResponseCode);
         AddText(command, "$ResponseText", attempt.ResponseText);
+        AddText(command, "$CallErrorType", attempt.CallErrorType);
+        AddText(command, "$CallErrorMessage", attempt.CallErrorMessage);
         AddText(command, "$ApprovalCode", attempt.ApprovalCode);
         AddText(command, "$Rrn", attempt.Rrn);
         AddText(command, "$PanMasked", attempt.PanMasked);
@@ -747,6 +792,8 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
             OriginalTransactionUuid = Text("OriginalTransactionUuid"),
             ResponseCode = Text("ResponseCode"),
             ResponseText = Text("ResponseText"),
+            CallErrorType = Text("CallErrorType"),
+            CallErrorMessage = Text("CallErrorMessage"),
             ApprovalCode = Text("ApprovalCode"),
             Rrn = Text("Rrn"),
             PanMasked = Text("PanMasked"),

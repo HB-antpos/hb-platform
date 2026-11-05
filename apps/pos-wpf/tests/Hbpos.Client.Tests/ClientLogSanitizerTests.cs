@@ -71,6 +71,35 @@ public sealed class ClientLogSanitizerTests
         Assert.Contains("P001", json, StringComparison.Ordinal);
     }
 
+    [Theory]
+    // 真机日志里被误伤的尝试编号（中间恰好连成 13 位以上数字的 GUID）。
+    [InlineData("attempt 15b5f123-4567-8901-23f7-1f3cdc97cc6a: call ended as Error Cancelled")]
+    // 全是数字的 GUID 段。
+    [InlineData("order 12345678-1234-1234-1234-123456789012 uploaded")]
+    // 发给 Zeller 的 reference（HBZ- 加 32 位十六进制）。
+    [InlineData("attempt created, reference HBZ-15b5f12345678901234567f71f3cdc97, amount 99 cents")]
+    [InlineData("refund reference HBZR-a1234567890123456789012345678901 sent")]
+    public void Serialize_keeps_guids_and_zeller_references_that_happen_to_contain_long_digit_runs(string message)
+    {
+        var json = ClientLogSanitizer.Serialize(new { Message = message });
+
+        Assert.DoesNotContain("REDACTED", json, StringComparison.Ordinal);
+        Assert.Contains(message, json, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("card 4111111111111111 declined", "4111111111111111")]
+    [InlineData("card:4111-1111-1111-1111.", "4111-1111-1111-1111")]
+    [InlineData("(4111 1111 1111 1111)", "4111 1111 1111 1111")]
+    [InlineData("card_4111111111111111", "4111111111111111")]
+    public void Serialize_still_redacts_card_numbers_next_to_punctuation(string message, string pan)
+    {
+        var json = ClientLogSanitizer.Serialize(new { Message = message });
+
+        Assert.DoesNotContain(pan, json, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED_CARD]", json, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Serialize_redacts_bare_voucher_assignment_in_message_text()
     {

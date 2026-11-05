@@ -430,7 +430,8 @@ public sealed class ZellerCardRecoveryProvider
             attempt.Reference,
             null,
             attempt.ResponseCode,
-            attempt.ResponseText,
+            // 中文注释：恢复中心这一栏只做显示。没有交易响应文字时显示 SDK 错误，主管能看出是刷卡机拒绝、超时还是取消。
+            attempt.ResponseText ?? FormatCallError(attempt),
             null,
             attempt.TransactionUuid,
             attempt.OperationGuid,
@@ -439,6 +440,13 @@ public sealed class ZellerCardRecoveryProvider
             IsOpen = isOpen,
             ReceiptApprovalReference = attempt.ApprovalCode ?? attempt.Rrn
         };
+
+    internal static string? FormatCallError(LocalZellerPaymentAttempt attempt) =>
+        attempt.CallErrorType is null
+            ? null
+            : attempt.CallErrorMessage is null
+                ? attempt.CallErrorType
+                : $"{attempt.CallErrorType}: {attempt.CallErrorMessage}";
 
     /// <summary>草稿和尝试必须是同一件事：订单 GUID、门店/设备/收银员、销售/退款、金额（分）、付款符号。不通过返回原因。</summary>
     internal static string? ValidateDraft(LocalZellerPaymentAttempt attempt, CardPaymentOrderDraft draft)

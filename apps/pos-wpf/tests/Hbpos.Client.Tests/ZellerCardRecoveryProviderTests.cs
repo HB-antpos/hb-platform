@@ -239,6 +239,32 @@ public sealed class ZellerCardRecoveryProviderTests
         Assert.Equal("incomplete", ZellerCardRecoveryProvider.ValidateDraft(attempt, draft with { OrderGuid = Guid.Empty }));
     }
 
+    [Fact]
+    public void Recovery_queue_shows_the_sdk_error_when_there_is_no_response_text()
+    {
+        var attempt = new LocalZellerPaymentAttempt(
+            Guid.NewGuid(), ZellerAttemptOperation.Sale, "HBZ-799287a33dc24df1bca3d33eea19b35a", 99, ZellerAttemptStatus.Unknown,
+            "{}", "S001", "POS-01", "C001", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        Assert.Null(ZellerCardRecoveryProvider.ToQueueItem(attempt, "Production", isOpen: true).ResponseText);
+        Assert.Equal(
+            "Cancelled: The request was cancelled before it could be processed",
+            ZellerCardRecoveryProvider.ToQueueItem(
+                attempt with { CallErrorType = "Cancelled", CallErrorMessage = "The request was cancelled before it could be processed" },
+                "Production",
+                isOpen: true).ResponseText);
+        Assert.Equal(
+            "Abandoned",
+            ZellerCardRecoveryProvider.ToQueueItem(attempt with { CallErrorType = "Abandoned" }, "Production", isOpen: true).ResponseText);
+        // 有交易响应文字时仍显示交易的文字。
+        Assert.Equal(
+            "Insufficient funds",
+            ZellerCardRecoveryProvider.ToQueueItem(
+                attempt with { ResponseText = "Insufficient funds", CallErrorType = "Cancelled" },
+                "Production",
+                isOpen: true).ResponseText);
+    }
+
     private static CardPaymentOrderDraft DraftOf(LocalZellerPaymentAttempt attempt) =>
         JsonSerializer.Deserialize<CardPaymentOrderDraft>(attempt.OrderDraftJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 

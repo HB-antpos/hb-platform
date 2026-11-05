@@ -314,12 +314,16 @@ public sealed class ZellerCardTerminalClient
 
         var expectation = new ZellerAttemptExpectation(type, pending.AmountCents, pending.Reference);
         var classification = ZellerResultClassifier.ClassifyCall(result, expectation);
+        var callError = DescribeCallError(result);
         var afterCall = submitted with
         {
             ReachedTerminal = result.ReachedTerminal || result.ProcessingStarted,
-            ProcessingStarted = result.ProcessingStarted
+            ProcessingStarted = result.ProcessingStarted,
+            CallErrorType = callError?.Type,
+            CallErrorMessage = callError?.Message
         };
-        Log($"attempt {attemptGuid}: call ended as {result.Outcome} {result.ErrorType}, decision {classification.Decision}");
+        Log($"attempt {attemptGuid}: call ended as {result.Outcome} {result.ErrorType}, decision {classification.Decision}, " +
+            DescribeCallDetail(result));
 
         return classification.Decision switch
         {
@@ -633,6 +637,44 @@ public sealed class ZellerCardTerminalClient
         new(state, attempt.AttemptGuid, attempt.Reference, attempt.AmountCents, attempt.FailureKind, attempt.UnknownReason, transaction, attempt.OperationKind);
 
     private void Log(string message) => _log?.Invoke(message);
+
+    /// <summary>SDK 错误原文最多存这么多字符，防止异常堆栈之类的长文本撑大本地库。</summary>
+    internal const int MaximumCallErrorMessageLength = 1_000;
+
+    /// <summary>
+    /// 调用没有返回交易时，记下错误类型和原文。错误类型优先用 SDK 的 ErrorType；
+    /// 看门狗放弃、抛异常这类没有 ErrorType 的，用调用结局的名字（Abandoned / Faulted / NotStarted）。
+    /// </summary>
+    internal static (string Type, string? Message)? DescribeCallError(ZellerCallResult result)
+    {
+        if (result.Outcome == ZellerCallOutcome.Transaction)
+        {
+            return null;
+        }
+
+        var type = result.ErrorType?.ToString() ?? result.Outcome.ToString();
+        return (type, TrimCallErrorMessage(result.Message));
+    }
+
+    private static string? TrimCallErrorMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return null;
+        }
+
+        var trimmed = message.Trim();
+        return trimmed.Length <= MaximumCallErrorMessageLength ? trimmed : trimmed[..MaximumCallErrorMessageLength];
+    }
+
+    /// <summary>「调用结束」日志行的明细：交易给状态和响应码/文字，错误给 SDK 原文。</summary>
+    private static string DescribeCallDetail(ZellerCallResult result) =>
+        result.Transaction is { } transaction
+            ? $"status {transaction.Status}, responseCode {Quote(transaction.ResponseCode)}, responseText {Quote(transaction.ResponseText)}"
+            : $"message {Quote(TrimCallErrorMessage(result.Message))}";
+
+    private static string Quote(string? value) =>
+        value is null ? "(none)" : $"\"{value.Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal)}\"";
 
     /// <summary>把网关的事件转成付款页能显示的进度。</summary>
     private sealed class EventForwarder(IProgress<ZellerPaymentProgress>? target) : IProgress<ZellerTerminalEvent>
