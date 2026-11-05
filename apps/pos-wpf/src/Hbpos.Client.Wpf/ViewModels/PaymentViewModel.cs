@@ -1593,29 +1593,6 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     private Task AddTenderByMethodAsync(PaymentMethodKind method) => AddTenderCoreAsync(method);
 
     /// <summary>
-    /// 这台收银机当前是不是 Zeller。现读本机设置（不联网），不靠进付款页时缓存的那份：
-    /// 那份是进页面后异步读的，收银员可能在它读完之前就点了刷卡。读不到设置时按「不是」处理，交给刷卡流程自己报错。
-    /// </summary>
-    private async Task<bool> IsZellerTillAsync()
-    {
-        if (_cardTerminalSetupService is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var configuration = await _cardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync();
-            return configuration.Processor == CardProcessorKind.Zeller;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-        {
-            ConsoleLog.WriteWarning("Payment", $"card processor lookup failed before installment card entry error={ex.GetType().Name}", exception: ex);
-            return false;
-        }
-    }
-
-    /// <summary>
     /// 新增一条付款项。<paramref name="accumulateInto"/> 非空时是「快捷现金累加」：
     /// 本次金额 <paramref name="accumulateDelta"/> 并入这条已有现金，成功后原地替换为累加后的新现金行。
     /// </summary>
@@ -1636,16 +1613,6 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         if (IsInstallmentPaymentEnabled && PaymentTenders.Count > 0)
         {
             SetStatus("payment.installment.status.singleTenderOnly");
-            NotifyPaymentCommandStates();
-            return;
-        }
-
-        if (method == PaymentMethodKind.Card && IsInstallmentPaymentEnabled && await IsZellerTillAsync())
-        {
-            // 中文注释：Zeller 暂不支持分期。付款页 Lay-by 的定金如果刷 Zeller，会按普通销售扣款（带销售订单草稿）；
-            // 分期建单后这条 Zeller 记录不会标记为已建单，下次登录的自动恢复会按草稿再补一张销售单，同一笔钱记两次。
-            // 所以在发请求前拦下，定金改用现金或代金券。
-            SetStatus("payment.installment.status.zellerUnsupported");
             NotifyPaymentCommandStates();
             return;
         }
