@@ -976,7 +976,13 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         if (IsManualCardSavePending) return;
         IsManualCardDialogOpen = false;
         IsManualCardSuccessChecked = false;
-        // 中文注释：窗口背后已占用的续付操作留在本地和中央，由分期中心恢复或主管结案；这里只放下页面引用。
+        // 中文注释：窗口背后已占用的续付操作留在本地和中央，由分期中心恢复或主管结案；这里只放下页面引用，
+        // 并告诉服务这笔不再算进行中（否则恢复会一直跳过它）。
+        if (_manualCardRepaymentOperationGuid is { } abandonedManualCardRepayment)
+        {
+            _installmentOrderService.AbandonManualCardRepayment(abandonedManualCardRepayment);
+        }
+
         _manualCardRepaymentOperationGuid = null;
         _manualCardRepaymentOrder = null;
         // 先封死上一付款代际并取消旧卡任务；Session setter 或其通知失败时，迟到结果也不能污染恢复页。

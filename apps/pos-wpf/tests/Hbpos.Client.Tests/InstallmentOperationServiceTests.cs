@@ -1344,7 +1344,18 @@ public sealed class InstallmentOperationServiceTests
 
             var cancelTask = service.ExecuteCancelAsync(order, Session, "客户取消");
             await terminal.RefundStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-            var recovery = await service.RecoverAsync(Session);
+            // 同一个服务实例的恢复会跳过正在执行的操作，不会打断这笔退款。
+            Assert.Empty(await service.RecoverAsync(Session));
+            // 这里验证的是「别处的恢复抢先把步骤改成结果不明」时回调仍然安全，所以用另一个实例来模拟（例如程序异常后的另一个入口）。
+            var otherEntry = new InstallmentOperationService(
+                repository,
+                api,
+                terminal,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings),
+                squarePaymentAttemptContextAccessor: context,
+                squareTerminalPaymentClient: lookup);
+            var recovery = await otherEntry.RecoverAsync(Session);
             terminal.ReleaseCallback.TrySetResult();
             var cancel = await cancelTask;
 

@@ -4494,9 +4494,6 @@
   <data name="installment.text.1ae472b7" xml:space="preserve">
     <value>手动刷卡续付请求必须带 MANUAL 引用且不含卡交易证据。</value>
   </data>
-  <data name="installment.text.1ae7697f" xml:space="preserve">
-    <value>手动刷卡续付正由另一恢复入口处理。</value>
-  </data>
   <data name="installment.text.1b4926a6" xml:space="preserve">
     <value>礼券批准证据不完整，保持锁定等待对账。</value>
   </data>
@@ -4743,9 +4740,6 @@
   <data name="installment.text.794d97e9" xml:space="preserve">
     <value>补款提交结果不完整，保持锁定等待恢复。</value>
   </data>
-  <data name="installment.text.794db9d8" xml:space="preserve">
-    <value>该分期正在另一台收银机付款，本机未调用 provider。</value>
-  </data>
   <data name="installment.text.79ef15cd" xml:space="preserve">
     <value>退款步骤需由取消操作处理。</value>
   </data>
@@ -4799,9 +4793,6 @@
   </data>
   <data name="installment.text.8abf7609" xml:space="preserve">
     <value>登记补款 provider 失败，未调用 provider：{0}</value>
-  </data>
-  <data name="installment.text.8b5b6b04" xml:space="preserve">
-    <value>手动刷卡续付尚未开始收款，已释放，可重新发起。</value>
   </data>
   <data name="installment.text.8c2a453b" xml:space="preserve">
     <value>退款终端调用被取消，结果未知。</value>
@@ -5138,5 +5129,20 @@
   </data>
   <data name="installment.center.supervisorCard.save" xml:space="preserve">
     <value>主管结案刷卡续付</value>
+  </data>
+  <data name="installment.text.31395ba8" xml:space="preserve">
+    <value>这张分期单还有一笔付款没有结束（可能在其他收银机上），本次没有收款。请稍后再试，或到分期中心查看。</value>
+  </data>
+  <data name="installment.text.7ae1434d" xml:space="preserve">
+    <value>这张分期单在本机还有一笔付款结果不明，本次没有收款。请到分期中心恢复，或请主管结案。</value>
+  </data>
+  <data name="installment.text.781062ca" xml:space="preserve">
+    <value>刷卡尚未开始，这笔续付已结案，可重新发起。</value>
+  </data>
+  <data name="installment.text.f4945dee" xml:space="preserve">
+    <value>这笔刷卡续付正由另一恢复入口处理。</value>
+  </data>
+  <data name="installment.text.ce2676c8" xml:space="preserve">
+    <value>本机之前那笔付款已确认收款并入账，本次没有再收款。请重新打开这张分期单核对余额。</value>
   </data>
 </root>

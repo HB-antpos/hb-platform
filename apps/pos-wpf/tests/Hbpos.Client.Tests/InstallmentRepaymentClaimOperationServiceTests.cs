@@ -587,7 +587,7 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
     }
 
     [Fact]
-    public async Task Manual_card_repayment_whose_claim_never_reached_the_server_can_be_recreated_and_released()
+    public async Task Card_repayment_draft_whose_claim_never_reached_the_server_is_closed_without_recreating_it()
     {
         var path = CreateTempDatabasePath();
         try
@@ -601,9 +601,11 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
 
             var recovered = Assert.Single(await service.RecoverAsync(Session));
 
+            // 本地还停在 Prepared、没有任何终端记录：刷卡终端从没收到过请求，直接结案；不为它重建 claim（重建只会白白占住分期单）。
             Assert.Equal(LocalInstallmentOperationState.Failed, recovered.State);
-            Assert.Equal(InstallmentRepaymentClaimStatus.Released, api.Status);
+            Assert.Equal(["claim:get"], events);
             Assert.Equal(0, api.CommitCalls);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(request.PaymentGuid))?.State);
         }
         finally
         {
@@ -748,6 +750,341 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         {
             DeleteTempDatabase(path);
         }
+    }
+
+    [Fact]
+    public async Task Repayment_blocked_by_this_tills_own_unfinished_zeller_payment_recovers_it_first_and_then_proceeds()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var server = new MultiClaimServer();
+            var zeller = new ZellerRepaymentRig(path);
+            var terminal = new RecordingTerminal([], new PaymentAuthorizationResult(false));
+            var service = zeller.CreateService(repository, server, terminal);
+
+            // 第一笔：刷卡没有完成，Zeller 查到 0 笔但还要等迟到复核；程序随后被关掉，这笔一直停在结果不明，后台仍占着这张分期单。
+            var first = CreateRequest(PaymentMethodKind.Card);
+            zeller.Gateway.OnPurchase = (_, _, _) =>
+                Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+            zeller.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+            Assert.True((await service.ExecuteRepaymentAsync(Session, first, authorizeCard: true)).RequiresReview);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, server.StatusOf(first.PaymentGuid));
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, (await repository.GetAsync(first.PaymentGuid))?.State);
+
+            // 第二笔：收银员重新发起（复核时间已到：尝试表用的假时钟早于真实时钟）。
+            // 后台先回 BUSY；本机把自己那笔复核成未扣款并结案后重试，这次照常刷卡入账。
+            var second = CreateRequest(PaymentMethodKind.Card);
+            zeller.Gateway.OnPurchase = (purchase, _, _) =>
+                Task.FromResult(ZellerCallResult.FromTransaction(ZellerApproved(purchase.Reference, purchase.AmountCents)));
+            var restarted = zeller.CreateService(repository, server, terminal);
+
+            var result = await restarted.ExecuteRepaymentAsync(Session, second, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Declined, server.StatusOf(first.PaymentGuid));
+            Assert.Equal(InstallmentRepaymentClaimStatus.Committed, server.StatusOf(second.PaymentGuid));
+            Assert.Equal(2, server.CreateCalls(second.PaymentGuid));
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(first.PaymentGuid))?.State);
+            // 第一笔没有被重新扣款：两笔各只发给刷卡机一次。
+            Assert.Equal(2, zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Repayment_blocked_by_this_tills_own_payment_that_is_still_unknown_says_so_and_takes_no_payment()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var server = new MultiClaimServer();
+            var zeller = new ZellerRepaymentRig(path);
+            var terminal = new RecordingTerminal([], new PaymentAuthorizationResult(false));
+            var service = zeller.CreateService(repository, server, terminal);
+            var first = CreateRequest(PaymentMethodKind.Card);
+            zeller.Gateway.OnPurchase = (_, _, _) =>
+                Task.FromResult(ZellerCallResult.FromError(ZellerErrorType.Cancelled, reachedTerminal: true));
+            zeller.Gateway.OnQuery = (_, _) => ZellerQueryResult.Found();
+            await service.ExecuteRepaymentAsync(Session, first, authorizeCard: true);
+
+            // 刷卡机查不到结果（断网）：第一笔仍然结果不明，第二笔不能收款，并且要说清楚是本机自己那笔。
+            zeller.Gateway.OnQuery = (_, _) => ZellerQueryResult.Failed(ZellerErrorType.NetworkFailure, "offline");
+            var second = CreateRequest(PaymentMethodKind.Card);
+            var purchasesBefore = zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal));
+            var result = await zeller.CreateService(repository, server, terminal).ExecuteRepaymentAsync(Session, second, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("本机", result.Message);
+            Assert.Equal(purchasesBefore, zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal)));
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, server.StatusOf(first.PaymentGuid));
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(second.PaymentGuid))?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Repayment_blocked_by_this_tills_own_payment_that_turns_out_paid_records_it_and_does_not_charge_again()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var server = new MultiClaimServer();
+            var zeller = new ZellerRepaymentRig(
+                path,
+                new ZellerClientOptions
+                {
+                    VerificationInterval = TimeSpan.FromMilliseconds(1),
+                    VerificationWindow = TimeSpan.FromMilliseconds(5)
+                },
+                TimeProvider.System);
+            var terminal = new RecordingTerminal([], new PaymentAuthorizationResult(false));
+            // 第一笔：网络断了，结果不明；其实刷卡机已经扣款成功。
+            var queryFindsApproval = false;
+            zeller.Gateway.OnPurchase = (_, _, _) => Task.FromResult(ZellerCallResult.Faulted("network dropped"));
+            zeller.Gateway.OnQuery = (reference, _) => queryFindsApproval
+                ? ZellerQueryResult.Found(ZellerApproved(reference, 4000))
+                : ZellerQueryResult.Failed(ZellerErrorType.NetworkFailure);
+            var first = CreateRequest(PaymentMethodKind.Card);
+            Assert.True((await zeller.CreateService(repository, server, terminal).ExecuteRepaymentAsync(Session, first, authorizeCard: true)).RequiresReview);
+
+            // 第二笔：收银员以为没成功又发起一次。本机先把第一笔查出来是已扣款并入账，然后必须停下，不能再刷一次。
+            queryFindsApproval = true;
+            var second = CreateRequest(PaymentMethodKind.Card);
+            var result = await zeller.CreateService(repository, server, terminal).ExecuteRepaymentAsync(Session, second, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("已确认收款", result.Message);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Committed, server.StatusOf(first.PaymentGuid));
+            Assert.Null(server.StatusOf(second.PaymentGuid));
+            Assert.Equal(1, zeller.Gateway.Calls.ToArray().Count(call => call.StartsWith("purchase:", StringComparison.Ordinal)));
+            Assert.Equal(LocalInstallmentOperationState.Completed, (await repository.GetAsync(first.PaymentGuid))?.State);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(second.PaymentGuid))?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Repayment_blocked_by_a_payment_on_another_till_is_reported_without_blaming_this_till()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var server = new MultiClaimServer();
+            server.SeedForeignBlockingClaim();
+            var terminal = new RecordingTerminal([], new PaymentAuthorizationResult(true));
+            var service = new InstallmentOperationService(repository, server, terminal, new NoopVoucherTenderClient());
+
+            var result = await service.ExecuteRepaymentAsync(Session, CreateRequest(PaymentMethodKind.Cash), authorizeCard: false);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Contains("其他收银机", result.Message);
+            Assert.DoesNotContain("本机还有", result.Message);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Recovery_never_touches_a_manual_card_repayment_while_its_collection_dialog_is_open()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events);
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+            await service.BeginManualCardRepaymentAsync(Session, request);
+
+            // 收款窗口开着的时候，登录后的恢复、付款页的自动复核都可能运行：这笔不是中断的操作，不能被改成结果不明。
+            Assert.Empty(await service.RecoverAsync(Session));
+            Assert.Equal(LocalInstallmentOperationState.TerminalSubmitting, (await repository.GetAsync(request.PaymentGuid))?.State);
+            Assert.Equal(InstallmentRepaymentClaimStatus.ProviderPending, api.Status);
+
+            var completed = await service.CompleteManualCardRepaymentAsync(request.PaymentGuid);
+            Assert.True(completed.Succeeded, completed.Message);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Abandoned_manual_card_repayment_is_handed_to_recovery_and_stays_locked_for_the_supervisor()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateManualRequest();
+            var api = new ClaimApi(request, events);
+            var service = new InstallmentOperationService(repository, api, new RecordingTerminal(events, new PaymentAuthorizationResult(false)), new NoopVoucherTenderClient());
+            await service.BeginManualCardRepaymentAsync(Session, request);
+
+            service.AbandonManualCardRepayment(request.PaymentGuid);
+            var recovered = Assert.Single(await service.RecoverAsync(Session));
+
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, recovered.State);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, api.Status);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    /// <summary>像真实后台一样按操作号记多笔续付 claim：同一张分期单同时只允许一笔占用，其余返回 BUSY。</summary>
+    private sealed class MultiClaimServer : IInstallmentApiClient
+    {
+        private sealed class Entry
+        {
+            public required InstallmentRepaymentClaimCreateRequest Request { get; init; }
+            public InstallmentRepaymentClaimStatus Status { get; set; } = InstallmentRepaymentClaimStatus.Prepared;
+            public string? Provider { get; set; }
+            public string? ProviderAttemptId { get; set; }
+            public InstallmentAppendPaymentResponse? Commit { get; set; }
+            public int CreateCalls { get; set; }
+        }
+
+        private readonly object _gate = new();
+        private readonly Dictionary<Guid, Entry> _claims = [];
+        private readonly Dictionary<Guid, int> _createCalls = [];
+        private bool _foreignBlocking;
+
+        public InstallmentRepaymentClaimStatus? StatusOf(Guid operationGuid)
+        {
+            lock (_gate) return _claims.TryGetValue(operationGuid, out var entry) ? entry.Status : null;
+        }
+
+        public int CreateCalls(Guid operationGuid)
+        {
+            lock (_gate) return _createCalls.GetValueOrDefault(operationGuid);
+        }
+
+        public void SeedForeignBlockingClaim()
+        {
+            lock (_gate) _foreignBlocking = true;
+        }
+
+        public Task<InstallmentRepaymentCapabilitiesResponse> GetRepaymentCapabilitiesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new InstallmentRepaymentCapabilitiesResponse(
+                true, false, true, 120, CardRepaymentSupported: true, CardRepaymentProviders: ["square", "linkly", "zeller", "manual"]));
+
+        public Task<InstallmentRepaymentClaimDto> CreateRepaymentClaimAsync(Guid installmentGuid, InstallmentRepaymentClaimCreateRequest claimRequest, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                _createCalls[claimRequest.OperationGuid] = _createCalls.GetValueOrDefault(claimRequest.OperationGuid) + 1;
+                if (_claims.TryGetValue(claimRequest.OperationGuid, out var existing))
+                {
+                    return Task.FromResult(Map(installmentGuid, existing));
+                }
+
+                var blocked = _foreignBlocking || _claims.Values.Any(entry => entry.Status is
+                    InstallmentRepaymentClaimStatus.Prepared or InstallmentRepaymentClaimStatus.ProviderPending or InstallmentRepaymentClaimStatus.Unknown);
+                if (blocked)
+                {
+                    return Task.FromException<InstallmentRepaymentClaimDto>(new CatalogApiException(
+                        "Another repayment claim is blocking this installment.", HttpStatusCode.Conflict, "INSTALLMENT_REPAYMENT_BUSY"));
+                }
+
+                var entry = new Entry { Request = claimRequest };
+                _claims[claimRequest.OperationGuid] = entry;
+                return Task.FromResult(Map(installmentGuid, entry));
+            }
+        }
+
+        public Task<InstallmentRepaymentClaimDto> BeginRepaymentProviderAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimBeginProviderRequest beginRequest, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                var entry = _claims[operationGuid];
+                entry.Status = InstallmentRepaymentClaimStatus.ProviderPending;
+                entry.Provider ??= beginRequest.Provider;
+                entry.ProviderAttemptId ??= beginRequest.ProviderAttemptId;
+                return Task.FromResult(Map(installmentGuid, entry));
+            }
+        }
+
+        public Task<InstallmentRepaymentClaimDto> GetRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                return _claims.TryGetValue(operationGuid, out var entry)
+                    ? Task.FromResult(Map(installmentGuid, entry))
+                    : Task.FromException<InstallmentRepaymentClaimDto>(new CatalogApiException("missing", HttpStatusCode.NotFound));
+            }
+        }
+
+        public Task<InstallmentRepaymentClaimDto> ResolveRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimResolveRequest resolveRequest, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                var entry = _claims[operationGuid];
+                entry.Status = resolveRequest.Outcome switch
+                {
+                    InstallmentRepaymentClaimResolveOutcome.Released => InstallmentRepaymentClaimStatus.Released,
+                    InstallmentRepaymentClaimResolveOutcome.Declined => InstallmentRepaymentClaimStatus.Declined,
+                    _ => InstallmentRepaymentClaimStatus.Unknown
+                };
+                return Task.FromResult(Map(installmentGuid, entry));
+            }
+        }
+
+        public Task<InstallmentRepaymentClaimDto> CommitRepaymentClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentRepaymentClaimCommitRequest commitRequest, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                var entry = _claims[operationGuid];
+                entry.Status = InstallmentRepaymentClaimStatus.Committed;
+                entry.Commit = CreateResponse(new InstallmentAppendPaymentRequest(
+                    installmentGuid,
+                    entry.Request.PaymentGuid,
+                    Session.StoreCode,
+                    Session.DeviceCode,
+                    Session.CashierId,
+                    Session.CashierName,
+                    entry.Request.Amount,
+                    entry.Request.Method,
+                    commitRequest.Reference,
+                    commitRequest.ReservationToken,
+                    commitRequest.CardTransactions,
+                    entry.Request.IdempotencyKey));
+                return Task.FromResult(Map(installmentGuid, entry));
+            }
+        }
+
+        public Task<InstallmentCreateResponse> CreateAsync(InstallmentCreateRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InstallmentAppendPaymentResponse> AppendPaymentAsync(InstallmentAppendPaymentRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InstallmentConfirmPickupResponse> ConfirmPickupAsync(InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InstallmentCancelResponse> CancelAsync(InstallmentCancelRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InstallmentVoidResponse> VoidAsync(InstallmentVoidRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        private static InstallmentRepaymentClaimDto Map(Guid installmentGuid, Entry entry) =>
+            new(installmentGuid, entry.Request.OperationGuid, entry.Request.PaymentGuid, entry.Request.Amount, entry.Request.Method,
+                entry.Request.IdempotencyKey, entry.Status, entry.Provider, entry.ProviderAttemptId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, entry.Commit);
     }
 
     private const string ZellerTransactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
