@@ -252,6 +252,26 @@ public sealed class ZellerResultClassifierTests
         Assert.True(classification.RebuildTerminalFirst);
     }
 
+    [Fact]
+    public void Call_cancelled_while_queued_in_the_gateway_was_not_submitted()
+    {
+        var classification = ZellerResultClassifier.ClassifyCall(ZellerCallResult.NotStarted(ZellerErrorType.Cancelled), Purchase);
+
+        Assert.Equal(ZellerCallDecision.NotSubmitted, classification.Decision);
+        Assert.Equal(ZellerFailureKind.Cancelled, classification.FailureKind);
+    }
+
+    [Fact]
+    public void Call_that_could_not_start_the_sdk_was_not_submitted_and_reports_the_sdk_as_unavailable()
+    {
+        var classification = ZellerResultClassifier.ClassifyCall(
+            ZellerCallResult.NotStarted(message: "WebView2 runtime is missing"),
+            Purchase);
+
+        Assert.Equal(ZellerCallDecision.NotSubmitted, classification.Decision);
+        Assert.Equal(ZellerFailureKind.SdkUnavailable, classification.FailureKind);
+    }
+
     // ── 按 reference 查询之后 ──
 
     [Theory]

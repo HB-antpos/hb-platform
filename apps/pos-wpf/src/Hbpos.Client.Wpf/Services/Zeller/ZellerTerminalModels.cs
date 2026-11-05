@@ -105,7 +105,10 @@ public enum ZellerCallOutcome
     Abandoned,
 
     /// <summary>SDK 抛出了异常。</summary>
-    Faulted
+    Faulted,
+
+    /// <summary>调用没有进入 SDK：还在网关里排队时就被取消了。请求确定没有发出。</summary>
+    NotStarted
 }
 
 /// <summary>扣款或退款调用的结果，加上调用期间收到的事件证据。</summary>
@@ -128,6 +131,13 @@ public sealed record ZellerCallResult(
 
     public static ZellerCallResult Faulted(string message, bool reachedTerminal = false, bool processingStarted = false) =>
         new(ZellerCallOutcome.Faulted, Message: message, ReachedTerminal: reachedTerminal, ProcessingStarted: processingStarted);
+
+    /// <summary>
+    /// 调用没有进入 SDK。errorType 为 Cancelled 表示在网关里排队时被取消；
+    /// 为空表示创建 Terminal 或发起调用时就失败了（例如缺少 WebView2 运行时），message 是原因。
+    /// </summary>
+    public static ZellerCallResult NotStarted(ZellerErrorType? errorType = null, string? message = null) =>
+        new(ZellerCallOutcome.NotStarted, ErrorType: errorType, Message: message);
 }
 
 /// <summary>按 reference 查询的结果。Succeeded 为 false 时不能把「没有交易」当成结论。</summary>
