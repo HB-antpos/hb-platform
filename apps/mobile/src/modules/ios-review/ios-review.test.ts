@@ -35,6 +35,7 @@ import {
   tryAuthenticateIosReview,
 } from "./index";
 import type { IosReviewConfig, IosReviewMarkerStorage } from "./index";
+import { runWithPreAuthGateOpen } from "../auth/password-reset";
 
 async function run() {
 const password = "ios-review-password-2026";
@@ -393,6 +394,28 @@ assert.deepEqual(await printIosReviewDocument("order-1"), {
 const exportResult = createIosReviewExport("sales-report", "csv");
 assert.equal(exportResult.mimeType, "text/csv");
 assert.ok(exportResult.uri.startsWith("data:text/csv"));
+
+// 登录前的重置密码页：用真实守卫走一遍，请求期间放行到真实网络，结束后回到 fail-closed。
+await clearIosReviewSession(markerStorage);
+configureIosReviewBuildGate(true);
+assert.equal(isIosReviewSessionActive(), true);
+const preAuthGate = {
+  isClosed: isIosReviewSessionActive,
+  open: () => beginStandardAuthentication(),
+  close: () => configureIosReviewBuildGate(true),
+};
+assert.equal(
+  await runWithPreAuthGateOpen(preAuthGate, async () => isIosReviewSessionActive()),
+  false,
+  "请求发出时必须已经离开审核本地通道"
+);
+assert.equal(isIosReviewSessionActive(), true, "请求结束后必须恢复登录前守卫");
+await assert.rejects(
+  createIosReviewTransport().dispatch({ method: "POST", url: "/auth/password-reset/request" }),
+  /IOS_REVIEW_UNHANDLED_REQUEST/,
+  "本地通道没有这个接口，不放行就只会本地报错"
+);
+configureIosReviewBuildGate(false);
 
 console.log("ios-review.test.ts: ok");
 }

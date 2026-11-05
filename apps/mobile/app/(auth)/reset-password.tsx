@@ -14,10 +14,13 @@ import {
   isResetCodeFormatValid,
   isValidResetEmail,
   normalizeResetCode,
+  runWithPreAuthGateOpen,
 } from "@/modules/auth/password-reset";
+import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { useAuthStore } from "@/store/auth-store";
 
 const RESEND_SECONDS = 60;
 
@@ -31,6 +34,8 @@ export default function ResetPasswordScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ email?: string }>();
   const { t, language } = useAppTranslation(["login", "common"]);
+  const beginStandardAuth = useAuthStore((s) => s.beginStandardAuth);
+  const rearmIosReviewPreAuth = useAuthStore((s) => s.rearmIosReviewPreAuth);
   const [step, setStep] = useState<"email" | "code" | "done">("email");
   const [email, setEmail] = useState(typeof params.email === "string" ? params.email : "");
   const [code, setCode] = useState("");
@@ -72,6 +77,13 @@ export default function ResetPasswordScreen() {
     setCopied(true);
   };
 
+  // 点「发送」「确认」是用户明确发起的真实请求，和点登录一样放行审核守卫，否则 iOS 正式包发不出去。
+  const preAuthGate = {
+    isClosed: isIosReviewSessionActive,
+    open: () => beginStandardAuth(),
+    close: rearmIosReviewPreAuth,
+  };
+
   const sendCode = async () => {
     if (!isValidResetEmail(email)) {
       setErrorMessage(t("resetPassword.errors.email"));
@@ -80,7 +92,7 @@ export default function ResetPasswordScreen() {
     setBusy(true);
     setErrorMessage("");
     try {
-      await requestPasswordResetCodeApi(email.trim());
+      await runWithPreAuthGateOpen(preAuthGate, () => requestPasswordResetCodeApi(email.trim()));
       setStep("code");
       setResendIn(RESEND_SECONDS);
     } catch (error) {
@@ -95,12 +107,12 @@ export default function ResetPasswordScreen() {
     setBusy(true);
     setErrorMessage("");
     try {
-      const result = await confirmPasswordResetApi({
+      const result = await runWithPreAuthGateOpen(preAuthGate, () => confirmPasswordResetApi({
         email: email.trim(),
         code: normalizeResetCode(code),
         newPassword: newPassword.trim(),
         confirmPassword: confirmPassword.trim(),
-      });
+      }));
       setLoginName(result.loginName);
       setStep("done");
     } catch (error) {
