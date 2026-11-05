@@ -27,6 +27,26 @@ public interface IInstallmentOperationService
         bool authorizeCard,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 手动刷卡续付第一步：先占中央 claim 并登记 Manual 通道，成功后收银员才能在独立刷卡机上收款。
+    /// 请求的 Reference 必须是 MANUAL: 引用，且不带卡交易证据。
+    /// </summary>
+    Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentAsync(
+        PosSessionState session,
+        InstallmentAppendPaymentRequest request,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new InstallmentOperationResult<bool>(false, Message: "当前版本不支持手动刷卡续付。"));
+
+    /// <summary>手动刷卡续付第二步：收银员确认独立刷卡机已收款，写入确认证据并提交。</summary>
+    Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentAsync(
+        Guid operationGuid,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "当前版本不支持手动刷卡续付。", RequiresReview: true));
+
+    /// <summary>收银员确认没有收款：中央 claim 结案为 Declined，本地操作结案为失败。中央结案失败时返回 false，保持占用。</summary>
+    Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
     Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> ExecuteRepaymentAsync(
         PosSessionState session,
         InstallmentAppendPaymentRequest request,
@@ -228,6 +248,175 @@ public sealed class InstallmentOperationService(
         var approvedOperation = ready.Operation!;
         var approvedRequest = Deserialize<InstallmentAppendPaymentRequest>(approvedOperation.RequestJson);
         return await SubmitRepaymentAsync(approvedOperation, approvedRequest, cancellationToken);
+    }
+
+    public Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentAsync(
+        PosSessionState session,
+        InstallmentAppendPaymentRequest request,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => BeginManualCardRepaymentCoreAsync(request, cancellationToken), CancellationToken.None);
+
+    private async Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentCoreAsync(
+        InstallmentAppendPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Method != PaymentMethodKind.Card ||
+            !ManualCardPaymentReference.IsManual(request.Reference) ||
+            request.CardTransactions is { Count: > 0 })
+        {
+            throw new ArgumentException("手动刷卡续付请求必须带 MANUAL 引用且不含卡交易证据。", nameof(request));
+        }
+
+        InstallmentRepaymentCapabilitiesResponse capabilities;
+        try
+        {
+            capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new InstallmentOperationResult<bool>(false, Message: $"无法确认服务端是否支持手动刷卡续付：{exception.Message}");
+        }
+
+        if (!InstallmentCardRepaymentCapability.IsManualSupported(capabilities))
+        {
+            return new InstallmentOperationResult<bool>(false, Message: ManualCardRepaymentUnsupportedMessage);
+        }
+
+        var operation = await repository.CreateOrGetAsync(CreateOperation(
+            request.PaymentGuid,
+            LocalInstallmentOperationKind.Repayment,
+            request.InstallmentGuid,
+            request.PaymentGuid,
+            request.StoreCode,
+            request.DeviceCode,
+            request.CashierId,
+            EnsureIdempotencyKey(request.IdempotencyKey, request.PaymentGuid),
+            JsonSerializer.Serialize(request, JsonOptions)), cancellationToken);
+        request = Deserialize<InstallmentAppendPaymentRequest>(operation.RequestJson);
+
+        var claim = await EnsureRepaymentClaimAsync(operation, request, cancellationToken);
+        if (!claim.Succeeded)
+        {
+            return new InstallmentOperationResult<bool>(false, Message: claim.Message, RequiresReview: claim.RequiresReview);
+        }
+
+        var attemptId = operation.OperationGuid.ToString("D");
+        var begin = await BeginRepaymentProviderAsync(operation, ManualCardPaymentReference.Processor, attemptId, cancellationToken);
+        if (!begin.Succeeded)
+        {
+            return new InstallmentOperationResult<bool>(false, Message: begin.Message, RequiresReview: begin.RequiresReview);
+        }
+
+        // 中文注释：从这里起收银员可能已经在独立刷卡机上收款，POS 无法查询；重启或中断后只能由主管结案。
+        if (!await repository.TryTransitionAsync(
+                operation.OperationGuid,
+                [LocalInstallmentOperationState.Prepared],
+                LocalInstallmentOperationState.TerminalSubmitting,
+                DateTimeOffset.UtcNow,
+                terminalAttemptGuid: attemptId,
+                terminalProcessor: ManualCardPaymentReference.Processor,
+                cancellationToken: CancellationToken.None))
+        {
+            return new InstallmentOperationResult<bool>(false, Message: "手动刷卡续付状态已被其他入口推进，请勿收款，到分期中心恢复。", RequiresReview: true);
+        }
+
+        return new InstallmentOperationResult<bool>(true, true);
+    }
+
+    public Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentAsync(
+        Guid operationGuid,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => CompleteManualCardRepaymentCoreAsync(operationGuid, cancellationToken), CancellationToken.None);
+
+    private async Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentCoreAsync(
+        Guid operationGuid,
+        CancellationToken cancellationToken)
+    {
+        var operation = await repository.GetAsync(operationGuid, cancellationToken);
+        if (operation is not { Kind: LocalInstallmentOperationKind.Repayment, State: LocalInstallmentOperationState.TerminalSubmitting } ||
+            !string.Equals(operation.TerminalProcessor, ManualCardPaymentReference.Processor, StringComparison.Ordinal))
+        {
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
+                false,
+                Message: "手动刷卡续付状态已变化，无法提交；款项已收的话请由主管在分期中心结案。",
+                RequiresReview: true);
+        }
+
+        var request = Deserialize<InstallmentAppendPaymentRequest>(operation.RequestJson);
+        // 中文注释：证据口径与销售的手动刷卡相同：处理器 Manual，TxnRef 与引用都是 MANUAL:{确认号}。
+        var approved = request with
+        {
+            CardTransactions =
+            [
+                new CardTransactionDto(
+                    ManualCardPaymentReference.Processor,
+                    request.Reference,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Manually confirmed by cashier",
+                    null,
+                    null,
+                    request.Amount,
+                    null)
+            ]
+        };
+        if (!await repository.TryTransitionAsync(
+                operationGuid,
+                [LocalInstallmentOperationState.TerminalSubmitting],
+                LocalInstallmentOperationState.TerminalApproved,
+                DateTimeOffset.UtcNow,
+                requestJson: JsonSerializer.Serialize(approved, JsonOptions),
+                cancellationToken: CancellationToken.None))
+        {
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
+                false,
+                Message: "手动刷卡确认未能保存，请勿重复收款，由主管在分期中心结案。",
+                RequiresReview: true);
+        }
+
+        var current = await repository.GetAsync(operationGuid, CancellationToken.None)
+            ?? throw new InvalidOperationException("分期操作状态未保存。");
+        return await SubmitRepaymentAsync(current, approved, cancellationToken);
+    }
+
+    public Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
+        Task.Run(() => CancelManualCardRepaymentCoreAsync(operationGuid, cancellationToken), CancellationToken.None);
+
+    private async Task<bool> CancelManualCardRepaymentCoreAsync(Guid operationGuid, CancellationToken cancellationToken)
+    {
+        var operation = await repository.GetAsync(operationGuid, cancellationToken);
+        if (operation is not { Kind: LocalInstallmentOperationKind.Repayment, State: LocalInstallmentOperationState.TerminalSubmitting } ||
+            !string.Equals(operation.TerminalProcessor, ManualCardPaymentReference.Processor, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            // 中文注释：先结中央 claim，成功才解开本地；反过来的话中央失败时分期单会一直被占用而本地已无记录可恢复。
+            await apiClient.ResolveRepaymentClaimAsync(
+                operation.InstallmentGuid,
+                operationGuid,
+                new InstallmentRepaymentClaimResolveRequest(InstallmentRepaymentClaimResolveOutcome.Declined),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogOperationIssue(operationGuid, "manual-card-repayment-cancel", "Kept locked", exception);
+            return false;
+        }
+
+        return await repository.TryTransitionAsync(
+            operationGuid,
+            [LocalInstallmentOperationState.TerminalSubmitting],
+            LocalInstallmentOperationState.Failed,
+            DateTimeOffset.UtcNow,
+            failureMessage: "收银员确认手动刷卡未收款。",
+            cancellationToken: CancellationToken.None);
     }
 
     public Task<InstallmentOperationResult<InstallmentConfirmPickupResponse>> ExecutePickupAsync(
@@ -704,6 +893,7 @@ public sealed class InstallmentOperationService(
             if (claim.Status == InstallmentRepaymentClaimStatus.Prepared &&
                 request.Method == PaymentMethodKind.Card &&
                 request.CardTransactions is not { Count: > 0 } &&
+                !ManualCardPaymentReference.IsManual(request.Reference) &&
                 cardTerminalSettingsProvider is not null)
             {
                 // 中文注释：服务端按通道放开刷卡续付。只在中央 claim 仍是 Prepared（尚未登记任何通道、刷卡机没收到请求）时
@@ -804,6 +994,8 @@ public sealed class InstallmentOperationService(
     }
 
     private const string PaymentMethodUnsupportedErrorCode = "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED";
+
+    private const string ManualCardRepaymentUnsupportedMessage = "分期续付暂不支持手动刷卡，请勿收款，请改用其他付款方式。";
 
     private const string UnsupportedCardRepaymentMessage = "本机刷卡通道暂不支持分期续付，刷卡终端未收到请求，请改用现金或礼券。";
 
@@ -909,6 +1101,10 @@ public sealed class InstallmentOperationService(
         if (value.StartsWith("Zeller", StringComparison.OrdinalIgnoreCase))
         {
             return "Zeller";
+        }
+        if (value.StartsWith(ManualCardPaymentReference.Processor, StringComparison.OrdinalIgnoreCase))
+        {
+            return ManualCardPaymentReference.Processor;
         }
 
         return null;
@@ -2786,6 +2982,18 @@ public sealed class InstallmentOperationService(
             operation = ready.Operation;
         }
 
+        if (operation.State == LocalInstallmentOperationState.Prepared &&
+            claim.Status == InstallmentRepaymentClaimStatus.Prepared &&
+            ManualCardPaymentReference.IsManual(request.Reference) &&
+            request.CardTransactions is not { Count: > 0 })
+        {
+            // 中文注释：还没登记 Manual 通道，收款窗口没有打开过，确定没有收款：释放 claim，可重新发起。
+            const string notStartedMessage = "手动刷卡续付尚未开始收款，已释放，可重新发起。";
+            return await FailUnsupportedCardRepaymentAsync(operation, "recover-manual-card", notStartedMessage)
+                ? new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, notStartedMessage)
+                : new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "手动刷卡续付正由另一恢复入口处理。");
+        }
+
         if (request.Method == PaymentMethodKind.Card && request.CardTransactions is not { Count: > 0 })
         {
             var terminalRecovery = await ReadPersistedTerminalApprovalAsync(operation, session, cancellationToken);
@@ -3014,7 +3222,10 @@ public sealed class InstallmentOperationService(
         string.IsNullOrWhiteSpace(operation.ResponseJson) &&
         request.CardTransactions is not { Count: > 0 } &&
         string.IsNullOrWhiteSpace(request.ReservationToken) &&
-        (request.Method != PaymentMethodKind.Card || string.IsNullOrWhiteSpace(request.Reference));
+        (request.Method != PaymentMethodKind.Card ||
+         string.IsNullOrWhiteSpace(request.Reference) ||
+         // 手动刷卡续付的 MANUAL 引用在收款前就写好了，本身不是批准证据。
+         ManualCardPaymentReference.IsManual(request.Reference));
 
     private static bool CanRecreateMissingCancelClaim(
         LocalInstallmentOperation operation,

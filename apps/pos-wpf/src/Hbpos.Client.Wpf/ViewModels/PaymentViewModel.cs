@@ -971,6 +971,9 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         if (IsManualCardSavePending) return;
         IsManualCardDialogOpen = false;
         IsManualCardSuccessChecked = false;
+        // 中文注释：窗口背后已占用的续付操作留在本地和中央，由分期中心恢复或主管结案；这里只放下页面引用。
+        _manualCardRepaymentOperationGuid = null;
+        _manualCardRepaymentOrder = null;
         // 先封死上一付款代际并取消旧卡任务；Session setter 或其通知失败时，迟到结果也不能污染恢复页。
         _paymentEntryVersion++;
         _cardSession.ResetManualCancellationState();
@@ -2708,59 +2711,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                     throw;
                 }
 
-                if (!repaymentResult.Succeeded)
-                {
-                    OperationAuditEvents.RecordAction(
-                        _operationAuditLogger,
-                        OperationAuditTypes.InstallmentRepaymentComplete,
-                        "Failed",
-                        Session,
-                        auditCart,
-                        reasonCode: "REPAYMENT",
-                        safeMessage: repaymentResult.Message,
-                        paymentMethod: appliedTender.Method.ToString(),
-                        paymentAmount: appliedTender.Amount,
-                        orderGuid: repaymentOrder.OrderId.ToString("D"));
-                    if (!repaymentResult.RequiresReview)
-                    {
-                        // 明确拒绝/claim busy 没有不确定 provider 副作用，可丢弃本次草稿并让下一次生成新的 operation。
-                        ResetInstallmentPaymentDraft();
-                        PaymentTenders.Clear();
-                        RecalculateTenderSummary();
-                    }
-                    SetStatus("payment.installment.status.actionFailed", repaymentResult.Message);
-                    return;
-                }
-
-                var completedOrder = repaymentResult.Order ?? repaymentOrder;
-                OperationAuditEvents.RecordAction(
-                    _operationAuditLogger,
-                    OperationAuditTypes.InstallmentRepaymentComplete,
-                    "Succeeded",
-                    Session,
-                    OperationAuditEvents.CaptureCart(_cart.Lines),
-                    reasonCode: "REPAYMENT",
-                    paymentMethod: appliedTender.Method.ToString(),
-                    paymentAmount: appliedTender.Amount,
-                    orderGuid: completedOrder.OrderId.ToString("D"));
-                ResetInstallmentPaymentDraft();
-                PaymentTenders.Clear();
-                _installmentRepaymentOrder = completedOrder;
-                TenderAmountText = string.Empty;
-                RecalculateTenderSummary();
-                SetStatus("payment.installment.status.repaymentRecorded", repaymentResult.Message);
-                OnPropertyChanged(nameof(InstallmentOrderInfoText));
-                if (_navigationActions.InstallmentOrderCreatedAsync is not null)
-                {
-                    // 分期补录成功后复用外层自动打印和回 POS 流程，避免收银员继续停在已完成的补录页。
-                    _installmentRepaymentOrder = null;
-                    IsInstallmentSwitchLocked = false;
-                    IsInstallmentPaymentEnabled = false;
-                    InstallmentCustomerName = string.Empty;
-                    InstallmentCustomerPhone = string.Empty;
-                    await _navigationActions.InstallmentOrderCreatedAsync(completedOrder);
-                }
-
+                await FinishInstallmentRepaymentAsync(repaymentOrder, appliedTender, repaymentResult, auditCart);
                 return;
             }
 
@@ -2912,6 +2863,67 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 IsPaymentInteractionLocked = false;
                 NotifyPaymentCommandStates();
             }
+        }
+    }
+
+    /// <summary>续付提交之后的收尾：失败留痕并按需丢弃草稿；成功留痕并走外层打印、回 POS 流程。</summary>
+    private async Task FinishInstallmentRepaymentAsync(
+        InstallmentOrderSummary repaymentOrder,
+        PaymentTender appliedTender,
+        InstallmentOrderActionResult repaymentResult,
+        OperationAuditCartSnapshot auditCart)
+    {
+        if (!repaymentResult.Succeeded)
+        {
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.InstallmentRepaymentComplete,
+                "Failed",
+                Session,
+                auditCart,
+                reasonCode: "REPAYMENT",
+                safeMessage: repaymentResult.Message,
+                paymentMethod: appliedTender.Method.ToString(),
+                paymentAmount: appliedTender.Amount,
+                orderGuid: repaymentOrder.OrderId.ToString("D"));
+            if (!repaymentResult.RequiresReview)
+            {
+                // 明确拒绝/claim busy 没有不确定 provider 副作用，可丢弃本次草稿并让下一次生成新的 operation。
+                ResetInstallmentPaymentDraft();
+                PaymentTenders.Clear();
+                RecalculateTenderSummary();
+            }
+            SetStatus("payment.installment.status.actionFailed", repaymentResult.Message);
+            return;
+        }
+
+        var completedOrder = repaymentResult.Order ?? repaymentOrder;
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.InstallmentRepaymentComplete,
+            "Succeeded",
+            Session,
+            OperationAuditEvents.CaptureCart(_cart.Lines),
+            reasonCode: "REPAYMENT",
+            paymentMethod: appliedTender.Method.ToString(),
+            paymentAmount: appliedTender.Amount,
+            orderGuid: completedOrder.OrderId.ToString("D"));
+        ResetInstallmentPaymentDraft();
+        PaymentTenders.Clear();
+        _installmentRepaymentOrder = completedOrder;
+        TenderAmountText = string.Empty;
+        RecalculateTenderSummary();
+        SetStatus("payment.installment.status.repaymentRecorded", repaymentResult.Message);
+        OnPropertyChanged(nameof(InstallmentOrderInfoText));
+        if (_navigationActions.InstallmentOrderCreatedAsync is not null)
+        {
+            // 分期补录成功后复用外层自动打印和回 POS 流程，避免收银员继续停在已完成的补录页。
+            _installmentRepaymentOrder = null;
+            IsInstallmentSwitchLocked = false;
+            IsInstallmentPaymentEnabled = false;
+            InstallmentCustomerName = string.Empty;
+            InstallmentCustomerPhone = string.Empty;
+            await _navigationActions.InstallmentOrderCreatedAsync(completedOrder);
         }
     }
 

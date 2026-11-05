@@ -8055,6 +8055,111 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.Null(installmentService.LastRepaymentRequest.Payment.CardTransactions);
     }
 
+    private PaymentViewModel CreateManualRepaymentViewModel(FakeInstallmentOrderService service, InstallmentOrderSummary order)
+    {
+        var viewModel = new PaymentViewModel(
+            new PosCartService(),
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            installmentOrderService: service,
+            paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(UseManualCard: true)));
+        viewModel.PrepareForInstallmentRepayment(Session, order);
+        return viewModel;
+    }
+
+    private static async Task WaitForManualCardAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 200 && !condition(); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition());
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_holds_the_claim_before_the_dialog_and_commits_on_confirmation()
+    {
+        var service = new FakeInstallmentOrderService();
+        var order = CreateInstallmentOrder("IO-20260703-0101", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var viewModel = CreateManualRepaymentViewModel(service, order);
+        viewModel.TenderAmountText = "30";
+
+        Assert.True(viewModel.OpenManualCardCommand.CanExecute(null));
+        viewModel.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => viewModel.IsManualCardDialogOpen);
+
+        Assert.Equal((order.OrderId, 30m), Assert.Single(service.ManualBegins));
+        Assert.Equal(30m, viewModel.ManualCardAmount);
+        Assert.False(viewModel.ConfirmManualCardCommand.CanExecute(null));
+        viewModel.IsManualCardSuccessChecked = true;
+        await viewModel.ConfirmManualCardCommand.ExecuteAsync(null);
+
+        Assert.Single(service.ManualCompletes);
+        Assert.Empty(service.ManualCancels);
+        Assert.False(viewModel.IsManualCardDialogOpen);
+        Assert.Empty(viewModel.PaymentTenders);
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_cancel_releases_the_claim_and_stays_open_when_release_fails()
+    {
+        var failing = new FakeInstallmentOrderService { ManualCancelResult = false };
+        var order = CreateInstallmentOrder("IO-20260703-0102", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var stuck = CreateManualRepaymentViewModel(failing, order);
+        stuck.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => stuck.IsManualCardDialogOpen);
+
+        stuck.CancelManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => failing.ManualCancels.Count == 1 && !stuck.IsPaymentInteractionLocked);
+
+        // 中央没结案时不能关窗：分期单还被占着，收银员要知道这笔没有放开。
+        Assert.True(stuck.IsManualCardDialogOpen);
+        Assert.False(string.IsNullOrWhiteSpace(stuck.ManualCardDialogStatusMessage));
+
+        var service = new FakeInstallmentOrderService();
+        var viewModel = CreateManualRepaymentViewModel(service, order);
+        viewModel.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => viewModel.IsManualCardDialogOpen);
+        Assert.Equal(90m, viewModel.ManualCardAmount);
+
+        viewModel.CancelManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => !viewModel.IsManualCardDialogOpen);
+
+        Assert.Single(service.ManualCancels);
+        Assert.Empty(service.ManualCompletes);
+    }
+
+    [Fact]
+    public async Task Manual_card_repayment_dialog_never_opens_when_the_claim_cannot_be_held()
+    {
+        var order = CreateInstallmentOrder("IO-20260703-0103", "Bob", "0400222333", paidAmount: 30m, outstandingAmount: 90m);
+        var unsupported = new FakeInstallmentOrderService { ManualCardRepaymentSupported = false };
+        var first = CreateManualRepaymentViewModel(unsupported, order);
+        first.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => !first.IsPaymentInteractionLocked);
+        Assert.Empty(unsupported.ManualBegins);
+        Assert.False(first.IsManualCardDialogOpen);
+
+        var busy = new FakeInstallmentOrderService
+        {
+            ManualBeginResult = new InstallmentManualCardRepaymentBeginResult(false, "该分期正在另一台收银机付款，本机未调用 provider。")
+        };
+        var second = CreateManualRepaymentViewModel(busy, order);
+        second.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => busy.ManualBegins.Count == 1 && !second.IsPaymentInteractionLocked);
+        Assert.False(second.IsManualCardDialogOpen);
+        Assert.Contains("另一台收银机", second.StatusMessage);
+
+        var tooMuch = new FakeInstallmentOrderService();
+        var third = CreateManualRepaymentViewModel(tooMuch, order);
+        third.TenderAmountText = "90.01";
+        third.OpenManualCardCommand.Execute(null);
+        await WaitForManualCardAsync(() => !third.IsPaymentInteractionLocked);
+        Assert.Empty(tooMuch.ManualBegins);
+        Assert.False(third.IsManualCardDialogOpen);
+    }
+
     [Fact]
     public async Task Payment_page_installment_repayment_rejects_card_tender_when_server_does_not_support_card_repayment()
     {
@@ -8839,6 +8944,45 @@ public sealed class PosTerminalCashPaymentViewModelTests
         public bool CardRepaymentSupported { get; init; } = true;
 
         public int CardRepaymentCapabilityChecks { get; private set; }
+
+        public bool ManualCardRepaymentSupported { get; init; } = true;
+
+        public InstallmentManualCardRepaymentBeginResult? ManualBeginResult { get; init; }
+
+        public InstallmentOrderActionResult ManualCompleteResult { get; init; } = new(true, "补款已记录。");
+
+        public bool ManualCancelResult { get; init; } = true;
+
+        public List<(Guid InstallmentGuid, decimal Amount)> ManualBegins { get; } = [];
+
+        public List<Guid> ManualCompletes { get; } = [];
+
+        public List<Guid> ManualCancels { get; } = [];
+
+        public Task<bool> IsManualCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ManualCardRepaymentSupported);
+
+        public Task<InstallmentManualCardRepaymentBeginResult> BeginManualCardRepaymentAsync(
+            Guid installmentGuid,
+            PosSessionState session,
+            decimal amount,
+            CancellationToken cancellationToken = default)
+        {
+            ManualBegins.Add((installmentGuid, amount));
+            return Task.FromResult(ManualBeginResult ?? new InstallmentManualCardRepaymentBeginResult(true, string.Empty, Guid.NewGuid(), amount));
+        }
+
+        public Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default)
+        {
+            ManualCompletes.Add(operationGuid);
+            return Task.FromResult(ManualCompleteResult);
+        }
+
+        public Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default)
+        {
+            ManualCancels.Add(operationGuid);
+            return Task.FromResult(ManualCancelResult);
+        }
 
         public InstallmentOrderCreateRequest? LastCreateRequest { get; private set; }
 

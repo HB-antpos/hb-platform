@@ -60,7 +60,8 @@ public sealed class InstallmentRepaymentClaimContractsTests
     [InlineData("linkly-cloud", "linkly")]
     [InlineData("ANZ", "linkly")]
     [InlineData("Zeller", "zeller")]
-    [InlineData("Manual", null)]
+    [InlineData("Manual", "manual")]
+    [InlineData("Offline Terminal", null)]
     [InlineData("cash", null)]
     [InlineData("  ", null)]
     public void Card_repayment_provider_families_normalize_claim_and_evidence_names(string value, string? expected)

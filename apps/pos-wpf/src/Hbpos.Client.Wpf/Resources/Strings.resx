@@ -245,6 +245,9 @@
   <data name="payment.installment.status.invalidAmount" xml:space="preserve"><value>Lay-by payment amount must be greater than zero and not exceed the outstanding amount.</value></data>
   <data name="payment.installment.status.singleTenderOnly" xml:space="preserve"><value>Lay-by mode accepts one payment at a time.</value></data>
   <data name="payment.installment.status.cardRepaymentUnsupported" xml:space="preserve"><value>Card payments for lay-by repayments are not supported yet. Please use cash or a voucher.</value></data>
+  <data name="payment.installment.status.manualCardRepaymentUnsupported" xml:space="preserve"><value>Manual card is not available for lay-by repayments on this server. Do not take the payment; use another payment method.</value></data>
+  <data name="payment.installment.status.manualCardRepaymentCancelled" xml:space="preserve"><value>Manual card repayment cancelled. No payment was recorded.</value></data>
+  <data name="payment.installment.status.manualCardRepaymentCancelFailed" xml:space="preserve"><value>The repayment could not be released. Check the connection and try again, or ask a supervisor to resolve it in the Lay-by Center.</value></data>
   <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This lay-by order cannot receive more payments.</value></data>
   <data name="payment.installment.status.actionFailed" xml:space="preserve"><value>Lay-by payment failed.</value></data>
   <data name="payment.installment.status.created" xml:space="preserve"><value>Lay-by order created.</value></data>

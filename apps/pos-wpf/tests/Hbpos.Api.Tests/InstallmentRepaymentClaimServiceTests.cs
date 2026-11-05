@@ -1322,6 +1322,7 @@ public sealed class InstallmentRepaymentClaimServiceTests
     [InlineData("linkly", "Linkly", "ANZ")]
     [InlineData("linkly", "linkly-cloud", "ANZ")]
     [InlineData("zeller", "Zeller", "Zeller")]
+    [InlineData("manual", "Manual", "Manual")]
     public async Task Enabled_card_provider_can_create_begin_and_commit_a_repayment(
         string enabledProvider,
         string claimProvider,
@@ -1486,7 +1487,7 @@ public sealed class InstallmentRepaymentClaimServiceTests
                 CardTransactions:
                 [
                     CardTransaction("ANZ", "TXN-1", 4m),
-                    CardTransaction("Manual", "MANUAL-1", 6m, null, null)
+                    CardTransaction("Offline Terminal", "OFFLINE-1", 6m, null, null)
                 ]),
             Identity(),
             CancellationToken.None);

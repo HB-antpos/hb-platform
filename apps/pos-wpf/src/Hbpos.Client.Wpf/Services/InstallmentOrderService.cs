@@ -47,6 +47,26 @@ public interface IInstallmentOrderService
     Task<bool> ResolveRefundStepAsync(Guid refundStepGuid, InstallmentRefundSupervisorResolution resolution, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
 
+    /// <summary>服务端是否放开手动刷卡续付；无法确认一律按不支持处理。</summary>
+    Task<bool> IsManualCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
+    /// <summary>手动刷卡续付第一步：占中央 claim。成功后才能打开收款窗口。</summary>
+    Task<InstallmentManualCardRepaymentBeginResult> BeginManualCardRepaymentAsync(
+        Guid installmentGuid,
+        PosSessionState session,
+        decimal amount,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new InstallmentManualCardRepaymentBeginResult(false, "当前版本不支持手动刷卡续付。"));
+
+    /// <summary>手动刷卡续付第二步：收银员已核实独立刷卡机收款成功。</summary>
+    Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new InstallmentOrderActionResult(false, "当前版本不支持手动刷卡续付。", RequiresReview: true));
+
+    /// <summary>收银员确认没有收款。中央结案失败时返回 false，收款窗口要保持打开。</summary>
+    Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
     /// <summary>占用该分期、卡状态不明的刷卡续付（任意收银机发起的）；没有、离线或服务端不支持时返回 null。</summary>
     Task<InstallmentPendingCardRepayment?> GetPendingCardRepaymentAsync(PosSessionState session, Guid installmentGuid, CancellationToken cancellationToken = default) =>
         Task.FromResult<InstallmentPendingCardRepayment?>(null);
@@ -386,6 +406,89 @@ public sealed class InstallmentOrderService(
         var settings = await cardTerminalSettingsProvider.GetSettingsAsync(cancellationToken);
         return settings.Processor == CardProcessorKind.Zeller;
     }
+
+    public async Task<bool> IsManualCardRepaymentSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
+    {
+        if (!session.IsOnline || installmentOperations is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return InstallmentCardRepaymentCapability.IsManualSupported(await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"manual card repayment capability check failed error={ex.GetType().Name} message={ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<InstallmentManualCardRepaymentBeginResult> BeginManualCardRepaymentAsync(
+        Guid installmentGuid,
+        PosSessionState session,
+        decimal amount,
+        CancellationToken cancellationToken = default)
+    {
+        if (installmentOperations is null)
+        {
+            return new InstallmentManualCardRepaymentBeginResult(false, "当前版本不支持手动刷卡续付。");
+        }
+
+        var local = await localRepository.GetAsync(installmentGuid, cancellationToken);
+        if (local is null)
+        {
+            return new InstallmentManualCardRepaymentBeginResult(false, "未找到本机缓存的分期单。");
+        }
+
+        var appliedAmount = Math.Min(amount, local.BalanceAmount);
+        if (appliedAmount <= 0m)
+        {
+            return new InstallmentManualCardRepaymentBeginResult(false, "这张分期单没有待付余额。");
+        }
+
+        var paymentGuid = Guid.NewGuid();
+        var request = new InstallmentAppendPaymentRequest(
+            installmentGuid,
+            paymentGuid,
+            session.StoreCode,
+            session.DeviceCode,
+            session.CashierId,
+            session.CashierName,
+            appliedAmount,
+            PaymentMethodKind.Card,
+            ManualCardPaymentReference.Format(paymentGuid),
+            null,
+            null,
+            EnsureIdempotencyKey(null, installmentGuid));
+        var begin = await installmentOperations.BeginManualCardRepaymentAsync(session, request, cancellationToken);
+        return begin.Succeeded
+            ? new InstallmentManualCardRepaymentBeginResult(true, begin.Message ?? string.Empty, paymentGuid, appliedAmount)
+            : new InstallmentManualCardRepaymentBeginResult(false, begin.Message ?? "手动刷卡续付未能开始，请勿收款。", RequiresReview: begin.RequiresReview);
+    }
+
+    public async Task<InstallmentOrderActionResult> CompleteManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default)
+    {
+        if (installmentOperations is null)
+        {
+            return new InstallmentOrderActionResult(false, "当前版本不支持手动刷卡续付。", RequiresReview: true);
+        }
+
+        var operation = await installmentOperations.CompleteManualCardRepaymentAsync(operationGuid, cancellationToken);
+        return new InstallmentOrderActionResult(
+            operation.Succeeded,
+            operation.Message ?? (operation.Succeeded ? "补款已记录。" : "补款结果未知，请勿重复收款。"),
+            operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
+            operation.RequiresReview);
+    }
+
+    public Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
+        installmentOperations is null
+            ? Task.FromResult(false)
+            : installmentOperations.CancelManualCardRepaymentAsync(operationGuid, cancellationToken);
 
     public async Task<InstallmentPendingCardRepayment?> GetPendingCardRepaymentAsync(
         PosSessionState session,
@@ -1177,6 +1280,14 @@ public sealed record InstallmentOrderCreateResult(
     bool Succeeded,
     string Message,
     InstallmentOrderSummary? Order = null,
+    bool RequiresReview = false);
+
+/// <summary>手动刷卡续付第一步的结果。成功时 OperationGuid 和 Amount 是这次占住的操作和金额。</summary>
+public sealed record InstallmentManualCardRepaymentBeginResult(
+    bool Succeeded,
+    string Message,
+    Guid? OperationGuid = null,
+    decimal Amount = 0m,
     bool RequiresReview = false);
 
 /// <summary>卡状态不明、等待主管结案的刷卡续付。</summary>
