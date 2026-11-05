@@ -1652,6 +1652,7 @@
         "StoreProductMaintenance": "Store Product Maintenance",
         "ContainerLegacyDetail": "Legacy Container Detail",
         "YiwuContainerBatch": "Yiwu Container Batch Update",
+        "StoreSync": "Store Price Sync",
         "System": "System Sync"
       },
       "fields": {

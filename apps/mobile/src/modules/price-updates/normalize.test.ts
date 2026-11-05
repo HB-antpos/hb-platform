@@ -8,6 +8,7 @@ import {
   normalizePriceUpdateTaskPage,
   normalizeSuggestedDiscountLookup,
   normalizeSyncTargets,
+  normalizeSyncToOtherStoresWarehouseResult,
 } from "./normalize";
 
 const camel = normalizePriceUpdateTask({
@@ -133,6 +134,37 @@ assert.equal(targets.targets.length, 2, "没有分店代码的目标必须丢弃
 assert.equal(targets.targets[1].storeName, "1003", "缺少分店名时回退到分店代码");
 assert.equal(targets.targets[1].retailPrice, null);
 assert.equal(targets.sourceDiscountRate, 0.2);
+// 旧后端不返回仓库字段：一律按「非仓库商品」处理，面板行为与改动前一致。
+assert.equal(targets.warehouseApplicable, false);
+assert.equal(targets.warehouseRetailPrice, null);
+assert.equal(targets.warehouseSuggestedDiscountRate, null);
+
+const warehouseTargets = normalizeSyncTargets({
+  sourceStoreCode: "1001",
+  productCode: "P001",
+  targets: [],
+  warehouseApplicable: true,
+  warehouseRetailPrice: 10,
+  warehouseSuggestedDiscountRate: 0,
+});
+assert.equal(warehouseTargets.warehouseApplicable, true);
+assert.equal(warehouseTargets.warehouseRetailPrice, 10);
+assert.equal(warehouseTargets.warehouseSuggestedDiscountRate, 0, "0 = 明确无折扣，不能被当成未设置");
+assert.equal(
+  normalizeSyncTargets({ WarehouseApplicable: true, WarehouseRetailPrice: "9.5" }).warehouseRetailPrice,
+  9.5,
+  "兼容 PascalCase 与字符串金额"
+);
+
+assert.deepEqual(
+  normalizeSyncToOtherStoresWarehouseResult({ updatedStoreCount: 2, warehouseUpdated: true, warehouseRetailPrice: 12 }),
+  { updated: true, retailPrice: 12, suggestedDiscountRate: null }
+);
+assert.deepEqual(
+  normalizeSyncToOtherStoresWarehouseResult({ updatedStoreCount: 2 }),
+  { updated: false, retailPrice: null, suggestedDiscountRate: null },
+  "旧后端没有仓库字段时视为未更新"
+);
 
 assert.deepEqual(normalizePriceNotificationPreview({ affectedStores: 6, skippedSpecialStores: 1 }), {
   affectedStores: 6,

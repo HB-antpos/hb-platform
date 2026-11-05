@@ -146,6 +146,31 @@ namespace BlazorApp.Shared.DTOs
         public bool SyncIsSpecialProduct { get; set; }
         public bool SyncDiscountRate { get; set; }
         public string Mode { get; set; } = SyncModeConstants.Overwrite;
+
+        /// <summary>
+        /// 同步时是否一并把仓库商品（供应商 200）的零售价 / 建议折扣更新为来源分店的值。
+        /// 默认 false（Web 批量入口行为不变）；手机端「同步其它分店」传 true，
+        /// 否则其它分店扫码仍会因与仓库价不一致而提示「是否同步仓库价格」。
+        /// </summary>
+        public bool SyncWarehouse { get; set; }
+    }
+
+    /// <summary>
+    /// 同步其它分店的结果；仅在 <see cref="SyncToOtherStoresDto.SyncWarehouse"/> 为 true 时作为响应 Data 返回，
+    /// 让调用方知道仓库价是否被一并更新。
+    /// </summary>
+    public sealed class SyncToOtherStoresResultDto
+    {
+        public int AffectedRows { get; set; }
+
+        /// <summary>本次是否真的改动了仓库侧的零售价或建议折扣。</summary>
+        public bool WarehouseUpdated { get; set; }
+
+        /// <summary>同步后仓库零售价（未命中仓库商品时为 null）。</summary>
+        public decimal? WarehouseRetailPrice { get; set; }
+
+        /// <summary>同步后仓库建议折扣（null = 未设置）。</summary>
+        public decimal? WarehouseSuggestedDiscountRate { get; set; }
     }
 
     public class SyncRetailPriceFromHqRequest

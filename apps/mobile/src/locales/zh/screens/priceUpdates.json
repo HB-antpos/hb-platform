@@ -205,6 +205,7 @@
     "savedNoNotification": "已保存。各分店价格已一致，未产生通知",
     "syncedStores": "已同步 {{count}} 家分店",
     "syncedStoresWithLabels": "已同步 {{count}} 家分店，{{labelCount}} 家已收到待换标签通知",
+    "warehouseUpdatedSuffix": "；仓库价已同步更新",
     "previewAutoSync": "保存后，{{count}} 家分店的价格会自动更新，并收到『待换标签』通知",
     "previewNeedsUpdate": "保存后，{{count}} 家价格不同的分店会收到『需改价』通知",
     "previewSkippedSuffix": "；{{count}} 家特殊商品将跳过"
@@ -234,6 +235,7 @@
     "failed": "同步失败，请重试",
     "footerHint": "被同步的分店会收到一条待换标签通知",
     "submit": "同步到 {{count}} 家分店",
+    "warehouseNotice": "仓库商品：同步后仓库零售价、建议折扣也会更新为本店的值（零售价 {{price}}）；未同步且价格不同的分店会收到『需改价』通知",
     "inlineEntry": "同步其它分店 · 零售价、折扣",
     "inlineSaveAndSync": "保存并同步其它分店"
   },

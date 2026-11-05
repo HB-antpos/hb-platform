@@ -77,6 +77,7 @@
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />
+    <Compile Include="StoreSyncWarehousePriceTests.cs" />
     <Compile Include="WarehouseProductSupplyNoticeTests.cs" />
     <Compile Include="WarehouseProductBatchUpdateSupplyNoticeTests.cs" />
     <Compile Include="StoreProductMaintenanceLookupTests.cs" />

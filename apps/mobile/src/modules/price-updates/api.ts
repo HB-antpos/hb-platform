@@ -12,6 +12,7 @@ import {
   normalizePriceUpdateTaskPage,
   normalizeSuggestedDiscountLookup,
   normalizeSyncTargets,
+  normalizeSyncToOtherStoresWarehouseResult,
 } from "./normalize";
 import { parsePriceNotificationHeader, type PriceNotificationSummary } from "./price-notification";
 import type {
@@ -25,6 +26,7 @@ import type {
   SuggestedDiscountSource,
   SyncTargetsResult,
   SyncToOtherStoresRequest,
+  SyncToOtherStoresWarehouseResult,
 } from "./types";
 
 const BASE_PATH = "/react/v1/store-product-maintenance";
@@ -177,7 +179,12 @@ export async function getSyncTargets(productCode: string, sourceStoreCode: strin
 
 export async function syncToOtherStores(
   payload: SyncToOtherStoresRequest
-): Promise<{ updatedStoreCount: number; notification: PriceNotificationSummary | null }> {
+): Promise<{
+  updatedStoreCount: number;
+  notification: PriceNotificationSummary | null;
+  /** 仓库商品同步时后端一并更新仓库价的结果；旧后端不返回则 updated=false。 */
+  warehouse: SyncToOtherStoresWarehouseResult;
+}> {
   const response = await apiClient.post(
     `${BASE_PATH}/products/sync-to-other-stores`,
     payload,
@@ -188,6 +195,7 @@ export async function syncToOtherStores(
   return {
     updatedStoreCount: Number.isFinite(updatedStoreCount) ? updatedStoreCount : 0,
     notification: parsePriceNotificationHeader(response.headers),
+    warehouse: normalizeSyncToOtherStoresWarehouseResult(data),
   };
 }
 

@@ -1652,6 +1652,7 @@
         "StoreProductMaintenance": "分店商品维护",
         "ContainerLegacyDetail": "旧版货柜明细",
         "YiwuContainerBatch": "义乌货柜批量修改",
+        "StoreSync": "分店同步价格",
         "System": "系统同步"
       },
       "fields": {

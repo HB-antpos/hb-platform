@@ -12,6 +12,8 @@ import {
   describeSyncTargetChange,
   getDefaultSelectedSyncTargets,
   getSelectableSyncTargetCodes,
+  resolveEffectiveSyncFields,
+  willSyncWarehousePrice,
   type SyncFieldSelection,
 } from "@/modules/price-updates/sync-targets";
 import type { SyncTargetStore } from "@/modules/price-updates/types";
@@ -75,7 +77,15 @@ export function SyncToOtherStoresSheet({
     [selectableCodes, selected]
   );
   const allSelected = selectableCodes.length > 0 && selectedCodes.length === selectableCodes.length;
-  const anyFieldSelected = fields.syncRetailPrice || fields.syncDiscountRate || fields.syncPurchasePrice;
+  // 仓库商品不同步进货价（见 resolveEffectiveSyncFields）：请求、校验、预览都用生效后的字段。
+  const warehouseApplicable = data?.warehouseApplicable === true;
+  const effectiveFields = useMemo(
+    () => resolveEffectiveSyncFields(fields, warehouseApplicable),
+    [fields, warehouseApplicable]
+  );
+  const syncsWarehouse = willSyncWarehousePrice(effectiveFields, warehouseApplicable);
+  const anyFieldSelected =
+    effectiveFields.syncRetailPrice || effectiveFields.syncDiscountRate || effectiveFields.syncPurchasePrice;
 
   const toggleTarget = (storeCode: string) => {
     setSelected((current) => {
@@ -95,10 +105,12 @@ export function SyncToOtherStoresSheet({
         productCode,
         sourceStoreCode,
         targetStoreCodes: selectedCodes,
-        ...fields,
+        ...effectiveFields,
       });
       void queryClient.invalidateQueries({ queryKey: priceUpdateCountQueryKey() });
-      onSynced(buildSyncToOtherStoresMessage(result.updatedStoreCount, result.notification, t));
+      onSynced(
+        buildSyncToOtherStoresMessage(result.updatedStoreCount, result.notification, t, result.warehouse.updated)
+      );
     } catch (error) {
       setErrorMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "syncSheet.failed" }));
     } finally {
@@ -110,7 +122,7 @@ export function SyncToOtherStoresSheet({
     const change = describeSyncTargetChange(
       target,
       { retailPrice: data?.sourceRetailPrice ?? null, discountRate: data?.sourceDiscountRate ?? null },
-      fields
+      effectiveFields
     );
     if (change.kind === "noRecord") return null;
     if (change.kind === "price") {
@@ -166,7 +178,10 @@ export function SyncToOtherStoresSheet({
           ["syncRetailPrice", "syncSheet.fields.retailPrice"],
           ["syncDiscountRate", "syncSheet.fields.discountRate"],
           ["syncPurchasePrice", "syncSheet.fields.purchasePrice"],
-        ] as const).map(([key, labelKey]) => (
+        ] as const)
+          // 仓库商品的进货价由仓库统一管理，不提供同步开关。
+          .filter(([key]) => !(warehouseApplicable && key === "syncPurchasePrice"))
+          .map(([key, labelKey]) => (
           <View key={key} style={styles.fieldSwitch}>
             <Text variant="bodySmall">{t(labelKey)}</Text>
             <Switch
@@ -177,6 +192,18 @@ export function SyncToOtherStoresSheet({
           </View>
         ))}
       </View>
+
+      {syncsWarehouse ? (
+        // 仓库商品：同步会把仓库价也改成本店的值，并让未同步且价格不同的分店收到「需改价」，提前说清楚。
+        <View style={styles.warehouseNotice}>
+          <Icon source="warehouse" size={18} color={HB_COLORS.warning} />
+          <Text variant="bodySmall" style={[styles.flex, styles.warningText]}>
+            {t("syncSheet.warehouseNotice", {
+              price: formatMoney(data?.sourceRetailPrice ?? null),
+            })}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.listHeader}>
         <Text variant="titleSmall" style={styles.flex}>
@@ -356,6 +383,7 @@ const styles = StyleSheet.create({
   errorText: { color: HB_COLORS.danger },
   sourceBox: { gap: HB_SPACING.xxs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   sourceText: { fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
+  warehouseNotice: { flexDirection: "row", alignItems: "flex-start", gap: HB_SPACING.xs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   fieldRow: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.sm },
   fieldSwitch: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xxs },
   listHeader: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
