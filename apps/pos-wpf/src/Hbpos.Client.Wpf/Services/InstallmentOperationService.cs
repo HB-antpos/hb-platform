@@ -16,7 +16,9 @@ public sealed record InstallmentOperationResult<T>(
     T? Response = default,
     LocalInstallmentOrder? LocalOrder = null,
     string? Message = null,
-    bool RequiresReview = false);
+    bool RequiresReview = false,
+    // 结果暂时不明、但到这个时间之后再恢复一次就能有结论（Zeller 取消或超时后的迟到复核）。调用方可以到点自动恢复。
+    DateTimeOffset? AutoRecoveryDueAt = null);
 
 /// <summary>供创建、补款、取消页面和启动恢复共用的窄服务边界。</summary>
 public interface IInstallmentOperationService
@@ -35,13 +37,13 @@ public interface IInstallmentOperationService
         PosSessionState session,
         InstallmentAppendPaymentRequest request,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentOperationResult<bool>(false, Message: "当前版本不支持手动刷卡续付。"));
+        Task.FromResult(new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。")));
 
     /// <summary>手动刷卡续付第二步：收银员确认独立刷卡机已收款，写入确认证据并提交。</summary>
     Task<InstallmentOperationResult<InstallmentAppendPaymentResponse>> CompleteManualCardRepaymentAsync(
         Guid operationGuid,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "当前版本不支持手动刷卡续付。", RequiresReview: true));
+        Task.FromResult(new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.3233494a", "当前版本不支持手动刷卡续付。"), RequiresReview: true));
 
     /// <summary>收银员确认没有收款：中央 claim 结案为 Declined，本地操作结案为失败。中央结案失败时返回 false，保持占用。</summary>
     Task<bool> CancelManualCardRepaymentAsync(Guid operationGuid, CancellationToken cancellationToken = default) =>
@@ -66,7 +68,7 @@ public interface IInstallmentOperationService
         CancellationToken cancellationToken = default) =>
         Task.FromResult(new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
             false,
-            Message: "安全提货确认服务未配置。",
+            Message: InstallmentText.L("installment.text.b098412f", "安全提货确认服务未配置。"),
             RequiresReview: true));
 
     Task<IReadOnlyList<InstallmentOperationRecoveryResult>> RecoverAsync(
@@ -187,6 +189,10 @@ public sealed class InstallmentOperationService(
         bool authorizeCard,
         CancellationToken cancellationToken = default)
     {
+        // 中文注释：调用方的取消只作用于刷卡终端这一步（收银员在付款页点取消）。占 claim、登记通道、提交入账都不随它取消：
+        // 这些步骤被打断只会留下结果不明的操作；终端批准之后更不能因为取消而不入账。
+        var terminalCancellation = cancellationToken;
+        cancellationToken = CancellationToken.None;
         var operation = await repository.CreateOrGetAsync(CreateOperation(
             request.PaymentGuid,
             LocalInstallmentOperationKind.Repayment,
@@ -235,19 +241,23 @@ public sealed class InstallmentOperationService(
             // 中文注释：中央 claim 已进入 provider 阶段时，只有本机恢复流程可以继续查询同一 attempt；此处绝不能再次授权。
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
                 false,
-                Message: "补款 provider 结果正在由发起设备恢复，请勿再次收款。",
+                Message: InstallmentText.L("installment.text.6d34a7ab", "补款 provider 结果正在由发起设备恢复，请勿再次收款。"),
                 RequiresReview: true);
         }
 
-        var ready = await EnsureRepaymentTerminalApprovalAsync(operation, session, authorizeCard, cancellationToken, claim.CardSettings);
+        var ready = await EnsureRepaymentTerminalApprovalAsync(operation, session, authorizeCard, terminalCancellation, claim.CardSettings);
         if (!ready.Succeeded)
         {
-            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: ready.Message, RequiresReview: ready.RequiresReview);
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
+                false,
+                Message: ready.Message,
+                RequiresReview: ready.RequiresReview,
+                AutoRecoveryDueAt: ready.RequiresReview ? await GetZellerLateRecheckDueAsync(operation.OperationGuid) : null);
         }
 
         var approvedOperation = ready.Operation!;
         var approvedRequest = Deserialize<InstallmentAppendPaymentRequest>(approvedOperation.RequestJson);
-        return await SubmitRepaymentAsync(approvedOperation, approvedRequest, cancellationToken);
+        return await SubmitRepaymentAsync(approvedOperation, approvedRequest, CancellationToken.None);
     }
 
     public Task<InstallmentOperationResult<bool>> BeginManualCardRepaymentAsync(
@@ -264,7 +274,7 @@ public sealed class InstallmentOperationService(
             !ManualCardPaymentReference.IsManual(request.Reference) ||
             request.CardTransactions is { Count: > 0 })
         {
-            throw new ArgumentException("手动刷卡续付请求必须带 MANUAL 引用且不含卡交易证据。", nameof(request));
+            throw new ArgumentException(InstallmentText.L("installment.text.1ae472b7", "手动刷卡续付请求必须带 MANUAL 引用且不含卡交易证据。"), nameof(request));
         }
 
         InstallmentRepaymentCapabilitiesResponse capabilities;
@@ -274,7 +284,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return new InstallmentOperationResult<bool>(false, Message: $"无法确认服务端是否支持手动刷卡续付：{exception.Message}");
+            return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.982c1b23", "无法确认服务端是否支持手动刷卡续付：{0}", exception.Message));
         }
 
         if (!InstallmentCardRepaymentCapability.IsManualSupported(capabilities))
@@ -317,7 +327,7 @@ public sealed class InstallmentOperationService(
                 terminalProcessor: ManualCardPaymentReference.Processor,
                 cancellationToken: CancellationToken.None))
         {
-            return new InstallmentOperationResult<bool>(false, Message: "手动刷卡续付状态已被其他入口推进，请勿收款，到分期中心恢复。", RequiresReview: true);
+            return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.7edba736", "手动刷卡续付状态已被其他入口推进，请勿收款，到分期中心恢复。"), RequiresReview: true);
         }
 
         return new InstallmentOperationResult<bool>(true, true);
@@ -338,7 +348,7 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
                 false,
-                Message: "手动刷卡续付状态已变化，无法提交；款项已收的话请由主管在分期中心结案。",
+                Message: InstallmentText.L("installment.text.41d3eda5", "手动刷卡续付状态已变化，无法提交；款项已收的话请由主管在分期中心结案。"),
                 RequiresReview: true);
         }
 
@@ -374,12 +384,12 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(
                 false,
-                Message: "手动刷卡确认未能保存，请勿重复收款，由主管在分期中心结案。",
+                Message: InstallmentText.L("installment.text.16f22cf0", "手动刷卡确认未能保存，请勿重复收款，由主管在分期中心结案。"),
                 RequiresReview: true);
         }
 
         var current = await repository.GetAsync(operationGuid, CancellationToken.None)
-            ?? throw new InvalidOperationException("分期操作状态未保存。");
+            ?? throw new InvalidOperationException(InstallmentText.L("installment.text.2a11ee6b", "分期操作状态未保存。"));
         return await SubmitRepaymentAsync(current, approved, cancellationToken);
     }
 
@@ -415,7 +425,7 @@ public sealed class InstallmentOperationService(
             [LocalInstallmentOperationState.TerminalSubmitting],
             LocalInstallmentOperationState.Failed,
             DateTimeOffset.UtcNow,
-            failureMessage: "收银员确认手动刷卡未收款。",
+            failureMessage: InstallmentText.L("installment.text.6ddb1050", "收银员确认手动刷卡未收款。"),
             cancellationToken: CancellationToken.None);
     }
 
@@ -456,7 +466,7 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货操作身份与本地记录不一致，保持锁定等待核对。",
+                Message: InstallmentText.L("installment.text.69f4353f", "提货操作身份与本地记录不一致，保持锁定等待核对。"),
                 RequiresReview: true);
         }
 
@@ -468,7 +478,7 @@ public sealed class InstallmentOperationService(
                 true,
                 completed,
                 ToLocalOrder(completed.Details),
-                "分期单已确认提货。");
+                InstallmentText.L("installment.text.18912330", "分期单已确认提货。"));
         }
 
         // API 已发出或结果未知时只能由恢复流程重放同一幂等请求，普通点击不得再次 POST。
@@ -476,7 +486,7 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货确认结果未知，已锁定；请刷新恢复，勿重复确认。",
+                Message: InstallmentText.L("installment.text.94836ef0", "提货确认结果未知，已锁定；请刷新恢复，勿重复确认。"),
                 RequiresReview: true);
         }
 
@@ -495,7 +505,7 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货确认正在恢复或已结束，请刷新核对。",
+                Message: InstallmentText.L("installment.text.d0d69c0c", "提货确认正在恢复或已结束，请刷新核对。"),
                 RequiresReview: true);
         }
 
@@ -524,7 +534,7 @@ public sealed class InstallmentOperationService(
         if (!string.Equals(localOrder.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(localOrder.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消退款仅允许分期创建设备执行。");
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.6f52081f", "取消退款仅允许分期创建设备执行。"));
         }
 
         var recoverable = await repository.GetRecoverableAsync(session.StoreCode, cancellationToken);
@@ -628,7 +638,7 @@ public sealed class InstallmentOperationService(
                             [LocalInstallmentRefundStepState.TerminalSubmitting],
                             LocalInstallmentRefundStepState.ResultUnknown,
                             DateTimeOffset.UtcNow,
-                            failureMessage: "重启时退款终端结果未知，等待主管结案。",
+                            failureMessage: InstallmentText.L("installment.text.a59d838f", "重启时退款终端结果未知，等待主管结案。"),
                             cancellationToken: CancellationToken.None);
                     }
 
@@ -637,7 +647,7 @@ public sealed class InstallmentOperationService(
                         [LocalInstallmentOperationState.TerminalSubmitting],
                         LocalInstallmentOperationState.ResultUnknown,
                         DateTimeOffset.UtcNow,
-                        failureMessage: "重启时退款终端结果未知，禁止自动重试。",
+                        failureMessage: InstallmentText.L("installment.text.b95e65fb", "重启时退款终端结果未知，禁止自动重试。"),
                         cancellationToken: CancellationToken.None);
                     var resumedCancel = await repository.GetAsync(operation.OperationGuid, CancellationToken.None);
                     var resumedSteps = await repository.GetRefundStepsAsync(operation.OperationGuid, CancellationToken.None);
@@ -656,13 +666,13 @@ public sealed class InstallmentOperationService(
                                 [LocalInstallmentOperationState.ResultUnknown],
                                 LocalInstallmentOperationState.Failed,
                                 DateTimeOffset.UtcNow,
-                                failureMessage: "重启前尚未调用退款 provider，可重新发起取消。",
+                                failureMessage: InstallmentText.L("installment.text.e736770d", "重启前尚未调用退款 provider，可重新发起取消。"),
                                 cancellationToken: CancellationToken.None);
-                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "尚未调用退款 provider，可重新发起取消。"));
+                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.ef814ed5", "尚未调用退款 provider，可重新发起取消。")));
                         }
                         else
                         {
-                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "中央取消 claim 结案失败，保持锁定。"));
+                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.25f7f6b2", "中央取消 claim 结案失败，保持锁定。")));
                         }
                         continue;
                     }
@@ -674,7 +684,7 @@ public sealed class InstallmentOperationService(
                         if ((rejectedRefundReset || HasSquareRejectedRefundReset(resumedSteps)) &&
                             await TryFinalizeRejectedCancelRecoveryAsync(resumedCancel, resumedSteps))
                         {
-                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "Square 退款已明确拒绝，可重新发起取消。"));
+                            results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.526dd732", "Square 退款已明确拒绝，可重新发起取消。")));
                             continue;
                         }
                         await TryResolveCancelClaimAsync(
@@ -689,7 +699,7 @@ public sealed class InstallmentOperationService(
                     }
                     else
                     {
-                        results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "退款结果未知，保持锁定。"));
+                        results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.f939e643", "退款结果未知，保持锁定。")));
                     }
                     continue;
                 }
@@ -699,7 +709,7 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentOperationState.TerminalSubmitting],
                     LocalInstallmentOperationState.ResultUnknown,
                     DateTimeOffset.UtcNow,
-                    failureMessage: "重启时终端结果未知，禁止自动重试。",
+                    failureMessage: InstallmentText.L("installment.text.7adf4ff0", "重启时终端结果未知，禁止自动重试。"),
                     cancellationToken: cancellationToken);
                 var resumed = await repository.GetAsync(operation.OperationGuid, cancellationToken);
                 if (resumed is not null && !string.IsNullOrWhiteSpace(resumed.TerminalAttemptGuid))
@@ -708,13 +718,13 @@ public sealed class InstallmentOperationService(
                     {
                         LocalInstallmentOperationKind.Create => await RecoverCreateAsync(resumed, session, cancellationToken),
                         LocalInstallmentOperationKind.Repayment => await RecoverRepaymentAsync(resumed, session, cancellationToken),
-                        _ => new InstallmentOperationRecoveryResult(resumed.OperationGuid, resumed.Kind, LocalInstallmentOperationState.ResultUnknown, false, "终端结果未知，保持锁定。")
+                        _ => new InstallmentOperationRecoveryResult(resumed.OperationGuid, resumed.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.691f6fef", "终端结果未知，保持锁定。"))
                     };
                     results.Add(resumedResult);
                     continue;
                 }
 
-                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "终端结果未知，保持锁定。"));
+                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.691f6fef", "终端结果未知，保持锁定。")));
                 continue;
             }
 
@@ -732,7 +742,7 @@ public sealed class InstallmentOperationService(
                     continue;
                 }
 
-                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, "未提交终端的草稿保留给用户继续。"));
+                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, InstallmentText.L("installment.text.03308b74", "未提交终端的草稿保留给用户继续。")));
                 continue;
             }
 
@@ -744,7 +754,7 @@ public sealed class InstallmentOperationService(
                     LocalInstallmentOperationKind.Repayment => await RecoverRepaymentAsync(operation, session, cancellationToken),
                     LocalInstallmentOperationKind.Cancel => await RecoverCancelAsync(operation, session, cancellationToken),
                     LocalInstallmentOperationKind.Pickup => await RecoverPickupAsync(operation, cancellationToken),
-                    _ => new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, "退款步骤需由取消操作处理。")
+                    _ => new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, InstallmentText.L("installment.text.79ef15cd", "退款步骤需由取消操作处理。"))
                 };
                 results.Add(result);
             }
@@ -757,7 +767,7 @@ public sealed class InstallmentOperationService(
                     DateTimeOffset.UtcNow,
                     failureMessage: exception.Message,
                     cancellationToken: cancellationToken);
-                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "恢复 API 结果未知，保持锁定。"));
+                results.Add(new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.2ad96bbc", "恢复 API 结果未知，保持锁定。")));
             }
         }
 
@@ -843,7 +853,7 @@ public sealed class InstallmentOperationService(
         var operation = await repository.GetAsync(operationGuid, cancellationToken);
         if (operation is null || operation.Kind != LocalInstallmentOperationKind.Cancel)
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "未找到待主管结案的取消操作。");
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.67190cad", "未找到待主管结案的取消操作。"));
         }
 
         return await ContinueCancelAsync(operation, installmentNumber, session, true, cancellationToken);
@@ -859,7 +869,7 @@ public sealed class InstallmentOperationService(
             var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
             if (!capabilities.RepaymentClaimsSupported)
             {
-                return RepaymentClaimReady.Failed("当前服务端不支持安全补款 claim，已在 provider 调用前停止。", requiresReview: true);
+                return RepaymentClaimReady.Failed(InstallmentText.L("installment.text.22df2843", "当前服务端不支持安全补款 claim，已在 provider 调用前停止。"), requiresReview: true);
             }
 
             var claim = await apiClient.CreateRepaymentClaimAsync(
@@ -874,7 +884,7 @@ public sealed class InstallmentOperationService(
             if (claim.Status == InstallmentRepaymentClaimStatus.Committed)
             {
                 return claim.Commit is null
-                    ? RepaymentClaimReady.Failed("中央补款已提交但缺少结果快照，保持锁定等待对账。", requiresReview: true)
+                    ? RepaymentClaimReady.Failed(InstallmentText.L("installment.text.a6daa5ba", "中央补款已提交但缺少结果快照，保持锁定等待对账。"), requiresReview: true)
                     : RepaymentClaimReady.Committed(claim, claim.Commit);
             }
 
@@ -885,9 +895,9 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentOperationState.Prepared],
                     LocalInstallmentOperationState.Failed,
                     DateTimeOffset.UtcNow,
-                    failureMessage: $"中央补款 claim 已结束：{claim.Status}",
+                    failureMessage: InstallmentText.L("installment.text.dba15a93", "中央补款 claim 已结束：{0}", claim.Status),
                     cancellationToken: CancellationToken.None);
-                return RepaymentClaimReady.Failed("原补款 claim 已结束，请重新发起付款。", requiresReview: false);
+                return RepaymentClaimReady.Failed(InstallmentText.L("installment.text.d8cd7ea7", "原补款 claim 已结束，请重新发起付款。"), requiresReview: false);
             }
 
             if (claim.Status == InstallmentRepaymentClaimStatus.Prepared &&
@@ -908,7 +918,7 @@ public sealed class InstallmentOperationService(
                 {
                     return await FailUnsupportedCardRepaymentAsync(operation, "repayment-claim-create", rejection)
                         ? RepaymentClaimReady.Failed(rejection, requiresReview: false)
-                        : RepaymentClaimReady.Failed("分期续付刷卡未开始，但本地状态未能更新，请到分期中心恢复。", requiresReview: true);
+                        : RepaymentClaimReady.Failed(InstallmentText.L("installment.text.97208fb3", "分期续付刷卡未开始，但本地状态未能更新，请到分期中心恢复。"), requiresReview: true);
                 }
 
                 // 中文注释：这次读到的设置就是本次分期全程使用的快照，交给刷卡 attempt，不再重读。
@@ -931,8 +941,8 @@ public sealed class InstallmentOperationService(
                 cancellationToken: CancellationToken.None);
             return RepaymentClaimReady.Failed(
                 request.Method == PaymentMethodKind.Card
-                    ? "分期续付暂不支持刷卡，本机未调用刷卡终端，请改用现金或礼券。"
-                    : "服务端不支持该补款方式，本机未调用 provider，请改用其他付款方式。",
+                    ? InstallmentText.L("installment.text.80ae4aad", "分期续付暂不支持刷卡，本机未调用刷卡终端，请改用现金或礼券。")
+                    : InstallmentText.L("installment.text.75796655", "服务端不支持该补款方式，本机未调用 provider，请改用其他付款方式。"),
                 requiresReview: false);
         }
         catch (CatalogApiException exception) when (exception.ErrorCode is
@@ -949,14 +959,14 @@ public sealed class InstallmentOperationService(
                 cancellationToken: CancellationToken.None);
             return RepaymentClaimReady.Failed(
                 exception.ErrorCode == "INSTALLMENT_REPAYMENT_BUSY"
-                    ? "该分期正在另一台收银机付款，本机未调用 provider。"
-                    : "补款 claim 与本地付款指纹不一致，本机未调用 provider。",
+                    ? InstallmentText.L("installment.text.794db9d8", "该分期正在另一台收银机付款，本机未调用 provider。")
+                    : InstallmentText.L("installment.text.a7f622f1", "补款 claim 与本地付款指纹不一致，本机未调用 provider。"),
                 requiresReview: false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Stopped before provider", exception);
-            return RepaymentClaimReady.Failed($"创建补款 claim 失败，已在 provider 调用前停止：{exception.Message}", requiresReview: true);
+            return RepaymentClaimReady.Failed(InstallmentText.L("installment.text.4aa9dbc0", "创建补款 claim 失败，已在 provider 调用前停止：{0}", exception.Message), requiresReview: true);
         }
     }
 
@@ -975,7 +985,7 @@ public sealed class InstallmentOperationService(
                 cancellationToken);
             return claim.Status == InstallmentRepaymentClaimStatus.ProviderPending
                 ? TerminalReady.Success(operation)
-                : TerminalReady.Unknown($"中央补款 claim 状态为 {claim.Status}，禁止调用 provider。");
+                : TerminalReady.Unknown(InstallmentText.L("installment.text.14ee598d", "中央补款 claim 状态为 {0}，禁止调用 provider。", claim.Status));
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == PaymentMethodUnsupportedErrorCode)
         {
@@ -984,28 +994,52 @@ public sealed class InstallmentOperationService(
             LogOperationIssue(operation.OperationGuid, "repayment-begin-provider", "Failed (provider not enabled, provider not called)", exception);
             return await FailUnsupportedCardRepaymentAsync(operation, "repayment-begin-provider")
                 ? TerminalReady.Failed(UnsupportedCardRepaymentMessage)
-                : TerminalReady.Unknown($"登记补款 provider 被拒，未调用 provider：{exception.Message}");
+                : TerminalReady.Unknown(InstallmentText.L("installment.text.722fb6e2", "登记补款 provider 被拒，未调用 provider：{0}", exception.Message));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogOperationIssue(operation.OperationGuid, "repayment-begin-provider", "Unknown (provider not called)", exception);
-            return TerminalReady.Unknown($"登记补款 provider 失败，未调用 provider：{exception.Message}");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.8abf7609", "登记补款 provider 失败，未调用 provider：{0}", exception.Message));
         }
     }
 
     private const string PaymentMethodUnsupportedErrorCode = "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED";
 
-    private const string ManualCardRepaymentUnsupportedMessage = "分期续付暂不支持手动刷卡，请勿收款，请改用其他付款方式。";
+    private static string ManualCardRepaymentUnsupportedMessage => InstallmentText.L("installment.text.6f176121", "分期续付暂不支持手动刷卡，请勿收款，请改用其他付款方式。");
 
-    private const string UnsupportedCardRepaymentMessage = "本机刷卡通道暂不支持分期续付，刷卡终端未收到请求，请改用现金或礼券。";
+    private static string UnsupportedCardRepaymentMessage => InstallmentText.L("installment.text.b6d9beb7", "本机刷卡通道暂不支持分期续付，刷卡终端未收到请求，请改用现金或礼券。");
 
     /// <summary>Zeller 单笔扣款最低 100 分（1.00 澳元），与付款页同口径（CashPaymentWorkflowService.ZellerMinimumPurchaseCents）。</summary>
     internal const int ZellerMinimumPurchaseCents = CashPaymentWorkflowService.ZellerMinimumPurchaseCents;
 
-    internal const string ZellerBelowMinimumMessage = "Zeller 单笔刷卡最低 $1.00，刷卡终端未收到请求，请改用现金或礼券。";
+    internal static string ZellerBelowMinimumMessage => InstallmentText.L("installment.text.9ae4ed54", "Zeller 单笔刷卡最低 $1.00，刷卡终端未收到请求，请改用现金或礼券。");
 
-    private const string ZellerAwaitingLateRecheckMessage =
-        "Zeller 暂未查到这笔扣款（顾客取消或刷卡超时）。系统约 1 分钟后会再向 Zeller 复核一次，复核前请勿重新收款；之后在分期中心恢复这笔续付即可。";
+    private static string CancelledBeforeTerminalMessage => InstallmentText.L("installment.text.a6bb64fc", "已取消，刷卡终端未收到请求，没有扣款。");
+
+    /// <summary>这笔续付的 Zeller 扣款按未付款收尾、但还排着迟到复核时，返回复核时间；其余情况返回 null。</summary>
+    private async Task<DateTimeOffset?> GetZellerLateRecheckDueAsync(Guid operationGuid)
+    {
+        if (zellerPaymentAttemptRepository is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var attempt = await zellerPaymentAttemptRepository.GetAsync(ZellerRepaymentAttemptGuid(operationGuid), CancellationToken.None);
+            return attempt is { Status: ZellerAttemptStatus.Canceled, LateRecheckDueAt: not null, LateRecheckedAt: null }
+                ? attempt.LateRecheckDueAt
+                : null;
+        }
+        catch (Exception exception)
+        {
+            LogOperationIssue(operationGuid, "zeller-late-recheck-due", "Ignored", exception);
+            return null;
+        }
+    }
+
+    private static string ZellerAwaitingLateRecheckMessage =>
+        InstallmentText.L("installment.text.d6cb7d45", "Zeller 暂未查到这笔扣款（顾客取消或刷卡超时）。系统约 1 分钟后会自动向 Zeller 复核一次，复核前请勿重新收款。");
 
     private static int ToCents(decimal amount) =>
         (int)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero);
@@ -1017,8 +1051,9 @@ public sealed class InstallmentOperationService(
     private async Task<bool> FailUnsupportedCardRepaymentAsync(
         LocalInstallmentOperation operation,
         string stage,
-        string message = UnsupportedCardRepaymentMessage)
+        string? message = null)
     {
+        message ??= UnsupportedCardRepaymentMessage;
         if (!await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.Prepared],
@@ -1068,7 +1103,7 @@ public sealed class InstallmentOperationService(
                 [LocalInstallmentOperationState.TerminalSubmitting, LocalInstallmentOperationState.ResultUnknown],
                 LocalInstallmentOperationState.ResultUnknown,
                 DateTimeOffset.UtcNow,
-                failureMessage: $"中央补款 claim 结案失败：{exception.Message}",
+                failureMessage: InstallmentText.L("installment.text.a481b4bf", "中央补款 claim 结案失败：{0}", exception.Message),
                 cancellationToken: CancellationToken.None);
         }
     }
@@ -1134,7 +1169,7 @@ public sealed class InstallmentOperationService(
                 DateTimeOffset.UtcNow,
                 cancellationToken))
         {
-            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "中央补款已提交，本地快照正在恢复。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.ba3b5ce5", "中央补款已提交，本地快照正在恢复。"), RequiresReview: true);
         }
 
         await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
@@ -1153,7 +1188,7 @@ public sealed class InstallmentOperationService(
             var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
             if (!capabilities.CancelClaimsSupported)
             {
-                return CancelClaimReady.Failed("当前服务端不支持安全取消 claim，已在退款前停止。", requiresReview: true);
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.111b3e0d", "当前服务端不支持安全取消 claim，已在退款前停止。"), requiresReview: true);
             }
 
             InstallmentCancelClaimDto claim;
@@ -1165,7 +1200,7 @@ public sealed class InstallmentOperationService(
             {
                 if (!CanRecreateMissingCancelClaim(operation, steps))
                 {
-                    const string message = "远端取消 claim 缺失，但本地已越过退款 provider 前边界；保持锁定并等待人工对账。";
+                    var message = InstallmentText.L("installment.text.4e4ed3c9", "远端取消 claim 缺失，但本地已越过退款 provider 前边界；保持锁定并等待人工对账。");
                     await repository.TryTransitionAsync(
                         operation.OperationGuid,
                         [operation.State],
@@ -1190,13 +1225,13 @@ public sealed class InstallmentOperationService(
 
             if (!IsMatchingCancelClaim(operation, fingerprint, claim))
             {
-                return CancelClaimReady.Failed("取消 claim 与本地耐久退款计划不一致，未调用退款 provider。", requiresReview: true);
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.c96243d0", "取消 claim 与本地耐久退款计划不一致，未调用退款 provider。"), requiresReview: true);
             }
 
             if (claim.Status == InstallmentCancelClaimStatus.Committed)
             {
                 return claim.Commit is null
-                    ? CancelClaimReady.Failed("中央取消已提交但缺少结果快照，保持锁定等待对账。", requiresReview: true)
+                    ? CancelClaimReady.Failed(InstallmentText.L("installment.text.b05221ba", "中央取消已提交但缺少结果快照，保持锁定等待对账。"), requiresReview: true)
                     : CancelClaimReady.Committed(claim, ToCancelResponse(operation.InstallmentGuid, claim.Commit));
             }
 
@@ -1207,9 +1242,9 @@ public sealed class InstallmentOperationService(
                     [operation.State],
                     LocalInstallmentOperationState.Failed,
                     DateTimeOffset.UtcNow,
-                    failureMessage: $"中央取消 claim 已结束：{claim.Status}",
+                    failureMessage: InstallmentText.L("installment.text.62ef41b7", "中央取消 claim 已结束：{0}", claim.Status),
                     cancellationToken: CancellationToken.None);
-                return CancelClaimReady.Failed("原取消 claim 已结束，请重新发起取消。", requiresReview: false);
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.1973944d", "原取消 claim 已结束，请重新发起取消。"), requiresReview: false);
             }
 
             return CancelClaimReady.Success(claim);
@@ -1229,9 +1264,9 @@ public sealed class InstallmentOperationService(
 
             var message = exception.ErrorCode switch
             {
-                "INSTALLMENT_MUTATION_BUSY" => "该分期正在执行付款或取消，本机未调用退款 provider。",
-                "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED" => "当前服务端不支持该退款方式，本机未调用退款 provider。",
-                _ => "取消 claim 与服务端权威退款计划不一致，本机未调用退款 provider。"
+                "INSTALLMENT_MUTATION_BUSY" => InstallmentText.L("installment.text.1a82c84c", "该分期正在执行付款或取消，本机未调用退款 provider。"),
+                "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED" => InstallmentText.L("installment.text.2fa17d59", "当前服务端不支持该退款方式，本机未调用退款 provider。"),
+                _ => InstallmentText.L("installment.text.757be352", "取消 claim 与服务端权威退款计划不一致，本机未调用退款 provider。")
             };
             return CancelClaimReady.Failed(
                 message,
@@ -1240,7 +1275,7 @@ public sealed class InstallmentOperationService(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogOperationIssue(operation.OperationGuid, "cancel-claim-ensure", "Stopped before refund", exception);
-            return CancelClaimReady.Failed($"创建或读取取消 claim 失败，已在退款前停止：{exception.Message}", requiresReview: true);
+            return CancelClaimReady.Failed(InstallmentText.L("installment.text.192cf011", "创建或读取取消 claim 失败，已在退款前停止：{0}", exception.Message), requiresReview: true);
         }
     }
 
@@ -1256,7 +1291,7 @@ public sealed class InstallmentOperationService(
 
         if (claim.Status is not InstallmentCancelClaimStatus.Prepared and not InstallmentCancelClaimStatus.Unknown)
         {
-            return CancelClaimReady.Failed($"中央取消 claim 状态为 {claim.Status}，禁止调用退款 provider。", requiresReview: true);
+            return CancelClaimReady.Failed(InstallmentText.L("installment.text.df538790", "中央取消 claim 状态为 {0}，禁止调用退款 provider。", claim.Status), requiresReview: true);
         }
 
         try
@@ -1264,7 +1299,7 @@ public sealed class InstallmentOperationService(
             var begun = await apiClient.BeginCancelRefundAsync(operation.InstallmentGuid, operation.OperationGuid, cancellationToken);
             return begun.Status == InstallmentCancelClaimStatus.RefundPending
                 ? CancelClaimReady.Success(begun)
-                : CancelClaimReady.Failed($"中央取消 claim 状态为 {begun.Status}，禁止调用退款 provider。", requiresReview: true);
+                : CancelClaimReady.Failed(InstallmentText.L("installment.text.df538790", "中央取消 claim 状态为 {0}，禁止调用退款 provider。", begun.Status), requiresReview: true);
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED")
         {
@@ -1274,7 +1309,7 @@ public sealed class InstallmentOperationService(
                 !CanSafelyTerminateCancelBeforeRefund(operation, steps))
             {
                 await LockCancelForReviewAsync(operation, exception.Message);
-                return CancelClaimReady.Failed("取消退款方式不受支持，但本地已越过安全终结边界；保持锁定等待人工对账。", requiresReview: true);
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.e5777112", "取消退款方式不受支持，但本地已越过安全终结边界；保持锁定等待人工对账。"), requiresReview: true);
             }
 
             var released = await TryResolveCancelClaimAsync(
@@ -1284,17 +1319,17 @@ public sealed class InstallmentOperationService(
                 CancellationToken.None);
             if (!released)
             {
-                await LockCancelForReviewAsync(operation, "中央取消 claim 释放失败，保持锁定等待人工对账。");
-                return CancelClaimReady.Failed("中央取消 claim 释放失败，保持锁定等待人工对账。", requiresReview: true);
+                await LockCancelForReviewAsync(operation, InstallmentText.L("installment.text.124af4f8", "中央取消 claim 释放失败，保持锁定等待人工对账。"));
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.124af4f8", "中央取消 claim 释放失败，保持锁定等待人工对账。"), requiresReview: true);
             }
 
-            if (!await TryMarkCancelFailedAsync(operation, "当前服务端不支持该退款方式，中央 claim 已安全释放。"))
+            if (!await TryMarkCancelFailedAsync(operation, InstallmentText.L("installment.text.b0704eb7", "当前服务端不支持该退款方式，中央 claim 已安全释放。")))
             {
-                await LockCancelForReviewAsync(operation, "中央取消 claim 已释放，但本地终态落盘失败。");
-                return CancelClaimReady.Failed("中央取消 claim 已释放，但本地终态落盘失败。", requiresReview: true);
+                await LockCancelForReviewAsync(operation, InstallmentText.L("installment.text.6b43e4bc", "中央取消 claim 已释放，但本地终态落盘失败。"));
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.6b43e4bc", "中央取消 claim 已释放，但本地终态落盘失败。"), requiresReview: true);
             }
 
-            return CancelClaimReady.Failed("当前服务端不支持该退款方式，本机未调用退款 provider，可重新发起取消。", requiresReview: false);
+            return CancelClaimReady.Failed(InstallmentText.L("installment.text.c3bfe1a3", "当前服务端不支持该退款方式，本机未调用退款 provider，可重新发起取消。"), requiresReview: false);
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_CANCEL_CLAIM_EXPIRED")
         {
@@ -1308,29 +1343,29 @@ public sealed class InstallmentOperationService(
                     current.Status is not InstallmentCancelClaimStatus.Released and not InstallmentCancelClaimStatus.Declined ||
                     !CanSafelyTerminateCancelBeforeRefund(operation, steps))
                 {
-                    await LockCancelForReviewAsync(operation, "取消 claim 过期后的远端终态无法安全确认。");
-                    return CancelClaimReady.Failed("取消 claim 过期后的远端终态无法安全确认，保持锁定等待人工对账。", requiresReview: true);
+                    await LockCancelForReviewAsync(operation, InstallmentText.L("installment.text.93d725ff", "取消 claim 过期后的远端终态无法安全确认。"));
+                    return CancelClaimReady.Failed(InstallmentText.L("installment.text.4243b08a", "取消 claim 过期后的远端终态无法安全确认，保持锁定等待人工对账。"), requiresReview: true);
                 }
 
-                if (!await TryMarkCancelFailedAsync(operation, $"中央取消 claim 已结束：{current.Status}"))
+                if (!await TryMarkCancelFailedAsync(operation, InstallmentText.L("installment.text.62ef41b7", "中央取消 claim 已结束：{0}", current.Status)))
                 {
-                    await LockCancelForReviewAsync(operation, "中央取消 claim 已结束，但本地终态落盘失败。");
-                    return CancelClaimReady.Failed("中央取消 claim 已结束，但本地终态落盘失败。", requiresReview: true);
+                    await LockCancelForReviewAsync(operation, InstallmentText.L("installment.text.2dd4fea8", "中央取消 claim 已结束，但本地终态落盘失败。"));
+                    return CancelClaimReady.Failed(InstallmentText.L("installment.text.2dd4fea8", "中央取消 claim 已结束，但本地终态落盘失败。"), requiresReview: true);
                 }
 
-                return CancelClaimReady.Failed("原取消 claim 已过期结束，请重新发起取消。", requiresReview: false);
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.4a598eaa", "原取消 claim 已过期结束，请重新发起取消。"), requiresReview: false);
             }
             catch (Exception refreshException)
             {
                 LogOperationIssue(operation.OperationGuid, "cancel-claim-refresh", "Locked for review", refreshException);
-                await LockCancelForReviewAsync(operation, $"取消 claim 过期后重新读取失败：{refreshException.Message}");
-                return CancelClaimReady.Failed("取消 claim 过期后的远端状态读取失败，保持锁定等待人工对账。", requiresReview: true);
+                await LockCancelForReviewAsync(operation, InstallmentText.L("installment.text.51edd211", "取消 claim 过期后重新读取失败：{0}", refreshException.Message));
+                return CancelClaimReady.Failed(InstallmentText.L("installment.text.8debe136", "取消 claim 过期后的远端状态读取失败，保持锁定等待人工对账。"), requiresReview: true);
             }
         }
         catch (Exception exception)
         {
             LogOperationIssue(operation.OperationGuid, "cancel-begin-refund", "Failed (refund provider not called)", exception);
-            return CancelClaimReady.Failed($"登记取消退款阶段失败，未调用退款 provider：{exception.Message}", requiresReview: true);
+            return CancelClaimReady.Failed(InstallmentText.L("installment.text.8811e19b", "登记取消退款阶段失败，未调用退款 provider：{0}", exception.Message), requiresReview: true);
         }
     }
 
@@ -1363,7 +1398,7 @@ public sealed class InstallmentOperationService(
                 [LocalInstallmentOperationState.TerminalSubmitting, LocalInstallmentOperationState.ResultUnknown],
                 LocalInstallmentOperationState.ResultUnknown,
                 DateTimeOffset.UtcNow,
-                failureMessage: $"中央取消 claim 结案失败：{exception.Message}",
+                failureMessage: InstallmentText.L("installment.text.206bc23a", "中央取消 claim 结案失败：{0}", exception.Message),
                 cancellationToken: CancellationToken.None);
             return false;
         }
@@ -1386,7 +1421,7 @@ public sealed class InstallmentOperationService(
                 DateTimeOffset.UtcNow,
                 cancellationToken))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "中央取消已提交，本地快照正在恢复。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.1842b64b", "中央取消已提交，本地快照正在恢复。"), RequiresReview: true);
         }
 
         return new InstallmentOperationResult<InstallmentCancelResponse>(true, response, local, response.Message);
@@ -1435,7 +1470,7 @@ public sealed class InstallmentOperationService(
             var provider = ResolveRepaymentProvider(request);
             if (string.IsNullOrWhiteSpace(provider))
             {
-                return TerminalReady.Unknown("无法确定具体银行卡处理器，未登记 claim begin 且未调用付款 provider。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.df8c2574", "无法确定具体银行卡处理器，未登记 claim begin 且未调用付款 provider。"));
             }
 
             var begin = await BeginRepaymentProviderAsync(
@@ -1489,7 +1524,7 @@ public sealed class InstallmentOperationService(
                 cancellationToken: CancellationToken.None))
         {
             // 另一恢复入口可能已进入 provider；本地竞争失败不能把中央 claim 错误解锁为 Declined。
-            return TerminalReady.Unknown("礼券补款正在恢复，请勿重复预占。");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.24022f87", "礼券补款正在恢复，请勿重复预占。"));
         }
 
         try
@@ -1502,10 +1537,10 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentOperationState.TerminalSubmitting],
                     LocalInstallmentOperationState.ResultUnknown,
                     DateTimeOffset.UtcNow,
-                    failureMessage: authorization.Message ?? "礼券预占结果未知。",
+                    failureMessage: authorization.Message ?? InstallmentText.L("installment.text.42c72ff1", "礼券预占结果未知。"),
                     cancellationToken: CancellationToken.None);
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                return TerminalReady.Unknown("礼券预占结果未知，请勿重复操作。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.f74a5270", "礼券预占结果未知，请勿重复操作。"));
             }
 
             if (!authorization.Approved || !HasExactAuthorizedAmount(authorization, request.Amount))
@@ -1526,10 +1561,10 @@ public sealed class InstallmentOperationService(
                             [LocalInstallmentOperationState.TerminalSubmitting],
                             LocalInstallmentOperationState.ResultUnknown,
                             DateTimeOffset.UtcNow,
-                            failureMessage: "礼券不足额预占未确认释放。",
+                            failureMessage: InstallmentText.L("installment.text.93971090", "礼券不足额预占未确认释放。"),
                             cancellationToken: CancellationToken.None);
                         await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                        return TerminalReady.Unknown("礼券预占释放结果未知，保持锁定等待对账。");
+                        return TerminalReady.Unknown(InstallmentText.L("installment.text.57096cf9", "礼券预占释放结果未知，保持锁定等待对账。"));
                     }
                 }
                 else if (authorization.Approved)
@@ -1539,10 +1574,10 @@ public sealed class InstallmentOperationService(
                         [LocalInstallmentOperationState.TerminalSubmitting],
                         LocalInstallmentOperationState.ResultUnknown,
                         DateTimeOffset.UtcNow,
-                        failureMessage: "礼券已部分批准但缺少可释放的 reservation token。",
+                        failureMessage: InstallmentText.L("installment.text.370367c3", "礼券已部分批准但缺少可释放的 reservation token。"),
                         cancellationToken: CancellationToken.None);
                     await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                    return TerminalReady.Unknown("礼券部分批准证据不完整，保持锁定等待对账。");
+                    return TerminalReady.Unknown(InstallmentText.L("installment.text.55e56500", "礼券部分批准证据不完整，保持锁定等待对账。"));
                 }
 
                 await repository.TryTransitionAsync(
@@ -1550,10 +1585,10 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentOperationState.TerminalSubmitting],
                     LocalInstallmentOperationState.Failed,
                     DateTimeOffset.UtcNow,
-                    failureMessage: authorization.Message ?? "礼券未获批准。",
+                    failureMessage: authorization.Message ?? InstallmentText.L("installment.text.4f337346", "礼券未获批准。"),
                     cancellationToken: CancellationToken.None);
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
-                return TerminalReady.Failed(authorization.Message ?? "礼券未获批准。");
+                return TerminalReady.Failed(authorization.Message ?? InstallmentText.L("installment.text.4f337346", "礼券未获批准。"));
             }
 
             var (voucherCode, reservationToken) = OrderUploadService.ParseVoucherReference(authorization.Reference);
@@ -1564,10 +1599,10 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentOperationState.TerminalSubmitting],
                     LocalInstallmentOperationState.ResultUnknown,
                     DateTimeOffset.UtcNow,
-                    failureMessage: "礼券已批准但缺少可恢复的 reservation token。",
+                    failureMessage: InstallmentText.L("installment.text.a7b3b9e7", "礼券已批准但缺少可恢复的 reservation token。"),
                     cancellationToken: CancellationToken.None);
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                return TerminalReady.Unknown("礼券批准证据不完整，保持锁定等待对账。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.1b4926a6", "礼券批准证据不完整，保持锁定等待对账。"));
             }
 
             var approvedRequest = request with
@@ -1585,11 +1620,11 @@ public sealed class InstallmentOperationService(
                     cancellationToken: CancellationToken.None))
             {
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                return TerminalReady.Unknown("礼券批准结果未能持久化，保持锁定等待恢复。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.03724916", "礼券批准结果未能持久化，保持锁定等待恢复。"));
             }
 
             var approved = await repository.GetAsync(operation.OperationGuid, CancellationToken.None)
-                ?? throw new InvalidOperationException("礼券补款批准状态未保存。");
+                ?? throw new InvalidOperationException(InstallmentText.L("installment.text.3bbc2593", "礼券补款批准状态未保存。"));
             return TerminalReady.Success(approved);
         }
         catch (Exception exception)
@@ -1603,7 +1638,7 @@ public sealed class InstallmentOperationService(
                 failureMessage: exception.Message,
                 cancellationToken: CancellationToken.None);
             await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-            return TerminalReady.Unknown("礼券预占结果未知，请勿重复操作。");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.f74a5270", "礼券预占结果未知，请勿重复操作。"));
         }
     }
 
@@ -1612,14 +1647,17 @@ public sealed class InstallmentOperationService(
         TerminalAttemptScope? terminalAttempt = null;
         try
         {
-            terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, cancellationToken, settingsSnapshot);
+            // 中文注释：续付时，取消只作用于终端调用本身；读设置、落 attempt、登记通道这些准备步骤照常做完，
+            // 这样取消后的状态是确定的（要么没发给终端，要么交给终端结果）。
+            var setupCancellation = beginRepaymentClaim ? CancellationToken.None : cancellationToken;
+            terminalAttempt = await CreateTerminalAttemptScopeAsync(operation, amount, session, setupCancellation, settingsSnapshot);
             if (terminalAttempt.IsUnsupportedProcessor)
             {
                 // 中文注释：Zeller 暂不支持分期。刷卡机不会收到任何请求，也还没登记还款 claim。
                 // 开单路径进到这里时操作已经是 TerminalSubmitting（EnsureCreateTerminalApprovalAsync 先推进再调用），
                 // 必须和银行拒绝一样落成 Failed：否则重启后会变成「结果未知」，并挡住这台机器后续所有分期开单。
                 // 还款路径这时仍是 Prepared，没有推进过，不用回退。
-                const string unsupportedMessage = "Zeller 刷卡暂不支持分期付款，请改用其他付款方式。";
+                var unsupportedMessage = InstallmentText.L("installment.text.07ce2c61", "Zeller 刷卡暂不支持分期付款，请改用其他付款方式。");
                 if (!beginRepaymentClaim &&
                     !await repository.TryTransitionAsync(
                         operation.OperationGuid,
@@ -1631,14 +1669,14 @@ public sealed class InstallmentOperationService(
                         cancellationToken: CancellationToken.None))
                 {
                     // 本地状态没写成功（另一个入口已经推进了它）：交给恢复处理。这笔确实没有发给刷卡机。
-                    return TerminalReady.Unknown("Zeller 刷卡暂不支持分期付款，刷卡机没有收到请求；分期操作状态未能更新，请到分期中心恢复。");
+                    return TerminalReady.Unknown(InstallmentText.L("installment.text.fa40e7f0", "Zeller 刷卡暂不支持分期付款，刷卡机没有收到请求；分期操作状态未能更新，请到分期中心恢复。"));
                 }
 
                 return TerminalReady.Failed(unsupportedMessage);
             }
             if (terminalAttempt.RequiresReview)
             {
-                var reviewMessage = terminalAttempt.ReviewMessage ?? "银行卡 attempt 无法按当前终端模式安全复用，保持锁定等待主管恢复。";
+                var reviewMessage = terminalAttempt.ReviewMessage ?? InstallmentText.L("installment.text.125be6d0", "银行卡 attempt 无法按当前终端模式安全复用，保持锁定等待主管恢复。");
                 var expectedReviewStates = beginRepaymentClaim
                     ? new[] { LocalInstallmentOperationState.Prepared }
                     : new[] { LocalInstallmentOperationState.TerminalSubmitting };
@@ -1662,10 +1700,10 @@ public sealed class InstallmentOperationService(
             {
                 if (string.IsNullOrWhiteSpace(provider))
                 {
-                    return TerminalReady.Unknown("无法确定具体银行卡处理器，未登记 claim begin 且未调用付款 provider。");
+                    return TerminalReady.Unknown(InstallmentText.L("installment.text.df8c2574", "无法确定具体银行卡处理器，未登记 claim begin 且未调用付款 provider。"));
                 }
 
-                var begin = await BeginRepaymentProviderAsync(operation, provider, providerAttemptId, cancellationToken);
+                var begin = await BeginRepaymentProviderAsync(operation, provider, providerAttemptId, setupCancellation);
                 if (!begin.Succeeded)
                 {
                     return begin;
@@ -1685,8 +1723,34 @@ public sealed class InstallmentOperationService(
                     cancellationToken: CancellationToken.None))
             {
                 // 另一恢复入口可能已进入 provider；本地竞争失败不能把中央 claim 错误解锁为 Declined。
-                return TerminalReady.Unknown("终端操作正在恢复，请勿重复收款。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.9d04b65f", "终端操作正在恢复，请勿重复收款。"));
             }
+
+            if (beginRepaymentClaim && cancellationToken.IsCancellationRequested)
+            {
+                // 中文注释：收银员在请求发给刷卡终端之前就点了取消：确定没有扣款，按明确取消结案，可以马上重新收款。
+                var cancelledBeforeTerminal = new PaymentAuthorizationResult(
+                    false,
+                    Message: CancelledBeforeTerminalMessage,
+                    Processor: terminalAttempt.Processor,
+                    ResponseText: "CANCELLED");
+                await terminalAttempt.RecordOutcomeAsync(cancelledBeforeTerminal, CancellationToken.None);
+                if (!await repository.TryTransitionAsync(
+                        operation.OperationGuid,
+                        [LocalInstallmentOperationState.TerminalSubmitting],
+                        LocalInstallmentOperationState.Failed,
+                        DateTimeOffset.UtcNow,
+                        terminalProcessor: provider,
+                        failureMessage: CancelledBeforeTerminalMessage,
+                        cancellationToken: CancellationToken.None))
+                {
+                    return TerminalReady.Unknown(InstallmentText.L("installment.text.9d04b65f", "终端操作正在恢复，请勿重复收款。"));
+                }
+
+                await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
+                return TerminalReady.Failed(CancelledBeforeTerminalMessage);
+            }
+
             using var terminalContext = terminalAttempt.BeginContext();
             var authorization = await (terminalAttempt.AuthorizeAsync(amount, session, cancellationToken)
                 ?? cardTerminalClient.AuthorizeAsync(amount, session, cancellationToken));
@@ -1706,7 +1770,7 @@ public sealed class InstallmentOperationService(
                 {
                     await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
                 }
-                return TerminalReady.Unknown(authorization.Message ?? "终端结果未知，请勿重复收款。");
+                return TerminalReady.Unknown(authorization.Message ?? InstallmentText.L("installment.text.e6a65c34", "终端结果未知，请勿重复收款。"));
             }
 
             if (!authorization.Approved)
@@ -1722,7 +1786,7 @@ public sealed class InstallmentOperationService(
                 }
                 // 明确拒绝同样会留下未确认的终态会话，不 ack 会让下一笔刷卡被 409 拦下。
                 await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
-                return TerminalReady.Failed(authorization.Message ?? "银行卡未获批准。");
+                return TerminalReady.Failed(authorization.Message ?? InstallmentText.L("installment.text.af388ae7", "银行卡未获批准。"));
             }
 
             if (!HasExactAuthorizedAmount(authorization, amount) || !terminalAttempt.HasVerifiedApprovalEvidence(authorization))
@@ -1742,7 +1806,7 @@ public sealed class InstallmentOperationService(
                 {
                     await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
                 }
-                return TerminalReady.Unknown("终端批准金额与分期金额不一致，保持锁定，请勿重复收款。");
+                return TerminalReady.Unknown(InstallmentText.L("installment.text.371eab73", "终端批准金额与分期金额不一致，保持锁定，请勿重复收款。"));
             }
 
             await terminalAttempt.RecordOutcomeAsync(authorization, CancellationToken.None);
@@ -1752,7 +1816,7 @@ public sealed class InstallmentOperationService(
                 return TerminalReady.Unknown("Terminal approval could not be durably recorded; payment remains locked.");
             }
             var approved = await repository.GetAsync(operation.OperationGuid, CancellationToken.None)
-                ?? throw new InvalidOperationException("终端批准状态未保存。");
+                ?? throw new InvalidOperationException(InstallmentText.L("installment.text.17ac8fb3", "终端批准状态未保存。"));
             return TerminalReady.Success(approved);
         }
         catch (OperationCanceledException)
@@ -1769,7 +1833,7 @@ public sealed class InstallmentOperationService(
             {
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
             }
-            return TerminalReady.Unknown("终端结果未知，请勿重复收款。");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.e6a65c34", "终端结果未知，请勿重复收款。"));
         }
         catch (Exception exception)
         {
@@ -1787,7 +1851,7 @@ public sealed class InstallmentOperationService(
             {
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
             }
-            return TerminalReady.Unknown("终端结果未知，请勿重复收款。");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.e6a65c34", "终端结果未知，请勿重复收款。"));
         }
         finally
         {
@@ -1868,7 +1932,7 @@ public sealed class InstallmentOperationService(
                 return TerminalAttemptScope.ForReview(
                     attempt.AttemptGuid,
                     attempt.Processor,
-                    "持久化的银行卡 attempt 与当前 Linkly 连接模式或 Local IP 引用不一致，保持锁定等待主管恢复。");
+                    InstallmentText.L("installment.text.8d14b04e", "持久化的银行卡 attempt 与当前 Linkly 连接模式或 Local IP 引用不一致，保持锁定等待主管恢复。"));
             }
 
             var attemptContext = new LinklyPaymentAttemptContext(
@@ -1905,7 +1969,7 @@ public sealed class InstallmentOperationService(
                                     : currentAttempt.UpdatedAt.AddTicks(1),
                                 CancellationToken.None))
                         {
-                            throw new InvalidOperationException("分期付款 attempt 已被其他任务推进、终态化或主管结案。");
+                            throw new InvalidOperationException(InstallmentText.L("installment.text.c2825938", "分期付款 attempt 已被其他任务推进、终态化或主管结案。"));
                         }
 
                         return;
@@ -2237,7 +2301,7 @@ public sealed class InstallmentOperationService(
 
         if (operation.State == LocalInstallmentOperationState.ResultUnknown)
         {
-            return TerminalReady.Unknown("终端或 API 结果未知，请先恢复或由主管处理。");
+            return TerminalReady.Unknown(InstallmentText.L("installment.text.99e44eda", "终端或 API 结果未知，请先恢复或由主管处理。"));
         }
 
         var transitioned = await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.Prepared], LocalInstallmentOperationState.TerminalApproved, DateTimeOffset.UtcNow, requestJson: requestJson, cancellationToken: cancellationToken);
@@ -2247,7 +2311,7 @@ public sealed class InstallmentOperationService(
         }
 
         var updated = await repository.GetAsync(operation.OperationGuid, cancellationToken)
-            ?? throw new InvalidOperationException("分期操作状态未保存。");
+            ?? throw new InvalidOperationException(InstallmentText.L("installment.text.2a11ee6b", "分期操作状态未保存。"));
         return TerminalReady.Success(updated);
     }
 
@@ -2257,15 +2321,15 @@ public sealed class InstallmentOperationService(
         return current?.State is LocalInstallmentOperationState.TerminalApproved or LocalInstallmentOperationState.ApiSubmitting
             ? TerminalReady.Success(current)
             : current?.State == LocalInstallmentOperationState.Completed
-                ? TerminalReady.Failed("操作已完成，请刷新分期列表。")
-                : TerminalReady.Unknown("同一分期操作正在恢复或结果未知，请勿重试。");
+                ? TerminalReady.Failed(InstallmentText.L("installment.text.e7a1eeef", "操作已完成，请刷新分期列表。"))
+                : TerminalReady.Unknown(InstallmentText.L("installment.text.1e7b7775", "同一分期操作正在恢复或结果未知，请勿重试。"));
     }
 
     private async Task<InstallmentOperationResult<InstallmentCreateResponse>> SubmitCreateAsync(LocalInstallmentOperation operation, InstallmentCreateRequest request, CancellationToken cancellationToken, bool allowStaleApiSubmittingClaim = false)
     {
         if (!await ClaimApiAsync(operation.OperationGuid, allowStaleApiSubmittingClaim, cancellationToken))
         {
-            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "分期操作正在恢复或已完成。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: InstallmentText.L("installment.text.6521b035", "分期操作正在恢复或已完成。"), RequiresReview: true);
         }
 
         try
@@ -2274,20 +2338,20 @@ public sealed class InstallmentOperationService(
             var local = ToLocalOrder(response.Details);
             if (!await repository.CompleteWithSnapshotAsync(operation.OperationGuid, [LocalInstallmentOperationState.ApiSubmitting], local, JsonSerializer.Serialize(response, JsonOptions), false, DateTimeOffset.UtcNow, cancellationToken))
             {
-                return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "创建结果已提交，正在安全对账，请勿重复收款。", RequiresReview: true);
+                return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: InstallmentText.L("installment.text.5c72284d", "创建结果已提交，正在安全对账，请勿重复收款。"), RequiresReview: true);
             }
             await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
             return new InstallmentOperationResult<InstallmentCreateResponse>(true, response, local, response.Message);
         }
         catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "create", "创建 API 调用已取消，结果未知。", exception, CancellationToken.None);
-            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "创建结果未知，请勿再次收款。", RequiresReview: true);
+            await MarkApiUnknownAsync(operation.OperationGuid, "create", InstallmentText.L("installment.text.2632dc02", "创建 API 调用已取消，结果未知。"), exception, CancellationToken.None);
+            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: InstallmentText.L("installment.text.73ba4db6", "创建结果未知，请勿再次收款。"), RequiresReview: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             await MarkApiUnknownAsync(operation.OperationGuid, "create", exception.Message, exception, CancellationToken.None);
-            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "分期创建结果未知，请勿再次收款。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: InstallmentText.L("installment.text.1d2b54f5", "分期创建结果未知，请勿再次收款。"), RequiresReview: true);
         }
     }
 
@@ -2295,7 +2359,7 @@ public sealed class InstallmentOperationService(
     {
         if (!await ClaimApiAsync(operation.OperationGuid, allowStaleApiSubmittingClaim, cancellationToken))
         {
-            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款操作正在恢复或已完成。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.846fc4f6", "补款操作正在恢复或已完成。"), RequiresReview: true);
         }
 
         try
@@ -2311,13 +2375,13 @@ public sealed class InstallmentOperationService(
             var response = committedClaim.Commit;
             if (committedClaim.Status != InstallmentRepaymentClaimStatus.Committed || response is null)
             {
-                await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", $"中央补款 claim 返回状态 {committedClaim.Status}，缺少提交结果。", null, CancellationToken.None);
-                return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款提交结果不完整，保持锁定等待恢复。", RequiresReview: true);
+                await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", InstallmentText.L("installment.text.81831fb5", "中央补款 claim 返回状态 {0}，缺少提交结果。", committedClaim.Status), null, CancellationToken.None);
+                return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.794d97e9", "补款提交结果不完整，保持锁定等待恢复。"), RequiresReview: true);
             }
             var local = ToLocalOrder(response.Details);
             if (!await repository.CompleteWithSnapshotAsync(operation.OperationGuid, [LocalInstallmentOperationState.ApiSubmitting], local, JsonSerializer.Serialize(response, JsonOptions), false, DateTimeOffset.UtcNow, cancellationToken))
             {
-                return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果已提交，正在安全对账，请勿重复收款。", RequiresReview: true);
+                return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.8043f56e", "补款结果已提交，正在安全对账，请勿重复收款。"), RequiresReview: true);
             }
             await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
             await TryMarkZellerRepaymentCompletedAsync(operation.OperationGuid);
@@ -2325,13 +2389,13 @@ public sealed class InstallmentOperationService(
         }
         catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", "补款 API 调用已取消，结果未知。", exception, CancellationToken.None);
-            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果未知，请勿再次收款。", RequiresReview: true);
+            await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", InstallmentText.L("installment.text.8857aa11", "补款 API 调用已取消，结果未知。"), exception, CancellationToken.None);
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.ba0b712d", "补款结果未知，请勿再次收款。"), RequiresReview: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", exception.Message, exception, CancellationToken.None);
-            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果未知，请勿再次收款。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: InstallmentText.L("installment.text.ba0b712d", "补款结果未知，请勿再次收款。"), RequiresReview: true);
         }
     }
 
@@ -2340,7 +2404,7 @@ public sealed class InstallmentOperationService(
         if (!string.Equals(operation.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(operation.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消退款仅允许原设备恢复。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.c7e0d488", "取消退款仅允许原设备恢复。"), RequiresReview: true);
         }
 
         var steps = await repository.GetRefundStepsAsync(operation.OperationGuid, cancellationToken);
@@ -2349,7 +2413,7 @@ public sealed class InstallmentOperationService(
         {
             if (claimReady.RequiresReview)
             {
-                await LockCancelForReviewAsync(operation, claimReady.Message ?? "取消 claim 状态无法安全确认。");
+                await LockCancelForReviewAsync(operation, claimReady.Message ?? InstallmentText.L("installment.text.85a2ce9e", "取消 claim 状态无法安全确认。"));
             }
             return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: claimReady.Message, RequiresReview: claimReady.RequiresReview);
         }
@@ -2369,7 +2433,7 @@ public sealed class InstallmentOperationService(
             steps.Any(IsRefundApproved);
         if ((operation.State == LocalInstallmentOperationState.ResultUnknown && !supervisorResolved && !partialApprovedRetry) || hasUnknownStep)
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "退款结果未知，已锁定等待主管三态结案。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.f599e835", "退款结果未知，已锁定等待主管三态结案。"), RequiresReview: true);
         }
 
         var begun = await BeginCancelRefundAsync(operation, claimReady.Claim!, cancellationToken);
@@ -2377,7 +2441,7 @@ public sealed class InstallmentOperationService(
         {
             if (begun.RequiresReview)
             {
-                await LockCancelForReviewAsync(operation, begun.Message ?? "取消退款阶段无法安全确认。");
+                await LockCancelForReviewAsync(operation, begun.Message ?? InstallmentText.L("installment.text.f4d121fb", "取消退款阶段无法安全确认。"));
             }
             return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: begun.Message, RequiresReview: begun.RequiresReview);
         }
@@ -2388,7 +2452,7 @@ public sealed class InstallmentOperationService(
         var claimed = await repository.TryTransitionAsync(operation.OperationGuid, expected, LocalInstallmentOperationState.TerminalSubmitting, DateTimeOffset.UtcNow, cancellationToken: cancellationToken);
         if (!claimed)
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消操作正在恢复。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.891631ed", "取消操作正在恢复。"), RequiresReview: true);
         }
 
         foreach (var step in steps.Where(step => step.State == LocalInstallmentRefundStepState.Prepared))
@@ -2430,7 +2494,7 @@ public sealed class InstallmentOperationService(
                 var resolved = await TryResolveCancelClaimAsync(operation, outcome, approvedRefunds, CancellationToken.None);
                 if (!resolved)
                 {
-                    return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "中央取消 claim 结案失败，保持锁定等待恢复。", RequiresReview: true);
+                    return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.bbfca9f3", "中央取消 claim 结案失败，保持锁定等待恢复。"), RequiresReview: true);
                 }
                 // 零成功的明确拒绝可终结本次 claim；部分退款已成功则保持 Unknown，只允许本机继续同一 operation。
                 await repository.TryTransitionAsync(
@@ -2447,7 +2511,7 @@ public sealed class InstallmentOperationService(
         steps = await repository.GetRefundStepsAsync(operation.OperationGuid, cancellationToken);
         if (!steps.All(IsRefundApproved))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "退款尚未全部完成，取消保持锁定。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.56447b28", "退款尚未全部完成，取消保持锁定。"), RequiresReview: true);
         }
 
         return await PersistApprovedRefundSnapshotAndSubmitAsync(operation, steps, cancellationToken);
@@ -2511,7 +2575,7 @@ public sealed class InstallmentOperationService(
         var persisted = await repository.GetAsync(operation.OperationGuid, CancellationToken.None);
         if (persisted is null || persisted.State is not (LocalInstallmentOperationState.TerminalApproved or LocalInstallmentOperationState.ApiSubmitting or LocalInstallmentOperationState.ResultUnknown))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "退款快照正在由其他恢复流程处理，取消保持锁定。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.a871152f", "退款快照正在由其他恢复流程处理，取消保持锁定。"), RequiresReview: true);
         }
 
         // CAS 未命中说明其他恢复入口已经接管；只能使用其已保存的请求快照，不能用内存中的旧版本覆盖或重发不同退款明细。
@@ -2528,7 +2592,7 @@ public sealed class InstallmentOperationService(
     {
         if (!await ClaimApiAsync(operation.OperationGuid, allowStaleApiSubmittingClaim, cancellationToken))
         {
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消 API 正在恢复或结果未知。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.4e2bee9a", "取消 API 正在恢复或结果未知。"), RequiresReview: true);
         }
 
         try
@@ -2560,15 +2624,15 @@ public sealed class InstallmentOperationService(
                 catch (Exception recoveryException)
                 {
                     LogOperationIssue(operation.OperationGuid, "cancel-commit", "First commit failed", firstException);
-                    await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit-recovery", $"{firstException.Message}; commit 恢复失败：{recoveryException.Message}", recoveryException, CancellationToken.None);
-                    return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果未知，退款不会重复执行。", RequiresReview: true);
+                    await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit-recovery", InstallmentText.L("installment.text.ae6a42e4", "{0}; commit 恢复失败：{1}", firstException.Message, recoveryException.Message), recoveryException, CancellationToken.None);
+                    return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.c5fc2fd8", "取消提交结果未知，退款不会重复执行。"), RequiresReview: true);
                 }
             }
 
             if (committedClaim.Status != InstallmentCancelClaimStatus.Committed || committedClaim.Commit is null)
             {
-                await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit", $"中央取消 claim 返回状态 {committedClaim.Status}，缺少提交结果。", null, CancellationToken.None);
-                return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果不完整，退款不会重复执行。", RequiresReview: true);
+                await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit", InstallmentText.L("installment.text.a1e0c563", "中央取消 claim 返回状态 {0}，缺少提交结果。", committedClaim.Status), null, CancellationToken.None);
+                return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.a26d53f7", "取消提交结果不完整，退款不会重复执行。"), RequiresReview: true);
             }
 
             return await CompleteCommittedCancelAsync(
@@ -2579,7 +2643,7 @@ public sealed class InstallmentOperationService(
         catch (Exception exception)
         {
             await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit", exception.Message, exception, CancellationToken.None);
-            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果未知，退款不会重复执行。", RequiresReview: true);
+            return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: InstallmentText.L("installment.text.c5fc2fd8", "取消提交结果未知，退款不会重复执行。"), RequiresReview: true);
         }
     }
 
@@ -2606,9 +2670,9 @@ public sealed class InstallmentOperationService(
                     DateTimeOffset.UtcNow,
                     refundReference: authorization.Reference,
                     cardTransactionsJson: SerializeTransactions(authorization.CardTransactions),
-                    failureMessage: authorization.Message ?? "退款结果未知。",
+                    failureMessage: authorization.Message ?? InstallmentText.L("installment.text.1a112e9f", "退款结果未知。"),
                     cancellationToken: CancellationToken.None);
-                return new InstallmentOperationResult<bool>(false, Message: "退款结果未知，等待主管结案。", RequiresReview: true);
+                return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.fd92734e", "退款结果未知，等待主管结案。"), RequiresReview: true);
             }
 
             if (!authorization.Approved)
@@ -2629,7 +2693,7 @@ public sealed class InstallmentOperationService(
                 {
                     await repository.TryTransitionRefundStepAsync(step.RefundStepGuid, [LocalInstallmentRefundStepState.TerminalSubmitting], LocalInstallmentRefundStepState.Prepared, DateTimeOffset.UtcNow, failureMessage: authorization.Message, cancellationToken: CancellationToken.None);
                 }
-                return new InstallmentOperationResult<bool>(false, Message: authorization.Message ?? "退款未获批准。");
+                return new InstallmentOperationResult<bool>(false, Message: authorization.Message ?? InstallmentText.L("installment.text.ba92ca1c", "退款未获批准。"));
             }
 
             if (!HasExactAuthorizedAmount(authorization, step.Amount) ||
@@ -2643,7 +2707,7 @@ public sealed class InstallmentOperationService(
                     DateTimeOffset.UtcNow,
                     failureMessage: "Refund approval evidence or amount did not match the persisted step.",
                     cancellationToken: CancellationToken.None);
-                return new InstallmentOperationResult<bool>(false, Message: "退款批准信息无法安全核验，等待主管结案。", RequiresReview: true);
+                return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.dda4ce18", "退款批准信息无法安全核验，等待主管结案。"), RequiresReview: true);
             }
 
             var approvedPersisted = await repository.TryTransitionRefundStepAsync(step.RefundStepGuid, [LocalInstallmentRefundStepState.TerminalSubmitting], LocalInstallmentRefundStepState.Approved, DateTimeOffset.UtcNow, authorization.Reference, authorization.CardTransactions is null ? null : JsonSerializer.Serialize(authorization.CardTransactions, JsonOptions), cancellationToken: CancellationToken.None);
@@ -2652,7 +2716,7 @@ public sealed class InstallmentOperationService(
                 var current = (await repository.GetRefundStepsAsync(step.OperationGuid, CancellationToken.None)).FirstOrDefault(item => item.RefundStepGuid == step.RefundStepGuid);
                 return current is not null && IsRefundApproved(current)
                     ? new InstallmentOperationResult<bool>(true, true)
-                    : new InstallmentOperationResult<bool>(false, Message: "退款结果正在恢复或未知，保持锁定。", RequiresReview: true);
+                    : new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.b3cd327f", "退款结果正在恢复或未知，保持锁定。"), RequiresReview: true);
             }
 
             return new InstallmentOperationResult<bool>(true, true);
@@ -2660,8 +2724,8 @@ public sealed class InstallmentOperationService(
         catch (OperationCanceledException exception)
         {
             LogRefundStepIssue(step, "ResultUnknown", exception, "canceled");
-            await repository.TryTransitionRefundStepAsync(step.RefundStepGuid, [LocalInstallmentRefundStepState.TerminalSubmitting], LocalInstallmentRefundStepState.ResultUnknown, DateTimeOffset.UtcNow, failureMessage: "退款终端调用被取消，结果未知。", cancellationToken: CancellationToken.None);
-            return new InstallmentOperationResult<bool>(false, Message: "退款结果未知，等待主管结案。", RequiresReview: true);
+            await repository.TryTransitionRefundStepAsync(step.RefundStepGuid, [LocalInstallmentRefundStepState.TerminalSubmitting], LocalInstallmentRefundStepState.ResultUnknown, DateTimeOffset.UtcNow, failureMessage: InstallmentText.L("installment.text.8c2a453b", "退款终端调用被取消，结果未知。"), cancellationToken: CancellationToken.None);
+            return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.fd92734e", "退款结果未知，等待主管结案。"), RequiresReview: true);
         }
         catch (Exception exception)
         {
@@ -2673,7 +2737,7 @@ public sealed class InstallmentOperationService(
                 DateTimeOffset.UtcNow,
                 failureMessage: exception.Message,
                 cancellationToken: CancellationToken.None);
-            return new InstallmentOperationResult<bool>(false, Message: "退款结果未知，等待主管结案。", RequiresReview: true);
+            return new InstallmentOperationResult<bool>(false, Message: InstallmentText.L("installment.text.fd92734e", "退款结果未知，等待主管结案。"), RequiresReview: true);
         }
     }
 
@@ -2776,9 +2840,9 @@ public sealed class InstallmentOperationService(
             var terminalRecovery = await ReadPersistedTerminalApprovalAsync(operation, session, cancellationToken);
             if (terminalRecovery.Rejected)
             {
-                await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: "终端明确拒绝或取消。", cancellationToken: CancellationToken.None);
+                await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: InstallmentText.L("installment.text.6566fa85", "终端明确拒绝或取消。"), cancellationToken: CancellationToken.None);
                 await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "终端已明确拒绝或取消，可重新操作。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.c6888ee5", "终端已明确拒绝或取消，可重新操作。"));
             }
 
             if (terminalRecovery.Approved)
@@ -2786,13 +2850,13 @@ public sealed class InstallmentOperationService(
                 request = request with { DownPayment = request.DownPayment with { Reference = terminalRecovery.Reference, CardTransactions = terminalRecovery.Transactions } };
                 if (!await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.TerminalApproved, DateTimeOffset.UtcNow, requestJson: JsonSerializer.Serialize(request, JsonOptions), cancellationToken: CancellationToken.None))
                 {
-                    return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "终端批准正在由其他恢复入口对账。");
+                    return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.b28489d2", "终端批准正在由其他恢复入口对账。"));
                 }
 
                 operation = (await repository.GetAsync(operation.OperationGuid, cancellationToken))!;
             }
             else
-            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "未确认终端批准，禁止自动重扣。");
+            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.0218a562", "未确认终端批准，禁止自动重扣。"));
         }
 
         var result = await SubmitCreateAsync(operation, request, cancellationToken, allowStaleApiSubmittingClaim: true);
@@ -2840,7 +2904,7 @@ public sealed class InstallmentOperationService(
         {
             if (!CanRecreateMissingRepaymentClaim(operation, request))
             {
-                const string message = "远端补款 claim 缺失，但本地已有 provider attempt 或批准证据；保持锁定并等待人工对账。";
+                var message = InstallmentText.L("installment.text.6b6244e3", "远端补款 claim 缺失，但本地已有 provider attempt 或批准证据；保持锁定并等待人工对账。");
                 await repository.TryTransitionAsync(
                     operation.OperationGuid,
                     [operation.State],
@@ -2874,14 +2938,14 @@ public sealed class InstallmentOperationService(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogOperationIssue(operation.OperationGuid, "recover-repayment-read-claim", "Kept locked", exception);
-            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, $"读取中央补款 claim 失败，保持锁定：{exception.Message}");
+            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.22bd8803", "读取中央补款 claim 失败，保持锁定：{0}", exception.Message));
         }
 
         if (claim.Status == InstallmentRepaymentClaimStatus.Committed)
         {
             if (claim.Commit is null)
             {
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "中央补款已提交但缺少结果快照，保持锁定。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.0c58896e", "中央补款已提交但缺少结果快照，保持锁定。"));
             }
 
             var completed = await CompleteCommittedRepaymentAsync(operation, claim.Commit, cancellationToken);
@@ -2895,9 +2959,9 @@ public sealed class InstallmentOperationService(
                 [operation.State],
                 LocalInstallmentOperationState.Failed,
                 DateTimeOffset.UtcNow,
-                failureMessage: $"中央补款 claim 已结束：{claim.Status}",
+                failureMessage: InstallmentText.L("installment.text.dba15a93", "中央补款 claim 已结束：{0}", claim.Status),
                 cancellationToken: CancellationToken.None);
-            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "原补款 claim 已结束，可重新发起付款。");
+            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.32df73b3", "原补款 claim 已结束，可重新发起付款。"));
         }
 
         if (claim.Status == InstallmentRepaymentClaimStatus.Unknown &&
@@ -2918,7 +2982,7 @@ public sealed class InstallmentOperationService(
         {
             if (string.IsNullOrWhiteSpace(claim.Provider) || string.IsNullOrWhiteSpace(claim.ProviderAttemptId))
             {
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "中央补款缺少卡 provider attempt 绑定，保持锁定。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.04000372", "中央补款缺少卡 provider attempt 绑定，保持锁定。"));
             }
 
             // begin-provider 已成功但本地状态尚未来得及推进：先把中央耐久 attempt 绑定回本地，再且仅再做 provider 查询。
@@ -2929,12 +2993,12 @@ public sealed class InstallmentOperationService(
                 DateTimeOffset.UtcNow,
                 terminalAttemptGuid: claim.ProviderAttemptId,
                 terminalProcessor: claim.Provider,
-                failureMessage: "begin-provider 后本地状态中断，正在查询原卡 attempt。",
+                failureMessage: InstallmentText.L("installment.text.4d0e09d4", "begin-provider 后本地状态中断，正在查询原卡 attempt。"),
                 cancellationToken: CancellationToken.None);
             operation = await repository.GetAsync(operation.OperationGuid, cancellationToken) ?? operation;
             if (!bound && operation.State is not LocalInstallmentOperationState.ResultUnknown and not LocalInstallmentOperationState.TerminalApproved and not LocalInstallmentOperationState.ApiSubmitting)
             {
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, "原卡 attempt 正由另一恢复入口处理。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, InstallmentText.L("installment.text.a5c95e8f", "原卡 attempt 正由另一恢复入口处理。"));
             }
         }
 
@@ -2946,7 +3010,7 @@ public sealed class InstallmentOperationService(
             {
                 // 本地已越过 provider 前置状态却没有 reservation token，结果只能保持 Unknown，绝不能再次兑换。
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "礼券 reservation 结果未知，禁止重复兑换。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.89e4d93a", "礼券 reservation 结果未知，禁止重复兑换。"));
             }
 
             // 礼券调用严格位于 Prepared -> TerminalSubmitting 之后；仍为 Prepared 证明 provider 尚未执行，可安全推进一次。
@@ -2988,10 +3052,10 @@ public sealed class InstallmentOperationService(
             request.CardTransactions is not { Count: > 0 })
         {
             // 中文注释：还没登记 Manual 通道，收款窗口没有打开过，确定没有收款：释放 claim，可重新发起。
-            const string notStartedMessage = "手动刷卡续付尚未开始收款，已释放，可重新发起。";
+            var notStartedMessage = InstallmentText.L("installment.text.8b5b6b04", "手动刷卡续付尚未开始收款，已释放，可重新发起。");
             return await FailUnsupportedCardRepaymentAsync(operation, "recover-manual-card", notStartedMessage)
                 ? new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, notStartedMessage)
-                : new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "手动刷卡续付正由另一恢复入口处理。");
+                : new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.1ae7697f", "手动刷卡续付正由另一恢复入口处理。"));
         }
 
         if (request.Method == PaymentMethodKind.Card && request.CardTransactions is not { Count: > 0 })
@@ -2999,10 +3063,10 @@ public sealed class InstallmentOperationService(
             var terminalRecovery = await ReadPersistedTerminalApprovalAsync(operation, session, cancellationToken);
             if (terminalRecovery.Rejected)
             {
-                await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: "终端明确拒绝或取消。", cancellationToken: CancellationToken.None);
+                await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: InstallmentText.L("installment.text.6566fa85", "终端明确拒绝或取消。"), cancellationToken: CancellationToken.None);
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
                 await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "终端已明确拒绝或取消，可重新操作。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.c6888ee5", "终端已明确拒绝或取消，可重新操作。"));
             }
 
             if (terminalRecovery.Approved)
@@ -3010,7 +3074,7 @@ public sealed class InstallmentOperationService(
                 request = request with { Reference = terminalRecovery.Reference, CardTransactions = terminalRecovery.Transactions };
                 if (!await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.TerminalApproved, DateTimeOffset.UtcNow, requestJson: JsonSerializer.Serialize(request, JsonOptions), cancellationToken: CancellationToken.None))
                 {
-                    return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "终端批准正在由其他恢复入口对账。");
+                    return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.b28489d2", "终端批准正在由其他恢复入口对账。"));
                 }
 
                 operation = (await repository.GetAsync(operation.OperationGuid, cancellationToken))!;
@@ -3022,7 +3086,7 @@ public sealed class InstallmentOperationService(
                     // Unknown 可能已通过同 provider/attempt 的 begin 恢复成 ProviderPending；未确认时必须再次归档为 Unknown。
                     await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Unknown, CancellationToken.None);
                 }
-                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, "未确认终端批准，禁止自动重扣。");
+                return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, InstallmentText.L("installment.text.0218a562", "未确认终端批准，禁止自动重扣。"));
             }
         }
 
@@ -3050,11 +3114,11 @@ public sealed class InstallmentOperationService(
         if ((rejectedRefundReset || HasSquareRejectedRefundReset(steps)) &&
             await TryFinalizeRejectedCancelRecoveryAsync(operation, steps))
         {
-            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "Square 退款已明确拒绝，可重新发起取消。");
+            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, InstallmentText.L("installment.text.526dd732", "Square 退款已明确拒绝，可重新发起取消。"));
         }
         if (!steps.All(IsRefundApproved))
         {
-            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, "退款未全部确认，保持锁定。" );
+            return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, operation.State, false, InstallmentText.L("installment.text.32e9991e", "退款未全部确认，保持锁定。") );
         }
 
         var result = await PersistApprovedRefundSnapshotAndSubmitAsync(operation, steps, cancellationToken);
@@ -3320,7 +3384,7 @@ public sealed class InstallmentOperationService(
                     PaymentMethodKind.Cash => "cash",
                     PaymentMethodKind.Card => "card",
                     PaymentMethodKind.Voucher => "voucher",
-                    _ => throw new InvalidOperationException("退款计划包含无效付款方式。")
+                    _ => throw new InvalidOperationException(InstallmentText.L("installment.text.59162947", "退款计划包含无效付款方式。"))
                 },
                 AmountCents = ToExactCents(step.Amount)
             })
@@ -3328,7 +3392,7 @@ public sealed class InstallmentOperationService(
             .ToArray();
         if (payments.Length == 0)
         {
-            throw new InvalidOperationException("分期没有可退款付款。");
+            throw new InvalidOperationException(InstallmentText.L("installment.text.3cc3b228", "分期没有可退款付款。"));
         }
 
         var material = new StringBuilder();
@@ -3357,13 +3421,13 @@ public sealed class InstallmentOperationService(
         var cents = amount * 100m;
         if (cents != decimal.Truncate(cents) || cents <= 0m || cents > long.MaxValue)
         {
-            throw new InvalidOperationException("退款金额无法转换为精确整数分。");
+            throw new InvalidOperationException(InstallmentText.L("installment.text.e33eb850", "退款金额无法转换为精确整数分。"));
         }
         return decimal.ToInt64(cents);
     }
 
     private static InstallmentCancelResponse ToCancelResponse(Guid installmentGuid, InstallmentCancelClaimCommitResponse commit) =>
-        new(installmentGuid, commit.Details.Status, commit.Details, commit.AlreadyCancelled, commit.AlreadyCancelled ? "分期已取消。" : "分期取消并退款完成。");
+        new(installmentGuid, commit.Details.Status, commit.Details, commit.AlreadyCancelled, commit.AlreadyCancelled ? InstallmentText.L("installment.text.9faa6b4b", "分期已取消。") : InstallmentText.L("installment.text.ec0c9a1e", "分期取消并退款完成。"));
     private static bool HasExactAuthorizedAmount(PaymentAuthorizationResult authorization, decimal expectedAmount)
     {
         return authorization.AuthorizedAmount is decimal authorizedAmount &&
@@ -3421,7 +3485,7 @@ public sealed class InstallmentOperationService(
         {
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货确认正在恢复或结果未知。",
+                Message: InstallmentText.L("installment.text.b98ae87c", "提货确认正在恢复或结果未知。"),
                 RequiresReview: true);
         }
 
@@ -3440,7 +3504,7 @@ public sealed class InstallmentOperationService(
             {
                 return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                     false,
-                    Message: "提货确认已提交，本地快照正在安全恢复。",
+                    Message: InstallmentText.L("installment.text.d0aeda1f", "提货确认已提交，本地快照正在安全恢复。"),
                     RequiresReview: true);
             }
 
@@ -3448,14 +3512,14 @@ public sealed class InstallmentOperationService(
                 true,
                 response,
                 local,
-                "分期单已确认提货。");
+                InstallmentText.L("installment.text.18912330", "分期单已确认提货。"));
         }
         catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "pickup", "提货确认 API 调用已取消，结果未知。", exception, CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "pickup", InstallmentText.L("installment.text.6dcb684f", "提货确认 API 调用已取消，结果未知。"), exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货确认请求超时，结果可能已提交；已锁定，请刷新恢复，勿重复确认提货。",
+                Message: InstallmentText.L("installment.text.79f6184e", "提货确认请求超时，结果可能已提交；已锁定，请刷新恢复，勿重复确认提货。"),
                 RequiresReview: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -3463,7 +3527,7 @@ public sealed class InstallmentOperationService(
             await MarkApiUnknownAsync(operation.OperationGuid, "pickup", exception.Message, exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
-                Message: "提货确认结果未知，已锁定；请刷新恢复，勿重复确认提货。",
+                Message: InstallmentText.L("installment.text.d34f2164", "提货确认结果未知，已锁定；请刷新恢复，勿重复确认提货。"),
                 RequiresReview: true);
         }
     }
@@ -3500,7 +3564,7 @@ public sealed class InstallmentOperationService(
             ConsoleLog.Write("InstallmentRecovery", $"Square settings lookup failed operationGuid={operation.OperationGuid} error={exception.GetType().Name}");
             foreach (var step in candidates)
             {
-                await MarkSquareRefundUnknownAsync(step, "Square 环境配置读取失败，保持锁定。", cancellationToken: CancellationToken.None);
+                await MarkSquareRefundUnknownAsync(step, InstallmentText.L("installment.text.daf67696", "Square 环境配置读取失败，保持锁定。"), cancellationToken: CancellationToken.None);
             }
             return false;
         }
@@ -3517,7 +3581,7 @@ public sealed class InstallmentOperationService(
             {
                 if (!Enum.TryParse<CardTerminalEnvironment>(step.ProviderEnvironment, ignoreCase: true, out var providerEnvironment))
                 {
-                    await MarkSquareRefundUnknownAsync(step, "Square 原退款环境无效，保持锁定。", cancellationToken: CancellationToken.None);
+                    await MarkSquareRefundUnknownAsync(step, InstallmentText.L("installment.text.15be2f34", "Square 原退款环境无效，保持锁定。"), cancellationToken: CancellationToken.None);
                     continue;
                 }
 
@@ -3537,7 +3601,7 @@ public sealed class InstallmentOperationService(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 ConsoleLog.Write("InstallmentRecovery", $"Square refund lookup failed refundStepGuid={step.RefundStepGuid} refundId={refundId} error={exception.GetType().Name}");
-                await MarkSquareRefundUnknownAsync(step, "Square 退款查询失败，保持锁定。", cancellationToken: CancellationToken.None);
+                await MarkSquareRefundUnknownAsync(step, InstallmentText.L("installment.text.df87593f", "Square 退款查询失败，保持锁定。"), cancellationToken: CancellationToken.None);
                 continue;
             }
 
@@ -3547,7 +3611,7 @@ public sealed class InstallmentOperationService(
                 !string.Equals(refund.Currency, "AUD", StringComparison.OrdinalIgnoreCase))
             {
                 // 响应身份不可信时不得覆盖已落盘的权威 refundId。
-                await MarkSquareRefundUnknownAsync(step, "Square 退款身份、原付款、金额或币种不匹配，保持锁定。", cancellationToken: CancellationToken.None);
+                await MarkSquareRefundUnknownAsync(step, InstallmentText.L("installment.text.7ea18c0f", "Square 退款身份、原付款、金额或币种不匹配，保持锁定。"), cancellationToken: CancellationToken.None);
                 continue;
             }
 
@@ -3573,14 +3637,14 @@ public sealed class InstallmentOperationService(
                     [LocalInstallmentRefundStepState.TerminalSubmitting, LocalInstallmentRefundStepState.ResultUnknown],
                     Guid.NewGuid().ToString("N"),
                     refund.UpdatedAt ?? DateTimeOffset.UtcNow,
-                    $"Square 退款状态为 {refund.Status}。",
+                    InstallmentText.L("installment.text.51dfe95a", "Square 退款状态为 {0}。", refund.Status),
                     CancellationToken.None);
                 continue;
             }
 
             var message = string.Equals(refund.Status, "PENDING", StringComparison.OrdinalIgnoreCase)
-                ? "Square 退款仍在处理中，保持锁定并稍后恢复。"
-                : $"Square 退款状态为 {refund.Status}，仅 COMPLETED 可自动确认，保持锁定。";
+                ? InstallmentText.L("installment.text.3d872fba", "Square 退款仍在处理中，保持锁定并稍后恢复。")
+                : InstallmentText.L("installment.text.eb20ae5f", "Square 退款状态为 {0}，仅 COMPLETED 可自动确认，保持锁定。", refund.Status);
             await MarkSquareRefundUnknownAsync(step, message, refund, CancellationToken.None);
         }
 
@@ -3612,7 +3676,7 @@ public sealed class InstallmentOperationService(
             [LocalInstallmentOperationState.TerminalSubmitting, LocalInstallmentOperationState.ResultUnknown],
             LocalInstallmentOperationState.Failed,
             DateTimeOffset.UtcNow,
-            failureMessage: "Square 退款已明确拒绝，可重新发起取消。",
+            failureMessage: InstallmentText.L("installment.text.526dd732", "Square 退款已明确拒绝，可重新发起取消。"),
             cancellationToken: CancellationToken.None);
         return failed ||
             (await repository.GetAsync(operation.OperationGuid, CancellationToken.None))?.State == LocalInstallmentOperationState.Failed;
@@ -3622,8 +3686,8 @@ public sealed class InstallmentOperationService(
         steps.Any(step =>
             step.State == LocalInstallmentRefundStepState.Prepared &&
             TryParseSquarePaymentId(step.OriginalReference, out _) &&
-            (string.Equals(step.FailureMessage, "Square 退款状态为 FAILED。", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(step.FailureMessage, "Square 退款状态为 REJECTED。", StringComparison.OrdinalIgnoreCase)));
+            (string.Equals(step.FailureMessage, InstallmentText.L("installment.text.50a45e3f", "Square 退款状态为 FAILED。"), StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(step.FailureMessage, InstallmentText.L("installment.text.fd8e0390", "Square 退款状态为 REJECTED。"), StringComparison.OrdinalIgnoreCase)));
 
     private Task<bool> MarkSquareRefundUnknownAsync(
         LocalInstallmentRefundStep step,
@@ -3698,7 +3762,7 @@ public sealed class InstallmentOperationService(
             : step.IdempotencyKey;
 
     private static IReadOnlyList<CardTransactionDto>? DeserializeTransactions(string? json) => string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<IReadOnlyList<CardTransactionDto>>(json, JsonOptions);
-    private static T Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new InvalidOperationException("分期操作快照无效。");
+    private static T Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new InvalidOperationException(InstallmentText.L("installment.text.c6c0d619", "分期操作快照无效。"));
     private static Guid DeterministicGuid(string value)
     {
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(value));

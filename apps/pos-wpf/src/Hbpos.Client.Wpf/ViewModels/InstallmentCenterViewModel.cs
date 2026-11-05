@@ -127,15 +127,15 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public IAsyncRelayCommand SupervisorResolveCardRepaymentCommand { get; }
     public IReadOnlyList<InstallmentCardRepaymentDecisionOption> SupervisorCardRepaymentDecisions { get; } =
         [
-            new(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, "已核实扣款成功：按这笔金额入账"),
-            new(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, "已核实没有扣款：结案并解除占用")
+            new(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, InstallmentText.L("installment.text.722823d8", "已核实扣款成功：按这笔金额入账")),
+            new(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, InstallmentText.L("installment.text.e6b422f3", "已核实没有扣款：结案并解除占用"))
         ];
     public bool HasPendingCardRepayment => PendingCardRepayment is not null;
     public string PendingCardRepaymentText => PendingCardRepayment is not { } pending
         ? string.Empty
         : string.Format(
             GetCulture(),
-            "刷卡续付 {0:C2}（{1}，收银机 {2}）结果不明，已占用这张分期单。请先在银行或刷卡机后台核实这笔交易，再按核实结果结案。",
+            InstallmentText.L("installment.text.373a90fc", "刷卡续付 {0:C2}（{1}，收银机 {2}）结果不明，已占用这张分期单。请先在银行或刷卡机后台核实这笔交易，再按核实结果结案。"),
             pending.Amount,
             pending.Provider,
             pending.ClaimantDeviceCode ?? "-");
@@ -295,11 +295,11 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
                 reasonCode: decision.Value.ToString(),
                 safeMessage: exception.GetType().Name,
                 orderGuid: pending.InstallmentGuid.ToString("D"));
-            SetLiteralStatus($"主管结案未保存：{exception.Message}");
+            SetLiteralStatus(InstallmentText.L("installment.text.e0740728", "主管结案未保存：{0}", exception.Message));
         }
         catch (OperationCanceledException)
         {
-            SetLiteralStatus("主管结案请求超时，结果未知，请刷新核对。");
+            SetLiteralStatus(InstallmentText.L("installment.text.fc2eda7c", "主管结案请求超时，结果未知，请刷新核对。"));
         }
         finally
         {
@@ -436,7 +436,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
 
         if (_isRecoveryStateUnknown)
         {
-            SetLiteralStatus("分期恢复状态未知，创建入口已锁定；请刷新核对后重试。");
+            SetLiteralStatus(InstallmentText.L("installment.text.984c9264", "分期恢复状态未知，创建入口已锁定；请刷新核对后重试。"));
             return;
         }
 
@@ -575,7 +575,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
 
         if (!string.IsNullOrWhiteSpace(failure))
         {
-            SetLiteralStatus($"{completedMessage} 退款券打印失败（{failure}），请在交易记录补打。");
+            SetLiteralStatus(InstallmentText.L("installment.text.f4a1a987", "{0} 退款券打印失败（{1}），请在交易记录补打。", completedMessage, failure));
         }
     }
 
@@ -701,7 +701,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
                 orderGuid: selectedOrder.OrderId.ToString("D"));
             if (!resolved)
             {
-                SetLiteralStatus("该退款步骤正在处理或已结案，保持锁定。 ");
+                SetLiteralStatus(InstallmentText.L("installment.text.096a56e8", "该退款步骤正在处理或已结案，保持锁定。 "));
                 return;
             }
 
@@ -716,7 +716,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             }
             else
             {
-                SetLiteralStatus("已记录继续等待，退款保持锁定。 ");
+                SetLiteralStatus(InstallmentText.L("installment.text.fccb0213", "已记录继续等待，退款保持锁定。 "));
             }
         }
         catch (ArgumentException exception)
@@ -734,8 +734,8 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
                 safeMessage: exception.GetType().Name,
                 orderGuid: selectedOrder.OrderId.ToString("D"));
             SetLiteralStatus(resolutionSaved
-                ? "主管裁决已保存但恢复查询超时，退款保持锁定，请刷新核对。"
-                : "主管裁决请求超时，结果未知，退款保持锁定，请刷新核对。");
+                ? InstallmentText.L("installment.text.1ea0a565", "主管裁决已保存但恢复查询超时，退款保持锁定，请刷新核对。")
+                : InstallmentText.L("installment.text.1ee69402", "主管裁决请求超时，结果未知，退款保持锁定，请刷新核对。"));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -747,7 +747,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
                 reasonCode: decision.ToString(),
                 safeMessage: exception.GetType().Name,
                 orderGuid: selectedOrder.OrderId.ToString("D"));
-            SetLiteralStatus("主管结案未保存，退款保持锁定。 ");
+            SetLiteralStatus(InstallmentText.L("installment.text.2b86d92c", "主管结案未保存，退款保持锁定。 "));
         }
         finally
         {
@@ -892,7 +892,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             var locked = recovered.Count(item => item.State == LocalInstallmentOperationState.ResultUnknown);
             if (locked > 0)
             {
-                SetLiteralStatus($"{locked} 个分期支付结果未知，已锁定，请勿重复收款。");
+                SetLiteralStatus(InstallmentText.L("installment.text.6a867ca4", "{0} 个分期支付结果未知，已锁定，请勿重复收款。", locked));
             }
         }
         catch (OperationCanceledException)
@@ -900,7 +900,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             // 恢复请求超时不代表远端操作未完成；优先刷新锁，刷新失败时保留现有锁集合。
             _isRecoveryStateUnknown = true;
             await RefreshLockedInstallmentsSafelyAsync();
-            const string timeoutStatus = "分期恢复超时，操作保持锁定，请勿重复收款；请刷新核对。";
+            var timeoutStatus = InstallmentText.L("installment.text.de1102b1", "分期恢复超时，操作保持锁定，请勿重复收款；请刷新核对。");
             SetLiteralStatus(timeoutStatus);
             return timeoutStatus;
         }
@@ -908,7 +908,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         {
             _isRecoveryStateUnknown = true;
             await RefreshLockedInstallmentsSafelyAsync();
-            var failureStatus = $"分期恢复失败：{ex.GetType().Name}。操作保持锁定，请勿重复收款；请刷新核对。";
+            var failureStatus = InstallmentText.L("installment.text.a6e351c5", "分期恢复失败：{0}。操作保持锁定，请勿重复收款；请刷新核对。", ex.GetType().Name);
             SetLiteralStatus(failureStatus);
             return failureStatus;
         }

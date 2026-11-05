@@ -84,6 +84,8 @@ public partial class App : Application
             await _host.StartAsync();
             RegisterShutdownSteps(_host);
             var localization = _host.Services.GetRequiredService<ILocalizationService>();
+            // 分期服务层的提示跟随界面语言（见 InstallmentText）。
+            InstallmentText.Configure(localization);
             LocalizationResourceProvider.Instance.Configure(localization);
             ButtonFeedbackRouter.Register(_host.Services.GetRequiredService<IUserFeedbackService>());
 

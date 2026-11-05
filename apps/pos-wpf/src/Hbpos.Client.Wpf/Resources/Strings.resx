@@ -248,6 +248,10 @@
   <data name="payment.installment.status.manualCardRepaymentUnsupported" xml:space="preserve"><value>Manual card is not available for lay-by repayments on this server. Do not take the payment; use another payment method.</value></data>
   <data name="payment.installment.status.manualCardRepaymentCancelled" xml:space="preserve"><value>Manual card repayment cancelled. No payment was recorded.</value></data>
   <data name="payment.installment.status.manualCardRepaymentCancelFailed" xml:space="preserve"><value>The repayment could not be released. Check the connection and try again, or ask a supervisor to resolve it in the Lay-by Center.</value></data>
+  <data name="payment.installment.status.cardRepaymentReady" xml:space="preserve"><value>Card selected. Press Complete Payment to start the card terminal.</value></data>
+  <data name="payment.installment.status.cardRepaymentCancelling" xml:space="preserve"><value>Cancelling on the card terminal. Please wait for the result...</value></data>
+  <data name="payment.installment.status.cardRepaymentNotCharged" xml:space="preserve"><value>The card was not charged. You can take the payment again.</value></data>
+  <data name="payment.installment.status.cardRepaymentStillUnknown" xml:space="preserve"><value>The card result is still unknown. Do not take the payment again; recover it in the Lay-by Center or ask a supervisor.</value></data>
   <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This lay-by order cannot receive more payments.</value></data>
   <data name="payment.installment.status.actionFailed" xml:space="preserve"><value>Lay-by payment failed.</value></data>
   <data name="payment.installment.status.created" xml:space="preserve"><value>Lay-by order created.</value></data>
@@ -1906,4 +1910,243 @@ Logged with reference {2}</value></data>
   <data name="cardRecovery.zeller.confirmedNotPaid" xml:space="preserve"><value>Recorded as not paid. The customer can pay again.</value></data>
   <data name="cardRecovery.zeller.partialRefund" xml:space="preserve"><value>The Zeller refund was approved but only covers part of the return, so the order cannot be completed automatically. Ask a supervisor to finish the return.</value></data>
   <data name="payment.card.zeller.minimumAmount" xml:space="preserve"><value>Zeller card payments must be at least $1.00. Use cash or another payment method for this amount. The customer was not charged.</value></data>
+  <data name="installment.text.0218a562" xml:space="preserve"><value>The terminal approval could not be confirmed. The card will not be charged again automatically.</value></data>
+  <data name="installment.text.03308b74" xml:space="preserve"><value>The draft was never sent to the terminal and is kept for you to continue.</value></data>
+  <data name="installment.text.03724916" xml:space="preserve"><value>The voucher approval could not be saved. It stays locked for recovery.</value></data>
+  <data name="installment.text.04000372" xml:space="preserve"><value>The repayment on the server has no card attempt linked. It stays locked.</value></data>
+  <data name="installment.text.07ce2c61" xml:space="preserve"><value>Zeller card payments are not available for this lay-by action. Use another payment method.</value></data>
+  <data name="installment.text.096a56e8" xml:space="preserve"><value>This refund step is being processed or is already resolved. It stays locked.</value></data>
+  <data name="installment.text.0c58896e" xml:space="preserve"><value>The repayment was recorded on the server but the result is missing. It stays locked.</value></data>
+  <data name="installment.text.0e15d337" xml:space="preserve"><value>Lay-by cancelled. A refund voucher was issued.</value></data>
+  <data name="installment.text.0fd34e37" xml:space="preserve"><value>After the supervisor resolution the state is {0}. Refresh to check.</value></data>
+  <data name="installment.text.111b3e0d" xml:space="preserve"><value>This server does not support secure cancellations. Stopped before refunding.</value></data>
+  <data name="installment.text.124af4f8" xml:space="preserve"><value>The cancellation could not be released on the server. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.125be6d0" xml:space="preserve"><value>The saved card attempt cannot be reused safely with the current terminal mode. It stays locked for a supervisor.</value></data>
+  <data name="installment.text.14ee598d" xml:space="preserve"><value>The repayment is in state {0} on the server. No payment was taken.</value></data>
+  <data name="installment.text.15be2f34" xml:space="preserve"><value>The original Square refund environment is invalid. It stays locked.</value></data>
+  <data name="installment.text.16f22cf0" xml:space="preserve"><value>The manual card confirmation could not be saved. Do not take the payment again; ask a supervisor to resolve it in the Lay-by Center.</value></data>
+  <data name="installment.text.17ac8fb3" xml:space="preserve"><value>The terminal approval was not saved.</value></data>
+  <data name="installment.text.1842b64b" xml:space="preserve"><value>The cancellation was recorded on the server. The local copy is being recovered.</value></data>
+  <data name="installment.text.18912330" xml:space="preserve"><value>Lay-by pickup confirmed.</value></data>
+  <data name="installment.text.192cf011" xml:space="preserve"><value>Could not start the cancellation. Stopped before refunding: {0}</value></data>
+  <data name="installment.text.1973944d" xml:space="preserve"><value>The previous cancellation has ended. Start the cancellation again.</value></data>
+  <data name="installment.text.1a112e9f" xml:space="preserve"><value>The refund result is unknown.</value></data>
+  <data name="installment.text.1a82c84c" xml:space="preserve"><value>This lay-by is being paid or cancelled elsewhere. No refund was sent from this POS.</value></data>
+  <data name="installment.text.1a93b644" xml:space="preserve"><value>Repayment recorded.</value></data>
+  <data name="installment.text.1ae472b7" xml:space="preserve"><value>A manual card repayment request must carry a MANUAL reference and no card transaction evidence.</value></data>
+  <data name="installment.text.1ae7697f" xml:space="preserve"><value>The manual card repayment is being handled by another recovery.</value></data>
+  <data name="installment.text.1b4926a6" xml:space="preserve"><value>The voucher approval is incomplete. It stays locked for reconciliation.</value></data>
+  <data name="installment.text.1d2b54f5" xml:space="preserve"><value>The lay-by create result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.1e7b7775" xml:space="preserve"><value>This lay-by operation is being recovered or its result is unknown. Do not retry.</value></data>
+  <data name="installment.text.1ea0a565" xml:space="preserve"><value>The supervisor decision was saved but the recovery check timed out. The refund stays locked; refresh to check.</value></data>
+  <data name="installment.text.1ee69402" xml:space="preserve"><value>The supervisor decision timed out. The result is unknown and the refund stays locked; refresh to check.</value></data>
+  <data name="installment.text.206bc23a" xml:space="preserve"><value>The cancellation could not be closed on the server: {0}</value></data>
+  <data name="installment.text.22bd8803" xml:space="preserve"><value>Could not read the repayment from the server. It stays locked: {0}</value></data>
+  <data name="installment.text.22df2843" xml:space="preserve"><value>This server does not support secure repayments. Stopped before taking any payment.</value></data>
+  <data name="installment.text.24022f87" xml:space="preserve"><value>The voucher repayment is being recovered. Do not redeem the voucher again.</value></data>
+  <data name="installment.text.25f7f6b2" xml:space="preserve"><value>The cancellation could not be closed on the server. It stays locked.</value></data>
+  <data name="installment.text.2632dc02" xml:space="preserve"><value>The create request was cancelled. The result is unknown.</value></data>
+  <data name="installment.text.282513ec" xml:space="preserve"><value>The repayment result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.2a11ee6b" xml:space="preserve"><value>The lay-by operation state was not saved.</value></data>
+  <data name="installment.text.2ad96bbc" xml:space="preserve"><value>The recovery result from the server is unknown. It stays locked.</value></data>
+  <data name="installment.text.2b86d92c" xml:space="preserve"><value>The supervisor resolution was not saved. The refund stays locked.</value></data>
+  <data name="installment.text.2dd4fea8" xml:space="preserve"><value>The cancellation has ended on the server, but the local state could not be saved.</value></data>
+  <data name="installment.text.2fa17d59" xml:space="preserve"><value>This server does not support this refund method. No refund was sent from this POS.</value></data>
+  <data name="installment.text.305d14d1" xml:space="preserve"><value>Items cannot be changed in the lay-by's current state.</value></data>
+  <data name="installment.text.30956fab" xml:space="preserve"><value>The new total cannot be less than the amount already paid.</value></data>
+  <data name="installment.text.3233494a" xml:space="preserve"><value>This version does not support manual card for lay-by repayments.</value></data>
+  <data name="installment.text.324acd2c" xml:space="preserve"><value>The cancellation recovery did not finish.</value></data>
+  <data name="installment.text.32df73b3" xml:space="preserve"><value>The previous repayment has ended. You can start the payment again.</value></data>
+  <data name="installment.text.32e9991e" xml:space="preserve"><value>Not all refunds are confirmed. It stays locked.</value></data>
+  <data name="installment.text.370367c3" xml:space="preserve"><value>The voucher was partly approved but there is no reservation token to release.</value></data>
+  <data name="installment.text.371eab73" xml:space="preserve"><value>The amount approved by the terminal does not match the lay-by amount. It stays locked; do not take the payment again.</value></data>
+  <data name="installment.text.373a90fc" xml:space="preserve"><value>Card repayment of {0:C2} ({1}, POS {2}) has an unknown result and is holding this lay-by. Check the transaction with the bank or the terminal portal first, then resolve it accordingly.</value></data>
+  <data name="installment.text.397b1898" xml:space="preserve"><value>The refund result is unknown. It is locked until it is resolved.</value></data>
+  <data name="installment.text.3ade43b5" xml:space="preserve"><value>The order was changed on another POS and has been refreshed. Make the change again.</value></data>
+  <data name="installment.text.3bbc2593" xml:space="preserve"><value>The voucher repayment approval was not saved.</value></data>
+  <data name="installment.text.3cc3b228" xml:space="preserve"><value>This lay-by has no payments to refund.</value></data>
+  <data name="installment.text.3d872fba" xml:space="preserve"><value>The Square refund is still processing. It stays locked and will be recovered later.</value></data>
+  <data name="installment.text.41d3eda5" xml:space="preserve"><value>The manual card repayment has changed and cannot be submitted. If the money was taken, ask a supervisor to resolve it in the Lay-by Center.</value></data>
+  <data name="installment.text.4243b08a" xml:space="preserve"><value>The final state of the expired cancellation could not be confirmed. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.42c72ff1" xml:space="preserve"><value>The voucher hold result is unknown.</value></data>
+  <data name="installment.text.44fdcf25" xml:space="preserve"><value>The save could not be confirmed ({0}). Check the order before saving again; saving twice will not apply the change twice.</value></data>
+  <data name="installment.text.49bd1a59" xml:space="preserve"><value>Lay-by {0} created.</value></data>
+  <data name="installment.text.4a598eaa" xml:space="preserve"><value>The previous cancellation expired. Start the cancellation again.</value></data>
+  <data name="installment.text.4aa9dbc0" xml:space="preserve"><value>Could not start the repayment. Stopped before taking any payment: {0}</value></data>
+  <data name="installment.text.4acb52ad" xml:space="preserve"><value>The pickup confirmation timed out and may have been recorded. Refresh to check; do not confirm pickup again.</value></data>
+  <data name="installment.text.4d0e09d4" xml:space="preserve"><value>The local state was interrupted after the payment channel was registered. Checking the original card attempt.</value></data>
+  <data name="installment.text.4e2bee9a" xml:space="preserve"><value>The cancellation is being recovered or its result is unknown.</value></data>
+  <data name="installment.text.4e4ed3c9" xml:space="preserve"><value>The cancellation is missing on the server, but a refund may already have been sent from this POS. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.4e68a38d" xml:space="preserve"><value>Lay-by voided.</value></data>
+  <data name="installment.text.4f337346" xml:space="preserve"><value>The voucher was not approved.</value></data>
+  <data name="installment.text.4fa8bf56" xml:space="preserve"><value>This lay-by client does not support secure cancellations.</value></data>
+  <data name="installment.text.4ff81fab" xml:space="preserve"><value>Lay-by cancelled. Refund voucher: {0}</value></data>
+  <data name="installment.text.50a45e3f" xml:space="preserve"><value>The Square refund status is FAILED.</value></data>
+  <data name="installment.text.51dfe95a" xml:space="preserve"><value>The Square refund status is {0}.</value></data>
+  <data name="installment.text.51edd211" xml:space="preserve"><value>Could not re-read the expired cancellation: {0}</value></data>
+  <data name="installment.text.526dd732" xml:space="preserve"><value>Square declined the refund. You can start the cancellation again.</value></data>
+  <data name="installment.text.55e56500" xml:space="preserve"><value>The partial voucher approval is incomplete. It stays locked for reconciliation.</value></data>
+  <data name="installment.text.56447b28" xml:space="preserve"><value>Not all refunds are complete. The cancellation stays locked.</value></data>
+  <data name="installment.text.57096cf9" xml:space="preserve"><value>The voucher hold release result is unknown. It stays locked for reconciliation.</value></data>
+  <data name="installment.text.57641432" xml:space="preserve"><value>Secure cancellations must be started from the lay-by details. Stopped.</value></data>
+  <data name="installment.text.57a439b3" xml:space="preserve"><value>The online lay-by detail service is not connected.</value></data>
+  <data name="installment.text.59162947" xml:space="preserve"><value>The refund plan contains an invalid payment method.</value></data>
+  <data name="installment.text.5b6ee401" xml:space="preserve"><value>This lay-by is not saved on this POS.</value></data>
+  <data name="installment.text.5c72284d" xml:space="preserve"><value>The lay-by was created on the server and is being reconciled. Do not take the payment again.</value></data>
+  <data name="installment.text.62ef41b7" xml:space="preserve"><value>The cancellation has already ended on the server: {0}</value></data>
+  <data name="installment.text.6521b035" xml:space="preserve"><value>The lay-by operation is being recovered or is already complete.</value></data>
+  <data name="installment.text.6566fa85" xml:space="preserve"><value>The terminal declined or cancelled the payment.</value></data>
+  <data name="installment.text.67190cad" xml:space="preserve"><value>No cancellation is waiting for a supervisor.</value></data>
+  <data name="installment.text.691f6fef" xml:space="preserve"><value>The terminal result is unknown. It stays locked.</value></data>
+  <data name="installment.text.69f4353f" xml:space="preserve"><value>The pickup operation does not match the local record. It stays locked until it is checked.</value></data>
+  <data name="installment.text.6a867ca4" xml:space="preserve"><value>{0} lay-by payment(s) have an unknown result and are locked. Do not take the payment again.</value></data>
+  <data name="installment.text.6b43e4bc" xml:space="preserve"><value>The cancellation was released on the server, but the local state could not be saved.</value></data>
+  <data name="installment.text.6b6244e3" xml:space="preserve"><value>The repayment is missing on the server, but this POS already has a card attempt or approval. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.6d34a7ab" xml:space="preserve"><value>This repayment is being recovered on the POS that started it. Do not take the payment again.</value></data>
+  <data name="installment.text.6d4333ba" xml:space="preserve"><value>This version does not support supervisor resolution of card repayments.</value></data>
+  <data name="installment.text.6dcb684f" xml:space="preserve"><value>The pickup confirmation request was cancelled. The result is unknown.</value></data>
+  <data name="installment.text.6ddb1050" xml:space="preserve"><value>The cashier confirmed that the manual card payment was not taken.</value></data>
+  <data name="installment.text.6f176121" xml:space="preserve"><value>Manual card is not available for lay-by repayments. Do not take the payment; use another method.</value></data>
+  <data name="installment.text.6f52081f" xml:space="preserve"><value>Cancel and refund can only be done on the POS that created the lay-by.</value></data>
+  <data name="installment.text.722823d8" xml:space="preserve"><value>Checked: the card was charged. Record this amount.</value></data>
+  <data name="installment.text.722fb6e2" xml:space="preserve"><value>The server refused this payment channel. No payment was taken: {0}</value></data>
+  <data name="installment.text.72b0db62" xml:space="preserve"><value>The secure repayment service is not configured. Payment stopped.</value></data>
+  <data name="installment.text.72fd2194" xml:space="preserve"><value>This lay-by client does not support secure repayments.</value></data>
+  <data name="installment.text.73ba4db6" xml:space="preserve"><value>The create result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.75796655" xml:space="preserve"><value>The server does not support this payment method for repayments. No payment was taken; use another method.</value></data>
+  <data name="installment.text.757be352" xml:space="preserve"><value>The cancellation does not match the server's refund plan. No refund was sent from this POS.</value></data>
+  <data name="installment.text.7808474a" xml:space="preserve"><value>This lay-by has no balance to pay.</value></data>
+  <data name="installment.text.794d97e9" xml:space="preserve"><value>The repayment result is incomplete. It stays locked for recovery.</value></data>
+  <data name="installment.text.794db9d8" xml:space="preserve"><value>This lay-by is being paid on another POS. No payment was taken here.</value></data>
+  <data name="installment.text.79ef15cd" xml:space="preserve"><value>Refund steps must be handled through the cancellation.</value></data>
+  <data name="installment.text.79f6184e" xml:space="preserve"><value>The pickup confirmation timed out and may have been recorded. It is locked; refresh to recover and do not confirm again.</value></data>
+  <data name="installment.text.7adf4ff0" xml:space="preserve"><value>The terminal result was unknown at restart. It will not be retried automatically.</value></data>
+  <data name="installment.text.7cc08205" xml:space="preserve"><value>This lay-by client does not support changing items.</value></data>
+  <data name="installment.text.7ea18c0f" xml:space="preserve"><value>The Square refund does not match the identity, original payment, amount or currency. It stays locked.</value></data>
+  <data name="installment.text.7edba736" xml:space="preserve"><value>This manual card repayment was already advanced elsewhere. Do not take the payment; recover it in the Lay-by Center.</value></data>
+  <data name="installment.text.8043f56e" xml:space="preserve"><value>The repayment was recorded on the server and is being reconciled. Do not take the payment again.</value></data>
+  <data name="installment.text.80ae4aad" xml:space="preserve"><value>Card is not available for lay-by repayments yet. The card terminal was not used; use cash or a voucher.</value></data>
+  <data name="installment.text.81831fb5" xml:space="preserve"><value>The server returned repayment state {0} without a result.</value></data>
+  <data name="installment.text.81fc82fd" xml:space="preserve"><value>The new total is below the minimum lay-by total.</value></data>
+  <data name="installment.text.846fc4f6" xml:space="preserve"><value>The repayment is being recovered or is already complete.</value></data>
+  <data name="installment.text.85a2ce9e" xml:space="preserve"><value>The cancellation state could not be confirmed.</value></data>
+  <data name="installment.text.85a38c72" xml:space="preserve"><value>This lay-by client does not support detail lookup.</value></data>
+  <data name="installment.text.8811e19b" xml:space="preserve"><value>Could not register the refund stage. No refund was sent: {0}</value></data>
+  <data name="installment.text.8857aa11" xml:space="preserve"><value>The repayment request was cancelled. The result is unknown.</value></data>
+  <data name="installment.text.891631ed" xml:space="preserve"><value>The cancellation is being recovered.</value></data>
+  <data name="installment.text.89e4d93a" xml:space="preserve"><value>The voucher reservation result is unknown. The voucher will not be redeemed again.</value></data>
+  <data name="installment.text.8abf7609" xml:space="preserve"><value>Could not register the payment channel. No payment was taken: {0}</value></data>
+  <data name="installment.text.8b5b6b04" xml:space="preserve"><value>The manual card repayment had not started and was released. You can start again.</value></data>
+  <data name="installment.text.8c2a453b" xml:space="preserve"><value>The refund terminal call was cancelled. The result is unknown.</value></data>
+  <data name="installment.text.8d14b04e" xml:space="preserve"><value>The saved card attempt does not match the current Linkly connection mode or Local IP reference. It stays locked for a supervisor.</value></data>
+  <data name="installment.text.8debe136" xml:space="preserve"><value>Could not read the state of the expired cancellation. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.93971090" xml:space="preserve"><value>The partial voucher hold could not be confirmed as released.</value></data>
+  <data name="installment.text.93d725ff" xml:space="preserve"><value>The final state of the expired cancellation could not be confirmed.</value></data>
+  <data name="installment.text.94836ef0" xml:space="preserve"><value>The pickup confirmation result is unknown and the lay-by is locked. Refresh to recover; do not confirm again.</value></data>
+  <data name="installment.text.97098fea" xml:space="preserve"><value>Lay-by detail does not match the requested order.</value></data>
+  <data name="installment.text.97208fb3" xml:space="preserve"><value>The card repayment did not start, but the local state could not be updated. Recover it in the Lay-by Center.</value></data>
+  <data name="installment.text.97c931a4" xml:space="preserve"><value>The supervisor confirmed the charge. Card repayment of {0:C2} is recorded.</value></data>
+  <data name="installment.text.982c1b23" xml:space="preserve"><value>Could not confirm whether the server supports manual card repayments: {0}</value></data>
+  <data name="installment.text.984c9264" xml:space="preserve"><value>The lay-by recovery state is unknown, so creating a lay-by is locked. Refresh to check, then retry.</value></data>
+  <data name="installment.text.98661790" xml:space="preserve"><value>The secure cancellation service is not configured. Stopped before refunding.</value></data>
+  <data name="installment.text.98e896f6" xml:space="preserve"><value>The pickup confirmation result is unknown. Refresh to check.</value></data>
+  <data name="installment.text.99e44eda" xml:space="preserve"><value>The terminal or server result is unknown. Recover it first or ask a supervisor.</value></data>
+  <data name="installment.text.9ae4ed54" xml:space="preserve"><value>Zeller's minimum card payment is $1.00. The terminal was not used; use cash or a voucher.</value></data>
+  <data name="installment.text.9c9e895a" xml:space="preserve"><value>The item details are incomplete or the amounts are invalid.</value></data>
+  <data name="installment.text.9d04b65f" xml:space="preserve"><value>The terminal operation is being recovered. Do not take the payment again.</value></data>
+  <data name="installment.text.9faa6b4b" xml:space="preserve"><value>Lay-by cancelled.</value></data>
+  <data name="installment.text.a01a1f80" xml:space="preserve"><value>Enter the reason (for example, where the transaction was checked).</value></data>
+  <data name="installment.text.a1e0c563" xml:space="preserve"><value>The server returned cancellation state {0} without a result.</value></data>
+  <data name="installment.text.a26d53f7" xml:space="preserve"><value>The cancellation result is incomplete. Refunds will not be repeated.</value></data>
+  <data name="installment.text.a481b4bf" xml:space="preserve"><value>The repayment could not be closed on the server: {0}</value></data>
+  <data name="installment.text.a59d838f" xml:space="preserve"><value>The refund terminal result was unknown at restart. Waiting for a supervisor to resolve it.</value></data>
+  <data name="installment.text.a5c95e8f" xml:space="preserve"><value>The original card attempt is being handled by another recovery.</value></data>
+  <data name="installment.text.a6bb64fc" xml:space="preserve"><value>Cancelled. The card terminal was not used and the customer was not charged.</value></data>
+  <data name="installment.text.a6daa5ba" xml:space="preserve"><value>The repayment was recorded on the server but the result is missing. It stays locked for reconciliation.</value></data>
+  <data name="installment.text.a6e351c5" xml:space="preserve"><value>Lay-by recovery failed: {0}. The operations stay locked; do not take the payment again. Refresh to check.</value></data>
+  <data name="installment.text.a749c009" xml:space="preserve"><value>The supervisor confirmed there was no charge. This card repayment is closed; you can take the payment again.</value></data>
+  <data name="installment.text.a7b3b9e7" xml:space="preserve"><value>The voucher was approved but there is no reservation token to recover.</value></data>
+  <data name="installment.text.a7f622f1" xml:space="preserve"><value>The repayment does not match the payment recorded on the server. No payment was taken here.</value></data>
+  <data name="installment.text.a871152f" xml:space="preserve"><value>The refund record is being handled by another recovery. The cancellation stays locked.</value></data>
+  <data name="installment.text.ac38fe22" xml:space="preserve"><value>Lay-by cancelled and refunded.</value></data>
+  <data name="installment.text.ad9cf6f7" xml:space="preserve"><value>This lay-by client does not support history search.</value></data>
+  <data name="installment.text.ae6a42e4" xml:space="preserve"><value>{0}; commit recovery failed: {1}</value></data>
+  <data name="installment.text.aed24720" xml:space="preserve"><value>Lay-by search exceeded 2 seconds. Narrow the date range and retry.</value></data>
+  <data name="installment.text.af388ae7" xml:space="preserve"><value>The card was not approved.</value></data>
+  <data name="installment.text.b05221ba" xml:space="preserve"><value>The cancellation was recorded on the server but the result is missing. It stays locked for reconciliation.</value></data>
+  <data name="installment.text.b0704eb7" xml:space="preserve"><value>This server does not support this refund method. The cancellation was released safely.</value></data>
+  <data name="installment.text.b098412f" xml:space="preserve"><value>The secure pickup confirmation service is not configured.</value></data>
+  <data name="installment.text.b28489d2" xml:space="preserve"><value>The terminal approval is being reconciled by another recovery.</value></data>
+  <data name="installment.text.b3cd327f" xml:space="preserve"><value>The refund is being recovered or its result is unknown. It stays locked.</value></data>
+  <data name="installment.text.b6d9beb7" xml:space="preserve"><value>This POS's card terminal is not enabled for lay-by repayments. The terminal was not used; use cash or a voucher.</value></data>
+  <data name="installment.text.b95e65fb" xml:space="preserve"><value>The refund terminal result was unknown at restart. It will not be retried automatically.</value></data>
+  <data name="installment.text.b98ae87c" xml:space="preserve"><value>The pickup confirmation is being recovered or its result is unknown.</value></data>
+  <data name="installment.text.ba0b712d" xml:space="preserve"><value>The repayment result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.ba3b5ce5" xml:space="preserve"><value>The repayment was recorded on the server. The local copy is being recovered.</value></data>
+  <data name="installment.text.ba92ca1c" xml:space="preserve"><value>The refund was not approved.</value></data>
+  <data name="installment.text.bbfca9f3" xml:space="preserve"><value>The cancellation could not be closed on the server. It stays locked for recovery.</value></data>
+  <data name="installment.text.bd763bf6" xml:space="preserve"><value>The response to the item change does not match the order.</value></data>
+  <data name="installment.text.c254ecd9" xml:space="preserve"><value>Items updated.</value></data>
+  <data name="installment.text.c2825938" xml:space="preserve"><value>The lay-by card attempt was already advanced, finished or resolved by a supervisor elsewhere.</value></data>
+  <data name="installment.text.c3bfe1a3" xml:space="preserve"><value>This server does not support this refund method. No refund was sent; you can start the cancellation again.</value></data>
+  <data name="installment.text.c5b9da04" xml:space="preserve"><value>The manual card repayment could not start. Do not take the payment.</value></data>
+  <data name="installment.text.c5fc2fd8" xml:space="preserve"><value>The cancellation result is unknown. Refunds will not be repeated.</value></data>
+  <data name="installment.text.c6888ee5" xml:space="preserve"><value>The terminal declined or cancelled the payment. You can try again.</value></data>
+  <data name="installment.text.c6c0d619" xml:space="preserve"><value>The lay-by operation record is invalid.</value></data>
+  <data name="installment.text.c7e0d488" xml:space="preserve"><value>Cancel and refund can only be recovered on the original POS.</value></data>
+  <data name="installment.text.c96243d0" xml:space="preserve"><value>The cancellation does not match the refund plan saved on this POS. No refund was sent.</value></data>
+  <data name="installment.text.cbf0eb9f" xml:space="preserve"><value>The save failed ({0}). The order was not changed; try again.</value></data>
+  <data name="installment.text.ce2ccb2a" xml:space="preserve"><value>The lay-by service is not connected.</value></data>
+  <data name="installment.text.ce7fc949" xml:space="preserve"><value>This lay-by client does not support supervisor resolution.</value></data>
+  <data name="installment.text.d081e8fa" xml:space="preserve"><value>The supervisor recovery service is not configured.</value></data>
+  <data name="installment.text.d0aeda1f" xml:space="preserve"><value>The pickup was confirmed on the server. The local copy is being recovered.</value></data>
+  <data name="installment.text.d0d69c0c" xml:space="preserve"><value>The pickup confirmation is being recovered or has finished. Refresh to check.</value></data>
+  <data name="installment.text.d34f2164" xml:space="preserve"><value>The pickup confirmation result is unknown and the lay-by is locked. Refresh to recover; do not confirm pickup again.</value></data>
+  <data name="installment.text.d6cb7d45" xml:space="preserve"><value>Zeller has no record of this payment yet (cancelled or timed out). It will be checked with Zeller again in about 1 minute. Do not take the payment again until then.</value></data>
+  <data name="installment.text.d8cd7ea7" xml:space="preserve"><value>The previous repayment has ended. Start the payment again.</value></data>
+  <data name="installment.text.daf67696" xml:space="preserve"><value>Could not read the Square environment settings. It stays locked.</value></data>
+  <data name="installment.text.dba15a93" xml:space="preserve"><value>The repayment has already ended on the server: {0}</value></data>
+  <data name="installment.text.dc04c2e9" xml:space="preserve"><value>The card deposit was not authorised. The lay-by was not created.</value></data>
+  <data name="installment.text.dd0c1097" xml:space="preserve"><value>Supervisor resolution needs a connection.</value></data>
+  <data name="installment.text.dda4ce18" xml:space="preserve"><value>The refund approval could not be verified. Waiting for a supervisor to resolve it.</value></data>
+  <data name="installment.text.de1102b1" xml:space="preserve"><value>Lay-by recovery timed out. The operations stay locked; do not take the payment again. Refresh to check.</value></data>
+  <data name="installment.text.df538790" xml:space="preserve"><value>The cancellation is in state {0} on the server. No refund was sent.</value></data>
+  <data name="installment.text.df87593f" xml:space="preserve"><value>The Square refund lookup failed. It stays locked.</value></data>
+  <data name="installment.text.df8c2574" xml:space="preserve"><value>The card processor could not be determined. The payment channel was not registered and no payment was taken.</value></data>
+  <data name="installment.text.e0740728" xml:space="preserve"><value>The supervisor resolution was not saved: {0}</value></data>
+  <data name="installment.text.e12b043f" xml:space="preserve"><value>The lay-by service does not support changing items.</value></data>
+  <data name="installment.text.e33eb850" xml:space="preserve"><value>The refund amount cannot be converted to exact cents.</value></data>
+  <data name="installment.text.e5777112" xml:space="preserve"><value>The refund method is not supported, but this POS is past the point where it can stop safely. It stays locked for manual reconciliation.</value></data>
+  <data name="installment.text.e6a65c34" xml:space="preserve"><value>The terminal result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.e6b422f3" xml:space="preserve"><value>Checked: the card was not charged. Close it and release the lay-by.</value></data>
+  <data name="installment.text.e736770d" xml:space="preserve"><value>The refund had not been sent before the restart. You can start the cancellation again.</value></data>
+  <data name="installment.text.e7a1eeef" xml:space="preserve"><value>The operation is complete. Refresh the lay-by list.</value></data>
+  <data name="installment.text.eb20ae5f" xml:space="preserve"><value>The Square refund status is {0}. Only COMPLETED is confirmed automatically; it stays locked.</value></data>
+  <data name="installment.text.eb24bc18" xml:space="preserve"><value>The pickup confirmation did not finish.</value></data>
+  <data name="installment.text.ec0c9a1e" xml:space="preserve"><value>Lay-by cancelled and refunded.</value></data>
+  <data name="installment.text.ef814ed5" xml:space="preserve"><value>The refund has not been sent. You can start the cancellation again.</value></data>
+  <data name="installment.text.f2fe4446" xml:space="preserve"><value>The lay-by create result is unknown. Do not take the payment again.</value></data>
+  <data name="installment.text.f4a1a987" xml:space="preserve"><value>{0} The refund voucher could not be printed ({1}). Reprint it from the transaction history.</value></data>
+  <data name="installment.text.f4d121fb" xml:space="preserve"><value>The refund stage of the cancellation could not be confirmed.</value></data>
+  <data name="installment.text.f599e835" xml:space="preserve"><value>The refund result is unknown. It is locked until a supervisor resolves it.</value></data>
+  <data name="installment.text.f74a5270" xml:space="preserve"><value>The voucher hold result is unknown. Do not try again.</value></data>
+  <data name="installment.text.f939e643" xml:space="preserve"><value>The refund result is unknown. It stays locked.</value></data>
+  <data name="installment.text.fa40e7f0" xml:space="preserve"><value>Zeller card payments are not available for this lay-by action and the terminal was not used. The operation state could not be updated; recover it in the Lay-by Center.</value></data>
+  <data name="installment.text.fc2eda7c" xml:space="preserve"><value>The supervisor resolution timed out. The result is unknown; refresh to check.</value></data>
+  <data name="installment.text.fccb0213" xml:space="preserve"><value>Recorded as keep waiting. The refund stays locked.</value></data>
+  <data name="installment.text.fd8e0390" xml:space="preserve"><value>The Square refund status is REJECTED.</value></data>
+  <data name="installment.text.fd92734e" xml:space="preserve"><value>The refund result is unknown. Waiting for a supervisor to resolve it.</value></data>
+  <data name="installment.center.action.recover" xml:space="preserve"><value>Recover</value></data>
+  <data name="installment.center.supervisorRefund.title" xml:space="preserve"><value>Supervisor refund resolution</value></data>
+  <data name="installment.center.supervisorRefund.note" xml:space="preserve"><value>Only a supervisor with the lay-by cancel permission can do this. Cashiers cannot retry a refund.</value></data>
+  <data name="installment.center.supervisorRefund.reason" xml:space="preserve"><value>Reason or note (required)</value></data>
+  <data name="installment.center.supervisorRefund.reference" xml:space="preserve"><value>Refund reference (when confirming refunded)</value></data>
+  <data name="installment.center.supervisorRefund.evidence" xml:space="preserve"><value>Bank evidence (when confirming not refunded)</value></data>
+  <data name="installment.center.supervisorRefund.save" xml:space="preserve"><value>Save supervisor resolution</value></data>
+  <data name="installment.center.supervisorCard.title" xml:space="preserve"><value>Supervisor card repayment resolution</value></data>
+  <data name="installment.center.supervisorCard.note" xml:space="preserve"><value>Needs a supervisor with the lay-by cancel permission. Confirming charged records this amount; confirming not charged closes it and releases the lay-by.</value></data>
+  <data name="installment.center.supervisorCard.decision" xml:space="preserve"><value>Select the checked result</value></data>
+  <data name="installment.center.supervisorCard.reason" xml:space="preserve"><value>Reason: where it was checked and what was found (required)</value></data>
+  <data name="installment.center.supervisorCard.reference" xml:space="preserve"><value>Approval code, RRN or transaction ID (optional)</value></data>
+  <data name="installment.center.supervisorCard.save" xml:space="preserve"><value>Resolve card repayment</value></data>
 </root>
