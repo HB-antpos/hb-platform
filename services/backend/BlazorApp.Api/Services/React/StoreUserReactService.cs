@@ -881,8 +881,14 @@ namespace BlazorApp.Api.Services.React
                     }
                 }
 
-                // 新建员工页的「重新发送」要求再发初始密码（InitialPassword）；
-                // 其余入口（重置密码、补邮箱）仍发验证码，员工自己设置。
+                // 三条通道（范围、受保护目标、补邮箱校验都已在上面共用）：
+                // - ResetPassword：店长重置密码，生成随机密码发邮件，旧密码立即失效（新版 App 的重置弹层）；
+                // - InitialPassword：新建员工页的「重新发送」/ 开通登录，发「账号已创建」初始密码；
+                // - 都没传：旧版 App，仍发验证码，员工自己设置。
+                if (dto.ResetPassword == true)
+                {
+                    return await _passwordResetService.SendResetPasswordAsync(userGuid, requestedBy);
+                }
                 return dto.InitialPassword == true
                     ? await _passwordResetService.SendInitialPasswordAsync(userGuid, requestedBy)
                     : await _passwordResetService.SendInviteAsync(userGuid, requestedBy, null);

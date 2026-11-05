@@ -341,6 +341,59 @@ public sealed class PasswordResetServiceTests : IDisposable
         var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == staff.UserGUID);
         Assert.Equal(originalHash, stored.PasswordHash);
         Assert.False((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
+        // 原本没有「须先改密」标记的账号，发信失败后也不能留下标记，否则员工用旧密码登录会被无故强制改密。
+        Assert.Empty(await _db.Queryable<UserPasswordChangeRequirement>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task SendInitialPassword_发信失败_账号原本就有须改密标记则保留()
+    {
+        var staff = await SeedUserAsync("staff", "staff@example.com");
+        await UserPasswordChangeRequirements.RequireAsync(
+            _db, staff.UserGUID, UserPasswordChangeRequirement.ReasonCreated, "manager-1", DateTime.UtcNow);
+        var service = CreateService();
+
+        _sender.FailNext = true;
+        var failed = await service.SendInitialPasswordAsync(staff.UserGUID, "manager-1");
+
+        Assert.False(failed.Success);
+        // 账号本来就是「待首次登录」，失败回滚不能把这个状态抹掉。
+        Assert.Single(await _db.Queryable<UserPasswordChangeRequirement>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task SendResetPassword_店长重置_发重置版邮件_记录reset原因_旧密码和旧登录立即失效()
+    {
+        var staff = await SeedUserAsync("staff", "staff@example.com");
+        await SeedRefreshTokenAsync(staff.UserGUID, "session-1");
+        var service = CreateService();
+
+        var result = await service.SendResetPasswordAsync(staff.UserGUID, "manager-1");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("st***@example.com", result.Data!.MaskedEmail);
+        Assert.Null(result.Data.ExpiresAtUtc);
+        var sent = Assert.Single(_sender.InitialSent);
+        Assert.True(sent.IsReset, "重置通道必须发重置版邮件，不能写成「账号已创建」");
+        Assert.Equal("staff@example.com", sent.To);
+        Assert.Matches("^[A-Za-z0-9]{4}$", sent.Password);
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == staff.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword(sent.Password, stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        Assert.False(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _), "旧密码必须立即失效");
+        var requirement = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
+        Assert.Equal(UserPasswordChangeRequirement.ReasonReset, requirement.Reason);
+        Assert.True((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
+    }
+
+    [Fact]
+    public async Task SendInitialPassword_仍发初始密码版邮件_不受重置通道影响()
+    {
+        var staff = await SeedUserAsync("staff", "staff@example.com");
+        var service = CreateService();
+
+        await service.SendInitialPasswordAsync(staff.UserGUID, "manager-1");
+
+        Assert.False(Assert.Single(_sender.InitialSent).IsReset);
     }
 
     [Fact]
@@ -417,7 +470,7 @@ public sealed class PasswordResetServiceTests : IDisposable
     {
         public List<(string To, string Code, bool Invite)> Sent { get; } = new();
         public List<(string To, string LoginName, string Code)> EmailChangeSent { get; } = new();
-        public List<(string To, string LoginName, string Password)> InitialSent { get; } = new();
+        public List<(string To, string LoginName, string Password, bool IsReset)> InitialSent { get; } = new();
         public bool FailNext { get; set; }
 
         public Task<ApiResponse<bool>> SendPasswordCodeAsync(
@@ -444,6 +497,7 @@ public sealed class PasswordResetServiceTests : IDisposable
             string displayName,
             string loginName,
             string initialPassword,
+            bool isReset = false,
             CancellationToken cancellationToken = default
         )
         {
@@ -452,7 +506,7 @@ public sealed class PasswordResetServiceTests : IDisposable
                 FailNext = false;
                 return Task.FromResult(ApiResponse<bool>.Error("邮件发送失败，请稍后重试", "ACCOUNT_EMAIL_SEND_FAILED"));
             }
-            InitialSent.Add((toEmail, loginName, initialPassword));
+            InitialSent.Add((toEmail, loginName, initialPassword, isReset));
             return Task.FromResult(ApiResponse<bool>.OK(true));
         }
 

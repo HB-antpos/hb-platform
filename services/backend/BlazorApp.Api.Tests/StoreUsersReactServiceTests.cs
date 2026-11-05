@@ -810,6 +810,37 @@ namespace BlazorApp.Api.Tests
             // 范围校验与验证码路径一致：不能给别的分店员工重发。
             Assert.False(foreign.Success);
             Assert.Equal(new[] { "staff-1" }, invites.InitialSent);
+            Assert.Empty(invites.ResetSent);
+        }
+
+        [Fact]
+        public async Task SendPasswordSetupEmailAsync_WithResetPasswordFlag_SendsResetPasswordInsteadOfCodeOrInitial()
+        {
+            await SeedStoreUserDataAsync();
+            // 与「拒绝本人」既有用例相同的前置：店长自己是本店的员工账号，才会走到「不能改本人」的拒绝分支。
+            await _db.Insertable(CreateUserRole("manager-1", "role-staff")).ExecuteCommandAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var reset = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", ResetPassword = true }, "manager-1");
+            // 两个标志同时传时以 ResetPassword 为准，不能既发重置又发初始密码。
+            var both = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", ResetPassword = true, InitialPassword = true }, "manager-1");
+            var self = await service.SendPasswordSetupEmailAsync(
+                "manager-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", ResetPassword = true }, "manager-1");
+            var foreign = await service.SendPasswordSetupEmailAsync(
+                "staff-2", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", ResetPassword = true }, "manager-1");
+
+            Assert.True(reset.Success, reset.Message);
+            Assert.True(both.Success, both.Message);
+            Assert.Equal(new[] { "staff-1", "staff-1" }, invites.ResetSent);
+            Assert.Empty(invites.InitialSent);
+            Assert.Empty(invites.Invited);
+            // 范围与目标保护校验和其他通道共用：不能重置本人、别的分店员工。
+            Assert.False(self.Success);
+            Assert.Equal("FORBIDDEN", self.Code);
+            Assert.False(foreign.Success);
         }
 
         [Fact]
@@ -1241,6 +1272,7 @@ namespace BlazorApp.Api.Tests
         {
             public List<string> Invited { get; } = new();
             public List<string> InitialSent { get; } = new();
+            public List<string> ResetSent { get; } = new();
 
             public Task<ApiResponse<bool>> RequestSelfServiceAsync(string email, string? requestIp) =>
                 Task.FromResult(ApiResponse<bool>.OK(true));
@@ -1258,6 +1290,15 @@ namespace BlazorApp.Api.Tests
             public Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(string userGuid, string requestedBy)
             {
                 InitialSent.Add(userGuid);
+                return Task.FromResult(ApiResponse<PasswordSetupEmailResultDto>.OK(new PasswordSetupEmailResultDto
+                {
+                    MaskedEmail = "st***@example.com",
+                }));
+            }
+
+            public Task<ApiResponse<PasswordSetupEmailResultDto>> SendResetPasswordAsync(string userGuid, string requestedBy)
+            {
+                ResetSent.Add(userGuid);
                 return Task.FromResult(ApiResponse<PasswordSetupEmailResultDto>.OK(new PasswordSetupEmailResultDto
                 {
                     MaskedEmail = "st***@example.com",

@@ -21,12 +21,16 @@ public interface IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>店长新建员工后，把系统生成的初始密码发到员工本人邮箱；员工首次登录必须改密。</summary>
+    /// <summary>
+    /// 把系统生成的随机密码发到员工本人邮箱；员工首次登录必须改密。
+    /// isReset=false 为店长新建员工的「账号已创建」文案，isReset=true 为店长重置密码的「密码已重置、旧密码已失效」文案。
+    /// </summary>
     Task<ApiResponse<bool>> SendInitialPasswordAsync(
         string toEmail,
         string displayName,
         string loginName,
         string initialPassword,
+        bool isReset = false,
         CancellationToken cancellationToken = default
     );
 
@@ -79,12 +83,13 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         string displayName,
         string loginName,
         string initialPassword,
+        bool isReset = false,
         CancellationToken cancellationToken = default
     )
     {
         // 日志只记类型，SendAsync 不会输出正文，初始密码不会进入日志。
-        var content = BuildInitialPassword(displayName, loginName, initialPassword);
-        return SendAsync(toEmail, content, "initial-password", cancellationToken);
+        var content = BuildInitialPassword(displayName, loginName, initialPassword, isReset);
+        return SendAsync(toEmail, content, isReset ? "reset-password" : "initial-password", cancellationToken);
     }
 
     public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
@@ -129,21 +134,39 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         return new EmailContent(subject, text, html);
     }
 
-    internal static EmailContent BuildInitialPassword(string displayName, string loginName, string initialPassword)
+    /// <summary>
+    /// 随机密码邮件正文。isReset=false 是新建员工 / 开通登录的「账号已创建」文案；
+    /// isReset=true 是店长重置密码：必须明说旧密码已失效（员工的旧密码和旧设备登录在送达时就被作废了），
+    /// 且「没想到会收到这封邮件」时应联系店长，而不是「忽略」——忽略的话员工会被锁在外面。
+    /// 两种文案都保留 "choose your own password"，英文单语测试依赖它。
+    /// </summary>
+    internal static EmailContent BuildInitialPassword(
+        string displayName,
+        string loginName,
+        string initialPassword,
+        bool isReset = false
+    )
     {
-        var subject = "Your Hot Bargain app account";
+        var subject = isReset ? "Your Hot Bargain app password has been reset" : "Your Hot Bargain app account";
+        var intro = isReset
+            ? "Your manager has reset the password of your Hot Bargain staff app account. Your old password no longer works."
+            : "An account has been created for you in the Hot Bargain staff app.";
+        var passwordLabel = isReset ? "New password" : "Initial password";
+        var closing = isReset
+            ? "Do not share this password with anyone, including your manager. If you did not expect this email, please let your manager know."
+            : "Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.";
         var text =
-            $"Hi {displayName},\n\nAn account has been created for you in the Hot Bargain staff app.\n\n" +
-            $"Sign-in name: {loginName}\nInitial password: {initialPassword}\n\n" +
+            $"Hi {displayName},\n\n{intro}\n\n" +
+            $"Sign-in name: {loginName}\n{passwordLabel}: {initialPassword}\n\n" +
             "Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.\n" +
-            "Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.\n";
+            $"{closing}\n";
         var html =
-            $"<p>Hi {Encode(displayName)},</p><p>An account has been created for you in the Hot Bargain staff app.</p>" +
+            $"<p>Hi {Encode(displayName)},</p><p>{Encode(intro)}</p>" +
             $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
-            "<p>Initial password:</p>" +
+            $"<p>{Encode(passwordLabel)}:</p>" +
             $"<p style=\"font-size:24px;font-weight:700;letter-spacing:2px;font-family:Consolas,monospace\">{Encode(initialPassword)}</p>" +
             "<p>Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.</p>" +
-            "<p>Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.</p>";
+            $"<p>{Encode(closing)}</p>";
         return new EmailContent(subject, text, html);
     }
 
