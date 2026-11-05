@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   normalizeAppBuildProfile,
   shouldRunAutomaticAppUpdatesForProfile,
+  shouldRunMobileOtaCheck,
 } from "./app-build-profile";
 
 function run() {
@@ -28,6 +29,13 @@ function run() {
     false,
     "显式 test profile 不应自动更新"
   );
+
+  const ota = { appReady: true, startupFailed: false, isIosReviewSession: false, profile: "production" };
+  assert.equal(shouldRunMobileOtaCheck(ota), true, "未登录也要检查 OTA，新装 App 才收得到修复");
+  assert.equal(shouldRunMobileOtaCheck({ ...ota, isIosReviewSession: true }), false, "审核演示会话必须完全离线");
+  assert.equal(shouldRunMobileOtaCheck({ ...ota, appReady: false }), false, "启动未就绪不检查");
+  assert.equal(shouldRunMobileOtaCheck({ ...ota, startupFailed: true }), false, "启动失败不检查");
+  assert.equal(shouldRunMobileOtaCheck({ ...ota, profile: "development" }), false, "开发包保留固定快照");
 
   console.log("app-build-profile.test.ts: ok");
 }

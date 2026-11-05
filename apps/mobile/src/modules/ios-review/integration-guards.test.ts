@@ -203,6 +203,22 @@ async function run() {
   assert.match(rootLayout, /!iosReviewOfflineGuardActive/);
   assert.match(rootLayout, /usePrinterAutoConnect\(\{\s*enabled:\s*sideEffectsEnabled\s*}\)/);
   assert.match(rootLayout, /<IosReviewBanner\s*\/>/);
+  // 只有 OTA 不等登录：新装 App 靠它才能修内置 JS 的缺陷。审核演示会话必须排除，其它更新通道不能跟着放开。
+  assert.match(
+    rootLayout,
+    /shouldRunMobileOtaCheck\(\{[\s\S]*?isIosReviewSession,[\s\S]*?}\)/,
+    "登录前 OTA 必须排除审核演示会话"
+  );
+  assert.match(
+    rootLayout,
+    /useMobileOtaUpdate\(\{\s*enabled:\s*mobileOtaCheckEnabled\s*&&\s*!pauseAutomaticOta/,
+    "OTA 检查走登录前可用的开关"
+  );
+  assert.match(
+    rootLayout,
+    /useAutomaticNativeAppUpdate\(\{\s*enabled:\s*automaticUpdatesEnabled/,
+    "原生包更新仍要等登录"
+  );
   assert.match(
     rootLayout,
     /const iosNativeUpdateEnabled\s*=\s*sideEffectsEnabled\s*&&\s*shouldEnableIosNativeUpdate/,

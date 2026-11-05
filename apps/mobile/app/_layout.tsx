@@ -11,7 +11,10 @@ import { StatusBar } from "expo-status-bar";
 import { installPrinterLinkDiagnostics } from "@/modules/printer/link-diagnostics-runtime";
 import { usePrinterAutoConnect } from "@/modules/printer/use-printer-auto-connect";
 import { waitForStartupReadiness } from "@/modules/startup/startup-readiness";
-import { shouldRunAutomaticAppUpdatesForProfile } from "@/modules/updates/app-build-profile";
+import {
+  shouldRunAutomaticAppUpdatesForProfile,
+  shouldRunMobileOtaCheck,
+} from "@/modules/updates/app-build-profile";
 import { backgroundDownloadGate } from "@/modules/updates/background-download-gate";
 import { IosNativeUpdateBoundary } from "@/modules/updates/IosNativeUpdateBoundary";
 import { AndroidNativeUpdateBoundary } from "@/modules/updates/AndroidNativeUpdateBoundary";
@@ -72,6 +75,14 @@ export default function RootLayout() {
     shouldRunAutomaticAppUpdatesForProfile(
       nativeAppBuildProfile
     );
+  // OTA 是唯一不等登录的更新通道：审核构建未登录时 sideEffectsEnabled 为假，下载闸门也还没接上登录状态，
+  // 所以未登录的 iPhone 能当场下载并提示重启；其余副作用仍等登录，审核演示会话里 OTA 也会停止。
+  const mobileOtaCheckEnabled = shouldRunMobileOtaCheck({
+    appReady,
+    startupFailed: Boolean(startupError),
+    isIosReviewSession,
+    profile: nativeAppBuildProfile,
+  });
   const iosNativeUpdateEnabled =
     sideEffectsEnabled &&
     shouldEnableIosNativeUpdate({
@@ -128,7 +139,7 @@ export default function RootLayout() {
     autoUpdate: autoUpdateAllowed,
   });
   const mobileOtaUpdate = useMobileOtaUpdate({
-    enabled: automaticUpdatesEnabled && !pauseAutomaticOta,
+    enabled: mobileOtaCheckEnabled && !pauseAutomaticOta,
     autoUpdate: autoUpdateAllowed,
     beforeCheck: iosNativeUpdateEnabled
       ? async () => {
