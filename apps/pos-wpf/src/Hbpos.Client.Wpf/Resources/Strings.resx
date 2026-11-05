@@ -1816,7 +1816,7 @@
 Logged with reference {2}</value></data>
   <data name="restart.failed.ok" xml:space="preserve"><value>Got it</value></data>
   <data name="settings.restartPrompt.title" xml:space="preserve"><value>Overnight restart</value></data>
-  <data name="settings.restartPrompt.description" xml:space="preserve"><value>If this POS has been running for 7 days or more, it restarts the computer automatically in the early morning (3:00 by default) after daily close.</value></data>
+  <data name="settings.restartPrompt.description" xml:space="preserve"><value>If this POS has been running for 7 days or more, it restarts the computer automatically in the early morning (3:00 by default). This also applies to registers that never do daily close.</value></data>
   <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Restart overnight after daily close</value></data>
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>Shows a 30-second countdown that can be cancelled, and skips the restart if a sale, payment or card task is unfinished. No admin prompt. Saved for this device only.</value></data>
   <data name="settings.scanner.title" xml:space="preserve"><value>Scanner sensitivity</value></data>
