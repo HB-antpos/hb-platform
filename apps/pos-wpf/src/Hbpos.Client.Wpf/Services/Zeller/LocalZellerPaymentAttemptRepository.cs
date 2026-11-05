@@ -112,6 +112,20 @@ public sealed record LocalZellerPaymentAttempt(
 
     public DateTimeOffset? CompletedAt { get; init; }
 
+    /// <summary>主管最近一次的决定（确认已付款、确认未付款、继续等待）。没有主管处理过时为空。</summary>
+    public ZellerSupervisorDecision? SupervisorDecision { get; init; }
+
+    public string? SupervisorNote { get; init; }
+
+    /// <summary>主管填写的付款参考号（例如 RRN 或批准码），选填。</summary>
+    public string? SupervisorFinancialReference { get; init; }
+
+    public string? SupervisorOperatorId { get; init; }
+
+    public string? SupervisorOperatorName { get; init; }
+
+    public DateTimeOffset? SupervisorDecidedAt { get; init; }
+
     /// <summary>把一笔 Zeller 交易的字段写进记录。查询回来的交易没有小票原文和批准码，已有的值不会被空值覆盖。</summary>
     public LocalZellerPaymentAttempt WithTransaction(ZellerTransaction transaction) => this with
     {
@@ -180,6 +194,13 @@ public interface ILocalZellerPaymentAttemptRepository
         string deviceCode,
         CancellationToken cancellationToken = default);
 
+    /// <summary>这台收银机上处于指定状态的尝试，最近更新的在前。</summary>
+    Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListByStatusAsync(
+        string storeCode,
+        string deviceCode,
+        IReadOnlyCollection<ZellerAttemptStatus> statuses,
+        CancellationToken cancellationToken = default);
+
     /// <summary>到期但还没复核的未付款记录。程序重启后用它补做复核。</summary>
     Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListLateRechecksDueAsync(
         DateTimeOffset now,
@@ -233,7 +254,13 @@ public static class ZellerPaymentAttemptSchema
             LateRecheckedAt TEXT NULL,
             CreatedAt TEXT NOT NULL,
             UpdatedAt TEXT NOT NULL,
-            CompletedAt TEXT NULL
+            CompletedAt TEXT NULL,
+            SupervisorDecision TEXT NULL,
+            SupervisorNote TEXT NULL,
+            SupervisorFinancialReference TEXT NULL,
+            SupervisorOperatorId TEXT NULL,
+            SupervisorOperatorName TEXT NULL,
+            SupervisorDecidedAt TEXT NULL
         );
         """,
         // 中文注释：reference 是找回交易的唯一线索，绝不允许两条尝试共用。
@@ -271,7 +298,9 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         TransactionUuid, OriginalTransactionUuid, ResponseCode, ResponseText, ApprovalCode, Rrn,
         PanMasked, Scheme, Bin, MerchantId, TerminalId, ReceiptText, ReceiptLink, TransactionTimestamp,
         OrderDraftJson, StoreCode, DeviceCode, CashierId, VerificationRounds,
-        LateRecheckDueAt, LateRecheckedAt, CreatedAt, UpdatedAt, CompletedAt
+        LateRecheckDueAt, LateRecheckedAt, CreatedAt, UpdatedAt, CompletedAt,
+        SupervisorDecision, SupervisorNote, SupervisorFinancialReference,
+        SupervisorOperatorId, SupervisorOperatorName, SupervisorDecidedAt
         """;
 
     // 中文注释：本地库可能随服务器地址切换到另一个文件，所以按文件路径记录「已建表」。
@@ -348,7 +377,9 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
                 $TransactionUuid, $OriginalTransactionUuid, $ResponseCode, $ResponseText, $ApprovalCode, $Rrn,
                 $PanMasked, $Scheme, $Bin, $MerchantId, $TerminalId, $ReceiptText, $ReceiptLink, $TransactionTimestamp,
                 $OrderDraftJson, $StoreCode, $DeviceCode, $CashierId, $VerificationRounds,
-                $LateRecheckDueAt, $LateRecheckedAt, $CreatedAt, $UpdatedAt, $CompletedAt
+                $LateRecheckDueAt, $LateRecheckedAt, $CreatedAt, $UpdatedAt, $CompletedAt,
+                $SupervisorDecision, $SupervisorNote, $SupervisorFinancialReference,
+                $SupervisorOperatorId, $SupervisorOperatorName, $SupervisorDecidedAt
             );
             """;
         AddParameters(command, attempt with { Version = 0 });
@@ -407,7 +438,13 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
                 LateRecheckDueAt = $LateRecheckDueAt,
                 LateRecheckedAt = $LateRecheckedAt,
                 UpdatedAt = $UpdatedAt,
-                CompletedAt = $CompletedAt
+                CompletedAt = $CompletedAt,
+                SupervisorDecision = $SupervisorDecision,
+                SupervisorNote = $SupervisorNote,
+                SupervisorFinancialReference = $SupervisorFinancialReference,
+                SupervisorOperatorId = $SupervisorOperatorId,
+                SupervisorOperatorName = $SupervisorOperatorName,
+                SupervisorDecidedAt = $SupervisorDecidedAt
             WHERE AttemptGuid = $AttemptGuid
               AND Status = $ExpectedStatus
               AND Version = $ExpectedVersion;
@@ -418,17 +455,36 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1 ? persisted : null;
     }
 
-    public async Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListOpenAsync(
+    public Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListOpenAsync(
         string storeCode,
         string deviceCode,
+        CancellationToken cancellationToken = default) =>
+        ListByStatusAsync(storeCode, deviceCode, [ZellerAttemptStatus.Submitted, ZellerAttemptStatus.Unknown], cancellationToken);
+
+    public async Task<IReadOnlyList<LocalZellerPaymentAttempt>> ListByStatusAsync(
+        string storeCode,
+        string deviceCode,
+        IReadOnlyCollection<ZellerAttemptStatus> statuses,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(statuses);
+        if (statuses.Count == 0)
+        {
+            return [];
+        }
+
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        var names = statuses.Distinct().Select((status, index) =>
+        {
+            var name = $"$Status{index}";
+            command.Parameters.AddWithValue(name, status.ToString());
+            return name;
+        }).ToArray();
         command.CommandText = $"""
             SELECT {Columns} FROM LocalZellerPaymentAttempts
             WHERE StoreCode = $StoreCode AND DeviceCode = $DeviceCode
-              AND Status IN ('Submitted', 'Unknown')
+              AND Status IN ({string.Join(", ", names)})
             ORDER BY UpdatedAt DESC, CreatedAt DESC;
             """;
         command.Parameters.AddWithValue("$StoreCode", storeCode);
@@ -564,6 +620,12 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
         command.Parameters.AddWithValue("$CreatedAt", FormatTime(attempt.CreatedAt));
         command.Parameters.AddWithValue("$UpdatedAt", FormatTime(attempt.UpdatedAt));
         AddText(command, "$CompletedAt", FormatTime(attempt.CompletedAt));
+        AddText(command, "$SupervisorDecision", attempt.SupervisorDecision?.ToString());
+        AddText(command, "$SupervisorNote", attempt.SupervisorNote);
+        AddText(command, "$SupervisorFinancialReference", attempt.SupervisorFinancialReference);
+        AddText(command, "$SupervisorOperatorId", attempt.SupervisorOperatorId);
+        AddText(command, "$SupervisorOperatorName", attempt.SupervisorOperatorName);
+        AddText(command, "$SupervisorDecidedAt", FormatTime(attempt.SupervisorDecidedAt));
     }
 
     private static void AddText(SqliteCommand command, string name, string? value) =>
@@ -619,7 +681,17 @@ public sealed class LocalZellerPaymentAttemptRepository(LocalSqliteStore store) 
             VerificationRounds = checked((int)Integer("VerificationRounds")),
             LateRecheckDueAt = ParseTime(Text("LateRecheckDueAt")),
             LateRecheckedAt = ParseTime(Text("LateRecheckedAt")),
-            CompletedAt = ParseTime(Text("CompletedAt"))
+            CompletedAt = ParseTime(Text("CompletedAt")),
+            SupervisorDecision = Text("SupervisorDecision") is { } decision &&
+                Enum.TryParse<ZellerSupervisorDecision>(decision, ignoreCase: false, out var parsedDecision) &&
+                Enum.IsDefined(parsedDecision)
+                    ? parsedDecision
+                    : null,
+            SupervisorNote = Text("SupervisorNote"),
+            SupervisorFinancialReference = Text("SupervisorFinancialReference"),
+            SupervisorOperatorId = Text("SupervisorOperatorId"),
+            SupervisorOperatorName = Text("SupervisorOperatorName"),
+            SupervisorDecidedAt = ParseTime(Text("SupervisorDecidedAt"))
         };
     }
 

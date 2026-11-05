@@ -341,6 +341,21 @@ public sealed class ZellerResultClassifierTests
 
         Assert.Equal(ZellerVerificationDecision.KeepUnknown, verification.Decision);
         Assert.Equal(ZellerUnknownReason.MultipleApproved, verification.UnknownReason);
+        Assert.NotNull(verification.Transaction);
+    }
+
+    [Fact]
+    public void Two_approvals_carry_the_earliest_one_as_evidence()
+    {
+        var earlier = Transaction() with { Timestamp = new DateTimeOffset(2026, 11, 5, 11, 24, 28, TimeSpan.FromHours(10)) };
+        var later = Transaction(uuid: "98b690b7-5eaa-41ec-8ff8-168c60364aac") with { Timestamp = earlier.Timestamp!.Value.AddSeconds(20) };
+
+        var verification = ZellerResultClassifier.ClassifyVerification(
+            ZellerCallDecision.Unknown,
+            ZellerQueryResult.Found(later, earlier),
+            Purchase);
+
+        Assert.Same(earlier, verification.Transaction);
     }
 
     [Fact]

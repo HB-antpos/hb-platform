@@ -131,7 +131,8 @@ public sealed class ZellerCardTerminalClient
         ILocalZellerPaymentAttemptRepository attempts,
         ZellerClientOptions? options = null,
         TimeProvider? timeProvider = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        ZellerAttemptActivity? activity = null)
     {
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _attempts = attempts ?? throw new ArgumentNullException(nameof(attempts));
@@ -139,7 +140,11 @@ public sealed class ZellerCardTerminalClient
         _options.Validate();
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
+        Activity = activity ?? new ZellerAttemptActivity();
     }
+
+    /// <summary>本进程里正在处理的尝试。恢复服务必须和客户端共用同一个实例。</summary>
+    public ZellerAttemptActivity Activity { get; }
 
     public async Task<ZellerPaymentOutcome> PurchaseAsync(
         ZellerPurchaseContext context,
@@ -175,6 +180,10 @@ public sealed class ZellerCardTerminalClient
         {
             OperationGuid = context.OperationGuid
         };
+
+        // 中文注释：先登记再落库，恢复服务看到这条记录时就知道它正在处理，不会去动它。
+        using var lease = Activity.TryEnter(attemptGuid)
+            ?? throw new InvalidOperationException($"Zeller attempt {attemptGuid} is already active.");
 
         // 中文注释：先落库再扣款。这一步失败就直接抛出，刷卡机没有收到任何请求。
         await _attempts.CreateAsync(pending, CancellationToken.None).ConfigureAwait(false);
@@ -235,6 +244,8 @@ public sealed class ZellerCardTerminalClient
             OriginalTransactionUuid = originalTransactionUuid
         };
 
+        using var lease = Activity.TryEnter(attemptGuid)
+            ?? throw new InvalidOperationException($"Zeller attempt {attemptGuid} is already active.");
         if (businessKey is null)
         {
             await _attempts.CreateAsync(pending, CancellationToken.None).ConfigureAwait(false);
@@ -336,6 +347,13 @@ public sealed class ZellerCardTerminalClient
     /// </summary>
     public async Task<ZellerPaymentOutcome?> RecheckAsync(Guid attemptGuid, CancellationToken cancellationToken = default)
     {
+        // 别人（例如恢复服务或主管结案）正在处理这条记录时不复核，留给下次。
+        using var lease = Activity.TryEnter(attemptGuid);
+        if (lease is null)
+        {
+            return null;
+        }
+
         var attempt = await _attempts.GetAsync(attemptGuid, cancellationToken).ConfigureAwait(false);
         if (attempt is not { Status: ZellerAttemptStatus.Canceled, LateRecheckDueAt: not null, LateRecheckedAt: null })
         {

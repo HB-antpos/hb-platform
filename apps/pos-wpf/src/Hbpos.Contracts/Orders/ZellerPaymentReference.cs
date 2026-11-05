@@ -34,6 +34,35 @@ public static class ZellerPaymentReference
     public static string FormatRefund(string refundReference, string refundTransactionUuid) =>
         $"{RefundPrefix}{RequireReference(refundReference, RefundReferencePrefix)}:{RequireTransactionUuid(refundTransactionUuid)}";
 
+    /// <summary>
+    /// 主管确认已付款、但查不到 Zeller 交易时的订单引用：ZELLER:{reference}，没有 transactionUuid。
+    /// 这种付款不能原路退回卡上（解析不出原交易），退款要改用其他方式。
+    /// </summary>
+    public static string FormatUnverifiedPayment(string reference) =>
+        $"{PaymentPrefix}{RequireReference(reference, PurchaseReferencePrefix)}";
+
+    /// <summary>主管确认已退款、但查不到 Zeller 退款交易时的订单引用：ZELLERRF:{refundReference}。</summary>
+    public static string FormatUnverifiedRefund(string refundReference) =>
+        $"{RefundPrefix}{RequireReference(refundReference, RefundReferencePrefix)}";
+
+    /// <summary>是不是主管确认、没有 transactionUuid 的 Zeller 引用（扣款或退款）。</summary>
+    public static bool IsUnverified(string? reference)
+    {
+        var trimmed = reference?.Trim();
+        if (trimmed is null)
+        {
+            return false;
+        }
+
+        if (trimmed.StartsWith(PaymentPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAttemptReference(trimmed[PaymentPrefix.Length..], PurchaseReferencePrefix);
+        }
+
+        return trimmed.StartsWith(RefundPrefix, StringComparison.OrdinalIgnoreCase) &&
+            IsAttemptReference(trimmed[RefundPrefix.Length..], RefundReferencePrefix);
+    }
+
     // 中文注释：防护判断包括损坏的 Zeller 引用，不能因为格式错误而回退到别的刷卡通道。
     public static bool IsZeller(string? reference)
     {

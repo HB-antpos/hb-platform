@@ -52,7 +52,13 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
             VerificationRounds = 3,
             LateRecheckDueAt = Created.AddMinutes(1),
             LateRecheckedAt = Created.AddMinutes(2),
-            CompletedAt = Created.AddSeconds(33)
+            CompletedAt = Created.AddSeconds(33),
+            SupervisorDecision = ZellerSupervisorDecision.ConfirmPaid,
+            SupervisorNote = "terminal showed APPROVED",
+            SupervisorFinancialReference = "264753970917",
+            SupervisorOperatorId = "M001",
+            SupervisorOperatorName = "Store Manager",
+            SupervisorDecidedAt = Created.AddMinutes(5)
         };
 
         await _repository.CreateAsync(attempt);
@@ -165,6 +171,22 @@ public sealed class LocalZellerPaymentAttemptRepositoryTests : IAsyncLifetime
         Assert.Equal(
             new[] { submitted.AttemptGuid, unknown.AttemptGuid }.OrderBy(guid => guid),
             open.Select(attempt => attempt.AttemptGuid).OrderBy(guid => guid));
+    }
+
+    [Fact]
+    public async Task List_by_status_returns_only_the_requested_statuses_on_this_device()
+    {
+        var pending = await CreateAsync(ZellerAttemptStatus.Pending);
+        var approved = await CreateAsync(ZellerAttemptStatus.Approved);
+        await CreateAsync(ZellerAttemptStatus.Unknown);
+        await CreateAsync(ZellerAttemptStatus.Approved, deviceCode: "POS-02");
+
+        var list = await _repository.ListByStatusAsync("S001", "POS-01", [ZellerAttemptStatus.Pending, ZellerAttemptStatus.Approved, ZellerAttemptStatus.Approved]);
+
+        Assert.Equal(
+            new[] { pending.AttemptGuid, approved.AttemptGuid }.OrderBy(guid => guid),
+            list.Select(attempt => attempt.AttemptGuid).OrderBy(guid => guid));
+        Assert.Empty(await _repository.ListByStatusAsync("S001", "POS-01", []));
     }
 
     [Fact]
