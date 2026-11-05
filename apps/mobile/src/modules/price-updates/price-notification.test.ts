@@ -80,6 +80,20 @@ assert.equal(
   'notification.syncedStoresWithLabels|{"count":5,"labelCount":4}'
 );
 assert.equal(buildSyncToOtherStoresMessage(5, null, t), 'notification.syncedStores|{"count":5}');
+assert.equal(
+  buildSyncToOtherStoresMessage(5, null, t, true),
+  'notification.syncedStores|{"count":5}notification.warehouseUpdatedSuffix',
+  "仓库价一并更新时在提示末尾补一句"
+);
+assert.equal(
+  buildSyncToOtherStoresMessage(5, { ...expected, labelOnlyStores: 4 }, t, true),
+  'notification.syncedStoresWithLabels|{"count":5,"labelCount":4}notification.warehouseUpdatedSuffix'
+);
+assert.equal(
+  buildSyncToOtherStoresMessage(5, null, t, false),
+  'notification.syncedStores|{"count":5}',
+  "仓库未更新（非仓库商品 / 旧后端）时提示不变"
+);
 
 assert.equal(buildPriceNotificationPreviewMessage(null, true, t), null);
 assert.equal(

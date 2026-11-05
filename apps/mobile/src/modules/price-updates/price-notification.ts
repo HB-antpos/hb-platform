@@ -126,15 +126,17 @@ export function buildPriceNotificationSaveMessage(
 export function buildSyncToOtherStoresMessage(
   updatedStoreCount: number,
   summary: PriceNotificationSummary | null | undefined,
-  t: PriceNotificationTranslate
+  t: PriceNotificationTranslate,
+  /** 仓库商品同步时后端一并更新了仓库价：提示末尾补一句，让店长知道仓库价也跟着变了。 */
+  warehouseUpdated = false
 ): string {
-  if (!summary) {
-    return t("notification.syncedStores", { count: updatedStoreCount });
-  }
-  return t("notification.syncedStoresWithLabels", {
-    count: updatedStoreCount,
-    labelCount: summary.labelOnlyStores,
-  });
+  const base = summary
+    ? t("notification.syncedStoresWithLabels", {
+        count: updatedStoreCount,
+        labelCount: summary.labelOnlyStores,
+      })
+    : t("notification.syncedStores", { count: updatedStoreCount });
+  return warehouseUpdated ? `${base}${t("notification.warehouseUpdatedSuffix")}` : base;
 }
 
 /**

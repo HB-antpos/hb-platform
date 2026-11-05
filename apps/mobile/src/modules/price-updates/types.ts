@@ -151,6 +151,17 @@ export interface SyncTargetsResult {
   sourceDiscountRate: number | null;
   sourcePurchasePrice: number | null;
   targets: SyncTargetStore[];
+  /** 仓库商品（供应商 200 且有仓库档案）：同步会一并把仓库零售价 / 建议折扣更新为本店的值。旧后端不返回则为 false。 */
+  warehouseApplicable: boolean;
+  warehouseRetailPrice: number | null;
+  warehouseSuggestedDiscountRate: number | null;
+}
+
+/** 同步成功后后端回报的仓库侧结果；旧后端不返回时 updated 为 false。 */
+export interface SyncToOtherStoresWarehouseResult {
+  updated: boolean;
+  retailPrice: number | null;
+  suggestedDiscountRate: number | null;
 }
 
 export interface SyncToOtherStoresRequest {

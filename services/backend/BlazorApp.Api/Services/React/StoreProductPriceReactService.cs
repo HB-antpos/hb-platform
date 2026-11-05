@@ -27,17 +27,21 @@ namespace BlazorApp.Api.Services.React
         /// 构造函数
         /// </summary>
         private readonly IStorePriceUpdateTaskService? _priceTaskService;
+        private readonly IWarehouseProductChangeHistoryService? _changeHistoryService;
 
         public StoreProductPriceReactService(
             SqlSugarContext context,
             ILogger<StoreProductPriceReactService> logger,
             // 可选：同步其它分店覆盖了对方的价格后，为其登记「待换标签」通知。
-            IStorePriceUpdateTaskService? priceTaskService = null
+            IStorePriceUpdateTaskService? priceTaskService = null,
+            // 可选：同步其它分店时一并更新仓库价，仓库价变动必须留审计；现有测试直接 new 本服务，不应被迫改动。
+            IWarehouseProductChangeHistoryService? changeHistoryService = null
         )
         {
             _context = context;
             _logger = logger;
             _priceTaskService = priceTaskService;
+            _changeHistoryService = changeHistoryService;
         }
 
         /// <summary>
@@ -689,6 +693,15 @@ namespace BlazorApp.Api.Services.React
                         .GroupBy(x => x.ProductCode!)
                         .ToDictionary(g => g.Key, g => g.First());
 
+                    // 仓库商品：必须先于任何分店价写入更新仓库价（锁序 Product → WarehouseProduct → StoreRetailPrice），
+                    // 并让后面的任务评估看到新的仓库价，否则刚被同步的分店会立刻被判成「需改价」。
+                    var warehouseOutcome = await SyncWarehousePricesFromSourceAsync(
+                        db,
+                        dto,
+                        sourcePriceMap,
+                        updatedBy
+                    );
+
                     var updateable = db.Updateable<StoreRetailPrice>()
                         .SetColumns(x => x.UpdatedAt == DateTime.Now)
                         .SetColumns(x => x.UpdatedBy == updatedBy);
@@ -877,6 +890,21 @@ namespace BlazorApp.Api.Services.React
                             _logger.LogError(notifyEx, "登记分店待换标签通知失败");
                         }
                     }
+                    else if (_priceTaskService != null && warehouseOutcome.ChangedProductCodes.Count > 0)
+                    {
+                        // 目标分店都没有价格记录时上面的评估不会触发；仓库价已变，仍要让其它分店按新仓库价对账。
+                        try
+                        {
+                            await _priceTaskService.OnWarehousePriceChangedAsync(
+                                warehouseOutcome.ChangedProductCodes,
+                                new PriceTaskInitiator(updatedBy, "StoreSync", dto.SourceStoreCode)
+                            );
+                        }
+                        catch (Exception notifyEx)
+                        {
+                            _logger.LogError(notifyEx, "同步仓库价后生成分店价格任务失败");
+                        }
+                    }
 
                     if (dto.SyncPurchasePrice)
                     {
@@ -893,7 +921,23 @@ namespace BlazorApp.Api.Services.React
 
                     await db.Ado.CommitTranAsync();
 
-                    return ApiResponse<object>.CreateSuccess($"成功同步 {affectedRows} 条记录");
+                    var successMessage = $"成功同步 {affectedRows} 条记录";
+                    if (!dto.SyncWarehouse)
+                    {
+                        // Web 批量入口响应保持原样（Data 为空）。
+                        return ApiResponse<object>.CreateSuccess(successMessage);
+                    }
+
+                    return ApiResponse<object>.OK(
+                        new SyncToOtherStoresResultDto
+                        {
+                            AffectedRows = affectedRows,
+                            WarehouseUpdated = warehouseOutcome.Updated,
+                            WarehouseRetailPrice = warehouseOutcome.RetailPrice,
+                            WarehouseSuggestedDiscountRate = warehouseOutcome.SuggestedDiscountRate,
+                        },
+                        successMessage
+                    );
                 }
                 catch (Exception)
                 {
@@ -908,6 +952,222 @@ namespace BlazorApp.Api.Services.React
                     return BuildSetChildPurchasePriceBusyResponse<object>();
                 return ApiResponse<object>.Error("同步失败", "DATABASE_ERROR", ex.Message);
             }
+        }
+
+        /// <summary>仓库商品的供应商编码；与扫码页「仓库零售价对账」的适用范围一致。</summary>
+        internal const string WarehouseSupplierCode = "200";
+
+        /// <summary>仓库侧价格同步的结果：哪些商品真的被改了，以及同步后的仓库价（单商品时给手机端展示）。</summary>
+        private sealed record WarehouseSyncOutcome(
+            IReadOnlyList<string> ChangedProductCodes,
+            decimal? RetailPrice,
+            decimal? SuggestedDiscountRate
+        )
+        {
+            public bool Updated => ChangedProductCodes.Count > 0;
+
+            public static WarehouseSyncOutcome None { get; } =
+                new(Array.Empty<string>(), null, null);
+        }
+
+        private static ISugarQueryable<T> WithUpdateLock<T>(ISugarQueryable<T> queryable, ISqlSugarClient db) =>
+            db.CurrentConnectionConfig.DbType == DbType.SqlServer
+                ? queryable.With(SqlWith.UpdLock)
+                : queryable;
+
+        /// <summary>
+        /// 同步其它分店时，把仓库商品（供应商 200）的零售价与建议折扣一并更新为来源分店的值。
+        /// 不更新的话，其它分店扫码仍会因与仓库价不一致而提示「是否同步仓库价格」，
+        /// 同步后还会被任务评估判成「需改价」。
+        /// 必须在调用方已开启的事务内、先于任何分店价写入调用（锁序 Product → WarehouseProduct → StoreRetailPrice）。
+        /// 仓库价变动统一写审计（Source=StoreSync）；价格任务由调用方在分店价改完后评估一次，所以这里跳过。
+        /// </summary>
+        private async Task<WarehouseSyncOutcome> SyncWarehousePricesFromSourceAsync(
+            ISqlSugarClient db,
+            SyncToOtherStoresDto dto,
+            IReadOnlyDictionary<string, StoreRetailPrice> sourcePriceMap,
+            string updatedBy
+        )
+        {
+            // OnlyUpdateNull 是「只补空值」语义，不能拿分店的值去改仓库这个全局价。
+            if (
+                !dto.SyncWarehouse
+                || dto.Mode != SyncModeConstants.Overwrite
+                || (!dto.SyncRetailPrice && !dto.SyncDiscountRate)
+                || sourcePriceMap.Count == 0
+            )
+            {
+                return WarehouseSyncOutcome.None;
+            }
+
+            if (_changeHistoryService == null)
+            {
+                // 没有审计服务就不改仓库价：宁可少同步一项，也不能留下无审计的全局价变动。
+                _logger.LogWarning("未注入仓库商品审计服务，同步其它分店时跳过仓库价更新");
+                return WarehouseSyncOutcome.None;
+            }
+
+            var sourceByCode = new Dictionary<string, StoreRetailPrice>(
+                sourcePriceMap,
+                StringComparer.OrdinalIgnoreCase
+            );
+            var codes = sourceByCode.Keys.ToList();
+
+            // 先 Product 后 WarehouseProduct，全部加更新锁，与仓库价对账 / 仓库商品写链路的锁序一致。
+            var products = await WithUpdateLock(
+                    db.Queryable<Product>()
+                        .Where(p => p.ProductCode != null && codes.Contains(p.ProductCode) && !p.IsDeleted),
+                    db
+                )
+                .ToListAsync();
+            var warehouseProducts = await WithUpdateLock(
+                    db.Queryable<WarehouseProduct>()
+                        .Where(w => codes.Contains(w.ProductCode) && !w.IsDeleted),
+                    db
+                )
+                .ToListAsync();
+            var warehouseByCode = warehouseProducts
+                .GroupBy(w => w.ProductCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            // 只有供应商 200 且有仓库档案的商品才有「仓库价」可言。
+            var applicable = products
+                .Where(p =>
+                    string.Equals(p.LocalSupplierCode?.Trim(), WarehouseSupplierCode, StringComparison.Ordinal)
+                    && p.ProductCode != null
+                    && warehouseByCode.ContainsKey(p.ProductCode)
+                    && sourceByCode.ContainsKey(p.ProductCode)
+                )
+                .GroupBy(p => p.ProductCode!, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+            if (applicable.Count == 0)
+            {
+                return WarehouseSyncOutcome.None;
+            }
+
+            var applicableCodes = applicable.Select(p => p.ProductCode!).ToList();
+            var domesticByCode = (
+                await db.Queryable<DomesticProduct>()
+                    .Where(d => applicableCodes.Contains(d.ProductCode) && !d.IsDeleted)
+                    .ToListAsync()
+            )
+                .GroupBy(d => d.ProductCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var suggestedDiscounts =
+                dto.SyncDiscountRate && _priceTaskService != null
+                    ? await _priceTaskService.GetSuggestedDiscountsAsync(applicableCodes)
+                    : new Dictionary<string, decimal?>();
+
+            var beforeSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(applicableCodes);
+            var now = DateTime.UtcNow;
+            var changedCodes = new List<string>();
+            decimal? reportedRetail = null;
+            decimal? reportedDiscount = null;
+            var reported = false;
+
+            foreach (var product in applicable)
+            {
+                var code = product.ProductCode!;
+                var source = sourceByCode[code];
+                var warehouse = warehouseByCode[code];
+                domesticByCode.TryGetValue(code, out var domestic);
+                var changed = false;
+
+                // ---- 零售价：三张主档联动（与手机端仓库 Patch 一致），源店价为空或 ≤ 0 不写 ----
+                var sourceRetail = StorePriceUpdateTaskService.Money(source.StoreRetailPriceValue);
+                if (dto.SyncRetailPrice && sourceRetail is > 0m)
+                {
+                    var retail = sourceRetail.Value;
+                    var needsRetailWrite =
+                        StorePriceUpdateTaskService.Money(warehouse.OEMPrice) != retail
+                        || StorePriceUpdateTaskService.Money(product.RetailPrice) != retail
+                        || (domestic != null && StorePriceUpdateTaskService.Money(domestic.OEMPrice) != retail);
+                    if (needsRetailWrite)
+                    {
+                        await db.Updateable<WarehouseProduct>()
+                            .SetColumns(w => w.OEMPrice == retail)
+                            .SetColumns(w => w.UpdatedAt == now)
+                            .SetColumns(w => w.UpdatedBy == updatedBy)
+                            .Where(w => w.ProductCode == warehouse.ProductCode && !w.IsDeleted)
+                            .ExecuteCommandAsync();
+                        await db.Updateable<Product>()
+                            .SetColumns(p => p.RetailPrice == retail)
+                            .SetColumns(p => p.UpdatedAt == now)
+                            .SetColumns(p => p.UpdatedBy == updatedBy)
+                            .Where(p => p.UUID == product.UUID && !p.IsDeleted)
+                            .ExecuteCommandAsync();
+                        if (domestic != null)
+                        {
+                            await db.Updateable<DomesticProduct>()
+                                .SetColumns(d => d.OEMPrice == retail)
+                                .SetColumns(d => d.UpdatedAt == now)
+                                .SetColumns(d => d.UpdatedBy == updatedBy)
+                                .Where(d => d.ProductCode == domestic.ProductCode && !d.IsDeleted)
+                                .ExecuteCommandAsync();
+                        }
+
+                        changed = true;
+                    }
+
+                    reportedRetail ??= retail;
+                }
+
+                // ---- 建议折扣：已设则跟随来源店；未设且来源店也没折扣时不凭空新建「0」基准 ----
+                if (dto.SyncDiscountRate && _priceTaskService != null)
+                {
+                    var sourceRate = source.DiscountRate ?? 0m;
+                    if (sourceRate is >= 0m and <= 1m)
+                    {
+                        var normalizedRate = StorePriceUpdateTaskService.Rate(sourceRate);
+                        suggestedDiscounts.TryGetValue(code, out var existingSuggested);
+                        var alreadyAligned = existingSuggested.HasValue
+                            ? StorePriceUpdateTaskService.Rate(existingSuggested) == normalizedRate
+                            : normalizedRate == 0m;
+                        if (
+                            !alreadyAligned
+                            && await _priceTaskService.SetSuggestedDiscountAsync(code, normalizedRate, updatedBy)
+                        )
+                        {
+                            changed = true;
+                            existingSuggested = normalizedRate;
+                        }
+
+                        if (!reported)
+                        {
+                            reportedDiscount = existingSuggested;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    changedCodes.Add(code);
+                }
+
+                // 手机端一次只同步单个商品；多商品调用时只回报第一个，不影响实际写入。
+                reported = true;
+            }
+
+            if (changedCodes.Count > 0)
+            {
+                var afterSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(applicableCodes);
+                await _changeHistoryService.RecordChangesAsync(
+                    beforeSnapshots,
+                    afterSnapshots,
+                    new WarehouseProductChangeHistoryContextDto
+                    {
+                        Action = "Update",
+                        Source = "StoreSync",
+                        SourceReference = dto.SourceStoreCode,
+                        ActorName = updatedBy,
+                        // 价格任务由调用方在分店价改完后统一评估一次，这里提前评估会读到旧分店价。
+                        SkipPriceTasks = true,
+                    }
+                );
+            }
+
+            return new WarehouseSyncOutcome(changedCodes, reportedRetail, reportedDiscount);
         }
 
         /// <summary>

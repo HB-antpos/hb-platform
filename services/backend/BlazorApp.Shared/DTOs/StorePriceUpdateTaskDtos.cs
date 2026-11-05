@@ -421,6 +421,18 @@ public sealed class StoreProductSyncTargetsDto
     public decimal? SourceDiscountRate { get; set; }
     public decimal? SourcePurchasePrice { get; set; }
     public List<StoreProductSyncTargetDto> Targets { get; set; } = new();
+
+    /// <summary>
+    /// 该商品是否属于仓库商品（供应商 200 且有仓库档案）。为 true 时同步会一并把仓库零售价 / 建议折扣
+    /// 更新为本店的值，面板据此提示并隐藏进货价同步。
+    /// </summary>
+    public bool WarehouseApplicable { get; set; }
+
+    /// <summary>仓库当前零售价（仅 WarehouseApplicable 时有值）。</summary>
+    public decimal? WarehouseRetailPrice { get; set; }
+
+    /// <summary>仓库当前建议折扣（null = 未设置）。</summary>
+    public decimal? WarehouseSuggestedDiscountRate { get; set; }
 }
 
 public sealed class MobileSyncStoreProductToOtherStoresRequestDto
@@ -437,4 +449,10 @@ public sealed class MobileSyncStoreProductToOtherStoresResultDto
 {
     public int UpdatedStoreCount { get; set; }
     public PriceNotificationSummaryDto? PriceNotification { get; set; }
+
+    /// <summary>本次是否同时更新了仓库零售价 / 建议折扣。</summary>
+    public bool WarehouseUpdated { get; set; }
+
+    public decimal? WarehouseRetailPrice { get; set; }
+    public decimal? WarehouseSuggestedDiscountRate { get; set; }
 }

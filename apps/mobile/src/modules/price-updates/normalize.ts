@@ -13,6 +13,7 @@ import type {
   StorePriceUpdateTaskPage,
   SyncTargetStore,
   SyncTargetsResult,
+  SyncToOtherStoresWarehouseResult,
 } from "./types";
 
 type RawRecord = Record<string, unknown>;
@@ -279,6 +280,19 @@ export function normalizeSyncTargets(payload: unknown): SyncTargetsResult {
     targets: Array.isArray(rawTargets)
       ? rawTargets.map(normalizeSyncTargetStore).filter((item) => item.storeCode)
       : [],
+    warehouseApplicable: pick(data, "warehouseApplicable") === true,
+    warehouseRetailPrice: toNumber(pick(data, "warehouseRetailPrice")),
+    warehouseSuggestedDiscountRate: toNumber(pick(data, "warehouseSuggestedDiscountRate")),
+  };
+}
+
+/** 同步其它分店的响应里仓库侧结果；缺字段（旧后端）一律视为「仓库未更新」。 */
+export function normalizeSyncToOtherStoresWarehouseResult(payload: unknown): SyncToOtherStoresWarehouseResult {
+  const data = asRecord(payload);
+  return {
+    updated: pick(data, "warehouseUpdated") === true,
+    retailPrice: toNumber(pick(data, "warehouseRetailPrice")),
+    suggestedDiscountRate: toNumber(pick(data, "warehouseSuggestedDiscountRate")),
   };
 }
 
