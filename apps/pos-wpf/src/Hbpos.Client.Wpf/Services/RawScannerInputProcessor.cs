@@ -49,6 +49,7 @@ public sealed class RawScannerInputProcessor
         var buffer = GetBuffer(devicePath);
         if (buffer.Text.Length > 0 && timestamp - buffer.LastInputAt > _scanTimeout)
         {
+            ScannerInputTiming.ReportGapReset("raw", buffer.Text.Length, (timestamp - buffer.LastInputAt).TotalMilliseconds);
             buffer.Text.Clear();
         }
 

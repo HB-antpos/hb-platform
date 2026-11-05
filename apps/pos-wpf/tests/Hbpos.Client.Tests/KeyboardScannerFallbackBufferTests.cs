@@ -220,7 +220,7 @@ public sealed class KeyboardScannerFallbackBufferTests
     [Theory]
     [InlineData(10)]
     [InlineData(250)]
-    [InlineData(1000)]
+    [InlineData(1500)]
     public void DuplicateGuard_drops_tail_of_previous_barcode_within_window(int lagMs)
     {
         // 回归：连读的第二次读码被界面卡顿截掉开头，只剩结尾，不能再当成新扫码写进搜索框。
@@ -238,7 +238,90 @@ public sealed class KeyboardScannerFallbackBufferTests
         var now = DateTimeOffset.UtcNow;
 
         Assert.True(guard.TryAccept("9525810220077", "raw", now));
-        Assert.True(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(1001)));
+        Assert.True(guard.TryAccept("5810220077", "raw", now.AddMilliseconds(1501)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_drops_keyboard_tail_of_a_full_raw_scan()
+    {
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.False(guard.TryAccept("5810220077", "keyboard-fallback", now.AddMilliseconds(530)));
+    }
+
+    [Theory]
+    [InlineData(1000, 1000, 0)]
+    [InlineData(1000, 1300, 300)]
+    [InlineData(int.MaxValue - 10, int.MinValue + 10, 21)]
+    public void ResolveEventTime_steps_back_by_event_age(int eventTick, int nowTick, int expectedAgeMs)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Equal(now.AddMilliseconds(-expectedAgeMs), ScannerInputTiming.ResolveEventTime(eventTick, nowTick, now));
+    }
+
+    [Theory]
+    [InlineData(2000, 1000)]
+    [InlineData(0, 100_000)]
+    public void ResolveEventTime_falls_back_to_now_for_invalid_event_ticks(int eventTick, int nowTick)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Equal(now, ScannerInputTiming.ResolveEventTime(eventTick, nowTick, now));
+    }
+
+    [Fact]
+    public void Buffer_keeps_full_barcode_when_a_stall_delays_handling_but_not_the_key_events()
+    {
+        // 回归：实测扫码中途卡顿 200ms，按处理时刻算只剩 5810220077；按事件时间算才是完整条码。
+        var buffer = new KeyboardScannerFallbackBuffer();
+        var scanStart = DateTimeOffset.UtcNow;
+        const int startTick = 1_000_000;
+        Key[] keys = [Key.D9, Key.D5, Key.D2, Key.D5, Key.D8, Key.D1, Key.D0, Key.D2, Key.D2, Key.D0, Key.D0, Key.D7, Key.D7];
+
+        for (var index = 0; index < keys.Length; index++)
+        {
+            var eventOffsetMs = index * 15;
+            var handledOffsetMs = index < 3 ? eventOffsetMs : 300 + index;
+            var timestamp = ScannerInputTiming.ResolveEventTime(
+                startTick + eventOffsetMs,
+                startTick + handledOffsetMs,
+                scanStart.AddMilliseconds(handledOffsetMs));
+            Assert.Null(buffer.Process(keys[index], timestamp));
+        }
+
+        Assert.Equal("9525810220077", buffer.Process(Key.Enter, scanStart.AddMilliseconds(400)));
+    }
+
+    [Fact]
+    public void DuplicateGuard_pairs_keyboard_copy_by_event_time_after_a_long_stall()
+    {
+        // 卡顿超过配对额度的 1.5 秒时，键盘拷贝按事件时间仍与 Raw 配对，同一次扫码不会加购两次。
+        var guard = new ScannerInputDuplicateGuard();
+        var now = DateTimeOffset.UtcNow;
+        var keyboardEventTime = ScannerInputTiming.ResolveEventTime(5_000, 7_000, now.AddMilliseconds(2020));
+
+        Assert.True(guard.TryAccept("9525810220077", "raw", now));
+        Assert.False(guard.TryAccept("9525810220077", "keyboard-fallback", keyboardEventTime));
+    }
+
+    [Fact]
+    public void ScanInputLagTracker_reports_stall_only_when_key_events_stayed_continuous()
+    {
+        var tracker = new ScanInputLagTracker();
+        var now = DateTimeOffset.UtcNow;
+
+        tracker.RecordCharacter(now, now);
+        tracker.RecordCharacter(now.AddMilliseconds(15), now.AddMilliseconds(215));
+        Assert.Equal(215, tracker.TakeAbsorbedGapMs());
+        Assert.Null(tracker.TakeAbsorbedGapMs());
+
+        // 事件时间本身就有停顿：这是真实间隔，不算被吸收的卡顿。
+        tracker.RecordCharacter(now, now);
+        tracker.RecordCharacter(now.AddMilliseconds(200), now.AddMilliseconds(200));
+        Assert.Null(tracker.TakeAbsorbedGapMs());
     }
 
     [Fact]

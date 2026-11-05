@@ -48,6 +48,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     private Task? _startupInitializationTask;
     private Task _windowModeSaveTask = Task.CompletedTask;
     private readonly KeyboardScannerFallbackBuffer _keyboardScannerFallback = new();
+    private readonly ScanInputLagTracker _keyboardInputLag = new();
     private bool _postShowStartupStarted;
     private bool _windowModeRestored;
     private bool _isApplyingWindowMode;
@@ -855,7 +856,14 @@ public partial class MainWindow : Window, IDisplayMovableWindow
             return;
         }
 
-        var timestamp = DateTimeOffset.Now;
+        var handledAt = DateTimeOffset.Now;
+        // 关键逻辑：按按键事件时间判断字符间隔并与 Raw 配对，界面线程卡顿时积压的按键仍算连续，条码不会被截断。
+        var timestamp = ScannerInputTiming.ResolveEventTime(e.Timestamp, Environment.TickCount, handledAt);
+        if (e.Key != Key.Enter)
+        {
+            _keyboardInputLag.RecordCharacter(timestamp, handledAt);
+        }
+
         var result = _keyboardScannerFallback.Process(e.Key, timestamp, e.ImeProcessedKey);
         if (result is null)
         {
@@ -864,12 +872,18 @@ public partial class MainWindow : Window, IDisplayMovableWindow
             return;
         }
 
+        var absorbedGapMs = _keyboardInputLag.TakeAbsorbedGapMs();
         if (_rawScannerService is IScannerInputDeduplicator deduplicator &&
             !deduplicator.TryAcceptScanDelivery(result, ScannerInputDuplicateGuard.KeyboardFallbackSource, timestamp))
         {
             // 同一把 HID 扫码枪可能同时产生 Raw Input 与普通键盘事件，只允许其中一路提交。
             e.Handled = true;
             return;
+        }
+
+        if (absorbedGapMs is { } gapMs)
+        {
+            ScannerInputTiming.ReportStallAbsorbed(ScannerInputDuplicateGuard.KeyboardFallbackSource, result, gapMs);
         }
 
         if (_viewModel.TryProcessKeyboardScannerInput(result))
@@ -1424,6 +1438,10 @@ internal sealed class KeyboardScannerFallbackBuffer
 
         if (_buffer.Length > 0 && timestamp - _lastInputAt > ScanTimeout)
         {
+            ScannerInputTiming.ReportGapReset(
+                ScannerInputDuplicateGuard.KeyboardFallbackSource,
+                _buffer.Length,
+                (timestamp - _lastInputAt).TotalMilliseconds);
             _buffer.Clear();
         }
 
