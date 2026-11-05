@@ -147,7 +147,7 @@
   "resetPassword": {
     "entry": "Set up / forgot password",
     "title": "Set up or reset password",
-    "emailDescription": "Enter your staff email and we will send a 6-digit code. The email you received when your manager created your account also contains a code.",
+    "emailDescription": "Enter your staff email and we will send a 6-digit code. New staff can also log in with the initial password in their account email.",
     "codeDescription": "A code has been sent to {{email}} (if an account exists for it). Check your email, then choose a new password.",
     "email": "Staff email",
     "changeEmail": "Change email",

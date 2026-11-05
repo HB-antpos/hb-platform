@@ -23,8 +23,9 @@ function assertOrdered(source: string, first: string, second: string, message: s
 }
 
 async function run() {
-  const [authStore, loginScreen, apiClient, rootLayout, tabsLayout, printerHook, banner, deviceStore, helpers] =
+  const [resetPasswordScreen, authStore, loginScreen, apiClient, rootLayout, tabsLayout, printerHook, banner, deviceStore, helpers] =
     await Promise.all([
+      readMobileSource("app/(auth)/reset-password.tsx"),
       readMobileSource("src/store/auth-store.ts"),
       readMobileSource("app/(auth)/login.tsx"),
       readMobileSource("src/shared/api/client.ts"),
@@ -59,6 +60,18 @@ async function run() {
     "审核登录和会话恢复都必须强制停止遗留后台定位"
   );
   assert.match(authStore, /wasIosReview \? \{ force: true } : undefined/);
+
+  // 登录前页面的真实请求必须放行守卫，否则 iOS 正式包发不出去，而开发包和安卓都测不出来。
+  assert.match(
+    resetPasswordScreen,
+    /runWithPreAuthGateOpen\(preAuthGate, \(\) => requestPasswordResetCodeApi\(/,
+    "发验证码必须放行审核守卫"
+  );
+  assert.match(
+    resetPasswordScreen,
+    /runWithPreAuthGateOpen\(preAuthGate, \(\) => confirmPasswordResetApi\(/,
+    "提交新密码必须放行审核守卫"
+  );
 
   const loginHandler = loginScreen.slice(loginScreen.indexOf("async function handleLogin"));
   assertOrdered(
