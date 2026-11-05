@@ -181,6 +181,68 @@ public sealed class ZellerPaymentWorkflowTests
         Assert.Empty(await fixture.Attempts.ListOpenAsync(fixture.Session.StoreCode, fixture.Session.DeviceCode));
     }
 
+    [Theory]
+    [InlineData("0.99")]
+    [InlineData("0.50")]
+    [InlineData("0.01")]
+    public async Task Sale_below_the_zeller_minimum_is_refused_before_anything_is_stored(string amount)
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync();
+
+        var result = await AddSaleAsync(fixture, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture));
+
+        // 中文注释：2026-11-05 真机：99 分被 Zeller 回绝并返回 Cancelled，无人值守模式下没有任何窗口说明原因。
+        Assert.False(result.Succeeded);
+        Assert.Equal("payment.card.zeller.minimumAmount", result.StatusKey);
+        Assert.False(result.CardResult!.RequiresRecovery);
+        Assert.Null(result.StatusMessage);
+        Assert.Null(result.RecoveryAttemptKey);
+        Assert.Empty(fixture.Gateway.Calls.ToArray());
+        Assert.Empty(await fixture.Attempts.ListOpenAsync(fixture.Session.StoreCode, fixture.Session.DeviceCode));
+    }
+
+    [Theory]
+    [InlineData("1.00", 100)]
+    [InlineData("1.01", 101)]
+    public async Task Sale_at_or_above_the_zeller_minimum_reaches_the_terminal(string amount, int expectedCents)
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync();
+        var purchasedCents = new List<int>();
+        fixture.Gateway.OnPurchase = (request, _, _) =>
+        {
+            purchasedCents.Add(request.AmountCents);
+            return Task.FromResult(ZellerCallResult.FromTransaction(Approved(request.AmountCents, request.Reference)));
+        };
+
+        var result = await AddSaleAsync(fixture, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture));
+
+        Assert.True(result.Succeeded, result.StatusKey);
+        Assert.Equal(expectedCents, Assert.Single(purchasedCents));
+    }
+
+    [Fact]
+    public async Task Refund_below_the_zeller_minimum_is_not_blocked()
+    {
+        await using var fixture = await ZellerWorkflowFixture.CreateAsync();
+        fixture.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(
+            Approved(request.AmountCents, request.Reference) with { Type = ZellerTransactionType.Refund }));
+
+        var result = await fixture.Workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            fixture.Session,
+            -0.5m,
+            [],
+            "0.5",
+            OriginalReference,
+            CancellationToken.None,
+            ReturnCart(0.5m).CreateSnapshot());
+
+        // 中文注释：最低 1.00 澳元只限制扣款；阶段 0 真机里 20、30、50 分的部分退款都成功了。
+        Assert.True(result.Succeeded, result.StatusKey);
+        var request = Assert.Single(fixture.Gateway.RefundRequests.ToArray());
+        Assert.Equal(50, request.AmountCents);
+    }
+
     [Fact]
     public async Task Zeller_selected_without_the_client_reports_the_component_unavailable()
     {

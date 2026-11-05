@@ -21,6 +21,9 @@ public sealed partial class CashPaymentWorkflowService
 {
     internal const string ZellerAttemptTenderKeyPrefix = "ZELLER_ATTEMPT:";
 
+    /// <summary>Zeller 单笔扣款的最低金额：100 分（1.00 澳元）。官方限制，不能在刷卡机上调整。</summary>
+    internal const int ZellerMinimumPurchaseCents = 100;
+
     private async Task<PaymentTenderAttemptResult> AuthorizeZellerTenderAsync(
         CardTerminalSettings settings,
         decimal amount,
@@ -45,6 +48,15 @@ public sealed partial class CashPaymentWorkflowService
         if (!TryConvertToZellerCents(amount, out var amountCents))
         {
             return CreateCardFailureResult(ZellerStatusKey("invalidRequest"));
+        }
+
+        if (!isRefund && amountCents < ZellerMinimumPurchaseCents)
+        {
+            // 中文注释：Zeller 官方限制单笔扣款最低 1.00 澳元，刷卡机上改不了。2026-11-05 真机实测：99 分在约 5 秒内
+            // 被回绝并返回 Cancelled(12)；程序用无人值守模式（不弹 SDK 窗口），收银员看不到任何原因，只会以为被人取消。
+            // 所以请求发出前就拦下并说明原因。拆分付款时这里的 amount 是刷卡那一部分，同样适用。退款不受此限制。
+            ConsoleLog.Write("Zeller", $"workflow sale blocked reason=below-minimum amountCents={amountCents} minimumCents={ZellerMinimumPurchaseCents}");
+            return CreateCardFailureResult(ZellerStatusKey("minimumAmount"));
         }
 
         if (cartSnapshot is null ||
