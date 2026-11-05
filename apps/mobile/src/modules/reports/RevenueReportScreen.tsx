@@ -1451,23 +1451,26 @@ export function RevenueReportScreen({
     const hourlyView = isHourlyDetailView(item) ? item : null;
     const upcoming = hourlyView?.status === "upcoming";
     const inProgress = hourlyView?.status === "live";
+    // 本期已打烊的小时（去年仍营业）：与未到一样只保留去年值，标注「未营业」，不显示 $0 / −100%。
+    const closed = Boolean(hourlyView?.closedHour);
+    const dimmed = upcoming || closed;
     // 只有逐日明细会走“本期先出”回退；同期未知时同期与增长率都显示“—”。
     const compareUnavailable = isDailyRow(item) && Boolean(item.compareUnavailable);
     // 进行中的小时只有半截数据，数值弱化显示且不算增长率；未到的小时只保留去年值。
     const currentStyle = inProgress ? styles.detailLiveValue : styles.strongText;
-    const mutedValue = upcoming ? styles.muted : currentStyle;
+    const mutedValue = dimmed ? styles.muted : currentStyle;
     const compareLabel = t("reports.metrics.compare");
     const compareText = (formatter: (value: number) => string, value: number) =>
       compareUnavailable ? "—" : formatter(value);
     const currentText = (formatter: (value: number) => string, value: number) =>
-      upcoming ? "—" : formatter(value);
+      dimmed ? "—" : formatter(value);
     return (
       <View
         style={[
           styles.detailCard,
           // 高亮「截至所选整点」的累计行；逐小时口径下这一行是 11–12 点，易被误读为 12 点，故不高亮。
           hourlyView?.isCutoffRow && hourlyDetailMode === "cumulative" ? styles.detailCutoffRow : null,
-          upcoming ? styles.detailUpcomingRow : null,
+          dimmed ? styles.detailUpcomingRow : null,
           index === 0 ? styles.detailCardFirst : null,
           index === detailListRows.length - 1 ? styles.detailCardLast : null,
         ]}
@@ -1488,6 +1491,8 @@ export function RevenueReportScreen({
               </Text>
             ) : upcoming ? (
               <TableText style={styles.muted}>{t("reports.cumulative.upcoming")}</TableText>
+            ) : closed ? (
+              <TableText style={styles.muted}>{t("reports.cumulative.closed")}</TableText>
             ) : null}
           </View>
           <View style={styles.detailAmountColumn}>
@@ -1509,7 +1514,7 @@ export function RevenueReportScreen({
                 current={item.revenue}
                 compare={item.compareRevenue}
                 newLabel={growthNewLabel}
-                unavailable={upcoming || compareUnavailable}
+                unavailable={dimmed || compareUnavailable}
               />
             )}
           </View>

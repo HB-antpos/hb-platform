@@ -205,6 +205,7 @@
     "savedNoNotification": "Saved. Store prices already match, no notices sent",
     "syncedStores": "Synced to {{count}} stores",
     "syncedStoresWithLabels": "Synced to {{count}} stores, {{labelCount}} received a relabel notice",
+    "warehouseUpdatedSuffix": "; warehouse price updated too",
     "previewAutoSync": "After saving, {{count}} stores update automatically and get a Relabel notice",
     "previewNeedsUpdate": "After saving, {{count}} stores with a different price get a Price change notice",
     "previewSkippedSuffix": "; {{count}} stores will be skipped (special product)"
@@ -234,6 +235,7 @@
     "failed": "Sync failed. Try again",
     "footerHint": "Synced stores receive a relabel notice",
     "submit": "Sync to {{count}} stores",
+    "warehouseNotice": "Warehouse product: the warehouse retail price and suggested discount will also be set to this store's values (retail {{price}}). Stores you don't sync that have a different price get a Price change notice.",
     "inlineEntry": "Sync to other stores · retail, discount",
     "inlineSaveAndSync": "Save & sync to other stores"
   },

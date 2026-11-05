@@ -27,6 +27,7 @@
     "前台订货": "Ordering portal",
     "后台管理": "Back-office management",
     "商品管理": "Product management",
+    "商品陈列图": "Product planograms",
     "国内采购": "China purchasing",
     "定价策略": "Pricing rules",
     "广告管理": "Advertisement management",
@@ -217,6 +218,10 @@
       "name": "Manage China suppliers",
       "description": "Add and maintain China suppliers on the web admin."
     },
+    "DomesticPurchase.ViewSupplierName": {
+      "name": "View China supplier names",
+      "description": "China suppliers show only the supplier code (e.g. HB196) by default on web, mobile and exports; with this permission, the supplier name, shop number, contact person and contact details are shown too."
+    },
     "EmployeeProfiles.EditPositionType": {
       "name": "Edit employment type",
       "description": "Change an employee's employment type (full-time, part-time or casual). Saving also needs Edit employee profiles."
@@ -312,6 +317,18 @@
     "Orders.View": {
       "name": "View orders",
       "description": "View POS sales records on the web admin, and store orders and incoming delivery notices in the app."
+    },
+    "Planogram.View": {
+      "name": "View planograms",
+      "description": "View display plans, product display specs, and shelf and hook models on the web admin."
+    },
+    "Planogram.Edit": {
+      "name": "Edit planograms",
+      "description": "Create and edit display plans and maintain product display specs (pack size, hang-hole offset, quantity per hook) on the web admin."
+    },
+    "Planogram.Manage": {
+      "name": "Manage planograms",
+      "description": "Maintain shelf and hook models, clear product display specs, and publish or archive display plans on the web admin."
     },
     "SalesOrders.View": {
       "name": "View POS orders",
@@ -672,6 +689,10 @@
     "SalesDashboard.MonthlyDailySalesDownload.View": {
       "name": "View and download monthly daily sales",
       "description": "Choose a month and stores, then preview and download each store's daily revenue, card and cash."
+    },
+    "SalesDashboard.HolidaySalesReport.View": {
+      "name": "View holiday sales report",
+      "description": "View Halloween KFC / Brazco item sales, sell-out lead days, slow movers and stock, for all stores combined or a single store."
     },
     "SalesDashboard.BatchProductSales.View": {
       "name": "View batch item sales",

@@ -23,10 +23,16 @@ assert.ok(editor.includes('CreateBatchNumberInput'), "套装及子项复用键�
 assert.ok(modal.includes('onRequestClose={form.dismiss}'), "Android 系统返回遵守提交关闭保护");
 assert.ok(modal.includes('form.creationUncertain') && modal.includes('form.returnToList'), "结果未知时只保留返回批次列表入口");
 assert.ok(modal.includes('sortSuppliersByName(form.suppliers, language)') && modal.includes('sortedSuppliers.map('), "创建批次的供应商选择列表按名字排序");
-assert.ok(readFileSync(resolve(directory, "DomesticProductList.tsx"), "utf8").includes('sortedSuppliers.map('), "商品列表的供应商筛选按名字排序");
+const productList = readFileSync(resolve(directory, "DomesticProductList.tsx"), "utf8");
+assert.ok(productList.includes('sortedSuppliers.map('), "商品列表的供应商筛选按名字排序");
+assert.ok(
+  productList.includes('<OptionPickerSheet') && productList.includes('searchable') && !productList.includes('styles.supplierModal'),
+  "商品列表的供应商筛选与其他页面一致，使用可搜索的 OptionPickerSheet 底部抽屉，而不是自绘 Modal",
+);
 for (const language of ["zh", "en"]) {
   const locale = JSON.parse(readFileSync(resolve(directory, `../../locales/${language}/screens/domesticPurchase.json`), "utf8"));
   assert.equal(locale.create.next, language === "zh" ? "下一步" : "Next");
   assert.equal(locale.create.done, language === "zh" ? "完成" : "Done");
+  assert.ok(locale.productList.filters.supplierSearchPlaceholder, `${language} 缺少供应商筛选的搜索占位文案`);
 }
 console.log("create-batch-keyboard-source.test.ts: ok");

@@ -36,6 +36,7 @@ const WEB_MENU: MenuSource[] = ([
   ["/executive-sales-intelligence/sales-detail-v2", "Sales detail", "销售明细", ["SalesDashboard.SalesDetail.View"]],
   ["/executive-sales-intelligence/compact-sales-board", "Compact sales board", "销售简报", ["SalesDashboard.CompactBoard.View"]],
   ["/executive-sales-intelligence/monthly-daily-sales-download", "Monthly daily sales download", "月度日销售下载", ["SalesDashboard.MonthlyDailySalesDownload.View"]],
+  ["/executive-sales-intelligence/holiday-sales-report", "Holiday sales report", "节日销售报告", ["SalesDashboard.HolidaySalesReport.View"]],
   ["/executive-sales-intelligence/product-movement-report", "Product movement", "商品流动", ["SalesDashboard.ProductMovement.View"]],
   ["/executive-sales-intelligence/warehouse-product-flow-analysis", "Warehouse product flow", "仓库商品流向", ["SalesDashboard.WarehouseFlow.View"]],
   ["/executive-sales-intelligence/local-product-sales-analysis", "Local product sales", "本地商品销售", ["SalesDashboard.LocalProductAnalysis.View"]],
@@ -47,6 +48,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/store-product-price", "Store product prices", "分店商品价格", ["StoreProducts.View"]],
   ["/pos-admin/pricing-strategies", "Pricing strategies", "定价策略", ["PricingStrategy.View"]],
   ["/pos-admin/promotions", "Promotions", "促销管理", ["Promotions.View"]],
+  // 商品陈列图是「商品与价格」合并页的页签；与后端 FullMenu 一致，入口只认 Planogram.View（Edit / Manage 经后端别名自动满足）。
+  ["/pos-admin/planograms", "Planograms", "商品陈列图", ["Planogram.View"]],
   ["/pos-admin/advertisements", "Advertisements", "广告管理", ["Advertisements.View"]],
   ["/pos-admin/cash-register-users", "Cashier barcodes", "收银用户", ["Store.ManageOperations"]],
   ["/pos-admin/operation-logs", "Operation logs", "操作日志", ["Permissions.PosTerminal.Audit.View"]],

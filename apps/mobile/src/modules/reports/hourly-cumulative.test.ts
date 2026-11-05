@@ -164,6 +164,32 @@ assert.equal(perHourRows[6].compareRevenue, 7_242);
 const pastRows = buildHourlyDetailRows(allStoreRows, { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: true });
 assert.ok(pastRows.every((detail) => detail.status === "complete"), "历史日期全部为完整小时");
 
+// 本期提早打烊：去年 18:00 仍有成交、今年 17:00 后无成交 → 逐小时口径标记 closedHour，不当作 −100%
+const earlyCloseRows = [
+  row(9, 500, 180, 5, 4), row(12, 0, 389, 0, 9), row(13, 200, 155, 3, 4), row(17, 67, 142, 2, 3), row(18, 0, 166, 0, 6),
+];
+assert.deepEqual(
+  buildHourlyDetailRows(earlyCloseRows, { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: false })
+    .filter((detail) => detail.closedHour).map((detail) => detail.hour),
+  [18],
+  "只有晚于本期最后成交小时的无成交整点算未营业；营业时段中间的 $0（12:00）仍是真实同比",
+);
+assert.ok(
+  buildHourlyDetailRows(earlyCloseRows, { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: true })
+    .every((detail) => !detail.closedHour),
+  "累计口径本期累计不会回落，不标记",
+);
+assert.ok(
+  buildHourlyDetailRows(earlyCloseRows, { cutoffHour: 13, live: true, cumulative: false })
+    .every((detail) => !detail.closedHour),
+  "当天进行中 / 未到的小时有自己的状态，不套用打烊",
+);
+assert.ok(
+  buildHourlyDetailRows([row(10, 0, 100), row(11, 0, 80)], { cutoffHour: FULL_DAY_CUTOFF_HOUR, live: false, cumulative: false })
+    .every((detail) => !detail.closedHour),
+  "整天都没有成交（休息日）时不套用，仍显示真实同比",
+);
+
 // 累计曲线模型
 const chart = buildCumulativeChartModel(series, { cutoffHour: 15, live: true, liveHourFraction: 0.5 });
 assert.ok(chart);

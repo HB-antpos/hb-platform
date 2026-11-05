@@ -303,6 +303,7 @@
       "upTo": "Up to",
       "live": "Live {{time}}",
       "upcoming": "Upcoming",
+      "closed": "Closed",
       "comparedAt": "at {{time}}",
       "footnote": "Cumulative from opening, in store local time. The current hour is compared once it completes."
     },

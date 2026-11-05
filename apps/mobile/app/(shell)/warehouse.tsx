@@ -2045,8 +2045,9 @@ export default function WarehouseScreen() {
                       <Text variant="bodyMedium" style={styles.mutedText}>
                         {t("product.fields.barcode")}: {formatDisplayValue(product.barcode)}
                       </Text>
+                      {/* 没有「查看国内供应商名称」权限时名称为 null：先退到国内供应商代码（如 HB196），再退到本地供应商代码。 */}
                       <Text variant="bodyMedium" style={styles.mutedText}>
-                        {t("product.fields.supplier")}: {formatDisplayValue(product.supplierName || product.localSupplierCode)}
+                        {t("product.fields.supplier")}: {formatDisplayValue(product.supplierName || product.supplierCode || product.localSupplierCode)}
                       </Text>
                       <View style={styles.heroBadgeRow}>
                         <View style={[styles.statusPill, { backgroundColor: displayWarehouseIsActive ? "#DCFCE7" : "#F1F5F9", borderColor: displayWarehouseIsActive ? "#BBF7D0" : "#E2E8F0" }]}>

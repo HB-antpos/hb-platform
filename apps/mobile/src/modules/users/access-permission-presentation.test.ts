@@ -197,8 +197,8 @@ const seededCategories = new Set(
     (match) => match[1],
   ),
 );
-// 「订单管理」已改名「分店订货」，「价格管理」随死权限一并移除。
-assert.equal(seededCategories.size, 36);
+// 「订单管理」已改名「分店订货」，「价格管理」随死权限一并移除；新增「商品陈列图」分类（Planogram.*，11-04）。
+assert.equal(seededCategories.size, 37);
 seededCategories.forEach((category) => {
   assert.notEqual(
     localizeAccessPermissionCategory(category, "en"),

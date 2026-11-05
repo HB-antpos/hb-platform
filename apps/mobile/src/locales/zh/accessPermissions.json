@@ -27,6 +27,7 @@
     "前台订货": "前台订货",
     "后台管理": "后台管理",
     "商品管理": "商品管理",
+    "商品陈列图": "商品陈列图",
     "国内采购": "国内采购",
     "定价策略": "定价策略",
     "广告管理": "广告管理",
@@ -217,6 +218,10 @@
       "name": "管理国内供应商",
       "description": "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"
     },
+    "DomesticPurchase.ViewSupplierName": {
+      "name": "查看国内供应商名称",
+      "description": "Web 与移动端所有显示国内供应商的页面及导出文件 - 默认只显示供应商代码（如 HB196），有此权限才显示供应商名称、店铺号、联系人与联系方式"
+    },
     "EmployeeProfiles.EditPositionType": {
       "name": "修改职位类型",
       "description": "修改全职、兼职、临时工等职位类型，保存时仍需维护员工个人信息权限。"
@@ -312,6 +317,18 @@
     "Orders.View": {
       "name": "查看订单",
       "description": "Web 页面 /pos-admin/sales-orders 收银记录与移动端「订货单」- 查看收银记录、分店订货单与到货预告"
+    },
+    "Planogram.View": {
+      "name": "查看商品陈列图",
+      "description": "Web 页面 /pos-admin/planograms - 查看陈列方案、商品陈列参数与货架 / 挂钩型号"
+    },
+    "Planogram.Edit": {
+      "name": "编辑商品陈列图",
+      "description": "Web 页面 /pos-admin/planograms - 新建与编辑陈列方案、维护商品陈列参数（包装尺寸、吊孔偏移、每钩挂数）"
+    },
+    "Planogram.Manage": {
+      "name": "管理商品陈列图",
+      "description": "Web 页面 /pos-admin/planograms - 维护货架与挂钩型号、清除商品陈列参数、发布与归档陈列方案"
     },
     "SalesOrders.View": {
       "name": "查看 POS 订单",
@@ -672,6 +689,10 @@
     "SalesDashboard.MonthlyDailySalesDownload.View": {
       "name": "查看并下载月度日销售",
       "description": "Web 页面 /executive-sales-intelligence/monthly-daily-sales-download - 选择月份和分店，预览并下载各店每天的营业额、刷卡和现金"
+    },
+    "SalesDashboard.HolidaySalesReport.View": {
+      "name": "查看节日销售报告",
+      "description": "Web 页面 /executive-sales-intelligence/holiday-sales-report - 查看万圣节 KFC / Brazco 商品的销售、卖断提前天数、滞销与库存，可看全部分店合计或单店"
     },
     "SalesDashboard.BatchProductSales.View": {
       "name": "查看批量货号销量",

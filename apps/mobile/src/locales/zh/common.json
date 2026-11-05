@@ -303,6 +303,7 @@
       "upTo": "截至",
       "live": "实时 {{time}}",
       "upcoming": "未到",
+      "closed": "未营业",
       "comparedAt": "{{time}} 后",
       "footnote": "从开门起累计，按门店本地时间；进行中的小时结束后才参与比较。"
     },
