@@ -80,6 +80,34 @@ public sealed class DailyCloseSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_counts_installment_payments_toward_the_cash_rounding_limit()
+    {
+        // 12 张订单的进位上限是 0.24（+1 分容差）。分期现金同样按笔进位：带上 5 笔分期付款后上限是 0.34。
+        var request = CreateRequest() with { CashRoundingAmount = 0.30m, CashDifference = 1.05m };
+
+        var rejected = await Assert.ThrowsAsync<DailyCloseValidationException>(() =>
+            CreateService(new FakeRepository()).SyncAsync(request, "S001", "POS-01", CancellationToken.None));
+        Assert.Equal("INVALID_CASH_ROUNDING", rejected.Code);
+
+        var repository = new FakeRepository();
+        var response = await CreateService(repository).SyncAsync(
+            request with { InstallmentPaymentCount = 5 },
+            "S001",
+            "POS-01",
+            CancellationToken.None);
+        Assert.True(response.Accepted);
+        Assert.Equal(400.30m, Assert.Single(repository.Records).ExpectedCashAmount);
+
+        var negative = await Assert.ThrowsAsync<DailyCloseValidationException>(() =>
+            CreateService(new FakeRepository()).SyncAsync(
+                CreateRequest() with { InstallmentPaymentCount = -1 },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+        Assert.Equal("INVALID_INSTALLMENT_PAYMENT_COUNT", negative.Code);
+    }
+
+    [Fact]
     public async Task SyncAsync_old_clients_without_cash_rounding_keep_the_previous_behavior()
     {
         var repository = new FakeRepository();

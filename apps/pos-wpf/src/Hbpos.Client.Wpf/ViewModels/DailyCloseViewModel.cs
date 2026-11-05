@@ -1565,12 +1565,21 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     private void ApplyReport(DailyCloseReport report)
     {
         _currentReport = report;
+        // 分期（Lay-by）收款接在销售汇总后面单列；没有分期收款的日子不显示这几行。
+        var installmentRows = report.HasInstallmentPayments
+            ? report.InstallmentPayments.Select(summary => new DailyClosePaymentSummaryItemViewModel(
+                $"Lay-by {summary.MethodLabel}",
+                summary.SalesAmount,
+                summary.RefundAmount,
+                summary.NetAmount,
+                summary.TransactionCount))
+            : [];
         PaymentSummaries.ReplaceWith(report.PaymentSummaries.Select(summary => new DailyClosePaymentSummaryItemViewModel(
             summary.MethodLabel,
             summary.SalesAmount,
             summary.RefundAmount,
             summary.NetAmount,
-            summary.TransactionCount)));
+            summary.TransactionCount)).Concat(installmentRows));
         CashRoundingAmount = report.CashRoundingAmount;
         ExpectedCashAmount = report.ExpectedCashAmount;
         GrossAmount = report.SalesAmount;

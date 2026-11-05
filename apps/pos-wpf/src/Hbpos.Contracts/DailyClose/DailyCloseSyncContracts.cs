@@ -73,7 +73,10 @@ public sealed record DailyCloseSyncRequest(
     decimal CashDifference,
     // 现金进位合计（澳洲现金按 5 分进位）：抽屉里实际收到的现金 = 现金净额 + 进位。
     // 可选、默认 0：旧客户端不带这个字段时与此前行为完全一致。
-    decimal CashRoundingAmount = 0m);
+    decimal CashRoundingAmount = 0m,
+    // 当天分期（Lay-by）收款与退款的笔数。分期现金和订单现金一样按笔进位，服务端核对进位上限时要把这些笔数算进去。
+    // Tenders 里的金额已经包含分期款项。可选、默认 0：旧客户端不带这个字段，行为不变。
+    int InstallmentPaymentCount = 0);
 
 /// <summary>
 /// Accepted 恒为 true（被拒绝时走 400 / 409）；AlreadySynced 表示同一份内容此前已入库；

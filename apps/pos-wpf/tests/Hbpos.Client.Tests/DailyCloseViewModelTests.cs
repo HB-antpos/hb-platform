@@ -1655,6 +1655,26 @@ public sealed class DailyCloseViewModelTests
             Task.FromResult(RestartFlowOutcome.NotDue);
     }
 
+    [Fact]
+    public async Task Summary_lists_installment_rows_after_the_sales_rows_and_includes_their_cash_in_expected_cash()
+    {
+        var service = new FakeDailyCloseService { ReportOverride = FakeDailyCloseService.CreateReportWithInstallments() };
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession());
+
+        await viewModel.RefreshSummaryCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            ["Cash", "Card", "Voucher", "Lay-by Cash", "Lay-by Card", "Lay-by Voucher"],
+            viewModel.PaymentSummaries.Select(item => item.Label));
+        var laybyCash = viewModel.PaymentSummaries.Single(item => item.Label == "Lay-by Cash");
+        Assert.Equal((60m, 15m, 45m), (laybyCash.SalesAmount, laybyCash.RefundAmount, laybyCash.NetAmount));
+        // 销售汇总不变，应有现金多出分期现金净额 45。
+        Assert.Equal(980.50m, viewModel.GrossAmount);
+        Assert.Equal(955.20m, viewModel.NetAmount);
+        Assert.Equal(18, viewModel.TransactionCount);
+        Assert.Equal(190.35m, viewModel.ExpectedCashAmount);
+    }
+
     private sealed class FakeDailyCloseService : IDailyCloseService
     {
         private readonly List<DailyCloseArchive> _archives = [];
@@ -1751,6 +1771,21 @@ public sealed class DailyCloseViewModelTests
             LastArchivesRequestedDate = businessDate;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<DailyCloseArchive>>(_archives.ToArray());
+        }
+
+        /// <summary>在默认汇总上加分期收款：现金收 60 退 15，刷卡收 120。</summary>
+        public static DailyCloseReport CreateReportWithInstallments()
+        {
+            return CreateReport() with
+            {
+                InstallmentSummaries =
+                [
+                    new DailyClosePaymentSummary(PaymentMethodKind.Cash, 60m, 15m, 45m, 3),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Card, 120m, 0m, 120m, 2),
+                    new DailyClosePaymentSummary(PaymentMethodKind.Voucher, 0m, 0m, 0m, 0)
+                ],
+                InstallmentPaymentCount = 5
+            };
         }
 
         /// <summary>在默认汇总上多一笔现金销售（订单数 +1，现金销售与净额各加 amount）。</summary>

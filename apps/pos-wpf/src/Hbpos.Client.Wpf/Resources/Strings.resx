@@ -1053,6 +1053,9 @@
   <data name="dailyClose.reportTitle" xml:space="preserve"><value>Z-Report</value></data>
   <data name="dailyClose.systemTotals" xml:space="preserve"><value>System Totals</value></data>
   <data name="dailyClose.method" xml:space="preserve"><value>Method</value></data>
+  <data name="dailyClose.layby.cash" xml:space="preserve"><value>Lay-by Cash</value></data>
+  <data name="dailyClose.layby.card" xml:space="preserve"><value>Lay-by Card</value></data>
+  <data name="dailyClose.layby.voucher" xml:space="preserve"><value>Lay-by Voucher</value></data>
   <data name="dailyClose.sales" xml:space="preserve"><value>Sales</value></data>
   <data name="dailyClose.refund" xml:space="preserve"><value>Refund</value></data>
   <data name="dailyClose.net" xml:space="preserve"><value>Net</value></data>

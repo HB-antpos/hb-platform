@@ -155,6 +155,15 @@
                 <DataTrigger Binding="{Binding Label}" Value="Voucher">
                     <Setter Property="Text" Value="{loc:Loc payment.method.voucher}" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding Label}" Value="Lay-by Cash">
+                    <Setter Property="Text" Value="{loc:Loc dailyClose.layby.cash}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Label}" Value="Lay-by Card">
+                    <Setter Property="Text" Value="{loc:Loc dailyClose.layby.card}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Label}" Value="Lay-by Voucher">
+                    <Setter Property="Text" Value="{loc:Loc dailyClose.layby.voucher}" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 

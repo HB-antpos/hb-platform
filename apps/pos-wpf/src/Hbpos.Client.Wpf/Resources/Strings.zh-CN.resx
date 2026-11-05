@@ -2947,6 +2947,15 @@
   <data name="dailyClose.systemTotals" xml:space="preserve">
     <value>系统汇总</value>
   </data>
+  <data name="dailyClose.layby.cash" xml:space="preserve">
+    <value>分期·现金</value>
+  </data>
+  <data name="dailyClose.layby.card" xml:space="preserve">
+    <value>分期·刷卡</value>
+  </data>
+  <data name="dailyClose.layby.voucher" xml:space="preserve">
+    <value>分期·礼券</value>
+  </data>
   <data name="dailyClose.method" xml:space="preserve">
     <value>方式</value>
   </data>

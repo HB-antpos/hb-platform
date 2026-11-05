@@ -178,6 +178,23 @@ public static class DailyCloseTextFormatter
                 payment.NetAmount));
         }
 
+        if (report.HasInstallmentPayments)
+        {
+            // 分期（Lay-by）收款不属于销售订单，单列：Sales 列是收到的定金和续付，Refund 列是取消分期的退款。
+            builder.Separator();
+            builder.Text(FitTwoColumns("Lay-by Payments", report.InstallmentPaymentCount.ToString(CultureInfo.InvariantCulture)));
+            foreach (var payment in report.InstallmentPayments)
+            {
+                builder.Text(FitPaymentColumns(
+                    $"LB {payment.MethodLabel}",
+                    payment.SalesAmount,
+                    payment.RefundAmount,
+                    payment.NetAmount));
+            }
+
+            builder.Text(FitTwoColumns("Lay-by Net", Money(report.InstallmentNetAmount)), isEmphasized: true);
+        }
+
         builder.Separator();
         builder.Text(FitTwoColumns("Orders", report.OrderCount.ToString(CultureInfo.InvariantCulture)));
         builder.Text(FitTwoColumns("Sales Amount", Money(report.SalesAmount)));
@@ -185,7 +202,7 @@ public static class DailyCloseTextFormatter
         builder.Text(FitTwoColumns("Return Qty", report.ReturnQuantity.ToString("0.##", CultureInfo.InvariantCulture)));
         builder.Text(FitTwoColumns("Net Amount", Money(report.NetAmount)), isEmphasized: true);
         builder.Separator();
-        // 现金进位（5 分进位）单独一行：Cash 行是订单精确金额，Cash Expected = Cash 净额 + 进位。
+        // 现金进位（5 分进位）单独一行：Cash 行是订单精确金额，Cash Expected = Cash 净额 + 分期现金净额 + 进位。
         builder.Text(FitTwoColumns("Cash Rounding", SignedMoney(report.CashRoundingAmount)));
         builder.Text(FitTwoColumns("Cash Expected", Money(report.ExpectedCashAmount)));
         builder.Text(FitTwoColumns("Cash Counted", Money(archive.CountedCashAmount)), isEmphasized: true);

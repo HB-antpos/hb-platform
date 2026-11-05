@@ -111,6 +111,16 @@ public sealed class DailyCloseUploadRepositoryTests
                 Assert.Contains(column, columns.Keys);
             }
 
+            // 分期收款列同样靠默认值补齐：历史日结不含分期，读出来是 0，应有现金与升级前一致。
+            Assert.Equal(("TEXT", true, "'0'"), columns["InstallmentCashReceivedAmount"]);
+            Assert.Equal(("INTEGER", true, "0"), columns["InstallmentPaymentCount"]);
+            var historical = await new LocalDailyCloseRepository(store).GetArchiveForUploadAsync(legacyGuids[0]);
+            Assert.False(historical!.Report.HasInstallmentPayments);
+            Assert.Equal(0, historical.Report.InstallmentPaymentCount);
+            Assert.Equal(
+                historical.Report.PaymentSummaries.Single(item => item.Method == Hbpos.Contracts.Orders.PaymentMethodKind.Cash).NetAmount,
+                historical.Report.SystemCashAmount);
+
             // 关键：没有任何回填 UPDATE，历史行靠列默认值自动变 Pending 且 NextUploadAt 为 NULL（立即到期）。
             var repository = new LocalDailyCloseRepository(store);
             foreach (var guid in legacyGuids)

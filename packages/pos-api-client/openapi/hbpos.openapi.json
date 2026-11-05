@@ -8561,6 +8561,10 @@
           "cashRoundingAmount": {
             "type": "number",
             "format": "double"
+          },
+          "installmentPaymentCount": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
