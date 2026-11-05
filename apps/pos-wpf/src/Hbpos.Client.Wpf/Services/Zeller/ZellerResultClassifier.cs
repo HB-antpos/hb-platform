@@ -34,6 +34,9 @@ public enum ZellerFailureKind
     SetupRequired,
     InvalidRequest,
     Busy,
+
+    /// <summary>Zeller SDK 本身起不来（例如缺少 WebView2 运行时），请求没有发出。</summary>
+    SdkUnavailable,
     OriginalTransactionNotFound,
     ResultUnknown
 }
@@ -108,6 +111,11 @@ public static class ZellerResultClassifier
             // 看门狗放弃的调用和抛异常的调用，SDK 内部状态都不可信：先重建 Terminal 再查询。
             ZellerCallOutcome.Abandoned => Unknown(ZellerUnknownReason.WatchdogTimeout, rebuildTerminalFirst: true),
             ZellerCallOutcome.Faulted => Unknown(ZellerUnknownReason.SdkException, rebuildTerminalFirst: true),
+
+            // 请求没有进入 SDK：要么在网关里排队时被取消，要么创建 Terminal 或发起调用时就失败了。
+            ZellerCallOutcome.NotStarted => new ZellerCallClassification(
+                ZellerCallDecision.NotSubmitted,
+                result.ErrorType == ZellerErrorType.Cancelled ? ZellerFailureKind.Cancelled : ZellerFailureKind.SdkUnavailable),
             _ => Unknown(ZellerUnknownReason.SdkError)
         };
     }
