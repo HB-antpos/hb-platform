@@ -2473,6 +2473,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/installments/{installmentGuid}/repayment-claims/blocking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    installmentGuid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["InstallmentRepaymentBlockingClaimResponseApiResult"];
+                        "application/json": components["schemas"]["InstallmentRepaymentBlockingClaimResponseApiResult"];
+                        "text/json": components["schemas"]["InstallmentRepaymentBlockingClaimResponseApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/installments/{installmentGuid}/repayment-claims/{operationGuid}/supervisor-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    installmentGuid: string;
+                    operationGuid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["InstallmentRepaymentClaimSupervisorResolveRequest"];
+                    "text/json": components["schemas"]["InstallmentRepaymentClaimSupervisorResolveRequest"];
+                    "application/*+json": components["schemas"]["InstallmentRepaymentClaimSupervisorResolveRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["InstallmentRepaymentClaimDtoApiResult"];
+                        "application/json": components["schemas"]["InstallmentRepaymentClaimDtoApiResult"];
+                        "text/json": components["schemas"]["InstallmentRepaymentClaimDtoApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/installments/{installmentGuid}/repayment-claims/{operationGuid}/commit": {
         parameters: {
             query?: never;
@@ -6753,6 +6838,15 @@ export interface components {
             /** Format: uuid */
             originalPaymentGuid?: string;
         };
+        InstallmentRepaymentBlockingClaimResponse: {
+            claim?: components["schemas"]["InstallmentRepaymentClaimDto"];
+        };
+        InstallmentRepaymentBlockingClaimResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["InstallmentRepaymentBlockingClaimResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
         InstallmentRepaymentCapabilitiesResponse: {
             repaymentClaimsSupported?: boolean;
             repaymentClaimsRequired?: boolean;
@@ -6770,6 +6864,7 @@ export interface components {
             repaymentClaimPrepareProviderV1?: boolean;
             amendLinesSupported?: boolean;
             cardRepaymentProviders?: string[] | null;
+            cardRepaymentSupervisorResolveSupported?: boolean;
         };
         InstallmentRepaymentCapabilitiesResponseApiResult: {
             success?: boolean;
@@ -6818,6 +6913,7 @@ export interface components {
             expiresAtUtc?: string | null;
             commit?: components["schemas"]["InstallmentAppendPaymentResponse"];
             alreadyExists?: boolean;
+            claimantDeviceCode?: string | null;
         };
         InstallmentRepaymentClaimDtoApiResult: {
             success?: boolean;
@@ -6850,6 +6946,16 @@ export interface components {
          * @enum {integer}
          */
         InstallmentRepaymentClaimStatus: 1 | 2 | 3 | 4 | 5 | 6;
+        InstallmentRepaymentClaimSupervisorResolveRequest: {
+            decision?: components["schemas"]["InstallmentRepaymentSupervisorDecision"];
+            reason?: string | null;
+            reference?: string | null;
+        };
+        /**
+         * Format: int32
+         * @enum {integer}
+         */
+        InstallmentRepaymentSupervisorDecision: 1 | 2;
         /**
          * Format: int32
          * @enum {integer}

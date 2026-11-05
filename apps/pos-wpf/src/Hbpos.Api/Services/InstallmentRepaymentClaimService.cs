@@ -95,6 +95,22 @@ public interface IInstallmentRepaymentClaimService
     Task EnsureLegacyAppendAllowedAsync(Guid installmentGuid, CancellationToken cancellationToken);
 
     Task EnsureNoBlockingClaimAsync(Guid installmentGuid, CancellationToken cancellationToken);
+
+    /// <summary>同店任意收银机查看占用该分期的续付 claim（没有时返回 null），供主管结案前核对。</summary>
+    Task<InstallmentRepaymentClaimDto?> GetBlockingForSupervisorAsync(
+        Guid installmentGuid,
+        InstallmentRepaymentClaimIdentity identity,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    /// <summary>主管结案卡状态不明的刷卡续付：确认已扣款按 claim 金额入账，确认未扣款结案为 Declined。</summary>
+    Task<InstallmentRepaymentClaimDto> SupervisorResolveAsync(
+        Guid installmentGuid,
+        Guid operationGuid,
+        InstallmentRepaymentClaimSupervisorResolveRequest request,
+        InstallmentRepaymentClaimIdentity identity,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }
 
 public sealed class InstallmentRepaymentClaimService(
@@ -133,7 +149,8 @@ public sealed class InstallmentRepaymentClaimService(
             CrossDevicePickupEnabled: _lifecycleOptions.PickupEnabled,
             RepaymentClaimPrepareProviderV1: true,
             AmendLinesSupported: true,
-            CardRepaymentProviders: _cardRepaymentProviders);
+            CardRepaymentProviders: _cardRepaymentProviders,
+            CardRepaymentSupervisorResolveSupported: true);
     }
 
     public async Task<InstallmentRepaymentClaimDto> CreateAsync(
@@ -695,6 +712,177 @@ public sealed class InstallmentRepaymentClaimService(
             alreadyExists: result.AlreadyRecorded);
     }
 
+    public async Task<InstallmentRepaymentClaimDto?> GetBlockingForSupervisorAsync(
+        Guid installmentGuid,
+        InstallmentRepaymentClaimIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        var viewer = NormalizeIdentity(identity);
+        // 中文注释：只读查看，分期查看或取消权限即可；结案本身另需取消权限。
+        if (viewer.PermissionCodes?.Any(code =>
+                string.Equals(code, Permissions.PosTerminal.Installments.View, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(code, Permissions.PosTerminal.Installments.Cancel, StringComparison.OrdinalIgnoreCase)) != true)
+        {
+            throw PermissionDenied("Verified cashier lacks the installment view permission.");
+        }
+
+        var blocking = await claimRepository.GetBlockingAsync(installmentGuid, cancellationToken);
+        if (blocking is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(blocking.StoreCode, viewer.StoreCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Mismatch("Installment does not belong to the authenticated store.");
+        }
+
+        blocking = await ExpirePreparedAsync(blocking, cancellationToken);
+        return IsBlocking(blocking.Status) ? await MapAsync(blocking, alreadyExists: true) : null;
+    }
+
+    public async Task<InstallmentRepaymentClaimDto> SupervisorResolveAsync(
+        Guid installmentGuid,
+        Guid operationGuid,
+        InstallmentRepaymentClaimSupervisorResolveRequest request,
+        InstallmentRepaymentClaimIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        var supervisor = NormalizeIdentity(identity);
+        RequireSupervisorPermission(supervisor);
+        if (!Enum.IsDefined(request.Decision))
+        {
+            throw Invalid("decision is invalid.");
+        }
+
+        var reason = NormalizeRequired(request.Reason, "reason", 200);
+        var reference = NormalizeOptional(request.Reference);
+        if (reference is { Length: > 100 })
+        {
+            throw Invalid("reference must not exceed 100 characters.");
+        }
+
+        var current = await claimRepository.GetAsync(operationGuid, cancellationToken)
+            ?? throw new InstallmentRepaymentClaimException(
+                InstallmentRepaymentClaimErrorCodes.NotFound,
+                "Repayment claim was not found.");
+        // 中文注释：主管结案可在同店任意收银机上做（发起的收银机可能已经坏了），但不能跨店、不能换分期单。
+        if (current.InstallmentGuid != installmentGuid ||
+            !string.Equals(current.StoreCode, supervisor.StoreCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Mismatch("Authenticated identity does not match the repayment claim.");
+        }
+
+        if (current.Method != PaymentMethodKind.Card)
+        {
+            throw Mismatch("Only card repayment claims can be resolved by a supervisor.");
+        }
+
+        var targetStatus = request.Decision == InstallmentRepaymentSupervisorDecision.ConfirmedCharged
+            ? InstallmentRepaymentClaimStatus.Committed
+            : InstallmentRepaymentClaimStatus.Declined;
+        if (current.Status == targetStatus)
+        {
+            return await MapAsync(current, alreadyExists: true);
+        }
+
+        if (current.Status is not (InstallmentRepaymentClaimStatus.ProviderPending or InstallmentRepaymentClaimStatus.Unknown) ||
+            string.IsNullOrWhiteSpace(current.Provider))
+        {
+            // Prepared 还没调用刷卡机，交给原收银机释放即可；其余终态不能再改。
+            throw Mismatch("Only a card claim whose provider result is pending or unknown can be resolved by a supervisor.");
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var reopened = current.Status == InstallmentRepaymentClaimStatus.ProviderPending
+            ? current
+            : await UpdateOrReloadAsync(current, current with
+            {
+                Status = InstallmentRepaymentClaimStatus.ProviderPending,
+                UpdatedAtUtc = now,
+                Revision = current.Revision + 1
+            }, cancellationToken);
+        if (reopened.Status != InstallmentRepaymentClaimStatus.ProviderPending)
+        {
+            throw Mismatch("Repayment claim changed while the supervisor was resolving it.");
+        }
+
+        InstallmentRepaymentClaimDto result;
+        if (request.Decision == InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged)
+        {
+            var declined = await UpdateOrReloadAsync(reopened, reopened with
+            {
+                Status = InstallmentRepaymentClaimStatus.Declined,
+                UpdatedAtUtc = now,
+                ExpiresAtUtc = null,
+                LastRecoveryCashierId = supervisor.CashierId,
+                LastRecoveryCashierName = supervisor.CashierName,
+                LastRecoveryCashierUserGuid = supervisor.CashierUserGuid,
+                RecoveredAtUtc = now,
+                Revision = reopened.Revision + 1
+            }, cancellationToken);
+            if (declined.Status != InstallmentRepaymentClaimStatus.Declined)
+            {
+                throw Mismatch("Repayment claim changed while the supervisor was resolving it.");
+            }
+
+            result = await MapAsync(declined, alreadyExists: false);
+            current = declined;
+        }
+        else
+        {
+            // 中文注释：没有刷卡机给的交易证据，按主管核实的结论写一条「<通道> Supervisor」证据，金额就是 claim 锁定的金额。
+            var provider = InstallmentCardRepaymentProviders.NormalizeFamily(reopened.Provider) ?? reopened.Provider!;
+            var processor = provider switch
+            {
+                InstallmentCardRepaymentProviders.Linkly => "ANZ Supervisor",
+                InstallmentCardRepaymentProviders.Square => "Square Supervisor",
+                InstallmentCardRepaymentProviders.Zeller => "Zeller Supervisor",
+                _ => $"{reopened.Provider} Supervisor"
+            };
+            var commitRequest = new InstallmentRepaymentClaimCommitRequest(
+                Reference: $"SUPERVISOR:{reference ?? reopened.OperationGuid.ToString("N")}",
+                CardTransactions:
+                [
+                    new CardTransactionDto(
+                        processor,
+                        TxnRef: reference ?? $"SUPERVISOR-{reopened.OperationGuid:N}",
+                        AuthCode: null,
+                        CardType: null,
+                        CardBin: null,
+                        MaskedCardNumber: null,
+                        MerchantId: null,
+                        ResponseCode: null,
+                        ResponseText: "SUPERVISOR CONFIRMED",
+                        Stan: null,
+                        BankDateTime: null,
+                        Amount: reopened.Amount,
+                        ReceiptText: null)
+                ]);
+            InstallmentRepaymentClaimCommitEvidenceValidator.Validate(reopened, commitRequest);
+            var committed = await commitRepository.CommitAsync(reopened, commitRequest, supervisor, now, cancellationToken);
+            result = Map(committed.Claim, committed.CommitResponse, alreadyExists: committed.AlreadyRecorded);
+            current = committed.Claim;
+        }
+
+        if (cardTenderVerifier is not null)
+        {
+            await cardTenderVerifier.RecordSupervisorResolutionAsync(current, request.Decision, reason, reference, supervisor);
+        }
+
+        return result;
+    }
+
+    private static void RequireSupervisorPermission(InstallmentRepaymentClaimIdentity identity)
+    {
+        if (identity.PermissionCodes?.Contains(
+                Permissions.PosTerminal.Installments.Cancel,
+                StringComparer.OrdinalIgnoreCase) != true)
+        {
+            throw PermissionDenied("Verified cashier lacks the installment cancellation permission required to resolve card repayments.");
+        }
+    }
+
     public async Task EnsureLegacyAppendAllowedAsync(
         Guid installmentGuid,
         CancellationToken cancellationToken)
@@ -934,7 +1122,8 @@ public sealed class InstallmentRepaymentClaimService(
             claim.UpdatedAtUtc,
             claim.ExpiresAtUtc,
             commit,
-            alreadyExists);
+            alreadyExists,
+            claim.ClaimantDeviceCode);
     }
 
     private static InstallmentRepaymentClaimCreateRequest NormalizeCreateRequest(

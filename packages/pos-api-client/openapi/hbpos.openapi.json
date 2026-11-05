@@ -3009,6 +3009,114 @@
         }
       }
     },
+    "/api/v1/installments/{installmentGuid}/repayment-claims/blocking": {
+      "get": {
+        "tags": [
+          "Installments"
+        ],
+        "parameters": [
+          {
+            "name": "installmentGuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentBlockingClaimResponseApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentBlockingClaimResponseApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentBlockingClaimResponseApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/installments/{installmentGuid}/repayment-claims/{operationGuid}/supervisor-resolve": {
+      "post": {
+        "tags": [
+          "Installments"
+        ],
+        "parameters": [
+          {
+            "name": "installmentGuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "operationGuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentRepaymentClaimSupervisorResolveRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentRepaymentClaimSupervisorResolveRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentRepaymentClaimSupervisorResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentClaimDtoApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentClaimDtoApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentRepaymentClaimDtoApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/installments/{installmentGuid}/repayment-claims/{operationGuid}/commit": {
       "post": {
         "tags": [
@@ -10204,6 +10312,35 @@
         },
         "additionalProperties": false
       },
+      "InstallmentRepaymentBlockingClaimResponse": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "$ref": "#/components/schemas/InstallmentRepaymentClaimDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallmentRepaymentBlockingClaimResponseApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InstallmentRepaymentBlockingClaimResponse"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "InstallmentRepaymentCapabilitiesResponse": {
         "type": "object",
         "properties": {
@@ -10254,6 +10391,9 @@
               "type": "string"
             },
             "nullable": true
+          },
+          "cardRepaymentSupervisorResolveSupported": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -10393,6 +10533,10 @@
           },
           "alreadyExists": {
             "type": "boolean"
+          },
+          "claimantDeviceCode": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -10479,6 +10623,31 @@
           4,
           5,
           6
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "InstallmentRepaymentClaimSupervisorResolveRequest": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/InstallmentRepaymentSupervisorDecision"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "reference": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallmentRepaymentSupervisorDecision": {
+        "enum": [
+          1,
+          2
         ],
         "type": "integer",
         "format": "int32"

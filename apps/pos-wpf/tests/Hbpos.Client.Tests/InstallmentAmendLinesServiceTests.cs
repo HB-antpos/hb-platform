@@ -342,6 +342,77 @@ public sealed class InstallmentAmendLinesServiceTests
         Assert.False(await harness.Service.IsCardRepaymentSupportedAsync(Session()));
     }
 
+    [Fact]
+    public async Task Pending_card_repayment_is_listed_only_for_card_claims_with_an_unknown_provider_result()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var installmentGuid = harness.Baseline.InstallmentGuid;
+        harness.Api.Capabilities = new(true, false, false, 120, CardRepaymentSupervisorResolveSupported: false);
+        harness.Api.BlockingClaim = Claim(installmentGuid, PaymentMethodKind.Card, InstallmentRepaymentClaimStatus.Unknown);
+        Assert.Null(await harness.Service.GetPendingCardRepaymentAsync(Session(), installmentGuid));
+
+        harness.Api.Capabilities = new(true, false, false, 120, CardRepaymentSupervisorResolveSupported: true);
+        var pending = await harness.Service.GetPendingCardRepaymentAsync(Session(), installmentGuid);
+        Assert.NotNull(pending);
+        Assert.Equal(25m, pending.Amount);
+        Assert.Equal("Zeller", pending.Provider);
+        Assert.Equal("POS-02", pending.ClaimantDeviceCode);
+
+        harness.Api.BlockingClaim = Claim(installmentGuid, PaymentMethodKind.Cash, InstallmentRepaymentClaimStatus.ProviderPending);
+        Assert.Null(await harness.Service.GetPendingCardRepaymentAsync(Session(), installmentGuid));
+        harness.Api.BlockingClaim = Claim(installmentGuid, PaymentMethodKind.Card, InstallmentRepaymentClaimStatus.Prepared);
+        Assert.Null(await harness.Service.GetPendingCardRepaymentAsync(Session(), installmentGuid));
+        Assert.Null(await harness.Service.GetPendingCardRepaymentAsync(Session(isOnline: false), installmentGuid));
+    }
+
+    [Fact]
+    public async Task Supervisor_resolution_sends_the_decision_and_saves_the_committed_snapshot()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var installmentGuid = harness.Baseline.InstallmentGuid;
+        var details = Details(T0, OriginalLines());
+        var claim = Claim(installmentGuid, PaymentMethodKind.Card, InstallmentRepaymentClaimStatus.Unknown);
+        harness.Api.SupervisorResolveResponse = claim with
+        {
+            Status = InstallmentRepaymentClaimStatus.Committed,
+            Commit = new InstallmentAppendPaymentResponse(installmentGuid, claim.PaymentGuid, details.PaidAmount, details.BalanceAmount, details.Status, details)
+        };
+        var pending = new InstallmentPendingCardRepayment(installmentGuid, claim.OperationGuid, 25m, "Zeller", "POS-02", InstallmentRepaymentClaimStatus.Unknown, T0);
+
+        var missingReason = await harness.Service.ResolveCardRepaymentBySupervisorAsync(
+            Session(), pending, InstallmentRepaymentSupervisorDecision.ConfirmedCharged, " ", null);
+        var result = await harness.Service.ResolveCardRepaymentBySupervisorAsync(
+            Session(), pending, InstallmentRepaymentSupervisorDecision.ConfirmedCharged, " Zeller portal shows approved ", "RRN-1");
+
+        Assert.False(missingReason.Succeeded);
+        Assert.True(result.Succeeded, result.Message);
+        Assert.NotNull(result.Order);
+        var sent = Assert.Single(harness.Api.SupervisorRequests);
+        Assert.Equal(claim.OperationGuid, sent.OperationGuid);
+        Assert.Equal(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, sent.Request.Decision);
+        Assert.Equal("Zeller portal shows approved", sent.Request.Reason);
+        Assert.Equal("RRN-1", sent.Request.Reference);
+        Assert.NotNull(await harness.Repository.GetAsync(installmentGuid));
+    }
+
+    private static InstallmentRepaymentClaimDto Claim(
+        Guid installmentGuid,
+        PaymentMethodKind method,
+        InstallmentRepaymentClaimStatus status) => new(
+        installmentGuid,
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        25m,
+        method,
+        "idem",
+        status,
+        status == InstallmentRepaymentClaimStatus.Prepared ? null : method == PaymentMethodKind.Card ? "Zeller" : "Cash",
+        status == InstallmentRepaymentClaimStatus.Prepared ? null : "attempt",
+        T0,
+        T0,
+        null,
+        ClaimantDeviceCode: "POS-02");
+
     [Theory]
     [InlineData(CardProcessorKind.Square, true)]
     [InlineData(CardProcessorKind.Linkly, true)]
@@ -625,6 +696,25 @@ public sealed class InstallmentAmendLinesServiceTests
         public int DetailsCallCount { get; private set; }
 
         public InstallmentRepaymentCapabilitiesResponse? Capabilities { get; set; }
+
+        public InstallmentRepaymentClaimDto? BlockingClaim { get; set; }
+
+        public InstallmentRepaymentClaimDto? SupervisorResolveResponse { get; set; }
+
+        public List<(Guid OperationGuid, InstallmentRepaymentClaimSupervisorResolveRequest Request)> SupervisorRequests { get; } = [];
+
+        public Task<InstallmentRepaymentBlockingClaimResponse> GetBlockingRepaymentClaimAsync(Guid installmentGuid, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new InstallmentRepaymentBlockingClaimResponse(BlockingClaim));
+
+        public Task<InstallmentRepaymentClaimDto> SupervisorResolveRepaymentClaimAsync(
+            Guid installmentGuid,
+            Guid operationGuid,
+            InstallmentRepaymentClaimSupervisorResolveRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            SupervisorRequests.Add((operationGuid, request));
+            return Task.FromResult(SupervisorResolveResponse ?? throw new InvalidOperationException("SupervisorResolveResponse was not configured."));
+        }
 
         public Exception? CapabilitiesException { get; set; }
 

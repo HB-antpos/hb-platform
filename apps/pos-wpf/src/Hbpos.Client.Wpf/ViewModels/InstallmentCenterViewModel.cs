@@ -47,6 +47,11 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     [ObservableProperty] private string _supervisorRefundReason = string.Empty;
     [ObservableProperty] private string _supervisorRefundEvidence = string.Empty;
     [ObservableProperty] private string _supervisorRefundReference = string.Empty;
+    [ObservableProperty] private InstallmentPendingCardRepayment? _pendingCardRepayment;
+    // 中文注释：结论不给默认值，主管必须自己选「已扣款」或「未扣款」。
+    [ObservableProperty] private InstallmentRepaymentSupervisorDecision? _supervisorCardRepaymentDecision;
+    [ObservableProperty] private string _supervisorCardRepaymentReason = string.Empty;
+    [ObservableProperty] private string _supervisorCardRepaymentReference = string.Empty;
 
     public InstallmentCenterViewModel(
         IInstallmentOrderService installmentOrderService,
@@ -92,6 +97,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         VoidCancelCommand = new AsyncRelayCommand(VoidCancelAsync, CanVoidCancel);
         ConfirmPickupCommand = new AsyncRelayCommand(ConfirmPickupAsync, CanConfirmPickup);
         SupervisorResolveRefundCommand = new AsyncRelayCommand(ResolveRefundBySupervisorAsync, CanResolveRefundBySupervisor);
+        SupervisorResolveCardRepaymentCommand = new AsyncRelayCommand(ResolveCardRepaymentBySupervisorAsync, CanResolveCardRepaymentBySupervisor);
         BackToPaymentCommand = new RelayCommand(_backToPayment);
 
         RefreshPaymentMethodOptions();
@@ -118,6 +124,21 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public IAsyncRelayCommand VoidCancelCommand { get; }
     public IAsyncRelayCommand ConfirmPickupCommand { get; }
     public IAsyncRelayCommand SupervisorResolveRefundCommand { get; }
+    public IAsyncRelayCommand SupervisorResolveCardRepaymentCommand { get; }
+    public IReadOnlyList<InstallmentCardRepaymentDecisionOption> SupervisorCardRepaymentDecisions { get; } =
+        [
+            new(InstallmentRepaymentSupervisorDecision.ConfirmedCharged, "已核实扣款成功：按这笔金额入账"),
+            new(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, "已核实没有扣款：结案并解除占用")
+        ];
+    public bool HasPendingCardRepayment => PendingCardRepayment is not null;
+    public string PendingCardRepaymentText => PendingCardRepayment is not { } pending
+        ? string.Empty
+        : string.Format(
+            GetCulture(),
+            "刷卡续付 {0:C2}（{1}，收银机 {2}）结果不明，已占用这张分期单。请先在银行或刷卡机后台核实这笔交易，再按核实结果结案。",
+            pending.Amount,
+            pending.Provider,
+            pending.ClaimantDeviceCode ?? "-");
     public IRelayCommand BackToPaymentCommand { get; }
 
     public string PageTitleText => T("installment.center.title", "Lay-by Center");
@@ -171,6 +192,123 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         OnPropertyChanged(nameof(IsSelectedOrderLocked));
         RaiseSelectionStateChanged();
         _ = RefreshSupervisorRefundStepsSafelyAsync(value?.OrderId);
+        PendingCardRepayment = null;
+        _ = RefreshPendingCardRepaymentSafelyAsync(value?.OrderId);
+    }
+
+    partial void OnPendingCardRepaymentChanged(InstallmentPendingCardRepayment? value)
+    {
+        SupervisorCardRepaymentDecision = null;
+        SupervisorCardRepaymentReason = string.Empty;
+        SupervisorCardRepaymentReference = string.Empty;
+        OnPropertyChanged(nameof(HasPendingCardRepayment));
+        OnPropertyChanged(nameof(PendingCardRepaymentText));
+        SupervisorResolveCardRepaymentCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnSupervisorCardRepaymentDecisionChanged(InstallmentRepaymentSupervisorDecision? value) =>
+        SupervisorResolveCardRepaymentCommand.NotifyCanExecuteChanged();
+
+    partial void OnSupervisorCardRepaymentReasonChanged(string value) =>
+        SupervisorResolveCardRepaymentCommand.NotifyCanExecuteChanged();
+
+    private async Task RefreshPendingCardRepaymentSafelyAsync(Guid? installmentGuid)
+    {
+        if (installmentGuid is null || IsOffline)
+        {
+            return;
+        }
+
+        try
+        {
+            var pending = await _installmentOrderService.GetPendingCardRepaymentAsync(Session, installmentGuid.Value);
+            if (SelectedOrder?.OrderId == installmentGuid)
+            {
+                PendingCardRepayment = pending;
+            }
+        }
+        catch (Exception exception)
+        {
+            ConsoleLog.WriteError("InstallmentSupervisor", "failed to load the pending card repayment", null, exception);
+        }
+    }
+
+    private bool CanResolveCardRepaymentBySupervisor() =>
+        !IsBusy &&
+        !IsOffline &&
+        PendingCardRepayment is not null &&
+        SelectedOrder?.OrderId == PendingCardRepayment.InstallmentGuid &&
+        SupervisorCardRepaymentDecision is not null &&
+        !string.IsNullOrWhiteSpace(SupervisorCardRepaymentReason);
+
+    private async Task ResolveCardRepaymentBySupervisorAsync()
+    {
+        var pending = PendingCardRepayment;
+        var decision = SupervisorCardRepaymentDecision;
+        var selectedOrder = SelectedOrder;
+        if (pending is null || decision is null || selectedOrder?.OrderId != pending.InstallmentGuid)
+        {
+            return;
+        }
+
+        using var authorization = await AuthorizeAsync(Permissions.PosTerminal.Installments.Cancel, "supervisor-card-repayment-resolution");
+        if (authorization is null)
+        {
+            return;
+        }
+
+        using var authorizationActivation = authorization.Activate();
+        if (PendingCardRepayment?.OperationGuid != pending.OperationGuid || SupervisorCardRepaymentDecision != decision)
+        {
+            return;
+        }
+
+        var reason = SupervisorCardRepaymentReason.Trim();
+        var reference = Normalize(SupervisorCardRepaymentReference);
+        try
+        {
+            IsBusy = true;
+            var result = await _installmentOrderService.ResolveCardRepaymentBySupervisorAsync(Session, pending, decision.Value, reason, reference);
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.InstallmentRepaymentComplete,
+                result.Succeeded ? "SupervisorResolved" : "SupervisorResolutionRejected",
+                Session,
+                reasonCode: decision.Value.ToString(),
+                safeMessage: $"reason={reason}; reference={reference ?? "-"}; provider={pending.Provider}; claimantDevice={pending.ClaimantDeviceCode ?? "-"}",
+                paymentMethod: PaymentMethodKind.Card.ToString(),
+                paymentAmount: pending.Amount,
+                orderGuid: pending.InstallmentGuid.ToString("D"));
+            SetLiteralStatus(result.Message);
+            if (result.Order is not null)
+            {
+                AppendOrUpdateOrder(result.Order);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.InstallmentRepaymentComplete,
+                "SupervisorResolutionFailed",
+                Session,
+                reasonCode: decision.Value.ToString(),
+                safeMessage: exception.GetType().Name,
+                orderGuid: pending.InstallmentGuid.ToString("D"));
+            SetLiteralStatus($"主管结案未保存：{exception.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            SetLiteralStatus("主管结案请求超时，结果未知，请刷新核对。");
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshLockedInstallmentsSafelyAsync();
+            await RefreshPendingCardRepaymentSafelyAsync(pending.InstallmentGuid);
+            OnPropertyChanged(nameof(IsSelectedOrderLocked));
+            RaiseSelectionStateChanged();
+        }
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -868,6 +1006,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         ConfirmPickupCommand.NotifyCanExecuteChanged();
         RecoveryCommand.NotifyCanExecuteChanged();
         SupervisorResolveRefundCommand.NotifyCanExecuteChanged();
+        SupervisorResolveCardRepaymentCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsCreateEnabled));
         OnPropertyChanged(nameof(IsAddRepaymentEnabled));
         OnPropertyChanged(nameof(IsCancelWithRefundEnabled));
@@ -961,3 +1100,6 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         }
     }
 }
+
+/// <summary>主管结案刷卡续付的选项。</summary>
+public sealed record InstallmentCardRepaymentDecisionOption(InstallmentRepaymentSupervisorDecision Decision, string Label);

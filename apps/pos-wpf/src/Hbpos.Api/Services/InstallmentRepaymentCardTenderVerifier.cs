@@ -11,6 +11,14 @@ namespace Hbpos.Api.Services;
 public interface IInstallmentRepaymentCardTenderVerifier
 {
     Task VerifyAsync(InstallmentRepaymentClaimRecord claim, InstallmentRepaymentClaimCommitRequest request);
+
+    /// <summary>主管结案留痕：登记一条 Warning 级异常（含主管、结论、原因、参考号），供财务按银行流水复核。</summary>
+    Task RecordSupervisorResolutionAsync(
+        InstallmentRepaymentClaimRecord claim,
+        InstallmentRepaymentSupervisorDecision decision,
+        string reason,
+        string? reference,
+        InstallmentRepaymentClaimIdentity supervisor) => Task.CompletedTask;
 }
 
 public sealed class InstallmentRepaymentCardTenderVerifier(
@@ -73,6 +81,56 @@ public sealed class InstallmentRepaymentCardTenderVerifier(
                 claim.PaymentGuid,
                 claim.StoreCode,
                 claim.ClaimantDeviceCode);
+        }
+    }
+
+    public async Task RecordSupervisorResolutionAsync(
+        InstallmentRepaymentClaimRecord claim,
+        InstallmentRepaymentSupervisorDecision decision,
+        string reason,
+        string? reference,
+        InstallmentRepaymentClaimIdentity supervisor)
+    {
+        using var timeout = new CancellationTokenSource(VerificationTimeout);
+        var issueType = decision == InstallmentRepaymentSupervisorDecision.ConfirmedCharged
+            ? CardTenderIssueTypes.SupervisorConfirmedCharged
+            : CardTenderIssueTypes.SupervisorConfirmedNotCharged;
+        var issue = new CardTenderIssue(
+            issueType,
+            CardTenderIssueSeverities.Warning,
+            CardTenderIssueSources.InstallmentRepayment,
+            claim.StoreCode,
+            supervisor.DeviceCode,
+            null,
+            null,
+            reference,
+            claim.InstallmentGuid.ToString("D"),
+            claim.PaymentGuid.ToString("D"),
+            claim.Amount,
+            CardTenderEvidenceChecker.Truncate(
+                $"Supervisor {supervisor.CashierName} ({supervisor.CashierId}) on device {supervisor.DeviceCode} resolved the {claim.Provider} card repayment " +
+                $"(operation {claim.OperationGuid:D}, started on {claim.ClaimantDeviceCode} by {claim.CashierName}) as {decision}. Reason: {reason}" +
+                (reference is null ? string.Empty : $" Reference: {reference}")));
+        logger?.LogWarning(
+            "Installment card repayment resolved by supervisor decision={Decision} installmentGuid={InstallmentGuid} operationGuid={OperationGuid} paymentGuid={PaymentGuid} amount={Amount} provider={Provider} supervisor={SupervisorId} device={DeviceCode} reason={Reason} reference={Reference}",
+            decision,
+            claim.InstallmentGuid,
+            claim.OperationGuid,
+            claim.PaymentGuid,
+            claim.Amount,
+            claim.Provider,
+            supervisor.CashierId,
+            supervisor.DeviceCode,
+            reason,
+            reference);
+        try
+        {
+            await repository.UpsertIssuesAsync([issue], timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            // 结案本身已经落库；留痕失败只记日志（日志里已有完整结论）。
+            logger?.LogError(ex, "Supervisor resolution audit issue could not be recorded operationGuid={OperationGuid}", claim.OperationGuid);
         }
     }
 

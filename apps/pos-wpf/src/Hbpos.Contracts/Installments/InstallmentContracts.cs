@@ -132,7 +132,9 @@ public sealed record InstallmentRepaymentCapabilitiesResponse(
     bool RepaymentClaimPrepareProviderV1 = false,
     bool AmendLinesSupported = false,
     // 允许刷卡续付的通道族（square / linkly / zeller）。旧服务端不返回（null）时，客户端只能看 CardRepaymentSupported。
-    IReadOnlyList<string>? CardRepaymentProviders = null);
+    IReadOnlyList<string>? CardRepaymentProviders = null,
+    // 服务端支持主管结案卡状态不明的刷卡续付（supervisor-resolve 与 blocking 查询）。
+    bool CardRepaymentSupervisorResolveSupported = false);
 
 /// <summary>
 /// 分期续付刷卡通道族的统一口径：claim 上登记的 provider、卡证据的 Processor、能力位与服务端开关都按它归一。
@@ -232,7 +234,28 @@ public sealed record InstallmentRepaymentClaimDto(
     DateTimeOffset UpdatedAtUtc,
     DateTimeOffset? ExpiresAtUtc,
     InstallmentAppendPaymentResponse? Commit = null,
-    bool AlreadyExists = false);
+    bool AlreadyExists = false,
+    // 发起这笔续付的收银机；主管在别的收银机上结案时据此提示。旧服务端不返回。
+    string? ClaimantDeviceCode = null);
+
+/// <summary>主管对卡状态不明的刷卡续付做的人工结论。</summary>
+public enum InstallmentRepaymentSupervisorDecision
+{
+    /// <summary>已向银行 / 刷卡机后台核实扣款成功：按 claim 金额入账。</summary>
+    ConfirmedCharged = 1,
+
+    /// <summary>已核实没有扣款：结案为 Declined，解除对该分期的占用。</summary>
+    ConfirmedNotCharged = 2
+}
+
+/// <summary>占用某个分期的续付 claim；没有占用时 Claim 为 null。</summary>
+public sealed record InstallmentRepaymentBlockingClaimResponse(InstallmentRepaymentClaimDto? Claim);
+
+/// <summary>主管结案请求。Reason 必填；Reference 可填银行批准码、RRN 等核实依据。</summary>
+public sealed record InstallmentRepaymentClaimSupervisorResolveRequest(
+    InstallmentRepaymentSupervisorDecision Decision,
+    string Reason,
+    string? Reference = null);
 
 public sealed record InstallmentCancelClaimCreateRequest(
     Guid OperationGuid,

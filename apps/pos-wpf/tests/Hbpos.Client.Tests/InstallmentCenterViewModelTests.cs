@@ -639,6 +639,53 @@ public sealed class InstallmentCenterViewModelTests
     }
 
     [Fact]
+    public async Task Supervisor_card_repayment_resolution_requires_an_explicit_decision_and_reason()
+    {
+        var targetOrder = CreateOrder("IO-CARD-UNKNOWN", "张三", "0400111222", "刷卡结果不明", canCancelWithRefund: true);
+        var pending = new InstallmentPendingCardRepayment(
+            targetOrder.OrderId,
+            Guid.NewGuid(),
+            30m,
+            "Zeller",
+            "POS-02",
+            InstallmentRepaymentClaimStatus.Unknown,
+            DateTimeOffset.UtcNow);
+        var service = new FakeInstallmentOrderService
+        {
+            Orders = [targetOrder],
+            PendingCardRepayment = pending
+        };
+        var session = CreateSession() with
+        {
+            CashierSession = CreateCashierSession(Permissions.PosTerminal.Installments.Cancel)
+        };
+        var viewModel = new InstallmentCenterViewModel(service, session, _ => Task.CompletedTask, () => { });
+
+        await viewModel.LoadAsync();
+        viewModel.SelectedOrder = null;
+        viewModel.SelectedOrder = targetOrder;
+
+        Assert.True(viewModel.HasPendingCardRepayment);
+        Assert.Contains("POS-02", viewModel.PendingCardRepaymentText);
+        Assert.Null(viewModel.SupervisorCardRepaymentDecision);
+        Assert.False(viewModel.SupervisorResolveCardRepaymentCommand.CanExecute(null));
+        viewModel.SupervisorCardRepaymentDecision = InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged;
+        Assert.False(viewModel.SupervisorResolveCardRepaymentCommand.CanExecute(null));
+        viewModel.SupervisorCardRepaymentReason = "Zeller 后台没有这笔交易";
+        viewModel.SupervisorCardRepaymentReference = " ";
+        Assert.True(viewModel.SupervisorResolveCardRepaymentCommand.CanExecute(null));
+
+        await viewModel.SupervisorResolveCardRepaymentCommand.ExecuteAsync(null);
+
+        var resolution = Assert.NotNull(service.LastCardRepaymentResolution);
+        Assert.Equal(pending.OperationGuid, resolution.Pending.OperationGuid);
+        Assert.Equal(InstallmentRepaymentSupervisorDecision.ConfirmedNotCharged, resolution.Decision);
+        Assert.Equal("Zeller 后台没有这笔交易", resolution.Reason);
+        Assert.Null(resolution.Reference);
+        Assert.False(viewModel.HasPendingCardRepayment);
+    }
+
+    [Fact]
     public async Task Supervisor_refund_resolution_handles_recovery_timeout_after_decision_is_saved()
     {
         var auditLogger = new RecordingOperationAuditLogger();
@@ -961,6 +1008,28 @@ public sealed class InstallmentCenterViewModelTests
     private sealed class FakeInstallmentOrderService : IInstallmentOrderService
     {
         public IReadOnlyList<InstallmentOrderSummary> Orders { get; init; } = [];
+
+        public InstallmentPendingCardRepayment? PendingCardRepayment { get; set; }
+
+        public InstallmentOrderActionResult CardRepaymentResolutionResult { get; init; } = new(true, "已结案");
+
+        public (InstallmentPendingCardRepayment Pending, InstallmentRepaymentSupervisorDecision Decision, string Reason, string? Reference)? LastCardRepaymentResolution { get; private set; }
+
+        public Task<InstallmentPendingCardRepayment?> GetPendingCardRepaymentAsync(PosSessionState session, Guid installmentGuid, CancellationToken cancellationToken = default) =>
+            Task.FromResult(PendingCardRepayment?.InstallmentGuid == installmentGuid ? PendingCardRepayment : null);
+
+        public Task<InstallmentOrderActionResult> ResolveCardRepaymentBySupervisorAsync(
+            PosSessionState session,
+            InstallmentPendingCardRepayment pending,
+            InstallmentRepaymentSupervisorDecision decision,
+            string reason,
+            string? reference,
+            CancellationToken cancellationToken = default)
+        {
+            LastCardRepaymentResolution = (pending, decision, reason, reference);
+            PendingCardRepayment = null;
+            return Task.FromResult(CardRepaymentResolutionResult);
+        }
 
         public InstallmentOrderActionResult AddRepaymentResult { get; init; } = new(false, "未配置");
 
