@@ -75,7 +75,7 @@ public sealed class ReceiptQueryServiceTests
     }
 
     [Fact]
-    public void Receipt_query_service_preserves_local_voucher_refund_mapping()
+    public void Receipt_query_service_maps_pure_voucher_refund_to_ordinary_refund_receipt_with_separate_voucher_face()
     {
         var order = CreateOrder(Guid.NewGuid(), DateTimeOffset.UtcNow, actualAmount: 8m) with
         {
@@ -87,13 +87,21 @@ public sealed class ReceiptQueryServiceTests
 
         var receipt = ReceiptQueryService.CreateReceipt(order);
 
-        var refundVoucher = Assert.IsType<RefundVoucherReceipt>(receipt.RefundVoucher);
-        Assert.Equal("RF-LOCAL", refundVoucher.VoucherCode);
-        Assert.Equal(8m, refundVoucher.Amount);
+        // 普通小票不再带券面：打出来是带商品明细的退款小票。
+        Assert.Null(receipt.RefundVoucher);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+        Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("*** Refund ***", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
+        Assert.All(receipt.Lines, line => Assert.Contains(line.DisplayName, document.PlainText, StringComparison.Ordinal));
+
+        // 券面另由 ReceiptRefundVoucherDocuments 生成。
+        var voucherDocument = Assert.Single(ReceiptRefundVoucherDocuments.Create(receipt));
+        Assert.Equal(new RefundVoucherReceipt("RF-LOCAL", 8m), voucherDocument.RefundVoucher);
     }
 
     [Fact]
-    public async Task Remote_order_history_maps_voucher_refund_to_standalone_receipt()
+    public async Task Remote_order_history_maps_pure_voucher_refund_to_ordinary_refund_receipt()
     {
         var orderGuid = Guid.NewGuid();
         var details = CreateRemoteDetails(
@@ -105,13 +113,13 @@ public sealed class ReceiptQueryServiceTests
         var receipt = await service.GetDetailsAsync(orderGuid);
 
         Assert.NotNull(receipt);
-        var refundVoucher = Assert.IsType<RefundVoucherReceipt>(receipt.RefundVoucher);
-        Assert.Equal("RF-REMOTE", refundVoucher.VoucherCode);
-        Assert.Equal(8m, refundVoucher.Amount);
-
+        Assert.Null(receipt.RefundVoucher);
         var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
-        Assert.Contains("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
-        Assert.DoesNotContain("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
+
+        var voucherDocument = Assert.Single(ReceiptRefundVoucherDocuments.Create(receipt));
+        Assert.Equal(new RefundVoucherReceipt("RF-REMOTE", 8m), voucherDocument.RefundVoucher);
     }
 
     [Fact]

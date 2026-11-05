@@ -91,14 +91,15 @@ public sealed class ReceiptQueryService(ILocalOrderRepository orderRepository) :
             }).ToList(),
             payments,
             order.TenderedAmount,
-            order.ChangeAmount,
-            RefundVoucher: ReceiptRefundVoucherMapper.TryCreate(payments));
+            order.ChangeAmount);
+        // 中文注释：纯退代金券单也返回带商品明细的普通退款小票，不再把券面塞进来；
+        // 券面由 ReceiptRefundVoucherDocuments 单独生成（自动打印与手动补打都在普通小票之后另出一张）。
     }
 }
 
 internal static class ReceiptRefundVoucherMapper
 {
-    // 本地与远程详情统一按小票付款行判断，避免两条收据路径的退款券语义漂移。
+    // 本地与远程详情统一按小票付款行判断「是否纯退代金券单」，避免两条收据路径的退款券语义漂移。
     public static RefundVoucherReceipt? TryCreate(IEnumerable<ReceiptPaymentLine> payments)
     {
         var paymentList = payments.ToList();

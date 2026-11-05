@@ -1135,6 +1135,146 @@ public sealed class ReceiptPrintingTests
             element => element.Text == $"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}");
     }
 
+    private static ReceiptDetails CreatePureVoucherRefundReceipt(Guid orderGuid, string voucherCode = "RF123") =>
+        CreateReceipt(orderGuid, paymentReference: $"VOUCHER_REFUND:{voucherCode}", paymentMethod: PaymentMethodKind.Voucher) with
+        {
+            TotalAmount = -8m,
+            ActualAmount = -8m,
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, $"VOUCHER_REFUND:{voucherCode}")]
+        };
+
+    private static void AssertRefundReceiptThenVoucherFace(IReadOnlyList<ReceiptPrintDocument> documents, string voucherCode)
+    {
+        Assert.Equal(2, documents.Count);
+        Assert.Contains("TAX INVOICE", documents[0].PlainText, StringComparison.Ordinal);
+        Assert.Contains("*** Refund ***", documents[0].PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFUND VOUCHER", documents[0].PlainText, StringComparison.Ordinal);
+        Assert.Contains("REFUND VOUCHER", documents[1].PlainText, StringComparison.Ordinal);
+        Assert.Contains($"Voucher: {voucherCode}", documents[1].PlainText, StringComparison.Ordinal);
+        Assert.Contains(documents[1].Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == voucherCode);
+    }
+
+    [Theory]
+    [InlineData(ReceiptPrintReason.Manual)]
+    [InlineData(ReceiptPrintReason.LastReceipt)]
+    [InlineData(ReceiptPrintReason.Reprint)]
+    public async Task Manual_print_of_pure_voucher_refund_prints_refund_receipt_then_voucher_face(ReceiptPrintReason reason)
+    {
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver);
+
+        var result = await service.PrintReceiptAsync(CreatePureVoucherRefundReceipt(Guid.NewGuid()), reason);
+
+        // 手动打印/补打上一张/历史补打：先出带商品明细的退款小票，再补出券面，券丢了也能重打。
+        Assert.True(result.Succeeded);
+        AssertRefundReceiptThenVoucherFace(driver.Documents, "RF123");
+    }
+
+    [Fact]
+    public async Task Order_and_latest_receipt_print_of_pure_voucher_refund_also_reprint_voucher_face()
+    {
+        var receipt = CreatePureVoucherRefundReceipt(Guid.NewGuid(), "RF321");
+        var query = new FakeReceiptQueryService { LatestReceipt = receipt };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(query, new FakeReceiptPrinterSettingsStore(), new ReceiptTextFormatter(), driver);
+
+        Assert.True((await service.PrintReceiptAsync(receipt.OrderGuid, ReceiptPrintReason.Manual)).Succeeded);
+        AssertRefundReceiptThenVoucherFace(driver.Documents, "RF321");
+
+        driver.Documents.Clear();
+        Assert.True((await service.PrintLatestReceiptAsync()).Succeeded);
+        AssertRefundReceiptThenVoucherFace(driver.Documents, "RF321");
+    }
+
+    [Theory]
+    [InlineData(ReceiptPrintReason.VoucherOrderAuto)]
+    [InlineData(ReceiptPrintReason.CardAuto)]
+    public async Task Automatic_print_of_pure_voucher_refund_receipt_does_not_append_voucher_face(ReceiptPrintReason reason)
+    {
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver);
+
+        var result = await service.PrintReceiptAsync(CreatePureVoucherRefundReceipt(Guid.NewGuid()), reason);
+
+        // 自动打印由付款完成流程自己逐张出券面，打印服务不能再重复附一张。
+        Assert.True(result.Succeeded);
+        var document = Assert.Single(driver.Documents);
+        Assert.Contains("*** Refund ***", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Manual_print_of_mixed_cash_and_voucher_refund_prints_only_the_refund_receipt()
+    {
+        var receipt = CreatePureVoucherRefundReceipt(Guid.NewGuid()) with
+        {
+            TotalAmount = -10m,
+            ActualAmount = -10m,
+            Payments =
+            [
+                new ReceiptPaymentLine(PaymentMethodKind.Cash, -2m, null),
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, "VOUCHER_REFUND:RF123")
+            ]
+        };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver);
+
+        var result = await service.PrintReceiptAsync(receipt, ReceiptPrintReason.Reprint);
+
+        Assert.True(result.Succeeded);
+        var document = Assert.Single(driver.Documents);
+        Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Manual_print_of_pure_voucher_refund_skips_voucher_face_when_receipt_print_fails()
+    {
+        var driver = new RecordingReceiptPrinterDriver { PrintResult = new ReceiptPrinterDriverResult(false, "printer offline") };
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver);
+
+        var result = await service.PrintReceiptAsync(CreatePureVoucherRefundReceipt(Guid.NewGuid()), ReceiptPrintReason.Manual);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("printer offline", result.Message);
+        Assert.Single(driver.Documents);
+    }
+
+    [Fact]
+    public async Task Manual_print_of_pure_voucher_refund_reports_voucher_face_failure_with_code()
+    {
+        var driver = new RecordingReceiptPrinterDriver();
+        driver.PrintResults.Enqueue(new ReceiptPrinterDriverResult(true, "printed"));
+        driver.PrintResults.Enqueue(new ReceiptPrinterDriverResult(false, "paper out"));
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver);
+        var receipt = CreatePureVoucherRefundReceipt(Guid.NewGuid());
+
+        var result = await service.PrintReceiptAsync(receipt, ReceiptPrintReason.Manual);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("RF123: paper out", result.Message);
+        Assert.Equal(receipt.OrderGuid, result.OrderGuid);
+        Assert.Equal(2, driver.Documents.Count);
+    }
+
     private sealed class FakeVoucherExpiryLookup(DateTimeOffset? expiry) : IVoucherExpiryLookup
     {
         public List<(string StoreCode, string VoucherCode)> Calls { get; } = [];
@@ -1682,6 +1822,11 @@ public sealed class ReceiptPrintingTests
 
         public ReceiptPrinterDriverResult PrintResult { get; init; } = new(true, "printed");
 
+        /// <summary>按顺序给每次打印返回的结果；用完后回落到 <see cref="PrintResult"/>。</summary>
+        public Queue<ReceiptPrinterDriverResult> PrintResults { get; } = new();
+
+        public List<ReceiptPrintDocument> Documents { get; } = [];
+
         public ReceiptPrinterDriverResult OpenCashDrawerResult { get; init; } = new(true, "drawer opened");
 
         public Exception? OpenCashDrawerException { get; init; }
@@ -1695,7 +1840,8 @@ public sealed class ReceiptPrintingTests
         {
             LastDocument = document;
             LastSettings = settings;
-            return Task.FromResult(PrintResult);
+            Documents.Add(document);
+            return Task.FromResult(PrintResults.Count > 0 ? PrintResults.Dequeue() : PrintResult);
         }
 
         public Task<ReceiptPrinterDriverResult> TestAsync(

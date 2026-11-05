@@ -18,7 +18,10 @@ public enum ReceiptPrintReason
     InstallmentAuto,
     VoucherRefundAuto,
     VoucherBalanceAuto,
-    Test
+    Test,
+    // 中文注释：用了代金券（付款或退成退款券）的销售/退款，收款完成后自动出普通小票（随后再出券面/余额凭证）。
+    // 放在末尾，避免改动既有成员的数值。
+    VoucherOrderAuto
 }
 
 public enum ReceiptPrintElementKind
@@ -1351,6 +1354,40 @@ public sealed class ReceiptPrintService(
         ReceiptDetails receipt,
         ReceiptPrintReason reason = ReceiptPrintReason.Manual,
         CancellationToken cancellationToken = default)
+    {
+        var result = await PrintSingleReceiptAsync(receipt, reason, cancellationToken);
+        if (!result.Succeeded || !ShouldReprintRefundVoucherFaces(receipt, reason))
+        {
+            return result;
+        }
+
+        // 中文注释：纯退代金券单的普通小票（带商品明细）不再等同于券面；手动打印/补打上一张/历史补打时
+        // 紧跟着补出券面，保证券丢了仍能从这些入口重打（与改动前「补打 = 出券面」的能力一致）。
+        foreach (var voucherDocument in ReceiptRefundVoucherDocuments.Create(receipt))
+        {
+            var voucherResult = await PrintSingleReceiptAsync(voucherDocument, reason, cancellationToken);
+            if (!voucherResult.Succeeded)
+            {
+                return voucherResult with
+                {
+                    Message = $"{voucherDocument.RefundVoucher!.VoucherCode}: {voucherResult.Message}"
+                };
+            }
+        }
+
+        return result;
+    }
+
+    private static bool ShouldReprintRefundVoucherFaces(ReceiptDetails receipt, ReceiptPrintReason reason) =>
+        reason is ReceiptPrintReason.Manual or ReceiptPrintReason.LastReceipt or ReceiptPrintReason.Reprint &&
+        receipt.RefundVoucher is null &&
+        receipt.VoucherBalance is null &&
+        ReceiptRefundVoucherMapper.TryCreate(receipt.Payments) is not null;
+
+    private async Task<ReceiptPrintResult> PrintSingleReceiptAsync(
+        ReceiptDetails receipt,
+        ReceiptPrintReason reason,
+        CancellationToken cancellationToken)
     {
         // 中文注释：到期日补查是网络调用（最长几秒），放在拿到打印锁之前，避免堵住其它小票的打印。
         receipt = await WithVoucherExpiryAsync(receipt, cancellationToken);
