@@ -41,6 +41,7 @@ public sealed partial class CardRecoveryCenterViewModel
     public bool IsChannelAll { get => ChannelIndex == 0; set { if (value) ChannelIndex = 0; } }
     public bool IsChannelLinkly { get => ChannelIndex == 1; set { if (value) ChannelIndex = 1; } }
     public bool IsChannelSquare { get => ChannelIndex == 2; set { if (value) ChannelIndex = 2; } }
+    public bool IsChannelZeller { get => ChannelIndex == 3; set { if (value) ChannelIndex = 3; } }
     public bool IsOperationAll { get => OperationIndex == 0; set { if (value) OperationIndex = 0; } }
     public bool IsOperationSale { get => OperationIndex == 1; set { if (value) OperationIndex = 1; } }
     public bool IsOperationRefund { get => OperationIndex == 2; set { if (value) OperationIndex = 2; } }
@@ -527,7 +528,7 @@ public sealed partial class CardRecoveryCenterViewModel
         foreach (var name in new[]
                  {
                      nameof(PendingCount), nameof(FailedCount), nameof(ResolvedCount), nameof(ReviewCount),
-                     nameof(IsChannelAll), nameof(IsChannelLinkly), nameof(IsChannelSquare),
+                     nameof(IsChannelAll), nameof(IsChannelLinkly), nameof(IsChannelSquare), nameof(IsChannelZeller),
                      nameof(IsOperationAll), nameof(IsOperationSale), nameof(IsOperationRefund),
                      nameof(ListCountText), nameof(IsSelectedRefund), nameof(SelectedTone), nameof(SelectedStatusPillText),
                      nameof(SelectedTitleText), nameof(SelectedHeadlineText), nameof(SelectedCashierNameText),

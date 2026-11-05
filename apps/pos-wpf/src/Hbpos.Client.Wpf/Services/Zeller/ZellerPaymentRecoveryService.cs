@@ -1,3 +1,4 @@
+using Hbpos.Client.Wpf.Models;
 using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Wpf.Services.Zeller;
@@ -60,7 +61,8 @@ public sealed record ZellerResolutionResult(
     bool Succeeded,
     string? Error = null,
     LocalZellerPaymentAttempt? Attempt = null,
-    string? OrderPaymentReference = null)
+    string? OrderPaymentReference = null,
+    LocalFinancialSupervisorResolution? Journal = null)
 {
     public static ZellerResolutionResult Fail(string error) => new(false, error);
 }
@@ -214,9 +216,14 @@ public sealed class ZellerPaymentRecoveryService
     }
 
     /// <summary>主管结案。以人工确认为准，不实时查询（恢复中心打开结案弹窗前应先调 RecoverAttemptAsync 查一次）。</summary>
+    /// <param name="journalFactory">
+    /// 给出时，用结案后的记录生成一条主管结案日志，和记录的更新在同一个事务里写入（LocalFinancialSupervisorResolutions），
+    /// 写入的日志随结果返回，调用方提交后再触发审计上传。
+    /// </param>
     public async Task<ZellerResolutionResult> ResolveAsync(
         Guid attemptGuid,
         ZellerSupervisorResolution resolution,
+        Func<LocalZellerPaymentAttempt, LocalFinancialSupervisorResolution>? journalFactory = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(resolution);
@@ -265,17 +272,31 @@ public sealed class ZellerPaymentRecoveryService
             SupervisorDecidedAt = now
         };
 
+        LocalFinancialSupervisorResolution? journal = null;
+        async Task<LocalZellerPaymentAttempt> PersistAsync(LocalZellerPaymentAttempt next)
+        {
+            if (journalFactory is null)
+            {
+                return await SaveAsync(attempt, next).ConfigureAwait(false);
+            }
+
+            var dated = next with { UpdatedAt = _time.GetUtcNow() };
+            journal = journalFactory(dated);
+            return await _attempts.TryUpdateWithJournalAsync(attempt, dated, journal, CancellationToken.None).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"Zeller attempt {attempt.AttemptGuid} was changed by another writer.");
+        }
+
         switch (resolution.Decision)
         {
             case ZellerSupervisorDecision.ContinueWaiting:
-                var waiting = await SaveAsync(attempt, stamped with
+                var waiting = await PersistAsync(stamped with
                 {
                     Status = ZellerAttemptStatus.Unknown,
                     FailureKind = ZellerFailureKind.ResultUnknown,
                     UnknownReason = attempt.Status == ZellerAttemptStatus.Submitted ? ZellerUnknownReason.ProcessExited : attempt.UnknownReason
                 }).ConfigureAwait(false);
                 Log($"attempt {attemptGuid}: supervisor {waiting.SupervisorOperatorId} chose to keep waiting");
-                return new ZellerResolutionResult(true, Attempt: waiting);
+                return new ZellerResolutionResult(true, Attempt: waiting, Journal: journal);
 
             case ZellerSupervisorDecision.ConfirmNotPaid:
                 if (HoldsLocalApprovalEvidence(attempt))
@@ -284,7 +305,7 @@ public sealed class ZellerPaymentRecoveryService
                         "Zeller has already reported this payment as approved, so it cannot be confirmed as not paid. Confirm it as paid, or refund it.");
                 }
 
-                var notPaid = await SaveAsync(attempt, stamped with
+                var notPaid = await PersistAsync(stamped with
                 {
                     Status = ZellerAttemptStatus.Canceled,
                     FailureKind = ZellerFailureKind.None,
@@ -292,10 +313,10 @@ public sealed class ZellerPaymentRecoveryService
                     CompletedAt = now
                 }).ConfigureAwait(false);
                 Log($"attempt {attemptGuid}: supervisor {notPaid.SupervisorOperatorId} confirmed not paid");
-                return new ZellerResolutionResult(true, Attempt: notPaid);
+                return new ZellerResolutionResult(true, Attempt: notPaid, Journal: journal);
 
             default:
-                var paid = await SaveAsync(attempt, stamped with
+                var paid = await PersistAsync(stamped with
                 {
                     Status = ZellerAttemptStatus.Approved,
                     FailureKind = ZellerFailureKind.None,
@@ -304,7 +325,7 @@ public sealed class ZellerPaymentRecoveryService
                 }).ConfigureAwait(false);
                 var orderReference = OrderReferenceFor(paid);
                 Log($"attempt {attemptGuid}: supervisor {paid.SupervisorOperatorId} confirmed paid, order reference {orderReference}");
-                return new ZellerResolutionResult(true, Attempt: paid, OrderPaymentReference: orderReference);
+                return new ZellerResolutionResult(true, Attempt: paid, OrderPaymentReference: orderReference, Journal: journal);
         }
     }
 
@@ -342,7 +363,7 @@ public sealed class ZellerPaymentRecoveryService
         attempt.UnknownReason is ZellerUnknownReason.LateApproval or ZellerUnknownReason.MultipleApproved;
 
     /// <summary>主管确认已付款后写进订单的引用。查得到 transactionUuid 就带上；查不到用未核实的格式，不能原路退款。</summary>
-    private static string OrderReferenceFor(LocalZellerPaymentAttempt attempt)
+    internal static string OrderReferenceFor(LocalZellerPaymentAttempt attempt)
     {
         var hasUuid = Guid.TryParse(attempt.TransactionUuid, out var uuid) && uuid != Guid.Empty;
         return attempt.OperationKind == ZellerAttemptOperation.Refund

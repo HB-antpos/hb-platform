@@ -610,6 +610,12 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                  HasApprovedPaymentEvidence(attempt));
         }
 
+        if (attempt.Processor == CardProcessorKind.Zeller)
+        {
+            // Zeller：已发出没结果、结果未知的记录可以主管结案；已批准（只差补单）的用「检查」补单，不需要决定。
+            return StatusIs(attempt.Status, "Submitted", "Unknown");
+        }
+
         if (attempt.Processor != CardProcessorKind.Square)
         {
             return false;
@@ -1110,12 +1116,14 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         {
             CardProcessorKind.Linkly => "cardRecovery.center.channel.linkly",
             CardProcessorKind.Square => "cardRecovery.center.channel.square",
+            CardProcessorKind.Zeller => "cardRecovery.center.channel.zeller",
             _ => "cardRecovery.center.value.unknown"
         };
         return T(key, key switch
         {
             "cardRecovery.center.channel.linkly" => "Linkly",
             "cardRecovery.center.channel.square" => "Square",
+            "cardRecovery.center.channel.zeller" => "Zeller",
             _ => "Unknown"
         });
     }
@@ -1132,6 +1140,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         {
             "none" => "cardRecovery.center.value.unknown",
             "pending" => "cardRecovery.center.transactionStatus.pending",
+            // Zeller：请求已交给刷卡机，还没有结果。
+            "submitted" => "cardRecovery.center.transactionStatus.submitted",
             "sessionstarted" => "cardRecovery.center.transactionStatus.sessionStarted",
             "recovering" => "cardRecovery.center.transactionStatus.recovering",
             "approved" => "cardRecovery.center.transactionStatus.approved",
@@ -1154,6 +1164,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         return T(key, key switch
         {
             "cardRecovery.center.transactionStatus.pending" => "Pending",
+            "cardRecovery.center.transactionStatus.submitted" => "Sent to terminal, no result yet",
             "cardRecovery.center.transactionStatus.sessionStarted" => "Session started",
             "cardRecovery.center.transactionStatus.recovering" => "Checking result",
             "cardRecovery.center.transactionStatus.approved" => "Payment approved",

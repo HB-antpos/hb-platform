@@ -69,7 +69,12 @@ public sealed partial class CardRecoveryCenterViewModel
     private static bool IsReview(CardRecoveryQueueItem item) => item.IsOpen && item.Status is "RequiresReview" or "Unknown" or SquarePaymentRecoveryService.SettlementRejectedStatus;
     private IEnumerable<CardRecoveryQueueItem> FilteredHistory() => _history.Where(item =>
         (_category switch { "failed" => IsFailed(item), "resolved" => !item.IsOpen && !IsFailed(item), "review" => IsReview(item), _ => item.IsOpen }) &&
-        (ChannelIndex == 0 || item.Processor == (ChannelIndex == 1 ? CardProcessorKind.Linkly : CardProcessorKind.Square)) &&
+        (ChannelIndex == 0 || item.Processor == ChannelIndex switch
+        {
+            1 => CardProcessorKind.Linkly,
+            3 => CardProcessorKind.Zeller,
+            _ => CardProcessorKind.Square
+        }) &&
         (OperationIndex == 0 || (OperationIndex == 2 ? item.OperationKind == "Refund" : item.OperationKind != "Refund")) &&
         (string.IsNullOrWhiteSpace(SearchText) || string.Join(" ", OrderReference(item), item.AttemptGuid, item.TxnRef, item.CheckoutId, item.SessionId, item.PaymentId, item.PaymentReference)
             .Contains(SearchText.Trim(), StringComparison.OrdinalIgnoreCase)));

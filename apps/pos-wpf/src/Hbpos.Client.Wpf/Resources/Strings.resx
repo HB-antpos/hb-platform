@@ -1888,4 +1888,14 @@ Logged with reference {2}</value></data>
   <data name="payment.card.zeller.notStarted" xml:space="preserve"><value>The Zeller payment could not be started. The customer was not charged.</value></data>
   <data name="payment.card.zeller.paymentPageOnly" xml:space="preserve"><value>Zeller card payments can only be taken from the payment page.</value></data>
   <data name="payment.status.cardVerifying" xml:space="preserve"><value>Checking the result with Zeller (check {0}). Do not ask the customer to tap again.</value></data>
+  <data name="cardRecovery.center.channel.zeller" xml:space="preserve"><value>Zeller</value></data>
+  <data name="cardRecovery.center.transactionStatus.submitted" xml:space="preserve"><value>Sent to terminal, no result yet</value></data>
+  <data name="cardRecovery.zeller.approved" xml:space="preserve"><value>The previous Zeller card payment was successful. The order has been recovered and saved automatically.</value></data>
+  <data name="cardRecovery.zeller.unknown" xml:space="preserve"><value>The Zeller payment result could not be confirmed. Check it with a supervisor before taking payment again.</value></data>
+  <data name="cardRecovery.zeller.inProgress" xml:space="preserve"><value>This Zeller payment is still being checked on this POS. Try again in a moment.</value></data>
+  <data name="cardRecovery.zeller.notPaid" xml:space="preserve"><value>Zeller reports this payment was not approved. The customer was not charged.</value></data>
+  <data name="cardRecovery.zeller.notFound" xml:space="preserve"><value>This Zeller payment was not found on this POS.</value></data>
+  <data name="cardRecovery.zeller.keepWaiting" xml:space="preserve"><value>The Zeller payment stays open. Check it again later.</value></data>
+  <data name="cardRecovery.zeller.confirmedNotPaid" xml:space="preserve"><value>Recorded as not paid. The customer can pay again.</value></data>
+  <data name="cardRecovery.zeller.partialRefund" xml:space="preserve"><value>The Zeller refund was approved but only covers part of the return, so the order cannot be completed automatically. Ask a supervisor to finish the return.</value></data>
 </root>
