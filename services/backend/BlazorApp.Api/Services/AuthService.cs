@@ -88,14 +88,42 @@ namespace BlazorApp.Api.Services
                 // ❌ 用户不存在或密码验证失败；旧客户端未传格式时按 clientSha256 兼容处理。
                 if (user == null || !VerifyPassword(request.Password, user.PasswordHash, request.PasswordFormat, out var needsPasswordRehash))
                 {
-                    return new LoginResponse { Success = false, Message = "用户名或密码错误" };
+                    return new LoginResponse
+                    {
+                        Success = false,
+                        Message = "用户名或密码错误",
+                        // 只有这一类失败会被控制器计入登录限流。
+                        ErrorCode = LoginErrorCodes.InvalidCredentials,
+                    };
+                }
+
+                // ⏳ 系统生成并邮件发出的临时密码（4 位随机，强度低）只在 72 小时内有效。
+                // 放在密码校验通过之后：只有拿到正确临时密码的人才会看到「已过期」，
+                // 凭据不对的人看不出账号是否处于待首次登录状态。店长手输的密码与无标记账号不受影响。
+                if (await UserPasswordChangeRequirements.IsEmailedPasswordExpiredAsync(
+                    _dbContext.Db,
+                    user.UserGUID,
+                    DateTime.UtcNow
+                ))
+                {
+                    return new LoginResponse
+                    {
+                        Success = false,
+                        Message = "临时密码已过期，请联系店长重新发送",
+                        ErrorCode = LoginErrorCodes.TempPasswordExpired,
+                    };
                 }
 
                 // 🚫 账号被标记为「不允许登录 Web / App」：密码正确也拒绝，且不更新最后登录时间。
                 // 放在密码校验之后，凭据不对的人看不出账号是否存在或被限制。
                 if (await UserLoginRestrictions.IsRestrictedAsync(_dbContext.Db, user.UserGUID))
                 {
-                    return new LoginResponse { Success = false, Message = "该账号未开通登录权限，请联系店长" };
+                    return new LoginResponse
+                    {
+                        Success = false,
+                        Message = "该账号未开通登录权限，请联系店长",
+                        ErrorCode = LoginErrorCodes.LoginRestricted,
+                    };
                 }
 
                 // 🔍 调试：检查用户角色信息
@@ -157,6 +185,7 @@ namespace BlazorApp.Api.Services
                 {
                     Success = false,
                     Message = "登录过程中出现错误，请稍后重试",
+                    ErrorCode = LoginErrorCodes.Error,
                 };
             }
         }

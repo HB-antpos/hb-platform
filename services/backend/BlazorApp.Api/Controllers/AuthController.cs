@@ -26,6 +26,7 @@ namespace BlazorApp.Api.Controllers
         private readonly ILogger<AuthController> _logger;
         private readonly IClientIpResolver _clientIpResolver;
         private readonly UserLoginDeviceAuditService? _loginDeviceAuditService;
+        private readonly ILoginAttemptLimiter? _loginAttemptLimiter;
 
         /// <summary>
         /// 构造函数 - 依赖注入认证服务、数据库上下文和角色服务
@@ -37,6 +38,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="logger">日志记录器</param>
         /// <param name="clientIpResolver">客户端公网 IP 解析器</param>
         /// <param name="loginDeviceAuditService">App 登录设备与定位审计服务</param>
+        /// <param name="loginAttemptLimiter">登录失败限流；生产由 DI 注入，不传（如部分单元测试）则不限流</param>
         public AuthController(
             IAuthService authService,
             SqlSugarContext dbContext,
@@ -44,9 +46,11 @@ namespace BlazorApp.Api.Controllers
             IUserService userService,
             ILogger<AuthController> logger,
             IClientIpResolver? clientIpResolver = null,
-            UserLoginDeviceAuditService? loginDeviceAuditService = null
+            UserLoginDeviceAuditService? loginDeviceAuditService = null,
+            ILoginAttemptLimiter? loginAttemptLimiter = null
         )
         {
+            _loginAttemptLimiter = loginAttemptLimiter;
             _authService = authService;
             _dbContext = dbContext;
             _roleService = roleService;
@@ -87,13 +91,13 @@ namespace BlazorApp.Api.Controllers
 
             NormalizeOptionalLoginLocation(request);
 
-            var tokenResponse = await AuthenticateAndIssueTokensAsync(request);
-            if (tokenResponse == null)
+            var outcome = await AuthenticateAndIssueTokensAsync(request);
+            if (outcome.Tokens == null)
             {
-                return ApiResponse<TokenResponse>.Error("用户名或密码错误");
+                return ApiResponse<TokenResponse>.Error(outcome.Message ?? "用户名或密码错误", outcome.ErrorCode);
             }
 
-            return ApiResponse<TokenResponse>.OK(tokenResponse, "登录成功");
+            return ApiResponse<TokenResponse>.OK(outcome.Tokens, "登录成功");
         }
 
         /// <summary>
@@ -108,12 +112,13 @@ namespace BlazorApp.Api.Controllers
                 return ApiResponse<SessionResponse>.Error("请求数据格式无效");
             }
 
-            var tokenResponse = await AuthenticateAndIssueTokensAsync(request);
-            if (tokenResponse == null)
+            var outcome = await AuthenticateAndIssueTokensAsync(request);
+            if (outcome.Tokens == null)
             {
-                return ApiResponse<SessionResponse>.Error("用户名或密码错误");
+                return ApiResponse<SessionResponse>.Error(outcome.Message ?? "用户名或密码错误", outcome.ErrorCode);
             }
 
+            var tokenResponse = outcome.Tokens;
             CookieHelper.SetTokens(Response, tokenResponse.AccessToken, tokenResponse.RefreshToken);
             return ApiResponse<SessionResponse>.OK(CreateSessionResponse(tokenResponse), "登录成功");
         }
@@ -502,15 +507,47 @@ namespace BlazorApp.Api.Controllers
             }
         }
 
-        private async Task<TokenResponse?> AuthenticateAndIssueTokensAsync(LoginRequest request)
+        /// <summary>
+        /// 一次登录尝试的结果：成功带令牌；失败时 Message / ErrorCode 为 null 表示按通用的「用户名或密码错误」返回
+        /// （保持原有对外行为），只有限流与临时密码过期两种失败会带具体原因。
+        /// </summary>
+        private sealed record LoginAttemptOutcome(TokenResponse? Tokens, string? Message = null, string? ErrorCode = null);
+
+        private async Task<LoginAttemptOutcome> AuthenticateAndIssueTokensAsync(LoginRequest request)
         {
+            var ipAddress = _clientIpResolver.Resolve(Request.HttpContext);
+            var accountKey = (request.Username ?? string.Empty).Trim().ToLowerInvariant();
+
+            // 先看是否处于锁定期：锁定期内连正确密码也不验证，否则攻击者可以一直猜、猜中就放行。
+            // 日志只记 IP 与剩余秒数，不记登录名——用户可能把密码误输进用户名框。
+            var waitSeconds = _loginAttemptLimiter?.GetLockoutSeconds(accountKey, ipAddress) ?? 0;
+            if (waitSeconds > 0)
+            {
+                _logger.LogWarning("登录尝试被限流，来源 IP：{Ip}，剩余锁定 {Seconds} 秒", ipAddress, waitSeconds);
+                var minutes = Math.Max(1, (waitSeconds + 59) / 60);
+                return new LoginAttemptOutcome(null, $"登录失败次数过多，请约 {minutes} 分钟后再试", LoginErrorCodes.RateLimited);
+            }
+
             var loginResponse = await _authService.LoginAsync(request);
             if (!loginResponse.Success)
             {
-                return null;
+                // 密码正确但邮件临时密码已过期：告诉员工去找店长重新发送，而不是让他以为密码输错了。
+                if (loginResponse.ErrorCode == LoginErrorCodes.TempPasswordExpired)
+                {
+                    return new LoginAttemptOutcome(null, loginResponse.Message, loginResponse.ErrorCode);
+                }
+
+                // 只有凭据错误才算一次猜测；账号未开通登录、系统异常都不计，避免误锁。
+                if (loginResponse.ErrorCode == LoginErrorCodes.InvalidCredentials)
+                {
+                    _loginAttemptLimiter?.RecordFailure(accountKey, ipAddress);
+                }
+                return new LoginAttemptOutcome(null);
             }
 
-            var ipAddress = _clientIpResolver.Resolve(Request.HttpContext);
+            // 凭据已验证通过：清掉该账号的失败计数（IP 计数保留，门店共用出口 IP）。
+            _loginAttemptLimiter?.RecordSuccess(accountKey);
+
             var userAgent = Request.Headers["User-Agent"].ToString();
 
             // 关键逻辑：登录名可以是用户名或邮箱，LoginAsync 已经确定了是哪个账号。
@@ -518,7 +555,7 @@ namespace BlazorApp.Api.Controllers
             var loggedInUserGuid = loginResponse.User?.UserGUID;
             if (string.IsNullOrWhiteSpace(loggedInUserGuid))
             {
-                return null;
+                return new LoginAttemptOutcome(null);
             }
             var userList = await _dbContext
                 .Db.Queryable<User>()
@@ -530,7 +567,7 @@ namespace BlazorApp.Api.Controllers
 
             if (user == null)
             {
-                return null;
+                return new LoginAttemptOutcome(null);
             }
 
             user.LastLoginIp = ipAddress;
@@ -560,7 +597,7 @@ namespace BlazorApp.Api.Controllers
                 tokenResponse.IsDeviceSwitched = audit.IsDeviceSwitched;
                 tokenResponse.IsCommonDevice = audit.IsCommonDevice;
             }
-            return tokenResponse;
+            return new LoginAttemptOutcome(tokenResponse);
         }
 
         private void NormalizeOptionalLoginLocation(LoginRequest request)

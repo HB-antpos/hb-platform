@@ -314,7 +314,8 @@ public sealed class PasswordResetServiceTests : IDisposable
         Assert.True(PasswordHasher.VerifyPassword(sent.Password, stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
         Assert.False(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
         var requirement = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
-        Assert.Equal(UserPasswordChangeRequirement.ReasonCreated, requirement.Reason);
+        // 系统生成并邮件发出的临时密码用 -emailed 原因标记：登录时超过 72 小时即失效。
+        Assert.Equal(UserPasswordChangeRequirement.ReasonCreatedEmailed, requirement.Reason);
         Assert.True((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
         Assert.All(await _db.Queryable<UserPasswordResetCode>().ToListAsync(), row => Assert.NotNull(row.ConsumedAtUtc));
     }
@@ -349,16 +350,23 @@ public sealed class PasswordResetServiceTests : IDisposable
     public async Task SendInitialPassword_发信失败_账号原本就有须改密标记则保留()
     {
         var staff = await SeedUserAsync("staff", "staff@example.com");
+        // 原本是店长手输密码留下的标记（5 天前，不会过期）。
+        var originalAt = DateTime.UtcNow.AddDays(-5);
         await UserPasswordChangeRequirements.RequireAsync(
-            _db, staff.UserGUID, UserPasswordChangeRequirement.ReasonCreated, "manager-1", DateTime.UtcNow);
+            _db, staff.UserGUID, UserPasswordChangeRequirement.ReasonReset, "old-manager", originalAt);
         var service = CreateService();
 
         _sender.FailNext = true;
-        var failed = await service.SendInitialPasswordAsync(staff.UserGUID, "manager-1");
+        var failed = await service.SendResetPasswordAsync(staff.UserGUID, "manager-1");
 
         Assert.False(failed.Success);
-        // 账号本来就是「待首次登录」，失败回滚不能把这个状态抹掉。
-        Assert.Single(await _db.Queryable<UserPasswordChangeRequirement>().ToListAsync());
+        // 账号本来就是「待首次登录」，失败回滚要把标记整行还原：原因、时间、操作人都不能变。
+        // 否则手输密码的标记会被换成「邮件临时密码」标记，72 小时后原本好好的密码会失效。
+        var restored = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
+        Assert.Equal(UserPasswordChangeRequirement.ReasonReset, restored.Reason);
+        Assert.Equal("old-manager", restored.RequiredBy);
+        Assert.True((restored.RequiredAtUtc - originalAt).Duration() < TimeSpan.FromSeconds(1));
+        Assert.False(UserPasswordChangeRequirements.IsEmailedReason(restored.Reason));
     }
 
     [Fact]
@@ -381,7 +389,7 @@ public sealed class PasswordResetServiceTests : IDisposable
         Assert.True(PasswordHasher.VerifyPassword(sent.Password, stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
         Assert.False(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _), "旧密码必须立即失效");
         var requirement = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
-        Assert.Equal(UserPasswordChangeRequirement.ReasonReset, requirement.Reason);
+        Assert.Equal(UserPasswordChangeRequirement.ReasonResetEmailed, requirement.Reason);
         Assert.True((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
     }
 

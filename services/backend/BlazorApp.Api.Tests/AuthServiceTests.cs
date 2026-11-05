@@ -678,8 +678,8 @@ namespace BlazorApp.Api.Tests
 
         private void CreateLegacyUserSchemaWithoutPhone()
         {
-            // 登录会读「不允许登录」标记表，旧结构测试库也要有这张表。
-            _db.CodeFirst.InitTables<UserLoginRestriction>();
+            // 登录会读「不允许登录」与「须先改密」两张标记表（后者用来判断邮件临时密码是否过期），旧结构测试库也要有。
+            _db.CodeFirst.InitTables<UserLoginRestriction, UserPasswordChangeRequirement>();
             _db.Ado.ExecuteCommand(
                 """
                 CREATE TABLE [User] (
@@ -733,8 +733,8 @@ namespace BlazorApp.Api.Tests
 
         private void CreateLegacyUserSchemaWithoutLastLoginIp()
         {
-            // 登录会读「不允许登录」标记表，旧结构测试库也要有这张表。
-            _db.CodeFirst.InitTables<UserLoginRestriction>();
+            // 登录会读「不允许登录」与「须先改密」两张标记表（后者用来判断邮件临时密码是否过期），旧结构测试库也要有。
+            _db.CodeFirst.InitTables<UserLoginRestriction, UserPasswordChangeRequirement>();
             _db.Ado.ExecuteCommand(
                 """
                 CREATE TABLE [User] (
@@ -875,6 +875,130 @@ namespace BlazorApp.Api.Tests
             Assert.True(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
         }
 
+        private async Task<LoginResponse> LoginWithRequirementAsync(
+            string username,
+            string password,
+            string? requirementReason,
+            double requirementAgeHours
+        )
+        {
+            await CreateCurrentAuthSchemaAsync();
+            var user = await SeedCurrentUserAsync(username);
+            if (requirementReason != null)
+            {
+                await _db.Insertable(new UserPasswordChangeRequirement
+                {
+                    UserGUID = user.UserGUID,
+                    Reason = requirementReason,
+                    RequiredAtUtc = DateTime.UtcNow.AddHours(-requirementAgeHours),
+                }).ExecuteCommandAsync();
+            }
+
+            var service = new AuthService(CreateSqlSugarContext(_db), CreateJwtConfiguration(), new HttpContextAccessor());
+            return await service.LoginAsync(new LoginRequest
+            {
+                Username = username,
+                Password = password,
+                PasswordFormat = PasswordHasher.PasswordFormatRaw,
+            });
+        }
+
+        [Theory]
+        [InlineData(UserPasswordChangeRequirement.ReasonCreatedEmailed)]
+        [InlineData(UserPasswordChangeRequirement.ReasonResetEmailed)]
+        public async Task LoginAsync_WhenEmailedTemporaryPasswordExpired_RejectsEvenWithCorrectPassword(string reason)
+        {
+            var result = await LoginWithRequirementAsync("expired-temp", "Secret123", reason, requirementAgeHours: 73);
+
+            Assert.False(result.Success);
+            Assert.Equal(LoginErrorCodes.TempPasswordExpired, result.ErrorCode);
+            Assert.Contains("过期", result.Message);
+            Assert.Null(result.User);
+            // 过期后标记保留：店长重新发送 / 重置时会整行覆盖，员工改密成功才会清除。
+            Assert.True(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+        }
+
+        [Theory]
+        [InlineData(UserPasswordChangeRequirement.ReasonCreatedEmailed)]
+        [InlineData(UserPasswordChangeRequirement.ReasonResetEmailed)]
+        public async Task LoginAsync_WhenEmailedTemporaryPasswordStillValid_Succeeds(string reason)
+        {
+            var result = await LoginWithRequirementAsync("fresh-temp", "Secret123", reason, requirementAgeHours: 71);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Null(result.ErrorCode);
+        }
+
+        [Theory]
+        [InlineData(UserPasswordChangeRequirement.ReasonCreated)]
+        [InlineData(UserPasswordChangeRequirement.ReasonReset)]
+        public async Task LoginAsync_WhenPasswordWasTypedByManager_NeverExpires(string reason)
+        {
+            // 店长手输的密码（created / reset）不受 72 小时限制，只有「系统生成并邮件发出」的才会失效。
+            var result = await LoginWithRequirementAsync("manager-typed", "Secret123", reason, requirementAgeHours: 24 * 30);
+
+            Assert.True(result.Success, result.Message);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenAccountHasNoRequirement_Succeeds()
+        {
+            var result = await LoginWithRequirementAsync("no-requirement", "Secret123", requirementReason: null, requirementAgeHours: 0);
+
+            Assert.True(result.Success, result.Message);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenPasswordWrongOnExpiredAccount_DoesNotRevealExpiry()
+        {
+            // 凭据不对的人看不出账号是否处于「待首次登录且已过期」：只返回通用的凭据错误，并带可计入限流的代码。
+            var result = await LoginWithRequirementAsync(
+                "expired-wrong",
+                "Wrong999",
+                UserPasswordChangeRequirement.ReasonResetEmailed,
+                requirementAgeHours: 100
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("用户名或密码错误", result.Message);
+            Assert.Equal(LoginErrorCodes.InvalidCredentials, result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task LoginAsync_WhenUnknownUser_ReturnsInvalidCredentialsCode()
+        {
+            var result = await LoginWithRequirementAsync("someone", "Secret123", requirementReason: null, requirementAgeHours: 0);
+            Assert.True(result.Success);
+
+            var service = new AuthService(CreateSqlSugarContext(_db), CreateJwtConfiguration(), new HttpContextAccessor());
+            var missing = await service.LoginAsync(new LoginRequest
+            {
+                Username = "no-such-user",
+                Password = "Secret123",
+                PasswordFormat = PasswordHasher.PasswordFormatRaw,
+            });
+
+            // 账号不存在与密码错误同一结果，限流才不会泄露账号是否存在。
+            Assert.False(missing.Success);
+            Assert.Equal(LoginErrorCodes.InvalidCredentials, missing.ErrorCode);
+        }
+
+        [Fact]
+        public void IsEmailedPasswordExpired_BoundaryIsExactly72Hours()
+        {
+            var issuedAt = new DateTime(2026, 11, 6, 0, 0, 0, DateTimeKind.Utc);
+            var row = new UserPasswordChangeRequirement
+            {
+                UserGUID = "u1",
+                Reason = UserPasswordChangeRequirement.ReasonCreatedEmailed,
+                RequiredAtUtc = issuedAt,
+            };
+
+            Assert.False(UserPasswordChangeRequirements.IsEmailedPasswordExpired(row, issuedAt.AddHours(72).AddSeconds(-1)));
+            Assert.True(UserPasswordChangeRequirements.IsEmailedPasswordExpired(row, issuedAt.AddHours(72)));
+            Assert.False(UserPasswordChangeRequirements.IsEmailedPasswordExpired(null, issuedAt.AddDays(30)));
+        }
+
         private async Task SeedRefreshTokenAsync(string userGuid, string sessionId)
         {
             await _db.Insertable(new RefreshToken
@@ -941,7 +1065,7 @@ namespace BlazorApp.Api.Tests
         private Task CreateCurrentAuthSchemaAsync()
         {
             _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken, SysRolePermission>();
-            _db.CodeFirst.InitTables<SysUserPermission, UserLoginRestriction>();
+            _db.CodeFirst.InitTables<SysUserPermission, UserLoginRestriction, UserPasswordChangeRequirement>();
             return Task.CompletedTask;
         }
 

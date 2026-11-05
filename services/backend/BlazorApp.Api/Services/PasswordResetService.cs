@@ -157,8 +157,8 @@ public sealed class PasswordResetService : IPasswordResetService
         }
 
         var previousHash = user.PasswordHash;
-        // 记下写入前是否已有「须先改密」标记：发信失败回滚时，只清掉我们刚加的那条（见下方失败分支）。
-        var hadRequirement = await UserPasswordChangeRequirements.IsRequiredAsync(db, userGuid);
+        // 记下写入前的「须先改密」标记整行（可能没有）：发信失败回滚时按原样还原（见下方失败分支）。
+        var previousRequirement = await UserPasswordChangeRequirements.GetAsync(db, userGuid);
         var initialPassword = GenerateInitialPassword();
         var newHash = PasswordHasher.HashSubmittedPassword(initialPassword, PasswordHasher.PasswordFormatRaw);
         var now = DateTime.UtcNow;
@@ -176,7 +176,8 @@ public sealed class PasswordResetService : IPasswordResetService
             await UserPasswordChangeRequirements.RequireAsync(
                 db,
                 userGuid,
-                isReset ? UserPasswordChangeRequirement.ReasonReset : UserPasswordChangeRequirement.ReasonCreated,
+                // 4 位随机临时密码强度低：用 -emailed 原因标记，登录时超过 72 小时即失效（见 AuthService.LoginAsync）。
+                isReset ? UserPasswordChangeRequirement.ReasonResetEmailed : UserPasswordChangeRequirement.ReasonCreatedEmailed,
                 requestedBy,
                 now
             );
@@ -203,11 +204,13 @@ public sealed class PasswordResetService : IPasswordResetService
                 .SetColumns(item => item.UpdatedAt == DateTime.UtcNow)
                 .Where(item => item.UserGUID == userGuid && item.PasswordHash == newHash)
                 .ExecuteCommandAsync();
-            // 密码已恢复成原样，「须先改密」标记也要还原：重置对象是在用的老账号，
-            // 不清掉的话员工用旧密码登录会被无故强制改密。仅当本来就没有标记、且哈希确实是我们恢复的才清。
-            if (restored > 0 && !hadRequirement)
+            // 密码已恢复成原样，「须先改密」标记也要还原成写入前的样子：重置对象是在用的老账号，
+            // 原本没有标记就删掉（否则员工用旧密码登录会被无故强制改密）；原本有标记就按原行写回
+            // （原因、时间都不变，否则手输密码的标记会被换成会过期的临时密码标记）。
+            // 仅当哈希确实是我们恢复的才动标记，期间别处发生的改密不被覆盖。
+            if (restored > 0)
             {
-                await UserPasswordChangeRequirements.ClearAsync(db, userGuid);
+                await UserPasswordChangeRequirements.RestoreAsync(db, userGuid, previousRequirement);
             }
             return ApiResponse<PasswordSetupEmailResultDto>.Error(
                 send.Message,
